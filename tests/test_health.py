@@ -1,11 +1,8 @@
-from fastapi.testclient import TestClient
-
-from backend.main import app
-
-client = TestClient(app)
+"""Tests for the /health endpoint."""
 
 
-def test_health_check():
+def test_health_check(client):
+    """Health endpoint returns status ok with version."""
     response = client.get("/health")
     assert response.status_code == 200
     data = response.json()

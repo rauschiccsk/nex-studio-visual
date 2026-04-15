@@ -1,0 +1,57 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nexstudio
+      POSTGRES_PASSWORD: nexstudio
+      POSTGRES_DB: nexstudio
+    ports:
+      - "9178:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexstudio -d nexstudio"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "9176:9176"
+    environment:
+      DATABASE_URL: "postgresql+pg8000://nexstudio:nexstudio@db:5432/nexstudio"
+      TEST_DATABASE_URL: "postgresql+pg8000://nexstudio:nexstudio@db:5432/nexstudio_test"
+      SECRET_KEY: "change-me-in-production"
+      BACKEND_PORT: "9176"
+      FRONTEND_PORT: "9177"
+      VITE_API_BASE_URL: "http://localhost:9176"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:9176/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: "http://localhost:9176"
+    restart: unless-stopped
+    ports:
+      - "9177:9177"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  pgdata:

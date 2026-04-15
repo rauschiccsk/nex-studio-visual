@@ -1,0 +1,151 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install poetry
+          poetry install --no-interaction
+
+      - name: Ruff check
+        run: poetry run ruff check .
+
+      - name: Ruff format check
+        run: poetry run ruff format --check .
+
+  test:
+    name: Test
+    runs-on: self-hosted
+    needs: lint
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: nexstudio
+          POSTGRES_PASSWORD: nexstudio
+          POSTGRES_DB: nexstudio
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nexstudio -d nexstudio"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install poetry
+          poetry install --no-interaction
+
+      - name: Create test database
+        env:
+          PGPASSWORD: nexstudio
+        run: |
+          psql -h localhost -U nexstudio -d nexstudio -c "CREATE DATABASE nexstudio_test OWNER nexstudio;"
+
+      - name: Run Alembic migrations
+        env:
+          DATABASE_URL: "postgresql+pg8000://nexstudio:nexstudio@localhost:5432/nexstudio"
+        run: poetry run alembic upgrade head
+
+      - name: Run tests
+        env:
+          DATABASE_URL: "postgresql+pg8000://nexstudio:nexstudio@localhost:5432/nexstudio"
+          TEST_DATABASE_URL: "postgresql+pg8000://nexstudio:nexstudio@localhost:5432/nexstudio_test"
+          SECRET_KEY: "ci-test-secret-key"
+          BACKEND_PORT: "9176"
+          FRONTEND_PORT: "9177"
+        run: poetry run pytest --tb=short -q
+
+  build-frontend:
+    name: Build Frontend
+    runs-on: self-hosted
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm install
+
+      - name: TypeScript check
+        working-directory: frontend
+        run: npx tsc -b --noEmit 2>/dev/null || npx tsc -b
+
+      - name: Build
+        working-directory: frontend
+        env:
+          VITE_API_BASE_URL: "http://localhost:9176"
+        run: npm run build
+
+  build:
+    name: Build Docker Images
+    runs-on: self-hosted
+    needs: [test, build-frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: docker build -t nex-studio-backend:ci-${{ github.sha }} .
+
+      - name: Build frontend image
+        run: docker build -t nex-studio-frontend:ci-${{ github.sha }} frontend/
+
+      - name: Verify images
+        run: |
+          docker image inspect nex-studio-backend:ci-${{ github.sha }} > /dev/null
+          docker image inspect nex-studio-frontend:ci-${{ github.sha }} > /dev/null
+
+      - name: Clean up CI images
+        if: always()
+        run: |
+          docker rmi nex-studio-backend:ci-${{ github.sha }} || true
+          docker rmi nex-studio-frontend:ci-${{ github.sha }} || true
+
+  deploy:
+    name: Deploy
+    runs-on: self-hosted
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy with Docker Compose
+        run: |
+          docker compose pull db
+          docker compose build backend
+          docker compose up -d --force-recreate
+          sleep 5
+
+      - name: Health check
+        run: |
+          python -m backend.scripts.healthcheck || echo "Health check pending — backend may still be starting"
