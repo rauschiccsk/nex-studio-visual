@@ -62,10 +62,14 @@ jobs:
           poetry install --no-interaction
 
       - name: Create test database
-        env:
-          PGPASSWORD: nexstudio
         run: |
-          psql -h localhost -U nexstudio -d nexstudio -c "CREATE DATABASE nexstudio_test OWNER nexstudio;"
+          poetry run python -c "
+          import pg8000
+          conn = pg8000.connect(host='localhost', port=5432, user='nexstudio', password='nexstudio', database='nexstudio')
+          conn.autocommit = True
+          conn.run('CREATE DATABASE nexstudio_test OWNER nexstudio')
+          conn.close()
+          "
 
       - name: Run Alembic migrations
         env:
