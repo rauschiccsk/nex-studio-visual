@@ -145,9 +145,10 @@ jobs:
 
       - name: Deploy with Docker Compose
         run: |
-          docker compose pull db
-          docker compose build backend
-          docker compose up -d --force-recreate
+          docker compose -p nex-studio down --remove-orphans || true
+          docker compose -p nex-studio pull db
+          docker compose -p nex-studio build backend
+          docker compose -p nex-studio up -d --force-recreate
           sleep 5
 
       - name: Health check
