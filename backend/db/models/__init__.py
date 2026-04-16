@@ -16,6 +16,7 @@ from backend.db.models.specifications import (
     RawSpecification,
 )
 from backend.db.models.tasks import Epic, Feat, Task
+from backend.db.models.versions import Version
 
 __all__ = [
     "ArchitectMessage",
@@ -47,4 +48,5 @@ __all__ = [
     "Task",
     "User",
     "UserSession",
+    "Version",
 ]

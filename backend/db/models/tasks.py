@@ -11,6 +11,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 
 from backend.db.models.base import Base, TimestampMixin, UUIDMixin
 
@@ -32,6 +33,12 @@ class Epic(Base, UUIDMixin, TimestampMixin):
         nullable=True,
         index=True,
     )
+    version_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("versions.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
     number = Column(Integer, nullable=False)
     title = Column(String(500), nullable=False)
     status = Column(String(20), nullable=False, server_default="planned")
@@ -43,6 +50,10 @@ class Epic(Base, UUIDMixin, TimestampMixin):
             name="ck_epics_status",
         ),
     )
+
+    # Inverse side of Version.epics. The FK uses ondelete='RESTRICT' —
+    # deleting a Version that still has Epics raises a FK violation.
+    version = relationship("Version", back_populates="epics")
 
 
 class Feat(Base, UUIDMixin, TimestampMixin):

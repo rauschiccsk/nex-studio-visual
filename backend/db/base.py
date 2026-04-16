@@ -22,6 +22,7 @@ from backend.db.models.projects import ModuleDependency, Project, ProjectMember,
 from backend.db.models.reports import ReportConfig
 from backend.db.models.specifications import DesignDocument, ProfessionalSpecification, RawSpecification
 from backend.db.models.tasks import Epic, Feat, Task
+from backend.db.models.versions import Version
 
 # The complete list of concrete ORM models covered by Alembic migrations 001-022.
 # Ordered loosely by creation order so diffs against migration history are easy
@@ -53,6 +54,7 @@ ALL_MODELS: tuple[type, ...] = (
     AutoFixAttempt,
     ExecutionLog,
     GuardianReview,
+    Version,
 )
 
 __all__ = [
@@ -86,4 +88,5 @@ __all__ = [
     "UUIDMixin",
     "User",
     "UserSession",
+    "Version",
 ]

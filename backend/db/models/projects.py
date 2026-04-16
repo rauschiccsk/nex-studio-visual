@@ -11,6 +11,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 
 from backend.db.models.base import Base, TimestampMixin, UUIDMixin
 
@@ -49,6 +50,15 @@ class Project(Base, UUIDMixin, TimestampMixin):
             "status IN ('active', 'archived', 'paused')",
             name="ck_projects_status",
         ),
+    )
+
+    # Inverse side of Version.project (defined in backend/db/models/versions.py).
+    # Deleting a Project cascades to its Versions via the FK ondelete='CASCADE'.
+    versions = relationship(
+        "Version",
+        back_populates="project",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
 

@@ -15,6 +15,15 @@ from sqlalchemy.orm import Session
 # ``backend.db.base`` imports every ORM model — importing it here populates
 # ``Base.metadata`` with every table before ``create_all`` runs.
 from backend.db.base import Base
+
+# Explicit model imports for ``Base.metadata`` awareness — required by the
+# Model Generation Checklist. ``backend.db.base`` re-exports these, but each
+# new model is listed explicitly here so missing registrations surface as
+# import errors during test collection.
+from backend.db.models.bugs import Bug  # noqa: F401
+from backend.db.models.projects import Project  # noqa: F401
+from backend.db.models.tasks import Epic  # noqa: F401
+from backend.db.models.versions import Version  # noqa: F401
 from backend.db.session import _ensure_pg8000_driver, get_db
 from backend.main import app
 

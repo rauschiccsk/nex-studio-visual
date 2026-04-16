@@ -10,6 +10,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
+from sqlalchemy.orm import relationship
 
 from backend.db.models.base import Base, TimestampMixin, UUIDMixin
 
@@ -23,6 +24,12 @@ class Bug(Base, UUIDMixin, TimestampMixin):
         UUID(as_uuid=True),
         ForeignKey("projects.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
+    )
+    version_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("versions.id", ondelete="RESTRICT"),
+        nullable=True,
         index=True,
     )
     bug_number = Column(Integer, nullable=False)
@@ -56,6 +63,10 @@ class Bug(Base, UUIDMixin, TimestampMixin):
             name="ck_bugs_source",
         ),
     )
+
+    # Inverse side of Version.bugs. The FK uses ondelete='RESTRICT' —
+    # deleting a Version that still has Bugs raises a FK violation.
+    version = relationship("Version", back_populates="bugs")
 
 
 class BugFixTask(Base, UUIDMixin, TimestampMixin):
