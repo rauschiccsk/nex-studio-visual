@@ -9,6 +9,7 @@ from sqlalchemy import text
 
 from backend.api.routes.architect_messages import router as architect_messages_router
 from backend.api.routes.architect_sessions import router as architect_sessions_router
+from backend.api.routes.auth import router as auth_router
 from backend.api.routes.auto_fix_attempts import router as auto_fix_attempts_router
 from backend.api.routes.bug_fix_tasks import router as bug_fix_tasks_router
 from backend.api.routes.bugs import router as bugs_router
@@ -80,6 +81,7 @@ app.add_middleware(
 # Entity CRUD routers (Feat 4). Prefixes are kebab-case and applied here —
 # each router module is prefix-less so it can be mounted on an isolated
 # TestClient app in its router tests without prefix duplication.
+app.include_router(auth_router, prefix="/api/v1/auth")
 app.include_router(users_router, prefix="/api/v1/users")
 app.include_router(user_sessions_router, prefix="/api/v1/user-sessions")
 app.include_router(projects_router, prefix="/api/v1/projects")

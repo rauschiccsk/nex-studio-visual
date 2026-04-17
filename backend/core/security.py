@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 from backend.config.settings import settings
 from backend.db.models.foundation import User
 from backend.db.session import get_db
+from backend.services import auth as auth_service
 
 # ``auto_error=False`` so a missing header surfaces as ``credentials is
 # None`` and we can raise our own 401 with the WWW-Authenticate header
@@ -73,6 +74,14 @@ def get_current_user(
         user_id = UUID(str(payload["sub"]))
     except (JWTError, KeyError, ValueError) as exc:
         raise unauthorized from exc
+
+    # Validate token_version claim against DB — logout bumps tv to
+    # invalidate all previously-issued JWTs.
+    tv_claim = payload.get("tv")
+    if tv_claim is not None:
+        db_tv = auth_service.get_token_version(db, user_id)
+        if db_tv is not None and tv_claim < db_tv:
+            raise unauthorized
 
     user = db.get(User, user_id)
     if user is None or not user.is_active:
