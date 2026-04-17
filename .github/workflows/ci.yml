@@ -108,7 +108,7 @@ jobs:
       - name: Build
         working-directory: frontend
         env:
-          VITE_API_BASE_URL: "http://localhost:9176"
+          VITE_API_BASE_URL: ""
         run: npm run build
 
   build:
@@ -146,8 +146,10 @@ jobs:
       - name: Deploy with Docker Compose
         run: |
           docker compose -p nex-studio down --remove-orphans || true
+          docker stop nex-studio-frontend-1 nex-studio-backend-1 nex-studio-db-1 2>/dev/null || true
+          docker rm nex-studio-frontend-1 nex-studio-backend-1 nex-studio-db-1 2>/dev/null || true
           docker compose -p nex-studio pull db
-          docker compose -p nex-studio build backend
+          docker compose -p nex-studio build backend frontend
           docker compose -p nex-studio up -d --force-recreate
           sleep 5
 
