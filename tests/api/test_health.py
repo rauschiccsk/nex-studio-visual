@@ -3,6 +3,15 @@
 from unittest.mock import patch
 
 
+def test_health_check(client):
+    """Health endpoint returns status ok with version."""
+    response = client.get("/health")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["version"] == "0.1.0"
+
+
 def test_health_returns_claude_fields(client):
     """Health endpoint includes claude_cli_available and claude_config_mounted."""
     resp = client.get("/health")

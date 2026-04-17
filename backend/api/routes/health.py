@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 def _check_claude_cli_available() -> bool:
     """Return True if the ``claude`` CLI binary is on PATH."""
-    return shutil.which("claude") is not None
+    return shutil.which(settings.claude_cli_path) is not None
 
 
 def _check_claude_config_mounted() -> bool:
