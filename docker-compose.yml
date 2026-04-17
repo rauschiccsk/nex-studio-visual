@@ -20,10 +20,12 @@ services:
   backend:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: backend/Dockerfile
     restart: unless-stopped
     ports:
       - "9176:9176"
+    volumes:
+      - /home/andros/.claude:/root/.claude:ro
     environment:
       DATABASE_URL: "postgresql+pg8000://nexstudio:nexstudio@db:5432/nexstudio"
       TEST_DATABASE_URL: "postgresql+pg8000://nexstudio:nexstudio@db:5432/nexstudio_test"
@@ -31,6 +33,8 @@ services:
       BACKEND_PORT: "9176"
       FRONTEND_PORT: "9177"
       VITE_API_BASE_URL: "http://localhost:9176"
+      CLAUDE_CONFIG_DIR: "/root/.claude"
+      CLAUDE_CLI_PATH: "claude"
     depends_on:
       db:
         condition: service_healthy

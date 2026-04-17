@@ -16,6 +16,11 @@ class Settings(BaseSettings):
         "http://127.0.0.1:9177",
     ]
 
+    # Claude CLI configuration
+    claude_config_dir: str = "/root/.claude"
+    claude_cli_path: str = "claude"
+    claude_stream_timeout: int = 300
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 
