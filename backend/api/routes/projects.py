@@ -5,7 +5,8 @@ Exposes the standard CRUD surface for projects:
 * ``GET    /``              → paginated list (filter by ``status``,
   ``category`` and ``created_by``).
 * ``GET    /{project_id}``  → single project by primary key.
-* ``POST   /``              → create a new project.
+* ``POST   /``              → create a new project (with port and GitHub
+  repo validation).
 * ``PATCH  /{project_id}``  → partial update of the mutable fields.
 * ``DELETE /{project_id}``  → hard-delete a project (HTTP 204).
 
@@ -21,24 +22,116 @@ applied in ``backend/main.py`` via ``app.include_router``.
 
 from __future__ import annotations
 
+import logging
 from typing import Optional
 from uuid import UUID
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from backend.db.session import get_db
 from backend.schemas.pagination import PaginatedResponse
 from backend.schemas.project import (
+    GitHubRepoNotFoundError,
+    PortCheckResponse,
+    PortConflictError,
+    PortSuggestResponse,
     ProjectCategory,
     ProjectCreate,
     ProjectRead,
     ProjectStatus,
     ProjectUpdate,
 )
+from backend.services import github_validation as github_validation_service
+from backend.services import port_registry as port_registry_service
 from backend.services import project as project_service
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["Projects"])
+
+
+def _validate_ports(db: Session, payload: ProjectCreate) -> None:
+    """Validate that all supplied ports are in range and not already allocated.
+
+    Raises :class:`~fastapi.HTTPException` directly — 422 for out-of-range,
+    409 for conflicts.
+    """
+    ports = [
+        ("backend_port", payload.backend_port),
+        ("frontend_port", payload.frontend_port),
+        ("db_port", payload.db_port),
+    ]
+
+    for field_name, port_value in ports:
+        if port_value is None:
+            continue
+
+        # Range check (9100–9299)
+        if port_value < port_registry_service.PORT_RANGE_MIN or port_value > port_registry_service.PORT_RANGE_MAX:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Port {port_value} ({field_name}) is outside the allowed range "
+                    f"({port_registry_service.PORT_RANGE_MIN}–{port_registry_service.PORT_RANGE_MAX})."
+                ),
+            )
+
+        # Uniqueness check
+        if not port_registry_service.check_port_available(db, port_value):
+            conflict_name = port_registry_service.get_conflict_project_name(db, port_value)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=PortConflictError(
+                    detail=(
+                        f"Port {port_value} ({field_name}) is already allocated"
+                        f"{' to project ' + repr(conflict_name) if conflict_name else ''}."
+                    ),
+                    port=port_value,
+                    conflict_project=conflict_name,
+                ).model_dump(),
+            )
+
+
+def _validate_github_repo(repo_url: str | None) -> None:
+    """Validate that the GitHub repository exists via the GitHub API.
+
+    Delegates to :func:`backend.services.github_validation.validate_github_repo`
+    and translates its exceptions into appropriate HTTP responses.
+
+    Expects *repo_url* in ``owner/repo`` format (e.g.
+    ``rauschiccsk/nex-horizont``). Raises :class:`~fastapi.HTTPException`
+    422 when the repo is not found or the API call fails.
+    """
+    if not repo_url:
+        return
+
+    try:
+        exists = github_validation_service.validate_github_repo(repo_url)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=GitHubRepoNotFoundError(
+                detail=str(exc),
+                repo_url=repo_url,
+            ).model_dump(),
+        ) from exc
+    except (RuntimeError, httpx.HTTPError) as exc:
+        logger.warning("GitHub API request failed for repo %r", repo_url, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Could not verify GitHub repository '{repo_url}': GitHub API unavailable.",
+        ) from exc
+
+    if not exists:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=GitHubRepoNotFoundError(
+                detail=f"GitHub repository '{repo_url}' not found.",
+                repo_url=repo_url,
+            ).model_dump(),
+        )
 
 
 def _map_value_error(exc: ValueError) -> HTTPException:
@@ -103,6 +196,46 @@ def list_projects(
     )
 
 
+@router.get("/ports/check", response_model=PortCheckResponse)
+def check_port(
+    port: int = Query(..., description="Port number to check (9100–9299)."),
+    project_id: Optional[str] = Query(
+        default=None,
+        description="Exclude this project from the conflict check (for editing).",
+    ),
+    db: Session = Depends(get_db),
+) -> PortCheckResponse:
+    """Check whether a port is available in the ICC Port Registry range."""
+    try:
+        available = port_registry_service.check_port_available(db, port, project_id)
+    except ValueError as exc:
+        raise _map_value_error(exc) from exc
+
+    conflict_project: str | None = None
+    if not available:
+        conflict_project = port_registry_service.get_conflict_project_name(db, port, project_id)
+
+    return PortCheckResponse(available=available, conflict_project=conflict_project)
+
+
+@router.get("/ports/suggest", response_model=PortSuggestResponse)
+def suggest_port(
+    type: str = Query(
+        ...,
+        alias="type",
+        description="Port type: backend | frontend | db.",
+    ),
+    db: Session = Depends(get_db),
+) -> PortSuggestResponse:
+    """Suggest the next available port for the given type."""
+    try:
+        suggested = port_registry_service.suggest_next_port(db, type)
+    except ValueError as exc:
+        raise _map_value_error(exc) from exc
+
+    return PortSuggestResponse(suggested_port=suggested)
+
+
 @router.get("/{project_id}", response_model=ProjectRead)
 def get_project(
     project_id: UUID,
@@ -120,12 +253,30 @@ def get_project(
     "",
     response_model=ProjectRead,
     status_code=status.HTTP_201_CREATED,
+    responses={
+        409: {"model": PortConflictError, "description": "Port or slug conflict"},
+        422: {"model": GitHubRepoNotFoundError, "description": "Validation error or GitHub repo not found"},
+    },
 )
 def create_project(
     payload: ProjectCreate,
     db: Session = Depends(get_db),
 ) -> ProjectRead:
-    """Create a new project."""
+    """Create a new project.
+
+    Validates before persisting:
+
+    * **Slug uniqueness** — 409 if another project uses the same slug.
+    * **Port range** — 422 if any supplied port is outside 9100–9299.
+    * **Port uniqueness** — 409 if any supplied port is already allocated.
+    * **GitHub repo** — 422 if ``repo_url`` is set but the repository
+      does not exist on GitHub.
+    """
+    # Pre-creation validation (ports + GitHub).  These raise HTTPException
+    # directly so they bypass the generic ValueError mapping below.
+    _validate_ports(db, payload)
+    _validate_github_repo(payload.repo_url)
+
     try:
         project = project_service.create(db, payload)
         db.commit()

@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
@@ -15,6 +16,16 @@ class Settings(BaseSettings):
         "http://localhost:9177",
         "http://127.0.0.1:9177",
     ]
+
+    # GitHub integration
+    github_token: str = Field(
+        default="",
+        description="GitHub personal access token for repository validation API calls",
+    )
+    github_api_timeout: float = Field(
+        default=10.0,
+        description="Timeout in seconds for GitHub API requests",
+    )
 
     # Claude CLI configuration
     claude_config_dir: str = "/root/.claude"

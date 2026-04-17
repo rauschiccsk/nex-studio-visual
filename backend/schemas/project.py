@@ -30,6 +30,40 @@ ProjectCategory = Literal["singlemodule", "multimodule"]
 ProjectStatus = Literal["active", "archived", "paused"]
 
 
+class PortCheckResponse(BaseModel):
+    """Response for port availability check."""
+
+    available: bool = Field(description="Whether the port is available.")
+    conflict_project: Optional[str] = Field(
+        default=None,
+        description="Name of the project occupying this port, if any.",
+    )
+
+
+class PortSuggestResponse(BaseModel):
+    """Response for port suggestion."""
+
+    suggested_port: int = Field(description="The first free port in the ICC range.")
+
+
+class PortConflictError(BaseModel):
+    """Error detail returned when a requested port is already allocated."""
+
+    detail: str = Field(description="Human-readable conflict description.")
+    port: int = Field(description="The conflicting port number.")
+    conflict_project: str | None = Field(
+        default=None,
+        description="Name of the project that occupies the port.",
+    )
+
+
+class GitHubRepoNotFoundError(BaseModel):
+    """Error detail returned when the GitHub repository cannot be found."""
+
+    detail: str = Field(description="Human-readable error message.")
+    repo_url: str = Field(description="The repository URL that was not found.")
+
+
 class ProjectCreate(BaseModel):
     """Payload for creating a new project.
 

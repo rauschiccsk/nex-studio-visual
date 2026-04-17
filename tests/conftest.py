@@ -7,6 +7,9 @@ keeping the test database clean without costly create/drop cycles.
 
 import os
 
+# Set required env vars BEFORE any backend imports trigger Settings() instantiation
+os.environ.setdefault("GITHUB_TOKEN", "ghp_test_dummy_token")
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text

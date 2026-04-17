@@ -86,12 +86,29 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project, ProjectMember
 from backend.db.models.reports import ReportConfig
+
+
+@pytest.fixture(autouse=True)
+def _mock_github_validation():
+    """Bypass real GitHub API calls in integration tests.
+
+    The router delegates to ``github_validation_service.validate_github_repo``
+    which hits the live API.  Integration tests care about the DB workflow, not
+    the GitHub round-trip, so we stub the service to always return ``True``.
+    """
+    with patch(
+        "backend.services.github_validation.validate_github_repo",
+        return_value=True,
+    ):
+        yield
+
 
 # ---------------------------------------------------------------------------
 # Precondition fixtures — the four ICC users named in the §3.6 worked
@@ -445,6 +462,9 @@ class TestCreateProjectEdgeCases:
         (``... already exists``), which the router's ``_map_value_error``
         translates to HTTP 409. The second POST must not create a
         second row.
+
+        Uses unique ports on the second request to ensure it reaches
+        the name-uniqueness check (port validation runs first).
         """
         first = client.post(
             "/api/v1/projects",
@@ -452,13 +472,20 @@ class TestCreateProjectEdgeCases:
         )
         assert first.status_code == 201, first.text
 
-        # Same name, different slug — still rejected on the name check.
+        # Same name, different slug + different ports — rejected on name check.
         conflict = client.post(
             "/api/v1/projects",
-            json=_project_payload(zoltan.id, slug="nex-horizont-2"),
+            json=_project_payload(
+                zoltan.id,
+                slug="nex-horizont-2",
+                backend_port=9180,
+                frontend_port=9181,
+                db_port=9182,
+            ),
         )
         assert conflict.status_code == 409, conflict.text
-        assert "already exists" in conflict.json()["detail"].lower()
+        detail = conflict.json()["detail"]
+        assert "already exists" in detail.lower()
 
         # Only the first row survives.
         db_session.expire_all()
@@ -475,6 +502,9 @@ class TestCreateProjectEdgeCases:
         hit can still collide on slug while using a different name.
         The router must reject it with HTTP 409 and no row is
         created.
+
+        Uses unique ports on the second request to ensure it reaches
+        the slug-uniqueness check (port validation runs first).
         """
         first = client.post(
             "/api/v1/projects",
@@ -482,17 +512,21 @@ class TestCreateProjectEdgeCases:
         )
         assert first.status_code == 201, first.text
 
-        # Different name, same slug — rejected on the slug check.
+        # Different name, same slug, different ports — rejected on slug check.
         conflict = client.post(
             "/api/v1/projects",
             json=_project_payload(
                 zoltan.id,
                 name="NEX Horizont (Mirror)",
                 slug=NEX_HORIZONT_SLUG,
+                backend_port=9190,
+                frontend_port=9191,
+                db_port=9192,
             ),
         )
         assert conflict.status_code == 409, conflict.text
-        assert "already exists" in conflict.json()["detail"].lower()
+        detail = conflict.json()["detail"]
+        assert "already exists" in detail.lower()
 
         # Only the first row survives; filtering by the duplicated
         # slug's project id returns the original.
