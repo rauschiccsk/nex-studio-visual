@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import uuid
 
+import bcrypt
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -15,9 +16,10 @@ from fastapi.testclient import TestClient
 from backend.api.routes.epics import router as epics_router
 from backend.api.routes.versions import router as versions_router
 from backend.core.security import get_current_user, require_ri_role
-from backend.db.models.foundation import User
+from backend.db.models.foundation import User, UserSession
 from backend.db.models.projects import Project
 from backend.db.session import get_db
+from backend.main import app as main_app
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -100,3 +102,46 @@ def client(db_session, ri_user):
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# Auth integration fixtures (shared by test_auth_flow / test_token_rotation)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def _seed_admin(db_session):
+    """Seed admin user with bcrypt-hashed password into test DB."""
+    password_hash = bcrypt.hashpw(b"Nex123", bcrypt.gensalt(rounds=4)).decode()
+    user = User(
+        username="admin",
+        email="admin@isnex.eu",
+        password_hash=password_hash,
+        role="ri",
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.flush()
+
+    session = UserSession(
+        user_id=user.id,
+        token_version=0,
+    )
+    db_session.add(session)
+    db_session.flush()
+    return user
+
+
+@pytest.fixture()
+def integration_client(db_session, _seed_admin):
+    """TestClient wired to the real app with SAVEPOINT-isolated DB."""
+
+    def _override_get_db():
+        yield db_session
+
+    main_app.dependency_overrides[get_db] = _override_get_db
+
+    with TestClient(main_app, raise_server_exceptions=False) as c:
+        yield c
+
+    main_app.dependency_overrides.clear()
