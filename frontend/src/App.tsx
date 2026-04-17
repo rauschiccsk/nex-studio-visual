@@ -103,6 +103,7 @@ function App() {
             path="projects/:slug/modules"
             element={<ModuleRegistryPage />}
           />
+          {/* Architect — project-level and module-level (DESIGN.md § 3.1) */}
           <Route path="projects/:slug/architect" element={<ArchitectPage />} />
           <Route
             path="projects/:slug/modules/:code/architect"

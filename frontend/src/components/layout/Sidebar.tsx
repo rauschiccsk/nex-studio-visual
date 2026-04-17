@@ -1,5 +1,5 @@
 import { NavLink, useMatch } from "react-router-dom";
-import { Tag } from "lucide-react";
+import { Brain, Tag } from "lucide-react";
 
 /**
  * Application sidebar — primary navigation surface for NEX Studio.
@@ -154,6 +154,10 @@ function Sidebar() {
   const projectMatch = useMatch("/projects/:slug/*");
   const slug = projectMatch?.params.slug;
 
+  /** Detect whether a module is selected (``/projects/:slug/modules/:code/*``). */
+  const moduleMatch = useMatch("/projects/:slug/modules/:code/*");
+  const moduleCode = moduleMatch?.params.code;
+
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
       <div className="flex h-14 items-center border-b border-gray-200 px-4 dark:border-gray-700">
@@ -197,6 +201,27 @@ function Sidebar() {
                   Versions
                 </span>
               </NavLink>
+              <NavLink
+                to={`/projects/${slug}/architect`}
+                end
+                className={navLinkClass}
+              >
+                <span className="flex items-center gap-2">
+                  <Brain className="h-4 w-4" aria-hidden="true" />
+                  Architect
+                </span>
+              </NavLink>
+              {moduleCode && (
+                <NavLink
+                  to={`/projects/${slug}/modules/${moduleCode}/architect`}
+                  className={navLinkClass}
+                >
+                  <span className="flex items-center gap-2">
+                    <Brain className="h-4 w-4" aria-hidden="true" />
+                    Architect ({moduleCode})
+                  </span>
+                </NavLink>
+              )}
             </div>
           </div>
         )}

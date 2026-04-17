@@ -32,6 +32,7 @@ export * from "./kbDocument";
 // Architect.
 export * from "./architectSession";
 export * from "./architectMessage";
+export * from "./architect";
 
 // Task hierarchy (Epic → Feat → Task).
 export * from "./epic";

@@ -36,6 +36,7 @@ function StubFallback() {
 /* ------------------------------------------------------------------ */
 
 vi.mock("lucide-react", () => ({
+  Brain: (props: Record<string, unknown>) => <svg data-testid="brain-icon" {...props} />,
   Tag: (props: Record<string, unknown>) => <svg data-testid="tag-icon" {...props} />,
 }));
 

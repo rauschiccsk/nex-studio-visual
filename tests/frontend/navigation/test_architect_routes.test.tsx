@@ -1,0 +1,1 @@
+../../../frontend/src/__tests__/navigation/test_architect_routes.test.tsx
