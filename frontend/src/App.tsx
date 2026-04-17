@@ -2,7 +2,6 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import AppLayout from "./components/layout/AppLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
-import { ThemeProvider } from "./contexts/ThemeContext";
 
 import ArchitectMessagePage from "./pages/ArchitectMessagePage";
 import ArchitectPage from "./pages/ArchitectPage";
@@ -77,7 +76,6 @@ import VersionsPage from "./pages/VersionsPage";
  */
 function App() {
   return (
-    <ThemeProvider>
     <BrowserRouter>
       <Routes>
         {/* Public route */}
@@ -205,7 +203,6 @@ function App() {
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </BrowserRouter>
-    </ThemeProvider>
   );
 }
 

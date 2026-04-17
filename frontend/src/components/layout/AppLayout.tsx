@@ -10,7 +10,7 @@ import Sidebar from "./Sidebar";
  */
 function AppLayout() {
   return (
-    <div className="flex h-full w-full bg-gray-50 dark:bg-gray-950">
+    <div className="flex h-full w-full bg-gray-50">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <Header />

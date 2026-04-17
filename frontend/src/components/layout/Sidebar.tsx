@@ -1,8 +1,6 @@
 import { NavLink, useMatch } from "react-router-dom";
 import { Tag } from "lucide-react";
 
-import { getCurrentUser } from "../../services/api";
-
 /**
  * Application sidebar — primary navigation surface for NEX Studio.
  *
@@ -20,10 +18,6 @@ import { getCurrentUser } from "../../services/api";
  * guardian, knowledge, migration, reports) so an operator can jump
  * directly from one entity surface to a related one without going back
  * to the dashboard.
- *
- * The "Access" admin group (Users, User Sessions, Project Members) is
- * visible only to users with the `ri` role — per DESIGN.md §2.2 and
- * BEHAVIOR.md workflow 3.24 (create_user).
  */
 
 type NavItem = {
@@ -37,8 +31,6 @@ type NavItem = {
 type NavGroup = {
   heading: string;
   items: NavItem[];
-  /** When true, only users with `ri` role see this group. */
-  riOnly?: boolean;
 };
 
 /**
@@ -60,7 +52,6 @@ const PRIMARY_NAV: NavItem[] = [
 const ADMIN_NAV: NavGroup[] = [
   {
     heading: "Access",
-    riOnly: true,
     items: [
       { to: "/admin/users", label: "Users" },
       { to: "/admin/user-sessions", label: "User Sessions" },
@@ -153,8 +144,8 @@ function navLinkClass({ isActive }: { isActive: boolean }): string {
   return [
     "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
     isActive
-      ? "bg-primary-100 text-primary-800 dark:bg-primary-900 dark:text-primary-200"
-      : "text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100",
+      ? "bg-primary-100 text-primary-800"
+      : "text-gray-700 hover:bg-gray-100 hover:text-gray-900",
   ].join(" ");
 }
 
@@ -163,14 +154,10 @@ function Sidebar() {
   const projectMatch = useMatch("/projects/:slug/*");
   const slug = projectMatch?.params.slug;
 
-  /** Current user — used to filter ri-only nav groups. */
-  const user = getCurrentUser();
-  const isRi = user?.role === "ri";
-
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-r border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
-      <div className="flex h-14 items-center border-b border-gray-200 px-4 dark:border-gray-700">
-        <span className="text-lg font-semibold text-primary-700 dark:text-primary-400">
+    <aside className="flex w-64 shrink-0 flex-col border-r border-gray-200 bg-white">
+      <div className="flex h-14 items-center border-b border-gray-200 px-4">
+        <span className="text-lg font-semibold text-primary-700">
           NEX Studio
         </span>
       </div>
@@ -196,8 +183,8 @@ function Sidebar() {
         {/* Project-context navigation — visible only when viewing a
             specific project (``/projects/:slug/…``). */}
         {slug && (
-          <div className="mt-4 border-t border-gray-200 pt-3 dark:border-gray-700">
-            <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+          <div className="mt-4 border-t border-gray-200 pt-3">
+            <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
               Project
             </p>
             <div className="space-y-1">
@@ -216,16 +203,15 @@ function Sidebar() {
 
         {/* Admin-CRUD surface (Feat 6).  Each heading is purely visual
             and is rendered as an ``h2`` so screen readers can navigate
-            the groups as document sections.
-            Groups with riOnly=true are hidden from non-ri users. */}
-        <div className="mt-6 border-t border-gray-200 pt-4 dark:border-gray-700">
-          <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+            the groups as document sections. */}
+        <div className="mt-6 border-t border-gray-200 pt-4">
+          <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
             Admin
           </p>
           <div className="space-y-4">
-            {ADMIN_NAV.filter((group) => !group.riOnly || isRi).map((group) => (
+            {ADMIN_NAV.map((group) => (
               <section key={group.heading} aria-label={group.heading}>
-                <h2 className="px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                <h2 className="px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
                   {group.heading}
                 </h2>
                 <div className="space-y-1">
@@ -245,8 +231,8 @@ function Sidebar() {
         </div>
       </nav>
 
-      <div className="border-t border-gray-200 p-3 dark:border-gray-700">
-        <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+      <div className="border-t border-gray-200 p-3">
+        <div className="flex items-center gap-2 text-xs text-gray-500">
           <span
             className="inline-block h-2 w-2 rounded-full bg-status-done"
             aria-hidden="true"

@@ -30,34 +30,6 @@
 /** localStorage key holding the JWT access token (see ProtectedRoute). */
 export const TOKEN_STORAGE_KEY = "nex_studio_token";
 
-/** Minimal user info extracted from the JWT payload (no signature verification). */
-export interface CurrentUser {
-  username: string;
-  role: string;
-}
-
-/**
- * Decode the JWT stored in localStorage and return basic user info.
- * This is UI-only — never use this for authorization decisions that
- * affect data security (those must be enforced server-side).
- */
-export function getCurrentUser(): CurrentUser | null {
-  if (typeof window === "undefined") return null;
-  const token = window.localStorage.getItem(TOKEN_STORAGE_KEY);
-  if (!token) return null;
-  try {
-    const parts = token.split(".");
-    if (parts.length !== 3) return null;
-    const payload = JSON.parse(atob(parts[1] ?? "")) as Record<string, unknown>;
-    if (typeof payload.sub === "string" && typeof payload.role === "string") {
-      return { username: payload.sub, role: payload.role };
-    }
-  } catch {
-    // malformed token — caller treats as unauthenticated
-  }
-  return null;
-}
-
 /** REST version prefix shared by every backend route (see DESIGN.md § 6). */
 const API_PREFIX = "/api/v1";
 

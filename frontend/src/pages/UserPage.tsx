@@ -27,7 +27,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { ApiError, api, getCurrentUser } from "../services/api";
+import { ApiError, api } from "../services/api";
 import type {
   PaginatedResponse,
   UserCreate,
@@ -109,25 +109,6 @@ function formatTimestamp(iso: string): string {
 }
 
 function UserPage() {
-  // Role guard — only ri users may manage the user registry.
-  const currentUser = getCurrentUser();
-  if (!currentUser || currentUser.role !== "ri") {
-    return (
-      <section className="space-y-2">
-        <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
-          Users
-        </h2>
-        <div
-          role="alert"
-          className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300"
-        >
-          <strong>Prístup zamietnutý.</strong> Správa používateľov je dostupná
-          iba pre rolu <code className="font-mono font-semibold">ri</code>.
-        </div>
-      </section>
-    );
-  }
-
   // ------------------------------------------------------------------ state
   const [mode, setMode] = useState<Mode>({ kind: "list" });
 
