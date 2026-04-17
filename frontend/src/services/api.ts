@@ -30,6 +30,32 @@
 /** localStorage key holding the JWT access token (see ProtectedRoute). */
 export const TOKEN_STORAGE_KEY = "nex_studio_token";
 
+// ---------------------------------------------------------------------------
+// Auth callback — breaks circular dependency between api.ts and authStore
+// ---------------------------------------------------------------------------
+
+/**
+ * Registered callback invoked on 401 responses *before* the hard redirect.
+ *
+ * ``authStore`` calls ``registerAuthCallback`` at module load time to wire
+ * its ``logout`` action here. This avoids a direct import of authStore
+ * from api.ts which would create a circular dependency (authStore →
+ * api/auth → api → authStore).
+ */
+let _onUnauthorizedCb: (() => void) | null = null;
+
+/**
+ * Register a callback invoked on every 401 response.
+ *
+ * Intended to be called once by ``authStore`` at module initialization.
+ * The callback should clear in-memory auth state (token + user object)
+ * without performing its own redirect — ``handleUnauthorized`` handles
+ * navigation.
+ */
+export function registerAuthCallback(cb: () => void): void {
+  _onUnauthorizedCb = cb;
+}
+
 /** REST version prefix shared by every backend route (see DESIGN.md § 6). */
 const API_PREFIX = "/api/v1";
 
@@ -113,6 +139,16 @@ function handleUnauthorized(): void {
   if (typeof window === "undefined") {
     return;
   }
+
+  // Notify authStore (if registered) so in-memory state is cleared.
+  if (_onUnauthorizedCb) {
+    try {
+      _onUnauthorizedCb();
+    } catch {
+      // Best-effort — continue with localStorage cleanup regardless.
+    }
+  }
+
   window.localStorage.removeItem(TOKEN_STORAGE_KEY);
   // Preserve the pre-logout path so LoginPage can bounce the user back.
   const current = window.location.pathname + window.location.search;
@@ -276,5 +312,50 @@ export const api = {
     return request<T>("DELETE", path, undefined, options);
   },
 };
+
+// ---------------------------------------------------------------------------
+// Convenience auth helpers — thin wrappers over the verb helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Convenience type mirroring ``AuthUser`` from ``api/auth.ts``.
+ *
+ * Duplicated here as a lightweight structural type to avoid importing from
+ * the feature module (which would make the base client depend on a feature
+ * layer).
+ */
+export interface CurrentUser {
+  id: string;
+  username: string;
+  email: string;
+  role: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Fetch the currently authenticated user's profile.
+ *
+ * Shorthand for ``api.get<CurrentUser>("/auth/me")``.
+ */
+export function getCurrentUser(
+  options?: RequestOptions,
+): Promise<CurrentUser> {
+  return api.get<CurrentUser>("/auth/me", options);
+}
+
+/**
+ * Invalidate the current session on the backend.
+ *
+ * Shorthand for ``api.post("/auth/logout")``. Uses ``skipAuthRedirect``
+ * to prevent the 401 interceptor from firing when the token is already
+ * expired at the moment the user clicks logout.
+ */
+export function logoutUser(): Promise<void> {
+  return api.post<void>("/auth/logout", undefined, {
+    skipAuthRedirect: true,
+  });
+}
 
 export default api;

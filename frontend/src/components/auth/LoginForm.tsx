@@ -1,0 +1,133 @@
+/**
+ * Reusable login form component — username + password fields with validation.
+ *
+ * Renders a controlled form with required-field validation. The parent
+ * component provides the ``onSubmit`` callback and controls loading /
+ * error state so the form itself stays presentation-only.
+ */
+
+import { useState, type FormEvent } from "react";
+
+export interface LoginFormProps {
+  /** Called when the form passes client-side validation. */
+  onSubmit: (username: string, password: string) => void;
+  /** Disables the submit button and shows a spinner label. */
+  loading?: boolean;
+  /** Error message displayed above the submit button. */
+  error?: string | null;
+}
+
+export default function LoginForm({
+  onSubmit,
+  loading = false,
+  error = null,
+}: LoginFormProps) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [touched, setTouched] = useState({ username: false, password: false });
+
+  const usernameError = touched.username && username.trim() === "";
+  const passwordError = touched.password && password.trim() === "";
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+
+    // Mark both fields as touched so validation errors show immediately.
+    setTouched({ username: true, password: true });
+
+    if (username.trim() === "" || password.trim() === "") {
+      return;
+    }
+
+    onSubmit(username.trim(), password);
+  }
+
+  return (
+    <form onSubmit={handleSubmit} noValidate data-testid="login-form">
+      {/* Username */}
+      <div className="mb-4">
+        <label
+          htmlFor="login-username"
+          className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
+        >
+          Username
+        </label>
+        <input
+          id="login-username"
+          name="username"
+          type="text"
+          autoComplete="username"
+          required
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          onBlur={() => setTouched((t) => ({ ...t, username: true }))}
+          disabled={loading}
+          className={`w-full rounded-md border px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-gray-100 ${
+            usernameError
+              ? "border-red-500 focus:ring-red-500"
+              : "border-gray-300 dark:border-gray-600"
+          }`}
+          data-testid="login-username"
+        />
+        {usernameError && (
+          <p className="mt-1 text-xs text-red-600" role="alert">
+            Username is required.
+          </p>
+        )}
+      </div>
+
+      {/* Password */}
+      <div className="mb-4">
+        <label
+          htmlFor="login-password"
+          className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
+        >
+          Password
+        </label>
+        <input
+          id="login-password"
+          name="password"
+          type="password"
+          autoComplete="current-password"
+          required
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          onBlur={() => setTouched((t) => ({ ...t, password: true }))}
+          disabled={loading}
+          className={`w-full rounded-md border px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-gray-100 ${
+            passwordError
+              ? "border-red-500 focus:ring-red-500"
+              : "border-gray-300 dark:border-gray-600"
+          }`}
+          data-testid="login-password"
+        />
+        {passwordError && (
+          <p className="mt-1 text-xs text-red-600" role="alert">
+            Password is required.
+          </p>
+        )}
+      </div>
+
+      {/* Error toast / banner */}
+      {error && (
+        <div
+          className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-400"
+          role="alert"
+          data-testid="login-error"
+        >
+          {error}
+        </div>
+      )}
+
+      {/* Submit */}
+      <button
+        type="submit"
+        disabled={loading}
+        className="btn-primary w-full"
+        data-testid="login-submit"
+      >
+        {loading ? "Signing in\u2026" : "Sign in"}
+      </button>
+    </form>
+  );
+}
