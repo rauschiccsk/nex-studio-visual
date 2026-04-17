@@ -5,7 +5,6 @@ from alembic import command
 from alembic.config import Config
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
 
 from backend.api.routes.architect import router as architect_router
 from backend.api.routes.architect_messages import router as architect_messages_router
@@ -21,6 +20,7 @@ from backend.api.routes.execution_logs import router as execution_logs_router
 from backend.api.routes.feats import router as feats_router
 from backend.api.routes.guardian_precedents import router as guardian_precedents_router
 from backend.api.routes.guardian_reviews import router as guardian_reviews_router
+from backend.api.routes.health import health_check as _health_check_handler
 from backend.api.routes.kb_documents import router as kb_documents_router
 from backend.api.routes.migration_batches import router as migration_batches_router
 from backend.api.routes.migration_category_statuses import (
@@ -41,7 +41,6 @@ from backend.api.routes.user_sessions import router as user_sessions_router
 from backend.api.routes.users import router as users_router
 from backend.api.routes.versions import router as versions_router
 from backend.config.settings import settings
-from backend.db.session import engine
 
 logger = logging.getLogger(__name__)
 
@@ -126,13 +125,5 @@ app.include_router(versions_router, prefix="/api/v1")
 
 @app.get("/health")
 def health_check() -> dict:
-    """Health check endpoint with database connectivity status."""
-    db_ok = False
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-            db_ok = True
-    except Exception:
-        logger.warning("Database health check failed", exc_info=True)
-
-    return {"status": "ok", "version": "0.1.0", "db": "connected" if db_ok else "disconnected"}
+    """Health check endpoint — delegates to the health module."""
+    return _health_check_handler()
