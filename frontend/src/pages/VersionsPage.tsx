@@ -1,27 +1,30 @@
 /**
- * Versions page — lists all versions for a project with progress tracking.
+ * VersionsPage — version list for a project.
  *
- * Route: ``/projects/:slug/versions``
+ * Route: ``projects/:slug/versions`` (child of ProjectLayout)
  *
- * First resolves the project UUID from the URL slug (GET /projects), then
- * fetches versions via GET /projects/{id}/versions.  Version numbers follow
- * the ICC convention: projects start at v0.1 and v1.0 is the first
+ * Receives the resolved project from ``ProjectLayout`` via outlet context —
+ * no extra projects-list fetch needed.  Version numbers follow the ICC
+ * convention: projects start at v0.1 and v1.0 is the first
  * production/deploy release.
+ *
+ * ENTER key in the "Nová verzia" dialog moves focus to the next field
+ * instead of submitting the form, preventing accidental early submission.
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useOutletContext, useParams } from "react-router-dom";
 import { Plus, AlertCircle, Tag } from "lucide-react";
 
 import VersionProgressBar from "../components/versions/VersionProgressBar";
 import VersionStatusBadge from "../components/versions/VersionStatusBadge";
-import { api, ApiError } from "../services/api";
+import { ApiError } from "../services/api";
 import {
   createVersion,
   listVersions,
   releaseVersion,
 } from "../services/api/versions";
-import type { ProjectRead } from "../types/project";
+import type { ProjectLayoutContext } from "./ProjectPage";
 import type { Version, VersionCreate } from "../types/version";
 import { getUserRole } from "../utils/auth";
 import { formatDate } from "../utils/format";
@@ -34,15 +37,19 @@ interface CreateVersionDialogProps {
   onCreated: (v: Version) => void;
 }
 
-function CreateVersionDialog({ projectId, onClose, onCreated }: CreateVersionDialogProps) {
-  const [form, setForm] = useState<VersionCreate>({
+function CreateVersionDialog({
+  projectId,
+  onClose,
+  onCreated,
+}: CreateVersionDialogProps) {
+  const [form, setForm]       = useState<VersionCreate>({
     version_number: "",
     name: "",
     description: "",
     target_date: "",
   });
   const [isSaving, setIsSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error,    setError]    = useState<string | null>(null);
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -68,6 +75,31 @@ function CreateVersionDialog({ projectId, onClose, onCreated }: CreateVersionDia
     [form, projectId, onCreated],
   );
 
+  /**
+   * Prevent ENTER from submitting the form when focus is on a text/date
+   * input.  Instead, move focus to the next focusable element so the user
+   * can fill in all fields before explicitly clicking "Vytvoriť".
+   * ENTER inside a <textarea> is intentionally left alone (newline insertion).
+   */
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLFormElement>) => {
+      if (e.key !== "Enter" || !(e.target instanceof HTMLInputElement)) return;
+      e.preventDefault();
+      const form = e.currentTarget;
+      const focusables = Array.from(
+        form.querySelectorAll<HTMLElement>(
+          "input:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled])",
+        ),
+      );
+      const idx  = focusables.indexOf(e.target as HTMLElement);
+      const next = focusables[idx + 1];
+      if (next !== undefined) {
+        next.focus();
+      }
+    },
+    [],
+  );
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
       <div className="w-full max-w-md rounded-xl border border-gray-700 bg-gray-800 p-6 shadow-2xl">
@@ -82,7 +114,7 @@ function CreateVersionDialog({ projectId, onClose, onCreated }: CreateVersionDia
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} onKeyDown={handleKeyDown} className="space-y-4">
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-300">
               Číslo verzie <span className="text-red-400">*</span>
@@ -91,7 +123,9 @@ function CreateVersionDialog({ projectId, onClose, onCreated }: CreateVersionDia
               type="text"
               required
               value={form.version_number}
-              onChange={(e) => setForm((f) => ({ ...f, version_number: e.target.value }))}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, version_number: e.target.value }))
+              }
               className="w-full rounded-lg border border-gray-600 bg-gray-900 px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
               placeholder="napr. 0.1"
               autoFocus
@@ -108,7 +142,9 @@ function CreateVersionDialog({ projectId, onClose, onCreated }: CreateVersionDia
             <input
               type="text"
               value={form.name ?? ""}
-              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, name: e.target.value }))
+              }
               className="w-full rounded-lg border border-gray-600 bg-gray-900 px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
               placeholder="napr. MVP základ"
             />
@@ -120,7 +156,9 @@ function CreateVersionDialog({ projectId, onClose, onCreated }: CreateVersionDia
             </label>
             <textarea
               value={form.description ?? ""}
-              onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, description: e.target.value }))
+              }
               rows={3}
               className="w-full rounded-lg border border-gray-600 bg-gray-900 px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
             />
@@ -133,7 +171,9 @@ function CreateVersionDialog({ projectId, onClose, onCreated }: CreateVersionDia
             <input
               type="date"
               value={form.target_date ?? ""}
-              onChange={(e) => setForm((f) => ({ ...f, target_date: e.target.value }))}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, target_date: e.target.value }))
+              }
               className="w-full rounded-lg border border-gray-600 bg-gray-900 px-3 py-2 text-sm text-gray-100 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
             />
           </div>
@@ -164,44 +204,41 @@ function CreateVersionDialog({ projectId, onClose, onCreated }: CreateVersionDia
 // ── Main page ────────────────────────────────────────────────────────────────
 
 function VersionsPage() {
-  const { slug } = useParams<{ slug: string }>();
+  const { slug }         = useParams<{ slug: string }>();
+  const { project }      = useOutletContext<ProjectLayoutContext>();
 
-  const [project, setProject]     = useState<ProjectRead | null>(null);
-  const [versions, setVersions]   = useState<Version[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError]         = useState<string | null>(null);
+  const [versions,   setVersions]   = useState<Version[]>([]);
+  const [isLoading,  setIsLoading]  = useState(true);
+  const [error,      setError]      = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
-  const [releasing, setReleasing] = useState<string | null>(null);
+  const [releasing,  setReleasing]  = useState<string | null>(null);
 
   const role = getUserRole();
   const isRi = role === "ri";
 
-  // ── Resolve project UUID from slug, then load versions ──────────────────
+  // ── Load versions ─────────────────────────────────────────────────────────
+
   const load = useCallback(async () => {
-    if (!slug) return;
     setIsLoading(true);
     setError(null);
     try {
-      const data = await api.get<{ items: ProjectRead[]; total: number }>("/projects");
-      const found = data.items.find((p) => p.slug === slug);
-      if (!found) {
-        setError(`Projekt '${slug}' nebol nájdený.`);
-        return;
-      }
-      setProject(found);
-
-      const versionList = await listVersions(found.id);
+      const versionList = await listVersions(project.id);
       setVersions(versionList);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Nepodarilo sa načítať verzie.");
+      setError(
+        err instanceof ApiError ? err.message : "Nepodarilo sa načítať verzie.",
+      );
     } finally {
       setIsLoading(false);
     }
-  }, [slug]);
+  }, [project.id]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
-  // ── Release handler ──────────────────────────────────────────────────────
+  // ── Release handler ───────────────────────────────────────────────────────
+
   const handleRelease = useCallback(async (id: string) => {
     if (!window.confirm("Uvoľniť túto verziu? Akcia je nevratná.")) return;
     setReleasing(id);
@@ -209,19 +246,23 @@ function VersionsPage() {
       const updated = await releaseVersion(id);
       setVersions((prev) => prev.map((v) => (v.id === id ? updated : v)));
     } catch (err) {
-      window.alert(err instanceof ApiError ? err.message : "Uvoľnenie zlyhalo.");
+      window.alert(
+        err instanceof ApiError ? err.message : "Uvoľnenie zlyhalo.",
+      );
     } finally {
       setReleasing(null);
     }
   }, []);
 
-  // ── Create handler ───────────────────────────────────────────────────────
+  // ── Create handler ────────────────────────────────────────────────────────
+
   const handleCreated = useCallback((v: Version) => {
     setVersions((prev) => [v, ...prev]);
     setShowCreate(false);
   }, []);
 
-  // ── Render ───────────────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────────────
+
   return (
     <section className="space-y-6">
       {/* Header */}
@@ -281,7 +322,14 @@ function VersionsPage() {
           <table className="min-w-full divide-y divide-gray-700">
             <thead className="bg-gray-800/60">
               <tr>
-                {["Verzia", "Názov", "Stav", "Cieľový dátum", "Priebeh", ...(isRi ? ["Akcie"] : [])].map((h) => (
+                {[
+                  "Verzia",
+                  "Názov",
+                  "Stav",
+                  "Cieľový dátum",
+                  "Priebeh",
+                  ...(isRi ? ["Akcie"] : []),
+                ].map((h) => (
                   <th
                     key={h}
                     className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500"
@@ -342,7 +390,7 @@ function VersionsPage() {
       )}
 
       {/* Create dialog */}
-      {showCreate && project && (
+      {showCreate && (
         <CreateVersionDialog
           projectId={project.id}
           onClose={() => setShowCreate(false)}

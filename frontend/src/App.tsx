@@ -34,7 +34,8 @@ import NotFoundPage from "./pages/NotFoundPage";
 import ProjectAdminPage from "./pages/ProjectAdminPage";
 import ProjectModulePage from "./pages/ProjectModulePage";
 import ProfessionalSpecificationPage from "./pages/ProfessionalSpecificationPage";
-import ProjectPage from "./pages/ProjectPage";
+import ProjectLayout from "./pages/ProjectPage";
+import ProjectOverview from "./pages/ProjectOverview";
 import ProjectsPage from "./pages/ProjectsPage";
 import RawSpecificationPage from "./pages/RawSpecificationPage";
 import ReportConfigPage from "./pages/ReportConfigPage";
@@ -96,28 +97,26 @@ function App() {
           <Route index element={<DashboardPage />} />
           <Route path="projects" element={<ProjectsPage />} />
           <Route path="projects/new" element={<NewProjectPage />} />
-          <Route path="projects/:slug" element={<ProjectPage />} />
-          <Route path="projects/:slug/spec" element={<SpecificationPage />} />
-          <Route
-            path="projects/:slug/modules"
-            element={<ModuleRegistryPage />}
-          />
-          {/* Architect — project-level and module-level (DESIGN.md § 3.1) */}
-          <Route path="projects/:slug/architect" element={<ArchitectPage />} />
-          <Route
-            path="projects/:slug/modules/:code/architect"
-            element={<ArchitectPage />}
-          />
-          <Route path="projects/:slug/versions" element={<VersionsPage />} />
-          <Route
-            path="projects/:slug/versions/:vid"
-            element={<VersionDetailPage />}
-          />
-          <Route path="projects/:slug/tasks" element={<TasksPage />} />
-          <Route path="projects/:slug/delegate" element={<DelegationPage />} />
-          <Route path="projects/:slug/reports" element={<ReportsPage />} />
-          <Route path="projects/:slug/migration" element={<MigrationPage />} />
-          <Route path="projects/:slug/kb" element={<KnowledgeBasePage />} />
+
+          {/* Project layout — header + tabs shared across all sub-pages */}
+          <Route path="projects/:slug" element={<ProjectLayout />}>
+            <Route index element={<ProjectOverview />} />
+            <Route path="spec" element={<SpecificationPage />} />
+            <Route path="modules" element={<ModuleRegistryPage />} />
+            {/* Architect — project-level and module-level (DESIGN.md § 3.1) */}
+            <Route path="architect" element={<ArchitectPage />} />
+            <Route
+              path="modules/:code/architect"
+              element={<ArchitectPage />}
+            />
+            <Route path="versions" element={<VersionsPage />} />
+            <Route path="versions/:vid" element={<VersionDetailPage />} />
+            <Route path="tasks" element={<TasksPage />} />
+            <Route path="delegate" element={<DelegationPage />} />
+            <Route path="reports" element={<ReportsPage />} />
+            <Route path="migration" element={<MigrationPage />} />
+            <Route path="kb" element={<KnowledgeBasePage />} />
+          </Route>
           <Route path="settings" element={<SettingsPage />} />
 
           {/* Admin CRUD pages (Feat 6) — one route per entity. */}

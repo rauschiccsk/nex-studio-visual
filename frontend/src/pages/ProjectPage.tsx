@@ -1,21 +1,46 @@
+/**
+ * ProjectLayout — shared header + tab navigation for all project sub-pages.
+ *
+ * Route: ``projects/:slug`` (parent / layout route)
+ *
+ * Fetches the project once by slug, renders the project header and tab bar,
+ * then delegates the active tab's content to a child route via
+ * ``<Outlet>``.  Child pages receive the resolved project through React
+ * Router's outlet-context so they avoid a redundant projects-list fetch.
+ *
+ * File intentionally kept as ``ProjectPage.tsx`` to minimise git churn;
+ * the exported component is named ``ProjectLayout``.
+ */
+
 import { useEffect, useState } from "react";
-import { NavLink, useParams } from "react-router-dom";
+import { NavLink, Outlet, useParams } from "react-router-dom";
 import {
   AlertCircle,
-  Calendar,
   Database,
   ExternalLink,
   Globe,
   Layers,
   Package,
   Server,
-  Shield,
 } from "lucide-react";
 
 import { api, ApiError } from "@/services/api";
 import type { ProjectRead } from "@/types";
 
-// ── helpers ─────────────────────────────────────────────────────────────────
+// ── Outlet context ──────────────────────────────────────────────────────────
+
+/**
+ * Passed to every child route via ``<Outlet context={...}>``.
+ *
+ * Child pages import this type and call
+ * ``useOutletContext<ProjectLayoutContext>()`` to receive the resolved project
+ * without making their own API call.
+ */
+export interface ProjectLayoutContext {
+  project: ProjectRead;
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
 
 const STATUS_BADGE: Record<string, string> = {
   active:   "bg-green-500/15 text-green-400 border border-green-500/30",
@@ -29,23 +54,14 @@ const STATUS_LABEL: Record<string, string> = {
   archived: "Archivovaný",
 };
 
-function InfoRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-start gap-2 py-2 border-b border-gray-700/60 last:border-0">
-      <span className="w-32 shrink-0 text-xs text-gray-500">{label}</span>
-      <span className="text-sm text-gray-300">{children}</span>
-    </div>
-  );
-}
+// ── Component ────────────────────────────────────────────────────────────────
 
-// ── component ────────────────────────────────────────────────────────────────
-
-function ProjectPage() {
+function ProjectLayout() {
   const { slug } = useParams<{ slug: string }>();
 
   const [project, setProject] = useState<ProjectRead | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading]  = useState(true);
+  const [error,   setError]    = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -66,6 +82,8 @@ function ProjectPage() {
       .finally(() => setLoading(false));
   }, [slug]);
 
+  // ── Loading ──────────────────────────────────────────────────────────────
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20 text-gray-500 text-sm">
@@ -73,6 +91,8 @@ function ProjectPage() {
       </div>
     );
   }
+
+  // ── Error ────────────────────────────────────────────────────────────────
 
   if (error || !project) {
     return (
@@ -94,11 +114,7 @@ function ProjectPage() {
     { label: "Správy",    to: `${base}/reports`,  end: false },
   ];
 
-  const createdAt = new Date(project.created_at).toLocaleDateString("sk-SK", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
+  // ── Render ───────────────────────────────────────────────────────────────
 
   return (
     <section className="space-y-6">
@@ -115,12 +131,14 @@ function ProjectPage() {
               <h2 className="text-xl font-bold text-gray-100 truncate">
                 {project.name}
               </h2>
-              <p className="mt-0.5 font-mono text-xs text-gray-500">{project.slug}</p>
+              <p className="mt-0.5 font-mono text-xs text-gray-500">
+                {project.slug}
+              </p>
             </div>
           </div>
 
           <span
-            className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_BADGE[project.status] ?? STATUS_BADGE.archived}`}
+            className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_BADGE[project.status] ?? STATUS_BADGE["archived"]}`}
           >
             {STATUS_LABEL[project.status] ?? project.status}
           </span>
@@ -185,56 +203,10 @@ function ProjectPage() {
         ))}
       </div>
 
-      {/* ── Prehľad content ── */}
-      <div className="rounded-xl border border-gray-700 bg-gray-800 p-6">
-        <h3 className="mb-4 text-sm font-semibold text-gray-400 uppercase tracking-wide">
-          Detaily projektu
-        </h3>
-
-        <div className="divide-y divide-gray-700/60">
-          <InfoRow label="Kategória">
-            <span className="flex items-center gap-1.5">
-              {project.category === "multimodule"
-                ? <><Layers className="h-3.5 w-3.5" /> Multimodule</>
-                : <><Package className="h-3.5 w-3.5" /> Single module</>}
-            </span>
-          </InfoRow>
-
-          <InfoRow label="Status">
-            <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[project.status]}`}>
-              {STATUS_LABEL[project.status]}
-            </span>
-          </InfoRow>
-
-          {project.source_path && (
-            <InfoRow label="Zdrojový kód">
-              <span className="font-mono text-xs">{project.source_path}</span>
-            </InfoRow>
-          )}
-
-          {project.kb_path && (
-            <InfoRow label="Knowledge base">
-              <span className="font-mono text-xs">{project.kb_path}</span>
-            </InfoRow>
-          )}
-
-          <InfoRow label="Guardian">
-            <span className="flex items-center gap-1.5">
-              <Shield className={`h-3.5 w-3.5 ${project.guardian_enabled ? "text-green-400" : "text-gray-600"}`} />
-              {project.guardian_enabled ? "Zapnutý" : "Vypnutý"}
-            </span>
-          </InfoRow>
-
-          <InfoRow label="Vytvorený">
-            <span className="flex items-center gap-1.5">
-              <Calendar className="h-3.5 w-3.5 text-gray-500" />
-              {createdAt}
-            </span>
-          </InfoRow>
-        </div>
-      </div>
+      {/* ── Child route content ── */}
+      <Outlet context={{ project } satisfies ProjectLayoutContext} />
     </section>
   );
 }
 
-export default ProjectPage;
+export default ProjectLayout;
