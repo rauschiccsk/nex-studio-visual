@@ -12,7 +12,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import html2canvas from "html2canvas";
-import { Check, Loader2, X } from "lucide-react";
+import { Check, ClipboardCopy, Loader2, X } from "lucide-react";
 
 import api from "@/services/api";
 
@@ -32,7 +32,38 @@ export function ScreenshotOverlay({ onClose }: Props) {
   const [dataUrl, setDataUrl] = useState<string | null>(null);
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [copyDone, setCopyDone] = useState(false);
   const overlayRef = useRef<HTMLDivElement>(null);
+
+  const handleCopy = (text: string) => {
+    const flash = () => {
+      setCopyDone(true);
+      setTimeout(() => setCopyDone(false), 1500);
+    };
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(flash).catch(() => {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        flash();
+      });
+    } else {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      flash();
+    }
+  };
 
   // Close on Escape
   useEffect(() => {
@@ -120,7 +151,20 @@ export function ScreenshotOverlay({ onClose }: Props) {
         {phase === "done" && uploadResult && (
           <div className="mb-4 rounded-lg border border-gray-700 bg-gray-900 px-3 py-2">
             <p className="mb-0.5 text-[10px] uppercase tracking-wider text-gray-500">Cesta na serveri</p>
-            <code className="text-xs text-green-300">uploads/{uploadResult.filename}</code>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 text-xs text-green-300">uploads/{uploadResult.filename}</code>
+              <button
+                onClick={() => handleCopy(`uploads/${uploadResult.filename}`)}
+                title="Copy path"
+                className={`flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors ${copyDone ? "text-green-400" : "text-gray-400 hover:bg-gray-800 hover:text-gray-200"}`}
+              >
+                {copyDone ? (
+                  <><Check className="h-3.5 w-3.5" />Copied!</>
+                ) : (
+                  <><ClipboardCopy className="h-3.5 w-3.5" />Copy</>
+                )}
+              </button>
+            </div>
             <p className="mt-1 text-[10px] text-gray-500">
               {(uploadResult.size / 1024).toFixed(1)} KB
             </p>
