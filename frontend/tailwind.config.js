@@ -8,6 +8,7 @@ export default {
       colors: {
         // NEX Studio brand palette
         primary: {
+          DEFAULT: "#3b82f6",
           50: "#eff6ff",
           100: "#dbeafe",
           200: "#bfdbfe",
