@@ -89,6 +89,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Literal, Optional
 from uuid import UUID
@@ -504,13 +505,34 @@ async def generate_design_doc(
             "PORT DOKUMENTÁCIA:\n"
             "- Port 5173 (Vite dev server) je povolená výnimka — v Section 1.1 pridaj"
             " poznámku '(dev-only, not in ICC registry)' za tento port\n\n"
-            "OPEN QUESTIONS:\n"
+            "OPEN QUESTIONS REGISTER:\n"
+            "- Q-xx register obsahuje VÝLUČNE nevyriešené otázky\n"
+            "- Changelog poznámky a administratívne záznamy o prečíslovaní do Q-xx NEPATRIA\n"
             "- Q-xx číslovanie musí byť sekvenčné bez medzier\n"
             "- Ak bola otázka vyriešená, pridaj riadok 'Resolved: [dôvod]' — nikdy"
             " nevynechávaj čísla\n\n"
             "CREDENTIALS V SECTION 9:\n"
             "- Každý placeholder credential (password, SECRET_KEY, API key) musí mať"
-            " komentár '# REPLACE IN PRODUCTION'\n\n"
+            " komentár '# REPLACE IN PRODUCTION'\n"
+            "- DATABASE_URL a iné URLs s embedded heslom: '# REPLACE IN PRODUCTION'"
+            " musí byť na TOM ISTOM RIADKU ako URL — nie na pokračovacom riadku\n\n"
+            "ICC-STANDARD MARKERY:\n"
+            "- [ICC-STANDARD] markery NESMÚ byť v texte headingov\n"
+            "- Ak šablóna má '## Section N: Name [ICC-STANDARD]',"
+            " výstup musí byť '## Section N: Name' — marker odstráň\n"
+            "- [ARCHITECT] a podobné markery musia byť kompletne odstránené z výstupu\n\n"
+            "DEFERRED ITEMS KONZISTENCIA:\n"
+            "- Každý cross-reference W-xx v texte dokumentu MUSÍ existovať"
+            " ako riadok v Deferred Items tabuľke\n"
+            "- Pred dokončením dokumentu skontroluj všetky W-xx referencie\n\n"
+            "YAML KOMENTÁRE:\n"
+            "- YAML inline komentáre: vždy na TOM ISTOM riadku ako hodnota:"
+            " 'KEY: value  # komentár'\n"
+            "- Komentár na pokračovacom riadku je syntaktická chyba v YAML\n\n"
+            "TABUĽKY V SECTION 5:\n"
+            "- Každý riadok tabuľky musí mať PRESNE rovnaký počet stĺpcov ako header riadok\n"
+            "- Hodnota stĺpca nesmie obsahovať obsah iného stĺpca\n"
+            "- Kontroluj špeciálne riadky updated_at, created_at — sú náchylné na chyby\n\n"
             f"ŠABLÓNA:\n\n{template_content}"
         )
     else:
@@ -536,6 +558,23 @@ async def generate_design_doc(
             "- Slovenská gramatika: skontroluj pádovú zhodu — inštrumentál ('nenulovým"
             " zostatkom', nie 'nenulový zostatkom'), genitív ('priradenej firme', nie"
             " 'priradenou firmy')\n\n"
+            "CROSS-REFERENCIE — KRITICKÉ:\n"
+            "- [[workflow:X]] použi LEN ak X je definovaný ako workflow v Section 3\n"
+            "- [[edge:X]] použi LEN ak X je definovaný ako edge case v Section 4\n"
+            "- Pred dokončením skontroluj každý cross-reference — nesprávny typ je chyba\n\n"
+            "ERROR TAXONOMY A EDGE CASES:\n"
+            "- Každý error kód v Error Taxonomy, ktorý reprezentuje user-facing scenár"
+            " (nie čistá systémová chyba), musí mať zodpovedajúci edge case v Section 4\n\n"
+            "INTERNÉ KÓDY:\n"
+            "- Ak workflow kroky referencujú interné kódy (BC-xx, formula kódy a pod.),"
+            " tieto musia byť definované v dokumente — inak ich nahraď popisným textom\n\n"
+            "OPEN QUESTIONS:\n"
+            "- Ak Changelog alebo iná sekcia spomína otvorené otázky Q-xx,"
+            " tieto musia byť vypísané v dedikovanej sekcii s ich znením a statusom\n\n"
+            "METADÁTA:\n"
+            "- Všetky metadatové polia (Verzia, Komplementárny k, Dátum) musia byť vyplnené\n"
+            "- Ak verzia komplementárneho dokumentu nie je známa, uveď 'TBD'"
+            " — NIKDY nie 'v(bude priradené)' alebo podobné\n\n"
             f"ŠABLÓNA:\n\n{template_content}"
         )
 
@@ -567,21 +606,29 @@ async def generate_design_doc(
         assistant_content = "".join(full_content)
         design_doc_id: str | None = None
 
-        # Post-generation validation: content must start with the expected heading
-        # and be at least 5000 chars (summary/description outputs are typically <3000).
+        # Post-generation validation: multi-check pipeline.
+        # Basic checks (prefix + length) run first; pattern checks only if basic pass.
         expected_prefix = f"# {doc_label}"
-        validation_ok = (
-            not error_occurred
-            and len(assistant_content) >= 5000
-            and assistant_content.lstrip().startswith(expected_prefix)
-        )
+        validation_failures: list[str] = []
 
-        if not validation_ok and not error_occurred:
-            reason = (
-                f"Obsah nezačína s '{expected_prefix}'"
-                if not assistant_content.lstrip().startswith(expected_prefix)
-                else f"Obsah je príliš krátky ({len(assistant_content)} znakov, minimum 5000)"
-            )
+        if not error_occurred:
+            if not assistant_content.lstrip().startswith(expected_prefix):
+                validation_failures.append(f"Obsah nezačína s '{expected_prefix}'")
+            elif len(assistant_content) < 5000:
+                validation_failures.append(f"Obsah je príliš krátky ({len(assistant_content)} znakov, minimum 5000)")
+            else:
+                # Pattern checks (only after basic checks pass)
+                if re.search(r"^#{1,6} .*\[ICC-STANDARD\]", assistant_content, re.MULTILINE):
+                    validation_failures.append("Dokument obsahuje [ICC-STANDARD] markery v headingoch")
+                if doc_type == "behavior" and "<!--" in assistant_content:
+                    validation_failures.append("Dokument obsahuje HTML komentáre <!-- ... --> zo šablóny")
+                if "(bude priradené)" in assistant_content:
+                    validation_failures.append("Dokument obsahuje nevyplnené metadátové polia '(bude priradené)'")
+
+        validation_ok = not error_occurred and not validation_failures
+
+        if validation_failures and not error_occurred:
+            reason = "; ".join(validation_failures)
             logger.warning(
                 "Design doc validation failed (type=%s, prof_spec=%s): %s",
                 doc_type,
