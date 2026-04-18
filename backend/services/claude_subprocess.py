@@ -1,18 +1,24 @@
 """Claude CLI subprocess executor for streaming AI responses.
 
-Spawns ``claude -p <prompt> --output-format stream-json`` as a subprocess,
-reads NDJSON lines from stdout, and yields content chunks as an async
-generator.  This is NOT a CRUD service — it has no database interaction.
+Spawns ``claude -p`` as a subprocess with stdin/stdout piping, reads
+NDJSON ``stream_event`` lines from stdout (requires ``--verbose
+--include-partial-messages``), and yields text chunks as an async
+generator.
 
-Design notes (per DESIGN.md D-11 — Claude MAX via CLI Subprocess):
+Design (DESIGN.md D-11 — Claude MAX via CLI Subprocess):
+- ICC uses Claude MAX subscription — no Anthropic API key needed.
+- System prompt goes to a temp file (--system-prompt-file) to avoid
+  OS ARG_MAX limits for large templates.
+- User prompt goes via stdin (also avoids ARG_MAX).
+- ``--include-partial-messages`` enables real-time ``content_block_delta``
+  streaming events so the frontend sees text arriving incrementally.
+- ``--no-session-persistence`` ensures each call is stateless.
 
-    * ICC uses Claude MAX subscription (flat rate) instead of Anthropic API.
-    * Claude AI is invoked via ``claude`` CLI subprocess with
-      ``CLAUDE_CONFIG_DIR`` pointing to the mounted auth config.
-    * ``--output-format stream-json`` produces NDJSON lines on stdout.
-    * The backend converts these to SSE events for the frontend.
-    * Timeout protection kills the subprocess if it exceeds the configured
-      limit (default 300 s from ``Settings.claude_stream_timeout``).
+Ported from the proven NEX Command ``ClaudeStreamingExecutor`` pattern
+(``backend/core/claude_streaming.py``) — root cause of the original
+non-streaming implementation was that ``_extract_content`` was reading
+``data["content"]`` instead of ``stream_event → content_block_delta →
+text_delta`` which is the actual Claude CLI NDJSON format.
 """
 
 from __future__ import annotations
@@ -21,73 +27,12 @@ import asyncio
 import json
 import logging
 import os
-import shlex
+import tempfile
 from collections.abc import AsyncGenerator
 
 from backend.config.settings import settings
 
 logger = logging.getLogger(__name__)
-
-# NDJSON message types that carry displayable content.
-_CONTENT_TYPES = frozenset({"assistant", "result"})
-
-
-def _build_claude_command(prompt: str) -> list[str]:
-    """Build the ``claude`` CLI argument list with proper escaping.
-
-    Args:
-        prompt: The user/system prompt to send to Claude.
-
-    Returns:
-        A list of strings suitable for ``asyncio.create_subprocess_exec``.
-    """
-    return [
-        settings.claude_cli_path,
-        "-p",
-        prompt,
-        "--output-format",
-        "stream-json",
-    ]
-
-
-def _build_env() -> dict[str, str]:
-    """Build the environment dict for the subprocess.
-
-    Copies the current process environment and overrides
-    ``CLAUDE_CONFIG_DIR`` with the value from settings.
-    """
-    env = os.environ.copy()
-    env["CLAUDE_CONFIG_DIR"] = settings.claude_config_dir
-    return env
-
-
-def _extract_content(line: str) -> str | None:
-    """Parse a single NDJSON line and extract displayable content.
-
-    The ``stream-json`` format emits objects with a ``type`` field.
-    We only forward ``assistant`` and ``result`` messages that carry
-    a non-empty ``content`` string.
-
-    Args:
-        line: A single NDJSON line from Claude CLI stdout.
-
-    Returns:
-        The content string if this line carries one, otherwise ``None``.
-    """
-    if not line.strip():
-        return None
-    try:
-        data = json.loads(line)
-    except json.JSONDecodeError:
-        logger.debug("Skipping non-JSON line from Claude CLI: %s", line[:120])
-        return None
-
-    msg_type = data.get("type", "")
-    if msg_type in _CONTENT_TYPES:
-        content = data.get("content", "")
-        if content:
-            return content
-    return None
 
 
 async def run_claude_stream(
@@ -95,61 +40,108 @@ async def run_claude_stream(
     context: str | None = None,
     timeout: int | None = None,
 ) -> AsyncGenerator[str, None]:
-    """Spawn ``claude`` CLI and yield content chunks as they arrive.
+    """Spawn ``claude`` CLI and yield text chunks as they arrive.
 
     Args:
-        prompt: The prompt text to send.  If *context* is provided it is
-            prepended to the prompt separated by a double newline.
-        context: Optional context string (e.g. design docs, conversation
-            history) prepended to the prompt.
-        timeout: Maximum wall-clock seconds before killing the subprocess.
+        prompt: The user message sent via stdin.
+        context: Optional system prompt — written to a temp file and
+            passed via ``--system-prompt-file`` to avoid ARG_MAX limits.
+        timeout: Maximum wall-clock seconds before killing the process.
             Defaults to ``Settings.claude_stream_timeout`` (300 s).
 
     Yields:
-        Content strings extracted from the NDJSON stream.
+        Text strings from ``content_block_delta`` streaming events.
 
     Raises:
-        RuntimeError: If the subprocess exits with a non-zero code or
-            emits errors on stderr.
+        RuntimeError: If the subprocess exits with a non-zero code.
         TimeoutError: If the subprocess exceeds *timeout* seconds.
     """
     effective_timeout = timeout if timeout is not None else settings.claude_stream_timeout
 
-    # Assemble full prompt with optional context prefix.
-    full_prompt = f"{context}\n\n{prompt}" if context else prompt
-    cmd = _build_claude_command(full_prompt)
-    env = _build_env()
+    # Write system prompt to a temp file — avoids OS ARG_MAX for large templates.
+    tmp_path: str | None = None
+    if context:
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".txt",
+            prefix="nex_sysprompt_",
+            delete=False,
+            encoding="utf-8",
+        )
+        tmp.write(context)
+        tmp.flush()
+        tmp.close()
+        tmp_path = tmp.name
+
+    cmd = [settings.claude_cli_path, "-p"]
+    if tmp_path:
+        cmd.extend(["--system-prompt-file", tmp_path])
+    cmd.extend([
+        "--output-format", "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+        "--no-session-persistence",
+    ])
+
+    env = os.environ.copy()
+    env["CLAUDE_CONFIG_DIR"] = settings.claude_config_dir
 
     logger.info(
-        "Spawning Claude CLI: %s (timeout=%ds)",
-        shlex.join(cmd[:3]) + " ...",
+        "Spawning Claude CLI (timeout=%ds, context=%s)",
         effective_timeout,
+        "yes" if tmp_path else "no",
     )
 
     process = await asyncio.create_subprocess_exec(
         *cmd,
+        stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         env=env,
+        limit=1024 * 1024,  # 1 MB per readline — NDJSON lines can be large
     )
+
+    assert process.stdin is not None  # noqa: S101
+    assert process.stdout is not None  # noqa: S101
+
+    # Send user prompt via stdin and close it so Claude knows input is done.
+    process.stdin.write(prompt.encode("utf-8"))
+    await process.stdin.drain()
+    process.stdin.close()
 
     stderr_chunks: list[bytes] = []
 
     try:
         async with asyncio.timeout(effective_timeout):
-            assert process.stdout is not None  # noqa: S101
-            assert process.stderr is not None  # noqa: S101
-
             while True:
                 line_bytes = await process.stdout.readline()
                 if not line_bytes:
-                    break
-                line = line_bytes.decode("utf-8", errors="replace")
-                content = _extract_content(line)
-                if content is not None:
-                    yield content
+                    break  # EOF — process finished
 
-            # Collect any remaining stderr after stdout is exhausted.
+                line = line_bytes.decode("utf-8", errors="replace").strip()
+                if not line:
+                    continue
+
+                try:
+                    data = json.loads(line)
+                except json.JSONDecodeError:
+                    logger.debug("Skipping non-JSON line: %.120s", line)
+                    continue
+
+                # Real-time streaming: content_block_delta carries individual text chunks.
+                if (
+                    data.get("type") == "stream_event"
+                    and isinstance(data.get("event"), dict)
+                    and data["event"].get("type") == "content_block_delta"
+                    and isinstance(data["event"].get("delta"), dict)
+                    and data["event"]["delta"].get("type") == "text_delta"
+                ):
+                    text = data["event"]["delta"].get("text", "")
+                    if text:
+                        yield text
+
+            # Collect any stderr emitted after stdout EOF.
+            assert process.stderr is not None  # noqa: S101
             stderr_chunks.append(await process.stderr.read())
 
     except TimeoutError:
@@ -157,15 +149,30 @@ async def run_claude_stream(
         try:
             process.kill()
         except ProcessLookupError:
-            pass  # Already exited.
+            pass
         await process.wait()
         raise TimeoutError(f"Claude CLI subprocess exceeded {effective_timeout}s timeout")
+    finally:
+        if process.returncode is None:
+            try:
+                process.terminate()
+                await asyncio.wait_for(process.wait(), timeout=5)
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+        if tmp_path is not None:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
     await process.wait()
 
     stderr_text = b"".join(stderr_chunks).decode("utf-8", errors="replace").strip()
     if stderr_text:
-        logger.warning("Claude CLI stderr: %s", stderr_text[:500])
+        logger.warning("Claude CLI stderr: %.500s", stderr_text)
 
     if process.returncode != 0:
-        raise RuntimeError(f"Claude CLI exited with code {process.returncode}: {stderr_text[:500]}")
+        raise RuntimeError(
+            f"Claude CLI exited with code {process.returncode}: {stderr_text[:500]}"
+        )
