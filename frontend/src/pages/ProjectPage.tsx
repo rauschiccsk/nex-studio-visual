@@ -103,6 +103,7 @@ function ProjectLayout() {
 
   const tabs = [
     { label: "Prehľad",   to: base,              end: true  },
+    { label: "Spec",      to: `${base}/spec`,     end: false },
     { label: "Verzie",    to: `${base}/versions`, end: false },
     { label: "Moduly",    to: `${base}/modules`,  end: false },
     { label: "Delegácia", to: `${base}/delegate`, end: false },

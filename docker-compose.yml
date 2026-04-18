@@ -26,6 +26,7 @@ services:
       - "9176:9176"
     volumes:
       - /home/andros/.claude:/root/.claude:ro
+      - /home/icc/knowledge:/home/icc/knowledge:ro
     environment:
       DATABASE_URL: "postgresql+pg8000://nexstudio:nexstudio@db:5432/nexstudio"
       TEST_DATABASE_URL: "postgresql+pg8000://nexstudio:nexstudio@db:5432/nexstudio_test"

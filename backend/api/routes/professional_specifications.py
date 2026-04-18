@@ -87,20 +87,32 @@ approval gating, §10 pipeline gating):
 
 from __future__ import annotations
 
-from typing import Optional
+import json
+import logging
+from pathlib import Path
+from typing import Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from backend.db.session import get_db
+from backend.config.settings import settings
+from backend.core.security import require_ri_role
+from backend.db.models.foundation import User
+from backend.db.session import SessionLocal, get_db
+from backend.schemas.design_document import DesignDocumentCreate
 from backend.schemas.pagination import PaginatedResponse
 from backend.schemas.professional_specification import (
     ProfessionalSpecificationCreate,
     ProfessionalSpecificationRead,
     ProfessionalSpecificationUpdate,
 )
+from backend.services import claude_subprocess
+from backend.services import design_document as design_document_service
 from backend.services import professional_specification as professional_specification_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Professional Specifications"])
 
@@ -274,6 +286,120 @@ def update_professional_specification(
         raise _map_value_error(exc) from exc
     db.refresh(spec)
     return ProfessionalSpecificationRead.model_validate(spec)
+
+
+@router.post("/{spec_id}/generate-design-doc", status_code=status.HTTP_200_OK)
+async def generate_design_doc(
+    spec_id: UUID,
+    doc_type: Literal["design", "behavior"] = Query(
+        ...,
+        description="Type of document to generate: ``design`` (DESIGN.md) or ``behavior`` (BEHAVIOR.md).",
+    ),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_ri_role),
+):
+    """Stream-generate a DESIGN.md or BEHAVIOR.md from an approved professional spec.
+
+    Reads the professional specification content and the appropriate template
+    (DESIGN_TEMPLATE.md or BEHAVIOR_TEMPLATE.md), then streams the AI response
+    as SSE events::
+
+        data: {"type": "chunk", "content": "..."}
+        data: {"type": "done", "content": "...full text...", "design_doc_id": "..."}
+        data: {"type": "error", "content": "..."}
+
+    On completion the result is persisted as a new ``DesignDocument`` row.
+    ``ri`` role only.
+    """
+    try:
+        prof_spec = professional_specification_service.get_by_id(db, spec_id)
+    except ValueError as exc:
+        raise _map_value_error(exc) from exc
+
+    # Load the appropriate template from KB
+    template_name = "DESIGN_TEMPLATE.md" if doc_type == "design" else "BEHAVIOR_TEMPLATE.md"
+    template_path = Path(settings.knowledge_base_path) / "templates" / template_name
+    try:
+        template_content = template_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Cannot read {template_name}: {exc}",
+        ) from exc
+
+    doc_label = "DESIGN.md" if doc_type == "design" else "BEHAVIOR.md"
+
+    system_prompt = (
+        f"Si ICC Architect AI. Tvojou úlohou je vytvoriť {doc_label} technický dokument"
+        f" z profesionálnej špecifikácie podľa ICC šablóny.\n\n"
+        "Pravidlá:\n"
+        "- Výstup musí byť validný Markdown podľa šablóny\n"
+        "- Vypln VŠETKY sekcie šablóny\n"
+        "- Jazyk: angličtina (technický dokument pre vývojárov)\n"
+        "- Buď konkrétny — žiadne placeholder texty\n"
+        "- Tech stack: Python FastAPI backend, React+TypeScript+Tailwind frontend, PostgreSQL\n\n"
+        f"ŠABLÓNA:\n\n{template_content}"
+    )
+
+    user_prompt = (
+        f"Vytvor {doc_label} technický dokument z nasledujúcej profesionálnej špecifikácie:\n\n{prof_spec.content}"
+    )
+
+    project_id = prof_spec.project_id
+
+    async def _sse_generator():
+        full_content: list[str] = []
+        error_occurred = False
+        try:
+            async for chunk in claude_subprocess.run_claude_stream(
+                prompt=user_prompt,
+                context=system_prompt,
+            ):
+                full_content.append(chunk)
+                yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+        except (RuntimeError, TimeoutError) as exc:
+            error_occurred = True
+            logger.error("Claude stream error for prof_spec %s: %s", spec_id, exc)
+            yield f"data: {json.dumps({'type': 'error', 'content': str(exc)})}\n\n"
+
+        assistant_content = "".join(full_content)
+        design_doc_id: str | None = None
+
+        if assistant_content and not error_occurred:
+            persist_db = SessionLocal()
+            try:
+                design_doc = design_document_service.create(
+                    persist_db,
+                    DesignDocumentCreate(
+                        project_id=project_id,
+                        module_id=None,
+                        doc_type=doc_type,
+                        content=assistant_content,
+                    ),
+                )
+                persist_db.commit()
+                persist_db.refresh(design_doc)
+                design_doc_id = str(design_doc.id)
+            except Exception:
+                persist_db.rollback()
+                logger.exception(
+                    "Failed to persist design doc (type=%s) for prof_spec %s",
+                    doc_type,
+                    spec_id,
+                )
+            finally:
+                persist_db.close()
+
+        yield f"data: {json.dumps({'type': 'done', 'content': assistant_content, 'design_doc_id': design_doc_id})}\n\n"
+
+    return StreamingResponse(
+        _sse_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.delete(

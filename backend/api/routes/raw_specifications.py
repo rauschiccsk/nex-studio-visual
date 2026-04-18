@@ -76,14 +76,22 @@ Design notes (per DESIGN.md §1.7 RawSpecification, §2
 
 from __future__ import annotations
 
+import json
+import logging
+from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from backend.db.session import get_db
+from backend.config.settings import settings
+from backend.core.security import require_ri_role
+from backend.db.models.foundation import User
+from backend.db.session import SessionLocal, get_db
 from backend.schemas.pagination import PaginatedResponse
+from backend.schemas.professional_specification import ProfessionalSpecificationCreate
 from backend.schemas.raw_specification import (
     RawSpecificationCreate,
     RawSpecificationInputFormat,
@@ -91,7 +99,11 @@ from backend.schemas.raw_specification import (
     RawSpecificationStatus,
     RawSpecificationUpdate,
 )
+from backend.services import claude_subprocess
+from backend.services import professional_specification as professional_specification_service
 from backend.services import raw_specification as raw_specification_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Raw Specifications"])
 
@@ -257,6 +269,129 @@ def update_raw_specification(
         raise _map_value_error(exc) from exc
     db.refresh(spec)
     return RawSpecificationRead.model_validate(spec)
+
+
+@router.post("/{spec_id}/generate", status_code=status.HTTP_200_OK)
+async def generate_professional_spec(
+    spec_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_ri_role),
+):
+    """Stream-generate a professional specification from a raw spec using Claude.
+
+    Reads the raw specification text and the PROFESSIONAL_SPEC_TEMPLATE.md,
+    then streams the AI response as SSE events::
+
+        data: {"type": "chunk", "content": "..."}
+        data: {"type": "done", "content": "...full text...", "professional_spec_id": "..."}
+        data: {"type": "error", "content": "..."}
+
+    On completion the result is persisted as a new ``ProfessionalSpecification``
+    row and the raw spec ``status`` is updated to ``done`` (or ``failed``
+    on error).  ``ri`` role only.
+    """
+    try:
+        raw_spec = raw_specification_service.get_by_id(db, spec_id)
+    except ValueError as exc:
+        raise _map_value_error(exc) from exc
+
+    # Load template from KB
+    template_path = Path(settings.knowledge_base_path) / "templates" / "PROFESSIONAL_SPEC_TEMPLATE.md"
+    try:
+        template_content = template_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Cannot read PROFESSIONAL_SPEC_TEMPLATE.md: {exc}",
+        ) from exc
+
+    # Mark as processing
+    try:
+        raw_specification_service.update(db, spec_id, RawSpecificationUpdate(status="processing"))
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        raise _map_value_error(exc) from exc
+
+    system_prompt = (
+        "Si ICC Professional Specification AI. Tvojou úlohou je transformovať surový"
+        " zákaznícky text na profesionálnu špecifikáciu podľa ICC šablóny.\n\n"
+        "Pravidlá:\n"
+        "- Výstup musí byť validný Markdown podľa šablóny\n"
+        "- Vypln VŠETKY sekcie šablóny podľa informácií zo surovej špecifikácie\n"
+        "- Ak niektorá informácia chýba, označ to ako otvorenú otázku v sekcii 9\n"
+        "- Jazyk: slovenčina (business jazyk, zrozumiteľný zákazníkovi)\n"
+        "- Konrétne príklady s reálnymi menami/číslami tam kde sú dostupné\n"
+        "- Zachovaj formát tabuľky pre každú sekciu kde je predpísaná\n\n"
+        f"ŠABLÓNA:\n\n{template_content}"
+    )
+
+    user_prompt = (
+        f"Transformuj nasledujúcu surový zákaznícku špecifikáciu na profesionálnu"
+        f" špecifikáciu podľa šablóny:\n\n{raw_spec.input_text}"
+    )
+
+    project_id = raw_spec.project_id
+
+    async def _sse_generator():
+        full_content: list[str] = []
+        error_occurred = False
+        try:
+            async for chunk in claude_subprocess.run_claude_stream(
+                prompt=user_prompt,
+                context=system_prompt,
+            ):
+                full_content.append(chunk)
+                yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+        except (RuntimeError, TimeoutError) as exc:
+            error_occurred = True
+            logger.error("Claude stream error for raw_spec %s: %s", spec_id, exc)
+            yield f"data: {json.dumps({'type': 'error', 'content': str(exc)})}\n\n"
+
+        assistant_content = "".join(full_content)
+        prof_spec_id: str | None = None
+
+        persist_db = SessionLocal()
+        try:
+            if assistant_content and not error_occurred:
+                # Count existing versions for this raw_spec
+                existing = professional_specification_service.count_professional_specifications(
+                    persist_db, raw_spec_id=spec_id
+                )
+                prof_spec = professional_specification_service.create(
+                    persist_db,
+                    ProfessionalSpecificationCreate(
+                        raw_spec_id=spec_id,
+                        project_id=project_id,
+                        content=assistant_content,
+                        version=existing + 1,
+                    ),
+                )
+                persist_db.commit()
+                persist_db.refresh(prof_spec)
+                prof_spec_id = str(prof_spec.id)
+
+            # Update raw_spec status
+            new_status: RawSpecificationStatus = "failed" if error_occurred else "done"
+            raw_specification_service.update(persist_db, spec_id, RawSpecificationUpdate(status=new_status))
+            persist_db.commit()
+        except Exception:
+            persist_db.rollback()
+            logger.exception("Failed to persist professional spec for raw_spec %s", spec_id)
+        finally:
+            persist_db.close()
+
+        done_payload = json.dumps({"type": "done", "content": assistant_content, "professional_spec_id": prof_spec_id})
+        yield f"data: {done_payload}\n\n"
+
+    return StreamingResponse(
+        _sse_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.delete(

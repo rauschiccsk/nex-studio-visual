@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     claude_cli_path: str = "claude"
     claude_stream_timeout: int = 300
 
+    # Knowledge Base path (mounted read-only from host)
+    knowledge_base_path: str = "/home/icc/knowledge"
+
     app_version: str = "0.1.0"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
