@@ -30,6 +30,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
+from backend.db.models.foundation import User
 from backend.db.session import get_db
 from backend.schemas.pagination import PaginatedResponse
 from backend.schemas.project import (
@@ -43,7 +44,6 @@ from backend.schemas.project import (
     ProjectStatus,
     ProjectUpdate,
 )
-from backend.db.models.foundation import User
 from backend.services import github_validation as github_validation_service
 from backend.services import port_registry as port_registry_service
 from backend.services import project as project_service
