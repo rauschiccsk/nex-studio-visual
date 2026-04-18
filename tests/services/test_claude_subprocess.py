@@ -1,8 +1,13 @@
 """Tests for :mod:`backend.services.claude_subprocess`.
 
-These tests mock ``asyncio.create_subprocess_exec`` so no real ``claude``
-CLI binary is required.  All async generators are consumed via
-``asyncio.run()`` wrappers to avoid a pytest-asyncio dependency.
+Mocks ``asyncio.create_subprocess_exec`` so no real ``claude`` CLI binary
+is required.  The new implementation:
+- Sends user prompt via stdin (not argv)
+- Writes optional system prompt to a temp file (``--system-prompt-file``)
+- Extracts text from ``stream_event → content_block_delta → text_delta``
+
+Private helpers (_build_claude_command, _build_env, _extract_content) were
+removed in the rewrite — only the public ``run_claude_stream`` is tested.
 """
 
 from __future__ import annotations
@@ -13,22 +18,28 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from backend.services.claude_subprocess import (
-    _build_claude_command,
-    _build_env,
-    _extract_content,
-    run_claude_stream,
-)
+from backend.services.claude_subprocess import run_claude_stream
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _make_ndjson_line(msg_type: str, content: str = "") -> bytes:
-    """Build a single NDJSON line as bytes."""
-    obj = {"type": msg_type, "content": content}
+def _stream_event(text: str) -> bytes:
+    """Build a content_block_delta stream_event NDJSON line."""
+    obj = {
+        "type": "stream_event",
+        "event": {
+            "type": "content_block_delta",
+            "delta": {"type": "text_delta", "text": text},
+        },
+    }
     return json.dumps(obj).encode("utf-8") + b"\n"
+
+
+def _other_event(event_type: str) -> bytes:
+    """Build a non-text stream_event line (should be ignored)."""
+    return json.dumps({"type": "stream_event", "event": {"type": event_type}}).encode() + b"\n"
 
 
 def _make_mock_process(
@@ -36,25 +47,33 @@ def _make_mock_process(
     stderr: bytes = b"",
     returncode: int = 0,
 ) -> MagicMock:
-    """Create a mock subprocess with async readline on stdout."""
+    """Create a mock subprocess compatible with the new stdin-based implementation."""
     process = MagicMock()
     process.returncode = returncode
 
-    line_iter = iter(stdout_lines + [b""])  # empty bytes signals EOF
+    # stdin — write/drain/close are called by run_claude_stream
+    stdin_mock = MagicMock()
+    stdin_mock.write = MagicMock()
+    stdin_mock.drain = AsyncMock()
+    stdin_mock.close = MagicMock()
+    process.stdin = stdin_mock
+
+    # stdout — readline yields pre-configured lines then EOF (b"")
+    line_iter = iter(stdout_lines + [b""])
 
     async def _readline() -> bytes:
         return next(line_iter)
 
     stdout_mock = MagicMock()
     stdout_mock.readline = _readline
+    process.stdout = stdout_mock
 
+    # stderr
     async def _read_stderr() -> bytes:
         return stderr
 
     stderr_mock = MagicMock()
     stderr_mock.read = _read_stderr
-
-    process.stdout = stdout_mock
     process.stderr = stderr_mock
 
     async def _wait() -> int:
@@ -62,11 +81,12 @@ def _make_mock_process(
 
     process.wait = _wait
     process.kill = MagicMock()
+    process.terminate = MagicMock()
 
     return process
 
 
-async def _collect_stream(
+async def _collect(
     prompt: str,
     context: str | None = None,
     timeout: int | None = None,
@@ -79,139 +99,190 @@ async def _collect_stream(
 
 
 # ---------------------------------------------------------------------------
-# _build_claude_command
+# run_claude_stream — content extraction
 # ---------------------------------------------------------------------------
 
 
-class TestBuildClaudeCommand:
-    def test_basic_prompt(self) -> None:
-        cmd = _build_claude_command("Hello world")
-        assert cmd[0] == "claude"
-        assert "-p" in cmd
-        idx = cmd.index("-p")
-        assert cmd[idx + 1] == "Hello world"
-        assert "--output-format" in cmd
-        assert "stream-json" in cmd
-
-    def test_prompt_with_special_chars(self) -> None:
-        prompt = 'Say "hello" && echo $VAR'
-        cmd = _build_claude_command(prompt)
-        idx = cmd.index("-p")
-        assert cmd[idx + 1] == prompt
-
-    def test_uses_settings_cli_path(self) -> None:
-        with patch("backend.services.claude_subprocess.settings") as mock_s:
-            mock_s.claude_cli_path = "/custom/claude"
-            cmd = _build_claude_command("test")
-            assert cmd[0] == "/custom/claude"
-
-
-# ---------------------------------------------------------------------------
-# _build_env
-# ---------------------------------------------------------------------------
-
-
-class TestBuildEnv:
-    def test_sets_claude_config_dir(self) -> None:
-        with patch("backend.services.claude_subprocess.settings") as mock_s:
-            mock_s.claude_config_dir = "/test/.claude"
-            env = _build_env()
-            assert env["CLAUDE_CONFIG_DIR"] == "/test/.claude"
-
-    def test_inherits_parent_env(self) -> None:
-        with patch.dict("os.environ", {"MY_VAR": "hello"}, clear=False):
-            env = _build_env()
-            assert env.get("MY_VAR") == "hello"
-
-
-# ---------------------------------------------------------------------------
-# _extract_content
-# ---------------------------------------------------------------------------
-
-
-class TestExtractContent:
-    def test_assistant_message(self) -> None:
-        line = json.dumps({"type": "assistant", "content": "Hello"})
-        assert _extract_content(line) == "Hello"
-
-    def test_result_message(self) -> None:
-        line = json.dumps({"type": "result", "content": "Done"})
-        assert _extract_content(line) == "Done"
-
-    def test_system_message_ignored(self) -> None:
-        line = json.dumps({"type": "system", "content": "init"})
-        assert _extract_content(line) is None
-
-    def test_empty_content_ignored(self) -> None:
-        line = json.dumps({"type": "assistant", "content": ""})
-        assert _extract_content(line) is None
-
-    def test_blank_line(self) -> None:
-        assert _extract_content("") is None
-        assert _extract_content("   ") is None
-
-    def test_invalid_json(self) -> None:
-        assert _extract_content("not-json{") is None
-
-    def test_missing_type(self) -> None:
-        line = json.dumps({"content": "orphan"})
-        assert _extract_content(line) is None
-
-
-# ---------------------------------------------------------------------------
-# run_claude_stream
-# ---------------------------------------------------------------------------
-
-
-class TestRunClaudeStream:
-    def test_yields_content_chunks(self) -> None:
+class TestContentExtraction:
+    def test_yields_text_chunks(self) -> None:
         lines = [
-            _make_ndjson_line("system", "init"),
-            _make_ndjson_line("assistant", "Hello"),
-            _make_ndjson_line("assistant", " world"),
-            _make_ndjson_line("result", "Final answer"),
+            _other_event("message_start"),
+            _stream_event("Hello"),
+            _stream_event(" world"),
+            _other_event("message_stop"),
         ]
         process = _make_mock_process(lines)
 
-        with patch("backend.services.claude_subprocess.asyncio") as mock_aio:
-            mock_aio.create_subprocess_exec = AsyncMock(return_value=process)
-            mock_aio.subprocess = asyncio.subprocess
-            mock_aio.timeout = asyncio.timeout
+        with patch(
+            "backend.services.claude_subprocess.asyncio.create_subprocess_exec",
+            AsyncMock(return_value=process),
+        ):
+            chunks = asyncio.run(_collect("test"))
 
-            chunks = asyncio.run(_collect_stream("test prompt"))
+        assert chunks == ["Hello", " world"]
 
-        assert chunks == ["Hello", " world", "Final answer"]
+    def test_non_text_events_ignored(self) -> None:
+        lines = [
+            _other_event("message_start"),
+            _stream_event("content"),
+            # result-type event should be ignored (not stream_event)
+            json.dumps({"type": "result", "result": "full text"}).encode() + b"\n",
+        ]
+        process = _make_mock_process(lines)
 
-    def test_context_prepended_to_prompt(self) -> None:
-        process = _make_mock_process([_make_ndjson_line("assistant", "ok")])
+        with patch(
+            "backend.services.claude_subprocess.asyncio.create_subprocess_exec",
+            AsyncMock(return_value=process),
+        ):
+            chunks = asyncio.run(_collect("test"))
 
-        with patch("backend.services.claude_subprocess.asyncio") as mock_aio:
-            mock_aio.create_subprocess_exec = AsyncMock(return_value=process)
-            mock_aio.subprocess = asyncio.subprocess
-            mock_aio.timeout = asyncio.timeout
+        assert chunks == ["content"]
 
-            asyncio.run(_collect_stream("question", context="ctx"))
+    def test_invalid_json_lines_skipped(self) -> None:
+        lines = [b"not-json\n", _stream_event("valid"), b"{{broken}}\n"]
+        process = _make_mock_process(lines)
 
-            call_args = mock_aio.create_subprocess_exec.call_args
-            cmd_list = call_args[0]
-            prompt_arg = cmd_list[2]  # [claude, -p, <prompt>, ...]
-            assert prompt_arg == "ctx\n\nquestion"
+        with patch(
+            "backend.services.claude_subprocess.asyncio.create_subprocess_exec",
+            AsyncMock(return_value=process),
+        ):
+            chunks = asyncio.run(_collect("test"))
 
+        assert chunks == ["valid"]
+
+    def test_empty_stream_yields_nothing(self) -> None:
+        process = _make_mock_process([_other_event("message_start")])
+
+        with patch(
+            "backend.services.claude_subprocess.asyncio.create_subprocess_exec",
+            AsyncMock(return_value=process),
+        ):
+            chunks = asyncio.run(_collect("test"))
+
+        assert chunks == []
+
+    def test_blank_text_delta_skipped(self) -> None:
+        lines = [_stream_event(""), _stream_event("real")]
+        process = _make_mock_process(lines)
+
+        with patch(
+            "backend.services.claude_subprocess.asyncio.create_subprocess_exec",
+            AsyncMock(return_value=process),
+        ):
+            chunks = asyncio.run(_collect("test"))
+
+        assert chunks == ["real"]
+
+
+# ---------------------------------------------------------------------------
+# run_claude_stream — stdin / argv
+# ---------------------------------------------------------------------------
+
+
+class TestStdinAndCommand:
+    def test_prompt_sent_via_stdin(self) -> None:
+        process = _make_mock_process([_stream_event("ok")])
+
+        with patch(
+            "backend.services.claude_subprocess.asyncio.create_subprocess_exec",
+            AsyncMock(return_value=process),
+        ):
+            asyncio.run(_collect("my prompt"))
+
+        process.stdin.write.assert_called_once_with(b"my prompt")
+
+    def test_no_context_no_system_prompt_file(self) -> None:
+        process = _make_mock_process([_stream_event("ok")])
+
+        with patch(
+            "backend.services.claude_subprocess.asyncio.create_subprocess_exec",
+            AsyncMock(return_value=process),
+        ) as mock_exec:
+            asyncio.run(_collect("direct prompt"))
+
+        assert "--system-prompt-file" not in mock_exec.call_args.args
+
+    def test_context_adds_system_prompt_file_flag(self) -> None:
+        process = _make_mock_process([_stream_event("ok")])
+
+        with patch(
+            "backend.services.claude_subprocess.asyncio.create_subprocess_exec",
+            AsyncMock(return_value=process),
+        ) as mock_exec:
+            asyncio.run(_collect("question", context="system instructions"))
+
+        assert "--system-prompt-file" in mock_exec.call_args.args
+
+    def test_include_partial_messages_flag_present(self) -> None:
+        process = _make_mock_process([_stream_event("ok")])
+
+        with patch(
+            "backend.services.claude_subprocess.asyncio.create_subprocess_exec",
+            AsyncMock(return_value=process),
+        ) as mock_exec:
+            asyncio.run(_collect("test"))
+
+        assert "--include-partial-messages" in mock_exec.call_args.args
+        assert "--verbose" in mock_exec.call_args.args
+
+    def test_uses_settings_cli_path(self) -> None:
+        process = _make_mock_process([_stream_event("ok")])
+
+        with (
+            patch(
+                "backend.services.claude_subprocess.asyncio.create_subprocess_exec",
+                AsyncMock(return_value=process),
+            ) as mock_exec,
+            patch("backend.services.claude_subprocess.settings") as mock_s,
+        ):
+            mock_s.claude_cli_path = "/custom/claude"
+            mock_s.claude_config_dir = "/test/.claude"
+            mock_s.claude_stream_timeout = 300
+            asyncio.run(_collect("test"))
+
+        assert mock_exec.call_args.args[0] == "/custom/claude"
+
+
+# ---------------------------------------------------------------------------
+# run_claude_stream — error handling
+# ---------------------------------------------------------------------------
+
+
+class TestErrorHandling:
     def test_nonzero_exit_raises_runtime_error(self) -> None:
         process = _make_mock_process([], stderr=b"fatal error", returncode=1)
 
-        with patch("backend.services.claude_subprocess.asyncio") as mock_aio:
-            mock_aio.create_subprocess_exec = AsyncMock(return_value=process)
-            mock_aio.subprocess = asyncio.subprocess
-            mock_aio.timeout = asyncio.timeout
-
+        with patch(
+            "backend.services.claude_subprocess.asyncio.create_subprocess_exec",
+            AsyncMock(return_value=process),
+        ):
             with pytest.raises(RuntimeError, match="exited with code 1"):
-                asyncio.run(_collect_stream("test"))
+                asyncio.run(_collect("test"))
+
+    def test_stderr_on_success_does_not_raise(self) -> None:
+        process = _make_mock_process(
+            [_stream_event("ok")],
+            stderr=b"some warning",
+            returncode=0,
+        )
+
+        with patch(
+            "backend.services.claude_subprocess.asyncio.create_subprocess_exec",
+            AsyncMock(return_value=process),
+        ):
+            chunks = asyncio.run(_collect("test"))
+
+        assert chunks == ["ok"]
 
     def test_timeout_kills_process(self) -> None:
-        """Simulate a timeout by having readline block forever."""
         process = MagicMock()
         process.returncode = -9
+
+        stdin_mock = MagicMock()
+        stdin_mock.write = MagicMock()
+        stdin_mock.drain = AsyncMock()
+        stdin_mock.close = MagicMock()
+        process.stdin = stdin_mock
 
         call_count = 0
 
@@ -219,20 +290,19 @@ class TestRunClaudeStream:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                return _make_ndjson_line("assistant", "partial")
+                return _stream_event("partial")
             await asyncio.sleep(999)
             return b""
 
         stdout_mock = MagicMock()
         stdout_mock.readline = _slow_readline
+        process.stdout = stdout_mock
 
         async def _read_stderr() -> bytes:
             return b""
 
         stderr_mock = MagicMock()
         stderr_mock.read = _read_stderr
-
-        process.stdout = stdout_mock
         process.stderr = stderr_mock
 
         async def _wait() -> int:
@@ -240,58 +310,13 @@ class TestRunClaudeStream:
 
         process.wait = _wait
         process.kill = MagicMock()
+        process.terminate = MagicMock()
 
-        with patch("backend.services.claude_subprocess.asyncio") as mock_aio:
-            mock_aio.create_subprocess_exec = AsyncMock(return_value=process)
-            mock_aio.subprocess = asyncio.subprocess
-            mock_aio.timeout = asyncio.timeout
-
+        with patch(
+            "backend.services.claude_subprocess.asyncio.create_subprocess_exec",
+            AsyncMock(return_value=process),
+        ):
             with pytest.raises(TimeoutError, match="exceeded"):
-                asyncio.run(_collect_stream("test", timeout=1))
+                asyncio.run(_collect("test", timeout=1))
 
-            process.kill.assert_called_once()
-
-    def test_empty_stream(self) -> None:
-        lines = [_make_ndjson_line("system", "init")]
-        process = _make_mock_process(lines)
-
-        with patch("backend.services.claude_subprocess.asyncio") as mock_aio:
-            mock_aio.create_subprocess_exec = AsyncMock(return_value=process)
-            mock_aio.subprocess = asyncio.subprocess
-            mock_aio.timeout = asyncio.timeout
-
-            chunks = asyncio.run(_collect_stream("test"))
-
-        assert chunks == []
-
-    def test_stderr_warning_on_success(self) -> None:
-        """stderr output on success should not raise, just log."""
-        process = _make_mock_process(
-            [_make_ndjson_line("assistant", "ok")],
-            stderr=b"some warning",
-            returncode=0,
-        )
-
-        with patch("backend.services.claude_subprocess.asyncio") as mock_aio:
-            mock_aio.create_subprocess_exec = AsyncMock(return_value=process)
-            mock_aio.subprocess = asyncio.subprocess
-            mock_aio.timeout = asyncio.timeout
-
-            chunks = asyncio.run(_collect_stream("test"))
-
-        assert chunks == ["ok"]
-
-    def test_no_context_prompt_passed_directly(self) -> None:
-        process = _make_mock_process([_make_ndjson_line("assistant", "ok")])
-
-        with patch("backend.services.claude_subprocess.asyncio") as mock_aio:
-            mock_aio.create_subprocess_exec = AsyncMock(return_value=process)
-            mock_aio.subprocess = asyncio.subprocess
-            mock_aio.timeout = asyncio.timeout
-
-            asyncio.run(_collect_stream("direct prompt"))
-
-            call_args = mock_aio.create_subprocess_exec.call_args
-            cmd_list = call_args[0]
-            prompt_arg = cmd_list[2]
-            assert prompt_arg == "direct prompt"
+        process.kill.assert_called_once()
