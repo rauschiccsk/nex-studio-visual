@@ -293,10 +293,10 @@ def create_project(
     * **GitHub repo** — 422 if ``repo_url`` is set but the repository
       does not exist on GitHub.
     """
-    # Pre-creation validation (ports + GitHub).  These raise HTTPException
-    # directly so they bypass the generic ValueError mapping below.
+    # Pre-creation validation (ports).  GitHub repo existence is NOT checked
+    # here — in NEX Studio workflow the project is registered before the repo
+    # is created.  repo_url is stored as metadata only.
     _validate_ports(db, payload)
-    _validate_github_repo(payload.repo_url)
 
     # Resolve created_by — use supplied UUID or fall back to active ri user.
     payload.created_by = _resolve_created_by(db, payload.created_by)
