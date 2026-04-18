@@ -564,7 +564,9 @@ async def generate_design_doc(
             )
             logger.warning(
                 "Design doc validation failed (type=%s, prof_spec=%s): %s",
-                doc_type, spec_id, reason,
+                doc_type,
+                spec_id,
+                reason,
             )
             yield f"data: {json.dumps({'type': 'validation_error', 'content': reason})}\n\n"
 
