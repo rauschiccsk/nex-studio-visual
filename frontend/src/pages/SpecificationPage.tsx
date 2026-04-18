@@ -62,6 +62,7 @@ interface GenDocState {
   mode: "view" | "edit";
   copyDone: boolean;
   currentSection: string;
+  elapsedSeconds: number;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -101,6 +102,14 @@ function StepHeader({
       )}
     </button>
   );
+}
+
+// ── Elapsed time formatter ───────────────────────────────────────────────────
+
+function formatElapsed(seconds: number): string {
+  const m = Math.floor(seconds / 60).toString().padStart(2, "0");
+  const s = (seconds % 60).toString().padStart(2, "0");
+  return `${m}:${s}`;
 }
 
 // ── Section detector (for streaming progress indicator) ──────────────────────
@@ -265,7 +274,7 @@ function SpecificationPage() {
   // ── Step 3: Design Documents ───────────────────────────────────────────
   const emptyDocState: GenDocState = {
     streaming: false, content: "", savedDoc: null, error: null,
-    mode: "edit", copyDone: false, currentSection: "",
+    mode: "edit", copyDone: false, currentSection: "", elapsedSeconds: 0,
   };
   const [designDoc, setDesignDoc] = useState<GenDocState>(emptyDocState);
   const [behaviorDoc, setBehaviorDoc] = useState<GenDocState>(emptyDocState);
@@ -278,6 +287,16 @@ function SpecificationPage() {
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
+
+  // ── Elapsed timer for doc generation ──────────────────────────────────
+  useEffect(() => {
+    if (!designDoc.streaming && !behaviorDoc.streaming) return;
+    const id = setInterval(() => {
+      setDesignDoc((p) => (p.streaming ? { ...p, elapsedSeconds: p.elapsedSeconds + 1 } : p));
+      setBehaviorDoc((p) => (p.streaming ? { ...p, elapsedSeconds: p.elapsedSeconds + 1 } : p));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [designDoc.streaming, behaviorDoc.streaming]);
 
   // ── Load existing data on mount ────────────────────────────────────────
   useEffect(() => {
@@ -529,7 +548,7 @@ function SpecificationPage() {
       const abortRef = docType === "design" ? designAbortRef : behaviorAbortRef;
       const textRef = docType === "design" ? designTextRef : behaviorTextRef;
 
-      setDoc((p) => ({ ...p, streaming: true, content: "", error: null, currentSection: "", mode: "edit" }));
+      setDoc((p) => ({ ...p, streaming: true, content: "", error: null, currentSection: "", mode: "edit", elapsedSeconds: 0 }));
 
       const ctrl = generateDesignDoc(
         profSpec.id,
@@ -851,11 +870,7 @@ function SpecificationPage() {
                       disabled={!profSpec}
                       className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-40"
                     >
-                      {state.streaming ? (
-                        <><Loader2 className="h-3 w-3 animate-spin" />Zastaviť</>
-                      ) : (
-                        <><Wand2 className="h-3 w-3" />Generovať</>
-                      )}
+                      {state.streaming ? "Zastaviť" : <><Wand2 className="h-3 w-3" />Generovať</>}
                     </button>
                     {state.savedDoc && !state.streaming && (
                       <span className="flex items-center gap-1 text-xs text-green-400">
@@ -863,12 +878,16 @@ function SpecificationPage() {
                         Uložený — {new Date(state.savedDoc.created_at).toLocaleDateString("sk-SK")}
                       </span>
                     )}
-                    {/* Live progress indicator */}
-                    {state.streaming && state.content.length > 0 && (
-                      <span className="text-xs text-indigo-300">
-                        {state.currentSection
-                          ? `${state.currentSection} · ${(state.content.length / 1000).toFixed(1)}k znakov`
-                          : `${(state.content.length / 1000).toFixed(1)}k znakov`}
+                    {/* Live progress indicator — visible from first click */}
+                    {state.streaming && (
+                      <span className="flex items-center gap-1.5 text-xs text-indigo-300">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        {state.content.length === 0
+                          ? `Čakám na Claude… ${formatElapsed(state.elapsedSeconds)}`
+                          : state.currentSection
+                            ? `${state.currentSection} · ${(state.content.length / 1000).toFixed(1)}k · ${formatElapsed(state.elapsedSeconds)}`
+                            : `Generujem… ${(state.content.length / 1000).toFixed(1)}k · ${formatElapsed(state.elapsedSeconds)}`
+                        }
                       </span>
                     )}
                   </div>
