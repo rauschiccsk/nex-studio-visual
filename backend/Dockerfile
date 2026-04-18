@@ -57,7 +57,7 @@ COPY --from=deps /usr/local/bin /usr/local/bin
 # Create non-root user matching the host andros uid (1000).
 # Claude CLI refuses to run as root — same pattern as NEX Command backend.
 RUN useradd -m -u 1000 -s /bin/bash andros \
-    && mkdir -p /home/andros/.claude \
+    && mkdir -p /home/andros/.claude /app/uploads \
     && chown -R andros:andros /app /home/andros
 
 # Copy application code with correct ownership

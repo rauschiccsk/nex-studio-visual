@@ -716,10 +716,34 @@ function SpecificationPage() {
                   <div className="flex-1" />
                   <button
                     onClick={() => {
-                      navigator.clipboard.writeText(profContent).then(() => {
+                      const flash = () => {
                         setCopyDone(true);
                         setTimeout(() => setCopyDone(false), 1500);
-                      });
+                      };
+                      if (navigator.clipboard) {
+                        navigator.clipboard.writeText(profContent).then(flash).catch(() => {
+                          // fallback for HTTP / non-secure contexts
+                          const ta = document.createElement("textarea");
+                          ta.value = profContent;
+                          ta.style.position = "fixed";
+                          ta.style.opacity = "0";
+                          document.body.appendChild(ta);
+                          ta.select();
+                          document.execCommand("copy");
+                          document.body.removeChild(ta);
+                          flash();
+                        });
+                      } else {
+                        const ta = document.createElement("textarea");
+                        ta.value = profContent;
+                        ta.style.position = "fixed";
+                        ta.style.opacity = "0";
+                        document.body.appendChild(ta);
+                        ta.select();
+                        document.execCommand("copy");
+                        document.body.removeChild(ta);
+                        flash();
+                      }
                     }}
                     title="Copy to clipboard"
                     className={`flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors ${copyDone ? "text-green-400" : "text-gray-400 hover:bg-gray-800 hover:text-gray-200"}`}
