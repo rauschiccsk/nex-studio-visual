@@ -6,13 +6,12 @@ Covers:
 * Port uniqueness → 409 Conflict (across all three port types).
 * Port range (9100–9299) → 422 Unprocessable Entity.
 * Invalid category → 422 (Pydantic rejects invalid Literal values).
-* GitHub repo validation → 422 when repo does not exist.
+* GitHub repo_url → accepted as-is, no existence check.
 """
 
 from __future__ import annotations
 
 import uuid
-from unittest.mock import patch
 
 import pytest
 from fastapi import FastAPI
@@ -230,56 +229,30 @@ class TestInvalidCategory:
 
 
 class TestGitHubRepoValidation:
-    """POST /api/v1/projects — GitHub repository validation (422).
+    """POST /api/v1/projects — GitHub repo_url is stored as metadata only.
 
-    Tests mock the service function rather than the low-level httpx call so the
-    router delegates correctly to ``github_validation_service``.
+    GitHub repo existence is NOT validated at project creation time.
+    In the NEX Studio workflow a project is registered before the repo is
+    created, so validation would block legitimate use.  repo_url is accepted
+    as-is regardless of whether the repository exists on GitHub.
     """
 
-    @patch("backend.services.github_validation.validate_github_repo", return_value=False)
-    def test_nonexistent_repo_returns_422(self, mock_validate, router_client, creator):
-        """A repo_url that the service says doesn't exist should return 422."""
+    def test_nonexistent_repo_accepted(self, router_client, creator):
+        """A repo_url for a non-existent repo is stored without validation."""
         payload = _payload(creator.id, repo_url="nonexistent/repo")
         resp = router_client.post("/api/v1/projects", json=payload)
-        assert resp.status_code == 422
-        error = resp.json()["detail"]
-        assert "not found" in error["detail"].lower()
-        assert error["repo_url"] == "nonexistent/repo"
-        mock_validate.assert_called_once_with("nonexistent/repo")
+        assert resp.status_code == 201
+        assert resp.json()["repo_url"] == "nonexistent/repo"
 
-    @patch(
-        "backend.services.github_validation.validate_github_repo",
-        side_effect=RuntimeError("GitHub API returned unexpected status 500"),
-    )
-    def test_github_api_error_returns_422(self, mock_validate, router_client, creator):
-        """A RuntimeError from the service should return 422 with unavailable message."""
-        payload = _payload(creator.id, repo_url="some/repo")
-        resp = router_client.post("/api/v1/projects", json=payload)
-        assert resp.status_code == 422
-        assert "unavailable" in resp.json()["detail"].lower()
-
-    @patch(
-        "backend.services.github_validation.validate_github_repo",
-        side_effect=RuntimeError("Connection refused"),
-    )
-    def test_github_network_error_returns_422(self, mock_validate, router_client, creator):
-        """A network error proxied as RuntimeError should return 422."""
-        payload = _payload(creator.id, repo_url="some/repo")
-        resp = router_client.post("/api/v1/projects", json=payload)
-        assert resp.status_code == 422
-        assert "unavailable" in resp.json()["detail"].lower()
-
-    @patch("backend.services.github_validation.validate_github_repo", return_value=True)
-    def test_valid_repo_succeeds(self, mock_validate, router_client, creator):
-        """A repo_url that the service confirms exists should allow creation."""
+    def test_any_repo_url_accepted(self, router_client, creator):
+        """Any org/repo string is accepted — existence check is not performed."""
         payload = _payload(creator.id, repo_url="valid-org/valid-repo")
         resp = router_client.post("/api/v1/projects", json=payload)
         assert resp.status_code == 201
         assert resp.json()["repo_url"] == "valid-org/valid-repo"
-        mock_validate.assert_called_once_with("valid-org/valid-repo")
 
-    def test_null_repo_url_skips_validation(self, router_client, creator):
-        """When repo_url is null, GitHub validation is skipped."""
+    def test_null_repo_url_accepted(self, router_client, creator):
+        """When repo_url is omitted the project is created with repo_url=null."""
         payload = _payload(creator.id)
         assert "repo_url" not in payload
         resp = router_client.post("/api/v1/projects", json=payload)

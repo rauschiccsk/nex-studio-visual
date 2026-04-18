@@ -97,14 +97,21 @@ class TestProjectCreate:
         assert payload.guardian_enabled is True
 
     def test_required_fields(self) -> None:
-        """name, slug, category, description, created_by are required."""
-        for field in ("name", "slug", "category", "description", "created_by"):
+        """name, slug, category, description are required. created_by is optional (resolved server-side)."""
+        for field in ("name", "slug", "category", "description"):
             data = self._minimal()
             del data[field]
             with pytest.raises(ValidationError) as excinfo:
                 ProjectCreate(**data)
             errors = excinfo.value.errors()
             assert any(err["loc"] == (field,) for err in errors), f"Expected error for missing '{field}'"
+
+    def test_created_by_is_optional(self) -> None:
+        """created_by defaults to None — resolved from the active session on the server."""
+        data = self._minimal()
+        del data["created_by"]
+        project = ProjectCreate(**data)
+        assert project.created_by is None
 
     def test_name_rejects_empty(self) -> None:
         with pytest.raises(ValidationError):

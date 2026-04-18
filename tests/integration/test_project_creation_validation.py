@@ -6,13 +6,11 @@ invalid inputs with appropriate HTTP status codes:
     1. Duplicate slug                      -> 409 CONFLICT
     2. Conflicting port (already allocated) -> 409 CONFLICT
     3. Port out of range (outside 9100-9299) -> 422
-    4. Non-existent GitHub repo             -> 422
+    4. repo_url is stored as metadata — no existence check (201 always)
     5. Verify error response structure
 """
 
 from __future__ import annotations
-
-from unittest.mock import patch
 
 import pytest
 
@@ -42,15 +40,11 @@ class TestProjectCreationValidation:
             "created_by": user_id,
         }
         payload.update(overrides)
-        with patch(
-            "backend.services.github_validation.validate_github_repo",
-            return_value=True,
-        ):
-            return client.post(
-                "/api/v1/projects",
-                json=payload,
-                headers=headers,
-            )
+        return client.post(
+            "/api/v1/projects",
+            json=payload,
+            headers=headers,
+        )
 
     def test_duplicate_slug_returns_409(self, integration_client, _seed_admin):
         """Creating a project with an existing slug must return 409."""
@@ -216,51 +210,43 @@ class TestProjectCreationValidation:
         )
         assert resp_above.status_code == 422
 
-    def test_nonexistent_github_repo_returns_422(self, integration_client, _seed_admin):
-        """Non-existent GitHub repo must be rejected with 422."""
+    def test_nonexistent_github_repo_accepted(self, integration_client, _seed_admin):
+        """repo_url for a non-existent repo is accepted — no existence check at creation."""
         headers, user_id = self._login_admin(integration_client)
 
-        with patch(
-            "backend.services.github_validation.validate_github_repo",
-            return_value=False,
-        ):
-            resp = integration_client.post(
-                "/api/v1/projects",
-                json={
-                    "name": "Bad Repo Project",
-                    "slug": "bad-repo-proj",
-                    "category": "singlemodule",
-                    "description": "Non-existent repo",
-                    "repo_url": "nonexistent-org/nonexistent-repo",
-                    "created_by": user_id,
-                },
-                headers=headers,
-            )
-        assert resp.status_code == 422
-        detail = resp.json()["detail"]
-        assert detail["repo_url"] == "nonexistent-org/nonexistent-repo"
-        assert "not found" in detail["detail"].lower()
-
-    def test_invalid_github_repo_format_returns_422(self, integration_client, _seed_admin):
-        """Invalid GitHub repo format must be rejected with 422."""
-        headers, user_id = self._login_admin(integration_client)
-
-        # Do NOT mock — let the real validation service catch the format error
         resp = integration_client.post(
             "/api/v1/projects",
             json={
-                "name": "Bad Format Repo",
-                "slug": "bad-format-repo",
+                "name": "Bad Repo Project",
+                "slug": "bad-repo-proj",
                 "category": "singlemodule",
-                "description": "Invalid repo format",
+                "description": "Non-existent repo — accepted as metadata",
+                "repo_url": "nonexistent-org/nonexistent-repo",
+                "created_by": user_id,
+            },
+            headers=headers,
+        )
+        assert resp.status_code == 201
+        assert resp.json()["repo_url"] == "nonexistent-org/nonexistent-repo"
+
+    def test_any_repo_url_format_accepted(self, integration_client, _seed_admin):
+        """repo_url is stored as-is — backend does not validate GitHub format or existence."""
+        headers, user_id = self._login_admin(integration_client)
+
+        resp = integration_client.post(
+            "/api/v1/projects",
+            json={
+                "name": "Any Format Repo",
+                "slug": "any-format-repo",
+                "category": "singlemodule",
+                "description": "Any repo_url string is accepted",
                 "repo_url": "no-slash-here",
                 "created_by": user_id,
             },
             headers=headers,
         )
-        assert resp.status_code == 422
-        detail = resp.json()["detail"]
-        assert detail["repo_url"] == "no-slash-here"
+        assert resp.status_code == 201
+        assert resp.json()["repo_url"] == "no-slash-here"
 
     def test_error_response_structure(self, integration_client, _seed_admin):
         """Verify error responses have the expected structure."""
@@ -306,26 +292,18 @@ class TestProjectCreationValidation:
         slug_detail = resp_slug.json()["detail"]
         assert isinstance(slug_detail, str)
 
-        # GitHub repo not found error structure
-        with patch(
-            "backend.services.github_validation.validate_github_repo",
-            return_value=False,
-        ):
-            resp_repo = integration_client.post(
-                "/api/v1/projects",
-                json={
-                    "name": "Repo Error Structure",
-                    "slug": "repo-error-structure",
-                    "category": "singlemodule",
-                    "description": "Test",
-                    "repo_url": "fake/repo",
-                    "created_by": user_id,
-                },
-                headers=headers,
-            )
-        assert resp_repo.status_code == 422
-        repo_detail = resp_repo.json()["detail"]
-        assert "detail" in repo_detail
-        assert "repo_url" in repo_detail
-        assert isinstance(repo_detail["detail"], str)
-        assert isinstance(repo_detail["repo_url"], str)
+        # repo_url is now accepted without existence check — project creates successfully
+        resp_repo = integration_client.post(
+            "/api/v1/projects",
+            json={
+                "name": "Repo Error Structure",
+                "slug": "repo-error-structure",
+                "category": "singlemodule",
+                "description": "Test",
+                "repo_url": "fake/repo",
+                "created_by": user_id,
+            },
+            headers=headers,
+        )
+        assert resp_repo.status_code == 201
+        assert resp_repo.json()["repo_url"] == "fake/repo"
