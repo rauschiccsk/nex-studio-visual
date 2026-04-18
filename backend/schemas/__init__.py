@@ -122,11 +122,6 @@ from backend.schemas.project import (
     ProjectStatus,
     ProjectUpdate,
 )
-from backend.schemas.project_member import (
-    ProjectMemberCreate,
-    ProjectMemberRead,
-    ProjectMemberUpdate,
-)
 from backend.schemas.project_module import (
     ProjectModuleCreate,
     ProjectModuleRead,
@@ -251,9 +246,6 @@ __all__ = [
     "ProfessionalSpecificationUpdate",
     "ProjectCategory",
     "ProjectCreate",
-    "ProjectMemberCreate",
-    "ProjectMemberRead",
-    "ProjectMemberUpdate",
     "ProjectModuleCreate",
     "ProjectModuleRead",
     "ProjectModuleStatus",

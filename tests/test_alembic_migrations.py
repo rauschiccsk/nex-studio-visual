@@ -65,7 +65,6 @@ def test_expected_domain_tables_present() -> None:
         "migration_id_map",
         "module_dependencies",
         "professional_specifications",
-        "project_members",
         "project_modules",
         "projects",
         "raw_specifications",

@@ -1,4 +1,4 @@
-"""Project domain models — projects, project members, and project modules."""
+"""Project domain models — projects and project modules."""
 
 from sqlalchemy import (
     Boolean,
@@ -60,26 +60,6 @@ class Project(Base, UUIDMixin, TimestampMixin):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
-
-
-class ProjectMember(Base, UUIDMixin, TimestampMixin):
-    """Membership link between a user and a project."""
-
-    __tablename__ = "project_members"
-
-    project_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("projects.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    user_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    __table_args__ = (UniqueConstraint("project_id", "user_id", name="uq_project_members_project_id_user_id"),)
 
 
 class ProjectModule(Base, UUIDMixin, TimestampMixin):

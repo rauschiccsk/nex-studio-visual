@@ -6,7 +6,6 @@ test database. The router is mounted at ``/api/v1/project-modules`` —
 the same prefix it will have in production via ``backend/main.py`` —
 but since this router is not yet wired into ``main.py`` we mount it on
 a dedicated ``TestClient`` app here (same pattern as
-:mod:`tests.test_project_member_router`,
 :mod:`tests.test_bug_router`, :mod:`tests.test_project_router` and
 :mod:`tests.test_guardian_precedent_router`).
 

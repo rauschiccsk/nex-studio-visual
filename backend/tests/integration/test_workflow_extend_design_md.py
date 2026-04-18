@@ -144,7 +144,7 @@ import pytest
 
 from backend.db.models.architect import ArchitectMessage, ArchitectSession
 from backend.db.models.foundation import User
-from backend.db.models.projects import Project, ProjectMember, ProjectModule
+from backend.db.models.projects import Project, ProjectModule
 from backend.db.models.specifications import DesignDocument
 
 # ---------------------------------------------------------------------------
@@ -195,8 +195,6 @@ def nex_horizont(db_session, tibor) -> Project:
     db_session.add(project)
     db_session.flush()
 
-    db_session.add(ProjectMember(project_id=project.id, user_id=tibor.id))
-    db_session.flush()
     return project
 
 

@@ -51,11 +51,7 @@ const PRIMARY_NAV: NavItem[] = [
  * dependency direction by skimming the list.
  */
 const ADMIN_NAV: NavGroup[] = [
-  {
-    heading: "Access",
-    items: [{ to: "/admin/project-members", label: "Project Members" }],
-  },
-  {
+{
     heading: "Projects",
     items: [
       { to: "/admin/projects", label: "Projects" },

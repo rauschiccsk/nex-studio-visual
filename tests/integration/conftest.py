@@ -17,7 +17,7 @@ from backend.api.routes.epics import router as epics_router
 from backend.api.routes.versions import router as versions_router
 from backend.core.security import get_current_user, require_ri_role
 from backend.db.models.foundation import User, UserSession
-from backend.db.models.projects import Project
+from backend.db.models.projects import ModuleDependency, Project, ProjectModule  # noqa: F401
 from backend.db.session import get_db
 from backend.main import app as main_app
 

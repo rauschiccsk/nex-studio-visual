@@ -321,7 +321,7 @@ def delete_project(
     """Hard-delete a project by primary key.
 
     Every inbound FK to ``projects.id`` uses ``ON DELETE CASCADE``, so
-    dependent rows (members, modules, specifications, design documents,
+    dependent rows (modules, specifications, design documents,
     KB docs, architect sessions, epics, bugs, delegations, migration
     tables, report configs) are removed automatically. Archiving is the
     preferred soft-disable path — callers should prefer ``PATCH`` with

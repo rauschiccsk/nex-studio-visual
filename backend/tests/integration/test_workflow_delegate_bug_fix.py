@@ -128,7 +128,7 @@ import pytest
 from backend.db.models.bugs import Bug, BugFixTask
 from backend.db.models.delegations import Delegation, ExecutionLog
 from backend.db.models.foundation import User
-from backend.db.models.projects import Project, ProjectMember
+from backend.db.models.projects import Project
 
 # ---------------------------------------------------------------------------
 # Precondition fixtures — NEX Horizont project with Zoltán (ri_director),
@@ -219,9 +219,6 @@ def nex_horizont(db_session, zoltan, dominik, nazar) -> Project:
     db_session.add(project)
     db_session.flush()
 
-    for user in (zoltan, dominik, nazar):
-        db_session.add(ProjectMember(project_id=project.id, user_id=user.id))
-    db_session.flush()
     return project
 
 

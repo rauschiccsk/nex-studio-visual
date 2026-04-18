@@ -31,7 +31,6 @@ from backend.api.routes.module_dependencies import router as module_dependencies
 from backend.api.routes.professional_specifications import (
     router as professional_specifications_router,
 )
-from backend.api.routes.project_members import router as project_members_router
 from backend.api.routes.project_modules import router as project_modules_router
 from backend.api.routes.projects import router as projects_router
 from backend.api.routes.raw_specifications import router as raw_specifications_router
@@ -85,7 +84,6 @@ app.include_router(auth_router, prefix="/api/v1/auth")
 app.include_router(users_router, prefix="/api/v1/users")
 app.include_router(user_sessions_router, prefix="/api/v1/user-sessions")
 app.include_router(projects_router, prefix="/api/v1/projects")
-app.include_router(project_members_router, prefix="/api/v1/project-members")
 app.include_router(project_modules_router, prefix="/api/v1/project-modules")
 app.include_router(module_dependencies_router, prefix="/api/v1/module-dependencies")
 app.include_router(raw_specifications_router, prefix="/api/v1/raw-specifications")

@@ -29,7 +29,7 @@ Design notes (per DESIGN.md §1.3 / §2.2 and :mod:`backend.db.models.projects`)
       depend on slug).
     * ``created_by`` is an audit column — immutable after creation.
     * Every inbound FK to ``projects.id`` uses ``ON DELETE CASCADE``
-      (``project_members``, ``project_modules``, ``raw_specifications``,
+      (``project_modules``, ``raw_specifications``,
       ``professional_specifications``, ``design_documents``, ``kb_documents``,
       ``architect_sessions``, ``epics``, ``bugs``, ``delegations``,
       ``migration_batches``, ``migration_id_map``,
@@ -259,9 +259,9 @@ def delete(db: Session, project_id: UUID) -> None:
     """Hard-delete a project.
 
     Every inbound foreign key to ``projects.id`` uses
-    ``ON DELETE CASCADE``, so dependent rows (members, modules,
-    specifications, design documents, KB docs, architect sessions, epics,
-    bugs, delegations, migration tables, report configs) are removed
+    ``ON DELETE CASCADE``, so dependent rows (modules, specifications,
+    design documents, KB docs, architect sessions, epics, bugs,
+    delegations, migration tables, report configs) are removed
     automatically at the DB level. No RESTRICT dependency check is
     required. Archiving is the preferred soft-disable path — callers
     should prefer :func:`update` with ``status='archived'`` and reserve

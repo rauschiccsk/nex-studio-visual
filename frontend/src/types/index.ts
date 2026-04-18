@@ -17,7 +17,6 @@ export * from "./userSession";
 
 // Projects and modules.
 export * from "./project";
-export * from "./projectMember";
 export * from "./projectModule";
 export * from "./moduleDependency";
 

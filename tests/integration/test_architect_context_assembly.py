@@ -19,7 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.db.models.foundation import User, UserSession
-from backend.db.models.projects import Project, ProjectMember, ProjectModule
+from backend.db.models.projects import Project, ProjectModule
 from backend.db.models.specifications import DesignDocument
 from backend.db.session import get_db
 from backend.main import app
@@ -61,10 +61,6 @@ def project(db_session, ri_user) -> Project:
         created_by=ri_user.id,
     )
     db_session.add(proj)
-    db_session.flush()
-
-    member = ProjectMember(project_id=proj.id, user_id=ri_user.id)
-    db_session.add(member)
     db_session.flush()
     return proj
 

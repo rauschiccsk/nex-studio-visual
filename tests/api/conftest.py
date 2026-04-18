@@ -5,6 +5,7 @@ from __future__ import annotations
 import bcrypt
 
 from backend.db.models.foundation import User, UserSession
+from backend.db.models.projects import ModuleDependency, Project, ProjectModule  # noqa: F401
 
 
 def hash_password(plain: str) -> str:

@@ -10,7 +10,7 @@
  * table and D-08 SSE streaming.
  *
  * Like the other Feat 6 admin pages (``ArchitectSessionPage``,
- * ``ProjectModulePage``, ``ProjectMemberPage``, ``MigrationIdMapPage``,
+ * ``ProjectModulePage``, ``MigrationIdMapPage``,
  * …) this surface is deliberately self-contained rather than reaching
  * for the global ``architectStore``: per DESIGN.md § 3.3 that store
  * backs the end-user ``ArchitectPage`` chat UI (streaming messages,

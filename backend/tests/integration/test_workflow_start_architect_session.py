@@ -134,7 +134,6 @@ from backend.db.models.foundation import User
 from backend.db.models.projects import (
     ModuleDependency,
     Project,
-    ProjectMember,
     ProjectModule,
 )
 from backend.db.models.specifications import DesignDocument
@@ -222,10 +221,6 @@ def nex_horizont(db_session, zoltan, tibor, peter) -> Project:
     db_session.add(project)
     db_session.flush()
 
-    db_session.add(ProjectMember(project_id=project.id, user_id=zoltan.id))
-    db_session.add(ProjectMember(project_id=project.id, user_id=tibor.id))
-    db_session.add(ProjectMember(project_id=project.id, user_id=peter.id))
-    db_session.flush()
     return project
 
 

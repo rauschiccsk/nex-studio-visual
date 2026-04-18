@@ -13,7 +13,7 @@
  * the ``ModuleService.start_module()`` prerequisite check.
  *
  * Like the other Feat 6 admin pages (``ProjectModulePage``,
- * ``ProjectMemberPage``, ``GuardianPrecedentPage``, …) this surface is
+ * ``GuardianPrecedentPage``, …) this surface is
  * deliberately self-contained rather than reaching for the global
  * ``moduleStore``: per DESIGN.md § 3.3 that store backs the end-user
  * Module Registry page / dependency-graph UI, which is a distinct

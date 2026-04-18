@@ -1,4 +1,4 @@
-"""Tests for :mod:`backend.services.project`.
+"""Tests for :mod:`backend.services.project` (project service).
 
 Exercises every public CRUD entry point against the SAVEPOINT-isolated
 session provided by ``tests/conftest.py``. Verifies:
@@ -10,10 +10,17 @@ session provided by ``tests/conftest.py``. Verifies:
 * Immutable fields (``id``, ``slug``, ``category``, ``created_by``,
   ``created_at``) stay unchanged on update.
 * List filters (``status``, ``category``, ``created_by``) and pagination.
+* ``list_projects`` returns **all** projects — no member-based filtering
+  (``get_projects_for_user`` removed along with the ``ProjectMember``
+  model).
 * ``delete`` cascades to dependent rows — every inbound FK uses
   ``ON DELETE CASCADE`` so no RESTRICT guard is needed.
 * No ``commit`` happens inside the service — the outer transaction rolls
   back cleanly at fixture teardown.
+
+Member-related tests (``add_member``, ``remove_member``,
+``get_project_members``) were removed — the ``ProjectMember`` model and
+``project_members`` table no longer exist.
 """
 
 from __future__ import annotations
@@ -252,34 +259,6 @@ class TestProjectService:
         """``delete`` on a non-existent id raises ``ValueError``."""
         with pytest.raises(ValueError, match="not found"):
             service.delete(db_session, uuid.uuid4())
-
-    def test_delete_cascades_to_project_members(self, db_session):
-        """``delete`` relies on DB-level CASCADE to clean up ``project_members``."""
-        from sqlalchemy import select as sa_select
-
-        from backend.db.models.projects import ProjectMember
-
-        owner = _make_user(db_session)
-        member_user = _make_user(db_session)
-        created = service.create(db_session, _payload(owner.id))
-
-        member = ProjectMember(project_id=created.id, user_id=member_user.id)
-        db_session.add(member)
-        db_session.flush()
-        member_id = member.id
-
-        # CASCADE means delete must succeed without a RESTRICT error.
-        service.delete(db_session, created.id)
-
-        # Expire the session cache so the next query hits the DB and sees
-        # the CASCADE effect rather than the now-stale in-memory ORM state.
-        db_session.expire_all()
-
-        # The dependent membership row is gone via CASCADE.
-        remaining = db_session.execute(
-            sa_select(ProjectMember).where(ProjectMember.id == member_id)
-        ).scalar_one_or_none()
-        assert remaining is None
 
     # ------------------------------------------------------------------ list
     def test_list_all(self, db_session):

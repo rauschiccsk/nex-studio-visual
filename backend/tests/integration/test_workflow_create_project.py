@@ -91,7 +91,7 @@ from unittest.mock import patch
 import pytest
 
 from backend.db.models.foundation import User
-from backend.db.models.projects import Project, ProjectMember
+from backend.db.models.projects import Project
 from backend.db.models.reports import ReportConfig
 
 
@@ -277,26 +277,7 @@ class TestCreateProjectHappyPath:
 
         project_id = created["id"]
 
-        # --- Step 3b: add all four selected members. The creator is
-        # automatically the first — BEHAVIOR.md §3.6 step 4 "Creator
-        # je automaticky člen". ``UNIQUE(project_id, user_id)`` is
-        # enforced by the service; a duplicate surfaces as HTTP 409.
-        selected_members = [zoltan, tibor, dominik, nazar]
-        member_ids: list[str] = []
-        for member in selected_members:
-            resp = client.post(
-                "/api/v1/project-members",
-                json={
-                    "project_id": project_id,
-                    "user_id": str(member.id),
-                },
-            )
-            assert resp.status_code == 201, resp.text
-            assert resp.json()["project_id"] == project_id
-            assert resp.json()["user_id"] == str(member.id)
-            member_ids.append(resp.json()["id"])
-
-        # --- Step 3c: create the default report configuration. Only
+        # --- Step 3b: create the default report configuration. Only
         # ``project_id`` is sent — the Pydantic schema / DB
         # ``server_default`` fills in the canonical 75 EUR / 35 EUR
         # rates (BEHAVIOR.md §3.6 postcondition line 4).
@@ -328,22 +309,7 @@ class TestCreateProjectHappyPath:
         assert after_list.json()["total"] == 1
         assert [row["id"] for row in after_list.json()["items"]] == [project_id]
 
-        # 2. Four memberships exist for the project.
-        members_list = client.get(
-            "/api/v1/project-members",
-            params={"project_id": project_id},
-        )
-        assert members_list.status_code == 200
-        assert members_list.json()["total"] == 4
-        listed_user_ids = {row["user_id"] for row in members_list.json()["items"]}
-        assert listed_user_ids == {
-            str(zoltan.id),
-            str(tibor.id),
-            str(dominik.id),
-            str(nazar.id),
-        }
-
-        # 3. The report configuration for the project is retrievable
+        # 2. The report configuration for the project is retrievable
         #    and carries the default rates.
         cfg_list = client.get(
             "/api/v1/report-configs",
@@ -373,19 +339,7 @@ class TestCreateProjectHappyPath:
         assert persisted_project.db_port == NEX_HORIZONT_DB_PORT
         assert persisted_project.repo_url == NEX_HORIZONT_REPO_URL
 
-        # 2. ``project_members`` has one row per selected member
-        #    (creator included).
-        persisted_members = [db_session.get(ProjectMember, uuid.UUID(mid)) for mid in member_ids]
-        assert all(row is not None for row in persisted_members)
-        assert {row.user_id for row in persisted_members} == {
-            zoltan.id,
-            tibor.id,
-            dominik.id,
-            nazar.id,
-        }
-        assert all(row.project_id == persisted_project.id for row in persisted_members)
-
-        # 3. ``report_configs`` has one row for the project with the
+        # 2. ``report_configs`` has one row for the project with the
         #    default senior / junior hourly rates (75 / 35 EUR).
         cfg_id = cfg_list.json()["items"][0]["id"]
         persisted_cfg = db_session.get(ReportConfig, uuid.UUID(cfg_id))

@@ -24,7 +24,7 @@ from backend.api.routes.architect import router as architect_router
 from backend.core.security import get_current_user, require_ri_role
 from backend.db.models.architect import ArchitectSession
 from backend.db.models.foundation import User
-from backend.db.models.projects import Project, ProjectMember
+from backend.db.models.projects import Project
 from backend.db.session import get_db
 
 # ---------------------------------------------------------------------------
@@ -56,13 +56,6 @@ def _make_project(db_session, *, owner: User) -> Project:
     db_session.add(project)
     db_session.flush()
     return project
-
-
-def _add_membership(db_session, *, project: Project, user: User) -> ProjectMember:
-    member = ProjectMember(project_id=project.id, user_id=user.id)
-    db_session.add(member)
-    db_session.flush()
-    return member
 
 
 def _make_session(db_session, *, project: Project, user: User) -> ArchitectSession:
@@ -132,7 +125,6 @@ def shu_user(db_session) -> User:
 @pytest.fixture()
 def project(db_session, ri_user) -> Project:
     proj = _make_project(db_session, owner=ri_user)
-    _add_membership(db_session, project=proj, user=ri_user)
     return proj
 
 
@@ -147,7 +139,6 @@ def ri_client(db_session, ri_user):
 @pytest.fixture()
 def ha_member_client(db_session, ha_user, project):
     """ha user who IS a member of the project."""
-    _add_membership(db_session, project=project, user=ha_user)
     app = _build_app(db_session, current_user=ha_user)
     with TestClient(app) as client:
         yield client
@@ -157,28 +148,7 @@ def ha_member_client(db_session, ha_user, project):
 @pytest.fixture()
 def shu_member_client(db_session, shu_user, project):
     """shu user who IS a member of the project."""
-    _add_membership(db_session, project=project, user=shu_user)
     app = _build_app(db_session, current_user=shu_user)
-    with TestClient(app) as client:
-        yield client
-    app.dependency_overrides.clear()
-
-
-@pytest.fixture()
-def nonmember_ri_client(db_session):
-    """ri user who is NOT a member of any project."""
-    user = _make_user(db_session, role="ri")
-    app = _build_app(db_session, current_user=user)
-    with TestClient(app) as client:
-        yield client
-    app.dependency_overrides.clear()
-
-
-@pytest.fixture()
-def nonmember_ha_client(db_session):
-    """ha user who is NOT a member of any project."""
-    user = _make_user(db_session, role="ha")
-    app = _build_app(db_session, current_user=user)
     with TestClient(app) as client:
         yield client
     app.dependency_overrides.clear()
@@ -305,59 +275,3 @@ class TestShuMemberReadOnly:
             f"/api/v1/architect/sessions/{session_obj.id}/close",
         )
         assert resp.status_code == 403
-
-
-# ---------------------------------------------------------------------------
-# Non-member — 404 on everything (do not leak project existence)
-# ---------------------------------------------------------------------------
-
-
-class TestNonMemberAccess:
-    """Non-member gets 404 on all endpoints regardless of role."""
-
-    def test_nonmember_ri_create_session_404(self, nonmember_ri_client, project):
-        resp = nonmember_ri_client.post(
-            f"/api/v1/projects/{project.id}/architect",
-            json={},
-        )
-        assert resp.status_code == 404
-
-    def test_nonmember_ri_list_sessions_404(self, nonmember_ri_client, project):
-        resp = nonmember_ri_client.get(
-            f"/api/v1/projects/{project.id}/architect",
-        )
-        assert resp.status_code == 404
-
-    def test_nonmember_ri_get_session_404(self, nonmember_ri_client, project, db_session, ri_user):
-        session_obj = _make_session(db_session, project=project, user=ri_user)
-        resp = nonmember_ri_client.get(
-            f"/api/v1/architect/sessions/{session_obj.id}",
-        )
-        assert resp.status_code == 404
-
-    def test_nonmember_ri_close_session_404(self, nonmember_ri_client, project, db_session, ri_user):
-        session_obj = _make_session(db_session, project=project, user=ri_user)
-        resp = nonmember_ri_client.post(
-            f"/api/v1/architect/sessions/{session_obj.id}/close",
-        )
-        assert resp.status_code == 404
-
-    def test_nonmember_ri_list_messages_404(self, nonmember_ri_client, project, db_session, ri_user):
-        session_obj = _make_session(db_session, project=project, user=ri_user)
-        resp = nonmember_ri_client.get(
-            f"/api/v1/architect/sessions/{session_obj.id}/messages",
-        )
-        assert resp.status_code == 404
-
-    def test_nonmember_ha_list_sessions_404(self, nonmember_ha_client, project):
-        resp = nonmember_ha_client.get(
-            f"/api/v1/projects/{project.id}/architect",
-        )
-        assert resp.status_code == 404
-
-    def test_nonmember_ha_get_session_404(self, nonmember_ha_client, project, db_session, ri_user):
-        session_obj = _make_session(db_session, project=project, user=ri_user)
-        resp = nonmember_ha_client.get(
-            f"/api/v1/architect/sessions/{session_obj.id}",
-        )
-        assert resp.status_code == 404

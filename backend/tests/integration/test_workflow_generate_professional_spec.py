@@ -70,7 +70,7 @@ from typing import Any
 import pytest
 
 from backend.db.models.foundation import User
-from backend.db.models.projects import Project, ProjectMember
+from backend.db.models.projects import Project
 from backend.db.models.specifications import ProfessionalSpecification, RawSpecification
 
 # ---------------------------------------------------------------------------
@@ -111,8 +111,6 @@ def nex_horizont(db_session, zoltan) -> Project:
     db_session.add(project)
     db_session.flush()
 
-    db_session.add(ProjectMember(project_id=project.id, user_id=zoltan.id))
-    db_session.flush()
     return project
 
 

@@ -169,7 +169,7 @@ import pytest
 from backend.db.models.architect import ArchitectMessage, ArchitectSession
 from backend.db.models.delegations import Delegation, ExecutionLog
 from backend.db.models.foundation import User
-from backend.db.models.projects import Project, ProjectMember, ProjectModule
+from backend.db.models.projects import Project, ProjectModule
 from backend.db.models.reports import ReportConfig
 from backend.db.models.tasks import Epic, Feat
 
@@ -307,8 +307,6 @@ def nex_horizont(db_session, zoltan) -> Project:
     db_session.add(project)
     db_session.flush()
 
-    db_session.add(ProjectMember(project_id=project.id, user_id=zoltan.id))
-    db_session.flush()
     return project
 
 
@@ -622,7 +620,6 @@ def _snapshot_row_state(db_session) -> dict[str, list[tuple]]:
     snapshot: dict[str, list[tuple]] = {}
     for model in (
         Project,
-        ProjectMember,
         ProjectModule,
         Epic,
         Feat,
@@ -900,7 +897,6 @@ class TestViewProjectReportEdgeCases:
         )
         db_session.add(project)
         db_session.flush()
-        db_session.add(ProjectMember(project_id=project.id, user_id=user.id))
         db_session.add(
             ReportConfig(
                 project_id=project.id,

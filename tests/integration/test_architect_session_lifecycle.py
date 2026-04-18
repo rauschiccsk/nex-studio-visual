@@ -21,7 +21,7 @@ from fastapi.testclient import TestClient
 
 from backend.db.models.architect import ArchitectMessage, ArchitectSession
 from backend.db.models.foundation import User, UserSession
-from backend.db.models.projects import Project, ProjectMember
+from backend.db.models.projects import Project
 from backend.db.models.specifications import DesignDocument
 from backend.db.session import get_db
 from backend.main import app
@@ -63,14 +63,6 @@ def _seed_project(db_session, _seed_ri_user) -> Project:
         created_by=_seed_ri_user.id,
     )
     db_session.add(project)
-    db_session.flush()
-
-    # Add user as project member (required by _require_project_membership)
-    member = ProjectMember(
-        project_id=project.id,
-        user_id=_seed_ri_user.id,
-    )
-    db_session.add(member)
     db_session.flush()
     return project
 

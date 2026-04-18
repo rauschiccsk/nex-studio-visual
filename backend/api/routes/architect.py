@@ -51,7 +51,7 @@ from backend.services import architect_context as architect_context_service
 from backend.services import architect_message as architect_message_service
 from backend.services import architect_session as architect_session_service
 from backend.services import claude_subprocess
-from backend.services import project_member as project_member_service
+from backend.services import project as project_service
 
 logger = logging.getLogger(__name__)
 
@@ -76,22 +76,18 @@ def _map_value_error(exc: ValueError) -> HTTPException:
     return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=message)
 
 
-def _require_project_membership(
+def _require_project_exists(
     db: Session,
     project_id: UUID,
-    user: User,
 ) -> None:
-    """Raise HTTP 404 if the user is not a member of the project.
+    """Raise HTTP 404 if the project does not exist.
 
-    Returns 404 (not 403) to avoid leaking project existence to
-    non-members — standard security practice (DESIGN.md §4.1).
+    Returns 404 to avoid leaking project existence — standard security
+    practice (DESIGN.md §4.1).
     """
-    count = project_member_service.count_project_members(
-        db,
-        project_id=project_id,
-        user_id=user.id,
-    )
-    if count == 0:
+    try:
+        project_service.get_by_id(db, project_id)
+    except ValueError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Project {project_id} not found",
@@ -118,7 +114,7 @@ def create_architect_session(
     URL path; ``created_by`` is the authenticated user.  ``module_id``
     is optional — ``None`` opens a Foundation / project-level session.
     """
-    _require_project_membership(db, project_id, current_user)
+    _require_project_exists(db, project_id)
     try:
         session_obj = architect_session_service.create_session(
             db,
@@ -155,7 +151,7 @@ def list_project_architect_sessions(
     current_user: User = Depends(get_current_user),
 ) -> PaginatedResponse[ArchitectSessionRead]:
     """Return a paginated list of Architect sessions for a project."""
-    _require_project_membership(db, project_id, current_user)
+    _require_project_exists(db, project_id)
     try:
         rows = architect_session_service.list_architect_sessions(
             db,
@@ -199,7 +195,7 @@ def get_architect_session(
         session_obj = architect_session_service.get_session(db, session_id)
     except ValueError as exc:
         raise _map_value_error(exc) from exc
-    _require_project_membership(db, session_obj.project_id, current_user)
+    _require_project_exists(db, session_obj.project_id)
     return ArchitectSessionRead.model_validate(session_obj)
 
 
@@ -218,12 +214,12 @@ def close_architect_session(
     ``closed`` and auto-stamps ``closed_at``.  Returns HTTP 409 if
     the session is already closed.
     """
-    # Look up session to verify membership before mutation.
+    # Look up session to verify project existence before mutation.
     try:
         session_obj = architect_session_service.get_session(db, session_id)
     except ValueError as exc:
         raise _map_value_error(exc) from exc
-    _require_project_membership(db, session_obj.project_id, current_user)
+    _require_project_exists(db, session_obj.project_id)
     try:
         session_obj = architect_session_service.close_session(db, session_id)
         db.commit()
@@ -253,11 +249,11 @@ def list_session_messages(
     Messages are ordered by ``created_at ASC`` (conversation order).
     """
     try:
-        # Validate session exists and check membership
+        # Validate session exists and check project existence
         session_obj = architect_session_service.get_session(db, session_id)
     except ValueError as exc:
         raise _map_value_error(exc) from exc
-    _require_project_membership(db, session_obj.project_id, current_user)
+    _require_project_exists(db, session_obj.project_id)
     try:
         rows = architect_message_service.list_architect_messages(
             db,
@@ -307,7 +303,7 @@ async def send_architect_message(
         session_obj = architect_session_service.get_session(db, session_id)
     except ValueError as exc:
         raise _map_value_error(exc) from exc
-    _require_project_membership(db, session_obj.project_id, current_user)
+    _require_project_exists(db, session_obj.project_id)
 
     if session_obj.status != "active":
         raise HTTPException(

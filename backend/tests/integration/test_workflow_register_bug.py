@@ -114,7 +114,7 @@ from sqlalchemy import select
 
 from backend.db.models.bugs import Bug
 from backend.db.models.foundation import User
-from backend.db.models.projects import Project, ProjectMember
+from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 
 # ---------------------------------------------------------------------------
@@ -224,9 +224,6 @@ def nex_horizont(db_session, zoltan, tibor, nazar, dominik) -> Project:
     db_session.add(project)
     db_session.flush()
 
-    for user in (zoltan, tibor, nazar, dominik):
-        db_session.add(ProjectMember(project_id=project.id, user_id=user.id))
-    db_session.flush()
     return project
 
 
@@ -655,7 +652,6 @@ class TestRegisterBugEdgeCases:
         )
         db_session.add(nex_marina)
         db_session.flush()
-        db_session.add(ProjectMember(project_id=nex_marina.id, user_id=nazar.id))
         # Marina needs its own release version — DESIGN.md §4.0
         # Rule 2 mandates a ``version_id`` on every new bug.
         marina_version = Version(

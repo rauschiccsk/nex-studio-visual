@@ -24,8 +24,8 @@ Design notes (per DESIGN.md §1.1 Foundation — Auth & Users and
       ``architect_sessions.created_by``, ``raw_specifications.created_by``,
       ``professional_specifications.approved_by``,
       ``design_documents.approved_by``) and raises :class:`ValueError` when
-      references exist. ``user_sessions`` and ``project_members`` cascade
-      on delete and therefore need no check.
+      references exist. ``user_sessions`` cascades
+      on delete and therefore needs no check.
     * ``is_active`` is the soft-disable flag — :func:`delete` is a hard
       delete reserved for test fixtures / admin tooling. Routine
       deactivation should :func:`update` with ``is_active=False``.
@@ -250,8 +250,8 @@ def _has_restrict_dependencies(db: Session, user_id: UUID) -> Optional[str]:
       * ``professional_specifications.approved_by``
       * ``design_documents.approved_by``
 
-    ``user_sessions.user_id`` and ``project_members.user_id`` use
-    ``ON DELETE CASCADE`` and therefore impose no constraint.
+    ``user_sessions.user_id`` uses ``ON DELETE CASCADE`` and therefore
+    imposes no constraint.
 
     Returns ``None`` when the user is safe to delete.
     """

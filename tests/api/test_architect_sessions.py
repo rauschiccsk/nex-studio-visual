@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient
 from backend.api.routes.architect import router as architect_router
 from backend.core.security import get_current_user, require_ri_role
 from backend.db.models.foundation import User
-from backend.db.models.projects import Project, ProjectMember, ProjectModule
+from backend.db.models.projects import Project, ProjectModule
 from backend.db.session import get_db
 
 # ---------------------------------------------------------------------------
@@ -54,13 +54,6 @@ def _make_project(db_session, *, owner: User) -> Project:
     db_session.add(project)
     db_session.flush()
     return project
-
-
-def _add_membership(db_session, *, project: Project, user: User) -> ProjectMember:
-    member = ProjectMember(project_id=project.id, user_id=user.id)
-    db_session.add(member)
-    db_session.flush()
-    return member
 
 
 def _make_module(db_session, *, project: Project) -> ProjectModule:
@@ -128,7 +121,6 @@ def ha_user(db_session) -> User:
 @pytest.fixture()
 def project(db_session, ri_user) -> Project:
     proj = _make_project(db_session, owner=ri_user)
-    _add_membership(db_session, project=proj, user=ri_user)
     return proj
 
 
@@ -260,8 +252,6 @@ class TestListArchitectSessions:
     def test_list_scoped_to_project(self, ri_client, db_session, ri_user):
         proj_a = _make_project(db_session, owner=ri_user)
         proj_b = _make_project(db_session, owner=ri_user)
-        _add_membership(db_session, project=proj_a, user=ri_user)
-        _add_membership(db_session, project=proj_b, user=ri_user)
 
         ri_client.post(f"/api/v1/projects/{proj_a.id}/architect", json={}).raise_for_status()
         ri_client.post(f"/api/v1/projects/{proj_b.id}/architect", json={}).raise_for_status()

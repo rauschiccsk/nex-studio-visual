@@ -32,7 +32,6 @@ import ModuleRegistryPage from "./pages/ModuleRegistryPage";
 import NewProjectPage from "./pages/NewProjectPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import ProjectAdminPage from "./pages/ProjectAdminPage";
-import ProjectMemberPage from "./pages/ProjectMemberPage";
 import ProjectModulePage from "./pages/ProjectModulePage";
 import ProfessionalSpecificationPage from "./pages/ProfessionalSpecificationPage";
 import ProjectPage from "./pages/ProjectPage";
@@ -60,7 +59,7 @@ import VersionsPage from "./pages/VersionsPage";
  * The ``/admin/*`` subtree (``/admin/users``, ``/admin/projects``,
  * ``/admin/guardian-precedents``, ``/admin/migration-batches``,
  * ``/admin/migration-category-statuses``, ``/admin/migration-id-maps``,
- * ``/admin/project-members``, ``/admin/project-modules``,
+ * ``/admin/project-modules``,
  * ``/admin/architect-sessions``, ``/admin/architect-messages``,
  * ``/admin/design-documents``, ``/admin/epics``, ``/admin/feats``,
  * ``/admin/tasks``, ``/admin/auto-fix-attempts``,
@@ -141,10 +140,6 @@ function App() {
           <Route
             path="admin/migration-id-maps"
             element={<MigrationIdMapPage />}
-          />
-          <Route
-            path="admin/project-members"
-            element={<ProjectMemberPage />}
           />
           <Route
             path="admin/project-modules"

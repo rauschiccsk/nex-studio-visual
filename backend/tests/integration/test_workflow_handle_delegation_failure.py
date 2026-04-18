@@ -102,7 +102,7 @@ from sqlalchemy import select
 from backend.db.models.delegations import AutoFixAttempt, Delegation, ExecutionLog
 from backend.db.models.foundation import User
 from backend.db.models.guardian import GuardianReview
-from backend.db.models.projects import Project, ProjectMember, ProjectModule
+from backend.db.models.projects import Project, ProjectModule
 from backend.db.models.specifications import DesignDocument
 from backend.db.models.tasks import Epic, Feat, Task
 
@@ -185,9 +185,6 @@ def nex_horizont(db_session, zoltan, dominik) -> Project:
     db_session.add(project)
     db_session.flush()
 
-    db_session.add(ProjectMember(project_id=project.id, user_id=zoltan.id))
-    db_session.add(ProjectMember(project_id=project.id, user_id=dominik.id))
-    db_session.flush()
     return project
 
 

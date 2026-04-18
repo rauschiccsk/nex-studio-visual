@@ -11,7 +11,7 @@
  * §1.5 ``architect_sessions`` table.
  *
  * Like the other Feat 6 admin pages (``ProjectModulePage``,
- * ``ProjectMemberPage``, ``MigrationIdMapPage``, …) this surface is
+ * ``MigrationIdMapPage``, …) this surface is
  * deliberately self-contained rather than reaching for the global
  * ``architectStore``: per DESIGN.md § 3.3 that store backs the
  * end-user ``ArchitectPage`` chat UI (sessions, messages, streaming

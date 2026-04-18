@@ -19,7 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.db.models.foundation import User, UserSession
-from backend.db.models.projects import Project, ProjectMember
+from backend.db.models.projects import Project
 from backend.db.models.specifications import DesignDocument
 from backend.db.session import get_db
 from backend.main import app
@@ -91,11 +91,6 @@ def project_with_members(db_session, ri_user, ha_user) -> Project:
         created_by=ri_user.id,
     )
     db_session.add(project)
-    db_session.flush()
-
-    # Both users are project members
-    for user in (ri_user, ha_user):
-        db_session.add(ProjectMember(project_id=project.id, user_id=user.id))
     db_session.flush()
 
     # Foundation DESIGN.md — prerequisite for Architect context

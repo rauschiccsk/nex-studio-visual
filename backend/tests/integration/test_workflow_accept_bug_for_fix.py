@@ -137,7 +137,7 @@ from sqlalchemy import select
 
 from backend.db.models.bugs import Bug, BugFixTask
 from backend.db.models.foundation import User
-from backend.db.models.projects import Project, ProjectMember
+from backend.db.models.projects import Project
 
 # ---------------------------------------------------------------------------
 # Precondition fixtures — NEX Horizont project with Zoltán (ri_director),
@@ -248,9 +248,6 @@ def nex_horizont(db_session, zoltan, tibor, nazar, dominik) -> Project:
     db_session.add(project)
     db_session.flush()
 
-    for user in (zoltan, tibor, nazar, dominik):
-        db_session.add(ProjectMember(project_id=project.id, user_id=user.id))
-    db_session.flush()
     return project
 
 
