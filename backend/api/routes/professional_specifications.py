@@ -95,6 +95,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.config.settings import settings
@@ -286,6 +287,153 @@ def update_professional_specification(
         raise _map_value_error(exc) from exc
     db.refresh(spec)
     return ProfessionalSpecificationRead.model_validate(spec)
+
+
+class _SpecChatHistoryItem(BaseModel):
+    role: str  # "user" | "assistant"
+    content: str
+
+
+class _SpecChatPayload(BaseModel):
+    message: str
+    current_content: str
+    history: list[_SpecChatHistoryItem] = []
+
+
+_CHAT_MARKER = "[SPRÁVA]"
+_SPEC_MARKER = "[SPEC]"
+
+
+@router.post("/{spec_id}/chat", status_code=status.HTTP_200_OK)
+async def chat_professional_spec(
+    spec_id: UUID,
+    payload: _SpecChatPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_ri_role),
+):
+    """Iteratively refine a professional specification via chat (SSE).
+
+    The AI returns two logical sections separated by ``[SPRÁVA]`` /
+    ``[SPEC]`` markers.  The backend parses these on the fly and emits
+    typed SSE events so the frontend can update the chat panel and the
+    spec editor independently::
+
+        data: {"type": "chat_chunk", "content": "..."}   ← conversational text
+        data: {"type": "spec_chunk", "content": "..."}   ← updated spec content
+        data: {"type": "done"}
+        data: {"type": "error", "content": "..."}
+
+    The endpoint is stateless — chat history is supplied by the caller
+    in ``payload.history`` so no DB chat-message table is required.
+    ``ri`` role only.
+    """
+    try:
+        professional_specification_service.get_by_id(db, spec_id)
+    except ValueError as exc:
+        raise _map_value_error(exc) from exc
+
+    template_path = Path(settings.knowledge_base_path) / "templates" / "PROFESSIONAL_SPEC_TEMPLATE.md"
+    try:
+        template_content = template_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Cannot read PROFESSIONAL_SPEC_TEMPLATE.md: {exc}",
+        ) from exc
+
+    # Build conversation history block
+    history_parts: list[str] = []
+    for item in payload.history:
+        role_label = "Používateľ" if item.role == "user" else "AI"
+        history_parts.append(f"[{role_label}]: {item.content}")
+    history_block = "\n\n".join(history_parts)
+
+    system_prompt = (
+        "Si ICC Professional Specification Editor AI.\n"
+        "Tvojou úlohou je upravovať profesionálnu špecifikáciu na základe požiadaviek používateľa.\n\n"
+        "FORMÁT ODPOVEDE — POVINNÝ, DODRŽUJ PRESNE:\n"
+        "[SPRÁVA]\n"
+        "Tu napíš 1-3 vety v slovenčine o tom čo si zmenil alebo doplnil.\n\n"
+        "[SPEC]\n"
+        "Tu napíš CELÚ aktualizovanú profesionálnu špecifikáciu — kompletný dokument.\n\n"
+        "PRAVIDLÁ:\n"
+        "- VŽDY začni odpoveď s [SPRÁVA] — nikdy nič pred tým\n"
+        "- [SPEC] musí obsahovať KOMPLETNÝ dokument, nie len zmenené časti\n"
+        "- Meni len to čo používateľ požaduje, ostatné ponechaj\n"
+        "- Jazyk: slovenčina, business štýl zrozumiteľný zákazníkovi\n"
+        "- Dodržuj štruktúru ICC šablóny\n\n"
+        f"ICC ŠABLÓNA:\n{template_content}"
+    )
+
+    user_prompt = (
+        f"AKTUÁLNA ŠPECIFIKÁCIA:\n{payload.current_content}\n\n"
+        + (f"HISTÓRIA KONVERZÁCIE:\n{history_block}\n\n" if history_block else "")
+        + f"POŽIADAVKA POUŽÍVATEĽA:\n{payload.message}"
+    )
+
+    async def _sse_generator():
+        buffer = ""
+        state = "preamble"  # → "chat" after [SPRÁVA] → "spec" after [SPEC]
+
+        try:
+            async for chunk in claude_subprocess.run_claude_stream(
+                prompt=user_prompt,
+                context=system_prompt,
+            ):
+                buffer += chunk
+
+                # State machine — process buffer until no more transitions
+                changed = True
+                while changed:
+                    changed = False
+
+                    if state == "preamble":
+                        if _CHAT_MARKER in buffer:
+                            idx = buffer.index(_CHAT_MARKER)
+                            buffer = buffer[idx + len(_CHAT_MARKER) :]
+                            state = "chat"
+                            changed = True
+                        elif len(buffer) > len(_CHAT_MARKER) * 3:
+                            # Discard preamble noise, keep tail for partial marker
+                            buffer = buffer[-len(_CHAT_MARKER) :]
+
+                    elif state == "chat":
+                        if _SPEC_MARKER in buffer:
+                            idx = buffer.index(_SPEC_MARKER)
+                            chat_part = buffer[:idx].strip()
+                            if chat_part:
+                                yield f"data: {json.dumps({'type': 'chat_chunk', 'content': chat_part})}\n\n"
+                            buffer = buffer[idx + len(_SPEC_MARKER) :]
+                            state = "spec"
+                            changed = True
+                        else:
+                            # Emit safe portion, hold potential partial marker tail
+                            safe_len = max(0, len(buffer) - len(_SPEC_MARKER))
+                            if safe_len > 0:
+                                yield f"data: {json.dumps({'type': 'chat_chunk', 'content': buffer[:safe_len]})}\n\n"
+                                buffer = buffer[safe_len:]
+
+                    elif state == "spec":
+                        if buffer:
+                            yield f"data: {json.dumps({'type': 'spec_chunk', 'content': buffer})}\n\n"
+                            buffer = ""
+
+        except (RuntimeError, TimeoutError) as exc:
+            logger.error("Claude stream error for spec chat %s: %s", spec_id, exc)
+            yield f"data: {json.dumps({'type': 'error', 'content': str(exc)})}\n\n"
+
+        # Flush remaining buffer
+        if buffer:
+            event_type = "spec_chunk" if state == "spec" else "chat_chunk"
+            yield f"data: {json.dumps({'type': event_type, 'content': buffer.strip()})}\n\n"
+
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+    return StreamingResponse(
+        _sse_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/{spec_id}/generate-design-doc", status_code=status.HTTP_200_OK)

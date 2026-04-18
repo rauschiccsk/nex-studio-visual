@@ -72,6 +72,148 @@ export function deleteProfessionalSpec(id: string): Promise<void> {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Streaming chat refinement (SSE)                                    */
+/* ------------------------------------------------------------------ */
+
+export interface SpecChatHistoryItem {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface SpecChatEvent {
+  type: "chat_chunk" | "spec_chunk" | "done" | "error";
+  content?: string;
+}
+
+/**
+ * Iteratively refine a professional specification via chat (SSE).
+ *
+ * Backend emits two event types:
+ *   - ``chat_chunk`` — conversational AI response (shown in chat panel)
+ *   - ``spec_chunk`` — updated spec content (shown in spec editor)
+ *   - ``done``       — stream complete
+ *   - ``error``      — stream error
+ */
+export function chatProfessionalSpec(
+  specId: string,
+  message: string,
+  currentContent: string,
+  history: SpecChatHistoryItem[],
+  onChatChunk: (content: string) => void,
+  onSpecChunk: (content: string) => void,
+  onDone: () => void,
+  onError?: (error: Error) => void,
+): AbortController {
+  const controller = new AbortController();
+  const baseUrl = resolveBaseUrl();
+  const url = `${baseUrl}${API_PREFIX}/professional-specifications/${specId}/chat`;
+
+  const token =
+    typeof window !== "undefined"
+      ? window.localStorage.getItem(TOKEN_STORAGE_KEY)
+      : null;
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "text/event-stream",
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  _consumeChatStream(
+    url,
+    headers,
+    { message, current_content: currentContent, history },
+    controller.signal,
+    onChatChunk,
+    onSpecChunk,
+    onDone,
+    onError,
+  );
+  return controller;
+}
+
+async function _consumeChatStream(
+  url: string,
+  headers: Record<string, string>,
+  body: object,
+  signal: AbortSignal,
+  onChatChunk: (content: string) => void,
+  onSpecChunk: (content: string) => void,
+  onDone: () => void,
+  onError?: (error: Error) => void,
+): Promise<void> {
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal,
+      credentials: "same-origin",
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Chat stream failed (${response.status}): ${text}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("Response body is not readable");
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith("data: ")) continue;
+        let event: SpecChatEvent;
+        try {
+          event = JSON.parse(trimmed.slice(6)) as SpecChatEvent;
+        } catch {
+          continue;
+        }
+        switch (event.type) {
+          case "chat_chunk":
+            onChatChunk(event.content ?? "");
+            break;
+          case "spec_chunk":
+            onSpecChunk(event.content ?? "");
+            break;
+          case "done":
+            onDone();
+            break;
+          case "error":
+            onError?.(new Error(event.content ?? "Unknown error"));
+            break;
+        }
+      }
+    }
+
+    // Flush remaining
+    if (buffer.trim().startsWith("data: ")) {
+      try {
+        const event = JSON.parse(buffer.trim().slice(6)) as SpecChatEvent;
+        if (event.type === "done") onDone();
+        else if (event.type === "error") onError?.(new Error(event.content ?? ""));
+      } catch {
+        // ignore
+      }
+    }
+  } catch (err: unknown) {
+    if (err instanceof DOMException && err.name === "AbortError") return;
+    onError?.(err instanceof Error ? err : new Error(String(err)));
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /*  Streaming generate-design-doc (SSE)                                */
 /* ------------------------------------------------------------------ */
 
