@@ -76,12 +76,15 @@ async def run_claude_stream(
     cmd = [settings.claude_cli_path, "-p"]
     if tmp_path:
         cmd.extend(["--system-prompt-file", tmp_path])
-    cmd.extend([
-        "--output-format", "stream-json",
-        "--verbose",
-        "--include-partial-messages",
-        "--no-session-persistence",
-    ])
+    cmd.extend(
+        [
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--include-partial-messages",
+            "--no-session-persistence",
+        ]
+    )
 
     env = os.environ.copy()
     env["CLAUDE_CONFIG_DIR"] = settings.claude_config_dir
@@ -173,6 +176,4 @@ async def run_claude_stream(
         logger.warning("Claude CLI stderr: %.500s", stderr_text)
 
     if process.returncode != 0:
-        raise RuntimeError(
-            f"Claude CLI exited with code {process.returncode}: {stderr_text[:500]}"
-        )
+        raise RuntimeError(f"Claude CLI exited with code {process.returncode}: {stderr_text[:500]}")
