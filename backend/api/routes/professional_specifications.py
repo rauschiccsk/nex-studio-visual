@@ -506,6 +506,8 @@ async def generate_design_doc(
             " Žiadny úvod, žiadne vysvetlenie, žiadny popis — iba čistý Markdown od prvého riadku.\n\n"
             "POVINNÉ PRAVIDLÁ — dodržuj presne:\n"
             "- Výstup musí byť čistý Markdown — BEZ akýchkoľvek <!-- komentárov --> zo šablóny\n"
+            "- BEZ textových markerov v headingoch: '⚠️ MANDATORY — do not remove or defer',"
+            " '[ICC-STANDARD]', '[ARCHITECT]' a podobné — tieto sú pokyny pre autora, nie obsah\n"
             "- Všetky {placeholder} hodnoty MUSIA byť nahradené reálnym obsahom\n"
             "- Všetky example_* anchory MUSIA byť premenované na reálne názvy z projektu\n"
             "- Vypln VŠETKY sekcie: Actors, Entry Points, Workflows, Edge Cases,"
@@ -545,7 +547,28 @@ async def generate_design_doc(
         assistant_content = "".join(full_content)
         design_doc_id: str | None = None
 
-        if assistant_content and not error_occurred:
+        # Post-generation validation: content must start with the expected heading
+        # and be at least 5000 chars (summary/description outputs are typically <3000).
+        expected_prefix = f"# {doc_label}"
+        validation_ok = (
+            not error_occurred
+            and len(assistant_content) >= 5000
+            and assistant_content.lstrip().startswith(expected_prefix)
+        )
+
+        if not validation_ok and not error_occurred:
+            reason = (
+                f"Obsah nezačína s '{expected_prefix}'"
+                if not assistant_content.lstrip().startswith(expected_prefix)
+                else f"Obsah je príliš krátky ({len(assistant_content)} znakov, minimum 5000)"
+            )
+            logger.warning(
+                "Design doc validation failed (type=%s, prof_spec=%s): %s",
+                doc_type, spec_id, reason,
+            )
+            yield f"data: {json.dumps({'type': 'validation_error', 'content': reason})}\n\n"
+
+        if assistant_content and validation_ok:
             persist_db = SessionLocal()
             try:
                 design_doc = design_document_service.create(

@@ -59,6 +59,7 @@ interface GenDocState {
   content: string;
   savedDoc: DesignDocumentRead | null;
   error: string | null;
+  validationError: string | null;
   mode: "view" | "edit";
   copyDone: boolean;
   currentSection: string;
@@ -273,7 +274,7 @@ function SpecificationPage() {
 
   // ── Step 3: Design Documents ───────────────────────────────────────────
   const emptyDocState: GenDocState = {
-    streaming: false, content: "", savedDoc: null, error: null,
+    streaming: false, content: "", savedDoc: null, error: null, validationError: null,
     mode: "edit", copyDone: false, currentSection: "", elapsedSeconds: 0,
   };
   const [designDoc, setDesignDoc] = useState<GenDocState>(emptyDocState);
@@ -548,7 +549,7 @@ function SpecificationPage() {
       const abortRef = docType === "design" ? designAbortRef : behaviorAbortRef;
       const textRef = docType === "design" ? designTextRef : behaviorTextRef;
 
-      setDoc((p) => ({ ...p, streaming: true, content: "", error: null, currentSection: "", mode: "edit", elapsedSeconds: 0 }));
+      setDoc((p) => ({ ...p, streaming: true, content: "", error: null, validationError: null, currentSection: "", mode: "edit", elapsedSeconds: 0 }));
 
       const ctrl = generateDesignDoc(
         profSpec.id,
@@ -573,6 +574,9 @@ function SpecificationPage() {
         },
         (err) => {
           setDoc((p) => ({ ...p, streaming: false, error: err.message }));
+        },
+        (reason) => {
+          setDoc((p) => ({ ...p, validationError: reason }));
         },
       );
       abortRef.current = ctrl;
@@ -952,6 +956,16 @@ function SpecificationPage() {
                     )}
                   </div>
                   {state.error && <p className="text-xs text-red-400">{state.error}</p>}
+                  {state.validationError && (
+                    <div className="flex items-start gap-2 rounded-lg border border-yellow-600/40 bg-yellow-900/20 px-3 py-2">
+                      <span className="text-yellow-400 text-sm">⚠</span>
+                      <div>
+                        <p className="text-xs font-medium text-yellow-400">Dokument sa nevygeneroval správne — nie je uložený</p>
+                        <p className="text-xs text-yellow-300/70">{state.validationError}</p>
+                        <p className="mt-1 text-xs text-yellow-300/50">Klikni „Generovať" znova.</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}

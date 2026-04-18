@@ -218,7 +218,7 @@ async function _consumeChatStream(
 /* ------------------------------------------------------------------ */
 
 export interface GenerateDesignDocStreamEvent {
-  type: "chunk" | "done" | "error";
+  type: "chunk" | "done" | "error" | "validation_error";
   content: string;
   design_doc_id?: string | null;
 }
@@ -234,6 +234,7 @@ export function generateDesignDoc(
   onChunk: (content: string) => void,
   onDone: (event: GenerateDesignDocStreamEvent & { type: "done" }) => void,
   onError?: (error: Error) => void,
+  onValidationError?: (reason: string) => void,
 ): AbortController {
   const controller = new AbortController();
   const baseUrl = resolveBaseUrl();
@@ -254,7 +255,7 @@ export function generateDesignDoc(
     headers.Authorization = `Bearer ${token}`;
   }
 
-  _consumeDesignDocStream(url, headers, controller.signal, onChunk, onDone, onError);
+  _consumeDesignDocStream(url, headers, controller.signal, onChunk, onDone, onError, onValidationError);
   return controller;
 }
 
@@ -265,6 +266,7 @@ async function _consumeDesignDocStream(
   onChunk: (content: string) => void,
   onDone: (event: GenerateDesignDocStreamEvent & { type: "done" }) => void,
   onError?: (error: Error) => void,
+  onValidationError?: (reason: string) => void,
 ): Promise<void> {
   try {
     const response = await fetch(url, {
@@ -314,6 +316,9 @@ async function _consumeDesignDocStream(
           case "error":
             onError?.(new Error(event.content));
             break;
+          case "validation_error":
+            onValidationError?.(event.content);
+            break;
         }
       }
     }
@@ -332,6 +337,9 @@ async function _consumeDesignDocStream(
             break;
           case "error":
             onError?.(new Error(event.content));
+            break;
+          case "validation_error":
+            onValidationError?.(event.content);
             break;
         }
       } catch {
