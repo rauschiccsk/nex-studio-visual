@@ -46,7 +46,7 @@ from __future__ import annotations
 import re
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from backend.core.security import get_current_user, require_ri_role
@@ -227,7 +227,7 @@ def delete_version(
     version_id: UUID,
     db: Session = Depends(get_db),
     _current_user: User = Depends(require_ri_role),
-) -> None:
+) -> Response:
     """Permanently delete a version.
 
     Only allowed when the version has no EPICs (Task Plan is empty) and
@@ -248,6 +248,7 @@ def delete_version(
     except ValueError as exc:
         db.rollback()
         raise _map_value_error(exc) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(
