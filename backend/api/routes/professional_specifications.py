@@ -502,6 +502,7 @@ async def generate_design_doc(
             async for chunk in claude_subprocess.run_claude_stream(
                 prompt=user_prompt,
                 context=system_prompt,
+                timeout=settings.claude_design_doc_timeout,
             ):
                 full_content.append(chunk)
                 yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
