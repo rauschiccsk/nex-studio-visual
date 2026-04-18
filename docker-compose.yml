@@ -27,6 +27,7 @@ services:
     volumes:
       - /home/andros/.claude:/home/andros/.claude
       - /home/icc/knowledge:/home/icc/knowledge:ro
+      - ./uploads:/app/uploads
     environment:
       DATABASE_URL: "postgresql+pg8000://nexstudio:nexstudio@db:5432/nexstudio"
       TEST_DATABASE_URL: "postgresql+pg8000://nexstudio:nexstudio@db:5432/nexstudio_test"

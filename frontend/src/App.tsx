@@ -1,7 +1,9 @@
+import { useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import AppLayout from "./components/layout/AppLayout";
 import ProtectedRoute from "./components/auth/ProtectedRoute";
+import { ScreenshotOverlay } from "./components/ScreenshotOverlay";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { useAuthStore } from "./store/authStore";
 
@@ -78,9 +80,22 @@ import VersionsPage from "./pages/VersionsPage";
  */
 function App() {
   const username = useAuthStore((s) => s.user?.username);
+  const [screenshotOpen, setScreenshotOpen] = useState(false);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && e.key === "S") {
+        e.preventDefault();
+        setScreenshotOpen(true);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   return (
     <ThemeProvider username={username}>
+    {screenshotOpen && <ScreenshotOverlay onClose={() => setScreenshotOpen(false)} />}
     <BrowserRouter>
       <Routes>
         {/* Public route */}

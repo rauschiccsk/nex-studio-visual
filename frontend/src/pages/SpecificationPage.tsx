@@ -16,7 +16,10 @@ import {
   CheckCircle,
   ChevronDown,
   ChevronRight,
+  ClipboardCopy,
+  Eye,
   Loader2,
+  Pencil,
   Send,
   Wand2,
 } from "lucide-react";
@@ -96,6 +99,93 @@ function StepHeader({
   );
 }
 
+// ── Markdown renderer ────────────────────────────────────────────────────────
+
+function renderMarkdown(text: string): string {
+  const lines: string[] = text.split("\n");
+  const out: string[] = [];
+  let inTable = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line: string = lines[i] ?? "";
+    const trimmed = line.trim();
+
+    // Table row detection
+    if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
+      if (!inTable) {
+        out.push('<table class="w-full text-xs border-collapse mb-2">');
+        inTable = true;
+        out.push("<thead><tr>");
+        const cells = trimmed
+          .slice(1, -1)
+          .split("|")
+          .map((c) => `<th class="border border-gray-600 px-2 py-1 bg-gray-700 text-left">${c.trim()}</th>`);
+        out.push(cells.join(""));
+        out.push("</tr></thead><tbody>");
+        continue;
+      } else if (/^\|[-| :]+\|$/.test(trimmed)) {
+        // separator row — skip
+        continue;
+      } else {
+        out.push("<tr>");
+        const cells = trimmed
+          .slice(1, -1)
+          .split("|")
+          .map((c) => `<td class="border border-gray-600 px-2 py-1">${c.trim()}</td>`);
+        out.push(cells.join(""));
+        out.push("</tr>");
+        continue;
+      }
+    } else if (inTable) {
+      out.push("</tbody></table>");
+      inTable = false;
+    }
+
+    // Headings
+    if (/^### /.test(line)) {
+      out.push(`<h3 class="text-sm font-semibold text-gray-200 mt-4 mb-1">${escMd(line.slice(4))}</h3>`);
+    } else if (/^## /.test(line)) {
+      out.push(`<h2 class="text-base font-bold text-gray-100 mt-5 mb-2 border-b border-gray-700 pb-1">${escMd(line.slice(3))}</h2>`);
+    } else if (/^# /.test(line)) {
+      out.push(`<h1 class="text-lg font-bold text-primary mt-4 mb-3">${escMd(line.slice(2))}</h1>`);
+    } else if (/^- /.test(line) || /^\* /.test(line)) {
+      out.push(`<li class="ml-4 text-xs text-gray-200 list-disc">${inlineMd(line.slice(2))}</li>`);
+    } else if (/^\d+\. /.test(line)) {
+      out.push(`<li class="ml-4 text-xs text-gray-200 list-decimal">${inlineMd(line.replace(/^\d+\. /, ""))}</li>`);
+    } else if (/^```/.test(line)) {
+      const codeLines: string[] = [];
+      i++;
+      while (i < lines.length && !(lines[i] ?? "").startsWith("```")) {
+        codeLines.push(lines[i] ?? "");
+        i++;
+      }
+      out.push(`<pre class="bg-gray-900 rounded p-2 my-2 overflow-x-auto text-xs text-green-300 font-mono">${escHtml(codeLines.join("\n"))}</pre>`);
+    } else if (trimmed === "") {
+      out.push('<div class="h-2"></div>');
+    } else {
+      out.push(`<p class="text-xs text-gray-200 leading-relaxed">${inlineMd(line)}</p>`);
+    }
+  }
+
+  if (inTable) out.push("</tbody></table>");
+  return out.join("\n");
+}
+
+function escHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function escMd(s: string): string {
+  return inlineMd(escHtml(s));
+}
+
+function inlineMd(s: string): string {
+  return escHtml(s)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+    .replace(/`(.+?)`/g, '<code class="bg-gray-800 px-1 rounded text-green-300">$1</code>');
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 function SpecificationPage() {
@@ -123,6 +213,9 @@ function SpecificationPage() {
   const [profGenerating, setProfGenerating] = useState(false); // initial SSE generate
   const [profSaving, setProfSaving] = useState(false);
   const [profError, setProfError] = useState<string | null>(null);
+
+  const [specMode, setSpecMode] = useState<"view" | "edit">("edit");
+  const [copyDone, setCopyDone] = useState(false);
 
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
@@ -245,6 +338,7 @@ function SpecificationPage() {
           setProfContent(event.content);
         }
         setProfGenerating(false);
+        setSpecMode("view");
         setChatMessages([
           {
             role: "assistant",
@@ -598,14 +692,57 @@ function SpecificationPage() {
                 </div>
               </div>
 
-              {/* ── Right: Spec editor — direct grid item, h-full fills the 560px cell ── */}
-              <textarea
-                ref={specTextRef}
-                className="h-full w-full resize-none rounded-lg border border-gray-600 bg-gray-900 px-3 py-2 font-mono text-xs text-gray-200 placeholder-gray-500 focus:border-primary focus:outline-none"
-                value={profContent}
-                onChange={(e) => setProfContent(e.target.value)}
-                placeholder="Tu sa objaví vygenerovaná profesionálna špecifikácia…"
-              />
+              {/* ── Right: Spec editor with View/Edit/Copy toolbar ── */}
+              <div className="flex flex-col overflow-hidden rounded-lg border border-gray-700 bg-gray-900">
+                {/* Toolbar */}
+                <div className="flex shrink-0 items-center gap-1 border-b border-gray-700 px-2 py-1">
+                  <button
+                    onClick={() => setSpecMode("view")}
+                    title="View (rendered)"
+                    className={`flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors ${specMode === "view" ? "bg-gray-700 text-gray-100" : "text-gray-400 hover:bg-gray-800 hover:text-gray-200"}`}
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                    View
+                  </button>
+                  <button
+                    onClick={() => setSpecMode("edit")}
+                    title="Edit (markdown)"
+                    className={`flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors ${specMode === "edit" ? "bg-gray-700 text-gray-100" : "text-gray-400 hover:bg-gray-800 hover:text-gray-200"}`}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                    Edit
+                  </button>
+                  <div className="flex-1" />
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(profContent).then(() => {
+                        setCopyDone(true);
+                        setTimeout(() => setCopyDone(false), 1500);
+                      });
+                    }}
+                    title="Copy to clipboard"
+                    className="flex items-center gap-1 rounded px-2 py-1 text-xs text-gray-400 hover:bg-gray-800 hover:text-gray-200 transition-colors"
+                  >
+                    <ClipboardCopy className="h-3.5 w-3.5" />
+                    {copyDone ? "Copied!" : "Copy"}
+                  </button>
+                </div>
+
+                {specMode === "view" ? (
+                  <div
+                    className="flex-1 overflow-y-auto px-4 py-3"
+                    dangerouslySetInnerHTML={{ __html: renderMarkdown(profContent) }}
+                  />
+                ) : (
+                  <textarea
+                    ref={specTextRef}
+                    className="flex-1 resize-none bg-gray-900 px-3 py-2 font-mono text-xs text-gray-200 placeholder-gray-500 focus:outline-none"
+                    value={profContent}
+                    onChange={(e) => setProfContent(e.target.value)}
+                    placeholder="Tu sa objaví vygenerovaná profesionálna špecifikácia…"
+                  />
+                )}
+              </div>
             </div>
             <p className="text-right text-[10px] text-gray-500">
               Môžeš editovať priamo. Po úpravách klikni „Schváliť a uložiť".
