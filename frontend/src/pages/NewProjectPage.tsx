@@ -75,7 +75,7 @@ function NewProjectPage() {
       </div>
 
       {/* Form */}
-      <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+      <div className="rounded-xl border border-gray-700 bg-gray-800 p-6 shadow-xl">
         <NewProjectForm onSubmit={handleSubmit} loading={loading} error={error} />
       </div>
     </section>

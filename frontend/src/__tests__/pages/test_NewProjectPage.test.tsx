@@ -4,13 +4,13 @@
  * Tests cover:
  *   1. Form renders all fields
  *   2. Slug auto-generation from name on blur
- *   3. GitHub repo auto-derive from slug
+ *   3. GitHub repo auto-derive from slug (short format rauschiccsk/slug)
  *   4. repoTouchedByUser flag — stops auto-derive after manual edit
  *   5. slugTouchedByUser flag — stops auto-generation after manual edit
- *   6. GitHub repo format validation
+ *   6. GitHub repo format validation (org/repo short format)
  *   7. Required field validation (name, slug)
- *   8. Category select works
- *   9. Port fields accept numbers
+ *   8. Category icon-button grid works (singlemodule / multimodule)
+ *   9. Port auto-suggest fires on slug change
  *  10. Submit calls onSubmit with correct data
  */
 
@@ -49,12 +49,23 @@ vi.mock("@/services/api", () => ({
   TOKEN_STORAGE_KEY: "nex_studio_token",
 }));
 
+// Port registry mock — default: suggest returns 9100, check returns available
+const suggestNextAvailablePortMock = vi.fn();
+const checkPortAvailabilityMock = vi.fn();
+
+vi.mock("@/services/api/port-registry", () => ({
+  suggestNextAvailablePort: suggestNextAvailablePortMock,
+  checkPortAvailability: checkPortAvailabilityMock,
+}));
+
 /* ------------------------------------------------------------------ */
 /*  Setup                                                              */
 /* ------------------------------------------------------------------ */
 
 beforeEach(() => {
   vi.resetAllMocks();
+  suggestNextAvailablePortMock.mockResolvedValue(9100);
+  checkPortAvailabilityMock.mockResolvedValue(true);
 });
 
 /* ------------------------------------------------------------------ */
@@ -84,6 +95,8 @@ describe("NewProjectForm", () => {
     expect(screen.getByTestId("project-slug")).toBeInTheDocument();
     expect(screen.getByTestId("project-repo")).toBeInTheDocument();
     expect(screen.getByTestId("project-category")).toBeInTheDocument();
+    expect(screen.getByTestId("category-singlemodule")).toBeInTheDocument();
+    expect(screen.getByTestId("category-multimodule")).toBeInTheDocument();
     expect(screen.getByTestId("project-description")).toBeInTheDocument();
     expect(screen.getByTestId("backend-port")).toBeInTheDocument();
     expect(screen.getByTestId("frontend-port")).toBeInTheDocument();
@@ -105,7 +118,7 @@ describe("NewProjectForm", () => {
     expect(slugInput.value).toBe("my-cool-project");
   });
 
-  it("auto-derives github_repo from slug on name blur", async () => {
+  it("auto-derives github_repo from slug on name blur (short format)", async () => {
     const user = userEvent.setup();
     const NewProjectForm = await importForm();
     render(<NewProjectForm onSubmit={vi.fn()} />);
@@ -116,7 +129,7 @@ describe("NewProjectForm", () => {
     await user.type(nameInput, "NEX Horizont");
     fireEvent.blur(nameInput);
 
-    expect(repoInput.value).toBe("https://github.com/rauschiccsk/nex-horizont");
+    expect(repoInput.value).toBe("rauschiccsk/nex-horizont");
   });
 
   it("auto-derives github_repo when slug is manually changed", async () => {
@@ -129,7 +142,7 @@ describe("NewProjectForm", () => {
 
     await user.type(slugInput, "custom-slug");
 
-    expect(repoInput.value).toBe("https://github.com/rauschiccsk/custom-slug");
+    expect(repoInput.value).toBe("rauschiccsk/custom-slug");
   });
 
   it("stops auto-deriving repo after user manually edits repo (repoTouchedByUser)", async () => {
@@ -140,16 +153,14 @@ describe("NewProjectForm", () => {
     const nameInput = screen.getByTestId("project-name");
     const repoInput = screen.getByTestId("project-repo");
 
-    // User manually sets a custom repo URL
-    await user.type(repoInput, "https://github.com/myorg/custom-repo");
+    // User manually sets a custom repo (short format)
+    await user.type(repoInput, "myorg/custom-repo");
 
     // Now typing name and blurring should NOT overwrite repo
     await user.type(nameInput, "Some Project");
     fireEvent.blur(nameInput);
 
-    expect((repoInput as HTMLInputElement).value).toBe(
-      "https://github.com/myorg/custom-repo",
-    );
+    expect((repoInput as HTMLInputElement).value).toBe("myorg/custom-repo");
   });
 
   it("stops auto-generating slug after user manually edits slug (slugTouchedByUser)", async () => {
@@ -176,15 +187,13 @@ describe("NewProjectForm", () => {
     render(<NewProjectForm onSubmit={vi.fn()} />);
 
     const repoInput = screen.getByTestId("project-repo");
-    await user.type(repoInput, "not-a-valid-url");
+    await user.type(repoInput, "not-a-valid-repo");
 
     await waitFor(() => {
       expect(screen.getByTestId("repo-error")).toBeInTheDocument();
     });
 
-    expect(screen.getByTestId("repo-error")).toHaveTextContent(
-      "Format: https://github.com/org/repo",
-    );
+    expect(screen.getByTestId("repo-error")).toHaveTextContent("Formát: org/repo");
   });
 
   it("accepts valid github_repo format without error", async () => {
@@ -193,7 +202,7 @@ describe("NewProjectForm", () => {
     render(<NewProjectForm onSubmit={vi.fn()} />);
 
     const repoInput = screen.getByTestId("project-repo");
-    await user.type(repoInput, "https://github.com/org/my-repo");
+    await user.type(repoInput, "rauschiccsk/my-repo");
 
     await waitFor(() => {
       expect(screen.queryByTestId("repo-error")).not.toBeInTheDocument();
@@ -209,22 +218,49 @@ describe("NewProjectForm", () => {
     await user.click(screen.getByTestId("submit-button"));
 
     await waitFor(() => {
-      expect(screen.getByText("Name is required.")).toBeInTheDocument();
+      expect(screen.getByText("Názov je povinný.")).toBeInTheDocument();
     });
 
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it("category select defaults to singlemodule and can be changed", async () => {
+  it("category defaults to singlemodule and switches via icon buttons", async () => {
     const user = userEvent.setup();
     const NewProjectForm = await importForm();
     render(<NewProjectForm onSubmit={vi.fn()} />);
 
-    const select = screen.getByTestId("project-category") as HTMLSelectElement;
-    expect(select.value).toBe("singlemodule");
+    // singlemodule selected by default
+    expect(screen.getByTestId("category-singlemodule")).toHaveClass("border-primary");
+    expect(screen.getByTestId("category-multimodule")).not.toHaveClass("border-primary");
 
-    await user.selectOptions(select, "multimodule");
-    expect(select.value).toBe("multimodule");
+    await user.click(screen.getByTestId("category-multimodule"));
+
+    expect(screen.getByTestId("category-multimodule")).toHaveClass("border-primary");
+    expect(screen.getByTestId("category-singlemodule")).not.toHaveClass("border-primary");
+  });
+
+  it("auto-suggests 3 consecutive ports when slug is generated", async () => {
+    const user = userEvent.setup();
+    const NewProjectForm = await importForm();
+    render(<NewProjectForm onSubmit={vi.fn()} />);
+
+    await user.type(screen.getByTestId("project-name"), "NEX Ledger");
+    fireEvent.blur(screen.getByTestId("project-name"));
+
+    await waitFor(() => {
+      expect(
+        (screen.getByTestId("backend-port-input") as HTMLInputElement).value,
+      ).toBe("9100");
+    });
+
+    expect(
+      (screen.getByTestId("frontend-port-input") as HTMLInputElement).value,
+    ).toBe("9101");
+    expect(
+      (screen.getByTestId("db-port-input") as HTMLInputElement).value,
+    ).toBe("9102");
+
+    expect(screen.getByText("Automaticky navrhnuté porty")).toBeInTheDocument();
   });
 
   it("calls onSubmit with correct ProjectCreationFormData", async () => {
@@ -233,14 +269,21 @@ describe("NewProjectForm", () => {
     const NewProjectForm = await importForm();
     render(<NewProjectForm onSubmit={onSubmit} />);
 
-    // Fill in form
+    // Fill name → triggers slug auto-gen on blur + port auto-suggest
     await user.type(screen.getByTestId("project-name"), "Test Project");
-    fireEvent.blur(screen.getByTestId("project-name")); // triggers slug auto-gen
+    fireEvent.blur(screen.getByTestId("project-name"));
+
+    // Wait for port auto-suggest to resolve
+    await waitFor(() => {
+      expect(
+        (screen.getByTestId("backend-port-input") as HTMLInputElement).value,
+      ).toBe("9100");
+    });
+
     await user.type(screen.getByTestId("project-description"), "A test project");
-    await user.selectOptions(screen.getByTestId("project-category"), "multimodule");
-    await user.type(screen.getByTestId("backend-port"), "9100");
-    await user.type(screen.getByTestId("frontend-port"), "9101");
-    await user.type(screen.getByTestId("db-port"), "5432");
+
+    // Switch to multimodule
+    await user.click(screen.getByTestId("category-multimodule"));
 
     await user.click(screen.getByTestId("submit-button"));
 
@@ -253,10 +296,10 @@ describe("NewProjectForm", () => {
       slug: "test-project",
       category: "multimodule",
       description: "A test project",
-      github_repo: "https://github.com/rauschiccsk/test-project",
+      github_repo: "rauschiccsk/test-project",
       backend_port: 9100,
       frontend_port: 9101,
-      db_port: 5432,
+      db_port: 9102,
     });
   });
 
@@ -272,7 +315,7 @@ describe("NewProjectForm", () => {
     render(<NewProjectForm onSubmit={vi.fn()} loading={true} />);
 
     expect(screen.getByTestId("submit-button")).toBeDisabled();
-    expect(screen.getByTestId("submit-button")).toHaveTextContent("Vytvaram projekt");
+    expect(screen.getByTestId("submit-button")).toHaveTextContent("Vytváram projekt");
   });
 });
 

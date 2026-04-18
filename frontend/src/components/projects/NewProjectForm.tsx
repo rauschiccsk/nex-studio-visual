@@ -1,28 +1,72 @@
 /**
- * Reusable "New Project" form component — single screen CRUD.
+ * New Project form — visual design matching NEX Command NewProjectDialog.
  *
- * Renders a controlled form with all fields required by
- * {@link ProjectCreationFormData}.  Inline validation includes:
- *   - Slug uniqueness check (debounced, calls parent callback)
- *   - Port availability check (debounced, calls parent callback)
- *   - GitHub repo format validation (``https://github.com/org/repo``)
- *   - Auto-generate slug from name on blur
- *   - Auto-derive github_repo as ``https://github.com/rauschiccsk/{slug}``
- *     (stops auto-derive when user manually edits — ``repoTouchedByUser``)
- *
- * The form is presentation-only: the parent page component supplies
- * ``onSubmit``, ``onValidateSlug``, ``onValidatePort`` callbacks and
- * controls loading / server-error state.
+ * Key behaviours:
+ *   - Category selector: icon-button grid (singlemodule / multimodule)
+ *   - Port auto-suggest: fires on slug change via /ports/suggest API,
+ *     fills BE/FE/DB with 3 consecutive ports, shows ⚡ indicator
+ *   - PortField component: per-field suggest + availability check on blur
+ *   - Slug auto-generate from name on blur
+ *   - GitHub repo auto-derive: short format ``rauschiccsk/{slug}``
+ *   - Dark-first styling (bg-gray-900 / border-gray-600 / text-gray-100)
  */
 
 import { useState, useCallback, useEffect, useRef, type FormEvent } from "react";
+import { Package, Layers, Zap } from "lucide-react";
 
 import type {
   ProjectCreationFormData,
   ProjectCategory,
-  PortValidationError,
   SlugValidationError,
 } from "@/types";
+import PortField from "./PortField";
+import { suggestNextAvailablePort } from "@/services/api/port-registry";
+
+// ---------------------------------------------------------------------------
+// Category options
+// ---------------------------------------------------------------------------
+
+const CATEGORY_OPTIONS: {
+  value: ProjectCategory;
+  label: string;
+  icon: typeof Package;
+  desc: string;
+}[] = [
+  {
+    value: "singlemodule",
+    label: "Single module",
+    icon: Package,
+    desc: "Jeden repozitár, priamy vývoj",
+  },
+  {
+    value: "multimodule",
+    label: "Multi module",
+    icon: Layers,
+    desc: "Viac repozitárov, komplexný projekt",
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const GITHUB_ORG = "rauschiccsk";
+
+/** Regex for short ``org/repo`` format. */
+const GITHUB_REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+
+function toSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/** Returns short ``rauschiccsk/{slug}`` form. */
+function deriveRepo(slug: string): string {
+  return slug ? `${GITHUB_ORG}/${slug}` : "";
+}
 
 // ---------------------------------------------------------------------------
 // Props
@@ -33,36 +77,10 @@ export interface NewProjectFormProps {
   onSubmit: (data: ProjectCreationFormData) => void;
   /** Async slug uniqueness check — returns null if valid, error otherwise. */
   onValidateSlug?: (slug: string) => Promise<SlugValidationError | null>;
-  /** Async port availability check — returns null if valid, error otherwise. */
-  onValidatePort?: (
-    port: number,
-    field: "backend_port" | "frontend_port" | "db_port",
-  ) => Promise<PortValidationError | null>;
   /** Disables submit and shows loading state. */
   loading?: boolean;
   /** Server-side error message displayed above the submit button. */
   error?: string | null;
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-const GITHUB_ORG = "rauschiccsk";
-const GITHUB_REPO_RE = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
-
-/** Convert a human name to a URL-safe slug. */
-function toSlug(name: string): string {
-  return name
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-/** Build the default GitHub repo URL from a slug. */
-function deriveRepo(slug: string): string {
-  return slug ? `https://github.com/${GITHUB_ORG}/${slug}` : "";
 }
 
 // ---------------------------------------------------------------------------
@@ -72,7 +90,6 @@ function deriveRepo(slug: string): string {
 export default function NewProjectForm({
   onSubmit,
   onValidateSlug,
-  onValidatePort,
   loading = false,
   error = null,
 }: NewProjectFormProps) {
@@ -85,28 +102,19 @@ export default function NewProjectForm({
   const [backendPort, setBackendPort] = useState("");
   const [frontendPort, setFrontendPort] = useState("");
   const [dbPort, setDbPort] = useState("");
+  const [portsAutoSuggested, setPortsAutoSuggested] = useState(false);
 
   // -- Derivation flags -----------------------------------------------------
   const [slugTouchedByUser, setSlugTouchedByUser] = useState(false);
   const [repoTouchedByUser, setRepoTouchedByUser] = useState(false);
+  const portsTouchedByUser = useRef(false);
 
   // -- Validation state -----------------------------------------------------
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [slugError, setSlugError] = useState<string | null>(null);
   const [repoError, setRepoError] = useState<string | null>(null);
-  const [portErrors, setPortErrors] = useState<Record<string, string | null>>({
-    backend_port: null,
-    frontend_port: null,
-    db_port: null,
-  });
 
-  // -- Refs for debounce timers ---------------------------------------------
   const slugTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const portTimerRefs = useRef<Record<string, ReturnType<typeof setTimeout> | null>>({
-    backend_port: null,
-    frontend_port: null,
-    db_port: null,
-  });
 
   // -- Slug auto-generation on name blur ------------------------------------
   const handleNameBlur = useCallback(() => {
@@ -138,11 +146,32 @@ export default function NewProjectForm({
     setGithubRepo(value);
   }, []);
 
+  // -- Port auto-suggest on slug change ------------------------------------
+  useEffect(() => {
+    if (!slug || portsTouchedByUser.current) return;
+
+    let cancelled = false;
+    suggestNextAvailablePort("backend")
+      .then((p) => {
+        if (cancelled) return;
+        setBackendPort(String(p));
+        setFrontendPort(String(p + 1));
+        setDbPort(String(p + 2));
+        setPortsAutoSuggested(true);
+      })
+      .catch(() => {
+        // API unavailable — leave fields empty, user can fill manually
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [slug]);
+
   // -- Debounced slug validation -------------------------------------------
   useEffect(() => {
     if (slugTimerRef.current) clearTimeout(slugTimerRef.current);
     setSlugError(null);
-
     if (!slug || !onValidateSlug) return;
 
     slugTimerRef.current = setTimeout(async () => {
@@ -161,68 +190,22 @@ export default function NewProjectForm({
       setRepoError(null);
       return;
     }
-    if (!GITHUB_REPO_RE.test(githubRepo)) {
-      setRepoError("Format: https://github.com/org/repo");
-    } else {
-      setRepoError(null);
-    }
+    setRepoError(GITHUB_REPO_RE.test(githubRepo) ? null : "Formát: org/repo");
   }, [githubRepo]);
 
-  // -- Debounced port validation -------------------------------------------
-  const validatePort = useCallback(
-    (value: string, field: "backend_port" | "frontend_port" | "db_port") => {
-      if (portTimerRefs.current[field]) {
-        clearTimeout(portTimerRefs.current[field]!);
-      }
-
-      const num = parseInt(value, 10);
-      if (!value || isNaN(num)) {
-        setPortErrors((prev) => ({ ...prev, [field]: null }));
-        return;
-      }
-
-      if (num < 1 || num > 65535) {
-        setPortErrors((prev) => ({ ...prev, [field]: "Port must be 1\u201365535" }));
-        return;
-      }
-
-      if (!onValidatePort) {
-        setPortErrors((prev) => ({ ...prev, [field]: null }));
-        return;
-      }
-
-      portTimerRefs.current[field] = setTimeout(async () => {
-        const result = await onValidatePort(num, field);
-        setPortErrors((prev) => ({ ...prev, [field]: result?.message ?? null }));
-      }, 400);
-    },
-    [onValidatePort],
-  );
-
   // -- Client-side validation -----------------------------------------------
-  const nameError = touched.name && name.trim() === "" ? "Name is required." : null;
-  const slugEmpty = touched.slug && slug.trim() === "" ? "Slug is required." : null;
-
-  const hasErrors =
-    !!nameError ||
-    !!slugEmpty ||
-    !!slugError ||
-    !!repoError ||
-    !!portErrors.backend_port ||
-    !!portErrors.frontend_port ||
-    !!portErrors.db_port;
+  const nameError = touched.name && name.trim() === "" ? "Názov je povinný." : null;
+  const slugEmpty = touched.slug && slug.trim() === "" ? "Slug je povinný." : null;
+  const hasErrors = !!nameError || !!slugEmpty || !!slugError || !!repoError;
 
   // -- Submit ---------------------------------------------------------------
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
-
-    // Mark required fields as touched
     setTouched({ name: true, slug: true });
-
     if (name.trim() === "" || slug.trim() === "") return;
     if (hasErrors) return;
 
-    const data: ProjectCreationFormData = {
+    onSubmit({
       name: name.trim(),
       slug: slug.trim(),
       category,
@@ -231,17 +214,13 @@ export default function NewProjectForm({
       backend_port: backendPort ? parseInt(backendPort, 10) : null,
       frontend_port: frontendPort ? parseInt(frontendPort, 10) : null,
       db_port: dbPort ? parseInt(dbPort, 10) : null,
-    };
-
-    onSubmit(data);
+    });
   }
 
-  // -- Shared input class ---------------------------------------------------
+  // -- Input class helper ---------------------------------------------------
   const inputClass = (hasErr: boolean) =>
-    `w-full rounded-md border px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 dark:bg-gray-800 dark:text-gray-100 ${
-      hasErr
-        ? "border-red-500 focus:ring-red-500"
-        : "border-gray-300 focus:ring-primary-500 dark:border-gray-600"
+    `w-full rounded-lg border px-3 py-2 text-sm bg-gray-900 text-gray-100 focus:outline-none focus:border-primary ${
+      hasErr ? "border-red-500" : "border-gray-600"
     }`;
 
   return (
@@ -251,13 +230,40 @@ export default function NewProjectForm({
       data-testid="new-project-form"
       className="space-y-5"
     >
+      {/* Category — icon-button grid */}
+      <div>
+        <label className="mb-2 block text-sm font-medium text-gray-300">
+          Typ projektu
+        </label>
+        <div className="grid grid-cols-2 gap-2" data-testid="project-category">
+          {CATEGORY_OPTIONS.map(({ value, label, icon: Icon, desc }) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setCategory(value)}
+              disabled={loading}
+              className={`p-3 rounded-lg border text-left transition-colors ${
+                category === value
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-gray-600 text-gray-400 hover:border-gray-500"
+              }`}
+              data-testid={`category-${value}`}
+            >
+              <Icon className="w-4 h-4 mb-1" />
+              <div className="text-sm font-medium">{label}</div>
+              <div className="text-[10px] opacity-70">{desc}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Name */}
       <div>
         <label
           htmlFor="project-name"
-          className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
+          className="mb-1 block text-sm font-medium text-gray-300"
         >
-          Project Name *
+          Názov projektu *
         </label>
         <input
           id="project-name"
@@ -266,12 +272,12 @@ export default function NewProjectForm({
           onChange={(e) => setName(e.target.value)}
           onBlur={handleNameBlur}
           disabled={loading}
-          placeholder="NEX Horizont"
+          placeholder="NEX Ledger"
           className={inputClass(!!nameError)}
           data-testid="project-name"
         />
         {nameError && (
-          <p className="mt-1 text-xs text-red-600" role="alert">
+          <p className="mt-1 text-xs text-red-500" role="alert">
             {nameError}
           </p>
         )}
@@ -281,7 +287,7 @@ export default function NewProjectForm({
       <div>
         <label
           htmlFor="project-slug"
-          className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
+          className="mb-1 block text-sm font-medium text-gray-300"
         >
           Slug *
         </label>
@@ -292,17 +298,21 @@ export default function NewProjectForm({
           onChange={(e) => handleSlugChange(e.target.value)}
           onBlur={() => setTouched((t) => ({ ...t, slug: true }))}
           disabled={loading}
-          placeholder="nex-horizont"
+          placeholder="nex-ledger"
           className={inputClass(!!slugEmpty || !!slugError)}
           data-testid="project-slug"
         />
         {slugEmpty && (
-          <p className="mt-1 text-xs text-red-600" role="alert">
+          <p className="mt-1 text-xs text-red-500" role="alert">
             {slugEmpty}
           </p>
         )}
         {slugError && (
-          <p className="mt-1 text-xs text-red-600" role="alert" data-testid="slug-error">
+          <p
+            className="mt-1 text-xs text-red-500"
+            role="alert"
+            data-testid="slug-error"
+          >
             {slugError}
           </p>
         )}
@@ -312,9 +322,9 @@ export default function NewProjectForm({
       <div>
         <label
           htmlFor="project-repo"
-          className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
+          className="mb-1 block text-sm font-medium text-gray-300"
         >
-          GitHub Repository
+          GitHub repozitár
         </label>
         <input
           id="project-repo"
@@ -322,160 +332,99 @@ export default function NewProjectForm({
           value={githubRepo}
           onChange={(e) => handleRepoChange(e.target.value)}
           disabled={loading}
-          placeholder={`https://github.com/${GITHUB_ORG}/your-project`}
+          placeholder={`${GITHUB_ORG}/nazov-projektu`}
           className={inputClass(!!repoError)}
           data-testid="project-repo"
         />
         {repoError && (
-          <p className="mt-1 text-xs text-red-600" role="alert" data-testid="repo-error">
+          <p
+            className="mt-1 text-xs text-red-500"
+            role="alert"
+            data-testid="repo-error"
+          >
             {repoError}
           </p>
         )}
-      </div>
-
-      {/* Category */}
-      <div>
-        <label
-          htmlFor="project-category"
-          className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
-        >
-          Category
-        </label>
-        <select
-          id="project-category"
-          value={category}
-          onChange={(e) => setCategory(e.target.value as ProjectCategory)}
-          disabled={loading}
-          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-          data-testid="project-category"
-        >
-          <option value="singlemodule">Single Module</option>
-          <option value="multimodule">Multi Module</option>
-        </select>
       </div>
 
       {/* Description */}
       <div>
         <label
           htmlFor="project-description"
-          className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
+          className="mb-1 block text-sm font-medium text-gray-300"
         >
-          Description
+          Popis
         </label>
         <textarea
           id="project-description"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           disabled={loading}
-          rows={3}
-          placeholder="Brief project description..."
-          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+          rows={2}
+          placeholder="Krátky popis projektu..."
+          className="w-full rounded-lg border border-gray-600 px-3 py-2 text-sm bg-gray-900 text-gray-100 focus:outline-none focus:border-primary resize-none"
           data-testid="project-description"
         />
       </div>
 
-      {/* Ports — 3-column grid */}
-      <fieldset>
-        <legend className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-          Port Assignment
-        </legend>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          {/* Backend port */}
-          <div>
-            <label
-              htmlFor="backend-port"
-              className="mb-1 block text-xs text-gray-500 dark:text-gray-400"
-            >
-              Backend Port
-            </label>
-            <input
-              id="backend-port"
-              type="number"
-              min={1}
-              max={65535}
-              value={backendPort}
-              onChange={(e) => {
-                setBackendPort(e.target.value);
-                validatePort(e.target.value, "backend_port");
-              }}
-              disabled={loading}
-              placeholder="9176"
-              className={inputClass(!!portErrors.backend_port)}
-              data-testid="backend-port"
-            />
-            {portErrors.backend_port && (
-              <p className="mt-1 text-xs text-red-600" role="alert">
-                {portErrors.backend_port}
-              </p>
-            )}
-          </div>
-
-          {/* Frontend port */}
-          <div>
-            <label
-              htmlFor="frontend-port"
-              className="mb-1 block text-xs text-gray-500 dark:text-gray-400"
-            >
-              Frontend Port
-            </label>
-            <input
-              id="frontend-port"
-              type="number"
-              min={1}
-              max={65535}
-              value={frontendPort}
-              onChange={(e) => {
-                setFrontendPort(e.target.value);
-                validatePort(e.target.value, "frontend_port");
-              }}
-              disabled={loading}
-              placeholder="9177"
-              className={inputClass(!!portErrors.frontend_port)}
-              data-testid="frontend-port"
-            />
-            {portErrors.frontend_port && (
-              <p className="mt-1 text-xs text-red-600" role="alert">
-                {portErrors.frontend_port}
-              </p>
-            )}
-          </div>
-
-          {/* DB port */}
-          <div>
-            <label
-              htmlFor="db-port"
-              className="mb-1 block text-xs text-gray-500 dark:text-gray-400"
-            >
-              Database Port
-            </label>
-            <input
-              id="db-port"
-              type="number"
-              min={1}
-              max={65535}
-              value={dbPort}
-              onChange={(e) => {
-                setDbPort(e.target.value);
-                validatePort(e.target.value, "db_port");
-              }}
-              disabled={loading}
-              placeholder="5432"
-              className={inputClass(!!portErrors.db_port)}
-              data-testid="db-port"
-            />
-            {portErrors.db_port && (
-              <p className="mt-1 text-xs text-red-600" role="alert">
-                {portErrors.db_port}
-              </p>
-            )}
-          </div>
+      {/* Ports */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-sm font-medium text-gray-300">Porty</span>
+          {portsAutoSuggested && (
+            <span className="flex items-center gap-1 text-[11px] text-primary/70">
+              <Zap className="w-3 h-3" />
+              Automaticky navrhnuté porty
+            </span>
+          )}
         </div>
-      </fieldset>
+        <div className="grid grid-cols-3 gap-3 p-3 bg-gray-900/50 rounded-lg border border-gray-700">
+          <PortField
+            label="Backend"
+            type="backend"
+            value={backendPort}
+            onChange={(v) => {
+              portsTouchedByUser.current = true;
+              setPortsAutoSuggested(false);
+              setBackendPort(v);
+            }}
+            placeholder="9100"
+            disabled={loading}
+            testId="backend-port"
+          />
+          <PortField
+            label="Frontend"
+            type="frontend"
+            value={frontendPort}
+            onChange={(v) => {
+              portsTouchedByUser.current = true;
+              setPortsAutoSuggested(false);
+              setFrontendPort(v);
+            }}
+            placeholder="9101"
+            disabled={loading}
+            testId="frontend-port"
+          />
+          <PortField
+            label="Databáza"
+            type="db"
+            value={dbPort}
+            onChange={(v) => {
+              portsTouchedByUser.current = true;
+              setPortsAutoSuggested(false);
+              setDbPort(v);
+            }}
+            placeholder="9102"
+            disabled={loading}
+            testId="db-port"
+          />
+        </div>
+      </div>
 
       {/* Server error banner */}
       {error && (
         <div
-          className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-400"
+          className="rounded-lg bg-red-500/10 border border-red-500/30 p-3 text-sm text-red-400"
           role="alert"
           data-testid="form-error"
         >
@@ -487,10 +436,10 @@ export default function NewProjectForm({
       <button
         type="submit"
         disabled={loading || hasErrors}
-        className="btn-primary w-full"
+        className="w-full flex items-center justify-center px-4 py-2 bg-primary hover:bg-primary/90 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         data-testid="submit-button"
       >
-        {loading ? "Vytvaram projekt\u2026" : "Vytvorit projekt"}
+        {loading ? "Vytváram projekt\u2026" : "Vytvori\u0165 projekt"}
       </button>
     </form>
   );
