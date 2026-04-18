@@ -35,6 +35,7 @@
  * ``/admin/projects`` alongside the other Feat 6 CRUD surfaces.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { ApiError, api } from "../services/api";
 import type {
@@ -179,6 +180,8 @@ function renderNullable(value: string | number | null): string {
 }
 
 function ProjectAdminPage() {
+  const navigate = useNavigate();
+
   // ------------------------------------------------------------------ state
   const [mode, setMode] = useState<Mode>({ kind: "list" });
 
@@ -308,9 +311,7 @@ function ProjectAdminPage() {
   };
 
   const openCreate = () => {
-    setForm(EMPTY_FORM);
-    setError(null);
-    setMode({ kind: "create" });
+    navigate("/projects/new");
   };
 
   const openDetail = (id: string) => {
