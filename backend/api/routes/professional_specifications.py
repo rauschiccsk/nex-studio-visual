@@ -587,15 +587,36 @@ async def generate_design_doc(
             "- [[workflow:X]] použi LEN ak X je definovaný ako workflow v Section 3\n"
             "- [[edge:X]] použi LEN ak X je definovaný ako edge case v Section 4\n"
             "- Pred dokončením skontroluj každý cross-reference — nesprávny typ je chyba\n\n"
-            "ERROR TAXONOMY A EDGE CASES:\n"
-            "- Každý error kód v Error Taxonomy, ktorý reprezentuje user-facing scenár"
-            " (nie čistá systémová chyba), musí mať zodpovedajúci edge case v Section 4\n\n"
+            "ERROR TAXONOMY — KRITICKÉ:\n"
+            "- Každý error kód musí byť UNIKÁTNY — dva rôzne edge cases nesmú zdieľať"
+            " jeden kód; ak máš viac scenárov pre rovnaký typ chyby, vytvor E101, E102 atď.\n"
+            "- Každý user-facing error kód musí mať zodpovedajúci edge case v Section 4\n"
+            "- Bezpečnostné správanie (rate limiting, account lockout, session expiry)"
+            " popísané v Entry Points MUSÍ mať zodpovedajúci edge case v Section 4"
+            " a error kód v Section 7\n\n"
+            "DATA TOUCHED — POVINNÉ:\n"
+            "- Každý workflow v Section 3 MUSÍ mať sekciu '**Data touched:**' — bez výnimky\n"
+            "- Zahŕňa VŠETKY entity ktoré workflow čítá alebo modifikuje\n"
+            "- Ak pre daný workflow existuje audit logging, [[entity:AuditLog]]"
+            " MUSÍ byť zahrnutý v Data touched\n\n"
+            "ANCHOR FORMÁT:\n"
+            "- Používaj VÝLUČNE [[typ:meno]] formát (dvojité hranaté závorky,"
+            " bez medzery za dvojbodkou)\n"
+            "- Zakázaný formát: {{typ: meno}} — kučeravé závorky sú zakázané\n\n"
+            "BUSINESS RULES ŠTRUKTÚRA:\n"
+            "- Všetky pravidlá v Section 6 vrátane kalkulačných BC-xx MUSIA mať:"
+            " Constraint, Dôvod, Enforced at, Porušenie\n"
+            "- Pre kalkulačné pravidlá kde zlyhanie nie je user-visible:"
+            " Porušenie = 'N/A — pure computation'\n\n"
             "INTERNÉ KÓDY:\n"
             "- Ak workflow kroky referencujú interné kódy (BC-xx, formula kódy a pod.),"
             " tieto musia byť definované v dokumente — inak ich nahraď popisným textom\n\n"
-            "OPEN QUESTIONS:\n"
-            "- Ak Changelog alebo iná sekcia spomína otvorené otázky Q-xx,"
-            " tieto musia byť vypísané v dedikovanej sekcii s ich znením a statusom\n\n"
+            "OPEN QUESTIONS REGISTER:\n"
+            "- Q-xx číslovanie musí byť sekvenčné bez medzier\n"
+            "- Ak Q-xx číslo bolo zrušené alebo zlúčené, musí ostať v registri"
+            " s poznámkou 'Zrušené: [dôvod]' alebo 'Zlúčené s Q-yy'\n"
+            "- Externé kódy (F-xxx z Professional Specification) v Q-xx musia mať"
+            " anotáciu '[Professional Spec F-xxx]' pre jasnosť\n\n"
             "METADÁTA:\n"
             "- Všetky metadatové polia (Verzia, Komplementárny k, Dátum) musia byť vyplnené\n"
             "- Ak verzia komplementárneho dokumentu nie je známa, uveď 'TBD'"
@@ -628,7 +649,9 @@ async def generate_design_doc(
             logger.error("Claude stream error for prof_spec %s: %s", spec_id, exc)
             yield f"data: {json.dumps({'type': 'error', 'content': str(exc)})}\n\n"
 
-        assistant_content = "".join(full_content)
+        # Strip leading whitespace (newlines/spaces before first #) — fixes minor
+        # formatting artifact where Claude emits a leading space/newline before the title.
+        assistant_content = "".join(full_content).lstrip("\n ")
         design_doc_id: str | None = None
 
         # Post-generation validation: multi-check pipeline.
@@ -649,6 +672,14 @@ async def generate_design_doc(
                     validation_failures.append("Dokument obsahuje HTML komentáre <!-- ... --> zo šablóny")
                 if "(bude priradené)" in assistant_content:
                     validation_failures.append("Dokument obsahuje nevyplnené metadátové polia '(bude priradené)'")
+                # BEHAVIOR.md: wrong anchor format {{...}} instead of [[...]]
+                if doc_type == "behavior" and "{{" in assistant_content:
+                    validation_failures.append("Dokument obsahuje nesprávny anchor formát '{{...}}' — použiť '[[...]]'")
+                # DESIGN.md: backtick-wrapped FK field names
+                if doc_type == "design" and re.search(r"\*\*FK:\*\* `", assistant_content):
+                    validation_failures.append(
+                        "Dokument obsahuje backtick-wrapped FK field names — použiť plain text bez backtick"
+                    )
 
         validation_ok = not error_occurred and not validation_failures
 
