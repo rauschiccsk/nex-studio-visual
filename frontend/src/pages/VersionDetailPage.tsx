@@ -204,107 +204,101 @@ function VersionDetailPage() {
         </div>
 
         {/* ---- EPICs tab ---- */}
-        {activeTab === "epics" && (
-          <div className="mt-4" data-testid="epics-panel">
-            {epics.length === 0 ? (
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                No EPICs loaded yet. Per-version EPIC listing will be available
-                in a future update.
-              </p>
-            ) : (
-              <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
-                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                  <thead className="bg-gray-50 dark:bg-gray-900">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                        Title
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                        Status
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                        Progress
-                      </th>
+        <div className={`mt-4${activeTab !== "epics" ? " hidden" : ""}`} data-testid="epics-panel">
+          {epics.length === 0 ? (
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              No EPICs loaded yet. Per-version EPIC listing will be available
+              in a future update.
+            </p>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+              <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                <thead className="bg-gray-50 dark:bg-gray-900">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                      Title
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                      Status
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                      Progress
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                  {epics.map((e) => (
+                    <tr key={e.id} className="hover:bg-gray-50 dark:bg-gray-900 dark:hover:bg-gray-800">
+                      <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
+                        {e.title}
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800 dark:bg-gray-700 dark:text-gray-300">
+                          {e.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                        {e.progress}%
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
-                    {epics.map((e) => (
-                      <tr key={e.id} className="hover:bg-gray-50 dark:bg-gray-900 dark:hover:bg-gray-800">
-                        <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
-                          {e.title}
-                        </td>
-                        <td className="px-4 py-3 text-sm">
-                          <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800 dark:bg-gray-700 dark:text-gray-300">
-                            {e.status}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-                          {e.progress}%
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
 
         {/* ---- Task Plan tab ---- */}
-        {activeTab === "task_plan" && (
-          <div className="mt-4" data-testid="task-plan-panel">
-            <TaskPlanPanel versionId={version.id} canGenerate={isRi} />
-          </div>
-        )}
+        <div className={`mt-4${activeTab !== "task_plan" ? " hidden" : ""}`} data-testid="task-plan-panel">
+          <TaskPlanPanel versionId={version.id} canGenerate={isRi} />
+        </div>
 
         {/* ---- Bugs tab ---- */}
-        {activeTab === "bugs" && (
-          <div className="mt-4" data-testid="bugs-panel">
-            {bugs.length === 0 ? (
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                No bugs loaded yet. Per-version bug listing will be available
-                in a future update.
-              </p>
-            ) : (
-              <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
-                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                  <thead className="bg-gray-50 dark:bg-gray-900">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                        Title
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                        Severity
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                        Status
-                      </th>
+        <div className={`mt-4${activeTab !== "bugs" ? " hidden" : ""}`} data-testid="bugs-panel">
+          {bugs.length === 0 ? (
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              No bugs loaded yet. Per-version bug listing will be available
+              in a future update.
+            </p>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+              <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                <thead className="bg-gray-50 dark:bg-gray-900">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                      Title
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                      Severity
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                      Status
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                  {bugs.map((b) => (
+                    <tr key={b.id} className="hover:bg-gray-50 dark:bg-gray-900 dark:hover:bg-gray-800">
+                      <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
+                        {b.title}
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800 dark:bg-gray-700 dark:text-gray-300">
+                          {b.severity}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800 dark:bg-gray-700 dark:text-gray-300">
+                          {b.status}
+                        </span>
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
-                    {bugs.map((b) => (
-                      <tr key={b.id} className="hover:bg-gray-50 dark:bg-gray-900 dark:hover:bg-gray-800">
-                        <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
-                          {b.title}
-                        </td>
-                        <td className="px-4 py-3 text-sm">
-                          <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800 dark:bg-gray-700 dark:text-gray-300">
-                            {b.severity}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-sm">
-                          <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800 dark:bg-gray-700 dark:text-gray-300">
-                            {b.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ---- Footer: Release button ---- */}
