@@ -38,26 +38,22 @@ _SYSTEM_PROMPT = (
     " pre implementáciu projektu na základe DESIGN.md dokumentu.\n\n"
     "VÝSTUP — povinný formát:\n"
     "Odpoveď musí byť VÝLUČNE validný JSON objekt — žiadny iný text pred ani po JSON.\n"
-    "JSON schéma:\n"
+    "JSON schéma (PRESNE toto — žiadne extra polia):\n"
     "{\n"
     '  "epics": [\n'
     "    {\n"
     '      "number": 1,\n'
-    '      "title": "EPIC-1: Krátky popis (max 80 znakov)",\n'
+    '      "title": "EPIC-1: Krátky popis",\n'
     '      "feats": [\n'
     "        {\n"
     '          "number": 1,\n'
-    '          "title": "Feat title (max 120 znakov)",\n'
-    '          "description": "Podrobný popis čo sa implementuje",\n'
-    '          "estimated_minutes": 60,\n'
+    '          "title": "Feat title",\n'
     '          "tasks": [\n'
     "            {\n"
     '              "number": 1,\n'
-    '              "title": "Task title (max 120 znakov)",\n'
-    '              "description": "Konkrétne kroky, čo presne urobiť",\n'
+    '              "title": "Task title",\n'
     '              "task_type": "backend",\n'
-    '              "checklist_type": "model",\n'
-    '              "estimated_minutes": 30\n'
+    '              "checklist_type": "model"\n'
     "            }\n"
     "          ]\n"
     "        }\n"
@@ -65,18 +61,20 @@ _SYSTEM_PROMPT = (
     "    }\n"
     "  ]\n"
     "}\n\n"
+    "LIMITY — POVINNÉ (inak je výstup príliš veľký):\n"
+    "- Maximálne 6 EPICs celkovo\n"
+    "- Maximálne 4 Feats na EPIC\n"
+    "- Maximálne 6 Tasks na Feat\n"
+    "- title: max 100 znakov — krátko a vecne, žiadne vysvetlenia\n"
+    "- ŽIADNE description, ŽIADNE estimated_minutes polia — nie sú v schéme\n\n"
     "PRAVIDLÁ:\n"
     "- task_type: VÝLUČNE jedna z hodnôt: backend | frontend | migration | test | docs\n"
     "- checklist_type: model | schema | service | router | frontend | test | null\n"
-    "- Každá entita z DESIGN.md musí mať tasks pre: migration → backend → frontend\n"
-    "- EPIC-1 musí obsahovať foundation (auth + seed user) ak je to user-facing app\n"
-    "- Poradie taskov v rámci feat: migration → backend → frontend → test\n"
-    "- Číslovanie: epic.number globálne (1, 2, 3...), feat.number v rámci epic (1, 2...),"
-    " task.number v rámci feat (1, 2...)\n"
-    "- estimated_minutes: realistický odhad pre každý task (15-240 min)\n"
-    "- Žiadne placeholder texty, žiadne TODO\n"
-    "- MAXIMÁLNA GRANULARITA: radšej viac menších taskov ako jeden veľký\n"
-    "- POVINNÉ: vráť ČISTÝ JSON bez ```json``` fences a bez akéhokoľvek textu pred/po JSON\n"
+    "- EPIC-1 musí byť Foundation: auth, DB, project setup\n"
+    "- Poradie taskov: migration → backend → frontend → test\n"
+    "- Číslovanie: epic.number globálne (1,2,3...), feat.number v rámci epic (1,2...),"
+    " task.number v rámci feat (1,2...)\n"
+    "- POVINNÉ: vráť ČISTÝ JSON bez ```json``` fences, bez akéhokoľvek textu pred/po JSON\n"
 )
 
 
@@ -201,24 +199,14 @@ async def generate_task_plan_stream(
         )
         return
 
-    # Load BEHAVIOR.md — optional supplementary context.
-    behavior_content = _load_design_doc(db, project_id, "behavior")
-
     yield _sse({"type": "progress", "message": "Pripravujem prompt pre Claude…", "percent": 10})
 
     user_prompt_parts: list[str] = [
         "Na základe nasledovného DESIGN.md dokumentu vygeneruj kompletný Task Plan"
         " pre implementáciu projektu. Vráť VÝLUČNE JSON podľa schémy zo system promptu.\n\n"
         "## DESIGN.md\n\n",
-        design_content[:40000],  # Cap to avoid exceeding context limits
+        design_content[:20000],  # Cap to ~20k to keep output size manageable
     ]
-    if behavior_content:
-        user_prompt_parts.extend(
-            [
-                "\n\n## BEHAVIOR.md (doplnkový kontext pre workflows a edge cases)\n\n",
-                behavior_content[:15000],
-            ]
-        )
     user_prompt_parts.append("\n\nVygeneruj Task Plan. Vráť VÝLUČNE čistý JSON — žiadny iný text.")
     user_prompt = "".join(user_prompt_parts)
 
