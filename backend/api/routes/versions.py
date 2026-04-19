@@ -308,6 +308,7 @@ async def generate_task_plan(
                 yield event
         except Exception as exc:
             import json as _json
+
             logger.exception("Unexpected error in task plan SSE generator for version %s", version_id)
             yield f"data: {_json.dumps({'type': 'error', 'content': str(exc)})}\n\n"
         finally:

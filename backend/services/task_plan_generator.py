@@ -192,10 +192,12 @@ async def generate_task_plan_stream(
     # Load DESIGN.md — required.
     design_content = _load_design_doc(db, project_id, "design")
     if not design_content:
-        yield _sse({
-            "type": "validation_error",
-            "content": "Projekt nemá DESIGN.md. Najprv vygeneruj DESIGN.md cez Specification pipeline.",
-        })
+        yield _sse(
+            {
+                "type": "validation_error",
+                "content": "Projekt nemá DESIGN.md. Najprv vygeneruj DESIGN.md cez Specification pipeline.",
+            }
+        )
         return
 
     # Load BEHAVIOR.md — optional supplementary context.
@@ -210,13 +212,13 @@ async def generate_task_plan_stream(
         design_content[:40000],  # Cap to avoid exceeding context limits
     ]
     if behavior_content:
-        user_prompt_parts.extend([
-            "\n\n## BEHAVIOR.md (doplnkový kontext pre workflows a edge cases)\n\n",
-            behavior_content[:15000],
-        ])
-    user_prompt_parts.append(
-        "\n\nVygeneruj Task Plan. Vráť VÝLUČNE čistý JSON — žiadny iný text."
-    )
+        user_prompt_parts.extend(
+            [
+                "\n\n## BEHAVIOR.md (doplnkový kontext pre workflows a edge cases)\n\n",
+                behavior_content[:15000],
+            ]
+        )
+    user_prompt_parts.append("\n\nVygeneruj Task Plan. Vráť VÝLUČNE čistý JSON — žiadny iný text.")
     user_prompt = "".join(user_prompt_parts)
 
     yield _sse({"type": "progress", "message": "Volám Claude AI…", "percent": 15})
@@ -250,10 +252,12 @@ async def generate_task_plan_stream(
             version_id,
             full_response,
         )
-        yield _sse({
-            "type": "validation_error",
-            "content": "Claude nevrátil validný JSON s kľúčom 'epics'. Skús generovanie znovu.",
-        })
+        yield _sse(
+            {
+                "type": "validation_error",
+                "content": "Claude nevrátil validný JSON s kľúčom 'epics'. Skús generovanie znovu.",
+            }
+        )
         return
 
     epics_data = plan_data["epics"]
@@ -265,9 +269,7 @@ async def generate_task_plan_stream(
 
     # Optionally delete existing plan under this version.
     if replace_existing:
-        existing_epics = db.execute(
-            select(Epic).where(Epic.version_id == version_id)
-        ).scalars().all()
+        existing_epics = db.execute(select(Epic).where(Epic.version_id == version_id)).scalars().all()
         for ep in existing_epics:
             db.delete(ep)
         db.flush()
@@ -279,9 +281,7 @@ async def generate_task_plan_stream(
         return
 
     # Compute epic number offset so we don't collide with existing epics in the project.
-    max_num = db.execute(
-        select(sqlfunc.max(Epic.number)).where(Epic.project_id == project_id)
-    ).scalar() or 0
+    max_num = db.execute(select(sqlfunc.max(Epic.number)).where(Epic.project_id == project_id)).scalar() or 0
     epic_number_offset = max_num if not replace_existing else 0
 
     total_epics = len(epics_data)
@@ -365,23 +365,27 @@ async def generate_task_plan_stream(
                 db.add(task_orm)
                 created_tasks += 1
 
-                feat_summary["tasks"].append({
-                    "number": task_num,
-                    "title": task_title,
-                    "task_type": task_type,
-                    "status": "todo",
-                })
+                feat_summary["tasks"].append(
+                    {
+                        "number": task_num,
+                        "title": task_title,
+                        "task_type": task_type,
+                        "status": "todo",
+                    }
+                )
 
             db.flush()
             epic_summary["feats"].append(feat_summary)
 
         plan_summary.append(epic_summary)
         percent = 78 + int(17 * created_epics / total_epics)
-        yield _sse({
-            "type": "progress",
-            "message": f"EPIC-{epic_num} vytvorený ({created_epics}/{total_epics})…",
-            "percent": percent,
-        })
+        yield _sse(
+            {
+                "type": "progress",
+                "message": f"EPIC-{epic_num} vytvorený ({created_epics}/{total_epics})…",
+                "percent": percent,
+            }
+        )
 
     db.commit()
 
@@ -393,10 +397,12 @@ async def generate_task_plan_stream(
         created_tasks,
     )
 
-    yield _sse({
-        "type": "done",
-        "plan": plan_summary,
-        "epic_count": created_epics,
-        "feat_count": created_feats,
-        "task_count": created_tasks,
-    })
+    yield _sse(
+        {
+            "type": "done",
+            "plan": plan_summary,
+            "epic_count": created_epics,
+            "feat_count": created_feats,
+            "task_count": created_tasks,
+        }
+    )
