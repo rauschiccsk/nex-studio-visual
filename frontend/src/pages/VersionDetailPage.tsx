@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 
+import { TaskPlanPanel } from "../components/tasks/TaskPlanPanel";
 import VersionProgressBar from "../components/versions/VersionProgressBar";
 import VersionStatusBadge from "../components/versions/VersionStatusBadge";
 import ReleaseVersionDialog from "../components/versions/ReleaseVersionDialog";
@@ -29,7 +30,7 @@ import { formatDate } from "../utils/format";
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
 
-type Tab = "epics" | "bugs";
+type Tab = "epics" | "bugs" | "task_plan";
 
 /** Placeholder row for the EPICs tab (until per-version epic list API). */
 interface EpicRow {
@@ -187,6 +188,18 @@ function VersionDetailPage() {
             >
               Bugs ({version.bug_count})
             </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("task_plan")}
+              className={`whitespace-nowrap border-b-2 px-1 py-2 text-sm font-medium ${
+                activeTab === "task_plan"
+                  ? "border-primary-600 text-primary-600 dark:border-primary-400 dark:text-primary-400"
+                  : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-300"
+              }`}
+              data-testid="tab-task-plan"
+            >
+              Task Plan
+            </button>
           </nav>
         </div>
 
@@ -234,6 +247,13 @@ function VersionDetailPage() {
                 </table>
               </div>
             )}
+          </div>
+        )}
+
+        {/* ---- Task Plan tab ---- */}
+        {activeTab === "task_plan" && (
+          <div className="mt-4" data-testid="task-plan-panel">
+            <TaskPlanPanel versionId={version.id} canGenerate={isRi} />
           </div>
         )}
 
