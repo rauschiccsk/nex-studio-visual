@@ -2661,12 +2661,6 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
       Dokumenty
     </button>
-    <button onclick="kbSubTab('proposals')" id="kb-tab-proposals"
-      class="flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 border-transparent text-gray-500 hover:text-gray-300 transition-colors">
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-      Proposals
-      <span id="kb-proposals-badge" class="hidden ml-1 text-[10px] bg-amber-500 text-white rounded-full px-1.5 py-0.5 font-bold">2</span>
-    </button>
     <button onclick="kbSubTab('quality')" id="kb-tab-quality"
       class="flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 border-transparent text-gray-500 hover:text-gray-300 transition-colors">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
@@ -2878,17 +2872,6 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
   </div><!-- /panel-documents -->
 
   <!-- ── TAB: PROPOSALS ── -->
-  <div id="kb-panel-proposals" class="hidden flex-1 overflow-y-auto p-5">
-    <div class="max-w-2xl mx-auto space-y-4">
-      <div class="flex items-center justify-between mb-2">
-        <h2 class="text-sm font-semibold text-gray-300">KB Proposals</h2>
-        <span class="text-xs text-gray-600">CC navrhne zmeny → tu schvaľuješ pred zápisom do KB</span>
-      </div>
-      <!-- Proposal cards -->
-      <div id="kb-proposals-list"></div>
-    </div>
-  </div>
-
   <!-- ── TAB: KVALITA ── -->
   <div id="kb-panel-quality" class="hidden flex-1 overflow-y-auto p-5">
     <div class="max-w-3xl mx-auto space-y-5">
@@ -5150,22 +5133,6 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
     },
   ];
 
-  // Mock proposals
-  const _kbProposals = [
-    {
-      id:'p1', type:'create', status:'pending', file_path:'projects/nex-ledger/STATUS.md',
-      title:'NEX Ledger STATUS.md', diff_summary:'Nový dokument — stav projektu po session 2026-04-19',
-      content:`# NEX Ledger — Status\n\n## v0.1 Progress\n\n- [x] DB schema navrhnutá\n- [x] Journal entries CRUD\n- [ ] PDF export\n- [ ] ECB kurz feed\n\nPosledná aktualizácia: 2026-04-19`,
-      created_at:'2026-04-19T16:00:00Z', verdict:'pass', findings: []
-    },
-    {
-      id:'p2', type:'update', status:'pending', file_path:'icc/LESSONS_LEARNED.md',
-      title:'LESSONS_LEARNED.md — LL-004', diff_summary:'Pridaj LL-004: Circular import v FastAPI routeroch',
-      content:`## LL-004: Circular Import [2026-04-19]\n**Tag**: fastapi, import\n\nCircular import medzi router.py a service.py spôsobí runtime error pri štarte.\nRiešenie: presunúť shared types do separate types.py modul.`,
-      created_at:'2026-04-19T16:05:00Z', verdict:'review', findings: [{severity:'warning',message:'Existujúci dokument bude aktualizovaný — skontroluj diff'}]
-    },
-  ];
-
   let _kbActiveDoc = null;
   let _kbActiveCategory = 'all';
   let _kbScope = 'global'; // 'global' | 'project'
@@ -5177,11 +5144,6 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
 
   function kbInit() {
     kbSetScope(_kbScope, true);
-    _kbRenderProposals();
-    // Show proposals badge if pending
-    const pending = _kbProposals.filter(p => p.status === 'pending').length;
-    const badge = document.getElementById('kb-proposals-badge');
-    if (badge) { badge.textContent = pending; badge.classList.toggle('hidden', pending === 0); }
   }
 
   function kbSetScope(scope, silent) {
@@ -5231,7 +5193,7 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
 
   function kbSubTab(tab) {
     _kbActiveSubTab = tab;
-    ['documents','proposals','quality'].forEach(t => {
+    ['documents','quality'].forEach(t => {
       const panel = document.getElementById('kb-panel-' + t);
       const btn = document.getElementById('kb-tab-' + t);
       if (!panel || !btn) return;
@@ -5563,66 +5525,6 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
       kbHideUpload(); _kbRenderCategories(); kbFilter(); kbSelectDoc(newDoc.id);
       _showToast(`"${title}" uploaded & indexed`);
     }, 1400);
-  }
-
-  // Proposals
-  function _kbRenderProposals() {
-    const list = document.getElementById('kb-proposals-list');
-    if (!list) return;
-    if (_kbProposals.length === 0) {
-      list.innerHTML = `<div class="rounded-xl border border-slate-800 bg-slate-900 p-8 text-center"><p class="text-sm text-gray-600">Žiadne čakajúce proposals</p></div>`;
-      return;
-    }
-    list.innerHTML = _kbProposals.map(p => {
-      const verdictClass = p.verdict === 'pass' ? 'text-green-400 border-green-500/30' : p.verdict === 'review' ? 'text-amber-400 border-amber-500/30' : 'text-red-400 border-red-500/30';
-      const typeClass = p.type === 'create' ? 'text-green-400' : p.type === 'update' ? 'text-blue-400' : 'text-red-400';
-      const findingsHtml = p.findings.map(f => `<div class="text-[11px] ${f.severity==='error'?'text-red-400':'text-amber-400'} flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-current flex-shrink-0"></span>${f.message}</div>`).join('');
-      return `<div class="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
-        <div class="px-4 py-3 border-b border-slate-800 flex items-center gap-3">
-          <span class="text-[10px] font-mono ${typeClass} border border-current/30 rounded px-1.5 py-0.5 uppercase">${p.type}</span>
-          <span class="text-sm font-medium text-gray-200 flex-1 truncate">${p.title}</span>
-          <span class="text-[10px] font-mono border rounded px-1.5 py-0.5 ${verdictClass}">${p.verdict.toUpperCase()}</span>
-        </div>
-        <div class="px-4 py-3 space-y-2">
-          <div class="text-xs text-gray-500 font-mono">${p.file_path}</div>
-          <div class="text-xs text-gray-400">${p.diff_summary}</div>
-          ${findingsHtml}
-          <div class="bg-slate-950 rounded-lg p-3 text-[11px] text-gray-500 font-mono leading-relaxed max-h-24 overflow-y-auto whitespace-pre-wrap">${p.content.slice(0,200)}…</div>
-        </div>
-        <div class="px-4 py-3 border-t border-slate-800 flex items-center justify-between">
-          <span class="text-[10px] text-gray-600">${new Date(p.created_at).toLocaleString('sk-SK')}</span>
-          <div class="flex gap-2">
-            <button onclick="kbProposalAction('${p.id}','reject')" class="px-3 py-1.5 text-xs text-gray-400 border border-slate-700 rounded-lg hover:border-slate-500 transition-colors">Reject</button>
-            <button onclick="kbProposalAction('${p.id}','approve')" class="px-3 py-1.5 text-xs font-medium ${p.verdict==='fail'?'bg-red-600/80 hover:bg-red-600':'bg-primary-600 hover:bg-primary-500'} text-white rounded-lg transition-colors">${p.verdict==='fail'?'Approve anyway':'Approve'}</button>
-          </div>
-        </div>
-      </div>`;
-    }).join('');
-  }
-
-  function kbProposalAction(id, action) {
-    const idx = _kbProposals.findIndex(p => p.id === id);
-    if (idx < 0) return;
-    const p = _kbProposals[idx];
-    if (action === 'approve') {
-      // Write to KB as new doc
-      const existing = _kbDocs.find(d => d.file_path === p.file_path);
-      if (existing) { existing.content += '\n\n' + p.content; existing.indexed_at = new Date().toISOString(); }
-      else {
-        _kbDocs.unshift({ id:'prop'+id, title:p.title, category: p.file_path.split('/')[0], size_bytes: p.content.length,
-          file_path: p.file_path, indexed_at: new Date().toISOString(), qdrant_point_id:'ql-prop-'+id, content: p.content });
-        _kbRenderCategories();
-      }
-      _showToast(`Proposal schválený — "${p.title}" zapísaný do KB`);
-    } else {
-      _showToast(`Proposal odmietnutý — "${p.title}"`);
-    }
-    _kbProposals.splice(idx, 1);
-    _kbRenderProposals();
-    const pending = _kbProposals.filter(p2 => p2.status === 'pending').length;
-    const badge = document.getElementById('kb-proposals-badge');
-    if (badge) { badge.textContent = pending; badge.classList.toggle('hidden', pending === 0); }
-    if (action === 'approve') { kbFilter(); }
   }
 
   function kbRunScan(cleanup = false) {
