@@ -52,14 +52,7 @@
     #screen-new-version.active   { display: flex !important; }
     #screen-settings.active      { display: flex !important; }
     #screen-login.active         { display: flex !important; position: fixed; inset: 0; z-index: 100; background: #0f172a; }
-    #screen-architect.active     { display: flex !important; }
-    .arch-msg-user     { background: rgba(99,102,241,0.18); border: 1px solid rgba(99,102,241,0.28); }
-    .arch-msg-ai       { background: rgba(30,41,59,0.9);   border: 1px solid #1e293b; }
-    .arch-session-item { cursor: pointer; transition: background 0.12s; }
-    .arch-session-item:hover { background: rgba(255,255,255,0.04); }
-    .arch-session-item.active { background: rgba(99,102,241,0.12); border-left: 2px solid #6366f1; }
     @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
-    .arch-cursor { display: inline-block; width: 2px; height: 0.9em; background: #818cf8; vertical-align: text-bottom; animation: blink 1s step-end infinite; margin-left:1px; }
     #screen-kb.active          { display: flex !important; flex-direction: column; }
     #screen-bugs.active        { display: flex !important; }
     .bug-row { cursor: pointer; transition: background 0.1s; border-left: 2px solid transparent; }
@@ -176,10 +169,6 @@
     <a class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-gray-400 cursor-pointer" onclick="showScreen('implementacia')">
       <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
       <span class="sb-text">Implementation</span>
-    </a>
-    <a class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-gray-400 cursor-pointer" onclick="showScreen('architect')">
-      <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
-      <span class="sb-text">Architect</span>
     </a>
     <a class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-gray-400 cursor-pointer" onclick="showScreen('kb')">
       <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
@@ -2661,77 +2650,6 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
 </div><!-- /screen-login -->
 
 <!-- ─────────────────────────────────────────────────────────────
-     SCREEN: ARCHITECT
-──────────────────────────────────────────────────────────────── -->
-<div id="screen-architect" class="screen h-full overflow-hidden">
-
-  <!-- ── Sessions sidebar ── -->
-  <div class="w-52 flex-shrink-0 flex flex-col border-r border-slate-800 bg-slate-900/50">
-    <!-- Header -->
-    <div class="flex items-center justify-between px-3 py-3 border-b border-slate-800">
-      <span class="text-xs font-semibold text-gray-400 uppercase tracking-widest">Sessions</span>
-      <button onclick="archNewSession()" title="New session"
-        class="w-6 h-6 flex items-center justify-center rounded hover:bg-slate-700 text-gray-500 hover:text-primary-400 transition-colors">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-      </button>
-    </div>
-
-    <!-- Session list -->
-    <div class="flex-1 overflow-y-auto py-1" id="arch-session-list">
-      <!-- populated by archRenderSessions() -->
-    </div>
-
-    <!-- Context badge -->
-    <div class="px-3 py-2 border-t border-slate-800">
-      <div class="text-[10px] text-gray-600 uppercase tracking-widest mb-1">Active project</div>
-      <div class="text-xs font-medium text-primary-400 truncate ctx-project">NEX Ledger</div>
-      <div class="text-[10px] text-gray-500 font-mono ctx-version">v0.1</div>
-    </div>
-  </div>
-
-  <!-- ── Chat area ── -->
-  <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
-
-    <!-- Chat header -->
-    <div class="flex items-center gap-3 px-4 h-11 border-b border-slate-800 flex-shrink-0">
-      <svg class="w-4 h-4 text-primary-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
-      <span class="text-sm font-semibold text-gray-100">Architect — <span class="ctx-project">NEX Ledger</span></span>
-      <span class="text-xs text-gray-600 font-mono" id="arch-session-badge">Session: —</span>
-      <div class="ml-auto flex items-center gap-2">
-        <span id="arch-streaming-badge" class="hidden text-xs text-primary-400 flex items-center gap-1">
-          <span class="inline-block w-1.5 h-1.5 rounded-full bg-primary-400 animate-pulse"></span> Thinking…
-        </span>
-      </div>
-    </div>
-
-    <!-- Messages -->
-    <div id="arch-messages" class="flex-1 overflow-y-auto p-4 space-y-4">
-      <!-- rendered by archRenderMessages() -->
-    </div>
-
-    <!-- Error banner -->
-    <div id="arch-error" class="hidden mx-4 mb-2 rounded-md bg-red-500/10 border border-red-500/30 px-3 py-2 text-sm text-red-400"></div>
-
-    <!-- Input -->
-    <div class="border-t border-slate-800 p-3 flex-shrink-0">
-      <div class="flex gap-2 items-end">
-        <textarea id="arch-input" rows="1" placeholder="Opýtaj sa architekta… (Ctrl+Enter odošle)"
-          oninput="archAutoResize(this)"
-          onkeydown="archKeyDown(event)"
-          class="flex-1 resize-none rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-primary-500 transition-colors overflow-hidden min-h-[36px] max-h-[160px]"></textarea>
-        <button onclick="archSend()" id="arch-send-btn"
-          class="px-4 py-2 text-sm font-medium bg-primary-600 hover:bg-primary-500 text-white rounded-lg transition-colors whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed">
-          Send
-        </button>
-      </div>
-      <div class="mt-1 text-[10px] text-gray-700">Ctrl+Enter to send · Only <strong class="text-gray-600">ri</strong> role can send</div>
-    </div>
-
-  </div><!-- /chat area -->
-
-</div><!-- /screen-architect -->
-
-<!-- ─────────────────────────────────────────────────────────────
      SCREEN: KNOWLEDGE BASE
 ──────────────────────────────────────────────────────────────── -->
 <div id="screen-kb" class="screen h-full overflow-hidden">
@@ -2760,9 +2678,27 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
   <div id="kb-panel-documents" class="flex flex-1 overflow-hidden">
 
     <!-- Left: category sidebar -->
-    <div class="w-44 flex-shrink-0 flex flex-col border-r border-slate-800 bg-slate-900/40">
+    <div class="w-48 flex-shrink-0 flex flex-col border-r border-slate-800 bg-slate-900/40">
+      <!-- Scope toggle: Globálne / Projektové -->
+      <div class="px-2 pt-2 pb-1.5 border-b border-slate-800 flex-shrink-0">
+        <div class="flex rounded-lg bg-slate-800 p-0.5 gap-0.5">
+          <button id="kb-scope-global" onclick="kbSetScope('global')"
+            class="flex-1 text-[11px] font-medium py-1 rounded-md transition-colors bg-slate-700 text-gray-200">
+            Globálne
+          </button>
+          <button id="kb-scope-project" onclick="kbSetScope('project')"
+            class="flex-1 text-[11px] font-medium py-1 rounded-md transition-colors text-gray-500 hover:text-gray-400">
+            Projektové
+          </button>
+        </div>
+        <!-- Active project indicator (only in project scope) -->
+        <div id="kb-project-indicator" class="hidden mt-1.5 flex items-center gap-1.5 px-1">
+          <div class="w-1.5 h-1.5 rounded-full bg-primary-400 flex-shrink-0"></div>
+          <span class="text-[10px] text-primary-400 font-medium truncate" id="kb-project-name">NEX Ledger</span>
+        </div>
+      </div>
       <!-- Search -->
-      <div class="px-2.5 pt-2.5 pb-2 border-b border-slate-800">
+      <div class="px-2.5 pt-2 pb-2 border-b border-slate-800">
         <div class="relative">
           <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-600 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
           <input id="kb-search" type="text" placeholder="Vector search…"
@@ -3324,7 +3260,7 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
      JAVASCRIPT
 ════════════════════════════════════════════════════════════════════ -->
 <script>
-  const SCREENS = ['home','projects','project-detail','version','new-project','versions','new-version','spec','uidesign','design','taskplan','implementacia','architect','kb','bugs','settings','login'];
+  const SCREENS = ['home','projects','project-detail','version','new-project','versions','new-version','spec','uidesign','design','taskplan','implementacia','kb','bugs','settings','login'];
 
   // ---- Aktívny kontext (projekt + verzia) ----
   let activeCtx = { project: 'NEX Ledger', slug: 'NL', version: 'v0.1' };
@@ -3385,7 +3321,6 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
     'design':         'DESIGN.md',
     'taskplan':       'Task Plan',
     'implementacia':  'Implementation',
-    'architect':      'Architect',
     'kb':             'Knowledge Base',
     'bugs':           'Bug Report',
     'settings':       'Settings',
@@ -5132,259 +5067,55 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
   }
 
   // =========================================================================
-  // ARCHITECT
-  // =========================================================================
-
-  let _archActiveSession = null;
-  let _archStreaming = false;
-  let _archNextId = 100;
-
-  // Mock session data
-  const _archSessions = [
-    {
-      id: 'a3f1b2c4',
-      label: 'NEX Ledger v0.1 Architecture',
-      created_at: new Date(Date.now() - 1000 * 60 * 40), // 40 min ago
-      messages: [
-        { id: 1, role: 'user', content: 'Potrebujem navrhnúť štruktúru DB pre modul ledger. Plánujem tabulky: accounts, transactions, journal_entries. Aké vzťahy odporúčaš?', ts: new Date(Date.now() - 1000*60*38) },
-        { id: 2, role: 'assistant', content: 'Pre double-entry accounting (podvojné účtovníctvo) odporúčam nasledovnú štruktúru:\n\n**accounts** — chart of accounts\n• id, code (unikátny, napr. "1210"), name, account_type (asset/liability/equity/revenue/expense), parent_id (stromová hierarchia), is_active\n\n**journal_entries** — hlavný denník\n• id, entry_date, reference, description, created_by, posted_at (NULL = draft)\n\n**journal_lines** — riadky záznamu (vždy párovo: debet + kredit)\n• id, entry_id FK, account_id FK, debit NUMERIC(15,2), credit NUMERIC(15,2), description\n\nKonstraint: SUM(debit) = SUM(credit) per entry — ideálne enforciť na aplikačnej vrstve + DB CHECK.\n\n**transactions** môžeš použiť ako vyššiu abstrakciu (faktúra, platba), ktorá generuje journal_entries automaticky.\n\nChceš, aby som navrhol aj indexy a migračný skript?', ts: new Date(Date.now() - 1000*60*35) },
-        { id: 3, role: 'user', content: 'Áno, navrhni indexy. A ako riešiť multi-currency?', ts: new Date(Date.now() - 1000*60*20) },
-        { id: 4, role: 'assistant', content: 'Multi-currency rozšírenie:\n\n**Pridaj do journal_lines:**\n• currency_code CHAR(3) DEFAULT \'EUR\'\n• amount_original NUMERIC(15,2) — suma v pôvodnej mene\n• exchange_rate NUMERIC(12,6) DEFAULT 1.0 — kurz voči reporting mene\n• amount_reporting = amount_original × exchange_rate (computed/virtulálny stĺpec)\n\n**Indexy (PostgreSQL):**\n```sql\nCREATE INDEX ix_journal_lines_entry_id ON journal_lines(entry_id);\nCREATE INDEX ix_journal_lines_account_id ON journal_lines(account_id);\nCREATE INDEX ix_journal_entries_entry_date ON journal_entries(entry_date);\nCREATE INDEX ix_accounts_code ON accounts(code);\nCREATE INDEX ix_accounts_parent_id ON accounts(parent_id) WHERE parent_id IS NOT NULL;\n```\n\n**Reporting:** Všetky výkazy (súvaha, výsledovka) pracujú s amount_reporting — konzistentné aj pri rôznych menách.', ts: new Date(Date.now() - 1000*60*15) },
-      ]
-    },
-    {
-      id: 'b7d9e0f2',
-      label: 'NEX Ledger — API endpoints',
-      created_at: new Date(Date.now() - 1000*60*60*48), // 2 days ago
-      messages: [
-        { id: 10, role: 'user', content: 'Aké REST endpointy potrebujeme pre journal entries?', ts: new Date(Date.now() - 1000*60*60*48) },
-        { id: 11, role: 'assistant', content: 'Navrhované endpointy pre journal_entries modul:\n\n• GET  /api/v1/journal-entries          — list (filter: date_from, date_to, account_id, status)\n• POST /api/v1/journal-entries          — create draft entry\n• GET  /api/v1/journal-entries/{id}     — detail vrátane lines\n• POST /api/v1/journal-entries/{id}/post — zaúčtovať draft → posted\n• DELETE /api/v1/journal-entries/{id}   — zmazať len draft\n\nPosted entries sa NEMAŽÚ — len stornovacím zápisom.', ts: new Date(Date.now() - 1000*60*60*47) },
-      ]
-    },
-  ];
-
-  // Canned AI responses for demo
-  const _archCannedResponses = [
-    'Dobrá otázka. Na základe DESIGN.md a aktuálnej štruktúry projektu odporúčam nasledovný prístup:\n\nPre tento prípad platí princíp single responsibility — každý modul zodpovedá len za svoju doménu. Implementácia by mala byť izolovaná a testovateľná.',
-    'Z architektonického pohľadu vidím dve možnosti:\n\n**Varianta A** — synchronná verzia s DB transakciou. Jednoduchší kód, ale blokuje request.\n**Varianta B** — asynchrónna verzia s background workerom. Vyžaduje Temporal, ale škáluje lepšie.\n\nPre rozsah v0.1 odporúčam Variantu A — YAGNI princíp. Migrácia na Variant B je ľahká keď nastane potreba.',
-    'Presne — toto je štandardný pattern pre ICC projekty. Pozri PROJECT_PATTERNS.md §3.2 pre referenčnú implementáciu. Kľúčové: vždy pridaj indexy na FK stĺpce a timestamp polia pri filtrovaní.',
-    'Áno, toto je možné. Ale odporúčam najprv overiť či podobná funkcionalita nie je už implementovaná v inom module — duplicitná logika je hlavný zdroj bugov v dlhodobom vývoji.',
-  ];
-  let _archCannedIdx = 0;
-
-  function archRenderSessions() {
-    const list = document.getElementById('arch-session-list');
-    if (!list) return;
-    list.innerHTML = _archSessions.map((s, i) => {
-      const isActive = _archActiveSession && _archActiveSession.id === s.id;
-      const ago = _archTimeAgo(s.created_at);
-      return `<div class="arch-session-item px-3 py-2.5 border-l-2 ${isActive ? 'border-primary-500 bg-primary-500/10' : 'border-transparent'}" onclick="archSelectSession('${s.id}')">
-        <div class="text-xs font-medium ${isActive ? 'text-primary-300' : 'text-gray-400'} leading-tight truncate">${s.label}</div>
-        <div class="text-[10px] text-gray-600 mt-0.5 font-mono">${ago}</div>
-      </div>`;
-    }).join('');
-  }
-
-  function archSelectSession(id) {
-    _archActiveSession = _archSessions.find(s => s.id === id) || null;
-    archRenderSessions();
-    archRenderMessages();
-    const badge = document.getElementById('arch-session-badge');
-    if (badge) badge.textContent = _archActiveSession ? `Session: ${_archActiveSession.id.slice(0,8)}…` : 'Session: —';
-    // scroll to bottom
-    setTimeout(() => {
-      const msgs = document.getElementById('arch-messages');
-      if (msgs) msgs.scrollTop = msgs.scrollHeight;
-    }, 50);
-  }
-
-  function archNewSession() {
-    const project = activeCtx.project;
-    const newId = 'new' + Math.random().toString(36).slice(2, 8);
-    const sess = { id: newId, label: `${project} — new session`, created_at: new Date(), messages: [] };
-    _archSessions.unshift(sess);
-    archSelectSession(newId);
-    _showToast('New session started');
-  }
-
-  function archRenderMessages() {
-    const container = document.getElementById('arch-messages');
-    if (!container) return;
-    const msgs = _archActiveSession ? _archActiveSession.messages : [];
-
-    if (msgs.length === 0) {
-      container.innerHTML = `<div class="flex flex-col items-center justify-center h-full text-center py-16">
-        <svg class="w-10 h-10 text-gray-700 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
-        <p class="text-sm text-gray-600">No messages yet.</p>
-        <p class="text-xs text-gray-700 mt-1">Start the conversation below.</p>
-      </div>`;
-      return;
-    }
-
-    container.innerHTML = msgs.map(m => _archMsgHtml(m)).join('');
-  }
-
-  function _archMsgHtml(m) {
-    const isUser = m.role === 'user';
-    const timeStr = m.ts ? m.ts.toLocaleTimeString('sk-SK', {hour:'2-digit', minute:'2-digit'}) : '';
-    const content = m.content.replace(/\*\*(.+?)\*\*/g, '<strong class="font-semibold">$1</strong>')
-                             .replace(/```([\s\S]*?)```/g, '<pre class="bg-slate-950 rounded p-2 text-[11px] font-mono mt-1 mb-1 overflow-x-auto whitespace-pre-wrap">$1</pre>')
-                             .replace(/\n/g, '<br>');
-    if (isUser) {
-      return `<div class="flex justify-end">
-        <div class="max-w-[78%] arch-msg-user rounded-xl rounded-br-sm px-4 py-3 text-sm text-gray-100">
-          <div class="whitespace-pre-wrap break-words leading-relaxed">${content}</div>
-          <time class="block mt-1 text-[10px] text-primary-400/70 text-right">${timeStr}</time>
-        </div>
-      </div>`;
-    } else {
-      return `<div class="flex justify-start gap-2.5">
-        <div class="w-7 h-7 rounded-full bg-primary-600/20 border border-primary-500/30 flex items-center justify-center shrink-0 mt-0.5">
-          <svg class="w-3.5 h-3.5 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
-        </div>
-        <div class="max-w-[78%] arch-msg-ai rounded-xl rounded-tl-sm px-4 py-3 text-sm text-gray-200">
-          <div class="whitespace-pre-wrap break-words leading-relaxed">${content}</div>
-          <time class="block mt-1 text-[10px] text-gray-600">${timeStr}</time>
-        </div>
-      </div>`;
-    }
-  }
-
-  function archAutoResize(ta) {
-    ta.style.height = 'auto';
-    ta.style.height = Math.min(ta.scrollHeight, 160) + 'px';
-  }
-
-  function archKeyDown(e) {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
-      archSend();
-    }
-  }
-
-  function archSend() {
-    if (_archStreaming) return;
-    const input = document.getElementById('arch-input');
-    const text = input.value.trim();
-    if (!text) return;
-    if (!_archActiveSession) { _showToast('No active session. Click + to start one.'); return; }
-
-    // Add user message
-    const userMsg = { id: _archNextId++, role: 'user', content: text, ts: new Date() };
-    _archActiveSession.messages.push(userMsg);
-    input.value = '';
-    input.style.height = 'auto';
-    archRenderMessages();
-    _archScrollBottom();
-
-    // Start streaming AI response
-    _archStreaming = true;
-    const badge = document.getElementById('arch-streaming-badge');
-    if (badge) badge.classList.remove('hidden');
-    document.getElementById('arch-send-btn').disabled = true;
-
-    const aiText = _archCannedResponses[_archCannedIdx % _archCannedResponses.length];
-    _archCannedIdx++;
-
-    // Show thinking placeholder after 400ms
-    setTimeout(() => {
-      const aiMsg = { id: _archNextId++, role: 'assistant', content: '', ts: new Date() };
-      _archActiveSession.messages.push(aiMsg);
-      archRenderMessages();
-      _archScrollBottom();
-
-      // Stream character by character
-      let charIdx = 0;
-      const interval = setInterval(() => {
-        charIdx += Math.ceil(Math.random() * 6 + 2); // 3–8 chars per tick
-        if (charIdx >= aiText.length) charIdx = aiText.length;
-        aiMsg.content = aiText.slice(0, charIdx);
-
-        // Update last message in-place for performance
-        const msgs = document.getElementById('arch-messages');
-        if (msgs) {
-          const last = msgs.lastElementChild;
-          if (last) {
-            const partial = aiText.slice(0, charIdx).replace(/\*\*(.+?)\*\*/g, '<strong class="font-semibold">$1</strong>').replace(/\n/g, '<br>');
-            const contentDiv = last.querySelector('.whitespace-pre-wrap');
-            if (contentDiv) contentDiv.innerHTML = partial + '<span class="arch-cursor"></span>';
-          }
-        }
-        _archScrollBottom();
-
-        if (charIdx >= aiText.length) {
-          clearInterval(interval);
-          // Finalize
-          _archStreaming = false;
-          if (badge) badge.classList.add('hidden');
-          document.getElementById('arch-send-btn').disabled = false;
-          archRenderMessages(); // re-render without cursor
-          _archScrollBottom();
-        }
-      }, 30);
-    }, 500);
-  }
-
-  function _archScrollBottom() {
-    const msgs = document.getElementById('arch-messages');
-    if (msgs) msgs.scrollTop = msgs.scrollHeight;
-  }
-
-  function _archTimeAgo(date) {
-    const diff = Date.now() - date.getTime();
-    const mins = Math.floor(diff / 60000);
-    if (mins < 1) return 'just now';
-    if (mins < 60) return `${mins}m ago`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `${hrs}h ago`;
-    return `${Math.floor(hrs/24)}d ago`;
-  }
-
-
   // =========================================================================
   // KNOWLEDGE BASE
   // =========================================================================
 
-  const _KB_CATEGORIES = ['standards','decisions','lessons','patterns','design','behavior','session','credentials'];
+  // Global = ICC-wide docs; project = linked to active project/version
+  const _KB_CAT_GLOBAL  = ['standards','decisions','lessons','patterns','credentials'];
+  const _KB_CAT_PROJECT = ['design','behavior','architect','status','history'];
+  const _KB_CATEGORIES  = [..._KB_CAT_GLOBAL, ..._KB_CAT_PROJECT];
 
   const _KB_CAT_COLORS = {
     standards:   { text:'text-blue-400',   border:'border-blue-500/40',   bg:'bg-blue-500/10'    },
     decisions:   { text:'text-purple-400', border:'border-purple-500/40', bg:'bg-purple-500/10'  },
     lessons:     { text:'text-amber-400',  border:'border-amber-500/40',  bg:'bg-amber-500/10'   },
     patterns:    { text:'text-emerald-400',border:'border-emerald-500/40',bg:'bg-emerald-500/10' },
+    credentials: { text:'text-red-400',    border:'border-red-500/40',    bg:'bg-red-500/10'     },
     design:      { text:'text-primary-400',border:'border-primary-500/40',bg:'bg-primary-500/10' },
     behavior:    { text:'text-pink-400',   border:'border-pink-500/40',   bg:'bg-pink-500/10'    },
-    session:     { text:'text-gray-400',   border:'border-gray-500/40',   bg:'bg-gray-500/10'    },
-    credentials: { text:'text-red-400',    border:'border-red-500/40',    bg:'bg-red-500/10'     },
+    architect:   { text:'text-indigo-400', border:'border-indigo-500/40', bg:'bg-indigo-500/10'  },
+    status:      { text:'text-cyan-400',   border:'border-cyan-500/40',   bg:'bg-cyan-500/10'    },
+    history:     { text:'text-orange-400', border:'border-orange-500/40', bg:'bg-orange-500/10'  },
   };
 
   const _kbDocs = [
     {
-      id:'d1', title:'DESIGN.md', category:'design', size_bytes: 3840,
+      id:'d1', title:'DESIGN.md', category:'design', scope:'project', size_bytes: 3840,
       file_path:'/home/icc/knowledge/projects/nex-ledger/DESIGN.md',
       indexed_at:'2026-04-19T14:22:00Z', qdrant_point_id:'ql-d1-001',
       content:`# DESIGN.md — NEX Ledger v0.1\n\n## Overview\n\nNEX Ledger je modulárny účtovnícky systém navrhnutý pre ICC projekty. Implementuje double-entry accounting s plnou auditovateľnosťou.\n\n## Architektonické rozhodnutia\n\n### Double-entry model\nVšetky finančné transakcie sú zaznamenané ako dvojice zápisov (debet/kredit). Každý **journal_entry** musí mať SUM(debit) = SUM(credit).\n\n### Multi-currency\nBáza je EUR. Všetky cudzomenne transakcie sa konvertujú pomocou denného kurzu (ECB feed).\n\n## Tech Stack\n\n- **Backend**: FastAPI + PostgreSQL (pg8000)\n- **Frontend**: React + TypeScript + Tailwind\n- **Reporting**: PDF generovanie via WeasyPrint\n\n## API Endpoints\n\n### Journal Entries\n\`\`\`\nGET  /api/v1/journal-entries\nPOST /api/v1/journal-entries\nGET  /api/v1/journal-entries/{id}\nPOST /api/v1/journal-entries/{id}/post\n\`\`\``
     },
     {
-      id:'d2', title:'BEHAVIOR.md', category:'behavior', size_bytes: 2210,
+      id:'d2', title:'BEHAVIOR.md', category:'behavior', scope:'project', size_bytes: 2210,
       file_path:'/home/icc/knowledge/projects/nex-ledger/BEHAVIOR.md',
       indexed_at:'2026-04-19T14:25:00Z', qdrant_point_id:'ql-d2-001',
       content:`# BEHAVIOR.md — NEX Ledger v0.1\n\n## Používateľské scenáre\n\n### UC-01: Zaúčtovanie faktúry\n\n1. Účtovník otvorí modul Journal Entries\n2. Klikne na **+ Nový západ**\n3. Vyplní: dátum, referencia, popis\n4. Pridá riadky: debet účet 311, kredit účet 604\n5. Systém overí SUM(debit) = SUM(credit)\n6. Klikne **Post** — záznam zaúčtovaný a uzamknutý\n\n## Validačné pravidlá\n\n- **R01**: SUM(debit) MUSÍ byť rovné SUM(credit) per entry\n- **R02**: Účet musí existovať v chart_of_accounts\n- **R03**: Draft entry možno editovať, posted entry je read-only`
     },
     {
-      id:'d3', title:'ICC_STANDARDS.md', category:'standards', size_bytes: 4512,
+      id:'d3', title:'ICC_STANDARDS.md', category:'standards', scope:'global', size_bytes: 4512,
       file_path:'/home/icc/knowledge/icc/ICC_STANDARDS.md',
       indexed_at:'2026-04-18T10:00:00Z', qdrant_point_id:'ql-d3-001',
       content:`# ICC STANDARDS v1.0.0\n\n## Tech Stack (záväzný)\n\n| Oblasť | Povinné | Zakázané |\n|---|---|---|\n| Backend | Python 3.x, FastAPI | Django, Flask |\n| Frontend | React + TS + Vite + Tailwind | — |\n| Databáza | PostgreSQL (pg8000) | psycopg2, asyncpg |\n\n## Port Registry (9100–9299)\n\n- 9100: NEX Command\n- 9110/9111: NEX Automat\n- 9130/9131: Qdrant\n- 9150: PostgreSQL`
     },
     {
-      id:'d4', title:'DECISIONS.md', category:'decisions', size_bytes: 3100,
+      id:'d4', title:'DECISIONS.md', category:'decisions', scope:'global', size_bytes: 3100,
       file_path:'/home/icc/knowledge/icc/DECISIONS.md',
       indexed_at:'2026-04-18T10:05:00Z', qdrant_point_id:'ql-d4-001',
       content:`# DECISIONS.md\n\n## D-001: PostgreSQL as primary database\n**Dátum**: 2026-01-15 — **Status**: FINAL\n\nVšetky ICC projekty používajú PostgreSQL cez pg8000 driver.\n\n## D-002: Tailwind CDN zakázaný v produkcii\n**Dátum**: 2026-02-01 — **Status**: FINAL\n\nCDN verzia je len pre prototypy. Production build MUSÍ používať PostCSS.\n\n## D-003: Qdrant self-hosted pre RAG\n**Dátum**: 2026-03-01 — **Status**: ACTIVE\n\nOdmietnuté: Pinecone (externá SaaS). Schválené: Qdrant self-hosted na ANDROS.`
     },
     {
-      id:'d5', title:'LESSONS_LEARNED.md', category:'lessons', size_bytes: 2890,
+      id:'d5', title:'LESSONS_LEARNED.md', category:'lessons', scope:'global', size_bytes: 2890,
       file_path:'/home/icc/knowledge/icc/LESSONS_LEARNED.md',
       indexed_at:'2026-04-18T10:10:00Z', qdrant_point_id:'ql-d5-001',
       content:`# LESSONS LEARNED\n\n## LL-001: Phantom Execution [2026-03-18]\n**Tag**: phantom, git\n\nNIKDY nevygenerovať fiktívny output. Ak nie je shell prístup → deleguj na CC.\n\n## LL-002: Mock DB v testoch [2026-03-25]\n**Tag**: testing, database\n\nIntegration testy MUSIA hittovať real databázu — mock/prod divergencia maskovala broken migráciu.\n\n## LL-003: Destructive Overwrite [2026-04-02]\n**Tag**: files, edit\n\nVždy prečítaj full current content pred editom. Modifikuj LEN konkrétny riadok/sekciu.`
@@ -5393,7 +5124,29 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
       id:'d6', title:'SESSION_2026-04-19.md', category:'session', size_bytes: 980,
       file_path:'/home/icc/knowledge/sessions/SESSION_2026-04-19.md',
       indexed_at: null, qdrant_point_id: null,
+      scope: 'project',
       content:`# Session Log — 2026-04-19\n\n## Summary\nSession zameraná na NEX Ledger DB návrh a multi-currency implementáciu.\n\n## Dokončené\n\n- [x] DB schema: accounts, journal_entries, journal_lines\n- [x] Multi-currency rozšírenie\n- [x] PostgreSQL indexy navrhnuté\n\n## Bloky\n\n- ECB kurz feed — čakáme na rozhodnutie o provideri\n\n## Ďalší krok\nImplementovať journal_entries CRUD v backend/api/routes/journal_entries.py`
+    },
+    {
+      id:'d7', title:'ARCHITECT.md', category:'architect', size_bytes: 2640,
+      file_path:'/home/icc/knowledge/projects/nex-ledger/ARCHITECT.md',
+      indexed_at:'2026-04-19T15:00:00Z', qdrant_point_id:'ql-d7-001',
+      scope: 'project',
+      content:`# ARCHITECT.md — NEX Ledger v0.1\n\n## Architektonické rozhodnutia\n\n### AR-001: pg8000 miesto psycopg2\nDôvod: ICC štandard. pg8000 je pure-Python, bez C dependencies.\n\n### AR-002: Separate service layer\nBusiness logika NESMIE byť v routeroch. Routery volajú service funkcie.\n\n### AR-003: Multi-currency cez view\nExchange rates sú cachované dennou úlohou. Transakcie ukladajú original_amount + original_currency + eur_amount.\n\n## Otvorené otázky\n\n- Q1: Batch posting alebo per-entry? → rozhodnutie odložené na v0.2\n- Q2: ECB feed provider — priamy API alebo cez FIXER.io?\n\n## Zamietnuté alternatívy\n\n- Django REST Framework — porušuje ICC štandard\n- SQLAlchemy ORM — príliš veľká závislosť pre tento projekt`
+    },
+    {
+      id:'d8', title:'STATUS.md', category:'status', size_bytes: 1180,
+      file_path:'/home/icc/knowledge/projects/nex-ledger/STATUS.md',
+      indexed_at:'2026-04-20T08:00:00Z', qdrant_point_id:'ql-d8-001',
+      scope: 'project',
+      content:`# STATUS.md — NEX Ledger\n\nPosledná aktualizácia: **2026-04-20**\n\n## Aktuálna verzia: v0.1 (in progress)\n\n### Hotovo\n- [x] DB schema: accounts, journal_entries, journal_lines, exchange_rates\n- [x] Journal entries CRUD (backend)\n- [x] Double-entry validácia\n- [x] Multi-currency základ\n\n### V progrese\n- [ ] ECB feed integrácia (blocker: provider decision)\n- [ ] PDF export via WeasyPrint\n- [ ] Frontend — Journal Entries table\n\n### Blokujúce závislosti\n- ECB kurz feed: čaká na rozhodnutie Ri o provideri (FIXER.io vs priamy ECB XML)`
+    },
+    {
+      id:'d9', title:'HISTORY.md', category:'history', size_bytes: 1540,
+      file_path:'/home/icc/knowledge/projects/nex-ledger/HISTORY.md',
+      indexed_at:'2026-04-20T08:05:00Z', qdrant_point_id:'ql-d9-001',
+      scope: 'project',
+      content:`# HISTORY.md — NEX Ledger\n\n## v0.1 (2026-04 — in progress)\n\n### 2026-04-20\n- BUG-001 identifikovaný: double-entry validácia neprechádza nulové sumy\n- BUG-002: zaokrúhľovanie EUR kurzu na 2 desatinné miesta\n\n### 2026-04-19\n- Session: DB schema navrhnutá a commitnutá\n- Multi-currency rozšírenie schválené\n- AR-003 zapísaný do ARCHITECT.md\n\n### 2026-04-15\n- Kickoff: NEX Ledger v0.1 štart\n- Tech stack potvrdený: FastAPI + pg8000 + React + Tailwind\n- Port: 9170 pridelený v ICC Port Registry\n\n## Zámer projektu\nNEX Ledger je ICC interný účtovnícky nástroj. Cieľ v0.1: základný journal entries workflow pre Zoltána.`
     },
   ];
 
@@ -5415,6 +5168,7 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
 
   let _kbActiveDoc = null;
   let _kbActiveCategory = 'all';
+  let _kbScope = 'global'; // 'global' | 'project'
   let _kbMode = 'browse'; // browse | edit | create
   let _kbSearchResults = null; // null = browse mode, [] = search results
   let _kbConfirmingDelete = false;
@@ -5422,13 +5176,57 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
   let _kbActiveSubTab = 'documents';
 
   function kbInit() {
-    _kbRenderCategories();
-    kbFilter();
+    kbSetScope(_kbScope, true);
     _kbRenderProposals();
     // Show proposals badge if pending
     const pending = _kbProposals.filter(p => p.status === 'pending').length;
     const badge = document.getElementById('kb-proposals-badge');
     if (badge) { badge.textContent = pending; badge.classList.toggle('hidden', pending === 0); }
+  }
+
+  function kbSetScope(scope, silent) {
+    _kbScope = scope;
+    _kbActiveCategory = 'all';
+    _kbActiveDoc = null;
+    _kbSearchResults = null;
+    const inp = document.getElementById('kb-search');
+    if (inp) inp.value = '';
+    // Toggle button styles
+    const gBtn = document.getElementById('kb-scope-global');
+    const pBtn = document.getElementById('kb-scope-project');
+    if (gBtn && pBtn) {
+      const active   = 'bg-slate-700 text-gray-200';
+      const inactive = 'text-gray-500 hover:text-gray-400';
+      if (scope === 'global') {
+        gBtn.className = `flex-1 text-[11px] font-medium py-1 rounded-md transition-colors ${active}`;
+        pBtn.className = `flex-1 text-[11px] font-medium py-1 rounded-md transition-colors ${inactive}`;
+      } else {
+        pBtn.className = `flex-1 text-[11px] font-medium py-1 rounded-md transition-colors ${active}`;
+        gBtn.className = `flex-1 text-[11px] font-medium py-1 rounded-md transition-colors ${inactive}`;
+      }
+    }
+    // Project indicator
+    const ind = document.getElementById('kb-project-indicator');
+    if (ind) ind.classList.toggle('hidden', scope !== 'project');
+    // Update stats
+    const scopedDocs = _kbScopedDocs();
+    const statDocs  = document.getElementById('kb-stat-docs');
+    const statChunks = document.getElementById('kb-stat-chunks');
+    if (statDocs)   statDocs.textContent   = scopedDocs.length;
+    if (statChunks) statChunks.textContent = scopedDocs.reduce((s,d) => s + (d.size_bytes ? Math.ceil(d.size_bytes/500) : 0), 0);
+    if (!silent) {
+      _kbRenderCategories();
+      kbFilter();
+      _kbShowMode('browse');
+    } else {
+      _kbRenderCategories();
+      kbFilter();
+    }
+  }
+
+  function _kbScopedDocs() {
+    const scopeSet = _kbScope === 'global' ? _KB_CAT_GLOBAL : _KB_CAT_PROJECT;
+    return _kbDocs.filter(d => scopeSet.includes(d.category));
   }
 
   function kbSubTab(tab) {
@@ -5452,13 +5250,15 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
   function _kbRenderCategories() {
     const list = document.getElementById('kb-cat-list');
     if (!list) return;
+    const scopeSet = _kbScope === 'global' ? _KB_CAT_GLOBAL : _KB_CAT_PROJECT;
+    const scopedDocs = _kbDocs.filter(d => scopeSet.includes(d.category));
     const catCounts = {};
-    _KB_CATEGORIES.forEach(c => { catCounts[c] = _kbDocs.filter(d => d.category === c).length; });
-    const allCount = _kbDocs.length;
+    scopeSet.forEach(c => { catCounts[c] = _kbDocs.filter(d => d.category === c).length; });
+    const allCount = scopedDocs.length;
 
     let html = `<div class="kb-cat-btn flex items-center justify-between px-2 py-1.5 rounded-lg text-xs ${_kbActiveCategory === 'all' ? 'active text-primary-400 bg-primary-500/15' : 'text-gray-500'}" onclick="kbSetCategory('all')">
       <span>All</span><span class="text-[10px] font-mono">${allCount}</span></div>`;
-    _KB_CATEGORIES.forEach(cat => {
+    scopeSet.forEach(cat => {
       const count = catCounts[cat] || 0;
       const col = _KB_CAT_COLORS[cat] || {};
       const isActive = _kbActiveCategory === cat;
@@ -5479,8 +5279,10 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
 
   function kbFilter() {
     _kbSearchResults = null;
+    const scopeSet = _kbScope === 'global' ? _KB_CAT_GLOBAL : _KB_CAT_PROJECT;
     const filtered = _kbDocs.filter(d =>
-      _kbActiveCategory === 'all' || d.category === _kbActiveCategory
+      scopeSet.includes(d.category) &&
+      (_kbActiveCategory === 'all' || d.category === _kbActiveCategory)
     );
     _kbRenderList(filtered, false);
   }
@@ -6207,18 +6009,6 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
   (function() {
     const _base2 = showScreen;
     window.showScreen = function(name) {
-      if (name === 'architect') {
-        if (!_archActiveSession && _archSessions.length > 0) {
-          _archActiveSession = _archSessions[0];
-        }
-        setTimeout(() => {
-          archRenderSessions();
-          archRenderMessages();
-          const badge = document.getElementById('arch-session-badge');
-          if (badge && _archActiveSession) badge.textContent = `Session: ${_archActiveSession.id.slice(0,8)}…`;
-          _archScrollBottom();
-        }, 10);
-      }
       if (name === 'kb') {
         setTimeout(() => kbInit(), 10);
       }
