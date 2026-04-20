@@ -61,6 +61,22 @@
     @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
     .arch-cursor { display: inline-block; width: 2px; height: 0.9em; background: #818cf8; vertical-align: text-bottom; animation: blink 1s step-end infinite; margin-left:1px; }
     #screen-kb.active          { display: flex !important; flex-direction: column; }
+    #screen-bugs.active        { display: flex !important; }
+    .bug-row { cursor: pointer; transition: background 0.1s; border-left: 2px solid transparent; }
+    .bug-row:hover { background: rgba(255,255,255,0.03); }
+    .bug-row.active { background: rgba(99,102,241,0.1); border-left-color: #6366f1; }
+    .bug-sev-critical { background: rgba(239,68,68,0.15); color: #fca5a5; border: 1px solid rgba(239,68,68,0.3); }
+    .bug-sev-major    { background: rgba(249,115,22,0.15); color: #fdba74; border: 1px solid rgba(249,115,22,0.3); }
+    .bug-sev-minor    { background: rgba(234,179,8,0.15);  color: #fde047; border: 1px solid rgba(234,179,8,0.3); }
+    .bug-status-new        { background: rgba(99,102,241,0.15); color: #a5b4fc; border: 1px solid rgba(99,102,241,0.3); }
+    .bug-status-accepted   { background: rgba(34,197,94,0.15);  color: #86efac; border: 1px solid rgba(34,197,94,0.3); }
+    .bug-status-in_progress{ background: rgba(59,130,246,0.15); color: #93c5fd; border: 1px solid rgba(59,130,246,0.3); }
+    .bug-status-resolved   { background: rgba(148,163,184,0.15);color: #cbd5e1; border: 1px solid rgba(148,163,184,0.3); }
+    .bug-status-wont_fix   { background: rgba(100,116,139,0.12);color: #94a3b8; border: 1px solid rgba(100,116,139,0.25); }
+    .bug-src-internal{ background: rgba(100,116,139,0.15); color: #94a3b8; border: 1px solid rgba(100,116,139,0.3); }
+    .bug-src-customer{ background: rgba(139,92,246,0.15); color: #c4b5fd; border: 1px solid rgba(139,92,246,0.3); }
+    .bft-row { border-left: 2px solid transparent; transition: background 0.1s; }
+    .bft-row:hover { background: rgba(255,255,255,0.02); }
     .kb-doc-row   { cursor: pointer; transition: background 0.1s; border-left: 2px solid transparent; }
     .kb-doc-row:hover  { background: rgba(255,255,255,0.03); }
     .kb-doc-row.active { background: rgba(99,102,241,0.1); border-left-color: #6366f1; }
@@ -168,6 +184,10 @@
     <a class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-gray-400 cursor-pointer" onclick="showScreen('kb')">
       <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
       <span class="sb-text">Knowledge Base</span>
+    </a>
+    <a class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-gray-400 cursor-pointer" onclick="showScreen('bugs')">
+      <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      <span class="sb-text">Bug Report</span>
     </a>
     <div class="sb-section-label pt-3 pb-1 px-3 text-[10px] text-gray-600 uppercase tracking-widest font-semibold">Settings</div>
     <a class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-gray-400 cursor-pointer" onclick="showScreen('settings')">
@@ -3064,6 +3084,238 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
 
 </div><!-- /screen-kb -->
 
+<!-- ════════════════════════════════════════════════════════════════════
+     SCREEN: BUG REPORT
+────────────────────────────────────────────────────────────────────── -->
+<div id="screen-bugs" class="screen h-full overflow-hidden">
+
+  <!-- Left panel: filter + list -->
+  <div class="w-80 flex flex-col border-r border-slate-800 h-full flex-shrink-0">
+
+    <!-- Toolbar -->
+    <div class="flex items-center gap-2 px-3 py-2.5 border-b border-slate-800 flex-shrink-0">
+      <div class="relative flex-1">
+        <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-600 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0"/></svg>
+        <input id="bug-search" type="text" placeholder="Hľadať bugy…" oninput="bugsFilter()" class="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-700 bg-slate-900 text-gray-300 placeholder-gray-600 focus:outline-none focus:border-primary-500 transition-colors" />
+      </div>
+      <button onclick="bugsStartCreate()" class="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-primary-600 hover:bg-primary-500 text-white rounded-lg transition-colors flex-shrink-0">
+        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        Nový
+      </button>
+    </div>
+
+    <!-- Filters -->
+    <div class="flex flex-wrap gap-1.5 px-3 py-2 border-b border-slate-800 flex-shrink-0">
+      <select id="bug-filter-sev" onchange="bugsFilter()" class="text-[11px] rounded border border-slate-700 bg-slate-900 text-gray-400 px-1.5 py-1 focus:outline-none">
+        <option value="">Severita</option>
+        <option value="critical">Critical</option>
+        <option value="major">Major</option>
+        <option value="minor">Minor</option>
+      </select>
+      <select id="bug-filter-status" onchange="bugsFilter()" class="text-[11px] rounded border border-slate-700 bg-slate-900 text-gray-400 px-1.5 py-1 focus:outline-none">
+        <option value="">Status</option>
+        <option value="new">New</option>
+        <option value="accepted">Accepted</option>
+        <option value="in_progress">In Progress</option>
+        <option value="resolved">Resolved</option>
+        <option value="wont_fix">Won't Fix</option>
+      </select>
+      <select id="bug-filter-src" onchange="bugsFilter()" class="text-[11px] rounded border border-slate-700 bg-slate-900 text-gray-400 px-1.5 py-1 focus:outline-none">
+        <option value="">Zdroj</option>
+        <option value="internal">Internal</option>
+        <option value="customer">Customer</option>
+      </select>
+      <button onclick="bugsResetFilters()" class="text-[11px] text-gray-600 hover:text-gray-400 transition-colors">Reset</button>
+    </div>
+
+    <!-- Bug list -->
+    <div id="bug-list" class="flex-1 overflow-y-auto py-1"></div>
+
+  </div>
+
+  <!-- Right panel -->
+  <div class="flex-1 flex flex-col h-full overflow-hidden">
+
+    <!-- Empty state -->
+    <div id="bug-empty" class="flex-1 flex flex-col items-center justify-center gap-3 text-center p-8">
+      <svg class="w-12 h-12 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      <p class="text-sm text-gray-600">Vyber bug zo zoznamu alebo vytvor nový</p>
+    </div>
+
+    <!-- VIEW panel -->
+    <div id="bug-view-panel" class="hidden flex-col h-full overflow-hidden">
+      <!-- Header -->
+      <div class="flex items-center gap-3 px-5 h-12 border-b border-slate-800 flex-shrink-0">
+        <span id="bug-view-number" class="text-xs font-mono font-bold text-gray-500"></span>
+        <span id="bug-view-title" class="flex-1 text-sm font-semibold text-gray-100 truncate"></span>
+        <div class="flex items-center gap-2 flex-shrink-0">
+          <span id="bug-view-sev" class="text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wide"></span>
+          <span id="bug-view-status" class="text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wide"></span>
+          <button onclick="bugsStartEdit()" class="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-gray-400 border border-slate-700 rounded-lg hover:border-primary-500 hover:text-primary-400 transition-colors">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+            Upraviť
+          </button>
+          <button id="bug-delete-normal" onclick="bugsAskDelete()" class="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-gray-500 border border-slate-700 rounded-lg hover:border-red-700 hover:text-red-400 transition-colors">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            Zmazať
+          </button>
+          <span id="bug-delete-confirm" class="hidden items-center gap-2 text-xs">
+            <span class="text-red-400">Naozaj zmazať?</span>
+            <button onclick="bugsConfirmDelete()" class="px-2 py-1 bg-red-600 hover:bg-red-500 text-white rounded text-xs transition-colors">Áno</button>
+            <button onclick="bugsCancelDelete()" class="px-2 py-1 border border-slate-600 text-gray-400 rounded text-xs hover:border-slate-500 transition-colors">Nie</button>
+          </span>
+        </div>
+      </div>
+
+      <!-- Body -->
+      <div class="flex-1 overflow-y-auto">
+        <!-- Meta row -->
+        <div class="flex flex-wrap gap-4 px-5 py-3 border-b border-slate-800 bg-slate-900/40 text-xs text-gray-500">
+          <span>Zdroj: <span id="bug-view-src" class="text-gray-400"></span></span>
+          <span>Reporter: <span id="bug-view-reporter" class="text-gray-400"></span></span>
+          <span>Env: <span id="bug-view-env" class="text-gray-400"></span></span>
+          <span>Vytvorený: <span id="bug-view-created" class="text-gray-400"></span></span>
+          <span id="bug-view-commit-wrap" class="hidden">Commit: <code id="bug-view-commit" class="font-mono text-primary-400"></code></span>
+        </div>
+
+        <!-- Description -->
+        <div class="px-5 py-4 border-b border-slate-800">
+          <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Popis</div>
+          <div id="bug-view-desc" class="text-sm text-gray-300 leading-relaxed whitespace-pre-wrap"></div>
+        </div>
+
+        <!-- Bug Fix Tasks -->
+        <div class="px-5 py-4">
+          <div class="flex items-center justify-between mb-3">
+            <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Bug Fix Tasks</div>
+            <button onclick="bugsAddTask()" class="flex items-center gap-1 text-[11px] text-primary-400 hover:text-primary-300 transition-colors">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+              Pridať task
+            </button>
+          </div>
+          <div id="bug-tasks-list" class="space-y-1.5"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- EDIT panel -->
+    <div id="bug-edit-panel" class="hidden flex-col h-full overflow-y-auto">
+      <div class="flex items-center gap-3 px-5 h-12 border-b border-slate-800 flex-shrink-0">
+        <svg class="w-4 h-4 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+        <span class="flex-1 text-sm font-semibold text-gray-100">Upraviť bug</span>
+        <button onclick="bugsSaveEdit()" id="bug-edit-save-btn" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary-600 hover:bg-primary-500 text-white rounded-lg transition-colors">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+          Uložiť zmeny
+        </button>
+        <button onclick="bugsCancelEdit()" class="px-3 py-1.5 text-xs text-gray-400 border border-slate-700 rounded-lg hover:border-slate-600 transition-colors">Zrušiť</button>
+      </div>
+      <div class="p-5 space-y-4 max-w-xl">
+        <div>
+          <label class="block text-xs text-gray-500 mb-1.5">Názov *</label>
+          <input id="bug-edit-title" type="text" class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-primary-500 transition-colors" />
+        </div>
+        <div class="flex gap-3">
+          <div class="flex-1">
+            <label class="block text-xs text-gray-500 mb-1.5">Severita *</label>
+            <select id="bug-edit-sev" class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-primary-500 transition-colors">
+              <option value="critical">Critical</option>
+              <option value="major">Major</option>
+              <option value="minor">Minor</option>
+            </select>
+          </div>
+          <div class="flex-1">
+            <label class="block text-xs text-gray-500 mb-1.5">Status *</label>
+            <select id="bug-edit-status" class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-primary-500 transition-colors">
+              <option value="new">New</option>
+              <option value="accepted">Accepted</option>
+              <option value="in_progress">In Progress</option>
+              <option value="resolved">Resolved</option>
+              <option value="wont_fix">Won't Fix</option>
+            </select>
+          </div>
+          <div class="flex-1">
+            <label class="block text-xs text-gray-500 mb-1.5">Zdroj</label>
+            <select id="bug-edit-src" class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-primary-500 transition-colors">
+              <option value="internal">Internal</option>
+              <option value="customer">Customer</option>
+            </select>
+          </div>
+        </div>
+        <div class="flex gap-3">
+          <div class="flex-1">
+            <label class="block text-xs text-gray-500 mb-1.5">Reporter</label>
+            <input id="bug-edit-reporter" type="text" placeholder="Meno / email" class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-primary-500 transition-colors" />
+          </div>
+          <div class="flex-1">
+            <label class="block text-xs text-gray-500 mb-1.5">Prostredie</label>
+            <input id="bug-edit-env" type="text" placeholder="production / staging" class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-primary-500 transition-colors" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1.5">Commit hash (po oprave)</label>
+          <input id="bug-edit-commit" type="text" placeholder="a1b2c3d" class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm font-mono text-gray-200 placeholder-gray-600 focus:outline-none focus:border-primary-500 transition-colors" />
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1.5">Popis</label>
+          <textarea id="bug-edit-desc" rows="6" class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-primary-500 transition-colors resize-y font-mono"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- CREATE panel -->
+    <div id="bug-create-panel" class="hidden flex-col h-full overflow-y-auto">
+      <div class="flex items-center gap-3 px-5 h-12 border-b border-slate-800 flex-shrink-0">
+        <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        <span class="flex-1 text-sm font-semibold text-gray-100">Nový bug</span>
+        <button onclick="bugsSaveCreate()" id="bug-create-save-btn" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-green-600 hover:bg-green-500 text-white rounded-lg transition-colors">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+          Vytvoriť
+        </button>
+        <button onclick="bugsCancelCreate()" class="px-3 py-1.5 text-xs text-gray-400 border border-slate-700 rounded-lg hover:border-slate-600 transition-colors">Zrušiť</button>
+      </div>
+      <div class="p-5 space-y-4 max-w-xl">
+        <div>
+          <label class="block text-xs text-gray-500 mb-1.5">Názov *</label>
+          <input id="bug-create-title" type="text" placeholder="Stručný popis bugu" class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-primary-500 transition-colors" />
+        </div>
+        <div class="flex gap-3">
+          <div class="flex-1">
+            <label class="block text-xs text-gray-500 mb-1.5">Severita *</label>
+            <select id="bug-create-sev" class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-primary-500 transition-colors">
+              <option value="major">Major</option>
+              <option value="critical">Critical</option>
+              <option value="minor">Minor</option>
+            </select>
+          </div>
+          <div class="flex-1">
+            <label class="block text-xs text-gray-500 mb-1.5">Zdroj</label>
+            <select id="bug-create-src" class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-primary-500 transition-colors">
+              <option value="internal">Internal</option>
+              <option value="customer">Customer</option>
+            </select>
+          </div>
+        </div>
+        <div class="flex gap-3">
+          <div class="flex-1">
+            <label class="block text-xs text-gray-500 mb-1.5">Reporter</label>
+            <input id="bug-create-reporter" type="text" placeholder="Meno / email" class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-primary-500 transition-colors" />
+          </div>
+          <div class="flex-1">
+            <label class="block text-xs text-gray-500 mb-1.5">Prostredie</label>
+            <input id="bug-create-env" type="text" placeholder="production / staging" class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-primary-500 transition-colors" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1.5">Popis (kroky reprodukcie)</label>
+          <textarea id="bug-create-desc" rows="8" placeholder="1. Otvorte obrazovku X&#10;2. Kliknite na Y&#10;3. Očakávané: Z&#10;4. Skutočnosť: ..." class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-primary-500 transition-colors resize-y"></textarea>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</div><!-- /screen-bugs -->
+
 </main><!-- /main -->
 
 </div><!-- /right column -->
@@ -3072,7 +3324,7 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
      JAVASCRIPT
 ════════════════════════════════════════════════════════════════════ -->
 <script>
-  const SCREENS = ['home','projects','project-detail','version','new-project','versions','new-version','spec','uidesign','design','taskplan','implementacia','architect','kb','settings','login'];
+  const SCREENS = ['home','projects','project-detail','version','new-project','versions','new-version','spec','uidesign','design','taskplan','implementacia','architect','kb','bugs','settings','login'];
 
   // ---- Aktívny kontext (projekt + verzia) ----
   let activeCtx = { project: 'NEX Ledger', slug: 'NL', version: 'v0.1' };
@@ -3135,6 +3387,7 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
     'implementacia':  'Implementation',
     'architect':      'Architect',
     'kb':             'Knowledge Base',
+    'bugs':           'Bug Report',
     'settings':       'Settings',
     'login':          'Sign in',
   };
@@ -5626,6 +5879,330 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
     return `${Math.floor(hrs/24)}d ago`;
   }
 
+  // ════════════════════════════════════════════════════════════════════
+  // BUG REPORT
+  // ════════════════════════════════════════════════════════════════════
+
+  let _bugActive = null;
+  let _bugMode   = 'empty'; // empty | view | edit | create
+  let _bugConfirmingDelete = false;
+
+  const _bugSevLabel  = { critical:'Critical', major:'Major', minor:'Minor' };
+  const _bugStatLabel = { new:'New', accepted:'Accepted', in_progress:'In Progress', resolved:'Resolved', wont_fix:"Won't Fix" };
+  const _bugSrcLabel  = { internal:'Internal', customer:'Customer' };
+
+  const _bugsData = [
+    {
+      id:'bug1', number:1, title:'Double-entry validation ignoruje nulové sumy',
+      severity:'critical', status:'in_progress', source:'internal',
+      reported_by:'Tibor', environment:'production',
+      commit_hash: null,
+      created_at: new Date(Date.now() - 2*3600000),
+      description: 'Transakcia s debit=0 a credit=0 prechádza validáciou bez chyby.\n\nKroky reprodukcie:\n1. POST /api/v1/journal-entries s {"lines":[{"amount":0,"type":"debit"},{"amount":0,"type":"credit"}]}\n2. Odpoveď: 201 Created\n3. Očakávané: 422 Validation Error\n\nRoot cause: validator kontroluje len SUM(debit)==SUM(credit), nezakazuje nulu.',
+      tasks: [
+        { id:'bft1', number:1, title:'Pridaj validáciu amount > 0 do JournalEntryService', task_type:'backend', status:'in_progress' },
+        { id:'bft2', number:2, title:'Test: null sum validation', task_type:'test', status:'todo' },
+      ]
+    },
+    {
+      id:'bug2', number:2, title:'Zaokrúhľovanie EUR kurzu na 2 desatinné miesta',
+      severity:'major', status:'accepted', source:'internal',
+      reported_by:'Nazar', environment:'staging',
+      commit_hash: null,
+      created_at: new Date(Date.now() - 24*3600000),
+      description: 'ECB feed vracia kurz EUR/CZK = 25.3420, ale systém ho zaokrúhľuje na 25.34 pred uložením.\nPre sumy nad 100 000 CZK vzniká chyba 0.02-0.05 EUR.',
+      tasks: [
+        { id:'bft3', number:1, title:'Zvýš presnosť uloženia kurzu na 6 desatinných miest', task_type:'backend', status:'todo' },
+        { id:'bft4', number:2, title:'DB migrácia: zmena precision na exchange_rate', task_type:'migration', status:'todo' },
+      ]
+    },
+    {
+      id:'bug3', number:3, title:'PDF report nezobrazuje logo zákazníka',
+      severity:'minor', status:'new', source:'customer',
+      reported_by:'Ing. Novák (Stenia)', environment:'production',
+      commit_hash: null,
+      created_at: new Date(Date.now() - 3*24*3600000),
+      description: 'Po nahraní loga v Settings → Company Profile sa logo nezobrazuje v PDF reportoch.\nV HTML preview sa zobrazuje správne. Problém iba v PDF generovaní cez WeasyPrint.',
+      tasks: []
+    },
+    {
+      id:'bug4', number:4, title:'Chybová hláška pri exporte do XLS nie je po slovensky',
+      severity:'minor', status:'resolved', source:'customer',
+      reported_by:'Zoltán', environment:'production',
+      commit_hash: 'a3f8e2c',
+      created_at: new Date(Date.now() - 7*24*3600000),
+      description: 'Error message "Export failed: permission denied" bol v angličtine.\nOpravené: preložené do SK, doplnený detail o prístupových právach.',
+      tasks: [
+        { id:'bft5', number:1, title:'Preložiť error messages v ExportService', task_type:'backend', status:'done' },
+        { id:'bft6', number:2, title:'Update i18n SK súbor', task_type:'docs', status:'done' },
+      ]
+    },
+    {
+      id:'bug5', number:5, title:'Safari: modal pre schválenie transakcie sa nezatvára',
+      severity:'major', status:'new', source:'customer',
+      reported_by:'customer@emcenter.sk', environment:'production',
+      commit_hash: null,
+      created_at: new Date(Date.now() - 4*3600000),
+      description: 'Na Safari 17.x (macOS Sonoma) po kliknutí na "Schváliť" v TransactionApprovalModal sa modal nezatvorí.\nChrome a Firefox fungujú správne.\n\nConsole error: "TypeError: Cannot read property \'close\' of undefined"',
+      tasks: []
+    },
+  ];
+
+  function bugsInit() {
+    _bugMode = 'empty';
+    _bugActive = null;
+    _bugsRenderList(_bugsData);
+    _bugsShowPanel('empty');
+  }
+
+  function bugsFilter() {
+    const q   = (document.getElementById('bug-search')?.value || '').toLowerCase();
+    const sev = document.getElementById('bug-filter-sev')?.value || '';
+    const st  = document.getElementById('bug-filter-status')?.value || '';
+    const src = document.getElementById('bug-filter-src')?.value || '';
+    const filtered = _bugsData.filter(b => {
+      if (q && !b.title.toLowerCase().includes(q) && !('bug-'+b.number).includes(q)) return false;
+      if (sev && b.severity !== sev) return false;
+      if (st  && b.status   !== st)  return false;
+      if (src && b.source   !== src) return false;
+      return true;
+    });
+    _bugsRenderList(filtered);
+  }
+
+  function bugsResetFilters() {
+    document.getElementById('bug-search').value = '';
+    document.getElementById('bug-filter-sev').value = '';
+    document.getElementById('bug-filter-status').value = '';
+    document.getElementById('bug-filter-src').value = '';
+    bugsFilter();
+  }
+
+  function _bugsRenderList(list) {
+    const el = document.getElementById('bug-list');
+    if (!el) return;
+    if (list.length === 0) {
+      el.innerHTML = '<div class="p-4 text-xs text-gray-600 text-center">Žiadne bugy</div>';
+      return;
+    }
+    el.innerHTML = list.map(b => {
+      const active = _bugActive?.id === b.id ? 'active' : '';
+      const sevCls = `bug-sev-${b.severity}`;
+      const stCls  = `bug-status-${b.status}`;
+      const ago    = _bugTimeAgo(b.created_at);
+      return `<div class="bug-row ${active} px-3 py-2.5 flex flex-col gap-1" onclick="bugsSelectBug('${b.id}')">
+        <div class="flex items-start gap-2">
+          <span class="text-[10px] font-mono text-gray-600 shrink-0 mt-0.5">BUG-${String(b.number).padStart(3,'0')}</span>
+          <span class="text-xs text-gray-200 leading-snug flex-1">${b.title}</span>
+        </div>
+        <div class="flex items-center gap-1.5 pl-9 flex-wrap">
+          <span class="text-[10px] font-semibold px-1.5 py-px rounded-full ${sevCls}">${_bugSevLabel[b.severity]}</span>
+          <span class="text-[10px] font-semibold px-1.5 py-px rounded-full ${stCls}">${_bugStatLabel[b.status]}</span>
+          ${b.source === 'customer' ? `<span class="text-[10px] font-semibold px-1.5 py-px rounded-full bug-src-customer">Customer</span>` : ''}
+          <span class="text-[10px] text-gray-600 ml-auto">${ago}</span>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  function bugsSelectBug(id) {
+    _bugActive = _bugsData.find(b => b.id === id) || null;
+    _bugMode = 'view';
+    _bugConfirmingDelete = false;
+    bugsFilter(); // re-render list with active highlight
+    _bugsRenderView();
+    _bugsShowPanel('view');
+  }
+
+  function _bugsRenderView() {
+    if (!_bugActive) return;
+    const b = _bugActive;
+    const _t = id => document.getElementById(id);
+    if (_t('bug-view-number'))  _t('bug-view-number').textContent  = `BUG-${String(b.number).padStart(3,'0')}`;
+    if (_t('bug-view-title'))   _t('bug-view-title').textContent   = b.title;
+    if (_t('bug-view-desc'))    _t('bug-view-desc').textContent    = b.description;
+    if (_t('bug-view-reporter'))_t('bug-view-reporter').textContent= b.reported_by || '—';
+    if (_t('bug-view-env'))     _t('bug-view-env').textContent     = b.environment || '—';
+    if (_t('bug-view-created')) _t('bug-view-created').textContent = b.created_at.toLocaleDateString('sk-SK');
+    if (_t('bug-view-src'))     _t('bug-view-src').textContent     = _bugSrcLabel[b.source];
+
+    const sevEl = _t('bug-view-sev');
+    if (sevEl) { sevEl.textContent = _bugSevLabel[b.severity]; sevEl.className = `text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wide bug-sev-${b.severity}`; }
+    const stEl = _t('bug-view-status');
+    if (stEl) { stEl.textContent = _bugStatLabel[b.status]; stEl.className = `text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wide bug-status-${b.status}`; }
+
+    const commitWrap = _t('bug-view-commit-wrap');
+    if (commitWrap) {
+      if (b.commit_hash) { commitWrap.classList.remove('hidden'); _t('bug-view-commit').textContent = b.commit_hash; }
+      else { commitWrap.classList.add('hidden'); }
+    }
+
+    // Delete confirm state
+    const dn = _t('bug-delete-normal');
+    const dc = _t('bug-delete-confirm');
+    if (dn && dc) {
+      if (_bugConfirmingDelete) { dn.classList.add('hidden'); dc.classList.remove('hidden'); dc.classList.add('flex'); }
+      else { dn.classList.remove('hidden'); dc.classList.add('hidden'); dc.classList.remove('flex'); }
+    }
+
+    // Bug fix tasks
+    _bugsRenderTasks();
+  }
+
+  function _bugsRenderTasks() {
+    const el = document.getElementById('bug-tasks-list');
+    if (!el || !_bugActive) return;
+    const tasks = _bugActive.tasks || [];
+    if (tasks.length === 0) {
+      el.innerHTML = '<div class="text-xs text-gray-600 py-2">Žiadne fix tasky — klikni "+ Pridať task"</div>';
+      return;
+    }
+    const typeCols = { backend:'text-blue-400', frontend:'text-purple-400', migration:'text-orange-400', test:'text-green-400', docs:'text-gray-400' };
+    const stCols   = { todo:'text-gray-500', in_progress:'text-blue-400', done:'text-green-400', failed:'text-red-400' };
+    el.innerHTML = tasks.map(t => `
+      <div class="bft-row flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/60">
+        <span class="text-[10px] font-mono text-gray-600 w-10 shrink-0">T-${String(t.number).padStart(2,'0')}</span>
+        <span class="flex-1 text-xs text-gray-300">${t.title}</span>
+        <span class="text-[10px] font-medium ${typeCols[t.task_type] || ''} shrink-0">${t.task_type}</span>
+        <span class="text-[10px] font-semibold ${stCols[t.status] || ''} shrink-0">${t.status.replace('_',' ')}</span>
+      </div>`).join('');
+  }
+
+  function _bugsShowPanel(mode) {
+    const panels = { empty:'bug-empty', view:'bug-view-panel', edit:'bug-edit-panel', create:'bug-create-panel' };
+    Object.entries(panels).forEach(([m, id]) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const show = m === mode;
+      el.classList.toggle('hidden', !show);
+      if (m !== 'empty') el.classList.toggle('flex', show);
+    });
+  }
+
+  function bugsStartEdit() {
+    if (!_bugActive) return;
+    const b = _bugActive;
+    const _s = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
+    _s('bug-edit-title',    b.title);
+    _s('bug-edit-sev',      b.severity);
+    _s('bug-edit-status',   b.status);
+    _s('bug-edit-src',      b.source);
+    _s('bug-edit-reporter', b.reported_by);
+    _s('bug-edit-env',      b.environment);
+    _s('bug-edit-commit',   b.commit_hash);
+    _s('bug-edit-desc',     b.description);
+    _bugsShowPanel('edit');
+  }
+
+  function bugsCancelEdit() { _bugsShowPanel('view'); }
+
+  function bugsSaveEdit() {
+    if (!_bugActive) return;
+    const _g = id => document.getElementById(id)?.value?.trim() || '';
+    const title = _g('bug-edit-title');
+    if (!title) { _showToast('Názov je povinný'); return; }
+    _bugActive.title       = title;
+    _bugActive.severity    = _g('bug-edit-sev') || _bugActive.severity;
+    _bugActive.status      = _g('bug-edit-status') || _bugActive.status;
+    _bugActive.source      = _g('bug-edit-src') || _bugActive.source;
+    _bugActive.reported_by = _g('bug-edit-reporter') || null;
+    _bugActive.environment = _g('bug-edit-env') || null;
+    _bugActive.commit_hash = _g('bug-edit-commit') || null;
+    _bugActive.description = document.getElementById('bug-edit-desc')?.value || '';
+    _bugsRenderView();
+    _bugsShowPanel('view');
+    bugsFilter();
+    _showToast('Bug uložený');
+  }
+
+  function bugsStartCreate() {
+    ['bug-create-title','bug-create-reporter','bug-create-env','bug-create-desc'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.value = '';
+    });
+    document.getElementById('bug-create-sev').value = 'major';
+    document.getElementById('bug-create-src').value = 'internal';
+    _bugActive = null;
+    bugsFilter();
+    _bugsShowPanel('create');
+    setTimeout(() => document.getElementById('bug-create-title')?.focus(), 50);
+  }
+
+  function bugsCancelCreate() {
+    if (_bugActive) _bugsShowPanel('view');
+    else _bugsShowPanel('empty');
+  }
+
+  function bugsSaveCreate() {
+    const title = document.getElementById('bug-create-title')?.value?.trim();
+    if (!title) { _showToast('Názov je povinný'); return; }
+    const nextNum = Math.max(..._bugsData.map(b => b.number), 0) + 1;
+    const newBug = {
+      id: 'bug' + nextNum,
+      number: nextNum,
+      title,
+      severity: document.getElementById('bug-create-sev')?.value || 'major',
+      status: 'new',
+      source: document.getElementById('bug-create-src')?.value || 'internal',
+      reported_by: document.getElementById('bug-create-reporter')?.value?.trim() || null,
+      environment: document.getElementById('bug-create-env')?.value?.trim() || null,
+      commit_hash: null,
+      created_at: new Date(),
+      description: document.getElementById('bug-create-desc')?.value || '',
+      tasks: [],
+    };
+    _bugsData.unshift(newBug);
+    _bugActive = newBug;
+    bugsFilter();
+    _bugsRenderView();
+    _bugsShowPanel('view');
+    _showToast(`BUG-${String(newBug.number).padStart(3,'0')} vytvorený`);
+  }
+
+  function bugsAskDelete() {
+    _bugConfirmingDelete = true;
+    _bugsRenderView();
+  }
+
+  function bugsCancelDelete() {
+    _bugConfirmingDelete = false;
+    _bugsRenderView();
+  }
+
+  function bugsConfirmDelete() {
+    if (!_bugActive) return;
+    const idx = _bugsData.findIndex(b => b.id === _bugActive.id);
+    if (idx !== -1) _bugsData.splice(idx, 1);
+    _bugActive = null;
+    _bugConfirmingDelete = false;
+    bugsFilter();
+    _bugsShowPanel('empty');
+    _showToast('Bug zmazaný');
+  }
+
+  function bugsAddTask() {
+    if (!_bugActive) return;
+    const title = prompt('Názov fix tasku:');
+    if (!title?.trim()) return;
+    const nextNum = Math.max(...(_bugActive.tasks.map(t => t.number)), 0) + 1;
+    _bugActive.tasks.push({
+      id: 'bft_' + Math.random().toString(36).slice(2,8),
+      number: nextNum,
+      title: title.trim(),
+      task_type: 'backend',
+      status: 'todo',
+    });
+    _bugsRenderTasks();
+  }
+
+  function _bugTimeAgo(date) {
+    const diff = Date.now() - date.getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(diff / 3600000);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs/24)}d ago`;
+  }
+
   // Init architect + KB on showScreen
   (function() {
     const _base2 = showScreen;
@@ -5644,6 +6221,9 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
       }
       if (name === 'kb') {
         setTimeout(() => kbInit(), 10);
+      }
+      if (name === 'bugs') {
+        setTimeout(() => bugsInit(), 10);
       }
       _base2(name);
     };
