@@ -2,11 +2,14 @@ import { useState } from "react";
 import { NavLink, useMatch } from "react-router-dom";
 import {
   Brain,
+  ChevronDown,
+  ChevronRight,
   FolderKanban,
   LayoutDashboard,
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
+  ShieldCheck,
   Tag,
 } from "lucide-react";
 
@@ -122,10 +125,21 @@ function Sidebar() {
   const stored = localStorage.getItem("sidebarCollapsed");
   const [collapsed, setCollapsed] = useState(stored === "true");
 
+  const storedAdmin = localStorage.getItem("sidebarAdminOpen");
+  const [adminOpen, setAdminOpen] = useState(storedAdmin === "true");
+
   const toggle = () => {
     setCollapsed((prev) => {
       const next = !prev;
       localStorage.setItem("sidebarCollapsed", String(next));
+      return next;
+    });
+  };
+
+  const toggleAdmin = () => {
+    setAdminOpen((prev) => {
+      const next = !prev;
+      localStorage.setItem("sidebarAdminOpen", String(next));
       return next;
     });
   };
@@ -243,28 +257,42 @@ function Sidebar() {
           </div>
         )}
 
-        {/* Admin section — hidden when collapsed */}
+        {/* Admin section — hidden when sidebar is collapsed */}
         {!collapsed && (
-          <div className="mt-6 border-t border-gray-200 pt-4 dark:border-gray-700">
-            <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
-              Admin
-            </p>
-            <div className="space-y-4">
-              {ADMIN_NAV.map((group) => (
-                <section key={group.heading} aria-label={group.heading}>
-                  <h2 className="px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    {group.heading}
-                  </h2>
-                  <div className="space-y-1">
-                    {group.items.map((item) => (
-                      <NavLink key={item.to} to={item.to} className={navLinkClass}>
-                        {item.label}
-                      </NavLink>
-                    ))}
-                  </div>
-                </section>
-              ))}
-            </div>
+          <div className="mt-4 border-t border-gray-200 pt-3 dark:border-gray-700">
+            <button
+              type="button"
+              onClick={toggleAdmin}
+              className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-gray-100 transition-colors"
+              aria-expanded={adminOpen}
+            >
+              <ShieldCheck className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span className="flex-1 text-left">Admin</span>
+              {adminOpen ? (
+                <ChevronDown className="h-3.5 w-3.5 text-gray-400" aria-hidden="true" />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5 text-gray-400" aria-hidden="true" />
+              )}
+            </button>
+
+            {adminOpen && (
+              <div className="mt-2 space-y-4">
+                {ADMIN_NAV.map((group) => (
+                  <section key={group.heading} aria-label={group.heading}>
+                    <h2 className="px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      {group.heading}
+                    </h2>
+                    <div className="space-y-1">
+                      {group.items.map((item) => (
+                        <NavLink key={item.to} to={item.to} className={navLinkClass}>
+                          {item.label}
+                        </NavLink>
+                      ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </nav>
