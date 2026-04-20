@@ -308,3 +308,84 @@ export async function deleteEpic(epicId: string): Promise<void> {
   });
   if (!resp.ok) throw new Error(`Delete epic failed (${resp.status})`);
 }
+
+// ---------------------------------------------------------------------------
+// Feat execution (SSE)
+// ---------------------------------------------------------------------------
+
+export type FeatExecuteEvent =
+  | { type: "task_start"; task_id: string; task_number: number; task_title: string }
+  | { type: "chunk"; text: string; task_id: string }
+  | { type: "task_done"; task_id: string; status: string }
+  | { type: "feat_done"; feat_id: string; feat_status: string }
+  | { type: "error"; content: string };
+
+/**
+ * Stream-execute all todo/failed tasks in a feat via CC.
+ * Returns an AbortController so the caller can cancel the stream.
+ */
+export function executeFeat(
+  featId: string,
+  onEvent: (event: FeatExecuteEvent) => void,
+  onError?: (error: Error) => void,
+): AbortController {
+  const controller = new AbortController();
+  const headers = { ...authHeaders(), Accept: "text/event-stream" };
+
+  (async () => {
+    try {
+      const response = await fetch(`${base()}/feats/${featId}/execute`, {
+        method: "POST",
+        headers,
+        signal: controller.signal,
+        credentials: "same-origin",
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Execute feat failed (${response.status}): ${text}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("Response body is not readable");
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith("data: ")) continue;
+          try {
+            const event = JSON.parse(trimmed.slice(6)) as FeatExecuteEvent;
+            onEvent(event);
+          } catch {
+            continue;
+          }
+        }
+      }
+
+      if (buffer.trim().startsWith("data: ")) {
+        try {
+          const event = JSON.parse(buffer.trim().slice(6)) as FeatExecuteEvent;
+          onEvent(event);
+        } catch {
+          /* ignore */
+        }
+      }
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      onError?.(err instanceof Error ? err : new Error(String(err)));
+    }
+  })();
+
+  return controller;
+}

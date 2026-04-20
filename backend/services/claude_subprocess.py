@@ -39,6 +39,7 @@ async def run_claude_stream(
     prompt: str,
     context: str | None = None,
     timeout: int | None = None,
+    cwd: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """Spawn ``claude`` CLI and yield text chunks as they arrive.
 
@@ -101,6 +102,7 @@ async def run_claude_stream(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         env=env,
+        cwd=cwd,
         limit=1024 * 1024,  # 1 MB per readline — NDJSON lines can be large
     )
 

@@ -36,12 +36,14 @@ import {
   deleteEpic,
   deleteFeat,
   deleteTask,
+  executeFeat,
   fetchTaskPlan,
   generateTaskPlan,
   patchTask,
   resetPlan,
   resetTasks,
 } from "../../services/api/taskPlan";
+import type { FeatExecuteEvent } from "../../services/api/taskPlan";
 import type {
   EpicStatus,
   FeatStatus,
@@ -274,6 +276,28 @@ function TaskRow({ task, canGenerate, onStatusChange, onDelete }: TaskRowProps) 
 /*  Feat row                                                            */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/*  Feat execution state                                                */
+/* ------------------------------------------------------------------ */
+
+interface FeatExecState {
+  running: boolean;
+  output: string;
+  activeTaskId: string | null;
+  taskStatuses: Record<string, string>; // taskId → "in_progress" | "done" | "failed"
+  featStatus: string | null;
+  error: string | null;
+}
+
+const EXEC_IDLE: FeatExecState = {
+  running: false,
+  output: "",
+  activeTaskId: null,
+  taskStatuses: {},
+  featStatus: null,
+  error: null,
+};
+
 interface FeatRowProps {
   feat: TaskPlanFeat;
   epicId: string;
@@ -282,20 +306,97 @@ interface FeatRowProps {
   onTaskDelete: (featId: string, taskId: string) => void;
   onTaskAdd: (featId: string, title: string, taskType: string) => void;
   onFeatDelete: (featId: string) => void;
+  onFeatExecuted: (featId: string) => void;
 }
 
-function FeatRow({ feat, canGenerate, onTaskStatusChange, onTaskDelete, onTaskAdd, onFeatDelete }: FeatRowProps) {
+function FeatRow({ feat, canGenerate, onTaskStatusChange, onTaskDelete, onTaskAdd, onFeatDelete, onFeatExecuted }: FeatRowProps) {
   const lsKey = `taskPlan.feat.${feat.id}`;
   const [expanded, setExpanded] = useState(() => lsGet(lsKey, true));
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [addingTask, setAddingTask] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskType, setNewTaskType] = useState<"backend" | "frontend" | "migration" | "test" | "docs">("backend");
+  const [exec, setExec] = useState<FeatExecState>(EXEC_IDLE);
+  const [outputExpanded, setOutputExpanded] = useState(true);
+  const execAbortRef = useRef<AbortController | null>(null);
+  const outputRef = useRef<HTMLPreElement | null>(null);
 
   const toggle = () => {
     const next = !expanded;
     setExpanded(next);
     lsSet(lsKey, next);
+  };
+
+  const startExecute = () => {
+    execAbortRef.current?.abort();
+    setExec({ running: true, output: "", activeTaskId: null, taskStatuses: {}, featStatus: null, error: null });
+    setOutputExpanded(true);
+
+    const controller = executeFeat(
+      feat.id,
+      (event: FeatExecuteEvent) => {
+        switch (event.type) {
+          case "task_start":
+            setExec((prev) => ({
+              ...prev,
+              activeTaskId: event.task_id,
+              output: prev.output + `\n▶ Task ${event.task_number}: ${event.task_title}\n`,
+            }));
+            break;
+          case "chunk":
+            setExec((prev) => {
+              const updated = { ...prev, output: prev.output + event.text };
+              // Auto-scroll
+              setTimeout(() => {
+                if (outputRef.current) {
+                  outputRef.current.scrollTop = outputRef.current.scrollHeight;
+                }
+              }, 0);
+              return updated;
+            });
+            break;
+          case "task_done":
+            setExec((prev) => ({
+              ...prev,
+              activeTaskId: null,
+              taskStatuses: { ...prev.taskStatuses, [event.task_id]: event.status },
+              output: prev.output + `\n${event.status === "done" ? "✓" : "✗"} Task ${event.status.toUpperCase()}\n`,
+            }));
+            break;
+          case "feat_done":
+            setExec((prev) => ({
+              ...prev,
+              running: false,
+              featStatus: event.feat_status,
+              output: prev.output + `\n=== Feat ${event.feat_status.toUpperCase()} ===\n`,
+            }));
+            onFeatExecuted(feat.id);
+            break;
+          case "error":
+            setExec((prev) => ({
+              ...prev,
+              running: false,
+              error: event.content,
+              output: prev.output + `\n[ERROR] ${event.content}\n`,
+            }));
+            break;
+        }
+      },
+      (err) => {
+        setExec((prev) => ({
+          ...prev,
+          running: false,
+          error: err.message,
+          output: prev.output + `\n[ERROR] ${err.message}\n`,
+        }));
+      },
+    );
+    execAbortRef.current = controller;
+  };
+
+  const stopExecute = () => {
+    execAbortRef.current?.abort();
+    setExec((prev) => ({ ...prev, running: false, output: prev.output + "\n[CANCELLED]\n" }));
   };
 
   const submitTask = () => {
@@ -333,6 +434,26 @@ function FeatRow({ feat, canGenerate, onTaskStatusChange, onTaskDelete, onTaskAd
 
         {canGenerate && (
           <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+            {/* Execute feat */}
+            {exec.running ? (
+              <button
+                type="button"
+                title="Zastaviť exekúciu"
+                onClick={stopExecute}
+                className="rounded p-1 text-yellow-500 hover:text-yellow-700 animate-pulse"
+              >
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              </button>
+            ) : feat.status !== "done" && (
+              <button
+                type="button"
+                title="Spustiť exekúciu featu cez CC"
+                onClick={startExecute}
+                className="rounded p-1 text-gray-400 hover:text-green-600 dark:hover:text-green-400"
+              >
+                <Play className="h-3.5 w-3.5" />
+              </button>
+            )}
             <button
               type="button"
               title="Pridať task"
@@ -409,6 +530,52 @@ function FeatRow({ feat, canGenerate, onTaskStatusChange, onTaskDelete, onTaskAd
               </button>
             </div>
           )}
+
+          {/* CC execution output panel */}
+          {(exec.running || exec.output) && (
+            <div className="mt-2 ml-2 rounded border border-gray-700 dark:border-gray-600 bg-gray-900 overflow-hidden">
+              <div className="flex items-center justify-between px-2 py-1 border-b border-gray-700">
+                <span className="text-[10px] font-mono text-gray-400">
+                  {exec.running ? (
+                    <span className="flex items-center gap-1">
+                      <Loader2 className="h-3 w-3 animate-spin text-yellow-400" />
+                      <span className="text-yellow-400">Executing…</span>
+                    </span>
+                  ) : exec.featStatus === "done" ? (
+                    <span className="text-green-400">✓ Done</span>
+                  ) : (
+                    <span className="text-red-400">✗ Failed</span>
+                  )}
+                </span>
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setOutputExpanded((v) => !v)}
+                    className="text-gray-500 hover:text-gray-300 text-[10px] font-mono"
+                  >
+                    {outputExpanded ? "▲ collapse" : "▼ expand"}
+                  </button>
+                  {!exec.running && (
+                    <button
+                      type="button"
+                      onClick={() => setExec(EXEC_IDLE)}
+                      className="ml-1 text-gray-500 hover:text-gray-300"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+              {outputExpanded && (
+                <pre
+                  ref={outputRef}
+                  className="text-[10px] font-mono text-gray-200 p-2 max-h-64 overflow-y-auto whitespace-pre-wrap leading-relaxed"
+                >
+                  {exec.output || " "}
+                </pre>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -440,6 +607,7 @@ interface EpicRowProps {
   onFeatDelete: (epicId: string, featId: string) => void;
   onFeatAdd: (epicId: string, title: string) => void;
   onEpicDelete: (epicId: string) => void;
+  onFeatExecuted: (featId: string) => void;
 }
 
 function EpicRow({
@@ -451,6 +619,7 @@ function EpicRow({
   onFeatDelete,
   onFeatAdd,
   onEpicDelete,
+  onFeatExecuted,
 }: EpicRowProps) {
   const lsKey = `taskPlan.epic.${epic.id}`;
   const [expanded, setExpanded] = useState(() => lsGet(lsKey, true));
@@ -539,6 +708,7 @@ function EpicRow({
               onTaskDelete={(featId, taskId) => onTaskDelete(epic.id, featId, taskId)}
               onTaskAdd={(featId, title, taskType) => onTaskAdd(epic.id, featId, title, taskType)}
               onFeatDelete={(featId) => onFeatDelete(epic.id, featId)}
+              onFeatExecuted={onFeatExecuted}
             />
           ))}
           {epic.feats.length === 0 && (
@@ -913,6 +1083,20 @@ export function TaskPlanPanel({ versionId, canGenerate }: Props) {
     }
   }, [versionId]);
 
+  // Re-fetch plan after feat execution to sync task statuses from DB.
+  const handleFeatExecuted = useCallback(async () => {
+    const data = await fetchTaskPlan(versionId);
+    if (data) {
+      setState({
+        phase: "done",
+        epics: data.plan,
+        epicCount: data.epic_count,
+        featCount: data.feat_count,
+        taskCount: data.task_count,
+      });
+    }
+  }, [versionId]);
+
   /* ---------------------------------------------------------------- */
   /*  Render                                                           */
   /* ---------------------------------------------------------------- */
@@ -1075,6 +1259,7 @@ export function TaskPlanPanel({ versionId, canGenerate }: Props) {
             onFeatDelete={handleFeatDelete}
             onFeatAdd={handleFeatAdd}
             onEpicDelete={handleEpicDelete}
+            onFeatExecuted={handleFeatExecuted}
           />
         ))}
         {epics.length === 0 && (

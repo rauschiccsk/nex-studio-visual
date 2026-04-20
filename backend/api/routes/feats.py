@@ -59,13 +59,15 @@ Architecture):
 
 from __future__ import annotations
 
+import logging
 from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from backend.db.session import get_db
+from backend.db.session import SessionLocal, get_db
 from backend.schemas.feat import (
     FeatCreate,
     FeatRead,
@@ -74,6 +76,9 @@ from backend.schemas.feat import (
 )
 from backend.schemas.pagination import PaginatedResponse
 from backend.services import feat as feat_service
+from backend.services import feat_executor
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Feats"])
 
@@ -244,3 +249,37 @@ def delete_feat(
         db.rollback()
         raise _map_value_error(exc) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{feat_id}/execute")
+async def execute_feat(feat_id: UUID) -> StreamingResponse:
+    """Stream-execute all todo/failed tasks in a feat via Claude CC.
+
+    Streams SSE events::
+
+        data: {"type": "task_start",  "task_id": "...", "task_number": N, "task_title": "..."}
+        data: {"type": "chunk",       "text": "...", "task_id": "..."}
+        data: {"type": "task_done",   "task_id": "...", "status": "done"|"failed"}
+        data: {"type": "feat_done",   "feat_status": "...", "feat_id": "..."}
+        data: {"type": "error",       "content": "..."}
+
+    Requires ``Project.source_path`` to be set — CC runs in that directory.
+    """
+    import json as _json
+
+    async def _sse_generator():
+        exec_db = SessionLocal()
+        try:
+            async for event in feat_executor.execute_feat_stream(feat_id, exec_db):
+                yield event
+        except Exception as exc:
+            logger.exception("Unexpected error in feat execute SSE for feat %s", feat_id)
+            yield f"data: {_json.dumps({'type': 'error', 'content': str(exc)})}\n\n"
+        finally:
+            exec_db.close()
+
+    return StreamingResponse(
+        _sse_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
