@@ -2250,8 +2250,24 @@ Potrebujem účtovný systém pre malú firmu (do 20 zamestnancov). Systém mus�
     </div>
   </div>
 
+  <!-- ── STATE: GATE (Summary not yet approved) ── -->
+  <div id="arch-state-gate" class="flex-1 flex flex-col items-center justify-center gap-5 p-8 hidden">
+    <div class="w-16 h-16 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center">
+      <svg class="w-8 h-8 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+      </svg>
+    </div>
+    <div class="text-center">
+      <div class="text-sm font-semibold text-gray-300 mb-1">Čaká na schválenie Súhrnnej dokumentácie</div>
+      <div class="text-xs text-gray-500 max-w-xs leading-relaxed">Architecture sa odomkne až po schválení kroku 3 — Súhrnná dokumentácia.</div>
+    </div>
+    <button onclick="showScreen('summary')" class="flex items-center gap-2 text-xs text-primary-400 hover:text-primary-300 border border-primary-500/30 hover:border-primary-500/60 px-4 py-2 rounded-lg transition-colors">
+      Prejsť na Súhrnnú dokumentáciu →
+    </button>
+  </div>
+
   <!-- ── STATE: EMPTY ── -->
-  <div id="arch-state-empty" class="flex-1 flex flex-col items-center justify-center gap-5 p-8">
+  <div id="arch-state-empty" class="flex-1 flex flex-col items-center justify-center gap-5 p-8 hidden">
     <div class="w-16 h-16 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center">
       <svg class="w-8 h-8 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
@@ -4106,15 +4122,23 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
     if (name === 'spec') document.querySelector('[onclick="showScreen(\'spec\')"]')?.classList.add('active');
     if (name === 'uidesign') document.querySelector('[onclick="showScreen(\'uidesign\')"]')?.classList.add('active');
     if (name === 'version' || name === 'design') document.querySelector('[onclick="showScreen(\'version\')"]')?.classList.add('active');
-    if (name === 'architecture') document.querySelector('[onclick="showScreen(\'architecture\')"]')?.classList.add('active');
+    if (name === 'architecture') {
+      document.querySelector('[onclick="showScreen(\'architecture\')"]')?.classList.add('active');
+      if (!_pipelineState.doneSteps.has(5)) {
+        _archState = 'gate';
+      } else if (_archState === 'gate') {
+        _archState = 'empty';
+      }
+      archSetState(_archState);
+    }
     if (name === 'summary') {
       document.querySelector('[onclick="showScreen(\'summary\')"]')?.classList.add('active');
-      // Ak je UI Design schválený (step 4 done), zobraz stav "empty" (gate splnený), inak "gate"
-      if (_pipelineState.doneSteps.has(4)) {
-        if (_sumState === 'gate') sumSetState('empty');
-      } else {
-        sumSetState('gate');
+      if (!_pipelineState.doneSteps.has(4)) {
+        _sumState = 'gate';
+      } else if (_sumState === 'gate') {
+        _sumState = 'empty';
       }
+      sumSetState(_sumState);
     }
     if (name === 'taskplan') document.querySelector('[onclick="showScreen(\'taskplan\')"]')?.classList.add('active');
     if (name === 'implementacia') document.querySelector('[onclick="showScreen(\'implementacia\')"]')?.classList.add('active');
@@ -4212,6 +4236,10 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
   }
 
   function sumApprove() {
+    if (!_pipelineState.doneSteps.has(4)) {
+      _showToast('⛔ Najprv schváľ UI Design (krok 2)');
+      return;
+    }
     _pipelineState.doneSteps.add(5);
     _saveState();
 
@@ -4280,7 +4308,7 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
   let _archTab   = 'behavior'; // 'behavior' | 'design'
 
   function archSetState(state) {
-    ['empty','generating','done'].forEach(s => {
+    ['gate','empty','generating','done'].forEach(s => {
       const el = document.getElementById('arch-state-' + s);
       if (el) el.classList.toggle('hidden', s !== state);
     });
@@ -4348,6 +4376,10 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
   }
 
   function archApprove() {
+    if (!_pipelineState.doneSteps.has(5)) {
+      _showToast('⛔ Najprv schváľ Súhrnnú dokumentáciu (krok 3)');
+      return;
+    }
     _pipelineState.doneSteps.add(6);
     _saveState();
 
