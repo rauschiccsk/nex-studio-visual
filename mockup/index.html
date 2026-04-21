@@ -56,6 +56,7 @@
     #screen-kb.active          { display: flex !important; flex-direction: column; }
     #screen-summary.active      { display: flex !important; flex-direction: column; }
     #screen-architecture.active { display: flex !important; flex-direction: column; }
+    #screen-audit.active        { display: flex !important; flex-direction: column; }
     .bug-row { cursor: pointer; transition: background 0.1s; border-left: 2px solid transparent; }
     .bug-row:hover { background: rgba(255,255,255,0.03); }
     .bug-row.active { background: rgba(99,102,241,0.1); border-left-color: #6366f1; }
@@ -170,6 +171,10 @@
     <a class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-gray-400 cursor-pointer" onclick="showScreen('architecture')">
       <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
       <span class="sb-text">Architecture</span>
+    </a>
+    <a class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-gray-400 cursor-pointer" onclick="showScreen('audit')">
+      <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+      <span class="sb-text">Quality Audit</span>
     </a>
     <a class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-gray-400 cursor-pointer" onclick="showScreen('taskplan')">
       <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
@@ -706,27 +711,42 @@
         </div>
       </div>
 
-      <!-- STEP 5: Task Plan — PENDING -->
-      <div class="rounded-xl border border-slate-800 bg-slate-900 p-4 flex items-center gap-4 opacity-40 cursor-pointer card-hover" onclick="taskplanOpen()">
+      <!-- STEP 5: Quality Audit — PENDING -->
+      <div class="rounded-xl border border-slate-800 bg-slate-900 p-4 flex items-center gap-4 opacity-40 cursor-pointer card-hover" onclick="showScreen('audit')">
         <div class="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-sm font-bold text-gray-500 shrink-0">5</div>
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 mb-0.5">
             <span class="text-xs text-gray-600 font-semibold uppercase tracking-wider">Krok 5</span>
           </div>
-          <div class="text-sm font-semibold text-gray-400">Task Plan</div>
-          <div class="text-xs text-gray-500 mt-0.5">Epic → Feat → Task breakdown, CC delegácia pripravená</div>
+          <div class="text-sm font-semibold text-gray-400">Quality Audit</div>
+          <div class="text-xs text-gray-500 mt-0.5">Nezávislá kontrola — súlad dokumentácie, medzery, ICC štandardy</div>
         </div>
         <div class="shrink-0 flex items-center gap-2">
           <span class="text-[10px] bg-slate-800 text-gray-600 px-2 py-0.5 rounded-full border border-slate-700">Čaká na Architecture</span>
         </div>
       </div>
 
-      <!-- STEP 6: Implementácia — PENDING -->
-      <div class="rounded-xl border border-slate-800 bg-slate-900 p-4 flex items-center gap-4 opacity-40 cursor-pointer card-hover" onclick="implementaciaOpen()">
+      <!-- STEP 6: Task Plan — PENDING -->
+      <div class="rounded-xl border border-slate-800 bg-slate-900 p-4 flex items-center gap-4 opacity-40 cursor-pointer card-hover" onclick="taskplanOpen()">
         <div class="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-sm font-bold text-gray-500 shrink-0">6</div>
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 mb-0.5">
             <span class="text-xs text-gray-600 font-semibold uppercase tracking-wider">Krok 6</span>
+          </div>
+          <div class="text-sm font-semibold text-gray-400">Task Plan</div>
+          <div class="text-xs text-gray-500 mt-0.5">Epic → Feat → Task breakdown, CC delegácia pripravená</div>
+        </div>
+        <div class="shrink-0 flex items-center gap-2">
+          <span class="text-[10px] bg-slate-800 text-gray-600 px-2 py-0.5 rounded-full border border-slate-700">Čaká na Quality Audit</span>
+        </div>
+      </div>
+
+      <!-- STEP 7: Implementácia — PENDING -->
+      <div class="rounded-xl border border-slate-800 bg-slate-900 p-4 flex items-center gap-4 opacity-40 cursor-pointer card-hover" onclick="implementaciaOpen()">
+        <div class="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-sm font-bold text-gray-500 shrink-0">7</div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 mb-0.5">
+            <span class="text-xs text-gray-600 font-semibold uppercase tracking-wider">Krok 7</span>
           </div>
           <div class="text-sm font-semibold text-gray-400">Implementácia</div>
           <div class="text-xs text-gray-500 mt-0.5">CC agent píše kód, testy, commity — automatizované</div>
@@ -2416,6 +2436,130 @@ Potrebujem účtovný systém pre malú firmu (do 20 zamestnancov). Systém mus�
 
 </div><!-- /screen-architecture -->
 
+<!-- ═══════════════════════════════════════════════════════════ SCREEN: QUALITY AUDIT -->
+<div id="screen-audit" class="screen flex flex-col h-full">
+
+  <!-- Topbar -->
+  <div class="flex-shrink-0 bg-slate-900/50 border-b border-slate-800 px-5 py-2.5 flex items-center gap-3">
+    <div class="flex items-center gap-2 text-xs text-gray-500">
+      <span class="ctx-project text-gray-400 font-medium">NEX Ledger</span>
+      <span>·</span>
+      <span class="ctx-version bg-slate-800 text-gray-300 font-mono px-2 py-0.5 rounded">v0.1</span>
+    </div>
+    <div class="flex-1"></div>
+    <div class="flex items-center gap-1.5 text-xs text-gray-600">
+      <span>krok</span>
+      <span class="text-primary-400 font-semibold">5</span>
+      <span>/ 7 · Quality Audit</span>
+    </div>
+  </div>
+
+  <!-- ── STATE: GATE (Architecture not yet approved) ── -->
+  <div id="audit-state-gate" class="flex-1 flex flex-col items-center justify-center gap-5 p-8 hidden">
+    <div class="w-16 h-16 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center">
+      <svg class="w-8 h-8 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+      </svg>
+    </div>
+    <div class="text-center">
+      <div class="text-sm font-semibold text-gray-300 mb-1">Čaká na schválenie Architecture</div>
+      <div class="text-xs text-gray-500 max-w-xs leading-relaxed">Quality Audit sa odomkne až po schválení kroku 4 — Architecture (BEHAVIOR.md + DESIGN.md).</div>
+    </div>
+    <button onclick="showScreen('architecture')" class="flex items-center gap-2 text-xs text-primary-400 hover:text-primary-300 border border-primary-500/30 hover:border-primary-500/60 px-4 py-2 rounded-lg transition-colors">
+      Prejsť na Architecture →
+    </button>
+  </div>
+
+  <!-- ── STATE: EMPTY (unlocked, not yet run) ── -->
+  <div id="audit-state-empty" class="flex-1 flex flex-col items-center justify-center gap-5 p-8 hidden">
+    <div class="w-16 h-16 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center">
+      <svg class="w-8 h-8 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+      </svg>
+    </div>
+    <div class="text-center">
+      <div class="text-base font-semibold text-gray-200 mb-1">Quality Audit ešte nebol spustený</div>
+      <div class="text-xs text-gray-500 max-w-sm leading-relaxed">Nezávislý AI audit skontroluje súlad všetkej dokumentácie, medzery voči špecifikácii, dodržanie ICC štandardov a pripravenosť na generovanie Task Planu.</div>
+    </div>
+    <button onclick="auditRun()" class="flex items-center gap-2 bg-primary-600 hover:bg-primary-500 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+      Spustiť Quality Audit
+    </button>
+    <div class="text-xs text-gray-600">Zdroje: Spec · DevDocs · UI Design · Summary · Architecture</div>
+  </div>
+
+  <!-- ── STATE: RUNNING ── -->
+  <div id="audit-state-running" class="flex-1 flex flex-col hidden">
+    <div class="flex-shrink-0 px-6 py-4 border-b border-slate-800 flex items-center gap-4">
+      <div class="w-6 h-6 rounded-full border-2 border-primary-500 border-t-transparent animate-spin shrink-0"></div>
+      <div class="flex-1">
+        <div class="text-sm font-medium text-gray-200" id="audit-run-label">Načítavam dokumentáciu…</div>
+        <div class="h-1 bg-slate-700 rounded-full overflow-hidden mt-2">
+          <div class="h-full bg-primary-500 rounded-full transition-all duration-700" id="audit-run-bar" style="width:0%"></div>
+        </div>
+      </div>
+      <span class="text-xs text-primary-400 font-mono" id="audit-run-pct">0%</span>
+    </div>
+    <div class="flex-1 overflow-y-auto p-6">
+      <div class="max-w-3xl mx-auto space-y-2">
+        <div class="flex items-center gap-3 py-2 border-b border-slate-800">
+          <div class="w-2 h-2 rounded-full bg-primary-500 animate-pulse shrink-0"></div>
+          <span class="text-xs text-gray-500 font-medium" id="audit-run-phase">Kontrola pokrytia požiadaviek…</span>
+        </div>
+        <div class="text-[10px] text-gray-600 uppercase tracking-wider pt-2 font-semibold">Priebeh auditu</div>
+        <div id="audit-run-log" class="space-y-1 font-mono text-xs text-gray-500"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── STATE: DONE ── -->
+  <div id="audit-state-done" class="flex-1 flex flex-col hidden">
+    <!-- Action bar -->
+    <div class="flex-shrink-0 px-6 py-3 border-b border-slate-800 flex items-center gap-3">
+      <span id="audit-result-badge" class="text-[10px] bg-green-500/10 border border-green-500/25 text-green-400 px-2.5 py-1 rounded-full flex items-center gap-1.5">
+        <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+        PASS — pripravené na Task Plan
+      </span>
+      <span class="text-xs text-gray-600">pred chvíľou · 5 oblastí</span>
+      <div class="flex-1"></div>
+      <button onclick="auditRun()" class="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 border border-slate-700 hover:border-slate-600 px-3 py-1.5 rounded-lg transition-colors">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        Re-audit
+      </button>
+      <button onclick="auditApprove()" class="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-white text-xs font-medium px-4 py-1.5 rounded-lg transition-colors">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+        Schváliť Audit → Task Plan
+      </button>
+    </div>
+
+    <!-- Summary stats -->
+    <div class="flex-shrink-0 px-6 py-3 border-b border-slate-800 flex items-center gap-6">
+      <div class="flex items-center gap-2">
+        <div class="w-2 h-2 rounded-full bg-green-500 shrink-0"></div>
+        <span class="text-xs text-gray-400"><span id="audit-count-pass" class="font-semibold text-green-400">12</span> PASS</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <div class="w-2 h-2 rounded-full bg-yellow-500 shrink-0"></div>
+        <span class="text-xs text-gray-400"><span id="audit-count-warn" class="font-semibold text-yellow-400">2</span> WARNING</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <div class="w-2 h-2 rounded-full bg-red-500 shrink-0"></div>
+        <span class="text-xs text-gray-400"><span id="audit-count-block" class="font-semibold text-red-400">0</span> BLOCKER</span>
+      </div>
+      <div class="flex-1"></div>
+      <span class="text-[10px] text-gray-600">5 oblastí auditovaných</span>
+    </div>
+
+    <!-- Audit report -->
+    <div class="flex-1 overflow-y-auto p-6">
+      <div class="max-w-3xl mx-auto space-y-4" id="audit-report-body">
+        <!-- Filled by auditRun() -->
+      </div>
+    </div>
+  </div>
+
+</div><!-- /screen-audit -->
+
 <div id="screen-design" class="screen flex flex-col h-full">
 
   <!-- Topbar -->
@@ -3687,7 +3831,7 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
      JAVASCRIPT
 ════════════════════════════════════════════════════════════════════ -->
 <script>
-  const SCREENS = ['home','projects','project-detail','version','new-project','versions','new-version','spec','uidesign','summary','architecture','design','taskplan','implementacia','kb','settings','login'];
+  const SCREENS = ['home','projects','project-detail','version','new-project','versions','new-version','spec','uidesign','summary','architecture','audit','design','taskplan','implementacia','kb','settings','login'];
 
   // ---- Aktívny kontext (projekt + verzia) ----
   let activeCtx = { project: 'NEX Ledger', slug: 'NL', version: 'v0.1' };
@@ -3747,6 +3891,7 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
     'uidesign':       'UI Design',
     'summary':        'Summary',
     'architecture':   'Architecture',
+    'audit':          'Quality Audit',
     'design':         'DESIGN.md',
     'taskplan':       'Task Plan',
     'implementacia':  'Implementation',
@@ -3799,14 +3944,15 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
     const TW = size === 'lg' ? 'text-[10px]' : 'text-[9px]';
     const GW = size === 'lg' ? 'w-8' : 'w-6';
     const MB = size === 'lg' ? 'mb-3.5' : 'mb-3';
-    // Steps: 1-3 always done; 4=DESIGN.md→has(5), 5=Task Plan→has(6), 6=Implementácia→has(7)
+    // Steps: 1-3 always done; 4=UIDesign, 5=Summary, 6=Arch, 7=Audit, 8=TaskPlan, 9=ImplDone
     const steps = [
-      { lbl:'Raw Spec',      done:true,         active:false },
-      { lbl:'BEHAVIOR',      done:true,         active:false },
-      { lbl:'Pro Spec',      done:true,         active:false },
-      { lbl:'DESIGN.md',     done:done.has(5),  active:!done.has(5) },
-      { lbl:'Task Plan',     done:done.has(6),  active:done.has(5)&&!done.has(6) },
-      { lbl:'Implementácia', done:done.has(7),  active:done.has(6)&&!done.has(7) },
+      { lbl:'Spec',          done:true,          active:false },
+      { lbl:'DevDocs+UI',    done:true,          active:false },
+      { lbl:'Summary',       done:done.has(5),   active:!done.has(5) },
+      { lbl:'Architecture',  done:done.has(6),   active:done.has(5)&&!done.has(6) },
+      { lbl:'Audit',         done:done.has(7),   active:done.has(6)&&!done.has(7) },
+      { lbl:'Task Plan',     done:done.has(8),   active:done.has(7)&&!done.has(8) },
+      { lbl:'Impl',          done:done.has(9),   active:done.has(8)&&!done.has(9) },
     ];
     const conCls = [
       'bg-green-500',
@@ -3814,6 +3960,7 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
       done.has(5) ? 'bg-green-500' : 'bg-primary-500',
       done.has(6) ? 'bg-green-500' : done.has(5) ? 'bg-primary-500' : 'bg-slate-700',
       done.has(7) ? 'bg-green-500' : done.has(6) ? 'bg-primary-500' : 'bg-slate-700',
+      done.has(8) ? 'bg-green-500' : done.has(7) ? 'bg-primary-500' : 'bg-slate-700',
     ];
     let html = '<div class="flex items-center gap-0">';
     for (let i = 0; i < steps.length; i++) {
@@ -3853,10 +4000,10 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
     const dtp = document.getElementById('detail-pipe');
     if (dtp) dtp.innerHTML = _renderMiniPipelineHtml(done, 'sm');
     // Progress bar + labels (NEX Ledger v0.1)
-    const count = Math.min(done.size + 3, 7);
-    const pcts  = {3:43, 4:57, 5:71, 6:86, 7:100};
-    const pct   = pcts[count] || 43;
-    const stepLbls = {3:'UI Design', 4:'DESIGN.md', 5:'Task Plan', 6:'Implementácia', 7:'Hotovo'};
+    const count = Math.min(done.size + 3, 9);
+    const pcts  = {3:33, 4:44, 5:56, 6:67, 7:78, 8:89, 9:100};
+    const pct   = pcts[count] || 33;
+    const stepLbls = {3:'UI Design', 4:'Summary', 5:'Architecture', 6:'Quality Audit', 7:'Task Plan', 8:'Implementácia', 9:'Hotovo'};
     const lbl   = stepLbls[count] || 'UI Design';
     const nlStep = document.getElementById('home-nl-step');
     if (nlStep) nlStep.textContent = `v0.1 · ${lbl}`;
@@ -3875,12 +4022,14 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
         done.has(5)?'bg-green-500':done.has(4)?'bg-primary-500':'bg-slate-700',
         done.has(6)?'bg-green-500':done.has(5)?'bg-primary-500':'bg-slate-700',
         done.has(7)?'bg-green-500':done.has(6)?'bg-primary-500':'bg-slate-700',
+        done.has(8)?'bg-green-500':done.has(7)?'bg-primary-500':'bg-slate-700',
+        done.has(9)?'bg-green-500':done.has(8)?'bg-primary-500':'bg-slate-700',
       ];
-      const krokyLbls = {3:'UI Design',4:'DESIGN.md',5:'Task Plan',6:'Implementácia',7:'Hotovo'};
+      const krokyLbls = {3:'UI Design',4:'Summary',5:'Architecture',6:'Quality Audit',7:'Task Plan',8:'Implementácia',9:'Hotovo'};
       const krokyLbl  = krokyLbls[count] || 'UI Design';
-      const lblCls = done.has(7) ? 'text-green-500' : 'text-gray-500';
+      const lblCls = done.has(9) ? 'text-green-500' : 'text-gray-500';
       vPipe.innerHTML = segCls.map(c=>`<div class="h-1 w-6 rounded-full ${c}"></div>`).join('')
-        + `<span class="${lblCls} text-[10px] ml-1">krok ${count}/7 · ${krokyLbl}</span>`;
+        + `<span class="${lblCls} text-[10px] ml-1">krok ${count}/9 · ${krokyLbl}</span>`;
     }
   }
 
@@ -3890,6 +4039,7 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
         doneSteps:     [..._pipelineState.doneSteps],
         sumState:      typeof _sumState       !== 'undefined' && _sumState       !== 'generating' ? _sumState       : 'gate',
         archState:     typeof _archState      !== 'undefined' && _archState      !== 'generating' ? _archState      : 'empty',
+        auditState:    typeof _auditState     !== 'undefined' && _auditState     !== 'running'    ? _auditState     : 'gate',
         designState:   typeof _designState    !== 'undefined' && _designState    !== 'generating' ? _designState    : 'empty',
         taskplanState: typeof _taskplanState  !== 'undefined' && _taskplanState  !== 'generating' ? _taskplanState  : 'empty',
         implFeatSt:    typeof _implFeatSt     !== 'undefined' ? {..._implFeatSt}     : {},
@@ -3905,6 +4055,7 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
       if (Array.isArray(d.doneSteps))  d.doneSteps.forEach(s => _pipelineState.doneSteps.add(Number(s)));
       if (d.sumState)                  _sumState       = d.sumState;
       if (d.archState)                 _archState      = d.archState;
+      if (d.auditState)                _auditState     = d.auditState;
       if (d.designState)               _designState    = d.designState;
       if (d.taskplanState)             _taskplanState  = d.taskplanState;
       if (d.implFeatSt)                Object.assign(_implFeatSt,  d.implFeatSt);
@@ -3916,16 +4067,16 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
     location.reload();
   }
 
-  function _markStep7Done() {
-    _pipelineState.doneSteps.add(7);
+  function _markStep8Done() {
+    _pipelineState.doneSteps.add(8);
     _saveState();
     applyVersionState();
     _applyGlobalPipelineViews();
-    _showToast('Krok 7 — Implementation označený ako Done');
+    _showToast('Krok 8 — Task Plan označený ako Done');
   }
 
   function _markImplDone() {
-    _pipelineState.doneSteps.add(8);
+    _pipelineState.doneSteps.add(9);
     _saveState();
     applyVersionState();
     _applyGlobalPipelineViews();
@@ -3933,7 +4084,7 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
   }
 
   function _resetImplAll() {
-    _pipelineState.doneSteps.delete(8);
+    _pipelineState.doneSteps.delete(9);
     _implResetState();
     _saveState();
     applyVersionState();
@@ -3944,11 +4095,13 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
 
   function _undoLastStep() {
     const done = _pipelineState.doneSteps;
-    const last = [7, 6, 5, 4].find(n => done.has(n));
+    const last = [9, 8, 7, 6, 5, 4].find(n => done.has(n));
     if (!last) return;
-    if (last === 7) _implResetState();
-    if (last === 6) { _taskplanState = 'empty'; taskplanSetState('empty'); }
-    if (last === 5) { _designState = 'empty'; designSetState('empty'); }
+    if (last === 9) _implResetState();
+    if (last === 8) { _taskplanState = 'empty'; taskplanSetState('empty'); }
+    if (last === 7) { _auditState = 'empty'; auditSetState('empty'); }
+    if (last === 6) { _archState = 'empty'; archSetState('empty'); }
+    if (last === 5) { _sumState = 'empty'; sumSetState('empty'); }
     done.delete(last);
     _saveState();
     applyVersionState();
@@ -4100,10 +4253,11 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
       }
     }
 
-    // ── Steps 4 / 5 / 6 via hub.children ───────────────────────────────
+    // ── Steps 4 / 5 / 6 / 7 via hub.children ──────────────────────────
     const card4 = hub.children[3]; // Architecture
-    const card5 = hub.children[4]; // Task Plan
-    const card6 = hub.children[5]; // Implementácia
+    const card5 = hub.children[4]; // Quality Audit
+    const card6 = hub.children[5]; // Task Plan
+    const card7 = hub.children[6]; // Implementácia
 
     if (card4) {
       if (done.has(6)) {
@@ -4140,11 +4294,43 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
     if (card5) {
       if (done.has(7)) {
         card5.className = 'rounded-xl border border-green-500/20 bg-slate-900 p-4 flex items-center gap-4 cursor-pointer card-hover transition-all duration-300';
-        card5.onclick = () => taskplanOpen();
+        card5.onclick = () => showScreen('audit');
         card5.innerHTML = `
           <div class="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center text-base font-bold text-white shrink-0">✓</div>
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 mb-0.5"><span class="text-xs text-green-500 font-semibold uppercase tracking-wider">Krok 5</span></div>
+            <div class="text-sm font-semibold text-gray-100">Quality Audit</div>
+            <div class="text-xs text-gray-500 mt-0.5">Všetky kontroly prešli — dokumentácia pripravená na Task Plan</div>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <span class="text-[10px] bg-green-500/10 border border-green-500/25 text-green-400 px-2 py-0.5 rounded-full">Schválené</span>
+            <button onclick="event.stopPropagation();showScreen('audit')" class="text-xs text-gray-500 hover:text-gray-300 transition-colors">Zobraziť →</button>
+          </div>`;
+      } else if (done.has(6)) {
+        card5.className = 'rounded-xl border border-primary-500/40 bg-primary-600/5 p-4 flex items-center gap-4 cursor-pointer card-hover transition-all duration-300';
+        card5.onclick = () => showScreen('audit');
+        card5.innerHTML = `
+          <div class="w-10 h-10 rounded-full bg-primary-600 ring-4 ring-primary-500/20 flex items-center justify-center text-sm font-bold text-white shrink-0">5</div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-0.5"><span class="text-xs text-primary-400 font-semibold uppercase tracking-wider">Krok 5 · Aktívny</span></div>
+            <div class="text-sm font-semibold text-gray-100">Quality Audit</div>
+            <div class="text-xs text-gray-500 mt-0.5">Nezávislá kontrola — súlad dokumentácie, ICC štandardy, pripravenosť</div>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <span class="text-[10px] bg-yellow-500/15 border border-yellow-500/30 text-yellow-400 px-2 py-0.5 rounded-full">In Progress</span>
+            <button onclick="event.stopPropagation();showScreen('audit')" class="flex items-center gap-1.5 bg-primary-600 hover:bg-primary-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors">Pokračovať →</button>
+          </div>`;
+      }
+    }
+
+    if (card6) {
+      if (done.has(8)) {
+        card6.className = 'rounded-xl border border-green-500/20 bg-slate-900 p-4 flex items-center gap-4 cursor-pointer card-hover transition-all duration-300';
+        card6.onclick = () => taskplanOpen();
+        card6.innerHTML = `
+          <div class="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center text-base font-bold text-white shrink-0">✓</div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-0.5"><span class="text-xs text-green-500 font-semibold uppercase tracking-wider">Krok 6</span></div>
             <div class="text-sm font-semibold text-gray-100">Task Plan</div>
             <div class="text-xs text-gray-500 mt-0.5">Epic → Feat → Task breakdown — schválený</div>
           </div>
@@ -4152,13 +4338,13 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
             <span class="text-[10px] bg-green-500/10 border border-green-500/25 text-green-400 px-2 py-0.5 rounded-full">Schválené</span>
             <button onclick="event.stopPropagation();taskplanOpen()" class="text-xs text-gray-500 hover:text-gray-300 transition-colors">Zobraziť →</button>
           </div>`;
-      } else if (done.has(6)) {
-        card5.className = 'rounded-xl border border-primary-500/40 bg-primary-600/5 p-4 flex items-center gap-4 cursor-pointer card-hover transition-all duration-300';
-        card5.onclick = () => taskplanOpen();
-        card5.innerHTML = `
-          <div class="w-10 h-10 rounded-full bg-primary-600 ring-4 ring-primary-500/20 flex items-center justify-center text-sm font-bold text-white shrink-0">5</div>
+      } else if (done.has(7)) {
+        card6.className = 'rounded-xl border border-primary-500/40 bg-primary-600/5 p-4 flex items-center gap-4 cursor-pointer card-hover transition-all duration-300';
+        card6.onclick = () => taskplanOpen();
+        card6.innerHTML = `
+          <div class="w-10 h-10 rounded-full bg-primary-600 ring-4 ring-primary-500/20 flex items-center justify-center text-sm font-bold text-white shrink-0">6</div>
           <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 mb-0.5"><span class="text-xs text-primary-400 font-semibold uppercase tracking-wider">Krok 5 · Aktívny</span></div>
+            <div class="flex items-center gap-2 mb-0.5"><span class="text-xs text-primary-400 font-semibold uppercase tracking-wider">Krok 6 · Aktívny</span></div>
             <div class="text-sm font-semibold text-gray-100">Task Plan</div>
             <div class="text-xs text-gray-500 mt-0.5">Epic → Feat → Task breakdown, CC delegácia pripravená</div>
           </div>
@@ -4169,15 +4355,15 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
       }
     }
 
-    if (card6 && done.has(7)) {
-      if (done.has(8)) {
+    if (card7 && done.has(8)) {
+      if (done.has(9)) {
         // Implementácia — Dokončená
-        card6.className = 'rounded-xl border border-green-500/20 bg-slate-900 p-4 flex items-center gap-4 cursor-pointer card-hover transition-all duration-300';
-        card6.onclick = () => implementaciaOpen();
-        card6.innerHTML = `
+        card7.className = 'rounded-xl border border-green-500/20 bg-slate-900 p-4 flex items-center gap-4 cursor-pointer card-hover transition-all duration-300';
+        card7.onclick = () => implementaciaOpen();
+        card7.innerHTML = `
           <div class="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center text-base font-bold text-white shrink-0">✓</div>
           <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 mb-0.5"><span class="text-xs text-green-500 font-semibold uppercase tracking-wider">Krok 6</span></div>
+            <div class="flex items-center gap-2 mb-0.5"><span class="text-xs text-green-500 font-semibold uppercase tracking-wider">Krok 7</span></div>
             <div class="text-sm font-semibold text-gray-100">Implementácia</div>
             <div class="text-xs text-gray-500 mt-0.5">CC agent dokončil všetky tasky</div>
           </div>
@@ -4189,12 +4375,12 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
           </div>`;
       } else {
         // Implementácia — In Progress
-        card6.className = 'rounded-xl border border-primary-500/40 bg-primary-600/5 p-4 flex items-center gap-4 cursor-pointer card-hover transition-all duration-300';
-        card6.onclick = () => implementaciaOpen();
-        card6.innerHTML = `
-          <div class="w-10 h-10 rounded-full bg-primary-600 ring-4 ring-primary-500/20 flex items-center justify-center text-sm font-bold text-white shrink-0">6</div>
+        card7.className = 'rounded-xl border border-primary-500/40 bg-primary-600/5 p-4 flex items-center gap-4 cursor-pointer card-hover transition-all duration-300';
+        card7.onclick = () => implementaciaOpen();
+        card7.innerHTML = `
+          <div class="w-10 h-10 rounded-full bg-primary-600 ring-4 ring-primary-500/20 flex items-center justify-center text-sm font-bold text-white shrink-0">7</div>
           <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 mb-0.5"><span class="text-xs text-primary-400 font-semibold uppercase tracking-wider">Krok 6 · Aktívny</span></div>
+            <div class="flex items-center gap-2 mb-0.5"><span class="text-xs text-primary-400 font-semibold uppercase tracking-wider">Krok 7 · Aktívny</span></div>
             <div class="text-sm font-semibold text-gray-100">Implementácia</div>
             <div class="text-xs text-gray-500 mt-0.5">CC agent píše kód, testy, commity — automatizované</div>
           </div>
@@ -4207,19 +4393,19 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
     }
 
     // ── Stats ────────────────────────────────────────────────────────────
-    const completed = 2 + (done.has(4)?1:0) + (done.has(5)?1:0) + (done.has(6)?1:0) + (done.has(7)?1:0);
+    const completed = 2 + (done.has(4)?1:0) + (done.has(5)?1:0) + (done.has(6)?1:0) + (done.has(7)?1:0) + (done.has(8)?1:0);
     const ss = document.getElementById('version-stat-steps');
-    if (ss) ss.textContent = Math.min(completed, 6) + '/6';
-    const pcts = { 2:33, 3:50, 4:67, 5:83, 6:100 };
+    if (ss) ss.textContent = Math.min(completed, 7) + '/7';
+    const pcts = { 2:29, 3:43, 4:57, 5:71, 6:86, 7:100 };
     const sp = document.getElementById('version-stat-pct');
-    if (sp) sp.textContent = (pcts[Math.min(completed, 6)] || 33) + '%';
+    if (sp) sp.textContent = (pcts[Math.min(completed, 7)] || 29) + '%';
     const bl = document.getElementById('version-bar-label');
     if (bl) {
-      if (done.has(7)) {
+      if (done.has(8)) {
         bl.textContent = '✓ Hotovo'; bl.className = 'text-[10px] text-green-400 font-medium';
       } else {
-        const labels = { 4:'UI Design', 5:'Summary', 6:'Architecture', 7:'Task Plan' };
-        const activeStep = done.has(6)?7 : done.has(5)?6 : done.has(4)?5 : 4;
+        const labels = { 4:'UI Design', 5:'Summary', 6:'Architecture', 7:'Quality Audit', 8:'Task Plan' };
+        const activeStep = done.has(7)?8 : done.has(6)?7 : done.has(5)?6 : done.has(4)?5 : 4;
         bl.textContent = labels[activeStep] || 'UI Design';
         bl.className = 'text-[10px] text-primary-400 font-medium';
       }
@@ -4280,6 +4466,15 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
         _sumState = 'empty';
       }
       sumSetState(_sumState);
+    }
+    if (name === 'audit') {
+      document.querySelector('[onclick="showScreen(\'audit\')"]')?.classList.add('active');
+      if (!_pipelineState.doneSteps.has(6)) {
+        _auditState = 'gate';
+      } else if (_auditState === 'gate') {
+        _auditState = 'empty';
+      }
+      auditSetState(_auditState);
     }
     if (name === 'taskplan') document.querySelector('[onclick="showScreen(\'taskplan\')"]')?.classList.add('active');
     if (name === 'implementacia') document.querySelector('[onclick="showScreen(\'implementacia\')"]')?.classList.add('active');
@@ -4428,7 +4623,7 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
     }
 
     showScreen('version');
-    _showToast('Súhrnná dokumentácia schválená — krok 3/6 dokončený');
+    _showToast('Súhrnná dokumentácia schválená — krok 3/7 dokončený');
   }
 
   function sumToggleEdit() {
@@ -4545,17 +4740,82 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
             <button onclick="event.stopPropagation();showScreen('architecture')" class="text-xs text-gray-500 hover:text-gray-300 transition-colors">Zobraziť →</button>
           </div>`;
       }
-      // Krok 5 — odomkni Task Plan
+      // Krok 5 — odomkni Quality Audit
       const card5 = hub.children[4];
       if (card5) {
         card5.className = 'rounded-xl border border-primary-500/40 bg-primary-600/5 p-4 flex items-center gap-4 cursor-pointer card-hover transition-all duration-300';
-        card5.onclick = () => taskplanOpen();
+        card5.onclick = () => showScreen('audit');
         card5.innerHTML = `
           <div class="w-10 h-10 rounded-full bg-primary-600 ring-4 ring-primary-500/20 flex items-center justify-center text-sm font-bold text-white shrink-0">5</div>
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 mb-0.5">
               <span class="text-xs text-primary-400 font-semibold uppercase tracking-wider">Krok 5 · Aktívny</span>
             </div>
+            <div class="text-sm font-semibold text-gray-100">Quality Audit</div>
+            <div class="text-xs text-gray-500 mt-0.5">Nezávislá kontrola — súlad dokumentácie, ICC štandardy, pripravenosť</div>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <span class="text-[10px] bg-yellow-500/15 border border-yellow-500/30 text-yellow-400 px-2 py-0.5 rounded-full">In Progress</span>
+            <button onclick="event.stopPropagation();showScreen('audit')" class="flex items-center gap-1.5 bg-primary-600 hover:bg-primary-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors">Pokračovať →</button>
+          </div>`;
+      }
+    }
+
+    showScreen('version');
+    _showToast('Architecture schválená — krok 4/7 dokončený');
+  }
+
+  // ── Quality Audit screen ──
+  let _auditState = 'gate'; // 'gate' | 'empty' | 'running' | 'done'
+
+  function auditSetState(state) {
+    _auditState = state;
+    ['gate','empty','running','done'].forEach(s => {
+      const el = document.getElementById('audit-state-' + s);
+      if (el) el.classList.toggle('hidden', s !== state);
+    });
+  }
+
+  function auditApprove() {
+    if (!_pipelineState.doneSteps.has(6)) {
+      _showToast('⛔ Najprv schváľ Architecture (krok 4)');
+      return;
+    }
+    if (_auditState !== 'done') {
+      _showToast('⛔ Najprv spusti Quality Audit');
+      return;
+    }
+    _pipelineState.doneSteps.add(7);
+    _saveState();
+
+    // Krok 5 — označ Quality Audit ako Schválené
+    const hub = document.querySelector('#screen-version .space-y-3');
+    if (hub) {
+      const card5 = hub.children[4];
+      if (card5) {
+        card5.className = 'rounded-xl border border-green-500/20 bg-slate-900 p-4 flex items-center gap-4 cursor-pointer card-hover transition-all duration-300';
+        card5.onclick = () => showScreen('audit');
+        card5.innerHTML = `
+          <div class="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center text-base font-bold text-white shrink-0">✓</div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-0.5"><span class="text-xs text-green-500 font-semibold uppercase tracking-wider">Krok 5</span></div>
+            <div class="text-sm font-semibold text-gray-100">Quality Audit</div>
+            <div class="text-xs text-gray-500 mt-0.5">Všetky kontroly prešli — dokumentácia pripravená na Task Plan</div>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <span class="text-[10px] bg-green-500/10 border border-green-500/25 text-green-400 px-2 py-0.5 rounded-full">Schválené</span>
+            <button onclick="event.stopPropagation();showScreen('audit')" class="text-xs text-gray-500 hover:text-gray-300 transition-colors">Zobraziť →</button>
+          </div>`;
+      }
+      // Krok 6 — odomkni Task Plan
+      const card6 = hub.children[5];
+      if (card6) {
+        card6.className = 'rounded-xl border border-primary-500/40 bg-primary-600/5 p-4 flex items-center gap-4 cursor-pointer card-hover transition-all duration-300';
+        card6.onclick = () => taskplanOpen();
+        card6.innerHTML = `
+          <div class="w-10 h-10 rounded-full bg-primary-600 ring-4 ring-primary-500/20 flex items-center justify-center text-sm font-bold text-white shrink-0">6</div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-0.5"><span class="text-xs text-primary-400 font-semibold uppercase tracking-wider">Krok 6 · Aktívny</span></div>
             <div class="text-sm font-semibold text-gray-100">Task Plan</div>
             <div class="text-xs text-gray-500 mt-0.5">Epic → Feat → Task breakdown, CC delegácia pripravená</div>
           </div>
@@ -4567,7 +4827,178 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
     }
 
     showScreen('version');
-    _showToast('Architecture schválená — krok 4/6 dokončený');
+    _showToast('Quality Audit schválený — krok 5/7 dokončený');
+  }
+
+  function auditRun() {
+    auditSetState('running');
+    const logEl  = document.getElementById('audit-run-log');
+    const barEl  = document.getElementById('audit-run-bar');
+    const lblEl  = document.getElementById('audit-run-label');
+    const pctEl  = document.getElementById('audit-run-pct');
+    const phEl   = document.getElementById('audit-run-phase');
+    if (logEl) logEl.innerHTML = '';
+
+    const phases = [
+      { pct:15, lbl:'Načítavam dokumentáciu…',            phase:'1/5 · Spec pokrytie' },
+      { pct:30, lbl:'Kontrolujem pokrytie požiadaviek…',  phase:'1/5 · Spec pokrytie' },
+      { pct:45, lbl:'Porovnávam UI Design s BEHAVIOR.md…',phase:'2/5 · UI konzistencia' },
+      { pct:58, lbl:'Validujem ICC tech stack…',          phase:'3/5 · ICC štandardy' },
+      { pct:72, lbl:'Kontrolujem API/DB konzistenciu…',   phase:'4/5 · Technická správnosť' },
+      { pct:88, lbl:'Hľadám medzery a skryté predpoklady…',phase:'5/5 · Gap analýza' },
+      { pct:100,lbl:'Generujem report…',                  phase:'Audit dokončený' },
+    ];
+    const logLines = [
+      '→ Spec: 8 požiadaviek identifikovaných',
+      '→ BEHAVIOR.md: 8/8 požiadaviek pokrytých ✓',
+      '→ UI Design: 6 obrazoviek navrhnutých',
+      '→ BEHAVIOR.md: všetky flows majú UI protitpart ✓',
+      '→ Backend: Python 3.12 + FastAPI + pg8000 ✓',
+      '→ Frontend: React + TypeScript + Vite + Tailwind ✓',
+      '⚠ Email: Resend API — nie je v ICC schválenom zozname (odporúčanie: SMTP)',
+      '→ API endpoints: 7 endpointov v BEHAVIOR.md',
+      '→ DESIGN.md: 7/7 endpointov pokrytých ✓',
+      '→ DB schéma: 5 tabuliek — všetky entity pokryté ✓',
+      '→ Auth: JWT — endpoint /api/auth/login definovaný ✓',
+      '⚠ PDF generovanie: knižnica nie je špecifikovaná v DESIGN.md',
+      '→ Žiadne hardcoded credentials v dokumentácii ✓',
+      '→ Port: nespecifikovaný — odporúčanie ICC port 9190+ (testing range)',
+    ];
+
+    let stepIdx = 0, lineIdx = 0;
+    const interval = setInterval(() => {
+      if (stepIdx < phases.length) {
+        const p = phases[stepIdx];
+        if (barEl) barEl.style.width = p.pct + '%';
+        if (lblEl) lblEl.textContent = p.lbl;
+        if (pctEl) pctEl.textContent = p.pct + '%';
+        if (phEl)  phEl.textContent  = p.phase;
+        stepIdx++;
+      }
+      if (lineIdx < logLines.length && logEl) {
+        const div = document.createElement('div');
+        const isWarn = logLines[lineIdx].startsWith('⚠');
+        div.className = isWarn ? 'text-yellow-400' : 'text-gray-500';
+        div.textContent = logLines[lineIdx];
+        logEl.appendChild(div);
+        lineIdx++;
+      }
+      if (stepIdx >= phases.length && lineIdx >= logLines.length) {
+        clearInterval(interval);
+        _auditState = 'done';
+        _saveState();
+        setTimeout(() => _auditShowReport(), 400);
+      }
+    }, 350);
+  }
+
+  function _auditShowReport() {
+    auditSetState('done');
+    const body = document.getElementById('audit-report-body');
+    if (!body) return;
+
+    const sections = [
+      {
+        title: '1. Pokrytie špecifikácie',
+        icon: '✓',
+        iconCls: 'text-green-400',
+        items: [
+          { level:'pass',  text:'Všetkých 8 požiadaviek zo Spec je pokrytých v BEHAVIOR.md' },
+          { level:'pass',  text:'Všetky flows majú zodpovedajúcu UI Design obrazovku' },
+          { level:'pass',  text:'Edge cases (neúspešné párovanie, PDF zlyhanie) sú dokumentované' },
+        ]
+      },
+      {
+        title: '2. ICC Štandardy',
+        icon: '⚠',
+        iconCls: 'text-yellow-400',
+        items: [
+          { level:'pass',  text:'Tech stack: FastAPI + React + TypeScript + PostgreSQL (pg8000) ✓' },
+          { level:'pass',  text:'Identifikátory v angličtine, UI texty v slovenčine ✓' },
+          { level:'warn',  text:'Email provider: Resend API nie je v ICC schválenom zozname — odporúčame SMTP' },
+          { level:'pass',  text:'Žiadne hardcoded credentials v dokumentácii ✓' },
+        ]
+      },
+      {
+        title: '3. API / DB konzistencia',
+        icon: '✓',
+        iconCls: 'text-green-400',
+        items: [
+          { level:'pass',  text:'7/7 API endpointov z BEHAVIOR.md je definovaných v DESIGN.md' },
+          { level:'pass',  text:'Všetky DB entity (customers, invoices, bank_transactions…) majú schému' },
+          { level:'pass',  text:'Auth flow je plne definovaný — JWT, login endpoint, middleware' },
+        ]
+      },
+      {
+        title: '4. UI Design konzistencia',
+        icon: '✓',
+        iconCls: 'text-green-400',
+        items: [
+          { level:'pass',  text:'6/6 navrhnutých obrazoviek zodpovedá flows v BEHAVIOR.md' },
+          { level:'pass',  text:'Všetky CRUD operácie majú UI komponent (form, list, detail)' },
+        ]
+      },
+      {
+        title: '5. Gap analýza',
+        icon: '⚠',
+        iconCls: 'text-yellow-400',
+        items: [
+          { level:'warn',  text:'PDF generovanie: knižnica nie je špecifikovaná v DESIGN.md (WeasyPrint? ReportLab?)' },
+          { level:'pass',  text:'Tatra Banka OAuth2 integrácia je dokumentovaná ✓' },
+          { level:'pass',  text:'Žiadne skryté predpoklady ani TODO placeholdery nájdené ✓' },
+        ]
+      },
+    ];
+
+    const levelCls = {
+      pass: 'text-green-400',
+      warn: 'text-yellow-400',
+      block: 'text-red-400',
+    };
+    const levelIcon = { pass:'✓', warn:'⚠', block:'✗' };
+
+    let passCount=0, warnCount=0, blockCount=0;
+    sections.forEach(s => s.items.forEach(i => {
+      if (i.level==='pass') passCount++;
+      else if (i.level==='warn') warnCount++;
+      else blockCount++;
+    }));
+
+    const passEl  = document.getElementById('audit-count-pass');
+    const warnEl  = document.getElementById('audit-count-warn');
+    const blockEl = document.getElementById('audit-count-block');
+    if (passEl)  passEl.textContent  = passCount;
+    if (warnEl)  warnEl.textContent  = warnCount;
+    if (blockEl) blockEl.textContent = blockCount;
+
+    const badge = document.getElementById('audit-result-badge');
+    if (badge) {
+      if (blockCount > 0) {
+        badge.className = 'text-[10px] bg-red-500/10 border border-red-500/25 text-red-400 px-2.5 py-1 rounded-full flex items-center gap-1.5';
+        badge.innerHTML = `<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>FAIL — ${blockCount} blocker(y) musia byť opravené`;
+      } else if (warnCount > 0) {
+        badge.className = 'text-[10px] bg-yellow-500/10 border border-yellow-500/25 text-yellow-400 px-2.5 py-1 rounded-full flex items-center gap-1.5';
+        badge.innerHTML = `<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>PASS s ${warnCount} upozorneniami`;
+      } else {
+        badge.className = 'text-[10px] bg-green-500/10 border border-green-500/25 text-green-400 px-2.5 py-1 rounded-full flex items-center gap-1.5';
+        badge.innerHTML = `<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>PASS — pripravené na Task Plan`;
+      }
+    }
+
+    body.innerHTML = sections.map(sec => `
+      <div class="rounded-xl border border-slate-800 bg-slate-900 p-4">
+        <div class="flex items-center gap-2 mb-3">
+          <span class="text-sm font-semibold ${sec.iconCls}">${sec.icon}</span>
+          <span class="text-sm font-semibold text-gray-200">${sec.title}</span>
+        </div>
+        <div class="space-y-2">
+          ${sec.items.map(item => `
+            <div class="flex items-start gap-2.5 text-xs">
+              <span class="shrink-0 font-bold mt-0.5 ${levelCls[item.level]}">${levelIcon[item.level]}</span>
+              <span class="${item.level==='pass'?'text-gray-400':item.level==='warn'?'text-yellow-300/80':'text-red-300/80'}">${item.text}</span>
+            </div>`).join('')}
+        </div>
+      </div>`).join('');
   }
 
   // ── DESIGN.md screen ──
@@ -4666,7 +5097,7 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
     _pipelineState.doneSteps.add(5);
     _saveState();
     showScreen('version');
-    _showToast('DESIGN.md schválený — krok 5/7 dokončený');
+    _showToast('DESIGN.md schválený — vedľajší dokument schválený');
   }
 
   // ── Task Plan screen ──
@@ -4738,25 +5169,25 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
   }
 
   function taskplanApprove() {
-    if (!_pipelineState.doneSteps.has(6)) {
-      _showToast('⛔ Najprv schváľ Architecture (krok 4)');
+    if (!_pipelineState.doneSteps.has(7)) {
+      _showToast('⛔ Najprv schváľ Quality Audit (krok 5)');
       return;
     }
-    _pipelineState.doneSteps.add(7);
+    _pipelineState.doneSteps.add(8);
     _saveState();
 
-    // Krok 5 — označ Task Plan ako Schválené
+    // Krok 6 — označ Task Plan ako Schválené
     const hub = document.querySelector('#screen-version .space-y-3');
     if (hub) {
-      const card5 = hub.children[4];
-      if (card5) {
-        card5.className = 'rounded-xl border border-green-500/20 bg-slate-900 p-4 flex items-center gap-4 cursor-pointer card-hover transition-all duration-300';
-        card5.onclick = () => taskplanOpen();
-        card5.innerHTML = `
+      const card6 = hub.children[5];
+      if (card6) {
+        card6.className = 'rounded-xl border border-green-500/20 bg-slate-900 p-4 flex items-center gap-4 cursor-pointer card-hover transition-all duration-300';
+        card6.onclick = () => taskplanOpen();
+        card6.innerHTML = `
           <div class="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center text-base font-bold text-white shrink-0">✓</div>
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 mb-0.5">
-              <span class="text-xs text-green-500 font-semibold uppercase tracking-wider">Krok 5</span>
+              <span class="text-xs text-green-500 font-semibold uppercase tracking-wider">Krok 6</span>
             </div>
             <div class="text-sm font-semibold text-gray-100">Task Plan</div>
             <div class="text-xs text-gray-500 mt-0.5">Epic → Feat → Task breakdown — schválený</div>
@@ -4766,16 +5197,16 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
             <button onclick="event.stopPropagation();taskplanOpen()" class="text-xs text-gray-500 hover:text-gray-300 transition-colors">Zobraziť →</button>
           </div>`;
       }
-      // Krok 6 — odomkni Implementáciu
-      const card6 = hub.children[5];
-      if (card6) {
-        card6.className = 'rounded-xl border border-primary-500/40 bg-primary-600/5 p-4 flex items-center gap-4 cursor-pointer card-hover transition-all duration-300';
-        card6.onclick = () => implementaciaOpen();
-        card6.innerHTML = `
-          <div class="w-10 h-10 rounded-full bg-primary-600 ring-4 ring-primary-500/20 flex items-center justify-center text-sm font-bold text-white shrink-0">6</div>
+      // Krok 7 — odomkni Implementáciu
+      const card7 = hub.children[6];
+      if (card7) {
+        card7.className = 'rounded-xl border border-primary-500/40 bg-primary-600/5 p-4 flex items-center gap-4 cursor-pointer card-hover transition-all duration-300';
+        card7.onclick = () => implementaciaOpen();
+        card7.innerHTML = `
+          <div class="w-10 h-10 rounded-full bg-primary-600 ring-4 ring-primary-500/20 flex items-center justify-center text-sm font-bold text-white shrink-0">7</div>
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 mb-0.5">
-              <span class="text-xs text-primary-400 font-semibold uppercase tracking-wider">Krok 6 · Aktívny</span>
+              <span class="text-xs text-primary-400 font-semibold uppercase tracking-wider">Krok 7 · Aktívny</span>
             </div>
             <div class="text-sm font-semibold text-gray-100">Implementácia</div>
             <div class="text-xs text-gray-500 mt-0.5">CC agent píše kód, testy, commity — automatizované</div>
@@ -4788,7 +5219,7 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
     }
 
     showScreen('version');
-    _showToast('Task Plan schválený — krok 5/6 dokončený');
+    _showToast('Task Plan schválený — krok 6/7 dokončený');
   }
 
   // ── Implementácia screen — NEX Command faithful ──────────────────────────
@@ -4904,7 +5335,7 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
     showScreen('implementacia');
     const gate = document.getElementById('impl-gate');
     const body = document.querySelector('#screen-implementacia .flex.flex-1.min-h-0');
-    const hasTaskPlan = _pipelineState.doneSteps.has(7);
+    const hasTaskPlan = _pipelineState.doneSteps.has(8);
     if (gate)  { gate.classList.toggle('hidden', hasTaskPlan); gate.style.display = hasTaskPlan ? 'none' : 'flex'; }
     if (body)  body.classList.toggle('hidden', !hasTaskPlan);
   }
@@ -5273,7 +5704,7 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
 
     // All done?
     if (_implEpics.flatMap(e=>e.feats).every(f=>_implFeatSt[f.num]==='done')) {
-      _pipelineState.doneSteps.add(7);
+      _pipelineState.doneSteps.add(9);
       _saveState();
       _showToast('Implementácia dokončená — všetky featy úspešné!');
     }
