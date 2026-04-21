@@ -2528,7 +2528,7 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
               Auto-suggested
             </span>
           </div>
-          <div class="grid grid-cols-3 gap-3 p-3 bg-slate-900/60 rounded-lg border border-slate-700">
+          <div class="grid grid-cols-4 gap-3 p-3 bg-slate-900/60 rounded-lg border border-slate-700">
             <div>
               <label class="block text-xs text-gray-500 mb-1">Backend</label>
               <input id="np-be-port" type="number" placeholder="9100" min="1" max="65535"
@@ -2549,6 +2549,13 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
                 oninput="npOnPortInput()"
                 class="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm text-gray-100 font-mono focus:outline-none focus:border-primary-500 transition-colors" />
               <p id="np-db-status" class="mt-0.5 text-[10px] text-gray-600 h-3"></p>
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">UI Design</label>
+              <input id="np-ui-port" type="number" placeholder="9103" min="1" max="65535"
+                oninput="npOnPortInput()"
+                class="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm text-gray-100 font-mono focus:outline-none focus:border-primary-500 transition-colors" />
+              <p id="np-ui-status" class="mt-0.5 text-[10px] text-gray-600 h-3"></p>
             </div>
           </div>
         </div>
@@ -4538,6 +4545,7 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
     document.getElementById('np-be-port').value = NP_PORT_BASE;
     document.getElementById('np-fe-port').value = NP_PORT_BASE + 1;
     document.getElementById('np-db-port').value = NP_PORT_BASE + 2;
+    document.getElementById('np-ui-port').value = NP_PORT_BASE + 3;
     _npPortsAutoFilled = true;
     document.getElementById('np-ports-auto').classList.remove('hidden');
     // Simulate availability check hints
@@ -4548,6 +4556,8 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
       document.getElementById('np-fe-status').className = 'mt-0.5 text-[10px] text-green-500 h-3';
       document.getElementById('np-db-status').textContent = '✓ Available';
       document.getElementById('np-db-status').className = 'mt-0.5 text-[10px] text-green-500 h-3';
+      document.getElementById('np-ui-status').textContent = '✓ Available';
+      document.getElementById('np-ui-status').className = 'mt-0.5 text-[10px] text-green-500 h-3';
     }, 400);
   }
 
