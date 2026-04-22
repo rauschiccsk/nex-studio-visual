@@ -5,6 +5,10 @@ import { getVersion } from "@/services/api/versions";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
 
+// ─── Step route slugs ─────────────────────────────────────────────────────────
+
+const STEP_ROUTES = ["spec", "profspec", "summary", "architecture", "audit", "taskplan", "implementacia"];
+
 // ─── Pipeline step definitions ────────────────────────────────────────────────
 
 interface PipelineStep {
@@ -75,16 +79,17 @@ function MiniPipelineBar({ states }: { states: StepState[] }) {
 
 // ─── Step card ────────────────────────────────────────────────────────────────
 
-function StepCard({ step, state }: { step: PipelineStep; state: StepState }) {
+function StepCard({ step, state, onOpen }: { step: PipelineStep; state: StepState; onOpen: () => void }) {
   const isDone = state === "done";
   const isActive = state === "active";
   const isPending = state === "pending";
 
   return (
     <div
+      onClick={!isPending ? onOpen : undefined}
       className={`rounded-xl border p-4 flex items-center gap-4 transition-all ${
         isDone
-          ? "border-green-500/20 bg-slate-900"
+          ? "border-green-500/20 bg-slate-900 cursor-pointer hover:border-green-500/35"
           : isActive
           ? "border-primary-500/40 bg-slate-900"
           : "border-slate-800 bg-slate-900 opacity-50"
@@ -132,7 +137,10 @@ function StepCard({ step, state }: { step: PipelineStep; state: StepState }) {
           </span>
         )}
         {isActive && (
-          <button className="text-[10px] bg-primary-600 hover:bg-primary-500 text-white px-3 py-1.5 rounded-lg font-medium transition-colors">
+          <button
+            onClick={(e) => { e.stopPropagation(); onOpen(); }}
+            className="text-[10px] bg-primary-600 hover:bg-primary-500 text-white px-3 py-1.5 rounded-lg font-medium transition-colors"
+          >
             Otvoriť →
           </button>
         )}
@@ -272,7 +280,12 @@ export default function VersionDetailPage() {
       <div className="flex-1 overflow-y-auto p-6">
         <div className="max-w-3xl mx-auto space-y-3">
           {PIPELINE_STEPS.map((step, i) => (
-            <StepCard key={step.n} step={step} state={stepStates[i] ?? "pending"} />
+            <StepCard
+              key={step.n}
+              step={step}
+              state={stepStates[i] ?? "pending"}
+              onOpen={() => navigate(`/projects/${slug}/versions/${versionId}/${STEP_ROUTES[i]}`)}
+            />
           ))}
         </div>
       </div>

@@ -17,6 +17,13 @@ import MMModulePage from "./pages/MMModulePage";
 import MMDepMapPage from "./pages/MMDepMapPage";
 import KnowledgeBasePage from "./pages/KnowledgeBasePage";
 import SettingsPage from "./pages/SettingsPage";
+import SpecPage from "./pages/step/SpecPage";
+import ProfSpecPage from "./pages/step/ProfSpecPage";
+import SummaryPage from "./pages/step/SummaryPage";
+import ArchitecturePage from "./pages/step/ArchitecturePage";
+import AuditPage from "./pages/step/AuditPage";
+import TaskPlanPage from "./pages/step/TaskPlanPage";
+import ImplementaciaPage from "./pages/step/ImplementaciaPage";
 
 function App() {
   const username = useAuthStore((s) => s.user?.username);
@@ -40,6 +47,13 @@ function App() {
             <Route path="projects/:slug" element={<ProjectDetailPage />} />
             <Route path="projects/:slug/versions/new" element={<NewVersionPage />} />
             <Route path="projects/:slug/versions/:versionId" element={<VersionDetailPage />} />
+            <Route path="projects/:slug/versions/:versionId/spec" element={<SpecPage />} />
+            <Route path="projects/:slug/versions/:versionId/profspec" element={<ProfSpecPage />} />
+            <Route path="projects/:slug/versions/:versionId/summary" element={<SummaryPage />} />
+            <Route path="projects/:slug/versions/:versionId/architecture" element={<ArchitecturePage />} />
+            <Route path="projects/:slug/versions/:versionId/audit" element={<AuditPage />} />
+            <Route path="projects/:slug/versions/:versionId/taskplan" element={<TaskPlanPage />} />
+            <Route path="projects/:slug/versions/:versionId/implementacia" element={<ImplementaciaPage />} />
             <Route path="projects/:slug/mm" element={<MMOverviewPage />} />
             <Route path="projects/:slug/mm/depmap" element={<MMDepMapPage />} />
             <Route path="projects/:slug/mm/:moduleId" element={<MMModulePage />} />
