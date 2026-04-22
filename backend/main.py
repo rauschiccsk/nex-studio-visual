@@ -34,6 +34,7 @@ from backend.api.routes.professional_specifications import (
 from backend.api.routes.project_modules import router as project_modules_router
 from backend.api.routes.projects import router as projects_router
 from backend.api.routes.raw_specifications import router as raw_specifications_router
+from backend.api.routes.ui_designs import router as ui_designs_router
 from backend.api.routes.report_configs import router as report_configs_router
 from backend.api.routes.tasks import router as tasks_router
 from backend.api.routes.uploads import router as uploads_router
@@ -88,6 +89,7 @@ app.include_router(projects_router, prefix="/api/v1/projects")
 app.include_router(project_modules_router, prefix="/api/v1/project-modules")
 app.include_router(module_dependencies_router, prefix="/api/v1/module-dependencies")
 app.include_router(raw_specifications_router, prefix="/api/v1/raw-specifications")
+app.include_router(ui_designs_router, prefix="/api/v1/ui-designs")
 app.include_router(
     professional_specifications_router,
     prefix="/api/v1/professional-specifications",

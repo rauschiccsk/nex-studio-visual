@@ -5,11 +5,13 @@ import { getVersion } from "@/services/api/versions";
 import { listProfessionalSpecs } from "@/services/api/professionalSpecifications";
 import { listDesignDocuments } from "@/services/api/designDocuments";
 import { fetchTaskPlan } from "@/services/api/taskPlan";
+import { listUIDesigns } from "@/services/api/uiDesigns";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
 
 // ─── Step route slugs ─────────────────────────────────────────────────────────
 
+// Index 1 (step 2) is a parallel phase — individual routes handled in ParallelStep2Card
 const STEP_ROUTES = ["spec", "profspec", "summary", "architecture", "audit", "taskplan", "implementacia"];
 
 // ─── Pipeline step definitions ────────────────────────────────────────────────
@@ -38,6 +40,7 @@ type StepState = "done" | "active" | "pending";
 interface PipelineData {
   hasProfSpec: boolean;
   profSpecApproved: boolean;
+  uiDesignApproved: boolean;
   hasDesignDocs: boolean;
   hasTasks: boolean;
   allTasksDone: boolean;
@@ -59,8 +62,8 @@ function computeRealStepStates(data: PipelineData, version: Version): StepState[
   let doneCount = 0;
   if (data.hasProfSpec) {
     doneCount = 1;
-    if (data.profSpecApproved) {
-      doneCount = 3; // steps 1–3 done (summary is auto-done with profspec approval)
+    if (data.profSpecApproved && data.uiDesignApproved) {
+      doneCount = 3; // parallel phase done (both 2A + 2B approved) + summary auto-done
       if (data.hasDesignDocs) {
         doneCount = 5; // steps 1–5 done (audit auto-passes)
         if (data.hasTasks) {
@@ -185,6 +188,139 @@ function StepCard({ step, state, onOpen }: { step: PipelineStep; state: StepStat
   );
 }
 
+// ─── Parallel Step 2 card ─────────────────────────────────────────────────────
+
+interface SubPhaseCardProps {
+  code: string;
+  label: string;
+  approved: boolean;
+  active: boolean;
+  onClick: () => void;
+}
+
+function SubPhaseCard({ code, label, approved, active, onClick }: SubPhaseCardProps) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full text-left rounded-lg border p-3 transition-all ${
+        approved
+          ? "border-green-500/25 bg-green-500/5 hover:border-green-500/40"
+          : active
+          ? "border-primary-500/30 bg-primary-500/5 hover:border-primary-500/50"
+          : "border-slate-700 bg-slate-800/40 opacity-50 cursor-not-allowed"
+      }`}
+      disabled={!approved && !active}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className={`text-[10px] font-bold uppercase tracking-wider ${approved ? "text-green-400" : active ? "text-primary-400" : "text-slate-600"}`}>
+          {code}
+        </span>
+        {approved && (
+          <span className="text-[10px] bg-green-500/10 border border-green-500/25 text-green-400 px-1.5 py-0.5 rounded-full">✓</span>
+        )}
+        {!approved && active && (
+          <span className="text-[10px] text-primary-400">→</span>
+        )}
+      </div>
+      <div className={`text-xs font-semibold mt-0.5 ${approved ? "text-slate-200" : active ? "text-slate-200" : "text-slate-500"}`}>
+        {label}
+      </div>
+    </button>
+  );
+}
+
+function ParallelStep2Card({
+  state,
+  profSpecApproved,
+  uiDesignApproved,
+  onOpenProfSpec,
+  onOpenUIDesign,
+}: {
+  state: StepState;
+  profSpecApproved: boolean;
+  uiDesignApproved: boolean;
+  onOpenProfSpec: () => void;
+  onOpenUIDesign: () => void;
+}) {
+  const isDone = state === "done";
+  const isActive = state === "active";
+  const isPending = state === "pending";
+  const subActive = isActive || isDone;
+
+  return (
+    <div
+      className={`rounded-xl border p-4 transition-all ${
+        isDone
+          ? "border-green-500/20 bg-slate-900"
+          : isActive
+          ? "border-primary-500/40 bg-slate-900"
+          : "border-slate-800 bg-slate-900 opacity-50"
+      }`}
+    >
+      {/* Header */}
+      <div className="flex items-center gap-4 mb-3">
+        <div
+          className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${
+            isDone
+              ? "bg-green-500 text-white"
+              : isActive
+              ? "bg-primary-600 ring-4 ring-primary-500/25 text-white"
+              : "bg-slate-700 text-slate-500"
+          }`}
+        >
+          {isDone ? "✓" : "2"}
+        </div>
+        <div className="flex-1 min-w-0">
+          <span className={`text-xs font-semibold uppercase tracking-wider ${isDone ? "text-green-500" : isActive ? "text-primary-400" : "text-slate-600"}`}>
+            {isDone ? "Krok 2 · Hotový" : isActive ? "Krok 2 · Aktívny" : "Krok 2"}
+          </span>
+          <div className={`text-sm font-semibold ${isDone || isActive ? "text-slate-100" : "text-slate-400"}`}>
+            Paralelná fáza
+          </div>
+          <div className="text-xs text-slate-500 mt-0.5">Vývojová dokumentácia + UI Design — oba musia byť schválené</div>
+        </div>
+        {isPending && (
+          <span className="text-[10px] bg-slate-800 text-slate-600 px-2 py-0.5 rounded-full border border-slate-700 shrink-0">
+            Čaká na Spec
+          </span>
+        )}
+        {isDone && (
+          <span className="text-[10px] bg-green-500/10 border border-green-500/25 text-green-400 px-2 py-0.5 rounded-full shrink-0">
+            Schválené
+          </span>
+        )}
+      </div>
+
+      {/* Sub-phase cards */}
+      {!isPending && (
+        <div className="grid grid-cols-2 gap-2">
+          <SubPhaseCard
+            code="2A"
+            label="Vývojová dokumentácia"
+            approved={profSpecApproved}
+            active={subActive}
+            onClick={onOpenProfSpec}
+          />
+          <SubPhaseCard
+            code="2B"
+            label="UI Design"
+            approved={uiDesignApproved}
+            active={subActive}
+            onClick={onOpenUIDesign}
+          />
+        </div>
+      )}
+
+      {/* Gate note */}
+      {isActive && (
+        <div className="mt-2 pt-2 border-t border-slate-800 text-[10px] text-slate-600">
+          Oba sub-kroky musia byť schválené, aby sa odomkol Krok 3 (Súhrnná dokumentácia).
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── VersionDetailPage ────────────────────────────────────────────────────────
 
 export default function VersionDetailPage() {
@@ -196,6 +332,7 @@ export default function VersionDetailPage() {
   const [pipelineData, setPipelineData] = useState<PipelineData>({
     hasProfSpec: false,
     profSpecApproved: false,
+    uiDesignApproved: false,
     hasDesignDocs: false,
     hasTasks: false,
     allTasksDone: false,
@@ -222,9 +359,11 @@ export default function VersionDetailPage() {
           listDesignDocuments({ project_id: proj.id, doc_type: "behavior", limit: 1 }),
           listDesignDocuments({ project_id: proj.id, doc_type: "design", limit: 1 }),
           fetchTaskPlan(versionId!),
-        ]).then(([profRes, behRes, desRes, plan]) => {
+          listUIDesigns({ project_id: proj.id, limit: 1 }),
+        ]).then(([profRes, behRes, desRes, plan, uiRes]) => {
           if (cancelled) return;
           const profSpec = profRes.items[0] ?? null;
+          const uiDesign = uiRes.items[0] ?? null;
           const hasBehavior = !!behRes.items[0];
           const hasDesign = !!desRes.items[0];
           const epicCount = ver.epic_count ?? 0;
@@ -232,6 +371,7 @@ export default function VersionDetailPage() {
           setPipelineData({
             hasProfSpec: !!profSpec,
             profSpecApproved: !!profSpec?.approved_at,
+            uiDesignApproved: !!uiDesign?.approved_at,
             hasDesignDocs: hasBehavior && hasDesign,
             hasTasks: !!plan && plan.epic_count > 0,
             allTasksDone: epicCount > 0 && epicsDone >= epicCount,
@@ -338,14 +478,29 @@ export default function VersionDetailPage() {
       {/* ── Pipeline steps hub ── */}
       <div className="flex-1 overflow-y-auto p-6">
         <div className="max-w-3xl mx-auto space-y-3">
-          {PIPELINE_STEPS.map((step, i) => (
-            <StepCard
-              key={step.n}
-              step={step}
-              state={stepStates[i] ?? "pending"}
-              onOpen={() => navigate(`/projects/${slug}/versions/${versionId}/${STEP_ROUTES[i]}`)}
-            />
-          ))}
+          {PIPELINE_STEPS.map((step, i) => {
+            if (i === 1) {
+              // Step 2 is a parallel phase — custom card with 2A + 2B sub-cards
+              return (
+                <ParallelStep2Card
+                  key={step.n}
+                  state={stepStates[i] ?? "pending"}
+                  profSpecApproved={pipelineData.profSpecApproved}
+                  uiDesignApproved={pipelineData.uiDesignApproved}
+                  onOpenProfSpec={() => navigate(`/projects/${slug}/versions/${versionId}/profspec`)}
+                  onOpenUIDesign={() => navigate(`/projects/${slug}/versions/${versionId}/uidesign`)}
+                />
+              );
+            }
+            return (
+              <StepCard
+                key={step.n}
+                step={step}
+                state={stepStates[i] ?? "pending"}
+                onOpen={() => navigate(`/projects/${slug}/versions/${versionId}/${STEP_ROUTES[i]}`)}
+              />
+            );
+          })}
         </div>
       </div>
     </div>

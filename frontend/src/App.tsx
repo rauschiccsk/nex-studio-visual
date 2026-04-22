@@ -24,6 +24,7 @@ import ArchitecturePage from "./pages/step/ArchitecturePage";
 import AuditPage from "./pages/step/AuditPage";
 import TaskPlanPage from "./pages/step/TaskPlanPage";
 import ImplementaciaPage from "./pages/step/ImplementaciaPage";
+import UIDesignPage from "./pages/step/UIDesignPage";
 
 function App() {
   const username = useAuthStore((s) => s.user?.username);
@@ -54,6 +55,7 @@ function App() {
             <Route path="projects/:slug/versions/:versionId/audit" element={<AuditPage />} />
             <Route path="projects/:slug/versions/:versionId/taskplan" element={<TaskPlanPage />} />
             <Route path="projects/:slug/versions/:versionId/implementacia" element={<ImplementaciaPage />} />
+            <Route path="projects/:slug/versions/:versionId/uidesign" element={<UIDesignPage />} />
             <Route path="projects/:slug/mm" element={<MMOverviewPage />} />
             <Route path="projects/:slug/mm/depmap" element={<MMDepMapPage />} />
             <Route path="projects/:slug/mm/:moduleId" element={<MMModulePage />} />

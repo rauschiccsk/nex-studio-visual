@@ -1,4 +1,4 @@
-"""Specification domain models — raw, professional specifications and design documents."""
+"""Specification domain models — raw, professional specifications, design documents and UI designs."""
 
 from sqlalchemy import (
     TIMESTAMP,
@@ -115,3 +115,24 @@ class DesignDocument(Base, UUIDMixin, TimestampMixin):
             "doc_type",
         ),
     )
+
+
+class UIDesign(Base, UUIDMixin, TimestampMixin):
+    """AI-assisted UI mockup for a project — Step 2B of the pipeline."""
+
+    __tablename__ = "ui_designs"
+
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    content = Column(Text, nullable=False, server_default="")
+    html_preview = Column(Text, nullable=True)
+    approved_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    approved_at = Column(TIMESTAMP(timezone=True), nullable=True)
