@@ -8,6 +8,8 @@ import { useAuthStore } from "./store/authStore";
 import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
 import ProjectsPage from "./pages/ProjectsPage";
+import NewProjectPage from "./pages/NewProjectPage";
+import ProjectDetailPage from "./pages/ProjectDetailPage";
 
 function App() {
   const username = useAuthStore((s) => s.user?.username);
@@ -27,7 +29,8 @@ function App() {
           >
             <Route index element={<DashboardPage />} />
             <Route path="projects" element={<ProjectsPage />} />
-            <Route path="projects/new" element={<DashboardPage />} />
+            <Route path="projects/new" element={<NewProjectPage />} />
+            <Route path="projects/:slug" element={<ProjectDetailPage />} />
             <Route path="kb" element={<DashboardPage />} />
             <Route path="settings" element={<DashboardPage />} />
           </Route>
