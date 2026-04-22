@@ -15,6 +15,8 @@ import VersionDetailPage from "./pages/VersionDetailPage";
 import MMOverviewPage from "./pages/MMOverviewPage";
 import MMModulePage from "./pages/MMModulePage";
 import MMDepMapPage from "./pages/MMDepMapPage";
+import KnowledgeBasePage from "./pages/KnowledgeBasePage";
+import SettingsPage from "./pages/SettingsPage";
 
 function App() {
   const username = useAuthStore((s) => s.user?.username);
@@ -41,8 +43,8 @@ function App() {
             <Route path="projects/:slug/mm" element={<MMOverviewPage />} />
             <Route path="projects/:slug/mm/depmap" element={<MMDepMapPage />} />
             <Route path="projects/:slug/mm/:moduleId" element={<MMModulePage />} />
-            <Route path="kb" element={<DashboardPage />} />
-            <Route path="settings" element={<DashboardPage />} />
+            <Route path="kb" element={<KnowledgeBasePage />} />
+            <Route path="settings" element={<SettingsPage />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />
