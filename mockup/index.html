@@ -3000,18 +3000,30 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
       <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
       Pridať modul
     </button>
-    <button onclick="showScreen('mm-resources')" class="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 border border-slate-700 hover:border-slate-500 px-3 py-1.5 rounded-lg transition-colors">
+    <button onclick="mmOpenModuleDetail('CMN')" class="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 border border-slate-700 hover:border-slate-500 px-3 py-1.5 rounded-lg transition-colors">
       <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>
-      Shared Resources
+      Common
     </button>
     <button onclick="showScreen('mm-depmap')" class="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 border border-slate-700 hover:border-slate-500 px-3 py-1.5 rounded-lg transition-colors">
       <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
       Dependency Map
     </button>
     <div class="flex-1"></div>
-    <div id="mm-conflict-badge" class="hidden flex items-center gap-1.5 text-xs text-red-400 bg-red-500/10 border border-red-500/20 px-2.5 py-1 rounded-full">
-      <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
-      <span id="mm-conflict-count">1</span> konflikt
+  </div>
+
+  <!-- Version Pipeline Bar -->
+  <div class="flex-shrink-0 px-5 py-3 border-b border-slate-800 bg-slate-900/30">
+    <div class="flex items-center gap-3">
+      <div class="flex items-center gap-1.5 shrink-0">
+        <span class="text-[10px] text-gray-500">Verzia</span>
+        <span class="text-[10px] font-semibold text-gray-300 font-mono">v1.0</span>
+        <span class="text-[10px] text-gray-600">pipeline:</span>
+      </div>
+      <div class="flex items-center gap-0 flex-1 overflow-x-auto" id="mm-version-pipeline"></div>
+      <div class="shrink-0 flex items-center gap-2 text-[9px] text-gray-600">
+        <span class="flex items-center gap-1"><span class="w-2 h-px bg-slate-500 inline-block"></span>zdieľaný</span>
+        <span class="flex items-center gap-1"><span class="text-slate-500">↕</span>per modul</span>
+      </div>
     </div>
   </div>
 
@@ -3021,8 +3033,7 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
 
       <!-- Module grid -->
       <div>
-        <div class="text-[10px] text-gray-600 uppercase tracking-widest font-semibold mb-3">Moduly</div>
-        <div id="mm-module-grid" class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div id="mm-module-grid" class="grid grid-cols-1 gap-3">
           <!-- Filled by mmRenderModuleCards() -->
         </div>
       </div>
@@ -3055,11 +3066,11 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
             </div>
             <div class="flex items-center justify-between text-xs">
               <div class="flex items-center gap-2">
-                <div class="w-1.5 h-1.5 rounded-full bg-yellow-500 shrink-0"></div>
+                <div class="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0"></div>
                 <span class="font-mono text-gray-300">tax_rates</span>
-                <span class="text-gray-600">systém → všetky</span>
+                <span class="text-gray-600">CMN → všetky</span>
               </div>
-              <span class="text-[10px] text-yellow-400">Change req.</span>
+              <span class="text-[10px] text-green-400">Stabilná</span>
             </div>
             <div class="flex items-center justify-between text-xs">
               <div class="flex items-center gap-2">
@@ -3101,9 +3112,9 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
               </div>
             </div>
             <div class="flex items-start gap-2.5 text-xs">
-              <span class="shrink-0 w-6 h-6 rounded-full bg-yellow-500/20 text-yellow-400 flex items-center justify-center text-[9px] font-bold mt-0.5">SYS</span>
+              <span class="shrink-0 w-6 h-6 rounded-full bg-slate-500/20 text-slate-300 flex items-center justify-center text-[9px] font-bold mt-0.5">CMN</span>
               <div>
-                <span class="text-gray-300">Change request: <span class="font-mono text-yellow-300">tax_rates</span></span>
+                <span class="text-gray-300">Dev Docs & Impact — <span class="font-mono text-slate-300">tax_rates</span> zaradená do Common</span>
                 <span class="text-gray-600 ml-1">· včera</span>
               </div>
             </div>
@@ -3202,18 +3213,6 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
       <!-- WORKFLOW TAB -->
       <div id="mm-panel-workflow">
         <div class="space-y-2" id="mm-mod-steps-list"></div>
-        <div class="mt-5 p-4 rounded-xl border border-primary-500/20 bg-primary-600/5 flex items-center gap-4">
-          <div class="w-10 h-10 rounded-full bg-primary-600/20 flex items-center justify-center shrink-0">
-            <svg class="w-5 h-5 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-          </div>
-          <div class="flex-1">
-            <div class="text-sm font-semibold text-gray-200">Vstúpiť do workflow modulu</div>
-            <div class="text-xs text-gray-500 mt-0.5">Otvoriť 7-krokový pipeline pre tento modul</div>
-          </div>
-          <button onclick="mmEnterWorkflow()" class="flex items-center gap-1.5 bg-primary-600 hover:bg-primary-500 text-white text-xs font-medium px-4 py-2 rounded-lg transition-colors shrink-0">
-            Otvoriť →
-          </button>
-        </div>
       </div>
 
       <!-- RESOURCES TAB -->
@@ -3255,13 +3254,10 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
     <button onclick="showScreen('mm-overview')" class="text-gray-500 hover:text-gray-300 transition-colors">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
     </button>
-    <span class="text-sm font-semibold text-gray-100">Zdieľané zdroje</span>
+    <span class="text-sm font-semibold text-gray-100">Common — Zdieľané zdroje</span>
     <span id="mm-res-count" class="text-[10px] bg-slate-700 text-gray-400 px-2 py-0.5 rounded-full font-medium">12</span>
     <div class="flex-1"></div>
-    <button onclick="mmOpenChangeReq(null)" class="flex items-center gap-1.5 bg-primary-600 hover:bg-primary-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors">
-      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-      Change Request
-    </button>
+    <span class="text-[10px] text-gray-600 italic">Zmeny cez version pipeline →</span>
   </div>
   <!-- Filter bar -->
   <div class="flex-shrink-0 px-5 py-2 border-b border-slate-800 flex items-center gap-2 flex-wrap">
@@ -3321,13 +3317,9 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
         <div class="text-[10px] text-gray-600 uppercase tracking-widest font-semibold mb-3" id="mm-rd-schema-label">Schéma</div>
         <div id="mm-rd-schema" class="space-y-1.5 font-mono text-xs"></div>
       </div>
-      <!-- Change requests -->
-      <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
-        <div class="flex items-center justify-between mb-3">
-          <div class="text-[10px] text-gray-600 uppercase tracking-widest font-semibold">Change Requests</div>
-          <button onclick="mmOpenChangeReq(_mmCurrentResource)" class="text-[10px] text-primary-400 hover:text-primary-300 transition-colors">+ Nový</button>
-        </div>
-        <div id="mm-rd-crs" class="space-y-2"></div>
+      <!-- Version pipeline note -->
+      <div class="rounded-xl border border-slate-800 bg-slate-950/50 p-4 text-[10px] text-gray-600 leading-relaxed">
+        Zmeny zdieľaných zdrojov sa riešia cez <span class="text-gray-400">version pipeline</span> — nová verzia projektu, Dev Docs & Impact krok identifikuje dotknuté moduly, vygeneruje nové DESIGN.md pre CMN.
       </div>
     </div>
   </div>
@@ -3343,7 +3335,7 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
     <div class="flex-1"></div>
     <div class="flex items-center gap-3 text-[10px] text-gray-500">
       <span class="flex items-center gap-1"><span class="w-3 h-0.5 bg-green-500 inline-block rounded"></span>Stabilná závislosť</span>
-      <span class="flex items-center gap-1"><span class="w-3 h-0.5 bg-yellow-500 inline-block rounded"></span>Change req. aktívny</span>
+      <span class="flex items-center gap-1"><span class="w-5 h-5 text-[9px] bg-slate-500/20 text-slate-300 border border-slate-500/30 rounded px-1 font-mono font-bold inline-flex items-center">CMN</span>Spoločný základ</span>
     </div>
   </div>
   <div class="flex-1 overflow-y-auto flex items-start justify-center p-8">
@@ -4014,7 +4006,7 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
      JAVASCRIPT
 ════════════════════════════════════════════════════════════════════ -->
 <script>
-  const SCREENS = ['home','projects','project-detail','version','new-project','versions','new-version','spec','uidesign','summary','architecture','audit','design','taskplan','implementacia','kb','settings','login','mm-overview','mm-module','mm-resources','mm-resource-detail','mm-depmap','mm-changereq'];
+  const SCREENS = ['home','projects','project-detail','version','new-project','versions','new-version','spec','uidesign','summary','architecture','audit','design','taskplan','implementacia','kb','settings','login','mm-overview','mm-module','mm-resources','mm-resource-detail','mm-depmap'];
 
   // ---- Aktívny kontext (projekt + verzia) ----
   let activeCtx = { project: 'NEX Ledger', slug: 'NL', version: 'v0.1' };
@@ -4100,7 +4092,6 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
     'mm-resources':        'Shared Resources',
     'mm-resource-detail':  'Resource Detail',
     'mm-depmap':           'Dependency Map',
-    'mm-changereq':        'Change Request',
   };
   let _navStack   = [];   // array of screen names (history)
   let _navCurrent = 'home';
@@ -4685,7 +4676,7 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
     if (name === 'home')        renderProjectsHome();
     if (name === 'projects')   renderProjectsList();
     if (name === 'versions')   renderVersionsList();
-    if (name === 'mm-overview')       mmRenderModuleCards();
+    if (name === 'mm-overview')       { mmRenderModuleCards(); mmRenderVersionPipeline(); }
     if (name === 'mm-resources')      mmRenderResources();
     if (name === 'mm-depmap')         mmRenderDepMap();
   }
@@ -7429,16 +7420,23 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
   // =========================================================================
 
   const _mmModules = [
-    { code:'PAB',   name:'Partner Catalog', color:'indigo', step:4, status:'active',   owns:['partners','PartnerSelector','PartnerForm'],        uses:['tax_rates'],                          deps:[],            neededBy:['ESHOP','SKLAD','UCT'] },
-    { code:'ESHOP', name:'E-Shop',          color:'green',  step:3, status:'active',   owns:['products','orders','ProductCard','CartWidget'],     uses:['partners','tax_rates','PartnerSelector'], deps:['PAB'],    neededBy:['SKLAD','POS'] },
-    { code:'SKLAD', name:'Sklad',           color:'blue',   step:2, status:'active',   owns:['stock_items','StockTable'],                        uses:['partners','products','tax_rates','PartnerSelector'], deps:['PAB','ESHOP'], neededBy:[] },
-    { code:'UCT',   name:'Účtovníctvo',     color:'purple', step:1, status:'planning', owns:['ledger_entries','tax_rates','JournalEntry'],        uses:['partners'],                           deps:['PAB'],       neededBy:[] },
-    { code:'POS',   name:'Point of Sale',   color:'orange', step:0, status:'planning', owns:['pos_sessions','POSTerminal'],                       uses:['products','tax_rates'],               deps:['ESHOP'],     neededBy:[] },
+    // ── Špeciálne moduly ───────────────────────────────────────────────────────
+    { code:'CMN',  name:'Common',             color:'gray',   step:5, status:'active',  type:'common', owns:['DataGrid','SearchBar','FilterPanel','FormModal','DatePicker','tax_rates','currency_rates'], uses:[], deps:[], neededBy:['PAB','ESHOP','SKLAD','UCT','POS'],
+      desc:'Zdieľané UI komponenty a DB schémy — dedené všetkými modulmi.' },
+    { code:'PM',   name:'Programový Manažér', color:'teal',   step:7, status:'stable',  type:'system', owns:['auth_session','user_profiles','ModuleRegistry','AppShell'], uses:[], deps:[], neededBy:['PAB','ESHOP','SKLAD','UCT','POS','CMN'],
+      desc:'Správa prihlásenia a spúšťania modulov. Mení sa len pri pridaní nového modulu.' },
+    // ── Biznis moduly ──────────────────────────────────────────────────────────
+    { code:'PAB',  name:'Partner Catalog',    color:'indigo', step:4, status:'active',  type:'module', owns:['partners','PartnerSelector','PartnerForm'],        uses:['DataGrid','SearchBar','tax_rates'],                          deps:['CMN'],            neededBy:['ESHOP','SKLAD','UCT'] },
+    { code:'ESHOP',name:'E-Shop',             color:'green',  step:3, status:'active',  type:'module', owns:['products','orders','ProductCard','CartWidget'],     uses:['DataGrid','FilterPanel','partners','PartnerSelector'],       deps:['CMN','PAB'],      neededBy:['SKLAD','POS'] },
+    { code:'SKLAD',name:'Sklad',              color:'blue',   step:2, status:'active',  type:'module', owns:['stock_items','StockTable'],                        uses:['DataGrid','SearchBar','partners','products'],                deps:['CMN','PAB','ESHOP'], neededBy:[] },
+    { code:'UCT',  name:'Účtovníctvo',        color:'purple', step:1, status:'planning',type:'module', owns:['ledger_entries','JournalEntry'],                   uses:['DataGrid','tax_rates','partners'],                           deps:['CMN','PAB'],      neededBy:[] },
+    { code:'POS',  name:'Point of Sale',      color:'orange', step:0, status:'planning',type:'module', owns:['pos_sessions','POSTerminal'],                      uses:['DataGrid','FormModal','products'],                           deps:['CMN','ESHOP'],    neededBy:[] },
   ];
 
   let _mmCurrentModule = null;
 
   const _mmColors = {
+    gray:   { bg:'bg-slate-500/20', text:'text-slate-300',  border:'border-slate-500/30'  },
     indigo: { bg:'bg-indigo-500/20', text:'text-indigo-400', border:'border-indigo-500/30' },
     green:  { bg:'bg-green-500/20',  text:'text-green-400',  border:'border-green-500/30'  },
     blue:   { bg:'bg-blue-500/20',   text:'text-blue-400',   border:'border-blue-500/30'   },
@@ -7447,32 +7445,67 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
     teal:   { bg:'bg-teal-500/20',   text:'text-teal-400',   border:'border-teal-500/30'   },
     pink:   { bg:'bg-pink-500/20',   text:'text-pink-400',   border:'border-pink-500/30'   },
   };
-  const _mmStepNames = ['Spec','Dev Docs','Summary','Architecture','Quality Audit','Task Plan','Implementácia'];
+  // Step names for multi-module pipeline
+  // Steps 0,1,4,5,6 = shared (one for whole version)
+  // Steps 2,3       = per affected module
+  const _mmStepNames  = ['Spec','Dev Docs & Impact','UI Design','Architecture','Quality Audit','Task Plan','Implementácia'];
+  const _mmStepShared = [true, true, false, false, true, true, true]; // true = shared, false = per module
+  const _mmStepLabels = ['Zdieľaný','Zdieľaný','Per modul','Per modul','Zdieľaný','Zdieľaný','Zdieľaný'];
+
+  // Current version shared pipeline position (independent of individual module docs)
+  let _mmVersion = { version: 'v1.0', label: 'Základná verzia', step: 3 }; // step = Architecture
 
   function mmRenderModuleCards() {
     const grid = document.getElementById('mm-module-grid');
     if (!grid) return;
-    grid.innerHTML = _mmModules.map(m => {
+
+    // Separate module types for layout
+    const specialMods  = _mmModules.filter(m => m.type === 'common' || m.type === 'system');
+    const businessMods = _mmModules.filter(m => m.type === 'module');
+
+    const renderCard = m => {
       const c = _mmColors[m.color] || _mmColors.indigo;
-      const statusBadge = m.status === 'active'
-        ? '<span class="text-[9px] px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400 border border-green-500/25 font-medium">Aktívny</span>'
-        : '<span class="text-[9px] px-1.5 py-0.5 rounded-full bg-slate-700/50 text-slate-400 border border-slate-600/25 font-medium">Plánovanie</span>';
+
+      // Special badge per type
+      let statusBadge;
+      if (m.type === 'common') {
+        statusBadge = '<span class="text-[9px] px-1.5 py-0.5 rounded-full bg-slate-500/20 text-slate-300 border border-slate-500/30 font-medium">Common</span>';
+      } else if (m.type === 'system') {
+        statusBadge = '<span class="text-[9px] px-1.5 py-0.5 rounded-full bg-teal-500/15 text-teal-400 border border-teal-500/25 font-medium">Systémový</span>';
+      } else if (m.status === 'active') {
+        statusBadge = '<span class="text-[9px] px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400 border border-green-500/25 font-medium">Aktívny</span>';
+      } else {
+        statusBadge = '<span class="text-[9px] px-1.5 py-0.5 rounded-full bg-slate-700/50 text-slate-400 border border-slate-600/25 font-medium">Plánovanie</span>';
+      }
+
+      // Dots — for system module show all filled
       const dots = _mmStepNames.map((_, i) => {
-        const filled = i < m.step;
-        const current = i === m.step && m.step < 7;
+        const filled  = m.type === 'system' ? true : i < m.step;
+        const current = m.type === 'system' ? false : (i === m.step && m.step < 7);
         const cls = filled ? 'bg-primary-500' : (current ? 'bg-primary-400 animate-pulse' : 'bg-slate-700');
-        return `<div class="w-2 h-2 rounded-full ${cls}" title="${_mmStepNames[i]}"></div>`;
+        const sharedCls = _mmStepShared[i] ? '' : 'ring-1 ring-offset-1 ring-offset-slate-900 ring-slate-600';
+        return `<div class="w-2 h-2 rounded-full ${cls} ${sharedCls}" title="${_mmStepNames[i]} (${_mmStepLabels[i]})"></div>`;
       }).join('');
-      const depStatus = m.deps.length > 0
-        ? `<div class="mt-2 pt-2 border-t border-slate-800 text-[10px] flex items-center gap-2">` +
-          m.deps.map(d => {
-            const dep = _mmModules.find(x => x.code === d);
-            const ok = dep && dep.step >= m.step;
-            return `<span class="${ok ? 'text-green-500' : 'text-yellow-500'}">${ok ? '✓' : '⚠'} ${d}</span>`;
-          }).join('') + `</div>`
-        : '';
+
+      const stepLabel = m.type === 'system' ? 'Stabilný ✓' : (m.step >= 7 ? 'Dokončený ✓' : `Krok ${m.step + 1}: ${_mmStepNames[m.step]}`);
+
+      // Extra desc for special modules
+      const descLine = (m.type === 'common' || m.type === 'system') && m.desc
+        ? `<div class="text-[10px] text-gray-500 mt-2 leading-relaxed">${m.desc}</div>`
+        : `<div class="flex items-center justify-between text-[10px] text-gray-600 mt-2">
+             <span>Závisí od: ${m.deps.filter(d => d !== 'CMN').join(', ') || '—'}</span>
+             <span>${m.owns.length} zdrojov</span>
+           </div>`;
+
+      // Border highlight for special modules
+      const cardBorder = m.type === 'common'
+        ? 'border-slate-600 bg-slate-900'
+        : m.type === 'system'
+          ? 'border-teal-800/40 bg-teal-950/20'
+          : 'border-slate-800 bg-slate-900';
+
       return `
-        <div onclick="mmOpenModuleDetail('${m.code}')" class="card-hover cursor-pointer rounded-xl border border-slate-800 bg-slate-900 p-4">
+        <div onclick="mmOpenModuleDetail('${m.code}')" class="card-hover cursor-pointer rounded-xl border ${cardBorder} p-4">
           <div class="flex items-start justify-between mb-3">
             <div class="flex items-center gap-2">
               <span class="text-xs font-bold px-2 py-0.5 rounded font-mono ${c.bg} ${c.text} border ${c.border}">${m.code}</span>
@@ -7480,26 +7513,64 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
             </div>
             ${statusBadge}
           </div>
-          <div class="flex items-center gap-1.5 mb-2">
+          <div class="flex items-center gap-1.5 mb-1">
             ${dots}
-            <span class="text-[10px] text-gray-500 ml-1">Krok ${m.step}/7</span>
+            <span class="text-[10px] text-gray-500 ml-1">${stepLabel}</span>
           </div>
-          <div class="flex items-center justify-between text-[10px] text-gray-600">
-            <span>Závisí od: ${m.deps.length > 0 ? m.deps.join(', ') : '—'}</span>
-            <span>${m.owns.length} zdrojov</span>
-          </div>
-          ${depStatus}
+          ${descLine}
         </div>`;
-    }).join('');
-    // Update stats
-    const avg = _mmModules.reduce((s, m) => s + m.step, 0) / _mmModules.length;
+    };
+
+    // Render: special modules first (full-width row), then business modules
+    const specialHtml = specialMods.map(renderCard).join('');
+    const businessHtml = businessMods.map(renderCard).join('');
+
+    grid.innerHTML = `
+      <div class="col-span-full">
+        <div class="text-[10px] text-gray-600 uppercase tracking-widest font-semibold mb-2">Špeciálne moduly</div>
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">${specialHtml}</div>
+      </div>
+      <div class="col-span-full mt-1">
+        <div class="text-[10px] text-gray-600 uppercase tracking-widest font-semibold mb-2">Biznis moduly</div>
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">${businessHtml}</div>
+      </div>`;
+
+    // Update stats — count only business modules + CMN, exclude PM
+    const counted = _mmModules.filter(m => m.type !== 'system');
+    const avg = counted.reduce((s, m) => s + Math.min(m.step, 7), 0) / counted.length;
     const pct = Math.round((avg / 7) * 100);
-    const bar = document.getElementById('mm-stat-bar');
+    const bar   = document.getElementById('mm-stat-bar');
     const pctEl = document.getElementById('mm-stat-pct');
     const modsEl = document.getElementById('mm-stat-modules');
-    if (bar) bar.style.width = pct + '%';
+    if (bar)   bar.style.width = pct + '%';
     if (pctEl) pctEl.textContent = pct + '%';
-    if (modsEl) modsEl.textContent = _mmModules.length;
+    if (modsEl) modsEl.textContent = _mmModules.filter(m => m.type === 'module').length;
+  }
+
+  function mmRenderVersionPipeline() {
+    const el = document.getElementById('mm-version-pipeline');
+    if (!el) return;
+    el.innerHTML = _mmStepNames.map((name, i) => {
+      const done    = i < _mmVersion.step;
+      const current = i === _mmVersion.step;
+      const shared  = _mmStepShared[i];
+      const dotCls  = done ? 'bg-primary-500' : (current ? 'bg-primary-400 animate-pulse' : 'bg-slate-700');
+      const labelCls = done ? 'text-primary-400' : (current ? 'text-gray-200 font-semibold' : 'text-gray-600');
+      const badge   = shared
+        ? ''
+        : '<span class="ml-0.5 text-[8px] text-slate-500 leading-none">↕</span>';
+      return `
+        <div class="flex items-center gap-1 ${i > 0 ? 'ml-1' : ''}">
+          ${i > 0 ? '<div class="w-4 h-px bg-slate-700 shrink-0"></div>' : ''}
+          <div class="flex flex-col items-center gap-0.5 relative group">
+            <div class="w-2.5 h-2.5 rounded-full ${dotCls} shrink-0"></div>
+            <span class="text-[9px] ${labelCls} whitespace-nowrap hidden sm:block">${name}${badge}</span>
+            <div class="absolute bottom-full mb-1.5 left-1/2 -translate-x-1/2 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-[9px] text-gray-300 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 shadow-lg">
+              ${name} — ${_mmStepLabels[i]}${current ? ' · Aktuálny krok' : (done ? ' · Dokončený' : '')}
+            </div>
+          </div>
+        </div>`;
+    }).join('');
   }
 
   function mmOpenModuleDetail(code) {
@@ -7515,7 +7586,13 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
     if (badge) { badge.textContent = m.code; badge.className = `text-[11px] font-bold px-2 py-0.5 rounded font-mono ${c.bg} ${c.text} border ${c.border}`; }
     if (title) title.textContent = m.name;
     if (statusBadge) {
-      if (m.status === 'active') {
+      if (m.type === 'system') {
+        statusBadge.className = 'text-[10px] px-2.5 py-1 rounded-full border font-medium bg-teal-500/15 text-teal-400 border-teal-500/25';
+        statusBadge.textContent = 'Stabilný';
+      } else if (m.type === 'common') {
+        statusBadge.className = 'text-[10px] px-2.5 py-1 rounded-full border font-medium bg-slate-500/20 text-slate-300 border-slate-500/30';
+        statusBadge.textContent = 'Common';
+      } else if (m.status === 'active') {
         statusBadge.className = 'text-[10px] px-2.5 py-1 rounded-full border font-medium bg-green-500/15 text-green-400 border-green-500/25';
         statusBadge.textContent = 'Aktívny';
       } else {
@@ -7524,21 +7601,40 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
       }
     }
 
-    // Pipeline dots bar
+    // Hide "enter workflow" button for special modules
+    const enterBtn = document.getElementById('mm-mod-enter-btn');
+    if (enterBtn) enterBtn.style.display = 'none'; // workflow is version-level, not per-module
+
+    // Pipeline dots bar — for system module show all green; for others show hybrid
     const dotsEl = document.getElementById('mm-mod-pipeline-dots');
     const labelEl = document.getElementById('mm-mod-pipeline-label');
     if (dotsEl) {
-      dotsEl.innerHTML = _mmStepNames.map((n, i) => {
-        const filled = i < m.step;
-        const current = i === m.step && m.step < 7;
-        const cls = filled ? 'bg-primary-500' : (current ? 'bg-primary-400 animate-pulse' : 'bg-slate-700');
-        return `<div class="relative group">
-          <div class="w-3 h-3 rounded-full ${cls}"></div>
-          <div class="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-slate-800 text-[9px] text-gray-300 px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none border border-slate-700 z-10">${n}</div>
-        </div><div class="flex-1 h-px bg-slate-800" style="max-width:20px"></div>`;
-      }).join('').replace(/<div class="flex-1 h-px bg-slate-800" style="max-width:20px"><\/div>$/, '');
+      if (m.type === 'system') {
+        dotsEl.innerHTML = _mmStepNames.map((n, i) =>
+          `<div class="relative group">
+            <div class="w-3 h-3 rounded-full bg-primary-500"></div>
+            <div class="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-slate-800 text-[9px] text-gray-300 px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none border border-slate-700 z-10">${n}</div>
+          </div><div class="flex-1 h-px bg-slate-800" style="max-width:20px"></div>`
+        ).join('').replace(/<div class="flex-1 h-px bg-slate-800" style="max-width:20px"><\/div>$/, '');
+        if (labelEl) labelEl.textContent = 'Stabilný — všetky kroky ✓';
+      } else {
+        // Hybrid: shared steps use _mmVersion.step, per-module steps use m.step
+        dotsEl.innerHTML = _mmStepNames.map((n, i) => {
+          const shared    = _mmStepShared[i];
+          const effective = shared ? _mmVersion.step : m.step;
+          const filled    = i < effective;
+          const current   = i === effective;
+          const cls       = filled ? 'bg-primary-500' : (current ? 'bg-primary-400 animate-pulse' : 'bg-slate-700');
+          const ring      = shared ? '' : 'ring-1 ring-offset-1 ring-offset-slate-900 ring-slate-600';
+          return `<div class="relative group">
+            <div class="w-3 h-3 rounded-full ${cls} ${ring}"></div>
+            <div class="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-slate-800 text-[9px] text-gray-300 px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none border border-slate-700 z-10">${n} (${_mmStepLabels[i]})</div>
+          </div><div class="flex-1 h-px bg-slate-800" style="max-width:20px"></div>`;
+        }).join('').replace(/<div class="flex-1 h-px bg-slate-800" style="max-width:20px"><\/div>$/, '');
+        const curStep = _mmStepShared[_mmVersion.step] ? _mmVersion.step : m.step;
+        if (labelEl) labelEl.textContent = curStep < 7 ? `Krok ${curStep + 1}: ${_mmStepNames[curStep]}` : 'Dokončený ✓';
+      }
     }
-    if (labelEl) labelEl.textContent = m.step < 7 ? `Krok ${m.step + 1}: ${_mmStepNames[m.step]}` : 'Dokončený ✓';
 
     // Render tab contents
     mmRenderModuleSteps(m);
@@ -7551,25 +7647,85 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
   function mmRenderModuleSteps(m) {
     const el = document.getElementById('mm-mod-steps-list');
     if (!el) return;
-    el.innerHTML = _mmStepNames.map((name, i) => {
-      const done = i < m.step;
-      const current = i === m.step && m.step < 7;
-      let icon, cls, badge;
-      if (done) {
-        icon = `<svg class="w-4 h-4 text-green-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>`;
-        cls  = 'border-green-500/20 bg-green-500/5';
-        badge = '<span class="text-[10px] text-green-400">Dokončený</span>';
-      } else if (current) {
-        icon = `<div class="w-4 h-4 rounded-full border-2 border-primary-400 bg-primary-400/20 shrink-0"></div>`;
-        cls  = 'border-primary-500/30 bg-primary-600/5';
-        badge = '<span class="text-[10px] text-primary-400 font-medium">Aktívny</span>';
-      } else {
-        icon = `<div class="w-4 h-4 rounded-full border-2 border-slate-700 shrink-0"></div>`;
-        cls  = 'border-slate-800 bg-slate-950/30 opacity-40';
-        badge = '<span class="text-[10px] text-gray-600">Čaká</span>';
-      }
-      return `<div class="flex items-center gap-3 p-3 rounded-lg border ${cls}">${icon}<span class="text-xs font-medium text-gray-300 flex-1">Krok ${i+1}: ${name}</span>${badge}</div>`;
-    }).join('');
+
+    // Special: PM (system) — all done, stable, no per-module docs
+    if (m.type === 'system') {
+      el.innerHTML = `
+        <div class="rounded-xl border border-teal-700/30 bg-teal-950/20 p-4 text-xs text-teal-300 leading-relaxed">
+          <div class="font-semibold mb-1">Systémový modul — stabilný</div>
+          <div class="text-teal-400/70">${m.desc}</div>
+          <div class="mt-3 text-[10px] text-teal-500">Programový Manažér prechádza pipeline len keď sa pridáva nový biznis modul do systému. Inak zostáva nezmenený naprieč verziami.</div>
+        </div>`;
+      return;
+    }
+
+    // Common module — show its role in pipeline
+    if (m.type === 'common') {
+      const vStep = _mmVersion.step;
+      el.innerHTML = `
+        <div class="rounded-xl border border-slate-600 bg-slate-900/60 p-4 mb-4">
+          <div class="text-[10px] text-gray-500 uppercase tracking-widest font-semibold mb-2">Rola Common v pipeline</div>
+          <div class="text-xs text-gray-300 leading-relaxed">${m.desc}</div>
+          <div class="mt-3 text-[10px] text-gray-500">Zmeny v Common module (grid, formuláre, schémy) sú automaticky zdedené všetkými biznis modulmi. Biznis moduly nedostávajú nové DESIGN.md — Common ich má ako jediný.</div>
+        </div>` +
+        _mmStepNames.map((name, i) => {
+          const done    = i < m.step;
+          const current = i === m.step && m.step < 7;
+          const shared  = _mmStepShared[i];
+          let icon, cls, badge, note;
+          if (done) {
+            icon  = `<svg class="w-4 h-4 text-green-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>`;
+            cls   = 'border-green-500/20 bg-green-500/5';
+            badge = '<span class="text-[10px] text-green-400">Dokončený</span>';
+          } else if (current) {
+            icon  = `<div class="w-4 h-4 rounded-full border-2 border-primary-400 bg-primary-400/20 shrink-0"></div>`;
+            cls   = 'border-primary-500/30 bg-primary-600/5';
+            badge = '<span class="text-[10px] text-primary-400 font-medium">Aktívny</span>';
+          } else {
+            icon  = `<div class="w-4 h-4 rounded-full border-2 border-slate-700 shrink-0"></div>`;
+            cls   = 'border-slate-800 bg-slate-950/30 opacity-40';
+            badge = '<span class="text-[10px] text-gray-600">Čaká</span>';
+          }
+          note = shared
+            ? `<span class="text-[9px] text-slate-600 ml-1">zdieľaný</span>`
+            : `<span class="text-[9px] text-slate-500 ml-1">↕ per modul</span>`;
+          return `<div class="flex items-center gap-3 p-3 rounded-lg border ${cls}">${icon}<span class="text-xs font-medium text-gray-300 flex-1">Krok ${i+1}: ${name}${note}</span>${badge}</div>`;
+        }).join('');
+      return;
+    }
+
+    // Business module — show version context (shared steps from version, own steps per module)
+    const vStep = _mmVersion.step; // current shared version step
+    el.innerHTML = `
+      <div class="rounded-xl border border-slate-800 bg-slate-950/50 p-3 mb-3 text-[10px] text-gray-500 leading-relaxed">
+        Kroky <span class="text-slate-400 font-medium">Spec, Dev Docs & Impact, Quality Audit, Task Plan, Implementácia</span> sú zdieľané pre celú verziu.
+        Kroky <span class="text-slate-400 font-medium">UI Design, Architecture</span> má každý dotknutý modul samostatne.
+      </div>` +
+      _mmStepNames.map((name, i) => {
+        const shared  = _mmStepShared[i];
+        // For shared steps: use version step position; for per-module steps: use module step
+        const effectiveStep = shared ? vStep : m.step;
+        const done    = i < effectiveStep;
+        const current = i === effectiveStep;
+        let icon, cls, badge, note;
+        if (done) {
+          icon  = `<svg class="w-4 h-4 text-green-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>`;
+          cls   = 'border-green-500/20 bg-green-500/5';
+          badge = '<span class="text-[10px] text-green-400">Dokončený</span>';
+        } else if (current) {
+          icon  = `<div class="w-4 h-4 rounded-full border-2 border-primary-400 bg-primary-400/20 shrink-0"></div>`;
+          cls   = 'border-primary-500/30 bg-primary-600/5';
+          badge = '<span class="text-[10px] text-primary-400 font-medium">Aktívny</span>';
+        } else {
+          icon  = `<div class="w-4 h-4 rounded-full border-2 border-slate-700 shrink-0"></div>`;
+          cls   = 'border-slate-800 bg-slate-950/30 opacity-40';
+          badge = '<span class="text-[10px] text-gray-600">Čaká</span>';
+        }
+        note = shared
+          ? `<span class="text-[9px] text-slate-600 ml-1">zdieľaný</span>`
+          : `<span class="text-[9px] text-slate-500 ml-1">↕ tento modul</span>`;
+        return `<div class="flex items-center gap-3 p-3 rounded-lg border ${cls}">${icon}<span class="text-xs font-medium text-gray-300 flex-1">Krok ${i+1}: ${name}${note}</span>${badge}</div>`;
+      }).join('');
   }
 
   function mmRenderModuleResources(m) {
@@ -7672,7 +7828,7 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
   const _sharedResources = [
     { id:'sr1',  name:'partners',        type:'db_table',     owner:'PAB',   consumers:['ESHOP','SKLAD','UCT'], status:'stable',     desc:'Tabuľka partnerov, dodávateľov a odberateľov',  schema:['id UUID PK','name VARCHAR','type ENUM','email VARCHAR','phone VARCHAR','tax_id VARCHAR','created_at TIMESTAMP'] },
     { id:'sr2',  name:'products',        type:'db_table',     owner:'ESHOP', consumers:['SKLAD','POS'],         status:'stable',     desc:'Katalóg produktov a služieb',                   schema:['id UUID PK','code VARCHAR','name VARCHAR','price DECIMAL','unit VARCHAR','category_id UUID','active BOOL'] },
-    { id:'sr3',  name:'tax_rates',       type:'db_table',     owner:'UCT',   consumers:['PAB','ESHOP','SKLAD','POS'], status:'change_req', desc:'Sadzby DPH a daňové kategórie',       schema:['id UUID PK','code VARCHAR','rate DECIMAL','name VARCHAR','valid_from DATE'] },
+    { id:'sr3',  name:'tax_rates',       type:'db_table',     owner:'CMN',   consumers:['PAB','ESHOP','SKLAD','UCT','POS'], status:'stable', desc:'Sadzby DPH a daňové kategórie',       schema:['id UUID PK','code VARCHAR','rate DECIMAL','name VARCHAR','valid_from DATE'] },
     { id:'sr4',  name:'orders',          type:'db_table',     owner:'ESHOP', consumers:['UCT'],                 status:'stable',     desc:'Objednávky zákazníkov',                         schema:['id UUID PK','partner_id UUID FK','status ENUM','total DECIMAL','created_at TIMESTAMP'] },
     { id:'sr5',  name:'stock_items',     type:'db_table',     owner:'SKLAD', consumers:['POS'],                 status:'stable',     desc:'Skladové zásoby a pohyby tovaru',               schema:['id UUID PK','product_id UUID FK','quantity DECIMAL','location VARCHAR','updated_at TIMESTAMP'] },
     { id:'sr6',  name:'ledger_entries',  type:'db_table',     owner:'UCT',   consumers:[],                      status:'stable',     desc:'Účtovné záznamy (double-entry)',                schema:['id UUID PK','debit_account VARCHAR','credit_account VARCHAR','amount DECIMAL','date DATE','reference VARCHAR'] },
@@ -7684,9 +7840,8 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
     { id:'sr12', name:'JournalEntry',    type:'ui_component', owner:'UCT',   consumers:[],                      status:'stable',     desc:'Formulár pre manuálny účtovný záznam',          schema:['onSubmit: (entry) => void','readOnly?: boolean'] },
   ];
 
-  const _changeRequests = [
-    { id:'cr1', resourceId:'sr3', resource:'tax_rates', proposedBy:'ESHOP', type:'schema_change', title:'Pridať stĺpec eu_vat_code', desc:'Potrebujeme EU VAT kód pre cross-border predaj do EÚ', status:'open', date:'20. 4. 2026' },
-  ];
+  // CRs removed — changes go through version pipeline
+  const _changeRequests = [];
 
   let _mmCurrentResource = null;
   let _mmResTypeFilter = 'all';
@@ -7820,60 +7975,99 @@ Docker Compose — backend (8000), frontend (3000, Nginx), postgres (5432 intern
   function mmRenderDepMap() {
     const svg = document.getElementById('mm-depmap-svg');
     if (!svg) return;
-    // Fixed positions for 5 modules (cx, cy)
-    const pos = { PAB:[350,65], ESHOP:[170,200], UCT:[530,200], SKLAD:[90,335], POS:[270,335] };
-    const W = 130, H = 54;
-    // Edges: [from, to, resources label]
+
+    // Business module positions (cx = center x, cy = center y)
+    const pos = { PAB:[270,60], ESHOP:[110,185], UCT:[460,185], SKLAD:[80,305], POS:[235,305] };
+    const W = 118, H = 48;
+
+    // Hardcoded hex colors per module color name
+    const hexColors = {
+      gray:   ['#64748b','#cbd5e1'],
+      indigo: ['#4f46e5','#818cf8'],
+      green:  ['#16a34a','#4ade80'],
+      blue:   ['#2563eb','#60a5fa'],
+      purple: ['#9333ea','#c084fc'],
+      orange: ['#ea580c','#fb923c'],
+      teal:   ['#0d9488','#2dd4bf'],
+    };
+
+    // ── CMN foundation bar ────────────────────────────────────────────────────
+    const cmnY = 372, cmnX = 15, cmnW = 665, cmnH = 46;
+    const cmnSvg = `
+      <g onclick="mmOpenModuleDetail('CMN')" style="cursor:pointer">
+        <rect x="${cmnX}" y="${cmnY}" width="${cmnW}" height="${cmnH}" rx="10"
+          fill="#47556922" stroke="#64748b" stroke-width="1.5"/>
+        <text x="${cmnX + 18}" y="${cmnY + 17}" font-size="11" font-weight="700"
+          fill="#cbd5e1" font-family="monospace">CMN</text>
+        <text x="${cmnX + 18}" y="${cmnY + 32}" font-size="9" fill="#64748b">Common</text>
+        <text x="${cmnX + cmnW/2 + 20}" y="${cmnY + 17}" text-anchor="middle"
+          font-size="9" fill="#94a3b8">DataGrid · SearchBar · FilterPanel · FormModal · DatePicker</text>
+        <text x="${cmnX + cmnW/2 + 20}" y="${cmnY + 31}" text-anchor="middle"
+          font-size="9" fill="#64748b">tax_rates · currency_rates  —  dedené všetkými modulmi</text>
+      </g>`;
+
+    // ── Dashed lines: business modules → CMN ─────────────────────────────────
+    const cmnLinesSvg = Object.entries(pos).map(([code, [cx, cy]]) =>
+      `<line x1="${cx}" y1="${cy + H/2}" x2="${cx}" y2="${cmnY}"
+        stroke="#475569" stroke-width="1" stroke-dasharray="4,3" opacity="0.5"/>`
+    ).join('');
+
+    // ── PM box — top right ────────────────────────────────────────────────────
+    const pmX = 576, pmY = 28, pmW = 100, pmH = 46;
+    const pmSvg = `
+      <g onclick="mmOpenModuleDetail('PM')" style="cursor:pointer">
+        <rect x="${pmX}" y="${pmY}" width="${pmW}" height="${pmH}" rx="8"
+          fill="#0d948820" stroke="#0d9488" stroke-width="1.5" stroke-dasharray="5,3"/>
+        <text x="${pmX + pmW/2}" y="${pmY + 16}" text-anchor="middle"
+          font-size="11" font-weight="700" fill="#2dd4bf" font-family="monospace">PM</text>
+        <text x="${pmX + pmW/2}" y="${pmY + 30}" text-anchor="middle"
+          font-size="8" fill="#94a3b8">Prg. Manažér</text>
+      </g>`;
+
+    // ── Module-to-module edges ────────────────────────────────────────────────
     const edges = [
-      ['PAB','ESHOP','partners, PartnerSelector'],
+      ['PAB','ESHOP','partners'],
       ['PAB','UCT',  'partners'],
-      ['ESHOP','SKLAD','products, orders'],
+      ['ESHOP','SKLAD','products'],
       ['ESHOP','POS',  'products'],
     ];
-    const crRes = _changeRequests.filter(c => c.status === 'open').map(c => {
-      const r = _sharedResources.find(x => x.id === c.resourceId);
-      return r ? r.name : '';
-    });
-    // Draw edges first (behind nodes)
     const edgeSvg = edges.map(([from, to, label]) => {
       const [fx, fy] = pos[from], [tx, ty] = pos[to];
-      const x1 = fx, y1 = fy + H/2;
-      const x2 = tx, y2 = ty - H/2;
+      const x1 = fx, y1 = fy + H/2, x2 = tx, y2 = ty - H/2;
       const mx = (x1+x2)/2, my = (y1+y2)/2;
-      const hasChange = label.split(',').map(s=>s.trim()).some(l => crRes.includes(l));
-      const color = hasChange ? '#eab308' : '#22c55e';
       const d = `M ${x1} ${y1} C ${x1} ${my}, ${x2} ${my}, ${x2} ${y2}`;
-      return `<path d="${d}" stroke="${color}" stroke-width="1.5" fill="none" stroke-dasharray="${hasChange ? '5,3' : 'none'}" opacity="0.6"/>
-        <text x="${mx}" y="${my - 6}" text-anchor="middle" font-size="9" fill="${color}" opacity="0.8">${label}</text>`;
+      return `<path d="${d}" stroke="#22c55e" stroke-width="1.5" fill="none" opacity="0.6"/>
+        <text x="${mx + 6}" y="${my - 3}" font-size="8" fill="#22c55e" opacity="0.8">${label}</text>`;
     }).join('');
-    // Draw module nodes
-    const nodeSvg = _mmModules.map(m => {
-      const [cx, cy] = pos[m.code] || [0,0];
+
+    // ── Business module nodes ─────────────────────────────────────────────────
+    const bizMods = _mmModules.filter(m => m.type === 'module');
+    const nodeSvg = bizMods.map(m => {
+      if (!pos[m.code]) return '';
+      const [cx, cy] = pos[m.code];
       const x = cx - W/2, y = cy - H/2;
-      const col = _mmColors[m.color] || _mmColors.indigo;
-      // Extract hex-ish colors from tailwind classes — use hardcoded colors per module
-      const colors = { indigo:['#4f46e5','#818cf8'], green:['#16a34a','#4ade80'], blue:['#2563eb','#60a5fa'], purple:['#9333ea','#c084fc'], orange:['#ea580c','#fb923c'] };
-      const [bg, text] = colors[m.color] || colors.indigo;
-      const hasConflict = _changeRequests.some(cr => cr.status === 'open' && _sharedResources.find(r => r.id === cr.resourceId)?.owner === m.code);
+      const [bg, text] = hexColors[m.color] || hexColors.indigo;
       const stepPct = Math.round((m.step / 7) * 100);
-      return `<g onclick="mmOpenModuleDetail('${m.code}')" style="cursor:pointer" class="dep-node-g">
-        <rect x="${x}" y="${y}" width="${W}" height="${H}" rx="10" fill="${bg}22" stroke="${bg}" stroke-width="1.5"/>
-        <text x="${cx}" y="${cy - 8}" text-anchor="middle" font-size="11" font-weight="700" fill="${text}" font-family="monospace">${m.code}</text>
+      return `<g onclick="mmOpenModuleDetail('${m.code}')" style="cursor:pointer">
+        <rect x="${x}" y="${y}" width="${W}" height="${H}" rx="8" fill="${bg}22" stroke="${bg}" stroke-width="1.5"/>
+        <text x="${cx}" y="${cy - 7}" text-anchor="middle" font-size="11" font-weight="700" fill="${text}" font-family="monospace">${m.code}</text>
         <text x="${cx}" y="${cy + 6}" text-anchor="middle" font-size="9" fill="#94a3b8">${m.name}</text>
-        <text x="${cx}" y="${cy + 18}" text-anchor="middle" font-size="8" fill="${bg}cc">Krok ${m.step}/7 · ${stepPct}%</text>
-        ${hasConflict ? `<circle cx="${x+W-8}" cy="${y+8}" r="5" fill="#eab308"/><text x="${x+W-8}" y="${y+12}" text-anchor="middle" font-size="7" fill="#000">!</text>` : ''}
+        <text x="${cx}" y="${cy + 18}" text-anchor="middle" font-size="8" fill="${bg}bb">Krok ${m.step}/7 · ${stepPct}%</text>
       </g>`;
     }).join('');
-    // Legend
+
+    // ── Legend ────────────────────────────────────────────────────────────────
     const legend = `<g>
-      <rect x="10" y="400" width="8" height="2" rx="1" fill="#22c55e"/>
-      <text x="22" y="404" font-size="9" fill="#94a3b8">Stabilná závislosť</text>
-      <rect x="130" y="399" width="8" height="2" rx="1" fill="#eab308" stroke-dasharray="3,2"/>
-      <text x="142" y="404" font-size="9" fill="#94a3b8">Change request aktívny</text>
-      <circle cx="274" cy="401" r="4" fill="#eab30866"/>
-      <text x="282" y="405" font-size="9" fill="#94a3b8">Owner má otvorený CR</text>
+      <line x1="10" y1="432" x2="24" y2="432" stroke="#22c55e" stroke-width="1.5"/>
+      <text x="28" y="436" font-size="9" fill="#94a3b8">Modul → modul závislosť</text>
+      <line x1="190" y1="432" x2="204" y2="432" stroke="#475569" stroke-width="1" stroke-dasharray="4,3"/>
+      <text x="208" y="436" font-size="9" fill="#94a3b8">→ CMN (dedičnosť)</text>
+      <rect x="322" y="427" width="32" height="10" rx="3" fill="#0d948820" stroke="#0d9488" stroke-width="1" stroke-dasharray="3,2"/>
+      <text x="360" y="436" font-size="9" fill="#94a3b8">Programový Manažér (stabilný)</text>
     </g>`;
-    svg.innerHTML = edgeSvg + nodeSvg + legend;
+
+    svg.setAttribute('viewBox', '0 0 700 450');
+    svg.innerHTML = cmnLinesSvg + edgeSvg + cmnSvg + nodeSvg + pmSvg + legend;
   }
 
   // ── Change Request ─────────────────────────────────────────────────────────

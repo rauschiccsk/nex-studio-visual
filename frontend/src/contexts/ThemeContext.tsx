@@ -41,13 +41,14 @@ export function darkModeKey(username: string): string {
   return `nex_dark_${username}`;
 }
 
-/** Read persisted dark-mode preference for *username*. */
+/** Read persisted dark-mode preference for *username*. Defaults to dark. */
 function readPersistedDark(username: string | undefined): boolean {
-  if (!username) return false;
+  if (!username) return true;
   try {
-    return localStorage.getItem(darkModeKey(username)) === "true";
+    const stored = localStorage.getItem(darkModeKey(username));
+    return stored === null ? true : stored === "true";
   } catch {
-    return false;
+    return true;
   }
 }
 

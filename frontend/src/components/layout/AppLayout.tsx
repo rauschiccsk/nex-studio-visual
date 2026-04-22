@@ -1,25 +1,17 @@
 import { Outlet } from "react-router-dom";
-import Header from "./Header";
 import Sidebar from "./Sidebar";
+import Topbar from "./Topbar";
 
-/**
- * Primary application layout: sidebar + header + main content area.
- *
- * Rendered as a parent route for every authenticated page (DESIGN.md § 3.2).
- * Child routes are rendered via <Outlet />.
- */
-function AppLayout() {
+export default function AppLayout() {
   return (
-    <div className="flex h-full w-full bg-gray-50 dark:bg-gray-900">
+    <div className="flex h-full w-full bg-slate-950">
       <Sidebar />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <Header />
-        <main className="flex-1 overflow-y-auto p-6">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <Topbar />
+        <main className="flex-1 overflow-y-auto">
           <Outlet />
         </main>
       </div>
     </div>
   );
 }
-
-export default AppLayout;

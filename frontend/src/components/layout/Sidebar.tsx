@@ -1,325 +1,227 @@
 import { useState } from "react";
-import { NavLink, useMatch } from "react-router-dom";
-import {
-  Brain,
-  ChevronDown,
-  ChevronRight,
-  FolderKanban,
-  LayoutDashboard,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Settings,
-  ShieldCheck,
-  Tag,
-} from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { useAuthStore } from "@/store/authStore";
 
-import SidebarFooter from "./SidebarFooter";
+// ─── SVG icon helpers ───────────────────────────────────────────────────────
 
-type NavItem = {
-  to: string;
+const IconHome = () => (
+  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+  </svg>
+);
+
+const IconFolder = () => (
+  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+  </svg>
+);
+
+const IconVersions = () => (
+  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+  </svg>
+);
+
+const IconWorkflow = () => (
+  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+  </svg>
+);
+
+const IconBook = () => (
+  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+  </svg>
+);
+
+const IconSettings = () => (
+  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+  </svg>
+);
+
+const IconAdmin = () => (
+  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+  </svg>
+);
+
+const IconLogout = () => (
+  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+  </svg>
+);
+
+const IconSidebarToggle = () => (
+  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <rect x="3" y="3" width="18" height="18" rx="2" strokeWidth="1.8" />
+    <path d="M9 3v18" strokeWidth="1.8" />
+  </svg>
+);
+
+// ─── NavItem ─────────────────────────────────────────────────────────────────
+
+interface NavItemProps {
+  icon: React.ReactNode;
   label: string;
-  end?: boolean;
-};
-
-type NavGroup = {
-  heading: string;
-  items: NavItem[];
-};
-
-const PRIMARY_NAV: (NavItem & { icon: React.ReactNode })[] = [
-  { to: "/", label: "Dashboard", end: true, icon: <LayoutDashboard className="h-4 w-4 shrink-0" aria-hidden="true" /> },
-  { to: "/projects", label: "Projects", icon: <FolderKanban className="h-4 w-4 shrink-0" aria-hidden="true" /> },
-];
-
-const ADMIN_NAV: NavGroup[] = [
-  {
-    heading: "Projects",
-    items: [
-      { to: "/admin/projects", label: "Projects" },
-      { to: "/admin/project-modules", label: "Project Modules" },
-      { to: "/admin/module-dependencies", label: "Module Dependencies" },
-    ],
-  },
-  {
-    heading: "Specifications",
-    items: [
-      { to: "/admin/raw-specifications", label: "Raw Specifications" },
-      { to: "/admin/professional-specifications", label: "Professional Specifications" },
-      { to: "/admin/design-documents", label: "Design Documents" },
-    ],
-  },
-  {
-    heading: "Architect",
-    items: [
-      { to: "/admin/architect-sessions", label: "Architect Sessions" },
-      { to: "/admin/architect-messages", label: "Architect Messages" },
-    ],
-  },
-  {
-    heading: "Work Items",
-    items: [
-      { to: "/admin/epics", label: "Epics" },
-      { to: "/admin/feats", label: "Feats" },
-      { to: "/admin/tasks", label: "Tasks" },
-    ],
-  },
-  {
-    heading: "Bugs",
-    items: [
-      { to: "/admin/bugs", label: "Bugs" },
-      { to: "/admin/bug-fix-tasks", label: "Bug Fix Tasks" },
-      { to: "/admin/auto-fix-attempts", label: "Auto-Fix Attempts" },
-    ],
-  },
-  {
-    heading: "Delegation",
-    items: [
-      { to: "/admin/delegations", label: "Delegations" },
-      { to: "/admin/execution-logs", label: "Execution Logs" },
-    ],
-  },
-  {
-    heading: "Guardian",
-    items: [
-      { to: "/admin/guardian-precedents", label: "Guardian Precedents" },
-      { to: "/admin/guardian-reviews", label: "Guardian Reviews" },
-    ],
-  },
-  {
-    heading: "Knowledge",
-    items: [{ to: "/admin/kb-documents", label: "KB Documents" }],
-  },
-  {
-    heading: "Migration",
-    items: [
-      { to: "/admin/migration-batches", label: "Migration Batches" },
-      { to: "/admin/migration-category-statuses", label: "Category Statuses" },
-      { to: "/admin/migration-id-maps", label: "ID Maps" },
-    ],
-  },
-  {
-    heading: "Reports",
-    items: [{ to: "/admin/report-configs", label: "Report Configs" }],
-  },
-];
-
-function navLinkClass({ isActive }: { isActive: boolean }): string {
-  return [
-    "block rounded-md px-3 py-2 text-sm font-medium transition-colors",
-    isActive
-      ? "bg-primary-100 text-primary-800 dark:bg-primary-900 dark:text-primary-200"
-      : "text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-gray-100",
-  ].join(" ");
+  path?: string;
+  collapsed: boolean;
+  active?: boolean;
+  muted?: boolean;
+  onClick?: () => void;
 }
 
-function iconNavClass({ isActive }: { isActive: boolean }): string {
-  return [
-    "flex items-center justify-center rounded-md p-2 transition-colors",
-    isActive
-      ? "bg-primary-100 text-primary-800 dark:bg-primary-900 dark:text-primary-200"
-      : "text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-gray-100",
-  ].join(" ");
+function NavItem({ icon, label, path, collapsed, active, muted, onClick }: NavItemProps) {
+  const navigate = useNavigate();
+
+  const handleClick = () => {
+    if (muted) return;
+    if (onClick) { onClick(); return; }
+    if (path) navigate(path);
+  };
+
+  const base = "flex items-center gap-2.5 py-2 rounded-lg text-sm transition-colors w-full";
+  const px = collapsed ? "px-0 justify-center" : "px-3";
+  const color = active
+    ? "bg-primary-500/15 text-primary-400"
+    : muted
+    ? "text-slate-700 cursor-not-allowed"
+    : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200";
+
+  return (
+    <button className={`${base} ${px} ${color}`} onClick={handleClick} title={collapsed ? label : undefined}>
+      {icon}
+      {!collapsed && <span>{label}</span>}
+    </button>
+  );
 }
 
-function Sidebar() {
-  const stored = localStorage.getItem("sidebarCollapsed");
-  const [collapsed, setCollapsed] = useState(stored === "true");
+// ─── SectionLabel ────────────────────────────────────────────────────────────
 
-  const storedAdmin = localStorage.getItem("sidebarAdminOpen");
-  const [adminOpen, setAdminOpen] = useState(storedAdmin === "true");
+function SectionLabel({ label, collapsed }: { label: string; collapsed: boolean }) {
+  if (collapsed) return <div className="h-3" />;
+  return (
+    <div className="pt-3 pb-1 px-3 text-[10px] text-slate-700 uppercase tracking-widest font-semibold">
+      {label}
+    </div>
+  );
+}
 
-  const toggle = () => {
-    setCollapsed((prev) => {
-      const next = !prev;
-      localStorage.setItem("sidebarCollapsed", String(next));
-      return next;
-    });
+// ─── Sidebar ─────────────────────────────────────────────────────────────────
+
+export default function Sidebar() {
+  const [collapsed, setCollapsed] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const user = useAuthStore((s) => s.user);
+  const logout = useAuthStore((s) => s.logout);
+
+  const isActive = (path: string) =>
+    path === "/" ? location.pathname === "/" : location.pathname.startsWith(path);
+
+  const handleLogout = async () => {
+    await logout();
+    navigate("/login");
   };
 
-  const toggleAdmin = () => {
-    setAdminOpen((prev) => {
-      const next = !prev;
-      localStorage.setItem("sidebarAdminOpen", String(next));
-      return next;
-    });
-  };
-
-  const projectMatch = useMatch("/projects/:slug/*");
-  const slug = projectMatch?.params.slug;
-
-  const moduleMatch = useMatch("/projects/:slug/modules/:code/*");
-  const moduleCode = moduleMatch?.params.code;
+  const initials = user?.username ? user.username.slice(0, 1).toUpperCase() : "?";
 
   return (
     <aside
-      className={`flex shrink-0 flex-col border-r border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 transition-all duration-200 ${collapsed ? "w-14" : "w-64"}`}
+      className="flex-shrink-0 bg-slate-900 border-r border-slate-800 flex flex-col select-none transition-all duration-200 overflow-x-hidden"
+      style={{ width: collapsed ? "3.5rem" : "14rem" }}
     >
-      {/* Header — logo + toggle */}
-      <div className="flex h-14 items-center border-b border-gray-200 px-3 dark:border-gray-700">
+      {/* Logo + toggle */}
+      <div className="px-3 py-3 border-b border-slate-800 flex items-center gap-3 min-h-[56px]">
         {!collapsed && (
-          <span className="flex-1 text-lg font-semibold text-primary-700 dark:text-primary-400">
-            NEX Studio
-          </span>
+          <>
+            <div className="w-8 h-8 rounded-lg bg-primary-600 flex items-center justify-center text-white font-black text-sm shrink-0">
+              NS
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-bold text-slate-100 leading-tight">NEX Studio</div>
+              <div className="text-[10px] text-primary-400 font-mono">v0.1.x</div>
+            </div>
+          </>
         )}
         <button
-          onClick={toggle}
-          className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          onClick={() => setCollapsed((c) => !c)}
+          className={`flex items-center justify-center rounded hover:bg-slate-800 text-slate-500 hover:text-slate-300 transition-colors shrink-0 ${collapsed ? "w-8 h-8" : "w-6 h-6"}`}
+          title={collapsed ? "Rozšíriť" : "Zúžiť"}
         >
-          {collapsed ? (
-            <PanelLeftOpen className="h-4 w-4" />
-          ) : (
-            <PanelLeftClose className="h-4 w-4" />
-          )}
+          <IconSidebarToggle />
         </button>
       </div>
 
-      <nav className="flex-1 overflow-y-auto p-2" aria-label="Primary navigation">
-        {/* Top-level nav */}
-        <div className="space-y-1">
-          {PRIMARY_NAV.map((item) =>
-            collapsed ? (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                className={iconNavClass}
-                title={item.label}
-              >
-                {item.icon}
-              </NavLink>
-            ) : (
-              <NavLink key={item.to} to={item.to} end={item.end} className={navLinkClass}>
-                <span className="flex items-center gap-2">
-                  {item.icon}
-                  {item.label}
-                </span>
-              </NavLink>
-            ),
+      {/* Navigation */}
+      <nav className="flex-1 p-2 space-y-0.5 overflow-y-auto overflow-x-hidden">
+        <NavItem icon={<IconHome />} label="Dashboard" path="/" collapsed={collapsed} active={isActive("/")} />
+        <NavItem icon={<IconFolder />} label="Projects" path="/projects" collapsed={collapsed} active={isActive("/projects")} />
+
+        <SectionLabel label="Project" collapsed={collapsed} />
+        <NavItem icon={<IconVersions />} label="Versions" collapsed={collapsed} muted />
+        <NavItem icon={<IconWorkflow />} label="Workflow" collapsed={collapsed} muted />
+
+        <SectionLabel label="Settings" collapsed={collapsed} />
+        <NavItem icon={<IconBook />} label="Knowledge Base" path="/kb" collapsed={collapsed} active={isActive("/kb")} />
+        <NavItem icon={<IconSettings />} label="Settings" path="/settings" collapsed={collapsed} active={isActive("/settings")} />
+
+        {/* Admin */}
+        <div className="pt-2">
+          <button
+            onClick={() => setAdminOpen((o) => !o)}
+            className={`flex items-center gap-2.5 py-2 rounded-lg text-sm text-slate-500 hover:bg-slate-800/60 hover:text-slate-400 transition-colors w-full ${collapsed ? "px-0 justify-center" : "px-3"}`}
+            title={collapsed ? "Admin" : undefined}
+          >
+            <IconAdmin />
+            {!collapsed && (
+              <>
+                <span>Admin</span>
+                <svg
+                  className={`w-3 h-3 ml-auto transition-transform ${adminOpen ? "rotate-90" : ""}`}
+                  fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </>
+            )}
+          </button>
+          {adminOpen && !collapsed && (
+            <div className="pl-6 mt-0.5 space-y-0.5">
+              {["Používatelia", "Delegácie", "Execution Logs", "Guardian", "Migrácie"].map((item) => (
+                <button
+                  key={item}
+                  className="block w-full text-left px-3 py-1.5 rounded text-xs text-slate-500 hover:bg-slate-800/60 hover:text-slate-400 transition-colors"
+                >
+                  {item}
+                </button>
+              ))}
+            </div>
           )}
         </div>
-
-        {/* Project-context nav */}
-        {slug && (
-          <div className="mt-4 border-t border-gray-200 pt-3 dark:border-gray-700">
-            {!collapsed && (
-              <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
-                Project
-              </p>
-            )}
-            <div className="space-y-1">
-              {collapsed ? (
-                <>
-                  <NavLink
-                    to={`/projects/${slug}/versions`}
-                    className={iconNavClass}
-                    title="Versions"
-                  >
-                    <Tag className="h-4 w-4" aria-hidden="true" />
-                  </NavLink>
-                  <NavLink
-                    to={`/projects/${slug}/architect`}
-                    end
-                    className={iconNavClass}
-                    title="Architect"
-                  >
-                    <Brain className="h-4 w-4" aria-hidden="true" />
-                  </NavLink>
-                </>
-              ) : (
-                <>
-                  <NavLink to={`/projects/${slug}/versions`} className={navLinkClass}>
-                    <span className="flex items-center gap-2">
-                      <Tag className="h-4 w-4" aria-hidden="true" />
-                      Versions
-                    </span>
-                  </NavLink>
-                  <NavLink to={`/projects/${slug}/architect`} end className={navLinkClass}>
-                    <span className="flex items-center gap-2">
-                      <Brain className="h-4 w-4" aria-hidden="true" />
-                      Architect
-                    </span>
-                  </NavLink>
-                  {moduleCode && (
-                    <NavLink
-                      to={`/projects/${slug}/modules/${moduleCode}/architect`}
-                      className={navLinkClass}
-                    >
-                      <span className="flex items-center gap-2">
-                        <Brain className="h-4 w-4" aria-hidden="true" />
-                        Architect ({moduleCode})
-                      </span>
-                    </NavLink>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Admin section — hidden when sidebar is collapsed */}
-        {!collapsed && (
-          <div className="mt-4 border-t border-gray-200 pt-3 dark:border-gray-700">
-            <button
-              type="button"
-              onClick={toggleAdmin}
-              className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-gray-100 transition-colors"
-              aria-expanded={adminOpen}
-            >
-              <ShieldCheck className="h-4 w-4 shrink-0" aria-hidden="true" />
-              <span className="flex-1 text-left">Admin</span>
-              {adminOpen ? (
-                <ChevronDown className="h-3.5 w-3.5 text-gray-400" aria-hidden="true" />
-              ) : (
-                <ChevronRight className="h-3.5 w-3.5 text-gray-400" aria-hidden="true" />
-              )}
-            </button>
-
-            {adminOpen && (
-              <div className="mt-2 space-y-4">
-                {ADMIN_NAV.map((group) => (
-                  <section key={group.heading} aria-label={group.heading}>
-                    <h2 className="px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                      {group.heading}
-                    </h2>
-                    <div className="space-y-1">
-                      {group.items.map((item) => (
-                        <NavLink key={item.to} to={item.to} className={navLinkClass}>
-                          {item.label}
-                        </NavLink>
-                      ))}
-                    </div>
-                  </section>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
       </nav>
 
-      <div className="border-t border-gray-200 p-2 dark:border-gray-700">
-        {collapsed ? (
-          <NavLink to="/settings" className={iconNavClass} title="Settings">
-            <Settings className="h-4 w-4" aria-hidden="true" />
-          </NavLink>
-        ) : (
-          <div className="space-y-2">
-            <NavLink to="/settings" className={navLinkClass}>
-              <span className="flex items-center gap-2">
-                <Settings className="h-4 w-4" aria-hidden="true" />
-                Settings
-              </span>
-            </NavLink>
-            <SidebarFooter />
-            <div className="flex items-center gap-2 px-3 text-xs text-gray-500 dark:text-gray-400">
-              <span className="inline-block h-2 w-2 rounded-full bg-status-done" aria-hidden="true" />
-              <span>Connected</span>
-            </div>
+      {/* User */}
+      <div className="p-3 border-t border-slate-800">
+        <div className={`flex items-center gap-2.5 px-2 py-1.5 rounded-lg ${collapsed ? "justify-center" : ""}`}>
+          <div className="w-7 h-7 rounded-full bg-primary-600 flex items-center justify-center text-xs font-bold shrink-0">
+            {initials}
           </div>
-        )}
+          {!collapsed && (
+            <>
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-medium text-slate-200 truncate">{user?.username ?? "—"}</div>
+                <div className="text-[10px] text-slate-500">Director · Ri</div>
+              </div>
+              <button onClick={handleLogout} title="Sign out" className="shrink-0 text-slate-600 hover:text-slate-400 transition-colors">
+                <IconLogout />
+              </button>
+            </>
+          )}
+        </div>
       </div>
     </aside>
   );
 }
-
-export default Sidebar;
