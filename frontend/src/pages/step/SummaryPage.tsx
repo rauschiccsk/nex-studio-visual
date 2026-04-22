@@ -3,9 +3,11 @@ import { useNavigate, useParams } from "react-router-dom";
 import { listProjectsApi } from "@/services/api/projects";
 import { getVersion } from "@/services/api/versions";
 import { listProfessionalSpecs } from "@/services/api/professionalSpecifications";
+import { listUIDesigns } from "@/services/api/uiDesigns";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
 import type { ProfessionalSpecificationRead } from "@/types/professionalSpecification";
+import type { UIDesignRead } from "@/types/uiDesign";
 
 // ─── SummaryPage — Step 3 ─────────────────────────────────────────────────────
 
@@ -16,6 +18,7 @@ export default function SummaryPage() {
   const [project, setProject] = useState<ProjectRead | null>(null);
   const [version, setVersion] = useState<Version | null>(null);
   const [profSpec, setProfSpec] = useState<ProfessionalSpecificationRead | null>(null);
+  const [uiDesign, setUIDesign] = useState<UIDesignRead | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -29,9 +32,13 @@ export default function SummaryPage() {
       if (cancelled || !proj) { setError("Projekt nebol nájdený."); setLoading(false); return; }
       setProject(proj);
       setVersion(ver);
-      return listProfessionalSpecs({ project_id: proj.id, limit: 1 }).then((res) => {
+      return Promise.all([
+        listProfessionalSpecs({ project_id: proj.id, limit: 1 }),
+        listUIDesigns({ project_id: proj.id, limit: 1 }),
+      ]).then(([profRes, uiRes]) => {
         if (cancelled) return;
-        setProfSpec(res.items[0] ?? null);
+        setProfSpec(profRes.items[0] ?? null);
+        setUIDesign(uiRes.items[0] ?? null);
         setLoading(false);
       });
     }).catch(() => { if (!cancelled) { setError("Nepodarilo sa načítať dáta."); setLoading(false); } });
@@ -41,7 +48,9 @@ export default function SummaryPage() {
   if (loading) return <LoadingSpinner />;
   if (error || !project || !version) return <ErrorPanel msg={error} />;
 
-  const isApproved = !!profSpec?.approved_at;
+  const profSpecApproved = !!profSpec?.approved_at;
+  const uiDesignApproved = !!uiDesign?.approved_at;
+  const isApproved = profSpecApproved && uiDesignApproved;
 
   return (
     <div className="flex flex-col h-full">
@@ -50,39 +59,77 @@ export default function SummaryPage() {
       <div className="flex-1 overflow-y-auto p-6">
         <div className="max-w-3xl mx-auto">
 
-          {/* Gate: no approved prof spec */}
+          {/* Gate: parallel phase not fully approved */}
           {!isApproved && (
-            <div className="rounded-xl border border-dashed border-slate-700 p-10 text-center">
-              <svg className="w-12 h-12 text-slate-700 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="rounded-xl border border-dashed border-slate-700 p-8 text-center">
+              <svg className="w-10 h-10 text-slate-700 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
               </svg>
-              <p className="text-sm text-slate-500 mb-1">Čaká na schválenie Kroku 2</p>
-              <p className="text-xs text-slate-700 mb-4">Súhrnná dokumentácia sa vygeneruje po schválení vývojovej dokumentácie.</p>
-              <div className="flex items-center justify-center gap-3 mb-4 text-xs">
-                <div className="flex items-center gap-1.5">
-                  {profSpec ? (
-                    <span className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse" />
-                  ) : (
-                    <span className="w-2 h-2 rounded-full bg-slate-600" />
-                  )}
-                  <span className="text-slate-500">Vývojová dokumentácia {profSpec ? "(čaká na schválenie)" : "(nevygenerovaná)"}</span>
+              <p className="text-sm text-slate-400 mb-1">Čaká na dokončenie Kroku 2</p>
+              <p className="text-xs text-slate-600 mb-5">Oba sub-kroky musia byť schválené pred pokračovaním.</p>
+
+              {/* 2A + 2B status */}
+              <div className="grid grid-cols-2 gap-3 max-w-sm mx-auto mb-5">
+                <div className={`rounded-lg border p-3 text-left ${profSpecApproved ? "border-green-500/25 bg-green-500/5" : "border-slate-700 bg-slate-800/50"}`}>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    {profSpecApproved
+                      ? <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
+                      : profSpec
+                      ? <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />
+                      : <span className="w-1.5 h-1.5 rounded-full bg-slate-600" />}
+                    <span className={`text-[10px] font-bold uppercase tracking-wider ${profSpecApproved ? "text-green-400" : "text-slate-500"}`}>2A</span>
+                  </div>
+                  <p className="text-xs text-slate-400">Vývojová dokumentácia</p>
+                  <p className="text-[10px] text-slate-600 mt-0.5">
+                    {profSpecApproved ? "Schválená" : profSpec ? "Čaká na schválenie" : "Nevygenerovaná"}
+                  </p>
+                </div>
+                <div className={`rounded-lg border p-3 text-left ${uiDesignApproved ? "border-green-500/25 bg-green-500/5" : "border-slate-700 bg-slate-800/50"}`}>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    {uiDesignApproved
+                      ? <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
+                      : uiDesign
+                      ? <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />
+                      : <span className="w-1.5 h-1.5 rounded-full bg-slate-600" />}
+                    <span className={`text-[10px] font-bold uppercase tracking-wider ${uiDesignApproved ? "text-green-400" : "text-slate-500"}`}>2B</span>
+                  </div>
+                  <p className="text-xs text-slate-400">UI Design</p>
+                  <p className="text-[10px] text-slate-600 mt-0.5">
+                    {uiDesignApproved ? "Schválený" : uiDesign ? "Čaká na schválenie" : "Nevytvorený"}
+                  </p>
                 </div>
               </div>
-              <button
-                onClick={() => navigate(`/projects/${slug}/versions/${versionId}/profspec`)}
-                className="text-xs bg-primary-600 hover:bg-primary-500 text-white px-3 py-1.5 rounded-lg font-medium transition-colors"
-              >
-                ← Krok 2 — Vývojová dokumentácia
-              </button>
+
+              <div className="flex items-center justify-center gap-2">
+                {!profSpecApproved && (
+                  <button
+                    onClick={() => navigate(`/projects/${slug}/versions/${versionId}/profspec`)}
+                    className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 px-3 py-1.5 rounded-lg font-medium transition-colors"
+                  >
+                    ← 2A Vývojová dok.
+                  </button>
+                )}
+                {!uiDesignApproved && (
+                  <button
+                    onClick={() => navigate(`/projects/${slug}/versions/${versionId}/uidesign`)}
+                    className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 px-3 py-1.5 rounded-lg font-medium transition-colors"
+                  >
+                    ← 2B UI Design
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
           {/* Approved: show summary placeholder */}
           {isApproved && profSpec && (
             <div className="space-y-4">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/10 border border-green-500/25 text-green-400">
-                  ✓ Vývojová dokumentácia schválená
+                  ✓ 2A Vývojová dokumentácia
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/10 border border-green-500/25 text-green-400">
+                  ✓ 2B UI Design
                 </span>
                 <div className="flex-1" />
                 <button
