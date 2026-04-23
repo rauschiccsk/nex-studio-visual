@@ -37,7 +37,11 @@ from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.versions import Version
-from backend.schemas.live_documents import FeatCompletionData, TaskCompletionData
+from backend.schemas.live_documents import (
+    FeatCompletionData,
+    ModuleEventData,
+    TaskCompletionData,
+)
 from backend.services.knowledge_base_writer import KnowledgeBaseWriter
 from backend.services.live_documents import (
     LiveDocumentService,
@@ -306,6 +310,77 @@ def test_architect_entry_multiple_commits_joined() -> None:
     entry = svc.generate_architect_entry(_task(commit_hashes=["aaa", "bbb", "ccc"]))
 
     assert "Commits: aaa, bbb, ccc" in entry
+
+
+# ── generate_module_event_entry ───────────────────────────────────────
+
+
+def _module_event(**overrides: Any) -> ModuleEventData:
+    defaults: dict[str, Any] = {
+        "event_type": "created",
+        "module_code": "MM",
+        "module_name": "Manažér modulov",
+        "category": "Systém",
+        "timestamp": datetime(2026, 4, 23, 19, 20, 0, tzinfo=timezone.utc),
+    }
+    defaults.update(overrides)
+    return ModuleEventData(**defaults)
+
+
+def test_module_event_created_format() -> None:
+    svc = LiveDocumentService("nex-test")
+    entry = svc.generate_module_event_entry(_module_event())
+
+    assert entry == "19:20 Module MM created — Manažér modulov (Systém)\n"
+
+
+def test_module_event_deleted_format() -> None:
+    svc = LiveDocumentService("nex-test")
+    entry = svc.generate_module_event_entry(_module_event(event_type="deleted"))
+
+    assert entry == "19:20 Module MM deleted — Manažér modulov\n"
+
+
+def test_module_event_status_changed_format() -> None:
+    svc = LiveDocumentService("nex-test")
+    entry = svc.generate_module_event_entry(
+        _module_event(
+            event_type="status_changed",
+            old_status="planned",
+            new_status="in_development",
+        )
+    )
+
+    assert entry == "19:20 Module MM status planned → in_development\n"
+
+
+def test_append_module_event_persists_to_history(tmp_path: Path) -> None:
+    writer = KnowledgeBaseWriter(tmp_path)
+    svc = LiveDocumentService("nex-test", writer=writer)
+
+    svc.append_module_event(_module_event())
+
+    content = writer.read("nex-test", "HISTORY.md")
+    assert "# nex-test — History" in content
+    assert "Module MM created — Manažér modulov (Systém)" in content
+
+
+def test_append_module_event_dedup_on_replay(tmp_path: Path) -> None:
+    """Writer-level dedup keeps a replay of the same event idempotent."""
+    writer = KnowledgeBaseWriter(tmp_path)
+    svc = LiveDocumentService("nex-test", writer=writer)
+    event = _module_event()
+
+    svc.append_module_event(event)
+    svc.append_module_event(event)
+
+    content = writer.read("nex-test", "HISTORY.md")
+    assert content.count("Module MM created") == 1
+
+
+def test_append_module_event_no_writer_is_noop() -> None:
+    svc = LiveDocumentService("nex-test")  # writer=None
+    svc.append_module_event(_module_event())  # must not raise
 
 
 # ── generate_phase_summary_entry ──────────────────────────────────────

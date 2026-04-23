@@ -35,6 +35,7 @@ from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.versions import Version
 from backend.schemas.live_documents import (
     FeatCompletionData,
+    ModuleEventData,
     TaskCompletionData,
 )
 from backend.services.knowledge_base_writer import KnowledgeBaseWriter
@@ -264,6 +265,30 @@ class LiveDocumentService:
 
         return "\n".join(lines)
 
+    def generate_module_event_entry(self, data: ModuleEventData) -> str:
+        """Return a single ``HISTORY.md`` line describing a module event.
+
+        Format matches the task-completion / phase-summary entries —
+        ``HH:MM`` prefix, single verb-form sentence:
+
+            HH:MM Module MM created — Manažér modulov (Systém)
+            HH:MM Module MM status planned → in_development
+            HH:MM Module MM deleted — Manažér modulov
+        """
+        ts = data.timestamp.strftime("%H:%M")
+        code = data.module_code
+        if data.event_type == "created":
+            return (
+                f"{ts} Module {code} created — {data.module_name} "
+                f"({data.category})\n"
+            )
+        if data.event_type == "deleted":
+            return f"{ts} Module {code} deleted — {data.module_name}\n"
+        # status_changed
+        return (
+            f"{ts} Module {code} status {data.old_status} → {data.new_status}\n"
+        )
+
     def generate_phase_summary_entry(self, data: FeatCompletionData) -> str:
         """Return the phase-closing entry appended to ``HISTORY.md``.
 
@@ -355,6 +380,21 @@ class LiveDocumentService:
         self._writer.save(self._slug, "STATUS.md", status_md)
         self._writer.save(self._slug, "HISTORY.md", self._history_header())
         self._writer.save(self._slug, "ARCHITECT.md", self._architect_header())
+
+    def append_module_event(self, data: ModuleEventData) -> None:
+        """Persist a module-lifecycle entry to ``HISTORY.md``.
+
+        No-op when the writer is not configured.
+        """
+        entry = self.generate_module_event_entry(data)
+        if not entry or self._writer is None:
+            return
+        self._writer.append(
+            self._slug,
+            "HISTORY.md",
+            entry,
+            header_if_new=self._history_header(),
+        )
 
     def append_phase_summary(self, data: FeatCompletionData) -> None:
         """Append the feat-completion summary entry to ``HISTORY.md``.

@@ -33,18 +33,21 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from backend.api.dependencies import get_knowledge_base_writer
 from backend.api.routes.project_modules import router as project_modules_router
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.session import get_db
+from backend.services.knowledge_base_writer import KnowledgeBaseWriter
 
 
 @pytest.fixture()
-def router_client(db_session):
-    """Mount the project_modules router on a fresh app with the DB override.
+def router_client(db_session, tmp_path):
+    """Mount the project_modules router on a fresh app with DB + KB overrides.
 
-    Keeping this fixture local to the router tests avoids coupling to
-    the global ``main.app``, which does not yet include this router.
+    The KnowledgeBaseWriter is redirected to ``tmp_path`` so module
+    create / status-change / delete hooks (N3) append to an isolated
+    HISTORY.md instead of the real ``/home/icc/knowledge`` tree.
     """
     app = FastAPI()
     app.include_router(project_modules_router, prefix="/api/v1/project-modules")
@@ -52,7 +55,11 @@ def router_client(db_session):
     def _override_get_db():
         yield db_session
 
+    def _override_kb_writer() -> KnowledgeBaseWriter:
+        return KnowledgeBaseWriter(tmp_path)
+
     app.dependency_overrides[get_db] = _override_get_db
+    app.dependency_overrides[get_knowledge_base_writer] = _override_kb_writer
 
     with TestClient(app) as client:
         yield client
@@ -428,3 +435,59 @@ class TestProjectModuleRouter:
         remaining = router_client.get(f"/api/v1/project-modules/{module_b['id']}")
         assert remaining.status_code == 200
         assert remaining.json()["id"] == module_b["id"]
+
+
+class TestModuleLiveDocsHook:
+    """Verify N3 — module CRUD append entries to HISTORY.md + regenerate STATUS."""
+
+    def test_create_appends_history_entry(self, router_client, project, tmp_path):
+        payload = _payload(project.id, code="PAB", name="Katalóg partnerov", category="Katalógy")
+        resp = router_client.post("/api/v1/project-modules", json=payload)
+        assert resp.status_code == 201
+
+        history = (tmp_path / "projects" / project.slug / "HISTORY.md").read_text(encoding="utf-8")
+        assert "Module PAB created — Katalóg partnerov (Katalógy)" in history
+
+    def test_status_change_appends_history_entry(self, router_client, project, tmp_path):
+        created = router_client.post(
+            "/api/v1/project-modules",
+            json=_payload(project.id, code="PAB", name="Katalóg partnerov"),
+        ).json()
+
+        resp = router_client.patch(
+            f"/api/v1/project-modules/{created['id']}",
+            json={"status": "in_development"},
+        )
+        assert resp.status_code == 200
+
+        history = (tmp_path / "projects" / project.slug / "HISTORY.md").read_text(encoding="utf-8")
+        assert "Module PAB status planned → in_development" in history
+
+    def test_non_status_patch_does_not_fire_event(self, router_client, project, tmp_path):
+        """A rename / category change does NOT spam HISTORY.md with events."""
+        created = router_client.post(
+            "/api/v1/project-modules",
+            json=_payload(project.id, code="PAB", name="Old Name"),
+        ).json()
+
+        router_client.patch(
+            f"/api/v1/project-modules/{created['id']}",
+            json={"name": "New Name"},
+        )
+
+        history = (tmp_path / "projects" / project.slug / "HISTORY.md").read_text(encoding="utf-8")
+        # One created entry, no status entries.
+        assert history.count("Module PAB") == 1
+        assert "status" not in history.lower() or "status_changed" not in history.lower()
+
+    def test_delete_appends_history_entry(self, router_client, project, tmp_path):
+        created = router_client.post(
+            "/api/v1/project-modules",
+            json=_payload(project.id, code="PAB", name="Katalóg partnerov"),
+        ).json()
+
+        resp = router_client.delete(f"/api/v1/project-modules/{created['id']}")
+        assert resp.status_code == 204
+
+        history = (tmp_path / "projects" / project.slug / "HISTORY.md").read_text(encoding="utf-8")
+        assert "Module PAB deleted — Katalóg partnerov" in history
