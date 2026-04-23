@@ -17,22 +17,41 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from backend.api.dependencies import get_knowledge_base_writer
 from backend.api.routes.projects import router as projects_router
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.session import get_db
+from backend.services.knowledge_base_writer import KnowledgeBaseWriter
 
 
 @pytest.fixture()
-def router_client(db_session):
-    """Mount the projects router on a fresh app with the DB override."""
+def router_client(db_session, tmp_path, monkeypatch):
+    """Mount the projects router on a fresh app with DB + KB + GitHub overrides.
+
+    * DB is the SAVEPOINT-isolated session from the root conftest.
+    * KB writes go to a ``tmp_path``-rooted writer — no test touches
+      the real ``/home/icc/knowledge`` tree.
+    * ``create_github_repo`` is monkey-patched to a no-op returning
+      ``True``. Without this, every successful POST would hit the
+      real GitHub API.
+    """
+    monkeypatch.setattr(
+        "backend.services.github_validation.create_github_repo",
+        lambda repo, **kwargs: True,
+    )
+
     app = FastAPI()
     app.include_router(projects_router, prefix="/api/v1/projects")
 
     def _override_get_db():
         yield db_session
 
+    def _override_kb_writer() -> KnowledgeBaseWriter:
+        return KnowledgeBaseWriter(tmp_path)
+
     app.dependency_overrides[get_db] = _override_get_db
+    app.dependency_overrides[get_knowledge_base_writer] = _override_kb_writer
 
     with TestClient(app) as client:
         yield client

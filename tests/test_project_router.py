@@ -36,15 +36,21 @@ from backend.services.knowledge_base_writer import KnowledgeBaseWriter
 
 
 @pytest.fixture()
-def router_client(db_session, tmp_path):
-    """Mount the projects router on a fresh app with DB + KB overrides.
+def router_client(db_session, tmp_path, monkeypatch):
+    """Mount the projects router on a fresh app with DB + KB + GitHub overrides.
 
-    Keeping this fixture local to the router tests avoids coupling to the
-    global ``main.app``, which does not yet include this router. The
-    :class:`KnowledgeBaseWriter` is redirected to the test's ``tmp_path``
-    so project creation can seed live documents without touching the
-    real ``/home/icc/knowledge`` tree.
+    * DB is the SAVEPOINT-isolated session from the root conftest.
+    * KB writes go to a ``tmp_path``-rooted writer — no test touches
+      the real ``/home/icc/knowledge`` tree.
+    * ``create_github_repo`` is monkey-patched to a no-op returning
+      ``True`` so every successful POST does not hit the live GitHub
+      API.
     """
+    monkeypatch.setattr(
+        "backend.services.github_validation.create_github_repo",
+        lambda repo, **kwargs: True,
+    )
+
     app = FastAPI()
     app.include_router(projects_router, prefix="/api/v1/projects")
 
@@ -335,10 +341,17 @@ class TestProjectRouter:
             "# live-docs-app — Architecture Log\n\n"
         )
 
-    def test_create_rolls_back_when_kb_write_fails(self, db_session, creator, tmp_path):
+    def test_create_rolls_back_when_kb_write_fails(
+        self, db_session, creator, tmp_path, monkeypatch
+    ):
         """If KB write raises OSError, the project must not end up in the DB."""
         from backend.api.dependencies import get_knowledge_base_writer
         from backend.services.knowledge_base_writer import KnowledgeBaseWriter
+
+        monkeypatch.setattr(
+            "backend.services.github_validation.create_github_repo",
+            lambda repo, **kwargs: True,
+        )
 
         class _FailingWriter(KnowledgeBaseWriter):
             def save(self, *args, **kwargs):  # type: ignore[override]
@@ -373,6 +386,162 @@ class TestProjectRouter:
             sa_select_project_by_slug("rollback-test")
         ).scalar_one_or_none()
         assert remaining is None, "Project row must have been rolled back on KB failure"
+
+    # ------------------------------------------------------ GitHub repo create
+
+    def test_create_calls_github_repo_create_with_slug(
+        self, db_session, creator, tmp_path, monkeypatch
+    ):
+        """POST forwards repo_url to create_github_repo before inserting the row."""
+        from backend.api.dependencies import get_knowledge_base_writer
+        from backend.services.knowledge_base_writer import KnowledgeBaseWriter
+
+        calls = []
+
+        def _mock_create(repo, **kwargs):
+            calls.append((repo, kwargs))
+            return True
+
+        monkeypatch.setattr(
+            "backend.services.github_validation.create_github_repo", _mock_create
+        )
+
+        app = FastAPI()
+        app.include_router(projects_router, prefix="/api/v1/projects")
+
+        def _override_get_db():
+            yield db_session
+
+        def _override_kb_writer() -> KnowledgeBaseWriter:
+            return KnowledgeBaseWriter(tmp_path)
+
+        app.dependency_overrides[get_db] = _override_get_db
+        app.dependency_overrides[get_knowledge_base_writer] = _override_kb_writer
+
+        with TestClient(app) as client:
+            payload = _payload(
+                creator.id,
+                slug="github-happy",
+                repo_url="rauschiccsk/github-happy",
+                description="Happy path for GitHub create",
+            )
+            resp = client.post("/api/v1/projects", json=payload)
+
+        app.dependency_overrides.clear()
+
+        assert resp.status_code == 201
+        assert len(calls) == 1
+        repo_arg, kwargs = calls[0]
+        assert repo_arg == "rauschiccsk/github-happy"
+        assert kwargs.get("description") == "Happy path for GitHub create"
+        assert kwargs.get("private") is True
+
+    def test_create_skips_github_when_repo_url_is_null(
+        self, router_client, creator, monkeypatch
+    ):
+        """A NULL repo_url short-circuits the GitHub call entirely."""
+        github_called = {"n": 0}
+
+        def _mock_create(repo, **kwargs):
+            github_called["n"] += 1
+            return True
+
+        # Re-patch over the router_client's no-op mock to observe invocations.
+        monkeypatch.setattr(
+            "backend.services.github_validation.create_github_repo", _mock_create
+        )
+
+        payload = _payload(creator.id, slug="no-repo")
+        payload.pop("repo_url", None)  # ensure explicitly null in body
+        resp = router_client.post("/api/v1/projects", json=payload)
+
+        assert resp.status_code == 201
+        assert github_called["n"] == 0
+
+    def test_create_rolls_back_when_github_repo_create_fails(
+        self, db_session, creator, tmp_path, monkeypatch
+    ):
+        """RuntimeError from create_github_repo → 500 and no DB row."""
+        from backend.api.dependencies import get_knowledge_base_writer
+        from backend.services.knowledge_base_writer import KnowledgeBaseWriter
+
+        def _raise_runtime(repo, **kwargs):
+            raise RuntimeError("token missing or insufficient scope")
+
+        monkeypatch.setattr(
+            "backend.services.github_validation.create_github_repo", _raise_runtime
+        )
+
+        app = FastAPI()
+        app.include_router(projects_router, prefix="/api/v1/projects")
+
+        def _override_get_db():
+            yield db_session
+
+        def _override_kb_writer() -> KnowledgeBaseWriter:
+            return KnowledgeBaseWriter(tmp_path)
+
+        app.dependency_overrides[get_db] = _override_get_db
+        app.dependency_overrides[get_knowledge_base_writer] = _override_kb_writer
+
+        with TestClient(app) as client:
+            payload = _payload(
+                creator.id, slug="gh-fail", repo_url="rauschiccsk/gh-fail"
+            )
+            resp = client.post("/api/v1/projects", json=payload)
+
+        app.dependency_overrides.clear()
+
+        assert resp.status_code == 500
+        assert "Failed to create GitHub repository" in resp.json()["detail"]
+
+        # No DB row, no KB folder.
+        remaining = db_session.execute(
+            sa_select_project_by_slug("gh-fail")
+        ).scalar_one_or_none()
+        assert remaining is None
+        assert not (tmp_path / "projects" / "gh-fail").exists()
+
+    def test_create_github_value_error_returns_422(
+        self, db_session, creator, tmp_path, monkeypatch
+    ):
+        """A ValueError from create_github_repo (unknown org) → 422."""
+        from backend.api.dependencies import get_knowledge_base_writer
+        from backend.services.knowledge_base_writer import KnowledgeBaseWriter
+
+        def _raise_value(repo, **kwargs):
+            raise ValueError("GitHub organisation 'nowhere' not found")
+
+        monkeypatch.setattr(
+            "backend.services.github_validation.create_github_repo", _raise_value
+        )
+
+        app = FastAPI()
+        app.include_router(projects_router, prefix="/api/v1/projects")
+
+        def _override_get_db():
+            yield db_session
+
+        def _override_kb_writer() -> KnowledgeBaseWriter:
+            return KnowledgeBaseWriter(tmp_path)
+
+        app.dependency_overrides[get_db] = _override_get_db
+        app.dependency_overrides[get_knowledge_base_writer] = _override_kb_writer
+
+        with TestClient(app) as client:
+            payload = _payload(
+                creator.id, slug="gh-no-org", repo_url="nowhere/repo"
+            )
+            resp = client.post("/api/v1/projects", json=payload)
+
+        app.dependency_overrides.clear()
+
+        assert resp.status_code == 422
+        # No DB row.
+        assert (
+            db_session.execute(sa_select_project_by_slug("gh-no-org")).scalar_one_or_none()
+            is None
+        )
 
 
 def sa_select_project_by_slug(slug: str):

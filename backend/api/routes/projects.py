@@ -335,25 +335,60 @@ def create_project(
     Validates before persisting:
 
     * **Slug uniqueness** — 409 if another project uses the same slug.
-    * **Port range** — 422 if any supplied port is outside 9100–9299.
-    * **Port uniqueness** — 409 if any supplied port is already allocated.
-    * **GitHub repo** — 422 if ``repo_url`` is set but the repository
-      does not exist on GitHub.
+    * **Port range** — 422 if any supplied port is outside 10100–14999.
+    * **Port uniqueness across projects** — 409 if any supplied port
+      is already allocated to another project.
+    * **Same-row port uniqueness** — 422 if the payload contains the
+      same port number in two different port columns.
 
-    On success, seeds three live documents
-    (``STATUS.md`` / ``HISTORY.md`` / ``ARCHITECT.md``) under
-    ``{knowledge_base_path}/projects/{slug}/``. The seeding happens
-    before the DB commit so a KB write failure rolls the project back
-    — a project never exists in the DB without its live documents in
-    the KB.
+    On success:
+
+    * **Creates the GitHub repository** via
+      ``github_validation.create_github_repo`` before any DB state
+      changes. Failure → 500 and no further work is attempted. A repo
+      that already exists is treated as success — reruns and
+      deliberate reuse both work. Skipped when ``repo_url`` is NULL.
+    * **Seeds three live documents** (``STATUS.md`` / ``HISTORY.md`` /
+      ``ARCHITECT.md``) under ``{knowledge_base_path}/projects/{slug}/``.
+    * The DB insert, KB write and commit happen in a single
+      transaction — a KB-write failure rolls the row back. If KB
+      write fails after GitHub repo was already created, the repo
+      stays dangling (documented known-item; manual cleanup on the
+      GitHub side).
     """
-    # Pre-creation validation (ports).  GitHub repo existence is NOT checked
-    # here — in NEX Studio workflow the project is registered before the repo
-    # is created.  repo_url is stored as metadata only.
+    # Pre-creation validation (ports).
     _validate_ports(db, payload)
 
     # Resolve created_by — use supplied UUID or fall back to active ri user.
     payload.created_by = _resolve_created_by(db, payload.created_by)
+
+    # Stage 1 — GitHub repo. Runs before any DB state so a failure is
+    # fully reversible (nothing has happened yet on our side).
+    if payload.repo_url:
+        try:
+            github_validation_service.create_github_repo(
+                payload.repo_url,
+                description=payload.description or "",
+                private=True,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=GitHubRepoNotFoundError(
+                    detail=str(exc), repo_url=payload.repo_url
+                ).model_dump(),
+            ) from exc
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to create GitHub repository: {exc}",
+            ) from exc
+        except httpx.HTTPError as exc:
+            logger.warning("GitHub API network error for %r", payload.repo_url, exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"GitHub API unreachable while creating '{payload.repo_url}': {exc}",
+            ) from exc
 
     try:
         project = project_service.create(db, payload)
