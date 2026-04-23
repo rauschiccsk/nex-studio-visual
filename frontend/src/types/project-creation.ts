@@ -37,6 +37,8 @@ export interface ProjectCreationFormData {
   frontend_port: number | null;
   /** Database port. */
   db_port: number | null;
+  /** UI Design mockup preview port (Step 2B output). */
+  ui_design_port: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -48,7 +50,7 @@ export interface PortValidationError {
   /** The port number that failed validation. */
   port: number;
   /** Which port field this error belongs to. */
-  field: "backend_port" | "frontend_port" | "db_port";
+  field: "backend_port" | "frontend_port" | "db_port" | "ui_design_port";
   /** Human-readable error message. */
   message: string;
   /** Slug of the project that currently occupies this port (if known). */

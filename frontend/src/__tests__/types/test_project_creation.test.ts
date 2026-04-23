@@ -22,9 +22,10 @@ describe("ProjectCreationFormData", () => {
       category: "singlemodule",
       description: "A test project",
       github_repo: "https://github.com/org/repo",
-      backend_port: 9100,
-      frontend_port: 9101,
-      db_port: 9102,
+      backend_port: 10100,
+      frontend_port: 10101,
+      db_port: 10102,
+      ui_design_port: 10103,
     };
 
     expect(form.name).toBe("My Project");
@@ -32,9 +33,9 @@ describe("ProjectCreationFormData", () => {
     expect(form.category).toBe("singlemodule");
     expect(form.description).toBe("A test project");
     expect(form.github_repo).toBe("https://github.com/org/repo");
-    expect(form.backend_port).toBe(9100);
-    expect(form.frontend_port).toBe(9101);
-    expect(form.db_port).toBe(9102);
+    expect(form.backend_port).toBe(10100);
+    expect(form.frontend_port).toBe(10101);
+    expect(form.db_port).toBe(10102);
   });
 
   it("accepts null port values", () => {
@@ -47,6 +48,7 @@ describe("ProjectCreationFormData", () => {
       backend_port: null,
       frontend_port: null,
       db_port: null,
+      ui_design_port: null,
     };
 
     expect(form.backend_port).toBeNull();
@@ -64,6 +66,7 @@ describe("ProjectCreationFormData", () => {
       backend_port: null,
       frontend_port: null,
       db_port: null,
+      ui_design_port: null,
     };
 
     expect(form.category).toBe("multimodule");
@@ -79,6 +82,7 @@ describe("ProjectCreationFormData", () => {
       backend_port: null,
       frontend_port: null,
       db_port: null,
+      ui_design_port: null,
     };
 
     const keys = Object.keys(form).sort();
@@ -91,6 +95,7 @@ describe("ProjectCreationFormData", () => {
       "github_repo",
       "name",
       "slug",
+      "ui_design_port",
     ]);
   });
 });
@@ -98,15 +103,15 @@ describe("ProjectCreationFormData", () => {
 describe("PortValidationError", () => {
   it("accepts a complete error object", () => {
     const error: PortValidationError = {
-      port: 9100,
+      port: 10100,
       field: "backend_port",
-      message: "Port 9100 is already in use",
+      message: "Port 10100 is already in use",
       conflicting_project: "other-project",
     };
 
-    expect(error.port).toBe(9100);
+    expect(error.port).toBe(10100);
     expect(error.field).toBe("backend_port");
-    expect(error.message).toBe("Port 9100 is already in use");
+    expect(error.message).toBe("Port 10100 is already in use");
     expect(error.conflicting_project).toBe("other-project");
   });
 
