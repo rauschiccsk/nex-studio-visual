@@ -20,6 +20,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.db.models.foundation import User
 from backend.db.models.system_settings import SystemSetting
 from backend.schemas.system_setting import SystemSettingRead
 
@@ -53,19 +54,33 @@ def _to_read_from_default(key: str, default: _Default) -> SystemSettingRead:
         description=default.description,
         updated_at=None,
         updated_by=None,
+        updated_by_username=None,
         is_default=True,
     )
 
 
-def _to_read_from_row(row: SystemSetting) -> SystemSettingRead:
+def _to_read_from_row(
+    row: SystemSetting, username: Optional[str] = None
+) -> SystemSettingRead:
     return SystemSettingRead(
         key=row.key,
         value=row.value,
         description=row.description,
         updated_at=row.updated_at,
         updated_by=row.updated_by,
+        updated_by_username=username,
         is_default=False,
     )
+
+
+def _resolve_username(db: Session, user_id: Optional[UUID]) -> Optional[str]:
+    """Return the ``username`` for a user id, or ``None`` if the user is
+    missing (deleted or NULL on the row)."""
+    if user_id is None:
+        return None
+    return db.execute(
+        select(User.username).where(User.id == user_id)
+    ).scalar_one_or_none()
 
 
 def list_all(db: Session) -> list[SystemSettingRead]:
@@ -86,7 +101,7 @@ def list_all(db: Session) -> list[SystemSettingRead]:
     for key in keys:
         row = stored.get(key)
         if row is not None:
-            out.append(_to_read_from_row(row))
+            out.append(_to_read_from_row(row, _resolve_username(db, row.updated_by)))
             continue
         default = DEFAULT_SETTINGS.get(key)
         if default is not None:
@@ -104,7 +119,7 @@ def get_by_key(db: Session, key: str) -> SystemSettingRead:
         select(SystemSetting).where(SystemSetting.key == key)
     ).scalar_one_or_none()
     if row is not None:
-        return _to_read_from_row(row)
+        return _to_read_from_row(row, _resolve_username(db, row.updated_by))
 
     default = DEFAULT_SETTINGS.get(key)
     if default is None:
@@ -150,4 +165,4 @@ def upsert(
         row.updated_by = updated_by
 
     db.flush()
-    return _to_read_from_row(row)
+    return _to_read_from_row(row, _resolve_username(db, row.updated_by))

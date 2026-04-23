@@ -13,6 +13,8 @@ export interface SystemSettingRead {
   updated_at: string | null;
   /** UUID of the user who last edited; ``null`` for defaults. */
   updated_by: string | null;
+  /** Username of the user who last edited; ``null`` for defaults or when the user was deleted. */
+  updated_by_username: string | null;
   /** ``true`` when this value comes from the service-layer default. */
   is_default: boolean;
 }

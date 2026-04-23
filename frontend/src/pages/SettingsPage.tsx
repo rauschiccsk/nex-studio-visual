@@ -33,6 +33,8 @@ export default function SettingsPage() {
   const [githubOrgSaving, setGithubOrgSaving] = useState(false);
   const [githubOrgError, setGithubOrgError] = useState("");
   const [githubOrgSavedFlash, setGithubOrgSavedFlash] = useState(false);
+  const [githubOrgUpdatedBy, setGithubOrgUpdatedBy] = useState<string | null>(null);
+  const [githubOrgUpdatedAt, setGithubOrgUpdatedAt] = useState<string | null>(null);
 
   const isRi = user?.role === "ri";
 
@@ -43,6 +45,8 @@ export default function SettingsPage() {
       .then((s) => {
         setGithubOrg(s.value);
         setGithubOrgIsDefault(s.is_default);
+        setGithubOrgUpdatedBy(s.updated_by_username);
+        setGithubOrgUpdatedAt(s.updated_at);
         setGithubOrgLoaded(true);
       })
       .catch(() => setGithubOrgError("Nepodarilo sa načítať nastavenie."));
@@ -56,6 +60,8 @@ export default function SettingsPage() {
       const updated = await updateSystemSettingApi("github_org", githubOrg.trim());
       setGithubOrg(updated.value);
       setGithubOrgIsDefault(updated.is_default);
+      setGithubOrgUpdatedBy(updated.updated_by_username);
+      setGithubOrgUpdatedAt(updated.updated_at);
       setGithubOrgSavedFlash(true);
       setTimeout(() => setGithubOrgSavedFlash(false), 2000);
     } catch {
@@ -240,7 +246,12 @@ export default function SettingsPage() {
                     <span className="text-slate-600">Using default value.</span>
                   )}
                   {!githubOrgIsDefault && githubOrgLoaded && (
-                    <span className="text-slate-500">Stored override.</span>
+                    <span className="text-slate-500">
+                      Stored override
+                      {githubOrgUpdatedBy && <> by <span className="text-slate-400 font-medium">{githubOrgUpdatedBy}</span></>}
+                      {githubOrgUpdatedAt && <> at <span className="text-slate-500">{new Date(githubOrgUpdatedAt).toLocaleString("sk-SK")}</span></>}
+                      .
+                    </span>
                   )}
                   {githubOrgSavedFlash && <span className="text-green-400">Uložené.</span>}
                   {githubOrgError && <span className="text-red-400">{githubOrgError}</span>}

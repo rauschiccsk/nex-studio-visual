@@ -29,6 +29,13 @@ class SystemSettingRead(BaseModel):
     description: Optional[str] = None
     updated_at: Optional[datetime] = None
     updated_by: Optional[UUID] = None
+    updated_by_username: Optional[str] = Field(
+        default=None,
+        description=(
+            "Username of the user who last edited — resolved via join. "
+            "NULL when the value is a service-layer default."
+        ),
+    )
     is_default: bool = Field(
         default=False,
         description=(

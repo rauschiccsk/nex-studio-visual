@@ -49,6 +49,7 @@ def test_get_by_key_returns_default_when_no_row(db_session: Any) -> None:
     assert result.is_default is True
     assert result.updated_at is None
     assert result.updated_by is None
+    assert result.updated_by_username is None
 
 
 def test_get_by_key_unknown_raises(db_session: Any) -> None:
@@ -69,6 +70,7 @@ def test_upsert_creates_row_on_first_call(db_session: Any) -> None:
     assert result.value == "isnex-official"
     assert result.is_default is False
     assert result.updated_by == user.id
+    assert result.updated_by_username == user.username
     assert result.updated_at is not None
 
     # Row really exists in the DB.
