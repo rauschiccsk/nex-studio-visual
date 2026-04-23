@@ -63,9 +63,15 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.api.dependencies import get_knowledge_base_writer
+from backend.db.models.delegations import Delegation, ExecutionLog
+from backend.db.models.projects import Project
+from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.session import get_db
+from backend.schemas.live_documents import TaskCompletionData
 from backend.schemas.pagination import PaginatedResponse
 from backend.schemas.task import (
     TaskCreate,
@@ -75,8 +81,71 @@ from backend.schemas.task import (
     TaskUpdate,
 )
 from backend.services import task as task_service
+from backend.services.knowledge_base_writer import KnowledgeBaseWriter
+from backend.services.live_documents import LiveDocumentService
 
 router = APIRouter(tags=["Tasks"])
+
+
+def _task_context(db: Session, task_id: UUID) -> tuple[Task, Feat, Project] | None:
+    """Return the ``(task, feat, project)`` triple for a task in one query.
+
+    Used by the live-document hook on ``PATCH`` to resolve the slug
+    for the KB writer and the feat number for ``HISTORY.md`` / ``ARCHITECT.md``
+    entries. Returns ``None`` when the task does not exist.
+    """
+    row = db.execute(
+        select(Task, Feat, Project)
+        .join(Feat, Task.feat_id == Feat.id)
+        .join(Epic, Feat.epic_id == Epic.id)
+        .join(Project, Epic.project_id == Project.id)
+        .where(Task.id == task_id)
+    ).first()
+    if row is None:
+        return None
+    return row[0], row[1], row[2]
+
+
+def _build_task_completion_data(
+    db: Session, task: Task, feat: Feat
+) -> TaskCompletionData:
+    """Assemble the ``TaskCompletionData`` payload for a just-completed task.
+
+    Pulls the most recent successful ``ExecutionLog`` for the task to
+    surface the commit hash, duration and CC agent into the history /
+    architect entries. When no log exists (e.g. the task was flipped
+    to ``done`` manually without a delegation run) the DTO falls back
+    to neutral defaults — no commit suffix, zero duration, agent
+    ``"unknown"`` — and the generators render a minimal entry.
+    """
+    log_row = db.execute(
+        select(ExecutionLog, Delegation)
+        .join(Delegation, ExecutionLog.delegation_id == Delegation.id)
+        .where(ExecutionLog.task_id == task.id)
+        .where(ExecutionLog.status == "done")
+        .order_by(ExecutionLog.created_at.desc())
+        .limit(1)
+    ).first()
+
+    if log_row is None:
+        commit_hashes: list[str] = []
+        duration_seconds = 0.0
+        agent = "unknown"
+    else:
+        log, delegation = log_row
+        commit_hashes = [log.commit_hash] if log.commit_hash else []
+        duration_seconds = float(log.duration_seconds or 0)
+        agent = delegation.cc_agent
+
+    return TaskCompletionData(
+        feat_number=feat.number,
+        task_number=task.number,
+        task_title=task.title,
+        status="done",
+        duration_seconds=duration_seconds,
+        agent=agent,
+        commit_hashes=commit_hashes,
+    )
 
 
 def _map_value_error(exc: ValueError) -> HTTPException:
@@ -202,6 +271,7 @@ def update_task(
     task_id: UUID,
     payload: TaskUpdate,
     db: Session = Depends(get_db),
+    kb_writer: KnowledgeBaseWriter = Depends(get_knowledge_base_writer),
 ) -> TaskRead:
     """Partially update a task's mutable fields.
 
@@ -212,13 +282,46 @@ def update_task(
     must not be rewritten after the fact; ``updated_at`` is refreshed
     by the ORM on flush via ``onupdate=func.now()``. Fields omitted
     from the payload are left unchanged.
+
+    **Live documents side effect.** When a task transitions to
+    ``status='done'`` (and was not already done), this endpoint
+    appends a ``HISTORY.md`` entry, conditionally appends an
+    ``ARCHITECT.md`` entry (only when the task produced a commit), and
+    regenerates ``STATUS.md`` for the owning project. The KB writes
+    happen before ``db.commit()`` so an I/O failure rolls the status
+    change back — the DB and the KB never disagree.
     """
+    # Snapshot previous status before the update is applied — after
+    # task_service.update, the in-session task object will carry the
+    # new status, not the pre-update one.
+    ctx = _task_context(db, task_id)
+    previous_status = ctx[0].status if ctx is not None else None
+
     try:
         task = task_service.update(db, task_id, payload)
+
+        if (
+            ctx is not None
+            and previous_status != "done"
+            and task.status == "done"
+        ):
+            _, feat, project = ctx
+            data = _build_task_completion_data(db, task, feat)
+            svc = LiveDocumentService(project.slug, writer=kb_writer)
+            svc.append_history(data)
+            svc.append_architect(data)
+            svc.regenerate_status(db, project.id)
+
         db.commit()
     except ValueError as exc:
         db.rollback()
         raise _map_value_error(exc) from exc
+    except OSError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update live documents: {exc}",
+        ) from exc
     db.refresh(task)
     return TaskRead.model_validate(task)
 

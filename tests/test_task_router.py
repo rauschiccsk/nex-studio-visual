@@ -33,19 +33,25 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select as sa_select
 
+from backend.api.dependencies import get_knowledge_base_writer
 from backend.api.routes.tasks import router as tasks_router
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic, Feat
 from backend.db.session import get_db
+from backend.services.knowledge_base_writer import KnowledgeBaseWriter
 
 
 @pytest.fixture()
-def router_client(db_session):
-    """Mount the tasks router on a fresh app with the DB override.
+def router_client(db_session, tmp_path):
+    """Mount the tasks router on a fresh app with DB + KB overrides.
 
     Keeping this fixture local to the router tests avoids coupling to
     the global ``main.app``, which does not yet include this router.
+    The :class:`KnowledgeBaseWriter` is redirected to the test's
+    ``tmp_path`` so the live-document hook on ``PATCH`` (task
+    completion) writes into an isolated KB tree instead of the real
+    ``/home/icc/knowledge``.
     """
     app = FastAPI()
     app.include_router(tasks_router, prefix="/api/v1/tasks")
@@ -53,7 +59,11 @@ def router_client(db_session):
     def _override_get_db():
         yield db_session
 
+    def _override_kb_writer() -> KnowledgeBaseWriter:
+        return KnowledgeBaseWriter(tmp_path)
+
     app.dependency_overrides[get_db] = _override_get_db
+    app.dependency_overrides[get_knowledge_base_writer] = _override_kb_writer
 
     with TestClient(app) as client:
         yield client
@@ -460,3 +470,207 @@ class TestTaskRouter:
     def test_delete_missing_returns_404(self, router_client):
         resp = router_client.delete(f"/api/v1/tasks/{uuid.uuid4()}")
         assert resp.status_code == 404
+
+    # ------------------------------------------------------------- live docs
+
+    def test_patch_to_done_writes_history_and_status(
+        self, router_client, feat, project, tmp_path
+    ):
+        """Transition to done appends HISTORY.md and rebuilds STATUS.md."""
+        created = router_client.post(
+            "/api/v1/tasks",
+            json=_payload(feat_id=feat.id, title="Implement login"),
+        ).json()
+
+        resp = router_client.patch(
+            f"/api/v1/tasks/{created['id']}",
+            json={"status": "done"},
+        )
+        assert resp.status_code == 200, resp.text
+
+        project_dir = tmp_path / "projects" / project.slug
+        history = (project_dir / "HISTORY.md").read_text(encoding="utf-8")
+        status_md = (project_dir / "STATUS.md").read_text(encoding="utf-8")
+
+        # HISTORY entry present — task title and done icon.
+        assert "Implement login" in history
+        assert "✅" in history
+
+        # STATUS reflects the done task with a check mark.
+        assert "- [x]" in status_md
+        assert "Implement login" in status_md
+
+    def test_patch_to_done_with_execution_log_surfaces_commit(
+        self, db_session, router_client, feat, project, tmp_path
+    ):
+        """When an ExecutionLog carries a commit hash, it lands in the entries."""
+        from backend.db.models.delegations import Delegation, ExecutionLog
+
+        created = router_client.post(
+            "/api/v1/tasks",
+            json=_payload(feat_id=feat.id, title="Add migration"),
+        ).json()
+        task_id = uuid.UUID(created["id"])
+
+        # Seed a successful execution log with a commit.
+        delegation = Delegation(task_id=task_id, prompt="seed")
+        db_session.add(delegation)
+        db_session.flush()
+        log = ExecutionLog(
+            delegation_id=delegation.id,
+            task_id=task_id,
+            status="done",
+            commit_hash="abc1234567890",
+            duration_seconds=42,
+        )
+        db_session.add(log)
+        db_session.flush()
+
+        resp = router_client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "done"},
+        )
+        assert resp.status_code == 200
+
+        project_dir = tmp_path / "projects" / project.slug
+        history = (project_dir / "HISTORY.md").read_text(encoding="utf-8")
+        architect = (project_dir / "ARCHITECT.md").read_text(encoding="utf-8")
+        status_md = (project_dir / "STATUS.md").read_text(encoding="utf-8")
+
+        # History has the short commit prefix; architect has the full hash.
+        assert "abc1234" in history
+        assert "Commits: abc1234567890" in architect
+        # STATUS renders the 7-char commit suffix on the done task line.
+        assert "(abc1234)" in status_md
+
+    def test_patch_to_done_without_execution_log_minimal_architect(
+        self, router_client, feat, project, tmp_path
+    ):
+        """No execution log → architect entry has the task header but no Commits / Files lines."""
+        created = router_client.post(
+            "/api/v1/tasks",
+            json=_payload(feat_id=feat.id, title="Docs update"),
+        ).json()
+
+        router_client.patch(
+            f"/api/v1/tasks/{created['id']}",
+            json={"status": "done"},
+        )
+
+        project_dir = tmp_path / "projects" / project.slug
+        assert (project_dir / "HISTORY.md").is_file()
+        assert (project_dir / "STATUS.md").is_file()
+
+        arch = (project_dir / "ARCHITECT.md").read_text(encoding="utf-8")
+        # Header-level entry exists.
+        assert "### Task 1.1: Docs update" in arch
+        # Without a commit or arch files, the entry carries neither line.
+        assert "Commits:" not in arch
+        assert "Files:" not in arch
+
+    def test_patch_status_to_in_progress_does_not_fire_hook(
+        self, router_client, feat, project, tmp_path
+    ):
+        created = router_client.post(
+            "/api/v1/tasks",
+            json=_payload(feat_id=feat.id, title="In flight"),
+        ).json()
+
+        router_client.patch(
+            f"/api/v1/tasks/{created['id']}",
+            json={"status": "in_progress"},
+        )
+
+        project_dir = tmp_path / "projects" / project.slug
+        # No hook fired → no KB directory for the project at all.
+        assert not project_dir.exists()
+
+    def test_patch_title_only_does_not_fire_hook(
+        self, router_client, feat, project, tmp_path
+    ):
+        created = router_client.post(
+            "/api/v1/tasks",
+            json=_payload(feat_id=feat.id, title="Old title"),
+        ).json()
+
+        router_client.patch(
+            f"/api/v1/tasks/{created['id']}",
+            json={"title": "New title"},
+        )
+
+        project_dir = tmp_path / "projects" / project.slug
+        assert not project_dir.exists()
+
+    def test_patch_to_done_replayed_is_idempotent(
+        self, router_client, feat, project, tmp_path
+    ):
+        """Second PATCH to done does not duplicate the HISTORY entry."""
+        created = router_client.post(
+            "/api/v1/tasks",
+            json=_payload(feat_id=feat.id, title="Once done, stays done"),
+        ).json()
+
+        router_client.patch(
+            f"/api/v1/tasks/{created['id']}",
+            json={"status": "done"},
+        )
+        router_client.patch(
+            f"/api/v1/tasks/{created['id']}",
+            json={"status": "done"},
+        )
+
+        project_dir = tmp_path / "projects" / project.slug
+        history = (project_dir / "HISTORY.md").read_text(encoding="utf-8")
+
+        # Second PATCH: previous_status is already "done" so the hook
+        # never fires — regardless, even if it had fired, writer-level
+        # dedup would strip the duplicate first line.
+        assert history.count("Once done, stays done") == 1
+
+    def test_patch_rolls_back_when_kb_write_fails(
+        self, db_session, project, feat
+    ):
+        """OSError on KB write → 500 + task.status unchanged in DB."""
+        from backend.api.dependencies import get_knowledge_base_writer
+        from backend.services.knowledge_base_writer import KnowledgeBaseWriter
+
+        class _FailingWriter(KnowledgeBaseWriter):
+            def append(self, *args, **kwargs):  # type: ignore[override]
+                raise OSError("disk full simulation")
+
+        # Build a fresh app with the failing writer override.
+        from backend.db.models.tasks import Task as _Task
+
+        app = FastAPI()
+        app.include_router(tasks_router, prefix="/api/v1/tasks")
+
+        def _override_get_db():
+            yield db_session
+
+        def _override_kb_writer() -> KnowledgeBaseWriter:
+            return _FailingWriter("/tmp/unused")
+
+        app.dependency_overrides[get_db] = _override_get_db
+        app.dependency_overrides[get_knowledge_base_writer] = _override_kb_writer
+
+        with TestClient(app) as client:
+            created = client.post(
+                "/api/v1/tasks",
+                json=_payload(feat_id=feat.id, title="Will fail"),
+            ).json()
+            resp = client.patch(
+                f"/api/v1/tasks/{created['id']}",
+                json={"status": "done"},
+            )
+
+        app.dependency_overrides.clear()
+
+        assert resp.status_code == 500
+        assert "Failed to update live documents" in resp.json()["detail"]
+
+        # Re-read the task straight from the DB — the status transition must
+        # have been rolled back so the task is still "todo".
+        reloaded = db_session.execute(
+            sa_select(_Task).where(_Task.id == uuid.UUID(created["id"]))
+        ).scalar_one()
+        assert reloaded.status == "todo"
