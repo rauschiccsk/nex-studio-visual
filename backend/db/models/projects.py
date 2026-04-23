@@ -29,6 +29,7 @@ class Project(Base, UUIDMixin, TimestampMixin):
     backend_port = Column(Integer, nullable=True)
     frontend_port = Column(Integer, nullable=True)
     db_port = Column(Integer, nullable=True)
+    ui_design_port = Column(Integer, nullable=True)
     repo_url = Column(String(255), nullable=True)
     source_path = Column(Text, nullable=True)
     kb_path = Column(Text, nullable=True)

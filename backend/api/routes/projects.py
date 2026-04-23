@@ -88,6 +88,7 @@ def _validate_ports(db: Session, payload: ProjectCreate) -> None:
         ("backend_port", payload.backend_port),
         ("frontend_port", payload.frontend_port),
         ("db_port", payload.db_port),
+        ("ui_design_port", payload.ui_design_port),
     ]
 
     for field_name, port_value in ports:

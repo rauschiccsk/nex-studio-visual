@@ -101,6 +101,10 @@ class TestCheckPortAvailable:
         _make_project(db_session, frontend_port=10170)
         assert check_port_available(db_session, 10170) is False
 
+    def test_port_unavailable_when_used_as_ui_design(self, db_session):
+        _make_project(db_session, ui_design_port=10103)
+        assert check_port_available(db_session, 10103) is False
+
     def test_port_below_range_raises(self, db_session):
         with pytest.raises(ValueError, match="outside the allowed range"):
             check_port_available(db_session, 10099)
@@ -146,10 +150,16 @@ class TestSuggestNextPort:
             suggest_next_port(db_session, "invalid")
 
     def test_all_valid_types(self, db_session):
-        """All three port types return a valid suggestion."""
-        for port_type in ("backend", "frontend", "db"):
+        """All four port types return a valid suggestion."""
+        for port_type in ("backend", "frontend", "db", "ui_design"):
             result = suggest_next_port(db_session, port_type)
             assert PORT_RANGE_MIN <= result <= PORT_RANGE_MAX
+
+    def test_suggest_skips_ui_design_port_allocation(self, db_session):
+        """A port used as ui_design_port also blocks its suggestion for backend."""
+        _make_project(db_session, ui_design_port=PORT_RANGE_MIN)
+        result = suggest_next_port(db_session, "backend")
+        assert result == PORT_RANGE_MIN + 1
 
     def test_suggests_gap_port(self, db_session):
         """When 10100 is taken but 10101 is free, suggests 10101."""
@@ -168,7 +178,7 @@ class TestGetAllAllocatedPorts:
 
     def test_empty_when_no_projects(self, db_session):
         result = get_all_allocated_ports(db_session)
-        assert result == {"backend": [], "frontend": [], "db": []}
+        assert result == {"backend": [], "frontend": [], "db": [], "ui_design": []}
 
     def test_returns_allocated_ports(self, db_session):
         _make_project(db_session, backend_port=10100, frontend_port=10101, db_port=10102)
@@ -198,6 +208,18 @@ class TestGetAllAllocatedPorts:
         _make_project(db_session, user=user, backend_port=10150)
         result = get_all_allocated_ports(db_session)
         assert result["backend"] == [10100, 10150, 10200]
+
+    def test_ui_design_port_surfaces_separately(self, db_session):
+        _make_project(
+            db_session,
+            backend_port=10100,
+            frontend_port=10101,
+            db_port=10102,
+            ui_design_port=10103,
+        )
+        result = get_all_allocated_ports(db_session)
+        assert result["ui_design"] == [10103]
+        assert result["backend"] == [10100]
 
 
 # ==================================================================

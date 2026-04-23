@@ -34,9 +34,9 @@ from backend.api.routes.professional_specifications import (
 from backend.api.routes.project_modules import router as project_modules_router
 from backend.api.routes.projects import router as projects_router
 from backend.api.routes.raw_specifications import router as raw_specifications_router
-from backend.api.routes.ui_designs import router as ui_designs_router
 from backend.api.routes.report_configs import router as report_configs_router
 from backend.api.routes.tasks import router as tasks_router
+from backend.api.routes.ui_designs import router as ui_designs_router
 from backend.api.routes.uploads import router as uploads_router
 from backend.api.routes.user_sessions import router as user_sessions_router
 from backend.api.routes.users import router as users_router

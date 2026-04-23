@@ -128,6 +128,10 @@ class ProjectCreate(BaseModel):
         default=None,
         description="Database port from the ICC Port Registry.",
     )
+    ui_design_port: Optional[int] = Field(
+        default=None,
+        description="UI Design mockup preview port (Step 2B output) from the ICC Port Registry.",
+    )
     repo_url: Optional[str] = Field(
         default=None,
         max_length=255,
@@ -189,6 +193,10 @@ class ProjectUpdate(BaseModel):
         default=None,
         description="Updated database port.",
     )
+    ui_design_port: Optional[int] = Field(
+        default=None,
+        description="Updated UI Design mockup preview port.",
+    )
     repo_url: Optional[str] = Field(
         default=None,
         max_length=255,
@@ -227,6 +235,7 @@ class ProjectRead(BaseModel):
     backend_port: Optional[int] = None
     frontend_port: Optional[int] = None
     db_port: Optional[int] = None
+    ui_design_port: Optional[int] = None
     repo_url: Optional[str] = Field(default=None, max_length=255)
     source_path: Optional[str] = None
     kb_path: Optional[str] = None
