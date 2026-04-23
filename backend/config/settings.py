@@ -37,6 +37,21 @@ class Settings(BaseSettings):
     # Knowledge Base path (mounted read-only from host)
     knowledge_base_path: str = "/home/icc/knowledge"
 
+    # Claude Code OAuth token — surfaced as an env var by the Claude CLI
+    # environment. ICC uses Claude MAX OAuth rather than the Anthropic
+    # API (CLAUDE.md §7.1, DECISIONS.md D-001). The backend does not
+    # consume the token itself; the CLI subprocess does. Declared here
+    # so pydantic's strict ``extra='forbid'`` default tolerates the
+    # ``.env`` entry without downgrading to ``extra='ignore'``.
+    claude_code_oauth_token: str = Field(
+        default="",
+        description=(
+            "Claude Code OAuth token from the CLI environment. "
+            "Declared so Settings tolerates it in .env; not consumed "
+            "by the backend directly."
+        ),
+    )
+
     app_version: str = "0.1.0"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
