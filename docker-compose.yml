@@ -41,6 +41,11 @@ services:
       CLAUDE_CONFIG_DIR: "/home/andros/.claude"
       CLAUDE_CLI_PATH: "claude"
       CLAUDE_CODE_OAUTH_TOKEN: "${CLAUDE_CODE_OAUTH_TOKEN}"
+      # GitHub PAT used by create_github_repo to provision the project
+      # repository under rauschiccsk on POST /api/v1/projects.
+      # Scope required: admin:org (create repo under an organisation)
+      # + repo (manage repo metadata). Set in /opt/nex-studio-src/.env.
+      GITHUB_TOKEN: "${GITHUB_TOKEN}"
     depends_on:
       db:
         condition: service_healthy
