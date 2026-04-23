@@ -46,6 +46,25 @@ class PortSuggestResponse(BaseModel):
     suggested_port: int = Field(description="The first free port in the ICC range.")
 
 
+class PortBlockSuggestResponse(BaseModel):
+    """Response for block-based port suggestion.
+
+    A port block is a contiguous range of ``block_size`` ports starting
+    at ``base`` — per DECISIONS.md D-020 the default block is 10 ports
+    with ``+0 backend``, ``+1 frontend``, ``+2 db``, ``+3 ui-design``,
+    and ``+4..+9`` as per-project reserve. Consumers fill the first
+    four slots in the new-project form; the reserve stays unallocated
+    until the project needs cache / worker / admin-UI.
+    """
+
+    base: int = Field(
+        description="Base port of the first free block in the ICC range."
+    )
+    block_size: int = Field(
+        description="Number of consecutive ports reserved per project block."
+    )
+
+
 class PortConflictError(BaseModel):
     """Error detail returned when a requested port is already allocated."""
 

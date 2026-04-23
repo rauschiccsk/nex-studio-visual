@@ -5,7 +5,7 @@ invalid inputs with appropriate HTTP status codes:
 
     1. Duplicate slug                      -> 409 CONFLICT
     2. Conflicting port (already allocated) -> 409 CONFLICT
-    3. Port out of range (outside 9100-9299) -> 422
+    3. Port out of range (outside 10100-14999) -> 422
     4. repo_url is stored as metadata — no existence check (201 always)
     5. Verify error response structure
 """
@@ -76,14 +76,14 @@ class TestProjectCreationValidation:
         """Creating a project with a port already allocated returns 409."""
         headers, user_id = self._login_admin(integration_client)
 
-        # Create first project with backend_port 9250
+        # Create first project with backend_port 10150
         resp1 = self._create_project(
             integration_client,
             headers,
             user_id,
             name="Port Owner",
             slug="port-owner",
-            backend_port=9250,
+            backend_port=10150,
         )
         assert resp1.status_code == 201
 
@@ -94,44 +94,44 @@ class TestProjectCreationValidation:
             user_id,
             name="Port Stealer",
             slug="port-stealer",
-            backend_port=9250,
+            backend_port=10150,
         )
         assert resp2.status_code == 409
         detail = resp2.json()["detail"]
         # The detail is a dict (PortConflictError schema)
-        assert detail["port"] == 9250
+        assert detail["port"] == 10150
         assert detail["conflict_project"] == "Port Owner"
 
     def test_port_conflict_across_port_types(self, integration_client, _seed_admin):
         """A port used as backend_port cannot be reused as frontend_port."""
         headers, user_id = self._login_admin(integration_client)
 
-        # Create project with backend_port 9260
+        # Create project with backend_port 10160
         resp1 = self._create_project(
             integration_client,
             headers,
             user_id,
             name="Cross Port Owner",
             slug="cross-port-owner",
-            backend_port=9260,
+            backend_port=10160,
         )
         assert resp1.status_code == 201
 
-        # Try to use 9260 as frontend_port in another project
+        # Try to use 10160 as frontend_port in another project
         resp2 = self._create_project(
             integration_client,
             headers,
             user_id,
             name="Cross Port Stealer",
             slug="cross-port-stealer",
-            frontend_port=9260,
+            frontend_port=10160,
         )
         assert resp2.status_code == 409
         detail = resp2.json()["detail"]
-        assert detail["port"] == 9260
+        assert detail["port"] == 10160
 
     def test_port_below_range_returns_422(self, integration_client, _seed_admin):
-        """Port below 9100 must be rejected with 422."""
+        """Port below 10100 must be rejected with 422."""
         headers, user_id = self._login_admin(integration_client)
 
         resp = self._create_project(
@@ -144,10 +144,10 @@ class TestProjectCreationValidation:
         )
         assert resp.status_code == 422
         detail = resp.json()["detail"]
-        assert "outside the allowed range" in detail.lower() or "9100" in detail
+        assert "outside the allowed range" in detail.lower() or "10100" in detail
 
     def test_port_above_range_returns_422(self, integration_client, _seed_admin):
-        """Port above 9299 must be rejected with 422."""
+        """Port above 14999 must be rejected with 422."""
         headers, user_id = self._login_admin(integration_client)
 
         resp = self._create_project(
@@ -156,57 +156,57 @@ class TestProjectCreationValidation:
             user_id,
             name="Port Too High",
             slug="port-too-high",
-            frontend_port=9300,
+            frontend_port=15000,
         )
         assert resp.status_code == 422
         detail = resp.json()["detail"]
-        assert "outside the allowed range" in detail.lower() or "9299" in detail
+        assert "outside the allowed range" in detail.lower() or "14999" in detail
 
     def test_port_at_boundaries(self, integration_client, _seed_admin):
-        """Ports at exact boundaries: 9099 rejected, 9100 accepted, 9299 accepted, 9300 rejected."""
+        """Ports at exact boundaries: 10099 rejected, 10100 accepted, 14999 accepted, 15000 rejected."""
         headers, user_id = self._login_admin(integration_client)
 
-        # 9099 — below range
+        # 10099 — below range
         resp_below = self._create_project(
             integration_client,
             headers,
             user_id,
             name="Boundary Below",
             slug="boundary-below",
-            backend_port=9099,
+            backend_port=10099,
         )
         assert resp_below.status_code == 422
 
-        # 9100 — lower bound (valid)
+        # 10100 — lower bound (valid)
         resp_low = self._create_project(
             integration_client,
             headers,
             user_id,
             name="Boundary Low",
             slug="boundary-low",
-            backend_port=9100,
+            backend_port=10100,
         )
         assert resp_low.status_code == 201
 
-        # 9299 — upper bound (valid)
+        # 14999 — upper bound (valid)
         resp_high = self._create_project(
             integration_client,
             headers,
             user_id,
             name="Boundary High",
             slug="boundary-high",
-            frontend_port=9299,
+            frontend_port=14999,
         )
         assert resp_high.status_code == 201
 
-        # 9300 — above range
+        # 15000 — above range
         resp_above = self._create_project(
             integration_client,
             headers,
             user_id,
             name="Boundary Above",
             slug="boundary-above",
-            db_port=9300,
+            db_port=15000,
         )
         assert resp_above.status_code == 422
 
@@ -259,7 +259,7 @@ class TestProjectCreationValidation:
             user_id,
             name="Structure Test",
             slug="structure-test",
-            backend_port=9270,
+            backend_port=10170,
         )
         assert resp1.status_code == 201
 
@@ -270,7 +270,7 @@ class TestProjectCreationValidation:
             user_id,
             name="Structure Test 2",
             slug="structure-test-2",
-            backend_port=9270,
+            backend_port=10170,
         )
         assert resp_port.status_code == 409
         port_detail = resp_port.json()["detail"]

@@ -4,7 +4,7 @@ Covers:
 
 * Slug uniqueness → 409 Conflict.
 * Port uniqueness → 409 Conflict (across all three port types).
-* Port range (9100–9299) → 422 Unprocessable Entity.
+* Port range (10100–14999) → 422 Unprocessable Entity.
 * Invalid category → 422 (Pydantic rejects invalid Literal values).
 * GitHub repo_url → accepted as-is, no existence check.
 """
@@ -109,48 +109,48 @@ class TestPortConflict:
 
     def test_backend_port_conflict(self, router_client, creator, db_session):
         """A backend_port already allocated should return 409 with PortConflictError body."""
-        _make_project(db_session, creator, backend_port=9150)
-        payload = _payload(creator.id, backend_port=9150)
+        _make_project(db_session, creator, backend_port=10150)
+        payload = _payload(creator.id, backend_port=10150)
         resp = router_client.post("/api/v1/projects", json=payload)
         assert resp.status_code == 409
         error = resp.json()["detail"]
-        assert error["port"] == 9150
-        assert "9150" in error["detail"]
+        assert error["port"] == 10150
+        assert "10150" in error["detail"]
 
     def test_frontend_port_conflict(self, router_client, creator, db_session):
         """A frontend_port already allocated should return 409 with PortConflictError body."""
-        _make_project(db_session, creator, frontend_port=9200)
-        payload = _payload(creator.id, frontend_port=9200)
+        _make_project(db_session, creator, frontend_port=10200)
+        payload = _payload(creator.id, frontend_port=10200)
         resp = router_client.post("/api/v1/projects", json=payload)
         assert resp.status_code == 409
         error = resp.json()["detail"]
-        assert error["port"] == 9200
-        assert "9200" in error["detail"]
+        assert error["port"] == 10200
+        assert "10200" in error["detail"]
 
     def test_db_port_conflict(self, router_client, creator, db_session):
         """A db_port already allocated should return 409 with PortConflictError body."""
-        _make_project(db_session, creator, db_port=9180)
-        payload = _payload(creator.id, db_port=9180)
+        _make_project(db_session, creator, db_port=10180)
+        payload = _payload(creator.id, db_port=10180)
         resp = router_client.post("/api/v1/projects", json=payload)
         assert resp.status_code == 409
         error = resp.json()["detail"]
-        assert error["port"] == 9180
-        assert "9180" in error["detail"]
+        assert error["port"] == 10180
+        assert "10180" in error["detail"]
 
     def test_cross_type_port_conflict(self, router_client, creator, db_session):
         """A port used as backend in one project should conflict when used as frontend."""
-        _make_project(db_session, creator, backend_port=9170)
-        payload = _payload(creator.id, frontend_port=9170)
+        _make_project(db_session, creator, backend_port=10170)
+        payload = _payload(creator.id, frontend_port=10170)
         resp = router_client.post("/api/v1/projects", json=payload)
         assert resp.status_code == 409
         error = resp.json()["detail"]
-        assert error["port"] == 9170
-        assert "9170" in error["detail"]
+        assert error["port"] == 10170
+        assert "10170" in error["detail"]
 
     def test_no_port_conflict_when_ports_differ(self, router_client, creator, db_session):
         """Different ports should not conflict."""
-        _make_project(db_session, creator, backend_port=9150)
-        payload = _payload(creator.id, backend_port=9151)
+        _make_project(db_session, creator, backend_port=10150)
+        payload = _payload(creator.id, backend_port=10151)
         resp = router_client.post("/api/v1/projects", json=payload)
         assert resp.status_code == 201
 
@@ -162,42 +162,42 @@ class TestPortConflict:
 
 
 class TestPortRange:
-    """POST /api/v1/projects — port range validation (9100–9299, 422)."""
+    """POST /api/v1/projects — port range validation (10100–14999, 422)."""
 
     def test_backend_port_below_range(self, router_client, creator):
-        """A backend_port below 9100 should return 422."""
-        payload = _payload(creator.id, backend_port=9099)
+        """A backend_port below 10100 should return 422."""
+        payload = _payload(creator.id, backend_port=10099)
         resp = router_client.post("/api/v1/projects", json=payload)
         assert resp.status_code == 422
-        assert "9099" in resp.json()["detail"]
+        assert "10099" in resp.json()["detail"]
 
     def test_frontend_port_above_range(self, router_client, creator):
-        """A frontend_port above 9299 should return 422."""
-        payload = _payload(creator.id, frontend_port=9300)
+        """A frontend_port above 14999 should return 422."""
+        payload = _payload(creator.id, frontend_port=15000)
         resp = router_client.post("/api/v1/projects", json=payload)
         assert resp.status_code == 422
-        assert "9300" in resp.json()["detail"]
+        assert "15000" in resp.json()["detail"]
 
     def test_db_port_below_range(self, router_client, creator):
-        """A db_port below 9100 should return 422."""
+        """A db_port below 10100 should return 422."""
         payload = _payload(creator.id, db_port=8000)
         resp = router_client.post("/api/v1/projects", json=payload)
         assert resp.status_code == 422
         assert "8000" in resp.json()["detail"]
 
     def test_boundary_min_accepted(self, router_client, creator):
-        """Port 9100 (range minimum) should be accepted."""
-        payload = _payload(creator.id, backend_port=9100)
+        """Port 10100 (range minimum) should be accepted."""
+        payload = _payload(creator.id, backend_port=10100)
         resp = router_client.post("/api/v1/projects", json=payload)
         assert resp.status_code == 201
-        assert resp.json()["backend_port"] == 9100
+        assert resp.json()["backend_port"] == 10100
 
     def test_boundary_max_accepted(self, router_client, creator):
-        """Port 9299 (range maximum) should be accepted."""
-        payload = _payload(creator.id, frontend_port=9299)
+        """Port 14999 (range maximum) should be accepted."""
+        payload = _payload(creator.id, frontend_port=14999)
         resp = router_client.post("/api/v1/projects", json=payload)
         assert resp.status_code == 201
-        assert resp.json()["frontend_port"] == 9299
+        assert resp.json()["frontend_port"] == 14999
 
 
 class TestInvalidCategory:

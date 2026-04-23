@@ -2,7 +2,7 @@
 
 E2E scenario:
     1. POST /api/v1/auth/login (admin/Nex123)   -> 200 + JWT
-    2. GET  /api/v1/projects/ports/check         -> port availability (9100-9299)
+    2. GET  /api/v1/projects/ports/check         -> port availability (10100-14999)
     3. Mock GitHub API to validate repo_url
     4. POST /api/v1/projects (valid ports + repo) -> 201
     5. GET  /api/v1/projects/{id}                -> verify created
@@ -38,9 +38,9 @@ class TestProjectCreationFlow:
         admin_user_id = login_data["user"]["id"]
 
         # ------------------------------------------------------------------
-        # Step 2: Check port availability (9100-9299 range)
+        # Step 2: Check port availability (10100-14999 range)
         # ------------------------------------------------------------------
-        for port in (9200, 9201, 9202):
+        for port in (10100, 10101, 10102):
             port_resp = integration_client.get(
                 "/api/v1/projects/ports/check",
                 params={"port": port},
@@ -65,9 +65,9 @@ class TestProjectCreationFlow:
                     "slug": "nex-integration-test",
                     "category": "singlemodule",
                     "description": "Integration test project",
-                    "backend_port": 9200,
-                    "frontend_port": 9201,
-                    "db_port": 9202,
+                    "backend_port": 10100,
+                    "frontend_port": 10101,
+                    "db_port": 10102,
                     "repo_url": "rauschiccsk/nex-test-repo",
                     "created_by": admin_user_id,
                 },
@@ -79,9 +79,9 @@ class TestProjectCreationFlow:
         assert project_data["name"] == "NEX Integration Test"
         assert project_data["slug"] == "nex-integration-test"
         assert project_data["category"] == "singlemodule"
-        assert project_data["backend_port"] == 9200
-        assert project_data["frontend_port"] == 9201
-        assert project_data["db_port"] == 9202
+        assert project_data["backend_port"] == 10100
+        assert project_data["frontend_port"] == 10101
+        assert project_data["db_port"] == 10102
         assert project_data["repo_url"] == "rauschiccsk/nex-test-repo"
         assert project_data["status"] == "active"
         assert project_data["created_by"] == admin_user_id
@@ -97,7 +97,7 @@ class TestProjectCreationFlow:
         fetched = get_resp.json()
         assert fetched["id"] == project_id
         assert fetched["slug"] == "nex-integration-test"
-        assert fetched["backend_port"] == 9200
+        assert fetched["backend_port"] == 10100
 
         # ------------------------------------------------------------------
         # Step 5: Verify project appears in list
@@ -166,8 +166,8 @@ class TestProjectCreationFlow:
                     "slug": "port-check-proj",
                     "category": "singlemodule",
                     "description": "Test port allocation",
-                    "backend_port": 9210,
-                    "frontend_port": 9211,
+                    "backend_port": 10110,
+                    "frontend_port": 10111,
                     "created_by": admin_user_id,
                 },
                 headers=admin_headers,
@@ -175,7 +175,7 @@ class TestProjectCreationFlow:
         assert create_resp.status_code == 201
 
         # Now those ports should be occupied
-        for port in (9210, 9211):
+        for port in (10110, 10111):
             check_resp = integration_client.get(
                 "/api/v1/projects/ports/check",
                 params={"port": port},

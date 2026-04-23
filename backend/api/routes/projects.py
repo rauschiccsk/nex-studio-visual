@@ -36,6 +36,7 @@ from backend.db.session import get_db
 from backend.schemas.pagination import PaginatedResponse
 from backend.schemas.project import (
     GitHubRepoNotFoundError,
+    PortBlockSuggestResponse,
     PortCheckResponse,
     PortConflictError,
     PortSuggestResponse,
@@ -223,7 +224,7 @@ def list_projects(
 
 @router.get("/ports/check", response_model=PortCheckResponse)
 def check_port(
-    port: int = Query(..., description="Port number to check (9100–9299)."),
+    port: int = Query(..., description="Port number to check (10100–14999)."),
     project_id: Optional[str] = Query(
         default=None,
         description="Exclude this project from the conflict check (for editing).",
@@ -259,6 +260,29 @@ def suggest_port(
         raise _map_value_error(exc) from exc
 
     return PortSuggestResponse(suggested_port=suggested)
+
+
+@router.get("/ports/suggest-block", response_model=PortBlockSuggestResponse)
+def suggest_port_block(
+    db: Session = Depends(get_db),
+) -> PortBlockSuggestResponse:
+    """Return the base port of the first free 10-port block in the registry.
+
+    Used by the new-project form to auto-fill the four port inputs
+    (backend / frontend / db / ui-design) from a contiguous block per
+    DECISIONS.md D-020 (Port Registry v2, 10-port blocks).
+    """
+    try:
+        base = port_registry_service.suggest_next_port_block(db)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+
+    return PortBlockSuggestResponse(
+        base=base,
+        block_size=port_registry_service.PORT_BLOCK_SIZE,
+    )
 
 
 @router.get("/{project_id}", response_model=ProjectRead)

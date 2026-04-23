@@ -83,8 +83,8 @@ class TestProjectCreate:
         payload = ProjectCreate(
             **self._minimal(
                 status="paused",
-                backend_port=9100,
-                frontend_port=9101,
+                backend_port=10100,
+                frontend_port=10101,
                 db_port=5432,
                 repo_url="org/repo",
                 source_path="/opt/repo-src/",
@@ -93,7 +93,7 @@ class TestProjectCreate:
             )
         )
         assert payload.status == "paused"
-        assert payload.backend_port == 9100
+        assert payload.backend_port == 10100
         assert payload.guardian_enabled is True
 
     def test_required_fields(self) -> None:
@@ -171,8 +171,8 @@ class TestProjectUpdate:
             name="New Name",
             description="New description",
             status="archived",
-            backend_port=9200,
-            frontend_port=9201,
+            backend_port=10200,
+            frontend_port=10201,
             db_port=5433,
             repo_url="org/new-repo",
             source_path="/opt/new/",

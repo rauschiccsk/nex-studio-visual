@@ -3,7 +3,7 @@
 Covers:
 
 * ``GET /api/v1/projects/ports/check?port=N`` — availability check with
-  range validation (9100–9299), conflict detection and ``project_id``
+  range validation (10100–14999), conflict detection and ``project_id``
   exclusion.
 * ``GET /api/v1/projects/ports/suggest?type=T`` — next-free-port
   suggestion for ``backend``, ``frontend`` and ``db`` types.
@@ -76,7 +76,7 @@ class TestPortCheck:
 
     def test_available_port(self, router_client):
         """A port with no allocations should be reported as available."""
-        resp = router_client.get("/api/v1/projects/ports/check", params={"port": 9150})
+        resp = router_client.get("/api/v1/projects/ports/check", params={"port": 10150})
         assert resp.status_code == 200
         body = resp.json()
         assert body["available"] is True
@@ -84,8 +84,8 @@ class TestPortCheck:
 
     def test_unavailable_port(self, router_client, db_session, creator):
         """A port allocated to an existing project should be unavailable."""
-        proj = _make_project(db_session, creator, backend_port=9150)
-        resp = router_client.get("/api/v1/projects/ports/check", params={"port": 9150})
+        proj = _make_project(db_session, creator, backend_port=10150)
+        resp = router_client.get("/api/v1/projects/ports/check", params={"port": 10150})
         assert resp.status_code == 200
         body = resp.json()
         assert body["available"] is False
@@ -93,8 +93,8 @@ class TestPortCheck:
 
     def test_unavailable_cross_type(self, router_client, db_session, creator):
         """A frontend port should conflict when checked against any type."""
-        proj = _make_project(db_session, creator, frontend_port=9200)
-        resp = router_client.get("/api/v1/projects/ports/check", params={"port": 9200})
+        proj = _make_project(db_session, creator, frontend_port=10200)
+        resp = router_client.get("/api/v1/projects/ports/check", params={"port": 10200})
         assert resp.status_code == 200
         body = resp.json()
         assert body["available"] is False
@@ -102,10 +102,10 @@ class TestPortCheck:
 
     def test_same_project_excluded(self, router_client, db_session, creator):
         """A project's own port should be available when project_id is passed."""
-        proj = _make_project(db_session, creator, backend_port=9160)
+        proj = _make_project(db_session, creator, backend_port=10160)
         resp = router_client.get(
             "/api/v1/projects/ports/check",
-            params={"port": 9160, "project_id": str(proj.id)},
+            params={"port": 10160, "project_id": str(proj.id)},
         )
         assert resp.status_code == 200
         body = resp.json()
@@ -113,24 +113,24 @@ class TestPortCheck:
         assert body["conflict_project"] is None
 
     def test_below_range(self, router_client):
-        """Ports below 9100 should be rejected (422)."""
-        resp = router_client.get("/api/v1/projects/ports/check", params={"port": 9099})
+        """Ports below 10100 should be rejected (422)."""
+        resp = router_client.get("/api/v1/projects/ports/check", params={"port": 10099})
         assert resp.status_code == 422
 
     def test_above_range(self, router_client):
-        """Ports above 9299 should be rejected (422)."""
-        resp = router_client.get("/api/v1/projects/ports/check", params={"port": 9300})
+        """Ports above 14999 should be rejected (422)."""
+        resp = router_client.get("/api/v1/projects/ports/check", params={"port": 15000})
         assert resp.status_code == 422
 
     def test_boundary_min(self, router_client):
-        """Port 9100 (range minimum) should be accepted."""
-        resp = router_client.get("/api/v1/projects/ports/check", params={"port": 9100})
+        """Port 10100 (range minimum) should be accepted."""
+        resp = router_client.get("/api/v1/projects/ports/check", params={"port": 10100})
         assert resp.status_code == 200
         assert resp.json()["available"] is True
 
     def test_boundary_max(self, router_client):
-        """Port 9299 (range maximum) should be accepted."""
-        resp = router_client.get("/api/v1/projects/ports/check", params={"port": 9299})
+        """Port 14999 (range maximum) should be accepted."""
+        resp = router_client.get("/api/v1/projects/ports/check", params={"port": 14999})
         assert resp.status_code == 200
         assert resp.json()["available"] is True
 
@@ -145,18 +145,18 @@ class TestPortSuggest:
 
     @pytest.mark.parametrize("port_type", ["backend", "frontend", "db"])
     def test_suggest_returns_port_in_range(self, router_client, port_type):
-        """Suggestion for each valid type should return a port in 9100–9299."""
+        """Suggestion for each valid type should return a port in 10100–14999."""
         resp = router_client.get("/api/v1/projects/ports/suggest", params={"type": port_type})
         assert resp.status_code == 200
         port = resp.json()["suggested_port"]
-        assert 9100 <= port <= 9299
+        assert 10100 <= port <= 14999
 
     def test_suggest_skips_allocated(self, router_client, db_session, creator):
         """The suggested port should skip already-allocated ports."""
-        _make_project(db_session, creator, backend_port=9100)
+        _make_project(db_session, creator, backend_port=10100)
         resp = router_client.get("/api/v1/projects/ports/suggest", params={"type": "backend"})
         assert resp.status_code == 200
-        assert resp.json()["suggested_port"] != 9100
+        assert resp.json()["suggested_port"] != 10100
 
     def test_suggest_invalid_type(self, router_client):
         """An invalid port type should return 422."""
@@ -167,3 +167,31 @@ class TestPortSuggest:
         """Omitting the required type param should return 422."""
         resp = router_client.get("/api/v1/projects/ports/suggest")
         assert resp.status_code == 422
+
+
+class TestSuggestPortBlockEndpoint:
+    """GET /api/v1/projects/ports/suggest-block"""
+
+    def test_empty_db_returns_range_min_with_block_size(self, router_client):
+        """With no projects, the first free block starts at 10100 and is 10 wide."""
+        resp = router_client.get("/api/v1/projects/ports/suggest-block")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body == {"base": 10100, "block_size": 10}
+
+    def test_first_block_occupied_returns_second(
+        self, router_client, creator, db_session
+    ):
+        """A single project in the first block pushes the suggestion to 10110."""
+        _make_project(db_session, creator, backend_port=10105)
+        resp = router_client.get("/api/v1/projects/ports/suggest-block")
+        assert resp.status_code == 200
+        assert resp.json() == {"base": 10110, "block_size": 10}
+
+    def test_gap_block_preferred(self, router_client, creator, db_session):
+        """Block 1 taken + Block 3 taken → Block 2 wins (first free)."""
+        _make_project(db_session, creator, backend_port=10100)
+        _make_project(db_session, creator, backend_port=10120)
+        resp = router_client.get("/api/v1/projects/ports/suggest-block")
+        assert resp.status_code == 200
+        assert resp.json()["base"] == 10110
