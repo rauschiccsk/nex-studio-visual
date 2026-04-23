@@ -1,11 +1,15 @@
 import { useEffect, useState } from "react";
 import { listUsersApi, createUserApi, updateUserApi } from "@/services/api/users";
+import {
+  getSystemSettingApi,
+  updateSystemSettingApi,
+} from "@/services/api/systemSettings";
 import { useAuthStore } from "@/store/authStore";
 import type { UserRead, UserRole } from "@/types/user";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-type SettingsTab = "appearance" | "users" | "sessions";
+type SettingsTab = "appearance" | "icc" | "users" | "sessions";
 
 function roleCls(role: string) {
   if (role === "ri") return "text-indigo-400";
@@ -21,6 +25,45 @@ export default function SettingsPage() {
 
   // Appearance
   const [lang, setLang] = useState<"sk" | "en">("sk");
+
+  // ICC — github_org
+  const [githubOrg, setGithubOrg] = useState("");
+  const [githubOrgLoaded, setGithubOrgLoaded] = useState(false);
+  const [githubOrgIsDefault, setGithubOrgIsDefault] = useState(true);
+  const [githubOrgSaving, setGithubOrgSaving] = useState(false);
+  const [githubOrgError, setGithubOrgError] = useState("");
+  const [githubOrgSavedFlash, setGithubOrgSavedFlash] = useState(false);
+
+  const isRi = user?.role === "ri";
+
+  // Load github_org whenever the ICC tab becomes visible (first time only).
+  useEffect(() => {
+    if (tab !== "icc" || githubOrgLoaded) return;
+    getSystemSettingApi("github_org")
+      .then((s) => {
+        setGithubOrg(s.value);
+        setGithubOrgIsDefault(s.is_default);
+        setGithubOrgLoaded(true);
+      })
+      .catch(() => setGithubOrgError("Nepodarilo sa načítať nastavenie."));
+  }, [tab, githubOrgLoaded]);
+
+  async function handleSaveGithubOrg() {
+    if (!githubOrg.trim()) return;
+    setGithubOrgSaving(true);
+    setGithubOrgError("");
+    try {
+      const updated = await updateSystemSettingApi("github_org", githubOrg.trim());
+      setGithubOrg(updated.value);
+      setGithubOrgIsDefault(updated.is_default);
+      setGithubOrgSavedFlash(true);
+      setTimeout(() => setGithubOrgSavedFlash(false), 2000);
+    } catch {
+      setGithubOrgError("Nepodarilo sa uložiť. Skontroluj, či máš rolu ri.");
+    } finally {
+      setGithubOrgSaving(false);
+    }
+  }
 
   // Users
   const [users, setUsers] = useState<UserRead[]>([]);
@@ -74,6 +117,7 @@ export default function SettingsPage() {
 
   const TABS: { id: SettingsTab; label: string }[] = [
     { id: "appearance", label: "Appearance" },
+    { id: "icc", label: "ICC" },
     { id: "users", label: "Users" },
     { id: "sessions", label: "Sessions" },
   ];
@@ -151,6 +195,59 @@ export default function SettingsPage() {
                 >
                   English
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── ICC ── */}
+        {tab === "icc" && (
+          <div className="p-6 max-w-lg">
+            <h2 className="text-sm font-semibold text-slate-300 mb-1">ICC integrations</h2>
+            <p className="text-xs text-slate-600 mb-4">
+              Runtime-mutable ICC-wide settings. Editable only by ri role.
+            </p>
+            <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-widest mb-1">
+                  GitHub organization
+                </label>
+                <p className="text-xs text-slate-600 mb-2">
+                  Used to auto-fill the repository URL on the new-project
+                  form as <code className="text-slate-400">{"{github_org}/{slug}"}</code>.
+                </p>
+                <div className="flex gap-2 items-center">
+                  <input
+                    type="text"
+                    value={githubOrg}
+                    onChange={(e) => setGithubOrg(e.target.value)}
+                    disabled={!isRi || !githubOrgLoaded}
+                    placeholder="rauschiccsk"
+                    className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 font-mono focus:outline-none focus:border-primary-500 disabled:opacity-50"
+                  />
+                  {isRi && (
+                    <button
+                      onClick={handleSaveGithubOrg}
+                      disabled={githubOrgSaving || !githubOrg.trim() || !githubOrgLoaded}
+                      className="px-3 py-2 text-xs font-medium text-white bg-primary-600 hover:bg-primary-500 disabled:opacity-40 rounded-lg transition-colors"
+                    >
+                      {githubOrgSaving ? "Ukladám…" : "Save"}
+                    </button>
+                  )}
+                </div>
+                <div className="mt-2 text-[11px] flex items-center gap-2">
+                  {githubOrgIsDefault && githubOrgLoaded && (
+                    <span className="text-slate-600">Using default value.</span>
+                  )}
+                  {!githubOrgIsDefault && githubOrgLoaded && (
+                    <span className="text-slate-500">Stored override.</span>
+                  )}
+                  {githubOrgSavedFlash && <span className="text-green-400">Uložené.</span>}
+                  {githubOrgError && <span className="text-red-400">{githubOrgError}</span>}
+                  {!isRi && (
+                    <span className="ml-auto text-slate-700">Read-only — ri role required.</span>
+                  )}
+                </div>
               </div>
             </div>
           </div>

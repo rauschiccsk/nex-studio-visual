@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createProjectApi, suggestPortBlockApi } from "@/services/api/projects";
+import { getSystemSettingApi } from "@/services/api/systemSettings";
 import { useAuthStore } from "@/store/authStore";
 import type { ProjectCategory } from "@/types";
 
@@ -57,6 +58,8 @@ export default function NewProjectPage() {
   const [slug, setSlug] = useState("");
   const [slugManual, setSlugManual] = useState(false);
   const [repo, setRepo] = useState("");
+  const [repoManual, setRepoManual] = useState(false);
+  const [githubOrg, setGithubOrg] = useState<string>("");
   const [description, setDescription] = useState("");
   const [backendPort, setBackendPort] = useState<string>("");
   const [frontendPort, setFrontendPort] = useState<string>("");
@@ -71,6 +74,28 @@ export default function NewProjectPage() {
 
   // Auto-focus name on mount
   useEffect(() => { nameRef.current?.focus(); }, []);
+
+  // Load the github_org ICC setting — used to auto-fill repo_url as
+  // "{github_org}/{slug}". Fails silently when the endpoint is
+  // unreachable; the user can still enter repo_url manually.
+  useEffect(() => {
+    getSystemSettingApi("github_org")
+      .then((s) => setGithubOrg(s.value))
+      .catch(() => {
+        /* leave empty; user types repo_url manually */
+      });
+  }, []);
+
+  // Whenever github_org or slug changes and the user has not manually
+  // edited the repo field, regenerate the auto-filled value.
+  useEffect(() => {
+    if (repoManual) return;
+    if (!githubOrg || !slug) {
+      setRepo("");
+      return;
+    }
+    setRepo(`${githubOrg}/${slug}`);
+  }, [githubOrg, slug, repoManual]);
 
   // Auto-suggest the four ports of a single free block on mount.
   // The backend allocates a contiguous 10-port block per project per
@@ -230,15 +255,18 @@ export default function NewProjectPage() {
               />
             </Field>
 
-            {/* GitHub repo */}
+            {/* GitHub repo — auto-filled as {github_org}/{slug} from ICC settings. */}
             <Field label="GitHub repository">
               <input
                 type="text"
-                placeholder="rauschiccsk/project-name"
+                placeholder={githubOrg ? `${githubOrg}/project-name` : "rauschiccsk/project-name"}
                 autoComplete="off"
                 spellCheck={false}
                 value={repo}
-                onChange={(e) => setRepo(e.target.value)}
+                onChange={(e) => {
+                  setRepo(e.target.value);
+                  setRepoManual(true);
+                }}
                 className={`${inputCls} font-mono`}
               />
             </Field>
