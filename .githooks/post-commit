@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+#
+# Post-commit hook — keep ``VITE_APP_VERSION`` in ``.env`` in sync with
+# the current HEAD so the sidebar footer visibly reflects each commit.
+#
+# Format: ``0.1.<commit_count>-<short_hash>`` (e.g. ``0.1.87-2e3cd8b``).
+# Only the single VITE_APP_VERSION line is touched — any other values in
+# ``.env`` (backend secrets, local overrides) are preserved.
+#
+# Enable once per clone:
+#   git config core.hooksPath .githooks
+#
+# The hook only writes (never reads) credential lines, so it is
+# compatible with CLAUDE.md §13.
+
+set -euo pipefail
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+ENV_FILE="${REPO_ROOT}/.env"
+
+COMMIT_COUNT=$(git rev-list --count HEAD)
+SHORT_HASH=$(git rev-parse --short HEAD)
+VERSION="0.1.${COMMIT_COUNT}-${SHORT_HASH}"
+NEW_LINE="VITE_APP_VERSION=${VERSION}"
+
+if [[ -f "${ENV_FILE}" ]] && grep -q '^VITE_APP_VERSION=' "${ENV_FILE}"; then
+    # Replace the existing line in-place, preserve everything else.
+    sed -i "s|^VITE_APP_VERSION=.*|${NEW_LINE}|" "${ENV_FILE}"
+else
+    # First run (or line missing) — append. ``touch`` ensures the file
+    # exists on a fresh clone where ``.env`` has never been created.
+    touch "${ENV_FILE}"
+    printf '%s\n' "${NEW_LINE}" >> "${ENV_FILE}"
+fi
+
+echo "post-commit: VITE_APP_VERSION=${VERSION}"
