@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     # Claude CLI configuration
     claude_config_dir: str = "/root/.claude"
     claude_cli_path: str = "claude"
-    claude_stream_timeout: int = 300
+    claude_stream_timeout: int = 1800
     claude_design_doc_timeout: int = 1800
     claude_task_plan_timeout: int = 1800
 
