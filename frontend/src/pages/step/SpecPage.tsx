@@ -247,7 +247,7 @@ export default function SpecPage() {
               {!genDone && !generating && rawSpec.status !== "done" && (
                 <div className="rounded-xl border border-slate-700 bg-slate-900 p-5 text-center">
                   <p className="text-sm text-slate-400 mb-1">Zákaznícka špecifikácia uložená</p>
-                  <p className="text-xs text-slate-600 mb-4">Klikni na tlačidlo nižšie pre vygenerovanie profesionálnej špecifikácie pomocou AI.</p>
+                  <p className="text-xs text-slate-600 mb-4">Klikni na tlačidlo nižšie pre vygenerovanie vývojovej dokumentácie pomocou AI.</p>
                   <button
                     onClick={handleGenerate}
                     className="flex items-center gap-2 mx-auto bg-primary-600 hover:bg-primary-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
@@ -255,7 +255,7 @@ export default function SpecPage() {
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                     </svg>
-                    Generovať profesionálnu špecifikáciu
+                    Generovať vývojovú dokumentáciu
                   </button>
                 </div>
               )}
@@ -263,7 +263,7 @@ export default function SpecPage() {
               {rawSpec.status === "done" && !generating && !genDone && (
                 <div className="rounded-xl border border-green-500/20 bg-green-500/5 p-4 flex items-center justify-between">
                   <div>
-                    <div className="text-sm font-medium text-green-400">Profesionálna špecifikácia existuje</div>
+                    <div className="text-sm font-medium text-green-400">Vývojová dokumentácia existuje</div>
                     <div className="text-xs text-slate-500 mt-0.5">Môžeš pokračovať na krok 2 alebo regenerovať.</div>
                   </div>
                   <div className="flex gap-2">
@@ -290,7 +290,7 @@ export default function SpecPage() {
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
-                Generujem profesionálnu špecifikáciu…
+                Generujem vývojovú dokumentáciu…
                 <button onClick={handleAbort} className="ml-auto text-xs text-slate-600 hover:text-red-400 transition-colors">Zastaviť</button>
               </div>
               <pre
@@ -308,7 +308,7 @@ export default function SpecPage() {
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
-                  Profesionálna špecifikácia vygenerovaná
+                  Vývojová dokumentácia vygenerovaná
                 </div>
                 <button
                   onClick={() => navigate(`/projects/${slug}/versions/${versionId}/profspec`)}

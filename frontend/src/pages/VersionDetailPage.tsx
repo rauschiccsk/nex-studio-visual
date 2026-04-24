@@ -26,7 +26,7 @@ interface PipelineStep {
 const PIPELINE_STEPS: PipelineStep[] = [
   { n: 1, label: "Zákaznícka špecifikácia", sublabel: "Zákazník opisuje čo chce v tejto verzii. Pre v0.2+ stačí delta." },
   { n: 2, label: "Vývojová dokumentácia", sublabel: "Paralelná fáza: BEHAVIOR.md + DESIGN.md — architektonické rozhodnutia." },
-  { n: 3, label: "Súhrnná dokumentácia", sublabel: "Professional Spec — konsolidácia dokumentácie.", waitFor: "Vývojová dokumentácia" },
+  { n: 3, label: "Súhrnná dokumentácia", sublabel: "Konsolidácia vývojovej dokumentácie pre review.", waitFor: "Vývojová dokumentácia" },
   { n: 4, label: "Architecture", sublabel: "BEHAVIOR.md + DESIGN.md review a finalizácia.", waitFor: "Súhrnná dokumentácia" },
   { n: 5, label: "Quality Audit", sublabel: "Nezávislá kontrola — súlad dokumentácie, medzery, ICC štandardy.", waitFor: "Architecture" },
   { n: 6, label: "Task Plan", sublabel: "Epic → Feat → Task breakdown, CC delegácia pripravená.", waitFor: "Quality Audit" },

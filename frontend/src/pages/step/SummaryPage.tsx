@@ -147,7 +147,7 @@ export default function SummaryPage() {
                   <span className="text-[10px] text-slate-600">· {project.name} {version.version_number}</span>
                 </div>
                 <div className="text-xs text-slate-500 mb-3">
-                  Súhrnná dokumentácia je automaticky odvodená z profesionálnej špecifikácie.
+                  Súhrnná dokumentácia je automaticky odvodená z vývojovej dokumentácie.
                   Plná implementácia so samostatným generovaním bude dostupná v ďalšej verzii.
                 </div>
                 <div className="rounded-lg border border-slate-700 bg-slate-950 p-4">

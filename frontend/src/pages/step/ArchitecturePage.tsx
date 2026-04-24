@@ -133,7 +133,7 @@ export default function ArchitecturePage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
             </svg>
             <p className="text-sm text-slate-500 mb-1">Čaká na schválenie Kroku 2</p>
-            <p className="text-xs text-slate-700 mb-4">Architecture dokumenty sa vygenerujú po schválení profesionálnej špecifikácie.</p>
+            <p className="text-xs text-slate-700 mb-4">Architecture dokumenty sa vygenerujú po schválení vývojovej dokumentácie.</p>
             <button
               onClick={() => navigate(`/projects/${slug}/versions/${versionId}/profspec`)}
               className="text-xs bg-primary-600 hover:bg-primary-500 text-white px-3 py-1.5 rounded-lg font-medium transition-colors"
@@ -147,7 +147,7 @@ export default function ArchitecturePage() {
         {hasApprovedProfSpec && !hasBoth && !generating && (
           <div className="p-6 max-w-3xl mx-auto space-y-4">
             <p className="text-xs text-slate-600">
-              Generuj BEHAVIOR.md a DESIGN.md z profesionálnej špecifikácie. Oba dokumenty musíš vygenerovať.
+              Generuj BEHAVIOR.md a DESIGN.md z vývojovej dokumentácie. Oba dokumenty musíš vygenerovať.
             </p>
             <div className="grid grid-cols-2 gap-4">
               {/* BEHAVIOR.md */}

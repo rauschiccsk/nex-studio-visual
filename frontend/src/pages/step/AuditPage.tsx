@@ -13,7 +13,7 @@ const AUDIT_CHECKS = [
   { label: "BEHAVIOR.md existuje a nie je prázdny", key: "behavior_exists" },
   { label: "DESIGN.md existuje a nie je prázdny", key: "design_exists" },
   { label: "Oba dokumenty sú prepojené (rovnaký project_id)", key: "linked" },
-  { label: "Dokumenty boli vygenerované z schválenej profesionálnej špecifikácie", key: "profspec_approved" },
+  { label: "Dokumenty boli vygenerované zo schválenej vývojovej dokumentácie", key: "profspec_approved" },
   { label: "DESIGN.md obsahuje sekcie: Architecture, DB Schema, API Endpoints", key: "design_sections" },
   { label: "BEHAVIOR.md obsahuje sekcie: Business Rules, Workflows, Edge Cases", key: "behavior_sections" },
 ];

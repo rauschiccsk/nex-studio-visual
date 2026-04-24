@@ -117,7 +117,7 @@ export default function ProfSpecPage() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
           </svg>
           <p className="text-sm text-slate-500 mb-1">Čaká na Krok 1</p>
-          <p className="text-xs text-slate-700 mb-4">Profesionálna špecifikácia sa vygeneruje po dokončení zákazníckej špecifikácie.</p>
+          <p className="text-xs text-slate-700 mb-4">Vývojová dokumentácia sa vygeneruje po dokončení zákazníckej špecifikácie.</p>
           <button
             onClick={() => navigate(`/projects/${slug}/versions/${versionId}/spec`)}
             className="text-xs bg-primary-600 hover:bg-primary-500 text-white px-3 py-1.5 rounded-lg font-medium transition-colors"
@@ -233,7 +233,7 @@ export default function ProfSpecPage() {
         {/* Right: Spec content */}
         <div className="flex-1 flex flex-col overflow-hidden">
           <div className="px-4 py-2 border-b border-slate-800 flex-shrink-0 flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-widest">Profesionálna špecifikácia</span>
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-widest">Vývojová dokumentácia</span>
             <span className="text-[10px] text-slate-600 font-mono">v{spec.version}</span>
           </div>
           <div className="flex-1 overflow-y-auto p-5">
