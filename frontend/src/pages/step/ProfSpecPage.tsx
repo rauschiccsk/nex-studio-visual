@@ -343,6 +343,7 @@ export default function ProfSpecPage() {
                   prose-code:before:content-none prose-code:after:content-none
                   prose-table:text-sm prose-th:text-slate-200 prose-td:text-slate-300
                   prose-th:border-slate-700 prose-td:border-slate-800
+                  [&_th:first-child]:whitespace-nowrap [&_td:first-child]:whitespace-nowrap
                   prose-hr:border-slate-800
                   prose-a:text-primary-400 hover:prose-a:text-primary-300"
               >
