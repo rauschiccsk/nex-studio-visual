@@ -41,7 +41,13 @@ export default function ProfSpecPage() {
   // full updated document, not a diff) so subsequent chunks append to
   // the fresh version instead of concatenating with the old v0.1 copy.
   const specChunkStartedRef = useRef(false);
+  // Ref-mirrored spec content so ``onDone`` can auto-persist the final
+  // version without the stale-closure snapshot problem — the initial
+  // DB load seeds both state + ref, chat chunks update both, and
+  // manual Save also keeps the ref in sync.
+  const specContentRef = useRef("");
   const [chatError, setChatError] = useState("");
+  const [chatAutosaveNote, setChatAutosaveNote] = useState("");
   const [specContent, setSpecContent] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -71,7 +77,10 @@ export default function ProfSpecPage() {
         if (cancelled) return;
         const s = res.items[0] ?? null;
         setSpec(s);
-        if (s) setSpecContent(s.content);
+        if (s) {
+          setSpecContent(s.content);
+          specContentRef.current = s.content;
+        }
         setLoading(false);
       });
     }).catch(() => { if (!cancelled) { setError("Nepodarilo sa načítať dáta."); setLoading(false); } });
@@ -90,6 +99,7 @@ export default function ProfSpecPage() {
     setChatStreaming(true);
     setChatBuffer("");
     setChatError("");
+    setChatAutosaveNote("");
     chatBufferRef.current = "";
     specChunkStartedRef.current = false;
 
@@ -108,8 +118,10 @@ export default function ProfSpecPage() {
         // with the old and new specs concatenated.
         if (!specChunkStartedRef.current) {
           specChunkStartedRef.current = true;
+          specContentRef.current = chunk;
           setSpecContent(chunk);
         } else {
+          specContentRef.current += chunk;
           setSpecContent((prev) => prev + chunk);
         }
       },
@@ -120,6 +132,26 @@ export default function ProfSpecPage() {
         setChatBuffer("");
         if (finalMsg) {
           setChatHistory((h) => [...h, { role: "assistant", content: finalMsg }]);
+        }
+        // Auto-persist the AI-updated spec. Chat updates are useless if
+        // they only live in FE state — refresh/navigation loses everything
+        // (as happened with Zoltán's 10-Q round-trip). PATCH runs once
+        // per turn, only when the spec body actually changed.
+        if (specChunkStartedRef.current && spec) {
+          const latest = specContentRef.current;
+          setChatAutosaveNote("Ukladám zmeny…");
+          updateProfessionalSpec(spec.id, { content: latest })
+            .then((updated) => {
+              setSpec(updated);
+              specContentRef.current = updated.content;
+              setChatAutosaveNote("✓ Zmeny uložené");
+              setTimeout(() => setChatAutosaveNote(""), 2500);
+            })
+            .catch((e: unknown) => {
+              const err = e instanceof Error ? e.message : String(e);
+              setChatError(`Chyba pri ukladaní zmien: ${err}`);
+              setChatAutosaveNote("");
+            });
         }
       },
       (err) => {
@@ -162,6 +194,7 @@ export default function ProfSpecPage() {
       const updated = await updateProfessionalSpec(spec.id, { content: editContent });
       setSpec(updated);
       setSpecContent(updated.content);
+      specContentRef.current = updated.content;
       setEditing(false);
     } finally {
       setSaving(false);
@@ -300,6 +333,11 @@ export default function ProfSpecPage() {
                 >
                   ×
                 </button>
+              </div>
+            )}
+            {chatAutosaveNote && (
+              <div className="rounded-md border border-green-500/25 bg-green-500/10 px-2.5 py-1.5 text-[11px] text-green-400">
+                {chatAutosaveNote}
               </div>
             )}
             <textarea
