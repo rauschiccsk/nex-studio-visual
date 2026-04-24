@@ -139,19 +139,20 @@ export function chatUIDesign(
   return controller;
 }
 
+/**
+ * Stream-generate the initial HTML mockup for a UIDesign.
+ *
+ * The backend pulls the latest approved Vývojová dokumentácia from the
+ * DB on its own — the FE no longer has to ship the profspec content
+ * (and potentially truncate it). Generation fails with HTTP 422 if no
+ * approved Vývojová dokumentácia exists for the owning project yet.
+ */
 export function generateUIDesign(
   uiDesignId: string,
-  projectName: string,
-  profspecContent: string,
   onEvent: (event: UIDesignSSEEvent) => void,
 ): AbortController {
   const controller = new AbortController();
   const url = `${resolveBaseUrl()}${API_PREFIX}/ui-designs/${uiDesignId}/generate`;
-  _consumeUIDesignStream(
-    url,
-    { project_name: projectName, profspec_content: profspecContent },
-    onEvent,
-    controller.signal,
-  );
+  _consumeUIDesignStream(url, {}, onEvent, controller.signal);
   return controller;
 }

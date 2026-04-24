@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { listProjectsApi } from "@/services/api/projects";
 import { getVersion } from "@/services/api/versions";
-import { listProfessionalSpecs } from "@/services/api/professionalSpecifications";
 import {
   listUIDesigns,
   createUIDesign,
@@ -36,7 +35,6 @@ export default function UIDesignPage() {
   const [project, setProject] = useState<ProjectRead | null>(null);
   const [version, setVersion] = useState<Version | null>(null);
   const [uiDesign, setUIDesign] = useState<UIDesignRead | null>(null);
-  const [profspecContent, setProfspecContent] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -70,15 +68,11 @@ export default function UIDesignPage() {
       if (cancelled || !proj) { setError("Projekt nebol nájdený."); setLoading(false); return; }
       setProject(proj);
       setVersion(ver);
-      return Promise.all([
-        listUIDesigns({ project_id: proj.id, limit: 1 }),
-        listProfessionalSpecs({ project_id: proj.id, limit: 1 }),
-      ]).then(([uiRes, profRes]) => {
+      return listUIDesigns({ project_id: proj.id, limit: 1 }).then((uiRes) => {
         if (cancelled) return;
         const ui = uiRes.items[0] ?? null;
         setUIDesign(ui);
         if (ui?.html_preview) setHtmlContent(ui.html_preview);
-        setProfspecContent(profRes.items[0]?.content ?? "");
         setLoading(false);
       });
     }).catch(() => { if (!cancelled) { setError("Nepodarilo sa načítať dáta."); setLoading(false); } });
@@ -102,8 +96,6 @@ export default function UIDesignPage() {
       setChatBuffer("");
       abortRef.current = generateUIDesign(
         created.id,
-        project.name,
-        profspecContent,
         (event: UIDesignSSEEvent) => {
           if (event.type === "chat_chunk") {
             chatAccum += event.content;

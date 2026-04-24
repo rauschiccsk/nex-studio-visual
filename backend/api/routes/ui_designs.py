@@ -17,13 +17,19 @@ import logging
 from typing import Optional
 from uuid import UUID
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from backend.config.settings import settings
 
 from backend.core.security import require_ri_role
 from backend.db.models.foundation import User
+from backend.db.models.projects import Project
+from backend.db.models.specifications import ProfessionalSpecification
 from backend.db.session import get_db
 from backend.schemas.pagination import PaginatedResponse
 from backend.schemas.ui_design import UIDesignCreate, UIDesignRead, UIDesignUpdate
@@ -37,6 +43,25 @@ router = APIRouter(tags=["UI Designs"])
 
 _CHAT_MARKER = "[SPRÁVA]"
 _HTML_MARKER = "[HTML]"
+
+
+def _notify_mockup_reload(project_id: UUID) -> None:
+    """Fire-and-forget POST to the mockup server's admin channel.
+
+    Called after every ``html_preview`` write so the dedicated per-
+    project listener on ``{Project.ui_design_port}`` picks up the new
+    content without needing its own DB polling loop. Failures
+    (mockup container down, network blip) are logged and swallowed —
+    the mockup server will rehydrate from DB the next time it
+    restarts.
+    """
+    url = f"{settings.mockup_admin_url.rstrip('/')}/admin/reload/{project_id}"
+    try:
+        httpx.post(url, timeout=2.0)
+    except httpx.HTTPError as exc:
+        logger.warning(
+            "Mockup reload notify failed for project %s: %s", project_id, exc
+        )
 
 
 def _map_value_error(exc: ValueError) -> HTTPException:
@@ -92,9 +117,16 @@ def update_ui_design(
         obj = ui_design_service.update(db, ui_design_id, data)
         db.commit()
         db.refresh(obj)
-        return UIDesignRead.model_validate(obj)
     except ValueError as exc:
         raise _map_value_error(exc) from exc
+
+    # Notify the per-project mockup listener only when the HTML
+    # actually changed on this PATCH; approval-only updates have no
+    # effect on the rendered mockup and do not deserve a reload ping.
+    if data.html_preview is not None:
+        _notify_mockup_reload(obj.project_id)
+
+    return UIDesignRead.model_validate(obj)
 
 
 @router.delete("/{ui_design_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -126,28 +158,46 @@ class _ChatPayload(BaseModel):
 
 
 _SYSTEM_PROMPT = (
-    "Si ICC UI Dizajnér AI. Tvojou úlohou je vytvárať a upravovať HTML mockupy webových aplikácií "
-    "podľa požiadaviek vývojového tímu a zákazníka.\n\n"
+    "Si ICC UI Dizajnér AI. Tvojou úlohou je vytvárať a iterovať HTML "
+    "mockupy podnikových informačných systémov na základe schválenej "
+    "vývojovej dokumentácie.\n\n"
     "FORMÁT ODPOVEDE — POVINNÝ, DODRŽUJ PRESNE:\n"
     "[SPRÁVA]\n"
-    "Tu napíš 1-3 vety v slovenčine o tom čo si zmenil alebo doplnil v mockupe.\n\n"
+    "1–3 vety v slovenčine o tom čo si zmenil alebo doplnil v mockupe "
+    "(alebo prečo nemôžeš splniť požiadavku).\n\n"
     "[HTML]\n"
-    "Tu napíš KOMPLETNÉ self-contained HTML — celý dokument od <!DOCTYPE html> po </html>.\n\n"
+    "KOMPLETNÉ self-contained HTML — celý dokument od <!DOCTYPE html> po "
+    "</html>. VYNECHAJ tento blok iba ak požiadavka nie je zmena mockupu "
+    "(napr. otázka, potvrdenie, test) — v takom prípade odpovedaj iba v "
+    "[SPRÁVA].\n\n"
     "PRAVIDLÁ PRE HTML:\n"
-    "- VŽDY generuj kompletný HTML dokument (vrátane DOCTYPE, head, body)\n"
-    "- Použi len inline <style> alebo style= atribúty — bez externých CSS knižníc\n"
-    "- Dark theme: pozadie #0f172a (slate-950), text #e2e8f0 (slate-200), border #1e293b (slate-800)\n"
-    "- Primárna farba: #6366f1 (indigo-500)\n"
-    "- Základná štruktúra: sidebar (šírka 180px, pevný vľavo) + main content (flex-1)\n"
-    "- Realistické slovenské dummy dáta\n"
-    "- Font: system-ui, sans-serif\n"
-    "- Bez JavaScriptu — len statický HTML/CSS prototype\n"
-    "- Výška body 100vh, flex layout\n\n"
-    "PRAVIDLÁ:\n"
-    "- VŽDY začni odpoveď s [SPRÁVA] — nikdy nič pred tým\n"
-    "- [HTML] musí obsahovať KOMPLETNÝ dokument, nie len zmenené časti\n"
-    "- Meni len to čo používateľ požaduje, ostatné ponechaj\n"
-    "- Jazyk UI: slovenčina\n"
+    "- Generuj kompletný HTML dokument (DOCTYPE, <html>, <head>, <body>).\n"
+    "- Použi len inline <style> v <head> alebo style= atribúty — žiadne "
+    "externé CSS knižnice, žiadne CDN linky.\n"
+    "- Bez JavaScriptu — statický HTML/CSS prototype.\n"
+    "- Dark theme: pozadie #0f172a (slate-950), text #e2e8f0 (slate-200), "
+    "border #1e293b (slate-800), primárna farba #6366f1 (indigo-500).\n"
+    "- Font: system-ui, sans-serif. Mono pre identifikátory: ui-monospace, "
+    "SFMono-Regular, Menlo.\n"
+    "- Výška body 100vh, flex layout (sidebar + main content).\n"
+    "- Realistické slovenské dummy dáta zodpovedajúce doméne aplikácie.\n\n"
+    "LAYOUT PATTERNS (použi tieto ak vývojová dokumentácia nevyžaduje iné):\n"
+    "- Top bar (výška ~48 px): logo vľavo, príkazové / vyhľadávacie pole "
+    "uprostred (napr. placeholder 'Napíš príkaz alebo skratku (OF)…'), "
+    "user avatar vpravo.\n"
+    "- Ľavý sidebar (šírka ~220 px): moduly zoskupené podľa kategórií zo "
+    "špecifikácie; kategórie majú malý caps label, moduly ikonou + názvom; "
+    "aktívny modul podsvietený.\n"
+    "- Hlavná plocha: tabový pracovný priestor s 1–3 otvorenými tabmi; aspoň "
+    "jeden tab zobrazuje obsah konkrétneho modulu (tabuľka záznamov, "
+    "formulár, dashboard metriky) s realistickými dummy dátami.\n"
+    "- Ak špecifikácia obsahuje maticu prístupových práv — ukáž jej náhľad "
+    "v jednom tab-e alebo na samostatnej obrazovke.\n\n"
+    "PRAVIDLÁ ITERÁCIE:\n"
+    "- VŽDY začni odpoveď s [SPRÁVA] — nikdy nič pred tým.\n"
+    "- Keď emituješ [HTML], musí obsahovať KOMPLETNÝ dokument (nie diff).\n"
+    "- Meň len to čo používateľ explicitne požaduje; ostatné ponechaj.\n"
+    "- Jazyk UI: slovenčina. Komentáre v HTML sú voliteľné.\n"
 )
 
 
@@ -249,40 +299,85 @@ async def chat_ui_design(
 
 # ── Initial generate ──────────────────────────────────────────────────────────
 
+# The generate endpoint no longer takes profspec text from the caller
+# — it pulls the latest approved Vývojová dokumentácia straight from
+# the DB so the FE cannot accidentally submit a stale or truncated
+# context. An empty body is accepted for forward-compat with clients
+# that might want to override later.
 class _GeneratePayload(BaseModel):
-    project_name: str = ""
-    profspec_content: str = ""
+    pass
 
 
 @router.post("/{ui_design_id}/generate", status_code=status.HTTP_200_OK)
 async def generate_ui_design(
     ui_design_id: UUID,
-    payload: _GeneratePayload,
+    payload: _GeneratePayload,  # noqa: ARG001 — reserved for future overrides
     db: Session = Depends(get_db),
     current_user: User = Depends(require_ri_role),
 ):
-    """Stream-generate initial HTML mockup from profspec context.
+    """Stream-generate initial HTML mockup from approved Vývojová dokumentácia.
+
+    The ``UIDesign.project_id`` points at the owning project; we fetch
+    the newest ``ProfessionalSpecification`` for that project that has
+    ``approved_at`` stamped and feed its full content into the AI
+    prompt. Generation is refused with 422 if no approved spec exists
+    — the UI Design step is gated on Krok 2A approval per the pipeline
+    contract (see VersionDetailPage ``STEP_ROUTES``).
 
     Same SSE format as /chat — chat_chunk + html_chunk + done.
     """
     try:
-        ui_design_service.get_by_id(db, ui_design_id)
+        ui_design = ui_design_service.get_by_id(db, ui_design_id)
     except ValueError as exc:
         raise _map_value_error(exc) from exc
 
-    project_ctx = f"Projekt: {payload.project_name}\n\n" if payload.project_name else ""
-    profspec_ctx = (
-        f"PROFESIONÁLNA ŠPECIFIKÁCIA:\n{payload.profspec_content[:3000]}\n\n"
-        if payload.profspec_content
-        else ""
+    # Load the project (for the name) and the approved Vývojová
+    # dokumentácia content in a single trip so the prompt can reference
+    # both without string shuffling at the call site.
+    project = db.get(Project, ui_design.project_id)
+    if project is None:  # defensive — FK CASCADE should prevent this
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Owning project for UIDesign {ui_design_id} not found",
+        )
+    profspec = (
+        db.execute(
+            select(ProfessionalSpecification)
+            .where(ProfessionalSpecification.project_id == ui_design.project_id)
+            .where(ProfessionalSpecification.approved_at.isnot(None))
+            .order_by(ProfessionalSpecification.approved_at.desc())
+            .limit(1)
+        )
+        .scalars()
+        .first()
     )
+    if profspec is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Najprv schváľ Vývojovú dokumentáciu (Krok 2A) — UI Design "
+                "generátor potrebuje schválený obsah ako vstup."
+            ),
+        )
 
     user_prompt = (
-        f"{project_ctx}"
-        f"{profspec_ctx}"
-        "ÚLOHA: Vytvor základný UI prototype (HTML mockup) pre túto aplikáciu. "
-        "Zahrň: sidebar s navigáciou, hlavný obsah dashboardu s kľúčovými metrikami alebo zoznamom. "
-        "Použi realistické slovenské dummy dáta."
+        f"PROJEKT: {project.name}\n\n"
+        "VÝVOJOVÁ DOKUMENTÁCIA (schválená, v plnom znení):\n"
+        "─────────────────────────────────────────────────\n"
+        f"{profspec.content}\n"
+        "─────────────────────────────────────────────────\n\n"
+        "ÚLOHA: Na základe celej vývojovej dokumentácie vytvor prvý HTML "
+        "prototype UI tejto aplikácie.\n\n"
+        "Mockup musí vizuálne pokryť KAŽDÝ funkčný modul z §3 špecifikácie "
+        "— bočný panel musí obsahovať všetky aktívne moduly zoskupené "
+        "podľa kategórií, hlavná plocha musí mať tabový pracovný priestor "
+        "s aspoň jedným otvoreným modulom, a v hornej lište musí byť "
+        "príkazové / vyhľadávacie pole pre spúšťanie modulu cez krátky "
+        "identifikátor (napr. 'OF'). Použi realistické slovenské dummy "
+        "dáta zodpovedajúce doméne IS (faktúry, partneri, skladové karty…).\n\n"
+        "Rešpektuj aktorov a ich obmedzenia (§2): mockup zobrazuj z "
+        "pohľadu Bežného používateľa (rola ha/editor), ktorý má prístup "
+        "iba k niekoľkým modulom — ostatné kategórie skry."
     )
 
     stream_timeout = system_setting_service.get_int(db, "claude_stream_timeout_seconds")
