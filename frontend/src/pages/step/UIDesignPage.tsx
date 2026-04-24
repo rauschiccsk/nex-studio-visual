@@ -44,6 +44,8 @@ export default function UIDesignPage() {
   const [chatInput, setChatInput] = useState("");
   const [chatStreaming, setChatStreaming] = useState(false);
   const [chatBuffer, setChatBuffer] = useState("");
+  const [chatError, setChatError] = useState("");
+  const [chatAutosaveNote, setChatAutosaveNote] = useState("");
   const [htmlContent, setHtmlContent] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -107,6 +109,8 @@ export default function UIDesignPage() {
       let chatAccum = "";
       setChatStreaming(true);
       setChatBuffer("");
+      setChatError("");
+      setChatAutosaveNote("");
       abortRef.current = generateUIDesign(
         created.id,
         (event: UIDesignSSEEvent) => {
@@ -118,15 +122,31 @@ export default function UIDesignPage() {
             setHtmlContent(htmlAccum);
           } else if (event.type === "done") {
             setChatStreaming(false);
-            setChatHistory([{ role: "assistant", content: chatAccum || "Základný mockup vygenerovaný." }]);
+            setChatHistory([
+              { role: "assistant", content: chatAccum.trim() || "Základný mockup vygenerovaný." },
+            ]);
             setChatBuffer("");
-            // Save html_preview to backend
+            // Save html_preview — chat persistence is handled by the
+            // backend (mirror of /chat), so only the HTML round-trip
+            // needs FE wiring + user-visible feedback.
             if (created.id && htmlAccum) {
-              updateUIDesign(created.id, { html_preview: htmlAccum }).then(setUIDesign).catch(() => {});
+              setChatAutosaveNote("Ukladám mockup…");
+              updateUIDesign(created.id, { html_preview: htmlAccum })
+                .then((updated) => {
+                  setUIDesign(updated);
+                  setChatAutosaveNote("✓ Mockup uložený");
+                  setTimeout(() => setChatAutosaveNote(""), 2500);
+                })
+                .catch((e: unknown) => {
+                  const err = e instanceof Error ? e.message : String(e);
+                  setChatError(`Chyba pri ukladaní mockupu: ${err}`);
+                  setChatAutosaveNote("");
+                });
             }
           } else if (event.type === "error") {
             setChatStreaming(false);
             setChatBuffer("");
+            setChatError(event.content || "Chyba pri generovaní mockupu.");
           }
         },
       );
@@ -142,6 +162,8 @@ export default function UIDesignPage() {
     setChatHistory((h) => [...h, { role: "user", content: msg }]);
     setChatStreaming(true);
     setChatBuffer("");
+    setChatError("");
+    setChatAutosaveNote("");
 
     let htmlAccum = "";
     let chatAccum = "";
@@ -161,17 +183,32 @@ export default function UIDesignPage() {
           setHtmlContent(htmlAccum);
         } else if (event.type === "done") {
           setChatStreaming(false);
-          setChatHistory((h) => [...h, { role: "assistant", content: chatAccum }]);
+          const finalMsg = chatAccum.trim();
+          if (finalMsg) {
+            setChatHistory((h) => [...h, { role: "assistant", content: finalMsg }]);
+          }
           setChatBuffer("");
-          // Persist html_preview
+          // Persist html_preview only when the AI actually re-emitted
+          // one — a pure-chat reply (clarification / question) leaves
+          // the mockup intact, no PATCH needed.
           if (htmlAccum) {
+            setChatAutosaveNote("Ukladám mockup…");
             updateUIDesign(uiDesign.id, { html_preview: htmlAccum })
-              .then(setUIDesign)
-              .catch(() => {});
+              .then((updated) => {
+                setUIDesign(updated);
+                setChatAutosaveNote("✓ Mockup uložený");
+                setTimeout(() => setChatAutosaveNote(""), 2500);
+              })
+              .catch((e: unknown) => {
+                const err = e instanceof Error ? e.message : String(e);
+                setChatError(`Chyba pri ukladaní mockupu: ${err}`);
+                setChatAutosaveNote("");
+              });
           }
         } else if (event.type === "error") {
           setChatStreaming(false);
           setChatBuffer("");
+          setChatError(event.content || "Chyba pri komunikácii s AI.");
         }
       },
     );
@@ -298,6 +335,19 @@ export default function UIDesignPage() {
                   </div>
                 </div>
               ))}
+              {chatStreaming && !chatBuffer && (
+                <div className="flex gap-2 justify-start">
+                  <div className="w-6 h-6 rounded-full bg-primary-600/30 flex items-center justify-center text-[9px] text-primary-400 font-bold shrink-0 mt-0.5">AI</div>
+                  <div className="max-w-[85%] text-xs px-3 py-2 rounded-lg bg-slate-800 text-slate-500 rounded-tl-none flex items-center gap-2">
+                    <span className="flex gap-1" aria-hidden>
+                      <span className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-bounce [animation-delay:-0.3s]" />
+                      <span className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-bounce [animation-delay:-0.15s]" />
+                      <span className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-bounce" />
+                    </span>
+                    <span className="italic">AI premýšľa…</span>
+                  </div>
+                </div>
+              )}
               {chatStreaming && chatBuffer && (
                 <div className="flex gap-2 justify-start">
                   <div className="w-6 h-6 rounded-full bg-primary-600/30 flex items-center justify-center text-[9px] text-primary-400 font-bold shrink-0 mt-0.5">AI</div>
@@ -309,6 +359,23 @@ export default function UIDesignPage() {
               <div ref={chatEndRef} />
             </div>
             <div className="border-t border-slate-800 p-3 flex-shrink-0 space-y-2">
+              {chatError && (
+                <div className="rounded-md border border-red-500/30 bg-red-500/10 px-2.5 py-1.5 text-[11px] text-red-400 flex items-start gap-2">
+                  <span className="flex-1">{chatError}</span>
+                  <button
+                    onClick={() => setChatError("")}
+                    className="text-red-400/70 hover:text-red-300 shrink-0"
+                    aria-label="Zavrieť chybu"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
+              {chatAutosaveNote && (
+                <div className="rounded-md border border-green-500/25 bg-green-500/10 px-2.5 py-1.5 text-[11px] text-green-400">
+                  {chatAutosaveNote}
+                </div>
+              )}
               <textarea
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}

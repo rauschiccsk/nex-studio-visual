@@ -48,6 +48,16 @@ router = APIRouter(tags=["UI Designs"])
 _CHAT_MARKER = "[SPRÁVA]"
 _HTML_MARKER = "[HTML]"
 
+# Fall back to pure chat mode after this many characters of preamble
+# without either marker. Mirrors the Vývojová dokumentácia chat (see
+# ``professional_specifications.py``) — Claude occasionally answers a
+# non-mockup question (clarification, test echo) without emitting any
+# marker, and the previous logic silently discarded everything past the
+# last 8 bytes. Large enough to tolerate a legitimate preamble (``{"type"
+# :"system",...}``) but small enough to surface forgotten markers
+# quickly.
+_PREAMBLE_FALLBACK_THRESHOLD = 256
+
 
 def _notify_mockup_reload(project_id: UUID) -> None:
     """Fire-and-forget POST to the mockup server's admin channel.
@@ -241,6 +251,11 @@ async def chat_ui_design(
 
     async def _sse_generator():
         buffer = ""
+        # ``preamble`` → ``chat`` on [SPRÁVA] → ``html`` on [HTML].
+        # ``chat_fallback`` is entered when neither marker appears within
+        # ``_PREAMBLE_FALLBACK_THRESHOLD`` bytes — the whole stream is
+        # then treated as chat (no HTML update) so a markerless reply
+        # (e.g. AI answering a plain question) isn't silently swallowed.
         state = "preamble"
         chat_accumulator: list[str] = []
         stream_error = False
@@ -263,8 +278,22 @@ async def chat_ui_design(
                             buffer = buffer[idx + len(_CHAT_MARKER):]
                             state = "chat"
                             changed = True
-                        elif len(buffer) > len(_CHAT_MARKER) * 3:
-                            buffer = buffer[-len(_CHAT_MARKER):]
+                        elif _HTML_MARKER in buffer:
+                            # AI skipped [SPRÁVA] entirely — treat the
+                            # preamble as chat and jump straight to HTML.
+                            idx = buffer.index(_HTML_MARKER)
+                            chat_part = buffer[:idx].strip()
+                            if chat_part:
+                                yield f"data: {json.dumps({'type': 'chat_chunk', 'content': chat_part})}\n\n"
+                                chat_accumulator.append(chat_part)
+                            buffer = buffer[idx + len(_HTML_MARKER):]
+                            state = "html"
+                            changed = True
+                        elif len(buffer) > _PREAMBLE_FALLBACK_THRESHOLD:
+                            # No markers at all — treat the whole stream
+                            # as a chat reply; HTML preview untouched.
+                            state = "chat_fallback"
+                            changed = True
 
                     elif state == "chat":
                         if _HTML_MARKER in buffer:
@@ -282,6 +311,12 @@ async def chat_ui_design(
                                 yield f"data: {json.dumps({'type': 'chat_chunk', 'content': buffer[:safe_len]})}\n\n"
                                 chat_accumulator.append(buffer[:safe_len])
                                 buffer = buffer[safe_len:]
+
+                    elif state == "chat_fallback":
+                        if buffer:
+                            yield f"data: {json.dumps({'type': 'chat_chunk', 'content': buffer})}\n\n"
+                            chat_accumulator.append(buffer)
+                            buffer = ""
 
                     elif state == "html":
                         if buffer:
@@ -454,6 +489,13 @@ async def generate_ui_design(
     async def _sse_generator():
         buffer = ""
         state = "preamble"
+        # Mirror of ``/chat`` — accumulate the chat portion so the
+        # assistant's reply can be persisted at end of stream. The
+        # initial-generate turn has no user-typed prompt, so only the
+        # assistant row is stored (plus a fallback placeholder if Claude
+        # produces an empty [SPRÁVA]).
+        chat_accumulator: list[str] = []
+        stream_error = False
 
         try:
             async for chunk in claude_subprocess.run_claude_stream(
@@ -471,14 +513,25 @@ async def generate_ui_design(
                             buffer = buffer[idx + len(_CHAT_MARKER):]
                             state = "chat"
                             changed = True
-                        elif len(buffer) > len(_CHAT_MARKER) * 3:
-                            buffer = buffer[-len(_CHAT_MARKER):]
+                        elif _HTML_MARKER in buffer:
+                            idx = buffer.index(_HTML_MARKER)
+                            chat_part = buffer[:idx].strip()
+                            if chat_part:
+                                yield f"data: {json.dumps({'type': 'chat_chunk', 'content': chat_part})}\n\n"
+                                chat_accumulator.append(chat_part)
+                            buffer = buffer[idx + len(_HTML_MARKER):]
+                            state = "html"
+                            changed = True
+                        elif len(buffer) > _PREAMBLE_FALLBACK_THRESHOLD:
+                            state = "chat_fallback"
+                            changed = True
                     elif state == "chat":
                         if _HTML_MARKER in buffer:
                             idx = buffer.index(_HTML_MARKER)
                             chat_part = buffer[:idx].strip()
                             if chat_part:
                                 yield f"data: {json.dumps({'type': 'chat_chunk', 'content': chat_part})}\n\n"
+                                chat_accumulator.append(chat_part)
                             buffer = buffer[idx + len(_HTML_MARKER):]
                             state = "html"
                             changed = True
@@ -486,18 +539,59 @@ async def generate_ui_design(
                             safe_len = max(0, len(buffer) - len(_HTML_MARKER))
                             if safe_len > 0:
                                 yield f"data: {json.dumps({'type': 'chat_chunk', 'content': buffer[:safe_len]})}\n\n"
+                                chat_accumulator.append(buffer[:safe_len])
                                 buffer = buffer[safe_len:]
+                    elif state == "chat_fallback":
+                        if buffer:
+                            yield f"data: {json.dumps({'type': 'chat_chunk', 'content': buffer})}\n\n"
+                            chat_accumulator.append(buffer)
+                            buffer = ""
                     elif state == "html":
                         if buffer:
                             yield f"data: {json.dumps({'type': 'html_chunk', 'content': buffer})}\n\n"
                             buffer = ""
         except (RuntimeError, TimeoutError) as exc:
+            stream_error = True
             logger.error("Claude generate error for UI design %s: %s", ui_design_id, exc)
             yield f"data: {json.dumps({'type': 'error', 'content': str(exc)})}\n\n"
 
         if buffer:
             event_type = "html_chunk" if state == "html" else "chat_chunk"
             yield f"data: {json.dumps({'type': event_type, 'content': buffer.strip()})}\n\n"
+            if event_type == "chat_chunk":
+                chat_accumulator.append(buffer.strip())
+
+        # Persist the assistant turn so the chat panel survives navigation
+        # after the first mockup generation. Uses a fresh SessionLocal —
+        # the request-scoped ``db`` may be closed by the time the SSE tail
+        # runs. Empty / errored streams are skipped so the chat log isn't
+        # seeded with misleading rows. If the AI emitted a clean [HTML]
+        # block but no [SPRÁVA] body, we still store a short placeholder
+        # so the rehydrated chat doesn't appear empty after reload.
+        if not stream_error:
+            assistant_text = (
+                "".join(chat_accumulator).strip()
+                or "Základný mockup vygenerovaný."
+            )
+            persist_db = SessionLocal()
+            try:
+                chat_message_service.create(
+                    persist_db,
+                    UIDesignChatMessageCreate(
+                        ui_design_id=ui_design_id,
+                        role="assistant",
+                        content=assistant_text,
+                    ),
+                )
+                persist_db.commit()
+            except Exception:
+                persist_db.rollback()
+                logger.exception(
+                    "Failed to persist generate chat message for UIDesign %s",
+                    ui_design_id,
+                )
+            finally:
+                persist_db.close()
 
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
