@@ -6,6 +6,7 @@ import { listProfessionalSpecs, generateDesignDoc } from "@/services/api/profess
 import { listDesignDocuments } from "@/services/api/designDocuments";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
+import { useActiveContextSync } from "@/hooks/useActiveContextSync";
 import type { ProfessionalSpecificationRead } from "@/types/professionalSpecification";
 import type { DesignDocumentRead, DesignDocumentType } from "@/types/designDocument";
 
@@ -33,6 +34,8 @@ export default function ArchitecturePage() {
   const [genError, setGenError] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   const outputRef = useRef<HTMLPreElement>(null);
+
+  useActiveContextSync(project, version);
 
   useEffect(() => {
     if (!slug || !versionId) return;

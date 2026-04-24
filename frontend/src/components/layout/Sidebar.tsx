@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuthStore } from "@/store/authStore";
+import { useActiveContextStore } from "@/store/activeContextStore";
 
 // ─── SVG icon helpers ───────────────────────────────────────────────────────
 
@@ -25,6 +26,54 @@ const IconVersions = () => (
 const IconWorkflow = () => (
   <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+  </svg>
+);
+
+const IconSpec = () => (
+  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+  </svg>
+);
+
+const IconDoc = () => (
+  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+  </svg>
+);
+
+const IconUIDesign = () => (
+  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zM14 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+  </svg>
+);
+
+const IconSummary = () => (
+  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+  </svg>
+);
+
+const IconArchitecture = () => (
+  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+  </svg>
+);
+
+const IconAudit = () => (
+  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+  </svg>
+);
+
+const IconTaskPlan = () => (
+  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+  </svg>
+);
+
+const IconImplementation = () => (
+  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
   </svg>
 );
 
@@ -69,10 +118,11 @@ interface NavItemProps {
   collapsed: boolean;
   active?: boolean;
   muted?: boolean;
+  mutedTitle?: string;
   onClick?: () => void;
 }
 
-function NavItem({ icon, label, path, collapsed, active, muted, onClick }: NavItemProps) {
+function NavItem({ icon, label, path, collapsed, active, muted, mutedTitle, onClick }: NavItemProps) {
   const navigate = useNavigate();
 
   const handleClick = () => {
@@ -89,8 +139,10 @@ function NavItem({ icon, label, path, collapsed, active, muted, onClick }: NavIt
     ? "text-slate-700 cursor-not-allowed"
     : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200";
 
+  const title = collapsed ? label : muted ? mutedTitle : undefined;
+
   return (
-    <button className={`${base} ${px} ${color}`} onClick={handleClick} title={collapsed ? label : undefined}>
+    <button className={`${base} ${px} ${color}`} onClick={handleClick} title={title}>
       {icon}
       {!collapsed && <span>{label}</span>}
     </button>
@@ -117,9 +169,15 @@ export default function Sidebar() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
+  const ctx = useActiveContextStore((s) => s.context);
 
   const isActive = (path: string) =>
     path === "/" ? location.pathname === "/" : location.pathname.startsWith(path);
+
+  const isStepActive = (step: string) => {
+    if (!ctx) return false;
+    return location.pathname === `/projects/${ctx.slug}/versions/${ctx.versionId}/${step}`;
+  };
 
   const handleLogout = async () => {
     await logout();
@@ -127,6 +185,21 @@ export default function Sidebar() {
   };
 
   const initials = user?.username ? user.username.slice(0, 1).toUpperCase() : "?";
+
+  // Pipeline step nav data — one list drives the ordered render below.
+  const pipelineSteps: { num: string; label: string; step: string; icon: React.ReactNode }[] = [
+    { num: "1", label: "Zákaznícka špecifikácia", step: "spec", icon: <IconSpec /> },
+    { num: "2A", label: "Vývojová dokumentácia", step: "profspec", icon: <IconDoc /> },
+    { num: "2B", label: "UI Design", step: "uidesign", icon: <IconUIDesign /> },
+    { num: "3", label: "Súhrnná dokumentácia", step: "summary", icon: <IconSummary /> },
+    { num: "4", label: "Architecture", step: "architecture", icon: <IconArchitecture /> },
+    { num: "5", label: "Quality Audit", step: "audit", icon: <IconAudit /> },
+    { num: "6", label: "Task Plan", step: "taskplan", icon: <IconTaskPlan /> },
+    { num: "7", label: "Implementácia", step: "implementacia", icon: <IconImplementation /> },
+  ];
+
+  const hasCtx = Boolean(ctx);
+  const mutedTitle = "Najprv otvor verziu projektu";
 
   return (
     <aside
@@ -159,13 +232,50 @@ export default function Sidebar() {
       <nav className="flex-1 p-2 space-y-0.5 overflow-y-auto overflow-x-hidden">
         <NavItem icon={<IconHome />} label="Dashboard" path="/" collapsed={collapsed} active={isActive("/")} />
         <NavItem icon={<IconFolder />} label="Projects" path="/projects" collapsed={collapsed} active={isActive("/projects")} />
+        <NavItem
+          icon={<IconVersions />}
+          label="Versions"
+          path={hasCtx ? `/projects/${ctx!.slug}` : undefined}
+          collapsed={collapsed}
+          muted={!hasCtx}
+          mutedTitle={mutedTitle}
+          active={hasCtx ? location.pathname === `/projects/${ctx!.slug}` : false}
+        />
+        <NavItem
+          icon={<IconWorkflow />}
+          label="Workflow"
+          path={hasCtx ? `/projects/${ctx!.slug}/versions/${ctx!.versionId}` : undefined}
+          collapsed={collapsed}
+          muted={!hasCtx}
+          mutedTitle={mutedTitle}
+          active={hasCtx ? location.pathname === `/projects/${ctx!.slug}/versions/${ctx!.versionId}` : false}
+        />
 
-        <SectionLabel label="Project" collapsed={collapsed} />
-        <NavItem icon={<IconVersions />} label="Versions" collapsed={collapsed} muted />
-        <NavItem icon={<IconWorkflow />} label="Workflow" collapsed={collapsed} muted />
+        {/* Active context indicator — shown under Workflow so the user sees which
+            verzia the pipeline shortcuts below point to. */}
+        {hasCtx && !collapsed && (
+          <div className="px-3 pb-1 text-[10px] text-slate-600 font-mono truncate">
+            {ctx!.projectName} · {ctx!.versionNumber}
+          </div>
+        )}
+
+        <SectionLabel label="Pipeline" collapsed={collapsed} />
+        {pipelineSteps.map((s) => (
+          <NavItem
+            key={s.step}
+            icon={s.icon}
+            label={collapsed ? `${s.num}` : `${s.num}. ${s.label}`}
+            path={hasCtx ? `/projects/${ctx!.slug}/versions/${ctx!.versionId}/${s.step}` : undefined}
+            collapsed={collapsed}
+            active={isStepActive(s.step)}
+            muted={!hasCtx}
+            mutedTitle={mutedTitle}
+          />
+        ))}
+
+        <NavItem icon={<IconBook />} label="Knowledge Base" path="/kb" collapsed={collapsed} active={isActive("/kb")} />
 
         <SectionLabel label="Settings" collapsed={collapsed} />
-        <NavItem icon={<IconBook />} label="Knowledge Base" path="/kb" collapsed={collapsed} active={isActive("/kb")} />
         <NavItem icon={<IconSettings />} label="Settings" path="/settings" collapsed={collapsed} active={isActive("/settings")} />
 
         {/* Admin */}

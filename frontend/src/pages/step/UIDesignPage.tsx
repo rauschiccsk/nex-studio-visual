@@ -14,6 +14,7 @@ import type { UIDesignSSEEvent, ChatHistoryItem } from "@/services/api/uiDesigns
 import { useAuthStore } from "@/store/authStore";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
+import { useActiveContextSync } from "@/hooks/useActiveContextSync";
 import type { UIDesignRead } from "@/types/uiDesign";
 
 // ─── UIDesignPage — Step 2B ───────────────────────────────────────────────────
@@ -55,6 +56,8 @@ export default function UIDesignPage() {
 
   // Init generation
   const [initializing, setInitializing] = useState(false);
+
+  useActiveContextSync(project, version);
 
   useEffect(() => {
     if (!slug || !versionId) return;

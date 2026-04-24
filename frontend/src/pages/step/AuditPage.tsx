@@ -5,6 +5,7 @@ import { getVersion } from "@/services/api/versions";
 import { listDesignDocuments } from "@/services/api/designDocuments";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
+import { useActiveContextSync } from "@/hooks/useActiveContextSync";
 import type { DesignDocumentRead } from "@/types/designDocument";
 
 // ─── AuditPage — Step 5 ──────────────────────────────────────────────────────
@@ -29,6 +30,8 @@ export default function AuditPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [auditApproved, setAuditApproved] = useState(false);
+
+  useActiveContextSync(project, version);
 
   useEffect(() => {
     if (!slug || !versionId) return;

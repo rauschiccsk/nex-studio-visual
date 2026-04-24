@@ -6,6 +6,7 @@ import { fetchTaskPlan, executeFeat } from "@/services/api/taskPlan";
 import type { FeatExecuteEvent } from "@/services/api/taskPlan";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
+import { useActiveContextSync } from "@/hooks/useActiveContextSync";
 import type { TaskPlanEpic, TaskPlanFeat, TaskStatus } from "@/types/taskPlan";
 
 // ─── ImplementaciaPage — Step 7 ───────────────────────────────────────────────
@@ -33,6 +34,8 @@ export default function ImplementaciaPage() {
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
+
+  useActiveContextSync(project, version);
 
   useEffect(() => {
     if (!slug || !versionId) return;

@@ -6,6 +6,7 @@ import { listProfessionalSpecs } from "@/services/api/professionalSpecifications
 import { listUIDesigns } from "@/services/api/uiDesigns";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
+import { useActiveContextSync } from "@/hooks/useActiveContextSync";
 import type { ProfessionalSpecificationRead } from "@/types/professionalSpecification";
 import type { UIDesignRead } from "@/types/uiDesign";
 
@@ -21,6 +22,8 @@ export default function SummaryPage() {
   const [uiDesign, setUIDesign] = useState<UIDesignRead | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  useActiveContextSync(project, version);
 
   useEffect(() => {
     if (!slug || !versionId) return;

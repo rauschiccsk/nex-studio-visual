@@ -8,6 +8,7 @@ import { fetchTaskPlan } from "@/services/api/taskPlan";
 import { listUIDesigns } from "@/services/api/uiDesigns";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
+import { useActiveContextSync } from "@/hooks/useActiveContextSync";
 
 // ─── Step route slugs ─────────────────────────────────────────────────────────
 
@@ -339,6 +340,8 @@ export default function VersionDetailPage() {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  useActiveContextSync(project, version);
 
   useEffect(() => {
     if (!slug || !versionId) return;

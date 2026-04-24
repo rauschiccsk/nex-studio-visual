@@ -6,6 +6,7 @@ import { listDesignDocuments } from "@/services/api/designDocuments";
 import { fetchTaskPlan, generateTaskPlan } from "@/services/api/taskPlan";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
+import { useActiveContextSync } from "@/hooks/useActiveContextSync";
 import type { TaskPlanEpic, TaskPlanFeat, TaskPlanTask, TaskStatus } from "@/types/taskPlan";
 
 // ─── TaskPlanPage — Step 6 ────────────────────────────────────────────────────
@@ -31,6 +32,8 @@ export default function TaskPlanPage() {
   // Collapsed state: epic ids that are open
   const [openEpics, setOpenEpics] = useState<Set<string>>(new Set());
   const [openFeats, setOpenFeats] = useState<Set<string>>(new Set());
+
+  useActiveContextSync(project, version);
 
   useEffect(() => {
     if (!slug || !versionId) return;

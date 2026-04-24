@@ -6,6 +6,7 @@ import { listProfessionalSpecs, chatProfessionalSpec, updateProfessionalSpec } f
 import { useAuthStore } from "@/store/authStore";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
+import { useActiveContextSync } from "@/hooks/useActiveContextSync";
 import type { ProfessionalSpecificationRead } from "@/types/professionalSpecification";
 import type { SpecChatHistoryItem } from "@/services/api/professionalSpecifications";
 
@@ -33,6 +34,8 @@ export default function ProfSpecPage() {
 
   // Approve
   const [approving, setApproving] = useState(false);
+
+  useActiveContextSync(project, version);
 
   useEffect(() => {
     if (!slug || !versionId) return;

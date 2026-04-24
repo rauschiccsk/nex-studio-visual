@@ -11,6 +11,7 @@ import {
 import { useAuthStore } from "@/store/authStore";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
+import { useActiveContextSync } from "@/hooks/useActiveContextSync";
 import type { RawSpecificationRead } from "@/types/rawSpecification";
 
 // ─── SpecPage — Step 1 ────────────────────────────────────────────────────────
@@ -42,6 +43,8 @@ export default function SpecPage() {
   const [genError, setGenError] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   const outputRef = useRef<HTMLPreElement>(null);
+
+  useActiveContextSync(project, version);
 
   useEffect(() => {
     if (!slug || !versionId) return;
