@@ -36,6 +36,12 @@ export default function ProfSpecPage() {
   // Approve
   const [approving, setApproving] = useState(false);
 
+  // Manual edit of the spec content (overrides AI-generated output).
+  const [editing, setEditing] = useState(false);
+  const [editContent, setEditContent] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [copied, setCopied] = useState(false);
+
   useActiveContextSync(project, version);
 
   useEffect(() => {
@@ -105,6 +111,40 @@ export default function ProfSpecPage() {
       setSpec(updated);
     } finally {
       setApproving(false);
+    }
+  }
+
+  function handleStartEdit() {
+    setEditContent(specContent);
+    setEditing(true);
+  }
+
+  function handleCancelEdit() {
+    setEditing(false);
+  }
+
+  async function handleSaveEdit() {
+    if (!spec || saving || !editContent.trim()) return;
+    setSaving(true);
+    try {
+      const updated = await updateProfessionalSpec(spec.id, { content: editContent });
+      setSpec(updated);
+      setSpecContent(updated.content);
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleCopy() {
+    const text = editing ? editContent : specContent;
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard API can fail in insecure contexts — silent no-op.
     }
   }
 
@@ -238,13 +278,63 @@ export default function ProfSpecPage() {
 
         {/* Right: Spec content */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="px-4 py-2 border-b border-slate-800 flex-shrink-0 flex items-center justify-between">
+          <div className="px-4 py-2 border-b border-slate-800 flex-shrink-0 flex items-center gap-2">
             <span className="text-xs font-semibold text-slate-500 uppercase tracking-widest">Vývojová dokumentácia</span>
             <span className="text-[10px] text-slate-600 font-mono">v{spec.version}</span>
+            <div className="flex-1" />
+            <button
+              onClick={handleCopy}
+              disabled={!(editing ? editContent : specContent).trim()}
+              className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 border border-slate-700 hover:border-slate-500 disabled:opacity-40 px-2 py-1 rounded transition-colors"
+            >
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+              {copied ? "Skopírované ✓" : "Kopírovať"}
+            </button>
+            {!editing && (
+              <button
+                onClick={handleStartEdit}
+                className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 border border-slate-700 hover:border-slate-500 px-2 py-1 rounded transition-colors"
+              >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                </svg>
+                Upraviť
+              </button>
+            )}
+            {editing && (
+              <>
+                <button
+                  onClick={handleCancelEdit}
+                  className="text-xs text-slate-500 border border-slate-700 px-2 py-1 rounded hover:border-slate-500 transition-colors"
+                >
+                  Zrušiť
+                </button>
+                <button
+                  onClick={handleSaveEdit}
+                  disabled={saving || !editContent.trim()}
+                  className="text-xs bg-primary-600 hover:bg-primary-500 disabled:opacity-40 text-white px-3 py-1 rounded font-medium transition-colors"
+                >
+                  {saving ? "Ukladám…" : "Uložiť"}
+                </button>
+              </>
+            )}
           </div>
-          <div className="flex-1 overflow-y-auto p-5">
-            <pre className="text-sm text-slate-300 font-mono whitespace-pre-wrap leading-relaxed">{specContent}</pre>
-          </div>
+          {editing ? (
+            <textarea
+              value={editContent}
+              onChange={(e) => setEditContent(e.target.value)}
+              autoFocus
+              lang="sk"
+              spellCheck
+              className="flex-1 w-full px-5 py-5 bg-slate-950 border-0 text-sm text-slate-200 font-mono resize-none focus:outline-none leading-relaxed"
+            />
+          ) : (
+            <div className="flex-1 overflow-y-auto p-5">
+              <pre className="text-sm text-slate-300 font-mono whitespace-pre-wrap leading-relaxed">{specContent}</pre>
+            </div>
+          )}
         </div>
       </div>
     </div>
