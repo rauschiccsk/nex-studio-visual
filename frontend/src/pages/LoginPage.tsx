@@ -138,7 +138,9 @@ export default function LoginPage() {
           </form>
         </div>
 
-        <p className="mt-4 text-center text-[11px] text-slate-700">NEX Studio v0.1.x · ICC</p>
+        <p className="mt-4 text-center text-[11px] text-slate-700">
+          NEX Studio v{import.meta.env.VITE_APP_VERSION || "dev"} · ICC
+        </p>
       </div>
     </div>
   );
