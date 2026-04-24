@@ -71,6 +71,26 @@ export function deleteProfessionalSpec(id: string): Promise<void> {
   return api.delete<void>(`/professional-specifications/${id}`);
 }
 
+/**
+ * Persisted chat message — one turn in the Vývojová dokumentácia thread.
+ * Server-side, the POST ``/chat`` endpoint saves one ``user`` row + one
+ * ``assistant`` row at the end of each successful stream; this GET is
+ * what the ProfSpecPage calls on mount to rehydrate the chat panel.
+ */
+export interface SpecChatMessage {
+  id: string;
+  professional_spec_id: string;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+}
+
+export function listSpecChatMessages(specId: string): Promise<SpecChatMessage[]> {
+  return api.get<SpecChatMessage[]>(
+    `/professional-specifications/${specId}/chat-messages`,
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Streaming chat refinement (SSE)                                    */
 /* ------------------------------------------------------------------ */

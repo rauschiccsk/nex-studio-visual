@@ -105,6 +105,10 @@ from backend.db.models.foundation import User
 from backend.db.session import SessionLocal, get_db
 from backend.schemas.design_document import DesignDocumentCreate
 from backend.schemas.pagination import PaginatedResponse
+from backend.schemas.professional_spec_chat_message import (
+    ProfessionalSpecChatMessageCreate,
+    ProfessionalSpecChatMessageRead,
+)
 from backend.schemas.professional_specification import (
     ProfessionalSpecificationCreate,
     ProfessionalSpecificationRead,
@@ -112,6 +116,7 @@ from backend.schemas.professional_specification import (
 )
 from backend.services import claude_subprocess
 from backend.services import design_document as design_document_service
+from backend.services import professional_spec_chat_message as chat_message_service
 from backend.services import professional_specification as professional_specification_service
 from backend.services import system_setting as system_setting_service
 
@@ -392,6 +397,12 @@ async def chat_professional_spec(
         total_chars = 0
         chat_emitted = 0
         spec_emitted = 0
+        # Accumulate the chat portion so we can persist one assistant
+        # row per successful turn; the user's prompt is already in
+        # ``payload.message`` and is persisted in the same post-stream
+        # block.
+        chat_accumulator: list[str] = []
+        stream_error = False
 
         try:
             async for chunk in claude_subprocess.run_claude_stream(
@@ -424,6 +435,7 @@ async def chat_professional_spec(
                                 )
                                 yield f"data: {payload_json}\n\n"
                                 chat_emitted += len(chat_part)
+                                chat_accumulator.append(chat_part)
                             buffer = buffer[idx + len(_SPEC_MARKER) :]
                             state = "spec"
                             changed = True
@@ -443,6 +455,7 @@ async def chat_professional_spec(
                                 )
                                 yield f"data: {payload_json}\n\n"
                                 chat_emitted += len(chat_part)
+                                chat_accumulator.append(chat_part)
                             buffer = buffer[idx + len(_SPEC_MARKER) :]
                             state = "spec"
                             changed = True
@@ -455,6 +468,7 @@ async def chat_professional_spec(
                                 )
                                 yield f"data: {payload_json}\n\n"
                                 chat_emitted += safe_len
+                                chat_accumulator.append(buffer[:safe_len])
                                 buffer = buffer[safe_len:]
 
                     elif state == "chat_fallback":
@@ -464,6 +478,7 @@ async def chat_professional_spec(
                             )
                             yield f"data: {payload_json}\n\n"
                             chat_emitted += len(buffer)
+                            chat_accumulator.append(buffer)
                             buffer = ""
 
                     elif state == "spec":
@@ -476,6 +491,7 @@ async def chat_professional_spec(
                             buffer = ""
 
         except (RuntimeError, TimeoutError) as exc:
+            stream_error = True
             logger.error("Claude stream error for spec chat %s: %s", spec_id, exc)
             yield f"data: {json.dumps({'type': 'error', 'content': str(exc)})}\n\n"
 
@@ -489,8 +505,45 @@ async def chat_professional_spec(
             yield f"data: {payload_json}\n\n"
             if event_type == "chat_chunk":
                 chat_emitted += len(buffer.strip())
+                chat_accumulator.append(buffer.strip())
             else:
                 spec_emitted += len(buffer.strip())
+
+        # Persist the turn (user + assistant) so the chat panel survives
+        # navigation. Uses a fresh SessionLocal because the request-scoped
+        # ``db`` may already be closed by the time the SSE generator runs
+        # its tail; same pattern as ``generate_professional_spec`` and
+        # ``generate_design_doc``. We only persist on a clean stream —
+        # partial / errored turns would leave the chat log misleading.
+        if not stream_error:
+            assistant_text = "".join(chat_accumulator).strip()
+            persist_db = SessionLocal()
+            try:
+                chat_message_service.create(
+                    persist_db,
+                    ProfessionalSpecChatMessageCreate(
+                        professional_spec_id=spec_id,
+                        role="user",
+                        content=payload.message,
+                    ),
+                )
+                if assistant_text:
+                    chat_message_service.create(
+                        persist_db,
+                        ProfessionalSpecChatMessageCreate(
+                            professional_spec_id=spec_id,
+                            role="assistant",
+                            content=assistant_text,
+                        ),
+                    )
+                persist_db.commit()
+            except Exception:
+                persist_db.rollback()
+                logger.exception(
+                    "Failed to persist chat messages for spec %s", spec_id
+                )
+            finally:
+                persist_db.close()
 
         logger.info(
             "spec chat %s done: state=%s received=%d chat=%d spec=%d",
@@ -507,6 +560,32 @@ async def chat_professional_spec(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get(
+    "/{spec_id}/chat-messages",
+    response_model=list[ProfessionalSpecChatMessageRead],
+)
+def list_chat_messages(
+    spec_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_ri_role),
+) -> list[ProfessionalSpecChatMessageRead]:
+    """Return every chat turn persisted for a Vývojová dokumentácia spec.
+
+    Drives the left-panel chat hydration on ProfSpecPage mount so
+    history survives navigation. Messages are sorted ASC by
+    ``created_at`` — FE can render them top-down without resorting.
+    """
+    # 404 on unknown spec via the same translator the rest of the
+    # module uses — keeps the error shape consistent.
+    try:
+        professional_specification_service.get_by_id(db, spec_id)
+    except ValueError as exc:
+        raise _map_value_error(exc) from exc
+
+    rows = chat_message_service.list_by_spec(db, spec_id)
+    return [ProfessionalSpecChatMessageRead.model_validate(r) for r in rows]
 
 
 @router.post("/{spec_id}/generate-design-doc", status_code=status.HTTP_200_OK)

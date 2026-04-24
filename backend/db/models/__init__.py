@@ -12,6 +12,7 @@ from backend.db.models.projects import ModuleDependency, Project, ProjectModule
 from backend.db.models.reports import ReportConfig
 from backend.db.models.specifications import (
     DesignDocument,
+    ProfessionalSpecChatMessage,
     ProfessionalSpecification,
     RawSpecification,
 )
@@ -39,6 +40,7 @@ __all__ = [
     "ModuleDependency",
     "Project",
     "ProjectModule",
+    "ProfessionalSpecChatMessage",
     "ProfessionalSpecification",
     "RawSpecification",
     "ReportConfig",

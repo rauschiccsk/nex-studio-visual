@@ -2,7 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { listProjectsApi } from "@/services/api/projects";
 import { getVersion } from "@/services/api/versions";
-import { listProfessionalSpecs, chatProfessionalSpec, updateProfessionalSpec } from "@/services/api/professionalSpecifications";
+import {
+  listProfessionalSpecs,
+  chatProfessionalSpec,
+  listSpecChatMessages,
+  updateProfessionalSpec,
+} from "@/services/api/professionalSpecifications";
 import { useAuthStore } from "@/store/authStore";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
@@ -80,6 +85,17 @@ export default function ProfSpecPage() {
         if (s) {
           setSpecContent(s.content);
           specContentRef.current = s.content;
+          // Rehydrate chat history from the DB — survives navigation
+          // away / back. Fails silently because history is a "nice to
+          // have" overlay; the spec content itself already loaded.
+          listSpecChatMessages(s.id)
+            .then((msgs) => {
+              if (cancelled) return;
+              setChatHistory(
+                msgs.map((m) => ({ role: m.role, content: m.content })),
+              );
+            })
+            .catch(() => { /* non-blocking */ });
         }
         setLoading(false);
       });

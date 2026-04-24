@@ -9,6 +9,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    func,
 )
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -80,6 +81,39 @@ class ProfessionalSpecification(Base, UUIDMixin, TimestampMixin):
         nullable=True,
     )
     approved_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
+
+class ProfessionalSpecChatMessage(Base, UUIDMixin):
+    """Individual chat turn on a Vývojová dokumentácia refinement thread.
+
+    Mirrors :class:`backend.db.models.architect.ArchitectMessage` — same
+    ``role`` / ``content`` shape, CASCADE on parent delete, created_at
+    only (messages are append-only, never edited). Token / cost columns
+    intentionally omitted; add later if the UI ever surfaces them.
+    """
+
+    __tablename__ = "professional_spec_chat_messages"
+
+    professional_spec_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("professional_specifications.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    role = Column(String(20), nullable=False)
+    content = Column(Text, nullable=False)
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('user', 'assistant')",
+            name="ck_professional_spec_chat_messages_role",
+        ),
+    )
 
 
 class DesignDocument(Base, UUIDMixin, TimestampMixin):
