@@ -182,6 +182,22 @@ Jednoriadkový záznam pre state súbor:
 V NEX Studio neexistuje delegácia — implementujem priamo ja (§1). O to dôležitejšia je
 **vlastná verifikácia pred reportom Zoltánovi**. Žiadne "zdá sa, že to funguje" — preveriť.
 
+### 4.0 Pred písaním kódu — TDD (odporúčané)
+
+Pri novom feature / bug fixe s testovateľným správaním (endpoint, service
+funkcia, validačné pravidlo, edge case) **invokuj** `/tdd` skill a postupuj
+podľa RED-GREEN-REFACTOR cyklu:
+
+1. **RED** — napíš failing test ktorý zachytáva očakávané správanie, potvrď
+   že zlyhá so zmysluplnou chybou.
+2. **GREEN** — minimálna zmena kódu, aby test prešiel; bez refactoringu.
+3. **REFACTOR** — čisti s bezpečnostnou sieťou testu; každá úprava → re-run.
+
+Skip TDD pre: jednoriadkové config zmeny, refactory bez behaviour change,
+dokumentáciu, UI styling bez assertable behaviour.
+
+Detail: `.claude/skills/tdd.md`.
+
 ### 4.1 Self-verification (po každej implementácii)
 
 Pred reportom vždy over:
@@ -457,6 +473,25 @@ Proposing changes to code without reading it first is a **P1 incident** — lead
 
 ### Exception:
 Pure documentation or configuration tasks that don't touch source code (napr. markdown docs v `docs/`, session logs v `docs/session-logs/`, editácia `.github/workflows/*`, KB dokumenty v `/home/icc/knowledge/`) sú exempt from code discovery. Ale stále vyžadujú Read target súboru ak už existuje.
+
+### §14.1 Debugging — Systematic Debugging skill
+
+Pri ladení (zlyhaný test, chybne sa správajúca produkčná akcia, crash migrácie / buildu,
+„nefunguje to" hlásenie) **invokuj** `/systematic-debugging` skill. Pravidlá v jednej vete:
+
+**Žiadna zmena kódu bez pochopenia root cause.**
+
+Skill vynucuje 4-fázový protokol:
+
+1. **REPRODUCE** — minimálny trigger + deterministika (ak nejde reproducovať, pridaj
+   instrumentáciu namiesto fixu).
+2. **LOCATE** — zúž na najmenší chybný celok; git bisect ak to predtým fungovalo.
+3. **EXPLAIN** — root cause v jednej vete + identifikuj triedu bugu (stale closure,
+   race condition, SQL type mismatch…). Spýtaj sa „aký invariant sa porušil?"
+4. **FIX + PREVENT** — najprv red test, potom minimálny fix, preveriť blast radius
+   (siblings), dokumentovať root cause v commit message body.
+
+Zákaz: ad-hoc „skús niečo až to vyjde" prístup. Detail: `.claude/skills/systematic-debugging.md`.
 
 ---
 
