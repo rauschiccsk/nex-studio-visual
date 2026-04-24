@@ -15,6 +15,18 @@
 }
 
 @layer components {
+  /*
+   * Wavy red underline on misspelled words inside the bundled Slovak
+   * spellchecker backdrop (SlovakTextarea). Text itself is rendered
+   * transparent in the backdrop, but text-decoration is still painted
+   * so the underline shows through to the transparent textarea above.
+   */
+  .nex-misspelled {
+    text-decoration: underline wavy #ef4444;
+    text-decoration-skip-ink: none;
+    text-underline-offset: 2px;
+  }
+
   .btn {
     @apply inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium transition-colors focus:outline-none disabled:opacity-50 disabled:pointer-events-none;
   }

@@ -8,6 +8,7 @@ import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
 import { useActiveContextSync } from "@/hooks/useActiveContextSync";
 import SolutionTabs from "@/components/pipeline/SolutionTabs";
+import SlovakTextarea from "@/components/editor/SlovakTextarea";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ProfessionalSpecificationRead } from "@/types/professionalSpecification";
@@ -324,13 +325,11 @@ export default function ProfSpecPage() {
             )}
           </div>
           {editing ? (
-            <textarea
+            <SlovakTextarea
               value={editContent}
               onChange={(e) => setEditContent(e.target.value)}
               autoFocus
-              lang="sk"
-              spellCheck
-              className="flex-1 w-full px-5 py-5 bg-slate-950 border-0 text-sm text-slate-200 font-mono resize-none focus:outline-none leading-relaxed"
+              className="flex-1 w-full bg-slate-950"
             />
           ) : (
             <div className="flex-1 overflow-y-auto p-5">
