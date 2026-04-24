@@ -36,6 +36,11 @@ export default function ProfSpecPage() {
   // hitting the stale-closure snapshot of ``chatBuffer`` captured at
   // send time (which would otherwise always be "").
   const chatBufferRef = useRef("");
+  // Tracks whether the current chat turn has started streaming the new
+  // spec body. The first spec_chunk resets ``specContent`` (AI emits the
+  // full updated document, not a diff) so subsequent chunks append to
+  // the fresh version instead of concatenating with the old v0.1 copy.
+  const specChunkStartedRef = useRef(false);
   const [chatError, setChatError] = useState("");
   const [specContent, setSpecContent] = useState("");
   const abortRef = useRef<AbortController | null>(null);
@@ -86,6 +91,7 @@ export default function ProfSpecPage() {
     setChatBuffer("");
     setChatError("");
     chatBufferRef.current = "";
+    specChunkStartedRef.current = false;
 
     abortRef.current = chatProfessionalSpec(
       spec.id,
@@ -96,7 +102,17 @@ export default function ProfSpecPage() {
         chatBufferRef.current += chunk;
         setChatBuffer(chatBufferRef.current);
       },
-      (chunk) => setSpecContent((prev) => prev + chunk),
+      (chunk) => {
+        // First spec_chunk of the turn → AI is re-emitting the full
+        // updated document; wipe the previous version so we don't end up
+        // with the old and new specs concatenated.
+        if (!specChunkStartedRef.current) {
+          specChunkStartedRef.current = true;
+          setSpecContent(chunk);
+        } else {
+          setSpecContent((prev) => prev + chunk);
+        }
+      },
       () => {
         setChatStreaming(false);
         const finalMsg = chatBufferRef.current;

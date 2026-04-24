@@ -22,7 +22,12 @@ def _setup_config() -> None:
     config = context.config
 
     if config.config_file_name is not None:
-        fileConfig(config.config_file_name)
+        # disable_existing_loggers=False keeps uvicorn's access + error
+        # loggers alive after Alembic runs during the FastAPI lifespan
+        # hook. Without it, ``docker logs`` went dark the moment
+        # migrations finished, which hid the SSE spec-chat diagnostics
+        # during Zoltán's "žiadna reakcia" incident.
+        fileConfig(config.config_file_name, disable_existing_loggers=False)
 
     config.set_main_option("sqlalchemy.url", _ensure_pg8000_driver(settings.database_url))
 
