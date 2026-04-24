@@ -372,9 +372,23 @@ async def chat_professional_spec(
         + f"POŽIADAVKA POUŽÍVATEĽA:\n{payload.message}"
     )
 
+    # Fall back to pure chat mode after this many characters of preamble
+    # without ``[SPRÁVA]`` — Claude sometimes skips the marker on short
+    # prompts, and the previous logic silently trimmed the whole reply
+    # down to an 8-char tail. Large enough to allow a legitimate preamble
+    # (``{"type":"system",...``) but small enough to catch forgotten
+    # markers before the real response gets buffered into the void.
+    PREAMBLE_FALLBACK_THRESHOLD = 256
+
     async def _sse_generator():
         buffer = ""
-        state = "preamble"  # → "chat" after [SPRÁVA] → "spec" after [SPEC]
+        # ``preamble`` → ``chat`` on [SPRÁVA] → ``spec`` on [SPEC].
+        # ``chat_fallback`` is entered when markers are missing entirely;
+        # everything flows out as chat_chunk with no spec-content updates.
+        state = "preamble"
+        total_chars = 0
+        chat_emitted = 0
+        spec_emitted = 0
 
         try:
             async for chunk in claude_subprocess.run_claude_stream(
@@ -382,6 +396,7 @@ async def chat_professional_spec(
                 context=system_prompt,
             ):
                 buffer += chunk
+                total_chars += len(chunk)
 
                 # State machine — process buffer until no more transitions
                 changed = True
@@ -394,16 +409,36 @@ async def chat_professional_spec(
                             buffer = buffer[idx + len(_CHAT_MARKER) :]
                             state = "chat"
                             changed = True
-                        elif len(buffer) > len(_CHAT_MARKER) * 3:
-                            # Discard preamble noise, keep tail for partial marker
-                            buffer = buffer[-len(_CHAT_MARKER) :]
+                        elif _SPEC_MARKER in buffer:
+                            # AI skipped [SPRÁVA] — treat the preamble as
+                            # chat and jump straight to spec.
+                            idx = buffer.index(_SPEC_MARKER)
+                            chat_part = buffer[:idx].strip()
+                            if chat_part:
+                                payload_json = json.dumps(
+                                    {"type": "chat_chunk", "content": chat_part}
+                                )
+                                yield f"data: {payload_json}\n\n"
+                                chat_emitted += len(chat_part)
+                            buffer = buffer[idx + len(_SPEC_MARKER) :]
+                            state = "spec"
+                            changed = True
+                        elif len(buffer) > PREAMBLE_FALLBACK_THRESHOLD:
+                            # No markers at all — treat the whole stream
+                            # as a chat reply; spec content stays untouched.
+                            state = "chat_fallback"
+                            changed = True
 
                     elif state == "chat":
                         if _SPEC_MARKER in buffer:
                             idx = buffer.index(_SPEC_MARKER)
                             chat_part = buffer[:idx].strip()
                             if chat_part:
-                                yield f"data: {json.dumps({'type': 'chat_chunk', 'content': chat_part})}\n\n"
+                                payload_json = json.dumps(
+                                    {"type": "chat_chunk", "content": chat_part}
+                                )
+                                yield f"data: {payload_json}\n\n"
+                                chat_emitted += len(chat_part)
                             buffer = buffer[idx + len(_SPEC_MARKER) :]
                             state = "spec"
                             changed = True
@@ -411,23 +446,56 @@ async def chat_professional_spec(
                             # Emit safe portion, hold potential partial marker tail
                             safe_len = max(0, len(buffer) - len(_SPEC_MARKER))
                             if safe_len > 0:
-                                yield f"data: {json.dumps({'type': 'chat_chunk', 'content': buffer[:safe_len]})}\n\n"
+                                payload_json = json.dumps(
+                                    {"type": "chat_chunk", "content": buffer[:safe_len]}
+                                )
+                                yield f"data: {payload_json}\n\n"
+                                chat_emitted += safe_len
                                 buffer = buffer[safe_len:]
+
+                    elif state == "chat_fallback":
+                        if buffer:
+                            payload_json = json.dumps(
+                                {"type": "chat_chunk", "content": buffer}
+                            )
+                            yield f"data: {payload_json}\n\n"
+                            chat_emitted += len(buffer)
+                            buffer = ""
 
                     elif state == "spec":
                         if buffer:
-                            yield f"data: {json.dumps({'type': 'spec_chunk', 'content': buffer})}\n\n"
+                            payload_json = json.dumps(
+                                {"type": "spec_chunk", "content": buffer}
+                            )
+                            yield f"data: {payload_json}\n\n"
+                            spec_emitted += len(buffer)
                             buffer = ""
 
         except (RuntimeError, TimeoutError) as exc:
             logger.error("Claude stream error for spec chat %s: %s", spec_id, exc)
             yield f"data: {json.dumps({'type': 'error', 'content': str(exc)})}\n\n"
 
-        # Flush remaining buffer
+        # Flush remaining buffer. ``preamble`` at EOF means we never saw
+        # [SPRÁVA] AND never crossed the fallback threshold — rare but
+        # possible for very short Claude replies; send the whole thing as
+        # chat_chunk so the user at least sees something.
         if buffer:
             event_type = "spec_chunk" if state == "spec" else "chat_chunk"
-            yield f"data: {json.dumps({'type': event_type, 'content': buffer.strip()})}\n\n"
+            payload_json = json.dumps({"type": event_type, "content": buffer.strip()})
+            yield f"data: {payload_json}\n\n"
+            if event_type == "chat_chunk":
+                chat_emitted += len(buffer.strip())
+            else:
+                spec_emitted += len(buffer.strip())
 
+        logger.info(
+            "spec chat %s done: state=%s received=%d chat=%d spec=%d",
+            spec_id,
+            state,
+            total_chars,
+            chat_emitted,
+            spec_emitted,
+        )
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
     return StreamingResponse(
