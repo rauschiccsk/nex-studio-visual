@@ -236,12 +236,13 @@ def update(
 ) -> RawSpecification:
     """Partially update a raw specification.
 
-    Only ``input_text``, ``input_format``, ``language`` and ``status``
-    may be changed. ``id``, ``project_id``, ``created_by`` and
-    ``created_at`` are immutable — a specification belongs to exactly
-    one project and uploader for its lifetime (resubmissions are new
-    rows, not a reassignment) and ``updated_at`` is auto-stamped by
-    the ORM on flush via ``onupdate=func.now()``.
+    Only ``input_text``, ``input_format``, ``language``, ``status``,
+    ``approved_by`` and ``approved_at`` may be changed. ``id``,
+    ``project_id``, ``created_by`` and ``created_at`` are immutable —
+    a specification belongs to exactly one project and uploader for
+    its lifetime (resubmissions are new rows, not a reassignment) and
+    ``updated_at`` is auto-stamped by the ORM on flush via
+    ``onupdate=func.now()``.
 
     Fields that are ``None`` in the payload are treated as "leave
     unchanged" to support PATCH semantics.
@@ -260,11 +261,21 @@ def update(
         "input_format",
         "language",
         "status",
+        "approved_by",
+        "approved_at",
     }
 
+    # ``approved_by`` / ``approved_at`` must also accept explicit ``None``
+    # so an operator can un-approve a spec by PATCHing a null pair; the
+    # other allow-listed fields treat ``None`` as "leave unchanged".
+    nullable_fields = {"approved_by", "approved_at"}
+
     for field, value in update_data.items():
-        if field in allowed_fields and value is not None:
-            setattr(spec, field, value)
+        if field not in allowed_fields:
+            continue
+        if value is None and field not in nullable_fields:
+            continue
+        setattr(spec, field, value)
 
     db.flush()
     return spec

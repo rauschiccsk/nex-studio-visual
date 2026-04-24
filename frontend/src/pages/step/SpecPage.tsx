@@ -45,6 +45,9 @@ export default function SpecPage() {
   const abortRef = useRef<AbortController | null>(null);
   const outputRef = useRef<HTMLPreElement>(null);
 
+  // Approve
+  const [approving, setApproving] = useState(false);
+
   useActiveContextSync(project, version);
 
   useEffect(() => {
@@ -143,6 +146,20 @@ export default function SpecPage() {
     setGenerating(false);
   }
 
+  async function handleApprove() {
+    if (!rawSpec || approving) return;
+    setApproving(true);
+    try {
+      const updated = await updateRawSpecification(rawSpec.id, {
+        approved_by: user?.id ?? null,
+        approved_at: new Date().toISOString(),
+      });
+      setRawSpec(updated);
+    } finally {
+      setApproving(false);
+    }
+  }
+
   if (loading) return <LoadingSpinner />;
   if (error || !project || !version) return <ErrorPanel msg={error} />;
 
@@ -163,7 +180,21 @@ export default function SpecPage() {
         <span className="text-xs font-mono bg-slate-800 text-slate-300 px-2 py-0.5 rounded">{version.version_number}</span>
         <span className="text-slate-600">·</span>
         <span className="text-xs font-medium text-primary-400">Krok 1/7 — Zákaznícka špecifikácia</span>
+        {rawSpec?.approved_at && (
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/10 border border-green-500/25 text-green-400">
+            ✓ Schválená
+          </span>
+        )}
         <div className="flex-1" />
+        {rawSpec && !rawSpec.approved_at && (
+          <button
+            onClick={handleApprove}
+            disabled={approving}
+            className="text-xs bg-green-600 hover:bg-green-500 disabled:opacity-40 text-white px-3 py-1.5 rounded-lg font-medium transition-colors"
+          >
+            {approving ? "Schvaľujem…" : "Schváliť"}
+          </button>
+        )}
         {rawSpec?.status === "done" && (
           <button
             onClick={() => navigate(`/projects/${slug}/versions/${versionId}/profspec`)}

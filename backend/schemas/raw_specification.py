@@ -111,6 +111,14 @@ class RawSpecificationUpdate(BaseModel):
         default=None,
         description="Updated processing status: pending | processing | done | failed.",
     )
+    approved_by: Optional[UUID] = Field(
+        default=None,
+        description="User that approved the specification; cleared on un-approve.",
+    )
+    approved_at: Optional[datetime] = Field(
+        default=None,
+        description="ISO-8601 timestamp when the specification was approved.",
+    )
 
 
 class RawSpecificationRead(BaseModel):
@@ -131,5 +139,7 @@ class RawSpecificationRead(BaseModel):
     language: str = Field(..., min_length=1, max_length=10)
     status: RawSpecificationStatus
     created_by: UUID
+    approved_by: Optional[UUID] = None
+    approved_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime

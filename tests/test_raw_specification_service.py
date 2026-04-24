@@ -316,6 +316,45 @@ class TestRawSpecificationService:
                 RawSpecificationUpdate(input_text="nope"),
             )
 
+    def test_update_approve(self, db_session):
+        """Approving stamps ``approved_by`` + ``approved_at``."""
+        user = _make_user(db_session)
+        project = _make_project(db_session, user=user)
+        created = service.create(db_session, _payload(project.id, user.id))
+        assert created.approved_at is None
+        assert created.approved_by is None
+
+        when = datetime.now(timezone.utc)
+        updated = service.update(
+            db_session,
+            created.id,
+            RawSpecificationUpdate(approved_by=user.id, approved_at=when),
+        )
+        assert updated.approved_by == user.id
+        assert updated.approved_at == when
+
+    def test_update_unapprove(self, db_session):
+        """Explicit ``None`` on the approval pair clears the stamp."""
+        user = _make_user(db_session)
+        project = _make_project(db_session, user=user)
+        created = service.create(db_session, _payload(project.id, user.id))
+        service.update(
+            db_session,
+            created.id,
+            RawSpecificationUpdate(
+                approved_by=user.id,
+                approved_at=datetime.now(timezone.utc),
+            ),
+        )
+
+        cleared = service.update(
+            db_session,
+            created.id,
+            RawSpecificationUpdate(approved_by=None, approved_at=None),
+        )
+        assert cleared.approved_by is None
+        assert cleared.approved_at is None
+
     # ---------------------------------------------------------------- delete
     def test_delete(self, db_session):
         """``delete`` removes the row; subsequent lookup raises."""

@@ -35,6 +35,12 @@ class RawSpecification(Base, UUIDMixin, TimestampMixin):
         ForeignKey("users.id", ondelete="RESTRICT"),
         nullable=False,
     )
+    approved_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    approved_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
     __table_args__ = (
         CheckConstraint(

@@ -43,6 +43,10 @@ export interface RawSpecificationUpdate {
   input_format?: RawSpecificationInputFormat;
   language?: string;
   status?: RawSpecificationStatus;
+  /** User that approved the specification; pass ``null`` to un-approve. */
+  approved_by?: string | null;
+  /** ISO-8601 timestamp of approval; pass ``null`` to un-approve. */
+  approved_at?: string | null;
 }
 
 /** Serialised representation of a raw specification row. */
@@ -54,6 +58,8 @@ export interface RawSpecificationRead {
   language: string;
   status: RawSpecificationStatus;
   created_by: string;
+  approved_by: string | null;
+  approved_at: string | null;
   /** ISO-8601 timestamp. */
   created_at: string;
   /** ISO-8601 timestamp. */
