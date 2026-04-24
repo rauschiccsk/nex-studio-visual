@@ -73,11 +73,9 @@ describe("Sidebar", () => {
     renderSidebar();
     const versionEl = screen.getByTestId("version-text");
     expect(versionEl).toBeInTheDocument();
-    // Version is "X.Y.Z" in CI (e.g. "0.1.42") or "X.Y.Z-hash" from the
-    // local post-commit hook (e.g. "0.1.184-dccd96b"), and "dev" when
+    // Version is "X.Y.Z" (CI uses ``0.1.<run_number>``, the local
+    // post-commit hook uses ``0.1.<commit_count>``), and "dev" when
     // VITE_APP_VERSION is unset entirely.
-    expect(versionEl.textContent).toMatch(
-      /^NEX Studio v(\d+\.\d+\.\d+(-[0-9a-f]+)?|dev)$/,
-    );
+    expect(versionEl.textContent).toMatch(/^NEX Studio v(\d+\.\d+\.\d+|dev)$/);
   });
 });

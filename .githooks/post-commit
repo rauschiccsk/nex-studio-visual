@@ -3,7 +3,9 @@
 # Post-commit hook — keep ``VITE_APP_VERSION`` in ``.env`` in sync with
 # the current HEAD so the sidebar footer visibly reflects each commit.
 #
-# Format: ``0.1.<commit_count>-<short_hash>`` (e.g. ``0.1.87-2e3cd8b``).
+# Format: ``0.1.<commit_count>`` (e.g. ``0.1.186``). Monotonic with each
+# commit. To correlate a deployed version to a specific commit, use
+# ``git log --oneline`` — the N-th entry from root is ``0.1.N``.
 # Only the single VITE_APP_VERSION line is touched — any other values in
 # ``.env`` (backend secrets, local overrides) are preserved.
 #
@@ -19,8 +21,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 ENV_FILE="${REPO_ROOT}/.env"
 
 COMMIT_COUNT=$(git rev-list --count HEAD)
-SHORT_HASH=$(git rev-parse --short HEAD)
-VERSION="0.1.${COMMIT_COUNT}-${SHORT_HASH}"
+VERSION="0.1.${COMMIT_COUNT}"
 NEW_LINE="VITE_APP_VERSION=${VERSION}"
 
 if [[ -f "${ENV_FILE}" ]] && grep -q '^VITE_APP_VERSION=' "${ENV_FILE}"; then
