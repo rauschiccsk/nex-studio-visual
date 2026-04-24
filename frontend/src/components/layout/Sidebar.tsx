@@ -35,9 +35,9 @@ const IconSpec = () => (
   </svg>
 );
 
-const IconUIDesign = () => (
+const IconSolution = () => (
   <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zM14 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
   </svg>
 );
 
@@ -161,9 +161,10 @@ export default function Sidebar() {
   const isActive = (path: string) =>
     path === "/" ? location.pathname === "/" : location.pathname.startsWith(path);
 
-  const isStepActive = (step: string) => {
+  const isStepActive = (steps: string[]) => {
     if (!ctx) return false;
-    return location.pathname === `/projects/${ctx.slug}/versions/${ctx.versionId}/${step}`;
+    const base = `/projects/${ctx.slug}/versions/${ctx.versionId}/`;
+    return steps.some((s) => location.pathname === base + s);
   };
 
   const handleLogout = async () => {
@@ -173,15 +174,14 @@ export default function Sidebar() {
 
   const initials = user?.username ? user.username.slice(0, 1).toUpperCase() : "?";
 
-  // Pipeline step nav data — matches the mockup sidebar (index.html lines
-  // 165-191). The mockup collapses raw spec (Krok 1) + vývojová dok (Krok 2A)
-  // into a single "Specification" entry that internally tabs between the two;
-  // NEX Studio keeps them as separate routes, so the sidebar link targets
-  // ``/spec`` and the user moves to ``/profspec`` via the "Krok 2 →" button
-  // on SpecPage or from VersionDetailPage.
-  const pipelineSteps: { label: string; step: string; icon: React.ReactNode }[] = [
+  // Pipeline step nav data. The "Solution" entry represents the parallel
+  // Krok 2 phase — it lands on /profspec (Vývojová dokumentácia) and the
+  // SolutionTabs header inside ProfSpecPage + UIDesignPage lets the user
+  // switch to /uidesign (Návrh UI dizajnu). Active highlight covers both
+  // underlying routes.
+  const pipelineSteps: { label: string; step: string; icon: React.ReactNode; matchSteps?: string[] }[] = [
     { label: "Specification", step: "spec", icon: <IconSpec /> },
-    { label: "UI Design", step: "uidesign", icon: <IconUIDesign /> },
+    { label: "Solution", step: "profspec", icon: <IconSolution />, matchSteps: ["profspec", "uidesign"] },
     { label: "Summary", step: "summary", icon: <IconSummary /> },
     { label: "Architecture", step: "architecture", icon: <IconArchitecture /> },
     { label: "Quality Audit", step: "audit", icon: <IconAudit /> },
@@ -257,7 +257,7 @@ export default function Sidebar() {
             label={s.label}
             path={hasCtx ? `/projects/${ctx!.slug}/versions/${ctx!.versionId}/${s.step}` : fallbackPath}
             collapsed={collapsed}
-            active={isStepActive(s.step)}
+            active={isStepActive(s.matchSteps ?? [s.step])}
           />
         ))}
         <NavItem icon={<IconBook />} label="Knowledge Base" path="/kb" collapsed={collapsed} active={isActive("/kb")} />

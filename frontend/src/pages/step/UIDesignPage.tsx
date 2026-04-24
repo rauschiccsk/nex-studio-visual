@@ -15,6 +15,7 @@ import { useAuthStore } from "@/store/authStore";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
 import { useActiveContextSync } from "@/hooks/useActiveContextSync";
+import SolutionTabs from "@/components/pipeline/SolutionTabs";
 import type { UIDesignRead } from "@/types/uiDesign";
 
 // ─── UIDesignPage — Step 2B ───────────────────────────────────────────────────
@@ -229,6 +230,7 @@ export default function UIDesignPage() {
           </button>
         )}
       </div>
+      <SolutionTabs slug={slug!} versionId={versionId!} />
 
       {/* Empty state — no UIDesign yet */}
       {!uiDesign && !initializing && (

@@ -7,6 +7,7 @@ import { useAuthStore } from "@/store/authStore";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
 import { useActiveContextSync } from "@/hooks/useActiveContextSync";
+import SolutionTabs from "@/components/pipeline/SolutionTabs";
 import type { ProfessionalSpecificationRead } from "@/types/professionalSpecification";
 import type { SpecChatHistoryItem } from "@/services/api/professionalSpecifications";
 
@@ -115,6 +116,7 @@ export default function ProfSpecPage() {
     return (
       <div className="flex flex-col h-full">
         <StepHeader project={project} version={version} slug={slug!} versionId={versionId!} stepN={2} stepLabel="Vývojová dokumentácia" />
+        <SolutionTabs slug={slug!} versionId={versionId!} />
         <div className="flex-1 flex flex-col items-center justify-center p-10 text-center">
           <svg className="w-12 h-12 text-slate-700 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
@@ -175,6 +177,7 @@ export default function ProfSpecPage() {
           </button>
         )}
       </div>
+      <SolutionTabs slug={slug!} versionId={versionId!} />
 
       {/* Split panel */}
       <div className="flex-1 overflow-hidden flex">
