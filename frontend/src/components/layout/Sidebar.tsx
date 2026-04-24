@@ -117,16 +117,13 @@ interface NavItemProps {
   path?: string;
   collapsed: boolean;
   active?: boolean;
-  muted?: boolean;
-  mutedTitle?: string;
   onClick?: () => void;
 }
 
-function NavItem({ icon, label, path, collapsed, active, muted, mutedTitle, onClick }: NavItemProps) {
+function NavItem({ icon, label, path, collapsed, active, onClick }: NavItemProps) {
   const navigate = useNavigate();
 
   const handleClick = () => {
-    if (muted) return;
     if (onClick) { onClick(); return; }
     if (path) navigate(path);
   };
@@ -135,14 +132,10 @@ function NavItem({ icon, label, path, collapsed, active, muted, mutedTitle, onCl
   const px = collapsed ? "px-0 justify-center" : "px-3";
   const color = active
     ? "bg-primary-500/15 text-primary-400"
-    : muted
-    ? "text-slate-700 cursor-not-allowed"
     : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200";
 
-  const title = collapsed ? label : muted ? mutedTitle : undefined;
-
   return (
-    <button className={`${base} ${px} ${color}`} onClick={handleClick} title={title}>
+    <button className={`${base} ${px} ${color}`} onClick={handleClick} title={collapsed ? label : undefined}>
       {icon}
       {!collapsed && <span>{label}</span>}
     </button>
@@ -187,19 +180,23 @@ export default function Sidebar() {
   const initials = user?.username ? user.username.slice(0, 1).toUpperCase() : "?";
 
   // Pipeline step nav data — one list drives the ordered render below.
-  const pipelineSteps: { num: string; label: string; step: string; icon: React.ReactNode }[] = [
-    { num: "1", label: "Zákaznícka špecifikácia", step: "spec", icon: <IconSpec /> },
-    { num: "2A", label: "Vývojová dokumentácia", step: "profspec", icon: <IconDoc /> },
-    { num: "2B", label: "UI Design", step: "uidesign", icon: <IconUIDesign /> },
-    { num: "3", label: "Súhrnná dokumentácia", step: "summary", icon: <IconSummary /> },
-    { num: "4", label: "Architecture", step: "architecture", icon: <IconArchitecture /> },
-    { num: "5", label: "Quality Audit", step: "audit", icon: <IconAudit /> },
-    { num: "6", label: "Task Plan", step: "taskplan", icon: <IconTaskPlan /> },
-    { num: "7", label: "Implementácia", step: "implementacia", icon: <IconImplementation /> },
+  const pipelineSteps: { label: string; step: string; icon: React.ReactNode }[] = [
+    { label: "Zákaznícka špecifikácia", step: "spec", icon: <IconSpec /> },
+    { label: "Vývojová dokumentácia", step: "profspec", icon: <IconDoc /> },
+    { label: "UI Design", step: "uidesign", icon: <IconUIDesign /> },
+    { label: "Súhrnná dokumentácia", step: "summary", icon: <IconSummary /> },
+    { label: "Architecture", step: "architecture", icon: <IconArchitecture /> },
+    { label: "Quality Audit", step: "audit", icon: <IconAudit /> },
+    { label: "Task Plan", step: "taskplan", icon: <IconTaskPlan /> },
+    { label: "Implementácia", step: "implementacia", icon: <IconImplementation /> },
   ];
 
   const hasCtx = Boolean(ctx);
-  const mutedTitle = "Najprv otvor verziu projektu";
+
+  // Fallback target when no verzia context is stored yet — the user
+  // lands on the project picker, selects a project + verzia, and
+  // sidebar sync hooks populate the context from there onwards.
+  const fallbackPath = "/projects";
 
   return (
     <aside
@@ -235,19 +232,15 @@ export default function Sidebar() {
         <NavItem
           icon={<IconVersions />}
           label="Versions"
-          path={hasCtx ? `/projects/${ctx!.slug}` : undefined}
+          path={hasCtx ? `/projects/${ctx!.slug}` : fallbackPath}
           collapsed={collapsed}
-          muted={!hasCtx}
-          mutedTitle={mutedTitle}
           active={hasCtx ? location.pathname === `/projects/${ctx!.slug}` : false}
         />
         <NavItem
           icon={<IconWorkflow />}
           label="Workflow"
-          path={hasCtx ? `/projects/${ctx!.slug}/versions/${ctx!.versionId}` : undefined}
+          path={hasCtx ? `/projects/${ctx!.slug}/versions/${ctx!.versionId}` : fallbackPath}
           collapsed={collapsed}
-          muted={!hasCtx}
-          mutedTitle={mutedTitle}
           active={hasCtx ? location.pathname === `/projects/${ctx!.slug}/versions/${ctx!.versionId}` : false}
         />
 
@@ -264,12 +257,10 @@ export default function Sidebar() {
           <NavItem
             key={s.step}
             icon={s.icon}
-            label={collapsed ? `${s.num}` : `${s.num}. ${s.label}`}
-            path={hasCtx ? `/projects/${ctx!.slug}/versions/${ctx!.versionId}/${s.step}` : undefined}
+            label={s.label}
+            path={hasCtx ? `/projects/${ctx!.slug}/versions/${ctx!.versionId}/${s.step}` : fallbackPath}
             collapsed={collapsed}
             active={isStepActive(s.step)}
-            muted={!hasCtx}
-            mutedTitle={mutedTitle}
           />
         ))}
 
