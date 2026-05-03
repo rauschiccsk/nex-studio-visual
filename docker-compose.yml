@@ -35,6 +35,11 @@ services:
       # (STATUS.md / HISTORY.md / ARCHITECT.md) under projects/{slug}/.
       # See docs/architect/live-docs-port.md §3.
       - /home/icc/knowledge:/home/icc/knowledge:rw
+      # rw — backend bootstraps new projects into /opt/projects/<slug>/
+      # via subprocess invocation of icc-claude-template/init.sh on
+      # POST /api/v1/projects. Required write access for mkdir + git init
+      # + template file copy. Per icc/STRUCTURE.md.
+      - /opt/projects:/opt/projects:rw
       - uploads:/app/uploads
     environment:
       DATABASE_URL: "postgresql+pg8000://nexstudio:nexstudio@db:5432/nexstudio"

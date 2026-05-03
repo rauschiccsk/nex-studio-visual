@@ -52,6 +52,10 @@ from backend.services import project as project_service
 from backend.services import system_setting as system_setting_service
 from backend.services.knowledge_base_writer import KnowledgeBaseWriter
 from backend.services.live_documents import LiveDocumentService
+from backend.services.template_bootstrap import (
+    TemplateBootstrapError,
+    invoke_init_script,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -402,6 +406,20 @@ def create_project(
         LiveDocumentService(project.slug, writer=kb_writer).init_live_documents(
             db, project.id
         )
+        # Stage 3 — filesystem bootstrap via icc-claude-template/init.sh.
+        # Runs BEFORE db.commit() so a bootstrap failure rolls back the
+        # DB row cleanly. KB live docs are already on disk at this point;
+        # if init.sh fails, they remain dangling — documented known-item
+        # alongside the GitHub-repo dangling case (see docstring above).
+        # Disabled when template_init_script_path is empty.
+        try:
+            invoke_init_script(db, project)
+        except TemplateBootstrapError as exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Filesystem bootstrap failed: {exc}",
+            ) from exc
         db.commit()
     except ValueError as exc:
         db.rollback()

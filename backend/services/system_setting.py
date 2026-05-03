@@ -130,15 +130,38 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
     ),
     # ── Path templates ─────────────────────────────────────────────
     "default_source_path_template": _Default(
-        value="/opt/{slug}-src",
+        value="/opt/projects/{slug}",
         description=(
             "Default filesystem location where the project source is "
-            "checked out. ``{slug}`` is substituted with the project slug."
+            "checked out. ``{slug}`` is substituted with the project slug. "
+            "Convention per icc/STRUCTURE.md (2026-05-03): all new projects "
+            "live under /opt/projects/<slug>/. Legacy projects in "
+            "/opt/<slug>-src/ are migrated case-by-case."
         ),
     ),
     "default_kb_path_template": _Default(
         value="/home/icc/knowledge/projects/{slug}",
         description="Default KB directory for per-project live documents.",
+    ),
+    "template_init_script_path": _Default(
+        value="/home/icc/knowledge/templates/claude-project/init.sh",
+        description=(
+            "Absolute path to the icc-claude-template init.sh bootstrap "
+            "script. Invoked as subprocess on POST /api/v1/projects to "
+            "auto-create the project directory + CLAUDE.md + skills + "
+            "hooks + scripts. Override for self-hosted forks of the "
+            "template. Empty string disables auto-bootstrap."
+        ),
+    ),
+    "template_init_timeout_seconds": _Default(
+        value="60",
+        description=(
+            "Maximum wall-clock seconds for template init.sh subprocess "
+            "to complete. Typical greenfield bootstrap is < 5 s; the "
+            "60 s default tolerates first-time mkdir + git init + "
+            "Docker volume warmup."
+        ),
+        value_type="int",
     ),
 }
 
