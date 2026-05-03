@@ -138,13 +138,17 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
         description="Default KB directory for per-project live documents.",
     ),
     "template_init_script_path": _Default(
-        value="/home/icc/knowledge/templates/claude-project/init.sh",
+        value="",
         description=(
             "Absolute path to the icc-claude-template init.sh bootstrap "
             "script. Invoked as subprocess on POST /api/v1/projects to "
             "auto-create the project directory + CLAUDE.md + skills + "
-            "hooks + scripts. Override for self-hosted forks of the "
-            "template. Empty string disables auto-bootstrap."
+            "hooks + scripts. Empty string (default) disables auto-"
+            "bootstrap so a fresh install + test runs don't depend on "
+            "host filesystem template availability. Production deploy: "
+            "set via Settings UI to "
+            "'/home/icc/knowledge/templates/claude-project/init.sh' "
+            "(or fork path)."
         ),
     ),
     "template_init_timeout_seconds": _Default(
@@ -158,14 +162,16 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
         value_type="int",
     ),
     "reserved_port_ranges": _Default(
-        value="10110-10159",
+        value="",
         description=(
             "Comma-separated list of port ranges reserved for projects "
             "managed externally (not via NEX Studio web UI). Format: "
             "'<start>-<end>,<start>-<end>,...'. _validate_ports rejects "
-            "any port inside these ranges with HTTP 422. Default reserves "
-            "10110-10159 for NEX Automat per D-022 (50-port mega-app "
-            "allocation). Add new entries as ICC_STANDARDS evolves."
+            "any port inside these ranges with HTTP 422 and "
+            "suggest_next_port_block skips them. Empty default keeps "
+            "test fixtures + greenfield deployments unaffected. Production "
+            "deploy: set via Settings UI to '10110-10159' (NEX Automat "
+            "per D-022) plus any other commercial reservations."
         ),
     ),
 }

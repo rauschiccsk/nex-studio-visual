@@ -116,11 +116,14 @@ def invoke_init_script(db: Session, project: Project) -> BootstrapResult:
     """
     init_script_path = system_setting_service.get_str(db, "template_init_script_path")
     if not init_script_path:
-        raise TemplateBootstrapError(
-            "Auto-bootstrap disabled — template_init_script_path is empty in "
-            "system_settings. Either set the path or invoke init.sh manually "
-            "after project creation."
+        # Empty path = operator opt-out (per docstring). Graceful no-op
+        # so test environments + brownfield projects can disable
+        # auto-bootstrap without 500-ing project creation.
+        logger.info(
+            "Auto-bootstrap disabled (template_init_script_path empty) — skipping subprocess for slug=%s",
+            project.slug,
         )
+        return BootstrapResult(target=project.source_path or "", init_script="", stdout_tail="")
 
     script = Path(init_script_path)
     if not script.is_file():
