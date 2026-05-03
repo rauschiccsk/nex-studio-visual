@@ -167,9 +167,12 @@ class TestPortConflict:
         assert "10170" in error["detail"]
 
     def test_no_port_conflict_when_ports_differ(self, router_client, creator, db_session):
-        """Different ports should not conflict."""
+        """Different ports (different 10-port blocks) should not conflict."""
+        # Updated 2026-05-03: backend_port must be 10-aligned per Fix #2
+        # D-020 layout enforcement. Was 10150 + 10151 (non-aligned), now
+        # tests two distinct 10-port blocks.
         _make_project(db_session, creator, backend_port=10150)
-        payload = _payload(creator.id, backend_port=10151)
+        payload = _payload(creator.id, backend_port=10160)
         resp = router_client.post("/api/v1/projects", json=payload)
         assert resp.status_code == 201
 

@@ -126,7 +126,9 @@ class TestProjectService:
             created_by=user.id,
         )
         created = service.create(db_session, payload)
-        assert created.source_path == "/opt/conv-name-src"
+        # default_source_path_template flipped to /opt/projects/{slug}
+        # in 2026-05-03 per icc/STRUCTURE.md adoption.
+        assert created.source_path == "/opt/projects/conv-name"
         assert created.kb_path == "/home/icc/knowledge/projects/conv-name"
 
     def test_create_preserves_explicit_source_and_kb_path(self, db_session):
