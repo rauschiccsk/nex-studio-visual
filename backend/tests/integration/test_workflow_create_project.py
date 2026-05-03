@@ -100,12 +100,20 @@ def _mock_github_validation():
     """Bypass real GitHub API calls in integration tests.
 
     The router delegates to ``github_validation_service.validate_github_repo``
-    which hits the live API.  Integration tests care about the DB workflow, not
-    the GitHub round-trip, so we stub the service to always return ``True``.
+    AND ``github_validation_service.create_github_repo`` (M8 added the
+    second one for auto repo creation). Integration tests care about
+    the DB workflow, not the GitHub round-trip, so we stub both
+    services to always succeed.
     """
-    with patch(
-        "backend.services.github_validation.validate_github_repo",
-        return_value=True,
+    with (
+        patch(
+            "backend.services.github_validation.validate_github_repo",
+            return_value=True,
+        ),
+        patch(
+            "backend.services.github_validation.create_github_repo",
+            return_value=None,
+        ),
     ):
         yield
 
