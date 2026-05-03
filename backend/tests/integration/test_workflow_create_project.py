@@ -443,9 +443,9 @@ class TestCreateProjectEdgeCases:
             json=_project_payload(
                 zoltan.id,
                 slug="nex-horizont-2",
-                backend_port=9180,
-                frontend_port=9181,
-                db_port=9182,
+                backend_port=10190,
+                frontend_port=10191,
+                db_port=10192,
             ),
         )
         assert conflict.status_code == 409, conflict.text
@@ -484,9 +484,9 @@ class TestCreateProjectEdgeCases:
                 zoltan.id,
                 name="NEX Horizont (Mirror)",
                 slug=NEX_HORIZONT_SLUG,
-                backend_port=9190,
-                frontend_port=9191,
-                db_port=9192,
+                backend_port=10200,
+                frontend_port=10201,
+                db_port=10202,
             ),
         )
         assert conflict.status_code == 409, conflict.text
