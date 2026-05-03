@@ -72,6 +72,7 @@ def _project_slug(db: Session, project_id: UUID) -> str | None:
     project = db.get(Project, project_id)
     return project.slug if project is not None else None
 
+
 router = APIRouter(tags=["Project Modules"])
 
 

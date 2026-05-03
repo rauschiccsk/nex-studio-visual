@@ -47,11 +47,13 @@ _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 #: Filenames the writer is allowed to touch. Extended only via a
 #: documented change in ``docs/architect/live-docs-port.md``.
-ALLOWED_FILENAMES: frozenset[str] = frozenset({
-    "STATUS.md",
-    "ARCHITECT.md",
-    "HISTORY.md",
-})
+ALLOWED_FILENAMES: frozenset[str] = frozenset(
+    {
+        "STATUS.md",
+        "ARCHITECT.md",
+        "HISTORY.md",
+    }
+)
 
 
 class KnowledgeBaseWriter:
@@ -145,10 +147,7 @@ class KnowledgeBaseWriter:
         is inside ``{base}/projects/`` before ``rmtree``-ing.
         """
         if not _SLUG_RE.match(project_slug):
-            raise ValueError(
-                f"Invalid project slug: {project_slug!r}. "
-                "Expected lowercase alphanumeric with hyphens."
-            )
+            raise ValueError(f"Invalid project slug: {project_slug!r}. Expected lowercase alphanumeric with hyphens.")
 
         projects_root = (self._base_path / "projects").resolve()
         target = (projects_root / project_slug).resolve()
@@ -156,9 +155,7 @@ class KnowledgeBaseWriter:
         try:
             target.relative_to(projects_root)
         except ValueError as exc:
-            raise ValueError(
-                f"Resolved path escapes Knowledge Base projects root: {target}"
-            ) from exc
+            raise ValueError(f"Resolved path escapes Knowledge Base projects root: {target}") from exc
 
         if not target.is_dir():
             return False
@@ -179,15 +176,9 @@ class KnowledgeBaseWriter:
             * Resolved path is a descendant of ``{base_path}/projects``.
         """
         if not _SLUG_RE.match(project_slug):
-            raise ValueError(
-                f"Invalid project slug: {project_slug!r}. "
-                "Expected lowercase alphanumeric with hyphens."
-            )
+            raise ValueError(f"Invalid project slug: {project_slug!r}. Expected lowercase alphanumeric with hyphens.")
         if filename not in ALLOWED_FILENAMES:
-            raise ValueError(
-                f"Invalid filename: {filename!r}. "
-                f"Allowed: {sorted(ALLOWED_FILENAMES)}."
-            )
+            raise ValueError(f"Invalid filename: {filename!r}. Allowed: {sorted(ALLOWED_FILENAMES)}.")
 
         projects_root = (self._base_path / "projects").resolve()
         target = (projects_root / project_slug / filename).resolve()
@@ -197,9 +188,7 @@ class KnowledgeBaseWriter:
         try:
             target.relative_to(projects_root)
         except ValueError as exc:
-            raise ValueError(
-                f"Resolved path escapes Knowledge Base projects root: {target}"
-            ) from exc
+            raise ValueError(f"Resolved path escapes Knowledge Base projects root: {target}") from exc
 
         return target
 

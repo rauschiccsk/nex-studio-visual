@@ -183,7 +183,7 @@ def gsc_module(db_session, nex_horizont) -> ProjectModule:
     """
     module = ProjectModule(
         project_id=nex_horizont.id,
-        code = "gsc",
+        code="gsc",
         name="Globálne skladové karty",
         category="Sklad",
         status="in_design",  # Not ``done`` → blocks STK.
@@ -423,7 +423,7 @@ class TestAddModuleHappyPath:
             "/api/v1/project-modules",
             json=_module_payload(
                 nex_horizont.id,
-                code = "pab",
+                code="pab",
                 name="Katalóg partnerov",
                 category="Katalógy",
             ),

@@ -73,9 +73,7 @@ def _notify_mockup_reload(project_id: UUID) -> None:
     try:
         httpx.post(url, timeout=2.0)
     except httpx.HTTPError as exc:
-        logger.warning(
-            "Mockup reload notify failed for project %s: %s", project_id, exc
-        )
+        logger.warning("Mockup reload notify failed for project %s: %s", project_id, exc)
 
 
 def _map_value_error(exc: ValueError) -> HTTPException:
@@ -87,6 +85,7 @@ def _map_value_error(exc: ValueError) -> HTTPException:
 
 
 # ── CRUD ──────────────────────────────────────────────────────────────────────
+
 
 @router.get("", response_model=PaginatedResponse[UIDesignRead])
 def list_ui_designs(
@@ -158,6 +157,7 @@ def delete_ui_design(
 
 
 # ── AI Chat SSE ───────────────────────────────────────────────────────────────
+
 
 class _ChatHistoryItem(BaseModel):
     role: str
@@ -279,7 +279,7 @@ async def chat_ui_design(
                     if state == "preamble":
                         if _CHAT_MARKER in buffer:
                             idx = buffer.index(_CHAT_MARKER)
-                            buffer = buffer[idx + len(_CHAT_MARKER):]
+                            buffer = buffer[idx + len(_CHAT_MARKER) :]
                             state = "chat"
                             changed = True
                         elif _HTML_MARKER in buffer:
@@ -291,7 +291,7 @@ async def chat_ui_design(
                                 yield f"data: {json.dumps({'type': 'chat_chunk', 'content': chat_part})}\n\n"
                                 chat_accumulator.append(chat_part)
                                 chat_emitted += len(chat_part)
-                            buffer = buffer[idx + len(_HTML_MARKER):]
+                            buffer = buffer[idx + len(_HTML_MARKER) :]
                             state = "html"
                             changed = True
                         elif len(buffer) > _PREAMBLE_FALLBACK_THRESHOLD:
@@ -308,7 +308,7 @@ async def chat_ui_design(
                                 yield f"data: {json.dumps({'type': 'chat_chunk', 'content': chat_part})}\n\n"
                                 chat_accumulator.append(chat_part)
                                 chat_emitted += len(chat_part)
-                            buffer = buffer[idx + len(_HTML_MARKER):]
+                            buffer = buffer[idx + len(_HTML_MARKER) :]
                             state = "html"
                             changed = True
                         else:
@@ -374,9 +374,7 @@ async def chat_ui_design(
                 persist_db.commit()
             except Exception:
                 persist_db.rollback()
-                logger.exception(
-                    "Failed to persist chat messages for UIDesign %s", ui_design_id
-                )
+                logger.exception("Failed to persist chat messages for UIDesign %s", ui_design_id)
             finally:
                 persist_db.close()
 
@@ -422,6 +420,7 @@ def list_chat_messages(
 
 
 # ── Initial generate ──────────────────────────────────────────────────────────
+
 
 # The generate endpoint no longer takes profspec text from the caller
 # — it pulls the latest approved Vývojová dokumentácia straight from
@@ -534,7 +533,7 @@ async def generate_ui_design(
                     if state == "preamble":
                         if _CHAT_MARKER in buffer:
                             idx = buffer.index(_CHAT_MARKER)
-                            buffer = buffer[idx + len(_CHAT_MARKER):]
+                            buffer = buffer[idx + len(_CHAT_MARKER) :]
                             state = "chat"
                             changed = True
                         elif _HTML_MARKER in buffer:
@@ -544,7 +543,7 @@ async def generate_ui_design(
                                 yield f"data: {json.dumps({'type': 'chat_chunk', 'content': chat_part})}\n\n"
                                 chat_accumulator.append(chat_part)
                                 chat_emitted += len(chat_part)
-                            buffer = buffer[idx + len(_HTML_MARKER):]
+                            buffer = buffer[idx + len(_HTML_MARKER) :]
                             state = "html"
                             changed = True
                         elif len(buffer) > _PREAMBLE_FALLBACK_THRESHOLD:
@@ -558,7 +557,7 @@ async def generate_ui_design(
                                 yield f"data: {json.dumps({'type': 'chat_chunk', 'content': chat_part})}\n\n"
                                 chat_accumulator.append(chat_part)
                                 chat_emitted += len(chat_part)
-                            buffer = buffer[idx + len(_HTML_MARKER):]
+                            buffer = buffer[idx + len(_HTML_MARKER) :]
                             state = "html"
                             changed = True
                         else:
@@ -601,10 +600,7 @@ async def generate_ui_design(
         # block but no [SPRÁVA] body, we still store a short placeholder
         # so the rehydrated chat doesn't appear empty after reload.
         if not stream_error:
-            assistant_text = (
-                "".join(chat_accumulator).strip()
-                or "Základný mockup vygenerovaný."
-            )
+            assistant_text = "".join(chat_accumulator).strip() or "Základný mockup vygenerovaný."
             persist_db = SessionLocal()
             try:
                 chat_message_service.create(

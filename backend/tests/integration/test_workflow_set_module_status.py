@@ -175,7 +175,7 @@ def gsc_done(db_session, nex_horizont) -> ProjectModule:
     """
     module = ProjectModule(
         project_id=nex_horizont.id,
-        code = "gsc",
+        code="gsc",
         name="Globálne skladové karty",
         category="Sklad",
         status="done",
@@ -195,7 +195,7 @@ def stk_planned(db_session, nex_horizont, gsc_done) -> ProjectModule:
     """
     module = ProjectModule(
         project_id=nex_horizont.id,
-        code = "stk",
+        code="stk",
         name="Skladové karty zásob",
         category="Sklad",
         status="planned",

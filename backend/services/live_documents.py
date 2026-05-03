@@ -188,9 +188,7 @@ class LiveDocumentService:
         if project.category == "multimodule":
             modules = list(
                 db.execute(
-                    select(ProjectModule)
-                    .where(ProjectModule.project_id == project_id)
-                    .order_by(ProjectModule.code)
+                    select(ProjectModule).where(ProjectModule.project_id == project_id).order_by(ProjectModule.code)
                 ).scalars()
             )
 
@@ -207,22 +205,13 @@ class LiveDocumentService:
         # also no modules. Multi-module projects with modules but no
         # epics yet still deserve the modules section.
         if not epics_rows and not modules:
-            return (
-                f"# {project.name} — Status\n"
-                f"Updated: {now}\n\n"
-                "No epics planned yet.\n"
-            )
+            return f"# {project.name} — Status\nUpdated: {now}\n\nNo epics planned yet.\n"
 
         epic_ids = [epic.id for epic, _ in epics_rows]
         feats_by_epic = _group_feats_by_epic(db, epic_ids)
         feat_ids = [f.id for feats in feats_by_epic.values() for f in feats]
         tasks_by_feat = _group_tasks_by_feat(db, feat_ids)
-        done_task_ids = [
-            t.id
-            for feat_tasks in tasks_by_feat.values()
-            for t in feat_tasks
-            if t.status == "done"
-        ]
+        done_task_ids = [t.id for feat_tasks in tasks_by_feat.values() for t in feat_tasks if t.status == "done"]
         commit_by_task = _latest_commit_per_task(db, done_task_ids)
 
         lines: list[str] = [f"# {project.name} — Status", f"Updated: {now}", ""]
@@ -232,9 +221,7 @@ class LiveDocumentService:
         if modules:
             lines.append(f"## Modules ({len(modules)})")
             for m in modules:
-                lines.append(
-                    f"- [{m.status}] {m.code} · {m.name} · {m.category}"
-                )
+                lines.append(f"- [{m.status}] {m.code} · {m.name} · {m.category}")
             lines.append("")
         elif project.category == "multimodule":
             # Multi-module project with no modules yet — leave an explicit
@@ -253,10 +240,7 @@ class LiveDocumentService:
             if epic.status == "done":
                 epics_done += 1
 
-            header = (
-                f"## Epic {epic.number}: {epic.title} — "
-                f"{epic.status.upper().replace('_', ' ')}"
-            )
+            header = f"## Epic {epic.number}: {epic.title} — {epic.status.upper().replace('_', ' ')}"
             if version is not None:
                 header += f"  [{version.version_number}]"
             lines.append(header)
@@ -269,8 +253,7 @@ class LiveDocumentService:
                     feats_done += 1
 
                 lines.append(
-                    f"### Feat {epic.number}.{feat.number}: {feat.title} — "
-                    f"{feat.status.upper().replace('_', ' ')}"
+                    f"### Feat {epic.number}.{feat.number}: {feat.title} — {feat.status.upper().replace('_', ' ')}"
                 )
 
                 feat_tasks = tasks_by_feat.get(feat.id, [])
@@ -312,16 +295,11 @@ class LiveDocumentService:
         ts = data.timestamp.strftime("%H:%M")
         code = data.module_code
         if data.event_type == "created":
-            return (
-                f"{ts} Module {code} created — {data.module_name} "
-                f"({data.category})\n"
-            )
+            return f"{ts} Module {code} created — {data.module_name} ({data.category})\n"
         if data.event_type == "deleted":
             return f"{ts} Module {code} deleted — {data.module_name}\n"
         # status_changed
-        return (
-            f"{ts} Module {code} status {data.old_status} → {data.new_status}\n"
-        )
+        return f"{ts} Module {code} status {data.old_status} → {data.new_status}\n"
 
     def generate_phase_summary_entry(self, data: FeatCompletionData) -> str:
         """Return the phase-closing entry appended to ``HISTORY.md``.
@@ -407,8 +385,7 @@ class LiveDocumentService:
         """
         if self._writer is None:
             raise RuntimeError(
-                "init_live_documents requires a KnowledgeBaseWriter; "
-                "none was configured on the service."
+                "init_live_documents requires a KnowledgeBaseWriter; none was configured on the service."
             )
         status_md = self.generate_status_md(db, project_id)
         self._writer.save(self._slug, "STATUS.md", status_md)
@@ -461,9 +438,7 @@ def _group_feats_by_epic(db: Session, epic_ids: list[UUID]) -> dict[UUID, list[F
     """Return feats grouped by ``epic_id``, each list ordered by ``number ASC``."""
     if not epic_ids:
         return {}
-    feats = db.execute(
-        select(Feat).where(Feat.epic_id.in_(epic_ids)).order_by(Feat.number)
-    ).scalars()
+    feats = db.execute(select(Feat).where(Feat.epic_id.in_(epic_ids)).order_by(Feat.number)).scalars()
     grouped: dict[UUID, list[Feat]] = {}
     for feat in feats:
         grouped.setdefault(feat.epic_id, []).append(feat)
@@ -474,9 +449,7 @@ def _group_tasks_by_feat(db: Session, feat_ids: list[UUID]) -> dict[UUID, list[T
     """Return tasks grouped by ``feat_id``, each list ordered by ``number ASC``."""
     if not feat_ids:
         return {}
-    tasks = db.execute(
-        select(Task).where(Task.feat_id.in_(feat_ids)).order_by(Task.number)
-    ).scalars()
+    tasks = db.execute(select(Task).where(Task.feat_id.in_(feat_ids)).order_by(Task.number)).scalars()
     grouped: dict[UUID, list[Task]] = {}
     for task in tasks:
         grouped.setdefault(task.feat_id, []).append(task)

@@ -179,7 +179,7 @@ def dob_module(db_session, nex_horizont) -> ProjectModule:
     """
     module = ProjectModule(
         project_id=nex_horizont.id,
-        code = "dob",
+        code="dob",
         name="Dodávateľské objednávky",
         category="Nákup",
         status="in_design",

@@ -224,15 +224,15 @@ class TestProjectModuleRouter:
     @pytest.mark.parametrize(
         "code",
         [
-            "PAB",              # uppercase — legacy NEX Genesis 8.3 style, now rejected
+            "PAB",  # uppercase — legacy NEX Genesis 8.3 style, now rejected
             "Partner-Catalog",  # mixed case
-            "pab_catalog",      # underscore not allowed
-            "-pab",             # leading hyphen
-            "pab-",             # trailing hyphen
-            "p",                # below min_length (2)
-            "1pab",             # starts with digit
-            "pab!",             # non-alnum
-            "a" * 51,           # exceeds max_length (50)
+            "pab_catalog",  # underscore not allowed
+            "-pab",  # leading hyphen
+            "pab-",  # trailing hyphen
+            "p",  # below min_length (2)
+            "1pab",  # starts with digit
+            "pab!",  # non-alnum
+            "a" * 51,  # exceeds max_length (50)
         ],
     )
     def test_create_rejects_non_kebab_code(self, router_client, project, code):
@@ -243,12 +243,12 @@ class TestProjectModuleRouter:
     @pytest.mark.parametrize(
         "code",
         [
-            "pab",               # shortest realistic
-            "partner-catalog",   # canonical example
+            "pab",  # shortest realistic
+            "partner-catalog",  # canonical example
             "module-manager",
-            "mod1",              # digits allowed
-            "a1",                # min_length (2)
-            "a" * 50,            # exactly max_length
+            "mod1",  # digits allowed
+            "a1",  # min_length (2)
+            "a" * 50,  # exactly max_length
         ],
     )
     def test_create_accepts_valid_kebab_code(self, router_client, project, code):

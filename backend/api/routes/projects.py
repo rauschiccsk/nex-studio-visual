@@ -124,10 +124,7 @@ def _validate_ports(db: Session, payload: ProjectCreate) -> None:
         if port_value < range_min or port_value > range_max:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=(
-                    f"Port {port_value} ({field_name}) is outside the allowed range "
-                    f"({range_min}–{range_max})."
-                ),
+                detail=(f"Port {port_value} ({field_name}) is outside the allowed range ({range_min}–{range_max})."),
             )
 
         # Uniqueness check
@@ -161,9 +158,7 @@ def _validate_ports(db: Session, payload: ProjectCreate) -> None:
                 except ValueError:
                     # Malformed entry — skip (operator will see in logs);
                     # don't block project creation on a config typo.
-                    logger.warning(
-                        "Malformed reserved_port_ranges entry %r — skipped", spec
-                    )
+                    logger.warning("Malformed reserved_port_ranges entry %r — skipped", spec)
                     continue
                 if r_start <= port_value <= r_end:
                     raise HTTPException(
@@ -368,9 +363,7 @@ def suggest_port_block(
     try:
         base = port_registry_service.suggest_next_port_block(db)
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
     return PortBlockSuggestResponse(
         base=base,
@@ -452,9 +445,7 @@ def create_project(
         except ValueError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=GitHubRepoNotFoundError(
-                    detail=str(exc), repo_url=payload.repo_url
-                ).model_dump(),
+                detail=GitHubRepoNotFoundError(detail=str(exc), repo_url=payload.repo_url).model_dump(),
             ) from exc
         except RuntimeError as exc:
             raise HTTPException(
@@ -470,9 +461,7 @@ def create_project(
 
     try:
         project = project_service.create(db, payload)
-        LiveDocumentService(project.slug, writer=kb_writer).init_live_documents(
-            db, project.id
-        )
+        LiveDocumentService(project.slug, writer=kb_writer).init_live_documents(db, project.id)
         # Stage 3 — filesystem bootstrap via icc-claude-template/init.sh.
         # Runs BEFORE db.commit() so a bootstrap failure rolls back the
         # DB row cleanly. KB live docs are already on disk at this point;
@@ -586,24 +575,16 @@ def delete_project(
     try:
         kb_writer.delete_project(slug)
     except OSError as exc:
-        logger.warning(
-            "KB cleanup failed for deleted project %r: %s", slug, exc
-        )
+        logger.warning("KB cleanup failed for deleted project %r: %s", slug, exc)
 
     # GitHub repo cleanup — opt-in.
     if delete_github and repo_url:
-        gh_timeout = float(
-            system_setting_service.get_int(db, "github_api_timeout_seconds")
-        )
+        gh_timeout = float(system_setting_service.get_int(db, "github_api_timeout_seconds"))
         try:
             github_validation_service.delete_github_repo(repo_url, timeout=gh_timeout)
         except (ValueError, RuntimeError) as exc:
-            logger.warning(
-                "GitHub repo delete failed for %r: %s", repo_url, exc
-            )
+            logger.warning("GitHub repo delete failed for %r: %s", repo_url, exc)
         except httpx.HTTPError as exc:
-            logger.warning(
-                "GitHub API unreachable during delete of %r: %s", repo_url, exc
-            )
+            logger.warning("GitHub API unreachable during delete of %r: %s", repo_url, exc)
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)

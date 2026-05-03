@@ -62,9 +62,7 @@ def test_get_by_key_unknown_raises(db_session: Any) -> None:
 
 def test_upsert_creates_row_on_first_call(db_session: Any) -> None:
     user = _make_user(db_session)
-    result = service.upsert(
-        db_session, "github_org", "isnex-official", updated_by=user.id
-    )
+    result = service.upsert(db_session, "github_org", "isnex-official", updated_by=user.id)
 
     assert result.key == "github_org"
     assert result.value == "isnex-official"
@@ -76,18 +74,14 @@ def test_upsert_creates_row_on_first_call(db_session: Any) -> None:
     # Row really exists in the DB.
     from sqlalchemy import select as sa_select
 
-    stored = db_session.execute(
-        sa_select(SystemSetting).where(SystemSetting.key == "github_org")
-    ).scalar_one()
+    stored = db_session.execute(sa_select(SystemSetting).where(SystemSetting.key == "github_org")).scalar_one()
     assert stored.value == "isnex-official"
 
 
 def test_upsert_updates_existing_row(db_session: Any) -> None:
     user = _make_user(db_session)
     service.upsert(db_session, "github_org", "first-value", updated_by=user.id)
-    result = service.upsert(
-        db_session, "github_org", "second-value", updated_by=user.id
-    )
+    result = service.upsert(db_session, "github_org", "second-value", updated_by=user.id)
 
     assert result.value == "second-value"
     assert result.is_default is False

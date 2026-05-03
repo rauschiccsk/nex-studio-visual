@@ -52,8 +52,7 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
     "github_org": _Default(
         value="rauschiccsk",
         description=(
-            "GitHub organisation used to auto-fill repository URLs on "
-            "the new-project form as '{github_org}/{slug}'."
+            "GitHub organisation used to auto-fill repository URLs on the new-project form as '{github_org}/{slug}'."
         ),
     ),
     # ── Pipeline / AI ───────────────────────────────────────────────
@@ -69,10 +68,7 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
     "claude_design_doc_timeout_seconds": _Default(
         value="1800",
         value_type="int",
-        description=(
-            "Timeout for generating BEHAVIOR.md / DESIGN.md from an "
-            "approved Vývojová dokumentácia."
-        ),
+        description=("Timeout for generating BEHAVIOR.md / DESIGN.md from an approved Vývojová dokumentácia."),
     ),
     "claude_task_plan_timeout_seconds": _Default(
         value="1800",
@@ -96,8 +92,7 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
         value="12000",
         value_type="int",
         description=(
-            "Max characters of DESIGN.md handed to the feat-executor "
-            "AI prompt so the context window is not blown."
+            "Max characters of DESIGN.md handed to the feat-executor AI prompt so the context window is not blown."
         ),
     ),
     # ── Auth ────────────────────────────────────────────────────────
@@ -124,8 +119,7 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
         value="10",
         value_type="int",
         description=(
-            "Port block size per project. D-020 reserved 10-port blocks "
-            "(backend/frontend/db/ui-design + 6 spare)."
+            "Port block size per project. D-020 reserved 10-port blocks (backend/frontend/db/ui-design + 6 spare)."
         ),
     ),
     # ── Path templates ─────────────────────────────────────────────
@@ -200,9 +194,7 @@ def _load_effective(db: Session, key: str) -> tuple[str, str]:
     """Return ``(value_str, value_type)`` for *key* — DB row if present,
     default otherwise. Callers are expected to have validated the key
     exists in :data:`DEFAULT_SETTINGS`."""
-    row = db.execute(
-        select(SystemSetting).where(SystemSetting.key == key)
-    ).scalar_one_or_none()
+    row = db.execute(select(SystemSetting).where(SystemSetting.key == key)).scalar_one_or_none()
     if row is not None:
         return row.value, row.value_type
 
@@ -269,9 +261,7 @@ def _to_read_from_default(key: str, default: _Default) -> SystemSettingRead:
     )
 
 
-def _to_read_from_row(
-    row: SystemSetting, username: Optional[str] = None
-) -> SystemSettingRead:
+def _to_read_from_row(row: SystemSetting, username: Optional[str] = None) -> SystemSettingRead:
     return SystemSettingRead(
         key=row.key,
         value=row.value,
@@ -289,9 +279,7 @@ def _resolve_username(db: Session, user_id: Optional[UUID]) -> Optional[str]:
     missing (deleted or NULL on the row)."""
     if user_id is None:
         return None
-    return db.execute(
-        select(User.username).where(User.id == user_id)
-    ).scalar_one_or_none()
+    return db.execute(select(User.username).where(User.id == user_id)).scalar_one_or_none()
 
 
 def list_all(db: Session) -> list[SystemSettingRead]:
@@ -304,9 +292,7 @@ def list_all(db: Session) -> list[SystemSettingRead]:
 
     Ordered by key ASC so the Settings page renders a stable list.
     """
-    stored: dict[str, SystemSetting] = {
-        row.key: row for row in db.execute(select(SystemSetting)).scalars()
-    }
+    stored: dict[str, SystemSetting] = {row.key: row for row in db.execute(select(SystemSetting)).scalars()}
     keys = sorted(set(DEFAULT_SETTINGS.keys()) | set(stored.keys()))
     out: list[SystemSettingRead] = []
     for key in keys:
@@ -326,9 +312,7 @@ def get_by_key(db: Session, key: str) -> SystemSettingRead:
     Raises :class:`ValueError` if the key is neither stored nor in
     :data:`DEFAULT_SETTINGS`.
     """
-    row = db.execute(
-        select(SystemSetting).where(SystemSetting.key == key)
-    ).scalar_one_or_none()
+    row = db.execute(select(SystemSetting).where(SystemSetting.key == key)).scalar_one_or_none()
     if row is not None:
         return _to_read_from_row(row, _resolve_username(db, row.updated_by))
 
@@ -356,9 +340,7 @@ def _validate_value_for_type(value: str, value_type: SystemSettingValueType) -> 
         return
     if value_type == "bool":
         if value.strip().lower() not in ("true", "false", "1", "0", "yes", "no", "on", "off"):
-            raise ValueError(
-                f"Value {value!r} is not a valid bool — use true/false/1/0/yes/no/on/off"
-            )
+            raise ValueError(f"Value {value!r} is not a valid bool — use true/false/1/0/yes/no/on/off")
 
 
 def upsert(
@@ -385,9 +367,7 @@ def upsert(
 
     _validate_value_for_type(value, default.value_type)
 
-    row = db.execute(
-        select(SystemSetting).where(SystemSetting.key == key)
-    ).scalar_one_or_none()
+    row = db.execute(select(SystemSetting).where(SystemSetting.key == key)).scalar_one_or_none()
 
     if row is None:
         row = SystemSetting(

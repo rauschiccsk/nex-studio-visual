@@ -430,9 +430,7 @@ async def chat_professional_spec(
                             idx = buffer.index(_SPEC_MARKER)
                             chat_part = buffer[:idx].strip()
                             if chat_part:
-                                payload_json = json.dumps(
-                                    {"type": "chat_chunk", "content": chat_part}
-                                )
+                                payload_json = json.dumps({"type": "chat_chunk", "content": chat_part})
                                 yield f"data: {payload_json}\n\n"
                                 chat_emitted += len(chat_part)
                                 chat_accumulator.append(chat_part)
@@ -450,9 +448,7 @@ async def chat_professional_spec(
                             idx = buffer.index(_SPEC_MARKER)
                             chat_part = buffer[:idx].strip()
                             if chat_part:
-                                payload_json = json.dumps(
-                                    {"type": "chat_chunk", "content": chat_part}
-                                )
+                                payload_json = json.dumps({"type": "chat_chunk", "content": chat_part})
                                 yield f"data: {payload_json}\n\n"
                                 chat_emitted += len(chat_part)
                                 chat_accumulator.append(chat_part)
@@ -463,9 +459,7 @@ async def chat_professional_spec(
                             # Emit safe portion, hold potential partial marker tail
                             safe_len = max(0, len(buffer) - len(_SPEC_MARKER))
                             if safe_len > 0:
-                                payload_json = json.dumps(
-                                    {"type": "chat_chunk", "content": buffer[:safe_len]}
-                                )
+                                payload_json = json.dumps({"type": "chat_chunk", "content": buffer[:safe_len]})
                                 yield f"data: {payload_json}\n\n"
                                 chat_emitted += safe_len
                                 chat_accumulator.append(buffer[:safe_len])
@@ -473,9 +467,7 @@ async def chat_professional_spec(
 
                     elif state == "chat_fallback":
                         if buffer:
-                            payload_json = json.dumps(
-                                {"type": "chat_chunk", "content": buffer}
-                            )
+                            payload_json = json.dumps({"type": "chat_chunk", "content": buffer})
                             yield f"data: {payload_json}\n\n"
                             chat_emitted += len(buffer)
                             chat_accumulator.append(buffer)
@@ -483,9 +475,7 @@ async def chat_professional_spec(
 
                     elif state == "spec":
                         if buffer:
-                            payload_json = json.dumps(
-                                {"type": "spec_chunk", "content": buffer}
-                            )
+                            payload_json = json.dumps({"type": "spec_chunk", "content": buffer})
                             yield f"data: {payload_json}\n\n"
                             spec_emitted += len(buffer)
                             buffer = ""
@@ -539,9 +529,7 @@ async def chat_professional_spec(
                 persist_db.commit()
             except Exception:
                 persist_db.rollback()
-                logger.exception(
-                    "Failed to persist chat messages for spec %s", spec_id
-                )
+                logger.exception("Failed to persist chat messages for spec %s", spec_id)
             finally:
                 persist_db.close()
 
@@ -783,9 +771,7 @@ async def generate_design_doc(
     )
 
     project_id = prof_spec.project_id
-    design_doc_timeout = system_setting_service.get_int(
-        db, "claude_design_doc_timeout_seconds"
-    )
+    design_doc_timeout = system_setting_service.get_int(db, "claude_design_doc_timeout_seconds")
 
     async def _sse_generator():
         full_content: list[str] = []

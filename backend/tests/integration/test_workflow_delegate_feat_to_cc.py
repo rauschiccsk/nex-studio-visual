@@ -248,7 +248,7 @@ def stk_module(db_session, nex_horizont) -> ProjectModule:
     """
     module = ProjectModule(
         project_id=nex_horizont.id,
-        code = "stk",
+        code="stk",
         name="Skladové karty zásob",
         category="Sklad",
         status="in_development",

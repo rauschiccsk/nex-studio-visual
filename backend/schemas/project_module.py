@@ -75,10 +75,7 @@ class ProjectModuleCreate(BaseModel):
         min_length=MODULE_CODE_MIN_LENGTH,
         max_length=MODULE_CODE_MAX_LENGTH,
         pattern=MODULE_CODE_PATTERN,
-        description=(
-            "Kebab-case module code, unique within the project "
-            "(e.g. 'partner-catalog', 'module-manager')."
-        ),
+        description=("Kebab-case module code, unique within the project (e.g. 'partner-catalog', 'module-manager')."),
     )
     name: str = Field(
         ...,

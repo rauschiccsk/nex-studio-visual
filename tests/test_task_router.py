@@ -473,9 +473,7 @@ class TestTaskRouter:
 
     # ------------------------------------------------------------- live docs
 
-    def test_patch_to_done_writes_history_and_status(
-        self, router_client, feat, project, tmp_path
-    ):
+    def test_patch_to_done_writes_history_and_status(self, router_client, feat, project, tmp_path):
         """Transition to done appends HISTORY.md and rebuilds STATUS.md."""
         created = router_client.post(
             "/api/v1/tasks",
@@ -500,9 +498,7 @@ class TestTaskRouter:
         assert "- [x]" in status_md
         assert "Implement login" in status_md
 
-    def test_patch_to_done_with_execution_log_surfaces_commit(
-        self, db_session, router_client, feat, project, tmp_path
-    ):
+    def test_patch_to_done_with_execution_log_surfaces_commit(self, db_session, router_client, feat, project, tmp_path):
         """When an ExecutionLog carries a commit hash, it lands in the entries."""
         from backend.db.models.delegations import Delegation, ExecutionLog
 
@@ -543,9 +539,7 @@ class TestTaskRouter:
         # STATUS renders the 7-char commit suffix on the done task line.
         assert "(abc1234)" in status_md
 
-    def test_patch_to_done_without_execution_log_minimal_architect(
-        self, router_client, feat, project, tmp_path
-    ):
+    def test_patch_to_done_without_execution_log_minimal_architect(self, router_client, feat, project, tmp_path):
         """No execution log → architect entry has the task header but no Commits / Files lines."""
         created = router_client.post(
             "/api/v1/tasks",
@@ -568,9 +562,7 @@ class TestTaskRouter:
         assert "Commits:" not in arch
         assert "Files:" not in arch
 
-    def test_patch_status_to_in_progress_does_not_fire_hook(
-        self, router_client, feat, project, tmp_path
-    ):
+    def test_patch_status_to_in_progress_does_not_fire_hook(self, router_client, feat, project, tmp_path):
         created = router_client.post(
             "/api/v1/tasks",
             json=_payload(feat_id=feat.id, title="In flight"),
@@ -585,9 +577,7 @@ class TestTaskRouter:
         # No hook fired → no KB directory for the project at all.
         assert not project_dir.exists()
 
-    def test_patch_title_only_does_not_fire_hook(
-        self, router_client, feat, project, tmp_path
-    ):
+    def test_patch_title_only_does_not_fire_hook(self, router_client, feat, project, tmp_path):
         created = router_client.post(
             "/api/v1/tasks",
             json=_payload(feat_id=feat.id, title="Old title"),
@@ -601,9 +591,7 @@ class TestTaskRouter:
         project_dir = tmp_path / "projects" / project.slug
         assert not project_dir.exists()
 
-    def test_patch_to_done_replayed_is_idempotent(
-        self, router_client, feat, project, tmp_path
-    ):
+    def test_patch_to_done_replayed_is_idempotent(self, router_client, feat, project, tmp_path):
         """Second PATCH to done does not duplicate the HISTORY entry."""
         created = router_client.post(
             "/api/v1/tasks",
@@ -627,9 +615,7 @@ class TestTaskRouter:
         # dedup would strip the duplicate first line.
         assert history.count("Once done, stays done") == 1
 
-    def test_patch_rolls_back_when_kb_write_fails(
-        self, db_session, project, feat
-    ):
+    def test_patch_rolls_back_when_kb_write_fails(self, db_session, project, feat):
         """OSError on KB write → 500 + task.status unchanged in DB."""
         from backend.api.dependencies import get_knowledge_base_writer
         from backend.services.knowledge_base_writer import KnowledgeBaseWriter
@@ -670,7 +656,5 @@ class TestTaskRouter:
 
         # Re-read the task straight from the DB — the status transition must
         # have been rolled back so the task is still "todo".
-        reloaded = db_session.execute(
-            sa_select(_Task).where(_Task.id == uuid.UUID(created["id"]))
-        ).scalar_one()
+        reloaded = db_session.execute(sa_select(_Task).where(_Task.id == uuid.UUID(created["id"]))).scalar_one()
         assert reloaded.status == "todo"

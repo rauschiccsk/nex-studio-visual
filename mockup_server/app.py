@@ -71,10 +71,7 @@ def _fetch_all_projects_with_port() -> list[tuple[UUID, int]]:
     conn = pg8000.dbapi.connect(**_DSN_KW)
     try:
         cur = conn.cursor()
-        cur.execute(
-            "SELECT id, ui_design_port FROM projects "
-            "WHERE ui_design_port IS NOT NULL"
-        )
+        cur.execute("SELECT id, ui_design_port FROM projects WHERE ui_design_port IS NOT NULL")
         rows = [(UUID(str(pid)), int(port)) for pid, port in cur.fetchall()]
         return rows
     finally:
@@ -102,9 +99,7 @@ def _fetch_html_preview(project_id: UUID) -> str | None:
     try:
         cur = conn.cursor()
         cur.execute(
-            "SELECT html_preview FROM ui_designs "
-            "WHERE project_id = %s "
-            "ORDER BY created_at DESC LIMIT 1",
+            "SELECT html_preview FROM ui_designs WHERE project_id = %s ORDER BY created_at DESC LIMIT 1",
             (str(project_id),),
         )
         row = cur.fetchone()
@@ -156,9 +151,7 @@ class ProjectListener:
 
     def reload(self) -> None:
         self._load_html()
-        logger.info(
-            "listener reloaded project=%s bytes=%s", self.project_id, len(self._html)
-        )
+        logger.info("listener reloaded project=%s bytes=%s", self.project_id, len(self._html))
 
     def _load_html(self) -> None:
         html = _fetch_html_preview(self.project_id)
@@ -201,9 +194,7 @@ async def _handle_admin_reload(request: web.Request) -> web.Response:
     listener = _listeners.get(project_id)
     if listener is None:
         if not await _ensure_listener(project_id):
-            return web.json_response(
-                {"error": "no ui_design_port assigned to project"}, status=404
-            )
+            return web.json_response({"error": "no ui_design_port assigned to project"}, status=404)
         listener = _listeners[project_id]
 
     listener.reload()
@@ -214,10 +205,7 @@ async def _handle_admin_health(_request: web.Request) -> web.Response:
     return web.json_response(
         {
             "status": "ok",
-            "listeners": [
-                {"project_id": str(pid), "port": lst.port}
-                for pid, lst in _listeners.items()
-            ],
+            "listeners": [{"project_id": str(pid), "port": lst.port} for pid, lst in _listeners.items()],
         }
     )
 

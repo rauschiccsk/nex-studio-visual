@@ -44,9 +44,7 @@ def get_system_setting(
     try:
         return service.get_by_key(db, key)
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.patch("/{key}", response_model=SystemSettingRead)
@@ -62,13 +60,9 @@ def update_system_setting(
     expected to only PATCH registered keys).
     """
     try:
-        result = service.upsert(
-            db, key, payload.value, updated_by=current_user.id
-        )
+        result = service.upsert(db, key, payload.value, updated_by=current_user.id)
         db.commit()
     except ValueError as exc:
         db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return result

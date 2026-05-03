@@ -57,12 +57,8 @@ class PortBlockSuggestResponse(BaseModel):
     until the project needs cache / worker / admin-UI.
     """
 
-    base: int = Field(
-        description="Base port of the first free block in the ICC range."
-    )
-    block_size: int = Field(
-        description="Number of consecutive ports reserved per project block."
-    )
+    base: int = Field(description="Base port of the first free block in the ICC range.")
+    block_size: int = Field(description="Number of consecutive ports reserved per project block.")
 
 
 class PortConflictError(BaseModel):

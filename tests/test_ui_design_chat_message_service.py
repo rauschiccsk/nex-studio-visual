@@ -52,9 +52,7 @@ class TestUIDesignChatMessageService:
         )
         service.create(
             db_session,
-            UIDesignChatMessageCreate(
-                ui_design_id=ui.id, role="assistant", content="second"
-            ),
+            UIDesignChatMessageCreate(ui_design_id=ui.id, role="assistant", content="second"),
         )
         service.create(
             db_session,
@@ -69,9 +67,7 @@ class TestUIDesignChatMessageService:
         ui = _seed_ui_design(db_session)
         service.create(
             db_session,
-            UIDesignChatMessageCreate(
-                ui_design_id=ui.id, role="user", content="orphan-me"
-            ),
+            UIDesignChatMessageCreate(ui_design_id=ui.id, role="user", content="orphan-me"),
         )
         db_session.flush()
 
@@ -81,11 +77,7 @@ class TestUIDesignChatMessageService:
         from sqlalchemy import select
 
         remaining = (
-            db_session.execute(
-                select(UIDesignChatMessage).where(
-                    UIDesignChatMessage.ui_design_id == ui.id
-                )
-            )
+            db_session.execute(select(UIDesignChatMessage).where(UIDesignChatMessage.ui_design_id == ui.id))
             .scalars()
             .all()
         )

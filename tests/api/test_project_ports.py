@@ -179,9 +179,7 @@ class TestSuggestPortBlockEndpoint:
         body = resp.json()
         assert body == {"base": 10100, "block_size": 10}
 
-    def test_first_block_occupied_returns_second(
-        self, router_client, creator, db_session
-    ):
+    def test_first_block_occupied_returns_second(self, router_client, creator, db_session):
         """A single project in the first block pushes the suggestion to 10110."""
         _make_project(db_session, creator, backend_port=10105)
         resp = router_client.get("/api/v1/projects/ports/suggest-block")

@@ -324,7 +324,7 @@ def stk_in_design(db_session, nex_horizont, gsc_done) -> ProjectModule:
     """
     module = ProjectModule(
         project_id=nex_horizont.id,
-        code = "stk",
+        code="stk",
         name="Skladové karty zásob",
         category="Sklad",
         status="in_design",

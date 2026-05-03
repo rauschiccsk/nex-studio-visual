@@ -135,15 +135,9 @@ def _build_feat_completion_data(db: Session, feat: Feat) -> FeatCompletionData:
     audit pipeline in place; callers can override when those become
     available.
     """
-    total_tasks = db.execute(
-        select(func.count()).select_from(Task).where(Task.feat_id == feat.id)
-    ).scalar_one()
+    total_tasks = db.execute(select(func.count()).select_from(Task).where(Task.feat_id == feat.id)).scalar_one()
 
-    minutes = (
-        feat.actual_minutes
-        if feat.actual_minutes is not None
-        else (feat.estimated_minutes or 0)
-    )
+    minutes = feat.actual_minutes if feat.actual_minutes is not None else (feat.estimated_minutes or 0)
     duration_seconds = float(minutes * 60)
 
     return FeatCompletionData(
@@ -285,11 +279,7 @@ def update_feat(
     try:
         feat = feat_service.update(db, feat_id, payload)
 
-        if (
-            ctx is not None
-            and previous_status != "done"
-            and feat.status == "done"
-        ):
+        if ctx is not None and previous_status != "done" and feat.status == "done":
             _, project = ctx
             data = _build_feat_completion_data(db, feat)
             svc = LiveDocumentService(project.slug, writer=kb_writer)

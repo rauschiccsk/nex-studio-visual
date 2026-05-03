@@ -170,9 +170,7 @@ def test_filter_excludes_tests_by_infix() -> None:
 
 
 def test_filter_excludes_pycache() -> None:
-    assert _filter_arch_files(
-        ["__pycache__/app.cpython-312.pyc", "backend/app.py"]
-    ) == ["backend/app.py"]
+    assert _filter_arch_files(["__pycache__/app.cpython-312.pyc", "backend/app.py"]) == ["backend/app.py"]
 
 
 def test_filter_excludes_node_modules() -> None:
@@ -182,9 +180,11 @@ def test_filter_excludes_node_modules() -> None:
 
 
 def test_filter_keeps_docker_and_makefile() -> None:
-    assert _filter_arch_files(
-        ["Dockerfile", "docker-compose.yml", "Makefile", "random.txt"]
-    ) == ["Dockerfile", "docker-compose.yml", "Makefile"]
+    assert _filter_arch_files(["Dockerfile", "docker-compose.yml", "Makefile", "random.txt"]) == [
+        "Dockerfile",
+        "docker-compose.yml",
+        "Makefile",
+    ]
 
 
 def test_filter_rejects_unknown_extensions() -> None:
@@ -286,9 +286,7 @@ def test_architect_entry_failed_no_commits_returns_empty() -> None:
 def test_architect_entry_failed_with_commits_is_recorded() -> None:
     """A failed task that committed partial work still leaves a trail."""
     svc = LiveDocumentService("nex-test")
-    entry = svc.generate_architect_entry(
-        _task(status="failed", commit_hashes=["abc1234"])
-    )
+    entry = svc.generate_architect_entry(_task(status="failed", commit_hashes=["abc1234"]))
 
     assert "### Task 1.2: Repository setup" in entry
     assert "Commits: abc1234" in entry
@@ -296,9 +294,7 @@ def test_architect_entry_failed_with_commits_is_recorded() -> None:
 
 def test_architect_entry_all_changed_files_filtered_out() -> None:
     svc = LiveDocumentService("nex-test")
-    entry = svc.generate_architect_entry(
-        _task(changed_files=["README.md", "tests/test_x.py"])
-    )
+    entry = svc.generate_architect_entry(_task(changed_files=["README.md", "tests/test_x.py"]))
 
     assert "### Task 1.2: Repository setup" in entry
     assert "Files:" not in entry
@@ -594,10 +590,7 @@ def _make_epic(
 ) -> Epic:
     if number is None:
         current = db_session.execute(
-            sa_select(Epic.number)
-            .where(Epic.project_id == project.id)
-            .order_by(Epic.number.desc())
-            .limit(1)
+            sa_select(Epic.number).where(Epic.project_id == project.id).order_by(Epic.number.desc()).limit(1)
         ).scalar()
         number = (current or 0) + 1
     epic = Epic(
@@ -622,10 +615,7 @@ def _make_feat(
 ) -> Feat:
     if number is None:
         current = db_session.execute(
-            sa_select(Feat.number)
-            .where(Feat.epic_id == epic.id)
-            .order_by(Feat.number.desc())
-            .limit(1)
+            sa_select(Feat.number).where(Feat.epic_id == epic.id).order_by(Feat.number.desc()).limit(1)
         ).scalar()
         number = (current or 0) + 1
     feat = Feat(
@@ -650,10 +640,7 @@ def _make_task(
 ) -> Task:
     if number is None:
         current = db_session.execute(
-            sa_select(Task.number)
-            .where(Task.feat_id == feat.id)
-            .order_by(Task.number.desc())
-            .limit(1)
+            sa_select(Task.number).where(Task.feat_id == feat.id).order_by(Task.number.desc()).limit(1)
         ).scalar()
         number = (current or 0) + 1
     task = Task(
@@ -724,9 +711,7 @@ def test_status_md_empty_project(db_session: Any) -> None:
 
 def test_status_md_basic_hierarchy(db_session: Any) -> None:
     project = _make_project(db_session, name="App", slug="app")
-    epic = _make_epic(
-        db_session, project=project, number=1, title="Foundation", status="in_progress"
-    )
+    epic = _make_epic(db_session, project=project, number=1, title="Foundation", status="in_progress")
     feat = _make_feat(db_session, epic=epic, number=1, title="Auth", status="in_progress")
     _make_task(db_session, feat=feat, number=1, title="Login endpoint", status="done")
     _make_task(db_session, feat=feat, number=2, title="Logout endpoint", status="todo")
@@ -1058,9 +1043,7 @@ def test_regenerate_status_no_writer_is_noop(db_session: Any) -> None:
 # ── init_live_documents — project creation seed ──────────────────────
 
 
-def test_init_live_documents_creates_three_files(
-    db_session: Any, tmp_path: Path
-) -> None:
+def test_init_live_documents_creates_three_files(db_session: Any, tmp_path: Path) -> None:
     project = _make_project(db_session, slug="init-test")
     writer = KnowledgeBaseWriter(tmp_path)
     svc = LiveDocumentService("init-test", writer=writer)
@@ -1072,9 +1055,7 @@ def test_init_live_documents_creates_three_files(
     assert writer.exists("init-test", "ARCHITECT.md") is True
 
 
-def test_init_live_documents_status_shows_empty_state(
-    db_session: Any, tmp_path: Path
-) -> None:
+def test_init_live_documents_status_shows_empty_state(db_session: Any, tmp_path: Path) -> None:
     project = _make_project(db_session, name="Empty", slug="empty")
     writer = KnowledgeBaseWriter(tmp_path)
     svc = LiveDocumentService("empty", writer=writer)
@@ -1086,9 +1067,7 @@ def test_init_live_documents_status_shows_empty_state(
     assert "No epics planned yet." in status_md
 
 
-def test_init_live_documents_history_is_header_only(
-    db_session: Any, tmp_path: Path
-) -> None:
+def test_init_live_documents_history_is_header_only(db_session: Any, tmp_path: Path) -> None:
     project = _make_project(db_session, slug="hist-test")
     writer = KnowledgeBaseWriter(tmp_path)
     svc = LiveDocumentService("hist-test", writer=writer)
@@ -1098,18 +1077,14 @@ def test_init_live_documents_history_is_header_only(
     assert writer.read("hist-test", "HISTORY.md") == "# hist-test — History\n\n"
 
 
-def test_init_live_documents_architect_is_header_only(
-    db_session: Any, tmp_path: Path
-) -> None:
+def test_init_live_documents_architect_is_header_only(db_session: Any, tmp_path: Path) -> None:
     project = _make_project(db_session, slug="arch-test")
     writer = KnowledgeBaseWriter(tmp_path)
     svc = LiveDocumentService("arch-test", writer=writer)
 
     svc.init_live_documents(db_session, project.id)
 
-    assert writer.read("arch-test", "ARCHITECT.md") == (
-        "# arch-test — Architecture Log\n\n"
-    )
+    assert writer.read("arch-test", "ARCHITECT.md") == ("# arch-test — Architecture Log\n\n")
 
 
 def test_init_live_documents_raises_without_writer(db_session: Any) -> None:
@@ -1120,9 +1095,7 @@ def test_init_live_documents_raises_without_writer(db_session: Any) -> None:
         svc.init_live_documents(db_session, project.id)
 
 
-def test_init_live_documents_overwrites_existing_files(
-    db_session: Any, tmp_path: Path
-) -> None:
+def test_init_live_documents_overwrites_existing_files(db_session: Any, tmp_path: Path) -> None:
     """Re-running init on an existing KB cleanly overwrites any stale content."""
     project = _make_project(db_session, slug="redo")
     writer = KnowledgeBaseWriter(tmp_path)

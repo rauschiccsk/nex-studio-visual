@@ -334,16 +334,10 @@ class TestProjectRouter:
         assert "No epics planned yet." in status_md
 
         # HISTORY / ARCHITECT start as bare headers.
-        assert (project_dir / "HISTORY.md").read_text(encoding="utf-8") == (
-            "# live-docs-app — History\n\n"
-        )
-        assert (project_dir / "ARCHITECT.md").read_text(encoding="utf-8") == (
-            "# live-docs-app — Architecture Log\n\n"
-        )
+        assert (project_dir / "HISTORY.md").read_text(encoding="utf-8") == ("# live-docs-app — History\n\n")
+        assert (project_dir / "ARCHITECT.md").read_text(encoding="utf-8") == ("# live-docs-app — Architecture Log\n\n")
 
-    def test_create_rolls_back_when_kb_write_fails(
-        self, db_session, creator, tmp_path, monkeypatch
-    ):
+    def test_create_rolls_back_when_kb_write_fails(self, db_session, creator, tmp_path, monkeypatch):
         """If KB write raises OSError, the project must not end up in the DB."""
         from backend.api.dependencies import get_knowledge_base_writer
         from backend.services.knowledge_base_writer import KnowledgeBaseWriter
@@ -382,16 +376,12 @@ class TestProjectRouter:
 
         # And verify nothing landed in the DB.
 
-        remaining = db_session.execute(
-            sa_select_project_by_slug("rollback-test")
-        ).scalar_one_or_none()
+        remaining = db_session.execute(sa_select_project_by_slug("rollback-test")).scalar_one_or_none()
         assert remaining is None, "Project row must have been rolled back on KB failure"
 
     # ------------------------------------------------------ GitHub repo create
 
-    def test_create_calls_github_repo_create_with_slug(
-        self, db_session, creator, tmp_path, monkeypatch
-    ):
+    def test_create_calls_github_repo_create_with_slug(self, db_session, creator, tmp_path, monkeypatch):
         """POST forwards repo_url to create_github_repo before inserting the row."""
         from backend.api.dependencies import get_knowledge_base_writer
         from backend.services.knowledge_base_writer import KnowledgeBaseWriter
@@ -402,9 +392,7 @@ class TestProjectRouter:
             calls.append((repo, kwargs))
             return True
 
-        monkeypatch.setattr(
-            "backend.services.github_validation.create_github_repo", _mock_create
-        )
+        monkeypatch.setattr("backend.services.github_validation.create_github_repo", _mock_create)
 
         app = FastAPI()
         app.include_router(projects_router, prefix="/api/v1/projects")
@@ -436,9 +424,7 @@ class TestProjectRouter:
         assert kwargs.get("description") == "Happy path for GitHub create"
         assert kwargs.get("private") is True
 
-    def test_create_skips_github_when_repo_url_is_null(
-        self, router_client, creator, monkeypatch
-    ):
+    def test_create_skips_github_when_repo_url_is_null(self, router_client, creator, monkeypatch):
         """A NULL repo_url short-circuits the GitHub call entirely."""
         github_called = {"n": 0}
 
@@ -447,9 +433,7 @@ class TestProjectRouter:
             return True
 
         # Re-patch over the router_client's no-op mock to observe invocations.
-        monkeypatch.setattr(
-            "backend.services.github_validation.create_github_repo", _mock_create
-        )
+        monkeypatch.setattr("backend.services.github_validation.create_github_repo", _mock_create)
 
         payload = _payload(creator.id, slug="no-repo")
         payload.pop("repo_url", None)  # ensure explicitly null in body
@@ -458,9 +442,7 @@ class TestProjectRouter:
         assert resp.status_code == 201
         assert github_called["n"] == 0
 
-    def test_create_rolls_back_when_github_repo_create_fails(
-        self, db_session, creator, tmp_path, monkeypatch
-    ):
+    def test_create_rolls_back_when_github_repo_create_fails(self, db_session, creator, tmp_path, monkeypatch):
         """RuntimeError from create_github_repo → 500 and no DB row."""
         from backend.api.dependencies import get_knowledge_base_writer
         from backend.services.knowledge_base_writer import KnowledgeBaseWriter
@@ -468,9 +450,7 @@ class TestProjectRouter:
         def _raise_runtime(repo, **kwargs):
             raise RuntimeError("token missing or insufficient scope")
 
-        monkeypatch.setattr(
-            "backend.services.github_validation.create_github_repo", _raise_runtime
-        )
+        monkeypatch.setattr("backend.services.github_validation.create_github_repo", _raise_runtime)
 
         app = FastAPI()
         app.include_router(projects_router, prefix="/api/v1/projects")
@@ -485,9 +465,7 @@ class TestProjectRouter:
         app.dependency_overrides[get_knowledge_base_writer] = _override_kb_writer
 
         with TestClient(app) as client:
-            payload = _payload(
-                creator.id, slug="gh-fail", repo_url="rauschiccsk/gh-fail"
-            )
+            payload = _payload(creator.id, slug="gh-fail", repo_url="rauschiccsk/gh-fail")
             resp = client.post("/api/v1/projects", json=payload)
 
         app.dependency_overrides.clear()
@@ -496,9 +474,7 @@ class TestProjectRouter:
         assert "Failed to create GitHub repository" in resp.json()["detail"]
 
         # No DB row, no KB folder.
-        remaining = db_session.execute(
-            sa_select_project_by_slug("gh-fail")
-        ).scalar_one_or_none()
+        remaining = db_session.execute(sa_select_project_by_slug("gh-fail")).scalar_one_or_none()
         assert remaining is None
         assert not (tmp_path / "projects" / "gh-fail").exists()
 
@@ -515,9 +491,7 @@ class TestProjectRouter:
         assert resp.status_code == 204
         assert not project_dir.exists()
 
-    def test_delete_without_flag_does_not_touch_github(
-        self, router_client, creator, tmp_path, monkeypatch
-    ):
+    def test_delete_without_flag_does_not_touch_github(self, router_client, creator, tmp_path, monkeypatch):
         """Without ?delete_github=true, the GitHub API is not called."""
         github_delete_calls = []
 
@@ -525,22 +499,16 @@ class TestProjectRouter:
             github_delete_calls.append(repo)
             return True
 
-        monkeypatch.setattr(
-            "backend.services.github_validation.delete_github_repo", _mock_delete
-        )
+        monkeypatch.setattr("backend.services.github_validation.delete_github_repo", _mock_delete)
 
-        payload = _payload(
-            creator.id, slug="keep-repo", repo_url="rauschiccsk/keep-repo"
-        )
+        payload = _payload(creator.id, slug="keep-repo", repo_url="rauschiccsk/keep-repo")
         created = router_client.post("/api/v1/projects", json=payload).json()
         resp = router_client.delete(f"/api/v1/projects/{created['id']}")
 
         assert resp.status_code == 204
         assert github_delete_calls == []
 
-    def test_delete_with_flag_invokes_github_delete(
-        self, router_client, creator, tmp_path, monkeypatch
-    ):
+    def test_delete_with_flag_invokes_github_delete(self, router_client, creator, tmp_path, monkeypatch):
         """?delete_github=true passes repo_url to delete_github_repo."""
         github_delete_calls = []
 
@@ -548,48 +516,32 @@ class TestProjectRouter:
             github_delete_calls.append(repo)
             return True
 
-        monkeypatch.setattr(
-            "backend.services.github_validation.delete_github_repo", _mock_delete
-        )
+        monkeypatch.setattr("backend.services.github_validation.delete_github_repo", _mock_delete)
 
-        payload = _payload(
-            creator.id, slug="also-delete-repo", repo_url="rauschiccsk/also-delete-repo"
-        )
+        payload = _payload(creator.id, slug="also-delete-repo", repo_url="rauschiccsk/also-delete-repo")
         created = router_client.post("/api/v1/projects", json=payload).json()
-        resp = router_client.delete(
-            f"/api/v1/projects/{created['id']}?delete_github=true"
-        )
+        resp = router_client.delete(f"/api/v1/projects/{created['id']}?delete_github=true")
 
         assert resp.status_code == 204
         assert github_delete_calls == ["rauschiccsk/also-delete-repo"]
 
-    def test_delete_github_failure_does_not_block_response(
-        self, router_client, creator, tmp_path, monkeypatch
-    ):
+    def test_delete_github_failure_does_not_block_response(self, router_client, creator, tmp_path, monkeypatch):
         """If the GitHub delete fails, the endpoint still returns 204 — DB is gone."""
 
         def _raise_runtime(repo, **kwargs):
             raise RuntimeError("simulated GitHub outage")
 
-        monkeypatch.setattr(
-            "backend.services.github_validation.delete_github_repo", _raise_runtime
-        )
+        monkeypatch.setattr("backend.services.github_validation.delete_github_repo", _raise_runtime)
 
-        payload = _payload(
-            creator.id, slug="gh-del-fail", repo_url="rauschiccsk/gh-del-fail"
-        )
+        payload = _payload(creator.id, slug="gh-del-fail", repo_url="rauschiccsk/gh-del-fail")
         created = router_client.post("/api/v1/projects", json=payload).json()
-        resp = router_client.delete(
-            f"/api/v1/projects/{created['id']}?delete_github=true"
-        )
+        resp = router_client.delete(f"/api/v1/projects/{created['id']}?delete_github=true")
 
         # Project and KB gone; only the repo is left stranded.
         assert resp.status_code == 204
         assert router_client.get(f"/api/v1/projects/{created['id']}").status_code == 404
 
-    def test_create_github_value_error_returns_422(
-        self, db_session, creator, tmp_path, monkeypatch
-    ):
+    def test_create_github_value_error_returns_422(self, db_session, creator, tmp_path, monkeypatch):
         """A ValueError from create_github_repo (unknown org) → 422."""
         from backend.api.dependencies import get_knowledge_base_writer
         from backend.services.knowledge_base_writer import KnowledgeBaseWriter
@@ -597,9 +549,7 @@ class TestProjectRouter:
         def _raise_value(repo, **kwargs):
             raise ValueError("GitHub organisation 'nowhere' not found")
 
-        monkeypatch.setattr(
-            "backend.services.github_validation.create_github_repo", _raise_value
-        )
+        monkeypatch.setattr("backend.services.github_validation.create_github_repo", _raise_value)
 
         app = FastAPI()
         app.include_router(projects_router, prefix="/api/v1/projects")
@@ -614,19 +564,14 @@ class TestProjectRouter:
         app.dependency_overrides[get_knowledge_base_writer] = _override_kb_writer
 
         with TestClient(app) as client:
-            payload = _payload(
-                creator.id, slug="gh-no-org", repo_url="nowhere/repo"
-            )
+            payload = _payload(creator.id, slug="gh-no-org", repo_url="nowhere/repo")
             resp = client.post("/api/v1/projects", json=payload)
 
         app.dependency_overrides.clear()
 
         assert resp.status_code == 422
         # No DB row.
-        assert (
-            db_session.execute(sa_select_project_by_slug("gh-no-org")).scalar_one_or_none()
-            is None
-        )
+        assert db_session.execute(sa_select_project_by_slug("gh-no-org")).scalar_one_or_none() is None
 
 
 def sa_select_project_by_slug(slug: str):

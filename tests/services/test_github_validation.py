@@ -166,9 +166,7 @@ class TestCreateGithubRepo:
 
     @patch("backend.services.github_validation.httpx.post")
     @patch("backend.services.github_validation.httpx.get")
-    def test_successful_create_org(
-        self, mock_get: MagicMock, mock_post: MagicMock
-    ) -> None:
+    def test_successful_create_org(self, mock_get: MagicMock, mock_post: MagicMock) -> None:
         mock_get.side_effect = _mock_get_factory(owner_type="Organization")
         post_resp = MagicMock()
         post_resp.status_code = 201
@@ -191,9 +189,7 @@ class TestCreateGithubRepo:
 
     @patch("backend.services.github_validation.httpx.post")
     @patch("backend.services.github_validation.httpx.get")
-    def test_successful_create_user_when_token_matches(
-        self, mock_get: MagicMock, mock_post: MagicMock
-    ) -> None:
+    def test_successful_create_user_when_token_matches(self, mock_get: MagicMock, mock_post: MagicMock) -> None:
         """Owner is a User account that matches the token owner → /user/repos."""
         mock_get.side_effect = _mock_get_factory(
             owner_type="User",
@@ -217,9 +213,7 @@ class TestCreateGithubRepo:
 
     @patch("backend.services.github_validation.httpx.post")
     @patch("backend.services.github_validation.httpx.get")
-    def test_user_owner_token_mismatch_raises_value_error(
-        self, mock_get: MagicMock, mock_post: MagicMock
-    ) -> None:
+    def test_user_owner_token_mismatch_raises_value_error(self, mock_get: MagicMock, mock_post: MagicMock) -> None:
         """Owner is a User but the token belongs to someone else → ValueError."""
         mock_get.side_effect = _mock_get_factory(
             owner_type="User",
@@ -237,9 +231,7 @@ class TestCreateGithubRepo:
 
     @patch("backend.services.github_validation.httpx.post")
     @patch("backend.services.github_validation.httpx.get")
-    def test_owner_not_found_raises_value_error(
-        self, mock_get: MagicMock, mock_post: MagicMock
-    ) -> None:
+    def test_owner_not_found_raises_value_error(self, mock_get: MagicMock, mock_post: MagicMock) -> None:
         mock_get.side_effect = _mock_get_factory(owner_404=True)
 
         with patch("backend.services.github_validation.settings") as mock_settings:
@@ -252,16 +244,12 @@ class TestCreateGithubRepo:
 
     @patch("backend.services.github_validation.httpx.post")
     @patch("backend.services.github_validation.httpx.get")
-    def test_already_exists_returns_false(
-        self, mock_get: MagicMock, mock_post: MagicMock
-    ) -> None:
+    def test_already_exists_returns_false(self, mock_get: MagicMock, mock_post: MagicMock) -> None:
         """422 with 'already exists' is treated as success (re-use)."""
         mock_get.side_effect = _mock_get_factory(owner_type="Organization")
         post_resp = MagicMock()
         post_resp.status_code = 422
-        post_resp.json.return_value = {
-            "errors": [{"message": "name already exists on this account"}]
-        }
+        post_resp.json.return_value = {"errors": [{"message": "name already exists on this account"}]}
         mock_post.return_value = post_resp
 
         with patch("backend.services.github_validation.settings") as mock_settings:
@@ -273,9 +261,7 @@ class TestCreateGithubRepo:
 
     @patch("backend.services.github_validation.httpx.post")
     @patch("backend.services.github_validation.httpx.get")
-    def test_422_without_already_exists_raises_runtime(
-        self, mock_get: MagicMock, mock_post: MagicMock
-    ) -> None:
+    def test_422_without_already_exists_raises_runtime(self, mock_get: MagicMock, mock_post: MagicMock) -> None:
         """Any other 422 payload is a genuine validation error."""
         mock_get.side_effect = _mock_get_factory(owner_type="Organization")
         post_resp = MagicMock()
@@ -292,9 +278,7 @@ class TestCreateGithubRepo:
 
     @patch("backend.services.github_validation.httpx.post")
     @patch("backend.services.github_validation.httpx.get")
-    def test_401_raises_runtime_token_error(
-        self, mock_get: MagicMock, mock_post: MagicMock
-    ) -> None:
+    def test_401_raises_runtime_token_error(self, mock_get: MagicMock, mock_post: MagicMock) -> None:
         mock_get.side_effect = _mock_get_factory(owner_type="Organization")
         post_resp = MagicMock()
         post_resp.status_code = 401
@@ -309,9 +293,7 @@ class TestCreateGithubRepo:
 
     @patch("backend.services.github_validation.httpx.post")
     @patch("backend.services.github_validation.httpx.get")
-    def test_403_raises_runtime_token_error(
-        self, mock_get: MagicMock, mock_post: MagicMock
-    ) -> None:
+    def test_403_raises_runtime_token_error(self, mock_get: MagicMock, mock_post: MagicMock) -> None:
         mock_get.side_effect = _mock_get_factory(owner_type="Organization")
         post_resp = MagicMock()
         post_resp.status_code = 403
@@ -340,9 +322,7 @@ class TestCreateGithubRepo:
 
     @patch("backend.services.github_validation.httpx.post")
     @patch("backend.services.github_validation.httpx.get")
-    def test_description_and_private_false_forwarded(
-        self, mock_get: MagicMock, mock_post: MagicMock
-    ) -> None:
+    def test_description_and_private_false_forwarded(self, mock_get: MagicMock, mock_post: MagicMock) -> None:
         mock_get.side_effect = _mock_get_factory(owner_type="Organization")
         post_resp = MagicMock()
         post_resp.status_code = 201

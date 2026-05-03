@@ -249,9 +249,7 @@ def _get_reserved_ports(db: Session) -> set[int]:
     return blocked
 
 
-def suggest_next_port_block(
-    db: Session, block_size: int | None = None
-) -> int:
+def suggest_next_port_block(db: Session, block_size: int | None = None) -> int:
     """Return the base port of the first free ``block_size``-port block.
 
     A block is considered free when **none** of its ``block_size``
@@ -301,7 +299,4 @@ def suggest_next_port_block(
         if blocked.isdisjoint(range(base, base + block_size)):
             return base
 
-    raise ValueError(
-        f"No free {block_size}-port block in range "
-        f"{range_min}–{range_max}."
-    )
+    raise ValueError(f"No free {block_size}-port block in range {range_min}–{range_max}.")

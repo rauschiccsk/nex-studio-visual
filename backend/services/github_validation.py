@@ -113,8 +113,7 @@ def _resolve_repo_endpoint(owner: str, timeout: float) -> str:
         raise ValueError(f"GitHub account '{owner}' not found. Check the github_org setting.")
     if probe.status_code != 200:
         raise RuntimeError(
-            f"GitHub API returned unexpected status {probe.status_code} "
-            f"while probing account '{owner}': {probe.text}"
+            f"GitHub API returned unexpected status {probe.status_code} while probing account '{owner}': {probe.text}"
         )
     account_type = probe.json().get("type")
 
@@ -132,8 +131,7 @@ def _resolve_repo_endpoint(owner: str, timeout: float) -> str:
         )
         if who_resp.status_code != 200:
             raise RuntimeError(
-                f"GitHub API returned {who_resp.status_code} while identifying "
-                f"the token owner: {who_resp.text}"
+                f"GitHub API returned {who_resp.status_code} while identifying the token owner: {who_resp.text}"
             )
         token_login = who_resp.json().get("login")
         if token_login != owner:
@@ -144,10 +142,7 @@ def _resolve_repo_endpoint(owner: str, timeout: float) -> str:
             )
         return f"{GITHUB_API_BASE}/user/repos"
 
-    raise RuntimeError(
-        f"GitHub account '{owner}' has unexpected type {account_type!r}; "
-        "cannot decide create endpoint."
-    )
+    raise RuntimeError(f"GitHub account '{owner}' has unexpected type {account_type!r}; cannot decide create endpoint.")
 
 
 def create_github_repo(
@@ -205,8 +200,7 @@ def create_github_repo(
 
     if not settings.github_token:
         raise RuntimeError(
-            "Cannot create GitHub repository: no github_token configured. "
-            "Set GITHUB_TOKEN in the backend environment."
+            "Cannot create GitHub repository: no github_token configured. Set GITHUB_TOKEN in the backend environment."
         )
 
     url = _resolve_repo_endpoint(owner, timeout=timeout)
@@ -223,9 +217,7 @@ def create_github_repo(
         "auto_init": True,
     }
 
-    response = httpx.post(
-        url, headers=_github_headers(), json=body, timeout=timeout
-    )
+    response = httpx.post(url, headers=_github_headers(), json=body, timeout=timeout)
 
     if response.status_code == 201:
         logger.info("Created GitHub repository %s", repo)
@@ -241,16 +233,12 @@ def create_github_repo(
             payload = {}
         errors = payload.get("errors") or []
         already_exists = any(
-            isinstance(e, dict)
-            and "already exists" in str(e.get("message", "")).lower()
-            for e in errors
+            isinstance(e, dict) and "already exists" in str(e.get("message", "")).lower() for e in errors
         )
         if already_exists:
             logger.info("GitHub repository %s already exists — reusing", repo)
             return False
-        raise RuntimeError(
-            f"GitHub API rejected repository creation for '{repo}' (422): {response.text}"
-        )
+        raise RuntimeError(f"GitHub API rejected repository creation for '{repo}' (422): {response.text}")
 
     if response.status_code in (401, 403):
         raise RuntimeError(
@@ -296,9 +284,7 @@ def delete_github_repo(repo: str, *, timeout: float = _DEFAULT_GITHUB_API_TIMEOU
         raise ValueError(f"Invalid repository format '{repo}'. Owner and repo name must not be empty.")
 
     if not settings.github_token:
-        raise RuntimeError(
-            "Cannot delete GitHub repository: no github_token configured."
-        )
+        raise RuntimeError("Cannot delete GitHub repository: no github_token configured.")
 
     url = f"{GITHUB_API_BASE}/repos/{owner}/{name}"
     response = httpx.delete(url, headers=_github_headers(), timeout=timeout)

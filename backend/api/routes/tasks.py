@@ -106,9 +106,7 @@ def _task_context(db: Session, task_id: UUID) -> tuple[Task, Feat, Project] | No
     return row[0], row[1], row[2]
 
 
-def _build_task_completion_data(
-    db: Session, task: Task, feat: Feat
-) -> TaskCompletionData:
+def _build_task_completion_data(db: Session, task: Task, feat: Feat) -> TaskCompletionData:
     """Assemble the ``TaskCompletionData`` payload for a just-completed task.
 
     Pulls the most recent successful ``ExecutionLog`` for the task to
@@ -300,11 +298,7 @@ def update_task(
     try:
         task = task_service.update(db, task_id, payload)
 
-        if (
-            ctx is not None
-            and previous_status != "done"
-            and task.status == "done"
-        ):
+        if ctx is not None and previous_status != "done" and task.status == "done":
             _, feat, project = ctx
             data = _build_task_completion_data(db, task, feat)
             svc = LiveDocumentService(project.slug, writer=kb_writer)

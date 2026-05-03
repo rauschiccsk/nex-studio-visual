@@ -42,15 +42,13 @@ class SystemSettingRead(BaseModel):
     updated_by_username: Optional[str] = Field(
         default=None,
         description=(
-            "Username of the user who last edited — resolved via join. "
-            "NULL when the value is a service-layer default."
+            "Username of the user who last edited — resolved via join. NULL when the value is a service-layer default."
         ),
     )
     is_default: bool = Field(
         default=False,
         description=(
-            "True when the value is the service-layer default — no "
-            "row exists in the system_settings table yet."
+            "True when the value is the service-layer default — no row exists in the system_settings table yet."
         ),
     )
 

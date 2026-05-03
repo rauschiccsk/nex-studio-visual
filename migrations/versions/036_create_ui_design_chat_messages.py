@@ -33,9 +33,7 @@ def upgrade() -> None:
             server_default=sa.text("now()"),
             nullable=False,
         ),
-        sa.ForeignKeyConstraint(
-            ["ui_design_id"], ["ui_designs.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["ui_design_id"], ["ui_designs.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.CheckConstraint(
             "role IN ('user', 'assistant')",

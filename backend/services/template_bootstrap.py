@@ -77,9 +77,7 @@ def _port_base_from_backend(backend_port: int | None) -> int | None:
 # Returns None if the URL doesn't match, in which case we fall back to
 # a sensible default (``rauschiccsk/<slug>``) — init.sh stores it as
 # metadata only, so an approximation is acceptable for bootstrap.
-_GH_URL_PATTERN = re.compile(
-    r"https?://github\.com/([a-zA-Z0-9_-]+)/([a-zA-Z0-9_-]+?)(?:\.git)?/?$"
-)
+_GH_URL_PATTERN = re.compile(r"https?://github\.com/([a-zA-Z0-9_-]+)/([a-zA-Z0-9_-]+?)(?:\.git)?/?$")
 
 
 def _repo_from_url(repo_url: str | None, slug: str) -> str:
@@ -126,9 +124,7 @@ def invoke_init_script(db: Session, project: Project) -> BootstrapResult:
 
     script = Path(init_script_path)
     if not script.is_file():
-        raise TemplateBootstrapError(
-            f"template_init_script_path points at a non-existent file: {init_script_path}"
-        )
+        raise TemplateBootstrapError(f"template_init_script_path points at a non-existent file: {init_script_path}")
 
     if not project.source_path:
         raise TemplateBootstrapError(
@@ -148,21 +144,27 @@ def invoke_init_script(db: Session, project: Project) -> BootstrapResult:
 
     args = [
         str(script),
-        "--name", project.name,
-        "--slug", project.slug,
-        "--description", project.description or "",
-        "--port-base", str(port_base),
-        "--repo", repo,
-        "--variant", "general",  # B1 decision (2026-05-03) — UI doesn't expose variant yet
-        "--target", project.source_path,
+        "--name",
+        project.name,
+        "--slug",
+        project.slug,
+        "--description",
+        project.description or "",
+        "--port-base",
+        str(port_base),
+        "--repo",
+        repo,
+        "--variant",
+        "general",  # B1 decision (2026-05-03) — UI doesn't expose variant yet
+        "--target",
+        project.source_path,
         "--init-target",  # create the target dir if it doesn't exist
     ]
 
     timeout = system_setting_service.get_int(db, "template_init_timeout_seconds")
 
     logger.info(
-        "Invoking template init.sh for project %s (slug=%s, target=%s, "
-        "port-base=%d, repo=%s, timeout=%ds)",
+        "Invoking template init.sh for project %s (slug=%s, target=%s, port-base=%d, repo=%s, timeout=%ds)",
         project.id,
         project.slug,
         project.source_path,
@@ -191,12 +193,8 @@ def invoke_init_script(db: Session, project: Project) -> BootstrapResult:
         ) from exc
     except OSError as exc:
         # Permission, file-system, executable-bit, etc.
-        logger.error(
-            "Template init.sh OSError for slug=%s: %s", project.slug, exc
-        )
-        raise TemplateBootstrapError(
-            f"Template bootstrap OS error: {exc}"
-        ) from exc
+        logger.error("Template init.sh OSError for slug=%s: %s", project.slug, exc)
+        raise TemplateBootstrapError(f"Template bootstrap OS error: {exc}") from exc
 
     if result.returncode != 0:
         # Log full stderr for triage; expose trimmed message to caller.
@@ -210,8 +208,7 @@ def invoke_init_script(db: Session, project: Project) -> BootstrapResult:
         # Trim stderr to the most relevant tail (init.sh errors print at end).
         stderr_tail = "\n".join(result.stderr.strip().splitlines()[-10:])
         raise TemplateBootstrapError(
-            f"Template bootstrap failed (exit {result.returncode}): "
-            f"{stderr_tail or '<no stderr>'}"
+            f"Template bootstrap failed (exit {result.returncode}): {stderr_tail or '<no stderr>'}"
         )
 
     stdout_tail = "\n".join(result.stdout.strip().splitlines()[-50:])

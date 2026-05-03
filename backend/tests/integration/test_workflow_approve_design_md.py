@@ -200,7 +200,7 @@ def dob_module(db_session, nex_horizont) -> ProjectModule:
     """
     module = ProjectModule(
         project_id=nex_horizont.id,
-        code = "dob",
+        code="dob",
         name="Dodávateľské objednávky",
         category="Nákup",
         status="in_design",
@@ -620,7 +620,7 @@ class TestApproveDesignMdEdgeCases:
         # same project that has not yet completed.
         gsc = ProjectModule(
             project_id=nex_horizont.id,
-            code = "gsc",
+            code="gsc",
             name="Globálne skladové karty",
             category="Sklad",
             status="in_design",

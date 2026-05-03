@@ -56,9 +56,7 @@ from backend.config.settings import settings
 logging.getLogger("backend").setLevel(logging.INFO)
 if not logging.getLogger("backend").hasHandlers():
     _handler = logging.StreamHandler(sys.stderr)
-    _handler.setFormatter(
-        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-    )
+    _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     logging.getLogger("backend").addHandler(_handler)
     logging.getLogger("backend").propagate = False
 

@@ -408,9 +408,7 @@ class TestFeatRouter:
 
     # ------------------------------------------------------------- live docs
 
-    def test_patch_to_done_appends_phase_summary_and_status(
-        self, router_client, epic, project, tmp_path
-    ):
+    def test_patch_to_done_appends_phase_summary_and_status(self, router_client, epic, project, tmp_path):
         """Transition to done writes HISTORY phase summary and refreshes STATUS."""
         created = router_client.post(
             "/api/v1/feats",
@@ -443,9 +441,7 @@ class TestFeatRouter:
         # fixture derives it from uuid4) so match on the feat segment only.
         assert f"### Feat {epic.number}.1: Foundation — DONE" in status_md
 
-    def test_patch_to_done_counts_tasks_in_summary(
-        self, db_session, router_client, epic, project, tmp_path
-    ):
+    def test_patch_to_done_counts_tasks_in_summary(self, db_session, router_client, epic, project, tmp_path):
         """Phase summary's Tasks count comes from COUNT(tasks WHERE feat_id=...)."""
         created = router_client.post(
             "/api/v1/feats",
@@ -457,9 +453,7 @@ class TestFeatRouter:
         from backend.db.models.tasks import Task
 
         for i in (1, 2):
-            db_session.add(
-                Task(feat_id=feat_id, number=i, title=f"T{i}", task_type="backend")
-            )
+            db_session.add(Task(feat_id=feat_id, number=i, title=f"T{i}", task_type="backend"))
         db_session.flush()
 
         router_client.patch(
@@ -467,14 +461,10 @@ class TestFeatRouter:
             json={"status": "done", "actual_minutes": 30},
         )
 
-        history = (tmp_path / "projects" / project.slug / "HISTORY.md").read_text(
-            encoding="utf-8"
-        )
+        history = (tmp_path / "projects" / project.slug / "HISTORY.md").read_text(encoding="utf-8")
         assert "Tasks: 2" in history
 
-    def test_patch_to_done_with_estimated_only_uses_estimate(
-        self, router_client, epic, project, tmp_path
-    ):
+    def test_patch_to_done_with_estimated_only_uses_estimate(self, router_client, epic, project, tmp_path):
         """When actual_minutes is NULL, duration falls back to estimated_minutes."""
         created = router_client.post(
             "/api/v1/feats",
@@ -490,15 +480,11 @@ class TestFeatRouter:
             json={"status": "done"},
         )
 
-        history = (tmp_path / "projects" / project.slug / "HISTORY.md").read_text(
-            encoding="utf-8"
-        )
+        history = (tmp_path / "projects" / project.slug / "HISTORY.md").read_text(encoding="utf-8")
         # 120 minutes → 2h0m
         assert "Duration: 2h0m" in history
 
-    def test_patch_status_to_in_progress_does_not_fire_hook(
-        self, router_client, epic, project, tmp_path
-    ):
+    def test_patch_status_to_in_progress_does_not_fire_hook(self, router_client, epic, project, tmp_path):
         created = router_client.post(
             "/api/v1/feats",
             json=_payload(epic_id=epic.id),
@@ -511,9 +497,7 @@ class TestFeatRouter:
 
         assert not (tmp_path / "projects" / project.slug).exists()
 
-    def test_patch_title_only_does_not_fire_hook(
-        self, router_client, epic, project, tmp_path
-    ):
+    def test_patch_title_only_does_not_fire_hook(self, router_client, epic, project, tmp_path):
         created = router_client.post(
             "/api/v1/feats",
             json=_payload(epic_id=epic.id, title="Old"),
@@ -526,9 +510,7 @@ class TestFeatRouter:
 
         assert not (tmp_path / "projects" / project.slug).exists()
 
-    def test_patch_to_done_replayed_is_idempotent(
-        self, router_client, epic, project, tmp_path
-    ):
+    def test_patch_to_done_replayed_is_idempotent(self, router_client, epic, project, tmp_path):
         """Second PATCH to done skips the hook (previous_status already done)."""
         created = router_client.post(
             "/api/v1/feats",
@@ -544,14 +526,10 @@ class TestFeatRouter:
             json={"status": "done"},
         )
 
-        history = (tmp_path / "projects" / project.slug / "HISTORY.md").read_text(
-            encoding="utf-8"
-        )
+        history = (tmp_path / "projects" / project.slug / "HISTORY.md").read_text(encoding="utf-8")
         assert history.count("Feat 1 COMPLETE — Once done") == 1
 
-    def test_patch_rolls_back_when_kb_write_fails(
-        self, db_session, project, epic
-    ):
+    def test_patch_rolls_back_when_kb_write_fails(self, db_session, project, epic):
         """OSError on KB write → 500 + feat.status unchanged in DB."""
         from backend.api.dependencies import get_knowledge_base_writer
         from backend.db.models.tasks import Feat as _Feat
@@ -591,7 +569,5 @@ class TestFeatRouter:
         # The feat must remain in its pre-PATCH status.
         from sqlalchemy import select as _select
 
-        reloaded = db_session.execute(
-            _select(_Feat).where(_Feat.id == uuid.UUID(created["id"]))
-        ).scalar_one()
+        reloaded = db_session.execute(_select(_Feat).where(_Feat.id == uuid.UUID(created["id"]))).scalar_one()
         assert reloaded.status == "todo"

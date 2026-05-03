@@ -25,10 +25,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 _CHECK_NAME = "ck_project_modules_category"
-_CHECK_EXPR = (
-    "category IN ('Systém', 'Katalógy', 'Sklad', 'Predaj', "
-    "'Nákup', 'Účtovníctvo', 'Pokladňa')"
-)
+_CHECK_EXPR = "category IN ('Systém', 'Katalógy', 'Sklad', 'Predaj', 'Nákup', 'Účtovníctvo', 'Pokladňa')"
 
 
 def upgrade() -> None:

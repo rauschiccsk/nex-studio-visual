@@ -44,8 +44,7 @@ def search(query: str, tenant: str, limit: int) -> list[dict]:
     return [
         {
             "score": round(float(hit.score), 4),
-            "source_file": (hit.payload or {}).get("source_file")
-            or (hit.payload or {}).get("filename", ""),
+            "source_file": (hit.payload or {}).get("source_file") or (hit.payload or {}).get("filename", ""),
             "content": (hit.payload or {}).get("content", ""),
         }
         for hit in response.points

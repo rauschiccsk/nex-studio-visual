@@ -100,8 +100,7 @@ class ProjectModule(Base, UUIDMixin, TimestampMixin):
             name="ck_project_modules_status",
         ),
         CheckConstraint(
-            "category IN ('Systém', 'Katalógy', 'Sklad', 'Predaj', "
-            "'Nákup', 'Účtovníctvo', 'Pokladňa')",
+            "category IN ('Systém', 'Katalógy', 'Sklad', 'Predaj', 'Nákup', 'Účtovníctvo', 'Pokladňa')",
             name="ck_project_modules_category",
         ),
         # Kebab-case, matches backend.schemas.project_module.MODULE_CODE_PATTERN

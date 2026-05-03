@@ -72,21 +72,15 @@ class TestProfessionalSpecChatMessageService:
 
         service.create(
             db_session,
-            ProfessionalSpecChatMessageCreate(
-                professional_spec_id=spec.id, role="user", content="first"
-            ),
+            ProfessionalSpecChatMessageCreate(professional_spec_id=spec.id, role="user", content="first"),
         )
         service.create(
             db_session,
-            ProfessionalSpecChatMessageCreate(
-                professional_spec_id=spec.id, role="assistant", content="second"
-            ),
+            ProfessionalSpecChatMessageCreate(professional_spec_id=spec.id, role="assistant", content="second"),
         )
         service.create(
             db_session,
-            ProfessionalSpecChatMessageCreate(
-                professional_spec_id=spec.id, role="user", content="third"
-            ),
+            ProfessionalSpecChatMessageCreate(professional_spec_id=spec.id, role="user", content="third"),
         )
 
         rows = service.list_by_spec(db_session, spec.id)
@@ -100,15 +94,11 @@ class TestProfessionalSpecChatMessageService:
 
         service.create(
             db_session,
-            ProfessionalSpecChatMessageCreate(
-                professional_spec_id=spec_a.id, role="user", content="a1"
-            ),
+            ProfessionalSpecChatMessageCreate(professional_spec_id=spec_a.id, role="user", content="a1"),
         )
         service.create(
             db_session,
-            ProfessionalSpecChatMessageCreate(
-                professional_spec_id=spec_b.id, role="user", content="b1"
-            ),
+            ProfessionalSpecChatMessageCreate(professional_spec_id=spec_b.id, role="user", content="b1"),
         )
 
         rows_a = service.list_by_spec(db_session, spec_a.id)
@@ -121,9 +111,7 @@ class TestProfessionalSpecChatMessageService:
         spec = _seed_spec(db_session)
         service.create(
             db_session,
-            ProfessionalSpecChatMessageCreate(
-                professional_spec_id=spec.id, role="user", content="orphan-me"
-            ),
+            ProfessionalSpecChatMessageCreate(professional_spec_id=spec.id, role="user", content="orphan-me"),
         )
         db_session.flush()
 
@@ -132,11 +120,10 @@ class TestProfessionalSpecChatMessageService:
 
         # No rows should remain for the deleted spec id.
         from sqlalchemy import select
+
         remaining = (
             db_session.execute(
-                select(ProfessionalSpecChatMessage).where(
-                    ProfessionalSpecChatMessage.professional_spec_id == spec.id
-                )
+                select(ProfessionalSpecChatMessage).where(ProfessionalSpecChatMessage.professional_spec_id == spec.id)
             )
             .scalars()
             .all()

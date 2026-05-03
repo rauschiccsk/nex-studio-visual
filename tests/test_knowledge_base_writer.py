@@ -210,11 +210,11 @@ def test_accept_valid_slug_with_hyphens_and_digits(writer: KnowledgeBaseWriter) 
     "bad_filename",
     [
         "RANDOM.md",
-        "status.md",            # case-sensitive — only STATUS.md is allowed
-        "STATUS",               # no extension
-        "STATUS.MD",            # wrong case
-        "../STATUS.md",         # traversal attempt
-        "subdir/STATUS.md",     # nested path
+        "status.md",  # case-sensitive — only STATUS.md is allowed
+        "STATUS",  # no extension
+        "STATUS.MD",  # wrong case
+        "../STATUS.md",  # traversal attempt
+        "subdir/STATUS.md",  # nested path
         "",
     ],
 )
@@ -276,9 +276,7 @@ def test_delete_project_rejects_invalid_slug(writer: KnowledgeBaseWriter) -> Non
         writer.delete_project("../traversal")
 
 
-def test_delete_project_leaves_other_projects_intact(
-    writer: KnowledgeBaseWriter, tmp_path: Path
-) -> None:
+def test_delete_project_leaves_other_projects_intact(writer: KnowledgeBaseWriter, tmp_path: Path) -> None:
     writer.save("keep-me", "STATUS.md", "content")
     writer.save("remove-me", "STATUS.md", "content")
 
