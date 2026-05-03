@@ -272,8 +272,8 @@ def prior_modules_with_epics(
     for number, (code, name, category) in enumerate(
         [
             ("gsc", "Globálne skladové karty", "Sklad"),
-            ("DOB", "Dodávateľské objednávky", "Nákup"),
-            ("PAB", "Katalóg partnerov", "Katalógy"),
+            ("dob", "Dodávateľské objednávky", "Nákup"),
+            ("pab", "Katalóg partnerov", "Katalógy"),
         ],
         start=1,
     ):

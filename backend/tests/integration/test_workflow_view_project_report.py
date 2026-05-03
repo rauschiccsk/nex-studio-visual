@@ -240,7 +240,7 @@ GSC_FEATS_DONE = 3
 STK_FEATS_TOTAL = 5
 STK_FEATS_DONE = 0
 EXPECTED_MODULE_PROGRESS = {
-    "PAB": (PAB_FEATS_DONE, PAB_FEATS_TOTAL, 100),
+    "pab": (PAB_FEATS_DONE, PAB_FEATS_TOTAL, 100),
     "gsc": (GSC_FEATS_DONE, GSC_FEATS_TOTAL, 60),
     "stk": (STK_FEATS_DONE, STK_FEATS_TOTAL, 0),
 }
@@ -344,7 +344,7 @@ def modules(db_session, nex_horizont) -> dict[str, ProjectModule]:
     """
     rows: dict[str, ProjectModule] = {}
     for code, name, category, status in (
-        ("PAB", "Katalóg partnerov", "Katalógy", "done"),
+        ("pab", "Katalóg partnerov", "Katalógy", "done"),
         ("gsc", "Globálne skladové karty", "Sklad", "in_development"),
         ("stk", "Skladové karty zásob", "Sklad", "planned"),
     ):
@@ -372,7 +372,7 @@ def epics_with_feats(db_session, nex_horizont, modules) -> dict[str, Epic]:
     GSC gets epic 2, STK gets epic 3.
     """
     epics: dict[str, Epic] = {}
-    for idx, code in enumerate(("PAB", "gsc", "stk"), start=1):
+    for idx, code in enumerate(("pab", "gsc", "stk"), start=1):
         done_count = EXPECTED_MODULE_PROGRESS[code][0]
         total_count = EXPECTED_MODULE_PROGRESS[code][1]
         epic = Epic(
@@ -425,7 +425,7 @@ def completed_delegations(
     """
     delegations: list[Delegation] = []
     pab_feats = (
-        db_session.query(Feat).filter(Feat.epic_id == epics_with_feats["PAB"].id).order_by(Feat.number.asc()).all()
+        db_session.query(Feat).filter(Feat.epic_id == epics_with_feats["pab"].id).order_by(Feat.number.asc()).all()
     )
     gsc_feats = (
         db_session.query(Feat).filter(Feat.epic_id == epics_with_feats["gsc"].id).order_by(Feat.number.asc()).all()
@@ -481,7 +481,7 @@ def out_of_window_delegation(db_session, epics_with_feats) -> Delegation:
     Seeding it lets the happy-path test prove the client-side window
     would exclude it correctly.
     """
-    pab_epic = epics_with_feats["PAB"]
+    pab_epic = epics_with_feats["pab"]
     # Pick the first PAB feat — any feat works, we just need a valid
     # FK. The "extra" delegation is not counted toward the PAB 100%
     # completion (that's a feat-status observable, not a delegation
@@ -696,10 +696,10 @@ class TestViewProjectReportHappyPath:
         # one of the report's sources — it surfaces PAB / GSC / STK.
         assert modules_body["total"] == 3
         module_rows_by_code = {row["code"]: row for row in modules_body["items"]}
-        assert set(module_rows_by_code) == {"PAB", "gsc", "stk"}
+        assert set(module_rows_by_code) == {"pab", "gsc", "stk"}
         # Module status is the top-level signal the ``ModuleProgressGrid``
         # colour-codes against.
-        assert module_rows_by_code["PAB"]["status"] == "done"
+        assert module_rows_by_code["pab"]["status"] == "done"
         assert module_rows_by_code["gsc"]["status"] == "in_development"
         assert module_rows_by_code["stk"]["status"] == "planned"
 
@@ -829,7 +829,7 @@ class TestViewProjectReportHappyPath:
 
         # §3.19 step 4: "PAB: 100% | GSC: 60% | STK: 0%".
         assert progress_by_code == EXPECTED_MODULE_PROGRESS
-        assert progress_by_code["PAB"][2] == 100
+        assert progress_by_code["pab"][2] == 100
         assert progress_by_code["gsc"][2] == 60
         assert progress_by_code["stk"][2] == 0
 
