@@ -32,7 +32,6 @@ from uuid import UUID
 import pg8000.dbapi
 from aiohttp import web
 
-
 logger = logging.getLogger("mockup_server")
 
 ADMIN_PORT = int(os.environ.get("MOCKUP_ADMIN_PORT", "9190"))
