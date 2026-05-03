@@ -13,7 +13,7 @@
 - **Nadriadený**: Zoltán Rausch (Director/Ri) — komunikuje priamo cez Claude Code CLI terminál
 - **Vrstva CTL**: Neexistuje — CC agent komunikuje a implementuje priamo
 - **Model**: Claude Opus 4.7 (Claude MAX)
-- **Prostredie**: Claude Code CLI na ANDROS Ubuntu (100.107.134.104), projekt `/opt/nex-studio-src`
+- **Prostredie**: Claude Code CLI na ANDROS Ubuntu (100.107.134.104), projekt `/opt/projects/nex-studio`
 
 ### Princíp fungovania
 
@@ -31,12 +31,12 @@ Zoltán schváli alebo upraví. Potom implementuješ priamo.
 ## 2. PRE-TASK ANALÝZA (POVINNÁ)
 
 **Pred každým návrhom plánu** vykonaj tieto kroky. Nevynechaj žiadny.
-Pracovný adresár je vždy `/opt/nex-studio-src`. CC používa Read/Bash tools priamo v tejto session.
+Pracovný adresár je vždy `/opt/projects/nex-studio`. CC používa Read/Bash tools priamo v tejto session.
 
 ### 2.1 Session state a git kontext
 ```bash
 # Session state — posledný stav (read tool, nie cat)
-Read /opt/nex-studio-src/.nex-session-state.md
+Read /opt/projects/nex-studio/.nex-session-state.md
 
 # Posledné commity — čo sa naposledy robilo
 git log --oneline -10
@@ -68,31 +68,31 @@ Pre hľadanie relevantnej špecifikácie použij Glob/Grep na `/home/icc/knowled
 **Frontend (React + TypeScript + Vite):**
 ```bash
 # Štruktúra relevantnej časti frontendu
-find /opt/nex-studio-src/frontend/src -type f \( -name "*.ts" -o -name "*.tsx" \) | head -30
+find /opt/projects/nex-studio/frontend/src -type f \( -name "*.ts" -o -name "*.tsx" \) | head -30
 
 # TypeScript type-check
-cd /opt/nex-studio-src/frontend && npm run type-check 2>&1 | tail -20
+cd /opt/projects/nex-studio/frontend && npm run type-check 2>&1 | tail -20
 
 # Testy (vitest)
-cd /opt/nex-studio-src/frontend && npm test -- --run 2>&1 | tail -20
+cd /opt/projects/nex-studio/frontend && npm test -- --run 2>&1 | tail -20
 
 # Existujúce TODO/FIXME vo frontende
-grep -rn "TODO\|FIXME\|HACK" /opt/nex-studio-src/frontend/src/<relevant-path>/ 2>/dev/null
+grep -rn "TODO\|FIXME\|HACK" /opt/projects/nex-studio/frontend/src/<relevant-path>/ 2>/dev/null
 ```
 
 **Backend (Python + FastAPI — Poetry):**
 ```bash
 # Štruktúra relevantnej časti backendu
-find /opt/nex-studio-src/backend -type f -name "*.py" | head -30
+find /opt/projects/nex-studio/backend -type f -name "*.py" | head -30
 
 # Testy (pytest cez Poetry — spúšťaj z root, nie z backend/)
-cd /opt/nex-studio-src && poetry run pytest -q 2>&1 | tail -20
+cd /opt/projects/nex-studio && poetry run pytest -q 2>&1 | tail -20
 
 # Lint (ruff cez Poetry)
-cd /opt/nex-studio-src && poetry run ruff check backend 2>&1 | tail -10
+cd /opt/projects/nex-studio && poetry run ruff check backend 2>&1 | tail -10
 
 # Existujúce TODO/FIXME v backende
-grep -rn "TODO\|FIXME\|HACK" /opt/nex-studio-src/backend/<relevant-path>/ 2>/dev/null
+grep -rn "TODO\|FIXME\|HACK" /opt/projects/nex-studio/backend/<relevant-path>/ 2>/dev/null
 ```
 
 ### 2.4 Deployment kontext
@@ -158,7 +158,7 @@ Keď Zoltán zadá zámer, odpovedz v tomto formáte:
 Po každej dokončenej úlohe aktualizuj session state a veď session log.
 NEX Studio používa dva mechanizmy (viď Standing Rules — Session State and Logging):
 
-1. **`.nex-session-state.md`** (v `/opt/nex-studio-src`, nie v git) — aktuálny stav
+1. **`.nex-session-state.md`** (v `/opt/projects/nex-studio`, nie v git) — aktuálny stav
    pre ďalšiu session. Prepíš/aktualizuj po každej väčšej zmene.
 
 2. **`docs/session-logs/YYYY-MM-DD-NNN.md`** (v git) — štruktúrovaný log, audit trail.
@@ -209,19 +209,19 @@ git diff --stat
 git diff <kľúčové-súbory>
 
 # 2. TypeScript type-check (frontend)
-cd /opt/nex-studio-src/frontend && npm run type-check 2>&1 | tail -20
+cd /opt/projects/nex-studio/frontend && npm run type-check 2>&1 | tail -20
 
 # 3. Testy (vitest, frontend)
-cd /opt/nex-studio-src/frontend && npm test -- --run 2>&1 | tail -20
+cd /opt/projects/nex-studio/frontend && npm test -- --run 2>&1 | tail -20
 
 # 4. Lint (frontend)
-cd /opt/nex-studio-src/frontend && npm run lint 2>&1 | tail -20
+cd /opt/projects/nex-studio/frontend && npm run lint 2>&1 | tail -20
 
 # 5. Backend testy (pytest cez Poetry — spúšťaj z root)
-cd /opt/nex-studio-src && poetry run pytest -q 2>&1 | tail -20
+cd /opt/projects/nex-studio && poetry run pytest -q 2>&1 | tail -20
 
 # 6. Backend lint (ruff)
-cd /opt/nex-studio-src && poetry run ruff check backend 2>&1 | tail -10
+cd /opt/projects/nex-studio && poetry run ruff check backend 2>&1 | tail -10
 ```
 
 **UI zmeny** — type-check a testy overia len korektnosť kódu, nie feature correctness.
@@ -406,11 +406,11 @@ Použi Read tool na:
 - `/home/icc/knowledge/icc/LESSONS_LEARNED.md`
 - `/home/icc/knowledge/icc/PROJECT_PATTERNS.md`
 
-**1. NEX Studio session state.** Read tool na `/opt/nex-studio-src/.nex-session-state.md` (ak existuje — pri úplne novej inštalácii nie je).
+**1. NEX Studio session state.** Read tool na `/opt/projects/nex-studio/.nex-session-state.md` (ak existuje — pri úplne novej inštalácii nie je).
 
 **2. NEX Studio git kontext.**
 ```bash
-cd /opt/nex-studio-src && git status && git log --oneline -10
+cd /opt/projects/nex-studio && git status && git log --oneline -10
 ```
 
 **3. Stav lokálnych kontajnerov (ak sú relevantné).**
@@ -427,7 +427,7 @@ Výsledok zhrň Zoltánovi ako **Session Briefing** — 5-10 riadkov o tom, kde 
 ### FORBIDDEN actions (absolute, no exceptions):
 1. **NEVER read credential files** — `.env`, `*.secret`, `*.key`, vault exports, alebo akýkoľvek súbor obsahujúci heslá/tokeny/API kľúče
 2. **NEVER authenticate to NEX Command API** — `POST /api/auth/login` alebo akýkoľvek auth endpoint. CC nemá user account a NESMIE impersonovať žiadneho používateľa
-3. **NEVER use `grep` or `cat` on files known to contain credentials** — špeciálne `/opt/nex-studio-src/.env`, `/opt/nex-studio-src/backend/.env`, `/opt/nex-studio-src/frontend/.env.*` a akékoľvek KB credentials (`/home/icc/knowledge/credentials/`)
+3. **NEVER use `grep` or `cat` on files known to contain credentials** — špeciálne `/opt/projects/nex-studio/.env`, `/opt/projects/nex-studio/backend/.env`, `/opt/projects/nex-studio/frontend/.env.*` a akékoľvek KB credentials (`/home/icc/knowledge/credentials/`)
 4. **NEVER extract passwords, tokens, or secrets from any source** — environment premenné, `docker inspect`, config súbory, logy
 
 ### Knowledge Base operations:
@@ -504,7 +504,7 @@ Keď message obsahuje attached image (image_path):
 
 ### MANDATORY: Read the image
 1. ALWAYS use the Read tool on the image file path BEFORE responding about its content
-2. The image path is provided in the message — use it: `Read /opt/nex-studio-src/uploads/...`
+2. The image path is provided in the message — use it: `Read /opt/projects/nex-studio/uploads/...`
 3. ONLY describe what you actually see after reading the image
 
 ### FORBIDDEN: Fabrication
@@ -517,7 +517,7 @@ Keď message obsahuje attached image (image_path):
 - If image analysis requires action (e.g. fix a bug shown in screenshot), proceed with the fix based on what you ACTUALLY see
 
 Example correct workflow:
-1. `Read /opt/nex-studio-src/uploads/1773509750009_image.png`
+1. `Read /opt/projects/nex-studio/uploads/1773509750009_image.png`
 2. "The screenshot shows Pipeline tab with profspec stage approved, ui-design stage running (3/5 mockups generated)..."
 
 Example WRONG response:
@@ -730,7 +730,7 @@ ICC projekty (aktuálny stav):
 5. `emcenter-web` — `rauschiccsk/emcenter-web`
 6. `stenia-intrastat` — `rauschiccsk/stenia-intrastat`
 7. `rockart-web` — `rauschiccsk/rockart-web`
-8. `nex-studio` — `/opt/nex-studio-src` (local, no GitHub repo yet — §2.4)
+8. `nex-studio` — `/opt/projects/nex-studio` (local, no GitHub repo yet — §2.4)
 
 EXCLUDED: orthodox-portal, sally-qrcode-payment, genesis, icc-knowledge.
 
@@ -739,7 +739,7 @@ EXCLUDED: orthodox-portal, sally-qrcode-payment, genesis, icc-knowledge.
 # ═══════════════════════════════════════════════════════════════
 
 ## Session State File
-- Path: `/opt/nex-studio-src/.nex-session-state.md`
+- Path: `/opt/projects/nex-studio/.nex-session-state.md`
 - Čítam tento súbor na ŠTARTE každej session (load context).
 - Aktualizujem ho na KONCI každej session (current state).
 - Tento súbor je source of truth pre machine context medzi sessions.
