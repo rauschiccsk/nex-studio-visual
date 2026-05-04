@@ -674,9 +674,25 @@ Postup:
 ❌ **ZAKÁZANÉ:** "Tu sú odpovede na všetky 3 otázky: ..." — aj keď máš všetky odpovede pripravené
 ✅ **SPRÁVNE:** "Vidím 3 otázky. Začínam s #1: [diagnóza+návrh]. Po vyriešení #1 prechádzame na #2."
 
-**Výnimka:** triviálne yes/no informačné otázky, kde sa očakáva len fakt (napr. "aký je port DB?" + "aký je názov branchu?") — odpovedať možno zoznamom v jednej odpovedi.
+### Aplikácia pre plány s viacerými design rozhodnutiami
 
-**Prečo:** opakované paralelné odpovede zaplňujú kontext, miešajú diskusné vlákna a Zoltán musí ručne triediť, čo schvaľuje. Krok-za-krokom = jasná konverzácia, jeden schvaľovaný blok naraz, žiadne stratené decisions.
+Pravidlo platí ROVNAKO pre design rozhodnutia v rámci JEDNEJ úlohy. Plán s 5 fázami a 4 design otázkami **NIE JE výnimka** len preto, že ide o "jednu úlohu". Každé design rozhodnutie sa rieši samostatne.
+
+❌ **ZAKÁZANÉ:**
+> "Plán má fázy A-G. Otázky pred štartom: 1) auth role? 2) edit scope? 3) migration plan? 4) backup? Schvaľuješ en bloc?"
+
+✅ **SPRÁVNE:**
+> "Plán má fázy A-G. Najpodstatnejšie rozhodnutie pred štartom: auth role — odporúčam `ri` only. Schvaľuješ?"
+
+Po schválení / modifikácii prvého rozhodnutia → predstaviť druhé. Takto kým nie sú všetky design body vyriešené. **Mentálny test: ak by Zoltán odpovedal len "Áno", malo by to byť jednoznačné, ku ktorému rozhodnutiu sa vyjadruje. Ak nie, otázok je príliš veľa naraz.**
+
+### Mental check pred každou odpoveďou
+
+Pred odoslaním odpovede sa opýtaj: **"Obsahuje táto odpoveď viac než jednu vec, ktorá vyžaduje Zoltánovo schválenie alebo rozhodnutie?"** Ak áno → vystrihnúť všetko okrem prvej.
+
+**Výnimka:** triviálne yes/no informačné otázky, kde sa očakáva len fakt (napr. "aký je port DB?" + "aký je názov branchu?") — odpovedať možno zoznamom v jednej odpovedi. Toto NIE je výnimka pre design rozhodnutia.
+
+**Prečo:** opakované paralelné odpovede zaplňujú kontext, miešajú diskusné vlákna a Zoltán musí ručne triediť, čo schvaľuje. Krok-za-krokom = jasná konverzácia, jeden schvaľovaný blok naraz, žiadne stratené decisions. **Negatívny precedens 2026-05-04:** v credentials úlohe som po prvom doimplementovaní pravidla 2× po sebe poslal 4-6 design otázok naraz, lebo som si racionalizoval "design body jednej úlohy = jedna otázka". Práve túto medzeru nová podsekcia adresuje.
 
 ## REVIEW/CHECK PROTOCOL — INVIOLABLE
 
