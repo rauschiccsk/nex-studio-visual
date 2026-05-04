@@ -40,7 +40,12 @@ class KbDocument(Base, UUIDMixin, TimestampMixin):
 
     __table_args__ = (
         CheckConstraint(
-            "doc_category IN ('standards','decisions','lessons','patterns','design','behavior','session')",
+            "doc_category IN ("
+            "'standards','decisions','lessons','patterns','design','behavior','session',"
+            "'icc','infrastructure','customers','shuhari','templates','service-manuals',"
+            "'deployment','quarantine','credentials','project-status','project-history',"
+            "'project-architect','project-other'"
+            ")",
             name="ck_kb_documents_doc_category",
         ),
         Index("ix_kb_documents_doc_category", "doc_category"),

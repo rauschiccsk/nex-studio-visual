@@ -28,10 +28,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# Mirrors the CHECK constraint
-# ``doc_category IN ('standards','decisions','lessons','patterns','design','behavior','session')``
-# on the ``kb_documents`` table.
+# Mirrors the CHECK constraint on the ``kb_documents`` table.
+# Original 7 categories (NEX Studio pipeline artefacts) + filesystem-
+# derived categories added in migration 037 for the kb_sync seed.
 KbDocumentCategory = Literal[
+    # Original — NEX Studio pipeline / ICC-wide reference docs
     "standards",
     "decisions",
     "lessons",
@@ -39,6 +40,20 @@ KbDocumentCategory = Literal[
     "design",
     "behavior",
     "session",
+    # Added 037 — filesystem-derived categories
+    "icc",
+    "infrastructure",
+    "customers",
+    "shuhari",
+    "templates",
+    "service-manuals",
+    "deployment",
+    "quarantine",
+    "credentials",
+    "project-status",
+    "project-history",
+    "project-architect",
+    "project-other",
 ]
 
 

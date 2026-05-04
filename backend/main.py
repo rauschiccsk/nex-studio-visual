@@ -74,10 +74,40 @@ def _run_alembic_upgrade() -> None:
         raise
 
 
+def _run_kb_seed() -> None:
+    """Run KB filesystem → kb_documents seed on startup.
+
+    Idempotent — :func:`backend.services.kb_sync.seed_from_filesystem`
+    skips already-registered files. KB seed errors are logged but
+    NEVER abort startup (KB is a UX feature, not load-bearing for
+    the rest of the app).
+    """
+    try:
+        from backend.db.session import SessionLocal
+        from backend.services.kb_sync import seed_from_filesystem
+
+        with SessionLocal() as session:
+            result = seed_from_filesystem(session)
+            session.commit()
+            logger.info(
+                "KB seed: scanned=%d inserted=%d skipped=%d errors=%d",
+                result.scanned,
+                result.inserted,
+                result.skipped_existing,
+                result.errors,
+            )
+    except Exception:
+        logger.error(
+            "KB seed failed — UI will show 0 rows until next successful run",
+            exc_info=True,
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan: run migrations on startup."""
+    """Application lifespan: run migrations + KB seed on startup."""
     _run_alembic_upgrade()
+    _run_kb_seed()
     yield
 
 
