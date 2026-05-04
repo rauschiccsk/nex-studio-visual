@@ -296,9 +296,10 @@ Triggery pre NEX Studio:
 
 ### 5.3 RAG reindexácia (TODO — port z NEX Command)
 
-**Aktuálny stav:** RAG reindex funkcionalita existuje len v NEX Command a bude portovaná do
-NEX Studio (NEX Command je dočasný prototyp, bude odstránený). Do dokončenia portu spúšťa
-reindex manuálne Zoltán cez NEX Command UI.
+**Aktuálny stav:** RAG reindex funkcionalita existuje v NEX Command a bude portovaná aj
+do NEX Studio (každý dev workbench má vlastný RAG pipeline; NEX Command ostáva aktívny
+single-module dev environment). Do dokončenia portu spúšťa reindex pre NEX Studio
+manuálne Zoltán cez NEX Command UI.
 
 **Cieľový stav (po porte):**
 - CLI / skript v NEX Studio, ktorý prereaguje `/home/icc/knowledge/` → Qdrant (9130/9131) cez Ollama embeddings (9132)
@@ -358,7 +359,7 @@ Default pre generované aplikácie je rovnaký ako NEX Studio (React+TS+PWA fron
 
 ### 7.4 Čo NEX Studio nemá (vs. NEX Command dedičstvo)
 - **Žiadne čítanie `/home/icc/.github-token`** — §13 zakazuje prístup ku credentials. Keď pridáme remote repo, GitHub token prichádza cez CI secret store alebo `gh auth login` mechanizmus, nie cez priame čítanie súboru.
-- **Žiadne `/app/ssh/fleet_key`** — fleet deployment cez SSH je NEX Command-specific (dočasný prototyp, §5.3).
+- **Žiadne `/app/ssh/fleet_key`** — fleet deployment cez SSH je NEX Command-specific design (NEX Command rieši deployment cez SSH-fleet; NEX Studio má vlastný deployment model).
 
 ---
 
@@ -760,7 +761,7 @@ Cross-project architektonické rozhodnutie — viď `DECISIONS.md` v KB.
 ## Strategic
 - CI/CD is priority — automated testing and deployment pipeline (aplikuje sa keď pribudne remote repo).
 - **NEX Test is crash test for NEX Studio** — goal is NOT NEX Test but maximum NEX Studio quality. If NEX Studio bug found → STOP → fix NEX Studio → CONTINUE. Never fix NEX Test manually. (Viď aj memory `feedback_nex_studio_quality_principle.md`.)
-- **Strategic focus: NEX Studio** — dev workbench, ktorý nahradí NEX Command (dočasný prototyp, memory `project_nex_command_temporary.md`). Ostatné projekty (Payroll, Ledger, Test, komerčné) sa budú vyvíjať cez NEX Studio.
+- **Strategic focus: NEX Studio** — multi-module dev workbench pre rozsiahle projekty (orchestruje viacero modulov v jednom projekte). **NEX Command** zostáva ako predchodca NEX Studio — plne funkčný **single-module dev environment**, aktívne používaný (vývojový cyklus začína od hotových `DESIGN.md` a `BEHAVIOR.md`, pipeline generuje task plan a implementuje). NEX Studio NIE JE náhrada NEX Command — rozširuje záber o multi-module orchestráciu. Ostatné projekty (Payroll, Ledger, Test, komerčné) sa budú vyvíjať cez NEX Studio.
 
 ## RAG / Knowledge Base
 KB štruktúra, write rules a reindex pravidlá — viď §5.
@@ -768,7 +769,7 @@ KB path: `/home/icc/knowledge/` na ANDROS, tracked v `rauschiccsk/icc-knowledge`
 
 ## Approved Project List (AUTHORITATIVE)
 ICC projekty (aktuálny stav):
-1. `nex-command` — `rauschiccsk/nex-command` — **dočasný prototyp**, bude odstavený po sprevádzkovaní NEX Studio (memory `project_nex_command_temporary.md`)
+1. `nex-command` — `rauschiccsk/nex-command` — **active single-module dev environment** (predchodca NEX Studio, vývojový cyklus začína od hotových DESIGN.md a BEHAVIOR.md, ručne spravované, aktívne používané)
 2. `nex-automat` — `rauschiccsk/nex-automat`
 3. `nex-payroll` — `rauschiccsk/nex-payroll`
 4. `nex-ledger` — `rauschiccsk/nex-ledger`
