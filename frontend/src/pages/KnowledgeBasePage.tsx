@@ -15,9 +15,9 @@
  *   NEX Command had ``role`` + ``shuhari_phase``. Mapping:
  *     ``isDirector`` (NEX Command "director" role) → ``role === 'ri'``
  *     ``canWrite`` (NEX Command ``shuhari_phase !== 'shu'``) → ``role !== 'shu'``
- * * RAG endpoints (``/api/rag/stats``, ``/api/rag/search``, ``/api/rag/document``)
- *   are stubbed in M1 — wired up in M3 (RAG search milestone).
- *   The "Hľadať" button shows an info banner; vector search returns no results.
+ * * RAG endpoints (``/api/v1/rag/search``, ``/api/v1/rag/document``)
+ *   wired up in M3 — vector search shows ranked Qdrant matches in the
+ *   document list. Cross-tenant ``/stats`` panel still M8 (Audit).
  * * AuditDashboard "Quality" sub-tab is dropped in M1 — comes back in
  *   M8 (Audit/Reports milestone).
  */
@@ -54,6 +54,14 @@ interface KnowledgeDoc {
   filename: string;
   category: string;
   size_bytes: number;
+}
+
+interface SearchResult {
+  source_file: string;
+  title: string;
+  category: string;
+  snippet: string;
+  score: number;
 }
 
 // --- Helpers ---
@@ -122,8 +130,9 @@ export default function KnowledgeBasePage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  // Search state — RAG stubbed in M1
+  // Search state — RAG wired in M3 (Qdrant vector search)
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
   const [searchInfo, setSearchInfo] = useState<string | null>(null);
 
   // Copy
@@ -171,6 +180,7 @@ export default function KnowledgeBasePage() {
       setSelectedDoc(doc);
       setMode("browse");
       setSearchInfo(null);
+      setSearchResults(null);
       useSessionStore.getState().setKnowledgeDocPath(doc.relative_path);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Chyba pri načítaní dokumentu");
@@ -178,13 +188,63 @@ export default function KnowledgeBasePage() {
     setLoadingContent(false);
   };
 
-  const doSearch = () => {
-    // M1 stub: vector search není wired up. Plně v M3 (RAG milestone).
+  // Fallback for search hits whose ``source_file`` doesn't match a doc on
+  // disk — load full document straight from Qdrant chunks (e.g. orphan
+  // vectors from a previous index that points at a renamed file).
+  const loadDocContentByPath = async (filePath: string) => {
+    setLoadingContent(true);
+    setError("");
+    const filename = filePath.replace(/\\/g, "/").split("/").pop() || filePath;
+    try {
+      const data = await api.get<{ relative_path: string; content: string }>(
+        "/knowledge/documents/content",
+        { params: { relative_path: filePath } },
+      );
+      setDocContent(data.content);
+      setSelectedDoc({ relative_path: filePath, filename, category: "", size_bytes: 0 });
+      setMode("browse");
+      setSearchResults(null);
+      useSessionStore.getState().setKnowledgeDocPath(filePath);
+    } catch {
+      try {
+        const data = await api.get<{ content?: string; source_file?: string }>(
+          "/rag/document",
+          { params: { tenant: "icc", source_file: filePath } },
+        );
+        setDocContent(data.content || "");
+        setSelectedDoc({ relative_path: filePath, filename, category: "", size_bytes: 0 });
+        setMode("browse");
+        setSearchResults(null);
+        useSessionStore.getState().setKnowledgeDocPath(filePath);
+      } catch {
+        setError("Dokument sa nepodarilo načítať");
+      }
+    }
+    setLoadingContent(false);
+  };
+
+  const doSearch = async () => {
     if (!searchQuery.trim()) {
+      setSearchResults(null);
       setSearchInfo(null);
       return;
     }
-    setSearchInfo("Vector search bude k dispozícii v M3 (RAG milestone). Pre teraz použite filter podľa kategórie.");
+    setLoading(true);
+    setError("");
+    setSearchInfo(null);
+    try {
+      const data = await api.get<{ results: SearchResult[]; count: number }>(
+        "/rag/search",
+        { params: { tenant: "icc", query: searchQuery } },
+      );
+      setSearchResults(data.results);
+      setSelectedDoc(null);
+      setDocContent("");
+      setMode("browse");
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Chyba pri vyhľadávaní");
+    }
+    setLoading(false);
   };
 
   const refresh = useCallback(async () => {
@@ -201,6 +261,7 @@ export default function KnowledgeBasePage() {
         category: newCategory,
         filename,
         content: newContent,
+        tenant: "icc",
       });
       setMode("browse");
       setNewTitle("");
@@ -222,6 +283,7 @@ export default function KnowledgeBasePage() {
       await api.put("/knowledge/documents", {
         relative_path: selectedDoc.relative_path,
         content: editContent,
+        tenant: "icc",
       });
       setDocContent(editContent);
       setMode("browse");
@@ -238,7 +300,7 @@ export default function KnowledgeBasePage() {
     setError("");
     try {
       await api.delete("/knowledge/documents", {
-        params: { relative_path: selectedDoc.relative_path },
+        params: { relative_path: selectedDoc.relative_path, tenant: "icc" },
       });
       setSelectedDoc(null);
       setDocContent("");
@@ -267,6 +329,7 @@ export default function KnowledgeBasePage() {
     }
     setMode("browse");
     setSearchInfo(null);
+    setSearchResults(null);
     setSearchQuery("");
   }, [selectedCategory, loadDocuments]);
 
@@ -356,7 +419,7 @@ export default function KnowledgeBasePage() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && doSearch()}
-              placeholder="Vector search v knowledge base (M3)..."
+              placeholder="Vyhľadať v knowledge base..."
               className="w-full pl-9 pr-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
@@ -370,6 +433,7 @@ export default function KnowledgeBasePage() {
             onClick={() => {
               setSearchQuery("");
               setSearchInfo(null);
+              setSearchResults(null);
               refresh();
             }}
             className="p-2 bg-gray-700 text-gray-300 rounded-lg hover:bg-gray-600 transition-colors"
@@ -423,6 +487,45 @@ export default function KnowledgeBasePage() {
                 <div className="p-4 flex items-center gap-2 text-gray-400">
                   <Loader2 size={16} className="animate-spin" /> Načítavam...
                 </div>
+              ) : searchResults !== null ? (
+                searchResults.length === 0 ? (
+                  <div className="p-4 text-gray-500 text-sm">Žiadne výsledky</div>
+                ) : (
+                  searchResults.map((r) => (
+                    <button
+                      key={r.source_file}
+                      onClick={() => {
+                        const norm = (s: string) => s.replace(/\\/g, "/");
+                        const match = documents.find(
+                          (d) =>
+                            d.relative_path === r.source_file ||
+                            norm(d.relative_path) === norm(r.source_file) ||
+                            d.relative_path.endsWith(r.source_file) ||
+                            r.source_file.endsWith(d.relative_path),
+                        );
+                        if (match) {
+                          loadDocContent(match);
+                        } else {
+                          loadDocContentByPath(r.source_file);
+                        }
+                      }}
+                      className="w-full text-left p-3 border-b border-gray-700 hover:bg-gray-800 transition-colors"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Search size={14} className="text-blue-400 flex-shrink-0" />
+                        <span className="font-medium truncate text-sm text-gray-100">
+                          {r.title}
+                        </span>
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        {r.category} · score: {r.score.toFixed(2)}
+                      </div>
+                      {r.snippet && (
+                        <div className="text-xs text-gray-500 mt-1 line-clamp-2">{r.snippet}</div>
+                      )}
+                    </button>
+                  ))
+                )
               ) : documents.length === 0 ? (
                 <div className="p-4 text-gray-500 text-sm">Žiadne dokumenty</div>
               ) : (
@@ -454,7 +557,9 @@ export default function KnowledgeBasePage() {
               )}
             </div>
             <div className="px-3 py-2 border-t border-gray-700 text-xs text-gray-500">
-              {documents.length} dokumentov
+              {searchResults !== null
+                ? `${searchResults.length} výsledkov`
+                : `${documents.length} dokumentov`}
             </div>
           </div>
 
