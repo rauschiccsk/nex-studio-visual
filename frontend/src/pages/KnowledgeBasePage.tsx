@@ -1,818 +1,708 @@
-import { useEffect, useState, useCallback } from "react";
+/**
+ * Knowledge Base — filesystem browser + viewer + editor + creator.
+ *
+ * Ported 1:1 from NEX Command `frontend/src/components/rag/KnowledgeBrowser.tsx`
+ * (747 lines) per Director mandate 2026-05-07 (M1.D milestone).
+ * Page wraps the browser at route ``/kb`` (see App.tsx).
+ *
+ * Adaptations for NEX Studio:
+ *
+ * * API style — NEX Studio's ``api`` wrapper returns ``T`` directly
+ *   (NEX Command returns ``{ data: T }`` axios-like envelope).
+ * * API prefix — ``/api/v1/knowledge/*`` (NEX Studio convention) vs
+ *   NEX Command ``/api/knowledge/*``.
+ * * AuthUser shape — NEX Studio has ``role: 'ri' | 'ha' | 'shu'``;
+ *   NEX Command had ``role`` + ``shuhari_phase``. Mapping:
+ *     ``isDirector`` (NEX Command "director" role) → ``role === 'ri'``
+ *     ``canWrite`` (NEX Command ``shuhari_phase !== 'shu'``) → ``role !== 'shu'``
+ * * RAG endpoints (``/api/rag/stats``, ``/api/rag/search``, ``/api/rag/document``)
+ *   are stubbed in M1 — wired up in M3 (RAG search milestone).
+ *   The "Hľadať" button shows an info banner; vector search returns no results.
+ * * AuditDashboard "Quality" sub-tab is dropped in M1 — comes back in
+ *   M8 (Audit/Reports milestone).
+ */
+
+import { useState, useEffect, useCallback, useRef } from "react";
+import {
+  Search,
+  FileText,
+  FolderOpen,
+  RefreshCw,
+  Database,
+  Plus,
+  Pencil,
+  Trash2,
+  Save,
+  X,
+  Eye,
+  Loader2,
+  Copy,
+  Check,
+} from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import {
-  listKbDocuments,
-  listKbCategories,
-  createKbDocument,
-  updateKbDocument,
-  deleteKbDocument,
-  getKbDocumentContent,
-} from "@/services/api/kbDocuments";
-import { listProjectsApi } from "@/services/api/projects";
-import { kbCategoryColor } from "@/config/kbCategoryColors";
-import { ApiError } from "@/services/api";
-import type {
-  KbDocumentRead,
-  KbDocumentCategory,
-  KbDocumentCategoryWithCount,
-} from "@/types/kbDocument";
-import type { ProjectRead } from "@/types";
+import { api, ApiError } from "@/services/api";
+import { useAuthStore } from "@/store/authStore";
+import { useSessionStore } from "@/store/sessionStore";
+import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
+import { CodeBlock } from "@/components/markdown/CodeBlock";
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+// --- Interfaces ---
 
-const ALL_CATEGORIES_LABEL = "Všetky";
+interface KnowledgeDoc {
+  relative_path: string;
+  filename: string;
+  category: string;
+  size_bytes: number;
+}
 
-type KbMode = "view" | "edit" | "create";
-type KbTab = "documents" | "quality";
-type KbScope = "global" | "project";
+// --- Helpers ---
 
-// ─── KnowledgeBasePage ────────────────────────────────────────────────────────
+function makeTitle(filename: string): string {
+  let name = filename;
+  if (name.endsWith(".md")) name = name.slice(0, -3);
+  return name.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function titleToFilename(title: string): string {
+  return (
+    title
+      .trim()
+      .toUpperCase()
+      .replace(/\s+/g, "_")
+      .replace(/[^A-Z0-9_]/g, "") + ".md"
+  );
+}
+
+function extractProjectFromPath(relativePath: string): string | null {
+  // Pre "Všetky" view: extract <slug> z "projects/<slug>/STATUS.md".
+  const parts = relativePath.split("/");
+  if (parts.length >= 2 && parts[0] === "projects" && parts[1]) {
+    return parts[1];
+  }
+  return null;
+}
+
+// --- Component ---
 
 export default function KnowledgeBasePage() {
-  const [kbTab, setKbTab] = useState<KbTab>("documents");
-  const [scope, setScope] = useState<KbScope>("global");
-  const [selectedCat, setSelectedCat] = useState<KbDocumentCategory | "all">("all");
-  const [search, setSearch] = useState("");
+  const user = useAuthStore((s) => s.user);
+  const isDirector = user?.role === "ri";
+  const canWrite = user?.role !== "shu";
 
-  // Data
-  const [docs, setDocs] = useState<KbDocumentRead[]>([]);
-  const [categories, setCategories] = useState<KbDocumentCategoryWithCount[]>([]);
+  const sessionRestored = useRef(false);
+
+  // List state
+  const [documents, setDocuments] = useState<KnowledgeDoc[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(
+    () => useSessionStore.getState().knowledgeCategory,
+  );
   const [loading, setLoading] = useState(false);
-  const [projects, setProjects] = useState<ProjectRead[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
 
-  // Selected doc
-  const [selected, setSelected] = useState<KbDocumentRead | null>(null);
-  const [mode, setMode] = useState<KbMode>("view");
+  // Viewer state
+  const [selectedDoc, setSelectedDoc] = useState<KnowledgeDoc | null>(null);
+  const [docContent, setDocContent] = useState("");
+  const [loadingContent, setLoadingContent] = useState(false);
 
-  // Content of the selected doc — loaded on demand from
-  // ``GET /kb-documents/{id}/content``. ``null`` until first fetch.
-  const [content, setContent] = useState<string | null>(null);
-  const [contentLoading, setContentLoading] = useState(false);
-  const [contentError, setContentError] = useState<string | null>(null);
+  // Mode: 'browse' | 'edit' | 'create'
+  const [mode, setMode] = useState<"browse" | "edit" | "create">("browse");
 
   // Edit state
-  const [editTitle, setEditTitle] = useState("");
-  const [editPath, setEditPath] = useState("");
+  const [editContent, setEditContent] = useState("");
   const [saving, setSaving] = useState(false);
 
   // Create state
-  const [createTitle, setCreateTitle] = useState("");
-  const [createCat, setCreateCat] = useState<KbDocumentCategory>("");
-  const [createPath, setCreatePath] = useState("");
-  const [createContent, setCreateContent] = useState("");
-  const [createError, setCreateError] = useState("");
+  const [newTitle, setNewTitle] = useState("");
+  const [newCategory, setNewCategory] = useState("icc");
+  const [newFilename, setNewFilename] = useState("");
+  const [newContent, setNewContent] = useState("");
 
-  // Delete confirm
-  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  // Delete state
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
-  // Upload modal
-  const [showUpload, setShowUpload] = useState(false);
+  // Search state — RAG stubbed in M1
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchInfo, setSearchInfo] = useState<string | null>(null);
 
-  const loadDocs = useCallback(() => {
-    setLoading(true);
-    const params: Parameters<typeof listKbDocuments>[0] = { limit: 100 };
-    if (scope === "global") {
-      params.project_id = null;
-    } else if (selectedProjectId) {
-      params.project_id = selectedProjectId;
+  // Copy
+  const [copyDoc, isDocCopied] = useCopyToClipboard();
+
+  // Error
+  const [error, setError] = useState("");
+
+  // --- API calls ---
+
+  const loadCategories = useCallback(async () => {
+    try {
+      const data = await api.get<{ categories: string[] }>("/knowledge/categories");
+      setCategories(data.categories);
+    } catch {
+      /* silent */
     }
-    if (selectedCat !== "all") params.doc_category = selectedCat;
-    listKbDocuments(params)
-      .then((res) => setDocs(res.items))
-      .finally(() => setLoading(false));
-  }, [scope, selectedProjectId, selectedCat]);
+  }, []);
 
-  const loadCategories = useCallback(() => {
-    const params: Parameters<typeof listKbCategories>[0] = {};
-    if (scope === "global") {
-      params.project_id = null;
-    } else if (selectedProjectId) {
-      params.project_id = selectedProjectId;
-    } else {
-      // project scope without a selected project — no rows match
-      setCategories([]);
+  const loadDocuments = useCallback(async (category?: string | null) => {
+    setLoading(true);
+    setError("");
+    try {
+      const params = category ? { category } : {};
+      const data = await api.get<{ documents: KnowledgeDoc[]; count: number }>(
+        "/knowledge/documents",
+        { params },
+      );
+      setDocuments(data.documents);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Chyba pri načítaní dokumentov");
+    }
+    setLoading(false);
+  }, []);
+
+  const loadDocContent = async (doc: KnowledgeDoc) => {
+    setLoadingContent(true);
+    setError("");
+    try {
+      const data = await api.get<{ relative_path: string; content: string }>(
+        "/knowledge/documents/content",
+        { params: { relative_path: doc.relative_path } },
+      );
+      setDocContent(data.content);
+      setSelectedDoc(doc);
+      setMode("browse");
+      setSearchInfo(null);
+      useSessionStore.getState().setKnowledgeDocPath(doc.relative_path);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Chyba pri načítaní dokumentu");
+    }
+    setLoadingContent(false);
+  };
+
+  const doSearch = () => {
+    // M1 stub: vector search není wired up. Plně v M3 (RAG milestone).
+    if (!searchQuery.trim()) {
+      setSearchInfo(null);
       return;
     }
-    listKbCategories(params).then(setCategories);
-  }, [scope, selectedProjectId]);
+    setSearchInfo("Vector search bude k dispozícii v M3 (RAG milestone). Pre teraz použite filter podľa kategórie.");
+  };
+
+  const refresh = useCallback(async () => {
+    await Promise.all([loadDocuments(selectedCategory), loadCategories()]);
+  }, [loadDocuments, loadCategories, selectedCategory]);
+
+  const handleCreate = async () => {
+    if (!newTitle.trim() || !newCategory || !newContent.trim()) return;
+    setSaving(true);
+    setError("");
+    const filename = newFilename.trim() || titleToFilename(newTitle);
+    try {
+      await api.post("/knowledge/documents", {
+        category: newCategory,
+        filename,
+        content: newContent,
+      });
+      setMode("browse");
+      setNewTitle("");
+      setNewCategory("icc");
+      setNewFilename("");
+      setNewContent("");
+      await refresh();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Chyba pri vytváraní dokumentu");
+    }
+    setSaving(false);
+  };
+
+  const handleUpdate = async () => {
+    if (!selectedDoc || !editContent.trim()) return;
+    setSaving(true);
+    setError("");
+    try {
+      await api.put("/knowledge/documents", {
+        relative_path: selectedDoc.relative_path,
+        content: editContent,
+      });
+      setDocContent(editContent);
+      setMode("browse");
+      await refresh();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Chyba pri ukladaní");
+    }
+    setSaving(false);
+  };
+
+  const handleDelete = async () => {
+    if (!selectedDoc) return;
+    setDeleting(true);
+    setError("");
+    try {
+      await api.delete("/knowledge/documents", {
+        params: { relative_path: selectedDoc.relative_path },
+      });
+      setSelectedDoc(null);
+      setDocContent("");
+      setConfirmDelete(false);
+      setMode("browse");
+      useSessionStore.getState().setKnowledgeDocPath(null);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Chyba pri mazaní");
+    }
+    setDeleting(false);
+  };
+
+  // --- Effects ---
 
   useEffect(() => {
-    listProjectsApi({ limit: 100 }).then((res) => setProjects(res.items));
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    loadDocs();
-    setSelected(null);
-    setMode("view");
-  }, [loadDocs]);
+    loadDocuments(selectedCategory);
+    if (sessionRestored.current) {
+      setSelectedDoc(null);
+      setDocContent("");
+    }
+    setMode("browse");
+    setSearchInfo(null);
+    setSearchQuery("");
+  }, [selectedCategory, loadDocuments]);
 
   useEffect(() => {
-    loadCategories();
-  }, [loadCategories]);
+    if (sessionRestored.current || documents.length === 0) return;
+    sessionRestored.current = true;
+    const savedDocPath = useSessionStore.getState().knowledgeDocPath;
+    if (savedDocPath) {
+      const doc = documents.find((d) => d.relative_path === savedDocPath);
+      if (doc) {
+        loadDocContent(doc);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documents]);
 
-  // Load on-disk content whenever the selected doc changes (in view mode).
   useEffect(() => {
-    if (!selected || mode !== "view") {
-      setContent(null);
-      setContentError(null);
-      return;
+    if (newTitle.trim()) {
+      setNewFilename(titleToFilename(newTitle));
     }
-    setContentLoading(true);
-    setContentError(null);
-    setContent(null);
-    getKbDocumentContent(selected.id)
-      .then((res) => setContent(res.content))
-      .catch((err) => {
-        if (err instanceof ApiError) {
-          if (err.status === 403) {
-            setContentError("🔒 Tento dokument obsahuje citlivé dáta a jeho obsah nemožno zobraziť.");
-          } else if (err.status === 404) {
-            setContentError("Súbor neexistuje na disku — možno bol presunutý alebo vymazaný.");
-          } else if (err.status === 422) {
-            setContentError("Obsah nemožno zobraziť (binárny súbor, mimo KB, alebo prekročený limit 5 MB).");
-          } else {
-            setContentError(`Načítanie zlyhalo (HTTP ${err.status}).`);
-          }
-        } else {
-          setContentError("Načítanie zlyhalo — skontroluj sieť alebo backend.");
-        }
-      })
-      .finally(() => setContentLoading(false));
-  }, [selected, mode]);
+  }, [newTitle]);
 
-  const filteredDocs = search.trim()
-    ? docs.filter((d) =>
-        d.title.toLowerCase().includes(search.toLowerCase()) ||
-        d.file_path.toLowerCase().includes(search.toLowerCase()),
-      )
-    : docs;
-
-  function handleSelectDoc(doc: KbDocumentRead) {
-    setSelected(doc);
-    setMode("view");
-    setDeleteConfirm(false);
-  }
-
-  function handleStartEdit() {
-    if (!selected) return;
-    setEditTitle(selected.title);
-    setEditPath(selected.file_path);
-    setMode("edit");
-  }
-
-  async function handleSaveEdit() {
-    if (!selected) return;
-    setSaving(true);
-    try {
-      const updated = await updateKbDocument(selected.id, { title: editTitle, file_path: editPath });
-      setDocs((prev) => prev.map((d) => d.id === updated.id ? updated : d));
-      setSelected(updated);
-      setMode("view");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleDelete() {
-    if (!selected) return;
-    await deleteKbDocument(selected.id);
-    setDocs((prev) => prev.filter((d) => d.id !== selected.id));
-    setSelected(null);
-    setMode("view");
-    setDeleteConfirm(false);
-  }
-
-  function handleStartCreate() {
-    setMode("create");
-    setSelected(null);
-    const defaultCat = categories[0]?.code ?? "";
-    setCreateTitle(""); setCreateCat(defaultCat); setCreatePath(""); setCreateContent(""); setCreateError("");
-  }
-
-  async function handleSaveCreate() {
-    if (!createTitle || !createPath) { setCreateError("Názov a cesta súboru sú povinné."); return; }
-    setSaving(true);
-    setCreateError("");
-    try {
-      const payload = {
-        title: createTitle,
-        file_path: createPath,
-        doc_category: createCat,
-        project_id: scope === "project" && selectedProjectId ? selectedProjectId : null,
-      };
-      const doc = await createKbDocument(payload);
-      setDocs((prev) => [doc, ...prev]);
-      setSelected(doc);
-      setMode("view");
-    } catch {
-      setCreateError("Nepodarilo sa vytvoriť dokument.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  // Auto-generate filename from title
-  function autoFilename(title: string): string {
-    return title.toUpperCase().replace(/\s+/g, "_").replace(/[^A-Z0-9_]/g, "") + ".md";
-  }
-
-  const indexedCount = docs.filter((d) => d.qdrant_point_id).length;
+  // --- Render ---
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex h-[calc(100vh-100px)] bg-gray-900 rounded-xl border border-gray-700 overflow-hidden">
+      {/* Sidebar */}
+      <div className="w-56 bg-gray-800 p-4 border-r border-gray-700 flex flex-col">
+        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2 text-gray-100">
+          <FolderOpen size={20} />
+          Knowledge Base
+        </h2>
 
-      {/* Sub-tabs */}
-      <div className="flex items-center gap-1 px-4 pt-3 pb-0 border-b border-slate-800 flex-shrink-0 bg-slate-900/30">
-        <button
-          onClick={() => setKbTab("documents")}
-          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors ${
-            kbTab === "documents"
-              ? "border-primary-500 text-primary-400 bg-primary-500/5"
-              : "border-transparent text-slate-500 hover:text-slate-300"
-          }`}
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-          </svg>
-          Dokumenty
-        </button>
-        <button
-          onClick={() => setKbTab("quality")}
-          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors ${
-            kbTab === "quality"
-              ? "border-primary-500 text-primary-400 bg-primary-500/5"
-              : "border-transparent text-slate-500 hover:text-slate-300"
-          }`}
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-          </svg>
-          Kvalita
-        </button>
+        <div className="mb-4 p-3 bg-gray-700 rounded-lg text-sm">
+          <div className="flex items-center gap-1.5 mb-1">
+            <Database size={14} className="text-gray-400" />
+            <span className="font-medium text-gray-100">{documents.length} dokumentov</span>
+          </div>
+        </div>
+
+        <div className="space-y-1 flex-1 overflow-y-auto">
+          <button
+            onClick={() => {
+              setSelectedCategory(null);
+              useSessionStore.getState().setKnowledgeCategory(null);
+              useSessionStore.getState().setKnowledgeDocPath(null);
+            }}
+            className={`w-full text-left px-3 py-2 rounded text-sm transition-colors ${
+              !selectedCategory ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-700"
+            }`}
+          >
+            Všetky dokumenty
+          </button>
+          {categories
+            .filter((c) => isDirector || c !== "credentials")
+            .map((cat) => (
+              <button
+                key={cat}
+                onClick={() => {
+                  setSelectedCategory(cat);
+                  useSessionStore.getState().setKnowledgeCategory(cat);
+                  useSessionStore.getState().setKnowledgeDocPath(null);
+                }}
+                className={`w-full text-left px-3 py-2 rounded text-sm transition-colors ${
+                  selectedCategory === cat
+                    ? "bg-blue-600 text-white"
+                    : "text-gray-300 hover:bg-gray-700"
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+        </div>
       </div>
 
-      {/* ── DOKUMENTY ── */}
-      {kbTab === "documents" && (
-        <div className="flex flex-1 overflow-hidden">
-
-          {/* Left: category sidebar */}
-          <div className="w-48 flex-shrink-0 flex flex-col border-r border-slate-800 bg-slate-900/40">
-            {/* Scope toggle */}
-            <div className="px-2 pt-2 pb-1.5 border-b border-slate-800 flex-shrink-0">
-              <div className="flex rounded-lg bg-slate-800 p-0.5 gap-0.5">
-                <button
-                  onClick={() => setScope("global")}
-                  className={`flex-1 text-[11px] font-medium py-1 rounded-md transition-colors ${
-                    scope === "global" ? "bg-slate-700 text-slate-200" : "text-slate-500 hover:text-slate-400"
-                  }`}
-                >
-                  Globálne
-                </button>
-                <button
-                  onClick={() => setScope("project")}
-                  className={`flex-1 text-[11px] font-medium py-1 rounded-md transition-colors ${
-                    scope === "project" ? "bg-slate-700 text-slate-200" : "text-slate-500 hover:text-slate-400"
-                  }`}
-                >
-                  Projektové
-                </button>
-              </div>
-              {scope === "project" && (
-                <select
-                  value={selectedProjectId}
-                  onChange={(e) => setSelectedProjectId(e.target.value)}
-                  className="mt-1.5 w-full text-[10px] bg-slate-800 border border-slate-700 rounded px-1.5 py-1 text-primary-400 focus:outline-none focus:border-primary-500"
-                >
-                  <option value="">Vybrať projekt…</option>
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-              )}
-            </div>
-
-            {/* Search */}
-            <div className="px-2.5 pt-2 pb-2 border-b border-slate-800">
-              <div className="relative">
-                <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-600 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-                <input
-                  type="text"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Vector search…"
-                  className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-700 bg-slate-800 text-slate-200 placeholder-slate-600 focus:outline-none focus:border-primary-500 transition-colors"
-                />
-              </div>
-            </div>
-
-            {/* Stats */}
-            <div className="px-3 py-2 border-b border-slate-800/60">
-              <div className="text-[10px] text-slate-600 mb-1">Qdrant stats</div>
-              <div className="flex items-center gap-1.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />
-                <span className="text-[10px] text-slate-400">
-                  {docs.length} docs · {indexedCount} indexed
-                </span>
-              </div>
-            </div>
-
-            {/* Categories */}
-            <div className="flex-1 overflow-y-auto py-2 px-2 space-y-0.5">
-              <div className="text-[10px] text-slate-600 uppercase tracking-widest font-semibold px-2 pb-1">Kategórie</div>
-              {(() => {
-                const totalCount = categories.reduce((sum, c) => sum + c.count, 0);
-                const sidebarItems: { value: KbDocumentCategory | "all"; label: string; count: number }[] = [
-                  { value: "all", label: ALL_CATEGORIES_LABEL, count: totalCount },
-                  ...categories.map((c) => ({ value: c.code, label: c.code, count: c.count })),
-                ];
-                return sidebarItems.map((c) => (
-                  <button
-                    key={c.value}
-                    onClick={() => setSelectedCat(c.value)}
-                    className={`w-full text-left px-2 py-1.5 rounded-lg text-xs flex items-center justify-between transition-colors ${
-                      selectedCat === c.value
-                        ? "bg-primary-600/20 text-primary-400"
-                        : "text-slate-500 hover:text-slate-300 hover:bg-slate-800"
-                    }`}
-                  >
-                    <span>{c.label}</span>
-                    <span className="font-mono text-[10px] text-slate-600">{c.count}</span>
-                  </button>
-                ));
-              })()}
-            </div>
-
-            {/* Actions */}
-            <div className="border-t border-slate-800 px-2.5 py-2 space-y-1.5">
-              <button
-                onClick={handleStartCreate}
-                className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary-600 hover:bg-primary-500 text-white rounded-lg transition-colors"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                Nový
-              </button>
-              <button
-                onClick={() => setShowUpload(true)}
-                className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs text-slate-500 border border-slate-700 hover:border-slate-600 rounded-lg transition-colors"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                </svg>
-                Upload
-              </button>
-            </div>
+      {/* Main content */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Toolbar */}
+        <div className="p-3 border-b border-gray-700 flex gap-2">
+          <div className="flex-1 relative">
+            <Search
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+              size={16}
+            />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && doSearch()}
+              placeholder="Vector search v knowledge base (M3)..."
+              className="w-full pl-9 pr-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
           </div>
+          <button
+            onClick={doSearch}
+            className="px-3 py-2 bg-gray-700 text-gray-300 rounded-lg hover:bg-gray-600 text-sm transition-colors"
+          >
+            Hľadať
+          </button>
+          <button
+            onClick={() => {
+              setSearchQuery("");
+              setSearchInfo(null);
+              refresh();
+            }}
+            className="p-2 bg-gray-700 text-gray-300 rounded-lg hover:bg-gray-600 transition-colors"
+            title="Obnoviť"
+          >
+            <RefreshCw size={16} />
+          </button>
+          {canWrite && (
+            <button
+              onClick={() => {
+                setMode("create");
+                setSelectedDoc(null);
+                setDocContent("");
+                setNewTitle("");
+                setNewCategory(selectedCategory || "icc");
+                setNewFilename("");
+                setNewContent("");
+                setError("");
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 text-sm font-medium transition-colors"
+            >
+              <Plus size={16} /> Nový
+            </button>
+          )}
+        </div>
 
-          {/* Middle: document list */}
-          <div className="w-64 flex-shrink-0 flex flex-col border-r border-slate-800">
-            <div className="flex items-center justify-between px-3 h-10 border-b border-slate-800 flex-shrink-0">
-              <span className="text-xs font-semibold text-slate-500 uppercase tracking-widest">Dokumenty</span>
-              <span className="text-[10px] text-slate-600 font-mono">{filteredDocs.length}</span>
-            </div>
-            <div className="flex-1 overflow-y-auto divide-y divide-slate-800/50">
-              {loading && (
-                <div className="flex items-center justify-center py-8 text-slate-600 text-xs">Načítavam…</div>
-              )}
-              {!loading && filteredDocs.length === 0 && (
-                <div className="flex items-center justify-center py-8 text-slate-700 text-xs">Žiadne dokumenty</div>
-              )}
-              {filteredDocs.map((doc) => (
-                <button
-                  key={doc.id}
-                  onClick={() => handleSelectDoc(doc)}
-                  className={`w-full text-left px-3 py-2.5 transition-colors ${
-                    selected?.id === doc.id
-                      ? "bg-primary-600/10 border-l-2 border-primary-500"
-                      : "hover:bg-slate-800/50 border-l-2 border-transparent"
-                  }`}
-                >
-                  <div className="text-xs font-medium text-slate-200 truncate">{doc.title}</div>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <span className={`text-[9px] font-mono px-1 py-0.5 rounded border ${kbCategoryColor(doc.doc_category)}`}>
-                      {doc.doc_category}
-                    </span>
-                    {doc.qdrant_point_id && (
-                      <span className="text-[9px] text-green-400 font-mono">● indexed</span>
-                    )}
-                  </div>
-                </button>
-              ))}
-            </div>
+        {searchInfo && (
+          <div className="px-4 py-2 bg-blue-900/30 border-b border-blue-800/50 text-blue-300 text-sm flex items-center justify-between">
+            <span>{searchInfo}</span>
+            <button onClick={() => setSearchInfo(null)} className="text-blue-300 hover:text-blue-200">
+              <X size={14} />
+            </button>
           </div>
+        )}
 
-          {/* Right panel */}
-          <div className="flex-1 flex flex-col overflow-hidden">
+        {error && (
+          <div className="px-4 py-2 bg-red-900/30 border-b border-red-800/50 text-red-400 text-sm flex items-center justify-between">
+            <span>{error}</span>
+            <button onClick={() => setError("")} className="text-red-400 hover:text-red-300">
+              <X size={14} />
+            </button>
+          </div>
+        )}
 
-            {/* VIEW mode */}
-            {mode === "view" && (
-              <div className="flex flex-col h-full overflow-hidden">
-                <div className="flex items-center gap-2 px-4 h-11 border-b border-slate-800 flex-shrink-0">
-                  <svg className="w-4 h-4 text-slate-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  <span className="text-sm font-medium text-slate-300 truncate flex-1">
-                    {selected ? selected.title : "—"}
-                  </span>
-                  {selected && (
-                    <div className="flex items-center gap-1">
-                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${kbCategoryColor(selected.doc_category)}`}>
-                        {selected.doc_category}
-                      </span>
-                      <button
-                        onClick={handleStartEdit}
-                        className="flex items-center gap-1 px-2 py-1 text-[11px] text-slate-500 hover:text-slate-300 border border-slate-700 hover:border-slate-500 rounded transition-colors"
-                      >
-                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                        </svg>
-                        Upraviť
-                      </button>
-                      {selected.qdrant_point_id ? (
-                        <span className="text-[10px] text-green-400 flex items-center gap-1 px-2">
-                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                          </svg>
-                          Indexed
+        {/* Content area */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Document list */}
+          <div className="w-72 border-r border-gray-700 flex flex-col">
+            <div className="flex-1 overflow-y-auto">
+              {loading ? (
+                <div className="p-4 flex items-center gap-2 text-gray-400">
+                  <Loader2 size={16} className="animate-spin" /> Načítavam...
+                </div>
+              ) : documents.length === 0 ? (
+                <div className="p-4 text-gray-500 text-sm">Žiadne dokumenty</div>
+              ) : (
+                documents.map((doc) => {
+                  const project = extractProjectFromPath(doc.relative_path);
+                  return (
+                    <button
+                      key={doc.relative_path}
+                      onClick={() => loadDocContent(doc)}
+                      className={`w-full text-left p-3 border-b border-gray-700 hover:bg-gray-800 transition-colors ${
+                        selectedDoc?.relative_path === doc.relative_path ? "bg-gray-800" : ""
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <FileText size={14} className="text-gray-400 flex-shrink-0" />
+                        <span className="font-medium truncate text-sm text-gray-100">
+                          {makeTitle(doc.filename)}
                         </span>
-                      ) : (
-                        <span className="text-[10px] text-amber-400 px-2">Not indexed</span>
-                      )}
-                      {!deleteConfirm ? (
-                        <button
-                          onClick={() => setDeleteConfirm(true)}
-                          className="flex items-center gap-1 px-2 py-1 text-[11px] text-red-500/70 hover:text-red-400 border border-red-500/20 hover:border-red-500/40 rounded transition-colors"
-                        >
-                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                          Zmazať
-                        </button>
-                      ) : (
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[11px] text-red-400">Naozaj?</span>
-                          <button
-                            onClick={handleDelete}
-                            className="px-2 py-0.5 text-[11px] bg-red-600 hover:bg-red-500 text-white rounded transition-colors"
-                          >
-                            Áno
-                          </button>
-                          <button
-                            onClick={() => setDeleteConfirm(false)}
-                            className="px-2 py-0.5 text-[11px] bg-slate-700 hover:bg-slate-600 text-slate-300 rounded transition-colors"
-                          >
-                            Nie
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-                <div className="flex-1 overflow-y-auto p-5">
-                  {!selected ? (
-                    <div className="flex flex-col items-center justify-center h-full text-center">
-                      <svg className="w-10 h-10 text-slate-700 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                      </svg>
-                      <p className="text-sm text-slate-600">Vyber dokument zo zoznamu alebo vytvor nový</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-4 max-w-2xl">
-                      <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
-                        <div>
-                          <div className="text-xs text-slate-500 mb-0.5">Názov</div>
-                          <div className="text-sm text-slate-200 font-medium">{selected.title}</div>
-                        </div>
-                        <div>
-                          <div className="text-xs text-slate-500 mb-0.5">Cesta k súboru</div>
-                          <div className="font-mono text-xs text-slate-400 break-all">{selected.file_path}</div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <div className="text-xs text-slate-500 mb-0.5">Kategória</div>
-                            <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${kbCategoryColor(selected.doc_category)}`}>
-                              {selected.doc_category}
-                            </span>
-                          </div>
-                          <div>
-                            <div className="text-xs text-slate-500 mb-0.5">Vytvorené</div>
-                            <div className="text-xs text-slate-400">{new Date(selected.created_at).toLocaleDateString("sk-SK")}</div>
-                          </div>
-                        </div>
-                        {selected.qdrant_collection && (
-                          <div>
-                            <div className="text-xs text-slate-500 mb-0.5">Qdrant kolekcia</div>
-                            <div className="font-mono text-xs text-slate-400">{selected.qdrant_collection}</div>
-                          </div>
-                        )}
-                        {selected.indexed_at && (
-                          <div>
-                            <div className="text-xs text-slate-500 mb-0.5">Indexované</div>
-                            <div className="text-xs text-green-400">{new Date(selected.indexed_at).toLocaleString("sk-SK")}</div>
-                          </div>
-                        )}
                       </div>
-
-                      {/* Markdown content — GET /kb-documents/{id}/content */}
-                      <div className="rounded-xl border border-slate-800 bg-slate-900 p-5">
-                        <div className="text-xs text-slate-500 uppercase tracking-widest mb-3">Obsah</div>
-                        {contentLoading && (
-                          <div className="text-sm text-slate-500">Načítavam obsah…</div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        {project && !selectedCategory && (
+                          <span className="text-blue-400 mr-1.5">[{project}]</span>
                         )}
-                        {contentError && (
-                          <div className="text-sm text-amber-400">{contentError}</div>
-                        )}
-                        {!contentLoading && !contentError && content !== null && (
-                          <article className="prose prose-invert prose-sm max-w-none">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                              {content}
-                            </ReactMarkdown>
-                          </article>
-                        )}
+                        {doc.category} · {(doc.size_bytes / 1024).toFixed(1)} kB
                       </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+            <div className="px-3 py-2 border-t border-gray-700 text-xs text-gray-500">
+              {documents.length} dokumentov
+            </div>
+          </div>
 
-            {/* EDIT mode */}
-            {mode === "edit" && (
-              <div className="flex flex-col h-full overflow-hidden">
-                <div className="flex items-center gap-3 px-4 h-11 border-b border-slate-800 flex-shrink-0">
-                  <svg className="w-4 h-4 text-primary-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                  </svg>
-                  <span className="text-sm font-medium text-slate-300 truncate flex-1">{selected?.title}</span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={handleSaveEdit}
-                      disabled={saving}
-                      className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-primary-600 hover:bg-primary-500 disabled:opacity-40 text-white rounded-lg transition-colors"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                      {saving ? "Ukladám…" : "Uložiť zmeny"}
-                    </button>
-                    <button
-                      onClick={() => setMode("view")}
-                      className="flex items-center gap-1 px-3 py-1.5 text-xs text-slate-500 border border-slate-700 rounded-lg hover:border-slate-500 transition-colors"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                      Zrušiť
-                    </button>
+          {/* Viewer / Editor / Creator */}
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {mode === "create" ? (
+              <div className="flex-1 flex flex-col p-4 overflow-y-auto">
+                <h2 className="text-lg font-semibold text-gray-100 mb-4">Nový dokument</h2>
+                <div className="space-y-3 mb-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-400 mb-1">
+                      Názov dokumentu
+                    </label>
+                    <input
+                      type="text"
+                      value={newTitle}
+                      onChange={(e) => setNewTitle(e.target.value)}
+                      placeholder="Popisný názov..."
+                      className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
                   </div>
-                </div>
-                <div className="flex-1 overflow-y-auto p-5">
-                  <div className="max-w-2xl space-y-4">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Názov dokumentu</label>
-                      <input
-                        type="text"
-                        value={editTitle}
-                        onChange={(e) => setEditTitle(e.target.value)}
-                        className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-primary-500 transition-colors"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Cesta k súboru</label>
-                      <input
-                        type="text"
-                        value={editPath}
-                        onChange={(e) => setEditPath(e.target.value)}
-                        className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200 font-mono focus:outline-none focus:border-primary-500 transition-colors"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* CREATE mode */}
-            {mode === "create" && (
-              <div className="flex flex-col h-full overflow-y-auto">
-                <div className="flex items-center gap-3 px-4 h-11 border-b border-slate-800 flex-shrink-0">
-                  <svg className="w-4 h-4 text-green-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
-                  <span className="text-sm font-medium text-slate-300">Nový dokument</span>
-                  <div className="ml-auto flex items-center gap-2">
-                    <button
-                      onClick={handleSaveCreate}
-                      disabled={saving}
-                      className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-primary-600 hover:bg-primary-500 disabled:opacity-40 text-white rounded-lg transition-colors"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                      {saving ? "Ukladám…" : "Uložiť & Index"}
-                    </button>
-                    <button
-                      onClick={() => setMode("view")}
-                      className="flex items-center gap-1 px-3 py-1.5 text-xs text-slate-500 border border-slate-700 rounded-lg hover:border-slate-500 transition-colors"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                      Zrušiť
-                    </button>
-                  </div>
-                </div>
-                <div className="p-4 space-y-3 flex-shrink-0">
-                  {createError && (
-                    <div className="text-xs text-red-400 rounded bg-red-500/10 border border-red-500/20 px-3 py-2">{createError}</div>
-                  )}
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Názov dokumentu *</label>
-                      <input
-                        type="text"
-                        value={createTitle}
-                        onChange={(e) => {
-                          setCreateTitle(e.target.value);
-                          if (!createPath || createPath === autoFilename(createTitle)) {
-                            setCreatePath(autoFilename(e.target.value));
-                          }
-                        }}
-                        placeholder="Popisný názov…"
-                        className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-primary-500 transition-colors"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Kategória</label>
+                  <div className="flex gap-3">
+                    <div className="flex-1">
+                      <label className="block text-xs font-medium text-gray-400 mb-1">
+                        Kategória
+                      </label>
                       <select
-                        value={createCat}
-                        onChange={(e) => setCreateCat(e.target.value)}
-                        className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-primary-500 transition-colors"
+                        value={newCategory}
+                        onChange={(e) => setNewCategory(e.target.value)}
+                        className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       >
                         {categories.map((c) => (
-                          <option key={c.code} value={c.code}>{c.code}</option>
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
                         ))}
                       </select>
                     </div>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-400 mb-1">Cesta k súboru (absolútna)</label>
-                    <input
-                      type="text"
-                      value={createPath}
-                      onChange={(e) => setCreatePath(e.target.value)}
-                      placeholder="/home/icc/knowledge/…/NAZOV.md"
-                      className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200 font-mono placeholder-slate-600 focus:outline-none focus:border-primary-500 transition-colors"
-                    />
+                    <div className="flex-1">
+                      <label className="block text-xs font-medium text-gray-400 mb-1">
+                        Názov súboru
+                      </label>
+                      <input
+                        type="text"
+                        value={newFilename}
+                        onChange={(e) => setNewFilename(e.target.value)}
+                        placeholder="NAZOV.md"
+                        className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
                   </div>
                 </div>
-                <div className="flex-1 flex flex-col px-4 pb-4 min-h-0">
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Obsah (Markdown) — voliteľný poznámkový blok</label>
+                <label className="block text-xs font-medium text-gray-400 mb-1">
+                  Obsah (Markdown)
+                </label>
+                <textarea
+                  lang="sk"
+                  value={newContent}
+                  onChange={(e) => setNewContent(e.target.value)}
+                  placeholder="# Názov dokumentu&#10;&#10;Obsah v Markdown..."
+                  className="flex-1 min-h-[200px] px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-200 font-mono resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <div className="flex gap-2 mt-4">
+                  <button
+                    onClick={handleCreate}
+                    disabled={saving || !newTitle.trim() || !newContent.trim()}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                    Uložiť
+                  </button>
+                  <button
+                    onClick={() => setMode("browse")}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-gray-700 text-gray-300 rounded-lg hover:bg-gray-600 text-sm transition-colors"
+                  >
+                    <X size={16} /> Zrušiť
+                  </button>
+                </div>
+              </div>
+            ) : selectedDoc ? (
+              mode === "edit" ? (
+                <div className="flex-1 flex flex-col p-4 overflow-hidden">
+                  <div className="flex items-center justify-between mb-3">
+                    <h2 className="text-lg font-semibold text-gray-100">
+                      {makeTitle(selectedDoc.filename)}
+                    </h2>
+                    <span className="text-xs text-gray-500">{selectedDoc.relative_path}</span>
+                  </div>
                   <textarea
-                    value={createContent}
-                    onChange={(e) => setCreateContent(e.target.value)}
-                    placeholder={`# ${createTitle || "Názov dokumentu"}\n\nObsah v Markdown…`}
-                    className="flex-1 min-h-[200px] px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-200 font-mono resize-none focus:outline-none focus:border-primary-500 transition-colors leading-relaxed"
+                    lang="sk"
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                    className="flex-1 px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-200 font-mono resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      onClick={handleUpdate}
+                      disabled={saving}
+                      className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 text-sm font-medium transition-colors disabled:opacity-50"
+                    >
+                      {saving ? (
+                        <Loader2 size={16} className="animate-spin" />
+                      ) : (
+                        <Save size={16} />
+                      )}
+                      Uložiť zmeny
+                    </button>
+                    <button
+                      onClick={() => setMode("browse")}
+                      className="flex items-center gap-1.5 px-4 py-2 bg-gray-700 text-gray-300 rounded-lg hover:bg-gray-600 text-sm transition-colors"
+                    >
+                      <X size={16} /> Zrušiť
+                    </button>
+                  </div>
                 </div>
+              ) : (
+                <div className="flex-1 flex flex-col overflow-hidden">
+                  <div className="p-4 border-b border-gray-700 flex items-center justify-between">
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-100">
+                        {makeTitle(selectedDoc.filename)}
+                      </h2>
+                      <div className="text-xs text-gray-500 mt-1 flex gap-3">
+                        <span>{selectedDoc.category}</span>
+                        <span>{(selectedDoc.size_bytes / 1024).toFixed(1)} kB</span>
+                        <span className="font-mono">{selectedDoc.relative_path}</span>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => copyDoc(docContent)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 text-gray-300 rounded hover:bg-gray-600 text-sm transition-colors"
+                        title={isDocCopied ? "Skopírované!" : "Kopírovať obsah"}
+                      >
+                        {isDocCopied ? (
+                          <>
+                            <Check size={14} className="text-green-400" />
+                            <span className="text-green-400">Skopírované</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy size={14} /> Kopírovať
+                          </>
+                        )}
+                      </button>
+                      {canWrite && (
+                        <>
+                          <button
+                            onClick={() => {
+                              setEditContent(docContent);
+                              setMode("edit");
+                            }}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 text-gray-300 rounded hover:bg-gray-600 text-sm transition-colors"
+                          >
+                            <Pencil size={14} /> Upraviť
+                          </button>
+                          {!confirmDelete ? (
+                            <button
+                              onClick={() => setConfirmDelete(true)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-red-900/30 text-red-400 rounded hover:bg-red-900/50 text-sm transition-colors"
+                            >
+                              <Trash2 size={14} /> Zmazať
+                            </button>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-red-400">Naozaj zmazať?</span>
+                              <button
+                                onClick={handleDelete}
+                                disabled={deleting}
+                                className="flex items-center gap-1 px-2 py-1 bg-red-600 text-white rounded text-xs hover:bg-red-500 disabled:opacity-50"
+                              >
+                                {deleting ? (
+                                  <Loader2 size={12} className="animate-spin" />
+                                ) : (
+                                  "Áno"
+                                )}
+                              </button>
+                              <button
+                                onClick={() => setConfirmDelete(false)}
+                                className="px-2 py-1 bg-gray-700 text-gray-300 rounded text-xs hover:bg-gray-600"
+                              >
+                                Nie
+                              </button>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto p-6">
+                    {loadingContent ? (
+                      <div className="flex items-center gap-2 text-gray-400">
+                        <Loader2 size={16} className="animate-spin" /> Načítavam obsah...
+                      </div>
+                    ) : (
+                      <div className="prose prose-sm prose-invert max-w-none prose-headings:text-white prose-p:text-gray-200 prose-strong:text-white prose-li:text-gray-200 prose-code:text-gray-200 prose-a:text-blue-400 prose-td:text-gray-200 prose-th:text-gray-100 prose-table:border prose-table:border-gray-600 prose-td:border prose-td:border-gray-700 prose-td:px-3 prose-td:py-1 prose-th:border prose-th:border-gray-600 prose-th:px-3 prose-th:py-1 prose-th:bg-gray-800">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                            code({ className, children, ...props }) {
+                              const match = /language-(\w+)/.exec(className || "");
+                              const isInline =
+                                !className &&
+                                typeof children === "string" &&
+                                !children.includes("\n");
+                              if (!isInline && match) {
+                                return (
+                                  <CodeBlock language={match[1]}>{String(children)}</CodeBlock>
+                                );
+                              }
+                              if (
+                                !isInline &&
+                                typeof children === "string" &&
+                                children.includes("\n")
+                              ) {
+                                return <CodeBlock>{String(children)}</CodeBlock>;
+                              }
+                              return (
+                                <code
+                                  className="bg-gray-800 px-1.5 py-0.5 rounded text-sm"
+                                  {...props}
+                                >
+                                  {children}
+                                </code>
+                              );
+                            },
+                            pre({ children }) {
+                              return <>{children}</>;
+                            },
+                          }}
+                        >
+                          {docContent}
+                        </ReactMarkdown>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center text-gray-500">
+                <Eye size={48} className="mb-4 text-gray-600" />
+                <p className="text-sm">Vyber dokument zo zoznamu alebo vytvor nový</p>
               </div>
             )}
-
           </div>
         </div>
-      )}
-
-      {/* ── KVALITA ── */}
-      {kbTab === "quality" && (
-        <div className="flex-1 overflow-y-auto p-5">
-          <div className="max-w-3xl mx-auto space-y-5">
-            {/* Stats */}
-            <div className="grid grid-cols-4 gap-3">
-              <div className="rounded-xl border border-slate-800 bg-slate-900 p-3">
-                <div className="text-[10px] text-slate-600 uppercase tracking-widest mb-1">Dokumenty</div>
-                <div className="text-2xl font-bold text-slate-100">—</div>
-                <div className="text-[10px] text-slate-500 mt-0.5">na disku</div>
-              </div>
-              <div className="rounded-xl border border-slate-800 bg-slate-900 p-3">
-                <div className="text-[10px] text-slate-600 uppercase tracking-widest mb-1">Qdrant chunks</div>
-                <div className="text-2xl font-bold text-primary-400">—</div>
-                <div className="text-[10px] text-slate-500 mt-0.5">indexed</div>
-              </div>
-              <div className="rounded-xl border border-slate-800 bg-slate-900 p-3">
-                <div className="text-[10px] text-slate-600 uppercase tracking-widest mb-1">Posledný scan</div>
-                <div className="text-sm font-semibold text-slate-200 mt-1">—</div>
-                <div className="text-[10px] text-slate-600 mt-0.5">● N/A</div>
-              </div>
-              <div className="rounded-xl border border-slate-800 bg-slate-900 p-3">
-                <div className="text-[10px] text-slate-600 uppercase tracking-widest mb-1">Issues</div>
-                <div className="text-2xl font-bold text-slate-600">—</div>
-                <div className="text-[10px] text-slate-500 mt-0.5">warnings</div>
-              </div>
-            </div>
-
-            {/* Scan button */}
-            <div className="flex items-center gap-3">
-              <button className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 rounded-lg transition-colors">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                </svg>
-                Spustiť scan
-              </button>
-              <button className="flex items-center gap-2 px-4 py-2 text-sm text-slate-500 border border-slate-700 rounded-lg hover:border-slate-600 transition-colors">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-                Cleanup zombies
-              </button>
-              <span className="text-xs text-slate-600">Scan not yet implemented</span>
-            </div>
-
-            {/* Hallucinations */}
-            <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-slate-800">
-                <span className="text-xs font-semibold text-slate-400 uppercase tracking-widest">Top hallucinations (zakázané pojmy)</span>
-              </div>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-slate-800">
-                    <th className="px-4 py-2 text-left text-[10px] font-medium text-slate-600 uppercase">Term</th>
-                    <th className="px-4 py-2 text-left text-[10px] font-medium text-slate-600 uppercase">Count</th>
-                    <th className="px-4 py-2 text-left text-[10px] font-medium text-slate-600 uppercase">Severity</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/50">
-                  {[
-                    { term: "psycopg2", count: 0, sev: "error" },
-                    { term: "asyncpg", count: 0, sev: "error" },
-                    { term: "Django", count: 0, sev: "warning" },
-                    { term: "Flask", count: 0, sev: "warning" },
-                  ].map((r) => (
-                    <tr key={r.term}>
-                      <td className={`px-4 py-2 font-mono text-xs ${r.sev === "error" ? "text-red-400" : "text-amber-400"}`}>{r.term}</td>
-                      <td className="px-4 py-2 text-xs text-slate-400">{r.count}</td>
-                      <td className="px-4 py-2">
-                        <span className={`text-[10px] border rounded px-1.5 ${r.sev === "error" ? "text-red-400 border-red-500/30" : "text-amber-400 border-amber-500/30"}`}>{r.sev}</span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Audit log placeholder */}
-            <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-slate-800 flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-400 uppercase tracking-widest">Audit log</span>
-                <span className="text-[10px] text-slate-600">Audit log endpoint not yet implemented</span>
-              </div>
-              <div className="px-4 py-6 text-center text-xs text-slate-700">
-                Audit log bude dostupný po implementácii backendu.
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Upload modal */}
-      {showUpload && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80">
-          <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-900 p-6 shadow-2xl">
-            <div className="flex items-center justify-between mb-5">
-              <h3 className="text-sm font-semibold text-slate-100">Upload dokument</h3>
-              <button
-                onClick={() => setShowUpload(false)}
-                className="text-slate-600 hover:text-slate-300 transition-colors"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <div className="space-y-4">
-              <div className="border-2 border-dashed border-slate-700 rounded-xl p-8 text-center hover:border-primary-500/50 transition-colors cursor-pointer">
-                <svg className="w-8 h-8 text-slate-600 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                </svg>
-                <p className="text-sm text-slate-500">Klikni alebo pretiahnuť súbor sem</p>
-                <p className="text-[11px] text-slate-700 mt-1">.md, .txt, .pdf — max 10 MB</p>
-              </div>
-              <p className="text-xs text-slate-600 text-center">File upload endpoint not yet implemented in backend.</p>
-              <div className="flex gap-2 pt-1">
-                <button
-                  onClick={() => setShowUpload(false)}
-                  className="flex-1 px-4 py-2 text-sm text-slate-400 border border-slate-700 rounded-lg hover:border-slate-600 transition-colors"
-                >
-                  Zavrieť
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 }
