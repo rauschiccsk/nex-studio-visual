@@ -73,6 +73,19 @@ class Settings(BaseSettings):
     ]
     kb_access_shu: list[str] = ["icc/", "shuhari/"]
 
+    # RAG / Qdrant configuration (M3 milestone of feature parity audit).
+    # Mirrors NEX Command's RAG constants. Qdrant runs on the shared ICC
+    # infra port 9130 (CLAUDE.md ICC Port Registry); Ollama on 9132 with
+    # the ``nomic-embed-text`` embedding model. Chunking parameters
+    # match NEX Command exactly so re-indexing produces identical
+    # collections and search results carry over 1:1.
+    qdrant_url: str = "http://localhost:9130"
+    ollama_url: str = "http://localhost:9132"
+    embed_model: str = "nomic-embed-text"
+    rag_api_timeout: int = 30
+    rag_chunk_max_chars: int = 1000
+    rag_chunk_overlap: int = 200
+
     # Admin URL of the mockup server (``mockup_server/app.py``) that
     # hosts each project's UI design at its own ``ui_design_port``.
     # After the backend persists a new ``UIDesign.html_preview`` it

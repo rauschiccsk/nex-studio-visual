@@ -1,4 +1,4 @@
-"""Knowledge CRUD API routes — filesystem-based, M1 milestone of feature parity audit.
+"""Knowledge CRUD API routes — filesystem-based, M1+M3 milestones of feature parity audit.
 
 Ported 1:1 from NEX Command (`backend/api/routes/knowledge.py`) per
 Director mandate 2026-05-07. NEX Studio musí mať identický KB system
@@ -9,12 +9,15 @@ Differences from NEX Command source:
 * Auth dependency: ``backend.core.security.get_current_user`` (NEX Studio
   re-exports the same JWT-backed helper that NEX Command uses).
 * Mounted at ``/api/v1/knowledge`` (NEX Studio prefix convention).
-* RBAC stubs (``_has_full_access``, ``_is_restricted``, ``filter_kb_documents``,
-  ``is_path_allowed``) are NO-OPS in M1 — they are filled in M2
-  (Shuhari RBAC milestone).
-* Qdrant indexing (RAGIndexer auto-ingest after save) is a NO-OP in M1
-  — wired up in M3 (RAG search milestone).
-* Knowledge proposal workflow (proposal_repo) is OUT of M1 scope.
+* M2 (Shuhari RBAC): :func:`_has_full_access`, :func:`_is_restricted`,
+  :func:`filter_kb_documents`, :func:`is_path_allowed` are real
+  implementations — see :mod:`backend.utils.kb_access`.
+* M3 (RAG indexing): POST / PUT / DELETE now auto-ingest into Qdrant
+  via :class:`backend.rag.indexer.RAGIndexer`. Failures degrade
+  gracefully — disk write is the source of truth, Qdrant errors
+  return a ``warning`` field instead of failing the request.
+* Knowledge proposal workflow (proposal_repo) is OUT of scope for the
+  feature parity audit.
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ from sqlalchemy.orm import Session
 from backend.core.security import get_current_user, has_full_kb_access
 from backend.db.models.foundation import User
 from backend.db.session import get_db
+from backend.rag.indexer import RAGIndexer
 from backend.services.knowledge_manager import KnowledgeManager
 from backend.utils.kb_access import (
     filter_kb_documents as _filter_documents_by_role,
@@ -67,11 +71,17 @@ class CreateDocumentRequest(BaseModel):
     category: str
     filename: str
     content: str
+    tenant: str = "icc"
+    # Optional — when set, server logs a warning if ``category`` does
+    # not start with ``projects/<slug>``. Helps catch UI bugs that
+    # drop a project-scoped doc into the wrong KB tree.
+    project_slug: Optional[str] = None
 
 
 class UpdateDocumentRequest(BaseModel):
     relative_path: str
     content: str
+    tenant: str = "icc"
 
 
 class DeleteDocumentRequest(BaseModel):
@@ -83,6 +93,10 @@ class DeleteDocumentRequest(BaseModel):
 
 def _get_manager() -> KnowledgeManager:
     return KnowledgeManager()
+
+
+def _get_indexer() -> RAGIndexer:
+    return RAGIndexer()
 
 
 # --- Routes ---
@@ -157,11 +171,11 @@ def get_knowledge_categories(
 
 
 @router.post("/documents")
-def create_document(
+async def create_document(
     request: CreateDocumentRequest,
     user: User = Depends(get_current_user),
 ):
-    """Save document to disk."""
+    """Save document to disk + auto-ingest into Qdrant."""
     if not _has_full_access(user) and _is_restricted(request.category):
         raise HTTPException(
             status_code=403,
@@ -169,6 +183,7 @@ def create_document(
         )
 
     manager = _get_manager()
+    indexer = _get_indexer()
 
     try:
         relative_path = manager.save_document(
@@ -179,23 +194,49 @@ def create_document(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-    # M3 (RAG): wire up Qdrant indexing here.
+    if request.project_slug:
+        expected_prefix = f"projects/{request.project_slug}"
+        if not request.category.startswith(expected_prefix):
+            logger.warning(
+                f"KB category mismatch: project_slug='{request.project_slug}' "
+                f"but category='{request.category}' (expected prefix '{expected_prefix}')"
+            )
+
+    try:
+        result = await indexer.index_document(
+            file_path=relative_path,
+            tenant=request.tenant,
+            content=request.content,
+        )
+    except Exception as e:
+        logger.error(f"Qdrant ingest failed for {relative_path}: {e}")
+        return {
+            "relative_path": relative_path,
+            "filename": request.filename,
+            "category": request.category,
+            "size_bytes": len(request.content.encode("utf-8")),
+            "chunks": 0,
+            "tenant": request.tenant,
+            "warning": f"Saved to disk but Qdrant ingest failed: {e}",
+        }
 
     return {
         "relative_path": relative_path,
         "filename": request.filename,
         "category": request.category,
         "size_bytes": len(request.content.encode("utf-8")),
+        "chunks": result["chunks"],
+        "tenant": request.tenant,
     }
 
 
 @router.put("/documents")
-def update_document(
+async def update_document(
     request: UpdateDocumentRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Overwrite existing markdown file content."""
+    """Overwrite existing markdown file content + reindex in Qdrant."""
     if not _is_path_allowed(request.relative_path, user, db):
         raise HTTPException(status_code=403, detail="Prístup zamietnutý na základe Shuhari role")
 
@@ -207,6 +248,7 @@ def update_document(
         )
 
     manager = _get_manager()
+    indexer = _get_indexer()
 
     try:
         manager.update_document(request.relative_path, request.content)
@@ -215,21 +257,39 @@ def update_document(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-    # M3 (RAG): re-index here.
+    try:
+        result = await indexer.reindex_document(
+            file_path=request.relative_path,
+            tenant=request.tenant,
+            source_file=request.relative_path,
+            content=request.content,
+        )
+    except Exception as e:
+        logger.error(f"Qdrant reindex failed for {request.relative_path}: {e}")
+        return {
+            "relative_path": request.relative_path,
+            "size_bytes": len(request.content.encode("utf-8")),
+            "chunks": 0,
+            "tenant": request.tenant,
+            "warning": f"Updated on disk but Qdrant reindex failed: {e}",
+        }
 
     return {
         "relative_path": request.relative_path,
         "size_bytes": len(request.content.encode("utf-8")),
+        "chunks": result["chunks"],
+        "tenant": request.tenant,
     }
 
 
 @router.delete("/documents")
-def delete_document(
+async def delete_document(
     relative_path: str = Query(..., description="Relative path to document"),
+    tenant: str = Query("icc", description="Qdrant tenant collection"),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Delete markdown file from disk."""
+    """Delete markdown file from disk + remove chunks from Qdrant."""
     if not _is_path_allowed(relative_path, user, db):
         raise HTTPException(status_code=403, detail="Prístup zamietnutý na základe Shuhari role")
 
@@ -241,15 +301,43 @@ def delete_document(
         )
 
     manager = _get_manager()
+    indexer = _get_indexer()
+
+    logger.info(f"DELETE knowledge: relative_path='{relative_path}', tenant='{tenant}'")
+
+    # Delete from Qdrant first — failures don't block disk delete
+    qdrant_error: Optional[str] = None
+    try:
+        deleted_chunks = await indexer.delete_document(relative_path, tenant)
+        logger.info(f"Qdrant delete result: {deleted_chunks} chunks removed")
+    except Exception as e:
+        logger.error(f"Qdrant delete FAILED for '{relative_path}': {e}", exc_info=True)
+        deleted_chunks = 0
+        qdrant_error = str(e)
 
     try:
-        deleted = manager.delete_document(relative_path)
+        disk_deleted = manager.delete_document(relative_path)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-    if not deleted:
+    if not disk_deleted and deleted_chunks == 0:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    # M3 (RAG): Qdrant cleanup here.
+    result: dict = {
+        "deleted": True,
+        "relative_path": relative_path,
+        "chunks_removed": deleted_chunks,
+        "tenant": tenant,
+    }
 
-    return {"deleted": True, "relative_path": relative_path}
+    if qdrant_error:
+        result["warning"] = f"Disk deleted but Qdrant cleanup failed: {qdrant_error}"
+        logger.warning(f"Partial delete for '{relative_path}': disk OK, Qdrant FAILED")
+
+    if disk_deleted and deleted_chunks == 0 and not qdrant_error:
+        logger.warning(
+            f"Disk deleted but 0 Qdrant chunks found for '{relative_path}' — "
+            "possible orphan vectors with different source_file path"
+        )
+
+    return result
