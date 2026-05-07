@@ -17,6 +17,7 @@ from backend.db.models.delegations import AutoFixAttempt, Delegation, ExecutionL
 from backend.db.models.foundation import User, UserSession
 from backend.db.models.guardian import GuardianPrecedent, GuardianReview
 from backend.db.models.migration import MigrationBatch, MigrationCategoryStatus, MigrationIdMap
+from backend.db.models.project_member import ProjectMember
 from backend.db.models.projects import ModuleDependency, Project, ProjectModule
 from backend.db.models.reports import ReportConfig
 from backend.db.models.specifications import DesignDocument, ProfessionalSpecification, RawSpecification, UIDesign
@@ -35,6 +36,7 @@ ALL_MODELS: tuple[type, ...] = (
     MigrationBatch,
     MigrationCategoryStatus,
     ProjectModule,
+    ProjectMember,
     ArchitectSession,
     ArchitectMessage,
     DesignDocument,
@@ -78,6 +80,7 @@ __all__ = [
     "ModuleDependency",
     "ProfessionalSpecification",
     "Project",
+    "ProjectMember",
     "ProjectModule",
     "RawSpecification",
     "ReportConfig",

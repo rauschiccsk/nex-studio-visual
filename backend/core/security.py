@@ -103,3 +103,47 @@ def require_ri_role(
             detail="This operation requires the 'ri' role",
         )
     return current_user
+
+
+def require_ha_or_above(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Allow ``ri`` and ``ha`` users; reject ``shu`` with HTTP 403.
+
+    Mirrors NEX Command's ``require_ha_or_above`` (used for write-level
+    operations: create/update KB documents, run audits, manage projects).
+    The Shuhari hierarchy is ``ri > ha > shu``; this gate covers the
+    upper two roles.
+    """
+    if current_user.role not in ("ri", "ha"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This operation requires the 'ri' or 'ha' role",
+        )
+    return current_user
+
+
+def require_shu_or_above(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Allow any authenticated user (``ri``/``ha``/``shu``).
+
+    Equivalent to :func:`get_current_user` but expressed explicitly so
+    routes that document a Shuhari floor can still reference a named
+    dependency. Useful for audit clarity ("this endpoint requires at
+    least shu") and for symmetry with :func:`require_ha_or_above` and
+    :func:`require_ri_role`.
+    """
+    # All roles in our model satisfy this; we only need a valid user.
+    return current_user
+
+
+def has_full_kb_access(user: User) -> bool:
+    """True if the user can read every KB document, including any restricted category.
+
+    Mirrors NEX Command's ``_has_full_access(user)``. In NEX Studio's
+    flatter role model ``ri`` is the equivalent of NEX Command's
+    ``director`` role; ``ha`` and ``shu`` users are filtered by
+    category and per-project access (see :mod:`backend.utils.kb_access`).
+    """
+    return user.role == "ri"

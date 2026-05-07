@@ -33,6 +33,7 @@ from backend.api.routes.module_dependencies import router as module_dependencies
 from backend.api.routes.professional_specifications import (
     router as professional_specifications_router,
 )
+from backend.api.routes.project_members import router as project_members_router
 from backend.api.routes.project_modules import router as project_modules_router
 from backend.api.routes.projects import router as projects_router
 from backend.api.routes.raw_specifications import router as raw_specifications_router
@@ -121,6 +122,7 @@ app.include_router(
 )
 app.include_router(design_documents_router, prefix="/api/v1/design-documents")
 app.include_router(knowledge_router, prefix="/api/v1/knowledge")
+app.include_router(project_members_router, prefix="/api/v1/project-members")
 app.include_router(credentials_router, prefix="/api/v1/credentials")
 app.include_router(architect_sessions_router, prefix="/api/v1/architect-sessions")
 # The architect router spans two URL families (/projects/{id}/architect and

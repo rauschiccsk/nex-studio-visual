@@ -25,47 +25,37 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from backend.core.security import get_current_user
+from backend.core.security import get_current_user, has_full_kb_access
 from backend.db.models.foundation import User
 from backend.services.knowledge_manager import KnowledgeManager
+from backend.utils.kb_access import (
+    filter_kb_documents as _filter_documents_by_role,
+)
+from backend.utils.kb_access import (
+    is_path_allowed as _is_path_allowed,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Knowledge"])
 
 
-# --- M1 stubs (filled in M2 Shuhari RBAC milestone) ---
+# Restricted categories — readable only by users with full KB access
+# (``ri`` role). NEX Studio credentials live in their own store
+# (/opt/data/nex-studio/credentials/) outside KB root, so this list is
+# empty in practice; preserved for parity with NEX Command which uses
+# the same ``_is_restricted`` predicate to gate the credentials/ KB dir.
+_RESTRICTED_CATEGORIES: frozenset[str] = frozenset({"credentials"})
 
 
 def _has_full_access(user: User) -> bool:
-    """RBAC stub — M1 always returns True (auth-only).
-
-    M2 will check role + project assignments per NEX Command's
-    ``_has_full_access(user)`` logic.
-    """
-    return True
+    """Real M2 implementation: ``ri`` role has full KB access."""
+    return has_full_kb_access(user)
 
 
 def _is_restricted(category: str) -> bool:
-    """RBAC stub — M1 always returns False (no restricted categories).
-
-    Credentials are out of KB in NEX Studio (own store
-    ``/opt/data/nex-studio/credentials/`` since session 002, 2026-05-04),
-    so no in-KB restriction applies. M2 may extend with project-level
-    restrictions per Shuhari role.
-    """
-    return False
-
-
-def _filter_documents_by_role(documents: list[dict], user: User) -> list[dict]:
-    """RBAC stub — M1 returns documents unchanged. M2 fills with
-    NEX Command's ``filter_kb_documents`` logic."""
-    return documents
-
-
-def _is_path_allowed(relative_path: str, user: User) -> bool:
-    """RBAC stub — M1 always allows. M2 fills with NEX Command's
-    ``is_path_allowed`` per-role + project assignment check."""
-    return True
+    """Real M2 implementation: category is restricted iff in the
+    ``_RESTRICTED_CATEGORIES`` set."""
+    return category.lower() in _RESTRICTED_CATEGORIES
 
 
 # --- Request models ---

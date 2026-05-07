@@ -56,6 +56,23 @@ class Settings(BaseSettings):
     # Same rationale as ``kb_content_max_bytes``.
     credentials_content_max_bytes: int = 5 * 1024 * 1024
 
+    # KB access matrix per Shuhari role.
+    # Mirrors NEX Command's ``KB_ACCESS`` config (M2 feature parity, 2026-05-07).
+    # * "*"          — full access (every category)
+    # * concrete prefixes — read access to those category trees
+    # * "shu" gets icc/ + shuhari/ baseline; assigned project paths are
+    #   added dynamically by ``backend.utils.kb_access._add_assigned_projects``.
+    kb_access_ri: list[str] = ["*"]
+    kb_access_ha: list[str] = [
+        "icc/",
+        "shuhari/",
+        "infrastructure/",
+        "projects/",
+        "customers/",
+        "templates/",
+    ]
+    kb_access_shu: list[str] = ["icc/", "shuhari/"]
+
     # Admin URL of the mockup server (``mockup_server/app.py``) that
     # hosts each project's UI design at its own ``ui_design_port``.
     # After the backend persists a new ``UIDesign.html_preview`` it
