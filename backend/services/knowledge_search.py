@@ -83,9 +83,7 @@ async def search_knowledge(
         payload = hit.get("payload", {})
         source_file = payload.get("source_file", "")
         content = payload.get("content", "")
-        filename = payload.get(
-            "filename", source_file.split("/")[-1] if source_file else ""
-        )
+        filename = payload.get("filename", source_file.split("/")[-1] if source_file else "")
 
         # Deduplicate by source_file — keep highest score (results sorted by score)
         if source_file in seen_files:

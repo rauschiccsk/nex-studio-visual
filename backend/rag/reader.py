@@ -83,9 +83,7 @@ def get_document(tenant: str, source_file: str) -> Optional[Dict]:
     while True:
         results, next_offset = client.scroll(
             collection_name=tenant,
-            scroll_filter=Filter(
-                must=[FieldCondition(key="source_file", match=MatchValue(value=source_file))]
-            ),
+            scroll_filter=Filter(must=[FieldCondition(key="source_file", match=MatchValue(value=source_file))]),
             limit=100,
             offset=offset,
             with_payload=True,
@@ -174,14 +172,16 @@ def search(
         seen_sources.add(source)
 
         content = payload.get("content", "")
-        results.append({
-            "source_file": source,
-            "title": _make_title(source),
-            "category": _extract_category(source),
-            "snippet": _make_context_snippet(content, query),
-            "score": round(hit.score, 4),
-            "ingested_at": payload.get("ingested_at", ""),
-        })
+        results.append(
+            {
+                "source_file": source,
+                "title": _make_title(source),
+                "category": _extract_category(source),
+                "snippet": _make_context_snippet(content, query),
+                "score": round(hit.score, 4),
+                "ingested_at": payload.get("ingested_at", ""),
+            }
+        )
         if len(results) >= limit:
             break
 
@@ -298,7 +298,7 @@ def _make_context_snippet(content: str, query: str, max_length: int = 300) -> st
     if start > 0:
         space = snippet.find(" ")
         if space != -1 and space < 30:
-            snippet = snippet[space + 1:]
+            snippet = snippet[space + 1 :]
         snippet = "..." + snippet
     if end < len(content):
         space = snippet.rfind(" ")

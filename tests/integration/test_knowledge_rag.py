@@ -158,9 +158,7 @@ class TestKnowledgeRouterRagWireup:
         # Disk write must have happened
         assert (tmp_path / "icc" / "EDIT.md").read_text(encoding="utf-8") == "# new content"
 
-    def test_delete_qdrant_down_still_removes_disk(
-        self, db_session, tmp_path, monkeypatch
-    ):
+    def test_delete_qdrant_down_still_removes_disk(self, db_session, tmp_path, monkeypatch):
         ri = _make_user(db_session, "ri")
         (tmp_path / "icc").mkdir()
         target = tmp_path / "icc" / "DEL.md"
@@ -179,9 +177,7 @@ class TestKnowledgeRouterRagWireup:
         assert "warning" in body
         assert not target.exists()
 
-    def test_post_project_slug_mismatch_logs_warning(
-        self, db_session, tmp_path, monkeypatch, caplog
-    ):
+    def test_post_project_slug_mismatch_logs_warning(self, db_session, tmp_path, monkeypatch, caplog):
         import logging as _logging
 
         ri = _make_user(db_session, "ri")

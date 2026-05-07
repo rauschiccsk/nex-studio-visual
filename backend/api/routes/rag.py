@@ -96,10 +96,7 @@ async def list_documents(
     result = reader.list_documents(tenant=tenant, page=page, per_page=per_page)
 
     if not has_full_kb_access(user) and isinstance(result, dict) and "documents" in result:
-        result["documents"] = [
-            d for d in result["documents"]
-            if not _is_restricted(d.get("category", ""))
-        ]
+        result["documents"] = [d for d in result["documents"] if not _is_restricted(d.get("category", ""))]
 
     # RBAC: filter by Shuhari role
     if isinstance(result, dict) and "documents" in result:

@@ -130,15 +130,13 @@ class RAGIndexer:
                 if cut == -1:
                     cut = prev_tail.find(" ")
                 if cut != -1:
-                    prev_tail = prev_tail[cut + 1:]
+                    prev_tail = prev_tail[cut + 1 :]
                 overlapped.append(f"{prev_tail}\n\n{chunks[i]}")
             chunks = overlapped
 
         return chunks
 
-    async def index_document(
-        self, file_path: str, tenant: str, content: Optional[str] = None
-    ) -> dict:
+    async def index_document(self, file_path: str, tenant: str, content: Optional[str] = None) -> dict:
         """Read MD, chunk, embed, upsert to Qdrant. Returns stats."""
         # Read file if content not provided
         if content is None:
@@ -194,9 +192,7 @@ class RAGIndexer:
         # Upsert to Qdrant
         client = self._get_client()
         client.upsert(collection_name=tenant, points=points)
-        logger.info(
-            f"Indexed {total_chunks} chunks of {source_file} into '{tenant}'"
-        )
+        logger.info(f"Indexed {total_chunks} chunks of {source_file} into '{tenant}'")
 
         return {
             "source_file": source_file,
@@ -212,13 +208,7 @@ class RAGIndexer:
 
         client = self._get_client()
 
-        doc_filter = Filter(
-            must=[
-                FieldCondition(
-                    key="source_file", match=MatchValue(value=source_file)
-                )
-            ]
-        )
+        doc_filter = Filter(must=[FieldCondition(key="source_file", match=MatchValue(value=source_file))])
 
         # Count existing points
         count_result = client.count(
@@ -229,9 +219,7 @@ class RAGIndexer:
         count = count_result.count
 
         if count == 0:
-            logger.warning(
-                f"Qdrant delete: no points found for '{source_file}' in '{tenant}'"
-            )
+            logger.warning(f"Qdrant delete: no points found for '{source_file}' in '{tenant}'")
             return 0
 
         # Delete by filter — atomic single operation
@@ -240,9 +228,7 @@ class RAGIndexer:
             points_selector=FilterSelector(filter=doc_filter),
         )
 
-        logger.info(
-            f"Qdrant delete: removed {count} chunks of '{source_file}' from '{tenant}'"
-        )
+        logger.info(f"Qdrant delete: removed {count} chunks of '{source_file}' from '{tenant}'")
         return count
 
     async def reindex_document(
