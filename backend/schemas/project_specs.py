@@ -31,8 +31,7 @@ class ProjectSpecDoc(BaseModel):
     category: str = Field(
         ...,
         description=(
-            "Parent folder path within the project, e.g. "
-            "``nex-inbox/docs/specs`` or ``nex-inbox/docs/audits/v0.1.0``."
+            "Parent folder path within the project, e.g. ``nex-inbox/docs/specs`` or ``nex-inbox/docs/audits/v0.1.0``."
         ),
     )
     size_bytes: int

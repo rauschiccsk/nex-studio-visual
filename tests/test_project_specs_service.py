@@ -125,12 +125,8 @@ def test_list_ignores_invalid_slug_dirs(fake_projects_root: Path) -> None:
 
 
 def test_read_content_happy_path(fake_projects_root: Path) -> None:
-    _seed_project(
-        fake_projects_root, "nex-inbox", {"docs/specs/x.md": "hello world"}
-    )
-    assert (
-        svc.read_content("nex-inbox", "docs/specs/x.md") == "hello world"
-    )
+    _seed_project(fake_projects_root, "nex-inbox", {"docs/specs/x.md": "hello world"})
+    assert svc.read_content("nex-inbox", "docs/specs/x.md") == "hello world"
 
 
 def test_read_content_rejects_invalid_slug(fake_projects_root: Path) -> None:
@@ -139,25 +135,19 @@ def test_read_content_rejects_invalid_slug(fake_projects_root: Path) -> None:
 
 
 def test_read_content_rejects_path_traversal(fake_projects_root: Path) -> None:
-    _seed_project(
-        fake_projects_root, "nex-inbox", {"docs/specs/x.md": "x"}
-    )
+    _seed_project(fake_projects_root, "nex-inbox", {"docs/specs/x.md": "x"})
     with pytest.raises(ProjectSpecsError, match="traversal"):
         svc.read_content("nex-inbox", "docs/../../etc/passwd")
 
 
 def test_read_content_requires_docs_prefix(fake_projects_root: Path) -> None:
-    _seed_project(
-        fake_projects_root, "nex-inbox", {"README.md": "top"}
-    )
+    _seed_project(fake_projects_root, "nex-inbox", {"README.md": "top"})
     with pytest.raises(ProjectSpecsError, match="inside docs/"):
         svc.read_content("nex-inbox", "README.md")
 
 
 def test_read_content_only_md(fake_projects_root: Path) -> None:
-    _seed_project(
-        fake_projects_root, "nex-inbox", {"docs/x.json": "{}"}
-    )
+    _seed_project(fake_projects_root, "nex-inbox", {"docs/x.json": "{}"})
     with pytest.raises(ProjectSpecsError, match=".md"):
         svc.read_content("nex-inbox", "docs/x.json")
 
@@ -172,13 +162,9 @@ def test_read_content_missing_file(fake_projects_root: Path) -> None:
 
 
 def test_write_content_overwrites_existing(fake_projects_root: Path) -> None:
-    _seed_project(
-        fake_projects_root, "nex-inbox", {"docs/specs/x.md": "original"}
-    )
+    _seed_project(fake_projects_root, "nex-inbox", {"docs/specs/x.md": "original"})
     svc.write_content("nex-inbox", "docs/specs/x.md", "edited")
-    assert (
-        svc.read_content("nex-inbox", "docs/specs/x.md") == "edited"
-    )
+    assert svc.read_content("nex-inbox", "docs/specs/x.md") == "edited"
 
 
 def test_write_content_refuses_to_create_new(fake_projects_root: Path) -> None:
