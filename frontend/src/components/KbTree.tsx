@@ -27,13 +27,7 @@
  */
 
 import { useMemo, useState, useEffect } from "react";
-import {
-  ChevronDown,
-  ChevronRight,
-  FileText,
-  Folder,
-  FolderOpen,
-} from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
 import { buildTree } from "@/lib/kbTreeBuilder";
 import type { KnowledgeDoc, TreeNode } from "@/types/knowledge";
@@ -148,11 +142,12 @@ function TreeNodeView({
           ) : (
             <ChevronRight size={14} className="shrink-0 text-gray-400" />
           )}
-          {isOpen ? (
-            <FolderOpen size={16} className="shrink-0 text-blue-400" />
-          ) : (
-            <Folder size={16} className="shrink-0 text-blue-400" />
-          )}
+          <span
+            className="shrink-0 text-base leading-none"
+            aria-hidden="true"
+          >
+            {isOpen ? "📂" : "📁"}
+          </span>
           <span className="truncate">{node.name}</span>
         </button>
         {isOpen &&
@@ -186,7 +181,12 @@ function TreeNodeView({
     >
       {/* chevron-spacer so files align with folder names */}
       <span className="inline-block w-3.5 shrink-0" aria-hidden="true" />
-      <FileText size={14} className="shrink-0 text-gray-400" />
+      <span
+        className="shrink-0 text-base leading-none"
+        aria-hidden="true"
+      >
+        📄
+      </span>
       <span className="truncate">{node.name}</span>
     </button>
   );

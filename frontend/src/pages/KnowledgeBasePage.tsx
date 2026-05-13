@@ -98,12 +98,13 @@ export default function KnowledgeBasePage() {
   // List state
   const [documents, setDocuments] = useState<KnowledgeDoc[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
-  // selectedCategory drives the default category for "Nový" doc creation.
-  // Setter is unused after the categories sidebar removal (the value is
-  // restored from sessionStore at mount and not mutated thereafter).
-  const [selectedCategory] = useState<string | null>(
-    () => useSessionStore.getState().knowledgeCategory,
-  );
+  // selectedCategory was the active filter in the previous two-column
+  // layout; after the unified-tree refactor, every list view (tree,
+  // flat-all, search) always works against the full document set, so
+  // we no longer track it as state. The "Nový" doc creation form uses
+  // a static default category ("icc") — see line below.
+  // Note: the legacy `knowledgeCategory` slot in sessionStore is kept
+  // intact for now (no migration), simply unused by this page.
   const [loading, setLoading] = useState(false);
 
   // View mode: 'tree' (hierarchical browser, default) or 'all'
@@ -250,8 +251,8 @@ export default function KnowledgeBasePage() {
   };
 
   const refresh = useCallback(async () => {
-    await Promise.all([loadDocuments(selectedCategory), loadCategories()]);
-  }, [loadDocuments, loadCategories, selectedCategory]);
+    await Promise.all([loadDocuments(null), loadCategories()]);
+  }, [loadDocuments, loadCategories]);
 
   const handleCreate = async () => {
     if (!newTitle.trim() || !newCategory || !newContent.trim()) return;
@@ -324,7 +325,7 @@ export default function KnowledgeBasePage() {
   }, []);
 
   useEffect(() => {
-    loadDocuments(selectedCategory);
+    loadDocuments(null);
     if (sessionRestored.current) {
       setSelectedDoc(null);
       setDocContent("");
@@ -333,7 +334,7 @@ export default function KnowledgeBasePage() {
     setSearchInfo(null);
     setSearchResults(null);
     setSearchQuery("");
-  }, [selectedCategory, loadDocuments]);
+  }, [loadDocuments]);
 
   useEffect(() => {
     if (sessionRestored.current || documents.length === 0) return;
@@ -430,7 +431,7 @@ export default function KnowledgeBasePage() {
                   setSelectedDoc(null);
                   setDocContent("");
                   setNewTitle("");
-                  setNewCategory(selectedCategory || "icc");
+                  setNewCategory("icc");
                   setNewFilename("");
                   setNewContent("");
                   setError("");
