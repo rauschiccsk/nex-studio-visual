@@ -246,14 +246,34 @@ class TestUserRouter:
         )
         assert resp.status_code == 404
 
-    def test_delete_returns_204_and_deactivates(self, router_client):
+    def test_delete_hard_removes_user(self, router_client):
+        """DELETE is a hard delete (Director directive 2026-05-13).
+
+        After the call the row is gone — GET returns 404 and a new user
+        can immediately reuse the same email / username.
+        """
         created = router_client.post("/api/v1/users", json=_payload()).json()
         resp = router_client.delete(f"/api/v1/users/{created['id']}")
         assert resp.status_code == 204
-        # User still exists but is deactivated (soft-delete).
+        # Row must be gone — GET returns 404.
         get_resp = router_client.get(f"/api/v1/users/{created['id']}")
-        assert get_resp.status_code == 200
-        assert get_resp.json()["is_active"] is False
+        assert get_resp.status_code == 404
+
+    def test_delete_releases_email_and_username_for_reuse(self, router_client):
+        """After hard delete the email + username are free for a new user
+        — guards against the regression where soft-delete kept the
+        UNIQUE constraint and blocked recreation."""
+        original = router_client.post(
+            "/api/v1/users",
+            json=_payload(username="recycle", email="recycle@example.com"),
+        ).json()
+        router_client.delete(f"/api/v1/users/{original['id']}").raise_for_status()
+        # Recreate with the same username + email — must succeed.
+        resp = router_client.post(
+            "/api/v1/users",
+            json=_payload(username="recycle", email="recycle@example.com"),
+        )
+        assert resp.status_code == 201, resp.text
 
     def test_delete_missing_returns_404(self, router_client):
         resp = router_client.delete(f"/api/v1/users/{uuid.uuid4()}")

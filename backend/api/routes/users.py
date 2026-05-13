@@ -172,10 +172,25 @@ def delete_user(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_ri_role),
 ) -> Response:
-    """Soft-delete a user by setting ``is_active=False`` (ri only).
+    """Hard-delete a user (ri only).
 
-    An ``ri`` user cannot delete (deactivate) their own account — this
-    prevents accidental self-lockout.
+    The ``user_service.delete`` helper proactively checks every inbound
+    ``ondelete='RESTRICT'`` foreign key (projects, bugs, architect_sessions,
+    raw_specifications, professional_specifications, design_documents)
+    before issuing the DELETE — if any row still references the user,
+    a clean :class:`ValueError` propagates up to a 409 Conflict here
+    instead of a raw integrity error.
+
+    ``ri`` users cannot delete their own account — prevents accidental
+    self-lockout. For routine soft-disable, the operator should use
+    ``PATCH /users/{id}`` with ``is_active=false`` (rendered in the UI
+    as the separate "Deaktivovať" button).
+
+    History: until 2026-05-13 this endpoint was a soft-delete
+    (``update(is_active=False)``). The semantic mismatch — UI "trash" icon
+    suggesting a real delete while the row stayed in the DB blocking new
+    users with the same email/username — was the bug Director hit when
+    recreating "tibi". The endpoint now does what the verb says.
     """
     if user_id == current_user.id:
         raise HTTPException(
@@ -183,7 +198,7 @@ def delete_user(
             detail="Cannot delete your own account",
         )
     try:
-        user_service.update(db, user_id, UserUpdate(is_active=False))
+        user_service.delete(db, user_id)
         db.commit()
     except ValueError as exc:
         db.rollback()

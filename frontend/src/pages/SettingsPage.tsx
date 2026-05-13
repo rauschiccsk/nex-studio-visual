@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { listUsersApi, createUserApi, updateUserApi, deleteUserApi } from "@/services/api/users";
+import { listUsersApi, createUserApi, updateUserApi, deleteUserApi, changePasswordApi } from "@/services/api/users";
 import {
   listSystemSettingsApi,
   updateSystemSettingApi,
@@ -170,6 +170,9 @@ export default function SettingsPage() {
   const [editEmail, setEditEmail] = useState("");
   const [editRole, setEditRole] = useState<UserRole>("shu");
   const [editIsActive, setEditIsActive] = useState(true);
+  // Empty = keep current password (no rotation). Non-empty triggers a
+  // POST /users/{id}/change-password after the PATCH.
+  const [editPassword, setEditPassword] = useState("");
   const [editing, setEditing] = useState(false);
   const [editError, setEditError] = useState("");
 
@@ -247,6 +250,7 @@ export default function SettingsPage() {
     setEditEmail(u.email);
     setEditRole(u.role);
     setEditIsActive(u.is_active);
+    setEditPassword("");
     setEditError("");
     // Close the create form + delete confirm if either is open.
     setShowNewForm(false);
@@ -255,9 +259,15 @@ export default function SettingsPage() {
 
   async function handleSaveEdit() {
     if (!editingUser) return;
+    // Client-side password length guard (mirrors backend min_length=5).
+    if (editPassword && editPassword.length < PASSWORD_MIN_LENGTH) {
+      setEditError(`Heslo musí mať aspoň ${PASSWORD_MIN_LENGTH} znakov.`);
+      return;
+    }
     setEditing(true);
     setEditError("");
     try {
+      // PATCH first — profile fields update independently of password.
       const updated = await updateUserApi(editingUser.id, {
         first_name: editFirstName || null,
         last_name: editLastName || null,
@@ -265,8 +275,15 @@ export default function SettingsPage() {
         role: editRole,
         is_active: editIsActive,
       });
+      // Optional password rotation. Empty input = keep current.
+      // Done after PATCH so a failing PATCH doesn't leave the user
+      // with a rotated password but stale profile.
+      if (editPassword) {
+        await changePasswordApi(editingUser.id, editPassword);
+      }
       setUsers((prev) => prev.map((x) => x.id === updated.id ? updated : x));
       setEditingUser(null);
+      setEditPassword("");
     } catch (e) {
       const msg =
         e instanceof Error && e.message
@@ -716,17 +733,45 @@ export default function SettingsPage() {
                       Active
                     </label>
                   </div>
+                  <div className="col-span-2">
+                    <label className="block text-xs text-slate-500 mb-1">
+                      New password{" "}
+                      <span className="text-slate-600">
+                        (nechaj prázdne ak nemeniť)
+                      </span>
+                    </label>
+                    <input
+                      type="password"
+                      value={editPassword}
+                      onChange={(e) => setEditPassword(e.target.value)}
+                      placeholder={`min ${PASSWORD_MIN_LENGTH} characters`}
+                      className={`w-full bg-slate-800 border rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-primary-500 ${
+                        editPassword && editPassword.length < PASSWORD_MIN_LENGTH
+                          ? "border-red-500"
+                          : "border-slate-700"
+                      }`}
+                    />
+                    {editPassword && editPassword.length < PASSWORD_MIN_LENGTH && (
+                      <div className="mt-1 text-[10px] text-red-400">
+                        Heslo musí mať aspoň {PASSWORD_MIN_LENGTH} znakov ({editPassword.length}/{PASSWORD_MIN_LENGTH}).
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div className="flex gap-2 justify-end">
                   <button
-                    onClick={() => { setEditingUser(null); setEditError(""); }}
+                    onClick={() => { setEditingUser(null); setEditError(""); setEditPassword(""); }}
                     className="px-3 py-1.5 text-xs text-slate-400 border border-slate-700 rounded-lg hover:bg-slate-800 transition-colors"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleSaveEdit}
-                    disabled={editing || !editEmail}
+                    disabled={
+                      editing ||
+                      !editEmail ||
+                      (editPassword !== "" && editPassword.length < PASSWORD_MIN_LENGTH)
+                    }
                     className="px-3 py-1.5 text-xs font-medium text-white bg-primary-600 hover:bg-primary-500 disabled:opacity-40 rounded-lg transition-colors"
                   >
                     {editing ? "Ukladám…" : "Save"}
