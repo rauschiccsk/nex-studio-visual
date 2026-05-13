@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Pin, PinOff } from "lucide-react";
 import { listProjectsApi } from "@/services/api/projects";
+import { listVersions } from "@/services/api/versions";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import type { ProjectRead } from "@/types";
+import type { Version } from "@/types/version";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -132,6 +134,32 @@ export default function ProjectsPage() {
   const [error, setError] = useState("");
   const selectedProject = useActiveContextStore((s) => s.selectedProject);
   const setSelectedProject = useActiveContextStore((s) => s.setSelectedProject);
+  const setSelectedVersion = useActiveContextStore((s) => s.setSelectedVersion);
+
+  /** Pick a sensible default verzia for the freshly pinned projekt.
+   *
+   *  Priority:
+   *    1. ``status === "active"``  — the verzia currently being worked on
+   *    2. first row (list is ``version_number DESC`` — newest first)
+   *    3. ``null`` — no versions yet; Workflow stays disabled until one exists
+   *
+   *  Director directive 2026-05-14: Workflow must be enabled the moment
+   *  a project with an existing verzia is pinned — without this auto-pick
+   *  the user had to manually open the verzia first which was non-obvious.
+   */
+  async function pickDefaultVersion(projectId: string): Promise<Version | null> {
+    try {
+      const versions = await listVersions(projectId);
+      if (versions.length === 0) return null;
+      const active = versions.find((v) => v.status === "active");
+      return active ?? versions[0] ?? null;
+    } catch {
+      // Network / permission failure — leave version unset so Workflow
+      // stays disabled. User can still open the verzia manually via
+      // Versions link.
+      return null;
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -211,9 +239,19 @@ export default function ProjectsPage() {
                 onTogglePin={() => {
                   if (isSelected) {
                     setSelectedProject(null);
-                  } else {
-                    setSelectedProject({ slug: p.slug, name: p.name });
+                    return;
                   }
+                  // Optimistic pin first so the indicator updates
+                  // immediately; the version fetch is best-effort.
+                  setSelectedProject({ slug: p.slug, name: p.name });
+                  void pickDefaultVersion(p.id).then((v) => {
+                    if (v) {
+                      setSelectedVersion({
+                        versionId: v.id,
+                        versionNumber: v.version_number,
+                      });
+                    }
+                  });
                 }}
               />
             );
