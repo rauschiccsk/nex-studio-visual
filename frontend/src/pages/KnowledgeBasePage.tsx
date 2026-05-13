@@ -46,15 +46,10 @@ import { useAuthStore } from "@/store/authStore";
 import { useSessionStore } from "@/store/sessionStore";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 import { CodeBlock } from "@/components/markdown/CodeBlock";
+import { KbTree } from "@/components/KbTree";
+import type { KnowledgeDoc } from "@/types/knowledge";
 
 // --- Interfaces ---
-
-interface KnowledgeDoc {
-  relative_path: string;
-  filename: string;
-  category: string;
-  size_bytes: number;
-}
 
 interface SearchResult {
   source_file: string;
@@ -103,10 +98,17 @@ export default function KnowledgeBasePage() {
   // List state
   const [documents, setDocuments] = useState<KnowledgeDoc[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(
+  // selectedCategory drives the default category for "Nový" doc creation.
+  // Setter is unused after the categories sidebar removal (the value is
+  // restored from sessionStore at mount and not mutated thereafter).
+  const [selectedCategory] = useState<string | null>(
     () => useSessionStore.getState().knowledgeCategory,
   );
   const [loading, setLoading] = useState(false);
+
+  // View mode: 'tree' (hierarchical browser, default) or 'all'
+  // (flat list of all documents — toggle "Všetky dokumenty" above tree).
+  const [viewMode, setViewMode] = useState<"tree" | "all">("tree");
 
   // Viewer state
   const [selectedDoc, setSelectedDoc] = useState<KnowledgeDoc | null>(null);
@@ -356,215 +358,200 @@ export default function KnowledgeBasePage() {
 
   return (
     <div className="flex h-[calc(100vh-100px)] bg-gray-900 rounded-xl border border-gray-700 overflow-hidden">
-      {/* Sidebar */}
-      <div className="w-56 bg-gray-800 p-4 border-r border-gray-700 flex flex-col">
-        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2 text-gray-100">
-          <FolderOpen size={20} />
-          Knowledge Base
-        </h2>
-
-        <div className="mb-4 p-3 bg-gray-700 rounded-lg text-sm">
-          <div className="flex items-center gap-1.5 mb-1">
-            <Database size={14} className="text-gray-400" />
-            <span className="font-medium text-gray-100">{documents.length} dokumentov</span>
+      {/* KB Tree column — unified hierarchical browser (replaces former
+          categories sidebar + documents list) */}
+      <div className="w-80 bg-gray-800 border-r border-gray-700 flex flex-col min-w-0">
+        {/* Header */}
+        <div className="p-3 border-b border-gray-700">
+          <h2 className="text-base font-semibold flex items-center gap-2 text-gray-100">
+            <FolderOpen size={18} />
+            Knowledge Base
+          </h2>
+          <div className="mt-2 flex items-center gap-1.5 text-xs text-gray-400">
+            <Database size={12} />
+            <span>{documents.length} dokumentov</span>
           </div>
         </div>
 
-        <div className="space-y-1 flex-1 overflow-y-auto">
-          <button
-            onClick={() => {
-              setSelectedCategory(null);
-              useSessionStore.getState().setKnowledgeCategory(null);
-              useSessionStore.getState().setKnowledgeDocPath(null);
-            }}
-            className={`w-full text-left px-3 py-2 rounded text-sm transition-colors ${
-              !selectedCategory ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-700"
-            }`}
-          >
-            Všetky dokumenty
-          </button>
-          {categories
-            .filter((c) => isDirector || c !== "credentials")
-            .map((cat) => (
-              <button
-                key={cat}
-                onClick={() => {
-                  setSelectedCategory(cat);
-                  useSessionStore.getState().setKnowledgeCategory(cat);
-                  useSessionStore.getState().setKnowledgeDocPath(null);
-                }}
-                className={`w-full text-left px-3 py-2 rounded text-sm transition-colors ${
-                  selectedCategory === cat
-                    ? "bg-blue-600 text-white"
-                    : "text-gray-300 hover:bg-gray-700"
-                }`}
-              >
-                {cat}
-              </button>
-            ))}
-        </div>
-      </div>
-
-      {/* Main content */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Toolbar */}
-        <div className="p-3 border-b border-gray-700 flex gap-2">
-          <div className="flex-1 relative">
-            <Search
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-              size={16}
-            />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && doSearch()}
-              placeholder="Vyhľadať v knowledge base..."
-              className="w-full pl-9 pr-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
-          <button
-            onClick={doSearch}
-            className="px-3 py-2 bg-gray-700 text-gray-300 rounded-lg hover:bg-gray-600 text-sm transition-colors"
-          >
-            Hľadať
-          </button>
-          <button
-            onClick={() => {
-              setSearchQuery("");
-              setSearchInfo(null);
-              setSearchResults(null);
-              refresh();
-            }}
-            className="p-2 bg-gray-700 text-gray-300 rounded-lg hover:bg-gray-600 transition-colors"
-            title="Obnoviť"
-          >
-            <RefreshCw size={16} />
-          </button>
-          {canWrite && (
+        {/* Toolbar — Search + Hľadať + Refresh + Strom/Všetky toggle + Nový */}
+        <div className="p-3 border-b border-gray-700 flex flex-col gap-2">
+          <div className="flex gap-1.5">
+            <div className="flex-1 relative">
+              <Search
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"
+                size={14}
+              />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && doSearch()}
+                placeholder="Hľadať..."
+                className="w-full pl-8 pr-2 py-1.5 bg-gray-900 border border-gray-700 rounded text-xs text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+            <button
+              onClick={doSearch}
+              className="px-2 py-1.5 bg-gray-700 text-gray-300 rounded hover:bg-gray-600 text-xs transition-colors"
+            >
+              Hľadať
+            </button>
             <button
               onClick={() => {
-                setMode("create");
-                setSelectedDoc(null);
-                setDocContent("");
-                setNewTitle("");
-                setNewCategory(selectedCategory || "icc");
-                setNewFilename("");
-                setNewContent("");
-                setError("");
+                setSearchQuery("");
+                setSearchInfo(null);
+                setSearchResults(null);
+                refresh();
               }}
-              className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 text-sm font-medium transition-colors"
+              className="p-1.5 bg-gray-700 text-gray-300 rounded hover:bg-gray-600 transition-colors"
+              title="Obnoviť"
             >
-              <Plus size={16} /> Nový
+              <RefreshCw size={14} />
             </button>
-          )}
+          </div>
+          <div className="flex gap-1.5">
+            <button
+              onClick={() =>
+                setViewMode((m) => (m === "tree" ? "all" : "tree"))
+              }
+              className={`flex-1 px-2 py-1.5 rounded text-xs font-medium transition-colors ${
+                viewMode === "all"
+                  ? "bg-blue-600 text-white hover:bg-blue-500"
+                  : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+              }`}
+              title="Prepínať medzi hierarchickým stromom a plochým zoznamom"
+            >
+              {viewMode === "tree" ? "Všetky dokumenty" : "← Strom"}
+            </button>
+            {canWrite && (
+              <button
+                onClick={() => {
+                  setMode("create");
+                  setSelectedDoc(null);
+                  setDocContent("");
+                  setNewTitle("");
+                  setNewCategory(selectedCategory || "icc");
+                  setNewFilename("");
+                  setNewContent("");
+                  setError("");
+                }}
+                className="flex items-center gap-1 px-2 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-500 text-xs font-medium transition-colors"
+              >
+                <Plus size={14} /> Nový
+              </button>
+            )}
+          </div>
         </div>
 
         {searchInfo && (
-          <div className="px-4 py-2 bg-blue-900/30 border-b border-blue-800/50 text-blue-300 text-sm flex items-center justify-between">
-            <span>{searchInfo}</span>
-            <button onClick={() => setSearchInfo(null)} className="text-blue-300 hover:text-blue-200">
-              <X size={14} />
+          <div className="px-3 py-2 bg-blue-900/30 border-b border-blue-800/50 text-blue-300 text-xs flex items-center justify-between">
+            <span className="truncate">{searchInfo}</span>
+            <button
+              onClick={() => setSearchInfo(null)}
+              className="text-blue-300 hover:text-blue-200 ml-2"
+            >
+              <X size={12} />
             </button>
           </div>
         )}
 
         {error && (
-          <div className="px-4 py-2 bg-red-900/30 border-b border-red-800/50 text-red-400 text-sm flex items-center justify-between">
-            <span>{error}</span>
-            <button onClick={() => setError("")} className="text-red-400 hover:text-red-300">
-              <X size={14} />
+          <div className="px-3 py-2 bg-red-900/30 border-b border-red-800/50 text-red-400 text-xs flex items-center justify-between">
+            <span className="truncate">{error}</span>
+            <button onClick={() => setError("")} className="text-red-400 hover:text-red-300 ml-2">
+              <X size={12} />
             </button>
           </div>
         )}
 
-        {/* Content area */}
-        <div className="flex-1 flex overflow-hidden">
-          {/* Document list */}
-          <div className="w-72 border-r border-gray-700 flex flex-col">
-            <div className="flex-1 overflow-y-auto">
-              {loading ? (
-                <div className="p-4 flex items-center gap-2 text-gray-400">
-                  <Loader2 size={16} className="animate-spin" /> Načítavam...
-                </div>
-              ) : searchResults !== null ? (
-                searchResults.length === 0 ? (
-                  <div className="p-4 text-gray-500 text-sm">Žiadne výsledky</div>
-                ) : (
-                  searchResults.map((r) => (
-                    <button
-                      key={r.source_file}
-                      onClick={() => {
-                        const norm = (s: string) => s.replace(/\\/g, "/");
-                        const match = documents.find(
-                          (d) =>
-                            d.relative_path === r.source_file ||
-                            norm(d.relative_path) === norm(r.source_file) ||
-                            d.relative_path.endsWith(r.source_file) ||
-                            r.source_file.endsWith(d.relative_path),
-                        );
-                        if (match) {
-                          loadDocContent(match);
-                        } else {
-                          loadDocContentByPath(r.source_file);
-                        }
-                      }}
-                      className="w-full text-left p-3 border-b border-gray-700 hover:bg-gray-800 transition-colors"
-                    >
-                      <div className="flex items-center gap-2">
-                        <Search size={14} className="text-blue-400 flex-shrink-0" />
-                        <span className="font-medium truncate text-sm text-gray-100">
-                          {r.title}
-                        </span>
-                      </div>
-                      <div className="text-xs text-gray-500 mt-1">
-                        {r.category} · score: {r.score.toFixed(2)}
-                      </div>
-                      {r.snippet && (
-                        <div className="text-xs text-gray-500 mt-1 line-clamp-2">{r.snippet}</div>
+        {/* Tree / search results / flat-all list */}
+        <div className="flex-1 overflow-y-auto py-1">
+          {loading ? (
+            <div className="p-4 flex items-center gap-2 text-gray-400 text-sm">
+              <Loader2 size={14} className="animate-spin" /> Načítavam...
+            </div>
+          ) : searchResults !== null ? (
+            searchResults.length === 0 ? (
+              <div className="p-4 text-gray-500 text-xs">Žiadne výsledky</div>
+            ) : (
+              searchResults.map((r) => (
+                <button
+                  key={r.source_file}
+                  onClick={() => {
+                    const norm = (s: string) => s.replace(/\\/g, "/");
+                    const match = documents.find(
+                      (d) =>
+                        d.relative_path === r.source_file ||
+                        norm(d.relative_path) === norm(r.source_file) ||
+                        d.relative_path.endsWith(r.source_file) ||
+                        r.source_file.endsWith(d.relative_path),
+                    );
+                    if (match) {
+                      loadDocContent(match);
+                    } else {
+                      loadDocContentByPath(r.source_file);
+                    }
+                  }}
+                  className="w-full text-left p-3 border-b border-gray-700 hover:bg-gray-700/50 transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <Search size={12} className="text-blue-400 flex-shrink-0" />
+                    <span className="font-medium truncate text-xs text-gray-100">{r.title}</span>
+                  </div>
+                  <div className="text-[10px] text-gray-500 mt-1">
+                    {r.category} · score: {r.score.toFixed(2)}
+                  </div>
+                  {r.snippet && (
+                    <div className="text-[10px] text-gray-500 mt-1 line-clamp-2">{r.snippet}</div>
+                  )}
+                </button>
+              ))
+            )
+          ) : viewMode === "all" ? (
+            documents.length === 0 ? (
+              <div className="p-4 text-gray-500 text-xs">Žiadne dokumenty</div>
+            ) : (
+              documents.map((doc) => {
+                const project = extractProjectFromPath(doc.relative_path);
+                return (
+                  <button
+                    key={doc.relative_path}
+                    onClick={() => loadDocContent(doc)}
+                    className={`w-full text-left p-2 border-b border-gray-700/50 hover:bg-gray-700/50 transition-colors ${
+                      selectedDoc?.relative_path === doc.relative_path ? "bg-gray-700" : ""
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <FileText size={12} className="text-gray-400 flex-shrink-0" />
+                      <span className="font-medium truncate text-xs text-gray-100">
+                        {makeTitle(doc.filename)}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-gray-500 mt-0.5">
+                      {project && (
+                        <span className="text-blue-400 mr-1.5">[{project}]</span>
                       )}
-                    </button>
-                  ))
-                )
-              ) : documents.length === 0 ? (
-                <div className="p-4 text-gray-500 text-sm">Žiadne dokumenty</div>
-              ) : (
-                documents.map((doc) => {
-                  const project = extractProjectFromPath(doc.relative_path);
-                  return (
-                    <button
-                      key={doc.relative_path}
-                      onClick={() => loadDocContent(doc)}
-                      className={`w-full text-left p-3 border-b border-gray-700 hover:bg-gray-800 transition-colors ${
-                        selectedDoc?.relative_path === doc.relative_path ? "bg-gray-800" : ""
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <FileText size={14} className="text-gray-400 flex-shrink-0" />
-                        <span className="font-medium truncate text-sm text-gray-100">
-                          {makeTitle(doc.filename)}
-                        </span>
-                      </div>
-                      <div className="text-xs text-gray-500 mt-1">
-                        {project && !selectedCategory && (
-                          <span className="text-blue-400 mr-1.5">[{project}]</span>
-                        )}
-                        {doc.category} · {(doc.size_bytes / 1024).toFixed(1)} kB
-                      </div>
-                    </button>
-                  );
-                })
-              )}
-            </div>
-            <div className="px-3 py-2 border-t border-gray-700 text-xs text-gray-500">
-              {searchResults !== null
-                ? `${searchResults.length} výsledkov`
-                : `${documents.length} dokumentov`}
-            </div>
-          </div>
+                      {doc.category} · {(doc.size_bytes / 1024).toFixed(1)} kB
+                    </div>
+                  </button>
+                );
+              })
+            )
+          ) : (
+            <KbTree
+              documents={documents}
+              selectedPath={selectedDoc?.relative_path ?? null}
+              onSelect={loadDocContent}
+              hideCredentials={!isDirector}
+            />
+          )}
+        </div>
+      </div>
 
-          {/* Viewer / Editor / Creator */}
-          <div className="flex-1 flex flex-col overflow-hidden">
+      {/* Main content area — viewer / editor / creator (unchanged) */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Viewer / Editor / Creator */}
+        <div className="flex-1 flex flex-col overflow-hidden">
             {mode === "create" ? (
               <div className="flex-1 flex flex-col p-4 overflow-y-auto">
                 <h2 className="text-lg font-semibold text-gray-100 mb-4">Nový dokument</h2>
@@ -806,7 +793,6 @@ export default function KnowledgeBasePage() {
               </div>
             )}
           </div>
-        </div>
       </div>
     </div>
   );
