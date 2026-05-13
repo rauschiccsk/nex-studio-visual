@@ -182,14 +182,16 @@ export default function Sidebar() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
-  const ctx = useActiveContextStore((s) => s.context);
+  const selectedProject = useActiveContextStore((s) => s.selectedProject);
+  const selectedVersion = useActiveContextStore((s) => s.selectedVersion);
+  const setSelectedProject = useActiveContextStore((s) => s.setSelectedProject);
 
   const isActive = (path: string) =>
     path === "/" ? location.pathname === "/" : location.pathname.startsWith(path);
 
   const isStepActive = (steps: string[]) => {
-    if (!ctx) return false;
-    const base = `/projects/${ctx.slug}/versions/${ctx.versionId}/`;
+    if (!selectedProject || !selectedVersion) return false;
+    const base = `/projects/${selectedProject.slug}/versions/${selectedVersion.versionId}/`;
     return steps.some((s) => location.pathname === base + s);
   };
 
@@ -215,11 +217,11 @@ export default function Sidebar() {
     { label: "Implementation", step: "implementacia", icon: <IconImplementation /> },
   ];
 
-  const hasCtx = Boolean(ctx);
+  const hasProject = Boolean(selectedProject);
+  const hasFullContext = Boolean(selectedProject && selectedVersion);
 
-  // Fallback target when no verzia context is stored yet — the user
-  // lands on the project picker, selects a project + verzia, and
-  // sidebar sync hooks populate the context from there onwards.
+  // Fallback target when no project is pinned yet — sends the user to
+  // the project list where the Pin icon explicitly selects a project.
   const fallbackPath = "/projects";
 
   return (
@@ -258,16 +260,25 @@ export default function Sidebar() {
         <NavItem
           icon={<IconVersions />}
           label="Versions"
-          path={hasCtx ? `/projects/${ctx!.slug}` : fallbackPath}
+          path={hasProject ? `/projects/${selectedProject!.slug}` : fallbackPath}
           collapsed={collapsed}
-          active={hasCtx ? location.pathname === `/projects/${ctx!.slug}` : false}
+          active={hasProject ? location.pathname === `/projects/${selectedProject!.slug}` : false}
         />
         <NavItem
           icon={<IconWorkflow />}
           label="Workflow"
-          path={hasCtx ? `/projects/${ctx!.slug}/versions/${ctx!.versionId}` : fallbackPath}
+          path={
+            hasFullContext
+              ? `/projects/${selectedProject!.slug}/versions/${selectedVersion!.versionId}`
+              : fallbackPath
+          }
           collapsed={collapsed}
-          active={hasCtx ? location.pathname === `/projects/${ctx!.slug}/versions/${ctx!.versionId}` : false}
+          active={
+            hasFullContext
+              ? location.pathname ===
+                `/projects/${selectedProject!.slug}/versions/${selectedVersion!.versionId}`
+              : false
+          }
         />
 
         {/* Embedded agent terminals — replace external Windows Terminal
@@ -277,11 +288,30 @@ export default function Sidebar() {
         <NavItem icon={<IconImplementer />} label="Implementer" path="/implementer" collapsed={collapsed} active={isActive("/implementer")} />
         <NavItem icon={<IconAuditor />} label="Auditor" path="/auditor" collapsed={collapsed} active={isActive("/auditor")} />
 
-        {/* Active context indicator — shown under Workflow so the user sees which
-            verzia the pipeline shortcuts below point to. */}
-        {hasCtx && !collapsed && (
-          <div className="px-3 pb-1 text-[10px] text-slate-600 font-mono truncate">
-            {ctx!.projectName} · {ctx!.versionNumber}
+        {/* Selected project indicator — shown under the Designer/
+            Implementer/Auditor trio. Pin icon → user explicitly chose
+            this project in /projects. Version suffix appears once the
+            user opens a verzia (auto-set by useActiveContextSync). */}
+        {hasProject && !collapsed && (
+          <div className="px-3 pb-1 flex items-center gap-1.5 text-[10px] text-slate-500 font-mono">
+            <svg className="w-3 h-3 shrink-0 text-primary-400" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
+            </svg>
+            <span className="truncate flex-1">
+              {selectedProject!.name}
+              {selectedVersion && (
+                <span className="text-slate-600"> · {selectedVersion.versionNumber}</span>
+              )}
+            </span>
+            <button
+              onClick={() => setSelectedProject(null)}
+              title="Zrušiť výber projektu"
+              className="text-slate-600 hover:text-slate-300 shrink-0"
+            >
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
         )}
 
@@ -290,7 +320,11 @@ export default function Sidebar() {
             key={s.step}
             icon={s.icon}
             label={s.label}
-            path={hasCtx ? `/projects/${ctx!.slug}/versions/${ctx!.versionId}/${s.step}` : fallbackPath}
+            path={
+              hasFullContext
+                ? `/projects/${selectedProject!.slug}/versions/${selectedVersion!.versionId}/${s.step}`
+                : fallbackPath
+            }
             collapsed={collapsed}
             active={isStepActive(s.matchSteps ?? [s.step])}
           />

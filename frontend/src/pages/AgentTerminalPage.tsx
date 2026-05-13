@@ -3,38 +3,35 @@
  * Studio for one of the three agent roles (Designer / Implementer /
  * Auditor).
  *
- * Layout (approved 2026-05-13):
+ * Project anchor is read from :file:`store/activeContextStore.ts`
+ * (Director directive 2026-05-13: the Pin in ``/projects`` is the
+ * single source of "which project am I working on"; every
+ * context-needing page consumes it). The page does **not** show a
+ * project picker — if nothing is pinned, it shows a CTA pointing the
+ * user at ``/projects``.
  *
- *   ┌──────────────────────────────────────────────────────┐
- *   │ <role> · <project>     [● status]  [Change] [End]    │
- *   ├──────────────────────────────────────────────────────┤
- *   │                                                      │
- *   │              <xterm.js / AgentTerminal>              │
- *   │                                                      │
- *   └──────────────────────────────────────────────────────┘
+ * Three render states:
  *
- * Flow:
+ *   A. No ``selectedProject`` → CTA "Vyber projekt v Projects".
+ *   B. ``selectedProject`` set, no active session for ``(user, role)``
+ *      → "Spustiť <role> pre <project>" button → POST /spawn → attach.
+ *   C. Active session running → terminal full-page (xterm.js via
+ *      :file:`components/AgentTerminal.tsx`).
  *
- * 1. Mount → fetch ``GET /agent-terminal/sessions`` to find an active
- *    session for this ``(user, role)``. If found, attach. If not, show
- *    :file:`ProjectPickerModal`.
- * 2. User picks a project → ``POST /agent-terminal/spawn`` → render
- *    :file:`AgentTerminal` with the new ``session_id``.
- * 3. End / Change project → ``DELETE /agent-terminal/sessions/{id}``,
- *    re-show picker.
+ * A pinned-project change does **not** auto-end a running session.
+ * The session is bound to its ``project_slug`` in the DB row and
+ * represents a specific conversation continuity; user explicitly
+ * ends it before spawning for a different project.
  *
- * Single component shared by all three roles via the ``role`` prop —
- * routes ``/designer``, ``/implementer``, ``/auditor`` each render
- * ``<AgentTerminalPage role={...} />``.
- *
- * Permissions: ``ri`` only (Director). Non-ri users see a Lock panel;
- * the backend returns 403 + the API client surfaces it as ApiError.
+ * Permissions: ``ri`` only (Director). Non-ri users see a Lock panel.
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Lock, Loader2, RefreshCw, X } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Lock, Loader2, RefreshCw, X, FolderOpen, Play } from "lucide-react";
 
 import { useAuthStore } from "@/store/authStore";
+import { useActiveContextStore } from "@/store/activeContextStore";
 import { ApiError, TOKEN_STORAGE_KEY } from "@/services/api";
 import {
   listAgentTerminalSessionsApi,
@@ -44,7 +41,6 @@ import {
   type AgentTerminalSession,
 } from "@/services/api/agentTerminal";
 import { AgentTerminal } from "@/components/AgentTerminal";
-import { ProjectPickerModal } from "@/components/ProjectPickerModal";
 
 const ROLE_LABEL: Record<AgentRole, string> = {
   designer: "Designer",
@@ -52,23 +48,19 @@ const ROLE_LABEL: Record<AgentRole, string> = {
   auditor: "Auditor",
 };
 
-const ROLE_BLURB: Record<AgentRole, string> = {
-  designer: "Plánovacia fáza — vyber projekt, na ktorom má Designer pracovať.",
-  implementer: "Implementačná fáza — vyber projekt, na ktorom má Implementer pracovať.",
-  auditor: "Audit / overenie — vyber projekt, na ktorom má Auditor pracovať.",
-};
-
 export interface AgentTerminalPageProps {
   role: AgentRole;
 }
 
 export default function AgentTerminalPage({ role }: AgentTerminalPageProps) {
+  const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const isDirector = user?.role === "ri";
 
+  const selectedProject = useActiveContextStore((s) => s.selectedProject);
+
   const [session, setSession] = useState<AgentTerminalSession | null>(null);
   const [loading, setLoading] = useState(true);
-  const [picking, setPicking] = useState(false);
   const [spawning, setSpawning] = useState(false);
   const [ending, setEnding] = useState(false);
   const [error, setError] = useState("");
@@ -92,9 +84,6 @@ export default function AgentTerminalPage({ role }: AgentTerminalPageProps) {
       const rows = await listAgentTerminalSessionsApi();
       const active = rows.find((r) => r.role === role && r.ended_at === null);
       setSession(active ?? null);
-      if (!active) {
-        setPicking(true);
-      }
     } catch (e) {
       const msg =
         e instanceof ApiError ? e.message : "Nepodarilo sa načítať sessions.";
@@ -108,12 +97,15 @@ export default function AgentTerminalPage({ role }: AgentTerminalPageProps) {
     void refresh();
   }, [refresh]);
 
-  async function handlePickProject(slug: string) {
-    setPicking(false);
+  async function handleSpawn() {
+    if (!selectedProject) return;
     setSpawning(true);
     setError("");
     try {
-      const row = await spawnAgentTerminalApi({ role, project_slug: slug });
+      const row = await spawnAgentTerminalApi({
+        role,
+        project_slug: selectedProject.slug,
+      });
       setSession(row);
     } catch (e) {
       const msg =
@@ -121,20 +113,18 @@ export default function AgentTerminalPage({ role }: AgentTerminalPageProps) {
           ? `Nepodarilo sa spustiť session: ${e.message}`
           : "Nepodarilo sa spustiť session.";
       setError(msg);
-      setPicking(true);
     } finally {
       setSpawning(false);
     }
   }
 
-  async function handleEndSession(reopenPicker: boolean) {
+  async function handleEndSession() {
     if (!session) return;
     if (!window.confirm("Naozaj ukončiť session? Aktívna konverzácia zanikne.")) return;
     setEnding(true);
     try {
       await endAgentTerminalSessionApi(session.id);
       setSession(null);
-      if (reopenPicker) setPicking(true);
     } catch (e) {
       const msg =
         e instanceof ApiError ? e.message : "Nepodarilo sa ukončiť session.";
@@ -163,6 +153,14 @@ export default function AgentTerminalPage({ role }: AgentTerminalPageProps) {
     );
   }
 
+  // Display label for the session's project — falls back to the slug
+  // when we don't have a name handy (i.e. an active session attached to
+  // a project that was unpinned in the meantime).
+  const sessionProjectLabel =
+    session && selectedProject?.slug === session.project_slug
+      ? selectedProject.name
+      : session?.project_slug ?? "";
+
   return (
     <div className="flex h-full flex-col bg-slate-950">
       {/* Header chrome */}
@@ -171,14 +169,21 @@ export default function AgentTerminalPage({ role }: AgentTerminalPageProps) {
           <h1 className="text-sm font-semibold text-slate-100">
             {ROLE_LABEL[role]}
           </h1>
-          {session && (
+          {session ? (
             <>
               <span className="text-xs text-slate-600">·</span>
               <span className="truncate font-mono text-xs text-slate-400">
-                {session.project_slug}
+                {sessionProjectLabel}
               </span>
             </>
-          )}
+          ) : selectedProject ? (
+            <>
+              <span className="text-xs text-slate-600">·</span>
+              <span className="truncate font-mono text-xs text-slate-500">
+                {selectedProject.name}
+              </span>
+            </>
+          ) : null}
         </div>
 
         <div className="flex items-center gap-2">
@@ -196,25 +201,15 @@ export default function AgentTerminalPage({ role }: AgentTerminalPageProps) {
             <RefreshCw className="h-3.5 w-3.5" />
           </button>
           {session && (
-            <>
-              <button
-                onClick={() => void handleEndSession(true)}
-                disabled={ending}
-                className="rounded border border-slate-700 px-2 py-0.5 text-xs text-slate-400 transition-colors hover:bg-slate-800 disabled:opacity-40"
-                title="Zmeň projekt (ukončí aktuálnu session)"
-              >
-                Change project
-              </button>
-              <button
-                onClick={() => void handleEndSession(false)}
-                disabled={ending}
-                className="flex items-center gap-1 rounded border border-red-500/40 px-2 py-0.5 text-xs text-red-400 transition-colors hover:bg-red-500/10 disabled:opacity-40"
-                title="Ukončí session (SIGTERM)"
-              >
-                <X className="h-3 w-3" />
-                End session
-              </button>
-            </>
+            <button
+              onClick={() => void handleEndSession()}
+              disabled={ending}
+              className="flex items-center gap-1 rounded border border-red-500/40 px-2 py-0.5 text-xs text-red-400 transition-colors hover:bg-red-500/10 disabled:opacity-40"
+              title="Ukončí session (SIGTERM)"
+            >
+              <X className="h-3 w-3" />
+              End session
+            </button>
           )}
         </div>
       </div>
@@ -234,36 +229,50 @@ export default function AgentTerminalPage({ role }: AgentTerminalPageProps) {
             {spawning ? "Spúšťam claude CLI…" : "Načítavam stav…"}
           </div>
         ) : session && token ? (
+          // State C — active session: terminal full-page.
           <AgentTerminal
             key={session.id}
             sessionId={session.id}
             token={token}
             onEnded={() => void refresh()}
           />
-        ) : !picking ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+        ) : !selectedProject ? (
+          // State A — no project pinned: CTA to /projects.
+          <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
+            <FolderOpen className="h-10 w-10 text-slate-700" />
+            <h2 className="text-sm font-semibold text-slate-300">
+              Nemáš vybraný projekt
+            </h2>
+            <p className="max-w-md text-xs text-slate-500">
+              {ROLE_LABEL[role]} sa spúšťa nad konkrétnym projektom. Otvor{" "}
+              <span className="font-mono">Projects</span> a klikni na pin
+              ikonu pri projekte, ktorý chceš označiť ako{" "}
+              <span className="text-primary-400">Selected</span>.
+            </p>
+            <button
+              onClick={() => navigate("/projects")}
+              className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500"
+            >
+              → Otvor Projects
+            </button>
+          </div>
+        ) : (
+          // State B — project pinned, no active session: spawn CTA.
+          <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
             <p className="text-xs text-slate-500">
               Žiadna aktívna {ROLE_LABEL[role]} session.
             </p>
             <button
-              onClick={() => setPicking(true)}
-              className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500"
+              onClick={() => void handleSpawn()}
+              disabled={spawning}
+              className="flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-xs font-medium text-white hover:bg-primary-500 disabled:opacity-40"
             >
-              Spustiť {ROLE_LABEL[role]}
+              <Play className="h-3.5 w-3.5 fill-current" />
+              Spustiť {ROLE_LABEL[role]} pre {selectedProject.name}
             </button>
           </div>
-        ) : null}
+        )}
       </div>
-
-      {/* Project picker */}
-      {picking && (
-        <ProjectPickerModal
-          title={`Spustiť ${ROLE_LABEL[role]}`}
-          description={ROLE_BLURB[role]}
-          onPick={handlePickProject}
-          onCancel={() => setPicking(false)}
-        />
-      )}
     </div>
   );
 }

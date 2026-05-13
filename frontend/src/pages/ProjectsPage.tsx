@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Pin, PinOff } from "lucide-react";
 import { listProjectsApi } from "@/services/api/projects";
+import { useActiveContextStore } from "@/store/activeContextStore";
 import type { ProjectRead } from "@/types";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -32,17 +34,23 @@ function slugInitials(slug: string): string {
 interface ProjectRowProps {
   project: ProjectRead;
   index: number;
+  selected: boolean;
   onOpen: () => void;
+  onTogglePin: () => void;
 }
 
-function ProjectRow({ project, index, onOpen }: ProjectRowProps) {
+function ProjectRow({ project, index, selected, onOpen, onTogglePin }: ProjectRowProps) {
   const color = slugColor(index);
   const initials = slugInitials(project.slug);
   const isMulti = project.category === "multimodule";
   const port = project.backend_port ?? project.frontend_port ?? null;
 
+  const rowClass = selected
+    ? "rounded-xl border border-slate-800 border-l-4 border-l-primary-500 bg-primary-500/5 p-4 flex items-center gap-4 transition-colors"
+    : "rounded-xl border border-slate-800 bg-slate-900 p-4 flex items-center gap-4 hover:border-slate-700 transition-colors";
+
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 flex items-center gap-4 hover:border-slate-700 transition-colors">
+    <div className={rowClass}>
       {/* Slug icon */}
       <div className={`w-10 h-10 rounded-lg border flex items-center justify-center font-bold text-sm shrink-0 ${color}`}>
         {initials}
@@ -52,6 +60,11 @@ function ProjectRow({ project, index, onOpen }: ProjectRowProps) {
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
           <span className="font-semibold text-slate-100 text-sm">{project.name}</span>
+          {selected && (
+            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-primary-500/20 border border-primary-500/30 text-primary-400 font-medium">
+              Selected
+            </span>
+          )}
           {isMulti && (
             <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 font-medium">
               MM
@@ -87,7 +100,18 @@ function ProjectRow({ project, index, onOpen }: ProjectRowProps) {
       </div>
 
       {/* Actions */}
-      <div className="flex items-center gap-2 shrink-0">
+      <div className="flex items-center gap-3 shrink-0">
+        <button
+          onClick={onTogglePin}
+          title={selected ? "Zrušiť výber" : "Označiť ako Selected"}
+          className={
+            selected
+              ? "text-primary-400 hover:text-primary-300 transition-colors"
+              : "text-slate-500 hover:text-slate-300 transition-colors"
+          }
+        >
+          {selected ? <Pin className="w-4 h-4 fill-current" /> : <PinOff className="w-4 h-4" />}
+        </button>
         <button
           onClick={onOpen}
           className="text-[11px] text-primary-400 hover:text-primary-300 transition-colors font-medium"
@@ -106,6 +130,8 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<ProjectRead[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const selectedProject = useActiveContextStore((s) => s.selectedProject);
+  const setSelectedProject = useActiveContextStore((s) => s.setSelectedProject);
 
   useEffect(() => {
     let cancelled = false;
@@ -173,14 +199,25 @@ export default function ProjectsPage() {
 
       {!loading && !error && projects.length > 0 && (
         <div className="space-y-3">
-          {projects.map((p, i) => (
-            <ProjectRow
-              key={p.id}
-              project={p}
-              index={i}
-              onOpen={() => navigate(`/projects/${p.slug}`)}
-            />
-          ))}
+          {projects.map((p, i) => {
+            const isSelected = selectedProject?.slug === p.slug;
+            return (
+              <ProjectRow
+                key={p.id}
+                project={p}
+                index={i}
+                selected={isSelected}
+                onOpen={() => navigate(`/projects/${p.slug}`)}
+                onTogglePin={() => {
+                  if (isSelected) {
+                    setSelectedProject(null);
+                  } else {
+                    setSelectedProject({ slug: p.slug, name: p.name });
+                  }
+                }}
+              />
+            );
+          })}
         </div>
       )}
     </div>

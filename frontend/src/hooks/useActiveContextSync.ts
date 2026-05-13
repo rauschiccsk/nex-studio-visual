@@ -8,26 +8,33 @@ import { useActiveContextStore } from "@/store/activeContextStore";
  * project + version on pages like ``VersionDetailPage`` and every
  * ``pages/step/*`` page.
  *
- * The sidebar reads ``activeContextStore`` to build one-click
- * pipeline shortcuts from anywhere in the app — so every page that
- * knows which verzia the user is on must keep the store fresh.
+ * Writes to the two independent slots (``selectedProject`` and
+ * ``selectedVersion``). The project slot is also writable from
+ * :file:`pages/ProjectsPage.tsx` via the Pin icon — that path is the
+ * canonical "user picked a project to work on" action, while this
+ * hook handles the implicit "user is currently looking at this
+ * project + version" sync.
  *
- * Pass ``null`` while data is still loading; the hook re-runs when
- * both ``project`` and ``version`` resolve.
+ * The hook re-runs when either ``project`` or ``version`` changes.
+ * Pass ``null`` while data is loading; the hook is a no-op for
+ * partial inputs.
  */
 export function useActiveContextSync(
   project: ProjectRead | null,
   version: Version | null,
 ): void {
-  const setActiveContext = useActiveContextStore((s) => s.setActiveContext);
+  const setSelectedProject = useActiveContextStore((s) => s.setSelectedProject);
+  const setSelectedVersion = useActiveContextStore((s) => s.setSelectedVersion);
 
   useEffect(() => {
-    if (!project || !version) return;
-    setActiveContext({
-      slug: project.slug,
-      versionId: version.id,
-      projectName: project.name,
-      versionNumber: version.version_number,
-    });
-  }, [project, version, setActiveContext]);
+    if (project) {
+      setSelectedProject({ slug: project.slug, name: project.name });
+    }
+    if (version) {
+      setSelectedVersion({
+        versionId: version.id,
+        versionNumber: version.version_number,
+      });
+    }
+  }, [project, version, setSelectedProject, setSelectedVersion]);
 }

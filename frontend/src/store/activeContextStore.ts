@@ -2,48 +2,85 @@
  * Active project + version context — Zustand store with localStorage
  * persistence.
  *
- * Remembers the last project/version the user was working on so the
- * sidebar can offer one-click navigation to pipeline steps
- * (``Zákaznícka špecifikácia``, ``Vývojová dokumentácia``…) from any
- * screen — including Dashboard, where no slug/versionId is in the URL.
+ * Two independent slots:
  *
- * Context is set on mount of ``VersionDetailPage`` and every
- * ``pages/step/*`` page via ``useParams``. It is cleared with
- * :func:`clearActiveContext` when the target verzia disappears
- * (e.g. backend returns 404 on navigation).
+ * * ``selectedProject`` — Director's explicit "Selected" pin from
+ *   :file:`pages/ProjectsPage.tsx` (Pin icon per row). Once pinned,
+ *   every feature in NEX Studio that needs a project anchor reads
+ *   this — agent terminals (Designer / Implementer / Auditor), and
+ *   any future "needs a project" page. Persisted; survives F5.
  *
- * Persisted under localStorage key ``nex-active-context`` so the
- * context survives F5 / browser restart. Values are non-sensitive
- * (slug + UUID + display names) — no tokens, no secrets.
+ * * ``selectedVersion`` — sub-selection auto-set by
+ *   :func:`useActiveContextSync` when the user opens a
+ *   ``VersionDetailPage`` / pipeline-step page. Independent of
+ *   ``selectedProject`` so a feature that only needs a project (e.g.
+ *   Designer terminal) is not blocked by "you haven't picked a
+ *   verzia yet".
+ *
+ * Helper :func:`hasFullContext` returns ``true`` only when both slots
+ * are populated — used by Sidebar to gate pipeline-step shortcuts
+ * (Spec, Audit, TaskPlan, …) which always need a verzia anchor.
+ *
+ * Persisted under localStorage key ``nex-active-context``. Zustand
+ * persist re-reads whatever shape is on disk; missing fields default
+ * to ``null`` so prior single-slot state migrates without breakage.
  */
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export interface ActiveContext {
+export interface SelectedProject {
   slug: string;
+  name: string;
+}
+
+export interface SelectedVersion {
   versionId: string;
-  projectName: string;
   versionNumber: string;
 }
 
 export interface ActiveContextState {
-  /** ``null`` when the user has never opened a version in this browser. */
-  context: ActiveContext | null;
-  setActiveContext: (ctx: ActiveContext) => void;
-  clearActiveContext: () => void;
+  selectedProject: SelectedProject | null;
+  selectedVersion: SelectedVersion | null;
+
+  /** Pin a project (or clear with ``null``). Clearing the project also
+   *  clears any active version sub-selection — a version without its
+   *  parent project is not a coherent state. */
+  setSelectedProject: (p: SelectedProject | null) => void;
+  /** Set the active version. Caller must ensure the version belongs to
+   *  the currently selected project; this store does not enforce it. */
+  setSelectedVersion: (v: SelectedVersion | null) => void;
+
+  /** ``true`` iff both ``selectedProject`` and ``selectedVersion``
+   *  are populated — required for pipeline-step navigation. */
+  hasFullContext: () => boolean;
 }
 
 export const useActiveContextStore = create<ActiveContextState>()(
   persist(
-    (set) => ({
-      context: null,
-      setActiveContext: (ctx) => set({ context: ctx }),
-      clearActiveContext: () => set({ context: null }),
+    (set, get) => ({
+      selectedProject: null,
+      selectedVersion: null,
+      setSelectedProject: (p) =>
+        set({
+          selectedProject: p,
+          // Clearing the project implies clearing the version. Switching
+          // to a different project also clears version — the previous
+          // version was scoped to the previous project.
+          selectedVersion: null,
+        }),
+      setSelectedVersion: (v) => set({ selectedVersion: v }),
+      hasFullContext: () => {
+        const s = get();
+        return s.selectedProject !== null && s.selectedVersion !== null;
+      },
     }),
     {
       name: "nex-active-context",
-      partialize: (state) => ({ context: state.context }),
+      partialize: (state) => ({
+        selectedProject: state.selectedProject,
+        selectedVersion: state.selectedVersion,
+      }),
     },
   ),
 );
