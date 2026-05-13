@@ -157,8 +157,14 @@ export default function SettingsPage() {
   const [newEmail, setNewEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newRole, setNewRole] = useState<UserRole>("shu");
+  const [newFirstName, setNewFirstName] = useState("");
+  const [newLastName, setNewLastName] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
+
+  /** Minimum password length — mirrors backend Pydantic constraint
+   *  (Director directive 2026-05-13, internal app). */
+  const PASSWORD_MIN_LENGTH = 5;
 
   useEffect(() => {
     if (tab !== "users") return;
@@ -174,15 +180,38 @@ export default function SettingsPage() {
 
   async function handleCreateUser() {
     if (!newUsername || !newEmail || !newPassword) return;
+    if (newPassword.length < PASSWORD_MIN_LENGTH) {
+      setCreateError(`Heslo musí mať aspoň ${PASSWORD_MIN_LENGTH} znakov.`);
+      return;
+    }
     setCreating(true);
     setCreateError("");
     try {
-      const u = await createUserApi({ username: newUsername, email: newEmail, password: newPassword, role: newRole });
+      const u = await createUserApi({
+        username: newUsername,
+        email: newEmail,
+        password: newPassword,
+        role: newRole,
+        first_name: newFirstName || null,
+        last_name: newLastName || null,
+      });
       setUsers((prev) => [u, ...prev]);
       setShowNewForm(false);
-      setNewUsername(""); setNewEmail(""); setNewPassword(""); setNewRole("shu");
-    } catch {
-      setCreateError("Nepodarilo sa vytvoriť používateľa.");
+      setNewUsername("");
+      setNewEmail("");
+      setNewPassword("");
+      setNewRole("shu");
+      setNewFirstName("");
+      setNewLastName("");
+    } catch (e) {
+      // Surface backend's specific error (e.g. "password too short",
+      // "username already exists") instead of a generic message.
+      // ApiError has .message (string); other errors fall back.
+      const msg =
+        e instanceof Error && e.message
+          ? `Nepodarilo sa vytvoriť používateľa: ${e.message}`
+          : "Nepodarilo sa vytvoriť používateľa.";
+      setCreateError(msg);
     } finally {
       setCreating(false);
     }
@@ -437,6 +466,7 @@ export default function SettingsPage() {
               <table className="w-full text-sm">
                 <thead className="bg-slate-900/80">
                   <tr className="text-[10px] uppercase tracking-widest text-slate-600">
+                    <th className="px-4 py-2.5 text-left font-semibold">Name</th>
                     <th className="px-4 py-2.5 text-left font-semibold">Username</th>
                     <th className="px-4 py-2.5 text-left font-semibold">Email</th>
                     <th className="px-4 py-2.5 text-left font-semibold">Role</th>
@@ -445,8 +475,15 @@ export default function SettingsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
-                  {users.map((u) => (
+                  {users.map((u) => {
+                    const fullName = [u.first_name, u.last_name]
+                      .filter(Boolean)
+                      .join(" ");
+                    return (
                     <tr key={u.id} className="hover:bg-slate-800/40 transition-colors">
+                      <td className="px-4 py-3 text-sm text-slate-300">
+                        {fullName || <span className="text-slate-600">—</span>}
+                      </td>
                       <td className="px-4 py-3 text-sm font-medium text-slate-200 font-mono">{u.username}</td>
                       <td className="px-4 py-3 text-xs text-slate-400">{u.email}</td>
                       <td className="px-4 py-3">
@@ -468,10 +505,11 @@ export default function SettingsPage() {
                         </button>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                   {!usersLoading && users.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="px-4 py-6 text-center text-xs text-slate-600">Žiadni používatelia</td>
+                      <td colSpan={6} className="px-4 py-6 text-center text-xs text-slate-600">Žiadni používatelia</td>
                     </tr>
                   )}
                 </tbody>
@@ -486,6 +524,26 @@ export default function SettingsPage() {
                   <div className="mb-3 text-xs text-red-400 rounded bg-red-500/10 border border-red-500/20 px-3 py-2">{createError}</div>
                 )}
                 <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">First name</label>
+                    <input
+                      type="text"
+                      value={newFirstName}
+                      onChange={(e) => setNewFirstName(e.target.value)}
+                      placeholder="e.g. Tibor"
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-primary-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Last name</label>
+                    <input
+                      type="text"
+                      value={newLastName}
+                      onChange={(e) => setNewLastName(e.target.value)}
+                      placeholder="e.g. Rausch"
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-primary-500"
+                    />
+                  </div>
                   <div>
                     <label className="block text-xs text-slate-500 mb-1">Username *</label>
                     <input
@@ -512,9 +570,18 @@ export default function SettingsPage() {
                       type="password"
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
-                      placeholder="min 8 characters"
-                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-primary-500"
+                      placeholder={`min ${PASSWORD_MIN_LENGTH} characters`}
+                      className={`w-full bg-slate-800 border rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-primary-500 ${
+                        newPassword && newPassword.length < PASSWORD_MIN_LENGTH
+                          ? "border-red-500"
+                          : "border-slate-700"
+                      }`}
                     />
+                    {newPassword && newPassword.length < PASSWORD_MIN_LENGTH && (
+                      <div className="mt-1 text-[10px] text-red-400">
+                        Heslo musí mať aspoň {PASSWORD_MIN_LENGTH} znakov ({newPassword.length}/{PASSWORD_MIN_LENGTH}).
+                      </div>
+                    )}
                   </div>
                   <div>
                     <label className="block text-xs text-slate-500 mb-1">Role</label>
@@ -531,14 +598,23 @@ export default function SettingsPage() {
                 </div>
                 <div className="flex gap-2 justify-end">
                   <button
-                    onClick={() => { setShowNewForm(false); setCreateError(""); }}
+                    onClick={() => {
+                      setShowNewForm(false);
+                      setCreateError("");
+                    }}
                     className="px-3 py-1.5 text-xs text-slate-400 border border-slate-700 rounded-lg hover:bg-slate-800 transition-colors"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleCreateUser}
-                    disabled={creating || !newUsername || !newEmail || !newPassword}
+                    disabled={
+                      creating ||
+                      !newUsername ||
+                      !newEmail ||
+                      !newPassword ||
+                      newPassword.length < PASSWORD_MIN_LENGTH
+                    }
                     className="px-3 py-1.5 text-xs font-medium text-white bg-primary-600 hover:bg-primary-500 disabled:opacity-40 rounded-lg transition-colors"
                   >
                     {creating ? "Vytváram…" : "Create"}

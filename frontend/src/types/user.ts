@@ -24,12 +24,17 @@ export interface UserCreate {
   username: string;
   /** Contact email — unique across the system. Max 255 chars. */
   email: string;
-  /** Plaintext password (min 8, max 128 chars). Hashed server-side. */
+  /** Plaintext password (min 5, max 128 chars). Hashed server-side.
+   *  Min 5 — Director directive 2026-05-13, NEX Studio is internal. */
   password: string;
   /** Access level: ``ri`` | ``ha`` | ``shu``. */
   role: UserRole;
   /** Soft-disable flag; defaults to ``true`` on the server. */
   is_active?: boolean;
+  /** Given name. Optional — legacy users may not have it. Max 100 chars. */
+  first_name?: string | null;
+  /** Family name. Optional — legacy users may not have it. Max 100 chars. */
+  last_name?: string | null;
 }
 
 /**
@@ -45,6 +50,8 @@ export interface UserUpdate {
   email?: string;
   role?: UserRole;
   is_active?: boolean;
+  first_name?: string | null;
+  last_name?: string | null;
 }
 
 /**
@@ -59,6 +66,10 @@ export interface UserRead {
   email: string;
   role: UserRole;
   is_active: boolean;
+  /** Given name (nullable — legacy users may not have it). */
+  first_name?: string | null;
+  /** Family name (nullable — legacy users may not have it). */
+  last_name?: string | null;
   /** ISO-8601 timestamp. */
   created_at: string;
   /** ISO-8601 timestamp. */
