@@ -56,6 +56,16 @@ services:
       CLAUDE_CONFIG_DIR: "/home/andros/.claude"
       CLAUDE_CLI_PATH: "claude"
       CLAUDE_CODE_OAUTH_TOKEN: "${CLAUDE_CODE_OAUTH_TOKEN}"
+      # Pin claude CLI to the version baked into the Docker image
+      # (RUN npm install -g @anthropic-ai/claude-code). The container
+      # runs as non-root andros (uid 1000) so the in-process auto-update
+      # path (``npm i -g``) cannot write to /usr/local — it fails noisily
+      # on every spawn. Disabling the updater silences both "Auto-update
+      # failed" and the follow-up "Native installation exists but
+      # ~/.local/bin is not in your PATH" warning that derives from the
+      # updater scanning the mounted ~/.claude state for installed
+      # binaries on the host. Updates happen at Docker image rebuild.
+      DISABLE_AUTOUPDATER: "1"
       # GitHub PAT used by create_github_repo to provision the project
       # repository under rauschiccsk on POST /api/v1/projects.
       # Scope required: admin:org (create repo under an organisation)
