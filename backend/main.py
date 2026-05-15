@@ -19,6 +19,7 @@ from backend.api.routes.bugs import router as bugs_router
 from backend.api.routes.credentials import router as credentials_router
 from backend.api.routes.delegations import router as delegations_router
 from backend.api.routes.design_documents import router as design_documents_router
+from backend.api.routes.dialogue import router as dialogue_router
 from backend.api.routes.epics import router as epics_router
 from backend.api.routes.execution_logs import router as execution_logs_router
 from backend.api.routes.feats import router as feats_router
@@ -52,6 +53,7 @@ from backend.api.routes.versions import router as versions_router
 from backend.config.settings import settings
 from backend.db.session import SessionLocal
 from backend.services import agent_terminal as agent_terminal_service
+from backend.services import dialogue as dialogue_service
 
 # Route application loggers at INFO to stderr so ``docker logs`` surfaces
 # request-level diagnostics (SSE state, Claude subprocess events, spec
@@ -127,6 +129,7 @@ async def lifespan(app: FastAPI):
     db = SessionLocal()
     try:
         agent_terminal_service.mark_orphaned_on_startup(db)
+        dialogue_service.mark_orphaned_on_startup(db)
     finally:
         db.close()
 
@@ -210,6 +213,7 @@ app.include_router(versions_router, prefix="/api/v1")
 app.include_router(uploads_router, prefix="/api/v1")
 app.include_router(system_settings_router, prefix="/api/v1/system-settings")
 app.include_router(agent_terminal_router, prefix="/api/v1/agent-terminal")
+app.include_router(dialogue_router, prefix="/api/v1/dialogue")
 
 
 @app.get("/health")
