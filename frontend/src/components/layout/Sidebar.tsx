@@ -162,8 +162,10 @@ export default function Sidebar() {
   // SolutionTabs header inside ProfSpecPage + UIDesignPage lets the user
   // switch to /uidesign (Návrh UI dizajnu). Active highlight covers both
   // underlying routes.
+  // "Specification" is rendered separately right after Workflow so the
+  // sidebar order matches the chronological pipeline flow (Workflow →
+  // Spec → Solution → Summary → …). Director directive 2026-05-15.
   const pipelineSteps: { label: string; step: string; icon: React.ReactNode; matchSteps?: string[] }[] = [
-    { label: "Specification", step: "spec", icon: <IconSpec /> },
     { label: "Solution", step: "profspec", icon: <IconSolution />, matchSteps: ["profspec", "uidesign"] },
     { label: "Summary", step: "summary", icon: <IconSummary /> },
     { label: "Architecture", step: "architecture", icon: <IconArchitecture /> },
@@ -221,6 +223,35 @@ export default function Sidebar() {
       <nav className="flex-1 p-2 space-y-0.5 overflow-y-auto overflow-x-hidden">
         <NavItem icon={<IconHome />} label="Dashboard" path="/" collapsed={collapsed} active={isActive("/")} />
         <NavItem icon={<IconFolder />} label="Projects" path="/projects" collapsed={collapsed} active={isActive("/projects")} />
+
+        {/* Selected project indicator — placed directly under Projects
+            (Director directive 2026-05-15: belongs near the source of
+            the Pin action). Pin icon → user explicitly chose this
+            project in /projects. Version suffix appears once the user
+            opens a verzia (auto-set by useActiveContextSync). */}
+        {hasProject && !collapsed && (
+          <div className="px-3 pb-1 flex items-center gap-1.5 text-[10px] text-slate-500 font-mono">
+            <svg className="w-3 h-3 shrink-0 text-primary-400" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
+            </svg>
+            <span className="truncate flex-1">
+              {selectedProject!.name}
+              {selectedVersion && (
+                <span className="text-slate-600"> · {selectedVersion.versionNumber}</span>
+              )}
+            </span>
+            <button
+              onClick={() => setSelectedProject(null)}
+              title="Zrušiť výber projektu"
+              className="text-slate-600 hover:text-slate-300 shrink-0"
+            >
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        )}
+
         <NavItem
           icon={<IconVersions />}
           label="Versions"
@@ -247,39 +278,29 @@ export default function Sidebar() {
           }
         />
 
+        {/* Specification — first chronological step of the pipeline,
+            placed directly under Workflow per Director directive
+            2026-05-15 (sidebar order must reflect pipeline chronology). */}
+        <NavItem
+          icon={<IconSpec />}
+          label="Specification"
+          path={
+            hasFullContext
+              ? `/projects/${selectedProject!.slug}/versions/${selectedVersion!.versionId}/spec`
+              : undefined
+          }
+          collapsed={collapsed}
+          disabled={!hasFullContext}
+          disabledTitle={noVersionTooltip}
+          active={isStepActive(["spec"])}
+        />
+
         {/* Embedded agent terminals — replace external Windows Terminal
             tabs with full-page xterm.js sessions inside NEX Studio
             (Director directive 2026-05-13). */}
         <NavItem icon={<IconDesigner />} label="Designer" path="/designer" collapsed={collapsed} active={isActive("/designer")} />
         <NavItem icon={<IconImplementer />} label="Implementer" path="/implementer" collapsed={collapsed} active={isActive("/implementer")} />
         <NavItem icon={<IconAuditor />} label="Auditor" path="/auditor" collapsed={collapsed} active={isActive("/auditor")} />
-
-        {/* Selected project indicator — shown under the Designer/
-            Implementer/Auditor trio. Pin icon → user explicitly chose
-            this project in /projects. Version suffix appears once the
-            user opens a verzia (auto-set by useActiveContextSync). */}
-        {hasProject && !collapsed && (
-          <div className="px-3 pb-1 flex items-center gap-1.5 text-[10px] text-slate-500 font-mono">
-            <svg className="w-3 h-3 shrink-0 text-primary-400" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
-            </svg>
-            <span className="truncate flex-1">
-              {selectedProject!.name}
-              {selectedVersion && (
-                <span className="text-slate-600"> · {selectedVersion.versionNumber}</span>
-              )}
-            </span>
-            <button
-              onClick={() => setSelectedProject(null)}
-              title="Zrušiť výber projektu"
-              className="text-slate-600 hover:text-slate-300 shrink-0"
-            >
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-        )}
 
         {pipelineSteps.map((s) => (
           <NavItem
