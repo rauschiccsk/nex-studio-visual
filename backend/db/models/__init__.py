@@ -6,6 +6,7 @@ from backend.db.models.base import Base, TimestampMixin, UUIDMixin
 from backend.db.models.bugs import Bug, BugFixTask
 from backend.db.models.credentials import Credential
 from backend.db.models.delegations import AutoFixAttempt, Delegation, ExecutionLog
+from backend.db.models.dialogue import DialogueMessage, DialogueSession
 from backend.db.models.foundation import User, UserSession
 from backend.db.models.guardian import GuardianPrecedent, GuardianReview
 from backend.db.models.migration import MigrationBatch, MigrationCategoryStatus, MigrationIdMap
@@ -30,6 +31,8 @@ __all__ = [
     "AutoFixAttempt",
     "Base",
     "Delegation",
+    "DialogueMessage",
+    "DialogueSession",
     "ExecutionLog",
     "UUIDMixin",
     "TimestampMixin",
