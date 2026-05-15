@@ -26,6 +26,7 @@ const IconWorkflow = () => <Emoji glyph="🔄" />;
 const IconDesigner = () => <Emoji glyph="✏️" />;
 const IconImplementer = () => <Emoji glyph="🔧" />;
 const IconAuditor = () => <Emoji glyph="🔍" />;
+const IconDialogue = () => <Emoji glyph="💬" />;
 
 const IconSpec = () => <Emoji glyph="📋" />;
 const IconSolution = () => <Emoji glyph="💡" />;
@@ -299,6 +300,7 @@ export default function Sidebar() {
             tabs with full-page xterm.js sessions inside NEX Studio
             (Director directive 2026-05-13). */}
         <NavItem icon={<IconDesigner />} label="Designer" path="/designer" collapsed={collapsed} active={isActive("/designer")} />
+        <NavItem icon={<IconDialogue />} label="Gate E Dialogue" path="/dialogue" collapsed={collapsed} active={isActive("/dialogue")} />
         <NavItem icon={<IconImplementer />} label="Implementer" path="/implementer" collapsed={collapsed} active={isActive("/implementer")} />
         <NavItem icon={<IconAuditor />} label="Auditor" path="/auditor" collapsed={collapsed} active={isActive("/auditor")} />
 

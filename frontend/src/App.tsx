@@ -18,6 +18,7 @@ import MMDepMapPage from "./pages/MMDepMapPage";
 import KnowledgeBasePage from "./pages/KnowledgeBasePage";
 import ProjectSpecsPage from "./pages/ProjectSpecsPage";
 import AgentTerminalPage from "./pages/AgentTerminalPage";
+import DialoguePage from "./pages/DialoguePage";
 import CredentialsPage from "./pages/CredentialsPage";
 import SettingsPage from "./pages/SettingsPage";
 import SpecPage from "./pages/step/SpecPage";
@@ -67,6 +68,7 @@ function App() {
             <Route path="designer" element={<AgentTerminalPage role="designer" />} />
             <Route path="implementer" element={<AgentTerminalPage role="implementer" />} />
             <Route path="auditor" element={<AgentTerminalPage role="auditor" />} />
+            <Route path="dialogue" element={<DialoguePage />} />
             <Route path="credentials" element={<CredentialsPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
