@@ -6,25 +6,15 @@ on:
   pull_request:
     branches: [main]
 
-# Opt JavaScript actions (checkout, setup-python, setup-node, ...)
-# into Node.js 24 runtime ahead of the 2026-06-02 forced transition.
-# Action versions are already current (@v4/@v5), but their bundled
-# Node runtime is still Node 20 — GitHub deprecates that 2026-09-16.
-# This env var silences the deprecation annotation and keeps CI clean.
-# Becomes redundant after 2026-06-02 when Node 24 is the default,
-# but stays harmless.
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-
 jobs:
   lint:
     name: Lint
     runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -59,10 +49,10 @@ jobs:
           --health-retries 5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -100,10 +90,10 @@ jobs:
     runs-on: self-hosted
     needs: lint
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
 
@@ -127,7 +117,7 @@ jobs:
     runs-on: self-hosted
     needs: [test, build-frontend]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Build backend image
         run: docker build -t nex-studio-backend:ci-${{ github.sha }} .
@@ -152,7 +142,7 @@ jobs:
     needs: build
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Deploy with Docker Compose
         working-directory: /opt/projects/nex-studio
