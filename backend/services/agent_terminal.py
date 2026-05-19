@@ -5,33 +5,45 @@ under a PTY, broadcasts stdout to all attached WebSocket listeners,
 forwards user input to the PTY master fd, and updates the audit row in
 ``agent_terminal_sessions`` on lifecycle events (spawn / end / idle / crash).
 
-Memory layout
--------------
-Module-level state holds a dict of **active** sessions only. Each entry
-is a :class:`_RuntimeSession` with:
+Persistence (2026-05-19 rework — Director directive)
+----------------------------------------------------
+Every PTY output chunk is **appended to a durable log file on disk**
+at :data:`TERMINAL_LOG_DIR`/<session-uuid>.log in addition to the RAM
+ring buffer. On attach, history is replayed from disk (not RAM), so:
 
-* a :class:`ptyprocess.PtyProcess` handle (claude CLI process under PTY)
-* an output ring buffer (last 64 KB of bytes for re-attach replay)
-* a set of :class:`asyncio.Queue` listeners (each WS connection = one queue)
-* an asyncio reader task that pumps PTY → buffer + listeners
+* Re-login after long idle preserves the full visual history
+* Cross-BE-restart sessions are resumed via ``claude --resume <uuid>``
+  on first attach — both visual log + AI conversation memory continue
 
-State is **not persistent across BE restart** — by design, per the
-session-lifecycle policy approved 2026-05-13. On startup, all DB rows
-with ``ended_at IS NULL`` are marked ``terminated_by='server_restart'``.
+Session lifecycle:
+
+* **spawn** assigns ``claude_session_id``, persists it in DB, and starts
+  claude with ``--session-id <uuid>``. Log file is created (0600).
+* PTY output → RAM deque (fast replay for fresh attachers) + disk file
+  (durable replay for cross-restart attachers).
+* On BE startup, sessions WITH ``claude_session_id`` are left as-is
+  (resumable). Legacy sessions without UUID are finalized as
+  ``server_restart``.
+* On attach to a row whose runtime is absent, we **auto-respawn** via
+  ``claude --resume <uuid>`` and continue appending to the same log.
+* On explicit end / idle / crash, the log file remains for audit; the
+  retention task cleans it up after :data:`LOG_RETENTION_DAYS` days.
+
+Log rotation: when the file exceeds :data:`LOG_FILE_MAX_BYTES`, the
+oldest half is truncated in-place (keeps the newer half intact). The
+rotation marker ``\\n[...log rotated, older history truncated...]\\n``
+is prepended so the user knows.
 
 Thread-safety
 -------------
-All mutation goes through ``asyncio.Lock`` per session. The reader task
-holds the lock briefly while appending to buffer + fanning out to
-listeners; ``attach`` holds it briefly to snapshot buffer + register
-listener atomically (no race where chunks land between snapshot and
-registration).
+All mutation goes through ``asyncio.Lock`` per session.
 """
 
 from __future__ import annotations
 
 import asyncio
 import collections
+import datetime as dt
 import errno
 import logging
 import os
@@ -55,10 +67,9 @@ PROJECTS_ROOT = Path("/opt/projects")
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9-]*[a-z0-9]$|^[a-z]$")
 _VALID_ROLES = frozenset({"designer", "implementer", "auditor"})
 
-# Output ring buffer: ~64 KB ≈ 10 000 lines of typical claude output.
-# Chunks are bytes (raw PTY output incl. ANSI escapes). The deque
-# trims oldest entries as new ones arrive.
-_BUFFER_MAX_CHUNKS = 512  # each chunk up to ~128 B; aggregate ≈ 64 KB
+# Output ring buffer (RAM) — fast replay for rapid re-attach. Disk log
+# is authoritative for long-term history.
+_BUFFER_MAX_CHUNKS = 512
 
 #: Idle TTL — sessions with no IO from user (input) for this many seconds
 #: get auto-killed by :func:`idle_cleanup`. 24h matches the policy
@@ -67,6 +78,21 @@ IDLE_TTL_SECONDS = 24 * 3600
 
 #: Grace period between SIGTERM and SIGKILL when ending a session.
 SIGTERM_GRACE_SECONDS = 5
+
+#: Directory for durable PTY output logs. Mounted as a Docker volume
+#: in production (docker-compose.yml backend service).
+TERMINAL_LOG_DIR = Path("/var/lib/nex-studio/terminal-logs")
+
+#: Hard cap on per-session log file size. When exceeded, the oldest
+#: half is truncated in-place (see :func:`_rotate_log_if_needed`).
+LOG_FILE_MAX_BYTES = 100 * 1024 * 1024  # 100 MB
+
+#: How long to keep log files for ended sessions. Background task in
+#: lifespan periodically removes older files.
+LOG_RETENTION_DAYS = 30
+
+#: How often to scan for stale log files (retention cleanup interval).
+LOG_CLEANUP_INTERVAL_SECONDS = 24 * 3600  # daily
 
 
 class AgentTerminalError(ValueError):
@@ -78,7 +104,7 @@ class SessionConflictError(AgentTerminalError):
 
 
 class SessionNotFoundError(AgentTerminalError):
-    """No active in-memory session for the given id."""
+    """No in-memory runtime AND no resumable DB row for the given id."""
 
 
 @dataclass
@@ -90,6 +116,7 @@ class _RuntimeSession:
     role: str
     project_slug: str
     process: ptyprocess.PtyProcess
+    claude_session_id: Optional[uuid.UUID] = None
     output_buffer: collections.deque[bytes] = field(
         default_factory=lambda: collections.deque(maxlen=_BUFFER_MAX_CHUNKS),
     )
@@ -119,11 +146,7 @@ def _validate_slug(slug: str) -> None:
 
 
 def _resolve_agent_spec(slug: str, role: str) -> Path:
-    """Return the validated path to ``.claude/agents/<role>/CLAUDE.md``.
-
-    Raises:
-        AgentTerminalError: project root missing or agent spec missing.
-    """
+    """Return the validated path to ``.claude/agents/<role>/CLAUDE.md``."""
     _validate_slug(slug)
     _validate_role(role)
     project_root = PROJECTS_ROOT / slug
@@ -135,6 +158,150 @@ def _resolve_agent_spec(slug: str, role: str) -> Path:
             f"Agent spec missing for {slug}/{role}: expected {spec}",
         )
     return spec
+
+
+# ---------------------------------------------------------------------------
+# Disk log helpers
+# ---------------------------------------------------------------------------
+
+
+def _log_path(session_id: uuid.UUID) -> Path:
+    """Compute the per-session log file path."""
+    return TERMINAL_LOG_DIR / f"{session_id}.log"
+
+
+def _ensure_log_dir() -> None:
+    """Create TERMINAL_LOG_DIR if missing. Idempotent. Mode 0700."""
+    TERMINAL_LOG_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+
+def _create_log_file(session_id: uuid.UUID) -> Path:
+    """Create an empty log file with mode 0600. Returns the path."""
+    _ensure_log_dir()
+    path = _log_path(session_id)
+    # Open with O_CREAT|O_TRUNC|O_WRONLY mode 0600 — overwrites if exists
+    # (shouldn't happen for a freshly assigned UUID).
+    fd = os.open(path, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
+    os.close(fd)
+    return path
+
+
+def _append_chunk_to_log(session_id: uuid.UUID, chunk: bytes) -> None:
+    """Append a PTY output chunk to the session's disk log.
+
+    Performs rotation if the file exceeds :data:`LOG_FILE_MAX_BYTES`
+    after the append: truncates the oldest half in-place, prepending a
+    visible marker so the user knows.
+
+    Tolerant of missing dir / file (recreates). Errors are logged but
+    not raised — disk persistence must not crash the reader task.
+    """
+    path = _log_path(session_id)
+    try:
+        _ensure_log_dir()
+        # Append (file may not exist yet — created here lazily for safety).
+        with open(path, "ab") as fh:
+            fh.write(chunk)
+        _rotate_log_if_needed(path)
+    except OSError as exc:
+        logger.warning(
+            "agent_terminal: failed to append to %s: %s",
+            path,
+            exc,
+        )
+
+
+def _rotate_log_if_needed(path: Path) -> None:
+    """If file > LOG_FILE_MAX_BYTES, keep the newer half + marker prefix.
+
+    In-place: read tail bytes into memory (max half of limit), then
+    rewrite the file with a marker + tail. Brief blocking IO; acceptable
+    because rotation is rare (only when a session's log doubles).
+    """
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return
+    if size <= LOG_FILE_MAX_BYTES:
+        return
+    keep_bytes = LOG_FILE_MAX_BYTES // 2
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(size - keep_bytes)
+            tail = fh.read(keep_bytes)
+        marker = (
+            b"\r\n\x1b[33m[...log rotated, older history truncated to keep size <= "
+            + str(LOG_FILE_MAX_BYTES).encode()
+            + b" bytes...]\x1b[0m\r\n"
+        )
+        with open(path, "wb") as fh:
+            fh.write(marker)
+            fh.write(tail)
+    except OSError as exc:
+        logger.warning("agent_terminal: log rotation failed for %s: %s", path, exc)
+
+
+def _replay_log(session_id: uuid.UUID, chunk_size: int = 65536) -> list[bytes]:
+    """Read the full log file and return a list of byte chunks.
+
+    Returns empty list if file does not exist (legacy session or new
+    session before first chunk).
+    """
+    path = _log_path(session_id)
+    if not path.is_file():
+        return []
+    chunks: list[bytes] = []
+    try:
+        with open(path, "rb") as fh:
+            while True:
+                chunk = fh.read(chunk_size)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+    except OSError as exc:
+        logger.warning("agent_terminal: log replay failed for %s: %s", path, exc)
+    return chunks
+
+
+# ---------------------------------------------------------------------------
+# PTY spawn helpers (initial + resume)
+# ---------------------------------------------------------------------------
+
+
+def _spawn_pty(
+    *,
+    spec_path: Path,
+    project_root: Path,
+    claude_session_id: uuid.UUID,
+    resume: bool,
+) -> ptyprocess.PtyProcess:
+    """Spawn the claude CLI under PTY.
+
+    Args:
+        spec_path: per-role charter (`.claude/agents/<role>/CLAUDE.md`)
+        project_root: cwd for claude (project source root)
+        claude_session_id: UUID for ``--session-id`` (fresh) or ``--resume``
+        resume: ``True`` → resume existing session by uuid; ``False`` →
+            create new session with charter injection.
+    """
+    env = {**os.environ, "TERM": "xterm-256color", "FORCE_COLOR": "1"}
+    if resume:
+        argv = ["claude", "--resume", str(claude_session_id)]
+    else:
+        append_prompt = spec_path.read_text(encoding="utf-8")
+        argv = [
+            "claude",
+            "--session-id",
+            str(claude_session_id),
+            "--append-system-prompt",
+            append_prompt,
+        ]
+    return ptyprocess.PtyProcess.spawn(
+        argv,
+        cwd=str(project_root),
+        env=env,
+        dimensions=(40, 120),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -151,17 +318,15 @@ async def spawn(
 ) -> AgentTerminalSession:
     """Spawn a new claude CLI process under PTY for ``(user, role, project)``.
 
-    Returns the persisted :class:`AgentTerminalSession` row. The runtime
-    state is registered in module-level ``_sessions`` keyed by the row id.
+    Assigns a fresh ``claude_session_id`` (UUID4) and creates a durable
+    log file on disk. Both are required for cross-restart auto-resume.
 
     Raises:
         AgentTerminalError: invalid role/slug or missing agent spec.
         SessionConflictError: an active session already exists for this
-            ``(user_id, role)`` pair (enforced both via the DB partial
-            unique index and an in-memory pre-check for a clean 409).
+            ``(user_id, role)`` pair.
     """
     spec_path = _resolve_agent_spec(project_slug, role)
-    append_prompt = spec_path.read_text(encoding="utf-8")
 
     existing = db.execute(
         select(AgentTerminalSession).where(
@@ -175,13 +340,13 @@ async def spawn(
             f"Active {role} session already running for user {user_id} (session_id={existing.id})",
         )
 
-    env = {**os.environ, "TERM": "xterm-256color", "FORCE_COLOR": "1"}
     project_root = PROJECTS_ROOT / project_slug
-    proc = ptyprocess.PtyProcess.spawn(
-        ["claude", "--append-system-prompt", append_prompt],
-        cwd=str(project_root),
-        env=env,
-        dimensions=(40, 120),
+    claude_session_id = uuid.uuid4()
+    proc = _spawn_pty(
+        spec_path=spec_path,
+        project_root=project_root,
+        claude_session_id=claude_session_id,
+        resume=False,
     )
 
     row = AgentTerminalSession(
@@ -189,10 +354,15 @@ async def spawn(
         role=role,
         project_slug=project_slug,
         pid=proc.pid,
+        claude_session_id=claude_session_id,
     )
     db.add(row)
     db.commit()
     db.refresh(row)
+
+    # Create durable log file (mode 0600). The reader task appends chunks
+    # to this file in parallel with the RAM ring buffer.
+    _create_log_file(row.id)
 
     runtime = _RuntimeSession(
         id=row.id,
@@ -200,6 +370,7 @@ async def spawn(
         role=role,
         project_slug=project_slug,
         process=proc,
+        claude_session_id=claude_session_id,
     )
 
     async with _registry_lock:
@@ -211,34 +382,114 @@ async def spawn(
     )
 
     logger.info(
-        "Spawned agent terminal session: id=%s user=%s role=%s project=%s pid=%s",
+        "Spawned agent terminal session: id=%s user=%s role=%s project=%s pid=%s claude_session_id=%s",
         row.id,
         user_id,
         role,
         project_slug,
         proc.pid,
+        claude_session_id,
     )
     return row
 
 
+async def _respawn_for_resume(
+    *,
+    row: AgentTerminalSession,
+    db: Session,
+) -> _RuntimeSession:
+    """Spawn a new PTY for an existing session via ``claude --resume <uuid>``.
+
+    Called from :func:`attach` when the row exists in DB (ended_at IS NULL,
+    has claude_session_id) but no runtime entry exists — typically after
+    a BE restart. Continues appending to the **same** disk log so the
+    user sees pre-restart history + new content seamlessly.
+
+    Updates the row's ``pid`` to the new PTY process id. The
+    ``claude_session_id`` is unchanged (--resume keeps AI memory).
+    """
+    if row.claude_session_id is None:
+        raise SessionNotFoundError(
+            f"Session {row.id} cannot be resumed: no claude_session_id (legacy session from before migration 046)",
+        )
+    spec_path = _resolve_agent_spec(row.project_slug, row.role)
+    project_root = PROJECTS_ROOT / row.project_slug
+
+    proc = _spawn_pty(
+        spec_path=spec_path,
+        project_root=project_root,
+        claude_session_id=row.claude_session_id,
+        resume=True,
+    )
+
+    # Update pid in DB row (new PTY process).
+    row.pid = proc.pid
+    db.commit()
+
+    runtime = _RuntimeSession(
+        id=row.id,
+        user_id=row.user_id,
+        role=row.role,
+        project_slug=row.project_slug,
+        process=proc,
+        claude_session_id=row.claude_session_id,
+    )
+
+    async with _registry_lock:
+        _sessions[row.id] = runtime
+
+    runtime.reader_task = asyncio.create_task(
+        _pump_output(runtime),
+        name=f"agent-terminal-reader-{row.id}",
+    )
+
+    logger.info(
+        "Resumed agent terminal session: id=%s role=%s new_pid=%s claude_session_id=%s",
+        row.id,
+        row.role,
+        proc.pid,
+        row.claude_session_id,
+    )
+    return runtime
+
+
 async def attach(session_id: uuid.UUID) -> AsyncIterator[bytes]:
-    """Async iterator yielding bytes from the PTY: history first, then live.
+    """Async iterator yielding bytes: full disk-log history first, then live.
+
+    If no runtime entry exists but a resumable row is present in DB,
+    auto-respawns the PTY via ``claude --resume <uuid>`` first.
 
     Caller (the WebSocket endpoint) consumes this iterator until it
-    returns (session ended) or the WS disconnects. On WS disconnect, the
-    `finally` block in the caller's loop is responsible for cleanup;
-    this iterator's own `finally` removes the listener queue.
+    returns (session ended) or the WS disconnects. The ``finally`` block
+    removes this listener queue.
     """
     runtime = _sessions.get(session_id)
     if runtime is None:
-        raise SessionNotFoundError(f"No active session: {session_id}")
+        # Try auto-respawn from DB row (cross-restart scenario).
+        from backend.db.session import SessionLocal
+
+        db = SessionLocal()
+        try:
+            row = db.get(AgentTerminalSession, session_id)
+            if row is None or row.ended_at is not None:
+                raise SessionNotFoundError(f"No active session: {session_id}")
+            if row.claude_session_id is None:
+                raise SessionNotFoundError(
+                    f"Session {session_id} cannot be resumed (legacy, no claude_session_id)",
+                )
+            runtime = await _respawn_for_resume(row=row, db=db)
+        finally:
+            db.close()
 
     q: asyncio.Queue[Optional[bytes]] = asyncio.Queue(maxsize=256)
+    # Snapshot disk log BEFORE registering listener — once we register,
+    # the reader task may append new chunks to ``q``. Disk log already
+    # contains everything up to ~now; the listener gets everything from
+    # ~now onward. The deque overlap (last 64 KB) is fine — duplicate
+    # bytes don't break the terminal renderer (ANSI is idempotent for
+    # repeated escape sequences, plain text is harmless).
+    history = _replay_log(session_id)
     async with runtime.lock:
-        # Snapshot buffer + register listener atomically. From this point
-        # the reader broadcasts new chunks to ``q`` directly, so there is
-        # no gap and no duplication.
-        history = list(runtime.output_buffer)
         runtime.listeners.add(q)
 
     try:
@@ -280,19 +531,12 @@ async def end_session(
 ) -> None:
     """Stop a running session. SIGTERM, grace, SIGKILL. DB row finalized.
 
-    Idempotent — if the session has already ended (no runtime entry,
-    or DB row already has ``ended_at`` set), this is a no-op.
-
-    Args:
-        session_id: id of the session to end
-        terminated_by: one of ``'idle'``, ``'user'``, ``'crash'``,
-            ``'server_restart'`` — recorded on the audit row
-        db: SQLAlchemy session for the DB row update
+    Idempotent. Note: the disk log file is **kept** after end_session;
+    the retention task (:func:`cleanup_old_logs`) removes it after
+    :data:`LOG_RETENTION_DAYS` days.
     """
     runtime = _sessions.get(session_id)
     if runtime is None:
-        # Possibly the reader task already finalized via crash path —
-        # ensure DB row reflects something terminal.
         _finalize_db_row(
             session_id,
             terminated_by=terminated_by,
@@ -303,7 +547,7 @@ async def end_session(
 
     try:
         runtime.process.kill(signal.SIGTERM)
-    except Exception:  # noqa: BLE001 — process may already be dead
+    except Exception:  # noqa: BLE001
         pass
 
     for _ in range(SIGTERM_GRACE_SECONDS * 10):
@@ -320,13 +564,7 @@ async def end_session(
 
 
 async def idle_cleanup(db: Session) -> int:
-    """Kill sessions idle for > :data:`IDLE_TTL_SECONDS`. Returns count killed.
-
-    Invoked periodically from the FastAPI lifespan task (every 5 min in
-    production). "Idle" = no user input in TTL window. PTY output alone
-    does not reset the clock — long-running claude generations are
-    legitimate and should not extend the lease indefinitely.
-    """
+    """Kill sessions idle for > :data:`IDLE_TTL_SECONDS`. Returns count."""
     now = time.time()
     to_kill: list[uuid.UUID] = [
         sid for sid, runtime in _sessions.items() if now - runtime.last_input_at > IDLE_TTL_SECONDS
@@ -342,19 +580,23 @@ async def idle_cleanup(db: Session) -> int:
 
 
 def mark_orphaned_on_startup(db: Session) -> int:
-    """Mark all ``ended_at IS NULL`` rows as ``server_restart``-terminated.
+    """Finalize legacy rows on BE startup. Resumable rows survive.
 
-    Invoked from the FastAPI lifespan on startup. Sessions cannot
-    survive a BE container restart (PTY processes live in the container
-    namespace), so every active row from the previous boot is an
-    orphan — finalize it for audit cleanliness.
+    With migration 046, sessions with ``claude_session_id`` are
+    **resumable** via ``claude --resume <uuid>`` on next attach. Their
+    DB row stays as-is (ended_at remains NULL); first attach triggers
+    auto-respawn.
 
-    Returns the number of rows finalized.
+    Legacy rows (claude_session_id IS NULL — spawned before migration
+    046) cannot be resumed and are finalized as ``server_restart``.
+
+    Returns the count of legacy rows finalized.
     """
-    rows = (
+    legacy_rows = (
         db.execute(
             select(AgentTerminalSession).where(
                 AgentTerminalSession.ended_at.is_(None),
+                AgentTerminalSession.claude_session_id.is_(None),
             ),
         )
         .scalars()
@@ -362,13 +604,85 @@ def mark_orphaned_on_startup(db: Session) -> int:
     )
     from sqlalchemy import func
 
-    for row in rows:
+    for row in legacy_rows:
         row.ended_at = func.now()
         row.terminated_by = "server_restart"
     db.commit()
-    if rows:
-        logger.info("Marked %d orphan sessions as server_restart", len(rows))
-    return len(rows)
+    if legacy_rows:
+        logger.info(
+            "Marked %d legacy (pre-046) sessions as server_restart",
+            len(legacy_rows),
+        )
+
+    resumable_count = (
+        db.execute(
+            select(AgentTerminalSession).where(
+                AgentTerminalSession.ended_at.is_(None),
+                AgentTerminalSession.claude_session_id.isnot(None),
+            ),
+        )
+        .scalars()
+        .all()
+    )
+    if resumable_count:
+        logger.info(
+            "Found %d resumable sessions (will respawn on first attach)",
+            len(resumable_count),
+        )
+    return len(legacy_rows)
+
+
+def cleanup_old_logs(db: Session) -> int:
+    """Delete log files for sessions ended more than LOG_RETENTION_DAYS ago.
+
+    Two-pass:
+
+    1. For each ``.log`` file in :data:`TERMINAL_LOG_DIR`, look up the
+       session row. If row exists and ``ended_at`` is older than
+       retention threshold → delete file.
+    2. Orphan files (no matching row in DB) older than retention by
+       file mtime → delete.
+
+    Returns the count of files deleted.
+    """
+    if not TERMINAL_LOG_DIR.is_dir():
+        return 0
+
+    threshold_dt = dt.datetime.now(dt.timezone.utc) - dt.timedelta(
+        days=LOG_RETENTION_DAYS,
+    )
+    threshold_ts = threshold_dt.timestamp()
+    deleted = 0
+    for path in TERMINAL_LOG_DIR.glob("*.log"):
+        try:
+            session_id = uuid.UUID(path.stem)
+        except ValueError:
+            continue  # unexpected filename
+        row = db.get(AgentTerminalSession, session_id)
+        should_delete = False
+        if row is not None and row.ended_at is not None:
+            if row.ended_at < threshold_dt:
+                should_delete = True
+        elif row is None:
+            # Orphan file (no DB row). Use mtime as fallback.
+            try:
+                if path.stat().st_mtime < threshold_ts:
+                    should_delete = True
+            except OSError:
+                continue
+        if should_delete:
+            try:
+                path.unlink()
+                deleted += 1
+            except OSError as exc:
+                logger.warning(
+                    "agent_terminal: failed to delete stale log %s: %s",
+                    path,
+                    exc,
+                )
+    if deleted:
+        logger.info("agent_terminal: deleted %d stale log files (>%dd)", deleted, LOG_RETENTION_DAYS)
+    return deleted
 
 
 # ---------------------------------------------------------------------------
@@ -377,16 +691,10 @@ def mark_orphaned_on_startup(db: Session) -> int:
 
 
 async def _pump_output(runtime: _RuntimeSession) -> None:
-    """Reader task: read PTY → append to buffer + broadcast to listeners.
+    """Reader task: PTY → RAM deque + disk log + WS listeners.
 
-    Terminates when the process exits (EOF / EIO from PTY). On exit,
-    finalizes the DB row via :func:`_cleanup_after_exit` with
-    ``terminated_by='crash'`` if exit code != 0, else ``'user'``.
-
-    The reader uses ``run_in_executor`` because ptyprocess reads are
-    blocking; using ``loop.add_reader`` would be slightly more efficient
-    but requires manual ``read()`` calls on the master fd, which
-    duplicates ptyprocess's existing edge-case handling.
+    Terminates when the process exits. On exit, finalizes the DB row
+    via :func:`_cleanup_after_exit`.
     """
     loop = asyncio.get_running_loop()
     try:
@@ -394,13 +702,15 @@ async def _pump_output(runtime: _RuntimeSession) -> None:
             chunk = await loop.run_in_executor(None, _safe_read, runtime.process)
             if chunk is None:
                 break
+            # Disk log append (outside the lock — file IO is independent
+            # from in-memory broadcast; failures are logged but tolerated).
+            _append_chunk_to_log(runtime.id, chunk)
             async with runtime.lock:
                 runtime.output_buffer.append(chunk)
                 for q in runtime.listeners:
                     try:
                         q.put_nowait(chunk)
                     except asyncio.QueueFull:
-                        # Slow listener — drop oldest item, retry.
                         try:
                             q.get_nowait()
                             q.put_nowait(chunk)
@@ -409,8 +719,6 @@ async def _pump_output(runtime: _RuntimeSession) -> None:
     except Exception:
         logger.exception("agent_terminal reader crashed for session %s", runtime.id)
 
-    # Process has exited (cleanly or otherwise). Finalize via a fresh
-    # DB session so we don't depend on the spawn-time session being open.
     from backend.db.session import SessionLocal
 
     exit_code = runtime.process.exitstatus
@@ -467,11 +775,7 @@ def _finalize_db_row(
     exit_code: Optional[int],
     db: Session,
 ) -> None:
-    """Update the audit row with ``ended_at`` + ``exit_code`` + ``terminated_by``.
-
-    Idempotent — if the row already has ``ended_at``, no-op. Tolerant of
-    a missing row (no-op + log).
-    """
+    """Update the audit row with ``ended_at`` + ``exit_code`` + ``terminated_by``."""
     from sqlalchemy import func
 
     row = db.get(AgentTerminalSession, session_id)

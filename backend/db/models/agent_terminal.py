@@ -55,6 +55,11 @@ class AgentTerminalSession(Base, UUIDMixin, TimestampMixin):
         nullable=False,
         server_default=func.now(),
     )
+    #: claude CLI session UUID — disk-persisted by claude itself.
+    #: Used for ``claude --resume <uuid>`` after BE restart so AI memory
+    #: continues. Nullable for legacy rows from before migration 046.
+    #: Director directive 2026-05-19: auto-resume on first attach.
+    claude_session_id = Column(UUID(as_uuid=True), nullable=True)
 
     __table_args__ = (
         CheckConstraint(

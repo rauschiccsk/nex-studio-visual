@@ -106,6 +106,28 @@ async def _agent_terminal_idle_loop() -> None:
             logger.exception("agent_terminal idle_cleanup loop iteration failed")
 
 
+async def _agent_terminal_log_retention_loop() -> None:
+    """Background task: daily, delete agent terminal log files older than
+    :data:`agent_terminal.LOG_RETENTION_DAYS` days.
+
+    Director directive 2026-05-19: durable PTY logs need retention to
+    avoid unbounded disk growth. Files for sessions still active or
+    ended within the retention window are preserved.
+    """
+    while True:
+        try:
+            await asyncio.sleep(agent_terminal_service.LOG_CLEANUP_INTERVAL_SECONDS)
+            db = SessionLocal()
+            try:
+                agent_terminal_service.cleanup_old_logs(db)
+            finally:
+                db.close()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("agent_terminal log retention loop iteration failed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan: migrations + agent terminal startup hooks.
@@ -137,15 +159,21 @@ async def lifespan(app: FastAPI):
         _agent_terminal_idle_loop(),
         name="agent-terminal-idle-cleanup",
     )
+    retention_task = asyncio.create_task(
+        _agent_terminal_log_retention_loop(),
+        name="agent-terminal-log-retention",
+    )
 
     try:
         yield
     finally:
         idle_task.cancel()
-        try:
-            await idle_task
-        except (asyncio.CancelledError, Exception):
-            pass
+        retention_task.cancel()
+        for t in (idle_task, retention_task):
+            try:
+                await t
+            except (asyncio.CancelledError, Exception):
+                pass
 
 
 app = FastAPI(

@@ -69,8 +69,18 @@ COPY --from=deps /usr/local/bin /usr/local/bin
 # Create non-root user matching the host andros uid (1000).
 # Claude CLI refuses to run as root — same pattern as NEX Command backend.
 RUN useradd -m -u 1000 -s /bin/bash andros \
-    && mkdir -p /home/andros/.claude /app/uploads \
-    && chown -R andros:andros /app /home/andros
+    && mkdir -p /home/andros/.claude /home/andros/.local/bin /app/uploads /var/lib/nex-studio/terminal-logs \
+    && ln -sf /usr/bin/claude /home/andros/.local/bin/claude \
+    && chown -R andros:andros /app /home/andros /var/lib/nex-studio
+# Symlink ~/.local/bin/claude → /usr/bin/claude: the host's
+# /home/andros/.claude/.claude.json has installMethod=native (claude
+# CLI was natively installed on ANDROS host into ~/.local/bin/claude).
+# That config is mounted into the container; without the symlink,
+# claude CLI 2.1.126+ emits a transient red startup warning
+# "Method is native, but claude command not found at /home/andros/.local/bin/claude".
+# DISABLE_AUTOUPDATER=1 silences auto-update warnings but NOT this
+# method check (separate pre-flight). Director directive 2026-05-19:
+# fix even cosmetic warnings, no loose ends.
 
 # Copy application code with correct ownership
 COPY --chown=andros:andros backend/ ./backend/

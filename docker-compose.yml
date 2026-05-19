@@ -46,6 +46,12 @@ services:
       # up. ri-gated REST API at /api/v1/credentials is the only way in.
       - /opt/data/nex-studio/credentials:/opt/data/nex-studio/credentials:rw
       - uploads:/app/uploads
+      # rw — durable PTY output logs per agent terminal session.
+      # Survives BE container restart so the visual scrollback is
+      # preserved + ``claude --resume <uuid>`` can continue AI memory.
+      # Director directive 2026-05-19. Retention: 30 days, rotation
+      # at 100 MB/file (in-place truncate of older half).
+      - terminal_logs:/var/lib/nex-studio/terminal-logs
     environment:
       DATABASE_URL: "postgresql+pg8000://nexstudio:nexstudio@db:5432/nexstudio"
       TEST_DATABASE_URL: "postgresql+pg8000://nexstudio:nexstudio@db:5432/nexstudio_test"
@@ -127,3 +133,4 @@ services:
 volumes:
   pgdata:
   uploads:
+  terminal_logs:
