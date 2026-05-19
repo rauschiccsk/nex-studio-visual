@@ -47,6 +47,11 @@ def fake_project(tmp_path, monkeypatch):
         (agent_dir / "CLAUDE.md").write_text(f"# {role} agent\nTest prompt.\n")
 
     monkeypatch.setattr(service, "PROJECTS_ROOT", tmp_path)
+    # Redirect durable PTY log dir to tmp_path/terminal-logs so the
+    # service can mkdir + write without root permission (the production
+    # path /var/lib/nex-studio/terminal-logs is owned by andros via
+    # Dockerfile chown, but CI runners have no such dir).
+    monkeypatch.setattr(service, "TERMINAL_LOG_DIR", tmp_path / "terminal-logs")
     yield slug
 
 

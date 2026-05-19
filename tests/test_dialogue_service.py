@@ -82,7 +82,13 @@ def fake_invoke_agent(monkeypatch):
         # Canned responses keyed on prompt content for predictability.
         if "Customer ready" in prompt or "Designer ready" in prompt:
             return "(ack)"
-        if "Generate the next question" in prompt:
+        # Match both legacy English wording and current Slovak prompt
+        # (`_NEXT_QUESTION_PROMPT` was rewritten to Slovak in dialogue
+        # iteration 2026-05-16+ with hard rules for turn-1 + persona +
+        # subject-of-audit). The trigger entry point sends the next-Q
+        # prompt; we recognize it by the stable phrase "ďalšiu otázku"
+        # (or the legacy English "Generate the next question").
+        if "ďalšiu otázku" in prompt or "Generate the next question" in prompt:
             return "Test Customer question?"
         return f"(fake response to: {prompt[:50]})"
 
