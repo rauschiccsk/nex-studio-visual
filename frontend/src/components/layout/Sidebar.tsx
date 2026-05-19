@@ -299,10 +299,10 @@ export default function Sidebar() {
         {/* Embedded agent terminals — replace external Windows Terminal
             tabs with full-page xterm.js sessions inside NEX Studio
             (Director directive 2026-05-13). */}
-        <NavItem icon={<IconDesigner />} label="Designer" path="/designer" collapsed={collapsed} active={isActive("/designer")} />
-        <NavItem icon={<IconDialogue />} label="Gate E Dialogue" path="/dialogue" collapsed={collapsed} active={isActive("/dialogue")} />
-        <NavItem icon={<IconImplementer />} label="Implementer" path="/implementer" collapsed={collapsed} active={isActive("/implementer")} />
-        <NavItem icon={<IconAuditor />} label="Auditor" path="/auditor" collapsed={collapsed} active={isActive("/auditor")} />
+        <NavItem icon={<IconDesigner />} label="AG Designer" path="/designer" collapsed={collapsed} active={isActive("/designer")} />
+        <NavItem icon={<IconDialogue />} label="AG Customer" path="/dialogue" collapsed={collapsed} active={isActive("/dialogue")} />
+        <NavItem icon={<IconImplementer />} label="AG Implementator" path="/implementer" collapsed={collapsed} active={isActive("/implementer")} />
+        <NavItem icon={<IconAuditor />} label="AG Auditor" path="/auditor" collapsed={collapsed} active={isActive("/auditor")} />
 
         {pipelineSteps.map((s) => (
           <NavItem

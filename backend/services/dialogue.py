@@ -96,9 +96,47 @@ _INIT_PROMPT_DESIGNER = (
 #: next question". Customer's charter §4 defines the 7-batch coverage
 #: walk-through; claude will pick the next un-covered question.
 _NEXT_QUESTION_PROMPT = (
-    "Generate the next question per your charter §4 coverage plan. "
-    "Reply with **just the question** in Slovak (1-3 sentences). "
-    "No preamble like 'OK, here is my next question:'."
+    "Vygeneruj ďalšiu otázku v Gate E dialógu podľa svojho charteru §4.\n\n"
+    "## HARD RULES (porušenie = invalid otázka)\n\n"
+    "**1. Turn detection** — najskôr zisti koľký si turn:\n"
+    "- Ak NEMÁŠ ešte žiadnu predošlú otázku v tejto session "
+    "(turn 1) → Otázka MUSÍ byť **modules overview**: 'Aké moduly "
+    "aplikácia má a stručne čo každý robí z pohľadu operátora?' "
+    "(môžeš reformulovať frázu, ale TÉMA = high-level zoznam modulov, "
+    "NIKDY konkrétny screen / detail / scenár).\n"
+    "- Ak si v turn 2+ → pokračuj v breadth pass podľa charter §4.1 "
+    "Phase 1 (1-2 otázok per podtéma, kompletný prechod batches 1→7 "
+    "pred akýmkoľvek depth-passom).\n\n"
+    "**2. Persona — non-technical zákazník**:\n"
+    "- ZAKÁZANÉ slová: IMAP, SMTP, bootstrap, dashboard, metriky, "
+    "onboarding, endpoint, API, modal, DTO, validácia, mock, "
+    "deployment, bundle, runtime.\n"
+    "- POVOLENÉ slová: emaily, úvodná obrazovka, prvé spustenie, "
+    "nastavenia, prihlásenie, prehľad, formulár, chybová hláška, "
+    "tlačidlo, menu.\n"
+    "- Pýtaš sa tak ako reálny operátor v účtovníckej firme bez IT "
+    "vzdelania.\n\n"
+    "**3. Otvorené otázky, NIE A/B comparisons**:\n"
+    "- ❌ ZLE: 'Vidím funkčný dashboard, ALEBO dedikovanú onboarding "
+    "obrazovku?' — ponúkaš Designerovi predpripravené možnosti.\n"
+    "- ✅ DOBRE: 'Čo presne uvidím keď prvýkrát otvorím aplikáciu?' — "
+    "otvorená otázka, Designer si zvolí ako odpovedať.\n\n"
+    "**4. Subject of audit = APLIKÁCIA, NIE osoba**:\n"
+    "- ✅ Pýtaš sa: čo aplikácia robí / zobrazuje / spracúva / "
+    "ako reaguje / aké akcie umožňuje\n"
+    "- ❌ ZAKÁZANÉ: pracovný režim osoby (typický deň operátora, "
+    "čo robí ráno/večer, ako si organizuje čas, koľko si dáva "
+    "prestávok, ako sa pripravuje na uzávierku).\n"
+    "- 'Z pohľadu operátora' je **šošovka pre formuláciu**, NIE "
+    "subject. Príklad: 'Z pohľadu operátora — ako aplikácia "
+    "zobrazuje stav faktúry?' → subject je APP (čo zobrazuje), "
+    "lens je operátor (komu zobrazuje).\n\n"
+    "**5. Output formát**:\n"
+    "- Iba samotná otázka v slovenčine, 1-3 vety.\n"
+    "- Žiadny preamble ('OK, here is my next question:'), žiadne "
+    "meta-komentáre, žiadne vysvetlenie prečo táto otázka.\n"
+    "- Žiadne vymyslené názvy (typu 'MÁGERSTAV') — používaj iba "
+    "termíny zo skutočnej špecifikácie."
 )
 
 
@@ -457,6 +495,59 @@ async def trigger_customer_next_question(
     )
 
 
+#: Wrapper applied to Designer's reply when forwarding to Customer.
+#:
+#: Workflow (Director directive 2026-05-16): Customer's response to a
+#: Designer reply is a **verification feedback** — NOT the next question.
+#: Director then explicitly triggers the next question via UI button,
+#: which gives Director a gate to inject additional context first
+#: ("ohľadom poslednej otázky opýtaj toto X") before the cycle resumes.
+#:
+#: Customer's feedback is persisted as ``status=delivered`` (not
+#: ``pending``) — there's nothing to forward, no Director approval gate,
+#: it's a terminal status report in chat.
+_DESIGNER_REPLY_WRAPPER = """\
+Designer odpovedal na tvoju poslednú otázku:
+
+---
+{designer_content}
+---
+
+Teraz urob v tomto poradí (4 kroky):
+
+1. **Verify** Designer odpoveď voči spec balíku. Prečítaj relevant \
+sekcie autoritatívnych dokumentov (`docs/specs/versions/v<X.Y.Z>/`: \
+`development-spec.md`, `backend/BEHAVIOR.md`, `frontend/BEHAVIOR.md`, \
+`api/openapi.yaml`, `ERROR_CODES.md`) podľa témy aktuálnej otázky. \
+Porovnaj Designer odpoveď s tým, čo dokumenty hovoria.
+
+2. **Zaloguj** otázku + odpoveď do \
+`docs/specs/versions/v<X.Y.Z>/customer-dialogue.md` per charter §5 \
+formát (pridaj novú ### Q{{N}} sekciu pod správny ## Batch nadpis, \
+zachytaj TODO findings z verification kroku 1).
+
+3. **Aktualizuj** `.nex-customer-state.md` — Coverage matrix (Q-count, \
+TODO-count) + Verification findings sekcia ak existujú nezrovnalosti.
+
+4. **Output v chate** = výhradne tvoj feedback Directorovi o Designer \
+odpovedi. Žiadny next question, žiadny preamble, žiadny meta-status \
+typu "Q-N zalogovaný". Formát (1-3 vety SK):
+
+   - **V poriadku**: "V poriadku — Designer odpoveď je konzistentná \
+so spec balíkom (`<konkrétna sekcia/súbor>`), žiadny TODO."
+   - **Výhrada**: "Výhrada: Designer `<konkrétne tvrdenie>`, ale \
+`<dokument>:<sekcia>` špecifikuje `<iné tvrdenie>`. Potrebné Designer \
+TODO." (alebo iná konkrétna výhrada — viď charter §4.4 verification \
+findings).
+
+Director vidí len tvoj feedback. Ak chce ďalšiu otázku, klikne v UI \
+explicit button — vtedy ti pošlem `Generate the next question per \
+your charter §4 coverage plan.` Cyklus pauzuje TU, na tvojom feedbacku. \
+Director môže pred trigger-om next question Director-inject-nuť ti \
+inštrukciu typu "Ohľadom poslednej otázky opýtaj ešte toto X" — vtedy \
+formuluješ follow-up otázku, nie feedback."""
+
+
 async def forward_approved_message(
     *,
     session: DialogueSession,
@@ -464,17 +555,40 @@ async def forward_approved_message(
     db: Session,
 ) -> DialogueMessage:
     """Forward an approved message to the recipient agent and persist
-    the recipient's response as a new pending message.
+    the recipient's response.
 
-    Recipient is the **opposite** of the approved message's author:
-    Customer's question → Designer; Designer's reply → Customer.
+    Recipient + persisted status depends on direction:
+
+    * Customer→Designer (approved Customer question forwarded to
+      Designer): Designer's answer persists as ``pending``. Director
+      sees it + approves to continue the cycle.
+
+    * Designer→Customer (approved Designer answer forwarded to
+      Customer): Customer's verification feedback persists as
+      ``delivered`` — terminal, no Director approval gate, nothing
+      gets forwarded next. Cycle pauses here until Director clicks
+      "Vyžiadať ďalšiu otázku" (or Director-injects context). This
+      gives Director a window to intervene before the next Q is
+      generated (Director directive 2026-05-16).
+
+    Designer→Customer forwards are wrapped with explicit instructions
+    (:data:`_DESIGNER_REPLY_WRAPPER`) so Customer produces a
+    verification feedback, not a next-question. Customer→Designer
+    forwards send the raw question — Designer's charter knows how
+    to answer.
     """
     if approved_message.author == "customer":
         recipient = "designer"
         recipient_uuid = session.designer_session_id
+        forwarded_content = approved_message.content
+        response_status = "pending"
     elif approved_message.author == "designer":
         recipient = "customer"
         recipient_uuid = session.customer_session_id
+        forwarded_content = _DESIGNER_REPLY_WRAPPER.format(
+            designer_content=approved_message.content,
+        )
+        response_status = "delivered"
     else:
         raise DialogueError(
             f"Cannot forward message from author {approved_message.author!r}",
@@ -487,13 +601,13 @@ async def forward_approved_message(
     response = await _invoke_agent(
         project_slug=session.project_slug,
         claude_session_id=recipient_uuid,
-        prompt=approved_message.content,
+        prompt=forwarded_content,
     )
     return add_message(
         session_id=session.id,
         author=recipient,
         content=response,
-        status="pending",
+        status=response_status,
         db=db,
     )
 
