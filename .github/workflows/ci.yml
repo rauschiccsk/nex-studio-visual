@@ -6,6 +6,16 @@ on:
   pull_request:
     branches: [main]
 
+# Opt JavaScript actions (checkout, setup-python, setup-node, ...)
+# into Node.js 24 runtime ahead of the 2026-06-02 forced transition.
+# Action versions are already current (@v4/@v5), but their bundled
+# Node runtime is still Node 20 — GitHub deprecates that 2026-09-16.
+# This env var silences the deprecation annotation and keeps CI clean.
+# Becomes redundant after 2026-06-02 when Node 24 is the default,
+# but stays harmless.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   lint:
     name: Lint
