@@ -264,6 +264,66 @@ Ak ktorýkoľvek check zlyhá:
 3. Re-run verifikácie
 4. Až po PASS → DONE report
 
+### 9.1 Docker / build patterns (lessons z NEX Inbox v0.1.0)
+
+NEX Inbox v0.1.0 release verdict bol false-positive lebo `docker compose build` nikdy nebol verified napriek 3 audit cyklom PASS. Nasledujúce pravidlá MANDATORY pre každý Dockerfile / docker-compose súbor ktorý Implementer vytvára alebo edituje:
+
+**Dockerfile MUSÍ obsahovať:**
+```dockerfile
+SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
+```
+Default `sh -c` v Dockerfile RUN príkazoch nemá `set -e` — multi-step `RUN poetry install && do_X && do_Y` zlyhanie v middle step nemusí propagovať failure exit code.
+
+**Po `RUN poetry install` / `npm ci` verify binary existence:**
+```dockerfile
+RUN poetry install --only main --no-root \
+    && test -x .venv/bin/uvicorn  # explicit binary check
+```
+Bez verify: dependency install môže silent-fail (napr. saxonche bez Java) ale image sa vytvorí. Runtime crash až keď container sa spustí.
+
+**Build context vs Dockerfile path consistency:**
+Pri `build.context: .` (repo root) v docker-compose.yml VŠETKY `COPY` cesty v Dockerfile MUSIA použiť relative-from-root path:
+- ✅ Správne: `COPY backend/pyproject.toml backend/poetry.lock ./`
+- ❌ Nesprávne: `COPY pyproject.toml poetry.lock ./` (hľadá v root, ale súbory sú v `backend/`)
+
+Pred commit-om Dockerfile zmeny:
+```bash
+docker compose build --no-cache 2>&1 | tail -20  # explicit verify
+```
+
+### 9.2 Smoke test pred DONE reportom (kritické)
+
+Self-verification §9 (testy + lint + typecheck) NIE JE dostačujúca pre release-relevant tasky. Pre tasky ktoré dotýkajú:
+- Dockerfile / docker-compose.yml zmeny
+- Backend / Frontend dependency changes (pyproject.toml, package.json)
+- BE/FE entrypoint changes (main.py, src/main.tsx)
+- Migration changes (alembic/versions/*)
+
+MUSÍM pred DONE reportom spustiť **end-to-end smoke test**:
+
+```bash
+# 1. Build images z aktuálneho kódu
+docker compose build 2>&1 | tail -10  # all stages must PASS
+
+# 2. Spustiť stack (clean state ak treba)
+docker compose down  # cleanup
+docker compose up -d db && sleep 10  # DB first
+poetry run alembic upgrade head  # migrations
+docker compose up -d  # full stack
+
+# 3. Wait + verify health
+sleep 15
+docker ps --filter "name=<slug>" --format "table {{.Names}}\t{{.Status}}"
+# All containers must show "Up (healthy)" — NOT "Restarting" or "Exited"
+
+# 4. Health endpoint
+curl -sf http://localhost:<port>/health  # must return non-empty JSON
+```
+
+**Zlyhanie ktoréhokoľvek kroku** → STOP, žiadny DONE report. Fix root cause, re-run smoke test.
+
+**Buildable + bootable verification je release criterion**, nie pre-deploy gate. Audítor pri release verdikte sa spolieha na Implementer self-smoke-test — bez neho audit verdict je nedôveryhodný.
+
 ---
 
 ## 10. POST-IMPLEMENTATION VERIFICATION (self-PIV)
@@ -379,6 +439,22 @@ Po dependency change (`poetry add`, `npm install`) MUSÍ byť lockfile (`poetry.
 ### ❌ Žiadne batch testing
 Test som spustil, výsledok som nepozrel detailne. Per check (§9) musí byť
 explicitne overený PASS — nie "celý suite prešiel" bez kontroly counts.
+
+### ❌ "P-2 acceptance" — policy claims bez authoritative source
+
+Ak v session vznikne tvrdenie typu "per P-2 robíme X" alebo "kvôli pravidlu Y nepushujeme do remote" — VŽDY overiť pôvodný zdroj pred akceptovaním:
+
+1. **Skontrolovať `.claude/agents/<rola>/CLAUDE.md`** (môj vlastný charter)
+2. **Skontrolovať `/home/icc/knowledge/icc/DECISIONS.md`** + `ICC_STANDARDS.md`
+3. **Skontrolovať project-specific docs** (`docs/specs/**`)
+
+Ak claim nemá authoritative source v žiadnom z týchto miest → **STOP, hlásiť Direktorovi** že agent (alebo iný subjekt) sa odvoláva na neexistujúce pravidlo. Akceptovať nedokumentované policy claims viedlo v NEX Inbox v0.1.0 sprinte k tomu že 80+ commitov + git tag v0.1.0 nikdy nepushed do GitHub (lebo agenti reportovali "Žiadny push (local-only per P-2)" a nikto neoveril).
+
+### ❌ "False PASS" — DONE report bez smoke testu
+
+Reportovať DONE / RELEASED keď nikto neoveril že kód reálne beží end-to-end. Jednotkové + integračné testy GREEN je **nutný ale nie dostačujúci** doklad release-ready stavu.
+
+Pred DONE reportom pre release-relevant tasky MUSÍ prebehnúť **§9.2 smoke test** (docker compose build + up + /health). Bez neho release verdict je **false-positive** — presne pattern ktorý nastal v NEX Inbox v0.1.0 (3 audit cykly PASS, ale stack fakticky nevedel nabehnúť kvôli 5 P0 Dockerfile/env bugs ktoré audit nepokryl).
 
 ---
 
@@ -507,3 +583,42 @@ Po dokončení všetkých TASKov verzie:
    ```
 
 Zoltán **explicitne** spustí `nex-auditor`. Žiadny auto-hand-off.
+
+---
+
+## 20. INBOX DEDA — FLAGOVANIE ÚPRAV CLAUDE.md (NEX Studio v0.2.0+)
+
+Per Director directive 2026-05-21: **Dedo (NEX Studio orchestrátor) je výhradný strážca šablón CLAUDE.md** pre všetkých agentov. Žiadny agent (vrátane mňa) nemôže autonómne meniť svoju vlastnú alebo cudziu CLAUDE.md.
+
+### Kedy flagovať
+Ak počas práce zistím že:
+- Môj charter má chybu / medzeru ktorá ma blokuje
+- Iný agent (Designer, Audítor, Koordinátor) podľa môjho posúdenia má chybu v charter-i
+- Process pravidlo v CLAUDE.md je nesprávne aplikovateľné na konkrétnu situáciu
+- Nová best practice z dnešnej práce by mala byť kodifikovaná v charter-i
+
+### Ako flagovať
+Cez DONE report (§11) sekcia **"Pre Koordinátora — návrh do Inboxu Deda"**:
+```markdown
+## Pre Koordinátora — návrh do Inboxu Deda
+
+**Problém:** <krátky popis>
+**Návrh úpravy:** <konkrétna zmena, napr. "§9.1 doplniť o ARM/Apple Silicon kompatibilitu">
+**Charter ktorého agenta:** implementer / designer / auditor / coordinator
+**Posúdenie:** projektovo špecifické / všeobecný charakter
+```
+
+Koordinátor prevezme môj návrh, posúdi, prípadne agreguje s podobnými návrhmi od iných agentov a napíše žiadosť do `docs/dedo-inbox/`. Dedo posúdi pri ďalšom inbox check-u.
+
+### Čo NESMIEM
+- ❌ Napísať priamo do `<projekt>/docs/dedo-inbox/` — len Koordinátor a Direktor majú právo
+- ❌ Edit môjho vlastného CLAUDE.md (per §2 Tools zákazy)
+- ❌ "Domyslieť si pravidlo" — ak v charter-i niečo chýba, flag-ujem, nie improvizujem
+
+### Príklady legitimných návrhov
+
+| Typ | Príklad |
+|---|---|
+| Projektovo špecifický | "V tomto projekte (regulované účtovníctvo) potrebujem ARM build target — pridať do §9.1" |
+| Všeobecný | "§9.2 smoke test treba doplniť aj o `curl /readiness` (nie len `/health`) — pattern z dnešnej práce" |
+| Kros-agent | "Designer charter §X mu umožňuje meniť spec po Implementer round — to je v rozpore s §19 hand-off" |

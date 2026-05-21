@@ -86,9 +86,16 @@ Tj NEX Inbox bol **NEX Test (crash test) pre NEX Studio**. Cieľ nie je NEX Inbo
 **Symptoms počas 8-dňového sprintu:**
 
 1. **Accepted "P-2 local-only" agent claim bez verifikácie** — agents reportovali "Žiadny push (local-only per P-2)" v každom DONE message. Ja som to akceptoval 8 dní bez overenia. "P-2" nikde explicit dokumentované v ICC štandardoch ani agent charters.
-2. **Accepted MÁGERSTAV pre-deploy gates kategorizáciu pre buildable + bootable** — toto je mojich `feedback_continuous_improvement` + `feedback_quality_first` memory failure.
-3. **Nikdy nezachytil "ale beží toto v skutočnosti?" počas release procedure** — Audítor robil Activity 4 audit report + git tag, ja som blindly relayoval bez signal-u Directorovi že žiadny smoke test prebehol.
-4. **Generated variant menus s obviously-bad options** (napr. Variant C "skip rebuild, test old version") — porušenie memory `feedback_quality_first`.
+2. **Accepted "NEX Studio Implementer agent neexistuje" predpoklad** (objavené 2026-05-21 pri diskusii o pridaní Implementer agenta pre NEX Studio refactor) — Director navrhol pridať Implementer agenta, ja som potvrdil bez overenia `ls .claude/agents/`. Realita: Implementer + Designer + Auditor charters už **existovali** od 12-Máj (510 LOC Implementer charter). Druhá inštancia rovnakého patternu ako #1.
+3. **Accepted MÁGERSTAV pre-deploy gates kategorizáciu pre buildable + bootable** — toto je mojich `feedback_continuous_improvement` + `feedback_quality_first` memory failure.
+4. **Nikdy nezachytil "ale beží toto v skutočnosti?" počas release procedure** — Audítor robil Activity 4 audit report + git tag, ja som blindly relayoval bez signal-u Directorovi že žiadny smoke test prebehol.
+5. **Generated variant menus s obviously-bad options** (napr. Variant C "skip rebuild, test old version") — porušenie memory `feedback_quality_first`.
+
+**Recurring pattern:** Symptoms #1 a #2 sú **2 inštancie rovnakého anti-patternu** — "accept situation bez verifikácie cez konkrétny tool call". Nie one-off — systémový gap v advisory disciplíne. Riešenie nie je nová memory pravidlo (per Director's preference), ale **disciplína overovať pred akceptovaním**:
+- Claim o filesystem → `ls`, `find`, `cat`
+- Claim o agent existence → `ls .claude/agents/`
+- Claim o git remote → `git remote -v`
+- Claim o policy → `grep` v ICC docs + agent charters
 
 **Improvements (NIE memory rules, ale disciplína):**
 
