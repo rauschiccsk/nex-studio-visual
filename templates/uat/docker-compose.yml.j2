@@ -1,0 +1,72 @@
+# UAT docker-compose template — per F-003 §3.
+#
+# Generic 3-service stack (backend + frontend + postgres) renderovaný cez
+# scripts/_uat_lib.render_template() s placeholdermi:
+#
+#   SLUG          — UAT slug (e.g. "mager", "dev")
+#   UAT_PORT      — alokovaný port z bloku 19500-19599 (frontend HTTPS via NGINX)
+#   BACKEND_PORT  — internal backend port (typicky UAT_PORT + 100)
+#   DB_PORT       — internal postgres port (typicky UAT_PORT + 200)
+#   PROJECT_PATH  — absolútna cesta zdroja /opt/projects/<projekt>
+#   PROJECT_NAME  — projekt slug (pre image tagy)
+#   POSTGRES_PASSWORD — UAT-specific generated password (z .env)
+#
+# Per-projekt customizácia (extra services ako Ollama, Redis): zatiaľ defer to v0.3.0+
+# per Sub-round 4 (generic template stačí pre 80% case).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: uat-{{ SLUG }}-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: {{ PROJECT_NAME }}_uat
+    volumes:
+      - uat-{{ SLUG }}-postgres-data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:{{ DB_PORT }}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    image: uat-{{ SLUG }}-backend:latest
+    container_name: uat-{{ SLUG }}-backend
+    restart: unless-stopped
+    build:
+      context: {{ PROJECT_PATH }}
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/{{ PROJECT_NAME }}_uat
+      UAT_SLUG: {{ SLUG }}
+    ports:
+      - "127.0.0.1:{{ BACKEND_PORT }}:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  frontend:
+    image: uat-{{ SLUG }}-frontend:latest
+    container_name: uat-{{ SLUG }}-frontend
+    restart: unless-stopped
+    build:
+      context: {{ PROJECT_PATH }}/frontend
+      dockerfile: Dockerfile
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:{{ UAT_PORT }}:80"
+
+volumes:
+  uat-{{ SLUG }}-postgres-data:
+    name: uat-{{ SLUG }}-postgres-data
