@@ -39,6 +39,11 @@ frontend/dist/
 # Alembic
 migrations/versions/__pycache__/
 .nex-session-state.md
+.nex-implementer-state.md
+.nex-designer-state.md
+.nex-auditor-state.md
+.nex-coordinator-state.md
+.nex-customer-state.md
 .claude/scheduled_tasks.lock
 /.dedo-channel/
 /.uat-ports.json
