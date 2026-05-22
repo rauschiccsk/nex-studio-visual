@@ -40,3 +40,4 @@ frontend/dist/
 migrations/versions/__pycache__/
 .nex-session-state.md
 .claude/scheduled_tasks.lock
+/.dedo-channel/
