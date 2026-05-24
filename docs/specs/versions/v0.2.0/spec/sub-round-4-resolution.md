@@ -175,7 +175,7 @@ F-001 má charter content kompletný. Pri implementácii Implementer skopíruje 
 
 #### O-003-2 — Auto-cleanup snapshots
 
-**Source:** `F-003` §14 O-2
+**Source:** `F-003` §15 O-2
 
 **Možnosti:**
 - A) Forever
@@ -193,7 +193,7 @@ F-001 má charter content kompletný. Pri implementácii Implementer skopíruje 
 
 #### O-003-3 — NEX Studio backend endpoint pre UAT status
 
-**Source:** `F-003` §14 O-3
+**Source:** `F-003` §15 O-3
 
 **Možnosti:**
 - A) CLI only
@@ -210,7 +210,7 @@ F-001 má charter content kompletný. Pri implementácii Implementer skopíruje 
 
 #### O-003-4 — Hotfix UAT slug
 
-**Source:** `F-003` §14 O-4
+**Source:** `F-003` §15 O-4
 
 **Možnosti:**
 - A) Defer to v0.3.0+ (default per customer-requirements §10)
@@ -482,7 +482,7 @@ Vyriešené: B) Python + rich.
 | `development-spec.md` §10 | 4 otvorené otázky (O-DS-1 až O-DS-4) |
 | `F-001-coordinator-charter.md` | Žiadne explicit otvorené otázky (kompletný charter) |
 | `F-002-inbox-deda.md` §11 | 4 otvorené otázky (O-002-1 až O-002-4) |
-| `F-003-uat-environment.md` §14 | 4 otvorené otázky (O-003-1 až O-003-4) |
+| `F-003-uat-environment.md` §15 | 4 otvorené otázky (O-003-1 až O-003-4) |
 | `F-004-create-project-improvements.md` §8 | 4 otvorené otázky (O-004-1 až O-004-4) |
 | `F-005-audit-smoke-test.md` §8 | 4 otvorené otázky (O-005-1 až O-005-4) |
 | `F-006-agent-charter-updates.md` §8 | 4 otvorené otázky (O-006-1 až O-006-4) |

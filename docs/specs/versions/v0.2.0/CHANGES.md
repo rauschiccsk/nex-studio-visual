@@ -5,6 +5,108 @@
 
 ---
 
+## 2026-05-24 — CR-022 F-003 comprehensive per-projekt auto-detection (alembic + env + DB + frontend + NGINX)
+
+### Kontext
+
+Bug #3 (alembic strategy mismatch) zachytený manual smoke testom 2026-05-24 (NEX Studio backend self-bootstraps alembic v lifespan, poetry nie je v runtime image → `docker exec poetry run alembic upgrade head` zlyhalo). Pred reaktívnym fixom Direktor schválil **comprehensive F-003 review** (per memory `feedback_quality_first` quality-first analýza).
+
+Sub-agent comprehensive design audit (~22 min) odhalil **14 findings** v F-003 generic template vs real-world target projekty (nex-studio + nex-inbox): 6 critical (blokujú UAT deploy), 5 medium, 3 low. Plus pending Bug #3 alembic.
+
+**Low findings (L-1, L-2, L-3) — žiadny fix potrebný (verified clean):**
+
+- L-1 Volume naming inconsistency (hyphens v UAT template vs underscores v nex-inbox vs single-word v nex-studio) — cosmetic, žiadne breaking, template konvencia ostáva
+- L-2 `container_name: uat-<slug>-*` — slug-scoped, žiadne collision cez sluggy, status command §4.3 matches
+- L-3 Missing `version:` field v compose — modernizovaný Compose ignoruje, oba source composes ho tiež vynechávajú
+
+**Headline:** F-003 template bol "happy-path generic skeleton" ktorý nesurvives kontakt s ani jedným z dvoch target projektov. Template encodes ONE shape of project, real projects sú heterogeneous.
+
+### Spec design root cause (Dedo acknowledgment)
+
+Toto je **moja chyba ako spec writer** rovnaká kategória ako CR-021. Designer pre-commit verification (môj vlastný návrh do Inbox Deda) by zachytil 4 z 6 critical findings (C-1, C-2, C-4, C-5) cez file-read comparison. C-3 (alembic) + C-6 (NGINX flow) by potrebovali **extended verification** — read backend `main.py` lifespan + Dockerfile runtime stage + mental simulation user request cez NGINX.
+
+### 6 Critical findings (zaradené do CR-022 spec amendment)
+
+| # | Finding | Resolution |
+|---|---|---|
+| **C-1** | Backend env-var schema project-specific (nex-studio 12+ vars `postgresql+pg8000://`, nex-inbox 8+ vars split `DB_HOST/PORT/NAME/USER/PASSWORD`), template má 2 generic vars | `_uat_lib.detect_backend_env_vars(source)` — parse `services.backend.environment` + `.env.example` → generate synthetic UAT `.env` cez `env_file:` |
+| **C-2** | Postgres user/password/DB name (template `postgres/.../<project>_uat` neplatí — nex-studio `nexstudio/nexstudio/nexstudio`, nex-inbox `nex_inbox/.../nex_inbox_dev`) | `_uat_lib.detect_db_credentials(source)` — parse `services.db.environment` → passthrough do template |
+| **C-3** | Alembic strategy (Bug #3) — nex-studio self-bootstraps v lifespan + poetry chýba v runtime; nex-inbox external `poetry run alembic` | `_uat_lib.detect_alembic_strategy(source)` — grep `backend/main.py` pre `command.upgrade` patterns + read Dockerfile runtime stage. Strategy: `self-bootstrap` (skip step 8) / `external` (try `python -m alembic` → `poetry run alembic` fallback) |
+| **C-4** | Frontend build context (template `<project>/frontend/`, nex-inbox potrebuje repo root pre `COPY frontend/...` paths) | `_uat_lib.detect_frontend_config(source)` — parse `services.frontend.build.{context,dockerfile,args}` |
+| **C-5** | `VITE_API_BASE_URL` build arg (nex-studio default `http://localhost:9176` broken pod NGINX, nex-inbox `/api/v1` OK) | Auto-detect z `services.frontend.build.args`, propagate do template `FRONTEND_BUILD_ARGS` |
+| **C-6** | NGINX vhost chýba `/api/` route na backend host port (browser pod Tailscale cannot reach backend) | NGINX template doplnený o `location /api/` proxy_pass na `BACKEND_HOST_PORT` + `/health` route |
+
+### 3 Medium findings inline v CR-022
+
+- **M-3 healthcheck `start_period: 90s`** — extended pre 50+ migrations (nex-studio self-bootstrap takes ~60-120s)
+- **M-4 `restart: "no"`** — UAT je ephemeral (per-cycle), production-style restart inappropriate
+- **M-5 explicit `networks:` block** — `uat-<slug>-net` namiesto coincidental default network
+
+### Defer to v0.3.0+ (per Sub-round 4 Q1)
+
+- **M-1 Custom services passthrough** (Ollama, Redis, mockup, postgres-exporter, monitoring-net) — Workaround v acceptance-checklist: mockup-dependent features explicit out of UAT scope
+- **M-2 nex-studio backend volume mounts** (7 mounts pre KB, Claude CLI auth, Docker socket) — Strategic question pre v0.3.0+: môže byť NEX Studio reasonably UAT-ovaný keď bootstrap-uje projekty?
+
+### Zmeny
+
+**F-003-uat-environment.md:**
+
+- §4.1 Discovery — rozšírená o 5 auto-detection patterns (alembic + env vars + DB credentials + frontend config + extended backend dockerfile per CR-021 expansion)
+- §10 NGINX vhost — pridaný `location /api/` proxy + `location /health` (C-6)
+- §11 Bezpečnostné aspekty — nový row "Synthetic credentials pre per-projekt env vars" (C-1)
+- §13 Acceptance #1 — expanded ("Acceptance verified pre obe target projekty: nex-inbox + nex-studio full attribute matrix")
+- §13.1 Inline template fixes (NEW) — M-3 healthcheck start_period 90s + M-4 restart no + M-5 explicit networks
+- §14 Mimo rozsahu (NEW heading) — M-1 + M-2 defer to v0.3.0+ s workaround notes
+- §15 Otvorené otázky (renumber from §14) — žiadne nové otázky
+
+### Implementer round 3 expected work
+
+Per Variant A (Single CR) schválený Direktorom 2026-05-24:
+
+1. **4 nové detection helpers + 1 refactor v `scripts/_uat_lib.py`:**
+   - `detect_db_credentials(source_path) → dict` (POSTGRES_USER/PASSWORD/DB z source compose db service)
+   - `detect_backend_env_vars(source_path) → dict` (parse `services.backend.environment` + `.env.example`, generate synthetic UAT .env content)
+   - `detect_frontend_config(source_path) → dict` (build context + dockerfile + build args vrátane VITE_API_BASE_URL)
+   - `detect_alembic_strategy(source_path) → str` ("self-bootstrap" / "external" / "skip")
+   - Plus refactor existujúceho CR-021 `detect_backend_config` ak vznikne shared utility duplicácia
+2. **`scripts/uat-deploy.py` integration:**
+   - Call všetkých 5 detection helpers v Discovery phase
+   - Generate synthetic UAT .env (write to `/opt/uat/<slug>/.env`)
+   - Conditional step 8: ak alembic_strategy == "self-bootstrap" → skip; ak "external" → try python -m alembic → fallback poetry run alembic
+   - Plus CLI flags: `--alembic-strategy {auto|self-bootstrap|external|skip}`, `--skip-env-detection`, `--db-user`, `--db-name`
+3. **`templates/uat/docker-compose.yml.j2`:**
+   - Change `environment:` block na `env_file:` (pointing na `/opt/uat/<slug>/.env`)
+   - DB credentials passthrough (POSTGRES_USER/PASSWORD/DB z detected)
+   - Frontend `build.context` + `dockerfile` + `args` placeholders
+   - Inline fixes M-3 (start_period 90s) + M-4 (restart no) + M-5 (networks)
+4. **`templates/uat/nginx-uat-vhost.conf`:**
+   - Add `location /api/` + `location /health` blocks (C-6)
+   - Plus `BACKEND_HOST_PORT` placeholder
+5. **Tests `tests/test_uat_lib.py` + `tests/test_uat_deploy.py`:**
+   - Per real I/O pattern (no mocking) — fixture composes for both nex-studio + nex-inbox styles
+   - Coverage: 6 critical scenarios (table-driven testy per finding) + edge cases (no source compose, partial env_file, malformed YAML)
+
+**Estimate Implementer round 3: ~5-7 hodín reálnej práce.**
+
+### Continuous improvement signal
+
+**Designer charter §X.Y "Pre-commit spec verification" pravidlo expansion** (z pôvodného CR-021 návrhu rozšírené):
+
+Sub-agent confirmoval že pravidlo by zachytilo 4 z 6 critical findings cez file-read. Pre C-3 + C-6 potrebné rozšírenie o:
+
+1. **"Read backend entrypoint" mandatory pre UAT/deploy specs** — Designer musí read `backend/main.py` lifespan + `backend/Dockerfile` runtime stage pred finalizáciou spec ktorá touch-uje alembic/bootstrap workflow
+2. **"Trace a user request" mental simulation pre NGINX/reverse-proxy specs** — Designer mental walkthrough: browser → reverse proxy → which container → which endpoint → response path. Surface chýbajúce routes pred deploy
+
+Toto bude aplikované v F-006 Designer charter rozšírenie (Implementer Fáza 3 work).
+
+### Lekcia — comprehensive review vs reaktívne discovery
+
+Manual smoke test discovery pattern (1 bug → fix → re-deploy → next bug) je nákladný (~3-5 h per cycle × 14 findings = ~42-70 hodín). Comprehensive sub-agent review (~22 min) odhalil všetkých 14 findings + consolidation návrh **single CR-022** vs piecemeal 14 CRs. **Time saved: ~12-18 hodín** (or more if smoke test cycles re-run).
+
+Tento pattern by mal byť aplikovaný **PRED prvým deploy attempt** pri každom F-spec ktorý dotyká real-world integration (deploy, audit, UAT). Pravidlo navrhnutý do Designer charter §X.Y "Pre-commit spec verification" v F-006.
+
+---
+
 ## 2026-05-22 — CR-021 F-003 §4.1 auto-detection per-projekt backend config
 
 ### Kontext

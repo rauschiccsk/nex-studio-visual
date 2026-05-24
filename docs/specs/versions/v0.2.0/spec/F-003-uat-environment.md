@@ -121,14 +121,44 @@ Implementované ako bash + Python skripty v `nex-studio/scripts/`. Volajú sa ce
 nex-studio uat-deploy mager
 ```
 
-1. **Discovery + auto-detection per-projekt config (CR-021):**
+1. **Discovery + auto-detection per-projekt config (CR-021 + CR-022):**
    - Verify `/opt/projects/<slug>/` existuje (alebo `/opt/projects/<projekt>/` ak slug ≠ projekt)
    - Check existing `/opt/uat/<slug>/` — ak existuje, signal Direktorovi pred nahradením
    - **Auto-detect per-projekt backend config** z `<source-projekt>/docker-compose.yml` (per CR-021):
      - Parse `services.backend.ports` mapping (napr. `9176:9176` → backend port = 9176; `8000:8000` → 8000)
      - Parse `services.backend.healthcheck.test` (re-use ten istý `test:` v UAT template) alebo derive z detected port
-     - Fallback ak source docker-compose neexistuje: default port 8000 + `/health` endpoint (current behaviour, zachované pre projekty ktoré matches generic FastAPI assumptions)
+     - Parse `services.backend.build.dockerfile` (CR-021 expansion — oba target projekty používajú `backend/Dockerfile`, generic default `Dockerfile` neplatí)
+     - Fallback ak source docker-compose neexistuje: default port 8000 + `/health` endpoint + dockerfile `Dockerfile`
      - Plus override cez CLI flags: `--backend-port <port>` + `--health-endpoint <path>` (pre edge cases)
+   - **Auto-detect per-projekt DB credentials** z `<source-projekt>/docker-compose.yml services.db.environment` (per CR-022 C-2):
+     - Parse `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` z db (alebo `postgres`) service
+     - Použiť v UAT template namiesto generic `postgres/postgres/<project>_uat` (ktorý produkuje invalid identifiers s hyphen-mi pre nex-studio + nex-inbox)
+     - Plus auto-detect connection driver — backend `DATABASE_URL` v source compose obsahuje napr. `postgresql+pg8000://...` (nex-studio) alebo split `DB_HOST/PORT/NAME/USER/PASSWORD` (nex-inbox)
+     - Fallback ak source neexistuje: `postgres / generated_password / <project>_uat`
+   - **Auto-detect per-projekt backend env vars** z `<source-projekt>/.env.example` + `services.backend.environment` (per CR-022 C-1):
+     - Parse všetky `KEY=VALUE` z `.env.example` (povinné env vars per projekt)
+     - Parse keys z `services.backend.environment` (ďalšie env vars passované cez compose)
+     - Generate synthetic UAT `.env` s:
+       - Random hodnoty pre keys končiace na `_PASSWORD`, `_SECRET`, `_KEY`, `_TOKEN` (cez `openssl rand -hex 32`)
+       - Auto-detected hodnoty pre DB connection vars (per credentials detection vyššie)
+       - Placeholder `__UAT_SYNTHETIC__` pre keys ktoré sa nedajú auto-generate (Direktor doplní pred deploy)
+     - Plus produkčné secrets sú **vždy synthetic** (per F-003 §11 bezpečnostné aspekty), žiadny passthrough produkčných credentials
+   - **Auto-detect per-projekt frontend config** z `<source-projekt>/docker-compose.yml services.frontend` (per CR-022 C-4 + C-5):
+     - Parse `services.frontend.build.context` (môže byť projekt root `.` alebo subadresár `./frontend/` — nex-inbox vs nex-studio)
+     - Parse `services.frontend.build.dockerfile` (nex-inbox `frontend/Dockerfile`, nex-studio `Dockerfile`)
+     - Parse `services.frontend.build.args` (najmä `VITE_API_BASE_URL` — nex-studio `""` vs nex-inbox `/api/v1`)
+     - Použiť v UAT template `FRONTEND_CONTEXT`, `FRONTEND_DOCKERFILE`, `FRONTEND_BUILD_ARGS` placeholderoch
+     - Fallback ak source nemá frontend service: skip frontend container (backend-only UAT)
+   - **Auto-detect alembic strategy** z `<source-projekt>/backend/main.py` + `<source-projekt>/backend/Dockerfile` (per CR-022 C-3):
+     - Read `backend/main.py` (alebo equivalent entrypoint): grep pre patterns `command.upgrade` / `alembic.command.upgrade` / `alembic_cfg` v lifespan/startup handleri
+     - Ak found → `alembic_strategy: self-bootstrap` (backend internally beží migrations pri starte) → UAT deploy step 8 **skipne** external alembic
+     - Read `backend/Dockerfile` runtime stage (`FROM ... AS runtime`): verify či `poetry` binary je v runtime image
+     - Ak `self-bootstrap` + poetry **chýba** v runtime → confirm skip rationale (poetry would fail anyway)
+     - Inak (no self-bootstrap pattern found) → `alembic_strategy: external` → UAT deploy step 8 vykoná migration command:
+       - Pokus 1: `python -m alembic upgrade head` (works ak alembic na PATH bez poetry)
+       - Pokus 2 fallback: `poetry run alembic upgrade head` (inbox-style)
+       - Pokus 3 fallback: clear error message s pokynom Direktorovi (manual exec)
+     - Plus CLI flag `--alembic-strategy {auto|self-bootstrap|external|skip}` pre override
 
 2. **DB snapshot existujúceho UAT (ak relevantné):**
    ```bash
@@ -566,7 +596,9 @@ Schvaľuješ prepísanie?
 
 ### NGINX reverse proxy
 
-UAT URL `https://uat-<slug>.isnex.eu` cez **host-level NGINX** (mimo Docker, na ANDROS host):
+UAT URL `https://uat-<slug>.isnex.eu` cez **host-level NGINX** (mimo Docker, na ANDROS host).
+
+**Per CR-022 C-6:** vhost musí proxy-ovať aj `/api/` na backend host port (inak browser pod Tailscale URL nemôže dosiahnuť backend). Pôvodný len `location /` na frontend nestačí pre projekty s cross-origin backend volaniami (nex-studio frontend cez `VITE_API_BASE_URL` volá backend direct, nie cez frontend nginx proxy).
 
 ```nginx
 # /etc/nginx/sites-available/uat-mager.conf
@@ -577,13 +609,29 @@ server {
     ssl_certificate /etc/letsencrypt/live/isnex.eu/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/isnex.eu/privkey.pem;
 
+    # Backend API (CR-022 C-6 — explicit route na backend host port)
+    location /api/ {
+        proxy_pass http://127.0.0.1:19601;  # backend host port = UAT_PORT + 100
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Backend health endpoint (smoke + monitoring)
+    location /health {
+        proxy_pass http://127.0.0.1:19601/health;
+    }
+
+    # Frontend (default route — static bundle alebo SPA)
     location / {
-        proxy_pass http://127.0.0.1:19501;  # alokovaný UAT port
+        proxy_pass http://127.0.0.1:19501;  # frontend = UAT_PORT
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }
 }
 ```
+
+**Poznámka pre nex-inbox vs nex-studio frontend nginx:** nex-inbox frontend container má vlastnú internal nginx ktorá môže proxy-ovať `/api/` na backend service v Docker network. Pre nex-studio frontend (Vite static bundle bez internal proxy) je host-level NGINX `/api/` route **nutný**. UAT generic template podporuje obe — frontend container dostane request na `/api/` len ak host NGINX nepřechytí prvý, čo závisí od poradia `location` blokov (specific `/api/` má prednosť pred `/`).
 
 ### Cert termination
 
@@ -607,6 +655,7 @@ Konvencia:
 | Aspekt | Riešenie |
 |---|---|
 | **UAT credentials** | Vlastné šifrovacie kľúče v `/opt/uat/<slug>/.env` (oddelené od `/opt/customers/<slug>/.env`). Generované pri uat-deploy (openssl rand -hex 16/32). UAT credentials sa NIKDY nepoužívajú v produkcii. |
+| **Synthetic credentials pre per-projekt env vars (CR-022 C-1)** | uat-deploy parse-uje `<source-projekt>/.env.example` + `services.backend.environment` z source compose → generate synthetic UAT `.env` s random hodnotami pre keys končiace na `_PASSWORD/_SECRET/_KEY/_TOKEN` (cez `openssl rand -hex 32`). Žiadny passthrough produkčných credentials. Keys ktoré sa nedajú auto-generate (napr. `OPERATOR_EMAIL`, `MOCKUP_ADMIN_URL`) dostanú placeholder `__UAT_SYNTHETIC__` — Direktor doplní pred deploy. |
 | **Testovacie dáta — syntetické** | Anonymizované (vymyslené IČO, neexistujúci dodávatelia). Audit-friendly, uložené v gite bez rizika PII leak. |
 | **Testovacie dáta — reálne** | `/opt/uat/<slug>/customer-test-data/` mimo gitu, mimo Docker volumes. Filesystem permissions 0700 (read iba Direktor). |
 | **DB snapshots** | Kompresia + `chmod 600` + uložené v `/opt/uat/<slug>/snapshots/` (NIE v gite, NIE v zákazníckom úložisku). |
@@ -695,7 +744,7 @@ Toto deployne v0.2.0 do `/opt/customers/mager/` (mimo F-003 scope — je to prod
 
 | # | Kritérium | Verifikácia |
 |---|---|---|
-| 1 | `uat-deploy <slug>` vie nasadiť UAT zostavu z aktuálneho kódu (s **auto-detected** per-projekt backend port + healthcheck per CR-021) | Spustenie príkazu → po 5-7 min stack healthy + URL dostupné. Auto-detection verified pre nex-inbox (8000) + nex-studio (9176) |
+| 1 | `uat-deploy <slug>` vie nasadiť UAT zostavu z aktuálneho kódu (s **auto-detected** per-projekt backend port + healthcheck + dockerfile + DB credentials + env vars + frontend context + alembic strategy per CR-021 + CR-022) | Spustenie príkazu → po 5-7 min stack healthy + URL dostupné. **Acceptance verified pre obe target projekty:** nex-inbox (BE 8000, DB user `nex_inbox`, FE context repo-root, alembic external) + nex-studio (BE 9176, DB user `nexstudio`, FE context `./frontend/`, alembic self-bootstrap, NGINX `/api/` proxy fungujúci) |
 | 2 | Direktor pristúpi cez vystavené URL z Tailscale/RDP/intranetu | `curl https://uat-<slug>.isnex.eu/health` cez Tailscale → 200 |
 | 3 | `uat-teardown <slug>` zachová DB snapshot pred destrukciou | Po teardown `ls snapshots/` ukáže nový súbor `v<version>-<dátum>-teardown.sql.gz` |
 | 4 | Akceptačný zoznam zobrazený Direktorovi po deploy | Output uat-deploy obsahuje preview počet scenárov + cesta k checklist-u |
@@ -708,7 +757,22 @@ Toto deployne v0.2.0 do `/opt/customers/mager/` (mimo F-003 scope — je to prod
 
 ---
 
-## 14. Otvorené otázky pre Sub-round 4
+## 13.1 Inline template fixes (CR-022 M-3 + M-4 + M-5)
+
+**M-3 healthcheck `start_period`:** UAT template má backend `healthcheck.retries: 12 × interval: 10s = 120s` budget. Pre projekty s 50+ migrations (nex-studio má 46 migrations) self-bootstrap môže prekročiť budget. **Doplnené** `start_period: 90s` v backend healthcheck — Docker waits pred counting failures.
+
+**M-4 `restart: unless-stopped` vs UAT ephemeral:** UAT je per-cycle (deploy → test → teardown). Production-style `restart: unless-stopped` znamená ANDROS reboot oživí stale UAT containers competing for ports. **Zmenené** na `restart: "no"` pre všetky UAT services.
+
+**M-5 explicit `networks:` block:** Compose default network konvencia `<directory>_default` funguje coincidentally (UAT slug-scoped cez `/opt/uat/<slug>/`), ale nie explicit. **Doplnené** explicit `networks: uat-<slug>-net` + assignment per service.
+
+## 14. Mimo rozsahu — defer to v0.3.0+
+
+| # | Položka | Dôvod odkladu |
+|---|---|---|
+| **M-1** | Custom services passthrough (Ollama, Redis, mockup, postgres-exporter, monitoring-net) | Per Sub-round 4 Q1 "per-projekt full compose customization defer to v0.3.0+". Workaround pre v0.2.0: dokumentovať v acceptance-checklist že mockup-dependent features sú **out of UAT scope** (production-only). |
+| **M-2** | Backend volume mounts pre nex-studio (`.claude`, `knowledge`, `projects`, `credentials`, `uploads`, `terminal_logs`, Docker socket) | Strategic question — môže byť NEX Studio reasonably UAT-ovaný keď bootstrap-uje projekty? Suggest: nex-studio dogfooding mode = `dev` UAT s stripped-down volume profile; spec amendment pre v0.3.0+ keď scope clear. |
+
+## 15. Otvorené otázky pre Sub-round 4
 
 | # | Otázka | Možnosti |
 |---|---|---|
@@ -719,7 +783,7 @@ Toto deployne v0.2.0 do `/opt/customers/mager/` (mimo F-003 scope — je to prod
 
 ---
 
-## 15. Krížové odkazy
+## 16. Krížové odkazy
 
 | Dokument | Súvislosť |
 |---|---|
