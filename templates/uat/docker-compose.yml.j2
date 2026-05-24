@@ -4,9 +4,12 @@
 # scripts/_uat_lib.render_template() s placeholdermi:
 #
 #   SLUG          — UAT slug (e.g. "mager", "dev")
-#   UAT_PORT      — alokovaný port z bloku 19500-19599 (frontend HTTPS via NGINX)
-#   BACKEND_PORT  — internal backend port (typicky UAT_PORT + 100)
-#   DB_PORT       — internal postgres port (typicky UAT_PORT + 200)
+#   UAT_PORT                 — alokovaný port z bloku 19500-19599 (frontend HTTPS via NGINX)
+#   BACKEND_HOST_PORT        — host-side backend port (UAT_PORT + 100)
+#   BACKEND_PORT             — container-side backend port (auto-detected, per CR-021)
+#   BACKEND_HEALTHCHECK_TEST — healthcheck test array (auto-detected, per CR-021)
+#   BACKEND_DOCKERFILE       — backend dockerfile path (auto-detected, per CR-021)
+#   DB_PORT                  — internal postgres port (typicky UAT_PORT + 200)
 #   PROJECT_PATH  — absolútna cesta zdroja /opt/projects/<projekt>
 #   PROJECT_NAME  — projekt slug (pre image tagy)
 #   POSTGRES_PASSWORD — UAT-specific generated password (z .env)
@@ -39,7 +42,7 @@ services:
     restart: unless-stopped
     build:
       context: {{ PROJECT_PATH }}
-      dockerfile: Dockerfile
+      dockerfile: {{ BACKEND_DOCKERFILE }}
     depends_on:
       postgres:
         condition: service_healthy
@@ -47,9 +50,9 @@ services:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/{{ PROJECT_NAME }}_uat
       UAT_SLUG: {{ SLUG }}
     ports:
-      - "127.0.0.1:{{ BACKEND_PORT }}:8000"
+      - "127.0.0.1:{{ BACKEND_HOST_PORT }}:{{ BACKEND_PORT }}"
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      test: {{ BACKEND_HEALTHCHECK_TEST | tojson }}
       interval: 10s
       timeout: 5s
       retries: 12

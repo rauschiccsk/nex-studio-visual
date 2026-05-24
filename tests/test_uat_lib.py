@@ -287,3 +287,87 @@ def test_print_url_outputs_url(capsys):
     _uat_lib.print_url("https://uat-mager.isnex.eu")
     captured = capsys.readouterr()
     assert "uat-mager.isnex.eu" in captured.out
+
+
+# ---------- CR-021: detect_backend_config (real I/O cez tmp_path) ----------
+
+
+def test_detect_backend_config_returns_default_when_no_compose(tmp_path):
+    """No docker-compose.yml in source → returns safe defaults."""
+    cfg = _uat_lib.detect_backend_config(tmp_path)
+    assert cfg["backend_port"] == 8000
+    assert cfg["healthcheck_test"] is None
+    assert cfg["dockerfile"] == "Dockerfile"
+
+
+def test_detect_backend_config_parses_nex_inbox_style(tmp_path):
+    """Standard 'host:container' port mapping (e.g. '8000:8000')."""
+    (tmp_path / "docker-compose.yml").write_text(
+        "services:\n"
+        "  backend:\n"
+        "    build:\n"
+        "      context: .\n"
+        "      dockerfile: backend/Dockerfile\n"
+        "    ports:\n"
+        '      - "8000:8000"\n'
+    )
+    cfg = _uat_lib.detect_backend_config(tmp_path)
+    assert cfg["backend_port"] == 8000
+    assert cfg["dockerfile"] == "backend/Dockerfile"
+
+
+def test_detect_backend_config_parses_nex_studio_style(tmp_path):
+    """Non-default port mapping (e.g. '9176:9176')."""
+    (tmp_path / "docker-compose.yml").write_text(
+        "services:\n"
+        "  backend:\n"
+        "    build:\n"
+        "      context: .\n"
+        "      dockerfile: backend/Dockerfile\n"
+        "    ports:\n"
+        '      - "9176:9176"\n'
+    )
+    cfg = _uat_lib.detect_backend_config(tmp_path)
+    assert cfg["backend_port"] == 9176
+
+
+def test_detect_backend_config_parses_localhost_prefix(tmp_path):
+    """Port mapping with '127.0.0.1:' prefix — container port is LAST segment."""
+    (tmp_path / "docker-compose.yml").write_text('services:\n  backend:\n    ports:\n      - "127.0.0.1:9176:9176"\n')
+    cfg = _uat_lib.detect_backend_config(tmp_path)
+    assert cfg["backend_port"] == 9176
+
+
+def test_detect_backend_config_parses_dict_mapping(tmp_path):
+    """Long-form dict port mapping with published/target keys."""
+    (tmp_path / "docker-compose.yml").write_text(
+        "services:\n  backend:\n    ports:\n      - published: 9176\n        target: 9176\n"
+    )
+    cfg = _uat_lib.detect_backend_config(tmp_path)
+    assert cfg["backend_port"] == 9176
+
+
+def test_detect_backend_config_preserves_custom_healthcheck(tmp_path):
+    """Source-defined healthcheck.test is re-used (not overridden)."""
+    (tmp_path / "docker-compose.yml").write_text(
+        "services:\n"
+        "  backend:\n"
+        "    ports:\n"
+        '      - "8000:8000"\n'
+        "    healthcheck:\n"
+        '      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]\n'
+    )
+    cfg = _uat_lib.detect_backend_config(tmp_path)
+    assert cfg["healthcheck_test"] == [
+        "CMD",
+        "curl",
+        "-f",
+        "http://localhost:8000/api/v1/health",
+    ]
+
+
+def test_detect_backend_config_dockerfile_falls_back_when_missing(tmp_path):
+    """No dockerfile specified in build → 'Dockerfile' default."""
+    (tmp_path / "docker-compose.yml").write_text('services:\n  backend:\n    ports:\n      - "8000:8000"\n')
+    cfg = _uat_lib.detect_backend_config(tmp_path)
+    assert cfg["dockerfile"] == "Dockerfile"

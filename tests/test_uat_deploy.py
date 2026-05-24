@@ -118,7 +118,7 @@ def test_deploy_allocates_port(monkeypatch, tmp_path):
 
 
 def test_render_compose_substitutes_slug_and_port(monkeypatch, tmp_path):
-    """Verify docker-compose template renders with the slug + allocated port."""
+    """Verify docker-compose template renders with slug + ports + detected backend config."""
     import _uat_lib
 
     out = _uat_lib.render_template(
@@ -126,7 +126,10 @@ def test_render_compose_substitutes_slug_and_port(monkeypatch, tmp_path):
         {
             "SLUG": "dev",
             "UAT_PORT": "19500",
-            "BACKEND_PORT": "19600",
+            "BACKEND_HOST_PORT": "19600",
+            "BACKEND_PORT": "8000",
+            "BACKEND_HEALTHCHECK_TEST": ["CMD", "curl", "-sf", "http://localhost:8000/health"],
+            "BACKEND_DOCKERFILE": "backend/Dockerfile",
             "DB_PORT": "19700",
             "PROJECT_PATH": "/opt/projects/nex-inbox",
             "PROJECT_NAME": "nex-inbox",
@@ -134,8 +137,9 @@ def test_render_compose_substitutes_slug_and_port(monkeypatch, tmp_path):
     )
     assert "uat-dev-postgres" in out
     assert "uat-dev-backend" in out
-    assert "127.0.0.1:19500" in out
-    assert "127.0.0.1:19600" in out
+    assert "127.0.0.1:19500" in out  # frontend UAT port
+    assert "127.0.0.1:19600:8000" in out  # host:container backend mapping
+    assert "backend/Dockerfile" in out  # detected dockerfile path
 
 
 def test_render_nginx_substitutes_slug_and_port(monkeypatch, tmp_path):
@@ -258,6 +262,87 @@ def test_generate_env_credentials_are_unique(monkeypatch, tmp_path):
 
 
 # ---------- Summary output ----------
+
+
+def test_deploy_uses_detected_backend_port_for_nex_studio_style(monkeypatch, tmp_path):
+    """Per CR-021 — uat-deploy auto-detects backend port from source compose.
+
+    Fixture source compose has port 9176 → rendered UAT compose must use 9176
+    as container port (with host port = uat_port + 100).
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("uat_deploy", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    monkeypatch.setattr("sys.path", [str(SCRIPT.parent), *sys.path])
+    spec.loader.exec_module(mod)
+
+    fake_uat_root = tmp_path / "uat"
+    fake_uat_root.mkdir()
+    project_path = tmp_path / "projects" / "nex-studio"
+    project_path.mkdir(parents=True)
+    (project_path / "docker-compose.yml").write_text(
+        "services:\n"
+        "  backend:\n"
+        "    build:\n"
+        "      context: .\n"
+        "      dockerfile: backend/Dockerfile\n"
+        "    ports:\n"
+        '      - "9176:9176"\n'
+    )
+    monkeypatch.setattr(mod, "UAT_ROOT", fake_uat_root)
+    monkeypatch.setattr(mod, "PROJECTS_ROOT", tmp_path / "projects")
+    monkeypatch.setattr(mod._uat_lib, "PORT_STATE_FILE", tmp_path / ".uat-ports.json")
+
+    rc = mod.deploy("nex-studio", project=None, dry_run=True, version="v0.2.0")
+    assert rc == 0
+
+    # In a real (non-dry-run) deploy, the rendered compose would be at uat_dir/.
+    # For dry-run we verify detection independently.
+    detected = mod._uat_lib.detect_backend_config(project_path)
+    assert detected["backend_port"] == 9176
+    assert detected["dockerfile"] == "backend/Dockerfile"
+
+
+def test_cli_backend_port_override_takes_precedence(monkeypatch, tmp_path):
+    """Per CR-021 — --backend-port flag overrides auto-detected value."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("uat_deploy", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    monkeypatch.setattr("sys.path", [str(SCRIPT.parent), *sys.path])
+    spec.loader.exec_module(mod)
+
+    fake_uat_root = tmp_path / "uat"
+    fake_uat_root.mkdir()
+    project_path = tmp_path / "projects" / "nex-studio"
+    project_path.mkdir(parents=True)
+    # Source compose says 9176 — CLI override 9999 must win.
+    (project_path / "docker-compose.yml").write_text('services:\n  backend:\n    ports:\n      - "9176:9176"\n')
+    (project_path / "docker-compose.yml").chmod(0o644)
+    (fake_uat_root / "nex-studio").mkdir()
+    monkeypatch.setattr(mod, "UAT_ROOT", fake_uat_root)
+    monkeypatch.setattr(mod, "PROJECTS_ROOT", tmp_path / "projects")
+    monkeypatch.setattr(mod._uat_lib, "PORT_STATE_FILE", tmp_path / ".uat-ports.json")
+
+    rc = mod.deploy(
+        "nex-studio",
+        project=None,
+        dry_run=False,
+        version="v0.2.0",
+        backend_port_override=9999,
+        health_endpoint_override=None,
+    )
+
+    # Stop after write (no docker available in tests) — failure is fine, but
+    # the rendered compose must already exist with the override port.
+    compose_path = fake_uat_root / "nex-studio" / "docker-compose.yml"
+    assert compose_path.exists(), f"compose not written; rc={rc}"
+    content = compose_path.read_text()
+    assert "127.0.0.1:" in content
+    # Host port = uat_port + 100, container port = 9999 (override). Mapping host:container.
+    assert ":9999" in content, f"override port 9999 missing in:\n{content}"
+    assert "9176" not in content, "detected port 9176 must not appear when override used"
 
 
 def test_deploy_releases_port_on_post_allocation_failure(monkeypatch, tmp_path):

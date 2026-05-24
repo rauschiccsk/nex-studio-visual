@@ -86,14 +86,27 @@ def write_nginx_config(slug: str, *, port: int) -> Path:
     return config_path
 
 
-def _write_uat_files(*, slug: str, project: str, port: int, version: str) -> Path:
-    """Write docker-compose.yml + .env into /opt/uat/<slug>/. Returns uat dir."""
+def _write_uat_files(
+    *,
+    slug: str,
+    project: str,
+    port: int,
+    version: str,
+    backend_container_port: int,
+    healthcheck_test: list[str],
+    backend_dockerfile: str,
+) -> Path:
+    """Write docker-compose.yml + .env into /opt/uat/<slug>/. Returns uat dir.
+
+    Per CR-021: backend_container_port + healthcheck_test + backend_dockerfile
+    are detected from source compose (with CLI override option).
+    """
     uat_dir = UAT_ROOT / slug
     uat_dir.mkdir(parents=True, exist_ok=True)
     (uat_dir / "snapshots").mkdir(exist_ok=True)
     (uat_dir / "logs").mkdir(exist_ok=True)
 
-    backend_port = port + 100
+    backend_host_port = port + 100
     db_port = port + 200
 
     compose = _uat_lib.render_template(
@@ -101,7 +114,10 @@ def _write_uat_files(*, slug: str, project: str, port: int, version: str) -> Pat
         {
             "SLUG": slug,
             "UAT_PORT": str(port),
-            "BACKEND_PORT": str(backend_port),
+            "BACKEND_HOST_PORT": str(backend_host_port),
+            "BACKEND_PORT": str(backend_container_port),
+            "BACKEND_HEALTHCHECK_TEST": healthcheck_test,
+            "BACKEND_DOCKERFILE": backend_dockerfile,
             "DB_PORT": str(db_port),
             "PROJECT_PATH": str(PROJECTS_ROOT / project),
             "PROJECT_NAME": project,
@@ -116,7 +132,14 @@ def _write_uat_files(*, slug: str, project: str, port: int, version: str) -> Pat
     return uat_dir
 
 
-def _print_summary(*, slug: str, port: int, version: str, dry_run: bool) -> None:
+def _print_summary(
+    *,
+    slug: str,
+    port: int,
+    version: str,
+    dry_run: bool,
+    backend_container_port: int = 8000,
+) -> None:
     mode = "[yellow]DRY-RUN[/yellow]" if dry_run else "[green]DEPLOYED[/green]"
     _uat_lib.console.print(f"\n=== UAT {mode} for slug={slug} (v{version}) ===")
     _uat_lib.console.print(
@@ -124,7 +147,7 @@ def _print_summary(*, slug: str, port: int, version: str, dry_run: bool) -> None
             {
                 "URL": f"https://uat-{slug}.isnex.eu",
                 "Frontend port (local)": f"127.0.0.1:{port}",
-                "Backend port (local)": f"127.0.0.1:{port + 100}",
+                "Backend port (host→container)": f"127.0.0.1:{port + 100} → {backend_container_port}",
                 "Postgres port (local)": f"127.0.0.1:{port + 200}",
                 "Compose": str(UAT_ROOT / slug / "docker-compose.yml"),
                 "NGINX config (local)": str(UAT_ROOT / slug / "nginx-uat-vhost.conf"),
@@ -148,8 +171,14 @@ def deploy(
     project: str | None = None,
     dry_run: bool = False,
     version: str = "v0.0.0-dev",
+    backend_port_override: int | None = None,
+    health_endpoint_override: str | None = None,
 ) -> int:
-    """Main deploy orchestrator per F-003 §4.1 11-step postup."""
+    """Main deploy orchestrator per F-003 §4.1 11-step postup.
+
+    Per CR-021: auto-detects backend port + healthcheck + dockerfile from source
+    docker-compose.yml. CLI overrides take precedence over detected values.
+    """
     _uat_lib.validate_slug(slug)
 
     if not check_uat_root_exists():
@@ -163,16 +192,46 @@ def deploy(
         _uat_lib.console.print(f"[red]ERROR:[/red] project directory not found: {project_path}")
         return 1
 
+    # CR-021: auto-detect per-projekt backend config (with CLI override option)
+    detected = _uat_lib.detect_backend_config(project_path)
+    backend_container_port = backend_port_override if backend_port_override is not None else detected["backend_port"]
+    backend_dockerfile = detected["dockerfile"]
+    if detected["healthcheck_test"] and not health_endpoint_override:
+        healthcheck_test = detected["healthcheck_test"]
+    else:
+        endpoint = health_endpoint_override or "/health"
+        healthcheck_test = ["CMD", "curl", "-sf", f"http://localhost:{backend_container_port}{endpoint}"]
+
+    _uat_lib.console.print(
+        f"[cyan]Backend config:[/cyan] port={backend_container_port}, "
+        f"dockerfile={backend_dockerfile}"
+        + (" [yellow](CLI override)[/yellow]" if backend_port_override else " (detected)")
+    )
+
     port = _uat_lib.allocate_port(slug)
     _uat_lib.console.print(f"[cyan]Port allocated:[/cyan] {port}")
 
     if dry_run:
-        _print_summary(slug=slug, port=port, version=version, dry_run=True)
+        _print_summary(
+            slug=slug,
+            port=port,
+            version=version,
+            dry_run=True,
+            backend_container_port=backend_container_port,
+        )
         return 0
 
     # Post-allocation: any failure must release the port to prevent state leak.
     try:
-        uat_dir = _write_uat_files(slug=slug, project=resolved_project, port=port, version=version)
+        uat_dir = _write_uat_files(
+            slug=slug,
+            project=resolved_project,
+            port=port,
+            version=version,
+            backend_container_port=backend_container_port,
+            healthcheck_test=healthcheck_test,
+            backend_dockerfile=backend_dockerfile,
+        )
         write_nginx_config(slug, port=port)
 
         # Existing snapshot (best-effort — skip if no postgres container yet)
@@ -193,8 +252,9 @@ def deploy(
         _uat_lib.docker_compose(["build"], cwd=uat_dir)
         _uat_lib.docker_compose(["up", "-d"], cwd=uat_dir)
 
-        # Wait healthy on backend
-        healthy = _uat_lib.wait_healthy(f"http://127.0.0.1:{port + 100}/health", timeout=120)
+        # Wait healthy on backend (use CLI-override endpoint if given, else /health)
+        endpoint = health_endpoint_override or "/health"
+        healthy = _uat_lib.wait_healthy(f"http://127.0.0.1:{port + 100}{endpoint}", timeout=120)
         if not healthy:
             _uat_lib.error_console.print(
                 "[red]ERROR:[/red] backend not healthy after 120s — check logs:\n"
@@ -238,6 +298,18 @@ def main() -> int:
         action="store_true",
         help="Print plan without invoking docker / writing files",
     )
+    parser.add_argument(
+        "--backend-port",
+        type=int,
+        default=None,
+        help="Override auto-detected backend container port (per CR-021).",
+    )
+    parser.add_argument(
+        "--health-endpoint",
+        type=str,
+        default=None,
+        help="Override auto-detected healthcheck endpoint (e.g. '/api/v1/health').",
+    )
     args = parser.parse_args()
 
     try:
@@ -246,6 +318,8 @@ def main() -> int:
             project=args.project,
             dry_run=args.dry_run,
             version=args.version,
+            backend_port_override=args.backend_port,
+            health_endpoint_override=args.health_endpoint,
         )
     except ValueError as exc:
         _uat_lib.error_console.print(f"[red]ERROR:[/red] slug: {exc}")

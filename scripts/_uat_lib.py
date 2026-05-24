@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 import jinja2
+import yaml
 from rich.console import Console
 from rich.table import Table
 
@@ -107,6 +108,65 @@ def local_nginx_config_path(slug: str) -> Path:
     `sudo cp` do nginx_config_path() pri NGINX aktivácii (per F-003 §10).
     """
     return uat_dir(slug) / "nginx-uat-vhost.conf"
+
+
+# ---------- CR-021: per-projekt backend config auto-detection ----------
+
+
+def detect_backend_config(source_project_path: Path) -> dict[str, Any]:
+    """Auto-detect backend port + healthcheck + dockerfile from source compose.
+
+    Per F-003 §4.1 + CR-021 amendment: parse `<source>/docker-compose.yml`
+    services.backend section to drive UAT compose rendering. Fallback when
+    source compose is missing or has no backend service.
+
+    Returns dict with keys:
+        backend_port: int (container port — last segment in host:container mapping)
+        healthcheck_test: list[str] | None (None → caller derives default)
+        dockerfile: str (relative path to Dockerfile, default "Dockerfile")
+
+    Defaults: {"backend_port": 8000, "healthcheck_test": None, "dockerfile": "Dockerfile"}
+    """
+    defaults: dict[str, Any] = {
+        "backend_port": 8000,
+        "healthcheck_test": None,
+        "dockerfile": "Dockerfile",
+    }
+
+    compose_path = source_project_path / "docker-compose.yml"
+    if not compose_path.exists():
+        return defaults
+
+    try:
+        data = yaml.safe_load(compose_path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        return defaults
+
+    backend = data.get("services", {}).get("backend") or {}
+
+    # Port: first mapping → container side is LAST segment of "host:container"
+    backend_port = defaults["backend_port"]
+    for mapping in backend.get("ports", []) or []:
+        if isinstance(mapping, str):
+            backend_port = int(mapping.split(":")[-1])
+            break
+        if isinstance(mapping, dict) and "target" in mapping:
+            backend_port = int(mapping["target"])
+            break
+
+    # Healthcheck (re-use source-defined test as-is)
+    healthcheck = backend.get("healthcheck") or {}
+    healthcheck_test = healthcheck.get("test")
+
+    # Dockerfile path (build.dockerfile, fallback "Dockerfile")
+    build = backend.get("build") or {}
+    dockerfile = build.get("dockerfile", defaults["dockerfile"]) if isinstance(build, dict) else defaults["dockerfile"]
+
+    return {
+        "backend_port": backend_port,
+        "healthcheck_test": healthcheck_test,
+        "dockerfile": dockerfile,
+    }
 
 
 # ---------- Port allocation ----------
