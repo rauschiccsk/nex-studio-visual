@@ -118,7 +118,7 @@ def test_deploy_allocates_port(monkeypatch, tmp_path):
 
 
 def test_render_compose_substitutes_slug_and_port(monkeypatch, tmp_path):
-    """Verify docker-compose template renders with slug + ports + detected backend config."""
+    """Verify docker-compose template renders with slug + ports + detected config (CR-022)."""
     import _uat_lib
 
     out = _uat_lib.render_template(
@@ -133,6 +133,11 @@ def test_render_compose_substitutes_slug_and_port(monkeypatch, tmp_path):
             "DB_PORT": "19700",
             "PROJECT_PATH": "/opt/projects/nex-inbox",
             "PROJECT_NAME": "nex-inbox",
+            "POSTGRES_USER": "nex_inbox",
+            "POSTGRES_DB": "nex_inbox_dev",
+            "FRONTEND_CONTEXT": "/opt/projects/nex-inbox",
+            "FRONTEND_DOCKERFILE": "frontend/Dockerfile",
+            "FRONTEND_BUILD_ARGS": {"VITE_API_BASE_URL": "/api/v1"},
         },
     )
     assert "uat-dev-postgres" in out
@@ -140,19 +145,38 @@ def test_render_compose_substitutes_slug_and_port(monkeypatch, tmp_path):
     assert "127.0.0.1:19500" in out  # frontend UAT port
     assert "127.0.0.1:19600:8000" in out  # host:container backend mapping
     assert "backend/Dockerfile" in out  # detected dockerfile path
+    # CR-022 — postgres credentials from detected source
+    assert "POSTGRES_USER: nex_inbox" in out
+    assert "POSTGRES_DB: nex_inbox_dev" in out
+    # CR-022 — backend uses env_file, NIE hardcoded environment block
+    assert "env_file:" in out
+    assert "DATABASE_URL:" not in out  # removed from template (now in .env)
+    # CR-022 §M-3 — healthcheck start_period for migrations budget
+    assert "start_period: 90s" in out
+    # CR-022 §M-4 — restart "no" for ephemeral UAT
+    assert 'restart: "no"' in out
+    # CR-022 §M-5 — explicit networks block
+    assert "uat-dev-net" in out
+    # CR-022 — frontend dynamic context + build args
+    assert "frontend/Dockerfile" in out
+    assert "VITE_API_BASE_URL" in out
 
 
 def test_render_nginx_substitutes_slug_and_port(monkeypatch, tmp_path):
-    """Verify nginx template renders with the slug + allocated port."""
+    """Verify nginx template renders s slug + frontend + backend port (CR-022)."""
     import _uat_lib
 
     out = _uat_lib.render_template(
         "uat/nginx-uat-vhost.conf",
-        {"SLUG": "dev", "UAT_PORT": "19500"},
+        {"SLUG": "dev", "UAT_PORT": "19500", "BACKEND_HOST_PORT": "19600"},
     )
     assert "uat-dev.isnex.eu" in out
-    assert "127.0.0.1:19500" in out
+    assert "127.0.0.1:19500" in out  # frontend
+    assert "127.0.0.1:19600" in out  # backend (CR-022 §C-6)
     assert "ssl_certificate" in out
+    # CR-022 §C-6 — backend proxy locations
+    assert "location /api/" in out
+    assert "location /health" in out
 
 
 # ---------- Project resolution ----------
