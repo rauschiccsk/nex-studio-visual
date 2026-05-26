@@ -1,0 +1,85 @@
+# Release Gate (Activity X) — GitHub Actions workflow template.
+#
+# Per F-005 §6 (K-004 deliverable, NEX Studio v0.2.0). Workflow rejects
+# release tag push (v*.*.*) ak Activity X (Buildable + Bootable Verification)
+# zlyhá. Plus uploads logs ako artifact pri failure pre Audítorský diagnostic.
+#
+# Activity X = 5 sub-aktivít (X.1-X.5) per `templates/auditor-activity-x-runbook.md`.
+# Bez Activity X PASS audit verdict NEMÔŽE byť PASS (per Auditor charter §X
+# + §12 K-003).
+#
+# Auto-include cez F-004 K-005 opt-in scope deferred do v0.3.0+ (per F-005 plan
+# Q-3 C decision 2026-05-26). Tento template je copy-paste deliverable; per-project
+# inclusion ostáva Director's voľba v F-006+ iteration.
+
+name: Release Gate (Activity X)
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Docker
+        uses: docker/setup-buildx-action@v3
+
+      - name: Setup Python + Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Activity X.1 Backend build
+        run: |
+          docker compose build backend 2>&1 | tee build-backend.log
+          docker run --rm --entrypoint="" ${{ github.repository }}-backend \
+            test -x /app/.venv/bin/uvicorn
+
+      - name: Activity X.2 Frontend build
+        run: |
+          docker compose build frontend 2>&1 | tee build-frontend.log
+          docker run --rm --entrypoint="" ${{ github.repository }}-frontend \
+            ls /usr/share/nginx/html/index.html
+
+      - name: Activity X.3 Database migrations
+        run: |
+          docker compose up -d db
+          sleep 10
+          poetry --directory backend install --only main --no-root
+          poetry --directory backend run alembic upgrade head
+
+      - name: Activity X.4 Full stack healthy
+        run: |
+          docker compose up -d
+          for i in {1..30}; do
+            UNHEALTHY=$(docker ps --filter "health=unhealthy" -q | wc -l)
+            STARTING=$(docker ps --filter "health=starting" -q | wc -l)
+            if [ $UNHEALTHY -eq 0 ] && [ $STARTING -eq 0 ]; then
+              echo "PASS X.4"; break
+            fi
+            sleep 5
+          done
+
+      - name: Activity X.5 Health endpoint
+        run: |
+          PORT=$(docker compose port backend 8000 | cut -d: -f2)
+          curl -sf -m 10 "http://localhost:${PORT}/health"
+
+      - name: Cleanup
+        if: always()
+        run: docker compose down -v
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: activity-x-logs
+          path: |
+            build-backend.log
+            build-frontend.log
