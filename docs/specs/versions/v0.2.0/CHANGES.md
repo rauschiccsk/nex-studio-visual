@@ -5,6 +5,56 @@
 
 ---
 
+## 2026-05-26 — CR-027 Synthetic secret format heuristic per suffix (Bug #12 fix)
+
+### Kontext
+
+Krok 10 retry po CR-026 (Bug #11 fix) — backend exited (3) s:
+```
+infra.crypto.EmailCredsKeyError: EMAIL_CREDS_ENCRYPTION_KEY musí byť presne
+32 bajtov (po base64 decode); dostal som 48 bajtov
+```
+
+### Root cause
+
+UAT synthetic gen pre `_KEY` suffix → `secrets.token_hex(32)` = 64 hex chars. nex-inbox `infra/crypto.py:CredsCipher` číta hodnotu ako **base64**, decodes → 64 hex chars treated as base64 = 48 bytes. Expected 32 bytes → strict check fail.
+
+Format-naive synthetic generator nemôže pokryť strict cryptographic format requirements (different libraries — Fernet, NaCl, cryptography — používajú base64-encoded raw bytes, nie hex). Suffix `_KEY` typicky znamená encryption key (crypto convention), iné suffixy znamenajú secret/token (any string acceptable).
+
+### Spec design root cause (Dedo acknowledgment)
+
+CR-022 §C-1 spec hovorí *"keys končiace na `_PASSWORD/_SECRET/_KEY/_TOKEN` (case-insensitive) → random hex32"* — **uniform format**. Comprehensive design audit nezvážil format heterogeneity medzi suffix categories. nex-studio backend nemá strict-format key check (Bug remained dormant), nex-inbox má → cross-project smoke odhalil.
+
+### Spec amendment
+
+- **F-003 §11** — pridaný nový row "Synthetic secret format heuristic per suffix (CR-027)" definujúci dispatch:
+  - `_KEY` → `base64.urlsafe_b64encode(secrets.token_bytes(32))` (44 chars, decoded = 32 bytes)
+  - `_PASSWORD`, `_SECRET`, `_TOKEN` → `secrets.token_hex(32)` (64 hex chars)
+
+### Implementer impl
+
+- `_uat_lib._synthetic_secret(key: str) → str` — nový helper enkapsuluje suffix-based dispatch
+- `_uat_lib.detect_backend_env_vars`: secret-suffix path nahradený `_synthetic_secret(key_str)` namiesto inline `secrets.token_hex(32)`
+- `import base64` pridaný
+
+### Tests
+
+- `test_synthetic_secret_key_suffix_returns_base64_32_bytes` — `_KEY` → 44 chars, base64 decode = 32 bytes
+- `test_synthetic_secret_password_suffix_returns_hex32` — `_PASSWORD` → 64 hex chars (regression)
+- `test_synthetic_secret_secret_token_suffixes_return_hex32` — `_SECRET`, `_TOKEN` → 64 hex chars (regression)
+- `test_detect_backend_env_vars_encryption_key_is_base64_decodable_32_bytes` — integration cez detect_backend_env_vars
+
+### Acceptance
+
+- Smoke Krok 10 (re-run): nex-inbox backend startup PASS (no EmailCredsKeyError), full healthy stack
+- Plus full backend test suite GREEN
+
+### Future considerations (deferred)
+
+Per-project format overrides (CR-028+) — ak iný projekt vyžaduje špecifický format pre konkrétny key (napr. `API_KEY` ako hex32 namiesto base64), bude treba mechanism (override file alebo CLI flag). Aktuálna heuristika rieši najčastejší prípad.
+
+---
+
 ## 2026-05-26 — CR-026 `.env.example` parse + compose union (Bug #11 fix)
 
 ### Kontext
