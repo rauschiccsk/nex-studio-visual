@@ -534,6 +534,64 @@ def test_detect_backend_env_vars_generates_synthetic_secrets(tmp_path):
         assert "original_" not in env[key], f"{key} retains original value"
 
 
+def test_detect_env_example_parses_basic(tmp_path):
+    """CR-026: <source>/.env.example parsed s same parser ako read_uat_env."""
+    (tmp_path / ".env.example").write_text(
+        "# Header\n\nLAUNCH_TOKEN=change-me\nJWT_SECRET_KEY=set-in-prod\nOPERATOR_EMAIL=ops@example.com\n"
+    )
+    env = _uat_lib.detect_env_example(tmp_path)
+    assert env == {
+        "LAUNCH_TOKEN": "change-me",
+        "JWT_SECRET_KEY": "set-in-prod",
+        "OPERATOR_EMAIL": "ops@example.com",
+    }
+
+
+def test_detect_env_example_missing_file_returns_empty(tmp_path):
+    """CR-026: graceful fallback when .env.example absent."""
+    assert _uat_lib.detect_env_example(tmp_path) == {}
+
+
+def test_detect_backend_env_vars_unions_env_example_with_compose(tmp_path):
+    """CR-026: keys from BOTH .env.example and compose.environment present."""
+    (tmp_path / ".env.example").write_text("LAUNCH_TOKEN=change-me\nOPERATOR_EMAIL=ops@example.com\n")
+    (tmp_path / "docker-compose.yml").write_text(
+        "services:\n  backend:\n    environment:\n      TENANT_SLUG: dev\n      DB_HOST: db\n"
+    )
+    env = _uat_lib.detect_backend_env_vars(tmp_path)
+    assert "LAUNCH_TOKEN" in env  # from .env.example, secret → synthetic
+    assert "OPERATOR_EMAIL" in env  # from .env.example, plain → copy
+    assert env["OPERATOR_EMAIL"] == "ops@example.com"
+    assert env["TENANT_SLUG"] == "dev"  # from compose
+    assert env["DB_HOST"] == "postgres"  # from compose, rewritten to UAT hostname
+
+
+def test_detect_backend_env_vars_compose_overrides_env_example(tmp_path):
+    """CR-026: same key in both → compose value wins (authoritative for runtime)."""
+    (tmp_path / ".env.example").write_text("OPERATOR_EMAIL=placeholder@example.com\n")
+    (tmp_path / "docker-compose.yml").write_text(
+        "services:\n  backend:\n    environment:\n      OPERATOR_EMAIL: ops@nexinbox.test\n"
+    )
+    env = _uat_lib.detect_backend_env_vars(tmp_path)
+    assert env["OPERATOR_EMAIL"] == "ops@nexinbox.test"
+
+
+def test_detect_backend_env_vars_env_example_secret_gets_synthetic(tmp_path):
+    """CR-026: .env.example-only secret (e.g. LAUNCH_TOKEN) hits synthetic gen, not passthrough."""
+    (tmp_path / ".env.example").write_text(
+        "LAUNCH_TOKEN=change-me-in-prod\n"
+        "JWT_SECRET_KEY=please-rotate\n"
+        "EMAIL_CREDS_ENCRYPTION_KEY=base64-encoded-32byte-key\n"
+    )
+    (tmp_path / "docker-compose.yml").write_text("services:\n  backend:\n    environment: {}\n")
+    env = _uat_lib.detect_backend_env_vars(tmp_path)
+    for key in ("LAUNCH_TOKEN", "JWT_SECRET_KEY", "EMAIL_CREDS_ENCRYPTION_KEY"):
+        assert len(env[key]) >= 32, f"{key} should be synthetic random hex32"
+        assert "change-me" not in env[key]
+        assert "please-rotate" not in env[key]
+        assert "base64" not in env[key]
+
+
 def test_detect_backend_env_vars_marks_user_secret_as_placeholder(tmp_path):
     """${VAR} env-var expansion → __UAT_SYNTHETIC__ placeholder (cannot read host env)."""
     (tmp_path / "docker-compose.yml").write_text(

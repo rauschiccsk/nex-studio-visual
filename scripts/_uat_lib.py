@@ -299,12 +299,39 @@ def _rewrite_db_connection_var(
     return str(value)
 
 
+def detect_env_example(source_project_path: Path) -> dict[str, str]:
+    """Parse <source>/.env.example into a dict (CR-026).
+
+    Same key=value parser ako :func:`read_uat_env` (CR-025), ale point at the
+    SOURCE repo's ``.env.example`` rather than ``/opt/uat/<slug>/.env``.
+    Ignores blank lines + ``#`` comments; values returned as raw strings (no
+    quote stripping, no ``${VAR}`` expansion — caller's downstream logic
+    handles `${VAR}` placeholder substitution).
+
+    Returns empty dict if ``.env.example`` is missing (caller falls back to
+    compose.environment-only behaviour).
+    """
+    path = source_project_path / ".env.example"
+    if not path.is_file():
+        return {}
+    out: dict[str, str] = {}
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        out[key.strip()] = value
+    return out
+
+
 def detect_backend_env_vars(
     source_project_path: Path,
     *,
     synthetic_db_password: str | None = None,
 ) -> dict[str, str]:
-    """Parse services.backend.environment and produce synthetic UAT env map.
+    """Parse `.env.example` + services.backend.environment and produce synthetic UAT env.
 
     Per F-003 §11 + CR-022 §C-1 (synthetic credentials generation):
     - Keys ending _PASSWORD/_SECRET/_KEY/_TOKEN (case-insensitive) → random hex32
@@ -320,15 +347,25 @@ def detect_backend_env_vars(
     writes to the top-level ``POSTGRES_PASSWORD`` .env line so the postgres
     container init and the backend connect agree.
 
-    Returns empty dict if no source compose or no backend service.
+    Per F-003 §11 CR-026: ``.env.example`` is the baseline (lists ALL env vars
+    backend reads, including secrets like LAUNCH_TOKEN/JWT_SECRET_KEY only set
+    at runtime via env_file: - .env). ``services.backend.environment`` from
+    compose UNION-MERGES on top, taking precedence for overlapping keys (compose
+    has authoritative DB host/port overrides). Returns empty dict only when
+    BOTH sources are empty/absent.
     """
-    data = _load_source_compose(source_project_path)
-    if data is None:
-        return {}
+    # Baseline: .env.example (CR-026). Cast to mutable dict for compose update.
+    raw_env: dict[str, Any] = dict(detect_env_example(source_project_path))
 
-    backend = data.get("services", {}).get("backend") or {}
-    env = backend.get("environment") or {}
-    if not isinstance(env, dict):
+    # Overlay: compose.environment (overrides for shared keys).
+    data = _load_source_compose(source_project_path)
+    if data is not None:
+        backend = data.get("services", {}).get("backend") or {}
+        compose_env = backend.get("environment") or {}
+        if isinstance(compose_env, dict):
+            raw_env.update(compose_env)
+
+    if not raw_env:
         return {}
 
     # Derive DB credentials + db name (used for DB connection rewrite)
@@ -340,7 +377,7 @@ def detect_backend_env_vars(
     shared_password = synthetic_db_password or secrets.token_hex(32)
 
     out: dict[str, str] = {}
-    for key, value in env.items():
+    for key, value in raw_env.items():
         key_str = str(key)
 
         # Priority 1: ${VAR} expansion → placeholder (cannot read host env per §4)
