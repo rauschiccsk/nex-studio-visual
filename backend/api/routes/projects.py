@@ -23,6 +23,7 @@ applied in ``backend/main.py`` via ``app.include_router``.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
@@ -502,10 +503,16 @@ def create_project(
             ) from exc
 
         # Stage 4 — F-004 K-001 push + verify, K-002 rollback on failure.
-        # Runs only if payload.repo_url je nastavený (skipped pre brownfield
-        # projects bez GitHub repo). Rollback v partial-failure scenárioch:
+        # Runs only if payload.repo_url + source_path + .git directory exist.
+        # The .git check is post-init.sh: dry-run mode, disabled bootstrap
+        # (template_init_script_path=""), or partial scaffold failure all
+        # legitimately produce no .git → Stage 4 logged + skipped (best-effort,
+        # matches Stage 5+6 pattern). Rollback v partial-push-failure:
         # local .git deleted; GitHub repo zostáva (manual cleanup by Director).
-        if payload.repo_url and project.source_path:
+        stage4_should_run = (
+            payload.repo_url and project.source_path and Path(project.source_path).joinpath(".git").is_dir()
+        )
+        if stage4_should_run:
             from backend.services.template_bootstrap import _repo_from_url
 
             repo_full_name = _repo_from_url(payload.repo_url, project.slug)
@@ -526,6 +533,15 @@ def create_project(
                         f"GitHub repo {repo_full_name} preserved — Director cleanup if needed."
                     ),
                 ) from exc
+        elif payload.repo_url and project.source_path:
+            # repo_url + source_path set but no .git — log info, skip Stage 4.
+            # Common in tests (init.sh dry-run mode) or disabled bootstrap.
+            logger.info(
+                "Stage 4 (push+verify) SKIPPED for slug=%s — no .git directory in %s "
+                "(init.sh dry-run, disabled bootstrap, or partial scaffold)",
+                project.slug,
+                project.source_path,
+            )
 
         # Stage 5+6 — F-004 K-004 smoke test + K-005 CI/CD opt-in.
         # Both are best-effort (logged warnings, NIE 500) — partial success
