@@ -5,6 +5,57 @@
 
 ---
 
+## 2026-05-26 — CR-023 Shared synthetic DB password (Bug #5 fix)
+
+### Kontext
+
+Real smoke test Krok 4 spustený 2026-05-26 (po CR-022 Implementer round 3 DONE) zachytil **Bug #5**: backend container exitne s kódom 3 pri startup s `password authentication failed for user "nexstudio"`. Postgres healthcheck OK, backend build OK, ale prvý connect cez SQLAlchemy fail.
+
+### Root cause
+
+`_uat_lib._rewrite_db_connection_var()` volá `secrets.token_hex(32)` **dvakrát nezávislo**:
+
+```python
+if key in {"DB_PASSWORD", "POSTGRES_PASSWORD"}:
+    return secrets.token_hex(32)       # synth A → POSTGRES_PASSWORD .env line
+if key == "DATABASE_URL":
+    password = secrets.token_hex(32)   # synth B (DIFFERENT) → embedded v DATABASE_URL
+    return f"postgresql://{user}:{password}@..."
+```
+
+Plus `uat-deploy.py:generate_uat_env()` generuje **tretí** `postgres_password = secrets.token_hex(32)` (synth C) pre top-level `POSTGRES_PASSWORD={postgres_password}` .env line (línia 77).
+
+Výsledok: postgres container init použije synth C, backend's `DATABASE_URL` má embedded synth B → auth FAIL. Komentár v kóde (`# Use synthetic password (matches what _PASSWORD suffix would generate).`) prezrádza zámer, ale impl nezdiela secret state medzi DB-credential consumers.
+
+### Spec design root cause (Dedo acknowledgment)
+
+CR-022 spec §11 row "Synthetic credentials pre per-projekt env vars" **neobsahoval explicit požiadavku** že synthetic DB password musí byť **jedna hodnota zdielaná** medzi všetkými DB credential consumers (POSTGRES_PASSWORD, DB_PASSWORD, DATABASE_URL embedded password). Implementer impl rozumne predpokladal "_PASSWORD suffix = random hex" ale dva rôzne calls produkujú dve rôzne hodnoty.
+
+### Spec amendment
+
+- **F-003 §11** — pridaný nový row "Shared synthetic DB password (CR-023)" explicitly požaduje single-source-of-truth synthetic DB password per UAT env build, zdielaný medzi všetkými DB credential consumers v rovnakej env.
+
+### Implementer impl
+
+- `_uat_lib.detect_backend_env_vars(source_project_path, *, synthetic_db_password: str | None = None)` — nový optional kwarg. Ak `None`, precomputes raz pred loopom (existing tests neporušené).
+- `_uat_lib._rewrite_db_connection_var(...)` — required `synthetic_password: str` parameter, reuse pre POSTGRES_PASSWORD/DB_PASSWORD return AND DATABASE_URL embedded password.
+- `uat-deploy.py:generate_uat_env(...)` — generate `postgres_password` ONCE early, pass downstream:
+  - Top-level `POSTGRES_PASSWORD={postgres_password}` .env line (postgres container init)
+  - `detect_backend_env_vars(synthetic_db_password=postgres_password)` (backend connect)
+  - DB_PASSWORD overlap loop override (zachované)
+- Plus regression test: `assert env["POSTGRES_PASSWORD"] == extract_password_from(env["DATABASE_URL"])` (post-generate).
+
+### Tests
+
+- `test_detect_backend_env_vars_shared_db_password` — nový test pre nex-studio-shape compose (DATABASE_URL embedded), asserting POSTGRES_PASSWORD .env line and DATABASE_URL embedded password match.
+
+### Acceptance
+
+- Real smoke test Krok 4 (re-run): backend startup PASS, no auth FAIL.
+- Plus full backend test suite GREEN.
+
+---
+
 ## 2026-05-24 — CR-022 F-003 comprehensive per-projekt auto-detection (alembic + env + DB + frontend + NGINX)
 
 ### Kontext
