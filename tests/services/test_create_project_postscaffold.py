@@ -8,7 +8,6 @@ Per Implementer charter §10.d test approach matrix:
 
 from __future__ import annotations
 
-import logging
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -17,17 +16,8 @@ import pytest
 
 from backend.services import create_project_postscaffold as mod
 
-
-@pytest.fixture(autouse=True)
-def _enable_log_propagation():
-    """backend.main sets `propagate=False` on `backend` logger — re-enable for caplog."""
-    backend_logger = logging.getLogger("backend")
-    original = backend_logger.propagate
-    backend_logger.propagate = True
-    try:
-        yield
-    finally:
-        backend_logger.propagate = original
+# Note: `_enable_log_propagation` autouse fixture moved do tests/services/conftest.py
+# (CR-030 cleanup batch 2026-05-26 Návrh #1 — shared across service tests).
 
 
 # ─── _run_smoke_test (K-004) ─────────────────────────────────────────────────
