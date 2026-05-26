@@ -304,7 +304,9 @@ if [ "$ENABLE_CICD" = "true" ]; then
 fi
 ```
 
-**Template `github-actions-workflow.yml`** (placeholder pre Sub-round 4 detail):
+**Template `github-actions-workflow.yml`** (placeholder pre Sub-round 4 detail).
+
+**CR-030 amendment (2026-05-26):** `workflow_dispatch:` trigger MUSÍ byť v `on:` block — slúži ako recovery escape hatch keď stuck/orphan run blokuje push events. Bez neho je manual retrigger cez `gh workflow run` nemožný (overené dnešným incidentom stuck-run `26447393728`). Aplikuje sa aj retroaktívne na existing `.github/workflows/ci.yml` všetkých ICC projektov.
 
 ```yaml
 name: CI
@@ -314,6 +316,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:    # CR-030: manual dispatch pre stuck-run recovery
 
 jobs:
   lint:

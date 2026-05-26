@@ -386,6 +386,72 @@ Real I/O test cost: +5-10s suite time per 100 testov. Bug class catched:
 permission, locking, encoding, atomic ops — všetky non-mockable.
 ```
 
+#### §9 (e) FULL pytest suite mandatory pred DONE (per CR-030)
+
+> Per CR-030 amendment (2026-05-26) — F-004 DONE rejection round. Implementer
+> reportoval "24/24 PASS lokálne" = iba F-004 nové tests; FULL suite spustený
+> nebol → 14 regression tests v existing files (test_project_router.py,
+> test_create_project_validation.py, test_project_creation_flow.py)
+> neodhalené pred push. CI FAIL detected too late (post-push).
+
+```markdown
+## §9 (e). FULL pytest suite mandatory pred DONE — eliminate ambiguity
+
+### §9.e.1 Princíp
+
+Self-verification "lokálne testy PASS" pred DONE report MUSÍ znamenať
+**FULL pytest suite** project-rootu (`python -m pytest backend/`,
+`python -m pytest <project>/`, alebo equivalent), NIE selective
+per-feature subset.
+
+### §9.e.2 Konkretne
+
+```bash
+# ✅ SPRÁVNE — full suite
+cd /opt/projects/<project>/backend
+poetry run pytest          # alebo `python -m pytest`
+
+# ❌ NESPRÁVNE — selective per-feature subset
+poetry run pytest tests/services/test_my_new_feature.py
+poetry run pytest -k "my_new_feature"
+```
+
+Plus assert v DONE reporte explicit:
+- "FULL pytest: XXX/XXX PASS" (NIE "feature tests: NN/NN PASS")
+- Number XXX musí byť > prior known total (verify žiadny test sa neztratil)
+
+### §9.e.3 Rationale
+
+Selective subset môže maskovať **regression v existing tests** — nový
+kód môže porušiť existing behavior cez shared mocks, fixtures, alebo
+import-time side-effects. Iba FULL suite detekuje tieto regressions
+pred CI gate.
+
+Bug context (F-004 DONE rejection, 2026-05-26):
+- Implementer aplikoval Stage 4 `push_and_verify` ktorý strict-checkoval
+  `.git` directory v project source_path
+- 14 existing tests mockovali `invoke_init_script` cez subprocess mock
+  (init.sh sa neexekutovala → `.git` nevznikol)
+- Existing tests passed before F-004 (Stage 4 neexistoval)
+- F-004 nové tests (24/24) passed (used real git init + bare repo origin)
+- FULL suite by detekoval 14 failures okamžite → rework v 30 min vs CI
+  fail po push + manual recovery cycle (4 hodín)
+
+### §9.e.4 Plus eliminuje ambiguity "lokálne PASS"
+
+Implementer's vlastný flag z F-004 DONE report:
+> "Default 'lokálne PASS' mám tendency interpret ako feature scope, ale
+>  Dedo reading je full suite. Dnešná chyba bola legitimate ambiguity."
+
+CR-030 §9.e eliminuje ambiguity explicit formuláciou.
+
+### §9.e.5 Hodnota pravidla
+
+Test suite execution time NEPRESHUPUJE 5 min pre väčšinu ICC projektov
+(2641 tests v nex-studio = ~2 min). Tradeoff favors comprehensive
+verification.
+```
+
 ---
 
 ## 5. Customer agent template (ak existuje per projekt)

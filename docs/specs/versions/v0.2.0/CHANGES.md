@@ -5,6 +5,51 @@
 
 ---
 
+## 2026-05-26 — CR-030 F-004 + F-006 amendments per F-004 retrospective (Inbox Deda návrhy #3 + #5)
+
+### Kontext
+
+Post-F-004 retrospective — Implementer F-004 round mal CI incident (stuck run `26447393728` + 14 regression tests). 5 návrhov do Inboxu Deda flagol Implementer + Dedo. CR-030 implementuje 2 najkritickejšie:
+
+- **Návrh #3** — CI workflow `workflow_dispatch:` trigger (recovery escape hatch pri stuck runs)
+- **Návrh #5** — Implementer charter §9 explicit "FULL pytest, NIE selective subset" (eliminate ambiguity)
+
+Návrhy #1 (caplog conftest), #2 (.venv pytest shebang) bundled do separate code cleanup batch (žiadny spec change). Návrh #4 (stuck-run monitoring alert) deferred do `/opt/infra/monitoring/` ICC infra round.
+
+### Spec amendments
+
+**F-004 §3.5 K-005** — `github-actions-workflow.yml` template MUSÍ obsahovať `workflow_dispatch:` trigger pre stuck-run recovery. Plus retroaktívne fix existing `.github/workflows/ci.yml` všetkých ICC projektov.
+
+**F-006 §4** — pridaná sub-sekcia §9 (e) FULL pytest suite mandatory pred DONE:
+- Self-verification "lokálne testy PASS" musí znamenať full suite (`python -m pytest backend/`)
+- Selective per-feature subset (e.g. iba nové tests) NIE je sufficient
+- DONE report MUSÍ assert "FULL pytest: XXX/XXX PASS" s prior total ≥ verification
+
+### Implementer downstream impact
+
+CR-030 spec amendment NESPUSTÍ priamy edit. Implementer round nasleduje:
+
+1. **CI workflow_dispatch apply** (nex-studio repo) — 2 yml files:
+   - `templates/github-actions-workflow.yml` (F-004 template, +1 LOC)
+   - `.github/workflows/ci.yml` (existing CI, +1 LOC)
+2. **Charter §9 (e) apply** (icc-knowledge repo) — append §9 (e) markdown code-fence content do `CLAUDE_IMPLEMENTER.md` (analogicky CR-029 §10 (d) apply pattern, commit `05cd6c3`)
+3. **Cross-repo ICC projects sync** — workflow_dispatch retroaktívne v ostatných ICC projektoch (delphi-studio, nex-inbox, ...) — deferred do separate "ICC standard sync" task
+
+### Plus návrhy #1, #2, #4 status
+
+- **#1 caplog autouse v conftest** — ACCEPTED, bundled do separate code cleanup Implementer round
+- **#2 venv pytest shebang rebuild** — ACCEPTED, bundled do same code cleanup batch
+- **#4 stuck-run monitoring alert** — ACCEPTED s deferral do `/opt/infra/monitoring/` ICC infra round (cross-project monitoring infrastructure scope)
+
+### Acceptance
+
+- F-004 spec amendment + F-006 spec amendment + CHANGES.md committed + push + CI PASS
+- Implementer round kickoff v `.dedo-channel/inbox/`
+- Implementer apply 2 yml changes (nex-studio) + 1 charter clause (icc-knowledge) + report v `.dedo-channel/inbox/`
+- Post-apply verify: CI workflow `workflow_dispatch:` test (manual `gh workflow run CI --ref main`)
+
+---
+
 ## 2026-05-26 — CR-029 F-006 charter updates per 3 Inbox Deda návrhy
 
 ### Kontext
