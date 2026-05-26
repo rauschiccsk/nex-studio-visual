@@ -5,6 +5,51 @@
 
 ---
 
+## 2026-05-26 — CR-025 Snapshot/teardown DB credentials propagation (Bug #8 fix)
+
+### Kontext
+
+Po CR-024 fix smoke retry pokračoval cez Krok 7 (`uat-status.py` PASS) na Krok 8 (`uat-snapshot.py dev --reason post-cr-024`) → **HTTP-equivalent FAIL**:
+
+```
+ERROR: pg_dump failed: Command '['docker', 'exec', 'uat-dev-postgres',
+'pg_dump', '-U', 'postgres']' returned non-zero exit status 1.
+```
+
+### Root cause
+
+`uat-snapshot.py` a `uat-teardown.py` volajú `pg_dump -U postgres` s **hardcoded** user "postgres". Ale postgres container beží s `POSTGRES_USER=nexstudio` (detected z source compose per CR-022). pg_dump zlyháva s `role "postgres" does not exist`.
+
+### Spec design root cause (Dedo acknowledgment)
+
+CR-022 detect_db_credentials zaviedol per-project POSTGRES_USER, ale **aplikoval ho len do uat-deploy** (template render + .env write). `uat-snapshot.py` a `uat-teardown.py` neboli v scope CR-022 sub-agent audit (focus bol `uat-deploy.py` + template) → hardcoded "postgres" zostal. Tretí gap **rovnakého patternu** ako CR-022 (DB creds) a CR-024 (frontend port): per-project value hardcoded v generic default.
+
+### Spec amendment
+
+- **F-003 §11** — pridaný nový row "Snapshot/teardown DB credentials propagation (CR-025)" requiring detected POSTGRES_USER + POSTGRES_DB cez `/opt/uat/<slug>/.env` (single source of truth).
+
+### Implementer impl
+
+- `_uat_lib.read_uat_env(slug: str) → dict[str, str]` — nový helper, parse `/opt/uat/<slug>/.env` do dict (single source of truth, no DB creds duplication)
+- `uat-snapshot.py.snapshot()`: read `POSTGRES_USER` + `POSTGRES_DB` z `/opt/uat/<slug>/.env`, call `pg_dump -U {user} -d {db}`
+- `uat-teardown.py` final-snapshot path: same fix
+
+### Tests
+
+- `test_read_uat_env_parses_basic` — basic key=value parsing
+- `test_read_uat_env_ignores_comments_and_blanks` — # comments + blank lines skipped
+- `test_read_uat_env_missing_file_returns_empty` — graceful degradation
+- `test_uat_snapshot_uses_detected_postgres_user` — integration (mock docker_exec, assert -U detected_user)
+- `test_uat_teardown_final_snapshot_uses_detected_user` — same for teardown
+
+### Acceptance
+
+- Smoke Krok 8 (re-run): snapshot file created v `/opt/uat/dev/snapshots/`, non-empty
+- Smoke Krok 9 (teardown): final snapshot PASS + clean teardown
+- Plus full backend test suite GREEN
+
+---
+
 ## 2026-05-26 — CR-024 Frontend container port auto-detection (Bug #7 fix)
 
 ### Kontext
