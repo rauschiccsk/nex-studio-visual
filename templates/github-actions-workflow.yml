@@ -13,6 +13,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:    # CR-030: manual dispatch pre stuck-run recovery
 
 jobs:
   lint:
