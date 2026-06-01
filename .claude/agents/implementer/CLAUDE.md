@@ -225,7 +225,25 @@ Skill `.claude/skills/tdd.md` (ak existuje) — detail RED-GREEN-REFACTOR cyklu.
 
 ## 9. SELF-VERIFICATION (Implementer-specific)
 
-Pred DONE reportom MUSÍM overiť:
+### MANDATORY orthogonal stages per scope
+
+Self-verification MUSÍ pokryť **všetky tri orthogonal stages** podľa scope
+zmien — lint, build/typecheck a test sú nezávislé (lint passing ≠ build
+passing ≠ tests passing). Žiadny shortcut „typecheck PASS = hotovo".
+
+| Scope (čo som menil) | MANDATORY stages pred DONE |
+|---|---|
+| FE súbory (`frontend/**` `.tsx`/`.ts`/`.css`) | **ESLint** + **tsc/vite build** + **vitest** — všetky tri |
+| BE súbory (`backend/**` `.py`) | **ruff check** + **ruff format --check** + **pytest** — všetky tri |
+| Docker / dependency change (`Dockerfile`, `pyproject.toml`, `package.json`) | nad rámec hore + **§9.2 smoke test** |
+| Integration tests (`tests/integration/**`) | nad rámec hore + **§9.3 dependency install + runtime** |
+| Meta-only (charter, docs, templates) | git diff overview + scope-relevant CI lint |
+
+**Pravidlo:** Stage zlyhanie = STOP, fix root cause, re-run **VŠETKY** stages
+(nie iba ten zlyhaný — fix mohol regresovať iný stage). Žiadny commit/push
+pred kompletnou PASS všetkých orthogonal stages.
+
+### Konkrétne príkazy
 
 ```bash
 # 1. Diff overview
@@ -411,6 +429,78 @@ poetry run pytest tests/integration/ -v
 report o "infrastructure gap" je **false-positive misdiagnosis**, ktorý
 maskuje fixable problem ako environmental constraint.
 
+### 9.4 Baseline verification pre pre-existing failures (per CR-NS-004)
+
+Ak `npm test` alebo `pytest` reportuje failures, MUSÍM overiť že sú
+**pre-existing baseline**, nie regresia z mojich zmien. Postup:
+
+```bash
+# 1. Snapshot mojej práce
+git stash
+
+# 2. Run testy na čistom HEAD (môj branch base)
+cd frontend && npm test -- --run 2>&1 | tail -5
+# alebo: poetry run pytest -q 2>&1 | tail -5
+
+# 3. Zaznam baseline counts (napr. „106/134 PASS, 28 FAIL")
+
+# 4. Unstash môj kód
+git stash pop
+
+# 5. Re-run testy s mojimi zmenami
+cd frontend && npm test -- --run 2>&1 | tail -5
+
+# 6. Porovnaj counts:
+#    - Rovnaký počet FAIL → pre-existing baseline ✅
+#    - Vyšší počet FAIL → moje zmeny pridali regresiu → STOP + fix
+#    - Iné fail-y (rôzne test mená) → moje zmeny niečo posunuli → STOP + investigate
+```
+
+**MANDATORY:** Bez baseline overovania nesmiem ignorovať failures s pasvnym
+„pre-existing" claimom. Cross-ref memory `feedback_implementer_self_verify`.
+
+**DONE report flagging:** Pre-existing failures MUSIA byť v DONE reporte
+explicitne označené ako baseline-overené, napr.:
+> FE Test: 106/134 PASS (28 FAIL pre-existing — baseline overený cez git
+> stash → unstash, rovnaký 28/134 výsledok)
+
+### 9.5 Evidence format requirement v DONE reporte
+
+Žiadne plain „PASS" / „FAIL" / „OK" v DONE reporte — KAŽDÝ stage výsledok
+MUSÍ obsahovať **konkrétny dôkaz** (exit code, počet testov, počet modulov,
+veľkosť bundlu atď.). Reader musí vedieť overiť cez re-run.
+
+**FE evidence format:**
+```
+FE Lint:  PASS (eslint exit 0, <N> warnings)
+FE Build: PASS (tsc -b clean, vite 2081 modules, bundle 1075 kB / gzip 284 kB)
+FE Test:  106/134 PASS (28 FAIL pre-existing — baseline overený §9.4)
+```
+
+**BE evidence format:**
+```
+BE Ruff:   PASS (ruff check backend, exit 0)
+BE Format: PASS (ruff format --check backend, exit 0)
+BE Test:   42/42 PASS (pytest -q, 4.7s)
+```
+
+**Smoke evidence format (per §9.2):**
+```
+Docker build: PASS (compose build, all stages OK)
+Container:    PASS (Up, 8/8 healthy)
+Health:       PASS (curl /health → {"status":"ok"})
+```
+
+**CI evidence format (per §15):**
+```
+CI run: <run-id> — Lint PASS, Build Frontend PASS, Test PASS,
+        Build Docker Images PASS, Deploy PASS
+```
+
+**Anti-pattern:** „Self-verify PASS" / „typecheck clean" / „looks ok" / „should
+work" v DONE reporte = **§13 False PASS** anti-pattern, blokujúce ako spec
+drift. Cross-ref §13.
+
 ---
 
 ## 10. POST-IMPLEMENTATION VERIFICATION (self-PIV)
@@ -464,11 +554,19 @@ Pre Zoltána per TASK alebo per ucelený blok TASKov:
 ## Dokončené: <názov TASKu>
 
 - **Zmeny**: <stručný popis čo sa zmenilo + kľúčové súbory>
-- **Typecheck**: FE [PASS / FAIL]
-- **Testy**: FE X/Y PASS, BE X/Y PASS (alebo FAIL s detailom; N/A ak sa strany netýka)
-- **Lint**: FE [PASS / FAIL], BE [PASS / FAIL]
+- **Self-verify**: per §9.5 evidence format — KAŽDÝ stage konkrétne číslo /
+  exit code, žiadne plain „PASS / FAIL". Pre-existing test failures
+  baseline-overené per §9.4.
+  - FE Lint:  PASS (eslint exit 0, <N> warnings)
+  - FE Build: PASS (vite 2081 modules, bundle 1075 kB)
+  - FE Test:  106/134 PASS (28 FAIL pre-existing baseline)
+  - BE Ruff:  PASS (ruff check exit 0)
+  - BE Format: PASS (ruff format --check exit 0)
+  - BE Test:  42/42 PASS
+- **Smoke** (ak §9.2 trigger): docker build PASS, containers Up/healthy, /health PASS
 - **Commit**: <hash> <message>
-- **CI**: <run ID> [všetky jobs PASS / FAIL detail] (keď bude remote repo)
+- **CI**: <run ID> — všetky jobs PASS (Lint, Build Frontend, Test, Build
+  Docker Images, Deploy) — per §15.3
 - **Ďalší krok**: <ďalší TASK alebo otázka>
 ```
 
@@ -480,8 +578,10 @@ Pre §17.1 úlohy pridať:
 
 ### Pravidlo
 - Reportujem **vlastné zistenia**, nie očakávania (§10 hlavného)
-- Ak niečo nebolo overené → priznať explicitne
-- Žiadne "zdá sa, že to funguje"
+- Ak niečo nebolo overené → priznať explicitne („Smoke nespustený — out of
+  scope pre charter-only zmenu")
+- Žiadne „zdá sa, že to funguje" / „looks ok" / „should work"
+- Plain „PASS" bez exit code/count = **§13 False PASS** anti-pattern
 
 ---
 
@@ -542,6 +642,32 @@ Ak claim nemá authoritative source v žiadnom z týchto miest → **STOP, hlás
 Reportovať DONE / RELEASED keď nikto neoveril že kód reálne beží end-to-end. Jednotkové + integračné testy GREEN je **nutný ale nie dostačujúci** doklad release-ready stavu.
 
 Pred DONE reportom pre release-relevant tasky MUSÍ prebehnúť **§9.2 smoke test** (docker compose build + up + /health). Bez neho release verdict je **false-positive** — presne pattern ktorý nastal v NEX Inbox v0.1.0 (3 audit cykly PASS, ale stack fakticky nevedel nabehnúť kvôli 5 P0 Dockerfile/env bugs ktoré audit nepokryl).
+
+### ❌ "False PASS in DONE report" — claim bez konkrétneho dôkazu (per CR-NS-006)
+
+Plain „PASS" / „FAIL" / „OK" / „looks ok" / „should work" v DONE reporte
+**bez konkrétneho exit code, počtu testov, počtu modulov, veľkosti bundlu**
+je False PASS. Director / Dedo nevedia overiť bez re-run, čo defeats účel
+DONE reportu (audit trail).
+
+Per §9.5 evidence format: každý stage MUSÍ uvádzať konkrétny dôkaz, napr.:
+- ❌ „FE Lint: PASS"
+- ✅ „FE Lint: PASS (eslint exit 0, 0 warnings)"
+- ❌ „Testy: OK"
+- ✅ „FE Test: 106/134 PASS (28 FAIL pre-existing — baseline overený §9.4)"
+
+### ❌ "Pre-existing baseline ignored" — failures bez baseline overovania (per CR-NS-004)
+
+Reportovať test failures s pasvnym „pre-existing" claimom **bez overovania
+cez `git stash` baseline** je anti-pattern. Failures môžu byť:
+- (a) skutočne pre-existing (rovnaký počet pred + po mojich zmenách)
+- (b) regresia mojich zmien (vyšší počet po mojich zmenách)
+- (c) test posun (rovnaký počet, ale **iné** mená test prípadov — môj kód
+  rozbil X a opravil Y)
+
+Bez §9.4 baseline overovania nesmiem rozlíšiť (a) od (b)/(c). Implementer
+default postup: VŽDY `git stash` → run → record → unstash → re-run →
+porovnaj counts + test mená pred reportom „pre-existing".
 
 ---
 
