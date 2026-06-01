@@ -324,6 +324,93 @@ curl -sf http://localhost:<port>/health  # must return non-empty JSON
 
 **Buildable + bootable verification je release criterion**, nie pre-deploy gate. Audítor pri release verdikte sa spolieha na Implementer self-smoke-test — bez neho audit verdict je nedôveryhodný.
 
+### 9.3 Integration Test Runtime + Diagnostic Discipline (per CR-NS-001)
+
+> Per Director directive 2026-06-01 + Dedo discovery: Implementer pri
+> cross-project prácach (napr. nex-inbox CR-045) reportoval "DB lokálne
+> nedostupný (no docker/podman)" pre integration testy, ALE skutočný root
+> cause bol že nespustil `poetry install --with dev` pred pytest.
+> `testcontainers` package v pyproject.toml existoval (`poetry show
+> testcontainers` → 4.14.2) ale nebol v aktive venv → `ImportError` →
+> mis-diagnostikované ako infrastructure gap. Gap je iba **dependency
+> install discipline** + **diagnostic discipline**.
+
+#### Pred integration tests — dependency install
+
+Integration tests (`pytest tests/integration/`) typicky používajú dev-only
+packages (testcontainers, pytest-asyncio plugins, mock helpers) ktoré
+nie sú v main deps:
+
+```bash
+# 1. Install dev dependencies (discover správnu group cez pyproject.toml)
+cd /opt/projects/<slug>/backend
+poetry install --with dev    # alebo --all-groups ak má projekt > 1 dev group
+
+# 2. Verify testcontainers import (najčastejšia missing dependency)
+poetry run python -c "from testcontainers.postgres import PostgresContainer"
+# ImportError → dependency nie je v aktive venv → fix pred pytest
+```
+
+Per project's pyproject.toml `[tool.poetry.group.dev.dependencies]` vs
+`[tool.poetry.group.test.dependencies]` vs split — discover správne group
+name cez `grep -A 5 "group\." pyproject.toml` ak `--with dev` nestačí.
+
+#### Diagnostic discipline (KRITICKÉ)
+
+**NIKDY nereportuj "DB nedostupný" / "no docker/podman" bez explicit
+diagnostic.** Real test postup (v poradí):
+
+```bash
+# 1. Docker socket mounted v container?
+ls -la /var/run/docker.sock
+# Expected: srw-rw---- ... /var/run/docker.sock
+
+# 2. Docker SDK accessible z Python?
+python -c "import docker; print(docker.from_env().version())"
+# Success: prints {'Version': '24.x.x', ...}
+# Failure: DockerException / PermissionError → infra problem
+
+# 3. testcontainers v venv?
+poetry run python -c "from testcontainers.postgres import PostgresContainer"
+# Success: silent exit 0
+# ImportError → missing dev dependency, NIE infra
+```
+
+**Reporting pravidlá:**
+
+- ✅ "Integration tests fail s `ImportError: testcontainers` — fix
+  `poetry install --with dev`, retry" → diagnose missing dependency
+- ✅ "Integration tests fail s `DockerException: connection refused` —
+  docker.sock not mounted / runtime not available" → diagnose infra
+- ✅ "Integration tests fail s `PermissionError` na docker.sock —
+  container user nemá `docker` group membership" → diagnose perms
+- ❌ "DB lokálne nedostupný (no docker/podman)" → **GENERIC, nepoužiteľné
+  pre fix path**
+- ❌ "Integration tests skipped — infrastructure gap" → **bez konkrétneho
+  error report = blind skip**
+
+#### Integration test run
+
+```bash
+# Ak všetky 3 diagnostics PASS:
+poetry run pytest tests/integration/ -v
+# NIE iba `--collect-only` — runtime overenie je requirement.
+
+# Failure pattern handling:
+# 1. Fail v test logic (assertion error, KeyError v test fixture)
+#    → fix pred DONE
+# 2. Fail v setup (testcontainers spawn failure, image pull timeout,
+#    network unreachable)
+#    → diagnose root cause + fix infra problem, NIE skip
+# 3. Pravidlo "skip" je len pre explicit pytest.mark.skipif markers
+#    s dokumentovaným dôvodom — NIE blanket "skipped pri integration
+#    suite zlyhaní"
+```
+
+**Bez explicit diagnostic + dependency install discipline** Implementer
+report o "infrastructure gap" je **false-positive misdiagnosis**, ktorý
+maskuje fixable problem ako environmental constraint.
+
 ---
 
 ## 10. POST-IMPLEMENTATION VERIFICATION (self-PIV)
