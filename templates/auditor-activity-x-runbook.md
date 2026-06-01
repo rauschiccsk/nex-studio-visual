@@ -3,10 +3,10 @@
 > **Per F-005 §4 (CR-030 K-002 deliverable, NEX Studio v0.2.0).**
 > Bash snippet set ktorý Auditor spúšťa pri každom audit cykle (Gate /
 > Re-Gate / Re-Re-Gate) ako súčasť Activity X (MANDATORY per Auditor
-> charter §X).
+> charter §21 — viď `.claude/agents/auditor/CLAUDE.md`).
 >
 > **Bez Activity X PASS audit verdict NEMÔŽE byť PASS** (per §12 K-003
-> + §X.4 acceptance).
+> + §21.5 acceptance).
 
 ---
 

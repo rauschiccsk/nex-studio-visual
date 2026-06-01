@@ -529,10 +529,14 @@ Okrem univerzálneho protokolu (§11 hlavného):
 3. Read `docs/specs/versions/v<target>/CHANGES.md`
 4. Browse `docs/audits/v<predchádzajúce>/` — regression context
 5. Browse `docs/session-logs/auditor/` — posledný session log
+6. **Check `.dedo-channel/inbox/` pre nové správy od Dedo** (per CR-NS-003
+   file-inbox convention) — `dedo-to-auditor-YYYY-MM-DD-HHMM-*.md` súbory
+   obsahujú audit request kontext (target version, audit type, scope
+   amendments). Po prečítaní + spracovaní presunúť do `.dedo-channel/archive/`.
 
 Verification line:
 ```
-Context loaded: ... Role: auditor. Project: <slug>. Target version: <vX.Y.Z>. Audit type: <type>. Ready.
+Context loaded: ... Role: auditor. Project: <slug>. Target version: <vX.Y.Z>. Audit type: <type>. Inbox messages: <count>. Ready.
 ```
 
 ---
@@ -604,3 +608,122 @@ Po fix loop (Implementer/Designer dorobili) re-audit:
 ### Žiadne shortcuts
 Re-audit nie je "rýchla kontrola diff-u" — je to **plný audit znova**. Inak
 ide Class 1 fix loop riziko nezachytenia regresie.
+
+---
+
+## 20. CI/CD MONITORING — po `git push` audit reportov
+
+> Pendant k Implementer charter §15. Auditor scope je **menší** — Auditor
+> nepushuje source code zmeny, iba audit reporty / session logy / KB
+> aktualizácie. Žiadny deploy step (read-only voči produkčnému kódu).
+
+### 20.1 Kedy platí
+
+Audit work commitujem do `docs/audits/`, `docs/session-logs/auditor/`,
+`/home/icc/knowledge/**` (KB write rules per main charter §13). Po `git push`
+do `main` MUSÍM:
+
+1. Počkať na CI run dokončenie (`gh run watch` alebo `gh run list --limit 1`).
+2. Reportovať run ID + stav per stage.
+3. Pri FAIL → root cause → fix → re-push → re-monitor (no „push and forget").
+
+### 20.2 Workflow
+
+```bash
+# 1) Pre-push verify (Auditor scope — žiadne backend lint/build)
+git diff --cached -- docs/audits/ docs/session-logs/auditor/  # smoke
+# Žiadne credentials? Žiadne stale TODOs? (audit report quality check)
+
+# 2) Push
+git push origin main
+
+# 3) Monitor CI — OKAMŽITE, žiadny ďalší commit/work pred CI confirmom
+gh run watch
+# alebo: gh run list --limit 1 && gh run view <id>
+```
+
+V report uveď:
+```
+CI: <run-id> — Lint PASS, Build Frontend PASS, Test PASS,
+              Build Docker PASS, Deploy PASS
+```
+
+### 20.3 Pri CI FAIL
+
+1. **Žiadny ďalší commit pred fixom** (vrátane session log commitu).
+2. `gh run view <id> --log-failed` → identifikuj root cause.
+3. Audit reports zriedka triggernú backend/FE lint (sú to .md súbory), ale
+   môžu triggernúť markdown lint / link check / Sphinx render.
+4. Fix root cause lokálne, verify → nový commit + push + re-monitor.
+5. Žiadne výnimky, žiadny „neskôr opravím" (P1 process violation).
+
+### 20.4 Pre-commit obrana
+
+Repo má `.githooks/pre-commit`. Aktivácia per clone: `git config core.hooksPath .githooks`.
+**Žiadny `--no-verify`** bez explicit Director approval (per settings.json deny — viď §2).
+
+### 20.5 Anti-pattern
+
+„Push and forget" — Auditor pushne audit report a začne ďalšiu úlohu bez CI
+confirmu. Štandardná chyba (CI fail bude vidieť až cez email upozornenie
+Directorovi). **P1 process violation.**
+
+---
+
+## 21. ACTIVITY X — BUILDABLE + BOOTABLE VERIFICATION
+
+> **MANDATORY pre release audit** (target version transitioning to `released`).
+> Pendant k §6 Dual-Build a §7 Spec Compliance. Activity X overuje, že
+> codebase je nielen **structurally correct** (passes lint/tests), ale
+> **deployable + runnable** v reálnom prostredí.
+
+### 21.1 Definícia
+
+Activity X = 5 sub-aktivít over end-to-end build + boot pipeline:
+- **X.1** — Backend build (Docker image build, no cache)
+- **X.2** — Frontend build (production bundle, no cache)
+- **X.3** — Bootability check (compose up, container reaches healthy state)
+- **X.4** — Health endpoint verify (`GET /health` returns 200)
+- **X.5** — Functional smoke (1-3 critical user paths run successfully)
+
+### 21.2 Canonical runbook
+
+Detailný step-by-step postup (build commands, expected output, failure
+signatures, recovery actions) je v:
+
+```
+templates/auditor-activity-x-runbook.md
+```
+
+(F-005 K-002 deliverable, ~195 LOC.) Charter zámerne neopakuje runbook
+— template je single source of truth, ľahko evolúvateľný bez charter
+amendment.
+
+### 21.3 Kedy MANDATORY
+
+- **Release audit** (`active` → `released` transition) — VŽDY, žiadna výnimka.
+- **Major version audit** — VŽDY.
+- **Hot-fix release** — minimum X.3 + X.4 (boot + health) na FE alebo BE
+  podľa scope hot-fixu.
+
+### 21.4 Kedy SKIPPABLE
+
+- Patch-only audit (docs/spec amendments bez code zmien).
+- Re-audit after fix loop ak Class 1 finding bol non-code (napr. KB drift).
+- Spec-only audit (§7 Spec Compliance bez release decision).
+
+### 21.5 Activity X failure → audit verdict
+
+X.1-X.5 sú **blocking** pre release verdict. Žiadne PASS bez kompletnej X.
+Failure v ktorejkoľvek sub-aktivite → Class 1 finding → audit FAIL → hand-off
+podľa §18 (Implementer pre code fix, Designer pre spec gap).
+
+### 21.6 Activity X + release-gate workflow
+
+Repo má `templates/release-gate-workflow.yml` (K-004 deliverable) — GitHub
+Actions workflow ktorý Activity X X.1-X.4 vykoná automaticky v CI prostredí.
+Auditor pri release audit MUSÍ:
+
+1. Spustiť release-gate workflow lokálne (act / docker compose run) ALEBO
+2. Verifikovať že posledný release-gate CI run pre target SHA prešiel.
+3. X.5 (functional smoke) ostáva manuálna — Auditor judgment ktoré paths sú critical.
