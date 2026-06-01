@@ -1,7 +1,9 @@
 /**
- * AgentTerminalPage — full-page embedded claude CLI session in NEX
- * Studio for one of the three agent roles (Designer / Implementer /
- * Auditor).
+ * AgentTerminalPage — full-page chrome for one of the three agent
+ * roles (Designer / Implementer / Auditor). The xterm.js terminal itself
+ * is mounted ABOVE this page in :file:`components/PersistentTerminalsLayer.tsx`
+ * so its WebSocket + scrollback survive React Router navigation between
+ * roles (CR-NS-004).
  *
  * Project anchor is read from :file:`store/activeContextStore.ts`
  * (Director directive 2026-05-13: the Pin in ``/projects`` is the
@@ -14,9 +16,12 @@
  *
  *   A. No ``selectedProject`` → CTA "Vyber projekt v Projects".
  *   B. ``selectedProject`` set, no active session for ``(user, role)``
- *      → "Spustiť <role> pre <project>" button → POST /spawn → attach.
- *   C. Active session running → terminal full-page (xterm.js via
- *      :file:`components/AgentTerminal.tsx`).
+ *      → "Spustiť <role> pre <project>" button → store ``spawn`` action.
+ *   C. Active session running → header chrome stays at the top of the
+ *      page (``relative z-10`` + opaque ``bg-slate-900`` so it visually
+ *      sits ON TOP of the layer's terminal); the body is an empty
+ *      placeholder ``flex-1`` div — the actual xterm viewport bleeds
+ *      through from the layer below at ``z-0``.
  *
  * A pinned-project change does **not** auto-end a running session.
  * The session is bound to its ``project_slug`` in the DB row and
@@ -26,21 +31,13 @@
  * Permissions: ``ri`` only (Director). Non-ri users see a Lock panel.
  */
 
-import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Lock, Loader2, RefreshCw, X, FolderOpen, Play } from "lucide-react";
 
 import { useAuthStore } from "@/store/authStore";
 import { useActiveContextStore } from "@/store/activeContextStore";
-import { ApiError, TOKEN_STORAGE_KEY } from "@/services/api";
-import {
-  listAgentTerminalSessionsApi,
-  spawnAgentTerminalApi,
-  endAgentTerminalSessionApi,
-  type AgentRole,
-  type AgentTerminalSession,
-} from "@/services/api/agentTerminal";
-import { AgentTerminal } from "@/components/AgentTerminal";
+import { useAgentTerminalStore } from "@/store/agentTerminalStore";
+import type { AgentRole } from "@/services/api/agentTerminal";
 
 const ROLE_LABEL: Record<AgentRole, string> = {
   designer: "Designer",
@@ -59,79 +56,27 @@ export default function AgentTerminalPage({ role }: AgentTerminalPageProps) {
 
   const selectedProject = useActiveContextStore((s) => s.selectedProject);
 
-  const [session, setSession] = useState<AgentTerminalSession | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [spawning, setSpawning] = useState(false);
-  const [ending, setEnding] = useState(false);
-  const [error, setError] = useState("");
+  const slot = useAgentTerminalStore((s) => s[role]);
+  const initialized = useAgentTerminalStore((s) => s.initialized);
+  const refresh = useAgentTerminalStore((s) => s.refresh);
+  const spawn = useAgentTerminalStore((s) => s.spawn);
+  const end = useAgentTerminalStore((s) => s.end);
 
-  // Token for WebSocket auth (browser WS API can't set headers, so it
-  // travels in the query string). Read once at mount — the WS will
-  // re-mount whenever ``session`` changes anyway.
-  const token =
-    typeof window !== "undefined"
-      ? window.localStorage.getItem(TOKEN_STORAGE_KEY)
-      : null;
-
-  const refresh = useCallback(async () => {
-    if (!isDirector) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError("");
-    try {
-      const rows = await listAgentTerminalSessionsApi();
-      const active = rows.find((r) => r.role === role && r.ended_at === null);
-      setSession(active ?? null);
-    } catch (e) {
-      const msg =
-        e instanceof ApiError ? e.message : "Nepodarilo sa načítať sessions.";
-      setError(msg);
-    } finally {
-      setLoading(false);
-    }
-  }, [role, isDirector]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  const session = slot.session;
+  const loading = !initialized || slot.status === "loading";
+  const spawning = slot.status === "spawning";
+  const ending = slot.status === "ending";
+  const error = slot.error;
 
   async function handleSpawn() {
     if (!selectedProject) return;
-    setSpawning(true);
-    setError("");
-    try {
-      const row = await spawnAgentTerminalApi({
-        role,
-        project_slug: selectedProject.slug,
-      });
-      setSession(row);
-    } catch (e) {
-      const msg =
-        e instanceof ApiError && e.message
-          ? `Nepodarilo sa spustiť session: ${e.message}`
-          : "Nepodarilo sa spustiť session.";
-      setError(msg);
-    } finally {
-      setSpawning(false);
-    }
+    await spawn(role, selectedProject.slug);
   }
 
   async function handleEndSession() {
     if (!session) return;
     if (!window.confirm("Naozaj ukončiť session? Aktívna konverzácia zanikne.")) return;
-    setEnding(true);
-    try {
-      await endAgentTerminalSessionApi(session.id);
-      setSession(null);
-    } catch (e) {
-      const msg =
-        e instanceof ApiError ? e.message : "Nepodarilo sa ukončiť session.";
-      setError(msg);
-    } finally {
-      setEnding(false);
-    }
+    await end(role);
   }
 
   // --- Render ---
@@ -163,8 +108,10 @@ export default function AgentTerminalPage({ role }: AgentTerminalPageProps) {
 
   return (
     <div className="flex h-full flex-col bg-slate-950">
-      {/* Header chrome */}
-      <div className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-slate-800 bg-slate-900 px-4 py-2.5">
+      {/* Header chrome — relative z-10 so it sits above the layer terminal
+          when the body is the empty State C placeholder. Opaque
+          bg-slate-900 visually masks the top edge of the xterm viewport. */}
+      <div className="relative z-10 flex flex-shrink-0 items-center justify-between gap-3 border-b border-slate-800 bg-slate-900 px-4 py-2.5">
         <div className="flex min-w-0 items-center gap-3">
           <h1 className="text-sm font-semibold text-slate-100">
             {ROLE_LABEL[role]}
@@ -214,9 +161,9 @@ export default function AgentTerminalPage({ role }: AgentTerminalPageProps) {
         </div>
       </div>
 
-      {/* Error banner */}
+      {/* Error banner — relative z-10 same as header. */}
       {error && (
-        <div className="flex-shrink-0 border-b border-red-500/30 bg-red-500/10 px-4 py-2 text-xs text-red-400">
+        <div className="relative z-10 flex-shrink-0 border-b border-red-500/30 bg-red-500/10 px-4 py-2 text-xs text-red-400">
           {error}
         </div>
       )}
@@ -228,14 +175,12 @@ export default function AgentTerminalPage({ role }: AgentTerminalPageProps) {
             <Loader2 className="h-4 w-4 animate-spin" />
             {spawning ? "Spúšťam claude CLI…" : "Načítavam stav…"}
           </div>
-        ) : session && token ? (
-          // State C — active session: terminal full-page.
-          <AgentTerminal
-            key={session.id}
-            sessionId={session.id}
-            token={token}
-            onEnded={() => void refresh()}
-          />
+        ) : session ? (
+          // State C — terminal viewport is rendered by PersistentTerminalsLayer
+          // at z-0 underneath this page. The page body stays empty so the
+          // xterm.js DOM shows through; opaque header chrome above covers
+          // the top edge of the layer.
+          <div className="h-full" />
         ) : !selectedProject ? (
           // State A — no project pinned: CTA to /projects.
           <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
