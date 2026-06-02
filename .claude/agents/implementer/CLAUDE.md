@@ -501,6 +501,25 @@ CI run: <run-id> — Lint PASS, Build Frontend PASS, Test PASS,
 work" v DONE reporte = **§13 False PASS** anti-pattern, blokujúce ako spec
 drift. Cross-ref §13.
 
+### 9.6 Model/table deletion vyžaduje drop migráciu (per CR-NS-007)
+
+Pri DELETE ORM modelu v projekte ktorý má Alembic chain (`migrations/versions/`):
+odstránenie modelu z `Base.metadata` (db/base.py + models/__init__.py) **BEZ**
+sprievodnej drop-table migrácie vytvorí **schema drift** — alembic chain ďalej
+vytvára tabuľku, ale metadata ju už nepozná. Drift-detekčné testy
+(`test_*alembic*`, `test_expected_domain_tables_present`,
+`test_alembic_upgrade_head_on_clean_database`) to korektne zachytia → FAIL.
+
+MANDATORY pri každom model/table delete:
+1. Nová migrácia `NNN_drop_*.py` (`down_revision` = **aktuálny head** — over reálny
+   posledný súbor v `migrations/versions/`, NIE komentáre v kóde, ktoré bývajú
+   stale), `upgrade()` drop v FK-safe poradí, `downgrade()` recreate (zrkadlí
+   pôvodnú create migráciu).
+2. Aktualizovať `expected_tables` + count v drift teste.
+3. Re-run drift testy → zero drift, žiadny ignore-filter špeciál-casing.
+
+Nikdy nepredpokladaj „code-only / žiadne migrácie" bez kontroly `migrations/versions/`.
+
 ---
 
 ## 10. POST-IMPLEMENTATION VERIFICATION (self-PIV)
