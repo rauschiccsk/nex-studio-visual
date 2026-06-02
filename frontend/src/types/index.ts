@@ -20,38 +20,16 @@ export * from "./project";
 export * from "./projectModule";
 export * from "./moduleDependency";
 
-// Specifications and design documents.
-export * from "./rawSpecification";
-export * from "./professionalSpecification";
-export * from "./designDocument";
-
 // Knowledge base.
 export * from "./kbDocument";
-
-// Architect.
-export * from "./architectSession";
-export * from "./architectMessage";
-export * from "./architect";
 
 // Task hierarchy (Epic → Feat → Task).
 export * from "./epic";
 export * from "./feat";
 export * from "./task";
 
-// Bugs and fix tasks.
+// Bugs.
 export * from "./bug";
-export * from "./bugFixTask";
-
-// Delegations and execution logs.
-export * from "./delegation";
-export * from "./executionLog";
-export * from "./autoFixAttempt";
-
-// Guardian.
-export * from "./guardian";
-
-// Reporting.
-export * from "./reportConfig";
 
 // Versions.
 export * from "./version";

@@ -30,7 +30,6 @@ from typing import Any
 import pytest
 from sqlalchemy import select as sa_select
 
-from backend.db.models.delegations import Delegation, ExecutionLog
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project, ProjectModule
 from backend.db.models.tasks import Epic, Feat, Task
@@ -519,37 +518,6 @@ def _make_task(
     return task
 
 
-def _make_execution_log(
-    db_session: Any,
-    *,
-    task: Task,
-    commit_hash: str | None,
-    status: str = "done",
-    created_at: datetime | None = None,
-) -> ExecutionLog:
-    delegation = Delegation(
-        task_id=task.id,
-        prompt=f"delegation-{uuid.uuid4().hex[:6]}",
-    )
-    db_session.add(delegation)
-    db_session.flush()
-    kwargs: dict[str, Any] = {
-        "delegation_id": delegation.id,
-        "task_id": task.id,
-        "status": status,
-        "commit_hash": commit_hash,
-    }
-    # Explicit ``created_at`` lets tests order rows deterministically;
-    # without it, three logs flushed in quick succession can share the
-    # same ``now()`` tick and the ORDER BY falls back to insertion order.
-    if created_at is not None:
-        kwargs["created_at"] = created_at
-    log = ExecutionLog(**kwargs)
-    db_session.add(log)
-    db_session.flush()
-    return log
-
-
 # ── generate_status_md — DB-backed ───────────────────────────────────
 
 
@@ -613,85 +581,6 @@ def test_status_md_epic_without_version_has_no_bracket(db_session: Any) -> None:
 
     assert "## Epic 1: E — PLANNED" in md
     assert "[v" not in md  # no version bracket anywhere
-
-
-def test_status_md_commit_hash_trimmed_to_seven(db_session: Any) -> None:
-    project = _make_project(db_session)
-    epic = _make_epic(db_session, project=project, number=1)
-    feat = _make_feat(db_session, epic=epic, number=1)
-    task = _make_task(db_session, feat=feat, number=1, title="T", status="done")
-    _make_execution_log(db_session, task=task, commit_hash="b8fa302deadbeef1234")
-
-    svc = LiveDocumentService(project.slug)
-    md = svc.generate_status_md(db_session, project.id)
-
-    assert "- [x] 1.1.1 T (b8fa302)" in md
-    assert "deadbeef" not in md
-
-
-def test_status_md_done_task_without_execution_log_has_no_commit(db_session: Any) -> None:
-    project = _make_project(db_session)
-    epic = _make_epic(db_session, project=project, number=1)
-    feat = _make_feat(db_session, epic=epic, number=1)
-    _make_task(db_session, feat=feat, number=1, title="T", status="done")
-
-    svc = LiveDocumentService(project.slug)
-    md = svc.generate_status_md(db_session, project.id)
-
-    assert "- [x] 1.1.1 T" in md
-    assert "- [x] 1.1.1 T (" not in md  # no parenthesised commit
-
-
-def test_status_md_newest_execution_log_wins(db_session: Any) -> None:
-    project = _make_project(db_session)
-    epic = _make_epic(db_session, project=project, number=1)
-    feat = _make_feat(db_session, epic=epic, number=1)
-    task = _make_task(db_session, feat=feat, number=1, title="T", status="done")
-
-    # Three logs with explicit, monotonically-increasing timestamps —
-    # newest should win via ORDER BY created_at DESC.
-    _make_execution_log(
-        db_session,
-        task=task,
-        commit_hash="aaaaaaa1111",
-        created_at=datetime(2026, 1, 1, 10, 0, tzinfo=timezone.utc),
-    )
-    _make_execution_log(
-        db_session,
-        task=task,
-        commit_hash="bbbbbbb2222",
-        created_at=datetime(2026, 1, 1, 11, 0, tzinfo=timezone.utc),
-    )
-    _make_execution_log(
-        db_session,
-        task=task,
-        commit_hash="ccccccc3333",
-        created_at=datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
-    )
-
-    svc = LiveDocumentService(project.slug)
-    md = svc.generate_status_md(db_session, project.id)
-
-    assert "(ccccccc)" in md
-    assert "(aaaaaaa)" not in md
-    assert "(bbbbbbb)" not in md
-
-
-def test_status_md_ignores_execution_logs_without_commit(db_session: Any) -> None:
-    project = _make_project(db_session)
-    epic = _make_epic(db_session, project=project, number=1)
-    feat = _make_feat(db_session, epic=epic, number=1)
-    task = _make_task(db_session, feat=feat, number=1, title="T", status="done")
-
-    # An older log with a commit + a newer log with NULL commit — the real
-    # commit should still surface (NULL rows are filtered out in the query).
-    _make_execution_log(db_session, task=task, commit_hash="feedface1234")
-    _make_execution_log(db_session, task=task, commit_hash=None)
-
-    svc = LiveDocumentService(project.slug)
-    md = svc.generate_status_md(db_session, project.id)
-
-    assert "(feedfac)" in md
 
 
 def test_status_md_hierarchical_numbering_across_epics(db_session: Any) -> None:

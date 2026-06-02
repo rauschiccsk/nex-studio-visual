@@ -21,20 +21,11 @@ const Emoji = ({ glyph }: { glyph: string }) => (
 const IconHome = () => <Emoji glyph="🏠" />;
 const IconFolder = () => <Emoji glyph="📁" />;
 const IconVersions = () => <Emoji glyph="🌿" />;
-const IconWorkflow = () => <Emoji glyph="🔄" />;
 
 const IconDesigner = () => <Emoji glyph="✏️" />;
 const IconImplementer = () => <Emoji glyph="🔧" />;
 const IconAuditor = () => <Emoji glyph="🔍" />;
 const IconDialogue = () => <Emoji glyph="💬" />;
-
-const IconSpec = () => <Emoji glyph="📋" />;
-const IconSolution = () => <Emoji glyph="💡" />;
-const IconSummary = () => <Emoji glyph="📊" />;
-const IconArchitecture = () => <Emoji glyph="🏗️" />;
-const IconAudit = () => <Emoji glyph="✅" />;
-const IconTaskPlan = () => <Emoji glyph="📅" />;
-const IconImplementation = () => <Emoji glyph="🚀" />;
 
 const IconKbBook = () => <Emoji glyph="📚" />;
 const IconProjectSpecsBook = () => <Emoji glyph="📖" />;
@@ -145,12 +136,6 @@ export default function Sidebar() {
   const isActive = (path: string) =>
     path === "/" ? location.pathname === "/" : location.pathname.startsWith(path);
 
-  const isStepActive = (steps: string[]) => {
-    if (!selectedProject || !selectedVersion) return false;
-    const base = `/projects/${selectedProject.slug}/versions/${selectedVersion.versionId}/`;
-    return steps.some((s) => location.pathname === base + s);
-  };
-
   const handleLogout = async () => {
     await logout();
     navigate("/login");
@@ -158,38 +143,8 @@ export default function Sidebar() {
 
   const initials = user?.username ? user.username.slice(0, 1).toUpperCase() : "?";
 
-  // Pipeline step nav data. The "Solution" entry represents the parallel
-  // Krok 2 phase — it lands on /profspec (Vývojová dokumentácia) and the
-  // SolutionTabs header inside ProfSpecPage + UIDesignPage lets the user
-  // switch to /uidesign (Návrh UI dizajnu). Active highlight covers both
-  // underlying routes.
-  // "Specification" is rendered separately right after Workflow so the
-  // sidebar order matches the chronological pipeline flow (Workflow →
-  // Spec → Solution → Summary → …). Director directive 2026-05-15.
-  const pipelineSteps: { label: string; step: string; icon: React.ReactNode; matchSteps?: string[] }[] = [
-    { label: "Solution", step: "profspec", icon: <IconSolution />, matchSteps: ["profspec", "uidesign"] },
-    { label: "Summary", step: "summary", icon: <IconSummary /> },
-    { label: "Architecture", step: "architecture", icon: <IconArchitecture /> },
-    { label: "Quality Audit", step: "audit", icon: <IconAudit /> },
-    { label: "Task Plan", step: "taskplan", icon: <IconTaskPlan /> },
-    { label: "Implementation", step: "implementacia", icon: <IconImplementation /> },
-  ];
-
   const hasProject = Boolean(selectedProject);
-  const hasFullContext = Boolean(selectedProject && selectedVersion);
-
-  // Director directive 2026-05-14: Workflow + pipeline-step links must
-  // show *workflow content*, never projekt content. When no verzia is
-  // selected yet the links can't resolve to a workflow URL — so they
-  // render in disabled state (visible for discoverability, not
-  // clickable). The Versions link is the only path that legitimately
-  // works with just a pinned projekt — that's where the user picks a
-  // verzia, which auto-fills the selectedVersion slot and re-enables
-  // the rest of the workflow group.
   const projectsFallback = "/projects";
-  const noVersionTooltip = hasProject
-    ? "Otvor verziu v Versions"
-    : "Najprv pripni projekt v Projects";
 
   return (
     <aside
@@ -260,42 +215,6 @@ export default function Sidebar() {
           collapsed={collapsed}
           active={hasProject ? location.pathname === `/projects/${selectedProject!.slug}` : false}
         />
-        <NavItem
-          icon={<IconWorkflow />}
-          label="Workflow"
-          path={
-            hasFullContext
-              ? `/projects/${selectedProject!.slug}/versions/${selectedVersion!.versionId}`
-              : undefined
-          }
-          collapsed={collapsed}
-          disabled={!hasFullContext}
-          disabledTitle={noVersionTooltip}
-          active={
-            hasFullContext
-              ? location.pathname ===
-                `/projects/${selectedProject!.slug}/versions/${selectedVersion!.versionId}`
-              : false
-          }
-        />
-
-        {/* Specification — first chronological step of the pipeline,
-            placed directly under Workflow per Director directive
-            2026-05-15 (sidebar order must reflect pipeline chronology). */}
-        <NavItem
-          icon={<IconSpec />}
-          label="Specification"
-          path={
-            hasFullContext
-              ? `/projects/${selectedProject!.slug}/versions/${selectedVersion!.versionId}/spec`
-              : undefined
-          }
-          collapsed={collapsed}
-          disabled={!hasFullContext}
-          disabledTitle={noVersionTooltip}
-          active={isStepActive(["spec"])}
-        />
-
         {/* Embedded agent terminals — replace external Windows Terminal
             tabs with full-page xterm.js sessions inside NEX Studio
             (Director directive 2026-05-13). */}
@@ -304,22 +223,6 @@ export default function Sidebar() {
         <NavItem icon={<IconImplementer />} label="AG Implementator" path="/implementer" collapsed={collapsed} active={isActive("/implementer")} />
         <NavItem icon={<IconAuditor />} label="AG Auditor" path="/auditor" collapsed={collapsed} active={isActive("/auditor")} />
 
-        {pipelineSteps.map((s) => (
-          <NavItem
-            key={s.step}
-            icon={s.icon}
-            label={s.label}
-            path={
-              hasFullContext
-                ? `/projects/${selectedProject!.slug}/versions/${selectedVersion!.versionId}/${s.step}`
-                : undefined
-            }
-            collapsed={collapsed}
-            disabled={!hasFullContext}
-            disabledTitle={noVersionTooltip}
-            active={isStepActive(s.matchSteps ?? [s.step])}
-          />
-        ))}
         <NavItem icon={<IconKbBook />} label="Knowledge Base" path="/kb" collapsed={collapsed} active={isActive("/kb")} />
         <NavItem icon={<IconProjectSpecsBook />} label="Project Specs" path="/project-specs" collapsed={collapsed} active={isActive("/project-specs")} />
         <NavItem icon={<IconKey />} label="Credentials" path="/credentials" collapsed={collapsed} active={isActive("/credentials")} />

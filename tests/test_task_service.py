@@ -29,7 +29,6 @@ import uuid
 import pytest
 from sqlalchemy import select as sa_select
 
-from backend.db.models.delegations import Delegation, ExecutionLog
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic, Feat, Task
@@ -421,58 +420,6 @@ class TestTaskService:
         """``delete`` on a non-existent id raises ``ValueError``."""
         with pytest.raises(ValueError, match="not found"):
             service.delete(db_session, uuid.uuid4())
-
-    def test_delete_nulls_delegation_task_id(self, db_session):
-        """Deleting a task NULLs ``delegations.task_id`` (``ON DELETE SET NULL``)."""
-        feat = _make_feat(db_session)
-        task = service.create(db_session, _payload(feat.id))
-
-        delegation = Delegation(
-            task_id=task.id,
-            prompt="Do the thing",
-        )
-        db_session.add(delegation)
-        db_session.flush()
-        delegation_id = delegation.id
-
-        service.delete(db_session, task.id)
-        # Expire the identity map so subsequent lookups hit the DB and
-        # observe the DB-level SET NULL.
-        db_session.expire_all()
-
-        remaining = db_session.execute(
-            sa_select(Delegation).where(Delegation.id == delegation_id),
-        ).scalar_one()
-        assert remaining.task_id is None
-
-    def test_delete_nulls_execution_log_task_id(self, db_session):
-        """Deleting a task NULLs ``execution_logs.task_id`` (``ON DELETE SET NULL``)."""
-        feat = _make_feat(db_session)
-        task = service.create(db_session, _payload(feat.id))
-
-        delegation = Delegation(
-            task_id=task.id,
-            prompt="Do the thing",
-        )
-        db_session.add(delegation)
-        db_session.flush()
-
-        log = ExecutionLog(
-            delegation_id=delegation.id,
-            task_id=task.id,
-            status="done",
-        )
-        db_session.add(log)
-        db_session.flush()
-        log_id = log.id
-
-        service.delete(db_session, task.id)
-        db_session.expire_all()
-
-        remaining = db_session.execute(
-            sa_select(ExecutionLog).where(ExecutionLog.id == log_id),
-        ).scalar_one()
-        assert remaining.task_id is None
 
     # ------------------------------------------------------------------ list
     def test_list_all(self, db_session):

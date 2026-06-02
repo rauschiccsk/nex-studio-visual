@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from backend.db.models.bugs import Bug, BugFixTask
+from backend.db.models.bugs import Bug
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
@@ -382,35 +382,6 @@ class TestBugService:
         """``delete`` on a non-existent id raises ``ValueError``."""
         with pytest.raises(ValueError, match="not found"):
             service.delete(db_session, uuid.uuid4())
-
-    def test_delete_cascades_to_bug_fix_tasks(self, db_session):
-        """``delete`` relies on DB-level CASCADE to clean up ``bug_fix_tasks``."""
-        from sqlalchemy import select as sa_select
-
-        user = _make_user(db_session)
-        project = _make_project(db_session, user=user)
-        version = _make_version(db_session, project=project)
-        created = service.create(db_session, _payload(project.id, user.id, version_id=version.id))
-
-        task = BugFixTask(
-            bug_id=created.id,
-            number=1,
-            title="Fix the thing",
-            description="",
-            task_type="backend",
-        )
-        db_session.add(task)
-        db_session.flush()
-        task_id = task.id
-
-        service.delete(db_session, created.id)
-
-        # Expire the session cache so the next query hits the DB and sees
-        # the CASCADE effect rather than the stale in-memory ORM state.
-        db_session.expire_all()
-
-        remaining = db_session.execute(sa_select(BugFixTask).where(BugFixTask.id == task_id)).scalar_one_or_none()
-        assert remaining is None
 
     # ------------------------------------------------------------------ list
     def test_list_all(self, db_session):

@@ -24,15 +24,9 @@ import uuid
 import bcrypt
 import pytest
 
-from backend.db.models.architect import ArchitectSession
 from backend.db.models.bugs import Bug
 from backend.db.models.foundation import User, UserSession
 from backend.db.models.projects import Project
-from backend.db.models.specifications import (
-    DesignDocument,
-    ProfessionalSpecification,
-    RawSpecification,
-)
 from backend.schemas.user import UserCreate, UserUpdate
 from backend.services import user as service
 
@@ -285,115 +279,6 @@ class TestUserService:
 
         with pytest.raises(ValueError, match="bugs"):
             service.delete(db_session, reporter.id)
-
-    def test_delete_blocked_by_architect_session(self, db_session):
-        """``delete`` refuses when an ``architect_sessions.created_by`` references the user."""
-        owner = service.create(db_session, _payload())
-        project = Project(
-            name=f"P-{uuid.uuid4().hex[:6]}",
-            slug=f"p-{uuid.uuid4().hex[:6]}",
-            category="singlemodule",
-            description="",
-            created_by=owner.id,
-        )
-        db_session.add(project)
-        db_session.flush()
-
-        arch_user = service.create(db_session, _payload())
-        session = ArchitectSession(
-            project_id=project.id,
-            created_by=arch_user.id,
-        )
-        db_session.add(session)
-        db_session.flush()
-
-        with pytest.raises(ValueError, match="architect_sessions"):
-            service.delete(db_session, arch_user.id)
-
-    def test_delete_blocked_by_raw_specification(self, db_session):
-        """``delete`` refuses when a ``raw_specifications.created_by`` references the user."""
-        owner = service.create(db_session, _payload())
-        project = Project(
-            name=f"P-{uuid.uuid4().hex[:6]}",
-            slug=f"p-{uuid.uuid4().hex[:6]}",
-            category="singlemodule",
-            description="",
-            created_by=owner.id,
-        )
-        db_session.add(project)
-        db_session.flush()
-
-        author = service.create(db_session, _payload())
-        raw_spec = RawSpecification(
-            project_id=project.id,
-            input_text="spec",
-            created_by=author.id,
-        )
-        db_session.add(raw_spec)
-        db_session.flush()
-
-        with pytest.raises(ValueError, match="raw_specifications"):
-            service.delete(db_session, author.id)
-
-    def test_delete_blocked_by_professional_specification(self, db_session):
-        """``delete`` refuses when a ``professional_specifications.approved_by`` references the user."""
-        owner = service.create(db_session, _payload())
-        project = Project(
-            name=f"P-{uuid.uuid4().hex[:6]}",
-            slug=f"p-{uuid.uuid4().hex[:6]}",
-            category="singlemodule",
-            description="",
-            created_by=owner.id,
-        )
-        db_session.add(project)
-        db_session.flush()
-
-        raw_spec = RawSpecification(
-            project_id=project.id,
-            input_text="spec",
-            created_by=owner.id,
-        )
-        db_session.add(raw_spec)
-        db_session.flush()
-
-        approver = service.create(db_session, _payload())
-        prof_spec = ProfessionalSpecification(
-            raw_spec_id=raw_spec.id,
-            project_id=project.id,
-            content="content",
-            approved_by=approver.id,
-        )
-        db_session.add(prof_spec)
-        db_session.flush()
-
-        with pytest.raises(ValueError, match="professional_specifications"):
-            service.delete(db_session, approver.id)
-
-    def test_delete_blocked_by_design_document(self, db_session):
-        """``delete`` refuses when a ``design_documents.approved_by`` references the user."""
-        owner = service.create(db_session, _payload())
-        project = Project(
-            name=f"P-{uuid.uuid4().hex[:6]}",
-            slug=f"p-{uuid.uuid4().hex[:6]}",
-            category="singlemodule",
-            description="",
-            created_by=owner.id,
-        )
-        db_session.add(project)
-        db_session.flush()
-
-        approver = service.create(db_session, _payload())
-        doc = DesignDocument(
-            project_id=project.id,
-            doc_type="design",
-            content="content",
-            approved_by=approver.id,
-        )
-        db_session.add(doc)
-        db_session.flush()
-
-        with pytest.raises(ValueError, match="design_documents"):
-            service.delete(db_session, approver.id)
 
     # ------------------------------------------------------------------ list
     def test_list_all(self, db_session):

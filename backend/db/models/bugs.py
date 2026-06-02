@@ -1,4 +1,4 @@
-"""Bug domain models — Bug and BugFixTask."""
+"""Bug domain model."""
 
 from sqlalchemy import (
     CheckConstraint,
@@ -67,36 +67,3 @@ class Bug(Base, UUIDMixin, TimestampMixin):
     # Inverse side of Version.bugs. The FK uses ondelete='RESTRICT' —
     # deleting a Version that still has Bugs raises a FK violation.
     version = relationship("Version", back_populates="bugs")
-
-
-class BugFixTask(Base, UUIDMixin, TimestampMixin):
-    """Task created to fix a specific bug."""
-
-    __tablename__ = "bug_fix_tasks"
-
-    bug_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("bugs.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    number = Column(Integer, nullable=False)
-    title = Column(String(500), nullable=False)
-    description = Column(Text, nullable=False, server_default="")
-    task_type = Column(String(20), nullable=False)
-    status = Column(String(20), nullable=False, server_default="todo", index=True)
-    estimated_minutes = Column(Integer, nullable=True)
-    actual_minutes = Column(Integer, nullable=True)
-    checklist_type = Column(String(30), nullable=True)
-
-    __table_args__ = (
-        UniqueConstraint("bug_id", "number", name="uq_bug_fix_tasks_bug_id_number"),
-        CheckConstraint(
-            "task_type IN ('backend', 'frontend', 'migration', 'test', 'docs')",
-            name="ck_bug_fix_tasks_task_type",
-        ),
-        CheckConstraint(
-            "status IN ('todo', 'in_progress', 'done', 'failed')",
-            name="ck_bug_fix_tasks_status",
-        ),
-    )

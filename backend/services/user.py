@@ -20,11 +20,8 @@ Design notes (per DESIGN.md §1.1 Foundation — Auth & Users and
       reaches the service (e.g. a bypassed schema) the DB CHECK will
       reject it on flush.
     * :func:`delete` proactively checks every inbound ``ondelete='RESTRICT'``
-      FK (``projects.created_by``, ``bugs.created_by``,
-      ``architect_sessions.created_by``, ``raw_specifications.created_by``,
-      ``professional_specifications.approved_by``,
-      ``design_documents.approved_by``) and raises :class:`ValueError` when
-      references exist. ``user_sessions`` cascades
+      FK (``projects.created_by``, ``bugs.created_by``) and raises
+      :class:`ValueError` when references exist. ``user_sessions`` cascades
       on delete and therefore needs no check.
     * ``is_active`` is the soft-disable flag — :func:`delete` is a hard
       delete reserved for test fixtures / admin tooling. Routine
@@ -42,15 +39,9 @@ import bcrypt
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from backend.db.models.architect import ArchitectSession
 from backend.db.models.bugs import Bug
 from backend.db.models.foundation import User, UserSession
 from backend.db.models.projects import Project
-from backend.db.models.specifications import (
-    DesignDocument,
-    ProfessionalSpecification,
-    RawSpecification,
-)
 from backend.schemas.user import UserCreate, UserRole, UserUpdate
 
 
@@ -254,10 +245,6 @@ def _has_restrict_dependencies(db: Session, user_id: UUID) -> Optional[str]:
     Checks every inbound ``ondelete='RESTRICT'`` FK on ``users.id``:
       * ``projects.created_by``
       * ``bugs.created_by``
-      * ``architect_sessions.created_by``
-      * ``raw_specifications.created_by``
-      * ``professional_specifications.approved_by``
-      * ``design_documents.approved_by``
 
     ``user_sessions.user_id`` uses ``ON DELETE CASCADE`` and therefore
     imposes no constraint.
@@ -267,14 +254,6 @@ def _has_restrict_dependencies(db: Session, user_id: UUID) -> Optional[str]:
     checks: list[tuple[type, object, str]] = [
         (Project, Project.created_by, "projects"),
         (Bug, Bug.created_by, "bugs"),
-        (ArchitectSession, ArchitectSession.created_by, "architect_sessions"),
-        (RawSpecification, RawSpecification.created_by, "raw_specifications"),
-        (
-            ProfessionalSpecification,
-            ProfessionalSpecification.approved_by,
-            "professional_specifications",
-        ),
-        (DesignDocument, DesignDocument.approved_by, "design_documents"),
     ]
     for model, column, table in checks:
         exists = db.execute(select(model.id).where(column == user_id).limit(1)).first()
@@ -293,9 +272,8 @@ def delete(db: Session, user_id: UUID) -> None:
     prefer :func:`update` with ``is_active=False`` (soft disable).
 
     Raises:
-        ValueError: If the user does not exist, or if any project, bug,
-            architect session, raw specification, professional
-            specification, or design document still references them.
+        ValueError: If the user does not exist, or if any project or bug
+            still references them.
     """
     user = get_by_id(db, user_id)
 

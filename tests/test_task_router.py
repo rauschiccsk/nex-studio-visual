@@ -538,47 +538,6 @@ class TestTaskRouter:
         assert "- [x]" in status_md
         assert "Implement login" in status_md
 
-    def test_patch_to_done_with_execution_log_surfaces_commit(self, db_session, router_client, feat, project, tmp_path):
-        """When an ExecutionLog carries a commit hash, it lands in the entries."""
-        from backend.db.models.delegations import Delegation, ExecutionLog
-
-        created = router_client.post(
-            "/api/v1/tasks",
-            json=_payload(feat_id=feat.id, title="Add migration"),
-        ).json()
-        task_id = uuid.UUID(created["id"])
-
-        # Seed a successful execution log with a commit.
-        delegation = Delegation(task_id=task_id, prompt="seed")
-        db_session.add(delegation)
-        db_session.flush()
-        log = ExecutionLog(
-            delegation_id=delegation.id,
-            task_id=task_id,
-            status="done",
-            commit_hash="abc1234567890",
-            duration_seconds=42,
-        )
-        db_session.add(log)
-        db_session.flush()
-
-        resp = router_client.patch(
-            f"/api/v1/tasks/{task_id}",
-            json={"status": "done"},
-        )
-        assert resp.status_code == 200
-
-        project_dir = tmp_path / "projects" / project.slug
-        history = (project_dir / "HISTORY.md").read_text(encoding="utf-8")
-        status_md = (project_dir / "STATUS.md").read_text(encoding="utf-8")
-
-        # History has the short commit prefix.
-        assert "abc1234" in history
-        # STATUS renders the 7-char commit suffix on the done task line.
-        assert "(abc1234)" in status_md
-        # ARCHITECT.md is deprecated — must not be created.
-        assert not (project_dir / "ARCHITECT.md").exists()
-
     def test_patch_to_done_without_execution_log_seeds_history_only(self, router_client, feat, project, tmp_path):
         """No execution log → HISTORY entry created, no ARCHITECT.md (deprecated)."""
         created = router_client.post(

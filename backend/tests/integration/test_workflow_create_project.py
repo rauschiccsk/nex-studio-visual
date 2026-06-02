@@ -84,7 +84,6 @@ Auth note:
 from __future__ import annotations
 
 import uuid
-from decimal import Decimal
 from typing import Any
 from unittest.mock import patch
 
@@ -92,7 +91,6 @@ import pytest
 
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
-from backend.db.models.reports import ReportConfig
 
 
 @pytest.fixture(autouse=True)
@@ -233,7 +231,7 @@ def _project_payload(creator_id: uuid.UUID, **overrides: Any) -> dict[str, Any]:
 class TestCreateProjectHappyPath:
     """End-to-end walkthrough of workflow §3.6 against the real app."""
 
-    def test_full_workflow_with_four_members_and_default_report_config(
+    def test_full_workflow_with_four_members(
         self,
         client,
         db_session,
@@ -247,8 +245,7 @@ class TestCreateProjectHappyPath:
         The test asserts both the HTTP contract (status codes, payload
         shape) and the database state after each step. The worked
         example from BEHAVIOR.md §3.6 is reproduced faithfully: Zoltán
-        creates NEX Horizont with four members and the default report
-        configuration is created automatically.
+        creates NEX Horizont with four members.
         """
         # --- Step 1 (precondition): no project with the target name /
         # slug exists yet. The dashboard uses this list to warn about
@@ -288,20 +285,6 @@ class TestCreateProjectHappyPath:
 
         project_id = created["id"]
 
-        # --- Step 3b: create the default report configuration. Only
-        # ``project_id`` is sent — the Pydantic schema / DB
-        # ``server_default`` fills in the canonical 75 EUR / 35 EUR
-        # rates (BEHAVIOR.md §3.6 postcondition line 4).
-        report_cfg_resp = client.post(
-            "/api/v1/report-configs",
-            json={"project_id": project_id},
-        )
-        assert report_cfg_resp.status_code == 201, report_cfg_resp.text
-        cfg = report_cfg_resp.json()
-        assert cfg["project_id"] == project_id
-        assert Decimal(cfg["senior_hourly_rate_eur"]) == Decimal("75.0000")
-        assert Decimal(cfg["junior_hourly_rate_eur"]) == Decimal("35.0000")
-
         # --- Step 5: system redirects to project dashboard; the
         # dashboard fires a ``GET /api/v1/projects/{id}`` on load to
         # hydrate the ``ProjectPage``. The re-read must echo what the
@@ -319,17 +302,6 @@ class TestCreateProjectHappyPath:
         assert after_list.status_code == 200
         assert after_list.json()["total"] == 1
         assert [row["id"] for row in after_list.json()["items"]] == [project_id]
-
-        # 2. The report configuration for the project is retrievable
-        #    and carries the default rates.
-        cfg_list = client.get(
-            "/api/v1/report-configs",
-            params={"project_id": project_id},
-        )
-        assert cfg_list.status_code == 200
-        assert cfg_list.json()["total"] == 1
-        assert Decimal(cfg_list.json()["items"][0]["senior_hourly_rate_eur"]) == Decimal("75.0000")
-        assert Decimal(cfg_list.json()["items"][0]["junior_hourly_rate_eur"]) == Decimal("35.0000")
 
         # --- Postcondition verification (DB state) ---------------------
         db_session.expire_all()
@@ -349,15 +321,6 @@ class TestCreateProjectHappyPath:
         assert persisted_project.frontend_port == NEX_HORIZONT_FRONTEND_PORT
         assert persisted_project.db_port == NEX_HORIZONT_DB_PORT
         assert persisted_project.repo_url == NEX_HORIZONT_REPO_URL
-
-        # 2. ``report_configs`` has one row for the project with the
-        #    default senior / junior hourly rates (75 / 35 EUR).
-        cfg_id = cfg_list.json()["items"][0]["id"]
-        persisted_cfg = db_session.get(ReportConfig, uuid.UUID(cfg_id))
-        assert persisted_cfg is not None
-        assert persisted_cfg.project_id == persisted_project.id
-        assert persisted_cfg.senior_hourly_rate_eur == Decimal("75.0000")
-        assert persisted_cfg.junior_hourly_rate_eur == Decimal("35.0000")
 
     def test_ri_senior_may_also_create_a_project(
         self,

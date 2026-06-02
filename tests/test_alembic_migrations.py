@@ -45,26 +45,20 @@ def test_every_model_table_is_in_metadata() -> None:
 
 
 def test_expected_domain_tables_present() -> None:
-    """All 23 domain tables (per Feat 1 Domain Models) are registered."""
+    """The 9 core domain tables that survive CR-NS-008 are registered.
+
+    The legacy in-app design/execution pipeline tables were dropped by
+    migration 048; multi-module (``project_modules`` /
+    ``module_dependencies``) and the agent infra (Versions / Epics /
+    Feats / Tasks / Bugs) are preserved.
+    """
     expected_tables = {
-        "architect_messages",
-        "architect_sessions",
-        "auto_fix_attempts",
-        "bug_fix_tasks",
         "bugs",
-        "delegations",
-        "design_documents",
         "epics",
-        "execution_logs",
         "feats",
-        "guardian_precedents",
-        "guardian_reviews",
         "module_dependencies",
-        "professional_specifications",
         "project_modules",
         "projects",
-        "raw_specifications",
-        "report_configs",
         "tasks",
         "user_sessions",
         "users",

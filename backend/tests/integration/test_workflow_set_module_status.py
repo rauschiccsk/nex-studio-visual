@@ -88,7 +88,6 @@ import uuid
 
 import pytest
 
-from backend.db.models.architect import ArchitectSession
 from backend.db.models.foundation import User
 from backend.db.models.projects import (
     ModuleDependency,
@@ -329,46 +328,16 @@ class TestSetModuleStatusHappyPath:
         planned_codes = {row["code"] for row in planned_list.json()["items"]}
         assert "stk" not in planned_codes
 
-        # 4. §3.8 postcondition line 2: "Architect session pre STK je
-        #    teraz možné otvoriť". Creating the session through the
-        #    real router succeeds — the DB layer does not gate session
-        #    creation on module status, but the positive observability
-        #    check keeps the §3.8 postcondition visible in the test
-        #    matrix. ``created_by`` is resolved via the project row
-        #    rather than the module's ORM relationship so the test
-        #    is not coupled to relationship-eager-loading semantics.
-        project = db_session.get(Project, stk_planned.project_id)
-        assert project is not None
-        session_resp = client.post(
-            "/api/v1/architect-sessions",
-            json={
-                "project_id": str(stk_planned.project_id),
-                "module_id": str(stk_planned.id),
-                "created_by": str(project.created_by),
-            },
-        )
-        assert session_resp.status_code == 201, session_resp.text
-        session_body = session_resp.json()
-        assert session_body["module_id"] == str(stk_planned.id)
-        assert session_body["status"] == "active"
-
         # --- Postcondition verification (DB state) ---------------------
         db_session.expire_all()
 
-        # 1. ``project_modules.status`` is persisted — not a
-        #    session-cached value — and the DB CHECK did not reject
-        #    the transition.
+        # ``project_modules.status`` is persisted — not a
+        # session-cached value — and the DB CHECK did not reject
+        # the transition.
         persisted_module = db_session.get(ProjectModule, stk_planned.id)
         assert persisted_module is not None
         assert persisted_module.status == "in_development"
         assert persisted_module.code == "stk"
-
-        # 2. The Architect session is persisted and wired to STK.
-        persisted_session = db_session.get(ArchitectSession, uuid.UUID(session_body["id"]))
-        assert persisted_session is not None
-        assert persisted_session.module_id == stk_planned.id
-        assert persisted_session.project_id == stk_planned.project_id
-        assert persisted_session.status == "active"
 
     def test_full_lifecycle_progression_planned_to_done(
         self,

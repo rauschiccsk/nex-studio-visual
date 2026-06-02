@@ -33,7 +33,6 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.db.models.delegations import ExecutionLog
 from backend.db.models.projects import Project, ProjectModule
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.versions import Version
@@ -113,10 +112,7 @@ class LiveDocumentService:
 
         Version appears as a bracketed suffix on the Epic header when
         ``epic.version_id`` is set; version-less epics render without
-        it. The 7-character commit suffix appears only on done tasks
-        that have at least one ``ExecutionLog`` row with a non-null
-        ``commit_hash`` — if a task has several such logs, the newest
-        one wins.
+        it.
 
         Returns a special message when the project does not exist
         (mirrors NEX Command behaviour) so the generator is safe to
@@ -158,8 +154,10 @@ class LiveDocumentService:
         feats_by_epic = _group_feats_by_epic(db, epic_ids)
         feat_ids = [f.id for feats in feats_by_epic.values() for f in feats]
         tasks_by_feat = _group_tasks_by_feat(db, feat_ids)
-        done_task_ids = [t.id for feat_tasks in tasks_by_feat.values() for t in feat_tasks if t.status == "done"]
-        commit_by_task = _latest_commit_per_task(db, done_task_ids)
+        # Commit-hash enrichment came from the removed ExecutionLog
+        # delegation pipeline (CR-NS-008); done tasks now render without
+        # a commit suffix.
+        commit_by_task: dict[UUID, str] = {}
 
         lines: list[str] = [f"# {project.name} — Status", f"Updated: {now}", ""]
 
@@ -383,31 +381,6 @@ def _group_tasks_by_feat(db: Session, feat_ids: list[UUID]) -> dict[UUID, list[T
     for task in tasks:
         grouped.setdefault(task.feat_id, []).append(task)
     return grouped
-
-
-def _latest_commit_per_task(db: Session, task_ids: list[UUID]) -> dict[UUID, str]:
-    """Return a mapping of ``task_id`` → newest ``ExecutionLog.commit_hash``.
-
-    Only rows with ``status='done'`` and a non-null ``commit_hash`` are
-    considered; for a task with multiple such rows, the newest one
-    (``created_at DESC``) wins.
-    """
-    if not task_ids:
-        return {}
-    rows = db.execute(
-        select(ExecutionLog.task_id, ExecutionLog.commit_hash)
-        .where(
-            ExecutionLog.task_id.in_(task_ids),
-            ExecutionLog.commit_hash.is_not(None),
-            ExecutionLog.status == "done",
-        )
-        .order_by(ExecutionLog.task_id, ExecutionLog.created_at.desc())
-    ).all()
-    commit_by_task: dict[UUID, str] = {}
-    for task_id, commit_hash in rows:
-        # First row per task_id due to DESC order — setdefault preserves it.
-        commit_by_task.setdefault(task_id, commit_hash)
-    return commit_by_task
 
 
 def _ordinal(n: int) -> str:

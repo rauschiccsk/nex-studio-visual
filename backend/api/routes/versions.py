@@ -43,12 +43,10 @@ prefix="/api/v1")``.
 
 from __future__ import annotations
 
-import logging
 import re
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -56,12 +54,9 @@ from sqlalchemy.orm import Session
 from backend.core.security import get_current_user, require_ri_role
 from backend.db.models.foundation import User
 from backend.db.models.tasks import Epic, Feat, Task
-from backend.db.session import SessionLocal, get_db
+from backend.db.session import get_db
 from backend.schemas.version import VersionCreate, VersionRead, VersionUpdate
-from backend.services import task_plan_generator
 from backend.services import version as version_service
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Versions"])
 
@@ -398,115 +393,6 @@ def reset_plan(
         db.delete(e)
     db.commit()
     return {"deleted_epics": count}
-
-
-@router.post("/versions/{version_id}/append-epic", status_code=status.HTTP_200_OK)
-async def append_epic(
-    version_id: UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_ri_role),
-):
-    """Stream-generate a new EPIC appended to the existing task plan.
-
-    Uses the same DESIGN.md + Claude pipeline as ``generate-task-plan`` but
-    never deletes existing EPICs — computes the next epic number offset and
-    appends the new EPIC(s) / Feats / Tasks after the last existing one.
-    ``ri`` role only.
-    """
-    try:
-        version = version_service.get_by_id(db, version_id)
-    except ValueError as exc:
-        raise _map_value_error(exc) from exc
-
-    project_id = version.project_id
-
-    async def _sse_generator():
-        gen_db = SessionLocal()
-        try:
-            async for event in task_plan_generator.generate_task_plan_stream(
-                version_id=version_id,
-                project_id=project_id,
-                db=gen_db,
-                replace_existing=False,
-            ):
-                yield event
-        except Exception as exc:
-            import json as _json
-
-            logger.exception("Unexpected error in append-epic SSE for version %s", version_id)
-            yield f"data: {_json.dumps({'type': 'error', 'content': str(exc)})}\n\n"
-        finally:
-            gen_db.close()
-
-    return StreamingResponse(
-        _sse_generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-
-class _GenerateTaskPlanRequest(BaseModel):
-    """Request body for POST /versions/{version_id}/generate-task-plan."""
-
-    replace_existing: bool = False
-    """When True, all existing EPICs under this version are deleted before
-    generating the new plan. Defaults to False (append / new plan)."""
-
-
-@router.post(
-    "/versions/{version_id}/generate-task-plan",
-    status_code=status.HTTP_200_OK,
-)
-async def generate_task_plan(
-    version_id: UUID,
-    payload: _GenerateTaskPlanRequest = _GenerateTaskPlanRequest(),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_ri_role),
-):
-    """Stream-generate a VERSION → EPIC → FEAT → TASK plan from the project's DESIGN.md.
-
-    Reads the latest DESIGN.md (and BEHAVIOR.md if available) stored in the
-    ``design_documents`` table for the parent project, calls Claude CLI to
-    generate the plan JSON, persists the resulting ``epics`` / ``feats`` /
-    ``tasks`` records, and streams SSE progress events::
-
-        data: {"type": "progress", "message": "...", "percent": N}
-        data: {"type": "done", "plan": [...], "epic_count": N, "feat_count": N, "task_count": N}
-        data: {"type": "error", "content": "..."}
-        data: {"type": "validation_error", "content": "..."}
-
-    ``ri`` role only.
-    """
-    try:
-        version = version_service.get_by_id(db, version_id)
-    except ValueError as exc:
-        raise _map_value_error(exc) from exc
-
-    project_id = version.project_id
-
-    async def _sse_generator():
-        gen_db = SessionLocal()
-        try:
-            async for event in task_plan_generator.generate_task_plan_stream(
-                version_id=version_id,
-                project_id=project_id,
-                db=gen_db,
-                replace_existing=payload.replace_existing,
-            ):
-                yield event
-        except Exception as exc:
-            import json as _json
-
-            logger.exception("Unexpected error in task plan SSE generator for version %s", version_id)
-            yield f"data: {_json.dumps({'type': 'error', 'content': str(exc)})}\n\n"
-        finally:
-            gen_db.close()
-
-    return StreamingResponse(
-        _sse_generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
 
 
 @router.post(

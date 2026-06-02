@@ -68,7 +68,6 @@ from sqlalchemy.orm import Session
 
 from backend.api.dependencies import get_knowledge_base_writer
 from backend.core.security import require_ha_or_above
-from backend.db.models.delegations import Delegation, ExecutionLog
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.session import get_db
@@ -110,43 +109,23 @@ def _task_context(db: Session, task_id: UUID) -> tuple[Task, Feat, Project] | No
     return row[0], row[1], row[2]
 
 
-def _build_task_completion_data(db: Session, task: Task, feat: Feat) -> TaskCompletionData:
+def _build_task_completion_data(task: Task, feat: Feat) -> TaskCompletionData:
     """Assemble the ``TaskCompletionData`` payload for a just-completed task.
 
-    Pulls the most recent successful ``ExecutionLog`` for the task to
-    surface the commit hash, duration and CC agent into the history /
-    architect entries. When no log exists (e.g. the task was flipped
-    to ``done`` manually without a delegation run) the DTO falls back
-    to neutral defaults — no commit suffix, zero duration, agent
-    ``"unknown"`` — and the generators render a minimal entry.
+    Commit-hash / duration / CC-agent enrichment used to come from the
+    ``ExecutionLog`` delegation pipeline. That subsystem has been removed
+    (CR-NS-008), so the DTO now always carries neutral defaults — no
+    commit suffix, zero duration, agent ``"unknown"`` — and the
+    generators render a minimal entry.
     """
-    log_row = db.execute(
-        select(ExecutionLog, Delegation)
-        .join(Delegation, ExecutionLog.delegation_id == Delegation.id)
-        .where(ExecutionLog.task_id == task.id)
-        .where(ExecutionLog.status == "done")
-        .order_by(ExecutionLog.created_at.desc())
-        .limit(1)
-    ).first()
-
-    if log_row is None:
-        commit_hashes: list[str] = []
-        duration_seconds = 0.0
-        agent = "unknown"
-    else:
-        log, delegation = log_row
-        commit_hashes = [log.commit_hash] if log.commit_hash else []
-        duration_seconds = float(log.duration_seconds or 0)
-        agent = delegation.cc_agent
-
     return TaskCompletionData(
         feat_number=feat.number,
         task_number=task.number,
         task_title=task.title,
         status="done",
-        duration_seconds=duration_seconds,
-        agent=agent,
-        commit_hashes=commit_hashes,
+        duration_seconds=0.0,
+        agent="unknown",
+        commit_hashes=[],
     )
 
 
@@ -303,7 +282,7 @@ def update_task(
 
         if ctx is not None and previous_status != "done" and task.status == "done":
             _, feat, project = ctx
-            data = _build_task_completion_data(db, task, feat)
+            data = _build_task_completion_data(task, feat)
             svc = LiveDocumentService(project.slug, writer=kb_writer)
             svc.append_history(data)
             svc.regenerate_status(db, project.id)
