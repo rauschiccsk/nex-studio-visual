@@ -43,6 +43,7 @@ const ROLE_LABEL: Record<AgentRole, string> = {
   designer: "Designer",
   implementer: "Implementer",
   auditor: "Auditor",
+  coordinator: "Koordinátor",
 };
 
 export interface AgentTerminalPageProps {

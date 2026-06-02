@@ -63,7 +63,7 @@ class AgentTerminalSession(Base, UUIDMixin, TimestampMixin):
 
     __table_args__ = (
         CheckConstraint(
-            "role IN ('designer', 'implementer', 'auditor')",
+            "role IN ('designer', 'implementer', 'auditor', 'coordinator')",
             name="ck_ats_role",
         ),
         CheckConstraint(

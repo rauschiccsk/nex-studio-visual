@@ -65,7 +65,7 @@ logger = logging.getLogger(__name__)
 
 PROJECTS_ROOT = Path("/opt/projects")
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9-]*[a-z0-9]$|^[a-z]$")
-_VALID_ROLES = frozenset({"designer", "implementer", "auditor"})
+_VALID_ROLES = frozenset({"designer", "implementer", "auditor", "coordinator"})
 
 # Output ring buffer (RAM) — fast replay for rapid re-attach. Disk log
 # is authoritative for long-term history.

@@ -1,11 +1,12 @@
 /**
- * agentTerminalStore — Zustand store owning the lifecycle of the three
- * embedded claude CLI sessions (Designer / Implementer / Auditor).
+ * agentTerminalStore — Zustand store owning the lifecycle of the embedded
+ * claude CLI sessions (Designer / Implementer / Auditor / Coordinator).
  *
  * Single source of truth so the WebSocket + xterm.js instance hosted by
  * :file:`components/PersistentTerminalsLayer.tsx` survives React Router
- * navigation between ``/designer`` ↔ ``/implementer`` ↔ ``/auditor``
- * (CR-NS-004). The page :file:`pages/AgentTerminalPage.tsx` consumes this
+ * navigation between ``/designer`` ↔ ``/implementer`` ↔ ``/auditor`` ↔
+ * ``/coordinator`` (CR-NS-004, CR-NS-009). The page
+ * :file:`pages/AgentTerminalPage.tsx` consumes this
  * store for chrome rendering and dispatches lifecycle actions; the layer
  * consumes it to know which slots to mount.
  *
@@ -38,6 +39,7 @@ export interface AgentTerminalState {
   designer: SlotState;
   implementer: SlotState;
   auditor: SlotState;
+  coordinator: SlotState;
   /** ``true`` once :func:`refresh` has completed at least once. Layer
    *  uses this to gate "first fetch after login" logic. */
   initialized: boolean;
@@ -48,11 +50,11 @@ export interface AgentTerminalState {
   spawn: (role: AgentRole, projectSlug: string) => Promise<void>;
   /** End the active session for ``role`` (idempotent) and clear slot. */
   end: (role: AgentRole) => Promise<void>;
-  /** Wipe all 3 slots and reset ``initialized`` — call on logout. */
+  /** Wipe all slots and reset ``initialized`` — call on logout. */
   reset: () => void;
 }
 
-const ROLES: readonly AgentRole[] = ["designer", "implementer", "auditor"];
+const ROLES: readonly AgentRole[] = ["designer", "implementer", "auditor", "coordinator"];
 
 function setSlot(
   state: AgentTerminalState,
@@ -66,6 +68,7 @@ export const useAgentTerminalStore = create<AgentTerminalState>()((set, get) => 
   designer: EMPTY_SLOT,
   implementer: EMPTY_SLOT,
   auditor: EMPTY_SLOT,
+  coordinator: EMPTY_SLOT,
   initialized: false,
 
   async refresh(): Promise<void> {
@@ -73,6 +76,7 @@ export const useAgentTerminalStore = create<AgentTerminalState>()((set, get) => 
       designer: { ...s.designer, status: "loading", error: "" },
       implementer: { ...s.implementer, status: "loading", error: "" },
       auditor: { ...s.auditor, status: "loading", error: "" },
+      coordinator: { ...s.coordinator, status: "loading", error: "" },
     }));
     try {
       const rows = await listAgentTerminalSessionsApi();
@@ -97,6 +101,7 @@ export const useAgentTerminalStore = create<AgentTerminalState>()((set, get) => 
         designer: { ...s.designer, status: "idle", error: msg },
         implementer: { ...s.implementer, status: "idle", error: msg },
         auditor: { ...s.auditor, status: "idle", error: msg },
+        coordinator: { ...s.coordinator, status: "idle", error: msg },
         initialized: true,
       }));
     }
@@ -138,6 +143,7 @@ export const useAgentTerminalStore = create<AgentTerminalState>()((set, get) => 
       designer: EMPTY_SLOT,
       implementer: EMPTY_SLOT,
       auditor: EMPTY_SLOT,
+      coordinator: EMPTY_SLOT,
       initialized: false,
     });
   },

@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9-]*[a-z0-9]$|^[a-z]$")
 
-AgentRole = Literal["designer", "implementer", "auditor"]
+AgentRole = Literal["designer", "implementer", "auditor", "coordinator"]
 TerminatedBy = Literal["idle", "user", "crash", "server_restart"]
 
 

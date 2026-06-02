@@ -40,6 +40,7 @@ function matchActiveRole(pathname: string): AgentRole | null {
   if (pathname === "/designer") return "designer";
   if (pathname === "/implementer") return "implementer";
   if (pathname === "/auditor") return "auditor";
+  if (pathname === "/coordinator") return "coordinator";
   return null;
 }
 
@@ -50,6 +51,7 @@ export function PersistentTerminalsLayer() {
   const designer = useAgentTerminalStore((s) => s.designer);
   const implementer = useAgentTerminalStore((s) => s.implementer);
   const auditor = useAgentTerminalStore((s) => s.auditor);
+  const coordinator = useAgentTerminalStore((s) => s.coordinator);
   const initialized = useAgentTerminalStore((s) => s.initialized);
   const refresh = useAgentTerminalStore((s) => s.refresh);
   const reset = useAgentTerminalStore((s) => s.reset);
@@ -87,6 +89,7 @@ export function PersistentTerminalsLayer() {
     ["designer", designer],
     ["implementer", implementer],
     ["auditor", auditor],
+    ["coordinator", coordinator],
   ];
 
   return (

@@ -1,15 +1,16 @@
 {
+  "model": "claude-opus-4-8",
   "_comment": "Production-ready Koordinátor settings.json template. Pri Create Project sa <PROJECT_ROOT> nahradí konkrétnou cestou (/opt/projects/<slug>/). Inšpirácia z nex-inbox Designer/Implementer/Auditor settings (proven pattern). Per memory L-016: žiadne relatívne globy v deny zozname — všetky cesty absolútne.",
   "permissions": {
     "allow": [
       "Read",
       "Glob",
       "Grep",
-      "Write(<PROJECT_ROOT>/docs/dedo-inbox/*.md)",
+      "Write(<PROJECT_ROOT>/.dedo-channel/inbox/*.md)",
       "Write(<PROJECT_ROOT>/docs/session-logs/coordinator/**)",
       "Write(<PROJECT_ROOT>/.nex-coordinator-state.md)",
       "Write(<PROJECT_ROOT>/docs/uat/**/acceptance-checklist.md)",
-      "Edit(<PROJECT_ROOT>/docs/dedo-inbox/*.md)",
+      "Edit(<PROJECT_ROOT>/.dedo-channel/inbox/*.md)",
       "Edit(<PROJECT_ROOT>/docs/session-logs/coordinator/**)",
       "Edit(<PROJECT_ROOT>/.nex-coordinator-state.md)",
       "Edit(<PROJECT_ROOT>/docs/uat/**/acceptance-checklist.md)",

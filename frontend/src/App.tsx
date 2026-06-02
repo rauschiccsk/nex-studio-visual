@@ -52,6 +52,7 @@ function App() {
             <Route path="designer" element={<AgentTerminalPage role="designer" />} />
             <Route path="implementer" element={<AgentTerminalPage role="implementer" />} />
             <Route path="auditor" element={<AgentTerminalPage role="auditor" />} />
+            <Route path="coordinator" element={<AgentTerminalPage role="coordinator" />} />
             <Route path="dialogue" element={<DialoguePage />} />
             <Route path="credentials" element={<CredentialsPage />} />
             <Route path="settings" element={<SettingsPage />} />

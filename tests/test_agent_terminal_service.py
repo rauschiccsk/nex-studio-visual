@@ -41,7 +41,7 @@ def fake_project(tmp_path, monkeypatch):
     """
     slug = "sample-project"
     project_root = tmp_path / slug
-    for role in ("designer", "implementer", "auditor"):
+    for role in ("designer", "implementer", "auditor", "coordinator"):
         agent_dir = project_root / ".claude" / "agents" / role
         agent_dir.mkdir(parents=True)
         (agent_dir / "CLAUDE.md").write_text(f"# {role} agent\nTest prompt.\n")
@@ -113,6 +113,33 @@ class TestSpawn:
         assert runtime.process.isalive()
 
         # Cleanup: end so cat exits cleanly.
+        await service.end_session(row.id, terminated_by="user", db=db_session)
+
+    @pytest.mark.asyncio
+    async def test_spawn_coordinator_role(
+        self,
+        db_session,
+        fake_project,
+        cat_spawn,
+    ):
+        """The coordinator role (CR-NS-009) spawns like any other valid role."""
+        user = seed_user(db_session, username="ri_spawn_coord", role="ri")
+
+        row = await service.spawn(
+            user_id=user.id,
+            role="coordinator",
+            project_slug=fake_project,
+            db=db_session,
+        )
+
+        assert row.id is not None
+        assert row.role == "coordinator"
+        assert row.ended_at is None
+
+        runtime = service._get_runtime_for_test(row.id)
+        assert runtime is not None
+        assert runtime.process.isalive()
+
         await service.end_session(row.id, terminated_by="user", db=db_session)
 
     @pytest.mark.asyncio

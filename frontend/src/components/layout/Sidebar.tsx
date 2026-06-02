@@ -22,6 +22,7 @@ const IconHome = () => <Emoji glyph="🏠" />;
 const IconFolder = () => <Emoji glyph="📁" />;
 const IconVersions = () => <Emoji glyph="🌿" />;
 
+const IconCoordinator = () => <Emoji glyph="🧭" />;
 const IconDesigner = () => <Emoji glyph="✏️" />;
 const IconImplementer = () => <Emoji glyph="🔧" />;
 const IconAuditor = () => <Emoji glyph="🔍" />;
@@ -218,6 +219,7 @@ export default function Sidebar() {
         {/* Embedded agent terminals — replace external Windows Terminal
             tabs with full-page xterm.js sessions inside NEX Studio
             (Director directive 2026-05-13). */}
+        <NavItem icon={<IconCoordinator />} label="AG Koordinátor" path="/coordinator" collapsed={collapsed} active={isActive("/coordinator")} />
         <NavItem icon={<IconDesigner />} label="AG Designer" path="/designer" collapsed={collapsed} active={isActive("/designer")} />
         <NavItem icon={<IconDialogue />} label="AG Customer" path="/dialogue" collapsed={collapsed} active={isActive("/dialogue")} />
         <NavItem icon={<IconImplementer />} label="AG Implementator" path="/implementer" collapsed={collapsed} active={isActive("/implementer")} />

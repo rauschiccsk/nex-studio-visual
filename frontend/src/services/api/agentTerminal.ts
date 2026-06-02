@@ -12,7 +12,7 @@
 
 import api from "../api";
 
-export type AgentRole = "designer" | "implementer" | "auditor";
+export type AgentRole = "designer" | "implementer" | "auditor" | "coordinator";
 
 export type TerminatedBy = "idle" | "user" | "crash" | "server_restart";
 
