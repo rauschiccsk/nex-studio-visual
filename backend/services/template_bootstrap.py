@@ -281,6 +281,17 @@ def _run_git(args: list[str], *, cwd: str, timeout: int = 60) -> subprocess.Comp
     )
 
 
+def _run_gh(args: list[str], *, timeout: int = 60) -> subprocess.CompletedProcess:
+    """Run a ``gh`` CLI command. Captures stdout+stderr; returns CompletedProcess."""
+    return subprocess.run(
+        ["gh", *args],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
+
+
 def push_and_verify(
     *,
     target: str,
@@ -294,7 +305,9 @@ def push_and_verify(
     Args:
         target: Local project directory (must already be a git repo after init.sh).
         repo_full_name: ``owner/name`` form (e.g. ``rauschiccsk/nex-foo``).
-        remote_url: Full git URL. Defaults to ``git@github.com:<repo_full_name>.git``.
+        remote_url: Full git URL. Defaults to ``https://github.com/<repo_full_name>.git``
+            (HTTPS, authenticated via the gh credential helper — the backend
+            container has no ``ssh`` binary).
         push_retry_attempts: How many transient-failure retries to attempt
             (default 1 = one retry on top of initial attempt per spec §3.2).
         timeout: Per-subprocess timeout in seconds.
@@ -309,7 +322,7 @@ def push_and_verify(
     if not (target_path / ".git").is_dir():
         raise TemplateBootstrapError(f"push_and_verify: {target} is not a git repository (init.sh did not run?)")
 
-    final_url = remote_url or f"git@github.com:{repo_full_name}.git"
+    final_url = remote_url or f"https://github.com/{repo_full_name}.git"
 
     # Step 1: Add origin remote (idempotent — replace if already exists)
     existing = _run_git(["remote", "get-url", "origin"], cwd=target, timeout=timeout)
@@ -321,6 +334,20 @@ def push_and_verify(
     if result.returncode != 0:
         raise GitPushVerificationError(
             f"git remote add/set-url failed (exit {result.returncode}): {result.stderr.strip()}"
+        )
+
+    # Step 1b: wire the HTTPS credential helper so `git push` authenticates via
+    # the gh token. The backend container has no ``ssh`` binary, so the default
+    # origin URL is HTTPS (see ``final_url``); ``gh auth setup-git`` is
+    # idempotent and sets ``credential.https://github.com.helper``. A non-zero
+    # exit is non-fatal — the push below surfaces the real error if credentials
+    # are genuinely missing.
+    gh_setup = _run_gh(["auth", "setup-git"], timeout=timeout)
+    if gh_setup.returncode != 0:
+        logger.warning(
+            "gh auth setup-git returned %d (continuing; push will surface any credential error): %s",
+            gh_setup.returncode,
+            gh_setup.stderr.strip(),
         )
 
     # Step 2: Push (with retry on transient failure)
