@@ -25,7 +25,7 @@ esac
 # Skip if file was deleted (e.g. by a tool run that removed it) or unreadable.
 [ -r "$FILE_PATH" ] || exit 0
 
-cd /opt/nex-studio-src || exit 0
+cd /opt/projects/nex-studio || exit 0
 
 # Run reindex; log to stderr so Claude Code can surface it, but never fail the hook.
 poetry run python scripts/rag_index.py "$FILE_PATH" >&2 || true

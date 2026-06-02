@@ -20,7 +20,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/opt/nex-studio-src/scripts/hook_rag_reindex.sh",
+            "command": "/opt/projects/nex-studio/scripts/hook_rag_reindex.sh",
             "timeout": 60
           }
         ]
