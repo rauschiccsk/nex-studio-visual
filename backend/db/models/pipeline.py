@@ -51,7 +51,8 @@ class PipelineState(Base, UUIDMixin, TimestampMixin):
     flow_type = Column(String(16), nullable=False)
     current_stage = Column(String(16), nullable=False)
     current_actor = Column(String(16), nullable=False)
-    status = Column(String(16), nullable=False)
+    # 'awaiting_director' is 17 chars — needs > 16.
+    status = Column(String(20), nullable=False)
     #: Human-readable "what happens next" sentence rendered on the board.
     next_action = Column(Text, nullable=False, server_default="")
     is_regate = Column(Boolean, nullable=False, server_default="false")

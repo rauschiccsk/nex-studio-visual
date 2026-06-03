@@ -54,7 +54,6 @@ approves or rejects, the cycle continues.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 import uuid
@@ -65,6 +64,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.db.models.dialogue import DialogueMessage, DialogueSession
+from backend.services.claude_agent import ClaudeAgentError, invoke_claude
 
 logger = logging.getLogger(__name__)
 
@@ -206,56 +206,19 @@ async def _invoke_agent(
         DialogueAgentError: subprocess non-zero exit, timeout, or
             decode failure.
     """
-    project_root = PROJECTS_ROOT / project_slug
-
-    args = ["claude", "-p", "--output-format", "text"]
-    if charter_path is not None:
-        # First invocation for this claude session — create it.
-        charter_text = charter_path.read_text(encoding="utf-8")
-        args += [
-            "--session-id",
-            str(claude_session_id),
-            "--append-system-prompt",
-            charter_text,
-        ]
-    else:
-        # Subsequent invocation — resume existing session.
-        args += ["--resume", str(claude_session_id)]
-    args.append(prompt)
-
-    logger.info(
-        "Invoking claude agent: project=%s session=%s charter=%s prompt_len=%d",
-        project_slug,
-        claude_session_id,
-        "yes" if charter_path else "no",
-        len(prompt),
-    )
-
-    proc = await asyncio.create_subprocess_exec(
-        *args,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        cwd=str(project_root),
-    )
+    # Delegates to the shared primitive (CR-NS-018 Phase 2 extraction) and
+    # preserves the Gate E error surface. Behaviour is identical to the
+    # original inline implementation.
     try:
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(),
+        return await invoke_claude(
+            project_slug=project_slug,
+            claude_session_id=claude_session_id,
+            prompt=prompt,
+            charter_path=charter_path,
             timeout=CLAUDE_INVOKE_TIMEOUT,
         )
-    except asyncio.TimeoutError as exc:
-        proc.kill()
-        await proc.wait()
-        raise DialogueAgentError(
-            f"claude invocation timed out after {CLAUDE_INVOKE_TIMEOUT}s",
-        ) from exc
-
-    if proc.returncode != 0:
-        stderr_text = stderr.decode("utf-8", errors="replace").strip()
-        raise DialogueAgentError(
-            f"claude exited with code {proc.returncode}: {stderr_text[:500]}",
-        )
-
-    return stdout.decode("utf-8", errors="replace").strip()
+    except ClaudeAgentError as exc:
+        raise DialogueAgentError(str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------
