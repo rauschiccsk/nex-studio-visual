@@ -14,7 +14,7 @@ from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.db.session import get_db
-from backend.services import orchestrator
+from backend.services import orchestrator, pipeline_runner
 from backend.services.pipeline_ws import registry
 
 
@@ -68,6 +68,11 @@ def client(db_session, monkeypatch):
     monkeypatch.setattr(orchestrator, "invoke_claude", fake)
     monkeypatch.setattr(orchestrator, "verify_mechanical", lambda slug, block: None)
 
+    # Async dispatch: capture scheduling instead of spawning a real bg task
+    # (the agent run is unit-tested directly in test_orchestrator / runner).
+    scheduled: list = []
+    monkeypatch.setattr(pipeline_runner, "schedule_dispatch", lambda vid: scheduled.append(vid))
+
     app = FastAPI()
     app.include_router(pipeline_router, prefix="/api/v1/pipeline")
 
@@ -86,6 +91,7 @@ def client(db_session, monkeypatch):
     with TestClient(app) as c:
         c._ri = ri
         c._fake = fake
+        c._scheduled = scheduled
         yield c
     app.dependency_overrides.clear()
     registry._conns.clear()
@@ -118,6 +124,20 @@ def test_start_then_board_populated(client, db_session):
     # board GET reflects it
     g = client.get(f"/api/v1/pipeline/{version.id}").json()
     assert g["state"]["current_stage"] == "kickoff"
+
+
+def test_start_returns_agent_working_and_schedules_dispatch(client, db_session):
+    """Async dispatch: POST returns instantly in ``agent_working`` and the
+    agent run is scheduled in the background (not awaited in the request)."""
+    version = _make_version(db_session, client._ri)
+    r = client.post(f"/api/v1/pipeline/{version.id}/action", json={"action": "start"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["state"]["status"] == "agent_working"
+    # No agent ran in-request — only the director kickoff message exists.
+    assert [m["author"] for m in body["recent_messages"]] == ["director"]
+    # A background dispatch was scheduled for this version.
+    assert version.id in client._scheduled
 
 
 def test_messages_paginated(client, db_session):

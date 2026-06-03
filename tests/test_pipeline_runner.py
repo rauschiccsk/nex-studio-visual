@@ -1,0 +1,151 @@
+"""Tests for the async dispatch background runner (CR-NS-018 fix-round).
+
+``pipeline_runner._run`` owns its own session + broadcasting. Here we drive it
+with a monkeypatched ``orchestrator.run_dispatch`` and a fake WS registry, and
+neutralise the session-lifecycle calls (``close``/``commit``/``rollback``) that
+don't translate to the SAVEPOINT-isolated test session — what's under test is
+the runner's *logic*: new-message diff broadcasting + the unexpected-exception →
+``blocked`` fallback.
+"""
+
+import uuid
+
+from sqlalchemy import select
+
+from backend.db.models.foundation import User
+from backend.db.models.pipeline import PipelineMessage, PipelineState
+from backend.db.models.projects import Project
+from backend.db.models.versions import Version
+from backend.services import orchestrator, pipeline_runner
+
+
+class _FakeRegistry:
+    def __init__(self):
+        self.events: list = []
+
+    async def broadcast(self, vid, payload):
+        self.events.append((vid, payload))
+
+
+def _make_version(db_session) -> Version:
+    user = User(
+        username=f"u_{uuid.uuid4().hex[:8]}",
+        email=f"{uuid.uuid4().hex[:8]}@example.com",
+        password_hash="hashed_password_placeholder",
+        role="ri",
+    )
+    db_session.add(user)
+    db_session.flush()
+    project = Project(
+        name=f"P {uuid.uuid4().hex[:8]}",
+        slug=f"p-{uuid.uuid4().hex[:8]}",
+        category="singlemodule",
+        description="d",
+        created_by=user.id,
+    )
+    db_session.add(project)
+    db_session.flush()
+    version = Version(project_id=project.id, version_number=f"1.{uuid.uuid4().hex[:4]}.0")
+    db_session.add(version)
+    db_session.flush()
+    return version
+
+
+def _seed_working_state(db_session, version_id) -> PipelineState:
+    state = PipelineState(
+        version_id=version_id,
+        flow_type="new_version",
+        current_stage="kickoff",
+        current_actor="coordinator",
+        status="agent_working",
+        next_action="working",
+    )
+    db_session.add(state)
+    db_session.add(
+        PipelineMessage(
+            version_id=version_id,
+            stage="kickoff",
+            author="director",
+            recipient="coordinator",
+            kind="kickoff",
+            content="start",
+        )
+    )
+    db_session.flush()
+    return state
+
+
+def _wire_runner(db_session, monkeypatch) -> _FakeRegistry:
+    fake_reg = _FakeRegistry()
+    monkeypatch.setattr(pipeline_runner, "registry", fake_reg)
+    monkeypatch.setattr(pipeline_runner, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(db_session, "close", lambda: None)
+    monkeypatch.setattr(db_session, "commit", db_session.flush)
+    monkeypatch.setattr(db_session, "rollback", lambda: None)
+    return fake_reg
+
+
+async def test_run_broadcasts_state_and_only_new_messages(db_session, monkeypatch):
+    version = _make_version(db_session)
+    _seed_working_state(db_session, version.id)
+    fake_reg = _wire_runner(db_session, monkeypatch)
+
+    async def fake_run_dispatch(db, vid):
+        st = db.execute(select(PipelineState).where(PipelineState.version_id == vid)).scalar_one()
+        st.status = "awaiting_director"
+        st.next_action = "Director: posúdiť."
+        db.add(
+            PipelineMessage(
+                version_id=vid,
+                stage="kickoff",
+                author="coordinator",
+                recipient="director",
+                kind="kickoff",
+                content="discovery done",
+            )
+        )
+        db.flush()
+        return st
+
+    monkeypatch.setattr(orchestrator, "run_dispatch", fake_run_dispatch)
+
+    await pipeline_runner._run(version.id)
+
+    types = [p["type"] for _, p in fake_reg.events]
+    assert "state_changed" in types
+    state_evt = next(p for _, p in fake_reg.events if p["type"] == "state_changed")
+    assert state_evt["state"]["status"] == "awaiting_director"
+    # Only the NEW coordinator message is broadcast — the pre-existing director
+    # kickoff message is not re-emitted.
+    added = [p["message"] for _, p in fake_reg.events if p["type"] == "message_added"]
+    assert len(added) == 1
+    assert added[0]["author"] == "coordinator"
+
+
+async def test_run_unexpected_exception_marks_blocked(db_session, monkeypatch):
+    version = _make_version(db_session)
+    _seed_working_state(db_session, version.id)
+    fake_reg = _wire_runner(db_session, monkeypatch)
+
+    async def boom(db, vid):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(orchestrator, "run_dispatch", boom)
+
+    await pipeline_runner._run(version.id)
+
+    state = db_session.execute(select(PipelineState).where(PipelineState.version_id == version.id)).scalar_one()
+    assert state.status == "blocked"
+    # a system notification was recorded + a state_changed broadcast emitted
+    sys_msgs = (
+        db_session.execute(
+            select(PipelineMessage).where(
+                PipelineMessage.version_id == version.id,
+                PipelineMessage.author == "system",
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(sys_msgs) == 1
+    assert any(p["type"] == "state_changed" for _, p in fake_reg.events)

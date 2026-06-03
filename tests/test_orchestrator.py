@@ -126,15 +126,51 @@ async def test_invoke_agent_parse_failure_escalates(db_session, fake_claude):
 # ── apply_action ──────────────────────────────────────────────────────────────
 
 
-async def test_start_creates_state_and_dispatches(db_session, fake_claude):
+async def test_start_returns_working_without_running_agent(db_session, fake_claude):
+    """Async dispatch: ``start`` returns instantly in ``agent_working`` and does
+    NOT invoke claude in-request (the agent runs later via ``run_dispatch``)."""
     version, _ = _make_version(db_session)
     fake_claude.response = _block(stage="kickoff", kind="done", summary="discovery ok", awaiting="director")
     state = await orchestrator.apply_action(db_session, version_id=version.id, action="start")
     assert state.current_stage == "kickoff"
-    assert state.status == "awaiting_director"
+    assert state.status == "agent_working"
+    # only the director kickoff message; no agent invocation happened in-request.
+    assert [m.author for m in _msgs(db_session, version.id)] == ["director"]
+    assert fake_claude.calls == []
     # double start rejected
     with pytest.raises(orchestrator.OrchestratorError):
         await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+
+
+async def test_run_dispatch_settles_awaiting(db_session, fake_claude):
+    version, _ = _make_version(db_session)
+    fake_claude.response = _block(stage="kickoff", kind="done", summary="discovery ok", awaiting="director")
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert state.status == "awaiting_director"
+    assert fake_claude.calls  # agent invoked in the background dispatch
+    assert any(m.author == "coordinator" for m in _msgs(db_session, version.id))
+
+
+async def test_run_dispatch_claude_error_blocks(db_session, monkeypatch):
+    async def _boom(**kwargs):
+        raise orchestrator.ClaudeAgentError("timed out after 900s")
+
+    monkeypatch.setattr(orchestrator, "invoke_claude", _boom)
+    monkeypatch.setattr(orchestrator, "verify_mechanical", lambda slug, block: None)
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert state.status == "blocked"
+    assert any(m.author == "system" and m.kind == "notification" for m in _msgs(db_session, version.id))
+
+
+async def test_run_dispatch_unparseable_blocks(db_session, fake_claude):
+    version, _ = _make_version(db_session)
+    fake_claude.response = "garbage — no status block"
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert state.status == "blocked"
 
 
 async def test_approve_advances_stage(db_session, fake_claude):
@@ -160,7 +196,8 @@ async def test_agent_question_blocks(db_session, fake_claude):
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
     fake_claude.response = _block(stage="gate_a", kind="blocked", summary="ctx", question="Ktorý port?")
-    state = await orchestrator.apply_action(db_session, version_id=version.id, action="approve")
+    await orchestrator.apply_action(db_session, version_id=version.id, action="approve")
+    state = await orchestrator.run_dispatch(db_session, version.id)
     assert state.status == "blocked"
     assert "Ktorý port" in state.next_action
 
@@ -218,7 +255,8 @@ async def test_verify_failure_retries_then_blocks(db_session, monkeypatch):
 
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
-    state = await orchestrator.apply_action(db_session, version_id=version.id, action="approve")
+    await orchestrator.apply_action(db_session, version_id=version.id, action="approve")
+    state = await orchestrator.run_dispatch(db_session, version.id)
     assert state.status == "blocked"
     assert "Verify zlyhal" in state.next_action
     # auto-return messages were recorded

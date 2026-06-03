@@ -33,7 +33,7 @@ from backend.schemas.pipeline import (
     PipelineStateRead,
 )
 from backend.services import agent_terminal as agent_terminal_service
-from backend.services import orchestrator
+from backend.services import orchestrator, pipeline_runner
 from backend.services.agent_terminal import AgentTerminalError, SessionConflictError
 from backend.services.orchestrator import OrchestratorError
 from backend.services.pipeline_ws import registry
@@ -160,6 +160,12 @@ async def post_action(
             version_id,
             {"type": "message_added", "message": PipelineMessageRead.model_validate(m).model_dump(mode="json")},
         )
+
+    # Async dispatch (CR-NS-018 fix-round): the action left an agent working —
+    # run it in the background; its result lands later via WS. POST returns now.
+    if state.status == "agent_working":
+        pipeline_runner.schedule_dispatch(version_id)
+
     return _board(db, version_id)
 
 

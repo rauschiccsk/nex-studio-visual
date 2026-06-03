@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     claude_config_dir: str = "/root/.claude"
     claude_cli_path: str = "claude"
 
+    # Backstop timeout (seconds) for a single headless ``claude -p`` invocation
+    # driven by the F-007 orchestrator (CR-NS-018 fix-round). Since agent
+    # dispatch is asynchronous, this only guards a *hung* agent, so it is
+    # generous. The orchestrator overrides it per stage (build is longer);
+    # this is the default + the env-tunable knob.
+    claude_invoke_timeout: int = 900
+
     # NOTE: operational timeouts (Claude stream / design doc / task plan,
     # GitHub API), conversation history limit, design-doc max chars,
     # token expiry, port registry bounds and path templates are all

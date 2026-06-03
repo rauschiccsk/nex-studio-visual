@@ -63,6 +63,26 @@ STAGE_ACTOR: dict[str, str] = {
 _VERIFY_RETRIES = 2
 _ACTIONS = frozenset({"start", "approve", "return", "ask", "answer", "verdict", "uat_accept", "pause"})
 
+# Per-stage backstop timeouts (seconds) for a single headless agent turn
+# (CR-NS-018 fix-round). Dispatch is async, so these only guard a *hung* agent.
+# Build is the heaviest single turn; gates/kickoff are read+produce. Unknown
+# stages fall back to the env-tunable ``claude_agent.CLAUDE_INVOKE_TIMEOUT``.
+STAGE_TIMEOUT: dict[str, int] = {
+    "kickoff": 900,
+    "gate_a": 900,
+    "gate_b": 900,
+    "gate_c": 900,
+    "gate_d": 900,
+    "gate_e": 900,
+    "build": 2400,
+    "gate_g": 1200,
+    "release": 900,
+}
+
+
+def _timeout_for(stage: str) -> int:
+    return STAGE_TIMEOUT.get(stage, claude_agent.CLAUDE_INVOKE_TIMEOUT)
+
 
 class OrchestratorError(ValueError):
     """Invalid orchestration request (unknown version/action, missing payload)."""
@@ -154,6 +174,7 @@ async def invoke_agent(
     role: str,
     stage: str,
     prompt: str,
+    timeout: Optional[int] = None,
 ) -> PipelineStatusBlock | ParseFailure:
     """Drive one agent turn headless and record its message.
 
@@ -161,6 +182,9 @@ async def invoke_agent(
     status block, and appends a ``pipeline_message``. On a claude error or a
     parse failure, records a ``system`` escalation message and returns the
     ``ParseFailure``. Does **not** mutate ``pipeline_state`` (the caller owns it).
+
+    ``timeout`` overrides the per-invocation backstop; ``None`` → the per-stage
+    default (:func:`_timeout_for`).
     """
     slug = _project_slug_for_version(db, version_id)
     session_id, is_first = _resolve_orch_session(db, slug, role)
@@ -174,6 +198,7 @@ async def invoke_agent(
             claude_session_id=session_id,
             prompt=prompt,
             charter_path=charter_path,
+            timeout=timeout if timeout is not None else _timeout_for(stage),
         )
     except ClaudeAgentError as exc:
         _record_message(
@@ -301,8 +326,14 @@ async def verify_done(db: Session, version_id: uuid.UUID, block: PipelineStatusB
 # ---------------------------------------------------------------------------
 
 
-async def _dispatch(db: Session, state: PipelineState) -> None:
-    """Invoke the actor for ``state.current_stage`` and settle the resulting status."""
+def _begin_dispatch(db: Session, state: PipelineState) -> None:
+    """Mark the actor for ``current_stage`` as working — synchronous, instant.
+
+    First half of the old ``_dispatch``: sets ``agent_working`` and flushes so
+    ``POST /action`` can return immediately. The actual agent run is deferred to
+    the background task (:func:`run_dispatch`). A terminal/``done`` stage (no
+    actor) is a no-op, leaving the caller's terminal state intact.
+    """
     stage = state.current_stage
     actor = STAGE_ACTOR.get(stage)
     if actor is None:  # ``done`` or unknown — nothing to dispatch.
@@ -312,19 +343,37 @@ async def _dispatch(db: Session, state: PipelineState) -> None:
     state.next_action = f"Agent '{actor}' pracuje na fáze '{stage}'."
     db.flush()
 
+
+async def run_dispatch(db: Session, version_id: uuid.UUID) -> Optional[PipelineState]:
+    """Run the working agent for a version and settle its status (background).
+
+    Second half of the old ``_dispatch``: reloads the (already ``agent_working``)
+    state, invokes the actor headless, and settles ``status`` to ``blocked`` or
+    ``awaiting_director``. Runs in :mod:`backend.services.pipeline_runner`'s
+    background task against a fresh session — never inside the request. Returns
+    the settled state (``None`` if the version/state vanished).
+    """
+    state = _get_state(db, version_id)
+    if state is None:
+        return None
+    stage = state.current_stage
+    actor = state.current_actor
+    if STAGE_ACTOR.get(stage) is None:  # terminal — nothing to run.
+        return state
+
     result = await invoke_agent(db, version_id=state.version_id, role=actor, stage=stage, prompt=_directive_for(stage))
 
     if isinstance(result, ParseFailure):
         state.status = "blocked"
         state.next_action = f"Blokované: {result.reason}. Eskalované Directorovi."
         db.flush()
-        return
+        return state
 
     if result.kind in ("question", "blocked"):
         state.status = "blocked"
         state.next_action = f"Agent '{actor}' sa pýta: {result.question}"
         db.flush()
-        return
+        return state
 
     if result.kind == "gate_report":
         reason = await _verify_with_retries(db, state, result)
@@ -335,12 +384,13 @@ async def _dispatch(db: Session, state: PipelineState) -> None:
             state.status = "awaiting_director"
             state.next_action = f"Director: schváliť/vrátiť fázu '{stage}'."
         db.flush()
-        return
+        return state
 
     # kickoff / answer / done-class agent output → await the Director.
     state.status = "awaiting_director"
     state.next_action = f"Director: posúdiť výstup fázy '{stage}'."
     db.flush()
+    return state
 
 
 async def _verify_with_retries(db: Session, state: PipelineState, block: PipelineStatusBlock) -> Optional[str]:
@@ -417,7 +467,7 @@ async def apply_action(
             content="Spustenie pipeline.",
             payload={"flow_type": flow_type},
         )
-        await _dispatch(db, state)
+        _begin_dispatch(db, state)
         return state
 
     if state is None:
@@ -441,7 +491,7 @@ async def apply_action(
             state.next_action = "Pipeline dokončená."
             db.flush()
         else:
-            await _dispatch(db, state)
+            _begin_dispatch(db, state)
         return state
 
     if action == "return":
@@ -457,7 +507,7 @@ async def apply_action(
             kind="return",
             content=str(comment),
         )
-        await _dispatch(db, state)
+        _begin_dispatch(db, state)
         return state
 
     if action == "ask":
@@ -473,7 +523,7 @@ async def apply_action(
             kind="question",
             content=str(text),
         )
-        await _dispatch(db, state)
+        _begin_dispatch(db, state)
         return state
 
     if action == "answer":
@@ -489,7 +539,7 @@ async def apply_action(
             kind="answer",
             content=str(text),
         )
-        await _dispatch(db, state)
+        _begin_dispatch(db, state)
         return state
 
     if action == "verdict":
@@ -509,7 +559,7 @@ async def apply_action(
         if verdict == "PASS":
             state.current_stage = "release"
             db.flush()
-            await _dispatch(db, state)
+            _begin_dispatch(db, state)
         else:
             entry = payload.get("entry_stage", "gate_a")
             if entry not in STAGE_ORDER:
@@ -518,7 +568,7 @@ async def apply_action(
             state.iteration += 1
             state.current_stage = entry
             db.flush()
-            await _dispatch(db, state)
+            _begin_dispatch(db, state)
         return state
 
     if action == "uat_accept":

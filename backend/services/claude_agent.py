@@ -14,13 +14,17 @@ from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
+from backend.config.settings import settings
+
 logger = logging.getLogger(__name__)
 
 PROJECTS_ROOT = Path("/opt/projects")
 
-#: Timeout per ``claude --print`` invocation (seconds). Tools-heavy turns can
-#: run long, so this is generous.
-CLAUDE_INVOKE_TIMEOUT = 180
+#: Default timeout per ``claude --print`` invocation (seconds). Agent dispatch
+#: is asynchronous (CR-NS-018 fix-round), so this only backstops a *hung* agent
+#: — hence generous and env-tunable via ``CLAUDE_INVOKE_TIMEOUT``. The
+#: orchestrator passes a per-stage ``timeout`` that overrides this default.
+CLAUDE_INVOKE_TIMEOUT = settings.claude_invoke_timeout
 
 
 class ClaudeAgentError(RuntimeError):
