@@ -168,6 +168,7 @@ Generujem prompt pre Designer:
 - **Dĺžka:** stredne dlhý (~30-60 riadkov) — Designer potrebuje kontext + úloha
 - **Self-contained:** Designer nevidí moje predošlé správy, preto plný kontext (per memory `feedback_agent_prompts_self_contained`)
 - **Žiadne kopírovanie spec obsahu** — Designer číta autoritatívny zdroj sám (per memory `feedback_read_spec_before_paraphrasing`)
+- **Otázkové kolo = PO JEDNEJ:** ak round zahŕňa clarifying otázky pre Direktora, v prompte agentovi explicitne uveď, že otázky kladie Direktorovi **po jednej** (§3.3) — jedna otázka → čaká na uzavretie → až potom ďalšia. NIKDY ho neinštruuj „produkuj všetky otázky naraz". Jeho zoznam je interný plán.
 
 Po Designer DONE:
 - Analyzujem výstup
