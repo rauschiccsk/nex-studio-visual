@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     # this is the default + the env-tunable knob.
     claude_invoke_timeout: int = 900
 
+    # Public base URL of the NEX Studio frontend, used only to build the
+    # ``/cockpit`` deep link in presence-aware Telegram notifications
+    # (CR-NS-018 Phase 5a). Empty → the notification omits the link.
+    app_public_url: str = ""
+
     # NOTE: operational timeouts (Claude stream / design doc / task plan,
     # GitHub API), conversation history limit, design-doc max chars,
     # token expiry, port registry bounds and path templates are all

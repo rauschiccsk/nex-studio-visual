@@ -16,15 +16,19 @@ from backend.db.models.foundation import User
 from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
-from backend.services import orchestrator, pipeline_runner
+from backend.services import notify, orchestrator, pipeline_runner
 
 
 class _FakeRegistry:
     def __init__(self):
         self.events: list = []
+        self.present: set = set()
 
     async def broadcast(self, vid, payload):
         self.events.append((vid, payload))
+
+    def present_director_ids(self, vid):
+        return self.present
 
 
 def _make_version(db_session) -> Version:
@@ -83,6 +87,23 @@ def _wire_runner(db_session, monkeypatch) -> _FakeRegistry:
     monkeypatch.setattr(db_session, "commit", db_session.flush)
     monkeypatch.setattr(db_session, "rollback", lambda: None)
     return fake_reg
+
+
+def _set_owner_with_chat(db_session, version, chat_id="555000111"):
+    """Give the version's project an owner that has a telegram_chat_id."""
+    owner = User(
+        username=f"own_{uuid.uuid4().hex[:8]}",
+        email=f"{uuid.uuid4().hex[:8]}@example.com",
+        password_hash="hashed_password_placeholder",
+        role="ri",
+        telegram_chat_id=chat_id,
+    )
+    db_session.add(owner)
+    db_session.flush()
+    project = db_session.get(Project, db_session.get(Version, version.id).project_id)
+    project.owner_id = owner.id
+    db_session.flush()
+    return owner
 
 
 async def test_run_broadcasts_state_and_only_new_messages(db_session, monkeypatch):
@@ -149,3 +170,65 @@ async def test_run_unexpected_exception_marks_blocked(db_session, monkeypatch):
     )
     assert len(sys_msgs) == 1
     assert any(p["type"] == "state_changed" for _, p in fake_reg.events)
+
+
+# ── presence-aware Telegram notify (CR-NS-018 Phase 5a) ───────────────────────
+
+
+async def _settle_awaiting(db, vid):
+    st = db.execute(select(PipelineState).where(PipelineState.version_id == vid)).scalar_one()
+    st.status = "awaiting_director"
+    st.next_action = "Director: posúdiť fázu."
+    db.flush()
+    return st
+
+
+def _capture_sends(monkeypatch):
+    sent: list = []
+
+    async def _send(message, chat_id):
+        sent.append((message, chat_id))
+
+    monkeypatch.setattr(notify, "send_telegram", _send)
+    return sent
+
+
+async def test_notify_fires_on_awaiting_when_no_presence(db_session, monkeypatch):
+    version = _make_version(db_session)
+    _seed_working_state(db_session, version.id)
+    _set_owner_with_chat(db_session, version, chat_id="999")
+    _wire_runner(db_session, monkeypatch)
+    monkeypatch.setattr(orchestrator, "run_dispatch", _settle_awaiting)
+    sent = _capture_sends(monkeypatch)
+
+    await pipeline_runner._run(version.id)
+
+    assert len(sent) == 1
+    assert sent[0][1] == "999"
+    assert "na rade" in sent[0][0]
+
+
+async def test_notify_suppressed_when_director_present(db_session, monkeypatch):
+    version = _make_version(db_session)
+    _seed_working_state(db_session, version.id)
+    _set_owner_with_chat(db_session, version, chat_id="999")
+    fake_reg = _wire_runner(db_session, monkeypatch)
+    fake_reg.present = {uuid.uuid4()}  # a Director has a live board socket
+    monkeypatch.setattr(orchestrator, "run_dispatch", _settle_awaiting)
+    sent = _capture_sends(monkeypatch)
+
+    await pipeline_runner._run(version.id)
+
+    assert sent == []
+
+
+async def test_notify_noop_when_no_chat_id(db_session, monkeypatch):
+    version = _make_version(db_session)  # project owner_id stays None
+    _seed_working_state(db_session, version.id)
+    _wire_runner(db_session, monkeypatch)
+    monkeypatch.setattr(orchestrator, "run_dispatch", _settle_awaiting)
+    sent = _capture_sends(monkeypatch)
+
+    await pipeline_runner._run(version.id)
+
+    assert sent == []

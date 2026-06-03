@@ -19,13 +19,20 @@ import uuid
 
 from sqlalchemy import select
 
+from backend.config.settings import settings
+from backend.db.models.foundation import User
 from backend.db.models.pipeline import PipelineMessage, PipelineState
+from backend.db.models.projects import Project
+from backend.db.models.versions import Version
 from backend.db.session import SessionLocal
 from backend.schemas.pipeline import PipelineMessageRead, PipelineStateRead
-from backend.services import orchestrator
+from backend.services import notify, orchestrator
 from backend.services.pipeline_ws import registry
 
 logger = logging.getLogger(__name__)
+
+# Settled states that warrant a Director nudge (F-007 §9). Never agent_working.
+_NOTIFY_STATUSES = ("awaiting_director", "blocked")
 
 # Strong refs to in-flight tasks so the event loop doesn't GC them mid-run
 # (mirrors the idle/retention tasks in ``main.py``). Discarded on completion.
@@ -88,8 +95,39 @@ async def _run(version_id: uuid.UUID) -> None:
         db.refresh(state)
         await _broadcast_state(version_id, state)
         await _broadcast_new_messages(db, version_id, pre_ids)
+        await _maybe_notify(db, version_id, state)
     finally:
         db.close()
+
+
+def _owner_chat_id(db, version_id: uuid.UUID) -> str | None:
+    """Telegram chat_id of the version's project owner, or ``None``."""
+    return db.execute(
+        select(User.telegram_chat_id)
+        .join(Project, Project.owner_id == User.id)
+        .join(Version, Version.project_id == Project.id)
+        .where(Version.id == version_id)
+    ).scalar_one_or_none()
+
+
+async def _maybe_notify(db, version_id: uuid.UUID, state: PipelineState) -> None:
+    """Presence-aware Telegram nudge (F-007 §9). Never blocks dispatch.
+
+    Fires only when the pipeline settled to a Director-actionable state AND no
+    Director has a live board WS for this version (presence = they'd already see
+    it). Recipient = version → project owner → ``telegram_chat_id``.
+    """
+    if state.status not in _NOTIFY_STATUSES:
+        return
+    if registry.present_director_ids(version_id):
+        return  # a Director is already on the board — no out-of-band nudge
+    chat_id = _owner_chat_id(db, version_id)
+    if not chat_id:
+        logger.info("version %s: no owner telegram_chat_id — skip notify", version_id)
+        return
+    link = f"\n{settings.app_public_url.rstrip('/')}/cockpit" if settings.app_public_url else ""
+    message = f"NEX Studio — na rade: {state.next_action}{link}"
+    await notify.send_telegram(message, chat_id)
 
 
 def _mark_blocked(db, version_id: uuid.UUID) -> PipelineState | None:

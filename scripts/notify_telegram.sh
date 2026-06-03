@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # Telegram notify sender for ICC agents (CR-NS-011).
 #
-# Usage: notify_telegram.sh "<message text>"
+# Usage: notify_telegram.sh "<message text>" ["<chat_id>"]
 #
-# Routes a single Telegram message to the project's configured recipient:
+# Routes a single Telegram message to a recipient:
 #   - Bot token  : TELEGRAM_ICC_BOT_TOKEN, sourced from the central host env
 #                  $TELEGRAM_CENTRAL_ENV (default
 #                  /opt/infra/telegram/icc-agents.env).
-#   - chat_id    : TELEGRAM_NOTIFY_CHAT_ID, read (not sourced) from the repo
+#   - chat_id    : taken from the optional 2nd arg when given (the backend
+#                  cockpit resolves the version owner's chat_id from the DB,
+#                  CR-NS-018 Phase 5a). When omitted, falls back to
+#                  TELEGRAM_NOTIFY_CHAT_ID, read (not sourced) from the repo
 #                  .env at the git toplevel.
 #
 # No-ops (exit 0) whenever any piece of config is absent — never fails the
@@ -19,6 +22,7 @@ set -uo pipefail
 
 MSG="${1:-}"
 [ -z "$MSG" ] && exit 0
+CHAT_ID_ARG="${2:-}"
 
 CENTRAL_ENV="${TELEGRAM_CENTRAL_ENV:-/opt/infra/telegram/icc-agents.env}"
 
@@ -30,14 +34,18 @@ if [ -r "$CENTRAL_ENV" ]; then
 fi
 [ -z "${TELEGRAM_ICC_BOT_TOKEN:-}" ] && exit 0
 
-# chat_id from the repo .env (parsed line-by-line, never sourced — a project
-# .env may contain arbitrary shell-unsafe content).
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-[ -z "$REPO_ROOT" ] && exit 0
-ENV_FILE="$REPO_ROOT/.env"
-[ -r "$ENV_FILE" ] || exit 0
-
-CHAT_ID="$(grep -E '^TELEGRAM_NOTIFY_CHAT_ID=' "$ENV_FILE" | tail -1 | cut -d= -f2-)"
+# chat_id: explicit 2nd arg wins (backend cockpit path); otherwise fall back to
+# the repo .env (parsed line-by-line, never sourced — a project .env may contain
+# arbitrary shell-unsafe content).
+if [ -n "$CHAT_ID_ARG" ]; then
+    CHAT_ID="$CHAT_ID_ARG"
+else
+    REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+    [ -z "$REPO_ROOT" ] && exit 0
+    ENV_FILE="$REPO_ROOT/.env"
+    [ -r "$ENV_FILE" ] || exit 0
+    CHAT_ID="$(grep -E '^TELEGRAM_NOTIFY_CHAT_ID=' "$ENV_FILE" | tail -1 | cut -d= -f2-)"
+fi
 # Strip optional surrounding quotes and any whitespace.
 CHAT_ID="${CHAT_ID%\"}"; CHAT_ID="${CHAT_ID#\"}"
 CHAT_ID="${CHAT_ID%\'}"; CHAT_ID="${CHAT_ID#\'}"
