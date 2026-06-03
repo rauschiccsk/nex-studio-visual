@@ -199,3 +199,57 @@ def test_post_action_broadcasts_to_registered_socket(client, db_session):
     types = [e["type"] for e in ws.received]
     assert "state_changed" in types
     assert "message_added" in types
+
+
+# ── debug-terminal attach (CR-NS-018 Phase 4, F-007 §10) ──────────────────────
+
+
+def test_debug_terminal_resumes_orchestrator_session(client, db_session, monkeypatch):
+    from backend.db.models.agent_terminal import AgentTerminalSession
+    from backend.db.models.orchestrator import OrchestratorSession
+    from backend.db.models.projects import Project
+    from backend.services import agent_terminal as agent_terminal_module
+
+    version = _make_version(db_session, client._ri)
+    slug = db_session.get(Project, db_session.get(Version, version.id).project_id).slug
+    orch_uuid = uuid.uuid4()
+    db_session.add(OrchestratorSession(project_slug=slug, role="implementer", claude_session_id=orch_uuid))
+    db_session.flush()
+
+    captured = {}
+
+    async def _fake_spawn(*, user_id, role, project_slug, db, claude_session_id=None):
+        captured["claude_session_id"] = claude_session_id
+        captured["role"] = role
+        captured["project_slug"] = project_slug
+        row = AgentTerminalSession(
+            user_id=user_id,
+            role=role,
+            project_slug=project_slug,
+            pid=4321,
+            claude_session_id=claude_session_id,
+        )
+        db.add(row)
+        db.flush()
+        return row
+
+    monkeypatch.setattr(agent_terminal_module, "spawn", _fake_spawn)
+
+    r = client.post(f"/api/v1/pipeline/{version.id}/debug-terminal?role=implementer")
+    assert r.status_code == 200, r.text
+    # the existing orchestrator UUID is resumed, not a fresh one
+    assert captured["claude_session_id"] == orch_uuid
+    assert captured["role"] == "implementer"
+    assert captured["project_slug"] == slug
+    assert r.json()["role"] == "implementer"
+
+
+def test_debug_terminal_no_orchestrator_session_404(client, db_session):
+    version = _make_version(db_session, client._ri)
+    r = client.post(f"/api/v1/pipeline/{version.id}/debug-terminal?role=implementer")
+    assert r.status_code == 404
+
+
+def test_debug_terminal_unknown_version_404(client):
+    r = client.post(f"/api/v1/pipeline/{uuid.uuid4()}/debug-terminal?role=implementer")
+    assert r.status_code == 404

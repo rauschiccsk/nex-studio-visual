@@ -138,7 +138,7 @@ def _directive_for(stage: str) -> str:
     """Minimal orchestrator directive for a stage. The agent reads its charter."""
     return (
         f"Pokračuj fázou '{stage}' podľa autoritatívneho spec balíka a svojho charteru. "
-        "Ukonči odpoveď strojovým <<<PIPELINE_STATUS>>> blokom (F-007 §5.3)."
+        "Ukonči odpoveď strojovým <<<PIPELINE_STATUS>>> blokom (F-007 §7.2)."
     )
 
 
@@ -286,7 +286,7 @@ async def verify_done(db: Session, version_id: uuid.UUID, block: PipelineStatusB
         stage=block.stage,
         prompt=(
             f"Verifikuj DONE report fázy '{block.stage}': spec compliance + žiadny "
-            "claim bez authoritative source (P-2). Ukonči <<<PIPELINE_STATUS>>> blokom."
+            "claim bez authoritative source (P-2). Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
         ),
     )
     if isinstance(judgment, ParseFailure):
@@ -364,7 +364,7 @@ async def _verify_with_retries(db: Session, state: PipelineState, block: Pipelin
             version_id=state.version_id,
             role=state.current_actor,
             stage=state.current_stage,
-            prompt=f"Verify zlyhal: {reason}. Oprav a znovu ukonči <<<PIPELINE_STATUS>>> blokom.",
+            prompt=f"Verify zlyhal: {reason}. Oprav a znovu ukonči <<<PIPELINE_STATUS>>> blokom (§7.2).",
         )
         if isinstance(retry, ParseFailure) or retry.kind != "gate_report":
             return reason  # give up on non-report → caller escalates

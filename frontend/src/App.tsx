@@ -19,6 +19,7 @@ import KnowledgeBasePage from "./pages/KnowledgeBasePage";
 import ProjectSpecsPage from "./pages/ProjectSpecsPage";
 import AgentTerminalPage from "./pages/AgentTerminalPage";
 import DialoguePage from "./pages/DialoguePage";
+import CockpitPage from "./pages/CockpitPage";
 import CredentialsPage from "./pages/CredentialsPage";
 import SettingsPage from "./pages/SettingsPage";
 
@@ -54,6 +55,7 @@ function App() {
             <Route path="auditor" element={<AgentTerminalPage role="auditor" />} />
             <Route path="coordinator" element={<AgentTerminalPage role="coordinator" />} />
             <Route path="dialogue" element={<DialoguePage />} />
+            <Route path="cockpit" element={<CockpitPage />} />
             <Route path="credentials" element={<CredentialsPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>

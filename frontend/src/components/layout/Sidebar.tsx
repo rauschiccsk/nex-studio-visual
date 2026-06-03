@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useAuthStore } from "@/store/authStore";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import { getAvailableRolesApi, type AgentRole, type AvailableRoles } from "@/services/api/agentTerminal";
+import { usePipelineWs } from "@/hooks/usePipelineWs";
 
 // ─── Icon helpers ───────────────────────────────────────────────────────────
 // Director directive 2026-05-15: full Unicode emoji glyphs instead of
@@ -28,6 +29,7 @@ const IconDesigner = () => <Emoji glyph="✏️" />;
 const IconImplementer = () => <Emoji glyph="🔧" />;
 const IconAuditor = () => <Emoji glyph="🔍" />;
 const IconDialogue = () => <Emoji glyph="💬" />;
+const IconCockpit = () => <Emoji glyph="🎛️" />;
 
 const IconKbBook = () => <Emoji glyph="📚" />;
 const IconProjectSpecsBook = () => <Emoji glyph="📖" />;
@@ -64,6 +66,9 @@ interface NavItemProps {
   /** Optional tooltip shown when the item is disabled — explains why
    *  the link is unavailable + how to enable it. */
   disabledTitle?: string;
+  /** When true an amber attention dot is shown (e.g. cockpit awaiting
+   *  Director — F-007 §9 in-app notification). */
+  badge?: boolean;
 }
 
 function NavItem({
@@ -75,6 +80,7 @@ function NavItem({
   onClick,
   disabled,
   disabledTitle,
+  badge,
 }: NavItemProps) {
   const navigate = useNavigate();
 
@@ -100,13 +106,23 @@ function NavItem({
 
   return (
     <button
-      className={`${base} ${px} ${color}`}
+      className={`${base} ${px} ${color} relative`}
       onClick={handleClick}
       disabled={disabled}
       title={tooltip}
     >
       {icon}
       {!collapsed && <span>{label}</span>}
+      {badge && (
+        <span
+          aria-label="awaiting director"
+          className={
+            collapsed
+              ? "absolute right-1 top-1 h-2 w-2 rounded-full bg-amber-400"
+              : "ml-auto h-2 w-2 rounded-full bg-amber-400"
+          }
+        />
+      )}
     </button>
   );
 }
@@ -134,6 +150,11 @@ export default function Sidebar() {
   const selectedProject = useActiveContextStore((s) => s.selectedProject);
   const selectedVersion = useActiveContextStore((s) => s.selectedVersion);
   const setSelectedProject = useActiveContextStore((s) => s.setSelectedProject);
+
+  // Sidebar-level pipeline WS on the pinned version (F-007 §7). Doubles as the
+  // §9 Director-presence signal; drives the cockpit "awaiting" attention dot.
+  const { board: pipelineBoard } = usePipelineWs(selectedVersion?.versionId ?? null);
+  const cockpitAwaiting = pipelineBoard?.state?.status === "awaiting_director";
 
   const isActive = (path: string) =>
     path === "/" ? location.pathname === "/" : location.pathname.startsWith(path);
@@ -251,6 +272,7 @@ export default function Sidebar() {
         <NavItem icon={<IconDialogue />} label="AG Customer" path="/dialogue" collapsed={collapsed} active={isActive("/dialogue")} />
         <NavItem icon={<IconImplementer />} label="AG Implementator" path="/implementer" collapsed={collapsed} active={isActive("/implementer")} disabled={agentDisabled("implementer")} disabledTitle={agentTitle("implementer")} />
         <NavItem icon={<IconAuditor />} label="AG Auditor" path="/auditor" collapsed={collapsed} active={isActive("/auditor")} disabled={agentDisabled("auditor")} disabledTitle={agentTitle("auditor")} />
+        <NavItem icon={<IconCockpit />} label="Orchestration Cockpit" path="/cockpit" collapsed={collapsed} active={isActive("/cockpit")} badge={cockpitAwaiting} />
 
         <NavItem icon={<IconKbBook />} label="Knowledge Base" path="/kb" collapsed={collapsed} active={isActive("/kb")} />
         <NavItem icon={<IconProjectSpecsBook />} label="Project Specs" path="/project-specs" collapsed={collapsed} active={isActive("/project-specs")} />

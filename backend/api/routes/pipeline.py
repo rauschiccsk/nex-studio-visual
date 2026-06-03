@@ -20,9 +20,11 @@ from sqlalchemy.orm import Session
 
 from backend.core.security import require_ri_role, verify_ws_token
 from backend.db.models.foundation import User
+from backend.db.models.orchestrator import OrchestratorSession
 from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.versions import Version
 from backend.db.session import SessionLocal, get_db
+from backend.schemas.agent_terminal import AgentTerminalSessionRead
 from backend.schemas.pagination import PaginatedResponse
 from backend.schemas.pipeline import (
     PipelineActionRequest,
@@ -30,7 +32,9 @@ from backend.schemas.pipeline import (
     PipelineMessageRead,
     PipelineStateRead,
 )
+from backend.services import agent_terminal as agent_terminal_service
 from backend.services import orchestrator
+from backend.services.agent_terminal import AgentTerminalError, SessionConflictError
 from backend.services.orchestrator import OrchestratorError
 from backend.services.pipeline_ws import registry
 
@@ -157,6 +161,52 @@ async def post_action(
             {"type": "message_added", "message": PipelineMessageRead.model_validate(m).model_dump(mode="json")},
         )
     return _board(db, version_id)
+
+
+@router.post("/{version_id}/debug-terminal", response_model=AgentTerminalSessionRead)
+async def open_debug_terminal(
+    version_id: uuid.UUID,
+    role: str = Query(..., description="orchestrator agent role to attach to"),
+    current_user: User = Depends(require_ri_role),
+    db: Session = Depends(get_db),
+) -> AgentTerminalSessionRead:
+    """Attach an interactive Director terminal to the headless agent session.
+
+    Resumes the existing ``orchestrator_session.claude_session_id`` for
+    ``(project, role)`` into a Director-owned ``agent_terminal_sessions`` row
+    so the standard AgentTerminal WS can stream it (F-007 §10 debug hatch).
+    The Director observes; the orchestrator still drives the pipeline.
+    """
+    if not _version_exists(db, version_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+
+    slug = orchestrator._project_slug_for_version(db, version_id)
+    orch = db.execute(
+        select(OrchestratorSession).where(
+            OrchestratorSession.project_slug == slug,
+            OrchestratorSession.role == role,
+        )
+    ).scalar_one_or_none()
+    if orch is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No orchestrator session for role '{role}' in project '{slug}'",
+        )
+
+    try:
+        row = await agent_terminal_service.spawn(
+            user_id=current_user.id,
+            role=role,
+            project_slug=slug,
+            db=db,
+            claude_session_id=orch.claude_session_id,
+        )
+    except SessionConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except AgentTerminalError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    return AgentTerminalSessionRead.model_validate(row)
 
 
 @router.websocket("/ws/{version_id}")

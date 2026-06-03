@@ -335,11 +335,17 @@ async def spawn(
     role: str,
     project_slug: str,
     db: Session,
+    claude_session_id: Optional[uuid.UUID] = None,
 ) -> AgentTerminalSession:
     """Spawn a new claude CLI process under PTY for ``(user, role, project)``.
 
     Assigns a fresh ``claude_session_id`` (UUID4) and creates a durable
     log file on disk. Both are required for cross-restart auto-resume.
+
+    When ``claude_session_id`` is provided (CR-NS-018 §10 debug attach), the
+    PTY ``--resume``s that existing session instead of minting a fresh one —
+    so a Director can attach an interactive terminal to the orchestrator's
+    headless agent conversation.
 
     Raises:
         AgentTerminalError: invalid role/slug or missing agent spec.
@@ -361,12 +367,16 @@ async def spawn(
         )
 
     project_root = PROJECTS_ROOT / project_slug
-    claude_session_id = uuid.uuid4()
+    if claude_session_id is None:
+        claude_session_id = uuid.uuid4()
+        resume = False
+    else:
+        resume = True
     proc = _spawn_pty(
         spec_path=spec_path,
         project_root=project_root,
         claude_session_id=claude_session_id,
-        resume=False,
+        resume=resume,
     )
 
     row = AgentTerminalSession(
