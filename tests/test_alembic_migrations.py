@@ -45,12 +45,13 @@ def test_every_model_table_is_in_metadata() -> None:
 
 
 def test_expected_domain_tables_present() -> None:
-    """The 9 core domain tables that survive CR-NS-008 are registered.
+    """The core domain tables that survive CR-NS-008 are registered.
 
     The legacy in-app design/execution pipeline tables were dropped by
     migration 048; multi-module (``project_modules`` /
     ``module_dependencies``) and the agent infra (Versions / Epics /
-    Feats / Tasks / Bugs) are preserved.
+    Feats / Tasks / Bugs) are preserved. The F-007 Orchestration Cockpit
+    (CR-NS-018) adds ``pipeline_state`` / ``pipeline_message`` (migration 051).
     """
     expected_tables = {
         "bugs",
@@ -62,6 +63,8 @@ def test_expected_domain_tables_present() -> None:
         "tasks",
         "user_sessions",
         "users",
+        "pipeline_state",
+        "pipeline_message",
     }
     present = set(Base.metadata.tables.keys())
     missing = expected_tables - present

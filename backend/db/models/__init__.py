@@ -6,6 +6,7 @@ from backend.db.models.bugs import Bug
 from backend.db.models.credentials import Credential
 from backend.db.models.dialogue import DialogueMessage, DialogueSession
 from backend.db.models.foundation import User, UserSession
+from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.project_member import ProjectMember
 from backend.db.models.projects import ModuleDependency, Project, ProjectModule
 from backend.db.models.tasks import Epic, Feat, Task
@@ -21,6 +22,8 @@ __all__ = [
     "Bug",
     "Credential",
     "ModuleDependency",
+    "PipelineMessage",
+    "PipelineState",
     "Project",
     "ProjectMember",
     "ProjectModule",

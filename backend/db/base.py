@@ -13,6 +13,7 @@ pipeline picks it up automatically.
 from backend.db.models.base import Base, TimestampMixin, UUIDMixin
 from backend.db.models.bugs import Bug
 from backend.db.models.foundation import User, UserSession
+from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.project_member import ProjectMember
 from backend.db.models.projects import ModuleDependency, Project, ProjectModule
 from backend.db.models.system_settings import SystemSetting
@@ -35,6 +36,8 @@ ALL_MODELS: tuple[type, ...] = (
     UserSession,
     Version,
     SystemSetting,
+    PipelineState,
+    PipelineMessage,
 )
 
 __all__ = [
@@ -44,6 +47,8 @@ __all__ = [
     "Epic",
     "Feat",
     "ModuleDependency",
+    "PipelineMessage",
+    "PipelineState",
     "Project",
     "ProjectMember",
     "ProjectModule",
