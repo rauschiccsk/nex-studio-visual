@@ -7,6 +7,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import type { PipelineMessage, PipelineParticipant } from "../../services/api/pipeline";
+import { ROLE_LABELS } from "./labels";
 
 const PARTICIPANT_EMOJI: Record<PipelineParticipant, string> = {
   coordinator: "🧭",
@@ -16,16 +17,6 @@ const PARTICIPANT_EMOJI: Record<PipelineParticipant, string> = {
   auditor: "🔍",
   director: "👔",
   system: "⚙️",
-};
-
-const PARTICIPANT_LABEL: Record<PipelineParticipant, string> = {
-  coordinator: "Koordinátor",
-  designer: "Designer",
-  customer: "Customer",
-  implementer: "Implementer",
-  auditor: "Auditor",
-  director: "Director",
-  system: "Systém",
 };
 
 const PARTICIPANT_ACCENT: Record<PipelineParticipant, string> = {
@@ -67,9 +58,9 @@ export function PipelineMessageBubble({ message }: Props) {
       <div className="mb-1 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-xs text-slate-300">
           <span aria-hidden="true">{PARTICIPANT_EMOJI[message.author]}</span>
-          <span className="font-semibold">{PARTICIPANT_LABEL[message.author]}</span>
+          <span className="font-semibold">{ROLE_LABELS[message.author]}</span>
           <span className="text-slate-600">→</span>
-          <span className="text-slate-400">{PARTICIPANT_LABEL[message.recipient]}</span>
+          <span className="text-slate-400">{ROLE_LABELS[message.recipient]}</span>
           <span className="text-slate-600">·</span>
           <span className="font-mono text-[10px] text-slate-500">{ts}</span>
         </div>

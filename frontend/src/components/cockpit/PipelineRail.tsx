@@ -5,6 +5,7 @@ import type {
   PipelineStage,
   PipelineState,
 } from "../../services/api/pipeline";
+import { ROLE_LABELS, STAGE_CODES, STAGE_LABELS } from "./labels";
 
 // Mirrors backend orchestrator.STAGE_ORDER + STAGE_ACTOR.
 const STAGE_ORDER: PipelineStage[] = [
@@ -20,26 +21,14 @@ const STAGE_ORDER: PipelineStage[] = [
   "done",
 ];
 
-const STAGE_LABEL: Record<PipelineStage, string> = {
-  kickoff: "Kickoff",
-  gate_a: "Gate A",
-  gate_b: "Gate B",
-  gate_c: "Gate C",
-  gate_d: "Gate D",
-  gate_e: "Gate E",
-  build: "Build",
-  gate_g: "Gate G",
-  release: "Release",
-  done: "Done",
-};
-
-// Agent chips (director is the human, not an agent chip).
-const AGENTS: { actor: PipelineActor; label: string; emoji: string }[] = [
-  { actor: "coordinator", label: "Koordinátor", emoji: "🧭" },
-  { actor: "designer", label: "Designer", emoji: "🎨" },
-  { actor: "customer", label: "Customer", emoji: "🧑‍💼" },
-  { actor: "implementer", label: "Implementer", emoji: "🔨" },
-  { actor: "auditor", label: "Auditor", emoji: "🔍" },
+// Agent chips (director is the human, not an agent chip). Labels from the shared
+// ROLE_LABELS map; emoji is decorative.
+const AGENTS: { actor: PipelineActor; emoji: string }[] = [
+  { actor: "coordinator", emoji: "🧭" },
+  { actor: "designer", emoji: "🎨" },
+  { actor: "customer", emoji: "🧑‍💼" },
+  { actor: "implementer", emoji: "🔨" },
+  { actor: "auditor", emoji: "🔍" },
 ];
 
 type ChipStatus = "idle" | "working" | "awaiting" | "blocked";
@@ -98,7 +87,7 @@ export function PipelineRail({ state }: Props) {
             return (
               <li key={stage} className={`flex items-center gap-2 text-xs ${color}`}>
                 <span className="w-3 text-center font-mono">{marker}</span>
-                <span>{STAGE_LABEL[stage]}</span>
+                <span title={STAGE_CODES[stage]}>{STAGE_LABELS[stage]}</span>
                 {current && state?.is_regate && (
                   <span className="rounded bg-amber-500/15 px-1 text-[9px] text-amber-300">
                     re-gate #{state.iteration}
@@ -115,13 +104,13 @@ export function PipelineRail({ state }: Props) {
           Agenti
         </h3>
         <ul className="space-y-1.5">
-          {AGENTS.map(({ actor, label, emoji }) => {
+          {AGENTS.map(({ actor, emoji }) => {
             const s = chipStatusFor(actor, state);
             return (
               <li key={actor} className="flex items-center justify-between gap-2 text-xs">
                 <span className="flex items-center gap-1.5 text-slate-400">
                   <span aria-hidden="true">{emoji}</span>
-                  {label}
+                  {ROLE_LABELS[actor]}
                 </span>
                 <span className={`font-mono text-[10px] ${CHIP_STYLE[s]}`}>{CHIP_LABEL[s]}</span>
               </li>
