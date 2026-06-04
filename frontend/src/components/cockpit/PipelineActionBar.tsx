@@ -11,7 +11,11 @@ import type {
   PipelineState,
 } from "../../services/api/pipeline";
 
-const GATE_STAGES = new Set(["gate_a", "gate_b", "gate_c", "gate_d", "gate_e"]);
+// Stages the Director ratifies with Schváliť/Vrátiť. kickoff is a ratification
+// gate too — the engine's approve advances kickoff→gate_a (NOT a `start`; the
+// real start is the state===null CTA on CockpitPage). gate_g is excluded — it
+// uses the PASS/FAIL verdict instead.
+const RATIFY_STAGES = new Set(["kickoff", "gate_a", "gate_b", "gate_c", "gate_d", "gate_e"]);
 
 interface Props {
   state: PipelineState | null;
@@ -83,17 +87,7 @@ export function PipelineActionBar({ state, inFlight, onAction }: Props) {
     <div className="flex flex-wrap items-center gap-2">
       {inFlight && <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500" />}
 
-      {current_stage === "kickoff" && awaiting && (
-        <button
-          onClick={() => onAction("start")}
-          disabled={inFlight}
-          className={`${btn} bg-primary-600 text-white hover:bg-primary-500`}
-        >
-          Spustiť
-        </button>
-      )}
-
-      {GATE_STAGES.has(current_stage) && awaiting && (
+      {RATIFY_STAGES.has(current_stage) && awaiting && (
         <>
           <button
             onClick={() => onAction("approve")}
