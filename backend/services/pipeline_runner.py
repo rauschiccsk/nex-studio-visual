@@ -143,8 +143,16 @@ async def _maybe_notify(db, version_id: uuid.UUID, state: PipelineState) -> None
     if not chat_id:
         logger.info("version %s: no owner telegram_chat_id — skip notify", version_id)
         return
+    # Generic nudge only — NEVER embed the raw next_action (it carries machine
+    # tokens like 'coordinator'/'gate_a'). Specifics live on the board.
+    proj_ver = db.execute(
+        select(Project.name, Version.version_number)
+        .join(Version, Version.project_id == Project.id)
+        .where(Version.id == version_id)
+    ).one_or_none()
+    label = f"{proj_ver[0]} {proj_ver[1]}" if proj_ver else "NEX Studio"
     link = f"\n{settings.app_public_url.rstrip('/')}/cockpit" if settings.app_public_url else ""
-    message = f"NEX Studio — na rade: {state.next_action}{link}"
+    message = f"🔔 {label}: si na rade v NEX Studio cockpite{link}"
     await notify.send_telegram(message, chat_id)
 
 

@@ -204,8 +204,12 @@ async def test_notify_fires_on_awaiting_when_no_presence(db_session, monkeypatch
     await pipeline_runner._run(version.id)
 
     assert len(sent) == 1
-    assert sent[0][1] == "999"
-    assert "na rade" in sent[0][0]
+    msg, chat = sent[0]
+    assert chat == "999"
+    assert "na rade" in msg
+    # generic nudge — no machine tokens (actor/stage codes) leak into human text
+    for token in ("coordinator", "kickoff", "gate_a", "current_actor", "agent_working"):
+        assert token not in msg
 
 
 async def test_notify_suppressed_when_director_present(db_session, monkeypatch):

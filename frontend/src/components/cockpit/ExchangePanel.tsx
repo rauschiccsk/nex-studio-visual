@@ -6,11 +6,13 @@ import type {
   ActivityLine,
   PipelineActionName,
   PipelineBoard,
+  PipelineState,
   PipelineStatus,
 } from "../../services/api/pipeline";
 import PipelineActionBar from "./PipelineActionBar";
 import PipelineActivityFeed from "./PipelineActivityFeed";
 import PipelineMessageBubble from "./PipelineMessageBubble";
+import { ROLE_LABELS, STAGE_LABELS } from "./labels";
 
 const STATUS_BANNER: Record<PipelineStatus, string> = {
   awaiting_director: "border-amber-500/40 bg-amber-500/10 text-amber-200",
@@ -19,12 +21,24 @@ const STATUS_BANNER: Record<PipelineStatus, string> = {
   done: "border-slate-600/40 bg-slate-700/10 text-slate-300",
 };
 
-const STATUS_LABEL: Record<PipelineStatus, string> = {
-  awaiting_director: "NA RADE: Director",
-  blocked: "BLOKOVANÉ: agent sa pýta",
-  agent_working: "Agent pracuje…",
-  done: "Hotovo",
-};
+// Compose the banner from machine values + Slovak display labels — never render
+// the raw backend ``next_action`` (it embeds machine tokens like 'coordinator').
+function bannerText(state: PipelineState): string {
+  const role = ROLE_LABELS[state.current_actor];
+  const stage = STAGE_LABELS[state.current_stage];
+  switch (state.status) {
+    case "agent_working":
+      return `${role} pracuje na fáze ${stage}`;
+    case "awaiting_director":
+      return `Na rade: Director — posúď fázu ${stage}`;
+    case "blocked":
+      return `Na rade: Director — odpovedz ${role}-ovi`;
+    case "done":
+      return "Hotovo";
+    default:
+      return stage;
+  }
+}
 
 interface Props {
   board: PipelineBoard;
@@ -38,7 +52,7 @@ export function ExchangePanel({ board, inFlight, activity, onAction }: Props) {
   const threadRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight });
+    threadRef.current?.scrollTo?.({ top: threadRef.current.scrollHeight });
   }, [recent_messages.length]);
 
   const banner = state ? STATUS_BANNER[state.status] : "";
@@ -47,8 +61,7 @@ export function ExchangePanel({ board, inFlight, activity, onAction }: Props) {
     <div className="flex h-full flex-col">
       {state && (
         <div className={`flex-shrink-0 border-b px-4 py-2.5 text-xs ${banner}`}>
-          <span className="font-mono">&gt; {STATUS_LABEL[state.status]}</span>
-          {state.next_action && <span className="ml-2 text-slate-200">— {state.next_action}</span>}
+          <span className="font-medium text-slate-100">{bannerText(state)}</span>
         </div>
       )}
 
