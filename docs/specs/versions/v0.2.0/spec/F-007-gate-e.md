@@ -31,14 +31,16 @@ Director:
      **ďalšia otázka**.
    - **(B) Návrhár našiel medzeru** — návrh riešenia ide **Koordinátorovi** →
      Koordinátor prekontroluje + dá **odporúčanie** → **Director** rozhodne
-     **opraviť / ponechať** → pokyn ide Návrhárovi → Návrhár **až teraz** opraví
-     (alebo ponechá) → **ďalšia otázka**.
+     **opraviť / ponechať** → rozhodnutie ide **cez Koordinátora** Návrhárovi
+     (nie Director→Návrhár priamo) → Návrhár **až teraz** opraví (alebo ponechá)
+     → **ďalšia otázka**.
 
 **Tvrdé pravidlo:** Návrhár **nikdy needituje spec sám** počas Gate E — výhradne
-na základe Directorom schváleného pokynu `fix` (vetva B). Routine otázka-odpoveď
-(vetva A) ide priamo Directorovi; cez Koordinátora idú **len nálezy** (na kontrolu
-+ odporúčanie). Žiadny autonómny beh vnútri okruhu — **každá** výmena stojí na
-schválení Directora.
+na základe Directorom schváleného pokynu `fix`, ktorý mu **doručí Koordinátor**
+(vetva B). **Director nepíše Návrhárovi priamo** — pri náleze idú cez Koordinátora
+**oba smery** (návrh hore, rozhodnutie dole), inak by Koordinátor vypadol z procesu.
+Routine otázka-odpoveď (vetva A) ide priamo Directorovi. Žiadny autonómny beh
+vnútri okruhu — **každá** výmena stojí na schválení Directora.
 
 ## 3. Rozhodnutie 2 — okruhy = organizácia previerky (nie jednotka schvaľovania)
 
@@ -85,10 +87,12 @@ moduly, obrazovky, chyby (NIB-XXX), edge-cases, integrácie.
   (true/false); ak `true`, pridá `proposed_fix` (textový návrh, žiaden edit).
   Zákazník: `kind=question` (otázka), `kind=gate_report` (okruh dokončený +
   nálezy). Presné polia dolaď v pláne; charter §7.2 zladím ja.
-- **Vetva B routing:** pri `gap_found` orchestrátor pošle návrh **Koordinátorovi**
-  (jeho session) na kontrolu + odporúčanie (reuse `_coordinator_relay`), výsledok
-  Directorovi. Director akcie: **schváliť odpoveď** (A → ďalšia otázka),
-  **opraviť** / **ponechať** (B). Mapovanie na cockpit akcie dolaď v pláne.
+- **Vetva B routing (cez Koordinátora OBOMA smermi):** pri `gap_found` orchestrátor
+  pošle návrh **Koordinátorovi** na kontrolu + odporúčanie (reuse `_coordinator_relay`),
+  výsledok Directorovi. Director rozhodne **opraviť** / **ponechať** → rozhodnutie
+  ide **cez Koordinátora** Návrhárovi (NIE Director→Návrhár priamo) — `fix` directive
+  Návrhárovi skomponuj zo schváleného návrhu + Koordinátorovho odporúčania.
+  Vetva A: **schváliť odpoveď** → ďalšia otázka. Mapovanie na cockpit akcie dolaď.
 - **Nálezy/riešenia** ako `pipeline_message` (stage=gate_e); poradie cez `seq`.
   Director-facing texty po slovensky, bežnou rečou (§7.2).
 
