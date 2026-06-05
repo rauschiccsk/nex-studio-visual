@@ -69,6 +69,20 @@ class PipelineStatusBlock(BaseModel):
     commits: list[str] = Field(default_factory=list)
     question: Optional[str] = None
 
+    # Gate E signals (F-007-gate-e §5/§7.2, CR-NS-018 Phase 1). All optional; only
+    # the Customer↔Designer loop (stage=gate_e) emits them, so non-gate-E blocks are
+    # unaffected. The Customer charter §7.2 is aligned to exactly these (Dedo).
+    #: Which of the 7 review okruhov this block concerns.
+    topic: Optional[str] = None
+    #: Customer signals the current okruh is finished → round boundary (with kind=gate_report).
+    topic_done: bool = False
+    #: A policy the Director must decide → mid-round pause (with the policy in ``question``).
+    needs_director_decision: bool = False
+    #: All 7 okruhy covered → final boundary; the Director's approve advances to build.
+    coverage_complete: bool = False
+    #: Structured findings for the Director's boundary view (alongside ``summary``).
+    findings: list[str] = Field(default_factory=list)
+
 
 @dataclass(frozen=True)
 class ParseFailure:

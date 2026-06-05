@@ -128,3 +128,66 @@ def test_question_required_for_question_kinds(kind):
 def test_question_blank_rejected(kind):
     res = parse_status_block(_block(stage="gate_a", kind=kind, summary="s", awaiting="director", question="   "))
     assert isinstance(res, ParseFailure)
+
+
+# ── Gate E signals (F-007-gate-e §5/§7.2, CR-NS-018 Phase 1) ────────────────────
+
+
+def test_gate_e_signals_default_when_absent():
+    """Non-gate-E blocks (and gate_e blocks not emitting them) get safe defaults."""
+    res = parse_status_block(_block(stage="gate_a", kind="answer", summary="s", awaiting="none"))
+    assert isinstance(res, PipelineStatusBlock)
+    assert res.topic is None
+    assert res.topic_done is False
+    assert res.needs_director_decision is False
+    assert res.coverage_complete is False
+    assert res.findings == []
+
+
+def test_gate_e_topic_boundary_block_parses():
+    res = parse_status_block(
+        _block(
+            stage="gate_e",
+            kind="gate_report",
+            summary="okruh prihlásenie dokončený",
+            awaiting="director",
+            topic="prihlasenie",
+            topic_done=True,
+            findings=["chýba reset hesla", "2FA nedefinované"],
+        )
+    )
+    assert isinstance(res, PipelineStatusBlock)
+    assert res.topic == "prihlasenie"
+    assert res.topic_done is True
+    assert res.findings == ["chýba reset hesla", "2FA nedefinované"]
+
+
+def test_gate_e_needs_director_decision_block_parses():
+    res = parse_status_block(
+        _block(
+            stage="gate_e",
+            kind="blocked",
+            summary="politika hesiel",
+            awaiting="director",
+            question="Vynútiť zmenu hesla pri prvom prihlásení?",
+            needs_director_decision=True,
+        )
+    )
+    assert isinstance(res, PipelineStatusBlock)
+    assert res.needs_director_decision is True
+    assert res.question == "Vynútiť zmenu hesla pri prvom prihlásení?"
+
+
+def test_gate_e_coverage_complete_block_parses():
+    res = parse_status_block(
+        _block(
+            stage="gate_e",
+            kind="gate_report",
+            summary="všetkých 7 okruhov pokrytých",
+            awaiting="director",
+            topic_done=True,
+            coverage_complete=True,
+        )
+    )
+    assert isinstance(res, PipelineStatusBlock)
+    assert res.coverage_complete is True
