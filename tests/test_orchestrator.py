@@ -606,3 +606,128 @@ async def test_advancing_action_allowed_when_blocked(db_session, fake_claude):
     _settle(db_session, version.id, status="blocked")
     state = await orchestrator.apply_action(db_session, version_id=version.id, action="approve")
     assert state.current_stage == "gate_a"
+
+
+# ── Gate E orchestrator loop (F-007-gate-e §2/§3/§5, CR-NS-018 Phase 2) ──────────
+
+
+def _to_gate_e(db_session, version):
+    """Put the pipeline at gate_e / customer / agent_working (loop entry)."""
+    state = orchestrator._get_state(db_session, version.id)
+    state.current_stage = "gate_e"
+    state.current_actor = "customer"
+    state.status = "agent_working"
+    db_session.flush()
+    return state
+
+
+class GateELoopClaude:
+    """invoke_claude stand-in for the gate_e loop: Customer always asks, Designer
+    always answers (distinguished by the Designer-relay prompt) → never converges,
+    so the round exhausts its exchange budget. Records every prompt."""
+
+    def __init__(self):
+        self.prompts: list[str] = []
+
+    async def __call__(self, *, prompt, **kwargs):
+        self.prompts.append(prompt)
+        if "Zákazník vo fáze Gate E sa pýta" in prompt:  # Designer turn
+            return _block(stage="gate_e", kind="answer", summary="vysvetlené, pokryté", awaiting="none")
+        return _block(stage="gate_e", kind="question", summary="?", question="ďalšia otázka?")  # Customer asks
+
+
+async def test_gate_e_loop_routes_question_then_settles_at_boundary(db_session, monkeypatch):
+    seq = SequenceClaude(
+        [
+            _block(stage="gate_e", kind="question", summary="?", question="Ako sa rieši reset hesla?"),
+            _block(stage="gate_e", kind="answer", summary="Reset cez email, pokryté v §4.2", awaiting="none"),
+            _block(
+                stage="gate_e",
+                kind="gate_report",
+                summary="okruh prihlásenie hotový",
+                awaiting="director",
+                topic="prihlasenie",
+                topic_done=True,
+                findings=["reset hesla pokrytý"],
+            ),
+        ]
+    )
+    monkeypatch.setattr(orchestrator, "invoke_claude", seq)
+    monkeypatch.setattr(orchestrator, "verify_mechanical", lambda slug, block: None)
+
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _to_gate_e(db_session, version)
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert state.status == "awaiting_director"
+    assert state.current_stage == "gate_e"  # stays in gate_e at a topic boundary
+    assert len(seq.prompts) == 3  # customer → designer → customer
+    msgs = _msgs(db_session, version.id)
+    assert any(m.author == "customer" for m in msgs)
+    assert any(m.author == "designer" for m in msgs)
+    # the Designer was asked the Customer's question
+    assert any("reset hesla" in p.lower() for p in seq.prompts)
+    assert "prihlasenie" in state.next_action
+
+
+async def test_gate_e_needs_director_decision_pauses_mid_round(db_session, monkeypatch):
+    seq = SequenceClaude(
+        [
+            _block(
+                stage="gate_e",
+                kind="blocked",
+                summary="politika hesiel",
+                awaiting="director",
+                question="Vynútiť zmenu hesla pri prvom prihlásení?",
+                needs_director_decision=True,
+            ),
+        ]
+    )
+    monkeypatch.setattr(orchestrator, "invoke_claude", seq)
+    monkeypatch.setattr(orchestrator, "verify_mechanical", lambda slug, block: None)
+
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _to_gate_e(db_session, version)
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert state.status == "blocked"
+    assert len(seq.prompts) == 1  # paused immediately, no Designer routing
+    assert "rozhodnutie Directora" in state.next_action
+
+
+async def test_gate_e_round_exhaustion_blocks(db_session, monkeypatch):
+    fake = GateELoopClaude()
+    monkeypatch.setattr(orchestrator, "invoke_claude", fake)
+    monkeypatch.setattr(orchestrator, "verify_mechanical", lambda slug, block: None)
+
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _to_gate_e(db_session, version)
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert state.status == "blocked"
+    assert "limit výmen" in state.next_action
+    # customer + designer per iteration, for _GATE_E_MAX_EXCHANGES iterations
+    assert len(fake.prompts) == 2 * orchestrator._GATE_E_MAX_EXCHANGES
+
+
+async def test_gate_e_designer_parse_failure_blocks(db_session, monkeypatch):
+    seq = SequenceClaude(
+        [
+            _block(stage="gate_e", kind="question", summary="?", question="Otázka pre Návrhára?"),
+            "garbage — no status block",  # designer relay primary
+            "garbage — no status block",  # retry 1
+            "garbage — no status block",  # retry 2
+        ]
+    )
+    monkeypatch.setattr(orchestrator, "invoke_claude", seq)
+    monkeypatch.setattr(orchestrator, "verify_mechanical", lambda slug, block: None)
+
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _to_gate_e(db_session, version)
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert state.status == "blocked"  # unparseable Designer turn → escalate, never guess

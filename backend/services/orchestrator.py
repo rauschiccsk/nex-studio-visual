@@ -67,6 +67,10 @@ _VERIFY_RETRIES = 2
 # Distinct from ``_VERIFY_RETRIES`` (which retries a *valid* report that failed
 # verification).
 _PARSE_RETRIES = 2
+# Max Customer↔Designer exchanges in one Gate E topic round before escalating to
+# blocked (F-007-gate-e §3/§5). A backstop against a non-converging round — never
+# an infinite loop. The Director resumes after deciding at the boundary.
+_GATE_E_MAX_EXCHANGES = 12
 _ACTIONS = frozenset(
     {
         "start",
@@ -534,6 +538,11 @@ async def run_dispatch(
     if STAGE_ACTOR.get(stage) is None:  # terminal — nothing to run.
         return state
 
+    # Gate E (F-007-gate-e §2/§3/§5): the orchestrator runs an autonomous
+    # Customer↔Designer loop for one topic round — not a single agent turn.
+    if stage == "gate_e":
+        return await _run_gate_e_round(db, state, on_event=on_event, directive=directive)
+
     prompt = directive if directive is not None else _directive_for(stage)
     result = await invoke_agent_with_parse_retry(
         db, version_id=state.version_id, role=actor, stage=stage, prompt=prompt, on_event=on_event
@@ -571,6 +580,90 @@ async def run_dispatch(
     # kickoff / answer / done-class agent output → await the Director.
     state.status = "awaiting_director"
     state.next_action = f"Director: posúdiť výstup fázy '{stage}'."
+    db.flush()
+    return state
+
+
+async def _run_gate_e_round(
+    db: Session,
+    state: PipelineState,
+    *,
+    on_event: Optional[claude_agent.EventCallback] = None,
+    directive: Optional[str] = None,
+) -> PipelineState:
+    """One Gate E topic round: orchestrator-mediated Customer↔Designer loop (§2/§3).
+
+    The Customer reviews the topic; on a ``question`` the orchestrator routes it to
+    the Designer (hub-and-spoke — agents never call each other), whose answer
+    (covered / fixed) is fed back to the Customer. Loops autonomously, bounded by
+    ``_GATE_E_MAX_EXCHANGES``, until the Customer signals the round boundary
+    (``gate_report`` + ``topic_done`` → ``awaiting_director``) or a policy the
+    Director must decide (``needs_director_decision`` → ``blocked`` mid-round pause).
+    Each turn is recorded as a ``pipeline_message`` (stage=gate_e, ``seq``-ordered)
+    by :func:`invoke_agent`. Only the first Customer turn streams ``on_event`` (the
+    later turns are secondary). On exhaustion → ``blocked`` (escalate, never guess).
+
+    Director boundary actions (continue-topic / final approve / decide-policy /
+    end-early) land in Phase 3; this phase delivers the loop + settle.
+    """
+    customer_prompt = directive if directive is not None else _directive_for("gate_e")
+    stream = on_event  # only the first Customer turn streams
+    for _ in range(_GATE_E_MAX_EXCHANGES):
+        cust = await invoke_agent_with_parse_retry(
+            db, version_id=state.version_id, role="customer", stage="gate_e", prompt=customer_prompt, on_event=stream
+        )
+        stream = None
+        if isinstance(cust, ParseFailure):
+            state.status = "blocked"
+            state.next_action = f"Blokované: {cust.reason}. Eskalované Directorovi."
+            db.flush()
+            return state
+
+        if cust.needs_director_decision:  # mid-round policy pause — never guess
+            state.status = "blocked"
+            state.next_action = f"Zákazník: potrebné rozhodnutie Directora — {cust.question or cust.summary}"
+            db.flush()
+            return state
+
+        if cust.kind == "gate_report" and cust.topic_done:  # round boundary
+            state.status = "awaiting_director"
+            topic = cust.topic or "okruh"
+            state.next_action = f"Director: posúď okruh '{topic}' (nálezy + riešenia Návrhára)."
+            db.flush()
+            return state
+
+        if cust.kind in ("question", "blocked"):  # route the Customer's question to the Designer
+            designer = await invoke_agent_with_parse_retry(
+                db,
+                version_id=state.version_id,
+                role="designer",
+                stage="gate_e",
+                prompt=(
+                    f"Zákazník vo fáze Gate E sa pýta: {cust.question}. Vysvetli, či je to už pokryté "
+                    "v návrhu, alebo oprav návrh. Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
+                ),
+            )
+            if isinstance(designer, ParseFailure):
+                state.status = "blocked"
+                state.next_action = f"Blokované: {designer.reason}. Eskalované Directorovi."
+                db.flush()
+                return state
+            customer_prompt = (
+                f"Návrhár odpovedal: {designer.summary}. Pokračuj v previerke okruhu — ak je to pokryté, "
+                "potvrď a uzavri okruh (topic_done), inak pokračuj v otázkach. "
+                "Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
+            )
+            continue
+
+        # Unexpected Customer output (answer/kickoff/done without topic_done) → let the Director judge.
+        state.status = "awaiting_director"
+        state.next_action = "Director: posúď výstup fázy gate_e."
+        db.flush()
+        return state
+
+    # Exchange budget exhausted without a boundary — escalate, never loop forever.
+    state.status = "blocked"
+    state.next_action = f"Gate E okruh prekročil limit výmen ({_GATE_E_MAX_EXCHANGES}). Eskalované Directorovi."
     db.flush()
     return state
 
