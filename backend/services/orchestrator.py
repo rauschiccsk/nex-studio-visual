@@ -61,6 +61,12 @@ STAGE_ACTOR: dict[str, str] = {
     "release": "coordinator",
 }
 _VERIFY_RETRIES = 2
+# Bounded re-invokes when the agent emits an unparseable <<<PIPELINE_STATUS>>>
+# block (CR-NS-018). A single LLM JSON typo must not halt the pipeline; the
+# agent runs ``--resume`` so a retry is a cheap re-emit, not a redo of the work.
+# Distinct from ``_VERIFY_RETRIES`` (which retries a *valid* report that failed
+# verification).
+_PARSE_RETRIES = 2
 _ACTIONS = frozenset({"start", "approve", "return", "ask", "answer", "verdict", "uat_accept", "pause"})
 
 # Per-stage backstop timeouts (seconds) for a single headless agent turn
@@ -281,6 +287,46 @@ async def invoke_agent(
     return parsed
 
 
+async def invoke_agent_with_parse_retry(
+    db: Session,
+    *,
+    version_id: uuid.UUID,
+    role: str,
+    stage: str,
+    prompt: str,
+    on_event: Optional[claude_agent.EventCallback] = None,
+) -> PipelineStatusBlock | ParseFailure:
+    """Invoke the actor; on a status-block ``ParseFailure``, re-invoke (bounded).
+
+    A single LLM JSON typo in the ``<<<PIPELINE_STATUS>>>`` block must not halt
+    the pipeline (CR-NS-018). On a parse failure we feed the error back and ask
+    the agent to re-emit **only** a corrected, valid block — same content, valid
+    JSON. The agent runs ``--resume`` so each retry is a cheap re-emit, not a
+    redo of the work. After ``_PARSE_RETRIES`` still-invalid attempts we return
+    the last :class:`ParseFailure` and the caller escalates to ``blocked``
+    (endpoint unchanged). No guessing — we never fabricate a block.
+
+    Distinct from :func:`_verify_with_retries`, which retries a *valid* report
+    that failed verification. Only the first (primary) invocation streams via
+    ``on_event``; the cheap re-emit retries don't stream.
+    """
+    result = await invoke_agent(db, version_id=version_id, role=role, stage=stage, prompt=prompt, on_event=on_event)
+    attempts = 0
+    while isinstance(result, ParseFailure) and attempts < _PARSE_RETRIES:
+        attempts += 1
+        result = await invoke_agent(
+            db,
+            version_id=version_id,
+            role=role,
+            stage=stage,
+            prompt=(
+                f"Tvoj <<<PIPELINE_STATUS>>> blok nebol platný JSON: {result.reason}. "
+                "Pošli LEN opravený, platný <<<PIPELINE_STATUS>>> blok — rovnaký obsah, správny JSON."
+            ),
+        )
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Verify hooks (F-007 §5.4)
 # ---------------------------------------------------------------------------
@@ -402,7 +448,7 @@ async def run_dispatch(
         return state
 
     prompt = directive if directive is not None else _directive_for(stage)
-    result = await invoke_agent(
+    result = await invoke_agent_with_parse_retry(
         db, version_id=state.version_id, role=actor, stage=stage, prompt=prompt, on_event=on_event
     )
 

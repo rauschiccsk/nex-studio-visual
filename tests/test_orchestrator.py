@@ -307,3 +307,59 @@ async def test_run_dispatch_generic_directive_without_override(db_session, fake_
     fake_claude.response = _block(stage="kickoff", kind="blocked", summary="x", question="?")
     await orchestrator.run_dispatch(db_session, version.id)
     assert "Pokračuj fázou 'kickoff'" in fake_claude.calls[-1]["prompt"]
+
+
+# ── parse-failure auto-retry (CR-NS-018: a single JSON typo must not halt) ──────
+
+
+class SequenceClaude:
+    """Async ``invoke_claude`` stand-in that returns a fixed sequence of outputs
+    (last one repeats once exhausted) and records every prompt it was given."""
+
+    def __init__(self, responses: list[str]):
+        self.responses = responses
+        self.prompts: list[str] = []
+
+    async def __call__(self, *, prompt, **kwargs):
+        idx = min(len(self.prompts), len(self.responses) - 1)
+        self.prompts.append(prompt)
+        return self.responses[idx]
+
+
+async def test_run_dispatch_parse_retry_recovers(db_session, monkeypatch):
+    """ParseFailure then a valid block on retry → the pipeline proceeds."""
+    fake = SequenceClaude(
+        [
+            "garbage — not a valid status block",  # invalid JSON → ParseFailure
+            _block(stage="kickoff", kind="done", summary="discovery ok", awaiting="director"),
+        ]
+    )
+    monkeypatch.setattr(orchestrator, "invoke_claude", fake)
+    monkeypatch.setattr(orchestrator, "verify_mechanical", lambda slug, block: None)
+
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert state.status == "awaiting_director"
+    # the retry prompt fed the JSON error back to the agent
+    assert any("nebol platný JSON" in p for p in fake.prompts)
+    assert len(fake.prompts) == 2  # primary + one recovery re-emit
+
+
+async def test_run_dispatch_parse_retry_exhausted_blocks(db_session, monkeypatch):
+    """Still-invalid after ``_PARSE_RETRIES`` → blocked + system notification."""
+    fake = SequenceClaude(["still no valid block here"])  # always invalid
+    monkeypatch.setattr(orchestrator, "invoke_claude", fake)
+    monkeypatch.setattr(orchestrator, "verify_mechanical", lambda slug, block: None)
+
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert state.status == "blocked"
+    # primary + _PARSE_RETRIES re-invokes
+    assert len(fake.prompts) == 1 + orchestrator._PARSE_RETRIES
+    # every failed parse was escalated as a system→director notification
+    notifs = [m for m in _msgs(db_session, version.id) if m.author == "system" and m.kind == "notification"]
+    assert len(notifs) >= 1
