@@ -67,10 +67,6 @@ _VERIFY_RETRIES = 2
 # Distinct from ``_VERIFY_RETRIES`` (which retries a *valid* report that failed
 # verification).
 _PARSE_RETRIES = 2
-# Max Customer↔Designer exchanges in one Gate E topic round before escalating to
-# blocked (F-007-gate-e §3/§5). A backstop against a non-converging round — never
-# an infinite loop. The Director resumes after deciding at the boundary.
-_GATE_E_MAX_EXCHANGES = 12
 _ACTIONS = frozenset(
     {
         "start",
@@ -79,6 +75,8 @@ _ACTIONS = frozenset(
         "ask",
         "answer",
         "apply_coordinator_recommendation",
+        "fix",
+        "leave",
         "verdict",
         "uat_accept",
         "end_gate_e",
@@ -89,7 +87,7 @@ _ACTIONS = frozenset(
 # agent has settled (CR-NS-018). Guarding these stops a stale board / double-click
 # from advancing while the agent is mid-work (which skipped a mandatory gate).
 _ADVANCING_ACTIONS = frozenset(
-    {"approve", "apply_coordinator_recommendation", "verdict", "uat_accept", "return", "end_gate_e"}
+    {"approve", "apply_coordinator_recommendation", "fix", "leave", "verdict", "uat_accept", "return", "end_gate_e"}
 )
 
 # Per-stage backstop timeouts (seconds) for a single headless agent turn
@@ -274,6 +272,42 @@ def _gate_e_coverage_complete(report: Optional[PipelineMessage]) -> bool:
     return bool(report and report.payload and report.payload.get("coverage_complete"))
 
 
+def _latest_designer_answer(db: Session, version_id: uuid.UUID) -> Optional[PipelineMessage]:
+    """Most recent Designer answer in Gate E (or ``None``) — carries ``gap_found`` /
+    ``proposed_fix`` in its payload, which gate the Branch B ``fix`` / ``leave`` actions."""
+    return db.execute(
+        select(PipelineMessage)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.author == "designer",
+            PipelineMessage.stage == "gate_e",
+            PipelineMessage.kind == "answer",
+        )
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def _latest_coordinator_message_content(db: Session, version_id: uuid.UUID) -> Optional[str]:
+    """Content of the most recent Coordinator message (any kind) for a version.
+
+    In Gate E Branch B this is the Coordinator's recommendation on a proposed fix —
+    composed into the Coordinator-relayed ``fix`` directive so the decision travels
+    Director→Coordinator→Designer (the Coordinator never drops out, §2)."""
+    return db.execute(
+        select(PipelineMessage.content)
+        .where(PipelineMessage.version_id == version_id, PipelineMessage.author == "coordinator")
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def _gate_e_gap_open(db: Session, version_id: uuid.UUID) -> bool:
+    """Whether the latest Designer answer flagged a gap (Branch B) — gates ``fix``/``leave``."""
+    ans = _latest_designer_answer(db, version_id)
+    return bool(ans and ans.payload and ans.payload.get("gap_found"))
+
+
 _GATE_E_ROLE_SK = {
     "customer": "Zákazník",
     "designer": "Návrhár",
@@ -369,12 +403,24 @@ def dispatch_directive(
         if content is None:
             return None
         return f"Director schválil odporúčania Koordinátora. Zapracuj ich podľa jeho hlásenia: {content}"
-    # A topic-boundary approve that STAYS in gate_e (next-topic continue) directs the
-    # Customer to the next okruh (F-007-gate-e §3). A final approve advances to build,
-    # so by then stage != gate_e and this does not fire.
-    if action == "approve" and stage == "gate_e":
+    # Gate E (F-007-gate-e revised §2): every continue goes to the Customer for the
+    # next question (or next okruh — the Customer tracks coverage). A final approve has
+    # already advanced to build, so stage != gate_e and this does not fire.
+    if action in ("approve", "leave") and stage == "gate_e":
         return (
-            "Director schválil okruh. Pokračuj ďalším okruhom previerky Gate E. "
+            "Director schválil — pokračuj v previerke Gate E ďalšou otázkou "
+            "(alebo ďalším okruhom). Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
+        )
+    # Branch B fix: the edit instruction is Coordinator-relayed (Director never writes
+    # to the Designer directly, §2) — composed from the proposed fix + the Coordinator's
+    # recommendation. Delivered to the Designer, who edits NOW (designer_edit dispatch).
+    if action == "fix" and stage == "gate_e":
+        ans = _latest_designer_answer(db, version_id)
+        proposed = (ans.payload.get("proposed_fix") if ans and ans.payload else None) or "(návrh chýba)"
+        recommendation = _latest_coordinator_message_content(db, version_id) or "(bez poznámky)"
+        return (
+            "Koordinátor odovzdáva Directorom schválený pokyn na opravu. Uprav návrh podľa "
+            f"schváleného riešenia: {proposed}. Odporúčanie Koordinátora: {recommendation}. "
             "Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
         )
     return directive_for_action(action, payload, stage)
@@ -472,11 +518,13 @@ async def invoke_agent(
             "awaiting": parsed.awaiting,
             "block_kind": parsed.kind,
             # Gate E signals (F-007-gate-e) — let apply_action/the FE derive the
-            # boundary type (topic vs final) and the open-finding gate.
+            # boundary type (topic vs final), the open-finding gate, and Branch A/B.
             "topic": parsed.topic,
             "topic_done": parsed.topic_done,
             "coverage_complete": parsed.coverage_complete,
             "findings": parsed.findings,
+            "gap_found": parsed.gap_found,
+            "proposed_fix": parsed.proposed_fix,
         },
     )
     return parsed
@@ -646,8 +694,14 @@ async def run_dispatch(
     version_id: uuid.UUID,
     on_event: Optional[claude_agent.EventCallback] = None,
     directive: Optional[str] = None,
+    *,
+    designer_edit: bool = False,
 ) -> Optional[PipelineState]:
     """Run the working agent for a version and settle its status (background).
+
+    ``designer_edit`` (Gate E Branch B ``fix``): the directive is the Coordinator-
+    relayed edit instruction — the Designer edits first, then the round continues to
+    the next Customer question (F-007-gate-e §2).
 
     Second half of the old ``_dispatch``: reloads the (already ``agent_working``)
     state, invokes the actor headless, and settles ``status`` to ``blocked`` or
@@ -673,10 +727,10 @@ async def run_dispatch(
     if STAGE_ACTOR.get(stage) is None:  # terminal — nothing to run.
         return state
 
-    # Gate E (F-007-gate-e §2/§3/§5): the orchestrator runs an autonomous
-    # Customer↔Designer loop for one topic round — not a single agent turn.
+    # Gate E (F-007-gate-e revised §2): per-question, Director-gated Customer↔Designer
+    # exchange — one Q&A then STOP. Not a single generic agent turn.
     if stage == "gate_e":
-        return await _run_gate_e_round(db, state, on_event=on_event, directive=directive)
+        return await _run_gate_e_round(db, state, on_event=on_event, directive=directive, designer_edit=designer_edit)
 
     prompt = directive if directive is not None else _directive_for(stage)
     result = await invoke_agent_with_parse_retry(
@@ -719,86 +773,108 @@ async def run_dispatch(
     return state
 
 
+_GATE_E_NO_EDIT = (
+    "odpovedz — vysvetli, či je to pokryté; ak je to medzera, LEN navrhni riešenie "
+    "(nastav gap_found=true + proposed_fix), NEUPRAVUJ žiadny súbor"
+)
+
+
+def _block_failed(state: PipelineState, db: Session, reason: str) -> PipelineState:
+    state.status = "blocked"
+    state.next_action = f"Blokované: {reason}. Eskalované Directorovi."
+    db.flush()
+    return state
+
+
+async def _coordinator_review_gap(db: Session, state: PipelineState, designer_block: PipelineStatusBlock) -> None:
+    """Branch B upward leg (§2): the Coordinator reviews the Designer's proposed fix and
+    records a recommendation for the Director. Reuses the parse-retry; its message is the
+    recommendation later composed into the Coordinator-relayed ``fix`` directive."""
+    await invoke_agent_with_parse_retry(
+        db,
+        version_id=state.version_id,
+        role="coordinator",
+        stage="gate_e",
+        prompt=(
+            f"Návrhár našiel medzeru a navrhol opravu (bez editu): {designer_block.proposed_fix}. "
+            "Prekontroluj návrh a daj Directorovi odporúčanie (opraviť / ponechať + prečo). "
+            "Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
+        ),
+    )
+
+
 async def _run_gate_e_round(
     db: Session,
     state: PipelineState,
     *,
     on_event: Optional[claude_agent.EventCallback] = None,
     directive: Optional[str] = None,
+    designer_edit: bool = False,
 ) -> PipelineState:
-    """One Gate E topic round: orchestrator-mediated Customer↔Designer loop (§2/§3).
+    """One Gate E per-question exchange (F-007-gate-e revised §2): Director-gated.
 
-    The Customer reviews the topic; on a ``question`` the orchestrator routes it to
-    the Designer (hub-and-spoke — agents never call each other), whose answer
-    (covered / fixed) is fed back to the Customer. Loops autonomously, bounded by
-    ``_GATE_E_MAX_EXCHANGES``, until the Customer signals the round boundary
-    (``gate_report`` + ``topic_done`` → ``awaiting_director``) or a policy the
-    Director must decide (``needs_director_decision`` → ``blocked`` mid-round pause).
-    Each turn is recorded as a ``pipeline_message`` (stage=gate_e, ``seq``-ordered)
-    by :func:`invoke_agent`. Only the first Customer turn streams ``on_event`` (the
-    later turns are secondary). On exhaustion → ``blocked`` (escalate, never guess).
+    Hub-and-spoke, **one question at a time** — never chains the next question without
+    the Director. Flow per re-dispatch:
 
-    Director boundary actions (continue-topic / final approve / decide-policy /
-    end-early) land in Phase 3; this phase delivers the loop + settle.
+    * ``designer_edit`` (Branch B ``fix``): the Designer first edits per the
+      Coordinator-relayed directive, then the round continues to the next question.
+    * One Customer turn: ``gate_report``+``topic_done`` → round boundary
+      (``awaiting_director``); a ``question`` → one Designer answer (no-edit:
+      explain / on a gap only PROPOSE) → if ``gap_found`` the Coordinator reviews the
+      proposal (Branch B upward leg) → **STOP** (``awaiting_director``).
+
+    Each turn is a ``pipeline_message`` (stage=gate_e, ``seq``-ordered). Only the first
+    turn streams ``on_event``. Parse failure → ``blocked`` (never guess).
     """
-    customer_prompt = directive if directive is not None else _directive_for("gate_e")
-    stream = on_event  # only the first Customer turn streams
-    for _ in range(_GATE_E_MAX_EXCHANGES):
-        cust = await invoke_agent_with_parse_retry(
-            db, version_id=state.version_id, role="customer", stage="gate_e", prompt=customer_prompt, on_event=stream
+    stream = on_event
+    if designer_edit:  # Branch B: the Designer applies the approved fix, then we continue
+        edit = await invoke_agent_with_parse_retry(
+            db, version_id=state.version_id, role="designer", stage="gate_e", prompt=directive, on_event=stream
         )
         stream = None
-        if isinstance(cust, ParseFailure):
-            state.status = "blocked"
-            state.next_action = f"Blokované: {cust.reason}. Eskalované Directorovi."
-            db.flush()
-            return state
+        if isinstance(edit, ParseFailure):
+            return _block_failed(state, db, edit.reason)
+        customer_prompt = _directive_for("gate_e")
+    else:
+        customer_prompt = directive if directive is not None else _directive_for("gate_e")
 
-        if cust.needs_director_decision:  # mid-round policy pause — never guess
-            state.status = "blocked"
-            state.next_action = f"Zákazník: potrebné rozhodnutie Directora — {cust.question or cust.summary}"
-            db.flush()
-            return state
+    cust = await invoke_agent_with_parse_retry(
+        db, version_id=state.version_id, role="customer", stage="gate_e", prompt=customer_prompt, on_event=stream
+    )
+    if isinstance(cust, ParseFailure):
+        return _block_failed(state, db, cust.reason)
 
-        if cust.kind == "gate_report" and cust.topic_done:  # round boundary
-            state.status = "awaiting_director"
-            topic = cust.topic or "okruh"
-            state.next_action = f"Director: posúď okruh '{topic}' (nálezy + riešenia Návrhára)."
-            db.flush()
-            return state
-
-        if cust.kind in ("question", "blocked"):  # route the Customer's question to the Designer
-            designer = await invoke_agent_with_parse_retry(
-                db,
-                version_id=state.version_id,
-                role="designer",
-                stage="gate_e",
-                prompt=(
-                    f"Zákazník vo fáze Gate E sa pýta: {cust.question}. Vysvetli, či je to už pokryté "
-                    "v návrhu, alebo oprav návrh. Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
-                ),
-            )
-            if isinstance(designer, ParseFailure):
-                state.status = "blocked"
-                state.next_action = f"Blokované: {designer.reason}. Eskalované Directorovi."
-                db.flush()
-                return state
-            customer_prompt = (
-                f"Návrhár odpovedal: {designer.summary}. Pokračuj v previerke okruhu — ak je to pokryté, "
-                "potvrď a uzavri okruh (topic_done), inak pokračuj v otázkach. "
-                "Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
-            )
-            continue
-
-        # Unexpected Customer output (answer/kickoff/done without topic_done) → let the Director judge.
+    if cust.kind == "gate_report" and cust.topic_done:  # round boundary
         state.status = "awaiting_director"
-        state.next_action = "Director: posúď výstup fázy gate_e."
+        state.next_action = f"Director: posúď okruh '{cust.topic or 'okruh'}' (nálezy + riešenia Návrhára)."
         db.flush()
         return state
 
-    # Exchange budget exhausted without a boundary — escalate, never loop forever.
-    state.status = "blocked"
-    state.next_action = f"Gate E okruh prekročil limit výmen ({_GATE_E_MAX_EXCHANGES}). Eskalované Directorovi."
+    if cust.kind in ("question", "blocked"):  # one Customer question → one Designer answer
+        designer = await invoke_agent_with_parse_retry(
+            db,
+            version_id=state.version_id,
+            role="designer",
+            stage="gate_e",
+            prompt=(
+                f"Zákazník vo fáze Gate E sa pýta: {cust.question}. {_GATE_E_NO_EDIT}. "
+                "Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
+            ),
+        )
+        if isinstance(designer, ParseFailure):
+            return _block_failed(state, db, designer.reason)
+        state.status = "awaiting_director"
+        if designer.gap_found:  # Branch B upward leg — Coordinator reviews before the Director
+            await _coordinator_review_gap(db, state, designer)
+            state.next_action = "Director: Návrhár našiel medzeru a navrhol opravu — rozhodni Opraviť/Ponechať."
+        else:  # Branch A — routine answer
+            state.next_action = "Director: posúď odpoveď Návrhára (schváliť → ďalšia otázka)."
+        db.flush()
+        return state
+
+    # Unexpected Customer output → let the Director judge.
+    state.status = "awaiting_director"
+    state.next_action = "Director: posúď výstup fázy gate_e."
     db.flush()
     return state
 
@@ -994,6 +1070,33 @@ async def apply_action(
             recipient=state.current_actor,
             kind="approval",
             content="Schválené odporúčania Koordinátora.",
+        )
+        _begin_dispatch(db, state)
+        return state
+
+    if action in ("fix", "leave"):
+        # Gate E Branch B (F-007-gate-e §2): only at a per-question stop with a Designer
+        # gap. The decision travels Director→Coordinator→Designer (never direct): we
+        # record it as director→coordinator; `fix` then re-dispatches with a
+        # Coordinator-relayed edit directive (designer_edit), `leave` continues to the
+        # next question with no edit.
+        if state.current_stage != "gate_e":
+            raise OrchestratorError(f"{action} je platné len vo fáze Gate E")
+        if not _gate_e_gap_open(db, version_id):
+            raise OrchestratorError("Žiadny návrh Návrhára na rozhodnutie (gap_found)")
+        content = (
+            "Director schválil opravu — Koordinátor odovzdá pokyn Návrhárovi."
+            if action == "fix"
+            else "Director ponechal bez úpravy — podľa odporúčania Koordinátora."
+        )
+        _record_message(
+            db,
+            version_id=version_id,
+            stage="gate_e",
+            author="director",
+            recipient="coordinator",
+            kind="approval",
+            content=content,
         )
         _begin_dispatch(db, state)
         return state

@@ -608,11 +608,11 @@ async def test_advancing_action_allowed_when_blocked(db_session, fake_claude):
     assert state.current_stage == "gate_a"
 
 
-# ── Gate E orchestrator loop (F-007-gate-e §2/§3/§5, CR-NS-018 Phase 2) ──────────
+# ── Gate E per-question loop (F-007-gate-e revised §2, CR-NS-018) ───────────────
 
 
 def _to_gate_e(db_session, version):
-    """Put the pipeline at gate_e / customer / agent_working (loop entry)."""
+    """Put the pipeline at gate_e / customer / agent_working (round entry)."""
     state = orchestrator._get_state(db_session, version.id)
     state.current_stage = "gate_e"
     state.current_actor = "customer"
@@ -621,26 +621,88 @@ def _to_gate_e(db_session, version):
     return state
 
 
-class GateELoopClaude:
-    """invoke_claude stand-in for the gate_e loop: Customer always asks, Designer
-    always answers (distinguished by the Designer-relay prompt) → never converges,
-    so the round exhausts its exchange budget. Records every prompt."""
+def _at_gate_e_gap(db_session, version, proposed_fix="Pridať tok reset hesla do §4.2"):
+    """Settle at a gate_e per-question stop with a Designer answer that flagged a gap
+    (Branch B) — gates the `fix` / `leave` actions."""
+    state = orchestrator._get_state(db_session, version.id)
+    state.current_stage = "gate_e"
+    state.current_actor = "customer"
+    state.status = "awaiting_director"
+    db_session.flush()
+    db_session.add(
+        PipelineMessage(
+            version_id=version.id,
+            stage="gate_e",
+            author="designer",
+            recipient="director",
+            kind="answer",
+            content="medzera",
+            payload={"gap_found": True, "proposed_fix": proposed_fix},
+        )
+    )
+    db_session.flush()
+    return state
 
-    def __init__(self):
-        self.prompts: list[str] = []
 
-    async def __call__(self, *, prompt, **kwargs):
-        self.prompts.append(prompt)
-        if "Zákazník vo fáze Gate E sa pýta" in prompt:  # Designer turn
-            return _block(stage="gate_e", kind="answer", summary="vysvetlené, pokryté", awaiting="none")
-        return _block(stage="gate_e", kind="question", summary="?", question="ďalšia otázka?")  # Customer asks
-
-
-async def test_gate_e_loop_routes_question_then_settles_at_boundary(db_session, monkeypatch):
+async def test_gate_e_branch_a_one_question_then_stops(db_session, monkeypatch):
+    """Per-question gating: Customer Q → Designer answer (no gap) → STOP. No chaining."""
     seq = SequenceClaude(
         [
             _block(stage="gate_e", kind="question", summary="?", question="Ako sa rieši reset hesla?"),
             _block(stage="gate_e", kind="answer", summary="Reset cez email, pokryté v §4.2", awaiting="none"),
+            _block(stage="gate_e", kind="question", summary="?", question="NEMALO by sa zavolať"),
+        ]
+    )
+    monkeypatch.setattr(orchestrator, "invoke_claude", seq)
+    monkeypatch.setattr(orchestrator, "verify_mechanical", lambda slug, block: None)
+
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _to_gate_e(db_session, version)
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert state.status == "awaiting_director"
+    assert state.current_stage == "gate_e"
+    assert len(seq.prompts) == 2  # customer → designer → STOP (no 3rd customer turn)
+    # the Designer was told NOT to edit
+    designer_prompt = seq.prompts[1]
+    assert "NEUPRAVUJ žiadny súbor" in designer_prompt
+    assert "schváliť → ďalšia otázka" in state.next_action
+
+
+async def test_gate_e_branch_b_coordinator_reviews_gap(db_session, monkeypatch):
+    """Designer flags a gap → Coordinator reviews the proposal (upward leg) → STOP."""
+    seq = SequenceClaude(
+        [
+            _block(stage="gate_e", kind="question", summary="?", question="Je reset hesla pokrytý?"),
+            _block(
+                stage="gate_e",
+                kind="answer",
+                summary="medzera",
+                awaiting="none",
+                gap_found=True,
+                proposed_fix="Pridať tok reset hesla do §4.2",
+            ),
+            _block(stage="gate_e", kind="gate_report", summary="odporúčam pridať reset hesla", awaiting="director"),
+        ]
+    )
+    monkeypatch.setattr(orchestrator, "invoke_claude", seq)
+    monkeypatch.setattr(orchestrator, "verify_mechanical", lambda slug, block: None)
+
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _to_gate_e(db_session, version)
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert state.status == "awaiting_director"
+    assert len(seq.prompts) == 3  # customer → designer (gap) → coordinator review
+    assert any(m.author == "coordinator" for m in _msgs(db_session, version.id))
+    assert "medzeru" in state.next_action
+
+
+async def test_gate_e_topic_boundary_stops(db_session, monkeypatch):
+    seq = SequenceClaude(
+        [
             _block(
                 stage="gate_e",
                 kind="gate_report",
@@ -648,7 +710,6 @@ async def test_gate_e_loop_routes_question_then_settles_at_boundary(db_session, 
                 awaiting="director",
                 topic="prihlasenie",
                 topic_done=True,
-                findings=["reset hesla pokrytý"],
             ),
         ]
     )
@@ -661,27 +722,18 @@ async def test_gate_e_loop_routes_question_then_settles_at_boundary(db_session, 
     state = await orchestrator.run_dispatch(db_session, version.id)
 
     assert state.status == "awaiting_director"
-    assert state.current_stage == "gate_e"  # stays in gate_e at a topic boundary
-    assert len(seq.prompts) == 3  # customer → designer → customer
-    msgs = _msgs(db_session, version.id)
-    assert any(m.author == "customer" for m in msgs)
-    assert any(m.author == "designer" for m in msgs)
-    # the Designer was asked the Customer's question
-    assert any("reset hesla" in p.lower() for p in seq.prompts)
+    assert len(seq.prompts) == 1  # boundary on the Customer turn — no Designer routing
     assert "prihlasenie" in state.next_action
 
 
-async def test_gate_e_needs_director_decision_pauses_mid_round(db_session, monkeypatch):
+async def test_gate_e_fix_edits_then_next_question(db_session, monkeypatch):
+    """designer_edit (Branch B fix): Designer edits per the relayed directive, then the
+    round continues to the next Customer question → Designer answer → STOP."""
     seq = SequenceClaude(
         [
-            _block(
-                stage="gate_e",
-                kind="blocked",
-                summary="politika hesiel",
-                awaiting="director",
-                question="Vynútiť zmenu hesla pri prvom prihlásení?",
-                needs_director_decision=True,
-            ),
+            _block(stage="gate_e", kind="answer", summary="opravené podľa návrhu", awaiting="none"),  # designer edit
+            _block(stage="gate_e", kind="question", summary="?", question="Ďalšia otázka?"),  # customer
+            _block(stage="gate_e", kind="answer", summary="pokryté", awaiting="none"),  # designer answer
         ]
     )
     monkeypatch.setattr(orchestrator, "invoke_claude", seq)
@@ -690,34 +742,20 @@ async def test_gate_e_needs_director_decision_pauses_mid_round(db_session, monke
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
     _to_gate_e(db_session, version)
-    state = await orchestrator.run_dispatch(db_session, version.id)
+    state = await orchestrator.run_dispatch(
+        db_session, version.id, directive="Koordinátor odovzdáva pokyn: uprav podľa návrhu", designer_edit=True
+    )
 
-    assert state.status == "blocked"
-    assert len(seq.prompts) == 1  # paused immediately, no Designer routing
-    assert "rozhodnutie Directora" in state.next_action
-
-
-async def test_gate_e_round_exhaustion_blocks(db_session, monkeypatch):
-    fake = GateELoopClaude()
-    monkeypatch.setattr(orchestrator, "invoke_claude", fake)
-    monkeypatch.setattr(orchestrator, "verify_mechanical", lambda slug, block: None)
-
-    version, _ = _make_version(db_session)
-    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
-    _to_gate_e(db_session, version)
-    state = await orchestrator.run_dispatch(db_session, version.id)
-
-    assert state.status == "blocked"
-    assert "limit výmen" in state.next_action
-    # customer + designer per iteration, for _GATE_E_MAX_EXCHANGES iterations
-    assert len(fake.prompts) == 2 * orchestrator._GATE_E_MAX_EXCHANGES
+    assert state.status == "awaiting_director"
+    assert seq.prompts[0] == "Koordinátor odovzdáva pokyn: uprav podľa návrhu"  # Designer edits first
+    assert len(seq.prompts) == 3  # edit → customer Q → designer A
 
 
 async def test_gate_e_designer_parse_failure_blocks(db_session, monkeypatch):
     seq = SequenceClaude(
         [
             _block(stage="gate_e", kind="question", summary="?", question="Otázka pre Návrhára?"),
-            "garbage — no status block",  # designer relay primary
+            "garbage — no status block",  # designer primary
             "garbage — no status block",  # retry 1
             "garbage — no status block",  # retry 2
         ]
@@ -731,6 +769,67 @@ async def test_gate_e_designer_parse_failure_blocks(db_session, monkeypatch):
     state = await orchestrator.run_dispatch(db_session, version.id)
 
     assert state.status == "blocked"  # unparseable Designer turn → escalate, never guess
+
+
+# ── Gate E Branch B actions: fix / leave (Coordinator-relayed) ──────────────────
+
+
+async def test_fix_requires_open_gap(db_session, fake_claude):
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    state = orchestrator._get_state(db_session, version.id)
+    state.current_stage = "gate_e"
+    state.current_actor = "customer"
+    state.status = "awaiting_director"
+    db_session.flush()  # no Designer gap answer present
+    with pytest.raises(orchestrator.OrchestratorError):
+        await orchestrator.apply_action(db_session, version_id=version.id, action="fix")
+
+
+async def test_fix_with_gap_dispatches_and_composes_coordinator_relayed_directive(db_session, fake_claude):
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _at_gate_e_gap(db_session, version, proposed_fix="Pridať tok reset hesla")
+    db_session.add(
+        PipelineMessage(
+            version_id=version.id,
+            stage="gate_e",
+            author="coordinator",
+            recipient="director",
+            kind="gate_report",
+            content="Odporúčam pridať, je to reálna medzera",
+        )
+    )
+    db_session.flush()
+
+    state = await orchestrator.apply_action(db_session, version_id=version.id, action="fix")
+    assert state.status == "agent_working"
+    assert state.current_stage == "gate_e"
+    directive = orchestrator.dispatch_directive(db_session, version.id, "fix", {}, "gate_e")
+    assert "Pridať tok reset hesla" in directive
+    assert "Odporúčam pridať" in directive
+    assert "Koordinátor" in directive
+
+
+async def test_leave_with_gap_continues_without_edit(db_session, fake_claude):
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _at_gate_e_gap(db_session, version)
+    state = await orchestrator.apply_action(db_session, version_id=version.id, action="leave")
+    assert state.status == "agent_working"
+    # leave decision recorded as Coordinator-relayed (director → coordinator)
+    decision = [m for m in _msgs(db_session, version.id) if m.kind == "approval" and m.recipient == "coordinator"][-1]
+    assert "ponechal" in decision.content.lower()
+    directive = orchestrator.dispatch_directive(db_session, version.id, "leave", {}, "gate_e")
+    assert "pokračuj" in directive.lower()
+
+
+async def test_fix_outside_gate_e_errors(db_session, fake_claude):
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _settle(db_session, version.id)  # kickoff, awaiting (past the status guard)
+    with pytest.raises(orchestrator.OrchestratorError):
+        await orchestrator.apply_action(db_session, version_id=version.id, action="fix")
 
 
 # ── Gate E boundary actions + coverage/end (F-007-gate-e §3/§4, CR-NS-018 Phase 3) ─

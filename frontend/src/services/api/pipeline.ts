@@ -87,6 +87,8 @@ export type PipelineActionName =
   | "ask"
   | "answer"
   | "apply_coordinator_recommendation"
+  | "fix"
+  | "leave"
   | "verdict"
   | "uat_accept"
   | "end_gate_e"

@@ -171,7 +171,9 @@ async def post_action(
         directive = orchestrator.dispatch_directive(
             db, version_id, payload.action, payload.payload or {}, state.current_stage
         )
-        pipeline_runner.schedule_dispatch(version_id, directive)
+        # Gate E Branch B fix: the Designer edits first (Coordinator-relayed directive),
+        # then the round continues to the next question (F-007-gate-e §2).
+        pipeline_runner.schedule_dispatch(version_id, directive, designer_edit=(payload.action == "fix"))
 
     return _board(db, version_id)
 

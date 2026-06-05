@@ -78,6 +78,23 @@ export function ExchangePanel({ board, inFlight, activity, onAction }: Props) {
   const gateEOpenFindings = Array.isArray(lastCustomerReport?.payload?.findings)
     ? (lastCustomerReport.payload.findings as string[]).length
     : 0;
+  // Per-question stop vs topic boundary (revised §2): the latest gate_e milestone is
+  // either a Designer answer (per-question — Branch A/B) or a Customer gate_report
+  // (topic boundary). gap_found on that answer → Branch B (Opraviť/Ponechať).
+  const lastGateEMilestone = [...recent_messages]
+    .reverse()
+    .find(
+      (m) =>
+        m.stage === "gate_e" &&
+        ((m.author === "designer" && m.kind === "answer") ||
+          (m.author === "customer" && m.kind === "gate_report")),
+    );
+  const gateEMode = !lastGateEMilestone
+    ? null
+    : lastGateEMilestone.author === "customer"
+      ? "boundary"
+      : "question";
+  const gateEGap = lastGateEMilestone?.author === "designer" && lastGateEMilestone.payload?.gap_found === true;
 
   return (
     <div className="flex h-full flex-col">
@@ -111,6 +128,8 @@ export function ExchangePanel({ board, inFlight, activity, onAction }: Props) {
           hasCoordinatorReport={hasCoordinatorReport}
           gateECoverageComplete={gateECoverageComplete}
           gateEOpenFindings={gateEOpenFindings}
+          gateEMode={gateEMode}
+          gateEGap={gateEGap}
           onAction={onAction}
         />
       </div>

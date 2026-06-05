@@ -111,7 +111,7 @@ async def test_run_broadcasts_state_and_only_new_messages(db_session, monkeypatc
     _seed_working_state(db_session, version.id)
     fake_reg = _wire_runner(db_session, monkeypatch)
 
-    async def fake_run_dispatch(db, vid, on_event=None, directive=None):
+    async def fake_run_dispatch(db, vid, on_event=None, directive=None, designer_edit=False):
         st = db.execute(select(PipelineState).where(PipelineState.version_id == vid)).scalar_one()
         st.status = "awaiting_director"
         st.next_action = "Director: posúdiť."
@@ -148,7 +148,7 @@ async def test_run_unexpected_exception_marks_blocked(db_session, monkeypatch):
     _seed_working_state(db_session, version.id)
     fake_reg = _wire_runner(db_session, monkeypatch)
 
-    async def boom(db, vid, on_event=None, directive=None):
+    async def boom(db, vid, on_event=None, directive=None, designer_edit=False):
         raise RuntimeError("kaboom")
 
     monkeypatch.setattr(orchestrator, "run_dispatch", boom)
@@ -175,7 +175,7 @@ async def test_run_unexpected_exception_marks_blocked(db_session, monkeypatch):
 # ── presence-aware Telegram notify (CR-NS-018 Phase 5a) ───────────────────────
 
 
-async def _settle_awaiting(db, vid, on_event=None, directive=None):
+async def _settle_awaiting(db, vid, on_event=None, directive=None, designer_edit=False):
     st = db.execute(select(PipelineState).where(PipelineState.version_id == vid)).scalar_one()
     st.status = "awaiting_director"
     st.next_action = "Director: posúdiť fázu."
@@ -246,7 +246,7 @@ async def test_run_streams_agent_activity(db_session, monkeypatch):
     _seed_working_state(db_session, version.id)  # kickoff / coordinator
     fake_reg = _wire_runner(db_session, monkeypatch)
 
-    async def fake_run_dispatch(db, vid, on_event=None, directive=None):
+    async def fake_run_dispatch(db, vid, on_event=None, directive=None, designer_edit=False):
         # the agent emits a tool event mid-run → runner translates + broadcasts
         await on_event(
             {

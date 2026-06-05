@@ -139,9 +139,26 @@ def test_gate_e_signals_default_when_absent():
     assert isinstance(res, PipelineStatusBlock)
     assert res.topic is None
     assert res.topic_done is False
-    assert res.needs_director_decision is False
     assert res.coverage_complete is False
     assert res.findings == []
+    assert res.gap_found is False
+    assert res.proposed_fix is None
+
+
+def test_gate_e_designer_answer_gap_parses():
+    res = parse_status_block(
+        _block(
+            stage="gate_e",
+            kind="answer",
+            summary="medzera: chýba reset hesla",
+            awaiting="none",
+            gap_found=True,
+            proposed_fix="Pridať tok reset hesla cez email do §4.2.",
+        )
+    )
+    assert isinstance(res, PipelineStatusBlock)
+    assert res.gap_found is True
+    assert res.proposed_fix == "Pridať tok reset hesla cez email do §4.2."
 
 
 def test_gate_e_topic_boundary_block_parses():
@@ -160,22 +177,6 @@ def test_gate_e_topic_boundary_block_parses():
     assert res.topic == "prihlasenie"
     assert res.topic_done is True
     assert res.findings == ["chýba reset hesla", "2FA nedefinované"]
-
-
-def test_gate_e_needs_director_decision_block_parses():
-    res = parse_status_block(
-        _block(
-            stage="gate_e",
-            kind="blocked",
-            summary="politika hesiel",
-            awaiting="director",
-            question="Vynútiť zmenu hesla pri prvom prihlásení?",
-            needs_director_decision=True,
-        )
-    )
-    assert isinstance(res, PipelineStatusBlock)
-    assert res.needs_director_decision is True
-    assert res.question == "Vynútiť zmenu hesla pri prvom prihlásení?"
 
 
 def test_gate_e_coverage_complete_block_parses():

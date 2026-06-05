@@ -35,6 +35,11 @@ interface Props {
   /** Gate E: count of open (unresolved) findings — any blocks closing (final /
    *  early-end). CR-NS-018 Phase 3. */
   gateEOpenFindings?: number;
+  /** Gate E (revised §2): the latest milestone — a per-question stop (Designer
+   *  answer) or a topic boundary (Customer gate_report). */
+  gateEMode?: "question" | "boundary" | null;
+  /** Gate E per-question: the Designer flagged a gap → Branch B (Opraviť/Ponechať). */
+  gateEGap?: boolean;
   onAction: (action: PipelineActionName, payload?: Record<string, unknown>) => void;
 }
 
@@ -61,6 +66,8 @@ export function PipelineActionBar({
   hasCoordinatorReport = false,
   gateECoverageComplete = false,
   gateEOpenFindings = 0,
+  gateEMode = null,
+  gateEGap = false,
   onAction,
 }: Props) {
   const [composer, setComposer] = useState<Composer>(null);
@@ -92,9 +99,8 @@ export function PipelineActionBar({
   const awaitingRatify = RATIFY_STAGES.has(current_stage) && awaiting;
   const canRatify = awaitingRatify || questionBlock;
   const gateEOpen = gateEOpenFindings > 0;
-  // Gate E mid-round policy pause: the Customer/Designer hit a policy only the
-  // Director can decide (needs_director_decision → blocked). Decided via answer.
-  const gateEPolicyPause = gateE && blocked && !isErrorBlock;
+  const gateEQuestion = gateE && awaiting && gateEMode === "question";
+  const gateEBoundary = gateE && awaiting && gateEMode === "boundary";
 
   const openComposer = (c: NonNullable<Composer>) => {
     setComposer(c);
@@ -181,8 +187,44 @@ export function PipelineActionBar({
         </>
       )}
 
-      {/* Gate E boundary (Customer↔Designer loop) — topic-continue vs final sign-off. */}
-      {gateE && awaiting && !gateECoverageComplete && (
+      {/* Gate E per-question stop (revised §2): Branch A approve, or Branch B Opraviť/Ponechať. */}
+      {gateEQuestion && !gateEGap && (
+        <ActionRow hint="Odpoveď je v poriadku → Zákazník pokračuje ďalšou otázkou.">
+          <button
+            onClick={() => onAction("approve")}
+            disabled={inFlight}
+            className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
+          >
+            Schváliť odpoveď
+          </button>
+        </ActionRow>
+      )}
+
+      {gateEQuestion && gateEGap && (
+        <>
+          <ActionRow hint="Schválený návrh sa pošle cez Koordinátora Návrhárovi → opraví → ďalšia otázka.">
+            <button
+              onClick={() => onAction("fix")}
+              disabled={inFlight}
+              className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
+            >
+              Opraviť
+            </button>
+          </ActionRow>
+          <ActionRow hint="Medzera sa ponechá bez úpravy (podľa odporúčania Koordinátora) → ďalšia otázka.">
+            <button
+              onClick={() => onAction("leave")}
+              disabled={inFlight}
+              className={`${btn} border border-slate-600 text-slate-300 hover:bg-slate-800`}
+            >
+              Ponechať
+            </button>
+          </ActionRow>
+        </>
+      )}
+
+      {/* Gate E topic boundary — topic-continue vs final sign-off. */}
+      {gateEBoundary && !gateECoverageComplete && (
         <>
           <ActionRow hint="Okruh sa uzavrie → Zákazník pokračuje ďalším okruhom previerky.">
             <button
@@ -220,7 +262,7 @@ export function PipelineActionBar({
         </>
       )}
 
-      {gateE && awaiting && gateECoverageComplete && (
+      {gateEBoundary && gateECoverageComplete && (
         <>
           <ActionRow
             hint={
@@ -247,18 +289,6 @@ export function PipelineActionBar({
             </button>
           </ActionRow>
         </>
-      )}
-
-      {gateEPolicyPause && (
-        <ActionRow hint="Tvoje rozhodnutie sa pošle Zákazníkovi → slučka previerky pokračuje.">
-          <button
-            onClick={() => openComposer({ action: "answer", label: "Rozhodnúť politiku", field: "text" })}
-            disabled={inFlight}
-            className={`${btn} bg-sky-600 text-white hover:bg-sky-500`}
-          >
-            Rozhodni politiku
-          </button>
-        </ActionRow>
       )}
 
       {current_stage === "gate_g" && awaiting && (

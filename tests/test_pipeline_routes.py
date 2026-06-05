@@ -84,7 +84,7 @@ def client(db_session, monkeypatch):
     scheduled: list = []
     scheduled_directives: list = []
 
-    def _capture_dispatch(vid, directive=None):
+    def _capture_dispatch(vid, directive=None, *, designer_edit=False):
         scheduled.append(vid)
         scheduled_directives.append(directive)
 

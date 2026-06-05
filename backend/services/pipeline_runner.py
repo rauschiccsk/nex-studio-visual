@@ -40,7 +40,7 @@ _NOTIFY_STATUSES = ("awaiting_director", "blocked")
 _BG_TASKS: set[asyncio.Task] = set()
 
 
-def schedule_dispatch(version_id: uuid.UUID, directive: str | None = None) -> None:
+def schedule_dispatch(version_id: uuid.UUID, directive: str | None = None, *, designer_edit: bool = False) -> None:
     """Fire-and-forget the agent run for ``version_id`` as a tracked task.
 
     ``directive`` (CR-NS-018) carries the Director's framed ``return``/``ask``/
@@ -48,8 +48,11 @@ def schedule_dispatch(version_id: uuid.UUID, directive: str | None = None) -> No
     re-dispatched agent acts on it instead of re-running the generic stage
     directive blind. The value is captured in-memory at schedule time (same
     process/event loop) — no DB round-trip needed.
+
+    ``designer_edit`` (Gate E Branch B ``fix``) routes the directive to the Designer
+    first (edit), then continues the per-question round.
     """
-    task = asyncio.create_task(_run(version_id, directive))
+    task = asyncio.create_task(_run(version_id, directive, designer_edit))
     _BG_TASKS.add(task)
     task.add_done_callback(_BG_TASKS.discard)
 
@@ -97,7 +100,7 @@ def _activity_callback(version_id: uuid.UUID, stage: str, actor: str):
     return _cb
 
 
-async def _run(version_id: uuid.UUID, directive: str | None = None) -> None:
+async def _run(version_id: uuid.UUID, directive: str | None = None, designer_edit: bool = False) -> None:
     """Run one agent dispatch and broadcast the result. Owns its own session."""
     db = SessionLocal()
     try:
@@ -105,7 +108,7 @@ async def _run(version_id: uuid.UUID, directive: str | None = None) -> None:
         pre = db.execute(select(PipelineState).where(PipelineState.version_id == version_id)).scalar_one_or_none()
         on_event = _activity_callback(version_id, pre.current_stage, pre.current_actor) if pre else None
         try:
-            state = await orchestrator.run_dispatch(db, version_id, on_event, directive)
+            state = await orchestrator.run_dispatch(db, version_id, on_event, directive, designer_edit=designer_edit)
             db.commit()
         except Exception:  # noqa: BLE001 — unexpected; degrade to blocked, don't hang UI.
             logger.exception("run_dispatch failed for version %s", version_id)

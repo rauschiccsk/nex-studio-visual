@@ -136,14 +136,57 @@ describe("PipelineActionBar — gate action clarity", () => {
   });
 });
 
-describe("PipelineActionBar — Gate E boundary (Phase 3)", () => {
+describe("PipelineActionBar — Gate E per-question (revised §2)", () => {
+  const gateE = (props: { gateEMode?: "question" | "boundary"; gateEGap?: boolean; onAction?: () => void }) => (
+    <PipelineActionBar
+      state={mkState("gate_e", "awaiting_director")}
+      inFlight={false}
+      gateEMode={props.gateEMode}
+      gateEGap={props.gateEGap}
+      onAction={props.onAction ?? vi.fn()}
+    />
+  );
+
+  it("Branch A (no gap) shows Schváliť odpoveď → approve, no Opraviť/Ponechať", () => {
+    const onAction = vi.fn();
+    render(gateE({ gateEMode: "question", onAction }));
+    const approve = screen.getByText("Schváliť odpoveď");
+    expect(screen.queryByText("Opraviť")).not.toBeInTheDocument();
+    expect(screen.queryByText("Ponechať")).not.toBeInTheDocument();
+    approve.click();
+    expect(onAction).toHaveBeenCalledWith("approve");
+  });
+
+  it("Branch B (gap) shows Opraviť (fix) / Ponechať (leave)", () => {
+    const onAction = vi.fn();
+    render(gateE({ gateEMode: "question", gateEGap: true, onAction }));
+    expect(screen.queryByText("Schváliť odpoveď")).not.toBeInTheDocument();
+    screen.getByText("Opraviť").click();
+    expect(onAction).toHaveBeenCalledWith("fix");
+    screen.getByText("Ponechať").click();
+    expect(onAction).toHaveBeenCalledWith("leave");
+  });
+
+  it("per-question stop shows no topic-boundary buttons", () => {
+    render(gateE({ gateEMode: "question" }));
+    expect(screen.queryByText("Schváliť okruh a pokračovať")).not.toBeInTheDocument();
+    expect(screen.queryByText("Ukončiť Gate E")).not.toBeInTheDocument();
+    expect(screen.queryByText(COORD)).not.toBeInTheDocument();
+  });
+});
+
+describe("PipelineActionBar — Gate E topic boundary (Phase 3)", () => {
   it("topic boundary shows continue + Ukončiť Gate E, not the generic ratify buttons", () => {
     render(
-      <PipelineActionBar state={mkState("gate_e", "awaiting_director")} inFlight={false} onAction={vi.fn()} />,
+      <PipelineActionBar
+        state={mkState("gate_e", "awaiting_director")}
+        inFlight={false}
+        gateEMode="boundary"
+        onAction={vi.fn()}
+      />,
     );
     expect(screen.getByText("Schváliť okruh a pokračovať")).toBeInTheDocument();
     expect(screen.getByText("Ukončiť Gate E")).toBeInTheDocument();
-    // not the generic gate_a–d labels, and never the Coordinator button at gate_e
     expect(screen.queryByText(APPROVE)).not.toBeInTheDocument();
     expect(screen.queryByText(COORD)).not.toBeInTheDocument();
     expect(screen.queryByText("Finálne schválenie → Programovanie")).not.toBeInTheDocument();
@@ -152,7 +195,12 @@ describe("PipelineActionBar — Gate E boundary (Phase 3)", () => {
   it("topic-boundary approve fires the plain approve (continue topic)", () => {
     const onAction = vi.fn();
     render(
-      <PipelineActionBar state={mkState("gate_e", "awaiting_director")} inFlight={false} onAction={onAction} />,
+      <PipelineActionBar
+        state={mkState("gate_e", "awaiting_director")}
+        inFlight={false}
+        gateEMode="boundary"
+        onAction={onAction}
+      />,
     );
     screen.getByText("Schváliť okruh a pokračovať").click();
     expect(onAction).toHaveBeenCalledWith("approve");
@@ -163,6 +211,7 @@ describe("PipelineActionBar — Gate E boundary (Phase 3)", () => {
       <PipelineActionBar
         state={mkState("gate_e", "awaiting_director")}
         inFlight={false}
+        gateEMode="boundary"
         gateEOpenFindings={2}
         onAction={vi.fn()}
       />,
@@ -173,7 +222,12 @@ describe("PipelineActionBar — Gate E boundary (Phase 3)", () => {
   it("Ukončiť Gate E fires end_gate_e when no open findings", () => {
     const onAction = vi.fn();
     render(
-      <PipelineActionBar state={mkState("gate_e", "awaiting_director")} inFlight={false} onAction={onAction} />,
+      <PipelineActionBar
+        state={mkState("gate_e", "awaiting_director")}
+        inFlight={false}
+        gateEMode="boundary"
+        onAction={onAction}
+      />,
     );
     screen.getByText("Ukončiť Gate E").click();
     expect(onAction).toHaveBeenCalledWith("end_gate_e");
@@ -185,6 +239,7 @@ describe("PipelineActionBar — Gate E boundary (Phase 3)", () => {
       <PipelineActionBar
         state={mkState("gate_e", "awaiting_director")}
         inFlight={false}
+        gateEMode="boundary"
         gateECoverageComplete
         onAction={onAction}
       />,
@@ -201,19 +256,12 @@ describe("PipelineActionBar — Gate E boundary (Phase 3)", () => {
       <PipelineActionBar
         state={mkState("gate_e", "awaiting_director")}
         inFlight={false}
+        gateEMode="boundary"
         gateECoverageComplete
         gateEOpenFindings={1}
         onAction={vi.fn()}
       />,
     );
     expect(screen.getByText("Finálne schválenie → Programovanie").closest("button")).toBeDisabled();
-  });
-
-  it("mid-round policy pause (blocked) shows Rozhodni politiku", () => {
-    const onAction = vi.fn();
-    render(<PipelineActionBar state={mkState("gate_e", "blocked")} inFlight={false} onAction={onAction} />);
-    expect(screen.getByText("Rozhodni politiku")).toBeInTheDocument();
-    // not the generic question-block ratify
-    expect(screen.queryByText(APPROVE)).not.toBeInTheDocument();
   });
 });
