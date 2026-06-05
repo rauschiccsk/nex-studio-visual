@@ -28,6 +28,11 @@ PROJECTS_ROOT = Path("/opt/projects")
 #: orchestrator passes a per-stage ``timeout`` that overrides this default.
 CLAUDE_INVOKE_TIMEOUT = settings.claude_invoke_timeout
 
+#: StreamReader line-buffer limit for stream-json mode (bytes). One NDJSON event
+#: can be a whole spec file on a single line, so the 64 KB default is far too
+#: small (CR-NS-018). 64 MB is generous and bounded.
+_STREAM_LINE_LIMIT = 64 * 1024 * 1024
+
 
 class ClaudeAgentError(RuntimeError):
     """claude CLI invocation failed (non-zero exit, timeout, decode failure)."""
@@ -104,6 +109,10 @@ async def invoke_claude(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=str(project_root),
+        # Generous StreamReader buffer: a single stream-json NDJSON event (e.g. a
+        # gate's full openapi.yaml in one `result` line) can far exceed the 64 KB
+        # default and would raise LimitOverrunError on readline (CR-NS-018).
+        limit=_STREAM_LINE_LIMIT,
     )
 
     if on_event is not None:

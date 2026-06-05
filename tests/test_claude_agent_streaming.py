@@ -144,3 +144,62 @@ async def test_text_mode_unchanged_when_no_callback(monkeypatch):
 # Ensure the module reference is used (guard against accidental import removal).
 def test_event_callback_type_exported():
     assert hasattr(claude_agent, "EventCallback")
+
+
+# ── >64 KB line regression (CR-NS-018 LimitOverrunError) ──────────────────────
+
+
+async def test_streaming_handles_large_result_line(monkeypatch):
+    """A single ``result`` NDJSON line far larger than the 64 KB default must
+    parse intact (e.g. a gate's full openapi.yaml in one JSON line)."""
+    big_summary = "x" * (200 * 1024)  # 200 KB — well over the 64 KB default
+    block = (
+        "<<<PIPELINE_STATUS>>>\n"
+        + json.dumps({"stage": "gate_b", "kind": "gate_report", "summary": big_summary, "awaiting": "director"})
+        + "\n<<<END_PIPELINE_STATUS>>>"
+    )
+    lines = [json.dumps({"type": "result", "result": block}).encode() + b"\n"]
+    _patch_exec(monkeypatch, _FakeProc(lines))
+
+    async def on_event(evt):
+        pass
+
+    out = await invoke_claude(project_slug="x", claude_session_id=uuid.uuid4(), prompt="go", on_event=on_event)
+    assert out == block
+    assert len(out) > 64 * 1024
+
+
+async def test_subprocess_exec_uses_large_stream_limit(monkeypatch):
+    captured = {}
+
+    async def _fake_exec(*args, **kwargs):
+        captured.update(kwargs)
+        return _FakeProc([json.dumps({"type": "result", "result": "ok"}).encode() + b"\n"])
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
+
+    async def on_event(evt):
+        pass
+
+    await invoke_claude(project_slug="x", claude_session_id=uuid.uuid4(), prompt="go", on_event=on_event)
+    assert captured["limit"] == claude_agent._STREAM_LINE_LIMIT
+    assert captured["limit"] > 64 * 1024
+
+
+async def test_default_streamreader_limit_overflows_but_ours_survives():
+    """Direct mechanism lock: the 64 KB default raises on a 200 KB line; the
+    configured limit reads it fine."""
+    big = b"x" * (200 * 1024)
+
+    default_reader = asyncio.StreamReader(limit=64 * 1024)
+    default_reader.feed_data(big + b"\n")
+    default_reader.feed_eof()
+    # readline() surfaces the overrun as ValueError (LimitOverrunError internally).
+    with pytest.raises((asyncio.LimitOverrunError, ValueError)):
+        await default_reader.readline()
+
+    ours = asyncio.StreamReader(limit=claude_agent._STREAM_LINE_LIMIT)
+    ours.feed_data(big + b"\n")
+    ours.feed_eof()
+    line = await ours.readline()
+    assert len(line) == len(big) + 1

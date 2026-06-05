@@ -57,11 +57,32 @@ describe("PipelineActionBar — kickoff ratification", () => {
     expect(screen.queryByText("Spustiť")).not.toBeInTheDocument();
   });
 
-  it("when blocked (agent asking) shows Odpoveď + Schváliť + Vrátiť (never a dead-end)", () => {
+  it("question-block (agent asking) shows Odpoveď + Schváliť + Vrátiť (never a dead-end)", () => {
     render(<PipelineActionBar state={mkState("kickoff", "blocked")} inFlight={false} onAction={vi.fn()} />);
     expect(screen.getByText("Odpoveď")).toBeInTheDocument();
     expect(screen.getByText("Schváliť")).toBeInTheDocument();
     expect(screen.getByText("Vrátiť")).toBeInTheDocument();
     expect(screen.getByText("Otázka")).toBeInTheDocument();
+    expect(screen.queryByText("Skús znova")).not.toBeInTheDocument();
+  });
+
+  it("error-block (agent crash) shows Skús znova, not Schváliť/Odpoveď", () => {
+    render(
+      <PipelineActionBar state={mkState("gate_b", "blocked")} inFlight={false} isErrorBlock onAction={vi.fn()} />,
+    );
+    expect(screen.getByText("Skús znova")).toBeInTheDocument();
+    expect(screen.getByText("Otázka")).toBeInTheDocument();
+    expect(screen.queryByText("Schváliť")).not.toBeInTheDocument();
+    expect(screen.queryByText("Vrátiť")).not.toBeInTheDocument();
+    expect(screen.queryByText("Odpoveď")).not.toBeInTheDocument();
+  });
+
+  it("Skús znova re-dispatches the current stage via return", () => {
+    const onAction = vi.fn();
+    render(
+      <PipelineActionBar state={mkState("gate_b", "blocked")} inFlight={false} isErrorBlock onAction={onAction} />,
+    );
+    screen.getByText("Skús znova").click();
+    expect(onAction).toHaveBeenCalledWith("return", { comment: "Skús znova." });
   });
 });

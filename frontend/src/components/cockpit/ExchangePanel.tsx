@@ -23,7 +23,7 @@ const STATUS_BANNER: Record<PipelineStatus, string> = {
 
 // Compose the banner from machine values + Slovak display labels — never render
 // the raw backend ``next_action`` (it embeds machine tokens like 'coordinator').
-function bannerText(state: PipelineState): string {
+function bannerText(state: PipelineState, errorBlock: boolean): string {
   const role = ROLE_LABELS[state.current_actor];
   const stage = STAGE_LABELS[state.current_stage];
   switch (state.status) {
@@ -32,7 +32,9 @@ function bannerText(state: PipelineState): string {
     case "awaiting_director":
       return `Na rade: Director — posúď fázu ${stage}`;
     case "blocked":
-      return `Na rade: Director — odpovedz ${role}-ovi`;
+      return errorBlock
+        ? `Agent zlyhal vo fáze ${stage} — skús znova`
+        : `Na rade: Director — odpovedz ${role}-ovi`;
     case "done":
       return "Hotovo";
     default:
@@ -56,12 +58,17 @@ export function ExchangePanel({ board, inFlight, activity, onAction }: Props) {
   }, [recent_messages.length]);
 
   const banner = state ? STATUS_BANNER[state.status] : "";
+  // An error-block (agent crash/timeout) escalates via a system notification —
+  // its last message is authored by "system" (an agent question is authored by
+  // the agent role). Drives the "Skús znova" retry vs answer/approve choice.
+  const lastMessage = recent_messages[recent_messages.length - 1];
+  const isErrorBlock = state?.status === "blocked" && lastMessage?.author === "system";
 
   return (
     <div className="flex h-full flex-col">
       {state && (
         <div className={`flex-shrink-0 border-b px-4 py-2.5 text-xs ${banner}`}>
-          <span className="font-medium text-slate-100">{bannerText(state)}</span>
+          <span className="font-medium text-slate-100">{bannerText(state, isErrorBlock)}</span>
         </div>
       )}
 
@@ -82,7 +89,7 @@ export function ExchangePanel({ board, inFlight, activity, onAction }: Props) {
       </div>
 
       <div className="flex-shrink-0 border-t border-slate-800 p-3">
-        <PipelineActionBar state={state} inFlight={inFlight} onAction={onAction} />
+        <PipelineActionBar state={state} inFlight={inFlight} isErrorBlock={isErrorBlock} onAction={onAction} />
       </div>
     </div>
   );

@@ -20,12 +20,15 @@ const RATIFY_STAGES = new Set(["kickoff", "gate_a", "gate_b", "gate_c", "gate_d"
 interface Props {
   state: PipelineState | null;
   inFlight: boolean;
+  /** Blocked due to an unexpected failure (agent crash/timeout) rather than an
+   *  agent question — offer "Skús znova" instead of answer/approve (CR-NS-018). */
+  isErrorBlock?: boolean;
   onAction: (action: PipelineActionName, payload?: Record<string, unknown>) => void;
 }
 
 type Composer = { action: PipelineActionName; label: string; field: string } | null;
 
-export function PipelineActionBar({ state, inFlight, onAction }: Props) {
+export function PipelineActionBar({ state, inFlight, isErrorBlock = false, onAction }: Props) {
   const [composer, setComposer] = useState<Composer>(null);
   const [text, setText] = useState("");
 
@@ -37,11 +40,17 @@ export function PipelineActionBar({ state, inFlight, onAction }: Props) {
   const working = status === "agent_working";
   const isDone = status === "done";
 
-  // Schváliť/Vrátiť are offered when ratifying a stage AND when an agent is
-  // blocked asking — so a ratification question is never a dead-end ask-loop:
-  // the Director can answer, approve/advance, or return (CR-NS-018). The engine's
+  // An error-block (agent crash/timeout) produced no agent output — Schváliť
+  // would wrongly skip the stage and Odpoveď answers a non-question. So in that
+  // case offer only "Skús znova" (re-dispatch the current stage). A question-block
+  // keeps the answer/approve/return choices (CR-NS-018).
+  const errorBlock = blocked && isErrorBlock;
+  const questionBlock = blocked && !isErrorBlock;
+
+  // Schváliť/Vrátiť: when ratifying a stage, AND when an agent is blocked asking
+  // (never a dead-end ask-loop) — but NOT for an error-block. The engine's
   // approve/return have no status guard, so they work from blocked too.
-  const canRatify = (RATIFY_STAGES.has(current_stage) && awaiting) || blocked;
+  const canRatify = (RATIFY_STAGES.has(current_stage) && awaiting) || questionBlock;
 
   const openComposer = (c: NonNullable<Composer>) => {
     setComposer(c);
@@ -141,13 +150,23 @@ export function PipelineActionBar({ state, inFlight, onAction }: Props) {
         </button>
       )}
 
-      {blocked && (
+      {questionBlock && (
         <button
           onClick={() => openComposer({ action: "answer", label: "Odpovedať agentovi", field: "text" })}
           disabled={inFlight}
           className={`${btn} bg-sky-600 text-white hover:bg-sky-500`}
         >
           Odpoveď
+        </button>
+      )}
+
+      {errorBlock && (
+        <button
+          onClick={() => onAction("return", { comment: "Skús znova." })}
+          disabled={inFlight}
+          className={`${btn} bg-primary-600 text-white hover:bg-primary-500`}
+        >
+          Skús znova
         </button>
       )}
 
