@@ -455,3 +455,94 @@ async def test_apply_coordinator_recommendation_no_report_errors(db_session, fak
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
     with pytest.raises(orchestrator.OrchestratorError):
         await orchestrator.apply_action(db_session, version_id=version.id, action="apply_coordinator_recommendation")
+
+
+# ── worker question routed through the Coordinator (hub-and-spoke, CR-NS-018) ────
+
+
+def _to_designer_gate(db_session, version):
+    """Put the pipeline at a designer gate, agent_working (worker about to run)."""
+    state = orchestrator._get_state(db_session, version.id)
+    state.current_stage = "gate_a"
+    state.current_actor = "designer"
+    state.status = "agent_working"
+    db_session.flush()
+    return state
+
+
+async def test_worker_question_routed_through_coordinator(db_session, monkeypatch):
+    seq = SequenceClaude(
+        [
+            _block(stage="gate_a", kind="blocked", summary="potrebujem rozhodnutie", question="Ktorý formát dátumu?"),
+            _block(stage="gate_a", kind="question", summary="relay", question="Návrhár potrebuje formát dátumu — ISO?"),
+        ]
+    )
+    monkeypatch.setattr(orchestrator, "invoke_claude", seq)
+    monkeypatch.setattr(orchestrator, "verify_mechanical", lambda slug, block: None)
+
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _to_designer_gate(db_session, version)
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert state.status == "blocked"
+    # worker invoked, then the Coordinator reviewed (2 invocations)
+    assert len(seq.prompts) == 2
+    # the Coordinator's relay is recorded as a thread message…
+    msgs = _msgs(db_session, version.id)
+    assert any(m.author == "coordinator" for m in msgs)
+    # …and the relay text is surfaced
+    assert "formát dátumu" in state.next_action
+
+
+async def test_coordinator_own_question_not_double_reviewed(db_session, fake_claude):
+    # kickoff actor IS the coordinator → surface directly, no relay invocation
+    fake_claude.response = _block(stage="kickoff", kind="blocked", summary="ctx", question="Ktorý port?")
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert state.status == "blocked"
+    assert len(fake_claude.calls) == 1  # only the coordinator itself, no review pass
+    assert "Ktorý port?" in state.next_action
+
+
+async def test_coordinator_relay_unparseable_falls_back_to_worker_question(db_session, monkeypatch):
+    seq = SequenceClaude(
+        [
+            _block(stage="gate_a", kind="blocked", summary="x", question="Ktorý formát?"),
+            "garbage — no status block",  # relay primary
+            "garbage — no status block",  # relay retry 1
+            "garbage — no status block",  # relay retry 2
+        ]
+    )
+    monkeypatch.setattr(orchestrator, "invoke_claude", seq)
+    monkeypatch.setattr(orchestrator, "verify_mechanical", lambda slug, block: None)
+
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _to_designer_gate(db_session, version)
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert state.status == "blocked"
+    # relay unparseable → fall back to the worker's original question (no dead-end)
+    assert "Ktorý formát?" in state.next_action
+
+
+async def test_answer_after_routed_question_reaches_worker(db_session, fake_claude):
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    state = orchestrator._get_state(db_session, version.id)
+    state.current_stage = "gate_a"
+    state.current_actor = "designer"
+    state.status = "blocked"
+    db_session.flush()
+
+    await orchestrator.apply_action(
+        db_session, version_id=version.id, action="answer", payload={"text": "Použi ISO 8601"}
+    )
+    directive = orchestrator.dispatch_directive(db_session, version.id, "answer", {"text": "Použi ISO 8601"}, "gate_a")
+    assert "Použi ISO 8601" in directive
+    # the answer message is addressed to the worker (designer), not the coordinator
+    answer_msg = [m for m in _msgs(db_session, version.id) if m.kind == "answer"][-1]
+    assert answer_msg.recipient == "designer"

@@ -444,6 +444,37 @@ async def verify_done(db: Session, version_id: uuid.UUID, block: PipelineStatusB
     return None
 
 
+async def _coordinator_relay(db: Session, state: PipelineState, worker_block: PipelineStatusBlock) -> Optional[str]:
+    """Coordinator review of a worker's question/blocked turn → a relay for the Director.
+
+    Hub-and-spoke (CR-NS-018): no worker output reaches the Director unreviewed.
+    Only gate_reports went through the Coordinator (:func:`verify_done`); a worker
+    ``question`` / ``blocked`` used to bypass it. This invokes the Coordinator
+    (parse-retry like the verify path) to check the work done + assess the
+    question, and returns its relay text. The Coordinator's turn is recorded as
+    its own thread message by :func:`invoke_agent`. Returns ``None`` if the relay
+    is unparseable after retries — the caller then surfaces the worker's original
+    question (never a dead-end). The worker stays ``current_actor``, so the
+    Director's answer routes back to the worker via :func:`dispatch_directive`.
+    """
+    kind_label = "je blokovaný" if worker_block.kind == "blocked" else "položil otázku"
+    asked = worker_block.question or worker_block.summary
+    relay = await invoke_agent_with_parse_retry(
+        db,
+        version_id=state.version_id,
+        role="coordinator",
+        stage=state.current_stage,
+        prompt=(
+            f"Worker '{state.current_actor}' vo fáze '{state.current_stage}' {kind_label}: {asked}. "
+            "Over jeho doterajšiu prácu (deliverables/commits) a posúď otázku; priprav pre Directora "
+            "relay — čo treba rozhodnúť. Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
+        ),
+    )
+    if isinstance(relay, ParseFailure):
+        return None
+    return relay.question or relay.summary
+
+
 # ---------------------------------------------------------------------------
 # Dispatch + actions
 # ---------------------------------------------------------------------------
@@ -511,8 +542,14 @@ async def run_dispatch(
         return state
 
     if result.kind in ("question", "blocked"):
+        # Hub-and-spoke (CR-NS-018): a worker's question/blocked turn is reviewed
+        # by the Coordinator first, who relays it to the Director. The Coordinator's
+        # own question (kickoff) is surfaced directly — no double-review. On an
+        # unparseable relay, fall back to the worker's question (never a dead-end).
+        relay = await _coordinator_relay(db, state, result) if actor != "coordinator" else None
+        question_text = relay if relay is not None else result.question
         state.status = "blocked"
-        state.next_action = f"Agent '{actor}' sa pýta: {result.question}"
+        state.next_action = f"Agent '{actor}' sa pýta: {question_text}"
         db.flush()
         return state
 
