@@ -75,6 +75,15 @@ def _msgs(db_session, version_id):
     return db_session.execute(select(PipelineMessage).where(PipelineMessage.version_id == version_id)).scalars().all()
 
 
+def _settle(db_session, version_id, status="awaiting_director"):
+    """Mark the pipeline as settled (agent done) so a Director advancing action is
+    valid — the status guard rejects acting while ``agent_working`` (CR-NS-018)."""
+    st = orchestrator._get_state(db_session, version_id)
+    st.status = status
+    db_session.flush()
+    return st
+
+
 # ── session resolution ────────────────────────────────────────────────────────
 
 
@@ -176,6 +185,7 @@ async def test_run_dispatch_unparseable_blocks(db_session, fake_claude):
 async def test_approve_advances_stage(db_session, fake_claude):
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _settle(db_session, version.id)
     state = await orchestrator.apply_action(db_session, version_id=version.id, action="approve")
     assert state.current_stage == "gate_a"
     assert state.current_actor == "designer"
@@ -184,6 +194,7 @@ async def test_approve_advances_stage(db_session, fake_claude):
 async def test_return_requires_comment(db_session, fake_claude):
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _settle(db_session, version.id)
     with pytest.raises(orchestrator.OrchestratorError):
         await orchestrator.apply_action(db_session, version_id=version.id, action="return", payload={})
     state = await orchestrator.apply_action(
@@ -195,6 +206,7 @@ async def test_return_requires_comment(db_session, fake_claude):
 async def test_agent_question_blocks(db_session, fake_claude):
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _settle(db_session, version.id)
     fake_claude.response = _block(stage="gate_a", kind="blocked", summary="ctx", question="Ktorý port?")
     await orchestrator.apply_action(db_session, version_id=version.id, action="approve")
     state = await orchestrator.run_dispatch(db_session, version.id)
@@ -205,6 +217,7 @@ async def test_agent_question_blocks(db_session, fake_claude):
 async def test_verdict_pass_to_release(db_session, fake_claude):
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _settle(db_session, version.id)
     state = await orchestrator.apply_action(
         db_session, version_id=version.id, action="verdict", payload={"verdict": "PASS"}
     )
@@ -214,6 +227,7 @@ async def test_verdict_pass_to_release(db_session, fake_claude):
 async def test_verdict_fail_regate(db_session, fake_claude):
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _settle(db_session, version.id)
     state = await orchestrator.apply_action(
         db_session,
         version_id=version.id,
@@ -228,6 +242,7 @@ async def test_verdict_fail_regate(db_session, fake_claude):
 async def test_uat_accept_done(db_session, fake_claude):
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _settle(db_session, version.id)
     state = await orchestrator.apply_action(db_session, version_id=version.id, action="uat_accept")
     assert state.current_stage == "done"
     assert state.status == "done"
@@ -255,6 +270,7 @@ async def test_verify_failure_retries_then_blocks(db_session, monkeypatch):
 
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _settle(db_session, version.id)
     await orchestrator.apply_action(db_session, version_id=version.id, action="approve")
     state = await orchestrator.run_dispatch(db_session, version.id)
     assert state.status == "blocked"
@@ -453,6 +469,7 @@ async def test_apply_coordinator_recommendation_redispatches_with_report(db_sess
 async def test_apply_coordinator_recommendation_no_report_errors(db_session, fake_claude):
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _settle(db_session, version.id)  # past the status guard → exercise the no-report path
     with pytest.raises(orchestrator.OrchestratorError):
         await orchestrator.apply_action(db_session, version_id=version.id, action="apply_coordinator_recommendation")
 
@@ -546,3 +563,46 @@ async def test_answer_after_routed_question_reaches_worker(db_session, fake_clau
     # the answer message is addressed to the worker (designer), not the coordinator
     answer_msg = [m for m in _msgs(db_session, version.id) if m.kind == "answer"][-1]
     assert answer_msg.recipient == "designer"
+
+
+# ── status guard: never act on / advance past a working agent (CR-NS-018) ───────
+
+
+@pytest.mark.parametrize(
+    "action,payload",
+    [
+        ("approve", {}),
+        ("verdict", {"verdict": "PASS"}),
+        ("uat_accept", {}),
+        ("return", {"comment": "x"}),
+        ("apply_coordinator_recommendation", {}),
+    ],
+)
+async def test_advancing_actions_rejected_while_agent_working(db_session, fake_claude, action, payload):
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")  # agent_working
+    with pytest.raises(orchestrator.OrchestratorError):
+        await orchestrator.apply_action(db_session, version_id=version.id, action=action, payload=payload)
+    # no advance / mutation happened
+    st = orchestrator._get_state(db_session, version.id)
+    assert st.current_stage == "kickoff"
+    assert st.status == "agent_working"
+
+
+async def test_answer_rejected_when_not_blocked(db_session, fake_claude):
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")  # agent_working
+    with pytest.raises(orchestrator.OrchestratorError):
+        await orchestrator.apply_action(db_session, version_id=version.id, action="answer", payload={"text": "x"})
+    _settle(db_session, version.id, status="awaiting_director")  # still not a question
+    with pytest.raises(orchestrator.OrchestratorError):
+        await orchestrator.apply_action(db_session, version_id=version.id, action="answer", payload={"text": "x"})
+
+
+async def test_advancing_action_allowed_when_blocked(db_session, fake_claude):
+    # the intentional ratify-out-of-a-question case: approve/return work from blocked
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _settle(db_session, version.id, status="blocked")
+    state = await orchestrator.apply_action(db_session, version_id=version.id, action="approve")
+    assert state.current_stage == "gate_a"

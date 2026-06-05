@@ -80,6 +80,10 @@ _ACTIONS = frozenset(
         "pause",
     }
 )
+# Actions that act on / advance past an agent's output — only valid once the
+# agent has settled (CR-NS-018). Guarding these stops a stale board / double-click
+# from advancing while the agent is mid-work (which skipped a mandatory gate).
+_ADVANCING_ACTIONS = frozenset({"approve", "apply_coordinator_recommendation", "verdict", "uat_accept", "return"})
 
 # Per-stage backstop timeouts (seconds) for a single headless agent turn
 # (CR-NS-018 fix-round). Dispatch is async, so these only guard a *hung* agent.
@@ -650,6 +654,17 @@ async def apply_action(
 
     if state is None:
         raise OrchestratorError("Pipeline not started for this version")
+
+    # Status guard (CR-NS-018): never act on / advance past an agent that is still
+    # working. The advancing actions need a settled agent (awaiting_director or a
+    # blocked ratify-out-of-a-question); answer needs an actual question (blocked);
+    # pause is only meaningful while the agent works.
+    if action in _ADVANCING_ACTIONS and state.status not in ("awaiting_director", "blocked"):
+        raise OrchestratorError("Agent ešte pracuje — počkaj na jeho výstup")
+    if action == "answer" and state.status != "blocked":
+        raise OrchestratorError("Agent sa na nič nepýta — odpoveď nie je na mieste")
+    if action == "pause" and state.status != "agent_working":
+        raise OrchestratorError("Pauza je možná len počas práce agenta")
 
     if action == "approve":
         _record_message(

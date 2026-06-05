@@ -7,11 +7,12 @@ import bcrypt
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from backend.api.routes.pipeline import router as pipeline_router
 from backend.core.security import get_current_user, require_ri_role
 from backend.db.models.foundation import User
-from backend.db.models.pipeline import PipelineMessage
+from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.db.session import get_db
@@ -44,6 +45,15 @@ def _seed_user(db_session, role="ri") -> User:
     db_session.add(u)
     db_session.flush()
     return u
+
+
+def _settle_status(db_session, version_id, status="awaiting_director") -> None:
+    """Settle the pipeline so a Director action passes the agent_working guard
+    (CR-NS-018). schedule_dispatch is mocked, so without this the state stays
+    agent_working after start and advancing actions would be rejected."""
+    st = db_session.execute(select(PipelineState).where(PipelineState.version_id == version_id)).scalar_one()
+    st.status = status
+    db_session.flush()
 
 
 def _make_version(db_session, user) -> Version:
@@ -155,6 +165,7 @@ def test_return_threads_director_comment_into_dispatch(client, db_session):
     the re-dispatch so the agent acts on it (not a blind generic re-run)."""
     version = _make_version(db_session, client._ri)
     client.post(f"/api/v1/pipeline/{version.id}/action", json={"action": "start"})
+    _settle_status(db_session, version.id, "awaiting_director")
     r = client.post(
         f"/api/v1/pipeline/{version.id}/action",
         json={"action": "return", "payload": {"comment": "Zlaď rozpor v kontrole súčtov"}},
@@ -169,6 +180,7 @@ def test_answer_threads_director_text_into_dispatch(client, db_session):
     """CR-NS-018: ``answer`` content reaches the agent (no re-ask loop)."""
     version = _make_version(db_session, client._ri)
     client.post(f"/api/v1/pipeline/{version.id}/action", json={"action": "start"})
+    _settle_status(db_session, version.id, "blocked")  # answer needs an open question
     r = client.post(
         f"/api/v1/pipeline/{version.id}/action",
         json={"action": "answer", "payload": {"text": "Schvaľujem port 8080"}},
@@ -195,6 +207,7 @@ def test_apply_coordinator_recommendation_threads_report(client, db_session):
         )
     )
     db_session.flush()
+    _settle_status(db_session, version.id, "awaiting_director")
     r = client.post(
         f"/api/v1/pipeline/{version.id}/action",
         json={"action": "apply_coordinator_recommendation"},
@@ -209,6 +222,7 @@ def test_apply_coordinator_recommendation_no_report_400(client, db_session):
     """No Coordinator report to apply → 400 (FE also hides the button)."""
     version = _make_version(db_session, client._ri)
     client.post(f"/api/v1/pipeline/{version.id}/action", json={"action": "start"})
+    _settle_status(db_session, version.id, "awaiting_director")  # past the guard → exercise no-report path
     r = client.post(
         f"/api/v1/pipeline/{version.id}/action",
         json={"action": "apply_coordinator_recommendation"},
