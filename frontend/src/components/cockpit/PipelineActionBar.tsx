@@ -16,9 +16,9 @@ import { nextStageLabel } from "./labels";
 
 // Stages the Director ratifies with Schváliť/Vrátiť. kickoff is a ratification
 // gate too — the engine's approve advances kickoff→gate_a (NOT a `start`; the
-// real start is the state===null CTA on CockpitPage). gate_g is excluded — it
-// uses the PASS/FAIL verdict instead.
-const RATIFY_STAGES = new Set(["kickoff", "gate_a", "gate_b", "gate_c", "gate_d", "gate_e"]);
+// real start is the state===null CTA on CockpitPage). gate_g (PASS/FAIL verdict)
+// and gate_e (its own Customer-loop boundary actions) are excluded.
+const RATIFY_STAGES = new Set(["kickoff", "gate_a", "gate_b", "gate_c", "gate_d"]);
 
 interface Props {
   state: PipelineState | null;
@@ -29,6 +29,12 @@ interface Props {
   /** A Coordinator gate_report exists to apply — gates the "Schváliť návrh
    *  Koordinátora" button (else the action would 400). CR-NS-018. */
   hasCoordinatorReport?: boolean;
+  /** Gate E: the Customer signalled all 7 okruhy covered → the boundary is the
+   *  FINAL sign-off (approve → Build), not a topic-continue. CR-NS-018 Phase 3. */
+  gateECoverageComplete?: boolean;
+  /** Gate E: count of open (unresolved) findings — any blocks closing (final /
+   *  early-end). CR-NS-018 Phase 3. */
+  gateEOpenFindings?: number;
   onAction: (action: PipelineActionName, payload?: Record<string, unknown>) => void;
 }
 
@@ -53,6 +59,8 @@ export function PipelineActionBar({
   inFlight,
   isErrorBlock = false,
   hasCoordinatorReport = false,
+  gateECoverageComplete = false,
+  gateEOpenFindings = 0,
   onAction,
 }: Props) {
   const [composer, setComposer] = useState<Composer>(null);
@@ -66,12 +74,16 @@ export function PipelineActionBar({
   const working = status === "agent_working";
   const isDone = status === "done";
 
+  // Gate E has its own boundary actions (Customer↔Designer loop) — kept out of the
+  // generic ratify / question-block paths (CR-NS-018 Phase 3).
+  const gateE = current_stage === "gate_e";
+
   // An error-block (agent crash/timeout) produced no agent output — Schváliť
   // would wrongly skip the stage and Odpoveď answers a non-question. So in that
   // case offer only "Skús znova" (re-dispatch the current stage). A question-block
   // keeps the answer/approve/return choices (CR-NS-018).
   const errorBlock = blocked && isErrorBlock;
-  const questionBlock = blocked && !isErrorBlock;
+  const questionBlock = blocked && !isErrorBlock && !gateE;
 
   // The full ratify gate (Schváliť podľa Návrhára / Koordinátora / Vrátiť) shows
   // at an awaiting ratify stage. Schváliť/Vrátiť also show on a question-block
@@ -79,6 +91,10 @@ export function PipelineActionBar({
   // guard, so they work from blocked too.
   const awaitingRatify = RATIFY_STAGES.has(current_stage) && awaiting;
   const canRatify = awaitingRatify || questionBlock;
+  const gateEOpen = gateEOpenFindings > 0;
+  // Gate E mid-round policy pause: the Customer/Designer hit a policy only the
+  // Director can decide (needs_director_decision → blocked). Decided via answer.
+  const gateEPolicyPause = gateE && blocked && !isErrorBlock;
 
   const openComposer = (c: NonNullable<Composer>) => {
     setComposer(c);
@@ -163,6 +179,86 @@ export function PipelineActionBar({
             </button>
           </ActionRow>
         </>
+      )}
+
+      {/* Gate E boundary (Customer↔Designer loop) — topic-continue vs final sign-off. */}
+      {gateE && awaiting && !gateECoverageComplete && (
+        <>
+          <ActionRow hint="Okruh sa uzavrie → Zákazník pokračuje ďalším okruhom previerky.">
+            <button
+              onClick={() => onAction("approve")}
+              disabled={inFlight}
+              className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
+            >
+              Schváliť okruh a pokračovať
+            </button>
+          </ActionRow>
+          <ActionRow hint="Vrátiš okruh Návrhárovi na prepracovanie.">
+            <button
+              onClick={() => openComposer({ action: "return", label: "Vrátiť s komentárom", field: "comment" })}
+              disabled={inFlight}
+              className={`${btn} border border-red-500/40 text-red-300 hover:bg-red-500/10`}
+            >
+              Vrátiť
+            </button>
+          </ActionRow>
+          <ActionRow
+            hint={
+              gateEOpen
+                ? `Najprv vyrieš otvorené nálezy (${gateEOpenFindings}) — blokujú uzavretie.`
+                : "Pokrytie stačí → uzavrie Gate E a posunie na Programovanie."
+            }
+          >
+            <button
+              onClick={() => onAction("end_gate_e")}
+              disabled={inFlight || gateEOpen}
+              className={`${btn} border border-slate-600 text-slate-300 hover:bg-slate-800`}
+            >
+              Ukončiť Gate E
+            </button>
+          </ActionRow>
+        </>
+      )}
+
+      {gateE && awaiting && gateECoverageComplete && (
+        <>
+          <ActionRow
+            hint={
+              gateEOpen
+                ? `Otvorené nálezy (${gateEOpenFindings}) blokujú uzavretie — najprv ich vyrieš.`
+                : "Všetkých 7 okruhov pokrytých, nálezy vyriešené → posun na Programovanie."
+            }
+          >
+            <button
+              onClick={() => onAction("approve")}
+              disabled={inFlight || gateEOpen}
+              className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
+            >
+              Finálne schválenie → Programovanie
+            </button>
+          </ActionRow>
+          <ActionRow hint="Vrátiš poslednému okruhu Návrhárovi na prepracovanie.">
+            <button
+              onClick={() => openComposer({ action: "return", label: "Vrátiť s komentárom", field: "comment" })}
+              disabled={inFlight}
+              className={`${btn} border border-red-500/40 text-red-300 hover:bg-red-500/10`}
+            >
+              Vrátiť
+            </button>
+          </ActionRow>
+        </>
+      )}
+
+      {gateEPolicyPause && (
+        <ActionRow hint="Tvoje rozhodnutie sa pošle Zákazníkovi → slučka previerky pokračuje.">
+          <button
+            onClick={() => openComposer({ action: "answer", label: "Rozhodnúť politiku", field: "text" })}
+            disabled={inFlight}
+            className={`${btn} bg-sky-600 text-white hover:bg-sky-500`}
+          >
+            Rozhodni politiku
+          </button>
+        </ActionRow>
       )}
 
       {current_stage === "gate_g" && awaiting && (

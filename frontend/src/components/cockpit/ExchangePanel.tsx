@@ -68,6 +68,16 @@ export function ExchangePanel({ board, inFlight, activity, onAction }: Props) {
   const hasCoordinatorReport = recent_messages.some(
     (m) => m.author === "coordinator" && m.kind === "gate_report",
   );
+  // Gate E boundary signals from the latest Customer gate_report (CR-NS-018 Phase 3):
+  // distinguishes a topic boundary (continue) from the final boundary (→ Build), and
+  // the open-finding gate that blocks closing.
+  const lastCustomerReport = [...recent_messages]
+    .reverse()
+    .find((m) => m.author === "customer" && m.stage === "gate_e" && m.kind === "gate_report");
+  const gateECoverageComplete = lastCustomerReport?.payload?.coverage_complete === true;
+  const gateEOpenFindings = Array.isArray(lastCustomerReport?.payload?.findings)
+    ? (lastCustomerReport.payload.findings as string[]).length
+    : 0;
 
   return (
     <div className="flex h-full flex-col">
@@ -99,6 +109,8 @@ export function ExchangePanel({ board, inFlight, activity, onAction }: Props) {
           inFlight={inFlight}
           isErrorBlock={isErrorBlock}
           hasCoordinatorReport={hasCoordinatorReport}
+          gateECoverageComplete={gateECoverageComplete}
+          gateEOpenFindings={gateEOpenFindings}
           onAction={onAction}
         />
       </div>

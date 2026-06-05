@@ -89,6 +89,7 @@ export type PipelineActionName =
   | "apply_coordinator_recommendation"
   | "verdict"
   | "uat_accept"
+  | "end_gate_e"
   | "pause";
 
 export interface PipelineActionRequest {

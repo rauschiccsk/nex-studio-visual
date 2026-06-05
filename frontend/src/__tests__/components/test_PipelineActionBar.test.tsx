@@ -135,3 +135,85 @@ describe("PipelineActionBar — gate action clarity", () => {
     expect(onAction).toHaveBeenCalledWith("return", { comment: "Skús znova." });
   });
 });
+
+describe("PipelineActionBar — Gate E boundary (Phase 3)", () => {
+  it("topic boundary shows continue + Ukončiť Gate E, not the generic ratify buttons", () => {
+    render(
+      <PipelineActionBar state={mkState("gate_e", "awaiting_director")} inFlight={false} onAction={vi.fn()} />,
+    );
+    expect(screen.getByText("Schváliť okruh a pokračovať")).toBeInTheDocument();
+    expect(screen.getByText("Ukončiť Gate E")).toBeInTheDocument();
+    // not the generic gate_a–d labels, and never the Coordinator button at gate_e
+    expect(screen.queryByText(APPROVE)).not.toBeInTheDocument();
+    expect(screen.queryByText(COORD)).not.toBeInTheDocument();
+    expect(screen.queryByText("Finálne schválenie → Programovanie")).not.toBeInTheDocument();
+  });
+
+  it("topic-boundary approve fires the plain approve (continue topic)", () => {
+    const onAction = vi.fn();
+    render(
+      <PipelineActionBar state={mkState("gate_e", "awaiting_director")} inFlight={false} onAction={onAction} />,
+    );
+    screen.getByText("Schváliť okruh a pokračovať").click();
+    expect(onAction).toHaveBeenCalledWith("approve");
+  });
+
+  it("Ukončiť Gate E is disabled while findings are open", () => {
+    render(
+      <PipelineActionBar
+        state={mkState("gate_e", "awaiting_director")}
+        inFlight={false}
+        gateEOpenFindings={2}
+        onAction={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Ukončiť Gate E").closest("button")).toBeDisabled();
+  });
+
+  it("Ukončiť Gate E fires end_gate_e when no open findings", () => {
+    const onAction = vi.fn();
+    render(
+      <PipelineActionBar state={mkState("gate_e", "awaiting_director")} inFlight={false} onAction={onAction} />,
+    );
+    screen.getByText("Ukončiť Gate E").click();
+    expect(onAction).toHaveBeenCalledWith("end_gate_e");
+  });
+
+  it("final boundary (coverage complete, no open findings) shows enabled final sign-off", () => {
+    const onAction = vi.fn();
+    render(
+      <PipelineActionBar
+        state={mkState("gate_e", "awaiting_director")}
+        inFlight={false}
+        gateECoverageComplete
+        onAction={onAction}
+      />,
+    );
+    const final = screen.getByText("Finálne schválenie → Programovanie");
+    expect(final.closest("button")).not.toBeDisabled();
+    expect(screen.queryByText("Schváliť okruh a pokračovať")).not.toBeInTheDocument();
+    final.click();
+    expect(onAction).toHaveBeenCalledWith("approve");
+  });
+
+  it("final sign-off is disabled while findings are open", () => {
+    render(
+      <PipelineActionBar
+        state={mkState("gate_e", "awaiting_director")}
+        inFlight={false}
+        gateECoverageComplete
+        gateEOpenFindings={1}
+        onAction={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Finálne schválenie → Programovanie").closest("button")).toBeDisabled();
+  });
+
+  it("mid-round policy pause (blocked) shows Rozhodni politiku", () => {
+    const onAction = vi.fn();
+    render(<PipelineActionBar state={mkState("gate_e", "blocked")} inFlight={false} onAction={onAction} />);
+    expect(screen.getByText("Rozhodni politiku")).toBeInTheDocument();
+    // not the generic question-block ratify
+    expect(screen.queryByText(APPROVE)).not.toBeInTheDocument();
+  });
+});

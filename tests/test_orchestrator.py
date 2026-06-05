@@ -731,3 +731,106 @@ async def test_gate_e_designer_parse_failure_blocks(db_session, monkeypatch):
     state = await orchestrator.run_dispatch(db_session, version.id)
 
     assert state.status == "blocked"  # unparseable Designer turn → escalate, never guess
+
+
+# ── Gate E boundary actions + coverage/end (F-007-gate-e §3/§4, CR-NS-018 Phase 3) ─
+
+
+def _at_gate_e_boundary(db_session, version, *, coverage_complete=False, findings=None):
+    """Settle at a gate_e boundary (awaiting_director) with a Customer gate_report
+    carrying the boundary signals in its payload."""
+    state = orchestrator._get_state(db_session, version.id)
+    state.current_stage = "gate_e"
+    state.current_actor = "customer"
+    state.status = "awaiting_director"
+    db_session.flush()
+    db_session.add(
+        PipelineMessage(
+            version_id=version.id,
+            stage="gate_e",
+            author="customer",
+            recipient="director",
+            kind="gate_report",
+            content="okruh",
+            payload={"coverage_complete": coverage_complete, "findings": findings or []},
+        )
+    )
+    db_session.flush()
+    return state
+
+
+async def test_invoke_agent_persists_gate_e_signals(db_session, fake_claude):
+    version, _ = _make_version(db_session)
+    fake_claude.response = _block(
+        stage="gate_e",
+        kind="gate_report",
+        summary="ok",
+        awaiting="director",
+        topic="moduly",
+        topic_done=True,
+        coverage_complete=True,
+        findings=["nález X"],
+    )
+    await orchestrator.invoke_agent(db_session, version_id=version.id, role="customer", stage="gate_e", prompt="go")
+    msg = [m for m in _msgs(db_session, version.id) if m.author == "customer"][-1]
+    assert msg.payload["topic"] == "moduly"
+    assert msg.payload["topic_done"] is True
+    assert msg.payload["coverage_complete"] is True
+    assert msg.payload["findings"] == ["nález X"]
+
+
+def test_dispatch_directive_gate_e_approve_continues(db_session):
+    version, _ = _make_version(db_session)
+    d = orchestrator.dispatch_directive(db_session, version.id, "approve", {}, "gate_e")
+    assert d is not None and "ďalším okruhom" in d
+    # a final approve has already advanced to build → no gate_e continue directive
+    assert orchestrator.dispatch_directive(db_session, version.id, "approve", {}, "build") is None
+
+
+async def test_gate_e_topic_boundary_approve_continues(db_session, fake_claude):
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _at_gate_e_boundary(db_session, version, coverage_complete=False)
+    state = await orchestrator.apply_action(db_session, version_id=version.id, action="approve")
+    assert state.current_stage == "gate_e"  # stays — next topic
+    assert state.status == "agent_working"
+
+
+async def test_gate_e_final_approve_advances_to_build(db_session, fake_claude):
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _at_gate_e_boundary(db_session, version, coverage_complete=True, findings=[])
+    state = await orchestrator.apply_action(db_session, version_id=version.id, action="approve")
+    assert state.current_stage == "build"
+
+
+async def test_gate_e_final_approve_blocked_by_open_findings(db_session, fake_claude):
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _at_gate_e_boundary(db_session, version, coverage_complete=True, findings=["nález X"])
+    with pytest.raises(orchestrator.OrchestratorError):
+        await orchestrator.apply_action(db_session, version_id=version.id, action="approve")
+
+
+async def test_end_gate_e_advances_when_no_open_findings(db_session, fake_claude):
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _at_gate_e_boundary(db_session, version, coverage_complete=False, findings=[])
+    state = await orchestrator.apply_action(db_session, version_id=version.id, action="end_gate_e")
+    assert state.current_stage == "build"
+
+
+async def test_end_gate_e_blocked_by_open_findings(db_session, fake_claude):
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _at_gate_e_boundary(db_session, version, coverage_complete=False, findings=["nález"])
+    with pytest.raises(orchestrator.OrchestratorError):
+        await orchestrator.apply_action(db_session, version_id=version.id, action="end_gate_e")
+
+
+async def test_end_gate_e_outside_gate_e_errors(db_session, fake_claude):
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _settle(db_session, version.id)  # kickoff, awaiting (past the status guard)
+    with pytest.raises(orchestrator.OrchestratorError):
+        await orchestrator.apply_action(db_session, version_id=version.id, action="end_gate_e")

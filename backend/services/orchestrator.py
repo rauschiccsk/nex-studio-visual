@@ -81,13 +81,16 @@ _ACTIONS = frozenset(
         "apply_coordinator_recommendation",
         "verdict",
         "uat_accept",
+        "end_gate_e",
         "pause",
     }
 )
 # Actions that act on / advance past an agent's output — only valid once the
 # agent has settled (CR-NS-018). Guarding these stops a stale board / double-click
 # from advancing while the agent is mid-work (which skipped a mandatory gate).
-_ADVANCING_ACTIONS = frozenset({"approve", "apply_coordinator_recommendation", "verdict", "uat_accept", "return"})
+_ADVANCING_ACTIONS = frozenset(
+    {"approve", "apply_coordinator_recommendation", "verdict", "uat_accept", "return", "end_gate_e"}
+)
 
 # Per-stage backstop timeouts (seconds) for a single headless agent turn
 # (CR-NS-018 fix-round). Dispatch is async, so these only guard a *hung* agent.
@@ -233,6 +236,44 @@ def latest_coordinator_report(db: Session, version_id: uuid.UUID) -> Optional[st
     ).scalar_one_or_none()
 
 
+def _latest_customer_gate_report(db: Session, version_id: uuid.UUID) -> Optional[PipelineMessage]:
+    """Most recent Customer ``gate_report`` for a version's Gate E (or ``None``).
+
+    Author + stage filtered, ordered by the monotonic ``seq``. Its payload carries
+    the Gate E boundary signals (``coverage_complete``, ``findings``, ``topic_done``)
+    that drive the boundary actions (F-007-gate-e §3/§4): topic boundary vs final
+    sign-off, and the open-finding gate that blocks closing.
+    """
+    return db.execute(
+        select(PipelineMessage)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.author == "customer",
+            PipelineMessage.stage == "gate_e",
+            PipelineMessage.kind == "gate_report",
+        )
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def _gate_e_open_findings(report: Optional[PipelineMessage]) -> list[str]:
+    """Open (unresolved) findings at the latest Gate E boundary — empty = clean.
+
+    Contract (F-007-gate-e §4): at a boundary the Customer's ``findings`` list = the
+    findings that remain UNRESOLVED (Designer-explained/fixed or Director-decided
+    ones are dropped). A non-empty list blocks closing Gate E (final or early-end).
+    """
+    if report is None or not report.payload:
+        return []
+    return list(report.payload.get("findings") or [])
+
+
+def _gate_e_coverage_complete(report: Optional[PipelineMessage]) -> bool:
+    """Whether the latest Customer boundary signalled all 7 okruhy covered (§4)."""
+    return bool(report and report.payload and report.payload.get("coverage_complete"))
+
+
 def dispatch_directive(
     db: Session, version_id: uuid.UUID, action: str, payload: dict[str, Any], stage: str
 ) -> Optional[str]:
@@ -248,6 +289,14 @@ def dispatch_directive(
         if content is None:
             return None
         return f"Director schválil odporúčania Koordinátora. Zapracuj ich podľa jeho hlásenia: {content}"
+    # A topic-boundary approve that STAYS in gate_e (next-topic continue) directs the
+    # Customer to the next okruh (F-007-gate-e §3). A final approve advances to build,
+    # so by then stage != gate_e and this does not fire.
+    if action == "approve" and stage == "gate_e":
+        return (
+            "Director schválil okruh. Pokračuj ďalším okruhom previerky Gate E. "
+            "Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
+        )
     return directive_for_action(action, payload, stage)
 
 
@@ -342,6 +391,12 @@ async def invoke_agent(
             "question": parsed.question,
             "awaiting": parsed.awaiting,
             "block_kind": parsed.kind,
+            # Gate E signals (F-007-gate-e) — let apply_action/the FE derive the
+            # boundary type (topic vs final) and the open-finding gate.
+            "topic": parsed.topic,
+            "topic_done": parsed.topic_done,
+            "coverage_complete": parsed.coverage_complete,
+            "findings": parsed.findings,
         },
     )
     return parsed
@@ -769,6 +824,21 @@ async def apply_action(
             kind="approval",
             content=payload.get("comment", "Schválené."),
         )
+        # Gate E (F-007-gate-e §3/§4): a topic boundary ratifies + continues to the
+        # NEXT okruh (stage STAYS gate_e); only a final boundary (coverage_complete +
+        # no open finding) signs off → build. An open finding blocks the final close.
+        if state.current_stage == "gate_e":
+            report = _latest_customer_gate_report(db, version_id)
+            if _gate_e_coverage_complete(report):
+                open_findings = _gate_e_open_findings(report)
+                if open_findings:
+                    raise OrchestratorError("Otvorené nálezy blokujú uzavretie Gate E — najprv ich vyrieš")
+                state.current_stage = _next_stage("gate_e")  # → build
+                db.flush()
+                _begin_dispatch(db, state)
+            else:
+                _begin_dispatch(db, state)  # next topic — stage unchanged
+            return state
         state.current_stage = _next_stage(state.current_stage)
         db.flush()
         if state.current_stage == "done":
@@ -892,6 +962,29 @@ async def apply_action(
             content="UAT accepted — pipeline done (prod-deploy hook deferred to Phase 5).",
         )
         db.flush()
+        return state
+
+    if action == "end_gate_e":
+        # Director ends Gate E early ("pokrytie stačí", F-007-gate-e §4) → advance to
+        # build. Skips remaining COVERAGE, but any open finding of a covered topic
+        # still blocks closing — no unresolved finding may pass to Build.
+        if state.current_stage != "gate_e":
+            raise OrchestratorError("end_gate_e je platné len vo fáze Gate E")
+        open_findings = _gate_e_open_findings(_latest_customer_gate_report(db, version_id))
+        if open_findings:
+            raise OrchestratorError("Otvorené nálezy blokujú uzavretie Gate E — najprv ich vyrieš")
+        _record_message(
+            db,
+            version_id=version_id,
+            stage="gate_e",
+            author="director",
+            recipient="customer",
+            kind="approval",
+            content="Gate E ukončené Directorom (pokrytie stačí).",
+        )
+        state.current_stage = _next_stage("gate_e")  # → build
+        db.flush()
+        _begin_dispatch(db, state)
         return state
 
     # action == "pause"
