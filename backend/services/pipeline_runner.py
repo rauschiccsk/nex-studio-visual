@@ -88,16 +88,25 @@ async def _broadcast_new_messages(db, version_id: uuid.UUID, pre_ids: set[uuid.U
         )
 
 
-def _activity_callback(version_id: uuid.UUID, stage: str, actor: str):
-    """Build the streaming callback that broadcasts ``agent_activity`` frames."""
+def _activity_callback(version_id: uuid.UUID, stage: str, fallback_actor: str):
+    """Build the streaming callback that broadcasts ``agent_activity`` frames.
+
+    The frame ``actor`` is the **real** invoked role (``evt["_role"]`` tagged by
+    :func:`orchestrator.invoke_agent`), so the rail steps through the agents in a
+    gate_e round; falls back to the nominal stage actor. A one-shot ``active_role``
+    event (no tool line) still emits a frame so a tool-less turn steps the rail."""
 
     async def _cb(evt: dict) -> None:
-        line, kind = activity_line(evt)
+        role = (evt.get("_role") if isinstance(evt, dict) else None) or fallback_actor
+        if isinstance(evt, dict) and evt.get("type") == "active_role":
+            line, kind = "pracuje…", "status"
+        else:
+            line, kind = activity_line(evt)
         if not line:
             return
         await registry.broadcast(
             version_id,
-            {"type": "agent_activity", "stage": stage, "actor": actor, "kind": kind, "line": line},
+            {"type": "agent_activity", "stage": stage, "actor": role, "kind": kind, "line": line},
         )
 
     return _cb

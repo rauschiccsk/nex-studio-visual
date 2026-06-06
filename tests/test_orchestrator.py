@@ -1137,3 +1137,76 @@ def test_gate_e_audit_markdown_assembles():
     assert "Zákazník" in md and "Návrhár" in md  # role-labelled transcript
     assert "Ako sa rieši reset hesla?" in md
     assert "Reset cez email" in md
+
+
+# ── recipient chain Z→N→K→D + real active role (cockpit accuracy, §5) ───────────
+
+
+async def test_gate_e_recipients_follow_the_chain(db_session, monkeypatch):
+    seq = SequenceClaude(
+        [
+            _block(stage="gate_e", kind="question", summary="?", question="Je X pokryté?"),
+            _block(stage="gate_e", kind="answer", summary="áno, §4.2", awaiting="none"),
+        ]
+    )
+    monkeypatch.setattr(orchestrator, "invoke_claude", seq)
+    monkeypatch.setattr(orchestrator, "verify_mechanical", lambda slug, block: None)
+
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _to_gate_e(db_session, version)
+    await orchestrator.run_dispatch(db_session, version.id)
+
+    msgs = _msgs(db_session, version.id)
+    customer = [m for m in msgs if m.author == "customer"][-1]
+    designer = [m for m in msgs if m.author == "designer"][-1]
+    assert customer.recipient == "designer"  # Z→N
+    assert designer.recipient == "coordinator"  # N→K
+
+
+async def test_gate_e_coordinator_recipient_is_director(db_session, monkeypatch):
+    seq = SequenceClaude(
+        [
+            _block(stage="gate_e", kind="question", summary="?", question="Je X pokryté?"),
+            _block(
+                stage="gate_e",
+                kind="answer",
+                summary="medzera",
+                awaiting="none",
+                gap_found=True,
+                proposed_fix="pridať X",
+            ),
+            _block(stage="gate_e", kind="gate_report", summary="odporúčam pridať X", awaiting="director"),
+        ]
+    )
+    monkeypatch.setattr(orchestrator, "invoke_claude", seq)
+    monkeypatch.setattr(orchestrator, "verify_mechanical", lambda slug, block: None)
+
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _to_gate_e(db_session, version)
+    await orchestrator.run_dispatch(db_session, version.id)
+
+    coordinator = [m for m in _msgs(db_session, version.id) if m.author == "coordinator"][-1]
+    assert coordinator.recipient == "director"  # K→D
+
+
+async def test_invoke_agent_default_recipient_is_director(db_session, fake_claude):
+    version, _ = _make_version(db_session)
+    await orchestrator.invoke_agent(db_session, version_id=version.id, role="designer", stage="gate_a", prompt="go")
+    msg = [m for m in _msgs(db_session, version.id) if m.author == "designer"][-1]
+    assert msg.recipient == "director"  # non-gate_e unchanged
+
+
+async def test_invoke_agent_emits_active_role_tagged_with_role(db_session, fake_claude):
+    captured: list = []
+
+    async def _cap(evt):
+        captured.append(evt)
+
+    version, _ = _make_version(db_session)
+    await orchestrator.invoke_agent(
+        db_session, version_id=version.id, role="designer", stage="gate_e", prompt="go", on_event=_cap
+    )
+    # the per-turn active-role signal carries the REAL role so the rail steps Z→N→K
+    assert captured[0] == {"type": "active_role", "_role": "designer"}

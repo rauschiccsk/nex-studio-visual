@@ -1,7 +1,30 @@
 // Left rail: stage progress + agent status chips (F-007 §7).
 
-import type { PipelineActor, PipelineState } from "../../services/api/pipeline";
+import type {
+  ActivityLine,
+  PipelineActor,
+  PipelineBoard,
+  PipelineState,
+} from "../../services/api/pipeline";
 import { ROLE_LABELS, STAGE_CODES, STAGE_LABELS, STAGE_ORDER } from "./labels";
+
+// The agent actually active (CR-NS-018): while working = the real streaming role
+// (latest activity frame, fallback the stage actor); at rest = who just acted
+// (latest non-director/system message author). NOT the nominal current_actor.
+export function deriveActiveAgent(board: PipelineBoard | null, activity: ActivityLine[]): PipelineActor | null {
+  const state = board?.state ?? null;
+  if (!state) return null;
+  if (state.status === "agent_working") {
+    const last = activity[activity.length - 1];
+    return (last?.actor as PipelineActor) ?? state.current_actor;
+  }
+  if (state.status === "awaiting_director" || state.status === "blocked") {
+    const msgs = board?.recent_messages ?? [];
+    const author = msgs[msgs.length - 1]?.author;
+    return author && author !== "director" && author !== "system" ? (author as PipelineActor) : null;
+  }
+  return null;
+}
 
 // Agent chips (director is the human, not an agent chip). Labels from the shared
 // ROLE_LABELS map; emoji is decorative.
@@ -29,8 +52,14 @@ const CHIP_LABEL: Record<ChipStatus, string> = {
   blocked: "blocked",
 };
 
-function chipStatusFor(actor: PipelineActor, state: PipelineState | null): ChipStatus {
-  if (!state || state.current_actor !== actor) return "idle";
+function chipStatusFor(
+  actor: PipelineActor,
+  state: PipelineState | null,
+  activeAgent: PipelineActor | null,
+): ChipStatus {
+  // The active agent is the one actually working / who just acted (CR-NS-018) — not
+  // the nominal stage actor (at gate_e that's always "customer"). Derived upstream.
+  if (!state || activeAgent !== actor) return "idle";
   switch (state.status) {
     case "agent_working":
       return "working";
@@ -45,9 +74,12 @@ function chipStatusFor(actor: PipelineActor, state: PipelineState | null): ChipS
 
 interface Props {
   state: PipelineState | null;
+  /** The agent actually active (working role, or latest message author at rest) —
+   *  derived in CockpitPage from activity + messages. Falls back to current_actor. */
+  activeAgent?: PipelineActor | null;
 }
 
-export function PipelineRail({ state }: Props) {
+export function PipelineRail({ state, activeAgent = null }: Props) {
   const currentIdx = state ? STAGE_ORDER.indexOf(state.current_stage) : -1;
 
   return (
@@ -87,7 +119,7 @@ export function PipelineRail({ state }: Props) {
         </h3>
         <ul className="space-y-1.5">
           {AGENTS.map(({ actor, emoji }) => {
-            const s = chipStatusFor(actor, state);
+            const s = chipStatusFor(actor, state, activeAgent);
             return (
               <li key={actor} className="flex items-center justify-between gap-2 text-xs">
                 <span className="flex items-center gap-1.5 text-slate-400">

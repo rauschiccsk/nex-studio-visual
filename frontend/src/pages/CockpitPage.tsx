@@ -11,7 +11,7 @@ import {
   postPipelineActionApi,
   type PipelineActionName,
 } from "../services/api/pipeline";
-import PipelineRail from "../components/cockpit/PipelineRail";
+import PipelineRail, { deriveActiveAgent } from "../components/cockpit/PipelineRail";
 import ExchangePanel from "../components/cockpit/ExchangePanel";
 import DebugTerminalDrawer from "../components/cockpit/DebugTerminalDrawer";
 
@@ -82,7 +82,7 @@ export default function CockpitPage() {
       <div className="flex min-h-0 flex-1">
         {/* Left rail */}
         <div className="w-56 flex-shrink-0 border-r border-slate-800">
-          <PipelineRail state={board?.state ?? null} />
+          <PipelineRail state={board?.state ?? null} activeAgent={deriveActiveAgent(board ?? null, activity)} />
         </div>
 
         {/* Right column */}

@@ -154,7 +154,9 @@ export function buildPipelineWsUrl(versionId: string, token: string): string {
 export interface ActivityLine {
   stage: PipelineStage;
   actor: PipelineActor;
-  kind: "tool" | "text" | "";
+  // "status" = a per-turn active-role signal ("…pracuje") that steps the rail
+  // through the agents in a round (CR-NS-018).
+  kind: "tool" | "text" | "status" | "";
   line: string;
 }
 

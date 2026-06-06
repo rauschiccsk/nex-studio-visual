@@ -298,3 +298,28 @@ async def test_run_persistent_transient_settles_blocked(db_session, monkeypatch)
     state = db_session.execute(select(PipelineState).where(PipelineState.version_id == version.id)).scalar_one()
     assert state.status == "blocked"  # never stuck at agent_working
     assert state.status != "agent_working"
+
+
+# ── activity frames carry the real role; active_role steps the rail (CR-NS-018) ─
+
+
+async def test_activity_callback_uses_real_role_and_active_role(db_session, monkeypatch):
+    fake_reg = _FakeRegistry()
+    monkeypatch.setattr(pipeline_runner, "registry", fake_reg)
+    vid = uuid.uuid4()
+    cb = pipeline_runner._activity_callback(vid, "gate_e", "customer")
+
+    # a one-shot active-role signal → a frame on the real role (steps the rail)
+    await cb({"type": "active_role", "_role": "designer"})
+    # a tool event tagged with the real role → frame actor = that role, not fallback
+    await cb(
+        {
+            "type": "assistant",
+            "message": {"content": [{"type": "tool_use", "name": "Read", "input": {"file_path": "docs/spec.md"}}]},
+            "_role": "coordinator",
+        }
+    )
+
+    frames = [p for _, p in fake_reg.events if p["type"] == "agent_activity"]
+    assert frames[0]["actor"] == "designer" and frames[0]["kind"] == "status"
+    assert frames[1]["actor"] == "coordinator" and frames[1]["line"] == "číta docs/spec.md"

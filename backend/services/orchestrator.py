@@ -486,6 +486,7 @@ async def invoke_agent(
     prompt: str,
     timeout: Optional[int] = None,
     on_event: Optional[claude_agent.EventCallback] = None,
+    recipient: str = "director",
 ) -> PipelineStatusBlock | ParseFailure:
     """Drive one agent turn headless and record its message.
 
@@ -496,12 +497,28 @@ async def invoke_agent(
 
     ``timeout`` overrides the per-invocation backstop; ``None`` → the per-stage
     default (:func:`_timeout_for`).
+
+    ``recipient`` (F-007-gate-e §5) is who the agent's message is addressed to —
+    the next in the chain (default ``"director"``; the gate_e round passes
+    ``designer`` / ``coordinator`` per Z→N→K→D). System escalations stay → Director.
+
+    When ``on_event`` is set, each streamed event (and a one-shot ``active_role``
+    signal at the start) is tagged with ``_role=role`` so the cockpit rail shows the
+    **real** working agent per turn, not the nominal stage actor.
     """
     slug = _project_slug_for_version(db, version_id)
     session_id, is_first = _resolve_orch_session(db, slug, role)
     charter_path: Optional[Path] = None
     if is_first:
         charter_path = claude_agent.PROJECTS_ROOT / slug / ".claude" / "agents" / role / "CLAUDE.md"
+
+    tagged_on_event: Optional[claude_agent.EventCallback] = None
+    if on_event is not None:
+
+        async def tagged_on_event(evt: dict) -> None:
+            await on_event({**evt, "_role": role} if isinstance(evt, dict) else evt)
+
+        await tagged_on_event({"type": "active_role"})  # per-turn rail signal (steps Z→N→K)
 
     try:
         stdout = await invoke_claude(
@@ -510,7 +527,7 @@ async def invoke_agent(
             prompt=prompt,
             charter_path=charter_path,
             timeout=timeout if timeout is not None else _timeout_for(stage),
-            on_event=on_event,
+            on_event=tagged_on_event,
         )
     except ClaudeAgentError as exc:
         _record_message(
@@ -554,7 +571,7 @@ async def invoke_agent(
         version_id=version_id,
         stage=stage,
         author=role,
-        recipient="director",
+        recipient=recipient,
         kind=msg_kind,
         content=parsed.summary,
         payload={
@@ -584,6 +601,7 @@ async def invoke_agent_with_parse_retry(
     stage: str,
     prompt: str,
     on_event: Optional[claude_agent.EventCallback] = None,
+    recipient: str = "director",
 ) -> PipelineStatusBlock | ParseFailure:
     """Invoke the actor; on a status-block ``ParseFailure``, re-invoke (bounded).
 
@@ -599,7 +617,9 @@ async def invoke_agent_with_parse_retry(
     that failed verification. Only the first (primary) invocation streams via
     ``on_event``; the cheap re-emit retries don't stream.
     """
-    result = await invoke_agent(db, version_id=version_id, role=role, stage=stage, prompt=prompt, on_event=on_event)
+    result = await invoke_agent(
+        db, version_id=version_id, role=role, stage=stage, prompt=prompt, on_event=on_event, recipient=recipient
+    )
     attempts = 0
     while isinstance(result, ParseFailure) and attempts < _PARSE_RETRIES:
         attempts += 1
@@ -612,6 +632,7 @@ async def invoke_agent_with_parse_retry(
                 f"Tvoj <<<PIPELINE_STATUS>>> blok nebol platný JSON: {result.reason}. "
                 "Pošli LEN opravený, platný <<<PIPELINE_STATUS>>> blok — rovnaký obsah, správny JSON."
             ),
+            recipient=recipient,
         )
     return result
 
@@ -875,13 +896,13 @@ async def _run_gate_e_round(
       a ``question`` → one Designer answer (no-edit: explain / on a gap only PROPOSE)
       → if ``gap_found`` the Coordinator reviews the proposal → STOP.
 
-    Each turn is a ``pipeline_message`` (stage=gate_e, ``seq``-ordered). Only the first
-    turn streams ``on_event``. Parse failure → ``blocked`` (never guess).
+    Each turn is a ``pipeline_message`` (stage=gate_e, ``seq``-ordered) with the chain
+    ``recipient`` (Z→N→K→D, §5), and every turn streams with its real ``_role`` so the
+    rail steps Customer→Designer→Coordinator. Parse failure → ``blocked`` (never guess).
     """
-    stream = on_event
     if gate_e_dispatch == "coordinator_consult":  # ask/return @ gate_e — Coordinator revises
         revised = await invoke_agent_with_parse_retry(
-            db, version_id=state.version_id, role="coordinator", stage="gate_e", prompt=directive, on_event=stream
+            db, version_id=state.version_id, role="coordinator", stage="gate_e", prompt=directive, on_event=on_event
         )
         if isinstance(revised, ParseFailure):
             return _block_failed(state, db, revised.reason)
@@ -892,9 +913,14 @@ async def _run_gate_e_round(
 
     if gate_e_dispatch == "designer_edit":  # Branch B: the Designer applies the approved fix, then continue
         edit = await invoke_agent_with_parse_retry(
-            db, version_id=state.version_id, role="designer", stage="gate_e", prompt=directive, on_event=stream
+            db,
+            version_id=state.version_id,
+            role="designer",
+            stage="gate_e",
+            prompt=directive,
+            on_event=on_event,
+            recipient="coordinator",
         )
-        stream = None
         if isinstance(edit, ParseFailure):
             return _block_failed(state, db, edit.reason)
         # Symmetric relay (§5): tell the Customer what was fixed before its next question.
@@ -906,7 +932,13 @@ async def _run_gate_e_round(
         customer_prompt = directive if directive is not None else _directive_for("gate_e")
 
     cust = await invoke_agent_with_parse_retry(
-        db, version_id=state.version_id, role="customer", stage="gate_e", prompt=customer_prompt, on_event=stream
+        db,
+        version_id=state.version_id,
+        role="customer",
+        stage="gate_e",
+        prompt=customer_prompt,
+        on_event=on_event,
+        recipient="designer",  # Z→N: the Customer's question is for the Designer
     )
     if isinstance(cust, ParseFailure):
         return _block_failed(state, db, cust.reason)
@@ -927,6 +959,8 @@ async def _run_gate_e_round(
                 f"Zákazník vo fáze Gate E sa pýta: {cust.question}. {_GATE_E_NO_EDIT}. "
                 "Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
             ),
+            on_event=on_event,
+            recipient="coordinator",  # N→K: the Designer's answer is for the Coordinator
         )
         if isinstance(designer, ParseFailure):
             return _block_failed(state, db, designer.reason)

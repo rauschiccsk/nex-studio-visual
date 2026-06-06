@@ -8,10 +8,10 @@ import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-import PipelineRail from "@/components/cockpit/PipelineRail";
+import PipelineRail, { deriveActiveAgent } from "@/components/cockpit/PipelineRail";
 import PipelineMessageBubble from "@/components/cockpit/PipelineMessageBubble";
 import { nextStageLabel } from "@/components/cockpit/labels";
-import type { PipelineMessage, PipelineState } from "@/services/api/pipeline";
+import type { ActivityLine, PipelineBoard, PipelineMessage, PipelineState } from "@/services/api/pipeline";
 
 function mkState(): PipelineState {
   return {
@@ -74,5 +74,57 @@ describe("cockpit Slovak labels", () => {
     expect(nextStageLabel("gate_e")).toBe("Programovanie"); // build
     expect(nextStageLabel("release")).toBe("Hotovo"); // done
     expect(nextStageLabel("done")).toBe("Hotovo"); // clamped
+  });
+});
+
+describe("deriveActiveAgent (real active agent, not current_actor)", () => {
+  const gateEState = (status: PipelineState["status"]): PipelineState => ({
+    id: "1",
+    version_id: "2",
+    flow_type: "new_version",
+    current_stage: "gate_e",
+    current_actor: "customer", // nominal stage actor — must NOT win
+    status,
+    next_action: "x",
+    is_regate: false,
+    iteration: 0,
+    created_at: "2026-06-06T00:00:00Z",
+    updated_at: "2026-06-06T00:00:00Z",
+  });
+  const board = (state: PipelineState, messages: PipelineMessage[] = []): PipelineBoard => ({
+    state,
+    recent_messages: messages,
+  });
+  const msg = (author: PipelineMessage["author"]): PipelineMessage => ({
+    id: author,
+    version_id: "2",
+    stage: "gate_e",
+    author,
+    recipient: "director",
+    kind: "answer",
+    content: "x",
+    status: "delivered",
+    payload: null,
+    created_at: "2026-06-06T00:00:00Z",
+  });
+
+  it("while working = the latest activity frame's role (not the stage actor)", () => {
+    const activity: ActivityLine[] = [
+      { stage: "gate_e", actor: "customer", kind: "status", line: "pracuje…" },
+      { stage: "gate_e", actor: "designer", kind: "status", line: "pracuje…" },
+    ];
+    expect(deriveActiveAgent(board(gateEState("agent_working")), activity)).toBe("designer");
+  });
+
+  it("while working with no activity falls back to current_actor", () => {
+    expect(deriveActiveAgent(board(gateEState("agent_working")), [])).toBe("customer");
+  });
+
+  it("at awaiting_director = the latest message author (who just acted)", () => {
+    expect(deriveActiveAgent(board(gateEState("awaiting_director"), [msg("coordinator")]), [])).toBe("coordinator");
+  });
+
+  it("ignores a system/director latest message at rest", () => {
+    expect(deriveActiveAgent(board(gateEState("blocked"), [msg("system")]), [])).toBeNull();
   });
 });
