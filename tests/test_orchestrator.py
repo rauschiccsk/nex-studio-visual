@@ -749,6 +749,8 @@ async def test_gate_e_fix_edits_then_next_question(db_session, monkeypatch):
     assert state.status == "awaiting_director"
     assert seq.prompts[0] == "Koordinátor odovzdáva pokyn: uprav podľa návrhu"  # Designer edits first
     assert len(seq.prompts) == 3  # edit → customer Q → designer A
+    # symmetric relay (§5): the Customer's prompt carries the fix outcome (Designer summary)
+    assert "opravené podľa návrhu" in seq.prompts[1]
 
 
 async def test_gate_e_designer_parse_failure_blocks(db_session, monkeypatch):
@@ -830,6 +832,61 @@ async def test_fix_outside_gate_e_errors(db_session, fake_claude):
     _settle(db_session, version.id)  # kickoff, awaiting (past the status guard)
     with pytest.raises(orchestrator.OrchestratorError):
         await orchestrator.apply_action(db_session, version_id=version.id, action="fix")
+
+
+# ── symmetric relay: Designer answer/outcome carried back to the Customer (§5) ──
+
+
+def _seed_gate_e_designer_answer(db_session, version, content, **payload):
+    db_session.add(
+        PipelineMessage(
+            version_id=version.id,
+            stage="gate_e",
+            author="designer",
+            recipient="director",
+            kind="answer",
+            content=content,
+            payload=payload or None,
+        )
+    )
+    db_session.flush()
+
+
+def test_gate_e_approve_relays_designer_answer_branch_a(db_session):
+    version, _ = _make_version(db_session)
+    _seed_gate_e_designer_answer(db_session, version, "Reset hesla je pokrytý v §4.2", gap_found=False)
+    d = orchestrator.dispatch_directive(db_session, version.id, "approve", {}, "gate_e")
+    assert "Návrhár odpovedal" in d
+    assert "Reset hesla je pokrytý v §4.2" in d
+
+
+def test_gate_e_approve_topic_boundary_is_generic_no_stale_answer(db_session):
+    version, _ = _make_version(db_session)
+    # an earlier designer answer, then a later Customer gate_report (the latest milestone)
+    _seed_gate_e_designer_answer(db_session, version, "stará odpoveď", gap_found=False)
+    db_session.add(
+        PipelineMessage(
+            version_id=version.id,
+            stage="gate_e",
+            author="customer",
+            recipient="director",
+            kind="gate_report",
+            content="okruh dokončený",
+            payload={"topic_done": True},
+        )
+    )
+    db_session.flush()
+    d = orchestrator.dispatch_directive(db_session, version.id, "approve", {}, "gate_e")
+    assert "Návrhár odpovedal" not in d
+    assert "stará odpoveď" not in d
+    assert "ďalším okruhom" in d
+
+
+def test_gate_e_leave_directive_states_decision(db_session):
+    version, _ = _make_version(db_session)
+    d = orchestrator.dispatch_directive(db_session, version.id, "leave", {}, "gate_e")
+    assert "ponechať" in d.lower()
+    assert "Pokračuj" in d
 
 
 # ── Gate E boundary actions + coverage/end (F-007-gate-e §3/§4, CR-NS-018 Phase 3) ─

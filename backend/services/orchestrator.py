@@ -23,7 +23,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Optional
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from backend.db.models.orchestrator import OrchestratorSession
@@ -288,6 +288,27 @@ def _latest_designer_answer(db: Session, version_id: uuid.UUID) -> Optional[Pipe
     ).scalar_one_or_none()
 
 
+def _latest_gate_e_milestone(db: Session, version_id: uuid.UUID) -> Optional[PipelineMessage]:
+    """Latest gate_e milestone — a Designer ``answer`` or a Customer ``gate_report`` (by ``seq``).
+
+    Distinguishes a per-question continue (latest = Designer answer → relay the answer
+    back to the Customer) from a topic-boundary continue (latest = Customer gate_report
+    → generic, no stale answer leaked into the next okruh). Symmetric relay (§5)."""
+    return db.execute(
+        select(PipelineMessage)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.stage == "gate_e",
+            or_(
+                and_(PipelineMessage.author == "designer", PipelineMessage.kind == "answer"),
+                and_(PipelineMessage.author == "customer", PipelineMessage.kind == "gate_report"),
+            ),
+        )
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
 def _latest_coordinator_message_content(db: Session, version_id: uuid.UUID) -> Optional[str]:
     """Content of the most recent Coordinator message (any kind) for a version.
 
@@ -403,13 +424,26 @@ def dispatch_directive(
         if content is None:
             return None
         return f"Director schválil odporúčania Koordinátora. Zapracuj ich podľa jeho hlásenia: {content}"
-    # Gate E (F-007-gate-e revised §2): every continue goes to the Customer for the
-    # next question (or next okruh — the Customer tracks coverage). A final approve has
-    # already advanced to build, so stage != gate_e and this does not fire.
-    if action in ("approve", "leave") and stage == "gate_e":
+    # Gate E (F-007-gate-e §5): symmetric relay — the continue-directive to the Customer
+    # MUST carry the Designer's reply, else the Customer (separate session) re-asks and
+    # logs a false open finding. A final approve has already advanced to build, so
+    # stage != gate_e and this does not fire.
+    if action == "leave" and stage == "gate_e":
         return (
-            "Director schválil — pokračuj v previerke Gate E ďalšou otázkou "
-            "(alebo ďalším okruhom). Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
+            "Director rozhodol nález ponechať (podľa odporúčania Koordinátora). "
+            "Pokračuj ďalšou otázkou previerky Gate E. Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
+        )
+    if action == "approve" and stage == "gate_e":
+        milestone = _latest_gate_e_milestone(db, version_id)
+        if milestone is not None and milestone.author == "designer":  # per-question (Branch A)
+            return (
+                f"Návrhár odpovedal na tvoju otázku: «{milestone.content}». Director to schválil. "
+                "Pokračuj ďalšou otázkou previerky Gate E. Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
+            )
+        # topic boundary (latest = Customer gate_report, or none) — no stale answer
+        return (
+            "Director schválil — pokračuj v previerke Gate E ďalším okruhom "
+            "(alebo ďalšou otázkou). Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
         )
     # Branch B fix: the edit instruction is Coordinator-relayed (Director never writes
     # to the Designer directly, §2) — composed from the proposed fix + the Coordinator's
@@ -834,7 +868,11 @@ async def _run_gate_e_round(
         stream = None
         if isinstance(edit, ParseFailure):
             return _block_failed(state, db, edit.reason)
-        customer_prompt = _directive_for("gate_e")
+        # Symmetric relay (§5): tell the Customer what was fixed before its next question.
+        customer_prompt = (
+            f"Tvoj nález Návrhár opravil podľa schváleného riešenia: «{edit.summary}». "
+            "Pokračuj ďalšou otázkou previerky Gate E. Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
+        )
     else:
         customer_prompt = directive if directive is not None else _directive_for("gate_e")
 
