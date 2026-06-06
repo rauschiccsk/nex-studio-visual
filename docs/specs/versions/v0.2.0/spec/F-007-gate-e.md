@@ -125,6 +125,15 @@ moduly, obrazovky, chyby (NIB-XXX), edge-cases, integrácie.
   reťaze Z→N→K→D: Zákazníkova otázka → `recipient="designer"`, Návrhárova
   odpoveď/gate_report → `recipient="coordinator"`, Koordinátorov report →
   `recipient="director"`. Board zobrazí pravdivú reťaz (FE číta uložený recipient).
+- **Inkrementálny broadcast správ (nie dávkovo na konci):** dnes `pipeline_runner._run`
+  spustí celé kolo, potom **naraz na konci** committne + broadcastne všetky správy
+  (`_broadcast_new_messages`). Director tak vidí agentov „pracovať" (activity feed), ale
+  **bubliny správ spadnú naraz**. Každú správu treba committnúť + broadcastnúť **hneď ako
+  vznikne** (po každom `_record_message` v dispatchi): Zákazníkova otázka sa zobrazí, kým
+  Návrhár pracuje, jeho odpoveď hneď ako dokončí, atď. Mechanizmus: hook `on_message`
+  (zrkadlo `on_event`) z runnera do orchestrátora; orchestrátor ostáva WS-free (len volá
+  hook), runner robí commit + `message_added` broadcast. Bonus: inkrementálna perzistencia
+  (pri páde v strede kola sa správy zachovajú + always-settle ich neprepíše).
 - **Rail „Agenti" = reálne aktívny agent (nie `current_actor`):** chip stav odvoď
   od **skutočne pracujúcej roly** počas dispatchu (orchestrátor signalizuje aktívnu
   rolu, ako sa cez gate_e kolo strieda Zákazník→Návrhár→Koordinátor) a od **autora
