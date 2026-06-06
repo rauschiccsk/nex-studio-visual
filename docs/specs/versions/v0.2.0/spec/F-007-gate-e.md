@@ -120,6 +120,17 @@ moduly, obrazovky, chyby (NIB-XXX), edge-cases, integrácie.
   FE: premenovať tlačidlo „Otázka" → **„Konzultovať s Koordinátorom"** (pokrýva otázku
   aj konštatovanie); platí pre gate_e a všeobecne (Director↔Koordinátor výhradne, §2).
   Zladiť ostatné gate_e Branch-B tlačidlá s týmto modelom.
+- **Recipient = agentová reťaz (nie paušálne „director"):** `invoke_agent` dnes
+  zapisuje `recipient="director"` pre **každý** turn — chyba. Na gate_e zapisuj podľa
+  reťaze Z→N→K→D: Zákazníkova otázka → `recipient="designer"`, Návrhárova
+  odpoveď/gate_report → `recipient="coordinator"`, Koordinátorov report →
+  `recipient="director"`. Board zobrazí pravdivú reťaz (FE číta uložený recipient).
+- **Rail „Agenti" = reálne aktívny agent (nie `current_actor`):** chip stav odvoď
+  od **skutočne pracujúcej roly** počas dispatchu (orchestrátor signalizuje aktívnu
+  rolu, ako sa cez gate_e kolo strieda Zákazník→Návrhár→Koordinátor) a od **autora
+  poslednej správy** pri `awaiting_director` (napr. Koordinátor po odporúčaní), nie od
+  `current_actor` (na gate_e stále „customer"). Activity frames nech nesú reálnu
+  strímujúcu rolu, nie nominálneho aktéra fázy.
 
 ## 6. Cutover starého `/dialogue` (dorieši odložené Phase 5 items 2+3)
 
