@@ -72,7 +72,8 @@ describe("cockpit Slovak labels", () => {
 
   it("nextStageLabel returns the following stage's Slovak label (clamped at done)", () => {
     expect(nextStageLabel("kickoff")).toBe("Rozsah"); // gate_a
-    expect(nextStageLabel("gate_e")).toBe("Programovanie"); // build
+    expect(nextStageLabel("gate_e")).toBe("Plán úloh"); // task_plan (CR-NS-020 CR-2)
+    expect(nextStageLabel("task_plan")).toBe("Programovanie"); // build
     expect(nextStageLabel("release")).toBe("Hotovo"); // done
     expect(nextStageLabel("done")).toBe("Hotovo"); // clamped
   });

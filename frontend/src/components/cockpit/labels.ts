@@ -49,9 +49,6 @@ export const ROLE_LABELS: Record<PipelineParticipant, string> = {
 
 // Canonical stage order — mirrors backend orchestrator.STAGE_ORDER. Shared so the
 // rail and the action bar don't each keep a copy (DRY).
-// NOTE: "task_plan" is intentionally absent here in CR-NS-020 CR-1 — it is a valid
-// value (label/code maps + backend CHECK) but not yet in the flow sequence. CR-2
-// inserts it after "gate_e" together with the orchestrator routing + dispatch.
 export const STAGE_ORDER: PipelineStage[] = [
   "kickoff",
   "gate_a",
@@ -59,6 +56,7 @@ export const STAGE_ORDER: PipelineStage[] = [
   "gate_c",
   "gate_d",
   "gate_e",
+  "task_plan",
   "build",
   "gate_g",
   "release",

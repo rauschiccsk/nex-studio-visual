@@ -15,6 +15,7 @@ from backend.db.models.foundation import User
 from backend.db.models.orchestrator import OrchestratorSession
 from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
+from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.versions import Version
 from backend.services import claude_agent, orchestrator
 from backend.services.pipeline_status import ParseFailure, PipelineStatusBlock
@@ -1063,8 +1064,8 @@ def test_dispatch_directive_gate_e_approve_continues(db_session):
     version, _ = _make_version(db_session)
     d = orchestrator.dispatch_directive(db_session, version.id, "approve", {}, "gate_e")
     assert d is not None and "ďalším okruhom" in d
-    # a final approve has already advanced to build → no gate_e continue directive
-    assert orchestrator.dispatch_directive(db_session, version.id, "approve", {}, "build") is None
+    # a final approve has already advanced past gate_e (→ task_plan) → no gate_e continue directive
+    assert orchestrator.dispatch_directive(db_session, version.id, "approve", {}, "task_plan") is None
 
 
 async def test_gate_e_topic_boundary_approve_continues(db_session, fake_claude):
@@ -1076,12 +1077,14 @@ async def test_gate_e_topic_boundary_approve_continues(db_session, fake_claude):
     assert state.status == "agent_working"
 
 
-async def test_gate_e_final_approve_advances_to_build(db_session, fake_claude):
+async def test_gate_e_final_approve_advances_to_task_plan(db_session, fake_claude):
+    # CR-NS-020 CR-2: gate_e now advances to task_plan (not build) — task_plan is inserted
+    # at STAGE_ORDER index 6, so _next_stage("gate_e") → "task_plan".
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
     _at_gate_e_boundary(db_session, version, coverage_complete=True, findings=[])
     state = await orchestrator.apply_action(db_session, version_id=version.id, action="approve")
-    assert state.current_stage == "build"
+    assert state.current_stage == "task_plan"
     # §4 audit record written before closing
     assert any(m.author == "system" and "Gate E audit" in m.content for m in _msgs(db_session, version.id))
 
@@ -1095,7 +1098,7 @@ async def test_gate_e_final_approve_not_blocked_by_customer_findings_array(db_se
         db_session, version, coverage_complete=True, findings=["a", "b", "c", "d", "e", "f"], open_gaps=0
     )
     state = await orchestrator.apply_action(db_session, version_id=version.id, action="approve")
-    assert state.current_stage == "build"  # deterministic open == 0 wins over the array
+    assert state.current_stage == "task_plan"  # deterministic open == 0 wins over the array
 
 
 async def test_gate_e_final_approve_blocked_by_open_findings(db_session, fake_claude):
@@ -1111,7 +1114,7 @@ async def test_end_gate_e_advances_when_no_open_findings(db_session, fake_claude
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
     _at_gate_e_boundary(db_session, version, coverage_complete=False, findings=[])
     state = await orchestrator.apply_action(db_session, version_id=version.id, action="end_gate_e")
-    assert state.current_stage == "build"
+    assert state.current_stage == "task_plan"
     assert any(m.author == "system" and "Gate E audit" in m.content for m in _msgs(db_session, version.id))
 
 
@@ -1363,3 +1366,132 @@ async def test_invoke_agent_emits_active_role_tagged_with_role(db_session, fake_
     )
     # the per-turn active-role signal carries the REAL role so the rail steps Z→N→K
     assert captured[0] == {"type": "active_role", "_role": "designer"}
+
+
+# ── task_plan stage + write-path (F-007 §5, CR-NS-020 CR-2) ─────────────────────
+
+
+def _to_task_plan(db_session, version):
+    """Put the pipeline at task_plan / designer / agent_working (Designer planning turn)."""
+    state = orchestrator._get_state(db_session, version.id)
+    state.current_stage = "task_plan"
+    state.current_actor = "designer"
+    state.status = "agent_working"
+    db_session.flush()
+    return state
+
+
+def _plan(*epics) -> dict:
+    """Build a task_plan ``plan`` payload from (epic_title, [(feat_title, [(task_title, task_type)])])."""
+    return {
+        "epics": [
+            {
+                "title": e_title,
+                "feats": [
+                    {"title": f_title, "tasks": [{"title": t_title, "task_type": t_type} for t_title, t_type in tasks]}
+                    for f_title, tasks in feats
+                ],
+            }
+            for e_title, feats in epics
+        ]
+    }
+
+
+def _epics_of(db_session, version):
+    return db_session.execute(select(Epic).where(Epic.version_id == version.id)).scalars().all()
+
+
+async def test_task_plan_write_path_materializes_hierarchy(db_session, fake_claude):
+    version, project = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _to_task_plan(db_session, version)
+    fake_claude.response = _block(
+        stage="task_plan",
+        kind="gate_report",
+        summary="plán rozložený",
+        awaiting="director",
+        plan=_plan(
+            ("Foundation", [("Schema", [("GL+AA+AP tables", "migration"), ("audit_log", "migration")])]),
+            ("Calc cores", [("Hlavná kniha", [("GL výpočet", "backend")])]),
+        ),
+        cross_cutting_rules="## Invarianty\n- spoločná transakčná hranica\n- immutable audit",
+    )
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert state.status == "awaiting_director"
+    assert state.current_stage == "task_plan"
+    epics = _epics_of(db_session, version)
+    assert len(epics) == 2
+    assert {e.title for e in epics} == {"Foundation", "Calc cores"}
+    assert all(e.project_id == project.id and e.status == "planned" for e in epics)
+    feats = db_session.execute(select(Feat)).scalars().all()
+    tasks = db_session.execute(select(Task)).scalars().all()
+    assert len(feats) == 2 and len(tasks) == 3
+    assert all(t.status == "todo" and t.baseline_sha is None for t in tasks)
+    assert {t.task_type for t in tasks} == {"migration", "backend"}
+    # the cross-cutting rules persist in the Designer's gate_report payload (CR-3 re-reads them)
+    designer = [m for m in _msgs(db_session, version.id) if m.author == "designer" and m.stage == "task_plan"][-1]
+    assert "transakčná" in designer.payload["cross_cutting_rules"]
+    # a system summary message is recorded for the audit trail + future TaskPlanPanel
+    assert any(
+        m.author == "system" and m.stage == "task_plan" and "Plán úloh zapísaný" in m.content
+        for m in _msgs(db_session, version.id)
+    )
+
+
+async def test_task_plan_gate_report_without_plan_blocks(db_session, fake_claude):
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _to_task_plan(db_session, version)
+    fake_claude.response = _block(
+        stage="task_plan", kind="gate_report", summary="zabudol som plán", awaiting="director"
+    )
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert state.status == "blocked"  # parse_status_block rejects a planless task_plan gate_report
+    assert _epics_of(db_session, version) == []  # nothing written
+
+
+async def test_task_plan_replan_replaces_no_duplicates(db_session, fake_claude):
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _to_task_plan(db_session, version)
+    fake_claude.response = _block(
+        stage="task_plan",
+        kind="gate_report",
+        summary="v1",
+        awaiting="director",
+        plan=_plan(("E1", [("F1", [("T1", "backend")])]), ("E2", [("F2", [("T2", "backend")])])),
+    )
+    await orchestrator.run_dispatch(db_session, version.id)
+    assert len(_epics_of(db_session, version)) == 2
+
+    # Director returned → Designer re-plans (fewer epics). The write-path must REPLACE.
+    _to_task_plan(db_session, version)
+    fake_claude.response = _block(
+        stage="task_plan",
+        kind="gate_report",
+        summary="v2",
+        awaiting="director",
+        plan=_plan(("E1 only", [("F1", [("T1", "backend")])])),
+    )
+    await orchestrator.run_dispatch(db_session, version.id)
+    epics = _epics_of(db_session, version)
+    assert len(epics) == 1  # replaced, not appended
+    assert epics[0].title == "E1 only"
+    assert len(db_session.execute(select(Task)).scalars().all()) == 1
+
+
+async def test_approve_at_task_plan_advances_to_build(db_session, fake_claude):
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _to_task_plan(db_session, version)
+    fake_claude.response = _block(
+        stage="task_plan",
+        kind="gate_report",
+        summary="plán",
+        awaiting="director",
+        plan=_plan(("E1", [("F1", [("T1", "backend")])])),
+    )
+    await orchestrator.run_dispatch(db_session, version.id)  # → awaiting_director
+    state = await orchestrator.apply_action(db_session, version_id=version.id, action="approve")
+    assert state.current_stage == "build"

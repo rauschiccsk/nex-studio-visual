@@ -24,14 +24,23 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Optional
 
-from sqlalchemy import and_, or_, select
+from pydantic import ValidationError
+from sqlalchemy import and_, delete, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.db.models.orchestrator import OrchestratorSession
 from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
+from backend.db.models.tasks import Epic
 from backend.db.models.versions import Version
+from backend.schemas.epic import EpicCreate
+from backend.schemas.feat import FeatCreate
+from backend.schemas.task import TaskCreate
 from backend.services import claude_agent
+from backend.services import epic as epic_service
+from backend.services import feat as feat_service
+from backend.services import task as task_service
 from backend.services.claude_agent import ClaudeAgentError, invoke_claude
 from backend.services.pipeline_status import ParseFailure, PipelineStatusBlock, parse_status_block
 
@@ -50,6 +59,7 @@ STAGE_ORDER: tuple[str, ...] = (
     "gate_c",
     "gate_d",
     "gate_e",
+    "task_plan",
     "build",
     "gate_g",
     "release",
@@ -62,6 +72,7 @@ STAGE_ACTOR: dict[str, str] = {
     "gate_c": "designer",
     "gate_d": "designer",
     "gate_e": "customer",
+    "task_plan": "designer",
     "build": "implementer",
     "gate_g": "auditor",
     "release": "coordinator",
@@ -107,6 +118,7 @@ STAGE_TIMEOUT: dict[str, int] = {
     "gate_c": 900,
     "gate_d": 900,
     "gate_e": 900,
+    "task_plan": 1200,
     "build": 2400,
     "gate_g": 1200,
     "release": 900,
@@ -436,6 +448,86 @@ def _write_gate_e_audit(db: Session, version_id: uuid.UUID) -> str:
     return rel
 
 
+def _write_task_plan(db: Session, state: PipelineState, block: PipelineStatusBlock) -> Optional[str]:
+    """Materialize the Designer's task_plan decomposition into Epic/Feat/Task rows.
+
+    F-007 §5 / CR-NS-020 CR-2. The deterministic mechanical gate for the task_plan
+    stage (replaces the disk-deliverable ``verify_mechanical`` — the plan's deliverable
+    is DB rows, not files). Returns a failure reason (→ ``status=blocked``, nothing
+    written) or ``None`` on success.
+
+    **Idempotent replace + atomic:** a Director ``return`` re-dispatches the Designer,
+    which re-runs this; we drop the version's existing epics first (FK cascade →
+    feats/tasks) so a re-plan never duplicates. The whole replace runs in a SAVEPOINT —
+    any failure rolls back the rows while the caller still records ``blocked`` (never a
+    half-written plan). Numbers are service-assigned (MAX+1); status is forced
+    (planned/todo — the Designer never pre-marks done); ``baseline_sha`` /
+    ``task_count`` / ``auto_fix_count`` stay untouched (CR-3 owns them).
+    """
+    plan = block.plan
+    if plan is None or not plan.epics:  # defensive — parse_status_block already guards this
+        return "task_plan gate_report carried no plan"
+    version = db.get(Version, state.version_id)
+    if version is None:
+        return "version not found for task_plan write"
+
+    n_epics = n_feats = n_tasks = 0
+    try:
+        with db.begin_nested():  # SAVEPOINT — atomic replace, no half-written plan
+            db.execute(delete(Epic).where(Epic.version_id == state.version_id))
+            db.flush()
+            for epic_in in plan.epics:
+                epic_row = epic_service.create(
+                    db,
+                    EpicCreate(
+                        project_id=version.project_id,
+                        version_id=state.version_id,
+                        title=epic_in.title,
+                        module_id=epic_in.module_id,
+                    ),
+                )
+                n_epics += 1
+                for feat_in in epic_in.feats:
+                    feat_row = feat_service.create(
+                        db,
+                        FeatCreate(
+                            epic_id=epic_row.id,
+                            title=feat_in.title,
+                            description=feat_in.description,
+                            estimated_minutes=feat_in.estimated_minutes,
+                        ),
+                    )
+                    n_feats += 1
+                    for task_in in feat_in.tasks:
+                        task_service.create(
+                            db,
+                            TaskCreate(
+                                feat_id=feat_row.id,
+                                title=task_in.title,
+                                task_type=task_in.task_type,
+                                description=task_in.description,
+                                checklist_type=task_in.checklist_type,
+                                priority=task_in.priority,
+                                estimated_minutes=task_in.estimated_minutes,
+                            ),
+                        )
+                        n_tasks += 1
+    except (ValueError, ValidationError, IntegrityError) as exc:
+        return f"plan write failed: {exc}"
+
+    _record_message(
+        db,
+        version_id=state.version_id,
+        stage="task_plan",
+        author="system",
+        recipient="director",
+        kind="notification",
+        content=f"Plán úloh zapísaný: {n_epics} epicov, {n_feats} featov, {n_tasks} taskov.",
+        payload={"task_plan_summary": {"epics": n_epics, "feats": n_feats, "tasks": n_tasks}},
+    )
+    return None
+
+
 def dispatch_directive(
     db: Session, version_id: uuid.UUID, action: str, payload: dict[str, Any], stage: str
 ) -> Optional[str]:
@@ -453,8 +545,8 @@ def dispatch_directive(
         return f"Director schválil odporúčania Koordinátora. Zapracuj ich podľa jeho hlásenia: {content}"
     # Gate E (F-007-gate-e §5): symmetric relay — the continue-directive to the Customer
     # MUST carry the Designer's reply, else the Customer (separate session) re-asks and
-    # logs a false open finding. A final approve has already advanced to build, so
-    # stage != gate_e and this does not fire.
+    # logs a false open finding. A final approve has already advanced past gate_e
+    # (→ task_plan), so stage != gate_e and this does not fire.
     if action == "leave" and stage == "gate_e":
         return (
             "Director rozhodol nález ponechať (podľa odporúčania Koordinátora). "
@@ -622,6 +714,11 @@ async def invoke_agent(
             "findings": parsed.findings,
             "gap_found": parsed.gap_found,
             "proposed_fix": parsed.proposed_fix,
+            # task_plan decomposition (F-007 §4/§5, CR-NS-020 CR-2). Persisted so the
+            # audit trail / TaskPlanPanel can show the plan and CR-3 can re-read the
+            # cross-cutting rules from this gate_report payload.
+            "plan": parsed.plan.model_dump() if parsed.plan is not None else None,
+            "cross_cutting_rules": parsed.cross_cutting_rules,
             # Caller-supplied structural markers (e.g. is_fix_edit) for the deterministic
             # open-finding count — orchestrator record, not agent self-report (§5).
             **(extra_payload or {}),
@@ -900,6 +997,20 @@ async def run_dispatch(
         question_text = relay if relay is not None else result.question
         state.status = "blocked"
         state.next_action = f"Agent '{actor}' sa pýta: {question_text}"
+        db.flush()
+        return state
+
+    if stage == "task_plan" and result.kind == "gate_report":
+        # F-007 §5 / CR-NS-020 CR-2: the plan's mechanical gate is the deterministic
+        # write-path (not the disk-deliverable verify_mechanical, nor a Coordinator judge
+        # turn — the Director reviews the materialized tree himself, per Dedo 2026-06-07).
+        reason = _write_task_plan(db, state, result)
+        if reason is not None:
+            state.status = "blocked"
+            state.next_action = f"Plán úloh zamietnutý: {reason}. Eskalované."
+        else:
+            state.status = "awaiting_director"
+            state.next_action = "Director: schváliť/vrátiť plán úloh."
         db.flush()
         return state
 
@@ -1191,14 +1302,14 @@ async def apply_action(
         )
         # Gate E (F-007-gate-e §3/§4): a topic boundary ratifies + continues to the
         # NEXT okruh (stage STAYS gate_e); only a final boundary (coverage_complete +
-        # no open finding) signs off → build. An open finding blocks the final close.
+        # no open finding) signs off → task_plan. An open finding blocks the final close.
         if state.current_stage == "gate_e":
             report = _latest_customer_gate_report(db, version_id)
             if _gate_e_coverage_complete(report):
                 if _gate_e_open_findings(db, version_id) > 0:
                     raise OrchestratorError("Otvorené nálezy blokujú uzavretie Gate E — najprv ich vyrieš")
                 _write_gate_e_audit(db, version_id)  # §4 audit record before closing
-                state.current_stage = _next_stage("gate_e")  # → build
+                state.current_stage = _next_stage("gate_e")  # → task_plan
                 db.flush()
                 _begin_dispatch(db, state)
             else:
@@ -1219,9 +1330,9 @@ async def apply_action(
         comment = payload.get("comment")
         if not comment or not str(comment).strip():
             raise OrchestratorError("return requires a non-empty payload.comment")
-        # Gate E (§2): Director ↔ Coordinator only — a return is Coordinator-relayed,
-        # never addressed to the Customer/Designer directly.
-        recipient = "coordinator" if state.current_stage == "gate_e" else state.current_actor
+        # Gate E + task_plan (§2/§5): Director ↔ Coordinator only — a return is
+        # Coordinator-relayed, never addressed to the Customer/Designer directly.
+        recipient = "coordinator" if state.current_stage in ("gate_e", "task_plan") else state.current_actor
         _record_message(
             db,
             version_id=version_id,
@@ -1238,9 +1349,9 @@ async def apply_action(
         text = payload.get("text")
         if not text or not str(text).strip():
             raise OrchestratorError("ask requires a non-empty payload.text")
-        # Gate E (§2): "Konzultovať s Koordinátorom" — the Director's input (question or
-        # constatation) goes to the Coordinator, never to the Customer/Designer directly.
-        recipient = "coordinator" if state.current_stage == "gate_e" else state.current_actor
+        # Gate E + task_plan (§2/§5): "Konzultovať s Koordinátorom" — the Director's input
+        # (question or constatation) goes to the Coordinator, never to the worker directly.
+        recipient = "coordinator" if state.current_stage in ("gate_e", "task_plan") else state.current_actor
         _record_message(
             db,
             version_id=version_id,
@@ -1381,7 +1492,7 @@ async def apply_action(
             content="Gate E ukončené Directorom (pokrytie stačí).",
         )
         _write_gate_e_audit(db, version_id)  # §4 audit record before closing
-        state.current_stage = _next_stage("gate_e")  # → build
+        state.current_stage = _next_stage("gate_e")  # → task_plan
         db.flush()
         _begin_dispatch(db, state)
         return state

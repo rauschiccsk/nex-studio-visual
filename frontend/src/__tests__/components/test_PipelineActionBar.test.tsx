@@ -195,7 +195,7 @@ describe("PipelineActionBar — Gate E topic boundary (Phase 3)", () => {
     expect(screen.getByText("Ukončiť Gate E")).toBeInTheDocument();
     expect(screen.queryByText(APPROVE)).not.toBeInTheDocument();
     expect(screen.queryByText(COORD)).not.toBeInTheDocument();
-    expect(screen.queryByText("Finálne schválenie → Programovanie")).not.toBeInTheDocument();
+    expect(screen.queryByText("Finálne schválenie → Plán úloh")).not.toBeInTheDocument();
   });
 
   it("topic-boundary approve fires the plain approve (continue topic)", () => {
@@ -250,7 +250,7 @@ describe("PipelineActionBar — Gate E topic boundary (Phase 3)", () => {
         onAction={onAction}
       />,
     );
-    const final = screen.getByText("Finálne schválenie → Programovanie");
+    const final = screen.getByText("Finálne schválenie → Plán úloh");
     expect(final.closest("button")).not.toBeDisabled();
     expect(screen.queryByText("Schváliť okruh a pokračovať")).not.toBeInTheDocument();
     final.click();
@@ -268,6 +268,6 @@ describe("PipelineActionBar — Gate E topic boundary (Phase 3)", () => {
         onAction={vi.fn()}
       />,
     );
-    expect(screen.getByText("Finálne schválenie → Programovanie").closest("button")).toBeDisabled();
+    expect(screen.getByText("Finálne schválenie → Plán úloh").closest("button")).toBeDisabled();
   });
 });

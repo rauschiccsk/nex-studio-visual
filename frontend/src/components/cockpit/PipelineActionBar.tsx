@@ -248,7 +248,7 @@ export function PipelineActionBar({
             hint={
               gateEOpen
                 ? `Najprv vyrieš otvorené nálezy (${gateEOpenFindings}) — blokujú uzavretie.`
-                : "Pokrytie stačí → uzavrie Gate E a posunie na Programovanie."
+                : `Pokrytie stačí → uzavrie Gate E a posunie na ${nextStageLabel(current_stage)}.`
             }
           >
             <button
@@ -268,7 +268,7 @@ export function PipelineActionBar({
             hint={
               gateEOpen
                 ? `Otvorené nálezy (${gateEOpenFindings}) blokujú uzavretie — najprv ich vyrieš.`
-                : "Všetkých 7 okruhov pokrytých, nálezy vyriešené → posun na Programovanie."
+                : `Všetkých 7 okruhov pokrytých, nálezy vyriešené → posun na ${nextStageLabel(current_stage)}.`
             }
           >
             <button
@@ -276,7 +276,7 @@ export function PipelineActionBar({
               disabled={inFlight || gateEOpen}
               className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
             >
-              Finálne schválenie → Programovanie
+              Finálne schválenie → {nextStageLabel(current_stage)}
             </button>
           </ActionRow>
           <ActionRow hint="Vrátiš poslednému okruhu Návrhárovi na prepracovanie.">

@@ -29,6 +29,8 @@ from typing import Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from backend.schemas.task import TaskPriority, TaskType
+
 _FENCE_RE = re.compile(
     r"<<<PIPELINE_STATUS>>>\s*(.*?)\s*<<<END_PIPELINE_STATUS>>>",
     re.DOTALL,
@@ -57,6 +59,48 @@ _AWAITING = frozenset({"director", "none"})
 _QUESTION_KINDS = frozenset({"question", "blocked"})
 
 
+# ── task_plan decomposition (F-007 §4/§5, CR-NS-020 CR-2) ────────────────────
+# The Designer emits the EPIC→FEAT→TASK breakdown of the final design as a typed
+# tree on the status block (NOT a free-form payload — PipelineStatusBlock ignores
+# extras, so the contract must be declared). Numbers are NOT emitted (the
+# epic/feat/task services auto-assign MAX+1); status is NOT emitted (the write-path
+# forces planned/todo — the Designer never pre-marks anything done).
+
+
+class TaskPlanTask(BaseModel):
+    """One coarse task (module = task, §4) under a feat."""
+
+    title: str = Field(min_length=1, max_length=500)
+    task_type: TaskType
+    description: str = ""
+    checklist_type: Optional[str] = Field(default=None, max_length=30)
+    priority: TaskPriority = "normal"
+    estimated_minutes: Optional[int] = None
+
+
+class TaskPlanFeat(BaseModel):
+    """A feat groups ≥1 task."""
+
+    title: str = Field(min_length=1, max_length=500)
+    description: str = ""
+    estimated_minutes: Optional[int] = None
+    tasks: list[TaskPlanTask] = Field(min_length=1)
+
+
+class TaskPlanEpic(BaseModel):
+    """An epic groups ≥1 feat. ``module_id`` is optional (project-level when null)."""
+
+    title: str = Field(min_length=1, max_length=500)
+    module_id: Optional[str] = None
+    feats: list[TaskPlanFeat] = Field(min_length=1)
+
+
+class TaskPlan(BaseModel):
+    """The full decomposition the orchestrator materializes into Epic/Feat/Task rows."""
+
+    epics: list[TaskPlanEpic] = Field(min_length=1)
+
+
 class PipelineStatusBlock(BaseModel):
     """Validated agent status block. ``extra='ignore'`` drops derived fields."""
 
@@ -70,6 +114,15 @@ class PipelineStatusBlock(BaseModel):
     commits: list[str] = Field(default_factory=list)
     question: Optional[str] = None
 
+    # task_plan decomposition (F-007 §4/§5, CR-NS-020 CR-2). Only the Designer at
+    # stage=task_plan emits these; other stages leave them unset.
+    #: Structured EPIC→FEAT→TASK tree the orchestrator write-path materializes.
+    plan: Optional[TaskPlan] = None
+    #: Cross-cutting regulated-ledger invariants (markdown), codified once by the
+    #: Designer; CR-3 re-reads this from the gate_report payload and injects it into
+    #: every per-task build brief.
+    cross_cutting_rules: Optional[str] = None
+
     # Gate E signals (F-007-gate-e §5/§7.2, CR-NS-018). All optional; only the
     # Customer↔Designer loop (stage=gate_e) emits them, so non-gate-E blocks are
     # unaffected. The Customer/Designer charters §7.2 are aligned to exactly these.
@@ -77,7 +130,7 @@ class PipelineStatusBlock(BaseModel):
     topic: Optional[str] = None
     #: Customer signals the current okruh is finished → round boundary (with kind=gate_report).
     topic_done: bool = False
-    #: All 7 okruhy covered → final boundary; the Director's approve advances to build (Customer).
+    #: All 7 okruhy covered → final boundary; the Director's approve advances to task_plan (Customer).
     coverage_complete: bool = False
     #: Structured findings for the Director's boundary view (alongside ``summary``).
     findings: list[str] = Field(default_factory=list)
@@ -131,5 +184,10 @@ def parse_status_block(stdout: str) -> ParseResult:
         return ParseFailure(f"unknown awaiting {block.awaiting!r}")
     if block.kind in _QUESTION_KINDS and not (block.question and block.question.strip()):
         return ParseFailure(f"kind={block.kind!r} requires a non-empty 'question'")
+    # task_plan close (F-007 §5, CR-NS-020 CR-2): the Designer's gate_report must carry the
+    # decomposition. A question/blocked turn is still allowed (re-plan dialogue); only the
+    # gate_report — the turn that closes the stage — requires a non-empty 'plan'.
+    if block.stage == "task_plan" and block.kind == "gate_report" and (block.plan is None or not block.plan.epics):
+        return ParseFailure("task_plan gate_report requires a non-empty 'plan' (EPIC→FEAT→TASK)")
 
     return block
