@@ -81,11 +81,17 @@ raz v pláne, orchestrátor injektuje do každého briefu.
 
 ## 5. Stage `task_plan` — plán sa schvaľuje RAZ
 
-Beží ako obyčajná gate (generic path): dispatch Návrhárovi → Návrhár dekomponuje finálny
-dizajn na EPIC/FEAT/TASK (zapíše cez write-path do ORM) → `gate_report` → `verify_done` →
-`awaiting_director`. **Director schváli plán RAZ** (`approve`). Potom sa už do plánu
-nezasahuje per-task — beží plynulo (§6). Director môže plán `vrátiť` Návrhárovi na
-prepracovanie, alebo `Konzultovať s Koordinátorom` (reuse gate_e reroute).
+Beží ako gate: dispatch Návrhárovi → Návrhár dekomponuje finálny dizajn na EPIK/FEAT/TASK a
+emituje ich ako **typovaný `plan` payload** v status bloku (§9) → orchestrátor ho
+**deterministicky zapíše** do ORM (`_write_task_plan` — idempotentný *replace* epík verzie
+pri re-plане; atomicky alebo `blocked`, žiadny polovičný plán) → `awaiting_director`.
+**Žiadny Koordinátor-judge turn** (CR-2 decision 2026-06-07): deterministický write-path JE
+mechanická gate a **plán reviewuje Director** (schváli materializovaný strom RAZ — hrubozrnný
+~6–8-task plán prečíta sám). Konzistentné s design-gate vzorom (gate_a–d sú Návrhár→Director
+priamo; globálny Koordinátor-reroute design-gate je parkovaný). **Director schváli plán RAZ**
+(`approve`). Potom sa do plánu per-task nezasahuje — beží plynulo (§6). Director môže plán
+`vrátiť` Návrhárovi alebo `Konzultovať s Koordinátorom` (jeho INPUTY idú cez Koordinátora —
+guard `current_stage in (gate_e, task_plan)`).
 
 ## 6. Stage `build` — plynulá per-task slučka (gate len pri výnimke)
 
@@ -163,9 +169,15 @@ task/turn, injektnutý cross-cutting blok), Koordinátor (relay per-task verdict
   `ck_pipeline_state_current_stage` + `ck_pipeline_message_stage`.
 - **`build` actor** zostáva `implementer`; build dispatch sa stáva loopom cez nový sub-flow
   selector (mirror `gate_e_dispatch`).
-- **Write-path** Návrhárovho plánu (status-block `deliverables`/`payload`) → Epic/Feat/Task
-  rows pod `version_id`. `Task.checklist_type` + `Feat.task_count`/`auto_fix_count`
-  zapisované per-task loopom.
+- **Write-path** Návrhárovho plánu → Epic/Feat/Task rows pod `version_id`. Plán príde ako
+  **typované polia** v status bloku (`PipelineStatusBlock` má `extra="ignore"` → free-form
+  payload sa ticho zahodí, preto typované): `plan` (nested `TaskPlan→Epic→Feat→Task`: title,
+  `task_type`, description, checklist_type, priority, estimated_minutes; epic `module_id`) +
+  `cross_cutting_rules` (markdown, CR-3 injektuje per task; perzistuje v gate_report message).
+  **Čísla** auto-assign (services MAX+1, Návrhár emituje v poradí), **status** vynútený
+  (todo/planned — Návrhár nič nepredznačí done), `task_count`/`auto_fix_count` server-managed
+  (CR-3), `baseline_sha` CR-3. Parser: `stage==task_plan` → `kind=gate_report` + neprázdny
+  `plan`, inak `ParseFailure`. `_write_task_plan` = idempotentný replace, atomicky alebo `blocked`.
 - **Status-blok signály (§7.2 zladím ja):** plán = `gate_report` + štruktúra v `payload`;
   per-task Programátor `gate_report` (`commits`/`deliverables`); Audítor `task_pass` +
   findings. `_build_open_findings` počíta failed tasky z logu.
