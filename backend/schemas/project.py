@@ -51,10 +51,10 @@ class PortBlockSuggestResponse(BaseModel):
 
     A port block is a contiguous range of ``block_size`` ports starting
     at ``base`` — per DECISIONS.md D-020 the default block is 10 ports
-    with ``+0 backend``, ``+1 frontend``, ``+2 db``, ``+3 ui-design``,
-    and ``+4..+9`` as per-project reserve. Consumers fill the first
-    four slots in the new-project form; the reserve stays unallocated
-    until the project needs cache / worker / admin-UI.
+    with ``+0 backend``, ``+1 frontend``, ``+2 db``, and ``+3..+9`` as
+    per-project reserve. Consumers fill the first three slots in the
+    new-project form; the reserve stays unallocated until the project
+    needs cache / worker / admin-UI.
     """
 
     base: int = Field(description="Base port of the first free block in the ICC range.")
@@ -123,10 +123,6 @@ class ProjectCreate(BaseModel):
     db_port: Optional[int] = Field(
         default=None,
         description="Database port from the ICC Port Registry.",
-    )
-    ui_design_port: Optional[int] = Field(
-        default=None,
-        description="UI Design mockup preview port (Step 2B output) from the ICC Port Registry.",
     )
     repo_url: Optional[str] = Field(
         default=None,
@@ -225,10 +221,6 @@ class ProjectUpdate(BaseModel):
         default=None,
         description="Updated database port.",
     )
-    ui_design_port: Optional[int] = Field(
-        default=None,
-        description="Updated UI Design mockup preview port.",
-    )
     repo_url: Optional[str] = Field(
         default=None,
         max_length=255,
@@ -267,7 +259,6 @@ class ProjectRead(BaseModel):
     backend_port: Optional[int] = None
     frontend_port: Optional[int] = None
     db_port: Optional[int] = None
-    ui_design_port: Optional[int] = None
     repo_url: Optional[str] = Field(default=None, max_length=255)
     source_path: Optional[str] = None
     kb_path: Optional[str] = None

@@ -35,7 +35,7 @@ from backend.services import system_setting as system_setting_service
 PORT_RANGE_MIN = 10100
 PORT_RANGE_MAX = 14999
 PORT_BLOCK_SIZE = 10
-PORT_TYPES = ("backend", "frontend", "db", "ui_design")
+PORT_TYPES = ("backend", "frontend", "db")
 
 
 def _port_range(db: Session) -> tuple[int, int]:
@@ -85,7 +85,6 @@ def check_port_available(
             Project.backend_port == port,
             Project.frontend_port == port,
             Project.db_port == port,
-            Project.ui_design_port == port,
         )
     )
 
@@ -135,14 +134,13 @@ def get_all_allocated_ports(db: Session) -> dict[str, list[int]]:
     Returns
     -------
     dict
-        Keys: ``"backend"``, ``"frontend"``, ``"db"``, ``"ui_design"``.
+        Keys: ``"backend"``, ``"frontend"``, ``"db"``.
         Values: sorted list of ports currently in use for that type.
     """
     stmt = select(
         Project.backend_port,
         Project.frontend_port,
         Project.db_port,
-        Project.ui_design_port,
     )
     rows = db.execute(stmt).all()
 
@@ -150,18 +148,15 @@ def get_all_allocated_ports(db: Session) -> dict[str, list[int]]:
         "backend": [],
         "frontend": [],
         "db": [],
-        "ui_design": [],
     }
 
-    for backend_port, frontend_port, db_port, ui_design_port in rows:
+    for backend_port, frontend_port, db_port in rows:
         if backend_port is not None:
             result["backend"].append(backend_port)
         if frontend_port is not None:
             result["frontend"].append(frontend_port)
         if db_port is not None:
             result["db"].append(db_port)
-        if ui_design_port is not None:
-            result["ui_design"].append(ui_design_port)
 
     for key in result:
         result[key].sort()
@@ -184,7 +179,6 @@ def get_conflict_project_name(
             Project.backend_port == port,
             Project.frontend_port == port,
             Project.db_port == port,
-            Project.ui_design_port == port,
         )
     )
     if project_id is not None:
@@ -201,20 +195,17 @@ def _get_all_used_ports(db: Session) -> set[int]:
         Project.backend_port,
         Project.frontend_port,
         Project.db_port,
-        Project.ui_design_port,
     )
     rows = db.execute(stmt).all()
 
     used: set[int] = set()
-    for backend_port, frontend_port, db_port, ui_design_port in rows:
+    for backend_port, frontend_port, db_port in rows:
         if backend_port is not None:
             used.add(backend_port)
         if frontend_port is not None:
             used.add(frontend_port)
         if db_port is not None:
             used.add(db_port)
-        if ui_design_port is not None:
-            used.add(ui_design_port)
     return used
 
 
@@ -258,9 +249,8 @@ def suggest_next_port_block(db: Session, block_size: int | None = None) -> int:
     configured ``port_range_min`` and advance by ``block_size``.
 
     Callers are expected to use the first ``block_size`` / number-of-
-    ports-in-use slots for actual services (backend, frontend, db,
-    ui_design — see DECISIONS.md D-020) and leave the rest as
-    per-project reserve.
+    ports-in-use slots for actual services (backend, frontend, db —
+    see DECISIONS.md D-020) and leave the rest as per-project reserve.
 
     Parameters
     ----------

@@ -101,12 +101,6 @@ services:
       # Same PAT as GITHUB_TOKEN typically; gh CLI prefers GH_TOKEN env name.
       # Per CR-NS-002 Director directive 2026-06-01.
       GH_TOKEN: "${GH_TOKEN:-}"
-      # Mockup server runs with network_mode: host so the backend
-      # (bridged) reaches it via host-gateway — extra_hosts below
-      # wires the Docker-standard name on Linux.
-      MOCKUP_ADMIN_URL: "http://host.docker.internal:9190"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy
@@ -134,25 +128,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-
-  # Dedicated per-project mockup listener. Runs on the host network so
-  # every project's ``ui_design_port`` (e.g. 10103 for nex-test) lands
-  # directly on the host without forwarding a 5000-port range. The
-  # admin channel runs on ``MOCKUP_ADMIN_PORT`` (default 9190) and
-  # receives POST /admin/reload/{project_id} from the backend after
-  # every ``html_preview`` write.
-  mockup:
-    build:
-      context: .
-      dockerfile: mockup_server/Dockerfile
-    restart: unless-stopped
-    network_mode: host
-    environment:
-      DATABASE_URL: "postgresql+pg8000://nexstudio:nexstudio@localhost:9178/nexstudio"
-      MOCKUP_ADMIN_PORT: "9190"
-    depends_on:
-      db:
-        condition: service_healthy
 
 volumes:
   pgdata:

@@ -98,16 +98,6 @@ class Settings(BaseSettings):
     rag_chunk_max_chars: int = 1000
     rag_chunk_overlap: int = 200
 
-    # Admin URL of the mockup server (``mockup_server/app.py``) that
-    # hosts each project's UI design at its own ``ui_design_port``.
-    # After the backend persists a new ``UIDesign.html_preview`` it
-    # POSTs to ``{mockup_admin_url}/admin/reload/{project_id}`` so
-    # the next GET on that project's port reflects the change.
-    # Uses ``host.docker.internal`` because the mockup service runs
-    # with ``network_mode: host`` while the backend is bridged —
-    # see docker-compose.yml.
-    mockup_admin_url: str = "http://host.docker.internal:9190"
-
     # Claude Code OAuth token — surfaced as an env var by the Claude CLI
     # environment. ICC uses Claude MAX OAuth rather than the Anthropic
     # API (CLAUDE.md §7.1, DECISIONS.md D-001). The backend does not

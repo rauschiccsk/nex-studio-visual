@@ -25,7 +25,6 @@ describe("ProjectCreationFormData", () => {
       backend_port: 10100,
       frontend_port: 10101,
       db_port: 10102,
-      ui_design_port: 10103,
     };
 
     expect(form.name).toBe("My Project");
@@ -48,7 +47,6 @@ describe("ProjectCreationFormData", () => {
       backend_port: null,
       frontend_port: null,
       db_port: null,
-      ui_design_port: null,
     };
 
     expect(form.backend_port).toBeNull();
@@ -66,7 +64,6 @@ describe("ProjectCreationFormData", () => {
       backend_port: null,
       frontend_port: null,
       db_port: null,
-      ui_design_port: null,
     };
 
     expect(form.category).toBe("multimodule");
@@ -82,7 +79,6 @@ describe("ProjectCreationFormData", () => {
       backend_port: null,
       frontend_port: null,
       db_port: null,
-      ui_design_port: null,
     };
 
     const keys = Object.keys(form).sort();
@@ -95,7 +91,6 @@ describe("ProjectCreationFormData", () => {
       "github_repo",
       "name",
       "slug",
-      "ui_design_port",
     ]);
   });
 });

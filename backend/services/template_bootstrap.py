@@ -71,9 +71,9 @@ class BootstrapResult:
 # v2 / D-020). NEX Studio's port allocation is column-by-column with
 # no enforced contiguous-block check, so we derive the base from
 # ``backend_port`` rounded down to nearest 10. If the actual frontend
-# / db / ui_design ports diverge from base+1 / +2 / +3 the project
-# still works — init.sh's port block in CLAUDE.md is reference-only,
-# not enforced at runtime.
+# / db ports diverge from base+1 / +2 the project still works —
+# init.sh's port block in CLAUDE.md is reference-only, not enforced
+# at runtime.
 def _port_base_from_backend(backend_port: int | None) -> int | None:
     if backend_port is None:
         return None

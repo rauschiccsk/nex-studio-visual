@@ -32,8 +32,6 @@ export interface ProjectCreate {
   backend_port?: number | null;
   frontend_port?: number | null;
   db_port?: number | null;
-  /** UI Design mockup preview port (Step 2B output). */
-  ui_design_port?: number | null;
   /** Git repository URL. Max 255 chars. */
   repo_url?: string | null;
   source_path?: string | null;
@@ -70,7 +68,6 @@ export interface ProjectUpdate {
   backend_port?: number | null;
   frontend_port?: number | null;
   db_port?: number | null;
-  ui_design_port?: number | null;
   repo_url?: string | null;
   source_path?: string | null;
   kb_path?: string | null;
@@ -88,7 +85,6 @@ export interface ProjectRead {
   backend_port: number | null;
   frontend_port: number | null;
   db_port: number | null;
-  ui_design_port: number | null;
   repo_url: string | null;
   source_path: string | null;
   kb_path: string | null;

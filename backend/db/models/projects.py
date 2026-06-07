@@ -29,7 +29,6 @@ class Project(Base, UUIDMixin, TimestampMixin):
     backend_port = Column(Integer, nullable=True)
     frontend_port = Column(Integer, nullable=True)
     db_port = Column(Integer, nullable=True)
-    ui_design_port = Column(Integer, nullable=True)
     repo_url = Column(String(255), nullable=True)
     source_path = Column(Text, nullable=True)
     kb_path = Column(Text, nullable=True)
@@ -67,10 +66,7 @@ class Project(Base, UUIDMixin, TimestampMixin):
             """
                     (backend_port IS NULL OR frontend_port IS NULL OR backend_port <> frontend_port)
                 AND (backend_port IS NULL OR db_port IS NULL OR backend_port <> db_port)
-                AND (backend_port IS NULL OR ui_design_port IS NULL OR backend_port <> ui_design_port)
                 AND (frontend_port IS NULL OR db_port IS NULL OR frontend_port <> db_port)
-                AND (frontend_port IS NULL OR ui_design_port IS NULL OR frontend_port <> ui_design_port)
-                AND (db_port IS NULL OR ui_design_port IS NULL OR db_port <> ui_design_port)
             """,
             name="ck_projects_ports_distinct",
         ),

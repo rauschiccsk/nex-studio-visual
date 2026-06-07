@@ -66,7 +66,6 @@ export default function NewProjectPage() {
   const [backendPort, setBackendPort] = useState<string>("");
   const [frontendPort, setFrontendPort] = useState<string>("");
   const [dbPort, setDbPort] = useState<string>("");
-  const [uiDesignPort, setUiDesignPort] = useState<string>("");
 
   // F-004 flags
   const [enableCoordinator, setEnableCoordinator] = useState(true);
@@ -124,17 +123,16 @@ export default function NewProjectPage() {
     setRepo(`${githubOrg}/${slug}`);
   }, [githubOrg, slug, repoManual]);
 
-  // Auto-suggest the four ports of a single free block on mount.
+  // Auto-suggest the three ports of a single free block on mount.
   // The backend allocates a contiguous 10-port block per project per
-  // DECISIONS.md D-020 — we fill +0 backend, +1 frontend, +2 db,
-  // +3 ui-design; the remaining +4..+9 stay as the project's reserve.
+  // DECISIONS.md D-020 — we fill +0 backend, +1 frontend, +2 db;
+  // the remaining +3..+9 stay as the project's reserve.
   useEffect(() => {
     suggestPortBlockApi()
       .then((block) => {
         setBackendPort(String(block.base));
         setFrontendPort(String(block.base + 1));
         setDbPort(String(block.base + 2));
-        setUiDesignPort(String(block.base + 3));
       })
       .catch(() => {
         // Registry exhausted or API unreachable — leave inputs empty,
@@ -179,7 +177,6 @@ export default function NewProjectPage() {
         backend_port: backendPort ? Number(backendPort) : null,
         frontend_port: frontendPort ? Number(frontendPort) : null,
         db_port: dbPort ? Number(dbPort) : null,
-        ui_design_port: uiDesignPort ? Number(uiDesignPort) : null,
         created_by: user?.id ?? "",
         owner_id: ownerId || null,
         // F-004 flags
@@ -195,7 +192,6 @@ export default function NewProjectPage() {
           backendPort: project.backend_port,
           frontendPort: project.frontend_port,
           dbPort: project.db_port,
-          uiDesignPort: project.ui_design_port,
         },
       });
     } catch (err: unknown) {
@@ -328,7 +324,7 @@ export default function NewProjectPage() {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm font-medium text-slate-300">Ports</span>
-                {(backendPort || frontendPort || dbPort || uiDesignPort) && (
+                {(backendPort || frontendPort || dbPort) && (
                   <span className="flex items-center gap-1 text-[11px] text-primary-400/70">
                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -337,12 +333,11 @@ export default function NewProjectPage() {
                   </span>
                 )}
               </div>
-              <div className="grid grid-cols-4 gap-3 p-3 bg-slate-900/60 rounded-lg border border-slate-700">
+              <div className="grid grid-cols-3 gap-3 p-3 bg-slate-900/60 rounded-lg border border-slate-700">
                 {([
                   { label: "Backend",   value: backendPort,   set: setBackendPort,   placeholder: "10100" },
                   { label: "Frontend",  value: frontendPort,  set: setFrontendPort,  placeholder: "10101" },
                   { label: "Database",  value: dbPort,        set: setDbPort,        placeholder: "10102" },
-                  { label: "UI Design", value: uiDesignPort,  set: setUiDesignPort,  placeholder: "10103" },
                 ] as const).map(({ label, value, set, placeholder }) => (
                   <div key={label}>
                     <label className="block text-xs text-slate-500 mb-1">{label}</label>

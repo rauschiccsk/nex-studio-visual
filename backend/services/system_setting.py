@@ -118,9 +118,7 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
     "port_block_size": _Default(
         value="10",
         value_type="int",
-        description=(
-            "Port block size per project. D-020 reserved 10-port blocks (backend/frontend/db/ui-design + 6 spare)."
-        ),
+        description=("Port block size per project. D-020 reserved 10-port blocks (backend/frontend/db + 7 spare)."),
     ),
     # ── Path templates ─────────────────────────────────────────────
     "default_source_path_template": _Default(

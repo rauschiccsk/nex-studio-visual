@@ -11,7 +11,6 @@ interface JustCreatedState {
   backendPort?: number | null;
   frontendPort?: number | null;
   dbPort?: number | null;
-  uiDesignPort?: number | null;
 }
 
 // ─── Pipeline bar ─────────────────────────────────────────────────────────────
@@ -191,11 +190,10 @@ export default function ProjectDetailPage() {
                   </a>
                 </span>
               )}
-              {(justCreated.backendPort || justCreated.frontendPort ||
-                justCreated.dbPort || justCreated.uiDesignPort) && (
+              {(justCreated.backendPort || justCreated.frontendPort || justCreated.dbPort) && (
                 <span className="font-mono">
                   ports {justCreated.backendPort ?? "—"}/{justCreated.frontendPort ?? "—"}/
-                  {justCreated.dbPort ?? "—"}/{justCreated.uiDesignPort ?? "—"}
+                  {justCreated.dbPort ?? "—"}
                 </span>
               )}
             </div>
@@ -260,7 +258,7 @@ export default function ProjectDetailPage() {
               <div className="text-slate-300 mt-0.5">{project.description}</div>
             </div>
           )}
-          {(project.backend_port || project.frontend_port || project.db_port || project.ui_design_port) && (
+          {(project.backend_port || project.frontend_port || project.db_port) && (
             <div className="col-span-2">
               <span className="text-slate-500 text-xs">Ports</span>
               <div className="flex gap-3 mt-1">
@@ -277,11 +275,6 @@ export default function ProjectDetailPage() {
                 {project.db_port && (
                   <span className="text-[11px] font-mono bg-slate-800 border border-slate-700 text-slate-300 px-2 py-0.5 rounded">
                     DB :{project.db_port}
-                  </span>
-                )}
-                {project.ui_design_port && (
-                  <span className="text-[11px] font-mono bg-slate-800 border border-slate-700 text-slate-300 px-2 py-0.5 rounded">
-                    UI :{project.ui_design_port}
                   </span>
                 )}
               </div>

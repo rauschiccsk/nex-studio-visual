@@ -24,7 +24,7 @@ export function getProjectApi(projectId: string): Promise<ProjectRead> {
 }
 
 export function suggestPortApi(
-  type: "backend" | "frontend" | "db" | "ui_design",
+  type: "backend" | "frontend" | "db",
 ): Promise<{ suggested_port: number }> {
   return api.get<{ suggested_port: number }>("/projects/ports/suggest", { params: { type } });
 }
@@ -37,7 +37,7 @@ export interface PortBlockSuggestion {
 /**
  * Ask the backend for the first free 10-port block in the ICC port
  * registry (DECISIONS.md D-020). The new-project form consumes this
- * to auto-fill the four port inputs from a single contiguous block.
+ * to auto-fill the three port inputs from a single contiguous block.
  */
 export function suggestPortBlockApi(): Promise<PortBlockSuggestion> {
   return api.get<PortBlockSuggestion>("/projects/ports/suggest-block");

@@ -235,28 +235,17 @@ class TestSameRowPortUniqueness:
         resp = router_client.post("/api/v1/projects", json=payload)
         assert resp.status_code == 422
 
-    def test_backend_equals_ui_design_rejected(self, router_client, creator):
-        payload = _payload(creator.id, backend_port=10100, ui_design_port=10100)
-        resp = router_client.post("/api/v1/projects", json=payload)
-        assert resp.status_code == 422
-
     def test_frontend_equals_db_rejected(self, router_client, creator):
         payload = _payload(creator.id, frontend_port=10101, db_port=10101)
         resp = router_client.post("/api/v1/projects", json=payload)
         assert resp.status_code == 422
 
-    def test_db_equals_ui_design_rejected(self, router_client, creator):
-        payload = _payload(creator.id, db_port=10102, ui_design_port=10102)
-        resp = router_client.post("/api/v1/projects", json=payload)
-        assert resp.status_code == 422
-
-    def test_all_four_distinct_accepted(self, router_client, creator):
+    def test_all_three_distinct_accepted(self, router_client, creator):
         payload = _payload(
             creator.id,
             backend_port=10100,
             frontend_port=10101,
             db_port=10102,
-            ui_design_port=10103,
         )
         resp = router_client.post("/api/v1/projects", json=payload)
         assert resp.status_code == 201

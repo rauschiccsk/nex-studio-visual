@@ -103,7 +103,6 @@ def _validate_ports(db: Session, payload: ProjectCreate) -> None:
         ("backend_port", payload.backend_port),
         ("frontend_port", payload.frontend_port),
         ("db_port", payload.db_port),
-        ("ui_design_port", payload.ui_design_port),
     ]
 
     # Same-row uniqueness — no two non-NULL port columns may share a value.
@@ -184,10 +183,10 @@ def _validate_ports(db: Session, payload: ProjectCreate) -> None:
     # Block-alignment check — backend_port must be at the start of a
     # 10-port block (10100, 10110, 10120, ...) when in commercial range
     # (>= 10100). Legacy 9100-9199 entries are exempt (D-020 "no
-    # migration" clause). Frontend / db / ui_design must follow the
-    # D-020 layout (+0 BE, +1 FE, +2 DB, +3 ui-design) so contiguous
-    # blocks remain coherent and `suggest_next_port_block` can find
-    # the next free 10-port block deterministically.
+    # migration" clause). Frontend / db must follow the D-020 layout
+    # (+0 BE, +1 FE, +2 DB) so contiguous blocks remain coherent and
+    # `suggest_next_port_block` can find the next free 10-port block
+    # deterministically.
     bp = payload.backend_port
     if bp is not None and bp >= 10100:
         if bp % 10 != 0:
@@ -203,7 +202,6 @@ def _validate_ports(db: Session, payload: ProjectCreate) -> None:
         layout = [
             ("frontend_port", payload.frontend_port, 1),
             ("db_port", payload.db_port, 2),
-            ("ui_design_port", payload.ui_design_port, 3),
         ]
         for field_name, value, offset in layout:
             if value is not None and value != bp + offset:
@@ -366,8 +364,8 @@ def suggest_port_block(
 ) -> PortBlockSuggestResponse:
     """Return the base port of the first free 10-port block in the registry.
 
-    Used by the new-project form to auto-fill the four port inputs
-    (backend / frontend / db / ui-design) from a contiguous block per
+    Used by the new-project form to auto-fill the three port inputs
+    (backend / frontend / db) from a contiguous block per
     DECISIONS.md D-020 (Port Registry v2, 10-port blocks).
     """
     try:
