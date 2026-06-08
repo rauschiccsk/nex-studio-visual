@@ -1811,3 +1811,38 @@ async def test_build_mechanical_fail_short_circuits_auditor(db_session, fake_cla
     db_session.refresh(task)
     assert task.status == "failed"
     assert not any(m.author == "auditor" for m in _msgs(db_session, version.id))  # short-circuited
+
+
+async def test_build_baseline_unreadable_halts_fail_closed(db_session, fake_claude, monkeypatch):
+    # CR-4.1: repo HEAD unreadable (_repo_head → None) → fail-closed HALT, never dispatch on an
+    # unknowable base; the task stays todo (auto-retried on resume).
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda root: None)
+    fake_claude.response = _build_fake()  # would build/audit IF anything were ever dispatched
+    version, project = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _epic, _feat, (task,) = _seed_one_feat(db_session, version, project, ["T"])
+    _to_build(db_session, version)
+
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert state.status == "awaiting_director"  # HALT, fail-closed
+    db_session.refresh(task)
+    assert task.status == "todo"  # precondition failure (not a failed attempt) → retried on resume
+    assert task.baseline_sha is None
+    msgs = _msgs(db_session, version.id)
+    assert not any(m.author == "implementer" for m in msgs)  # never built on an unknowable base
+    assert not any(m.author == "auditor" for m in msgs)
+    assert any(m.author == "coordinator" and m.stage == "build" for m in msgs)  # relayed to the Director
+
+
+async def test_approve_at_build_blocked_while_todo_remains(db_session, fake_claude):
+    # CR-4.1 (option B): the final build sign-off is invalid while a task is still todo — closes
+    # the baseline-HALT hole (a todo task isn't counted by _build_open_findings).
+    version, project = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _seed_one_feat(db_session, version, project, ["T-a", "T-b"])  # both todo
+    state = _to_build(db_session, version)
+    state.status = "awaiting_director"
+    db_session.flush()
+    with pytest.raises(orchestrator.OrchestratorError):
+        await orchestrator.apply_action(db_session, version_id=version.id, action="approve")

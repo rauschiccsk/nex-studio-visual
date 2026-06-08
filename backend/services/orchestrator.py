@@ -1485,6 +1485,30 @@ async def _run_build_round(
         # so _verify_task passes the real baseline — not a stale None — to verify_mechanical.
         if task.baseline_sha is None:
             task.baseline_sha = _repo_head(project_root)
+        if task.baseline_sha is None:
+            # Fail-closed (CR-NS-020 CR-4.1): repo HEAD unreadable → cannot anchor the diff →
+            # NEVER dispatch on an unknowable base. The task STAYS todo (a precondition failure,
+            # not a failed attempt) so it auto-retries on resume once HEAD is readable; the
+            # Coordinator relays to the Director (mirrors the 5-fail HALT path).
+            await invoke_agent_with_parse_retry(
+                db,
+                version_id=version_id,
+                role="coordinator",
+                stage="build",
+                prompt=(
+                    f"Úloha #{task.number} '{task.title}': nepodarilo sa zachytiť baseline — repo HEAD "
+                    "je nečitateľný (git zlyhal). Priprav pre Directora relay: treba opraviť repo a "
+                    "pokračovať. Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
+                ),
+                on_event=on_event,
+                on_message=on_message,
+            )
+            state.status = "awaiting_director"
+            state.next_action = (
+                f"Úloha #{task.number}: baseline nečitateľný (repo HEAD) — Director: oprav repo a pokračuj."
+            )
+            db.flush()
+            return state
         task.status = "in_progress"
         db.flush()
 
@@ -1654,10 +1678,20 @@ async def apply_action(
             else:
                 _begin_dispatch(db, state)  # next topic — stage unchanged
             return state
-        # Build (F-007 §6): the final sign-off advances build → gate_g, but a failed /
-        # unverified task blocks the close (deterministic gate from the orchestrator's record).
-        if state.current_stage == "build" and _build_open_findings(db, version_id) > 0:
-            raise OrchestratorError("Otvorené úlohy (failed/neoverené) blokujú uzavretie buildu — najprv ich vyrieš")
+        # Build (F-007 §6): the final sign-off advances build → gate_g. The invariant (CR-4.1
+        # option B): you cannot finally sign off a build with tasks still unbuilt — so a remaining
+        # `todo` task blocks `approve` (this also closes the baseline-HALT hole, where a task left
+        # todo is NOT counted by _build_open_findings). A failed / unverified (in_progress) task
+        # blocks too (the deterministic gate). `end_build` is the separate, deliberate early exit.
+        if state.current_stage == "build":
+            if task_service.get_next_todo_task(db, version_id) is not None:
+                raise OrchestratorError(
+                    "Build nie je hotový — ostávajú nepostavené úlohy (todo); finálne schválenie nie je možné"
+                )
+            if _build_open_findings(db, version_id) > 0:
+                raise OrchestratorError(
+                    "Otvorené úlohy (failed/neoverené) blokujú uzavretie buildu — najprv ich vyrieš"
+                )
         state.current_stage = _next_stage(state.current_stage)
         db.flush()
         if state.current_stage == "done":
