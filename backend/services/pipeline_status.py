@@ -122,6 +122,11 @@ class PipelineStatusBlock(BaseModel):
     #: Designer; CR-3 re-reads this from the gate_report payload and injects it into
     #: every per-task build brief.
     cross_cutting_rules: Optional[str] = None
+    #: Per-task Auditor verdict (F-007 §6, CR-NS-020 CR-4). Only the Auditor's build-stage
+    #: audit turn emits it; ``None`` (absent) is treated as FAIL by ``_verify_task``
+    #: (fail-closed — a task never passes without an explicit ``task_pass=true``). The
+    #: per-task audit findings ride in the reused ``findings`` field below.
+    task_pass: Optional[bool] = None
 
     # Gate E signals (F-007-gate-e §5/§7.2, CR-NS-018). All optional; only the
     # Customer↔Designer loop (stage=gate_e) emits them, so non-gate-E blocks are

@@ -60,7 +60,9 @@ class FakeClaude:
 
     async def __call__(self, *, project_slug, claude_session_id, prompt, charter_path=None, timeout=180, on_event=None):
         self.calls.append({"project_slug": project_slug, "session": claude_session_id, "prompt": prompt})
-        return self.response
+        # ``response`` may be a callable(prompt)->str so a single fake can answer different roles
+        # (e.g. Programmer vs Auditor in the CR-NS-020 build loop); else it's a fixed string.
+        return self.response(prompt) if callable(self.response) else self.response
 
 
 @pytest.fixture
@@ -1556,6 +1558,27 @@ def _build_report() -> str:
     )
 
 
+def _audit(task_pass: bool, findings=None) -> str:
+    return _block(
+        stage="build",
+        kind="gate_report",
+        summary="audit",
+        awaiting="director",
+        task_pass=task_pass,
+        findings=findings or [],
+    )
+
+
+def _build_fake(*, audit_pass=True, audit_findings=None):
+    """Role-aware fake_claude response (CR-NS-020 CR-4): the Programmer's build report vs the
+    Auditor's verdict (the per-task audit prompt starts with 'Audítor')."""
+
+    def _resp(prompt: str) -> str:
+        return _audit(audit_pass, audit_findings) if prompt.startswith("Audítor") else _build_report()
+
+    return _resp
+
+
 async def test_build_loop_runs_tasks_in_order_then_awaits_director(db_session, fake_claude, monkeypatch):
     monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "a" * 40)
     version, project = _make_version(db_session)
@@ -1563,7 +1586,7 @@ async def test_build_loop_runs_tasks_in_order_then_awaits_director(db_session, f
     _seed_cross_cutting(db_session, version, "## Invarianty\n- podvojnosť")
     _epic, feat, tasks = _seed_one_feat(db_session, version, project, ["T-one", "T-two"])
     _to_build(db_session, version)
-    fake_claude.response = _build_report()
+    fake_claude.response = _build_fake()
 
     state = await orchestrator.run_dispatch(db_session, version.id)
 
@@ -1572,9 +1595,11 @@ async def test_build_loop_runs_tasks_in_order_then_awaits_director(db_session, f
         db_session.refresh(t)
         assert t.status == "done"
         assert t.baseline_sha == "a" * 40  # baseline captured per task
-    briefs = [c["prompt"] for c in fake_claude.calls if "TASK #" in c["prompt"]]
+    briefs = [c["prompt"] for c in fake_claude.calls if c["prompt"].startswith("Programátor")]
     assert "T-one" in briefs[0] and "T-two" in briefs[1]  # dispatched in plan order
     assert all("podvojnosť" in b for b in briefs)  # cross-cutting block injected into every brief
+    # the Auditor was dispatched per task (CR-4 per-task audit turn)
+    assert any(m.author == "auditor" and m.stage == "build" for m in _msgs(db_session, version.id))
     # final sign-off advances build → gate_g
     state = await orchestrator.apply_action(db_session, version_id=version.id, action="approve")
     assert state.current_stage == "gate_g"
@@ -1593,7 +1618,7 @@ async def test_build_auto_fix_retries_then_passes(db_session, fake_claude, monke
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
     _epic, feat, (task,) = _seed_one_feat(db_session, version, project, ["T"])
     _to_build(db_session, version)
-    fake_claude.response = _build_report()
+    fake_claude.response = _build_fake()
 
     state = await orchestrator.run_dispatch(db_session, version.id)
 
@@ -1617,7 +1642,7 @@ async def test_build_auto_fix_exhausted_marks_failed_and_halts(db_session, fake_
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
     _epic, _feat, (task,) = _seed_one_feat(db_session, version, project, ["T"])
     _to_build(db_session, version)
-    fake_claude.response = _build_report()
+    fake_claude.response = _build_fake()
 
     state = await orchestrator.run_dispatch(db_session, version.id)
 
@@ -1641,7 +1666,7 @@ async def test_end_build_blocked_by_failed_task(db_session, fake_claude, monkeyp
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
     _seed_one_feat(db_session, version, project, ["T"])
     _to_build(db_session, version)
-    fake_claude.response = _build_report()
+    fake_claude.response = _build_fake()
     await orchestrator.run_dispatch(db_session, version.id)  # → failed + HALT
     with pytest.raises(orchestrator.OrchestratorError):
         await orchestrator.apply_action(db_session, version_id=version.id, action="end_build")
@@ -1666,7 +1691,7 @@ async def test_return_at_build_halt_resets_failed_and_reattempts(db_session, fak
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
     _epic, _feat, (task,) = _seed_one_feat(db_session, version, project, ["T"])
     _to_build(db_session, version)
-    fake_claude.response = _build_report()
+    fake_claude.response = _build_fake()
     await orchestrator.run_dispatch(db_session, version.id)  # → failed + HALT
     db_session.refresh(task)
     assert task.status == "failed"
@@ -1706,7 +1731,7 @@ async def test_build_resume_reclaims_orphaned_in_progress(db_session, fake_claud
     task.baseline_sha = "0" * 40  # the baseline captured by that prior dispatch
     db_session.flush()
     _to_build(db_session, version)
-    fake_claude.response = _build_report()
+    fake_claude.response = _build_fake()
     state = await orchestrator.run_dispatch(db_session, version.id)
     db_session.refresh(task)
     assert task.status == "done"  # reclaimed → re-run → completed
@@ -1730,8 +1755,59 @@ async def test_build_verify_receives_captured_baseline(db_session, fake_claude, 
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
     _epic, _feat, (task,) = _seed_one_feat(db_session, version, project, ["T"])
     _to_build(db_session, version)
-    fake_claude.response = _build_report()
+    fake_claude.response = _build_fake()
     await orchestrator.run_dispatch(db_session, version.id)
     assert seen["baseline"] == "9" * 40  # fresh task anchored to HEAD; the SHA reached verify
     db_session.refresh(task)
     assert task.baseline_sha == "9" * 40
+
+
+async def test_build_audit_fail_escalates_findings_then_passes(db_session, fake_claude, monkeypatch):
+    # CR-4: mechanical passes but the Auditor fails twice (findings) → auto-fix escalates the
+    # findings into the Programmer's next brief; a later audit pass → task done.
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "7" * 40)
+    audit_calls = {"n": 0}
+
+    def _resp(prompt: str) -> str:
+        if prompt.startswith("Audítor"):
+            audit_calls["n"] += 1
+            if audit_calls["n"] < 3:
+                return _audit(False, findings=["chýba podvojnosť"])
+            return _audit(True)
+        return _build_report()
+
+    fake_claude.response = _resp
+    version, project = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _epic, feat, (task,) = _seed_one_feat(db_session, version, project, ["T"])
+    _to_build(db_session, version)
+
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert state.status == "awaiting_director"
+    db_session.refresh(task)
+    assert task.status == "done"
+    assert audit_calls["n"] == 3  # audited each attempt; passed on the 3rd
+    # the audit findings were escalated into a later Programmer brief
+    prog_briefs = [c["prompt"] for c in fake_claude.calls if c["prompt"].startswith("Programátor")]
+    assert any("podvojnosť" in b for b in prog_briefs)
+    db_session.refresh(feat)
+    assert feat.auto_fix_count == 2
+
+
+async def test_build_mechanical_fail_short_circuits_auditor(db_session, fake_claude, monkeypatch):
+    # CR-4: a mechanical failure must NOT dispatch the Auditor (no point auditing a missing commit).
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "8" * 40)
+    monkeypatch.setattr(orchestrator, "verify_mechanical", lambda slug, block, baseline_sha=None: "commit chýba")
+    fake_claude.response = _build_fake()  # would audit-pass IF the Auditor were ever called
+    version, project = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _epic, _feat, (task,) = _seed_one_feat(db_session, version, project, ["T"])
+    _to_build(db_session, version)
+
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert state.status == "awaiting_director"  # HALT after 5 mechanical fails
+    db_session.refresh(task)
+    assert task.status == "failed"
+    assert not any(m.author == "auditor" for m in _msgs(db_session, version.id))  # short-circuited

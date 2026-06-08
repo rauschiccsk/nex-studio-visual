@@ -735,6 +735,9 @@ async def invoke_agent(
             # cross-cutting rules from this gate_report payload.
             "plan": parsed.plan.model_dump() if parsed.plan is not None else None,
             "cross_cutting_rules": parsed.cross_cutting_rules,
+            # Per-task Auditor verdict (F-007 §6, CR-NS-020 CR-4) — persisted for CR-5's
+            # per-task audit panel (the diff + findings the Director can drill into).
+            "task_pass": parsed.task_pass,
             # Caller-supplied structural markers (e.g. is_fix_edit) for the deterministic
             # open-finding count — orchestrator record, not agent self-report (§5).
             **(extra_payload or {}),
@@ -1367,6 +1370,26 @@ def _directive_for_build_task(task: Task, cross_cutting_rules: Optional[str], pr
     return "\n\n".join(parts)
 
 
+def _audit_prompt_for_task(task: Task, block: PipelineStatusBlock, cross_cutting_rules: Optional[str]) -> str:
+    """Per-task Auditor brief (§6, CR-NS-020 CR-4): audit-vs-spec scoped to ONE task — its
+    deliverables + the diff ``baseline_sha..HEAD`` + the relevant spec section + cross-cutting.
+    Lighter than the release audit (the Dual-Build / Tibor audit stays at gate_g)."""
+    parts = [f"Audítor, sprav audit-vs-spec JEDNEJ úlohy (TASK #{task.number}): {task.title}."]
+    if task.description:
+        parts.append(f"Popis úlohy: {task.description}")
+    parts.append(f"Deliverables Programátora: {', '.join(block.deliverables) if block.deliverables else '(žiadne)'}.")
+    if task.baseline_sha:
+        parts.append(f"Audituj IBA túto úlohu — preskúmaj diff `{task.baseline_sha}..HEAD` (git), nie celý projekt.")
+    parts.append(
+        "Over: spec compliance deliverables voči relevantnej sekcii autoritatívneho špecu "
+        "(docs/specs/), konzistenciu a dodržanie prierezových pravidiel."
+    )
+    if cross_cutting_rules:
+        parts.append(f"Prierezové pravidlá (musia byť dodržané):\n{cross_cutting_rules}")
+    parts.append("Ukonči <<<PIPELINE_STATUS>>> blokom: task_pass (true/false) + findings[] (čo treba opraviť). (§7.2)")
+    return "\n\n".join(parts)
+
+
 async def _verify_task(
     db: Session,
     state: PipelineState,
@@ -1377,12 +1400,32 @@ async def _verify_task(
     """Per-task quality gate (§6). Returns a failure reason or ``None`` (pass).
 
     **CR-3: deterministic mechanical verify** scoped to the task's ``baseline_sha`` (commit
-    exists + deliverables on disk + commits in ``baseline..HEAD``). **CR-4 extends THIS one
-    function** with the Auditor audit-vs-spec turn (``task_pass`` + findings) after a
-    mechanical pass — the loop, the ≤5 bound, the done/failed transitions and the HALT
-    around it stay untouched. ``on_message`` is threaded for CR-4's Auditor turn."""
+    exists + deliverables on disk + commits in ``baseline..HEAD``). **CR-4: + the Auditor
+    audit-vs-spec turn** after a mechanical pass — scoped to this ONE task, emitting
+    ``task_pass`` + per-task ``findings``. The findings-summary returned here is what the
+    CR-3 auto-fix loop escalates into the next brief + the HALT path relays; the loop, the
+    ≤5 bound, the done/failed transitions and the HALT stay untouched (the seam)."""
     slug = _project_slug_for_version(db, state.version_id)
-    return verify_mechanical(slug, block, task.baseline_sha)
+    mech = verify_mechanical(slug, block, task.baseline_sha)
+    if mech is not None:
+        return mech  # mechanical fail short-circuits — no point auditing a missing commit (saves a turn)
+    cross_cutting = _fetch_cross_cutting_rules(db, state.version_id)
+    audit = await invoke_agent(
+        db,
+        version_id=state.version_id,
+        role="auditor",
+        stage="build",
+        prompt=_audit_prompt_for_task(task, block, cross_cutting),
+        on_message=on_message,
+    )
+    if isinstance(audit, ParseFailure):
+        return f"audit nečitateľný: {audit.reason}"
+    if audit.kind == "blocked":
+        return f"audit blokovaný: {audit.question or audit.summary}"
+    if not audit.task_pass:  # fail-closed: absent / None / false → FAIL (never pass without an explicit verdict)
+        findings = "; ".join(audit.findings) if audit.findings else (audit.summary or "audit zlyhal")
+        return f"audit zlyhal: {findings}"
+    return None
 
 
 async def _run_build_round(
