@@ -102,14 +102,19 @@ task** — Director **sleduje** (panel + activity, §7) a zasahuje podľa potreb
 
 Per-task cyklus (`_run_build_round`, near-copy `_run_gate_e_round`):
 
-1. **Baseline** — `Task.baseline_sha` = repo HEAD pri dispatch-i tasku.
+1. **Baseline** — `Task.baseline_sha` = repo HEAD pri dispatch-i tasku. **Fail-closed (CR-4.1):**
+   ak sa baseline nedá zachytiť (HEAD nečitateľný, git zlyhá), **HALT** na `awaiting_director`
+   (relay cez Koordinátora), úloha ostáva `todo` — nikdy sa nestavia na neznámej báze.
 2. **Programátor stavia JEDEN task** — orchestrátor dispatchne ďalší `todo` task s briefom
    (title/description + spec sekcia + cross-cutting blok). Commit, `gate_report` s
    `commits[]` + `deliverables[]`.
 3. **Mechanical verify** (deterministic, žiadny agent) — `verify_mechanical`: commit
-   existuje, deliverables na disku, diff scoped na `baseline_sha..HEAD`.
-4. **Audítor audit** — audit-vs-spec scoped na deliverables; status block `task_pass`
-   (true/false) + findings.
+   existuje, deliverables na disku, diff scoped na `baseline_sha..HEAD`. **Mechanical FAIL
+   short-circuituje** — Audítor sa nevolá (netreba auditovať chýbajúci commit; šetrí turn).
+4. **Audítor audit** (len po mechanical PASS) — audit-vs-spec scoped na deliverables (diff
+   `baseline_sha..HEAD` + spec sekcia + cross-cutting); status block `task_pass` (true/false)
+   + findings. **Fail-closed:** `task_pass` chýba/None → FAIL (task neprejde bez explicit
+   `task_pass=true`).
 5. **Rozhodnutie:**
    - **PASS** → task `done`, baseline ďalšieho = current HEAD, **automaticky ďalší task**
      (žiadny Director klik).
@@ -119,8 +124,14 @@ Per-task cyklus (`_run_build_round`, near-copy `_run_gate_e_round`):
    - **FAIL aj po 5 pokusoch** → task `failed`, **HALT na `awaiting_director`**;
      Koordinátor relaynе Directorovi. Nič ďalšie sa nestavia.
 6. **Deterministická gate** — `_build_open_findings` (count z orchestrátorovho **logu**,
-   nie self-report): počet `failed`/neoverených taskov > 0 blokuje advance do `gate_g`,
-   kým ich Director nevyrieši. (Vzor z gate_e open-finding gate, 2026-06-05.)
+   nie self-report): počet `failed`/`in_progress` (neoverených) taskov > 0 blokuje advance do
+   `gate_g`, kým ich Director nevyrieši. `todo` sa **nepočíta** (aby `end_build` mohol pokročiť
+   so zvyškom). (Vzor z gate_e open-finding gate, 2026-06-05.)
+7. **Sign-off invariant (CR-4.1 option B)** — finálne schválenie (`approve`) je platné len keď
+   nezostáva žiadna `todo` úloha (`get_next_todo_task is None`) **a zároveň** `_build_open_findings
+   == 0`. Nemožno finálne schváliť build s nepostavenými úlohami — toto uzatvára aj baseline-HALT
+   dieru (HALT-nutá `todo` úloha sa do gate nepočíta, ale blokuje `approve`). `end_build` ostáva
+   vedomá výnimka („zvyšok do auditu": `todo` povolené, `failed`/`in_progress` blokuje).
 
 Director kedykoľvek môže zasiahnuť (pauza / `return` / `Konzultovať`). `end_build` (mirror
 `end_gate_e`) — Director „zvyšok do auditu", ale failed task stále blokuje.
@@ -135,6 +146,41 @@ Director kedykoľvek môže zasiahnuť (pauza / `return` / `Konzultovať`). `end
 - **Per-task audit výsledok rozkliknuteľný** (`VerificationPanel` ekvivalent) — diff +
   findings danej úlohy.
 - Director ↔ Koordinátor výhradne; gate len pri HALT (zlyhaný task) alebo vlastnom zásahu.
+
+### 7.1 CR-5 implementačné ukotvenie (grounding 2026-06-08)
+
+- **Žiadny nový backend endpoint** — `GET /versions/{version_id}/task-plan` (`api/routes/versions.py`)
+  už vracia EPIC→FEAT→TASK strom so statusmi (`epic`: planned/in_progress/done; `feat`/`task`:
+  todo/in_progress/done/failed) + počty. FE pridá len klienta `getTaskPlan(versionId)` do
+  `services/api/versions.ts`.
+- **Per-task audit dáta** (`task_pass`, `findings`, `verify_reason`) sú v `PipelineMessage.payload`
+  (JSONB) a už tečú na FE cez WS (`usePipelineWs`, frame `message_added`). Per-task audit panel ich
+  číta z message streamu (filter `stage in (build, gate_g)` + napáruj na task podľa `payload.task_id`),
+  netreba nový endpoint.
+- **Živá aktivita Programátora** — existujúci `PipelineActivityFeed` (frame `agent_activity`:
+  stage/actor/kind/line) ho už zobrazuje počas `agent_working`. CR-5 ho len ponechá viditeľný v
+  novom layoute.
+- **Layout** — dnes 2-stĺpcový (`PipelineRail` w-56 + `ExchangePanel` flex-1); CR-5 = 3-stĺpcový
+  (rail + ExchangePanel užší + `TaskPlanPanel` vpravo). Štítky reuse `labels.ts`.
+
+### 7.2 Resume po HALT — Director akcia „Pokračovať v builde"
+
+- Build sa po HALT (baseline-HALT alebo Directorova pauza) ustáli na `awaiting_director` so
+  zostávajúcou `todo` úlohou. Dnes resume vie len `return` (vyžaduje komentár, resetuje
+  `failed`→`todo`) — pre čistý „prostredie opravené, pokračuj" je to zbytočné trenie.
+- **Nová akcia `continue_build`** (bez komentára): pri `stage==build && status==awaiting_director`
+  re-dispatchne build slučku (`_begin_dispatch`). Odlišná od `return` (rework failed tasku, komentár
+  povinný) a `end_build` (preskoč zvyšok). FE button v `PipelineActionBar` za rovnakých podmienok.
+- Registrácia = `_ACTIONS` frozenset + handler v `apply_action` (reuse `_begin_dispatch`).
+
+### 7.3 Známy follow-up (NIE CR-5) — restart-mid-build recovery
+
+Build slučka beží ako background task; pri reštarte backendu zomrie a pipeline ostane stuck na
+`agent_working` (žiadny auto-resume). `lifespan` (`main.py`) reclaimuje orphaned agent_terminal +
+dialogue, **ale nie pipeline**. Pred ostrým NEX Ledger buildom treba samostatnú robustness CR:
+na štarte preklopiť stuck `agent_working` build → `awaiting_director` (Director resumne cez
+„Pokračovať v builde"), prípadne auto-resume. `_run_build_round` už reclaimuje orphaned `in_progress`
+→`todo` (CR-3), takže chýba len štartový trigger. **Mimo CR-5 scope.**
 
 **Auditovateľnosť** zostáva plná: Audítor audituje **každý** task automaticky + výsledok
 sa zaznamená a je viditeľný/rozkliknuteľný — Director to nemusí klikať per-task, ale vidí
@@ -153,8 +199,9 @@ broadcast; real-active-role rail signál; `verify_mechanical`/`verify_done`; FE
 widen-ujúca oba CHECK); `_run_build_round` + build dispatch selector; 2 helpery
 (`_build_open_findings` + per-task brief directive s cross-cutting blokom); stĺpec
 `Task.baseline_sha` + migrácia; orchestrátorov **write-path** do Epic/Feat/Task; Audítor
-per-task turn wiring; auto-fix slučka (max 5); FE `TaskPlanPanel` (strom) +
-`DelegationProgress` + per-task audit panel.
+per-task turn wiring; auto-fix slučka (max 5); FE `getTaskPlan` klient + `TaskPlanPanel` (strom) +
+per-task audit panel (z message payloadu) + `continue_build` akcia (CR-5). `PipelineActivityFeed`
+(živá aktivita) sa reuseuje — žiadny nový komponent.
 
 **Charter úpravy (Dedo, NIE Implementer — `.claude/agents/**` deny):** Návrhár (task_plan
 output + coarse granularita + cross-cutting kodifikácia), Audítor (per-task audit mode,
@@ -191,8 +238,9 @@ task/turn, injektnutý cross-cutting blok), Koordinátor (relay per-task verdict
 | **CR-1** | `Task.baseline_sha` + migrácia; `task_plan` stage na 4 lockstep miestach + migrácia (widen oba CHECK). Bez behaviorálnej zmeny. | — |
 | **CR-2** | Task-plán stage: write-path Návrhárovho plánu → Epic/Feat/Task; beží ako gate. Návrhár charter. | CR-1 |
 | **CR-3** | `_run_build_round` + `_build_open_findings` + per-task brief directive (cross-cutting); `build` = plynulá slučka + auto-fix N=5. Programátor + Koordinátor charter. | CR-2 |
-| **CR-4** | Audítor per-task turn wiring; `task_pass`+findings; deterministická gate z logu. Audítor charter. | CR-3 |
-| **CR-5** | FE: `TaskPlanPanel` (rozklikateľný EPIC-FEAT-TASK strom, current task), `DelegationProgress` (živá činnosť), per-task audit panel. | CR-3, CR-4 |
+| **CR-4** | Audítor per-task turn wiring; `task_pass`+findings; mechanical short-circuit + fail-closed. Audítor charter. | CR-3 |
+| **CR-4.1** | Fail-closed na baseline (HALT keď HEAD nečitateľný) + sign-off invariant (option B: `approve` blokuje zostávajúce `todo`). | CR-4 |
+| **CR-5** | FE: `getTaskPlan` klient + `TaskPlanPanel` (rozklikateľný EPIC-FEAT-TASK strom, current task) + per-task audit panel (z message payloadu) + `continue_build` akcia; `PipelineActivityFeed` reuse. | CR-3, CR-4.1 |
 
 ## 11. Rozhodnutia (posvätené 2026-06-07)
 
