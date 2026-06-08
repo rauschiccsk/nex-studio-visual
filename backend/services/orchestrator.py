@@ -1816,18 +1816,13 @@ async def apply_action(
         # build loop re-attempts it (fresh ≤5 budget) with the Director's comment threaded in.
         if state.current_stage == "build":
             _reset_failed_tasks_to_todo(db, version_id)
-        # task_plan re-plan (CR-NS-022 §3): a return = re-decompose. Drop the Designer's
-        # (slug, designer) session so the next dispatch is is_first → the (possibly updated)
-        # charter re-injects. The Designer re-decomposes from the on-disk spec (the --resume
-        # conversation is expendable here). Unblocks a charter fix that the stale session missed.
-        if state.current_stage == "task_plan":
-            db.execute(
-                delete(OrchestratorSession).where(
-                    OrchestratorSession.project_slug == _project_slug_for_version(db, version_id),
-                    OrchestratorSession.role == "designer",
-                )
-            )
-            db.flush()
+        # task_plan refine (CR-NS-024): a return KEEPS the Designer's (slug, designer) --resume
+        # session, so the next dispatch remembers the prior plan and applies just the Director's
+        # edit (the comment threads into the brief) — incremental refinement, not a from-scratch
+        # re-decompose. The Designer still re-reads the on-disk spec each turn, so an explicit
+        # "re-plan from scratch" comment is still honoured. (CR-NS-022 §3 deleted the session to
+        # force a one-time charter reload; that need is satisfied. Reloading a fixed charter is now
+        # a deliberate maintenance concern, never an implicit cost of every refine-return.)
         _begin_dispatch(db, state)
         return state
 

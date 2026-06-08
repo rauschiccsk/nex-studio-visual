@@ -1970,9 +1970,12 @@ async def test_parse_retry_recovers_without_director_leak(db_session, monkeypatc
     assert not any(m.author == "system" and m.recipient == "director" for m in _msgs(db_session, version.id))
 
 
-async def test_return_at_task_plan_blocked_resets_designer_session(db_session, fake_claude):
-    # §3: return is reachable from task_plan/blocked and drops the stale (slug, designer) session so
-    # the next dispatch re-injects the FIXED charter. (Unblocks NEX Ledger's stale-charter task_plan.)
+async def test_return_at_task_plan_keeps_designer_session_for_refine(db_session, fake_claude):
+    # CR-NS-024: return@task_plan is INCREMENTAL refine — it KEEPS the (slug, designer) --resume
+    # session so the Designer remembers the prior plan and applies just the Director's edit (the
+    # comment threads into the brief), instead of re-decomposing from scratch. (CR-NS-022 §3 used to
+    # delete the session for a one-time charter reload; that need is satisfied and is not paid on
+    # every refine-return.)
     from backend.db.models.orchestrator import OrchestratorSession
 
     version, project = _make_version(db_session)
@@ -1980,19 +1983,60 @@ async def test_return_at_task_plan_blocked_resets_designer_session(db_session, f
     state = orchestrator._get_state(db_session, version.id)
     state.current_stage = "task_plan"
     state.current_actor = "designer"
-    state.status = "blocked"  # the live nex-ledger condition
+    state.status = "awaiting_director"  # plan is on the table, Director refines it
     db_session.flush()
-    db_session.add(OrchestratorSession(project_slug=project.slug, role="designer", claude_session_id=uuid.uuid4()))
+    seeded_id = uuid.uuid4()
+    db_session.add(OrchestratorSession(project_slug=project.slug, role="designer", claude_session_id=seeded_id))
     db_session.flush()
 
+    comment = "rozdeľ poslednú úlohu na dve, zvyšok plánu nechaj"
     state = await orchestrator.apply_action(
-        db_session, version_id=version.id, action="return", payload={"comment": "oprav module_id a naplánuj znova"}
+        db_session, version_id=version.id, action="return", payload={"comment": comment}
     )
 
-    assert state.status == "agent_working"  # return re-dispatched from blocked
+    assert state.status == "agent_working"  # return still re-dispatches the Designer
     row = db_session.execute(
         select(OrchestratorSession).where(
             OrchestratorSession.project_slug == project.slug, OrchestratorSession.role == "designer"
         )
     ).scalar_one_or_none()
-    assert row is None  # stale session dropped → fixed charter re-injects on the next invoke
+    assert row is not None  # session KEPT → next dispatch is --resume (refine, not rebuild)
+    assert row.claude_session_id == seeded_id  # the SAME session — charter is NOT re-injected
+    # The Director's edit threads into the brief: it is recorded as a return message at task_plan.
+    returns = [
+        m
+        for m in _msgs(db_session, version.id)
+        if m.author == "director" and m.kind == "return" and m.stage == "task_plan"
+    ]
+    assert returns and returns[-1].content == comment
+
+
+async def test_return_at_task_plan_blocked_also_keeps_session(db_session, fake_claude):
+    # CR-NS-024 regression: the return handler does NOT branch on status, so a return reachable from
+    # task_plan/BLOCKED (the prior live nex-ledger condition, surfaced via the CR-NS-018 questionBlock)
+    # keeps the Designer session just like the awaiting_director refine path. Guards the equivalence the
+    # main test relies on, so the blocked origin stays covered after CR-NS-022's delete was dropped.
+    from backend.db.models.orchestrator import OrchestratorSession
+
+    version, project = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    state = orchestrator._get_state(db_session, version.id)
+    state.current_stage = "task_plan"
+    state.current_actor = "designer"
+    state.status = "blocked"
+    db_session.flush()
+    seeded_id = uuid.uuid4()
+    db_session.add(OrchestratorSession(project_slug=project.slug, role="designer", claude_session_id=seeded_id))
+    db_session.flush()
+
+    state = await orchestrator.apply_action(
+        db_session, version_id=version.id, action="return", payload={"comment": "oprav module_id a doplň testy"}
+    )
+
+    assert state.status == "agent_working"  # return re-dispatches from blocked too
+    row = db_session.execute(
+        select(OrchestratorSession).where(
+            OrchestratorSession.project_slug == project.slug, OrchestratorSession.role == "designer"
+        )
+    ).scalar_one_or_none()
+    assert row is not None and row.claude_session_id == seeded_id  # kept → --resume, no charter re-inject
