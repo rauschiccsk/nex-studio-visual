@@ -34,6 +34,7 @@ from backend.config.settings import settings
 from backend.db.session import SessionLocal
 from backend.services import agent_terminal as agent_terminal_service
 from backend.services import dialogue as dialogue_service
+from backend.services import orchestrator as orchestrator_service
 
 # Route application loggers at INFO to stderr so ``docker logs`` surfaces
 # request-level diagnostics (SSE state, Claude subprocess events, spec
@@ -132,6 +133,12 @@ async def lifespan(app: FastAPI):
     try:
         agent_terminal_service.mark_orphaned_on_startup(db)
         dialogue_service.mark_orphaned_on_startup(db)
+        # F-007 §7.3 / CR-NS-021: a backend restart kills the build loop's background dispatch,
+        # stranding the pipeline at build/agent_working. Flip such builds to awaiting_director so
+        # the Director can resume via "Pokračovať v builde" (the loop then reclaims the in_progress task).
+        recovered_builds = orchestrator_service.recover_orphaned_builds_on_startup(db)
+        if recovered_builds:
+            logger.info("Recovered %d orphaned build pipeline(s) after restart", recovered_builds)
     finally:
         db.close()
 

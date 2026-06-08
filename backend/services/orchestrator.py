@@ -1337,6 +1337,49 @@ def _reset_failed_tasks_to_todo(db: Session, version_id: uuid.UUID) -> None:
     db.flush()
 
 
+def recover_orphaned_builds_on_startup(db: Session) -> int:
+    """On BE startup, recover BUILD pipelines stranded at ``agent_working`` by a restart
+    (F-007 §7.3, CR-NS-021). Returns the number recovered.
+
+    The build loop runs as a background dispatch; a backend restart kills it, leaving the
+    pipeline stuck at ``build`` / ``agent_working`` with no auto-resume. This flips such rows
+    to ``awaiting_director`` (+ a clear ``next_action``) and records a system→director
+    ``notification`` so the Director can resume via "Pokračovať v builde" (``continue_build``)
+    — whose ``_run_build_round`` already reclaims the orphaned ``in_progress`` task and re-runs
+    it on its persisted ``baseline_sha``. Recovery ONLY flips state + notifies (the reclaim
+    stays in the loop, DRY). **BUILD only** — non-build stages are short, Director-attended
+    turns. ``Task.status`` is untouched, so the orphaned ``in_progress`` task stays counted by
+    :func:`_build_open_findings` and ``approve`` stays blocked until ``continue_build`` runs.
+    """
+    rows = (
+        db.execute(
+            select(PipelineState).where(
+                PipelineState.current_stage == "build",
+                PipelineState.status == "agent_working",
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for state in rows:
+        state.status = "awaiting_director"
+        state.next_action = "Build prerušený reštartom backendu — pokračuj cez 'Pokračovať v builde'."
+        _record_message(
+            db,
+            version_id=state.version_id,
+            stage="build",
+            author="system",
+            recipient="director",
+            kind="notification",
+            content=(
+                "Build bol prerušený reštartom backendu — obnovený do stavu 'čaká na Directora'. "
+                "Pokračuj cez 'Pokračovať v builde'."
+            ),
+        )
+    db.commit()
+    return len(rows)
+
+
 def _fetch_cross_cutting_rules(db: Session, version_id: uuid.UUID) -> Optional[str]:
     """Re-read the cross-cutting regulated-ledger invariants the Designer codified once in
     the task_plan gate_report payload (CR-NS-020 CR-2). Injected into every per-task brief."""

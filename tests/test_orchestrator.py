@@ -1876,3 +1876,68 @@ async def test_continue_build_rejected_outside_build(db_session, fake_claude):
     _settle(db_session, version.id)  # kickoff / awaiting_director (past the status guard)
     with pytest.raises(orchestrator.OrchestratorError):
         await orchestrator.apply_action(db_session, version_id=version.id, action="continue_build")
+
+
+# ── restart-mid-build recovery (F-007 §7.3, CR-NS-021) ──────────────────────────
+
+
+async def test_recover_orphaned_build_at_agent_working(db_session, fake_claude):
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    state = _to_build(db_session, version)  # build / agent_working (stranded by a restart)
+    assert state.status == "agent_working"
+
+    n = orchestrator.recover_orphaned_builds_on_startup(db_session)
+
+    assert n == 1
+    state = orchestrator._get_state(db_session, version.id)
+    assert state.current_stage == "build"
+    assert state.status == "awaiting_director"
+    assert "Pokračovať v builde" in state.next_action
+    notif = [
+        m
+        for m in _msgs(db_session, version.id)
+        if m.author == "system" and m.recipient == "director" and m.kind == "notification" and m.stage == "build"
+    ]
+    assert notif and "reštartom" in notif[-1].content
+
+
+async def test_recover_leaves_awaiting_director_build_untouched(db_session, fake_claude):
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    state = _to_build(db_session, version)
+    state.status = "awaiting_director"  # already settled — not stranded
+    db_session.flush()
+    assert orchestrator.recover_orphaned_builds_on_startup(db_session) == 0
+
+
+async def test_recover_leaves_non_build_agent_working_untouched(db_session, fake_claude):
+    # kickoff/agent_working after start — a non-build stage is NOT recovered (build-only).
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    assert orchestrator._get_state(db_session, version.id).status == "agent_working"
+    assert orchestrator.recover_orphaned_builds_on_startup(db_session) == 0
+    assert orchestrator._get_state(db_session, version.id).status == "agent_working"  # untouched
+
+
+async def test_recover_then_continue_build_reclaims_and_continues(db_session, fake_claude, monkeypatch):
+    # End-to-end: a build stranded mid-task → recover → continue_build → _run_build_round reclaims
+    # the orphaned in_progress task (from its persisted baseline) and finishes it.
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "a" * 40)
+    fake_claude.response = _build_fake()
+    version, project = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _epic, _feat, (task,) = _seed_one_feat(db_session, version, project, ["T"])
+    task.status = "in_progress"  # the Programmer was mid-task when the backend restarted
+    task.baseline_sha = "0" * 40  # baseline persisted by that dispatch
+    _to_build(db_session, version)
+    db_session.flush()
+
+    assert orchestrator.recover_orphaned_builds_on_startup(db_session) == 1
+    state = await orchestrator.apply_action(db_session, version_id=version.id, action="continue_build")
+    assert state.status == "agent_working"
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    db_session.refresh(task)
+    assert task.status == "done"  # reclaimed (in_progress→todo) + re-run → completed
+    assert state.status == "awaiting_director"
