@@ -18,7 +18,9 @@ import { nextStageLabel } from "./labels";
 // gate too — the engine's approve advances kickoff→gate_a (NOT a `start`; the
 // real start is the state===null CTA on CockpitPage). gate_g (PASS/FAIL verdict)
 // and gate_e (its own Customer-loop boundary actions) are excluded.
-const RATIFY_STAGES = new Set(["kickoff", "gate_a", "gate_b", "gate_c", "gate_d"]);
+// task_plan is a plain ratify gate (CR-NS-023): approve → task_plan→build (starts the per-task
+// loop); return → re-decompose (CR-NS-022 §3 resets the Designer session). build has its own block.
+const RATIFY_STAGES = new Set(["kickoff", "gate_a", "gate_b", "gate_c", "gate_d", "task_plan"]);
 
 interface Props {
   state: PipelineState | null;

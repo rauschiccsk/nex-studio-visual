@@ -298,3 +298,19 @@ describe("PipelineActionBar — build controls (CR-NS-020 CR-5)", () => {
     expect(screen.queryByText("Schváliť build → Audit")).not.toBeInTheDocument();
   });
 });
+
+describe("PipelineActionBar — task_plan ratify gate (CR-NS-023)", () => {
+  it("offers Schváliť podľa Návrhára + Vrátiť at task_plan/awaiting_director", () => {
+    const onAction = vi.fn();
+    render(<PipelineActionBar state={mkState("task_plan", "awaiting_director")} inFlight={false} onAction={onAction} />);
+    expect(screen.getByText("Schváliť podľa Návrhára")).toBeInTheDocument();
+    expect(screen.getByText("Vrátiť")).toBeInTheDocument();
+    screen.getByText("Schváliť podľa Návrhára").click();
+    expect(onAction).toHaveBeenCalledWith("approve");
+  });
+
+  it("does not show the ratify gate while task_plan is agent_working", () => {
+    render(<PipelineActionBar state={mkState("task_plan", "agent_working")} inFlight={false} onAction={vi.fn()} />);
+    expect(screen.queryByText("Schváliť podľa Návrhára")).not.toBeInTheDocument();
+  });
+});
