@@ -47,6 +47,16 @@ export const ROLE_LABELS: Record<PipelineParticipant, string> = {
   system: "Systém",
 };
 
+// Slovak labels for EPIC/FEAT/TASK node statuses in the TaskPlanPanel tree (CR-NS-020 CR-5).
+// Union of epic (planned/in_progress/done) + feat/task (todo/in_progress/done/failed).
+export const TASK_STATUS_LABELS: Record<string, string> = {
+  planned: "Naplánované",
+  todo: "Čaká",
+  in_progress: "Prebieha",
+  done: "Hotovo",
+  failed: "Zlyhalo",
+};
+
 // Canonical stage order — mirrors backend orchestrator.STAGE_ORDER. Shared so the
 // rail and the action bar don't each keep a copy (DRY).
 export const STAGE_ORDER: PipelineStage[] = [

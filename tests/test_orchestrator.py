@@ -580,6 +580,7 @@ async def test_answer_after_routed_question_reaches_worker(db_session, fake_clau
         ("uat_accept", {}),
         ("return", {"comment": "x"}),
         ("apply_coordinator_recommendation", {}),
+        ("continue_build", {}),
     ],
 )
 async def test_advancing_actions_rejected_while_agent_working(db_session, fake_claude, action, payload):
@@ -1598,8 +1599,9 @@ async def test_build_loop_runs_tasks_in_order_then_awaits_director(db_session, f
     briefs = [c["prompt"] for c in fake_claude.calls if c["prompt"].startswith("Programátor")]
     assert "T-one" in briefs[0] and "T-two" in briefs[1]  # dispatched in plan order
     assert all("podvojnosť" in b for b in briefs)  # cross-cutting block injected into every brief
-    # the Auditor was dispatched per task (CR-4 per-task audit turn)
-    assert any(m.author == "auditor" and m.stage == "build" for m in _msgs(db_session, version.id))
+    # the Auditor was dispatched per task (CR-4 per-task audit turn), tagged with task_id (CR-5)
+    auditor_msgs = [m for m in _msgs(db_session, version.id) if m.author == "auditor" and m.stage == "build"]
+    assert auditor_msgs and all(m.payload and m.payload.get("task_id") for m in auditor_msgs)
     # final sign-off advances build → gate_g
     state = await orchestrator.apply_action(db_session, version_id=version.id, action="approve")
     assert state.current_stage == "gate_g"
@@ -1846,3 +1848,31 @@ async def test_approve_at_build_blocked_while_todo_remains(db_session, fake_clau
     db_session.flush()
     with pytest.raises(orchestrator.OrchestratorError):
         await orchestrator.apply_action(db_session, version_id=version.id, action="approve")
+
+
+async def test_continue_build_resumes_at_halt(db_session, fake_claude, monkeypatch):
+    # CR-5 §7.2: continue_build re-dispatches the build loop after a HALT, no comment, no stage
+    # advance; the audit record is Director↔Coordinator (the engine re-dispatches the Implementer).
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "c" * 40)
+    fake_claude.response = _build_fake()
+    version, project = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _seed_one_feat(db_session, version, project, ["T"])
+    state = _to_build(db_session, version)
+    state.status = "awaiting_director"  # HALT
+    db_session.flush()
+
+    state = await orchestrator.apply_action(db_session, version_id=version.id, action="continue_build")
+
+    assert state.current_stage == "build"  # stage unchanged — does NOT advance to gate_g
+    assert state.status == "agent_working"  # re-dispatch initiated (the route then schedules the loop)
+    cont = [m for m in _msgs(db_session, version.id) if m.kind == "approval" and "pokračuje" in m.content]
+    assert cont and cont[-1].author == "director" and cont[-1].recipient == "coordinator"  # §6/§7 rule
+
+
+async def test_continue_build_rejected_outside_build(db_session, fake_claude):
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _settle(db_session, version.id)  # kickoff / awaiting_director (past the status guard)
+    with pytest.raises(orchestrator.OrchestratorError):
+        await orchestrator.apply_action(db_session, version_id=version.id, action="continue_build")

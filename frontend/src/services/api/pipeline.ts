@@ -99,6 +99,8 @@ export type PipelineActionName =
   | "verdict"
   | "uat_accept"
   | "end_gate_e"
+  | "end_build"
+  | "continue_build"
   | "pause";
 
 export interface PipelineActionRequest {

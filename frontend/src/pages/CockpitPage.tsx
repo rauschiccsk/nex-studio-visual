@@ -14,6 +14,7 @@ import {
 import PipelineRail, { deriveActiveAgent } from "../components/cockpit/PipelineRail";
 import ExchangePanel from "../components/cockpit/ExchangePanel";
 import DebugTerminalDrawer from "../components/cockpit/DebugTerminalDrawer";
+import TaskPlanPanel from "../components/cockpit/TaskPlanPanel";
 
 export default function CockpitPage() {
   const navigate = useNavigate();
@@ -115,6 +116,15 @@ export default function CockpitPage() {
             />
           )}
         </div>
+
+        {/* Right column — task-plan tree + per-task audit (F-007 §7, CR-NS-020 CR-5). Only during
+            task_plan / build, when the EPIC→FEAT→TASK plan exists and tasks are being built. */}
+        {versionId &&
+          (board?.state?.current_stage === "task_plan" || board?.state?.current_stage === "build") && (
+            <div className="flex w-80 flex-shrink-0 flex-col border-l border-slate-800">
+              <TaskPlanPanel versionId={versionId} messages={board?.recent_messages ?? []} />
+            </div>
+          )}
       </div>
     </div>
   );

@@ -271,3 +271,30 @@ describe("PipelineActionBar — Gate E topic boundary (Phase 3)", () => {
     expect(screen.getByText("Finálne schválenie → Plán úloh").closest("button")).toBeDisabled();
   });
 });
+
+describe("PipelineActionBar — build controls (CR-NS-020 CR-5)", () => {
+  it("offers the full build control set at build/awaiting_director", () => {
+    render(<PipelineActionBar state={mkState("build", "awaiting_director")} inFlight={false} onAction={vi.fn()} />);
+    expect(screen.getByText("Schváliť build → Audit")).toBeInTheDocument();
+    expect(screen.getByText("Pokračovať v builde")).toBeInTheDocument();
+    expect(screen.getByText("Vrátiť úlohu")).toBeInTheDocument();
+    expect(screen.getByText("Ukončiť build (zvyšok do auditu)")).toBeInTheDocument();
+  });
+
+  it("fires continue_build / approve / end_build with no payload", () => {
+    const onAction = vi.fn();
+    render(<PipelineActionBar state={mkState("build", "awaiting_director")} inFlight={false} onAction={onAction} />);
+    screen.getByText("Pokračovať v builde").click();
+    expect(onAction).toHaveBeenCalledWith("continue_build");
+    screen.getByText("Schváliť build → Audit").click();
+    expect(onAction).toHaveBeenCalledWith("approve");
+    screen.getByText("Ukončiť build (zvyšok do auditu)").click();
+    expect(onAction).toHaveBeenCalledWith("end_build");
+  });
+
+  it("hides the build controls while build is agent_working", () => {
+    render(<PipelineActionBar state={mkState("build", "agent_working")} inFlight={false} onAction={vi.fn()} />);
+    expect(screen.queryByText("Pokračovať v builde")).not.toBeInTheDocument();
+    expect(screen.queryByText("Schváliť build → Audit")).not.toBeInTheDocument();
+  });
+});

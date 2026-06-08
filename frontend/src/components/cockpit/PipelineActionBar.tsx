@@ -326,6 +326,51 @@ export function PipelineActionBar({
         </ActionRow>
       )}
 
+      {/* Build per-task loop (F-007 §6/§7): the Director's controls at a build awaiting-director
+          stop — sign-off, resume, rework a failed task, or early-end. The backend guards enforce
+          readiness (approve blocks while todo/open findings remain; end_build blocks on a failed
+          task), so the buttons are offered and the engine returns a clear error if not ready. */}
+      {current_stage === "build" && awaiting && (
+        <>
+          <ActionRow hint="Všetky úlohy hotové → uzavrie build a posunie na Audit.">
+            <button
+              onClick={() => onAction("approve")}
+              disabled={inFlight}
+              className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
+            >
+              Schváliť build → Audit
+            </button>
+          </ActionRow>
+          <ActionRow hint="Prostredie opravené → pokračuj v stavaní úloh (bez komentára).">
+            <button
+              onClick={() => onAction("continue_build")}
+              disabled={inFlight}
+              className={`${btn} bg-primary-600 text-white hover:bg-primary-500`}
+            >
+              Pokračovať v builde
+            </button>
+          </ActionRow>
+          <ActionRow hint="Vrátiš zlyhanú úlohu (cez Koordinátora) → nový pokus s pripomienkou.">
+            <button
+              onClick={() => openComposer({ action: "return", label: "Vrátiť úlohu s komentárom", field: "comment" })}
+              disabled={inFlight}
+              className={`${btn} border border-red-500/40 text-red-300 hover:bg-red-500/10`}
+            >
+              Vrátiť úlohu
+            </button>
+          </ActionRow>
+          <ActionRow hint="Zvyšok úloh pošleš do auditu (zlyhaná úloha stále blokuje).">
+            <button
+              onClick={() => onAction("end_build")}
+              disabled={inFlight}
+              className={`${btn} border border-slate-600 text-slate-300 hover:bg-slate-800`}
+            >
+              Ukončiť build (zvyšok do auditu)
+            </button>
+          </ActionRow>
+        </>
+      )}
+
       {questionBlock && (
         <ActionRow hint="Odpovieš agentovi → pokračuje vo fáze.">
           <button

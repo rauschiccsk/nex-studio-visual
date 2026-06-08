@@ -103,6 +103,7 @@ _ACTIONS = frozenset(
         "uat_accept",
         "end_gate_e",
         "end_build",
+        "continue_build",
         "pause",
     }
 )
@@ -120,6 +121,7 @@ _ADVANCING_ACTIONS = frozenset(
         "return",
         "end_gate_e",
         "end_build",
+        "continue_build",
     }
 )
 
@@ -1417,6 +1419,9 @@ async def _verify_task(
         stage="build",
         prompt=_audit_prompt_for_task(task, block, cross_cutting),
         on_message=on_message,
+        # Tag the audit message so the FE per-task audit panel can match it to its task
+        # (CR-NS-020 CR-5 — mirrors the Programmer turn's tag; payload merges it at invoke_agent).
+        extra_payload={"task_id": str(task.id), "task_number": task.number},
     )
     if isinstance(audit, ParseFailure):
         return f"audit nečitateľný: {audit.reason}"
@@ -1898,6 +1903,26 @@ async def apply_action(
         state.current_stage = _next_stage("build")  # → gate_g
         db.flush()
         _begin_dispatch(db, state)
+        return state
+
+    if action == "continue_build":
+        # Director resumes the build loop after a HALT ("prostredie opravené, pokračuj", F-007 §7.2)
+        # — no comment, no stage change: just re-dispatch _run_build_round (it re-picks the next
+        # todo task). Distinct from `return` (rework a failed task, comment required) and `end_build`
+        # (skip the rest → gate_g). The record is Director↔Coordinator (§6/§7 — the Director never
+        # addresses the worker directly; the engine re-dispatches the Implementer via _begin_dispatch).
+        if state.current_stage != "build":
+            raise OrchestratorError("continue_build je platné len vo fáze build")
+        _record_message(
+            db,
+            version_id=version_id,
+            stage="build",
+            author="director",
+            recipient="coordinator",
+            kind="approval",
+            content="Build pokračuje (prostredie opravené).",
+        )
+        _begin_dispatch(db, state)  # stage stays build; status → agent_working; the route schedules it
         return state
 
     # action == "pause"

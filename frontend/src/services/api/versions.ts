@@ -12,6 +12,7 @@
 
 import api from "../api";
 import type { Version, VersionCreate, VersionUpdate } from "../../types/version";
+import type { TaskPlanResponse } from "../../types/task-plan";
 
 /**
  * List every version belonging to a project, ordered by
@@ -60,4 +61,13 @@ export function releaseVersion(id: string): Promise<Version> {
  */
 export function deleteVersion(id: string): Promise<void> {
   return api.delete<void>(`/versions/${id}`);
+}
+
+/**
+ * Fetch the EPIC → FEAT → TASK task-plan tree (+ per-node status + counts) the
+ * Designer materialized for a version (F-007 task-plan node, CR-NS-020 CR-5).
+ * Drives the cockpit ``TaskPlanPanel``; reuses the existing backend endpoint.
+ */
+export function getTaskPlan(versionId: string): Promise<TaskPlanResponse> {
+  return api.get<TaskPlanResponse>(`/versions/${versionId}/task-plan`);
 }
