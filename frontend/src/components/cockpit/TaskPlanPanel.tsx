@@ -103,6 +103,17 @@ export default function TaskPlanPanel({ versionId, messages }: Props) {
   const allTasks: TaskPlanTaskNode[] = (plan?.plan ?? []).flatMap((e) => e.feats.flatMap((f) => f.tasks));
   const selectedTask = allTasks.find((t) => t.id === selectedTaskId) ?? null;
 
+  // Build-progress indicator (CR-NS-025 Part 2): % of tasks done, live for free off the same fetched
+  // plan as the tree (Part 1's task-start refetch updates it as tasks finish — no new data/endpoint).
+  const doneCount = allTasks.filter((t) => t.status === "done").length;
+  const failedCount = allTasks.filter((t) => t.status === "failed").length;
+  const totalCount = allTasks.length;
+  const pct = totalCount ? Math.round((doneCount / totalCount) * 100) : 0;
+  // Show only when there are tasks to track and no fetch error: hides the no-plan / loading / error
+  // states (mirrors the tree's error branch) AND the degenerate "epics but zero tasks" case — no
+  // confusing "0/0 úloh (0 %)". totalCount>0 already implies a non-null plan with a populated tree.
+  const showProgress = !error && totalCount > 0;
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-shrink-0 items-center justify-between border-b border-slate-800 px-3 py-2">
@@ -113,6 +124,24 @@ export default function TaskPlanPanel({ versionId, messages }: Props) {
           </span>
         )}
       </div>
+
+      {showProgress && (
+        <div className="flex-shrink-0 border-b border-slate-800 px-3 py-2">
+          <div className="mb-1 text-[10px] text-slate-400">
+            <span>
+              Postup: {doneCount}/{totalCount} úloh ({pct} %)
+            </span>
+            {failedCount > 0 && <span className="text-red-400"> · {failedCount} zlyhané</span>}
+          </div>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
+            <div
+              data-testid="taskplan-progress-fill"
+              className={`h-full rounded-full transition-all ${pct === 100 ? "bg-emerald-500" : "bg-amber-400"}`}
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2 text-xs">
         {error ? (

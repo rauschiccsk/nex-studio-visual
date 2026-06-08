@@ -76,7 +76,15 @@ def fake_claude(monkeypatch):
 
 
 def _msgs(db_session, version_id):
-    return db_session.execute(select(PipelineMessage).where(PipelineMessage.version_id == version_id)).scalars().all()
+    # Order by seq (insertion order) like every production query — created_at ties within a
+    # transaction (func.now() is constant), so order-dependent assertions need the seq tie-break.
+    return (
+        db_session.execute(
+            select(PipelineMessage).where(PipelineMessage.version_id == version_id).order_by(PipelineMessage.seq.asc())
+        )
+        .scalars()
+        .all()
+    )
 
 
 def _settle(db_session, version_id, status="awaiting_director"):
@@ -1614,6 +1622,69 @@ async def test_build_loop_runs_tasks_in_order_then_awaits_director(db_session, f
     # final sign-off advances build → gate_g
     state = await orchestrator.apply_action(db_session, version_id=version.id, action="approve")
     assert state.current_stage == "gate_g"
+
+
+async def test_build_records_task_start_notification_once_per_task(db_session, fake_claude, monkeypatch):
+    # CR-NS-025 Part 1: each dispatched task emits a system→director "▶ Úloha #N…" notification with a
+    # task_id payload, broadcast via on_message BEFORE the Programmer turn, so TaskPlanPanel refetches
+    # and the in_progress task shows live (the panel keys its refetch on messages.length).
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "a" * 40)
+    version, project = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _seed_cross_cutting(db_session, version, "## Invarianty")
+    _epic, _feat, tasks = _seed_one_feat(db_session, version, project, ["T-one", "T-two"])
+    _to_build(db_session, version)
+    fake_claude.response = _build_fake()
+
+    broadcast: list[tuple[str, str, str]] = []  # (author, kind, content) in on_message order
+
+    async def _collect(msg):
+        broadcast.append((msg.author, msg.kind, msg.content))
+
+    await orchestrator.run_dispatch(db_session, version.id, on_message=_collect)
+
+    starts = [
+        m for m in _msgs(db_session, version.id) if m.kind == "notification" and m.content.startswith("▶ Úloha #")
+    ]
+    assert len(starts) == len(tasks)  # exactly one start per task
+    for m, task in zip(starts, tasks):
+        assert m.author == "system" and m.recipient == "director" and m.stage == "build"
+        assert m.payload == {"task_id": str(task.id), "task_number": task.number}
+        assert task.title in m.content
+    # broadcast via on_message: EVERY task's breadcrumb precedes that task's own Programmer gate_report
+    for task in tasks:
+        start_i = next(i for i, (_a, k, c) in enumerate(broadcast) if k == "notification" and f"#{task.number}:" in c)
+        prog_i = next(
+            i for i, (a, k, _c) in enumerate(broadcast) if a == "implementer" and k == "gate_report" and i > start_i
+        )
+        assert start_i < prog_i
+
+
+async def test_build_task_start_notification_not_repeated_on_auto_fix(db_session, fake_claude, monkeypatch):
+    # CR-NS-025 Part 1: a task that auto-fixes (fail twice → pass on the 3rd) still emits exactly ONE
+    # start notification — the breadcrumb is per task; the auto-fix retries are separate return messages.
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "b" * 40)
+    calls = {"n": 0}
+
+    def _verify(slug, block, baseline_sha=None):
+        calls["n"] += 1
+        return "diff prázdny" if calls["n"] < 3 else None
+
+    monkeypatch.setattr(orchestrator, "verify_mechanical", _verify)
+    version, project = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _epic, _feat, (_task,) = _seed_one_feat(db_session, version, project, ["T"])
+    _to_build(db_session, version)
+    fake_claude.response = _build_fake()
+
+    await orchestrator.run_dispatch(db_session, version.id)
+
+    starts = [
+        m for m in _msgs(db_session, version.id) if m.kind == "notification" and m.content.startswith("▶ Úloha #")
+    ]
+    assert len(starts) == 1  # one start despite three attempts
+    autofix = [m for m in _msgs(db_session, version.id) if m.kind == "return" and "Auto-fix" in m.content]
+    assert len(autofix) == 2  # the retries are separate return messages, not start notifications
 
 
 async def test_build_auto_fix_retries_then_passes(db_session, fake_claude, monkeypatch):

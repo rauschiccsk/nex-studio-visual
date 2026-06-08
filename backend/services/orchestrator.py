@@ -1604,6 +1604,25 @@ async def _run_build_round(
             return state
         task.status = "in_progress"
         db.flush()
+        # CR-NS-025 Part 1: live current-task breadcrumb. The task is in_progress NOW, but the
+        # Programmer's first gate_report (the next recorded message) can be a long turn away — and
+        # TaskPlanPanel only refetches the plan when messages.length changes. Record ONE task-start
+        # notification per task (here, before the attempt loop) and broadcast it, so the panel
+        # refetches immediately and the in_progress task shows live. Auto-fix retries and the
+        # completion gate_report record their own messages → only the START was missing. Placed
+        # after the fail-closed baseline guard so a never-dispatched task emits no "začal" breadcrumb.
+        start_msg = _record_message(
+            db,
+            version_id=version_id,
+            stage="build",
+            author="system",
+            recipient="director",
+            kind="notification",
+            content=f"▶ Úloha #{task.number}: {task.title} — Programátor začal.",
+            payload={"task_id": str(task.id), "task_number": task.number},
+        )
+        if on_message is not None:
+            await on_message(start_msg)
 
         prior_failures: list[str] = []
         task_done = False

@@ -12,7 +12,7 @@ import "@testing-library/jest-dom/vitest";
 
 import TaskPlanPanel from "@/components/cockpit/TaskPlanPanel";
 import type { PipelineMessage } from "@/services/api/pipeline";
-import type { TaskPlanResponse } from "@/types/task-plan";
+import type { TaskPlanResponse, TaskNodeStatus } from "@/types/task-plan";
 import { getTaskPlan } from "@/services/api/versions";
 
 vi.mock("@/services/api/versions", () => ({ getTaskPlan: vi.fn() }));
@@ -84,5 +84,90 @@ describe("TaskPlanPanel (CR-NS-020 CR-5)", () => {
     task.closest("button")!.click();
     expect(await screen.findByText("Audit FAIL")).toBeInTheDocument();
     expect(screen.getByText("chýba podvojnosť")).toBeInTheDocument();
+  });
+});
+
+function planWith(statuses: TaskNodeStatus[]): TaskPlanResponse {
+  return {
+    plan: [
+      {
+        id: "e1",
+        number: 1,
+        title: "Epic",
+        status: "in_progress",
+        feats: [
+          {
+            id: "f1",
+            number: 1,
+            title: "Feat",
+            status: "in_progress",
+            tasks: statuses.map((status, i) => ({
+              id: `t${i + 1}`,
+              number: i + 1,
+              title: `Task ${i + 1}`,
+              task_type: "backend",
+              status,
+              priority: "normal",
+              checklist_type: null,
+              description: "",
+            })),
+          },
+        ],
+      },
+    ],
+    epic_count: 1,
+    feat_count: 1,
+    task_count: statuses.length,
+  };
+}
+
+const EMPTY_PLAN: TaskPlanResponse = { plan: [], epic_count: 0, feat_count: 0, task_count: 0 };
+
+describe("TaskPlanPanel — build progress indicator (CR-NS-025 Part 2)", () => {
+  it("renders the % of tasks done for a mixed plan (3/8 → 38 %)", async () => {
+    vi.mocked(getTaskPlan).mockResolvedValue(
+      planWith(["done", "done", "done", "in_progress", "todo", "todo", "todo", "todo"]),
+    );
+    render(<TaskPlanPanel versionId="v1" messages={[]} />);
+    expect(await screen.findByText(/Postup: 3\/8 úloh \(38 %\)/)).toBeInTheDocument();
+    expect(screen.getByTestId("taskplan-progress-fill")).toHaveClass("bg-amber-400"); // <100 → amber
+  });
+
+  it("shows 100 % and a green bar when all tasks are done", async () => {
+    vi.mocked(getTaskPlan).mockResolvedValue(planWith(["done", "done", "done"]));
+    render(<TaskPlanPanel versionId="v1" messages={[]} />);
+    expect(await screen.findByText(/Postup: 3\/3 úloh \(100 %\)/)).toBeInTheDocument();
+    expect(screen.getByTestId("taskplan-progress-fill")).toHaveClass("bg-emerald-500"); // 100 → green
+  });
+
+  it("surfaces the failed count in red when any task failed", async () => {
+    vi.mocked(getTaskPlan).mockResolvedValue(planWith(["done", "failed", "todo", "failed"]));
+    render(<TaskPlanPanel versionId="v1" messages={[]} />);
+    expect(await screen.findByText(/Postup: 1\/4 úloh \(25 %\)/)).toBeInTheDocument();
+    expect(screen.getByText(/· 2 zlyhané/)).toBeInTheDocument();
+  });
+
+  it("hides the indicator when there is no plan", async () => {
+    vi.mocked(getTaskPlan).mockResolvedValue(EMPTY_PLAN);
+    render(<TaskPlanPanel versionId="v1" messages={[]} />);
+    expect(await screen.findByText("Plán úloh ešte nebol vytvorený.")).toBeInTheDocument();
+    expect(screen.queryByText(/Postup:/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("taskplan-progress-fill")).not.toBeInTheDocument();
+  });
+
+  it("hides the indicator when a plan has epics but zero tasks (no '0/0' state)", async () => {
+    vi.mocked(getTaskPlan).mockResolvedValue(planWith([])); // one epic/feat, no tasks → totalCount 0
+    render(<TaskPlanPanel versionId="v1" messages={[]} />);
+    expect(await screen.findByText(/Epic/)).toBeInTheDocument(); // the tree still renders the epic
+    expect(screen.queryByText(/Postup:/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("taskplan-progress-fill")).not.toBeInTheDocument();
+  });
+
+  it("hides the indicator on a fetch error (consistent with the tree's error state)", async () => {
+    vi.mocked(getTaskPlan).mockRejectedValue(new Error("Načítanie plánu zlyhalo"));
+    render(<TaskPlanPanel versionId="v1" messages={[]} />);
+    expect(await screen.findByText("Načítanie plánu zlyhalo")).toBeInTheDocument();
+    expect(screen.queryByText(/Postup:/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("taskplan-progress-fill")).not.toBeInTheDocument();
   });
 });
