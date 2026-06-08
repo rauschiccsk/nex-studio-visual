@@ -49,7 +49,7 @@ na `task_plan` — netreba editovať tieto call-sites. Registrácia stage = 4 lo
 |---|---|---|
 | **Tvorba plánu** | **Návrhár** | Plán = dekompozícia schváleného dizajnu, nie nový dizajn. Vlastník dizajnu vlastní rozpad. Programátor NESMIE plánovať (Shu — kreativita zakázaná); Koordinátor nie je producent artefaktov. |
 | **Implementácia tasku** | **Programátor** | Deterministický vykonávateľ jedného tasku za turn; brief + relevantná spec sekcia + cross-cutting rules injektnuté orchestrátorom. |
-| **Per-task review** | **Audítor** (audit) + **Koordinátor** (relay) | Audítor robí audit-vs-spec scoped na deliverables tasku (Spec Compliance + Consistency). Koordinátor overí, že report je reálny, a relaynе pri zlyhaní/zásahu. |
+| **Per-task review** | **Audítor** (audit) + **Koordinátor** (relay) | Audítor robí audit-vs-spec scoped na deliverables tasku (Spec Compliance + Consistency). Koordinátor overí, že report je reálny, a relayne pri zlyhaní/zásahu. |
 | **Director** | **schváli plán RAZ** + zasahuje len pri výnimke | Director ↔ Koordinátor výhradne; nikdy priamo Programátorovi (`fix` cestuje cez Koordinátora). |
 
 ## 4. Štruktúra plánu — VERSION → EPIC → FEAT → TASK, hrubozrnná
@@ -84,7 +84,7 @@ raz v pláne, orchestrátor injektuje do každého briefu.
 Beží ako gate: dispatch Návrhárovi → Návrhár dekomponuje finálny dizajn na EPIK/FEAT/TASK a
 emituje ich ako **typovaný `plan` payload** v status bloku (§9) → orchestrátor ho
 **deterministicky zapíše** do ORM (`_write_task_plan` — idempotentný *replace* epík verzie
-pri re-plане; atomicky alebo `blocked`, žiadny polovičný plán) → `awaiting_director`.
+pri re-pláne; atomicky alebo `blocked`, žiadny polovičný plán) → `awaiting_director`.
 **Žiadny Koordinátor-judge turn** (CR-2 decision 2026-06-07): deterministický write-path JE
 mechanická gate a **plán reviewuje Director** (schváli materializovaný strom RAZ — hrubozrnný
 ~6–8-task plán prečíta sám). Konzistentné s design-gate vzorom (gate_a–d sú Návrhár→Director
@@ -122,7 +122,7 @@ Per-task cyklus (`_run_build_round`, near-copy `_run_gate_e_round`):
      eskalujúci context — reuse pattern z `_auto_fix_loop` / verify-retry). Ak niektorý
      pokus prejde → `done`, ďalší task.
    - **FAIL aj po 5 pokusoch** → task `failed`, **HALT na `awaiting_director`**;
-     Koordinátor relaynе Directorovi. Nič ďalšie sa nestavia.
+     Koordinátor relayne Directorovi. Nič ďalšie sa nestavia.
 6. **Deterministická gate** — `_build_open_findings` (count z orchestrátorovho **logu**,
    nie self-report): počet `failed`/`in_progress` (neoverených) taskov > 0 blokuje advance do
    `gate_g`, kým ich Director nevyrieši. `todo` sa **nepočíta** (aby `end_build` mohol pokročiť

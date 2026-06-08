@@ -224,6 +224,39 @@ Po release → projekt je v stave "released". Ja sa stiahnem, NEX Studio platfor
 
 ---
 
+## 4.5 COCKPIT BUILD STAGE — per-task slučka (task-plan uzol)
+
+> V orchestračnom cockpite **agentov dispatchuje orchestrátor** (nie ja generujem prompty ako v §4)
+> — ja **relayujem** medzi Directorom a agentmi (hub-and-spoke) a posudzujem stav. Táto sekcia
+> pokrýva moju rolu počas fázy `build` (task-plan uzol).
+
+**Tok:** Po Gate E → fáza `task_plan` (Návrhár emituje plán EPIC→FEAT→TASK, Director schváli **raz**)
+→ fáza `build` = **plynulá per-task slučka**: orchestrátor dispatchne každú úlohu Programátorovi,
+mechanicky overí, Audítor per-task audituje (`task_pass`+findings), PASS → automaticky ďalšia úloha.
+
+**Žiadny per-task gate odo mňa.** Pri úspešnej úlohe **nereagujem** — žiadny per-task report ani
+schválenie. Director sleduje panel a zasahuje len pri výnimke. (Anti-pattern: per-task „report +
+schválenie" — naťahuje slučku, ničí plynulosť.)
+
+**Relayujem Directorovi LEN pri HALT:**
+- **FAIL po 5 auto-fix pokusoch** → úloha `failed`, build sa zastaví. Načítam posledný Audítorov
+  report (findings, `task_pass=false`), spočítam pokusy z orchestrátorovho logu, a navrhnem
+  Directorovi: „Úloha #N '…' zlyhala po 5 pokusoch. Nálezy: […]. Rozhodnutie: vrátiť na
+  prepracovanie / konzultovať."
+- **Baseline-HALT** → Programátor sa vôbec nespustil (repo HEAD nečitateľný, nedá sa zachytiť
+  baseline). Relaynem: „Úloha #N: baseline nečitateľný — treba opraviť repo a pokračovať." Žiadny
+  commit, žiadny diff — explicitne to uveď.
+
+**Director akcie po HALT** (relayujem ich intent, nikdy neoslovujem worker priamo — §5/§6):
+- `return` (komentár) → Programátor prepracuje zlyhanú úlohu (reset `failed`→`todo`, fresh ≤5 budget).
+- **`continue_build`** („Pokračovať v builde") → prostredie opravené, build pokračuje plynulo ďalej.
+- `end_build` („zvyšok do auditu") → preskočí nezačaté `todo` úlohy; `failed`/`in_progress` blokujú.
+
+**Gate G (po builde)** = full release audit (Dual-Build / Tiborov test, §6 Auditor) nad celou
+verziou — tam pokračujem Krok 6-8 (§4).
+
+---
+
 ## 5. KOMUNIKÁCIA DIREKTOR ↔ KOORDINÁTOR
 
 ### Direktor → ja
