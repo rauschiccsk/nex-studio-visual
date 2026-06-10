@@ -778,8 +778,11 @@ async def invoke_agent_with_parse_retry(
             role=role,
             stage=stage,
             prompt=(
-                f"Tvoj <<<PIPELINE_STATUS>>> blok nebol platný JSON: {result.reason}. "
-                "Pošli LEN opravený, platný <<<PIPELINE_STATUS>>> blok — rovnaký obsah, správny JSON."
+                f"Tvoj <<<PIPELINE_STATUS>>> blok sa nepodarilo spracovať: {result.reason}. "
+                "Najčastejšia príčina je neescapovaná úvodzovka v textovom poli (summary/question/findings) — "
+                "v JSON reťazcoch píš slovenské úvodzovky kučeravé (znaky „ a “) alebo ich escapuj spätným lomítkom; "
+                "rovná úvodzovka (U+0022) v texte predčasne ukončí reťazec a rozbije celý blok. "
+                "Pošli LEN opravený, platný <<<PIPELINE_STATUS>>> blok — rovnaký obsah, správna JSON syntax aj schéma."
             ),
             recipient=recipient,
             on_message=on_message,
@@ -1500,7 +1503,12 @@ async def _verify_task(
     if mech is not None:
         return mech  # mechanical fail short-circuits — no point auditing a missing commit (saves a turn)
     cross_cutting = _fetch_cross_cutting_rules(db, state.version_id)
-    audit = await invoke_agent(
+    # Parse-retry on the AUDITOR (not the Programmer): an unparseable audit block is the
+    # Auditor's own formatting bug (e.g. an unescaped quote in a Slovak summary), so the fix
+    # is to re-ask the Auditor to re-emit valid JSON — NOT to bounce a failure into the
+    # auto-fix loop, which would re-run the Programmer's (correct) work on the wrong target
+    # (Dedo 2026-06-10: per-task audit JSON-robustness hardening).
+    audit = await invoke_agent_with_parse_retry(
         db,
         version_id=state.version_id,
         role="auditor",
