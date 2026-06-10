@@ -432,3 +432,60 @@ describe("PipelineActionBar — build readiness + paused (CR-NS-030 fold)", () =
     expect(onAction).toHaveBeenCalledWith("continue_build");
   });
 });
+
+describe("PipelineActionBar — accept_merged (WS-B2, CR-NS-031)", () => {
+  const buildActions: PipelineActionName[] = [
+    "approve",
+    "continue_build",
+    "return",
+    "end_build",
+    "accept_merged",
+    "ask",
+  ];
+
+  it("offers 'Uznať spoločný commit' at a build HALT (open findings) and fires accept_merged", () => {
+    const onAction = vi.fn();
+    render(
+      <PipelineActionBar
+        state={mkState("build", "awaiting_director")}
+        availableActions={buildActions}
+        allTasksDone={true}
+        buildOpenFindings={1}
+        inFlight={false}
+        onAction={onAction}
+      />,
+    );
+    const btn = screen.getByText("Uznať spoločný commit");
+    expect(btn).toBeInTheDocument();
+    btn.click();
+    expect(onAction).toHaveBeenCalledWith("accept_merged");
+  });
+
+  it("hides 'Uznať spoločný commit' on a clean build (no open findings)", () => {
+    render(
+      <PipelineActionBar
+        state={mkState("build", "awaiting_director")}
+        availableActions={buildActions}
+        allTasksDone={true}
+        buildOpenFindings={0}
+        inFlight={false}
+        onAction={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText("Uznať spoločný commit")).not.toBeInTheDocument();
+  });
+
+  it("hides 'Uznať spoločný commit' when the backend omits accept_merged (allowed() gate)", () => {
+    render(
+      <PipelineActionBar
+        state={mkState("build", "awaiting_director")}
+        availableActions={["approve", "continue_build", "return", "end_build", "ask"]} // accept_merged omitted
+        allTasksDone={true}
+        buildOpenFindings={1} // would show on findings alone — but the backend doesn't allow it
+        inFlight={false}
+        onAction={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText("Uznať spoločný commit")).not.toBeInTheDocument();
+  });
+});

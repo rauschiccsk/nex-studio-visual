@@ -644,6 +644,10 @@ def test_determine_available_actions_matrix():
     assert {"answer", "return", "continue_build", "end_build", "ask"} <= acts("build", "blocked")
     # a settled build (all tasks done) DOES offer the final sign-off
     assert "approve" in acts("build", "awaiting_director")
+    # accept_merged (WS-B2) is offered only at a settled build HALT (awaiting_director), never at a
+    # blocked programmer-question (no failed task to recognize there)
+    assert "accept_merged" in acts("build", "awaiting_director")
+    assert "accept_merged" not in acts("build", "blocked")
     # a gate question DOES offer approve (ratify the blocked-question output → advance)
     assert "approve" in acts("gate_a", "blocked")
     # agent working: only a build can be paused; gates offer nothing
@@ -677,6 +681,65 @@ async def test_build_readiness_reflects_todo_and_failed_tasks(db_session, fake_c
     tasks[0].status = "failed"
     db_session.flush()
     assert orchestrator.build_readiness(db_session, version.id) == (True, 1)
+
+
+async def test_accept_merged_moves_baseline_to_parent_and_task_repasses(db_session, fake_claude, monkeypatch):
+    # WS-B2 (CR-NS-031): a merged task (work in a commit at/before its baseline) dead-ends on
+    # "commit predates baseline". accept_merged moves the baseline to the reported commit's PARENT,
+    # resets the task to todo, records a director-decision audit message, and the re-dispatched build
+    # loop re-verifies it → done. No manual DB edit.
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "h" * 40)
+    monkeypatch.setattr(orchestrator, "_repo_parent", lambda root, commit: "p" * 40)
+    monkeypatch.setattr(orchestrator, "verify_mechanical", lambda slug, block, baseline_sha=None: None)
+    version, project = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _epic, _feat, (task,) = _seed_one_feat(db_session, version, project, ["T"])
+    # the merged-commit HALT: task failed, baseline = the merged commit, that commit reported by the Programmer
+    task.status = "failed"
+    task.baseline_sha = "m" * 40
+    db_session.flush()
+    db_session.add(
+        PipelineMessage(
+            version_id=version.id,
+            stage="build",
+            author="implementer",
+            recipient="director",
+            kind="gate_report",
+            content="hotovo (spoločný commit)",
+            payload={"task_id": str(task.id), "commits": ["m" * 40]},
+        )
+    )
+    db_session.flush()
+    state = _to_build(db_session, version)
+    state.status = "awaiting_director"
+    db_session.flush()
+
+    state = await orchestrator.apply_action(db_session, version_id=version.id, action="accept_merged")
+
+    db_session.refresh(task)
+    assert task.baseline_sha == "p" * 40  # moved to the reported commit's PARENT
+    assert task.status == "todo"  # reset → the loop re-verifies
+    assert state.status == "agent_working"  # re-dispatched
+    audit = [m for m in _msgs(db_session, version.id) if m.kind == "approval" and "spoločný commit" in m.content]
+    assert audit and audit[-1].payload.get("new_baseline") == "p" * 40  # director-decision recorded
+
+    # the re-dispatched build loop re-verifies the merged task against the moved baseline → done
+    fake_claude.response = _build_fake()
+    await orchestrator.run_dispatch(db_session, version.id)
+    db_session.refresh(task)
+    assert task.status == "done"
+
+
+async def test_accept_merged_rejected_without_failed_task(db_session, fake_claude):
+    # accept_merged needs a failed (merged) task — a clean build offers nothing to recognize.
+    version, project = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _seed_one_feat(db_session, version, project, ["T"])  # stays todo, none failed
+    state = _to_build(db_session, version)
+    state.status = "awaiting_director"
+    db_session.flush()
+    with pytest.raises(orchestrator.OrchestratorError):
+        await orchestrator.apply_action(db_session, version_id=version.id, action="accept_merged")
 
 
 async def test_answer_rejected_when_not_blocked(db_session, fake_claude):

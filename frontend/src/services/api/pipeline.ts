@@ -109,6 +109,7 @@ export type PipelineActionName =
   | "end_gate_e"
   | "end_build"
   | "continue_build"
+  | "accept_merged"
   | "pause";
 
 export interface PipelineActionRequest {

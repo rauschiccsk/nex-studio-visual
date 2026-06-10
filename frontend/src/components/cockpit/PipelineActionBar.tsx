@@ -420,6 +420,20 @@ export function PipelineActionBar({
               </button>
             </ActionRow>
           )}
+          {/* accept_merged (WS-B2, CR-NS-031): a merged task dead-ended on "commit predates baseline".
+              Offered only when a task actually failed (buildHasOpenFindings) — moves the baseline to the
+              reported commit's parent and re-verifies. */}
+          {allowed("accept_merged") && buildHasOpenFindings && (
+            <ActionRow hint="Práca úlohy je v spoločnom (skoršom) commite → uzná ho a úlohu znova overí.">
+              <button
+                onClick={() => onAction("accept_merged")}
+                disabled={inFlight}
+                className={`${btn} border border-sky-500/40 text-sky-300 hover:bg-sky-500/10`}
+              >
+                Uznať spoločný commit
+              </button>
+            </ActionRow>
+          )}
         </>
       )}
 

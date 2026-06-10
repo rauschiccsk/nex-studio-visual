@@ -104,6 +104,7 @@ _ACTIONS = frozenset(
         "end_gate_e",
         "end_build",
         "continue_build",
+        "accept_merged",
         "pause",
     }
 )
@@ -122,6 +123,7 @@ _ADVANCING_ACTIONS = frozenset(
         "end_gate_e",
         "end_build",
         "continue_build",
+        "accept_merged",
     }
 )
 
@@ -184,6 +186,11 @@ def determine_available_actions(state: PipelineState) -> set[str]:
         actions.update({"continue_build", "end_build"})
         if status == "awaiting_director":
             actions.add("approve")  # final sign-off only at a settled build — never on a blocked task
+            # accept_merged (WS-B2, CR-NS-031): a merged task dead-ends at a HALT, which settles to
+            # awaiting_director (never blocked — a blocked build is a programmer QUESTION, with no failed
+            # task to recognize). The FE further refines to "only when an open finding exists" via
+            # build_open_findings, so it never shows on a clean build.
+            actions.add("accept_merged")
     elif stage == "gate_g":
         actions.add("verdict")
     elif stage == "release":
@@ -979,6 +986,25 @@ def _repo_head(project_root: Path) -> Optional[str]:
         return None
 
 
+def _repo_parent(project_root: Path, commit: str) -> Optional[str]:
+    """Return the SHA of ``commit``'s first parent (``<commit>^``), or ``None`` if unreadable / a root
+    commit. Used by accept_merged (WS-B2, CR-NS-031): moving a merged task's baseline to the reported
+    commit's parent puts that commit back inside ``baseline..HEAD`` so it passes verify_mechanical."""
+    import subprocess
+
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(project_root), "rev-parse", "--verify", f"{commit}^"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        return r.stdout.strip() if r.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 async def verify_done(
     db: Session,
     version_id: uuid.UUID,
@@ -1441,6 +1467,37 @@ def _reset_failed_tasks_to_todo(db: Session, version_id: uuid.UUID) -> None:
     feat_ids = select(Feat.id).join(Epic, Epic.id == Feat.epic_id).where(Epic.version_id == version_id)
     db.execute(update(Task).where(Task.feat_id.in_(feat_ids), Task.status == "failed").values(status="todo"))
     db.flush()
+
+
+def _failed_build_task(db: Session, version_id: uuid.UUID) -> Optional[Task]:
+    """The version's failed build task (WS-B2, CR-NS-031) — the one the build loop HALTed on. The loop
+    processes tasks in order and stops on the first failure, so there is at most one; the lowest number
+    is the relevant one if several exist."""
+    feat_ids = select(Feat.id).join(Epic, Epic.id == Feat.epic_id).where(Epic.version_id == version_id)
+    return db.execute(
+        select(Task).where(Task.feat_id.in_(feat_ids), Task.status == "failed").order_by(Task.number).limit(1)
+    ).scalar_one_or_none()
+
+
+def _latest_reported_commit(db: Session, version_id: uuid.UUID, task_id: uuid.UUID) -> Optional[str]:
+    """The first commit the Programmer last reported for ``task_id`` (WS-B2, CR-NS-031), read from the
+    build dispatch messages' ``payload.commits``. Newest-first; ``None`` if no commit was reported."""
+    rows = (
+        db.execute(
+            select(PipelineMessage)
+            .where(PipelineMessage.version_id == version_id, PipelineMessage.stage == "build")
+            .order_by(PipelineMessage.seq.desc())
+        )
+        .scalars()
+        .all()
+    )
+    for m in rows:
+        payload = m.payload or {}
+        if str(payload.get("task_id")) == str(task_id):
+            commits = payload.get("commits") or []
+            if commits:
+                return commits[0]
+    return None
 
 
 def recover_orphaned_builds_on_startup(db: Session) -> int:
@@ -2137,6 +2194,48 @@ async def apply_action(
             content="Build pokračuje (prostredie opravené).",
         )
         _begin_dispatch(db, state)  # stage stays build; status → agent_working; the route schedules it
+        return state
+
+    if action == "accept_merged":
+        # WS-B2 (CR-NS-031): a legitimately-MERGED task dead-ends because its work sits in a commit
+        # at/before its baseline (verify_mechanical: "commit predates the task baseline" — e.g. status +
+        # transitions committed together, so task #3's work is in task #2's commit = task #3's baseline).
+        # The Director recognizes the Programmer's reported commit by moving the task's baseline to that
+        # commit's PARENT, so it falls back inside baseline..HEAD; the task resets to todo and the build
+        # loop re-verifies it (the Auditor checks the content as usual). Explicit Director action only —
+        # never silent auto-recognition (a task must never silently claim a prior commit).
+        if state.current_stage != "build":
+            raise OrchestratorError("accept_merged je platné len vo fáze build")
+        task = _failed_build_task(db, version_id)
+        if task is None:
+            raise OrchestratorError("Žiadna zlyhaná úloha — niet pri ktorej uznať spoločný commit")
+        commit = _latest_reported_commit(db, version_id, task.id)
+        if commit is None:
+            raise OrchestratorError("Programátor nenahlásil commit pre túto úlohu — nemožno uznať spoločný commit")
+        project_root = claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id)
+        parent = _repo_parent(project_root, commit)
+        if parent is None:
+            raise OrchestratorError(
+                f"Nepodarilo sa zistiť rodičovský commit pre {commit[:8]} — repo nečitateľné alebo koreňový commit"
+            )
+        task.baseline_sha = parent  # ORM assignment keeps the in-memory object in sync (CR-3 lesson)
+        task.status = "todo"  # re-attempt → the loop re-verifies against the moved baseline
+        db.flush()
+        task_service.recompute_feat_status(db, task.feat_id)
+        _record_message(
+            db,
+            version_id=version_id,
+            stage="build",
+            author="director",
+            recipient="coordinator",
+            kind="approval",
+            content=(
+                f"Uznaný spoločný commit pre úlohu #{task.number}: baseline presunutý na {parent[:8]} "
+                f"(rodič nahláseného commitu {commit[:8]}) — úloha sa znova overí."
+            ),
+            payload={"task_id": str(task.id), "accept_merged_commit": commit, "new_baseline": parent},
+        )
+        _begin_dispatch(db, state)  # re-run the build loop → re-verify the merged task against the moved baseline
         return state
 
     # action == "pause" (CR-NS-027): a genuine paused status, not just a label. The running build
