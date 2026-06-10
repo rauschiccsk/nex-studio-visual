@@ -24,6 +24,16 @@ const RATIFY_STAGES = new Set(["kickoff", "gate_a", "gate_b", "gate_c", "gate_d"
 
 interface Props {
   state: PipelineState | null;
+  /** Backend-authoritative offerable actions (WS-C1, CR-NS-030). When present, a button renders only
+   *  if its action is in this set (AND its existing finer condition holds); when absent, the FE falls
+   *  back to its own hardcoded logic. Ends no-op buttons like approve on a build-blocked task. */
+  availableActions?: PipelineActionName[];
+  /** Build readiness (WS-C1, CR-NS-030): false → a todo task remains (final approve@build blocked).
+   *  Absent → permissive (don't disable). */
+  allTasksDone?: boolean;
+  /** Build open findings (WS-C1, CR-NS-030): > 0 → a failed/unverified task (approve + end_build
+   *  blocked). Mirrors gateEOpenFindings. */
+  buildOpenFindings?: number;
   inFlight: boolean;
   /** Blocked due to an unexpected failure (agent crash/timeout) rather than an
    *  agent question — offer "Skús znova" instead of answer/approve (CR-NS-018). */
@@ -63,6 +73,9 @@ function ActionRow({ hint, children }: { hint?: string; children: ReactNode }) {
 
 export function PipelineActionBar({
   state,
+  availableActions,
+  allTasksDone,
+  buildOpenFindings,
   inFlight,
   isErrorBlock = false,
   hasCoordinatorReport = false,
@@ -78,10 +91,23 @@ export function PipelineActionBar({
   if (!state) return null;
 
   const { current_stage, status } = state;
+  // WS-C1 (CR-NS-030): the backend says which actions are valid to offer. A button renders only if
+  // its action is allowed (AND its existing finer condition below). Absent field → fall back to the
+  // FE's own logic (allow everything), so older boards / tests keep the current behaviour.
+  const allowed = (a: PipelineActionName) => (availableActions ? availableActions.includes(a) : true);
   const awaiting = status === "awaiting_director";
   const blocked = status === "blocked";
   const working = status === "agent_working";
+  const paused = status === "paused";
   const isDone = status === "done";
+
+  // Build readiness (WS-C1, CR-NS-030): the state-only available_actions OFFERS approve/end_build at a
+  // settled build, but apply_action rejects them while a todo remains (approve) or a finding is open
+  // (approve + end_build). Disable the buttons in those cases — like the Gate E open-finding gate —
+  // instead of letting them 400. Absent fields → permissive (don't disable), for backward-compat.
+  const buildHasOpenFindings = (buildOpenFindings ?? 0) > 0;
+  const buildEndReady = !buildHasOpenFindings; // end_build blocks only on open findings (todos are fine)
+  const buildApproveReady = allTasksDone !== false && !buildHasOpenFindings; // final sign-off: all done + clean
 
   // Gate E has its own boundary actions (Customer↔Designer loop) — kept out of the
   // generic ratify / question-block paths (CR-NS-018 Phase 3).
@@ -153,19 +179,21 @@ export function PipelineActionBar({
 
       {canRatify && (
         <>
-          <ActionRow
-            hint={`Prijme sa návrh Návrhára → spustí sa ďalšia fáza (${nextStageLabel(current_stage)}).`}
-          >
-            <button
-              onClick={() => onAction("approve")}
-              disabled={inFlight}
-              className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
+          {allowed("approve") && (
+            <ActionRow
+              hint={`Prijme sa návrh Návrhára → spustí sa ďalšia fáza (${nextStageLabel(current_stage)}).`}
             >
-              Schváliť podľa Návrhára
-            </button>
-          </ActionRow>
+              <button
+                onClick={() => onAction("approve")}
+                disabled={inFlight}
+                className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
+              >
+                Schváliť podľa Návrhára
+              </button>
+            </ActionRow>
+          )}
 
-          {awaitingRatify && hasCoordinatorReport && (
+          {awaitingRatify && hasCoordinatorReport && allowed("apply_coordinator_recommendation") && (
             <ActionRow hint="Návrhárovi sa pošlú odporúčania Koordinátora na zapracovanie. Pipeline počká.">
               <button
                 onClick={() => onAction("apply_coordinator_recommendation")}
@@ -177,15 +205,17 @@ export function PipelineActionBar({
             </ActionRow>
           )}
 
-          <ActionRow hint="Napíšeš vlastnú pripomienku → Návrhár prepracuje.">
-            <button
-              onClick={() => openComposer({ action: "return", label: "Vrátiť s komentárom", field: "comment" })}
-              disabled={inFlight}
-              className={`${btn} border border-red-500/40 text-red-300 hover:bg-red-500/10`}
-            >
-              Vrátiť
-            </button>
-          </ActionRow>
+          {allowed("return") && (
+            <ActionRow hint="Napíšeš vlastnú pripomienku → Návrhár prepracuje.">
+              <button
+                onClick={() => openComposer({ action: "return", label: "Vrátiť s komentárom", field: "comment" })}
+                disabled={inFlight}
+                className={`${btn} border border-red-500/40 text-red-300 hover:bg-red-500/10`}
+              >
+                Vrátiť
+              </button>
+            </ActionRow>
+          )}
         </>
       )}
 
@@ -293,7 +323,7 @@ export function PipelineActionBar({
         </>
       )}
 
-      {current_stage === "gate_g" && awaiting && (
+      {current_stage === "gate_g" && awaiting && allowed("verdict") && (
         <>
           <ActionRow hint="Audit prešiel → pipeline pokračuje na vydanie.">
             <button
@@ -316,7 +346,7 @@ export function PipelineActionBar({
         </>
       )}
 
-      {current_stage === "release" && awaiting && (
+      {current_stage === "release" && awaiting && allowed("uat_accept") && (
         <ActionRow hint="Verzia sa akceptuje zákazníkom (UAT) → hotovo.">
           <button
             onClick={() => onAction("uat_accept")}
@@ -334,46 +364,102 @@ export function PipelineActionBar({
           task), so the buttons are offered and the engine returns a clear error if not ready. */}
       {current_stage === "build" && awaiting && (
         <>
-          <ActionRow hint="Všetky úlohy hotové → uzavrie build a posunie na Audit.">
-            <button
-              onClick={() => onAction("approve")}
-              disabled={inFlight}
-              className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
+          {allowed("approve") && (
+            <ActionRow
+              hint={
+                buildApproveReady
+                  ? "Všetky úlohy hotové → uzavrie build a posunie na Audit."
+                  : "Build ešte nie je hotový (ostávajú nepostavené alebo neoverené úlohy) — najprv ich dokonči."
+              }
             >
-              Schváliť build → Audit
-            </button>
-          </ActionRow>
-          <ActionRow hint="Prostredie opravené → pokračuj v stavaní úloh (bez komentára).">
-            <button
-              onClick={() => onAction("continue_build")}
-              disabled={inFlight}
-              className={`${btn} bg-primary-600 text-white hover:bg-primary-500`}
+              <button
+                onClick={() => onAction("approve")}
+                disabled={inFlight || !buildApproveReady}
+                className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
+              >
+                Schváliť build → Audit
+              </button>
+            </ActionRow>
+          )}
+          {allowed("continue_build") && (
+            <ActionRow hint="Prostredie opravené → pokračuj v stavaní úloh (bez komentára).">
+              <button
+                onClick={() => onAction("continue_build")}
+                disabled={inFlight}
+                className={`${btn} bg-primary-600 text-white hover:bg-primary-500`}
+              >
+                Pokračovať v builde
+              </button>
+            </ActionRow>
+          )}
+          {allowed("return") && (
+            <ActionRow hint="Vrátiš zlyhanú úlohu (cez Koordinátora) → nový pokus s pripomienkou.">
+              <button
+                onClick={() => openComposer({ action: "return", label: "Vrátiť úlohu s komentárom", field: "comment" })}
+                disabled={inFlight}
+                className={`${btn} border border-red-500/40 text-red-300 hover:bg-red-500/10`}
+              >
+                Vrátiť úlohu
+              </button>
+            </ActionRow>
+          )}
+          {allowed("end_build") && (
+            <ActionRow
+              hint={
+                buildEndReady
+                  ? "Zvyšok (nepostavené úlohy) pošleš do auditu."
+                  : `Otvorené úlohy (${buildOpenFindings} zlyhané/neoverené) blokujú uzavretie — najprv ich vyrieš.`
+              }
             >
-              Pokračovať v builde
-            </button>
-          </ActionRow>
-          <ActionRow hint="Vrátiš zlyhanú úlohu (cez Koordinátora) → nový pokus s pripomienkou.">
-            <button
-              onClick={() => openComposer({ action: "return", label: "Vrátiť úlohu s komentárom", field: "comment" })}
-              disabled={inFlight}
-              className={`${btn} border border-red-500/40 text-red-300 hover:bg-red-500/10`}
-            >
-              Vrátiť úlohu
-            </button>
-          </ActionRow>
-          <ActionRow hint="Zvyšok úloh pošleš do auditu (zlyhaná úloha stále blokuje).">
-            <button
-              onClick={() => onAction("end_build")}
-              disabled={inFlight}
-              className={`${btn} border border-slate-600 text-slate-300 hover:bg-slate-800`}
-            >
-              Ukončiť build (zvyšok do auditu)
-            </button>
-          </ActionRow>
+              <button
+                onClick={() => onAction("end_build")}
+                disabled={inFlight || !buildEndReady}
+                className={`${btn} border border-slate-600 text-slate-300 hover:bg-slate-800`}
+              >
+                Ukončiť build (zvyšok do auditu)
+              </button>
+            </ActionRow>
+          )}
         </>
       )}
 
-      {questionBlock && (
+      {/* Build paused (CR-NS-027 + CR-NS-030): a cooperatively-paused build resumes via continue_build
+          or ends early via end_build. Without this block a paused build renders no controls — the pause
+          feature would be unusable from the UI (status=paused is neither awaiting nor blocked). */}
+      {current_stage === "build" && paused && (
+        <>
+          {allowed("continue_build") && (
+            <ActionRow hint="Build je pozastavený → pokračuj v stavaní úloh.">
+              <button
+                onClick={() => onAction("continue_build")}
+                disabled={inFlight}
+                className={`${btn} bg-primary-600 text-white hover:bg-primary-500`}
+              >
+                Pokračovať v builde
+              </button>
+            </ActionRow>
+          )}
+          {allowed("end_build") && (
+            <ActionRow
+              hint={
+                buildEndReady
+                  ? "Build ukončíš → zvyšok do auditu."
+                  : `Otvorené úlohy (${buildOpenFindings} zlyhané/neoverené) blokujú uzavretie — najprv ich vyrieš.`
+              }
+            >
+              <button
+                onClick={() => onAction("end_build")}
+                disabled={inFlight || !buildEndReady}
+                className={`${btn} border border-slate-600 text-slate-300 hover:bg-slate-800`}
+              >
+                Ukončiť build (zvyšok do auditu)
+              </button>
+            </ActionRow>
+          )}
+        </>
+      )}
+
+      {questionBlock && allowed("answer") && (
         <ActionRow hint="Odpovieš agentovi → pokračuje vo fáze.">
           <button
             onClick={() => openComposer({ action: "answer", label: "Odpovedať agentovi", field: "text" })}
@@ -385,7 +471,7 @@ export function PipelineActionBar({
         </ActionRow>
       )}
 
-      {errorBlock && (
+      {errorBlock && allowed("return") && (
         <ActionRow hint="Znovu spustí agenta v aktuálnej fáze.">
           <button
             onClick={() => onAction("return", { comment: "Skús znova." })}
@@ -399,7 +485,7 @@ export function PipelineActionBar({
 
       {/* Pause is build-only (CR-NS-027): only the build loop has a cooperative task boundary to
           stop at — a single-turn gate would silently complete, so we don't offer Pauza there. */}
-      {working && current_stage === "build" && (
+      {working && current_stage === "build" && allowed("pause") && (
         <ActionRow hint="Pozastaví build po dokončení aktuálnej úlohy.">
           <button
             onClick={() => onAction("pause")}
@@ -411,7 +497,7 @@ export function PipelineActionBar({
         </ActionRow>
       )}
 
-      {!isDone && (
+      {!isDone && allowed("ask") && (
         // At gate_e the Director communicates only with the Coordinator (§2): the
         // input (a question OR a constatation) goes to the Coordinator, who revises
         // its recommendation. Elsewhere it stays the plain "Otázka" (its reroute is a

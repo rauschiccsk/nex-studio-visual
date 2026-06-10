@@ -59,6 +59,16 @@ class PipelineBoardRead(BaseModel):
     #: Deterministic count of unresolved Gate E gaps (CR-NS-018 §5) — the authoritative
     #: open-finding value the FE close-gate reads, NOT the Customer's ``findings`` array.
     gate_e_open_findings: int = 0
+    #: Backend-authoritative set of Director actions valid to OFFER right now (WS-C1, CR-NS-030).
+    #: The FE renders only these (intersected with its finer message-derived conditions); empty when
+    #: the pipeline hasn't started.
+    available_actions: list[str] = Field(default_factory=list)
+    #: Build-readiness facts (WS-C1, CR-NS-030) the FE uses to DISABLE the final-approve / end-build
+    #: buttons (mirrors ``gate_e_open_findings``): ``all_tasks_done`` False → a task is still ``todo``
+    #: (approve blocked); ``build_open_findings`` > 0 → a failed/unverified task (approve + end_build
+    #: blocked). Defaults are the permissive "ready" values so an absent field never disables.
+    all_tasks_done: bool = True
+    build_open_findings: int = 0
 
 
 class PipelineActionRequest(BaseModel):

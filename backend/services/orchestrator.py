@@ -147,6 +147,64 @@ def _timeout_for(stage: str) -> int:
     return STAGE_TIMEOUT.get(stage, claude_agent.CLAUDE_INVOKE_TIMEOUT)
 
 
+def determine_available_actions(state: PipelineState) -> set[str]:
+    """The Director actions valid to OFFER right now, derived from (current_stage, status) — WS-C1
+    (CR-NS-030). The single backend source of truth for button presence, so the FE can't drift into
+    no-op buttons (the live bug: an "approve" rendered on a build-blocked task, where it is a no-op).
+
+    This is the (stage, status)-level offerable set — a subset of what :func:`apply_action` accepts.
+    Finer payload/DB preconditions stay in apply_action and are refined by the FE's message-derived
+    signals: a non-empty comment (return), all-tasks-done (approve@build), no open finding
+    (end_build / end_gate_e / final approve@gate_e), an open Designer gap (fix/leave), a Coordinator
+    report (apply_coordinator_recommendation). This set only removes the GROSS (stage, status)
+    mismatches; the FE intersects it with those finer conditions and falls back to its own logic when
+    the field is absent."""
+    stage, status = state.current_stage, state.status
+
+    if status == "agent_working":
+        # Nothing to ratify while the agent works; only a build loop has a cooperative pause boundary.
+        return {"pause"} if stage == "build" else set()
+    if status == "done":
+        return set()
+    if status == "paused":
+        # CR-NS-027: from a paused build, ONLY the resume pair.
+        return {"continue_build", "end_build"}
+
+    # Settled (awaiting_director / blocked): ask + return are universally valid (return has no stage
+    # guard in apply_action — it's also the error-block "Skús znova" recovery at any stage).
+    actions: set[str] = {"ask", "return"}
+    if status == "blocked":
+        actions.add("answer")  # a blocked state is an agent question — the Director can answer it
+
+    if stage in ("kickoff", "gate_a", "gate_b", "gate_c", "gate_d", "task_plan"):
+        actions.update({"approve", "apply_coordinator_recommendation"})
+    elif stage == "gate_e":
+        actions.update({"approve", "fix", "leave", "end_gate_e"})
+    elif stage == "build":
+        actions.update({"continue_build", "end_build"})
+        if status == "awaiting_director":
+            actions.add("approve")  # final sign-off only at a settled build — never on a blocked task
+    elif stage == "gate_g":
+        actions.add("verdict")
+    elif stage == "release":
+        actions.add("uat_accept")
+
+    return actions
+
+
+def build_readiness(db: Session, version_id: uuid.UUID) -> tuple[bool, int]:
+    """``(all_tasks_done, open_findings)`` for the build stage (WS-C1, CR-NS-030).
+
+    ``determine_available_actions`` is state-only, so it cannot gate the DB-dependent build
+    preconditions: approve@build is rejected while any task is ``todo`` (build not finished) or any is
+    ``failed``/unverified (open finding); end_build is rejected while a finding is open. The board
+    exposes these two facts so the FE can DISABLE "Schváliť build → Audit" / "Ukončiť build" when not
+    satisfiable — mirroring the existing Gate E ``gate_e_open_findings`` gate — instead of offering a
+    button that 400s. Cheap counts; the board computes them each fetch like ``_gate_e_open_findings``."""
+    all_tasks_done = task_service.get_next_todo_task(db, version_id) is None
+    return all_tasks_done, _build_open_findings(db, version_id)
+
+
 class OrchestratorError(ValueError):
     """Invalid orchestration request (unknown version/action, missing payload)."""
 

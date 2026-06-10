@@ -12,7 +12,7 @@ import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 import PipelineActionBar from "@/components/cockpit/PipelineActionBar";
-import type { PipelineState, PipelineStage, PipelineStatus } from "@/services/api/pipeline";
+import type { PipelineState, PipelineStage, PipelineStatus, PipelineActionName } from "@/services/api/pipeline";
 
 const APPROVE = "Schváliť podľa Návrhára";
 const COORD = "Schváliť návrh Koordinátora";
@@ -335,5 +335,100 @@ describe("PipelineActionBar — pause is build-only (CR-NS-027)", () => {
   it("does not offer Pauza at a gate (no cooperative boundary there)", () => {
     render(<PipelineActionBar state={mkState("gate_a", "agent_working")} inFlight={false} onAction={vi.fn()} />);
     expect(screen.queryByText("Pauza")).not.toBeInTheDocument();
+  });
+});
+
+describe("PipelineActionBar — backend-authoritative available_actions (CR-NS-030)", () => {
+  it("at build/blocked hides the no-op approve but keeps Odpoveď when the backend says so", () => {
+    render(
+      <PipelineActionBar
+        state={mkState("build", "blocked")}
+        availableActions={["answer", "return", "ask", "continue_build", "end_build"]}
+        inFlight={false}
+        onAction={vi.fn()}
+      />,
+    );
+    // approve is NOT in available_actions at a build-blocked task → the no-op button is gone
+    expect(screen.queryByText("Schváliť podľa Návrhára")).not.toBeInTheDocument();
+    // a programmer-question still offers Odpoveď (answer ∈ available_actions)
+    expect(screen.getByText("Odpoveď")).toBeInTheDocument();
+  });
+
+  it("renders only the backend-allowed buttons (drops Vrátiť when not allowed)", () => {
+    render(
+      <PipelineActionBar
+        state={mkState("gate_a", "awaiting_director")}
+        availableActions={["approve", "ask"]} // return deliberately omitted
+        inFlight={false}
+        onAction={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Schváliť podľa Návrhára")).toBeInTheDocument(); // approve allowed
+    expect(screen.queryByText("Vrátiť")).not.toBeInTheDocument(); // return NOT allowed → hidden
+  });
+
+  it("falls back to the FE's own logic when available_actions is absent (backward compat)", () => {
+    // no availableActions prop → allowed() returns true → the legacy question-block still shows approve
+    render(<PipelineActionBar state={mkState("build", "blocked")} inFlight={false} onAction={vi.fn()} />);
+    expect(screen.getByText("Schváliť podľa Návrhára")).toBeInTheDocument();
+  });
+});
+
+describe("PipelineActionBar — build readiness + paused (CR-NS-030 fold)", () => {
+  const buildActions: PipelineActionName[] = ["approve", "continue_build", "return", "end_build", "ask"];
+
+  it("disables 'Schváliť build → Audit' while tasks remain, enables it when all done", () => {
+    const { rerender } = render(
+      <PipelineActionBar
+        state={mkState("build", "awaiting_director")}
+        availableActions={buildActions}
+        allTasksDone={false}
+        buildOpenFindings={0}
+        inFlight={false}
+        onAction={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Schváliť build → Audit").closest("button")).toBeDisabled();
+    rerender(
+      <PipelineActionBar
+        state={mkState("build", "awaiting_director")}
+        availableActions={buildActions}
+        allTasksDone={true}
+        buildOpenFindings={0}
+        inFlight={false}
+        onAction={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Schváliť build → Audit").closest("button")).not.toBeDisabled();
+  });
+
+  it("disables 'Ukončiť build' while open findings remain", () => {
+    render(
+      <PipelineActionBar
+        state={mkState("build", "awaiting_director")}
+        availableActions={buildActions}
+        allTasksDone={true}
+        buildOpenFindings={2}
+        inFlight={false}
+        onAction={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Ukončiť build (zvyšok do auditu)").closest("button")).toBeDisabled();
+  });
+
+  it("offers the resume pair (continue_build + end_build) when the build is paused", () => {
+    const onAction = vi.fn();
+    render(
+      <PipelineActionBar
+        state={mkState("build", "paused")}
+        availableActions={["continue_build", "end_build"]}
+        inFlight={false}
+        onAction={onAction}
+      />,
+    );
+    expect(screen.getByText("Pokračovať v builde")).toBeInTheDocument();
+    expect(screen.getByText("Ukončiť build (zvyšok do auditu)")).toBeInTheDocument();
+    screen.getByText("Pokračovať v builde").click();
+    expect(onAction).toHaveBeenCalledWith("continue_build");
   });
 });

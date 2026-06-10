@@ -632,6 +632,53 @@ async def test_advancing_actions_rejected_while_agent_working(db_session, fake_c
     assert st.status == "agent_working"
 
 
+def test_determine_available_actions_matrix():
+    # WS-C1 (CR-NS-030): backend-authoritative offerable actions per (stage, status). The function reads
+    # only state.current_stage/.status, so a lightweight in-memory PipelineState suffices.
+    def acts(stage, status):
+        return orchestrator.determine_available_actions(PipelineState(current_stage=stage, status=status))
+
+    # THE live bug: a build-blocked task must NOT offer "approve" (the no-op Designer-gate button)…
+    assert "approve" not in acts("build", "blocked")
+    # …but it offers the real choices: answer the programmer question, return/continue/end, consult.
+    assert {"answer", "return", "continue_build", "end_build", "ask"} <= acts("build", "blocked")
+    # a settled build (all tasks done) DOES offer the final sign-off
+    assert "approve" in acts("build", "awaiting_director")
+    # a gate question DOES offer approve (ratify the blocked-question output → advance)
+    assert "approve" in acts("gate_a", "blocked")
+    # agent working: only a build can be paused; gates offer nothing
+    assert acts("build", "agent_working") == {"pause"}
+    assert acts("gate_a", "agent_working") == set()
+    # paused: only the resume pair
+    assert acts("build", "paused") == {"continue_build", "end_build"}
+    # gate_g is a verdict (PASS/FAIL), not an approve; release is uat_accept; done is terminal
+    assert "verdict" in acts("gate_g", "awaiting_director") and "approve" not in acts("gate_g", "awaiting_director")
+    assert "uat_accept" in acts("release", "awaiting_director")
+    assert acts("done", "done") == set()
+
+
+async def test_build_readiness_reflects_todo_and_failed_tasks(db_session, fake_claude):
+    # WS-C1 (CR-NS-030): build_readiness → (all_tasks_done, open_findings), the DB-dependent build
+    # facts the FE uses to disable approve/end_build (state-only available_actions can't see them).
+    version, project = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _epic, _feat, tasks = _seed_one_feat(db_session, version, project, ["A", "B"])
+
+    # all todo → not done, no open findings (approve disabled; end_build enabled)
+    assert orchestrator.build_readiness(db_session, version.id) == (False, 0)
+
+    # all done → ready (approve enabled)
+    for t in tasks:
+        t.status = "done"
+    db_session.flush()
+    assert orchestrator.build_readiness(db_session, version.id) == (True, 0)
+
+    # a failed task → no todo remains but an open finding (approve + end_build disabled)
+    tasks[0].status = "failed"
+    db_session.flush()
+    assert orchestrator.build_readiness(db_session, version.id) == (True, 1)
+
+
 async def test_answer_rejected_when_not_blocked(db_session, fake_claude):
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")  # agent_working

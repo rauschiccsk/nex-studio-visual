@@ -64,10 +64,19 @@ def _recent_messages(db: Session, version_id: uuid.UUID, limit: int) -> list[Pip
 
 def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> PipelineBoardRead:
     state = db.execute(select(PipelineState).where(PipelineState.version_id == version_id)).scalar_one_or_none()
+    # WS-C1 (CR-NS-030): build-readiness facts for the FE to disable the final-approve / end-build
+    # buttons when not satisfiable (the state-only available_actions can't see todos / open findings).
+    all_tasks_done, build_open_findings = (
+        orchestrator.build_readiness(db, version_id) if state is not None else (True, 0)
+    )
     return PipelineBoardRead(
         state=PipelineStateRead.model_validate(state) if state is not None else None,
         recent_messages=[PipelineMessageRead.model_validate(m) for m in _recent_messages(db, version_id, limit)],
         gate_e_open_findings=orchestrator._gate_e_open_findings(db, version_id),
+        # WS-C1 (CR-NS-030): backend-authoritative offerable actions so the FE can't show no-op buttons.
+        available_actions=sorted(orchestrator.determine_available_actions(state)) if state is not None else [],
+        all_tasks_done=all_tasks_done,
+        build_open_findings=build_open_findings,
     )
 
 

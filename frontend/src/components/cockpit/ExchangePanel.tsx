@@ -119,6 +119,9 @@ export function ExchangePanel({ board, inFlight, activity, onAction }: Props) {
       <div className="flex-shrink-0 border-t border-slate-800 p-3">
         <PipelineActionBar
           state={state}
+          availableActions={board.available_actions}
+          allTasksDone={board.all_tasks_done}
+          buildOpenFindings={board.build_open_findings}
           inFlight={inFlight}
           isErrorBlock={isErrorBlock}
           hasCoordinatorReport={hasCoordinatorReport}

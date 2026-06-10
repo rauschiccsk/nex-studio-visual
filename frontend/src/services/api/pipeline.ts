@@ -32,7 +32,7 @@ export type PipelineActor =
 
 export type PipelineParticipant = PipelineActor | "system";
 
-export type PipelineStatus = "agent_working" | "awaiting_director" | "blocked" | "done";
+export type PipelineStatus = "agent_working" | "awaiting_director" | "blocked" | "paused" | "done";
 
 export type PipelineMessageKind =
   | "kickoff"
@@ -83,6 +83,14 @@ export interface PipelineBoard {
   // Deterministic unresolved Gate E gap count (CR-NS-018 §5) — the close-gate value,
   // not the Customer's self-reported findings array.
   gate_e_open_findings?: number;
+  // Backend-authoritative set of Director actions valid to offer right now (WS-C1, CR-NS-030).
+  // The action bar renders only these; absent → fall back to the FE's own hardcoded logic.
+  available_actions?: PipelineActionName[];
+  // Build-readiness facts (WS-C1, CR-NS-030): the FE disables the final-approve / end-build buttons
+  // when not satisfiable (all_tasks_done false → a todo remains; build_open_findings > 0 → a
+  // failed/unverified task). Absent → permissive (don't disable). Mirrors gate_e_open_findings.
+  all_tasks_done?: boolean;
+  build_open_findings?: number;
 }
 
 // ── action requests ──────────────────────────────────────────────────────────
