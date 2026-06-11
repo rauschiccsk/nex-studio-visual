@@ -1499,6 +1499,20 @@ def _reset_failed_tasks_to_todo(db: Session, version_id: uuid.UUID) -> None:
     db.flush()
 
 
+def current_build_task(db: Session, version_id: uuid.UUID) -> Optional[Task]:
+    """The build task currently in focus (WS-C2, CR-NS-035) for the "kto je na rade" board: the
+    ``in_progress`` task while the Programmer works, else the ``failed`` (held) task at a HALT, else
+    ``None``. Lowest number wins if several share a status."""
+    feat_ids = select(Feat.id).join(Epic, Epic.id == Feat.epic_id).where(Epic.version_id == version_id)
+    for status_ in ("in_progress", "failed"):
+        task = db.execute(
+            select(Task).where(Task.feat_id.in_(feat_ids), Task.status == status_).order_by(Task.number).limit(1)
+        ).scalar_one_or_none()
+        if task is not None:
+            return task
+    return None
+
+
 def _failed_build_task(db: Session, version_id: uuid.UUID) -> Optional[Task]:
     """The version's failed build task (WS-B2, CR-NS-031) — the one the build loop HALTed on. The loop
     processes tasks in order and stops on the first failure, so there is at most one; the lowest number

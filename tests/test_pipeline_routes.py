@@ -142,6 +142,36 @@ def test_start_then_board_populated(client, db_session):
     # board GET reflects it
     g = client.get(f"/api/v1/pipeline/{version.id}").json()
     assert g["state"]["current_stage"] == "kickoff"
+    assert g["current_task"] is None  # WS-C2 (CR-NS-035): no current task outside build
+
+
+def test_board_current_task_at_build(client, db_session):
+    # WS-C2 (CR-NS-035): the board exposes the in-focus build task (#N + title) for the "kto je na rade" board.
+    from backend.db.models.tasks import Epic, Feat, Task
+
+    version = _make_version(db_session, client._ri)
+    project_id = db_session.get(Version, version.id).project_id
+    db_session.add(
+        PipelineState(
+            version_id=version.id,
+            flow_type="new_version",
+            current_stage="build",
+            current_actor="implementer",
+            status="agent_working",
+            next_action="",
+        )
+    )
+    epic = Epic(project_id=project_id, version_id=version.id, number=1, title="E", status="in_progress")
+    db_session.add(epic)
+    db_session.flush()
+    feat = Feat(epic_id=epic.id, number=1, title="F", description="", status="in_progress")
+    db_session.add(feat)
+    db_session.flush()
+    db_session.add(Task(feat_id=feat.id, number=2, title="AP tables", task_type="backend", status="in_progress"))
+    db_session.flush()
+
+    body = client.get(f"/api/v1/pipeline/{version.id}").json()
+    assert body["current_task"] == {"number": 2, "title": "AP tables"}
 
 
 def test_start_returns_agent_working_and_schedules_dispatch(client, db_session):

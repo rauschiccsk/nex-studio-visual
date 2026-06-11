@@ -12,6 +12,7 @@ import type {
 import PipelineActionBar from "./PipelineActionBar";
 import PipelineActivityFeed from "./PipelineActivityFeed";
 import PipelineMessageBubble from "./PipelineMessageBubble";
+import WhosTurnBoard from "./WhosTurnBoard";
 import { PIPELINE_STATUS_TONE, ROLE_LABELS, STAGE_LABELS, TONE_BANNER } from "./labels";
 
 // The Coordinator actions the orchestrator can EXECUTE on approval (F-008 §9) — used to decide whether
@@ -38,6 +39,8 @@ function bannerText(state: PipelineState, errorBlock: boolean): string {
       return errorBlock
         ? `Agent zlyhal vo fáze ${stage} — skús znova`
         : `Na rade: Director — odpovedz ${role}-ovi`;
+    case "paused":
+      return "Build pozastavený — pokračuj alebo ukonči";
     case "done":
       return "Hotovo";
     default:
@@ -122,6 +125,18 @@ export function ExchangePanel({ board, inFlight, activity, onAction }: Props) {
         <div className={`flex-shrink-0 border-b px-4 py-2.5 text-xs ${banner}`}>
           <span className="font-medium text-slate-100">{bannerText(state, isErrorBlock)}</span>
         </div>
+      )}
+
+      {/* "Kto je na rade" board (WS-C2, CR-NS-035): whose turn + decision-type + relay chain + current
+          task + the Coordinator's proposed action — honest, derived from the live state. Not at `done`
+          (the pipeline is finished — no one's turn; the banner's "Hotovo" suffices). */}
+      {state && state.status !== "done" && (
+        <WhosTurnBoard
+          state={state}
+          availableActions={board.available_actions}
+          currentTask={board.current_task}
+          coordinatorProposal={coordinatorProposal}
+        />
       )}
 
       <div ref={threadRef} className="flex-1 space-y-2 overflow-y-auto p-4">

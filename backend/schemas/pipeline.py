@@ -48,6 +48,13 @@ class PipelineMessageRead(BaseModel):
     seq: int
 
 
+class BoardTask(BaseModel):
+    """The build task currently in focus, for the "kto je na rade" board (WS-C2, CR-NS-035)."""
+
+    number: int
+    title: str
+
+
 class PipelineBoardRead(BaseModel):
     """Board snapshot: current state + the most recent messages.
 
@@ -69,6 +76,9 @@ class PipelineBoardRead(BaseModel):
     #: blocked). Defaults are the permissive "ready" values so an absent field never disables.
     all_tasks_done: bool = True
     build_open_findings: int = 0
+    #: The build task currently in focus (WS-C2, CR-NS-035) — in_progress while building, else the held
+    #: failed task at a HALT; the "kto je na rade" board shows "#N: title". ``None`` outside build.
+    current_task: Optional[BoardTask] = None
 
 
 class PipelineActionRequest(BaseModel):

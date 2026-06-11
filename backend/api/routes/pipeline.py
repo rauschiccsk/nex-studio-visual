@@ -27,6 +27,7 @@ from backend.db.session import SessionLocal, get_db
 from backend.schemas.agent_terminal import AgentTerminalSessionRead
 from backend.schemas.pagination import PaginatedResponse
 from backend.schemas.pipeline import (
+    BoardTask,
     PipelineActionRequest,
     PipelineBoardRead,
     PipelineMessageRead,
@@ -69,6 +70,12 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
     all_tasks_done, build_open_findings = (
         orchestrator.build_readiness(db, version_id) if state is not None else (True, 0)
     )
+    # WS-C2 (CR-NS-035): the build task in focus for the "kto je na rade" board (only at build).
+    ct = (
+        orchestrator.current_build_task(db, version_id)
+        if (state is not None and state.current_stage == "build")
+        else None
+    )
     return PipelineBoardRead(
         state=PipelineStateRead.model_validate(state) if state is not None else None,
         recent_messages=[PipelineMessageRead.model_validate(m) for m in _recent_messages(db, version_id, limit)],
@@ -77,6 +84,7 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         available_actions=sorted(orchestrator.determine_available_actions(state)) if state is not None else [],
         all_tasks_done=all_tasks_done,
         build_open_findings=build_open_findings,
+        current_task=BoardTask(number=ct.number, title=ct.title) if ct is not None else None,
     )
 
 

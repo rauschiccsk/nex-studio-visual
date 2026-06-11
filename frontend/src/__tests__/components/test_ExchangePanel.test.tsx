@@ -57,10 +57,13 @@ describe("ExchangePanel — unified banner colours (CR-NS-028)", () => {
     expect(banner).not.toHaveClass("bg-emerald-500/10"); // no emerald-for-working
   });
 
-  it("done banner uses the green tone", () => {
+  it("done banner uses the green tone + the whos-turn board is gated off (no turn at done)", () => {
     render(<ExchangePanel board={mkBoard("release", "director", "done")} inFlight={false} activity={[]} onAction={vi.fn()} />);
     const banner = screen.getByText("Hotovo").closest("div")!;
     expect(banner).toHaveClass("bg-emerald-500/10"); // green = done
+    // WhosTurnBoard (CR-NS-035) is not rendered at done — its markers are absent
+    expect(screen.queryByText(/fáza/)).not.toBeInTheDocument();
+    expect(screen.queryByText("cez Koordinátora")).not.toBeInTheDocument();
   });
 });
 

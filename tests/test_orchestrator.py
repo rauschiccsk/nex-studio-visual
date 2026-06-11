@@ -1006,6 +1006,24 @@ async def test_route_to_designer_parse_failure_clears_marker_and_blocks(db_sessi
     assert task.status == "failed"  # still held — the spec-fix didn't complete
 
 
+# ── WS-C2: "kto je na rade" current build task (CR-NS-035) ──────────────────────────────────────────
+
+
+async def test_current_build_task_picks_in_progress_then_failed(db_session, fake_claude):
+    # CR-NS-035: the board's current-task = in_progress while building, else the held failed task.
+    version, project = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _epic, _feat, (t1, t2) = _seed_one_feat(db_session, version, project, ["A", "B"])
+    assert orchestrator.current_build_task(db_session, version.id) is None  # all todo → none in focus
+    t2.status = "in_progress"
+    db_session.flush()
+    assert orchestrator.current_build_task(db_session, version.id).number == t2.number  # in_progress wins
+    t2.status = "done"
+    t1.status = "failed"
+    db_session.flush()
+    assert orchestrator.current_build_task(db_session, version.id).number == t1.number  # else the failed (held)
+
+
 async def test_answer_rejected_when_not_blocked(db_session, fake_claude):
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")  # agent_working

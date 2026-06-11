@@ -91,6 +91,8 @@ export interface PipelineBoard {
   // failed/unverified task). Absent → permissive (don't disable). Mirrors gate_e_open_findings.
   all_tasks_done?: boolean;
   build_open_findings?: number;
+  // The build task currently in focus (WS-C2, CR-NS-035) — the "kto je na rade" board shows "#N: title".
+  current_task?: { number: number; title: string } | null;
 }
 
 // ── action requests ──────────────────────────────────────────────────────────

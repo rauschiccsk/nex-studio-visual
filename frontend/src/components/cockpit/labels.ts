@@ -82,6 +82,7 @@ export const PIPELINE_STATUS_TONE: Record<string, StatusTone> = {
   agent_working: "blue",
   awaiting_director: "amber",
   blocked: "red",
+  paused: "amber", // waiting on the Director to resume/end (CR-NS-035)
   done: "green",
 };
 
