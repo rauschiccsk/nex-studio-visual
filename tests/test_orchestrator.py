@@ -3082,3 +3082,25 @@ async def test_internal_turn_failure_timing_only_when_usage_none(db_session, mon
     assert notes[0].payload is not None  # NOT a NULL payload — timing is carried (not skipped in aggregation)
     assert "usage" not in notes[0].payload  # no fabricated usage
     assert notes[0].payload["timing"]["parse_attempts"] == 1
+
+
+async def test_verify_task_audit_judge_parse_failure_visible_note(db_session, monkeypatch):
+    """Site 6 (WS-E addendum, CR-NS-037) — `_verify_task` Auditor judge exhausts parse-retries → note +
+    metrics; returns the IDENTICAL `audit nečitateľný:` reason so the auto-fix loop / ≤5 bound / HALT
+    are byte-for-byte preserved (no control-flow change)."""
+    monkeypatch.setattr(orchestrator, "verify_mechanical", lambda slug, block, baseline_sha=None: None)
+    seq = SequenceClaude([("garbage", _U(9, 4, "m")), ("garbage", _U(9, 4, "m")), ("garbage", _U(9, 4, "m"))])
+    monkeypatch.setattr(orchestrator, "invoke_claude", seq)
+    version, project = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _epic, _feat, (task,) = _seed_one_feat(db_session, version, project, ["T"])
+    state = _to_build(db_session, version)
+    block = parse_status_block(_block(stage="build", kind="gate_report", summary="hotovo", awaiting="director"))
+
+    reason = await orchestrator._verify_task(db_session, state, task, block)
+
+    assert reason is not None and reason.startswith("audit nečitateľný:")  # IDENTICAL return UNCHANGED
+    notes = [m for m in _msgs(db_session, version.id) if "Audítorov verdikt úlohy" in m.content]
+    assert len(notes) == 1 and notes[0].author == "system" and notes[0].recipient == "director"
+    assert notes[0].payload["usage"] == {"input_tokens": 27, "output_tokens": 12, "model": "m"}  # 3×(9,4)
+    assert notes[0].payload["timing"]["parse_attempts"] == 3

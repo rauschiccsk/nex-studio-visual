@@ -2150,6 +2150,19 @@ async def _verify_task(
         extra_payload={"task_id": str(task.id), "task_number": task.number},
     )
     if isinstance(audit, ParseFailure):
+        # WS-E (CR-NS-037 addendum — the 6th + FINAL Class-F site, §WS-E amended 5→6): the Auditor
+        # judge exhausted parse-retries → its tokens would leak + the failure was invisible. Make it
+        # visible + count it, then return the IDENTICAL reason so the auto-fix loop / ≤5 bound /
+        # failed+awaiting_director HALT stay byte-for-byte preserved (pure observability, no control-flow
+        # change).
+        await _record_internal_turn_parse_failure(
+            db,
+            state.version_id,
+            "build",
+            turn_label="Audítorov verdikt úlohy",
+            failed=audit,
+            on_message=on_message,
+        )
         return f"audit nečitateľný: {audit.reason}"
     if audit.kind == "blocked":
         return f"audit blokovaný: {audit.question or audit.summary}"
