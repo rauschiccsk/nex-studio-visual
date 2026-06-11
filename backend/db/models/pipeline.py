@@ -61,6 +61,11 @@ class PipelineState(Base, UUIDMixin, TimestampMixin):
     next_action = Column(Text, nullable=False, server_default="")
     is_regate = Column(Boolean, nullable=False, server_default="false")
     iteration = Column(Integer, nullable=False, server_default="0")
+    #: Transient return marker (E7 route_to_designer, CR-NS-034): "build" while a Designer spec-fix turn
+    #: is dispatched mid-build, so the dispatch-completion handler returns to _run_build_round (not a
+    #: gate); cleared on the Designer's DONE. Persisted (not in-memory like gate_e_dispatch) because the
+    #: route is an internal executor — the action route can't compute a transient marker for it.
+    returns_to = Column(String(20), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("version_id", name="uq_pipeline_state_version_id"),

@@ -21,6 +21,7 @@ const EXECUTABLE_COORDINATOR_ACTIONS = new Set([
   "coordinator_move_baseline",
   "coordinator_clear_session",
   "coordinator_escalate_dedo",
+  "coordinator_route_to_designer",
 ]);
 
 // Compose the banner from machine values + Slovak display labels — never render

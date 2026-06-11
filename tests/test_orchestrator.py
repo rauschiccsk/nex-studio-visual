@@ -936,6 +936,76 @@ async def test_coordinator_relay_prompt_instructs_triage_emit(db_session, monkey
     assert "coordinator_directive" in captured["prompt"] and "triage" in captured["prompt"].lower()
 
 
+# ── E7: route_to_designer — build→Designer spec-fix round-trip (F-008 §10, CR-NS-034) ──────────────
+
+
+def test_route_to_designer_is_executable():
+    # CR-NS-034: the spec_problem action is now an executable directive (not a relay).
+    assert orchestrator._coordinator_directive_executable(
+        _coord_directive(triage_class="spec_problem", proposed_action="coordinator_route_to_designer")
+    )
+
+
+async def test_coordinator_route_to_designer_round_trip(db_session, fake_claude, monkeypatch):
+    # F-008 §10: a spec_problem directive at a build HALT → approve → the Designer fixes the spec → the
+    # held failed task resets to todo + the build re-attempts against the corrected spec → done.
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "a" * 40)
+    monkeypatch.setattr(orchestrator, "verify_mechanical", lambda slug, block, baseline_sha=None: None)
+    version, project, task = await _build_at_halt(db_session, fake_claude)
+    _seed_coordinator_directive(
+        db_session,
+        version.id,
+        _coord_directive(
+            triage_class="spec_problem",
+            proposed_action="coordinator_route_to_designer",
+            target={"task_id": str(task.id)},
+            params={"section": "§4 duplicate-detection"},
+        ),
+    )
+
+    # approve → route_to_designer sets up the Designer dispatch (task held failed, returns_to='build')
+    state = await orchestrator.apply_action(
+        db_session, version_id=version.id, action="apply_coordinator_recommendation"
+    )
+    assert state.current_actor == "designer" and state.returns_to == "build" and state.status == "agent_working"
+    db_session.refresh(task)
+    assert task.status == "failed"  # held until the Designer's DONE (seam)
+
+    # the background dispatch: Designer spec-fix DONE → reset task → re-enter the build loop → re-built
+    fake_claude.response = _build_fake()
+    await orchestrator.run_dispatch(db_session, version.id)
+    db_session.refresh(task)
+    assert task.status == "done"  # re-attempted against the corrected spec
+    state = orchestrator._get_state(db_session, version.id)
+    assert state.returns_to is None  # marker cleared on the Designer's DONE
+    assert any(m.author == "designer" and m.stage == "build" for m in _msgs(db_session, version.id))  # spec-fix turn
+
+
+async def test_route_to_designer_parse_failure_clears_marker_and_blocks(db_session, fake_claude, monkeypatch):
+    # CR-NS-034 (review fix): a Designer spec-fix that can't be parsed CLEARS returns_to (marker is for
+    # one dispatch only) + blocks — no dangling marker that would hijack the Director's next action.
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "a" * 40)
+    version, _project, task = await _build_at_halt(db_session, fake_claude)
+    _seed_coordinator_directive(
+        db_session,
+        version.id,
+        _coord_directive(
+            triage_class="spec_problem",
+            proposed_action="coordinator_route_to_designer",
+            target={"task_id": str(task.id)},
+        ),
+    )
+    await orchestrator.apply_action(db_session, version_id=version.id, action="apply_coordinator_recommendation")
+
+    fake_claude.response = lambda prompt: "garbage — no status block"  # the Designer turn won't parse
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert state.status == "blocked"
+    assert state.returns_to is None  # cleared → return / continue_build now behave normally
+    db_session.refresh(task)
+    assert task.status == "failed"  # still held — the spec-fix didn't complete
+
+
 async def test_answer_rejected_when_not_blocked(db_session, fake_claude):
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")  # agent_working

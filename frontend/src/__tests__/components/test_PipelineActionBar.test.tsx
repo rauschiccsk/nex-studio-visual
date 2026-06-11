@@ -533,4 +533,19 @@ describe("PipelineActionBar — Coordinator proposal (E7, CR-NS-032)", () => {
     );
     expect(screen.queryByText(/Schváliť Koordinátorov návrh/)).not.toBeInTheDocument();
   });
+
+  it("labels a route_to_designer proposal by its effect (CR-NS-034)", () => {
+    render(
+      <PipelineActionBar
+        state={mkState("build", "awaiting_director")}
+        availableActions={["apply_coordinator_recommendation", "continue_build", "end_build", "return", "ask"]}
+        coordinatorProposal={mkDirective("coordinator_route_to_designer")}
+        inFlight={false}
+        onAction={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: /Schváliť Koordinátorov návrh.*opraviť spec cez Návrhára/ }),
+    ).toBeInTheDocument();
+  });
 });

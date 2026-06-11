@@ -1184,6 +1184,10 @@ async def run_dispatch(
     # Build (F-007 §6, CR-NS-020 CR-3): the continuous per-task loop — dispatches the
     # Programmer task-by-task with mechanical verify + auto-fix, not a single opaque turn.
     if stage == "build":
+        # E7 route_to_designer (F-008 §10, CR-NS-034): a Designer spec-fix turn is pending mid-build —
+        # run it instead of the Programmer loop; it resets the held task + re-enters the loop on DONE.
+        if state.returns_to == "build":
+            return await _run_designer_spec_fix(db, state, on_event=on_event, on_message=on_message)
         return await _run_build_round(db, state, on_event=on_event, directive=directive, on_message=on_message)
 
     prompt = directive if directive is not None else _directive_for(stage)
@@ -1532,7 +1536,13 @@ def _latest_reported_commit(db: Session, version_id: uuid.UUID, task_id: uuid.UU
 
 _COORDINATOR_CONFIDENCE_FLOOR = 0.80
 _EXECUTABLE_COORDINATOR_ACTIONS = frozenset(
-    {"coordinator_reset_task", "coordinator_move_baseline", "coordinator_clear_session", "coordinator_escalate_dedo"}
+    {
+        "coordinator_reset_task",
+        "coordinator_move_baseline",
+        "coordinator_clear_session",
+        "coordinator_escalate_dedo",
+        "coordinator_route_to_designer",
+    }
 )
 
 
@@ -1682,10 +1692,34 @@ def _coordinator_escalate_dedo(db: Session, state: PipelineState, directive: dic
     )
 
 
+def _coordinator_route_to_designer(db: Session, state: PipelineState, directive: dict[str, Any]) -> None:
+    """Route a build spec_problem to the Designer (E7, F-008 §10, CR-NS-034). The failed task stays
+    `failed` (held); we dispatch the DESIGNER to fix the spec, marking ``returns_to='build'`` so the
+    dispatch returns to _run_build_round on the Designer's DONE (which resets the task → todo against the
+    corrected spec). Mirrors the gate_e Branch B designer_edit precedent, adapted to build. Sets up the
+    Designer dispatch directly (current_actor=designer) — NOT _begin_dispatch (which would pick the
+    Implementer)."""
+    task = _directive_target_task(db, state.version_id, directive)
+    if task is None:
+        raise OrchestratorError("Koordinátorov route_to_designer: žiadna cieľová zlyhaná úloha")
+    state.current_actor = "designer"
+    state.status = "agent_working"
+    state.returns_to = "build"
+    state.next_action = "Návrhár opravuje spec pre zlyhanú build úlohu."
+    db.flush()
+    _coordinator_audit(
+        db,
+        state.version_id,
+        f"Vykonaný Koordinátorov návrh: úloha #{task.number} smerovaná na Návrhára na opravu spec — "
+        "po jeho DONE sa build úloha znova spustí proti opravenej spec.",
+        directive,
+    )
+
+
 def _execute_coordinator_directive(db: Session, state: PipelineState, directive: dict[str, Any]) -> PipelineState:
     """Execute an approved coordinator_directive (F-008 §4/§9): mutate state + an audit message, then
-    re-dispatch — EXCEPT escalate_dedo, which is non-blocking (write + audit + leave the pipeline settled
-    so the Director decides next)."""
+    re-dispatch — EXCEPT escalate_dedo (non-blocking: write + audit + leave settled) and route_to_designer
+    (sets up its OWN Designer dispatch + returns_to marker, not the generic build re-dispatch)."""
     proposed = directive.get("proposed_action")
     if proposed == "coordinator_reset_task":
         _coordinator_reset_task(db, state, directive)
@@ -1698,6 +1732,9 @@ def _execute_coordinator_directive(db: Session, state: PipelineState, directive:
         state.next_action = "Eskalácia pre Deda zapísaná — rozhodni o ďalšom kroku (build ostáva pozastavený)."
         db.flush()
         return state  # non-blocking: stays awaiting_director, no re-dispatch
+    elif proposed == "coordinator_route_to_designer":
+        _coordinator_route_to_designer(db, state, directive)
+        return state  # the executor already set up the Designer dispatch (current_actor=designer)
     else:
         raise OrchestratorError(f"Neznáma vykonateľná akcia Koordinátora: {proposed}")
     _begin_dispatch(db, state)  # reset / move_baseline / clear_session → re-run the build loop (re-verify)
@@ -2047,6 +2084,60 @@ async def _run_build_round(
             db.flush()
             return state
         # task done → continue the loop to the next todo task (no Director click; §6)
+
+
+async def _run_designer_spec_fix(
+    db: Session,
+    state: PipelineState,
+    *,
+    on_event: Optional[claude_agent.EventCallback] = None,
+    on_message: Optional[MessageCallback] = None,
+) -> PipelineState:
+    """E7 route_to_designer (F-008 §10, CR-NS-034): a mid-build Designer spec-fix turn. The Designer fixes
+    the spec/design for the held failed task (per the latest coordinator_directive's params/rationale) and
+    reports DONE; we then reset that task → todo (fresh ≤5 budget, corrected spec), clear the returns_to
+    marker, hand current_actor back to the Implementer, and re-enter _run_build_round so the Programmer
+    re-attempts. Mirrors the gate_e Branch B designer_edit precedent, adapted to build."""
+    version_id = state.version_id
+    task = _failed_build_task(db, version_id)
+    directive = _latest_coordinator_directive(db, version_id) or {}
+    section = (directive.get("params") or {}).get("section")
+    rationale = directive.get("rationale") or "spec problém pri build úlohe"
+    task_label = f"#{task.number} '{task.title}'" if task is not None else "build úloha"
+    prompt = (
+        f"Build úloha {task_label} narazila na problém v spec/dizajne: {rationale}. "
+        + (f"Týka sa to sekcie: {section}. " if section else "")
+        + "Oprav príslušnú spec/dizajn v `docs/specs/…` (si jediný s právom editovať spec), aby build "
+        "úloha mohla prejsť. Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
+    )
+    edit = await invoke_agent_with_parse_retry(
+        db,
+        version_id=version_id,
+        role="designer",
+        stage="build",
+        prompt=prompt,
+        on_event=on_event,
+        recipient="coordinator",
+        on_message=on_message,
+    )
+    if isinstance(edit, ParseFailure):
+        # Designer turn unparseable → CLEAR the marker (returns_to is for the duration of ONE Designer
+        # dispatch only) and block. The build returns to its HALT (the task stays failed); the Director's
+        # normal build/blocked actions work, and a re-route needs a FRESH Coordinator directive (re-triaged)
+        # — never a blind, unbounded Designer re-run, and never a dangling marker that hijacks return/ask.
+        state.returns_to = None
+        state.current_actor = "implementer"
+        db.flush()
+        return _block_failed(state, db, edit.reason)
+    # Designer DONE → reset the held failed task (corrected spec), clear the marker, hand back to build.
+    if task is not None:
+        task.status = "todo"
+        db.flush()
+        task_service.recompute_feat_status(db, task.feat_id)
+    state.returns_to = None
+    state.current_actor = "implementer"
+    db.flush()
+    return await _run_build_round(db, state, on_event=on_event, on_message=on_message)
 
 
 def _next_stage(stage: str) -> str:

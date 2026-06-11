@@ -111,6 +111,7 @@ export const COORDINATOR_ACTION_LABELS: Record<string, string> = {
   coordinator_move_baseline: "posunúť baseline",
   coordinator_clear_session: "vyčistiť session",
   coordinator_escalate_dedo: "eskalovať Dedovi",
+  coordinator_route_to_designer: "opraviť spec cez Návrhára",
 };
 
 export const TONE_BANNER: Record<StatusTone, string> = {
