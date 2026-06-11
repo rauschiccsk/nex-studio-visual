@@ -219,7 +219,8 @@ resolvable (version→project→owner_id, as in `_owner_chat_id`, `pipeline_runn
   `PUT /api/v1/user-agent-settings/{agent_role}` (upsert model+effort), scoped to the authenticated user.
 - **Settings UI — new "Agenti" tab** (`SettingsPage.tsx`): for each of the 5 pipeline agent-roles, a
   **Model** dropdown (Opus 4.8 `claude-opus-4-8` / Sonnet 4.6 `claude-sonnet-4-6` / Haiku 4.5
-  `claude-haiku-4-5-20251001`) + an **Effort** dropdown (low / medium / high / xhigh / max / ultracode).
+  `claude-haiku-4-5-20251001`) + an **Effort** dropdown (low / medium / high / xhigh / max — the 5 CLI
+  `--effort` levels; NO ultracode, see the Effort policy below).
   Shows + edits the CURRENT user's config; draft/save pattern like the System tab.
 - **Dispatch threading + application:** at `invoke_agent` (`orchestrator.py:784`), resolve the **project
   owner** (version→project→owner_id; reuse the `_owner_chat_id` join) → look up
@@ -228,8 +229,18 @@ resolvable (version→project→owner_id, as in `_owner_chat_id`, `pipeline_runn
   default (no flags → CLI uses `.claude/agents/<role>/settings.json`). **Unset = exactly today's behavior
   (no regression).** Attribution = **project owner** (stable, reuses existing resolution, aligns with the
   future per-user subscription); threading the *triggering* user is unnecessary.
-- **Effort enum:** low/medium/high/xhigh/max/ultracode — confirm these are exactly what `claude --effort`
-  accepts (Implementer checks `claude --effort`); if the CLI's accepted set differs, STOP+ask.
+- **Effort policy (DECIDED 2026-06-13, Director-approved after a full analysis):** effort enum = the **5 CLI
+  `--effort` levels** `low / medium / high / xhigh / max` (verified `claude --effort` accepts exactly these).
+  **NO `ultracode` in the cockpit.** Why: ultracode is NOT a `--effort` value — it is `--settings
+  '{"ultracode":true}'` = `xhigh` effort + dynamic-workflow orchestration; that orchestration is NOT
+  guaranteed to engage in a headless one-shot `claude -p` (the cockpit's dispatch shape), AND since ultracode
+  resolves to `xhigh` while the ladder is `low<medium<high<xhigh<max`, picking ultracode would give the role
+  LESS effort than `max` whenever the workflow layer silently no-ops (counterproductive). Dispatch uses the
+  `--effort` flag ONLY (no `--settings`). **Default Coordinator = `max`** (the judgment/operator role,
+  differentiated UP — the one role where peak reasoning matters most; it does NOT participate in Dual-Build,
+  so non-deterministic depth is fine, and its output stays a Director-gated proposal). Other roles default to
+  unset (= today's behavior) or the Director's per-role pick. ultracode remains for interactive/Dedo use,
+  where it reliably engages.
 
 **Out of scope (future epic — NOT this CR):** per-user Claude **subscription/auth** (per-user credentials /
 `.claude` config dirs / docker mounts / encrypted token storage). E3 is config-only on the shared login.
@@ -254,8 +265,8 @@ user's config is independent; the API rejects editing another user's config; WS-
   4-role subset (which omits `customer`). Do NOT copy `DebugAttachRole`.
 - **model + effort: validate via pydantic enums at the API/schema layer (NO DB CHECK on them — flexible to
   CLI evolution); store as `str`.** Only `agent_role` keeps a DB CHECK (stable set). Implementer confirms
-  `claude --effort` accepts {low,medium,high,xhigh,max,ultracode} + the 3 model IDs (`claude-opus-4-8` /
-  `claude-sonnet-4-6` / `claude-haiku-4-5-20251001`) at build; STOP+ask if the CLI's set differs.
+  `claude --effort` accepts exactly {low,medium,high,xhigh,max} (verified — NO ultracode, see the Effort
+  policy) + the 3 model IDs (`claude-opus-4-8` / `claude-sonnet-4-6` / `claude-haiku-4-5-20251001`) at build.
 - **Thread model/effort through `invoke_agent_with_parse_retry`'s retry loop** (orchestrator.py ~984) — else
   parse-retries lose the config.
 - **Graceful fallback:** owner_id NULL OR no `(owner, role)` row → no flags (`scalar_one_or_none`, today's
