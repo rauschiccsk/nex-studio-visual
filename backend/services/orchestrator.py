@@ -889,7 +889,12 @@ async def _coordinator_relay_engine_failure(
         prompt=(
             f"Vo fáze '{stage}' nastalo technické zlyhanie, ktoré treba oznámiť Directorovi: {reason}. "
             "Vysvetli mu to po slovensky, zrozumiteľne — čo sa stalo a čo môže urobiť — bez technického "
-            "žargónu a kódov. Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
+            "žargónu a kódov. "
+            # E7 (F-008 §3, CR-NS-033): triage the failure (typically nex_studio_bug or director_decision)
+            # + append a structured directive in the PAYLOAD — the human relay text stays plain (CR-NS-022).
+            "Klasifikuj zlyhanie (triage §7.1 — zvyčajne nex_studio_bug alebo director_decision) a pripoj "
+            "štruktúrovaný `coordinator_directive` popri vysvetlení (technické detaily nech ostanú v "
+            "payloade, nie v slovenskom texte). Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
         ),
         on_message=on_message,
     )
@@ -1042,7 +1047,11 @@ async def verify_done(
         stage=block.stage,
         prompt=(
             f"Verifikuj DONE report fázy '{block.stage}': spec compliance + žiadny "
-            "claim bez authoritative source (P-2). Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
+            "claim bez authoritative source (P-2). "
+            # E7 (F-008 §3, CR-NS-033): if you flag a problem, triage it + append a structured directive.
+            "Ak nájdeš problém, klasifikuj ho (triage podľa charteru §7.1) a popri slovenskom relayi "
+            "pripoj štruktúrovaný `coordinator_directive` (triage_class, proposed_action, target, params, "
+            "rationale, úprimná confidence). Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
         ),
         on_message=on_message,
     )
@@ -1081,7 +1090,12 @@ async def _coordinator_relay(
         prompt=(
             f"Worker '{state.current_actor}' vo fáze '{state.current_stage}' {kind_label}: {asked}. "
             "Over jeho doterajšiu prácu (deliverables/commits) a posúď otázku; priprav pre Directora "
-            "relay — čo treba rozhodnúť. Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
+            "relay — čo treba rozhodnúť. "
+            # E7 (F-008 §3, CR-NS-033): triage the surfaced problem + append a structured directive.
+            "Klasifikuj problém (triage podľa charteru §7.1 — spec_problem / programmer_guidance / "
+            "nex_studio_bug / director_decision) a popri relayi pripoj štruktúrovaný `coordinator_directive` "
+            "(proposed_action + úprimná confidence); Director ho schváli a engine vykoná. "
+            "Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
         ),
         on_message=on_message,
     )
@@ -1911,7 +1925,12 @@ async def _run_build_round(
                 prompt=(
                     f"Úloha #{task.number} '{task.title}': nepodarilo sa zachytiť baseline — repo HEAD "
                     "je nečitateľný (git zlyhal). Priprav pre Directora relay: treba opraviť repo a "
-                    "pokračovať. Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
+                    "pokračovať. "
+                    # E7 (F-008 §3, CR-NS-033): triage this build HALT + append a directive (typically
+                    # nex_studio_bug / director_decision — a repo/environment problem).
+                    "Klasifikuj problém (triage podľa charteru §7.1) a popri slovenskom relayi pripoj "
+                    "štruktúrovaný `coordinator_directive` (proposed_action + úprimná confidence). "
+                    "Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
                 ),
                 on_event=on_event,
                 on_message=on_message,
@@ -2010,7 +2029,13 @@ async def _run_build_round(
                 prompt=(
                     f"Úloha #{task.number} '{task.title}' zlyhala po {_AUTO_FIX_RETRIES} auto-fix pokusoch. "
                     f"Posledný dôvod: {prior_failures[-1]}. Priprav pre Directora relay — čo treba rozhodnúť "
-                    "(vrátiť na prepracovanie / konzultovať). Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
+                    "(vrátiť na prepracovanie / konzultovať). "
+                    # E7 (F-008 §3, CR-NS-033): this failed-task HALT is the PRIME triage point — classify
+                    # it and propose a concrete fix (reset_task / move_baseline / route_to_designer /
+                    # escalate_dedo) the Director approves + the engine executes.
+                    "Klasifikuj problém (triage podľa charteru §7.1) a popri relayi pripoj štruktúrovaný "
+                    "`coordinator_directive` (proposed_action + úprimná confidence). "
+                    "Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
                 ),
                 on_event=on_event,
                 on_message=on_message,

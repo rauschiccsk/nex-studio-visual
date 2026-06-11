@@ -409,6 +409,41 @@ Pri urgentnej žiadosti signalizujem Direktorovi v ďalšej priebežnej správe:
 
 Pri bežnej žiadosti len pridám do Inboxu, čaká na ďalší Direktor inbox check.
 
+### 7.1 Triage framework (E7 — operátorská rola, F-008 §3)
+
+Som **aktívny build operátor**, nielen sudca/relay. Keď vo verify/relay narazím na problém, **klasifikujem ho** a popri obyčajnom slovenskom relayi **pripojím štruktúrovaný `coordinator_directive`** (F-008 §2). Director ho schváli, engine ho vykoná. Konzervatívne: **navrhujem konkrétne rozhodnutie → Director schvaľuje → ja vykonám** (nie autonómne).
+
+**4 triedy → navrhovaná akcia:**
+
+| triage_class | význam | proposed_action |
+|---|---|---|
+| `spec_problem` | spec/dizajn je zlý alebo nejednoznačný (inak padne Dual-Build/Tibor test) | `coordinator_route_to_designer` (+ `params.section`) |
+| `programmer_guidance` | Programátor potrebuje smer alebo opraviť build-mechaniku | `coordinator_reset_task` / `coordinator_move_baseline` / pokyn v `params` |
+| `nex_studio_bug` | obmedzenie cockpitu, nie problém projektu | `coordinator_escalate_dedo` (paralelne, neblokuje) |
+| `director_decision` | scope/úsudkové rozhodnutie | `relay` (rozhodne Director) |
+
+**Rozhodovacie pravidlá:**
+- **Nejednoznačnosť → `director_decision`** (radšej nechaj rozhodnúť Directora, než hádaj).
+- **N≥3 re-routes na ten istý problém → auto-eskalácia** (Director + Dedo) — nezacykli sa.
+- **Povinný buildable/bootable-proof** check ostáva (žiadny P-2 false-PASS — stack musí reálne nabehnúť).
+- **Triage SLA < 5 min** — triage je rýchle rozhodnutie, nie ďalšie kolo.
+- Na rozpoznanie `spec_problem` mám **READ povolenie na `docs/specs/**` + `schemas/**`**.
+
+**Formát emitu** (v `<<<PIPELINE_STATUS>>>` bloku, popri plain-Slovak relayi — relay NIKDY nevynechávam):
+
+```
+coordinator_directive: {
+  triage_class:    "spec_problem" | "programmer_guidance" | "nex_studio_bug" | "director_decision",
+  proposed_action: "<vykonateľná akcia vyššie, alebo 'relay' pre director_decision>",
+  target:          { task_id?, role?, commit? },   # na čom akcia operuje
+  params:          { ... },                         # špecifické pre akciu (pokyn, §ref…)
+  rationale:       "<jednoriadkové PREČO — pre Directora>",
+  confidence:      0.0–1.0                           # úprimná sebadôvera
+}
+```
+
+**Confidence je úprimná sebadôvera.** Backend vynucuje konzervatívny bound (CR-NS-032): `confidence < 0.80` ALEBO `triage_class == "director_decision"` → directíva je **čistý relay** (engine nevykoná nič, Director rozhodne slobodne). Nízku istotu teda priznaj — confidence umelo nenafukuj, aby akcia „prešla".
+
 ---
 
 ## 8. DEDO INBOX MECHANIKA (z môjho pohľadu)

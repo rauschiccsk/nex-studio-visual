@@ -882,6 +882,60 @@ async def test_coordinator_escalate_dedo_writes_and_is_non_blocking(db_session, 
     assert files and "from: coordinator" in files[0].read_text(encoding="utf-8")
 
 
+# ── E7 A2: triage charter + emit-directive prompts (F-008 §3, CR-NS-033) ───────────────────────────
+
+
+def test_coordinator_charter_template_has_triage_section():
+    # CR-NS-033: the charter instructs the Coordinator to triage + emit a coordinator_directive.
+    from pathlib import Path
+
+    charter = (Path(__file__).resolve().parent.parent / "templates" / "coordinator-charter.md").read_text(
+        encoding="utf-8"
+    )
+    assert "Triage framework" in charter and "coordinator_directive" in charter
+    for cls in ("spec_problem", "programmer_guidance", "nex_studio_bug", "director_decision"):
+        assert cls in charter
+    assert "0.80" in charter  # the conservative confidence bound is documented for the agent
+
+
+async def test_verify_done_prompt_instructs_triage_emit(db_session, monkeypatch):
+    # CR-NS-033: the verify_done prompt tells the Coordinator to triage a flagged problem + append a directive.
+    captured = {}
+
+    async def _capture(db, *, version_id, role, stage, prompt, **kw):
+        captured["prompt"] = prompt
+        return PipelineStatusBlock(stage=stage, kind="gate_report", summary="ok", awaiting="director")
+
+    monkeypatch.setattr(orchestrator, "invoke_agent", _capture)
+    monkeypatch.setattr(orchestrator, "verify_mechanical", lambda slug, block, baseline_sha=None: None)
+    version, _ = _make_version(db_session)
+    block = PipelineStatusBlock(stage="gate_a", kind="gate_report", summary="ok", awaiting="director")
+    await orchestrator.verify_done(db_session, version.id, block)
+    assert "coordinator_directive" in captured["prompt"] and "triage" in captured["prompt"].lower()
+
+
+async def test_coordinator_relay_prompt_instructs_triage_emit(db_session, monkeypatch):
+    # CR-NS-033: the worker-question relay prompt tells the Coordinator to triage + append a directive.
+    captured = {}
+
+    async def _capture(db, *, version_id, role, stage, prompt, **kw):
+        captured["prompt"] = prompt
+        return PipelineStatusBlock(stage=stage, kind="gate_report", summary="relay", awaiting="director")
+
+    monkeypatch.setattr(orchestrator, "invoke_agent_with_parse_retry", _capture)
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    state = orchestrator._get_state(db_session, version.id)
+    state.current_stage = "build"
+    state.current_actor = "implementer"
+    db_session.flush()
+    worker_block = PipelineStatusBlock(
+        stage="build", kind="question", summary="?", awaiting="director", question="prečo zlyháva baseline?"
+    )
+    await orchestrator._coordinator_relay(db_session, state, worker_block)
+    assert "coordinator_directive" in captured["prompt"] and "triage" in captured["prompt"].lower()
+
+
 async def test_answer_rejected_when_not_blocked(db_session, fake_claude):
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")  # agent_working
@@ -2041,6 +2095,8 @@ async def test_build_auto_fix_exhausted_marks_failed_and_halts(db_session, fake_
     assert orchestrator._build_open_findings(db_session, version.id) == 1
     # a Coordinator relay message was recorded for the Director
     assert any(m.author == "coordinator" and m.stage == "build" for m in _msgs(db_session, version.id))
+    # CR-NS-033: the failed-task HALT relay prompt instructs the Coordinator to triage + emit a directive
+    assert any("coordinator_directive" in c["prompt"] for c in fake_claude.calls)
     # the failed task blocks the close (approve to gate_g)
     with pytest.raises(orchestrator.OrchestratorError):
         await orchestrator.apply_action(db_session, version_id=version.id, action="approve")
@@ -2220,6 +2276,8 @@ async def test_build_baseline_unreadable_halts_fail_closed(db_session, fake_clau
     assert not any(m.author == "implementer" for m in msgs)  # never built on an unknowable base
     assert not any(m.author == "auditor" for m in msgs)
     assert any(m.author == "coordinator" and m.stage == "build" for m in msgs)  # relayed to the Director
+    # CR-NS-033: the baseline-HALT relay prompt instructs the Coordinator to triage + emit a directive
+    assert any("coordinator_directive" in c["prompt"] for c in fake_claude.calls)
 
 
 async def test_approve_at_build_blocked_while_todo_remains(db_session, fake_claude):
