@@ -132,6 +132,53 @@ DATA capture must start now (history cannot be backfilled).
 - *Acceptance:* every new dispatch records tokens + time attributable to a task; Director-wait
   computable. Historical pipelines show no data (documented — starts fresh).
 
+### WS-E — Internal-turn parse-failure observability (Class F) — follow-up, added 2026-06-11 post-CR-036 review
+
+**Problem (grounded, verified by the CR-036 adversarial review — all 5 sites PRE-EXISTING, untouched by
+WS-D):** when an INTERNAL Coordinator/verify-judge turn (not a build worker) exhausts its parse-retries,
+the orchestrator DISCARDS the terminal `ParseFailure` → (a) its accumulated usage/timing LEAK (no
+`PipelineMessage` ⇒ absent from `aggregate_pipeline_usage`, WS-D), and (b) the failure is INVISIBLE to the
+Director (no escalation recorded). Sites: `_coordinator_relay` (~:1240, returns `None`; callers fall back
+to the raw worker question — graceful but silent), `_coordinator_review_gap` (~:1459, result discarded —
+fully silent no-op), the baseline-unreadable relay (~:2136) and the failed-task HALT relay (~:2249) in
+`_run_build_round` (relay result not captured), `_verify_with_retries` (~:1619, returns the prior
+reason-string, dropping usage; the `verify_done` coordinator judge ~:1196 stringifies its own ParseFailure
+too). RARE² (the Coordinator is relay-only — the most reliable agent — and needs 3 consecutive invalid
+blocks; `_PARSE_RETRIES`=2); BOUNDED (pipeline state stays correct in every case — the graceful fallbacks
+already settle to `awaiting_director`/`blocked`; no P0/P1). This is an **observability + metrics-completeness**
+gap, not a control-flow bug — and silent internal-turn failures directly contradict the E7/WS-C2
+transparency goal.
+
+**Changes (uniform pass — observability + metrics ONLY, NOT control-flow):**
+- **E-1 — Capture the metrics.** At each site capture the internal turn's accumulated usage/timing (reuse
+  CR-036 `_failure_metrics_payload(result)`) so it reaches a `PipelineMessage` and rolls up in
+  `aggregate_pipeline_usage`. For `_verify_with_retries`, propagate the `ParseFailure` (or its metrics) to
+  the caller instead of dropping to a bare reason-string.
+- **E-2 — Make the failure VISIBLE.** Record one `system→director` note (plain Slovak per CR-NS-022 §2)
+  naming the failed internal turn (Coordinator relay / gap-review / verify-judge) and that it exhausted
+  retries — so the Director knows the framing they see is a fallback (e.g. the raw worker question), not
+  the Coordinator's intended relay. Reuse the `_block_failed` note pattern. The visibility note is recorded
+  ALWAYS on internal-turn parse-exhaustion (visibility ≠ metrics — unlike `_block_failed`'s usage-gating);
+  the metrics payload is attached when present.
+- **PRESERVE the graceful fallback (HARD constraint).** Sites keep their existing settled outcome — `:1240`
+  still falls back to the raw worker question + `awaiting_director`; `:1459` stays non-blocking advisory;
+  `:2136`/`:2249` still settle to `awaiting_director` with the existing `next_action`; `:1619`'s caller
+  still blocks. We ADD the metrics + the visible note; we do NOT add decision branches, change offerable
+  actions, or change the stage/status outcome. If any site's control-flow makes a non-invasive add unclear,
+  STOP+ask (do not refactor control flow).
+- **Single drift-proof helper.** One shared `_record_internal_turn_parse_failure(...)` used by all 5 sites
+  so a future internal-turn relay cannot silently re-introduce the gap; per-site test.
+
+**Seams to preserve:** hub-and-spoke (the note is `system→director`, no new agent dispatch); deterministic
+gates unchanged; the `_coordinator_relay` raw-question fallback stays; no control-flow change to any site's
+settled state.
+
+**Acceptance:** each of the 5 sites, on an internal-turn parse-exhaustion, (a) records the internal turn's
+tokens/timing into a `PipelineMessage` that `aggregate_pipeline_usage` counts, and (b) records a
+Director-visible plain-Slovak note naming the failed internal turn — while the pipeline's settled state
+(`awaiting_director`/`blocked` + the existing `next_action` fallback) is UNCHANGED. Per-site tests; affected
+failure-path message-count tests updated to expect the new note; full suite green.
+
 ---
 
 ## 3. Out of scope (later phases)
@@ -144,5 +191,6 @@ DATA capture must start now (history cannot be backfilled).
 2. WS-B2 + WS-A3 baseline action (shared).
 3. WS-A1/A2/A3 (E7 — the axis; depends on B2 + structured directives).
 4. WS-C2, WS-D (parallel, independent).
+5. WS-E (follow-up robustness CR-NS-037, after WS-D — reuses CR-036 `_failure_metrics_payload`).
 
 **End of Phase 1 development spec.**
