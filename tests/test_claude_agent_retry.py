@@ -24,7 +24,8 @@ def no_sleep(monkeypatch):
 def _fake_once(monkeypatch, outcomes):
     """Patch _invoke_once to yield `outcomes` in order (last repeats); count calls.
 
-    Each outcome is ("raise", message) or ("ok", text)."""
+    Each outcome is ("raise", message) or ("ok", text). _invoke_once returns ``(text, usage)`` since
+    WS-D (CR-NS-036), so the "ok" stand-in mirrors that — usage None (retry logic doesn't touch it)."""
     calls = {"n": 0}
 
     async def _once(**kwargs):
@@ -33,7 +34,7 @@ def _fake_once(monkeypatch, outcomes):
         kind, value = outcomes[idx]
         if kind == "raise":
             raise ClaudeAgentError(value)
-        return value
+        return (value, None)
 
     monkeypatch.setattr(claude_agent, "_invoke_once", _once)
     return calls
@@ -45,7 +46,7 @@ async def _invoke():
 
 async def test_retries_transient_then_succeeds(monkeypatch, no_sleep):
     calls = _fake_once(monkeypatch, [("raise", "API Error 529 Overloaded"), ("ok", "done")])
-    assert await _invoke() == "done"
+    assert (await _invoke())[0] == "done"  # invoke_claude returns (text, usage)
     assert calls["n"] == 2  # one retry after the transient
 
 
@@ -65,5 +66,5 @@ async def test_non_transient_fails_fast(monkeypatch, no_sleep):
 
 async def test_rate_limit_is_transient(monkeypatch, no_sleep):
     calls = _fake_once(monkeypatch, [("raise", "429 Too Many Requests: rate limit"), ("ok", "ok")])
-    assert await _invoke() == "ok"
+    assert (await _invoke())[0] == "ok"  # invoke_claude returns (text, usage)
     assert calls["n"] == 2

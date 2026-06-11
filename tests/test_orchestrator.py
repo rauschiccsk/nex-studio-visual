@@ -144,6 +144,60 @@ async def test_invoke_agent_parse_failure_is_silent(db_session, fake_claude):
     assert _msgs(db_session, version.id) == []  # no raw escalation leaked to the Director
 
 
+# ── WS-D metrics: usage + timing capture (CR-NS-036) ────────────────────────────
+
+
+async def test_invoke_agent_records_usage_and_timing(db_session, fake_claude):
+    """A turn's token usage + dispatch wall-clock land in payload.usage / payload.timing (WS-D)."""
+    version, _ = _make_version(db_session)
+    # FakeClaude returns whatever `response` is — a (text, UsageMetadata) tuple here, like real claude.
+    fake_claude.response = (
+        _block(stage="gate_b", kind="gate_report", summary="ok"),
+        claude_agent.UsageMetadata(input_tokens=100, output_tokens=40, model="claude-z"),
+    )
+    await orchestrator.invoke_agent(db_session, version_id=version.id, role="designer", stage="gate_b", prompt="go")
+    msg = _msgs(db_session, version.id)[0]
+    assert msg.payload["usage"] == {"input_tokens": 100, "output_tokens": 40, "model": "claude-z"}
+    assert msg.payload["timing"]["parse_attempts"] == 1
+    assert msg.payload["timing"]["duration_seconds"] >= 0.0
+
+
+async def test_invoke_agent_no_usage_records_none_not_zeros(db_session, fake_claude):
+    """A bare-text response (no usage envelope) → payload.usage is None, never fabricated zeros (WS-D)."""
+    version, _ = _make_version(db_session)
+    fake_claude.response = _block(stage="gate_b", kind="gate_report", summary="ok")  # bare str → usage None
+    await orchestrator.invoke_agent(db_session, version_id=version.id, role="designer", stage="gate_b", prompt="go")
+    msg = _msgs(db_session, version.id)[0]
+    assert msg.payload["usage"] is None
+    assert msg.payload["timing"]["parse_attempts"] == 1
+
+
+async def test_parse_retry_accumulates_usage_and_attempts(db_session, monkeypatch):
+    """Failed parse re-emits burn tokens too — the surviving message sums across the primary + every
+    retry, and timing.parse_attempts counts them (WS-D)."""
+    seq = [
+        ("garbage — not a valid status block", claude_agent.UsageMetadata(10, 5, "m")),  # ParseFailure
+        (_block(stage="gate_b", kind="gate_report", summary="ok"), claude_agent.UsageMetadata(20, 8, "m")),
+    ]
+    calls = {"n": 0}
+
+    async def _fake(*, prompt, **kwargs):
+        i = min(calls["n"], len(seq) - 1)
+        calls["n"] += 1
+        return seq[i]
+
+    monkeypatch.setattr(orchestrator, "invoke_claude", _fake)
+    version, _ = _make_version(db_session)
+    result = await orchestrator.invoke_agent_with_parse_retry(
+        db_session, version_id=version.id, role="designer", stage="gate_b", prompt="go"
+    )
+    assert isinstance(result, PipelineStatusBlock)
+    msg = [m for m in _msgs(db_session, version.id) if m.payload and "usage" in m.payload][-1]
+    assert msg.payload["usage"]["input_tokens"] == 30  # 10 (failed re-emit) + 20 (success)
+    assert msg.payload["usage"]["output_tokens"] == 13  # 5 + 8
+    assert msg.payload["timing"]["parse_attempts"] == 2  # primary + one recovery re-emit
+
+
 # ── apply_action ──────────────────────────────────────────────────────────────
 
 
@@ -2659,3 +2713,165 @@ async def test_regate_preserves_agent_sessions(db_session, fake_claude):
         )
     ).scalar_one_or_none()
     assert row is not None and row.claude_session_id == seeded_id  # session kept (D2)
+
+
+# ── WS-D Option A: exhausted-retry metric capture across escalation sites (CR-NS-036) ─────────────
+# Dedo's coverage mandate: every terminal-ParseFailure escalation that records a Director-facing
+# message must carry the failed worker's usage/timing (else aggregate_pipeline_usage undercounts).
+# Per-site tests so a future escalation path can't silently re-introduce the undercount.
+
+
+def test_failure_metrics_helpers():
+    """The single shared carry helpers (drift-proof source of the attachment): empty/None unless a
+    ParseFailure actually captured usage (never fabricated)."""
+    from backend.services.pipeline_status import ParseFailure
+
+    assert orchestrator._failure_metrics_payload("not a failure") == {}
+    assert orchestrator._failure_metrics_payload(ParseFailure("r")) == {}  # usage None → nothing to carry
+    assert orchestrator._seed_metrics_from_failure(ParseFailure("r")) is None
+    pf = ParseFailure(
+        "r",
+        usage={"input_tokens": 12, "output_tokens": 5, "model": "m"},
+        timing={"duration_seconds": 1.5, "parse_attempts": 3},
+    )
+    assert orchestrator._failure_metrics_payload(pf) == {"usage": pf.usage, "timing": pf.timing}
+    seed = orchestrator._seed_metrics_from_failure(pf)
+    assert seed.saw_usage and (seed.input_tokens, seed.output_tokens, seed.attempts) == (12, 5, 3)
+    assert seed.usage_payload() == {"input_tokens": 12, "output_tokens": 5, "model": "m"}
+
+
+async def test_parse_retry_exhaustion_attaches_accumulated_metrics_to_failure(db_session, monkeypatch):
+    """The terminal ParseFailure carries the SUM of every exhausted attempt's tokens (WS-D step 1)."""
+
+    async def _fake(*, prompt, **kwargs):
+        return ("garbage not a block", claude_agent.UsageMetadata(10, 4, "m"))
+
+    monkeypatch.setattr(orchestrator, "invoke_claude", _fake)
+    version, _ = _make_version(db_session)
+    result = await orchestrator.invoke_agent_with_parse_retry(
+        db_session, version_id=version.id, role="designer", stage="gate_a", prompt="go"
+    )
+    assert isinstance(result, ParseFailure)
+    n = orchestrator._PARSE_RETRIES + 1  # primary + bounded retries
+    assert result.usage == {"input_tokens": 10 * n, "output_tokens": 4 * n, "model": "m"}
+    assert result.timing["parse_attempts"] == n
+
+
+async def test_main_dispatch_relay_carries_worker_metrics(db_session, monkeypatch):
+    """Gate worker parse-exhaustion → the Coordinator relay message counts worker + Coordinator tokens
+    (no extra notification, no undercount)."""
+    seq = SequenceClaude(
+        [
+            ("garbage", claude_agent.UsageMetadata(10, 4, "m")),  # kickoff worker primary
+            ("garbage", claude_agent.UsageMetadata(10, 4, "m")),  # retry 1
+            ("garbage", claude_agent.UsageMetadata(10, 4, "m")),  # retry 2 (exhausted)
+            (  # the Coordinator relay succeeds
+                _block(stage="kickoff", kind="gate_report", summary="relay Directorovi", awaiting="director"),
+                claude_agent.UsageMetadata(7, 3, "m"),
+            ),
+        ]
+    )
+    monkeypatch.setattr(orchestrator, "invoke_claude", seq)
+    monkeypatch.setattr(orchestrator, "verify_mechanical", lambda slug, block: None)
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert state.status == "blocked"
+    relays = [
+        m for m in _msgs(db_session, version.id) if m.author == "coordinator" and m.payload and m.payload.get("usage")
+    ]
+    assert len(relays) == 1
+    # worker 3×(10,4) seeded + Coordinator (7,3) → folded into the one relay message
+    assert relays[0].payload["usage"] == {"input_tokens": 37, "output_tokens": 15, "model": "m"}
+    assert relays[0].payload["timing"]["parse_attempts"] == 4  # 3 worker + 1 relay
+
+
+async def test_build_parsefailure_attempts_carry_worker_metrics(db_session, fake_claude, monkeypatch):
+    """A Programmer attempt that never parses produces no message of its own — its tokens ride on the
+    auto-fix-return message (keyed by task_id) so aggregate_pipeline_usage rolls them up to the task."""
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "e" * 40)
+    version, project = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _epic, _feat, (task,) = _seed_one_feat(db_session, version, project, ["T"])
+    _to_build(db_session, version)
+    # implementer never emits a parseable block → ParseFailure every attempt (with usage)
+    fake_claude.response = lambda prompt: ("garbage — no status block", claude_agent.UsageMetadata(8, 3, "m"))
+
+    await orchestrator.run_dispatch(db_session, version.id)
+
+    db_session.refresh(task)
+    assert task.status == "failed"
+    returns = [m for m in _msgs(db_session, version.id) if m.author == "system" and m.kind == "return"]
+    assert len(returns) == orchestrator._AUTO_FIX_RETRIES
+    for m in returns:
+        # each attempt exhausted its 3 parse-retries → accumulated 3×(8,3); attributed to the task
+        assert m.payload["usage"] == {"input_tokens": 24, "output_tokens": 9, "model": "m"}
+        assert m.payload["timing"]["parse_attempts"] == 3
+        assert m.payload["task_id"] == str(task.id)
+
+    from backend.services.pipeline_metrics import aggregate_pipeline_usage
+
+    agg = aggregate_pipeline_usage(db_session, version.id)
+    assert agg.by_task[task.id].input_tokens == 24 * orchestrator._AUTO_FIX_RETRIES
+
+
+async def test_gate_e_block_records_worker_metrics(db_session, monkeypatch):
+    """A Gate E parse-exhaustion routes to _block_failed (records no relay of its own) — WS-D records a
+    metrics-bearing system→director note so the failed Designer's tokens are counted."""
+    seq = SequenceClaude(
+        [
+            (
+                _block(stage="gate_e", kind="question", summary="?", question="Otázka pre Návrhára?"),
+                claude_agent.UsageMetadata(5, 2, "m"),
+            ),  # customer turn (its own message carries its metrics)
+            ("garbage — no status block", claude_agent.UsageMetadata(10, 4, "m")),  # designer primary
+            ("garbage — no status block", claude_agent.UsageMetadata(10, 4, "m")),  # retry 1
+            ("garbage — no status block", claude_agent.UsageMetadata(10, 4, "m")),  # retry 2
+        ]
+    )
+    monkeypatch.setattr(orchestrator, "invoke_claude", seq)
+    monkeypatch.setattr(orchestrator, "verify_mechanical", lambda slug, block: None)
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _to_gate_e(db_session, version)
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert state.status == "blocked"
+    notes = [
+        m
+        for m in _msgs(db_session, version.id)
+        if m.author == "system" and m.recipient == "director" and m.payload and m.payload.get("usage")
+    ]
+    assert len(notes) == 1  # the _block_failed metrics note (not a duplicate — this path had no relay)
+    assert notes[0].payload["usage"] == {"input_tokens": 30, "output_tokens": 12, "model": "m"}  # 3×(10,4)
+    assert notes[0].payload["timing"]["parse_attempts"] == 3
+
+
+async def test_route_to_designer_block_records_worker_metrics(db_session, fake_claude, monkeypatch):
+    """E7 Designer spec-fix parse-exhaustion → _block_failed records the failed Designer's tokens (WS-D)."""
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "a" * 40)
+    version, _project, task = await _build_at_halt(db_session, fake_claude)
+    _seed_coordinator_directive(
+        db_session,
+        version.id,
+        _coord_directive(
+            triage_class="spec_problem",
+            proposed_action="coordinator_route_to_designer",
+            target={"task_id": str(task.id)},
+        ),
+    )
+    await orchestrator.apply_action(db_session, version_id=version.id, action="apply_coordinator_recommendation")
+    fake_claude.response = lambda prompt: ("garbage — no status block", claude_agent.UsageMetadata(9, 6, "m"))
+
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert state.status == "blocked" and state.returns_to is None
+    notes = [
+        m
+        for m in _msgs(db_session, version.id)
+        if m.author == "system" and m.recipient == "director" and m.payload and m.payload.get("usage")
+    ]
+    assert len(notes) == 1
+    assert notes[0].payload["usage"] == {"input_tokens": 27, "output_tokens": 18, "model": "m"}  # 3×(9,6)
+    assert notes[0].payload["timing"]["parse_attempts"] == 3

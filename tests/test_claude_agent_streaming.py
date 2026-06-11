@@ -77,10 +77,11 @@ async def test_streaming_emits_events_and_returns_result_text(monkeypatch):
     async def on_event(evt):
         events.append(evt)
 
-    out = await invoke_claude(project_slug="x", claude_session_id=uuid.uuid4(), prompt="go", on_event=on_event)
+    out, usage = await invoke_claude(project_slug="x", claude_session_id=uuid.uuid4(), prompt="go", on_event=on_event)
 
     assert len(events) == 3  # every NDJSON line surfaced
     assert out == block  # final text == result event
+    assert usage is None  # this result event carries no usage block (WS-D: not fabricated)
     assert isinstance(parse_status_block(out), PipelineStatusBlock)  # parses as today
 
 
@@ -119,26 +120,93 @@ async def test_callback_exception_does_not_kill_run(monkeypatch):
     async def on_event(evt):
         raise RuntimeError("broken feed")
 
-    out = await invoke_claude(project_slug="x", claude_session_id=uuid.uuid4(), prompt="go", on_event=on_event)
+    out, _usage = await invoke_claude(project_slug="x", claude_session_id=uuid.uuid4(), prompt="go", on_event=on_event)
     assert out == block  # a broken callback must not break the agent run
 
 
-async def test_text_mode_unchanged_when_no_callback(monkeypatch):
+async def test_json_mode_returns_result_text_and_usage_no_callback(monkeypatch):
+    """No callback → non-streaming ``--output-format json`` (WS-D, CR-NS-036): the text comes from
+    the envelope's ``result`` field (so downstream parsing is unchanged) and the token usage is
+    parsed from the envelope's ``usage`` block (``modelUsage`` key → model name)."""
+    envelope = json.dumps(
+        {"result": "hello world", "usage": {"input_tokens": 12, "output_tokens": 34}, "modelUsage": {"claude-x": {}}}
+    ).encode()
+
     class _P:
         returncode = 0
 
         async def communicate(self):
-            return (b"hello world\n", b"")
+            return (envelope + b"\n", b"")
 
     async def _fake_exec(*args, **kwargs):
-        assert "stream-json" not in args  # text mode keeps the legacy args
-        assert "text" in args
+        assert "stream-json" not in args  # no callback → not the streaming path
+        assert "json" in args  # WS-D: json envelope (was the legacy 'text')
+        assert "text" not in args
         return _P()
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
 
-    out = await invoke_claude(project_slug="x", claude_session_id=uuid.uuid4(), prompt="go")
+    out, usage = await invoke_claude(project_slug="x", claude_session_id=uuid.uuid4(), prompt="go")
     assert out == "hello world"
+    assert usage is not None
+    assert (usage.input_tokens, usage.output_tokens) == (12, 34)
+    assert usage.model == "claude-x"  # derived from the modelUsage map key
+
+
+async def test_json_mode_no_usage_returns_none(monkeypatch):
+    """An envelope without a ``usage`` block → usage is ``None`` (WS-D: never fabricated zeros)."""
+
+    class _P:
+        returncode = 0
+
+        async def communicate(self):
+            return (json.dumps({"result": "hi"}).encode() + b"\n", b"")
+
+    async def _fake_exec(*args, **kwargs):
+        return _P()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
+
+    out, usage = await invoke_claude(project_slug="x", claude_session_id=uuid.uuid4(), prompt="go")
+    assert out == "hi"
+    assert usage is None
+
+
+async def test_json_mode_unparseable_envelope_raises(monkeypatch):
+    """Non-JSON stdout on the json path is a hard error (WS-D) — never a fabricated result."""
+
+    class _P:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"not a json envelope at all", b"")
+
+    async def _fake_exec(*args, **kwargs):
+        return _P()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
+
+    with pytest.raises(ClaudeAgentError):
+        await invoke_claude(project_slug="x", claude_session_id=uuid.uuid4(), prompt="go")
+
+
+async def test_streaming_parses_usage_from_result_event(monkeypatch):
+    """The stream-json ``result`` event carries the same ``usage`` block as json mode (WS-D)."""
+    lines = [
+        json.dumps(
+            {"type": "result", "result": "ok", "usage": {"input_tokens": 7, "output_tokens": 9}, "model": "claude-y"}
+        ).encode()
+        + b"\n"
+    ]
+    _patch_exec(monkeypatch, _FakeProc(lines))
+
+    async def on_event(evt):
+        pass
+
+    out, usage = await invoke_claude(project_slug="x", claude_session_id=uuid.uuid4(), prompt="go", on_event=on_event)
+    assert out == "ok"
+    assert usage is not None
+    assert (usage.input_tokens, usage.output_tokens, usage.model) == (7, 9, "claude-y")
 
 
 # Ensure the module reference is used (guard against accidental import removal).
@@ -164,7 +232,7 @@ async def test_streaming_handles_large_result_line(monkeypatch):
     async def on_event(evt):
         pass
 
-    out = await invoke_claude(project_slug="x", claude_session_id=uuid.uuid4(), prompt="go", on_event=on_event)
+    out, _usage = await invoke_claude(project_slug="x", claude_session_id=uuid.uuid4(), prompt="go", on_event=on_event)
     assert out == block
     assert len(out) > 64 * 1024
 

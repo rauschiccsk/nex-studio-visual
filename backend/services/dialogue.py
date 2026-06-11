@@ -210,13 +210,16 @@ async def _invoke_agent(
     # preserves the Gate E error surface. Behaviour is identical to the
     # original inline implementation.
     try:
-        return await invoke_claude(
+        # invoke_claude returns (text, usage) since WS-D (CR-NS-036); Gate E doesn't track
+        # token metrics, so drop the usage and preserve the original text-only contract.
+        text, _usage = await invoke_claude(
             project_slug=project_slug,
             claude_session_id=claude_session_id,
             prompt=prompt,
             charter_path=charter_path,
             timeout=CLAUDE_INVOKE_TIMEOUT,
         )
+        return text
     except ClaudeAgentError as exc:
         raise DialogueAgentError(str(exc)) from exc
 

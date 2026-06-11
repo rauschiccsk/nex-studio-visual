@@ -15,6 +15,8 @@ Enums follow the codebase convention (``String`` + DB ``CHECK`` constraint,
 not native PG ENUM). Phase 1 of F-007 §12.
 """
 
+from datetime import datetime, timezone
+
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -27,6 +29,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    event,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
@@ -66,6 +69,12 @@ class PipelineState(Base, UUIDMixin, TimestampMixin):
     #: gate); cleared on the Designer's DONE. Persisted (not in-memory like gate_e_dispatch) because the
     #: route is an internal executor — the action route can't compute a transient marker for it.
     returns_to = Column(String(20), nullable=True)
+    #: WS-D (CR-NS-036): when the pipeline ENTERED its current Director-wait status
+    #: (``awaiting_director`` / ``blocked``). Maintained by the ``status`` ``set`` event listener
+    #: below — set on entry, preserved across wait→wait, cleared on leaving. Powers the future
+    #: metrics page's Director-wait time (now − ``awaiting_director_since``). Nullable; NULL whenever
+    #: the pipeline isn't waiting on the Director.
+    awaiting_director_since = Column(TIMESTAMP(timezone=True), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("version_id", name="uq_pipeline_state_version_id"),
@@ -146,3 +155,29 @@ class PipelineMessage(Base, UUIDMixin):
         Index("ix_pipeline_message_version_created", "version_id", "created_at"),
         Index("ix_pipeline_message_version_seq", "version_id", "seq"),
     )
+
+
+#: Statuses in which the pipeline is waiting on a Director decision (WS-D, CR-NS-036).
+_DIRECTOR_WAIT_STATUSES = frozenset({"awaiting_director", "blocked"})
+
+
+@event.listens_for(PipelineState.status, "set")
+def _stamp_awaiting_director_since(target, value, oldvalue, initiator):
+    """Maintain :attr:`PipelineState.awaiting_director_since` on every ``status`` change (WS-D).
+
+    * ENTER a Director-wait status from a non-wait status → stamp ``now``.
+    * wait → wait (e.g. ``blocked`` → ``awaiting_director``) → keep the original clock (don't reset).
+    * LEAVE to any non-wait status → clear (``None``).
+
+    All status writes go through this ORM attribute (no bulk ``UPDATE`` bypasses it), so this is the
+    single, caller-agnostic source of truth — no need to touch the ~18 transition sites individually.
+    ``oldvalue`` may be SQLAlchemy's ``NO_VALUE`` sentinel for a never-loaded attribute; ``not in``
+    then treats it as a non-wait prior, which yields the correct stamp-on-entry behaviour.
+    """
+    if value == oldvalue:
+        return
+    if value in _DIRECTOR_WAIT_STATUSES:
+        if oldvalue not in _DIRECTOR_WAIT_STATUSES:
+            target.awaiting_director_since = datetime.now(timezone.utc)
+    else:
+        target.awaiting_director_since = None

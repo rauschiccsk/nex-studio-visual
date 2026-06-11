@@ -108,6 +108,33 @@ class TestPipelineState:
         db_session.add(_state(version, current_stage="task_plan"))
         db_session.flush()
 
+    def test_awaiting_director_since_lifecycle(self, db_session):
+        """WS-D (CR-NS-036): the status `set` event stamps awaiting_director_since on ENTERING a
+        Director-wait status, PRESERVES it across wait→wait, and CLEARS it on LEAVING — and the
+        value round-trips through the new column."""
+        version = _make_version(db_session)
+        state = _state(version, status="agent_working")
+        db_session.add(state)
+        db_session.flush()
+        db_session.refresh(state)
+        assert state.awaiting_director_since is None  # not waiting → unset
+
+        state.status = "awaiting_director"
+        assert state.awaiting_director_since is not None  # stamped on entry
+        db_session.flush()
+        db_session.refresh(state)
+        entered = state.awaiting_director_since
+        assert entered is not None  # persisted to the new column
+
+        state.status = "blocked"  # wait → wait must NOT reset the clock
+        assert state.awaiting_director_since == entered
+
+        state.status = "agent_working"  # leaving clears it
+        assert state.awaiting_director_since is None
+        db_session.flush()
+        db_session.refresh(state)
+        assert state.awaiting_director_since is None
+
     def test_fk_cascade_on_version_delete(self, db_session):
         version = _make_version(db_session)
         state = _state(version)

@@ -13,6 +13,7 @@ import json
 import logging
 import re
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 from uuid import UUID
@@ -52,6 +53,36 @@ class ClaudeAgentError(RuntimeError):
 EventCallback = Callable[[dict], Awaitable[None]]
 
 
+@dataclass(frozen=True)
+class UsageMetadata:
+    """Token usage for one ``claude -p`` invocation (WS-D, CR-NS-036). Extracted from the json /
+    stream-json result envelope — never fabricated (``None`` when the envelope carries no usage)."""
+
+    input_tokens: int
+    output_tokens: int
+    model: Optional[str] = None
+
+
+def _usage_from(envelope: dict) -> Optional[UsageMetadata]:
+    """Extract :class:`UsageMetadata` from a claude json / stream-json ``result`` envelope. The
+    envelope carries top-level ``usage`` ({input_tokens, output_tokens, …}) + ``modelUsage`` (a map
+    keyed by model name) — verified against the live ``--output-format json`` envelope. Returns
+    ``None`` (never zeros/guesses) when there is no ``usage`` block."""
+    usage = envelope.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    model = envelope.get("model")
+    if not model:
+        model_usage = envelope.get("modelUsage")
+        if isinstance(model_usage, dict) and model_usage:
+            model = next(iter(model_usage))  # the model name is the key
+    return UsageMetadata(
+        input_tokens=int(usage.get("input_tokens") or 0),
+        output_tokens=int(usage.get("output_tokens") or 0),
+        model=model if isinstance(model, str) else None,
+    )
+
+
 async def invoke_claude(
     *,
     project_slug: str,
@@ -60,8 +91,11 @@ async def invoke_claude(
     charter_path: Optional[Path] = None,
     timeout: int = CLAUDE_INVOKE_TIMEOUT,
     on_event: Optional[EventCallback] = None,
-) -> str:
+) -> tuple[str, Optional["UsageMetadata"]]:
     """Invoke ``claude -p`` with bounded transient-error retry (CR-NS-018 robustness).
+
+    Returns ``(text, usage)`` (WS-D, CR-NS-036): the result text + token usage from the json /
+    stream-json envelope (``usage`` is ``None`` when the envelope carries none).
 
     Delegates to :func:`_invoke_once`; on a **transient** ``ClaudeAgentError``
     (529 / overloaded / 429 / rate limit in stderr) retries with bounded backoff
@@ -105,7 +139,7 @@ async def _invoke_once(
     charter_path: Optional[Path] = None,
     timeout: int = CLAUDE_INVOKE_TIMEOUT,
     on_event: Optional[EventCallback] = None,
-) -> str:
+) -> tuple[str, Optional["UsageMetadata"]]:
     """One ``claude -p`` subprocess invocation (no retry — see :func:`invoke_claude`).
 
     Args:
@@ -120,22 +154,28 @@ async def _invoke_once(
         timeout: per-invocation subprocess timeout (seconds).
         on_event: opt-in streaming (CR-NS-018). When given, run with
             ``--output-format stream-json --verbose`` and ``await on_event(evt)``
-            for each NDJSON event as it arrives; the final text is taken from the
-            ``result`` event. When ``None`` (default) the behavior is byte-for-byte
-            the legacy ``--output-format text`` path (Gate E relies on this).
+            for each NDJSON event as it arrives; the final text + usage are taken
+            from the ``result`` event. When ``None`` (default) run non-streaming
+            with ``--output-format json`` and parse the same fields from its single
+            envelope (WS-D, CR-NS-036) — the ``result`` text is what the legacy text
+            path returned, so downstream status-block parsing is unaffected.
 
     Returns:
-        Plain text response from claude (stripped of trailing newline).
+        ``(text, usage)`` — the result text (stripped) + token usage from the json /
+        stream-json envelope; usage is ``None`` when the envelope carried none.
 
     Raises:
-        ClaudeAgentError: subprocess non-zero exit, timeout, or decode failure.
+        ClaudeAgentError: subprocess non-zero exit, timeout, decode/JSON failure, or a
+            json envelope with no ``result`` field.
     """
     project_root = PROJECTS_ROOT / project_slug
 
     if on_event is not None:
         args = ["claude", "-p", "--output-format", "stream-json", "--verbose"]
     else:
-        args = ["claude", "-p", "--output-format", "text"]
+        # WS-D (CR-NS-036): json (not text) so the envelope carries usage/cost; we return the same
+        # `result` text the text path returned, so downstream parsing is unaffected.
+        args = ["claude", "-p", "--output-format", "json"]
     if charter_path is not None:
         # First invocation for this claude session — create it.
         charter_text = charter_path.read_text(encoding="utf-8")
@@ -190,19 +230,29 @@ async def _invoke_once(
             f"claude exited with code {proc.returncode}: {stderr_text[:500]}",
         )
 
-    return stdout.decode("utf-8", errors="replace").strip()
+    # WS-D (CR-NS-036): --output-format json → parse the envelope for the result text + usage.
+    raw = stdout.decode("utf-8", errors="replace").strip()
+    try:
+        envelope = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ClaudeAgentError(f"claude json output not parseable: {exc}") from exc
+    if not isinstance(envelope, dict) or "result" not in envelope:
+        raise ClaudeAgentError("claude json output has no 'result' field")
+    return str(envelope["result"]).strip(), _usage_from(envelope)
 
 
-async def _invoke_streaming(proc, *, timeout: int, on_event: EventCallback) -> str:
-    """Read ``--output-format stream-json`` NDJSON, emit events, return final text.
+async def _invoke_streaming(proc, *, timeout: int, on_event: EventCallback) -> tuple[str, Optional["UsageMetadata"]]:
+    """Read ``--output-format stream-json`` NDJSON, emit events, return ``(text, usage)``.
 
-    The complete response is the ``result`` event's ``result`` field — the status
-    block is parsed from it downstream, exactly as in text mode. A callback that
-    raises is logged and swallowed (a broken UI feed must never kill an agent run).
+    The complete response is the ``result`` event's ``result`` field — the status block is parsed
+    from it downstream, exactly as in json mode — and that same event carries the token ``usage``
+    (WS-D, CR-NS-036). A callback that raises is logged and swallowed (a broken UI feed must never
+    kill an agent run).
     """
 
-    async def _consume() -> Optional[str]:
+    async def _consume() -> tuple[Optional[str], Optional[UsageMetadata]]:
         result_text: Optional[str] = None
+        result_usage: Optional[UsageMetadata] = None
         assert proc.stdout is not None
         async for raw in proc.stdout:
             line = raw.decode("utf-8", errors="replace").strip()
@@ -218,10 +268,11 @@ async def _invoke_streaming(proc, *, timeout: int, on_event: EventCallback) -> s
                 logger.exception("on_event callback failed; continuing")
             if isinstance(evt, dict) and evt.get("type") == "result":
                 result_text = evt.get("result")
-        return result_text
+                result_usage = _usage_from(evt)
+        return result_text, result_usage
 
     try:
-        result_text = await asyncio.wait_for(_consume(), timeout=timeout)
+        result_text, result_usage = await asyncio.wait_for(_consume(), timeout=timeout)
     except asyncio.TimeoutError as exc:
         proc.kill()
         await proc.wait()
@@ -235,4 +286,4 @@ async def _invoke_streaming(proc, *, timeout: int, on_event: EventCallback) -> s
         raise ClaudeAgentError(f"claude exited with code {proc.returncode}: {stderr_text[:500]}")
     if result_text is None:
         raise ClaudeAgentError("claude stream ended without a result event")
-    return result_text.strip()
+    return result_text.strip(), result_usage

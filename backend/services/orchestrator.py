@@ -21,7 +21,9 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, replace
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Optional
 
 from pydantic import ValidationError
@@ -50,6 +52,92 @@ logger = logging.getLogger(__name__)
 #: right after recording a dispatch-path message; the runner commits + broadcasts that
 #: one message (the engine stays WS-free). Defined here so ``claude_agent`` stays model-free.
 MessageCallback = Callable[[PipelineMessage], Awaitable[None]]
+
+
+@dataclass
+class _DispatchMetrics:
+    """Accumulates token usage + wall-clock across one logical agent turn (WS-D, CR-NS-036).
+
+    A turn may span several ``invoke_agent`` calls (parse-retry re-emits — each burns tokens
+    even when its block doesn't parse), so the metrics live in a single object threaded through
+    :func:`invoke_agent_with_parse_retry` and folded into the FINAL recorded message's payload.
+    ``saw_usage`` stays ``False`` until a real :class:`claude_agent.UsageMetadata` is seen, so a
+    run with no usage (test doubles / a usage-less envelope) records ``usage: None`` rather than
+    fabricated zeros."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    duration_seconds: float = 0.0
+    attempts: int = 0
+    model: Optional[str] = None
+    saw_usage: bool = False
+
+    def record(self, usage: Optional["claude_agent.UsageMetadata"], duration: float) -> None:
+        """Fold one invocation's outcome in: always count the attempt + its wall-clock; add tokens
+        only when the envelope actually carried usage."""
+        self.attempts += 1
+        self.duration_seconds += duration
+        if usage is not None:
+            self.saw_usage = True
+            self.input_tokens += usage.input_tokens
+            self.output_tokens += usage.output_tokens
+            if usage.model:
+                self.model = usage.model
+
+    def usage_payload(self) -> Optional[dict[str, Any]]:
+        """The ``payload.usage`` block, or ``None`` when no usage was ever captured (never fabricate)."""
+        if not self.saw_usage:
+            return None
+        return {"input_tokens": self.input_tokens, "output_tokens": self.output_tokens, "model": self.model}
+
+    def timing_payload(self) -> dict[str, Any]:
+        """The ``payload.timing`` block — duration + how many invocations the turn took (parse-retries)."""
+        return {"duration_seconds": round(self.duration_seconds, 3), "parse_attempts": self.attempts}
+
+
+def _split_claude_result(
+    result: "tuple[str, Optional[claude_agent.UsageMetadata]] | str",
+) -> "tuple[str, Optional[claude_agent.UsageMetadata]]":
+    """Normalise :func:`invoke_claude`'s return to ``(text, usage)``.
+
+    Since WS-D (CR-NS-036) ``invoke_claude`` returns ``(text, usage)``, but unit-test doubles that
+    monkeypatch ``orchestrator.invoke_claude`` still return a bare ``str`` — tolerate both so the
+    engine works under test without forcing every fake to mint usage."""
+    if isinstance(result, tuple):
+        return result[0], result[1]
+    return result, None
+
+
+def _failure_metrics_payload(result: object) -> dict[str, Any]:
+    """The WS-D ``usage``/``timing`` to fold onto an escalation message for a turn that produced NO
+    message of its own — a terminal :class:`ParseFailure` carrying captured usage (CR-NS-036). The
+    SINGLE source of the carry keys, so the attachment can't drift across the escalation sites.
+
+    Empty for a successful block (its own message already carries the metrics) or a ParseFailure with
+    no captured usage (nothing to count) — so attaching it is always a safe no-op."""
+    if not isinstance(result, ParseFailure) or result.usage is None:
+        return {}
+    return {"usage": result.usage, "timing": result.timing}
+
+
+def _seed_metrics_from_failure(result: object) -> Optional["_DispatchMetrics"]:
+    """A :class:`_DispatchMetrics` pre-loaded with a failed worker turn's captured usage/timing (WS-D),
+    so a Coordinator relay invoked to escalate that failure accumulates ON TOP and its recorded relay
+    message carries worker + coordinator tokens (no extra notification, no undercount). ``None`` when
+    there's nothing to carry (not a ParseFailure / no usage)."""
+    if not isinstance(result, ParseFailure) or result.usage is None:
+        return None
+    seed = _DispatchMetrics()
+    seed.saw_usage = True
+    seed.input_tokens = int(result.usage.get("input_tokens") or 0)
+    seed.output_tokens = int(result.usage.get("output_tokens") or 0)
+    model = result.usage.get("model")
+    seed.model = model if isinstance(model, str) else None
+    if result.timing:
+        seed.duration_seconds = float(result.timing.get("duration_seconds") or 0.0)
+        seed.attempts = int(result.timing.get("parse_attempts") or 0)
+    return seed
+
 
 # Ordered stages and the agent responsible for each (F-007 §3.1).
 STAGE_ORDER: tuple[str, ...] = (
@@ -697,6 +785,7 @@ async def invoke_agent(
     recipient: str = "director",
     on_message: Optional[MessageCallback] = None,
     extra_payload: Optional[dict[str, Any]] = None,
+    metrics: Optional["_DispatchMetrics"] = None,
 ) -> PipelineStatusBlock | ParseFailure:
     """Drive one agent turn headless and record its message.
 
@@ -715,6 +804,12 @@ async def invoke_agent(
     When ``on_event`` is set, each streamed event (and a one-shot ``active_role``
     signal at the start) is tagged with ``_role=role`` so the cockpit rail shows the
     **real** working agent per turn, not the nominal stage actor.
+
+    ``metrics`` (WS-D, CR-NS-036): an optional :class:`_DispatchMetrics` accumulator. When given
+    (by :func:`invoke_agent_with_parse_retry`) the turn's token usage + wall-clock fold into it
+    across parse-retries, and the recorded message's ``payload.usage`` / ``payload.timing`` reflect
+    the accumulated total. When ``None`` a fresh per-call accumulator is used (single-shot direct
+    callers still get accurate per-message metrics).
     """
     slug = _project_slug_for_version(db, version_id)
     session_id, is_first = _resolve_orch_session(db, slug, role)
@@ -730,26 +825,43 @@ async def invoke_agent(
 
         await tagged_on_event({"type": "active_role"})  # per-turn rail signal (steps Z→N→K)
 
+    # WS-D (CR-NS-036): time + meter this dispatch into the turn accumulator. A fresh local one for
+    # single-shot direct callers; the shared one when threaded through the parse-retry loop.
+    turn_metrics = metrics if metrics is not None else _DispatchMetrics()
+    _started = perf_counter()
     try:
-        stdout = await invoke_claude(
-            project_slug=slug,
-            claude_session_id=session_id,
-            prompt=prompt,
-            charter_path=charter_path,
-            timeout=timeout if timeout is not None else _timeout_for(stage),
-            on_event=tagged_on_event,
+        text, usage = _split_claude_result(
+            await invoke_claude(
+                project_slug=slug,
+                claude_session_id=session_id,
+                prompt=prompt,
+                charter_path=charter_path,
+                timeout=timeout if timeout is not None else _timeout_for(stage),
+                on_event=tagged_on_event,
+            )
         )
     except ClaudeAgentError as exc:
+        # A failed invocation still burned wall-clock (and counts as an attempt) — record it so the
+        # turn's timing/parse_attempts reflect retries; no usage (no envelope was returned) (WS-D).
+        turn_metrics.record(None, perf_counter() - _started)
         # Return the failure SILENTLY (CR-NS-022 §2 — no raw system→director dump here). The
         # caller decides if/how it reaches the Director: invoke_agent_with_parse_retry relays the
         # FINAL unrecovered failure via the Coordinator in plain Slovak; internal direct callers
         # (auditor / coordinator-judge) fold it into their own handling. Suppresses the leak where
         # an intermediate parse-retry later succeeds.
-        return ParseFailure(f"claude invocation failed: {exc}")
+        return ParseFailure(
+            f"claude invocation failed: {exc}",
+            usage=turn_metrics.usage_payload(),
+            timing=turn_metrics.timing_payload(),
+        )
+    turn_metrics.record(usage, perf_counter() - _started)
+    stdout = text
 
     parsed = parse_status_block(stdout)
     if isinstance(parsed, ParseFailure):
-        return parsed
+        # WS-D (CR-NS-036): carry this turn's accumulated metrics on the ParseFailure so a terminal
+        # escalation (which records the only message for this no-message turn) can fold them in.
+        return replace(parsed, usage=turn_metrics.usage_payload(), timing=turn_metrics.timing_payload())
 
     # Map the agent block.kind → message kind (question/blocked → question).
     msg_kind = "question" if parsed.kind in ("question", "blocked") else parsed.kind
@@ -802,6 +914,11 @@ async def invoke_agent(
             # Caller-supplied structural markers (e.g. is_fix_edit) for the deterministic
             # open-finding count — orchestrator record, not agent self-report (§5).
             **(extra_payload or {}),
+            # WS-D (CR-NS-036) token usage + dispatch timing for this turn — placed AFTER the
+            # extra_payload spread so these orchestrator-owned metrics are never clobbered. usage is
+            # None when no envelope carried it (never fabricated); timing accumulates parse-retries.
+            "usage": turn_metrics.usage_payload(),
+            "timing": turn_metrics.timing_payload(),
         },
     )
     if on_message is not None:  # incremental broadcast (CR-NS-018) — stream this turn now
@@ -820,6 +937,7 @@ async def invoke_agent_with_parse_retry(
     recipient: str = "director",
     on_message: Optional[MessageCallback] = None,
     extra_payload: Optional[dict[str, Any]] = None,
+    metrics: Optional["_DispatchMetrics"] = None,
 ) -> PipelineStatusBlock | ParseFailure:
     """Invoke the actor; on a status-block ``ParseFailure``, re-invoke (bounded).
 
@@ -835,6 +953,11 @@ async def invoke_agent_with_parse_retry(
     that failed verification. Only the first (primary) invocation streams via
     ``on_event``; the cheap re-emit retries don't stream.
     """
+    # WS-D (CR-NS-036): one accumulator for the whole turn — failed re-emits burn tokens too, so the
+    # surviving (successful) message's payload reflects the SUM across the primary + every retry. A
+    # caller may pre-seed it (the Coordinator relay carries a failed worker's lost tokens into its
+    # relay message — see _coordinator_relay_engine_failure).
+    turn_metrics = metrics if metrics is not None else _DispatchMetrics()
     result = await invoke_agent(
         db,
         version_id=version_id,
@@ -845,6 +968,7 @@ async def invoke_agent_with_parse_retry(
         recipient=recipient,
         on_message=on_message,
         extra_payload=extra_payload,
+        metrics=turn_metrics,
     )
     attempts = 0
     while isinstance(result, ParseFailure) and attempts < _PARSE_RETRIES:
@@ -864,6 +988,7 @@ async def invoke_agent_with_parse_retry(
             recipient=recipient,
             on_message=on_message,
             extra_payload=extra_payload,
+            metrics=turn_metrics,
         )
     return result
 
@@ -874,18 +999,28 @@ async def _coordinator_relay_engine_failure(
     stage: str,
     reason: str,
     on_message: Optional[MessageCallback] = None,
+    *,
+    failed: Optional[ParseFailure] = None,
 ) -> None:
     """Relay an engine-level hard failure to the Director via the Coordinator, in plain Slovak
     (F-007 §6/§7, CR-NS-022 §2). Called from the orchestration layer at the point it decides to
     block, so a worker parse-exhaustion / a plan write failure reaches the Director as a plain
     Coordinator explanation — never a raw technical dump. The Coordinator's turn
     (``recipient=director``) IS that message. If the Coordinator itself can't run, fall back to a
-    plain ``system→director`` note (the Coordinator's own failure is handled here — no re-relay)."""
+    plain ``system→director`` note (the Coordinator's own failure is handled here — no re-relay).
+
+    ``failed`` (WS-D, CR-NS-036): the worker's terminal :class:`ParseFailure` when this relay escalates
+    a parse-exhaustion (vs an engine error like a plan-write fail, where the worker DID produce a
+    message). When it carries usage, the relay's metric accumulator is pre-seeded with the worker's
+    lost tokens, so the recorded relay message counts worker + Coordinator (no extra notification, no
+    undercount); the fallback note carries them too."""
+    seed = _seed_metrics_from_failure(failed)
     relay = await invoke_agent_with_parse_retry(
         db,
         version_id=version_id,
         role="coordinator",
         stage=stage,
+        metrics=seed,
         prompt=(
             f"Vo fáze '{stage}' nastalo technické zlyhanie, ktoré treba oznámiť Directorovi: {reason}. "
             "Vysvetli mu to po slovensky, zrozumiteľne — čo sa stalo a čo môže urobiť — bez technického "
@@ -913,6 +1048,9 @@ async def _coordinator_relay_engine_failure(
                 f"Vo fáze '{stage}' nastal problém, ktorý si vyžaduje tvoju pozornosť — "
                 "skús akciu zopakovať; podrobnosti sú v zázname."
             ),
+            # WS-D (CR-NS-036): even when the Coordinator relay itself fails to parse, the failed
+            # worker's lost tokens ride on this fallback note so aggregate_pipeline_usage counts them.
+            payload=_failure_metrics_payload(failed) or None,
         )
         if on_message is not None:
             await on_message(msg)
@@ -1210,6 +1348,8 @@ async def run_dispatch(
             stage,
             f"agent '{actor}' nevrátil platný výstup ani po opravách: {result.reason}",
             on_message,
+            # WS-D (CR-NS-036): the worker produced no message — carry its lost tokens into the relay.
+            failed=result,
         )
         state.status = "blocked"
         state.next_action = "Blokované — Koordinátor poslal Directorovi vysvetlenie a ďalší krok."
@@ -1272,12 +1412,37 @@ _GATE_E_NO_EDIT = (
 )
 
 
-def _block_failed(state: PipelineState, db: Session, reason: str) -> PipelineState:
+async def _block_failed(
+    state: PipelineState,
+    db: Session,
+    reason: str,
+    *,
+    failed: Optional[ParseFailure] = None,
+    on_message: Optional[MessageCallback] = None,
+) -> PipelineState:
     # Plain next_action — no raw technical reason on the board (CR-NS-022 §2 refinement). The
     # ``reason`` is kept internal (logged); the Director acts via Vrátiť / Konzultovať.
     logger.info("pipeline %s blocked at %s: %s", state.version_id, state.current_stage, reason)
     state.status = "blocked"
     state.next_action = "Blokované — pozri priebeh a rozhodni (Vrátiť / Konzultovať)."
+    # WS-D (CR-NS-036): this block path records no relay message of its own, so a worker
+    # parse-exhaustion's tokens would otherwise be lost. When the failed turn carried usage, record a
+    # plain system→director note carrying it (the ONLY message on this path — not a duplicate) so
+    # aggregate_pipeline_usage counts it; the note also gives the Director a reason this blocked.
+    metrics_payload = _failure_metrics_payload(failed)
+    if metrics_payload:
+        msg = _record_message(
+            db,
+            version_id=state.version_id,
+            stage=state.current_stage,
+            author="system",
+            recipient="director",
+            kind="notification",
+            content="Fáza zablokovaná — agent nevrátil platný výstup ani po opravách; pozri priebeh a rozhodni.",
+            payload=metrics_payload,
+        )
+        if on_message is not None:
+            await on_message(msg)
     db.flush()
     return state
 
@@ -1343,7 +1508,7 @@ async def _run_gate_e_round(
             on_message=on_message,
         )
         if isinstance(revised, ParseFailure):
-            return _block_failed(state, db, revised.reason)
+            return await _block_failed(state, db, revised.reason, failed=revised, on_message=on_message)
         state.status = "awaiting_director"
         state.next_action = "Director: posúď prepracované odporúčanie Koordinátora (Schváliť návrh / Ponechať)."
         db.flush()
@@ -1364,7 +1529,7 @@ async def _run_gate_e_round(
             extra_payload={"is_fix_edit": True},
         )
         if isinstance(edit, ParseFailure):
-            return _block_failed(state, db, edit.reason)
+            return await _block_failed(state, db, edit.reason, failed=edit, on_message=on_message)
         # Symmetric relay (§5): tell the Customer what was fixed before its next question.
         customer_prompt = (
             f"Tvoj nález Návrhár opravil podľa schváleného riešenia: «{edit.summary}». "
@@ -1384,7 +1549,7 @@ async def _run_gate_e_round(
         on_message=on_message,
     )
     if isinstance(cust, ParseFailure):
-        return _block_failed(state, db, cust.reason)
+        return await _block_failed(state, db, cust.reason, failed=cust, on_message=on_message)
 
     if cust.kind == "gate_report" and cust.topic_done:  # round boundary
         state.status = "awaiting_director"
@@ -1407,7 +1572,7 @@ async def _run_gate_e_round(
             on_message=on_message,
         )
         if isinstance(designer, ParseFailure):
-            return _block_failed(state, db, designer.reason)
+            return await _block_failed(state, db, designer.reason, failed=designer, on_message=on_message)
         state.status = "awaiting_director"
         if designer.gap_found:  # Branch B upward leg — Coordinator reviews before the Director
             await _coordinator_review_gap(db, state, designer, on_message)
@@ -2060,7 +2225,16 @@ async def _run_build_round(
                 recipient="implementer",
                 kind="return",
                 content=f"Auto-fix {attempt}/{_AUTO_FIX_RETRIES} (úloha #{task.number}): {prior_failures[-1]}",
-                payload={"verify_reason": prior_failures[-1], "auto_fix_attempt": attempt, "task_id": str(task.id)},
+                payload={
+                    "verify_reason": prior_failures[-1],
+                    "auto_fix_attempt": attempt,
+                    "task_id": str(task.id),
+                    # WS-D (CR-NS-036): when this attempt's failure was a terminal ParseFailure (the
+                    # Programmer produced no message of its own), carry its tokens here — keyed by
+                    # task_id so aggregate_pipeline_usage rolls them up to the task. A verify-failed
+                    # gate_report attempt already recorded its own metric-bearing message → no-op.
+                    **_failure_metrics_payload(result),
+                },
             )
             if on_message is not None:
                 await on_message(msg)
@@ -2142,7 +2316,7 @@ async def _run_designer_spec_fix(
         state.returns_to = None
         state.current_actor = "implementer"
         db.flush()
-        return _block_failed(state, db, edit.reason)
+        return await _block_failed(state, db, edit.reason, failed=edit, on_message=on_message)
     # Designer DONE → reset the held failed task (corrected spec), clear the marker, hand back to build.
     if task is not None:
         task.status = "todo"

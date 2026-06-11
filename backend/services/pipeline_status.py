@@ -183,9 +183,18 @@ class PipelineStatusBlock(BaseModel):
 
 @dataclass(frozen=True)
 class ParseFailure:
-    """A status block that could not be parsed deterministically."""
+    """A status block that could not be parsed deterministically.
+
+    ``usage`` / ``timing`` (WS-D, CR-NS-036) carry the FAILED turn's accumulated token usage +
+    dispatch timing. A turn that never parses produces no agent ``PipelineMessage`` of its own, so the
+    orchestrator attaches its metrics here (via :func:`dataclasses.replace`) and the terminal
+    escalation that records a Director-facing message folds them in — otherwise those tokens would be
+    lost from :func:`pipeline_metrics.aggregate_pipeline_usage`. Both ``None`` when no usage was
+    captured (never fabricated)."""
 
     reason: str
+    usage: Optional[dict[str, Any]] = None
+    timing: Optional[dict[str, Any]] = None
 
 
 ParseResult = Union[PipelineStatusBlock, ParseFailure]
