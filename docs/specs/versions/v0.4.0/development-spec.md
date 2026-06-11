@@ -151,18 +151,34 @@ SEPARATE system** (`DialoguePage`, the gate_e Customer dialogue), NOT a persiste
     `pipeline.ts`; retype `DebugTerminalSession.role`, `openDebugTerminalApi(role)`, and
     `DebugTerminalDrawer` (`TERMINAL_ROLES`, `asTerminalRole(...)→DebugAttachRole`, the `role`
     state/`attach`/`changeRole`) to it. (`PipelineActor` is unsuitable — it has customer/director.)
-  - **Narrow the SPAWN type:** `AgentRole` → `Literal["coordinator"]` in `agentTerminal.ts:15` (FE) AND
-    `backend/schemas/agent_terminal.py:18` + `_VALID_ROLES`→`{"coordinator"}` (BE).
-    `AgentTerminalSession.role`/`SpawnRequest.role`/`AvailableRoles` auto-narrow to coordinator-only — and
-    that is CONSISTENT (the other NavItems are GONE, so gating/available-roles is coordinator-only; no
-    4-key requirement remains).
+  - **Narrow the SPAWN type (FE):** `AgentRole` → `Literal["coordinator"]` in `agentTerminal.ts:15`;
+    `SpawnRequest.role`/`AvailableRoles` auto-narrow to coordinator-only — CONSISTENT (the other NavItems are
+    GONE, so gating/available-roles is coordinator-only). **BE: the spawn path narrows to coordinator too,
+    BUT the BE carries the SYMMETRIC debug-attach overload — see the BE decouple below (my earlier "BE
+    narrowing is safe" claim was WRONG).**
   - Remove the now-unused `Sidebar.tsx` `agentDisabled()`/`agentTitle()` + trim/remove `AG_ROLE_LABEL`;
     `PersistentTerminalsLayer` `matchActiveRole()`/`entries` + `agentTerminalStore.ROLES` → coordinator-only;
     `AgentTerminalPage` `Record<AgentRole>`/role-prop auto-narrow.
   - **Update the obsolete test** `test_Sidebar_agent_gating.test.tsx` (it mocks 4-role gating — now
     coordinator-only).
-  - Backend `open_debug_terminal` takes `role: str` (not `AgentRole`) → BE narrowing is safe + does NOT
-    touch debug-attach. KEEP the DB CHECK constraint permissive (no migration).
+  - **BE debug-attach decouple (re-verified 2026-06-12 — the BE has the SYMMETRIC overload; the prior "BE
+    safe" claim was WRONG; a completeness sweep found 4 affected sites — the single failing test
+    `test_debug_terminal_resumes_orchestrator_session` covered only 2):**
+    - **Spawn = coordinator-only:** `SpawnRequest.role` = `Literal["coordinator"]`; `_VALID_ROLES` =
+      `{"coordinator"}`; the spawn-API path validates against it; `available_roles` stays coordinator-only.
+    - **Debug-attach = 4 roles:** add `_DEBUG_ATTACH_ROLES = {coordinator,designer,implementer,auditor}` +
+      a `_validate_debug_attach_role`; the debug-terminal endpoint (`pipeline.py:206`) validates against IT
+      (not `_VALID_ROLES`); **move the coordinator-only gate OUT of `_resolve_agent_spec`** to the spawn-API
+      entry, so debug-attach + auto-resume can use 4 roles.
+    - **Reads serialize 4 roles (the key fix a 2-schema split would miss):** the session-row READ schema
+      `AgentTerminalSessionRead.role` must accept the 4 roles (e.g. `DebugAttachRole`/`str`) — the SAME table
+      holds debug-attach (non-coordinator) rows, so this fixes BOTH `list_sessions` (`agent_terminal.py:130`,
+      `response_model=list[AgentTerminalSessionRead]`) AND the debug-terminal response in ONE schema. The
+      coordinator-only constraint lives on `SpawnRequest` + spawn validation, NOT the read schema.
+    - **Auto-resume:** `_respawn_for_resume` (`agent_terminal.py:~447/514`, WS reconnect) must resume a
+      non-coordinator debug-attach session — with the gate moved out of `_resolve_agent_spec`, it works.
+    - DB CHECK constraint stays permissive (no migration). Blast radius confirmed bounded to debug-attach +
+      auto-resume; the spawn API stays coordinator-only.
 
 **Seams to preserve:** the orchestrator pipeline still dispatches ALL roles
 (coordinator/designer/implementer/auditor/customer) — E3(a) removes only the interactive SIDEBAR terminals,
