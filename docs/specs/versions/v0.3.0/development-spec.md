@@ -134,7 +134,7 @@ DATA capture must start now (history cannot be backfilled).
 
 ### WS-E — Internal-turn parse-failure observability (Class F) — follow-up, added 2026-06-11 post-CR-036 review
 
-**Problem (grounded, verified by the CR-036 adversarial review — all 5 sites PRE-EXISTING, untouched by
+**Problem (grounded, verified by the CR-036 adversarial review — all 6 sites PRE-EXISTING, untouched by
 WS-D):** when an INTERNAL Coordinator/verify-judge turn (not a build worker) exhausts its parse-retries,
 the orchestrator DISCARDS the terminal `ParseFailure` → (a) its accumulated usage/timing LEAK (no
 `PipelineMessage` ⇒ absent from `aggregate_pipeline_usage`, WS-D), and (b) the failure is INVISIBLE to the
@@ -143,7 +143,9 @@ to the raw worker question — graceful but silent), `_coordinator_review_gap` (
 fully silent no-op), the baseline-unreadable relay (~:2136) and the failed-task HALT relay (~:2249) in
 `_run_build_round` (relay result not captured), `_verify_with_retries` (~:1619, returns the prior
 reason-string, dropping usage; the `verify_done` coordinator judge ~:1196 stringifies its own ParseFailure
-too). RARE² (the Coordinator is relay-only — the most reliable agent — and needs 3 consecutive invalid
+too), and the auditor per-task judge `_verify_task` (~:2152, returns `audit nečitateľný: …`, dropping the
+Auditor judge's metrics — surfaced by the CR-037 completeness sweep 2026-06-12, the 6th and final Class-F
+site). RARE² (the Coordinator is relay-only — the most reliable agent — and needs 3 consecutive invalid
 blocks; `_PARSE_RETRIES`=2); BOUNDED (pipeline state stays correct in every case — the graceful fallbacks
 already settle to `awaiting_director`/`blocked`; no P0/P1). This is an **observability + metrics-completeness**
 gap, not a control-flow bug — and silent internal-turn failures directly contradict the E7/WS-C2
@@ -166,14 +168,14 @@ transparency goal.
   still blocks. We ADD the metrics + the visible note; we do NOT add decision branches, change offerable
   actions, or change the stage/status outcome. If any site's control-flow makes a non-invasive add unclear,
   STOP+ask (do not refactor control flow).
-- **Single drift-proof helper.** One shared `_record_internal_turn_parse_failure(...)` used by all 5 sites
+- **Single drift-proof helper.** One shared `_record_internal_turn_parse_failure(...)` used by all 6 sites
   so a future internal-turn relay cannot silently re-introduce the gap; per-site test.
 
 **Seams to preserve:** hub-and-spoke (the note is `system→director`, no new agent dispatch); deterministic
 gates unchanged; the `_coordinator_relay` raw-question fallback stays; no control-flow change to any site's
 settled state.
 
-**Acceptance:** each of the 5 sites, on an internal-turn parse-exhaustion, (a) records the internal turn's
+**Acceptance:** each of the 6 sites, on an internal-turn parse-exhaustion, (a) records the internal turn's
 tokens/timing into a `PipelineMessage` that `aggregate_pipeline_usage` counts, and (b) records a
 Director-visible plain-Slovak note naming the failed internal turn — while the pipeline's settled state
 (`awaiting_director`/`blocked` + the existing `next_action` fallback) is UNCHANGED. Per-site tests; affected
