@@ -133,4 +133,23 @@ Implementer STOP+ask before building; decisions below REFINE §4–§7:
    return path; the gate_e Branch B `designer_edit` precedent is within-gate_e, not a build→Designer
    round-trip). **CR-NS-032 = A1 + the four executors + wiring + FE; `route_to_designer` is OUT.**
 
+## 10. `route_to_designer` design (CR-NS-034) — build→Designer spec-fix round-trip
+
+The hardest E7 action (build→Designer is NOT native today). Mirror the gate_e Branch B `designer_edit`
+precedent (a within-gate dispatch of the Designer for an edit + a return path), adapted to build:
+
+- **`coordinator_route_to_designer` executor** (approved at a build HALT for a `spec_problem`): dispatch
+  the **Designer** with the failed task's context + `params.section` — "fix the spec/design for this build
+  task" (it edits `docs/specs/…`, reports DONE). Mark the pipeline_state with a `returns_to="build"`
+  marker (analogous to `gate_e_dispatch="designer_edit"`) so the dispatch-completion handler returns to
+  **build**, not to a gate.
+- **On the Designer's DONE:** reset the failed task → `todo` (fresh ≤5 budget, now against the corrected
+  spec) + re-enter `_run_build_round` → the Programmer re-attempts with the fixed design.
+- Add `coordinator_route_to_designer` to the **executable** set (so an approved directive now EXECUTES it,
+  not relays). `determine_available_actions` unchanged — it stays an executor, not an offerable action
+  (contract A, §9.1).
+- **Seam:** the build task stays `failed` (held) while the Designer fixes; it resets to `todo` ONLY on the
+  Designer's DONE. Hub-and-spoke preserved (the orchestrator dispatches the Designer; the Coordinator only
+  proposed it; the Director approved).
+
 **End of F-008.**
