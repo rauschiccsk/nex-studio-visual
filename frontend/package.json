@@ -18,7 +18,7 @@
     "dictionary-sk": "^2.0.0",
     "html2canvas": "^1.4.1",
     "lucide-react": "^1.8.0",
-    "nex-shared": "github:rauschiccsk/nex-shared#v0.3.0",
+    "nex-shared": "github:rauschiccsk/nex-shared#v0.4.0",
     "nspell": "^2.1.5",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
