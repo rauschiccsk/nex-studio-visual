@@ -168,4 +168,31 @@ seams, acceptance — is in **`spec/E4-slovak-ui.md`**. Summary:
   (backend already restricts the credentials API to `ri` — this aligns nav visibility, not a new boundary).
 - **Seams:** no i18n library, no language store, no backend/agent/format changes, no new routes.
 
-**Sequence after E4: E1 (cross-project unification — the biggest, to be designed).**
+**Sequence after E4: E1 (cross-project unification — the biggest).**
+
+---
+
+## E1 — Cross-project unification (designed 2026-06-12)
+
+> **Director decisions:** mechanism = **shared library** (versioned, git-dep; not monorepo, not
+> template-copy); start with **NEX Studio as the vzor**; auth = **two modes** (username+password login like
+> NEX Studio for internal tools; NEX Genesis security-token launch like NEX Inbox for customer apps — NEX
+> Ledger is also token). Grounded by a 4-lens discovery: today projects share almost nothing (only the
+> `init.sh` agent/docs skeleton); FE look/layout/auth/API duplicated 3× + drifted; stack drift (Studio on
+> React 18 + Tailwind v3, the projects it builds on React 19 + Tailwind v4) blocks FE sharing; no
+> registry/monorepo/submodule infra exists.
+
+**Phased plan:**
+- **Phase A — NEX Studio stack upgrade + design-token foundation.** Bring NEX Studio to React 19 + Tailwind
+  v4 (so it can share) + express its palette as the canonical `@theme` tokens (the vzor). Spec:
+  **`spec/E1-phaseA-stack-upgrade.md`**. React bump = low risk (code is clean); Tailwind v4 = the real work;
+  RR v7 deferred to Phase B; folds the deferred FE-vitest cleanup (A4).
+- **Phase B — shared library.** Create the lib on the modern stack; extract from NEX Studio (tokens/theme,
+  AppShell/Sidebar/Header, UI primitives, API client + auth-store pattern); versioned git-based consumption;
+  RR v7 alignment.
+- **Phase C — shared auth module (two modes):** login (Studio pattern) + Genesis token-launch (Inbox pattern);
+  project picks at config/scaffold.
+- **Phase D — wire into `init.sh`/scaffolding** (new projects start unified) + migrate Inbox/Ledger to consume
+  the library.
+
+**End of E1 (Phase A designed; B–D high-level).**
