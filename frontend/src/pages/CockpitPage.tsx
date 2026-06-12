@@ -70,7 +70,7 @@ export default function CockpitPage() {
           <span className="font-mono text-xs text-slate-400">{selectedVersion.versionNumber}</span>
         </div>
         <span className="text-[10px] uppercase tracking-wider text-slate-600">
-          Orchestration Cockpit
+          Orchestrácia
         </span>
       </div>
 

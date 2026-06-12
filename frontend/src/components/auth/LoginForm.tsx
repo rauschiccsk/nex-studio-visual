@@ -50,7 +50,7 @@ export default function LoginForm({
           htmlFor="login-username"
           className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
         >
-          Username
+          Používateľské meno
         </label>
         <input
           id="login-username"
@@ -71,7 +71,7 @@ export default function LoginForm({
         />
         {usernameError && (
           <p className="mt-1 text-xs text-red-600" role="alert">
-            Username is required.
+            Používateľské meno je povinné.
           </p>
         )}
       </div>
@@ -82,7 +82,7 @@ export default function LoginForm({
           htmlFor="login-password"
           className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
         >
-          Password
+          Heslo
         </label>
         <input
           id="login-password"
@@ -103,7 +103,7 @@ export default function LoginForm({
         />
         {passwordError && (
           <p className="mt-1 text-xs text-red-600" role="alert">
-            Password is required.
+            Heslo je povinné.
           </p>
         )}
       </div>
@@ -126,7 +126,7 @@ export default function LoginForm({
         className="btn-primary w-full"
         data-testid="login-submit"
       >
-        {loading ? "Signing in\u2026" : "Sign in"}
+        {loading ? "Prihlasovanie\u2026" : "Prihl\u00e1si\u0165 sa"}
       </button>
     </form>
   );

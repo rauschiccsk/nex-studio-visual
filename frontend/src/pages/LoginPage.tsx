@@ -52,7 +52,7 @@ export default function LoginPage() {
             N
           </div>
           <h1 className="text-2xl font-bold text-primary-400 tracking-tight">NEX Studio</h1>
-          <p className="mt-1 text-sm text-slate-500">Sign in to your account</p>
+          <p className="mt-1 text-sm text-slate-500">Prihláste sa na svoj účet</p>
         </div>
 
         {/* Card */}
@@ -61,14 +61,14 @@ export default function LoginPage() {
             {/* Username */}
             <div>
               <label htmlFor="username" className="block text-sm font-medium text-slate-300 mb-1">
-                Username
+                Používateľské meno
               </label>
               <input
                 id="username"
                 ref={usernameRef}
                 type="text"
                 autoComplete="username"
-                placeholder="e.g. zoltan"
+                placeholder="napr. zoltan"
                 value={username}
                 onChange={(e) => { setUsername(e.target.value); setError(""); }}
                 className="w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-primary-500 transition-colors"
@@ -78,7 +78,7 @@ export default function LoginPage() {
             {/* Password */}
             <div>
               <label htmlFor="password" className="block text-sm font-medium text-slate-300 mb-1">
-                Password
+                Heslo
               </label>
               <div className="relative">
                 <input
@@ -129,10 +129,10 @@ export default function LoginPage() {
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
-                  Signing in…
+                  Prihlasovanie…
                 </>
               ) : (
-                "Sign in"
+                "Prihlásiť sa"
               )}
             </button>
           </form>

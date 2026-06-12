@@ -155,9 +155,9 @@ export default function NewProjectPage() {
 
   function validate(): boolean {
     const next: Record<string, string> = {};
-    if (!name.trim()) next.name = "Project name is required.";
-    if (!slug.trim()) next.slug = "Slug is required.";
-    else if (!/^[a-z0-9-]+$/.test(slug)) next.slug = "Slug: lowercase letters, numbers and hyphens only.";
+    if (!name.trim()) next.name = "Názov projektu je povinný.";
+    if (!slug.trim()) next.slug = "Slug je povinný.";
+    else if (!/^[a-z0-9-]+$/.test(slug)) next.slug = "Slug: iba malé písmená, čísla a pomlčky.";
     setErrors(next);
     return Object.keys(next).length === 0;
   }
@@ -214,7 +214,7 @@ export default function NewProjectPage() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
         </button>
-        <h1 className="text-base font-bold text-slate-100">New Project</h1>
+        <h1 className="text-base font-bold text-slate-100">Nový projekt</h1>
       </div>
 
       {/* Scrollable form */}
@@ -224,7 +224,7 @@ export default function NewProjectPage() {
 
             {/* Category */}
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">Project type</label>
+              <label className="block text-sm font-medium text-slate-300 mb-2">Typ projektu</label>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
@@ -238,8 +238,8 @@ export default function NewProjectPage() {
                   <svg className="w-4 h-4 mb-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
                   </svg>
-                  <div className="text-sm font-medium">Single module</div>
-                  <div className="text-[10px] opacity-70 mt-0.5">One repo, direct development</div>
+                  <div className="text-sm font-medium">Jeden modul</div>
+                  <div className="text-[10px] opacity-70 mt-0.5">Jedno úložisko, priamy vývoj</div>
                 </button>
                 <button
                   type="button"
@@ -253,14 +253,14 @@ export default function NewProjectPage() {
                   <svg className="w-4 h-4 mb-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
                   </svg>
-                  <div className="text-sm font-medium">Multi module</div>
-                  <div className="text-[10px] opacity-70 mt-0.5">Multiple repos, complex project</div>
+                  <div className="text-sm font-medium">Viacero modulov</div>
+                  <div className="text-[10px] opacity-70 mt-0.5">Viacero úložísk, komplexný projekt</div>
                 </button>
               </div>
             </div>
 
             {/* Name */}
-            <Field label="Project name *" error={errors.name}>
+            <Field label="Názov projektu *" error={errors.name}>
               <input
                 ref={nameRef}
                 type="text"
@@ -278,7 +278,7 @@ export default function NewProjectPage() {
               error={errors.slug}
               hint={
                 !slugManual && slug ? (
-                  <span className="text-[10px] text-primary-400/70 font-normal">auto-generated</span>
+                  <span className="text-[10px] text-primary-400/70 font-normal">automaticky generované</span>
                 ) : null
               }
             >
@@ -294,7 +294,7 @@ export default function NewProjectPage() {
             </Field>
 
             {/* GitHub repo — auto-filled as {github_org}/{slug} from ICC settings. */}
-            <Field label="GitHub repository">
+            <Field label="GitHub úložisko">
               <input
                 type="text"
                 placeholder={githubOrg ? `${githubOrg}/project-name` : "rauschiccsk/project-name"}
@@ -310,10 +310,10 @@ export default function NewProjectPage() {
             </Field>
 
             {/* Description */}
-            <Field label="Description">
+            <Field label="Popis">
               <textarea
                 rows={2}
-                placeholder="Short project description…"
+                placeholder="Krátky popis projektu…"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 className={`${inputCls} resize-none`}
@@ -323,13 +323,13 @@ export default function NewProjectPage() {
             {/* Ports */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-slate-300">Ports</span>
+                <span className="text-sm font-medium text-slate-300">Porty</span>
                 {(backendPort || frontendPort || dbPort) && (
                   <span className="flex items-center gap-1 text-[11px] text-primary-400/70">
                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                     </svg>
-                    Auto-suggested
+                    automaticky navrhnuté
                   </span>
                 )}
               </div>
@@ -337,7 +337,7 @@ export default function NewProjectPage() {
                 {([
                   { label: "Backend",   value: backendPort,   set: setBackendPort,   placeholder: "10100" },
                   { label: "Frontend",  value: frontendPort,  set: setFrontendPort,  placeholder: "10101" },
-                  { label: "Database",  value: dbPort,        set: setDbPort,        placeholder: "10102" },
+                  { label: "Databáza",  value: dbPort,        set: setDbPort,        placeholder: "10102" },
                 ] as const).map(({ label, value, set, placeholder }) => (
                   <div key={label}>
                     <label className="block text-xs text-slate-500 mb-1">{label}</label>
@@ -358,7 +358,7 @@ export default function NewProjectPage() {
             {/* CR-NS-012 — notification owner */}
             <div>
               <label htmlFor="np-owner" className="block text-sm font-medium text-slate-300 mb-2">
-                Owner <span className="text-slate-500 font-normal">(receives agent Telegram notifications)</span>
+                Vlastník <span className="text-slate-500 font-normal">(dostáva Telegram notifikácie od agenta)</span>
               </label>
               <select
                 id="np-owner"
@@ -381,7 +381,7 @@ export default function NewProjectPage() {
             {/* F-004 Setup options */}
             <div className="space-y-2 rounded-lg border border-slate-800 p-4">
               <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wide">
-                Setup options
+                Možnosti nastavenia
               </h3>
               <label className="flex items-center gap-3 text-sm text-slate-200 cursor-pointer">
                 <input
@@ -390,8 +390,8 @@ export default function NewProjectPage() {
                   onChange={(e) => setEnableCoordinator(e.target.checked)}
                   className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-primary-500 focus:ring-primary-500"
                 />
-                <span>Enable Koordinátor agent</span>
-                <span className="text-xs text-slate-500">(default ON)</span>
+                <span>Povoliť agenta Koordinátor</span>
+                <span className="text-xs text-slate-500">(predvolene zapnuté)</span>
               </label>
               <label className="flex items-center gap-3 text-sm text-slate-200 cursor-pointer">
                 <input
@@ -400,7 +400,7 @@ export default function NewProjectPage() {
                   onChange={(e) => setEnableCicd(e.target.checked)}
                   className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-primary-500 focus:ring-primary-500"
                 />
-                <span>Enable CI/CD (GitHub Actions)</span>
+                <span>Povoliť CI/CD (GitHub Actions)</span>
               </label>
               <label className="flex items-center gap-3 text-sm text-slate-200 cursor-pointer">
                 <input
@@ -409,7 +409,7 @@ export default function NewProjectPage() {
                   onChange={(e) => setFullSmoke(e.target.checked)}
                   className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-primary-500 focus:ring-primary-500"
                 />
-                <span>Full smoke test (build + up + /health, ~5-7 min)</span>
+                <span>Úplný smoke test (build + up + /health, ~5-7 min)</span>
               </label>
               <label className="flex items-center gap-3 text-sm text-slate-200 cursor-pointer">
                 <input
@@ -418,7 +418,7 @@ export default function NewProjectPage() {
                   onChange={(e) => setEnableBranchProtection(e.target.checked)}
                   className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-primary-500 focus:ring-primary-500"
                 />
-                <span>Enable branch protection (require PR, no force push)</span>
+                <span>Povoliť ochranu vetvy (vyžadovať PR, bez force push)</span>
               </label>
             </div>
 
@@ -436,7 +436,7 @@ export default function NewProjectPage() {
                 onClick={() => navigate("/projects")}
                 className="flex-1 px-4 py-2 text-sm text-slate-400 border border-slate-700 rounded-lg hover:bg-slate-800 transition-colors"
               >
-                Cancel
+                Zrušiť
               </button>
               <button
                 type="submit"
@@ -449,14 +449,14 @@ export default function NewProjectPage() {
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                     </svg>
-                    Creating…
+                    Vytváram…
                   </>
                 ) : (
                   <>
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                     </svg>
-                    Create project
+                    Vytvoriť projekt
                   </>
                 )}
               </button>

@@ -24,7 +24,7 @@ function Header() {
       <div className="flex items-center gap-3">
         <button
           type="button"
-          aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+          aria-label={isDark ? "Prepnúť na svetlý režim" : "Prepnúť na tmavý režim"}
           onClick={toggleDark}
           className="rounded-full p-2 text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
         >
@@ -34,7 +34,7 @@ function Header() {
           type="button"
           className="rounded-full bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
         >
-          Account
+          Účet
         </button>
       </div>
     </header>

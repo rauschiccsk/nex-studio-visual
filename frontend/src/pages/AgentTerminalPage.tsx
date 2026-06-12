@@ -135,13 +135,13 @@ export default function AgentTerminalPage({ role }: AgentTerminalPageProps) {
           {session && (
             <span className="flex items-center gap-1.5 rounded-full bg-green-500/10 px-2 py-0.5 text-[10px] text-green-400">
               <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
-              running · pid {session.pid}
+              beží · pid {session.pid}
             </span>
           )}
           <button
             onClick={() => void refresh()}
             className="text-slate-500 transition-colors hover:text-slate-200"
-            title="Refresh"
+            title="Obnoviť"
           >
             <RefreshCw className="h-3.5 w-3.5" />
           </button>
@@ -153,7 +153,7 @@ export default function AgentTerminalPage({ role }: AgentTerminalPageProps) {
               title="Ukončí session (SIGTERM)"
             >
               <X className="h-3 w-3" />
-              End session
+              Ukončiť session
             </button>
           )}
         </div>
@@ -188,9 +188,9 @@ export default function AgentTerminalPage({ role }: AgentTerminalPageProps) {
             </h2>
             <p className="max-w-md text-xs text-slate-500">
               {ROLE_LABEL[role]} sa spúšťa nad konkrétnym projektom. Otvor{" "}
-              <span className="font-mono">Projects</span> a klikni na pin
+              <span className="font-mono">Projekty</span> a klikni na pin
               ikonu pri projekte, ktorý chceš označiť ako{" "}
-              <span className="text-primary-400">Selected</span>.
+              <span className="text-primary-400">vybraný</span>.
             </p>
             <button
               onClick={() => navigate("/projects")}

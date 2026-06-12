@@ -358,7 +358,7 @@ export function PipelineActionBar({
             disabled={inFlight}
             className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
           >
-            UAT accept
+            Akceptovať UAT
           </button>
         </ActionRow>
       )}

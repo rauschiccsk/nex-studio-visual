@@ -15,9 +15,9 @@ function versionStatusCls(status: string) {
 }
 
 function versionStatusLabel(status: string) {
-  if (status === "active") return "In Progress";
-  if (status === "released") return "Released";
-  return "Planned";
+  if (status === "active") return "Prebieha";
+  if (status === "released") return "Vydané";
+  return "Plánované";
 }
 
 // ─── VersionDetailPage ────────────────────────────────────────────────────────
@@ -109,17 +109,17 @@ export default function VersionDetailPage() {
           <div className="flex items-center gap-5 text-center">
             <div>
               <div className="text-sm font-bold text-slate-100">{epicsDone}/{epicCount}</div>
-              <div className="text-[10px] text-slate-500">epics done</div>
+              <div className="text-[10px] text-slate-500">epic hotových</div>
             </div>
             <div>
               <div className="text-sm font-bold text-slate-100">{version.epic_count}</div>
-              <div className="text-[10px] text-slate-500">epics</div>
+              <div className="text-[10px] text-slate-500">epic</div>
             </div>
             <div>
               <div className={`text-sm font-bold ${version.bug_count > 0 ? "text-red-400" : "text-slate-100"}`}>
                 {version.bug_count}
               </div>
-              <div className="text-[10px] text-slate-500">bugs</div>
+              <div className="text-[10px] text-slate-500">chyby</div>
             </div>
           </div>
         </div>
@@ -133,7 +133,7 @@ export default function VersionDetailPage() {
               {version.version_number}{version.name ? ` — ${version.name}` : ""}
             </div>
             <div className="text-xs text-slate-500">
-              {epicCount} epic(s) · {epicsDone} done · {version.bug_count} bug(s).
+              {epicCount} epic · {epicsDone} hotových · {version.bug_count} chýb.
               Epics, feats a tasks pre túto verziu spravujú agenti (Designer / Implementer / Auditor).
             </div>
           </div>

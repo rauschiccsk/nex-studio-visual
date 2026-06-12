@@ -498,7 +498,7 @@ export default function DialoguePage() {
             </h2>
             <p className="max-w-md text-xs text-slate-500">
               Zákaznícky dialóg beží nad konkrétnym projektom. Otvor{" "}
-              <span className="font-mono">Projects</span> a pripni projekt.
+              <span className="font-mono">Projekty</span> a pripni projekt.
             </p>
             <button
               onClick={() => navigate("/projects")}

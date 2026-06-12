@@ -118,8 +118,8 @@ export default function SettingsPage() {
   const user = useAuthStore((s) => s.user);
   const [tab, setTab] = useState<SettingsTab>("appearance");
 
-  // Appearance
-  const [lang, setLang] = useState<"sk" | "en">("sk");
+  // Appearance — dark mode is the app default; the language switch stub was removed (E4, CR-NS-046:
+  // the UI is Slovak-only, no i18n).
 
   // System settings — loaded once the System tab becomes visible. The
   // per-row editor state (draft + saving + flash) lives alongside the
@@ -356,21 +356,21 @@ export default function SettingsPage() {
   }
 
   const TABS: { id: SettingsTab; label: string }[] = [
-    { id: "appearance", label: "Appearance" },
-    { id: "system", label: "System" },
+    { id: "appearance", label: "Vzhľad" },
+    { id: "system", label: "Systém" },
     { id: "agents", label: "Agenti" },
-    { id: "users", label: "Users" },
-    { id: "sessions", label: "Sessions" },
+    { id: "users", label: "Používatelia" },
+    { id: "sessions", label: "Relácie" },
   ];
 
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="flex-shrink-0 px-6 py-4 border-b border-slate-800 flex items-center justify-between">
-        <h1 className="text-base font-bold text-slate-100">Settings</h1>
+        <h1 className="text-base font-bold text-slate-100">Nastavenia</h1>
         {user && (
           <span className="text-xs text-slate-600">
-            Signed in as{" "}
+            Prihlásený ako{" "}
             <span className="text-slate-400 font-medium">{user.username}</span>
             {" · "}
             <span className={`font-mono text-[11px] ${roleCls(user.role)}`}>{user.role}</span>
@@ -401,40 +401,15 @@ export default function SettingsPage() {
         {/* ── Appearance ── */}
         {tab === "appearance" && (
           <div className="p-6 max-w-lg">
-            <h2 className="text-sm font-semibold text-slate-300 mb-4">Appearance</h2>
+            <h2 className="text-sm font-semibold text-slate-300 mb-4">Vzhľad</h2>
             <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 mb-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="text-sm font-medium text-slate-200">Dark mode</div>
-                  <div className="text-xs text-slate-500 mt-0.5">Use dark theme across the application</div>
+                  <div className="text-sm font-medium text-slate-200">Tmavý režim</div>
+                  <div className="text-xs text-slate-500 mt-0.5">Použiť tmavú tému v celej aplikácii</div>
                 </div>
                 <button className="relative inline-flex h-6 w-11 items-center rounded-full bg-primary-600 transition-colors focus:outline-none">
                   <span className="inline-block h-4 w-4 transform rounded-full bg-white transition-transform translate-x-6" />
-                </button>
-              </div>
-            </div>
-            <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 space-y-3">
-              <div className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-1">Language</div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setLang("sk")}
-                  className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${
-                    lang === "sk"
-                      ? "border-primary-500 bg-primary-500/10 text-primary-400"
-                      : "border-slate-700 text-slate-500 hover:text-slate-300"
-                  }`}
-                >
-                  Slovenčina
-                </button>
-                <button
-                  onClick={() => setLang("en")}
-                  className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${
-                    lang === "en"
-                      ? "border-primary-500 bg-primary-500/10 text-primary-400"
-                      : "border-slate-700 text-slate-500 hover:text-slate-300"
-                  }`}
-                >
-                  English
                 </button>
               </div>
             </div>
@@ -646,7 +621,7 @@ export default function SettingsPage() {
         {tab === "users" && (
           <div className="p-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-semibold text-slate-300">User management</h2>
+              <h2 className="text-sm font-semibold text-slate-300">Správa používateľov</h2>
               <button
                 onClick={() => { setShowNewForm((v) => !v); setEditingUser(null); setConfirmingDeleteId(null); }}
                 className="flex items-center gap-1.5 bg-primary-600 hover:bg-primary-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
@@ -654,7 +629,7 @@ export default function SettingsPage() {
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                 </svg>
-                New user
+                Nový používateľ
               </button>
             </div>
 
@@ -665,7 +640,7 @@ export default function SettingsPage() {
                 onChange={(e) => setRoleFilter(e.target.value)}
                 className="bg-slate-800 border border-slate-700 text-xs text-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-primary-500"
               >
-                <option value="">All roles</option>
+                <option value="">Všetky role</option>
                 <option value="ri">ri — Director</option>
                 <option value="ha">ha — Medior</option>
                 <option value="shu">shu — Junior</option>
@@ -675,12 +650,12 @@ export default function SettingsPage() {
                 onChange={(e) => setActiveFilter(e.target.value)}
                 className="bg-slate-800 border border-slate-700 text-xs text-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-primary-500"
               >
-                <option value="">Any status</option>
-                <option value="active">Active only</option>
-                <option value="inactive">Inactive only</option>
+                <option value="">Akýkoľvek stav</option>
+                <option value="active">Len aktívni</option>
+                <option value="inactive">Len neaktívni</option>
               </select>
               <span className="ml-auto text-xs text-slate-600">
-                {usersLoading ? "Načítavam…" : `${users.length} users`}
+                {usersLoading ? "Načítavam…" : `${users.length} používateľov`}
               </span>
             </div>
 
@@ -689,12 +664,12 @@ export default function SettingsPage() {
               <table className="w-full text-sm">
                 <thead className="bg-slate-900/80">
                   <tr className="text-[10px] uppercase tracking-widest text-slate-600">
-                    <th className="px-4 py-2.5 text-left font-semibold">Name</th>
-                    <th className="px-4 py-2.5 text-left font-semibold">Username</th>
+                    <th className="px-4 py-2.5 text-left font-semibold">Meno</th>
+                    <th className="px-4 py-2.5 text-left font-semibold">Používateľské meno</th>
                     <th className="px-4 py-2.5 text-left font-semibold">Email</th>
-                    <th className="px-4 py-2.5 text-left font-semibold">Role</th>
-                    <th className="px-4 py-2.5 text-left font-semibold">Status</th>
-                    <th className="px-4 py-2.5 text-right font-semibold">Actions</th>
+                    <th className="px-4 py-2.5 text-left font-semibold">Rola</th>
+                    <th className="px-4 py-2.5 text-left font-semibold">Stav</th>
+                    <th className="px-4 py-2.5 text-right font-semibold">Akcie</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
@@ -714,9 +689,9 @@ export default function SettingsPage() {
                       </td>
                       <td className="px-4 py-3">
                         {u.is_active ? (
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/10 border border-green-500/25 text-green-400">active</span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/10 border border-green-500/25 text-green-400">aktívny</span>
                         ) : (
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-400">inactive</span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-400">neaktívny</span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-right">
@@ -820,17 +795,17 @@ export default function SettingsPage() {
         {/* ── Sessions ── */}
         {tab === "sessions" && (
           <div className="p-6">
-            <h2 className="text-sm font-semibold text-slate-300 mb-1">User Sessions</h2>
-            <p className="text-xs text-slate-600 mb-4">Per-user JWT lifecycle anchors. Deleting a session invalidates all outstanding tokens.</p>
+            <h2 className="text-sm font-semibold text-slate-300 mb-1">Relácie používateľa</h2>
+            <p className="text-xs text-slate-600 mb-4">Kotvy životného cyklu JWT pre používateľa. Vymazanie relácie zneplatní všetky zostávajúce tokeny.</p>
             <div className="rounded-xl border border-slate-800 overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-slate-900/80">
                   <tr className="text-[10px] uppercase tracking-widest text-slate-600">
-                    <th className="px-4 py-2.5 text-left font-semibold">User</th>
-                    <th className="px-4 py-2.5 text-left font-semibold">Session ID</th>
+                    <th className="px-4 py-2.5 text-left font-semibold">Používateľ</th>
+                    <th className="px-4 py-2.5 text-left font-semibold">ID relácie</th>
                     <th className="px-4 py-2.5 text-right font-semibold">tv</th>
-                    <th className="px-4 py-2.5 text-left font-semibold">Last seen</th>
-                    <th className="px-4 py-2.5 text-right font-semibold">Actions</th>
+                    <th className="px-4 py-2.5 text-left font-semibold">Naposledy videný</th>
+                    <th className="px-4 py-2.5 text-right font-semibold">Akcie</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
@@ -840,13 +815,13 @@ export default function SettingsPage() {
                     <td className="px-4 py-3 text-right font-mono text-xs text-slate-400">—</td>
                     <td className="px-4 py-3 text-xs text-slate-500">—</td>
                     <td className="px-4 py-3 text-right">
-                      <span className="text-xs text-slate-700">current session</span>
+                      <span className="text-xs text-slate-700">aktuálna relácia</span>
                     </td>
                   </tr>
                 </tbody>
               </table>
             </div>
-            <p className="text-[11px] text-slate-700 mt-3">Session management endpoint not yet implemented in backend.</p>
+            <p className="text-[11px] text-slate-700 mt-3">Koncový bod správy relácií zatiaľ nie je implementovaný v backende.</p>
           </div>
         )}
       </div>

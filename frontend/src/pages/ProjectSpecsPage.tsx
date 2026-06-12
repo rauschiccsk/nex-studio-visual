@@ -160,7 +160,7 @@ export default function ProjectSpecsPage() {
         <div className="flex flex-col items-center gap-3 text-gray-400">
           <Lock size={48} />
           <p className="text-sm">
-            Project Specs sú dostupné iba Directorovi (ri rola).
+            Špecifikácie sú dostupné iba Directorovi (ri rola).
           </p>
         </div>
       </div>
@@ -175,7 +175,7 @@ export default function ProjectSpecsPage() {
         <div className="p-3 border-b border-gray-700">
           <h2 className="text-base font-semibold flex items-center gap-2 text-gray-100">
             <FolderOpen size={18} />
-            Project Specs
+            Špecifikácie
           </h2>
           <div className="mt-2 flex items-center gap-1.5 text-xs text-gray-400">
             <Database size={12} />

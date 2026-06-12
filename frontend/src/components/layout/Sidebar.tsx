@@ -113,7 +113,7 @@ function NavItem({
       {!collapsed && <span>{label}</span>}
       {badge && (
         <span
-          aria-label="awaiting director"
+          aria-label="čaká na Director-a"
           className={
             collapsed
               ? "absolute right-1 top-1 h-2 w-2 rounded-full bg-amber-400"
@@ -200,8 +200,8 @@ export default function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 p-2 space-y-0.5 overflow-y-auto overflow-x-hidden">
-        <NavItem icon={<IconHome />} label="Dashboard" path="/" collapsed={collapsed} active={isActive("/")} />
-        <NavItem icon={<IconFolder />} label="Projects" path="/projects" collapsed={collapsed} active={isActive("/projects")} />
+        <NavItem icon={<IconHome />} label="Prehľad" path="/" collapsed={collapsed} active={isActive("/")} />
+        <NavItem icon={<IconFolder />} label="Projekty" path="/projects" collapsed={collapsed} active={isActive("/projects")} />
 
         {/* Selected project indicator — placed directly under Projects
             (Director directive 2026-05-15: belongs near the source of
@@ -233,7 +233,7 @@ export default function Sidebar() {
 
         <NavItem
           icon={<IconVersions />}
-          label="Versions"
+          label="Verzie"
           path={hasProject ? `/projects/${selectedProject!.slug}` : projectsFallback}
           collapsed={collapsed}
           active={hasProject ? location.pathname === `/projects/${selectedProject!.slug}` : false}
@@ -242,12 +242,12 @@ export default function Sidebar() {
             when no project is selected. */}
         <NavItem
           icon={<IconBacklog />}
-          label="Backlog"
+          label="Zásobník"
           path={hasProject ? `/projects/${selectedProject!.slug}/backlog` : projectsFallback}
           collapsed={collapsed}
           active={hasProject ? isActive(`/projects/${selectedProject!.slug}/backlog`) : false}
           disabled={!hasProject}
-          disabledTitle="Vyber projekt pre prístup k backlogu"
+          disabledTitle="Vyber projekt pre prístup k zásobníku"
         />
         {/* E5 (CR-NS-044): per-project metrics / ROI. Project-scoped — disabled (not cross-domain
             fallback) when no project is selected. */}
@@ -265,14 +265,18 @@ export default function Sidebar() {
             Implementer / Auditor sidebar terminals were removed; the pipeline still dispatches all
             roles internally. */}
         <NavItem icon={<IconCoordinator />} label="AG Koordinátor" path="/coordinator" collapsed={collapsed} active={isActive("/coordinator")} />
-        <NavItem icon={<IconCockpit />} label="Orchestration Cockpit" path="/cockpit" collapsed={collapsed} active={isActive("/cockpit")} badge={cockpitAwaiting} />
+        <NavItem icon={<IconCockpit />} label="Orchestrácia" path="/cockpit" collapsed={collapsed} active={isActive("/cockpit")} badge={cockpitAwaiting} />
 
-        <NavItem icon={<IconKbBook />} label="Knowledge Base" path="/kb" collapsed={collapsed} active={isActive("/kb")} />
-        <NavItem icon={<IconProjectSpecsBook />} label="Project Specs" path="/project-specs" collapsed={collapsed} active={isActive("/project-specs")} />
-        <NavItem icon={<IconKey />} label="Credentials" path="/credentials" collapsed={collapsed} active={isActive("/credentials")} />
+        <NavItem icon={<IconKbBook />} label="Dokumentácia" path="/kb" collapsed={collapsed} active={isActive("/kb")} />
+        <NavItem icon={<IconProjectSpecsBook />} label="Špecifikácie" path="/project-specs" collapsed={collapsed} active={isActive("/project-specs")} />
+        {/* E4 (CR-NS-046): Credentials nav gated to Ri (mirrors the backend JWT-ri restriction + the
+            presence toggle gate); nav visibility only. */}
+        {user?.role === "ri" && (
+          <NavItem icon={<IconKey />} label="Prístupy" path="/credentials" collapsed={collapsed} active={isActive("/credentials")} />
+        )}
 
-        <SectionLabel label="Settings" collapsed={collapsed} />
-        <NavItem icon={<IconSettings />} label="Settings" path="/settings" collapsed={collapsed} active={isActive("/settings")} />
+        <SectionLabel label="Nastavenia" collapsed={collapsed} />
+        <NavItem icon={<IconSettings />} label="Nastavenia" path="/settings" collapsed={collapsed} active={isActive("/settings")} />
 
         {/* Admin */}
         <div className="pt-2">
@@ -296,7 +300,7 @@ export default function Sidebar() {
           </button>
           {adminOpen && !collapsed && (
             <div className="pl-6 mt-0.5 space-y-0.5">
-              {["Používatelia", "Delegácie", "Execution Logs", "Guardian", "Migrácie"].map((item) => (
+              {["Používatelia", "Delegácie", "Protokoly vykonávania", "Guardian", "Migrácie"].map((item) => (
                 <button
                   key={item}
                   className="block w-full text-left px-3 py-1.5 rounded text-xs text-slate-500 hover:bg-slate-800/60 hover:text-slate-400 transition-colors"
@@ -341,7 +345,7 @@ export default function Sidebar() {
                 <div className="text-xs font-medium text-slate-200 truncate">{user?.username ?? "—"}</div>
                 <div className="text-[10px] text-slate-500">Director · Ri</div>
               </div>
-              <button onClick={handleLogout} title="Sign out" className="shrink-0 text-slate-600 hover:text-slate-400 transition-colors">
+              <button onClick={handleLogout} title="Odhlásiť sa" className="shrink-0 text-slate-600 hover:text-slate-400 transition-colors">
                 <IconLogout />
               </button>
             </>

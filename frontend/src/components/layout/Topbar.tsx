@@ -1,10 +1,10 @@
 import { useLocation } from "react-router-dom";
 
 const breadcrumbMap: Record<string, string> = {
-  "/": "Dashboard",
-  "/projects": "Projects",
-  "/kb": "Knowledge Base",
-  "/settings": "Settings",
+  "/": "Prehľad",
+  "/projects": "Projekty",
+  "/kb": "Dokumentácia",
+  "/settings": "Nastavenia",
 };
 
 export default function Topbar() {
@@ -17,7 +17,7 @@ export default function Topbar() {
       {/* Connected indicator */}
       <div className="flex items-center gap-1.5 shrink-0">
         <div className="w-2 h-2 rounded-full bg-green-400" />
-        <span className="text-xs text-slate-300 font-medium">Connected</span>
+        <span className="text-xs text-slate-300 font-medium">Pripojené</span>
       </div>
 
       {/* Breadcrumb */}

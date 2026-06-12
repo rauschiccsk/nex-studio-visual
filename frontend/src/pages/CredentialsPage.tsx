@@ -159,9 +159,9 @@ export default function CredentialsPage() {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="flex items-center gap-3 px-4 h-12 border-b border-slate-800 flex-shrink-0">
-        <span className="text-sm font-medium text-slate-200">Credentials</span>
+        <span className="text-sm font-medium text-slate-200">Prístupy</span>
         <span className="text-[11px] text-slate-600">
-          {items.length} entries · /opt/data/nex-studio/credentials
+          {items.length} záznamov · /opt/data/nex-studio/credentials
         </span>
         <div className="ml-auto">
           <button

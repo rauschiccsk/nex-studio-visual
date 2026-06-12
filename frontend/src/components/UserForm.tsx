@@ -95,15 +95,15 @@ export function UserForm({
     passwordTooShort;
 
   const title = isEdit
-    ? `Edit user · ${initial?.username ?? ""}`
-    : "Create user";
+    ? `Upraviť používateľa · ${initial?.username ?? ""}`
+    : "Vytvoriť používateľa";
   const submitLabel = isEdit
     ? submitting
       ? "Ukladám…"
-      : "Save"
+      : "Uložiť"
     : submitting
       ? "Vytváram…"
-      : "Create";
+      : "Vytvoriť";
 
   function update<K extends keyof UserFormData>(key: K, value: UserFormData[K]) {
     setData((prev) => ({ ...prev, [key]: value }));
@@ -119,7 +119,7 @@ export function UserForm({
       <h3 className="text-sm font-semibold text-slate-300 mb-3">
         {isEdit ? (
           <>
-            Edit user ·{" "}
+            Upraviť používateľa ·{" "}
             <span className="font-mono text-slate-400">{initial?.username}</span>
           </>
         ) : (
@@ -135,32 +135,32 @@ export function UserForm({
 
       <div className="grid grid-cols-2 gap-3 mb-3">
         <div>
-          <label htmlFor="uf-first-name" className="block text-xs text-slate-500 mb-1">First name</label>
+          <label htmlFor="uf-first-name" className="block text-xs text-slate-500 mb-1">Meno</label>
           <input
             id="uf-first-name"
             type="text"
             value={data.first_name}
             onChange={(e) => update("first_name", e.target.value)}
-            placeholder="e.g. Tibor"
+            placeholder="napr. Tibor"
             className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-primary-500"
           />
         </div>
 
         <div>
-          <label htmlFor="uf-last-name" className="block text-xs text-slate-500 mb-1">Last name</label>
+          <label htmlFor="uf-last-name" className="block text-xs text-slate-500 mb-1">Priezvisko</label>
           <input
             id="uf-last-name"
             type="text"
             value={data.last_name}
             onChange={(e) => update("last_name", e.target.value)}
-            placeholder="e.g. Rausch"
+            placeholder="napr. Rausch"
             className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-primary-500"
           />
         </div>
 
         <div>
           <label htmlFor="uf-username" className="block text-xs text-slate-500 mb-1">
-            Username {isEdit ? "" : "*"}
+            Používateľské meno {isEdit ? "" : "*"}
           </label>
           <input
             id="uf-username"
@@ -168,8 +168,8 @@ export function UserForm({
             value={data.username}
             onChange={(e) => update("username", e.target.value)}
             disabled={isEdit}
-            title={isEdit ? "Username sa po vytvorení nemení (zachováva login stabilitu)." : undefined}
-            placeholder="e.g. tibi"
+            title={isEdit ? "Používateľské meno sa po vytvorení nemení (zachováva login stabilitu)." : undefined}
+            placeholder="napr. tibi"
             className={`w-full border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-primary-500 ${
               isEdit
                 ? "bg-slate-800/60 border-slate-700 text-slate-500 cursor-not-allowed"
@@ -185,7 +185,7 @@ export function UserForm({
             type="email"
             value={data.email}
             onChange={(e) => update("email", e.target.value)}
-            placeholder="e.g. tibi@isnex.ai"
+            placeholder="napr. tibi@isnex.ai"
             className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-primary-500"
           />
         </div>
@@ -194,11 +194,11 @@ export function UserForm({
           <label htmlFor="uf-password" className="block text-xs text-slate-500 mb-1">
             {isEdit ? (
               <>
-                New password{" "}
+                Nové heslo{" "}
                 <span className="text-slate-600">(nechaj prázdne ak nemeniť)</span>
               </>
             ) : (
-              "Password *"
+              "Heslo *"
             )}
           </label>
           <input
@@ -206,7 +206,7 @@ export function UserForm({
             type="password"
             value={data.password}
             onChange={(e) => update("password", e.target.value)}
-            placeholder={`min ${PASSWORD_MIN_LENGTH} characters`}
+            placeholder={`min. ${PASSWORD_MIN_LENGTH} znakov`}
             className={`w-full bg-slate-800 border rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-primary-500 ${
               passwordTooShort ? "border-red-500" : "border-slate-700"
             }`}
@@ -219,7 +219,7 @@ export function UserForm({
         </div>
 
         <div>
-          <label htmlFor="uf-role" className="block text-xs text-slate-500 mb-1">Role</label>
+          <label htmlFor="uf-role" className="block text-xs text-slate-500 mb-1">Rola</label>
           <select
             id="uf-role"
             value={data.role}
@@ -241,7 +241,7 @@ export function UserForm({
             type="text"
             value={data.telegram_chat_id}
             onChange={(e) => update("telegram_chat_id", e.target.value)}
-            placeholder="e.g. 123456789 (agent notifications)"
+            placeholder="napr. 123456789 (notifikácie agenta)"
             className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-primary-500"
           />
         </div>
@@ -256,7 +256,7 @@ export function UserForm({
                 onChange={(e) => update("is_active", e.target.checked)}
                 className="rounded bg-slate-800 border-slate-700"
               />
-              Active
+              Aktívny
             </label>
           </div>
         )}
@@ -268,7 +268,7 @@ export function UserForm({
           onClick={onCancel}
           className="px-3 py-1.5 text-xs text-slate-400 border border-slate-700 rounded-lg hover:bg-slate-800 transition-colors"
         >
-          Cancel
+          Zrušiť
         </button>
         <button
           type="button"

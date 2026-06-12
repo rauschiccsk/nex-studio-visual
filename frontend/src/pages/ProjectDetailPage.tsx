@@ -42,9 +42,9 @@ function versionStatusCls(status: string) {
 }
 
 function versionStatusLabel(status: string) {
-  if (status === "active") return "In Progress";
-  if (status === "released") return "Released";
-  return "Planned";
+  if (status === "active") return "Prebieha";
+  if (status === "released") return "Vydané";
+  return "Plánované";
 }
 
 function VersionCard({ version, onOpen }: { version: Version; onOpen: () => void }) {
@@ -201,7 +201,7 @@ export default function ProjectDetailPage() {
           <button
             onClick={() => setJustCreated(null)}
             className="text-green-300/70 hover:text-green-100 transition-colors"
-            aria-label="Dismiss"
+            aria-label="Zavrieť"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -248,19 +248,19 @@ export default function ProjectDetailPage() {
           </div>
           {project.repo_url && (
             <div>
-              <span className="text-slate-500 text-xs">Repository</span>
+              <span className="text-slate-500 text-xs">Úložisko</span>
               <div className="font-mono text-slate-200 mt-0.5">{project.repo_url}</div>
             </div>
           )}
           {project.description && (
             <div className="col-span-2">
-              <span className="text-slate-500 text-xs">Description</span>
+              <span className="text-slate-500 text-xs">Popis</span>
               <div className="text-slate-300 mt-0.5">{project.description}</div>
             </div>
           )}
           {(project.backend_port || project.frontend_port || project.db_port) && (
             <div className="col-span-2">
-              <span className="text-slate-500 text-xs">Ports</span>
+              <span className="text-slate-500 text-xs">Porty</span>
               <div className="flex gap-3 mt-1">
                 {project.backend_port && (
                   <span className="text-[11px] font-mono bg-slate-800 border border-slate-700 text-slate-300 px-2 py-0.5 rounded">

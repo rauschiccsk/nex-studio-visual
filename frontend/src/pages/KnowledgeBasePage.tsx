@@ -366,7 +366,7 @@ export default function KnowledgeBasePage() {
         <div className="p-3 border-b border-gray-700">
           <h2 className="text-base font-semibold flex items-center gap-2 text-gray-100">
             <FolderOpen size={18} />
-            Knowledge Base
+            Dokumentácia
           </h2>
           <div className="mt-2 flex items-center gap-1.5 text-xs text-gray-400">
             <Database size={12} />

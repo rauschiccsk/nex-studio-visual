@@ -64,7 +64,7 @@ function ProjectRow({ project, index, selected, onOpen, onTogglePin }: ProjectRo
           <span className="font-semibold text-slate-100 text-sm">{project.name}</span>
           {selected && (
             <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-primary-500/20 border border-primary-500/30 text-primary-400 font-medium">
-              Selected
+              Vybraný
             </span>
           )}
           {isMulti && (
@@ -74,12 +74,12 @@ function ProjectRow({ project, index, selected, onOpen, onTogglePin }: ProjectRo
           )}
           {project.status === "archived" && (
             <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-slate-700 text-slate-500">
-              Archived
+              Archivovaný
             </span>
           )}
           {project.status === "paused" && (
             <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/30 text-amber-400">
-              Paused
+              Pozastavený
             </span>
           )}
         </div>
@@ -105,7 +105,7 @@ function ProjectRow({ project, index, selected, onOpen, onTogglePin }: ProjectRo
       <div className="flex items-center gap-3 shrink-0">
         <button
           onClick={onTogglePin}
-          title={selected ? "Zrušiť výber" : "Označiť ako Selected"}
+          title={selected ? "Zrušiť výber" : "Označiť ako vybraný"}
           className={
             selected
               ? "text-primary-400 hover:text-primary-300 transition-colors"

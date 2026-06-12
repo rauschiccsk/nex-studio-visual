@@ -247,7 +247,7 @@ export default function BacklogPage() {
     <div className="p-6 max-w-5xl mx-auto">
       {/* Header */}
       <div className="flex items-center justify-between mb-1">
-        <h1 className="text-base font-bold text-slate-100">Backlog</h1>
+        <h1 className="text-base font-bold text-slate-100">Zásobník</h1>
         <button
           onClick={() => setShowNew((v) => !v)}
           className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-primary-600 hover:bg-primary-500 rounded-lg transition-colors"
@@ -312,7 +312,7 @@ export default function BacklogPage() {
                 : "border-transparent text-slate-500 hover:text-slate-300"
             }`}
           >
-            {t === "backlog" ? `Backlog (${backlogItems.length})` : `História (${realizedItems.length})`}
+            {t === "backlog" ? `Zásobník (${backlogItems.length})` : `História (${realizedItems.length})`}
           </button>
         ))}
       </div>

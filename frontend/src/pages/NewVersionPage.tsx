@@ -76,7 +76,7 @@ export default function NewVersionPage() {
 
   function validate(): boolean {
     const next: Record<string, string> = {};
-    if (!versionNumber.trim()) next.versionNumber = "Version number is required.";
+    if (!versionNumber.trim()) next.versionNumber = "Číslo verzie je povinné.";
     setErrors(next);
     return Object.keys(next).length === 0;
   }
@@ -125,7 +125,7 @@ export default function NewVersionPage() {
           </svg>
         </button>
         <div>
-          <h1 className="text-base font-bold text-slate-100">New Version</h1>
+          <h1 className="text-base font-bold text-slate-100">Nová verzia</h1>
           {project && (
             <p className="text-xs text-slate-500 mt-0.5">
               {project.name}
@@ -150,10 +150,10 @@ export default function NewVersionPage() {
               <div>
                 <div className="flex items-center gap-2 mb-1">
                   <label className="block text-sm font-medium text-slate-300">
-                    Version number *
+                    Číslo verzie *
                   </label>
                   {!versionManual && versionNumber && (
-                    <span className="text-[10px] text-primary-400/70 font-normal">auto-suggested</span>
+                    <span className="text-[10px] text-primary-400/70 font-normal">automaticky navrhnuté</span>
                   )}
                 </div>
                 <input
@@ -173,15 +173,15 @@ export default function NewVersionPage() {
                 {errors.versionNumber && (
                   <p className="mt-1 text-xs text-red-400">{errors.versionNumber}</p>
                 )}
-                <p className="mt-1 text-[11px] text-slate-600">Start at v0.1 · v1.0 = first production release</p>
+                <p className="mt-1 text-[11px] text-slate-600">Začnite na v0.1 · v1.0 = prvé produkčné vydanie</p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-1">
-                  Name <span className="text-slate-600 font-normal text-xs">(optional)</span>
+                  Názov <span className="text-slate-600 font-normal text-xs">(voliteľné)</span>
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. Payment module"
+                  placeholder="napr. platobný modul"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className={inputCls}
@@ -192,7 +192,7 @@ export default function NewVersionPage() {
             {/* Target date */}
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-1">
-                Target date <span className="text-slate-600 font-normal text-xs">(optional)</span>
+                Cieľový dátum <span className="text-slate-600 font-normal text-xs">(voliteľné)</span>
               </label>
               <input
                 type="date"
@@ -206,7 +206,7 @@ export default function NewVersionPage() {
             {lastVersion && (
               <div className="rounded-lg border border-slate-700 bg-slate-800/40 p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs text-slate-500">Previous version</span>
+                  <span className="text-xs text-slate-500">Predchádzajúca verzia</span>
                   <span className="text-xs font-medium text-slate-300 bg-slate-700 px-2.5 py-1 rounded font-mono">
                     {lastVersion.version_number}
                   </span>
@@ -220,10 +220,10 @@ export default function NewVersionPage() {
                   />
                   <label htmlFor="inherit-design" className="cursor-pointer">
                     <div className="text-xs text-slate-300 font-medium">
-                      Inherit DESIGN.md from {lastVersion.version_number}
+                      Zdediť DESIGN.md z {lastVersion.version_number}
                     </div>
                     <div className="text-[11px] text-slate-600 mt-0.5">
-                      AI will use previous architecture as a starting point
+                      AI použije predchádzajúcu architektúru ako východiskový bod
                     </div>
                   </label>
                 </div>
@@ -233,18 +233,18 @@ export default function NewVersionPage() {
             {/* Description / Intent */}
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-1">
-                Version intent{" "}
-                <span className="ml-1 text-slate-600 font-normal text-xs">(3–5 sentences, not a full spec)</span>
+                Zámer verzie{" "}
+                <span className="ml-1 text-slate-600 font-normal text-xs">(3–5 viet, nie celá špecifikácia)</span>
               </label>
               <textarea
                 rows={4}
-                placeholder="Example: Add payment module via Tatra Banka. Customer needs automatic payment matching with invoices and email notifications. Goal: working payments for pilot customer by end of May."
+                placeholder="Príklad: Pridať platobný modul cez Tatra banku. Zákazník potrebuje automatické párovanie platieb s faktúrami a emailové notifikácie. Cieľ: funkčné platby pre pilotného zákazníka do konca mája."
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 className={`${inputCls} resize-none leading-relaxed`}
               />
               <p className="text-[11px] text-slate-600 mt-1.5">
-                Raw Spec is entered in Step 1 of the pipeline after creating the version.
+                Raw Spec sa zadáva v kroku 1 pipeline po vytvorení verzie.
               </p>
             </div>
 
@@ -262,7 +262,7 @@ export default function NewVersionPage() {
                 onClick={() => navigate(`/projects/${slug}`)}
                 className="flex-1 px-4 py-2 text-sm text-slate-400 border border-slate-700 rounded-lg hover:bg-slate-800 transition-colors"
               >
-                Cancel
+                Zrušiť
               </button>
               <button
                 type="submit"
@@ -275,14 +275,14 @@ export default function NewVersionPage() {
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                     </svg>
-                    Creating…
+                    Vytváram…
                   </>
                 ) : (
                   <>
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
                     </svg>
-                    Create version
+                    Vytvoriť verziu
                   </>
                 )}
               </button>
