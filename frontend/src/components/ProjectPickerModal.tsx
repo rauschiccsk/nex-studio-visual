@@ -12,6 +12,7 @@
 
 import { useEffect, useState } from "react";
 import { X, FolderOpen, Loader2 } from "lucide-react";
+import { Card } from "nex-shared";
 
 import { listProjectsApi } from "@/services/api/projects";
 import type { ProjectRead } from "@/types";
@@ -47,7 +48,7 @@ export function ProjectPickerModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
-      <div className="w-full max-w-lg rounded-xl border border-slate-700 bg-slate-900 p-5 shadow-2xl">
+      <Card className="w-full max-w-lg p-5 shadow-2xl">
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold text-slate-200">{title}</h2>
@@ -98,7 +99,7 @@ export function ProjectPickerModal({
             </div>
           </div>
         )}
-      </div>
+      </Card>
     </div>
   );
 }

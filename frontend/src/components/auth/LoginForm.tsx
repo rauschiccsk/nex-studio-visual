@@ -7,7 +7,7 @@
  */
 
 import { useState, type FormEvent } from "react";
-import { Button } from "nex-shared";
+import { Button, Input } from "nex-shared";
 
 export interface LoginFormProps {
   /** Called when the form passes client-side validation. */
@@ -53,7 +53,7 @@ export default function LoginForm({
         >
           Používateľské meno
         </label>
-        <input
+        <Input
           id="login-username"
           name="username"
           type="text"
@@ -63,11 +63,7 @@ export default function LoginForm({
           onChange={(e) => setUsername(e.target.value)}
           onBlur={() => setTouched((t) => ({ ...t, username: true }))}
           disabled={loading}
-          className={`w-full rounded-md border px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-gray-100 ${
-            usernameError
-              ? "border-red-500 focus:ring-red-500"
-              : "border-gray-300 dark:border-gray-600"
-          }`}
+          invalid={usernameError}
           data-testid="login-username"
         />
         {usernameError && (
@@ -85,7 +81,7 @@ export default function LoginForm({
         >
           Heslo
         </label>
-        <input
+        <Input
           id="login-password"
           name="password"
           type="password"
@@ -95,11 +91,7 @@ export default function LoginForm({
           onChange={(e) => setPassword(e.target.value)}
           onBlur={() => setTouched((t) => ({ ...t, password: true }))}
           disabled={loading}
-          className={`w-full rounded-md border px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-gray-100 ${
-            passwordError
-              ? "border-red-500 focus:ring-red-500"
-              : "border-gray-300 dark:border-gray-600"
-          }`}
+          invalid={passwordError}
           data-testid="login-password"
         />
         {passwordError && (

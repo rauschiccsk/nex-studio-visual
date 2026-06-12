@@ -22,6 +22,7 @@
  */
 
 import { useState } from "react";
+import { Input, Select, Card } from "nex-shared";
 import type { UserRead, UserRole } from "@/types/user";
 
 /** Minimum password length — mirrors backend Pydantic constraint
@@ -115,7 +116,7 @@ export function UserForm({
   }
 
   return (
-    <div className="mt-4 rounded-xl border border-slate-700 bg-slate-900 p-4">
+    <Card className="mt-4 p-4">
       <h3 className="text-sm font-semibold text-slate-300 mb-3">
         {isEdit ? (
           <>
@@ -136,25 +137,23 @@ export function UserForm({
       <div className="grid grid-cols-2 gap-3 mb-3">
         <div>
           <label htmlFor="uf-first-name" className="block text-xs text-slate-500 mb-1">Meno</label>
-          <input
+          <Input
             id="uf-first-name"
             type="text"
             value={data.first_name}
             onChange={(e) => update("first_name", e.target.value)}
             placeholder="napr. Tibor"
-            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-primary-500"
           />
         </div>
 
         <div>
           <label htmlFor="uf-last-name" className="block text-xs text-slate-500 mb-1">Priezvisko</label>
-          <input
+          <Input
             id="uf-last-name"
             type="text"
             value={data.last_name}
             onChange={(e) => update("last_name", e.target.value)}
             placeholder="napr. Rausch"
-            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-primary-500"
           />
         </div>
 
@@ -180,13 +179,12 @@ export function UserForm({
 
         <div>
           <label htmlFor="uf-email" className="block text-xs text-slate-500 mb-1">Email *</label>
-          <input
+          <Input
             id="uf-email"
             type="email"
             value={data.email}
             onChange={(e) => update("email", e.target.value)}
             placeholder="napr. tibi@isnex.ai"
-            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-primary-500"
           />
         </div>
 
@@ -201,15 +199,13 @@ export function UserForm({
               "Heslo *"
             )}
           </label>
-          <input
+          <Input
             id="uf-password"
             type="password"
             value={data.password}
             onChange={(e) => update("password", e.target.value)}
             placeholder={`min. ${PASSWORD_MIN_LENGTH} znakov`}
-            className={`w-full bg-slate-800 border rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-primary-500 ${
-              passwordTooShort ? "border-red-500" : "border-slate-700"
-            }`}
+            invalid={passwordTooShort}
           />
           {passwordTooShort && (
             <div className="mt-1 text-[10px] text-red-400">
@@ -220,29 +216,27 @@ export function UserForm({
 
         <div>
           <label htmlFor="uf-role" className="block text-xs text-slate-500 mb-1">Rola</label>
-          <select
+          <Select
             id="uf-role"
             value={data.role}
             onChange={(e) => update("role", e.target.value as UserRole)}
-            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-primary-500"
           >
             <option value="shu">shu — Junior</option>
             <option value="ha">ha — Medior</option>
             <option value="ri">ri — Director</option>
-          </select>
+          </Select>
         </div>
 
         <div>
           <label htmlFor="uf-telegram" className="block text-xs text-slate-500 mb-1">
             Telegram chat_id
           </label>
-          <input
+          <Input
             id="uf-telegram"
             type="text"
             value={data.telegram_chat_id}
             onChange={(e) => update("telegram_chat_id", e.target.value)}
             placeholder="napr. 123456789 (notifikácie agenta)"
-            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-primary-500"
           />
         </div>
 
@@ -279,6 +273,6 @@ export function UserForm({
           {submitLabel}
         </button>
       </div>
-    </div>
+    </Card>
   );
 }
