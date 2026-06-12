@@ -94,17 +94,31 @@ the ROI showcase. Honest, never inflated (the anti-degradation principle).
   Recharts. Unset estimates → ROI "not configured", never fabricated.
 
 ### CR-NS-045 — A+ task-plan estimated_minutes (the human-baseline data source)
-The task-plan stage (Designer → EPIC/FEAT/TASK plan) must populate `estimated_minutes` per task:
-- **Task-plan output schema:** add `estimated_minutes` per task (the plan the Designer emits carries an
-  effort estimate, in minutes of HUMAN work, per task).
-- **Designer charter / task-plan prompt** (the task-plan node + `templates/.../designer` or the project
-  charter): instruct the Designer to estimate each task's human-effort during planning (a realistic
-  "a competent human dev would take ~N minutes"), NOT the agent's compute time.
-- **Persistence:** the orchestrator's task-plan parse/create path persists `estimated_minutes` onto the
-  `Task` rows (it is parsed from the plan, like `task_type`).
-- Feat-level rollup is derived (Σ of its tasks). Seam: estimates are an ADVISORY planning artifact — they
-  do NOT gate the build (a missing estimate is allowed → that task contributes 0 to the human-baseline).
-- Independent of CR-043/044: the metrics service reads whatever estimates exist (graceful null).
+> **Grounded 2026-06-14 (2-lens validation).** The DATA PLUMBING already exists end-to-end:
+> `TaskPlanTask.estimated_minutes` + `TaskPlanFeat.estimated_minutes` (`pipeline_status.py:79,87`,
+> `Optional[int]`); the parse/persist path (`orchestrator._write_task_plan` already passes
+> `estimated_minutes` into `TaskCreate`/`FeatCreate`, lines 744/758); the DB columns (`tasks.py:74,106`)
+> + all schemas; AND the metrics consumer (CR-043 `_human_minutes`) all ship today. **CR-045 makes NO
+> schema / persist / DB / migration / metrics changes.** What is MISSING is purely the INSTRUCTION to the
+> Designer to emit the estimates, plus test coverage → CR-045 is **instruction + test only**.
+
+The Designer (task_plan stage) must populate `estimated_minutes` per task. Deliverables:
+- **Orchestrator directive — the guaranteed in-prompt delivery.** The task_plan dispatch prompt is
+  `_directive_for("task_plan")` (`orchestrator.py:414`) → `_augment_brief_with_backlog` passthrough for
+  non-gate_a (line 1476), so it reaches the Designer verbatim. Add a `task_plan`-specific clause: set
+  `estimated_minutes` per TASK = realistic effort for a competent **HUMAN** developer in minutes (NOT the
+  agent's compute time); feat-level derived (Σ tasks); **ADVISORY** — a missing estimate is allowed
+  (→ 0 in the baseline) and NEVER gates the build.
+- **Spec source-of-truth.** `F-007-task-plan-node.md` §5/§9 — the `plan` payload field list already names
+  `estimated_minutes` (line ~222); document the HUMAN-effort + advisory semantics there (the spec, not the
+  charter, owns the plan-emission contract).
+- **Designer charter pointer.** `.claude/agents/designer/CLAUDE.md` §6 "Po Gate D" — a short note that the
+  task_plan emission carries per-task `estimated_minutes` (human-effort) per F-007 §5/§9. (The charter is
+  otherwise silent on task_plan; this is a pointer, not a full task_plan section.)
+- **Test.** `tests/test_orchestrator.py` — extend the `_plan()` helper to carry `estimated_minutes`; assert
+  Task + Feat round-trip in `test_task_plan_write_path_materializes_hierarchy`.
+- Seam: estimates are ADVISORY (Optional, null-safe, never gate the build). The metrics service reads
+  whatever estimates exist (graceful null). Independent of CR-043/044 (already shipped).
 
 ### Seams to preserve
 - WS-D capture UNCHANGED (E5 only READS it). The Director-wait accumulation is ADDITIVE to the existing
@@ -125,7 +139,7 @@ The task-plan stage (Designer → EPIC/FEAT/TASK plan) must populate `estimated_
 - **CR-NS-044 (E5 frontend):** the page + Recharts + the breakdowns + the pricing settings UX + tests
   (depends on CR-043's endpoint).
 - **CR-NS-045 (A+ task-plan estimates):** the Designer estimates each task in the task-plan → populates
-  `estimated_minutes` (the human-baseline data source; independent of 043/044). Validate its feasibility
-  (task-plan node + Designer charter + parse/persist) before dispatch.
+  `estimated_minutes` (the human-baseline data source; independent of 043/044). **Feasibility validated
+  2026-06-14:** all plumbing present → instruction + test only (see the CR-045 section above).
 
 **End of E5.**
