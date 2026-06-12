@@ -1,11 +1,7 @@
 /**
- * Dark mode integration test — verifies that the ``dark`` CSS class
- * is applied to ``<html>`` when ``isDark`` is true, ensuring Tailwind
- * ``dark:`` variants activate correctly (``darkMode: "class"``).
- *
- * This complements the unit-level ThemeContext tests in
- * ``__tests__/contexts/test_ThemeContext.test.tsx`` by testing the
- * DOM-level class manipulation that drives Tailwind's dark mode.
+ * Dark mode integration test — verifies the ``dark`` CSS class on ``<html>``
+ * tracks ``isDark`` (Tailwind v4 `@custom-variant dark`). NEX Studio is
+ * dark-by-default (CR-NS-038/047): no stored preference → dark.
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
@@ -16,10 +12,6 @@ import {
   useTheme,
   darkModeKey,
 } from "@/contexts/ThemeContext";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function wrapper(username: string) {
   return function Wrapper({ children }: { children: ReactNode }) {
@@ -32,47 +24,33 @@ beforeEach(() => {
   document.documentElement.classList.remove("dark");
 });
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 describe("Dark mode class strategy", () => {
-  it("adds 'dark' class to <html> when isDark is true", () => {
-    const { result } = renderHook(() => useTheme(), {
-      wrapper: wrapper("testuser"),
-    });
+  it("has the 'dark' class on <html> by default, removes it when toggled to light", () => {
+    const { result } = renderHook(() => useTheme(), { wrapper: wrapper("testuser") });
 
-    // Initially light mode — no dark class.
-    expect(document.documentElement.classList.contains("dark")).toBe(false);
-
-    // Toggle to dark.
-    act(() => result.current.toggleDark());
-
+    // Dark-by-default → class present on mount.
     expect(result.current.isDark).toBe(true);
     expect(document.documentElement.classList.contains("dark")).toBe(true);
+
+    act(() => result.current.toggleDark());
+    expect(result.current.isDark).toBe(false);
+    expect(document.documentElement.classList.contains("dark")).toBe(false);
   });
 
-  it("removes 'dark' class from <html> when isDark is toggled back to false", () => {
-    const { result } = renderHook(() => useTheme(), {
-      wrapper: wrapper("testuser"),
-    });
+  it("re-adds the 'dark' class when toggled back to dark", () => {
+    const { result } = renderHook(() => useTheme(), { wrapper: wrapper("testuser") });
 
-    // Enable dark mode.
-    act(() => result.current.toggleDark());
-    expect(document.documentElement.classList.contains("dark")).toBe(true);
-
-    // Disable dark mode.
-    act(() => result.current.toggleDark());
+    act(() => result.current.toggleDark()); // dark → light
     expect(document.documentElement.classList.contains("dark")).toBe(false);
+
+    act(() => result.current.toggleDark()); // light → dark
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
   });
 
   it("applies dark class on mount when persisted preference is true", () => {
-    // Pre-seed localStorage with dark preference.
     localStorage.setItem(darkModeKey("darkuser"), "true");
 
-    const { result } = renderHook(() => useTheme(), {
-      wrapper: wrapper("darkuser"),
-    });
+    const { result } = renderHook(() => useTheme(), { wrapper: wrapper("darkuser") });
 
     expect(result.current.isDark).toBe(true);
     expect(document.documentElement.classList.contains("dark")).toBe(true);
@@ -81,31 +59,22 @@ describe("Dark mode class strategy", () => {
   it("does not apply dark class on mount when persisted preference is false", () => {
     localStorage.setItem(darkModeKey("lightuser"), "false");
 
-    const { result } = renderHook(() => useTheme(), {
-      wrapper: wrapper("lightuser"),
-    });
+    const { result } = renderHook(() => useTheme(), { wrapper: wrapper("lightuser") });
 
     expect(result.current.isDark).toBe(false);
     expect(document.documentElement.classList.contains("dark")).toBe(false);
   });
 
-  it("dark class state is independent per user", () => {
-    // User A has dark mode on, User B has default (light).
-    localStorage.setItem(darkModeKey("userA"), "true");
+  it("dark class state is independent per user (explicit-light user vs dark default)", () => {
+    // userA explicitly LIGHT; userB has no preference → dark default.
+    localStorage.setItem(darkModeKey("userA"), "false");
 
-    const { result: resultA } = renderHook(() => useTheme(), {
-      wrapper: wrapper("userA"),
-    });
-    expect(resultA.current.isDark).toBe(true);
-    expect(document.documentElement.classList.contains("dark")).toBe(true);
-
-    // Remove dark class before mounting userB's context to isolate the test.
-    document.documentElement.classList.remove("dark");
-
-    const { result: resultB } = renderHook(() => useTheme(), {
-      wrapper: wrapper("userB"),
-    });
-    expect(resultB.current.isDark).toBe(false);
+    const { result: resultA } = renderHook(() => useTheme(), { wrapper: wrapper("userA") });
+    expect(resultA.current.isDark).toBe(false);
     expect(document.documentElement.classList.contains("dark")).toBe(false);
+
+    const { result: resultB } = renderHook(() => useTheme(), { wrapper: wrapper("userB") });
+    expect(resultB.current.isDark).toBe(true);
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
   });
 });

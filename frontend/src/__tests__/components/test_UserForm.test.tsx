@@ -37,46 +37,46 @@ describe("UserForm — mode='create'", () => {
     render(
       <UserForm mode="create" submitting={false} error="" onSubmit={vi.fn()} onCancel={vi.fn()} />,
     );
-    expect(screen.getByLabelText(/first name/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/last name/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/username/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^meno$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/priezvisko/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/používateľské meno/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/role/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/heslo/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/rola/i)).toBeInTheDocument();
   });
 
   it("does not show the Active checkbox in create mode", () => {
     render(
       <UserForm mode="create" submitting={false} error="" onSubmit={vi.fn()} onCancel={vi.fn()} />,
     );
-    expect(screen.queryByLabelText(/active/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/aktívny/i)).not.toBeInTheDocument();
   });
 
   it("username input is enabled (editable) in create mode", () => {
     render(
       <UserForm mode="create" submitting={false} error="" onSubmit={vi.fn()} onCancel={vi.fn()} />,
     );
-    expect(screen.getByLabelText(/username/i)).not.toBeDisabled();
+    expect(screen.getByLabelText(/používateľské meno/i)).not.toBeDisabled();
   });
 
   it("disables Create button while password < 5 chars", () => {
     render(
       <UserForm mode="create" submitting={false} error="" onSubmit={vi.fn()} onCancel={vi.fn()} />,
     );
-    fireEvent.change(screen.getByLabelText(/username/i), { target: { value: "tibi" } });
+    fireEvent.change(screen.getByLabelText(/používateľské meno/i), { target: { value: "tibi" } });
     fireEvent.change(screen.getByLabelText(/email/i), { target: { value: "tibi@icc.sk" } });
-    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "abc" } });
-    expect(screen.getByRole("button", { name: /create/i })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/heslo/i), { target: { value: "abc" } });
+    expect(screen.getByRole("button", { name: /vytvoriť/i })).toBeDisabled();
   });
 
   it("enables Create button when all required fields valid", () => {
     render(
       <UserForm mode="create" submitting={false} error="" onSubmit={vi.fn()} onCancel={vi.fn()} />,
     );
-    fireEvent.change(screen.getByLabelText(/username/i), { target: { value: "tibi" } });
+    fireEvent.change(screen.getByLabelText(/používateľské meno/i), { target: { value: "tibi" } });
     fireEvent.change(screen.getByLabelText(/email/i), { target: { value: "tibi@icc.sk" } });
-    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "abcde" } });
-    expect(screen.getByRole("button", { name: /create/i })).toBeEnabled();
+    fireEvent.change(screen.getByLabelText(/heslo/i), { target: { value: "abcde" } });
+    expect(screen.getByRole("button", { name: /vytvoriť/i })).toBeEnabled();
   });
 
   it("submits with is_active=true by default + collected form data", async () => {
@@ -84,12 +84,12 @@ describe("UserForm — mode='create'", () => {
     render(
       <UserForm mode="create" submitting={false} error="" onSubmit={onSubmit} onCancel={vi.fn()} />,
     );
-    fireEvent.change(screen.getByLabelText(/first name/i), { target: { value: "Tibor" } });
-    fireEvent.change(screen.getByLabelText(/last name/i), { target: { value: "Rausch" } });
-    fireEvent.change(screen.getByLabelText(/username/i), { target: { value: "tibi" } });
+    fireEvent.change(screen.getByLabelText(/^meno$/i), { target: { value: "Tibor" } });
+    fireEvent.change(screen.getByLabelText(/priezvisko/i), { target: { value: "Rausch" } });
+    fireEvent.change(screen.getByLabelText(/používateľské meno/i), { target: { value: "tibi" } });
     fireEvent.change(screen.getByLabelText(/email/i), { target: { value: "tibi@icc.sk" } });
-    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "abcde" } });
-    fireEvent.click(screen.getByRole("button", { name: /create/i }));
+    fireEvent.change(screen.getByLabelText(/heslo/i), { target: { value: "abcde" } });
+    fireEvent.click(screen.getByRole("button", { name: /vytvoriť/i }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit).toHaveBeenCalledWith({
       username: "tibi",
@@ -98,6 +98,7 @@ describe("UserForm — mode='create'", () => {
       role: "shu",
       first_name: "Tibor",
       last_name: "Rausch",
+      telegram_chat_id: "",
       is_active: true,
     });
   });
@@ -107,7 +108,7 @@ describe("UserForm — mode='create'", () => {
     render(
       <UserForm mode="create" submitting={false} error="" onSubmit={vi.fn()} onCancel={onCancel} />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+    fireEvent.click(screen.getByRole("button", { name: /zrušiť/i }));
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
@@ -131,9 +132,9 @@ describe("UserForm — mode='edit'", () => {
         onCancel={vi.fn()}
       />,
     );
-    expect(screen.getByLabelText(/first name/i)).toHaveValue("Tibor");
-    expect(screen.getByLabelText(/last name/i)).toHaveValue("Rausch");
-    expect(screen.getByLabelText(/username/i)).toHaveValue("tibi");
+    expect(screen.getByLabelText(/^meno$/i)).toHaveValue("Tibor");
+    expect(screen.getByLabelText(/priezvisko/i)).toHaveValue("Rausch");
+    expect(screen.getByLabelText(/používateľské meno/i)).toHaveValue("tibi");
     expect(screen.getByLabelText(/email/i)).toHaveValue("tibi@icc.sk");
   });
 
@@ -148,7 +149,7 @@ describe("UserForm — mode='edit'", () => {
         onCancel={vi.fn()}
       />,
     );
-    expect(screen.getByLabelText(/username/i)).toBeDisabled();
+    expect(screen.getByLabelText(/používateľské meno/i)).toBeDisabled();
   });
 
   it("shows Active checkbox in edit mode (reflecting initial)", () => {
@@ -162,7 +163,7 @@ describe("UserForm — mode='edit'", () => {
         onCancel={vi.fn()}
       />,
     );
-    const cb = screen.getByLabelText(/active/i) as HTMLInputElement;
+    const cb = screen.getByLabelText(/aktívny/i) as HTMLInputElement;
     expect(cb).toBeInTheDocument();
     expect(cb.checked).toBe(false);
   });
@@ -179,7 +180,7 @@ describe("UserForm — mode='edit'", () => {
         onCancel={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    fireEvent.click(screen.getByRole("button", { name: /uložiť/i }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({ password: "" }),
@@ -197,8 +198,8 @@ describe("UserForm — mode='edit'", () => {
         onCancel={vi.fn()}
       />,
     );
-    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "abc" } });
-    expect(screen.getByRole("button", { name: /save/i })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/heslo/i), { target: { value: "abc" } });
+    expect(screen.getByRole("button", { name: /uložiť/i })).toBeDisabled();
   });
 
   it("submit button reads 'Save' in edit mode (not 'Create')", () => {
@@ -212,8 +213,8 @@ describe("UserForm — mode='edit'", () => {
         onCancel={vi.fn()}
       />,
     );
-    expect(screen.getByRole("button", { name: /save/i })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /create/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /uložiť/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /vytvoriť/i })).not.toBeInTheDocument();
   });
 
   it("submits with full payload including changed password and is_active", async () => {
@@ -228,10 +229,10 @@ describe("UserForm — mode='edit'", () => {
         onCancel={vi.fn()}
       />,
     );
-    fireEvent.change(screen.getByLabelText(/first name/i), { target: { value: "Tiborko" } });
-    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "newone" } });
-    fireEvent.click(screen.getByLabelText(/active/i));
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    fireEvent.change(screen.getByLabelText(/^meno$/i), { target: { value: "Tiborko" } });
+    fireEvent.change(screen.getByLabelText(/heslo/i), { target: { value: "newone" } });
+    fireEvent.click(screen.getByLabelText(/aktívny/i));
+    fireEvent.click(screen.getByRole("button", { name: /uložiť/i }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit).toHaveBeenCalledWith({
       username: "tibi",
@@ -240,6 +241,7 @@ describe("UserForm — mode='edit'", () => {
       role: "ha",
       first_name: "Tiborko",
       last_name: "Rausch",
+      telegram_chat_id: "",
       is_active: false,
     });
   });

@@ -1,6 +1,45 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/* @tailwindcss/typography (v4 plugin form) — `prose` is used in markdown viewers
+   (KnowledgeBase / ProjectSpecs / Dialogue / Credentials / PipelineMessageBubble). */
+@plugin "@tailwindcss/typography";
+
+/* Dark mode via the `.dark` class (E1 Phase A, CR-NS-047) — replaces v3 `darkMode: "class"`.
+   NEX Studio stays dark-by-default (<html class="dark"> + per-user ThemeContext). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ──────────────────────────────────────────────────────────────────────────────
+   Canonical design tokens — the NEX Studio "vzor" palette (E1 Phase A / A3).
+   Ported VERBATIM from the v3 tailwind.config.js (representation change, NOT a
+   re-brand — vzhľad sa nemení). This @theme block is the Phase-B shared-library
+   contract: token names here are the canonical design source other projects align to.
+   ────────────────────────────────────────────────────────────────────────────── */
+@theme {
+  /* Primary — NEX Studio brand indigo (DEFAULT #6366f1 = the 500 step). */
+  --color-primary-50: #eef2ff;
+  --color-primary-100: #e0e7ff;
+  --color-primary-200: #c7d2fe;
+  --color-primary-300: #a5b4fc;
+  --color-primary-400: #818cf8;
+  --color-primary-500: #6366f1;
+  --color-primary-600: #4f46e5;
+  --color-primary-700: #4338ca;
+  --color-primary-800: #3730a3;
+  --color-primary-900: #312e81;
+  --color-primary-950: #1e1b4b;
+  --color-primary: #6366f1;
+
+  /* Module status colors (DESIGN.md §3.2). */
+  --color-status-planned: #6b7280;
+  --color-status-in-design: #f59e0b;
+  --color-status-in-development: #3b82f6;
+  --color-status-done: #10b981;
+  --color-status-failed: #ef4444;
+
+  /* Fonts. */
+  --font-sans: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", Consolas, Monaco, monospace;
+}
 
 @layer base {
   html,
@@ -11,6 +50,14 @@
 
   body {
     @apply bg-slate-950 text-slate-100 font-sans antialiased;
+  }
+
+  /* Tailwind v4 dropped the default `cursor: pointer` on <button> (E1 Phase A pin —
+     CR-NS-047). Restore the v3 behavior so the cockpit's ~165 buttons keep the
+     pointer cursor (UX unchanged). Disabled buttons keep the default cursor. */
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
   }
 }
 
@@ -27,16 +74,18 @@
     text-underline-offset: 2px;
   }
 
+  /* v4 note: @apply can't compose a custom component class (`@apply btn`), so the
+     shared base utilities are inlined per variant (identical visual result). */
   .btn {
     @apply inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium transition-colors focus:outline-none disabled:opacity-50 disabled:pointer-events-none;
   }
 
   .btn-primary {
-    @apply btn bg-primary-600 text-white hover:bg-primary-500;
+    @apply inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium transition-colors focus:outline-none disabled:opacity-50 disabled:pointer-events-none bg-primary-600 text-white hover:bg-primary-500;
   }
 
   .btn-secondary {
-    @apply btn bg-slate-800 text-slate-200 hover:bg-slate-700;
+    @apply inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium transition-colors focus:outline-none disabled:opacity-50 disabled:pointer-events-none bg-slate-800 text-slate-200 hover:bg-slate-700;
   }
 
   .card {

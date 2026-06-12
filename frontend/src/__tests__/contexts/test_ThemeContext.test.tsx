@@ -1,12 +1,9 @@
 /**
  * Tests for ThemeContext — DESIGN.md § 3.3a dark mode.
  *
- * Validates:
- * - toggle persists preference to localStorage
- * - localStorage key is scoped per username
- * - ``dark`` class is applied / removed on ``<html>``
- * - defaults to light mode when no persisted value
- * - reads persisted value on mount
+ * NEX Studio is **dark-by-default** (CR-NS-038/047): `readPersistedDark` returns
+ * `true` when there is no stored preference (incl. no username). These tests
+ * validate that dark-first default + per-user persistence + the `<html>.dark` class.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -17,10 +14,6 @@ import {
   useTheme,
   darkModeKey,
 } from "@/contexts/ThemeContext";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function wrapper(username: string | undefined) {
   return function Wrapper({ children }: { children: ReactNode }) {
@@ -33,118 +26,85 @@ beforeEach(() => {
   document.documentElement.classList.remove("dark");
 });
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 describe("ThemeContext", () => {
-  it("defaults to light mode (isDark = false)", () => {
-    const { result } = renderHook(() => useTheme(), {
-      wrapper: wrapper("testuser"),
-    });
-
-    expect(result.current.isDark).toBe(false);
+  it("defaults to dark mode (isDark = true) when no persisted value", () => {
+    const { result } = renderHook(() => useTheme(), { wrapper: wrapper("testuser") });
+    expect(result.current.isDark).toBe(true);
   });
 
-  it("toggleDark flips isDark to true and back", () => {
-    const { result } = renderHook(() => useTheme(), {
-      wrapper: wrapper("testuser"),
-    });
+  it("toggleDark flips isDark from the dark default to light and back", () => {
+    const { result } = renderHook(() => useTheme(), { wrapper: wrapper("testuser") });
+
+    act(() => result.current.toggleDark());
+    expect(result.current.isDark).toBe(false);
 
     act(() => result.current.toggleDark());
     expect(result.current.isDark).toBe(true);
-
-    act(() => result.current.toggleDark());
-    expect(result.current.isDark).toBe(false);
   });
 
-  it("persists dark mode preference to localStorage", () => {
-    const { result } = renderHook(() => useTheme(), {
-      wrapper: wrapper("alice"),
-    });
+  it("persists the preference to localStorage on toggle", () => {
+    const { result } = renderHook(() => useTheme(), { wrapper: wrapper("alice") });
 
-    act(() => result.current.toggleDark());
-
-    expect(localStorage.getItem(darkModeKey("alice"))).toBe("true");
-
-    act(() => result.current.toggleDark());
-
+    act(() => result.current.toggleDark()); // dark → light
     expect(localStorage.getItem(darkModeKey("alice"))).toBe("false");
+
+    act(() => result.current.toggleDark()); // light → dark
+    expect(localStorage.getItem(darkModeKey("alice"))).toBe("true");
   });
 
-  it("uses per-user localStorage key (nex_dark_{username})", () => {
+  it("uses a per-user localStorage key (nex_dark_{username})", () => {
     expect(darkModeKey("admin")).toBe("nex_dark_admin");
     expect(darkModeKey("tibor")).toBe("nex_dark_tibor");
 
-    // Set dark for alice, leave bob as default
-    localStorage.setItem(darkModeKey("alice"), "true");
+    // alice explicitly LIGHT; bob has no preference → dark default.
+    localStorage.setItem(darkModeKey("alice"), "false");
 
-    const { result: alice } = renderHook(() => useTheme(), {
-      wrapper: wrapper("alice"),
-    });
-    const { result: bob } = renderHook(() => useTheme(), {
-      wrapper: wrapper("bob"),
-    });
+    const { result: alice } = renderHook(() => useTheme(), { wrapper: wrapper("alice") });
+    const { result: bob } = renderHook(() => useTheme(), { wrapper: wrapper("bob") });
 
-    expect(alice.current.isDark).toBe(true);
-    expect(bob.current.isDark).toBe(false);
+    expect(alice.current.isDark).toBe(false);
+    expect(bob.current.isDark).toBe(true);
   });
 
-  it("reads persisted preference on mount", () => {
-    localStorage.setItem(darkModeKey("zoltan"), "true");
+  it("reads a persisted LIGHT preference on mount (overrides the dark default)", () => {
+    localStorage.setItem(darkModeKey("zoltan"), "false");
 
-    const { result } = renderHook(() => useTheme(), {
-      wrapper: wrapper("zoltan"),
-    });
-
-    expect(result.current.isDark).toBe(true);
-  });
-
-  it("applies dark class to <html> when isDark is true", () => {
-    const { result } = renderHook(() => useTheme(), {
-      wrapper: wrapper("testuser"),
-    });
-
-    expect(document.documentElement.classList.contains("dark")).toBe(false);
-
-    act(() => result.current.toggleDark());
-
-    expect(document.documentElement.classList.contains("dark")).toBe(true);
-
-    act(() => result.current.toggleDark());
-
-    expect(document.documentElement.classList.contains("dark")).toBe(false);
-  });
-
-  it("defaults to false when username is undefined", () => {
-    const { result } = renderHook(() => useTheme(), {
-      wrapper: wrapper(undefined),
-    });
+    const { result } = renderHook(() => useTheme(), { wrapper: wrapper("zoltan") });
 
     expect(result.current.isDark).toBe(false);
   });
 
-  it("does not persist when username is undefined", () => {
-    const { result } = renderHook(() => useTheme(), {
-      wrapper: wrapper(undefined),
-    });
+  it("applies / removes the dark class on <html> as isDark toggles", () => {
+    const { result } = renderHook(() => useTheme(), { wrapper: wrapper("testuser") });
+
+    // dark default → class present on mount
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
 
     act(() => result.current.toggleDark());
+    expect(document.documentElement.classList.contains("dark")).toBe(false);
 
-    // isDark toggled in memory
+    act(() => result.current.toggleDark());
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+  });
+
+  it("defaults to dark when username is undefined", () => {
+    const { result } = renderHook(() => useTheme(), { wrapper: wrapper(undefined) });
     expect(result.current.isDark).toBe(true);
-    // But nothing written to localStorage
+  });
+
+  it("does not persist when username is undefined", () => {
+    const { result } = renderHook(() => useTheme(), { wrapper: wrapper(undefined) });
+
+    act(() => result.current.toggleDark()); // dark → light, in-memory only
+    expect(result.current.isDark).toBe(false);
     expect(localStorage.length).toBe(0);
   });
 
   it("throws when useTheme is called outside ThemeProvider", () => {
-    // Suppress React error boundary noise
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-    expect(() => {
-      renderHook(() => useTheme());
-    }).toThrow("useTheme must be used within a <ThemeProvider>");
-
+    expect(() => renderHook(() => useTheme())).toThrow(
+      "useTheme must be used within a <ThemeProvider>",
+    );
     spy.mockRestore();
   });
 });

@@ -1,232 +1,116 @@
 /**
- * Unit tests for {@link LoginPage}.
+ * Unit tests for {@link LoginPage} (reconciled with the current inline form —
+ * E1 Phase A / CR-NS-047 FE-test cleanup).
  *
- * Tests cover:
- *   1. Successful form submission → redirect to /
- *   2. Error display on 401 (invalid credentials)
- *   3. Error display on network failure
- *   4. Required-field validation (empty submit)
- *   5. Redirect to ?next= path on success
+ * Current LoginPage: useNavigate + useLocation (redirect to `location.state.from`
+ * or "/"); id-based Slovak inputs (Používateľské meno / Heslo); a single generic
+ * error ("Nesprávne prihlasovacie údaje.") on any login failure; submit disabled
+ * while loading or when fields are empty.
  */
 
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-/* ------------------------------------------------------------------ */
-/*  Mocks                                                              */
-/* ------------------------------------------------------------------ */
+// ── Mocks ───────────────────────────────────────────────────────────────────
 
-// Mock react-router-dom — provide navigate + searchParams stubs
 const navigateMock = vi.fn();
-let searchParamsMap = new URLSearchParams();
+let locationMock: { state: unknown } = { state: null };
 
-vi.mock("react-router-dom", () => ({
-  useNavigate: () => navigateMock,
-  useSearchParams: () => [searchParamsMap],
-}));
-
-// Mock authStore — expose login as a controllable mock
-const loginMock: Mock = vi.fn();
-vi.mock("@/store/authStore", () => ({
-  useAuthStore: (selector: (s: Record<string, unknown>) => unknown) =>
-    selector({ login: loginMock }),
-}));
-
-// Mock api module — provide real ApiError class
-vi.mock("@/services/api", () => ({
-  ApiError: class ApiError extends Error {
-    status: number;
-    data: unknown;
-    constructor(status: number, message: string, data: unknown = null) {
-      super(message);
-      this.name = "ApiError";
-      this.status = status;
-      this.data = data;
-    }
-  },
-  TOKEN_STORAGE_KEY: "nex_studio_token",
-}));
-
-/* ------------------------------------------------------------------ */
-/*  Setup                                                              */
-/* ------------------------------------------------------------------ */
-
-beforeEach(() => {
-  vi.resetAllMocks();
-  searchParamsMap = new URLSearchParams();
+vi.mock("react-router-dom", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-router-dom")>();
+  return {
+    ...actual,
+    useNavigate: () => navigateMock,
+    useLocation: () => ({ pathname: "/login", search: "", hash: "", key: "t", state: locationMock.state }),
+  };
 });
 
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                            */
-/* ------------------------------------------------------------------ */
+const loginMock: Mock = vi.fn();
+let tokenValue: string | null = null;
+vi.mock("@/store/authStore", () => ({
+  useAuthStore: (selector: (s: Record<string, unknown>) => unknown) =>
+    selector({ login: loginMock, token: tokenValue }),
+}));
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  locationMock = { state: null };
+  tokenValue = null;
+});
 
 async function importPage() {
-  const mod = await import("@/pages/LoginPage");
-  return mod.default;
+  return (await import("@/pages/LoginPage")).default;
 }
 
-/** Create a real ApiError instance from the mocked module. */
-async function makeApiError(status: number, message: string) {
-  const mod = await import("@/services/api");
-  return new (mod.ApiError as new (s: number, m: string) => Error)(
-    status,
-    message,
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  Tests                                                              */
-/* ------------------------------------------------------------------ */
+// ── Tests ────────────────────────────────────────────────────────────────────
 
 describe("LoginPage", () => {
-  it("renders the login form with heading", async () => {
+  it("renders the heading, Slovak fields and the submit button", async () => {
     const LoginPage = await importPage();
     render(<LoginPage />);
 
     expect(screen.getByText("NEX Studio")).toBeInTheDocument();
-    expect(screen.getByText("Sign in to your account")).toBeInTheDocument();
-    expect(screen.getByTestId("login-username")).toBeInTheDocument();
-    expect(screen.getByTestId("login-password")).toBeInTheDocument();
-    expect(screen.getByTestId("login-submit")).toBeInTheDocument();
+    expect(screen.getByText("Prihláste sa na svoj účet")).toBeInTheDocument();
+    expect(screen.getByLabelText(/používateľské meno/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/heslo/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /prihlásiť sa/i })).toBeInTheDocument();
+  });
+
+  it("disables the submit button until both fields are filled", async () => {
+    const LoginPage = await importPage();
+    render(<LoginPage />);
+    const submit = screen.getByRole("button", { name: /prihlásiť sa/i });
+    expect(submit).toBeDisabled();
+
+    await userEvent.type(screen.getByLabelText(/používateľské meno/i), "zoltan");
+    await userEvent.type(screen.getByLabelText(/heslo/i), "secret");
+    expect(submit).toBeEnabled();
   });
 
   it("redirects to / on successful login", async () => {
-    loginMock.mockResolvedValueOnce(undefined);
-    const user = userEvent.setup();
-
+    loginMock.mockResolvedValue(undefined);
     const LoginPage = await importPage();
     render(<LoginPage />);
 
-    await user.type(screen.getByTestId("login-username"), "admin");
-    await user.type(screen.getByTestId("login-password"), "secret123");
-    await user.click(screen.getByTestId("login-submit"));
+    await userEvent.type(screen.getByLabelText(/používateľské meno/i), "zoltan");
+    await userEvent.type(screen.getByLabelText(/heslo/i), "secret");
+    await userEvent.click(screen.getByRole("button", { name: /prihlásiť sa/i }));
 
-    await waitFor(() => {
-      expect(loginMock).toHaveBeenCalledWith("admin", "secret123");
-    });
-
+    await waitFor(() => expect(loginMock).toHaveBeenCalledWith("zoltan", "secret"));
     expect(navigateMock).toHaveBeenCalledWith("/", { replace: true });
   });
 
-  it("redirects to ?next= path on successful login", async () => {
-    loginMock.mockResolvedValueOnce(undefined);
-    searchParamsMap = new URLSearchParams("next=/projects/my-project");
-    const user = userEvent.setup();
-
+  it("redirects to location.state.from on successful login", async () => {
+    locationMock = { state: { from: { pathname: "/cockpit" } } };
+    loginMock.mockResolvedValue(undefined);
     const LoginPage = await importPage();
     render(<LoginPage />);
 
-    await user.type(screen.getByTestId("login-username"), "admin");
-    await user.type(screen.getByTestId("login-password"), "pass");
-    await user.click(screen.getByTestId("login-submit"));
+    await userEvent.type(screen.getByLabelText(/používateľské meno/i), "zoltan");
+    await userEvent.type(screen.getByLabelText(/heslo/i), "secret");
+    await userEvent.click(screen.getByRole("button", { name: /prihlásiť sa/i }));
 
-    await waitFor(() => {
-      expect(navigateMock).toHaveBeenCalledWith("/projects/my-project", {
-        replace: true,
-      });
-    });
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/cockpit", { replace: true }));
   });
 
-  it("shows error message on 401 (invalid credentials)", async () => {
-    const apiError = await makeApiError(401, "Unauthorized");
-    loginMock.mockRejectedValueOnce(apiError);
-    const user = userEvent.setup();
-
+  it("shows the error message when login fails", async () => {
+    loginMock.mockRejectedValue(new Error("401"));
     const LoginPage = await importPage();
     render(<LoginPage />);
 
-    await user.type(screen.getByTestId("login-username"), "admin");
-    await user.type(screen.getByTestId("login-password"), "wrong");
-    await user.click(screen.getByTestId("login-submit"));
+    await userEvent.type(screen.getByLabelText(/používateľské meno/i), "zoltan");
+    await userEvent.type(screen.getByLabelText(/heslo/i), "bad");
+    await userEvent.click(screen.getByRole("button", { name: /prihlásiť sa/i }));
 
-    await waitFor(() => {
-      expect(screen.getByTestId("login-error")).toBeInTheDocument();
-    });
-
-    expect(screen.getByTestId("login-error")).toHaveTextContent(
-      "Invalid username or password.",
-    );
+    expect(await screen.findByText(/nesprávne prihlasovacie údaje/i)).toBeInTheDocument();
     expect(navigateMock).not.toHaveBeenCalled();
   });
 
-  it("shows error message on non-401 API error", async () => {
-    const apiError = await makeApiError(500, "Internal Server Error");
-    loginMock.mockRejectedValueOnce(apiError);
-    const user = userEvent.setup();
-
+  it("redirects away if already authenticated (token present)", async () => {
+    tokenValue = "existing-token";
     const LoginPage = await importPage();
     render(<LoginPage />);
-
-    await user.type(screen.getByTestId("login-username"), "admin");
-    await user.type(screen.getByTestId("login-password"), "pass");
-    await user.click(screen.getByTestId("login-submit"));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("login-error")).toBeInTheDocument();
-    });
-
-    expect(screen.getByTestId("login-error")).toHaveTextContent(
-      "Internal Server Error",
-    );
-  });
-
-  it("shows network error on non-ApiError failure", async () => {
-    loginMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
-    const user = userEvent.setup();
-
-    const LoginPage = await importPage();
-    render(<LoginPage />);
-
-    await user.type(screen.getByTestId("login-username"), "admin");
-    await user.type(screen.getByTestId("login-password"), "pass");
-    await user.click(screen.getByTestId("login-submit"));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("login-error")).toBeInTheDocument();
-    });
-
-    expect(screen.getByTestId("login-error")).toHaveTextContent(
-      "Network error. Please check your connection.",
-    );
-  });
-
-  it("shows validation errors when submitting empty fields", async () => {
-    const user = userEvent.setup();
-
-    const LoginPage = await importPage();
-    render(<LoginPage />);
-
-    await user.click(screen.getByTestId("login-submit"));
-
-    await waitFor(() => {
-      const alerts = screen.getAllByRole("alert");
-      expect(alerts.length).toBeGreaterThanOrEqual(2);
-    });
-
-    expect(screen.getByText("Username is required.")).toBeInTheDocument();
-    expect(screen.getByText("Password is required.")).toBeInTheDocument();
-    expect(loginMock).not.toHaveBeenCalled();
-  });
-
-  it("disables submit button while loading", async () => {
-    // Never-resolving promise to keep loading state
-    loginMock.mockReturnValueOnce(new Promise(() => {}));
-    const user = userEvent.setup();
-
-    const LoginPage = await importPage();
-    render(<LoginPage />);
-
-    await user.type(screen.getByTestId("login-username"), "admin");
-    await user.type(screen.getByTestId("login-password"), "pass");
-    await user.click(screen.getByTestId("login-submit"));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("login-submit")).toBeDisabled();
-    });
-
-    expect(screen.getByTestId("login-submit")).toHaveTextContent(
-      "Signing in\u2026",
-    );
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/", { replace: true }));
   });
 });

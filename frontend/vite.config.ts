@@ -1,11 +1,15 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 import { viteStaticCopy } from "vite-plugin-static-copy";
 import path from "path";
 
 export default defineConfig({
   plugins: [
     react(),
+    // Tailwind v4 via the Vite plugin (E1 Phase A, CR-NS-047) — replaces the v3
+    // postcss/tailwind.config setup; config now lives in src/index.css (@theme).
+    tailwindcss(),
     // Copy the bundled Slovak Hunspell dictionary (dictionary-sk) into
     // /dictionaries/sk/ so SlovakTextarea can fetch it at runtime. The
     // upstream package has a restrictive ``exports`` map that blocks

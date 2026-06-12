@@ -94,7 +94,7 @@ describe("Versions route resolution", () => {
 });
 
 describe("Sidebar Versions link", () => {
-  it("renders a Versions NavLink when inside a project context", async () => {
+  it("renders the 'Verzie' nav button when inside a project context", async () => {
     // Import Sidebar dynamically so the lucide-react mock is in place
     const { default: Sidebar } = await import(
       "@/components/layout/Sidebar"
@@ -108,12 +108,8 @@ describe("Sidebar Versions link", () => {
       </MemoryRouter>,
     );
 
-    const versionsLink = screen.getByRole("link", { name: /versions/i });
-    expect(versionsLink).toBeInTheDocument();
-    expect(versionsLink).toHaveAttribute(
-      "href",
-      "/projects/test-proj/versions",
-    );
+    // NavItems render as <button> (navigate-on-click), and the E4 label is Slovak.
+    expect(screen.getByRole("button", { name: /verzie/i })).toBeInTheDocument();
   });
 
   it("does NOT render the Versions link outside a project context", async () => {
