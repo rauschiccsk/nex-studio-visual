@@ -1,112 +1,61 @@
 /**
  * Auth Zustand store — DESIGN.md § 3.3 ``authStore``.
  *
- * Holds JWT token + user object. Persists to ``localStorage`` under
- * key ``nex-auth`` via Zustand ``persist`` middleware so the session
- * survives page reloads.
+ * Since E1 Phase C (CR-NS-052) the store machinery is the shared
+ * ``createAuthStore`` (nex-shared, mode 'login'); this file supplies the
+ * NEX-Studio-specific config and keeps the public surface (``useAuthStore`` with
+ * ``token``/``user``/``login``/``logout``/``fetchMe``) so every consumer
+ * (Sidebar, pages, ProtectedRoute) keeps reading it unchanged.
  *
- * The store deliberately does NOT store the full ``LoginResponse`` —
- * only the token string and the safe ``AuthUser`` projection.
+ * NEX-Studio specifics (config, not in the lib):
+ *   - role type ``'ri'|'ha'|'shu'`` (the generic user type ``T = AuthUser``);
+ *   - the ``nex_studio_token`` storage key bridged to the api-client (``setToken``);
+ *   - the E6 presence reset on login (``onLogin`` hook — app code, not lib);
+ *   - Zustand persist under ``nex-auth`` (survives reloads).
+ *
+ * The 401 → in-memory clear wiring (registerAuthCallback) is handled inside the
+ * shared store factory.
  */
 
-import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import type { StoreApi, UseBoundStore } from "zustand";
+import { createAuthStore, type LoginAuthState } from "nex-shared";
 
-import { TOKEN_STORAGE_KEY, registerAuthCallback } from "@/services/api";
+import { TOKEN_STORAGE_KEY } from "@/services/api";
 import type { AuthUser } from "@/services/api/auth";
 import { loginApi, logoutApi, getMeApi } from "@/services/api/auth";
 import { usePresenceStore } from "@/store/usePresenceStore";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+export type { AuthUser };
 
-export interface AuthState {
-  /** JWT access token (null when logged out). */
-  token: string | null;
-  /** Authenticated user profile (null when logged out). */
-  user: AuthUser | null;
-
-  /** Authenticate with username + password. Persists token. */
-  login: (username: string, password: string) => Promise<void>;
-  /** Clear session locally and invalidate on the backend. */
-  logout: () => Promise<void>;
-  /** Refresh the user profile from ``GET /auth/me``. */
-  fetchMe: () => Promise<void>;
-}
-
-// ---------------------------------------------------------------------------
-// Store
-// ---------------------------------------------------------------------------
-
-export const useAuthStore = create<AuthState>()(
-  persist(
-    (set, get) => ({
-      token: null,
-      user: null,
-
-      async login(username: string, password: string): Promise<void> {
-        const res = await loginApi(username, password);
-
-        // Persist the raw token under the key the api.ts interceptor reads.
-        if (typeof window !== "undefined") {
-          window.localStorage.setItem(TOKEN_STORAGE_KEY, res.access_token);
-        }
-
-        set({ token: res.access_token, user: res.user });
-
-        // E6 (CR-NS-038): a fresh login starts "at computer" — never silently carry a persisted
-        // "away" from a prior session into a new one.
-        usePresenceStore.getState().setIsAway(false);
-      },
-
-      async logout(): Promise<void> {
-        try {
-          await logoutApi();
-        } catch {
-          // Best-effort — clear local state regardless.
-        }
-
-        if (typeof window !== "undefined") {
-          window.localStorage.removeItem(TOKEN_STORAGE_KEY);
-        }
-
-        set({ token: null, user: null });
-      },
-
-      async fetchMe(): Promise<void> {
-        const { token } = get();
-        if (!token) return;
-
-        try {
-          const user = await getMeApi();
-          set({ user });
-        } catch {
-          // Token expired / invalid — clear state.
-          if (typeof window !== "undefined") {
-            window.localStorage.removeItem(TOKEN_STORAGE_KEY);
-          }
-          set({ token: null, user: null });
-        }
-      },
-    }),
-    {
-      name: "nex-auth",
-      // Only persist token + user; actions are recreated by Zustand.
-      partialize: (state) => ({
-        token: state.token,
-        user: state.user,
-      }),
-    },
-  ),
-);
-
-// ---------------------------------------------------------------------------
-// Wire authStore → api.ts 401 interceptor
-// ---------------------------------------------------------------------------
-// Clear in-memory Zustand state when the API client detects a 401. This
-// avoids a circular import (api.ts never imports authStore) by using the
-// callback registration pattern exposed by ``registerAuthCallback``.
-registerAuthCallback(() => {
-  useAuthStore.setState({ token: null, user: null });
+/** The bound auth store. Annotated via NEX Studio's own `zustand` (the shared
+ *  factory's return type references `zustand` across the package boundary —
+ *  the explicit type keeps the emitted declaration portable). */
+const authModule = createAuthStore<AuthUser, [string, string]>({
+  mode: "login",
+  persistKey: "nex-auth",
+  // Probe the current user (GET /auth/me).
+  getUser: getMeApi,
+  // Authenticate; map the backend LoginResponse → {token, user}.
+  login: async (username: string, password: string) => {
+    const res = await loginApi(username, password);
+    return { token: res.access_token, user: res.user };
+  },
+  // Invalidate the session on the backend (best-effort).
+  logout: logoutApi,
+  // Bridge the raw token to where the api-client reads it (nex_studio_token).
+  setToken: (token) => {
+    if (typeof window === "undefined") return;
+    if (token) {
+      window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
+    } else {
+      window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+    }
+  },
+  redirectOnUnauthorized: "/login",
+  // E6 (CR-NS-038): a fresh login starts "at computer" — never carry a persisted
+  // "away" from a prior session. App-side hook (presence is not lib concern).
+  onLogin: () => usePresenceStore.getState().setIsAway(false),
 });
+
+export const useAuthStore: UseBoundStore<StoreApi<LoginAuthState<AuthUser, [string, string]>>> =
+  authModule.useAuthStore;

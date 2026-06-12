@@ -1,17 +1,15 @@
 /**
  * Protected route wrapper — DESIGN.md § 3.1.
  *
- * Checks ``authStore.token``:
- *   - If null → redirect to ``/login``
- *   - If present → call ``authStore.fetchMe()`` on mount to revalidate the
- *     session, then render children.
- *
- * Wrap any ``<Route>`` element that requires authentication with this
- * component (see ``App.tsx``).
+ * Since E1 Phase C (CR-NS-052) the guard logic lives in the shared
+ * ``ProtectedRoute`` (nex-shared, router-agnostic); this thin wrapper supplies
+ * the NEX-Studio specifics: the auth-store reads (token + fetchMe revalidation)
+ * and the react-router redirect element (``<Navigate to="/login">`` preserving
+ * the originating location in ``state.from`` for the next-param bounce-back).
  */
 
-import { useEffect, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
+import { ProtectedRoute as SharedProtectedRoute } from "nex-shared";
 
 import { useAuthStore } from "@/store/authStore";
 
@@ -24,30 +22,15 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
   const fetchMe = useAuthStore((s) => s.fetchMe);
   const location = useLocation();
 
-  // Track whether the initial fetchMe call has completed so we don't
-  // flash protected content before the token is validated.
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    if (token) {
-      fetchMe().finally(() => setReady(true));
-    } else {
-      setReady(true);
-    }
-    // Run once on mount (or when token changes from null → string).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
-
-  // Still loading — show nothing (avoids flash of redirect or content).
-  if (!ready) return null;
-
-  // After fetchMe, re-read token — it may have been cleared if the
-  // token was expired/invalid.
-  const currentToken = useAuthStore.getState().token;
-
-  if (!currentToken) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
-  }
-
-  return <>{children}</>;
+  return (
+    <SharedProtectedRoute
+      authed={Boolean(token)}
+      validate={fetchMe}
+      // Re-read after fetchMe — the token may have been cleared if it was expired.
+      isAuthed={() => Boolean(useAuthStore.getState().token)}
+      redirect={<Navigate to="/login" state={{ from: location }} replace />}
+    >
+      {children}
+    </SharedProtectedRoute>
+  );
 }
