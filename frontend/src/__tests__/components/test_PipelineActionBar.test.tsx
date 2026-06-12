@@ -117,6 +117,36 @@ describe("PipelineActionBar — gate action clarity", () => {
     expect(screen.queryByText("Skús znova")).not.toBeInTheDocument();
   });
 
+  it("at a build question-block offers 'Schváliť a pokračovať' (one-click affirmative) → answer", () => {
+    const onAction = vi.fn();
+    render(
+      <PipelineActionBar
+        state={mkState("build", "blocked")}
+        availableActions={["answer", "return", "ask", "continue_build", "end_build"]} // no approve@build-blocked
+        inFlight={false}
+        onAction={onAction}
+      />,
+    );
+    const btn = screen.getByText("Schváliť a pokračovať");
+    expect(btn).toBeInTheDocument();
+    expect(screen.getByText("Odpoveď")).toBeInTheDocument(); // typed answer stays
+    btn.click();
+    expect(onAction).toHaveBeenCalledWith("answer", { text: "Schvaľujem, pokračuj podľa plánu." });
+  });
+
+  it("does NOT offer 'Schváliť a pokračovať' at a gate question-block (the ratify approve already covers it)", () => {
+    render(
+      <PipelineActionBar
+        state={mkState("kickoff", "blocked")}
+        availableActions={["answer", "return", "ask", "approve", "apply_coordinator_recommendation"]}
+        inFlight={false}
+        onAction={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(APPROVE)).toBeInTheDocument(); // "Schváliť podľa Návrhára" is the affirmative here
+    expect(screen.queryByText("Schváliť a pokračovať")).not.toBeInTheDocument(); // no redundant button
+  });
+
   it("does not show 'Schváliť návrh Koordinátora' on a question-block (only awaiting ratify)", () => {
     render(
       <PipelineActionBar

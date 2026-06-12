@@ -182,6 +182,24 @@ export function PipelineActionBar({
     <div className="flex flex-col gap-2.5">
       {inFlight && <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500" />}
 
+      {/* One-click affirmative for an AGENT question with no ratify gate (CR 2026-06-12): a build
+          question-block offers no "Schváliť podľa Návrhára" (approve@build = sign off the WHOLE build,
+          only at awaiting — never on a mid-build question), so the Coordinator's "odporúčam schváliť"
+          had no matching button and the Director had to type it via Odpoveď. Show it ONLY when answer
+          is offered but approve is NOT — i.e. exactly where the ratify approve is absent — so it never
+          duplicates it (at a gate question-block the approve button already covers this). */}
+      {questionBlock && allowed("answer") && !allowed("approve") && (
+        <ActionRow hint="Schváliš agentov plán → pokračuje vo fáze (afirmatívna odpoveď jedným klikom).">
+          <button
+            onClick={() => onAction("answer", { text: "Schvaľujem, pokračuj podľa plánu." })}
+            disabled={inFlight}
+            className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
+          >
+            Schváliť a pokračovať
+          </button>
+        </ActionRow>
+      )}
+
       {canRatify && (
         <>
           {allowed("approve") && (
@@ -498,7 +516,7 @@ export function PipelineActionBar({
       )}
 
       {questionBlock && allowed("answer") && (
-        <ActionRow hint="Odpovieš agentovi → pokračuje vo fáze.">
+        <ActionRow hint="Napíšeš agentovi vlastnú odpoveď → pokračuje vo fáze.">
           <button
             onClick={() => openComposer({ action: "answer", label: "Odpovedať agentovi", field: "text" })}
             disabled={inFlight}
