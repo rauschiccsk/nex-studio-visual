@@ -1315,7 +1315,8 @@ async def verify_done(
             # E7 (F-008 §3, CR-NS-033): if you flag a problem, triage it + append a structured directive.
             "Ak nájdeš problém, klasifikuj ho (triage podľa charteru §7.1) a popri slovenskom relayi "
             "pripoj štruktúrovaný `coordinator_directive` (triage_class, proposed_action, target, params, "
-            "rationale, úprimná confidence). Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
+            "rationale, úprimná confidence) — pričom `target` musí byť OBJEKT {task_id?, role?, commit?} "
+            "alebo úplne vynechaný, NIKDY nie voľný text. Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
         ),
         on_message=on_message,
     )

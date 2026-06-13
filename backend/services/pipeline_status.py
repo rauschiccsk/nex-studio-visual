@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from backend.schemas.task import TaskPriority, TaskType
 
@@ -129,6 +129,20 @@ class CoordinatorDirective(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
     rationale: str
     confidence: float = Field(ge=0.0, le=1.0)
+
+    @field_validator("target", mode="before")
+    @classmethod
+    def _tolerate_nonobject_target(cls, v: Any) -> Any:
+        """Degrade a non-object ``target`` to empty so a malformed value never crashes the parse.
+
+        Found via NEX Test (CR 2026-06-13): a gate_g FAIL gate_report's Coordinator verify-judge
+        auto-returned because the Coordinator (LLM) emitted ``target`` as prose / ``null`` instead of
+        the ``{task_id?, role?, commit?}`` object → ``target: Input should be a valid dictionary or
+        instance of CoordinatorTarget`` → ParseFailure → the FAIL verdict couldn't route. The
+        directive's meaning rides in ``rationale`` + ``proposed_action``; ``target`` is best-effort
+        execution metadata the executor reads conservatively, so empty is a safe degradation.
+        """
+        return v if isinstance(v, (dict, CoordinatorTarget)) else {}
 
 
 class PipelineStatusBlock(BaseModel):

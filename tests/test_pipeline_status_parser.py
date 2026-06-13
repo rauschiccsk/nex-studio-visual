@@ -63,6 +63,54 @@ def test_blocked_carries_question():
     assert res.question == "Ktorý port?"
 
 
+# ── coordinator_directive.target tolerance (NEX Test regression, CR 2026-06-13) ─
+
+
+def _directive(target):
+    return {
+        "triage_class": "spec_problem",
+        "proposed_action": "relay",
+        "target": target,
+        "rationale": "r",
+        "confidence": 0.5,
+    }
+
+
+@pytest.mark.parametrize("bad_target", ["frontend serializer cr014", None, ["a", "b"]])
+def test_coordinator_directive_tolerates_nonobject_target(bad_target):
+    # The Coordinator (LLM) emitted `target` as prose/null on a gate_g FAIL → the verify-judge parse
+    # auto-returned ("target: Input should be a valid dictionary…"), so the FAIL verdict couldn't route.
+    # A non-object target must NOT crash the parse — it degrades to an empty CoordinatorTarget.
+    res = parse_status_block(
+        _block(
+            stage="gate_g",
+            kind="gate_report",
+            summary="s",
+            awaiting="director",
+            coordinator_directive=_directive(bad_target),
+        )
+    )
+    assert isinstance(res, PipelineStatusBlock), res
+    assert res.coordinator_directive is not None
+    t = res.coordinator_directive.target
+    assert (t.task_id, t.role, t.commit) == (None, None, None)  # degraded to empty
+
+
+def test_coordinator_directive_preserves_valid_object_target():
+    res = parse_status_block(
+        _block(
+            stage="gate_g",
+            kind="gate_report",
+            summary="s",
+            awaiting="director",
+            coordinator_directive=_directive({"role": "implementer", "commit": "abc1234"}),
+        )
+    )
+    assert isinstance(res, PipelineStatusBlock), res
+    assert res.coordinator_directive.target.role == "implementer"
+    assert res.coordinator_directive.target.commit == "abc1234"
+
+
 # ── failure modes ─────────────────────────────────────────────────────────────
 
 
