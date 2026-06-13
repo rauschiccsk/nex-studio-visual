@@ -3543,3 +3543,51 @@ async def test_synthesis_at_task_plan_pass(db_session, fake_claude, monkeypatch)
     assert state.next_action == "Plán hotový — schváľ alebo vráť."  # from the synthesis
     syn = [m for m in _msgs(db_session, version.id) if m.payload.get("is_synthesis")]
     assert len(syn) == 1 and syn[0].author == "coordinator" and syn[0].recipient == "director"
+
+
+# ── CR-NS-054 Pillar C: per-task Director reporting (§C.1–§C.2) ──────────────────
+
+
+async def test_task_summary_recorded_on_done(db_session, fake_claude, monkeypatch):
+    """§C.1/§C.2: a passing build task records ONE per-task summary (is_task_summary) — done, 1 attempt,
+    audit_verdict.task_pass=True, no last_error."""
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "a" * 40)
+    version, project = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _epic, _feat, (task,) = _seed_one_feat(db_session, version, project, ["Auth modul"])
+    _to_build(db_session, version)
+    fake_claude.response = _build_fake(audit_pass=True)
+
+    await orchestrator.run_dispatch(db_session, version.id)
+
+    summaries = [m for m in _msgs(db_session, version.id) if (m.payload or {}).get("is_task_summary")]
+    assert len(summaries) == 1
+    assert summaries[0].author == "system" and summaries[0].recipient == "director"
+    ts = summaries[0].payload["task_summary"]
+    assert ts["final_status"] == "done"
+    assert ts["attempts"] == 1
+    assert ts["audit_verdict"]["task_pass"] is True
+    assert ts["last_error"] is None
+    assert ts["task_number"] == task.number and ts["title"] == "Auth modul"
+
+
+async def test_task_summary_recorded_on_failed(db_session, fake_claude, monkeypatch):
+    """§C.1/§C.2: a failing build task (audit never passes) records ONE per-task summary — failed,
+    _AUTO_FIX_RETRIES attempts, audit_verdict.task_pass=False, last_error = the verbatim audit reason."""
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "b" * 40)
+    version, project = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _epic, _feat, (task,) = _seed_one_feat(db_session, version, project, ["Broken modul"])
+    _to_build(db_session, version)
+    fake_claude.response = _build_fake(audit_pass=False, audit_findings=["chýba validácia DPH"])
+
+    await orchestrator.run_dispatch(db_session, version.id)
+
+    summaries = [m for m in _msgs(db_session, version.id) if (m.payload or {}).get("is_task_summary")]
+    assert len(summaries) == 1
+    ts = summaries[0].payload["task_summary"]
+    assert ts["final_status"] == "failed"
+    assert ts["attempts"] == orchestrator._AUTO_FIX_RETRIES
+    assert ts["audit_verdict"]["task_pass"] is False
+    assert "chýba validácia DPH" in (ts["last_error"] or "")
+    assert ts["task_number"] == task.number

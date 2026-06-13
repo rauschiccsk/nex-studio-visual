@@ -2376,6 +2376,97 @@ async def _verify_task(
     return None
 
 
+def _pokusy(n: int) -> str:
+    """Slovak plural for the attempt count (1 pokus / 2–4 pokusy / 5+ pokusov)."""
+    if n == 1:
+        return "1 pokus"
+    if 2 <= n <= 4:
+        return f"{n} pokusy"
+    return f"{n} pokusov"
+
+
+def _task_audit_verdict(db: Session, version_id: uuid.UUID, task_id: uuid.UUID) -> Optional[dict[str, Any]]:
+    """Surface the EXISTING per-task Auditor verdict (``task_pass`` + ``findings``) from its tagged build
+    message (CR-NS-054 — only the Auditor emits ``task_pass``). Returns the latest such verdict for the task,
+    or ``None`` when no audit message exists (a mechanical-only fail, or an Auditor ParseFailure that produced
+    no parsed block — both handled by the caller's degraded note)."""
+    rows = (
+        db.execute(
+            select(PipelineMessage.payload)
+            .where(
+                PipelineMessage.version_id == version_id,
+                PipelineMessage.author == "auditor",
+                PipelineMessage.stage == "build",
+            )
+            .order_by(PipelineMessage.seq.asc())
+        )
+        .scalars()
+        .all()
+    )
+    for payload in reversed(rows):
+        if payload and payload.get("task_id") == str(task_id):
+            return {"task_pass": payload.get("task_pass"), "findings": payload.get("findings") or []}
+    return None
+
+
+async def _record_task_summary(
+    db: Session,
+    version_id: uuid.UUID,
+    task: Task,
+    *,
+    status: str,
+    attempts: int,
+    work_summary: Optional[str] = None,
+    attempt_errors: Optional[list[str]] = None,
+    on_message: Optional[MessageCallback] = None,
+) -> None:
+    """§C.1/§C.2 (CR-NS-054, Pillar C) — record ONE factual per-task summary for the Director at a build-task
+    settle (``done`` | ``failed``). NEX Command parity: what was done + the audit verdict + how many ATTEMPTS
+    + the exact error for drill-down. Pure surfacing of EXISTING loop data (no LLM turn — keeps the build cheap
+    + automated); marked ``payload.is_task_summary=true`` (the FE keys off it — mirrors Pillar A's
+    ``is_synthesis``). The payload extends §C.1's listed fields with ``work_summary`` (the Implementer's final
+    report summary — §C.3a) and ``attempt_errors`` (every auto-fix attempt's reason — §C.3c per-pokus
+    drill-down) so the FE card is self-contained. **Additive: never gates the loop;** partial data (no /
+    unreadable audit) degrades to a clear note, never blocks."""
+    errors = attempt_errors or []
+    last_error = errors[-1] if errors else None
+    verdict = _task_audit_verdict(db, version_id, task.id)
+    if verdict is not None:
+        audit_verdict: dict[str, Any] = {"task_pass": verdict["task_pass"], "findings": verdict["findings"]}
+    elif last_error and "audit nečitateľný" in last_error:
+        audit_verdict = {"task_pass": None, "findings": [], "note": "(audit nečitateľný)"}
+    else:
+        audit_verdict = {"task_pass": None, "findings": [], "note": "(audit neprebehol)"}
+
+    done = status == "done"
+    content = f"Úloha #{task.number} „{task.title}“ — {'hotovo' if done else 'zlyhalo'} ({_pokusy(attempts)})"
+    msg = _record_message(
+        db,
+        version_id=version_id,
+        stage="build",
+        author="system",
+        recipient="director",
+        kind="notification",
+        content=content,
+        payload={
+            "is_task_summary": True,
+            "task_summary": {
+                "task_id": str(task.id),
+                "task_number": task.number,
+                "title": task.title,
+                "final_status": status,
+                "attempts": attempts,
+                "audit_verdict": audit_verdict,
+                "last_error": last_error,
+                "work_summary": work_summary,
+                "attempt_errors": errors,
+            },
+        },
+    )
+    if on_message is not None:
+        await on_message(msg)
+
+
 async def _run_build_round(
     db: Session,
     state: PipelineState,
@@ -2538,6 +2629,18 @@ async def _run_build_round(
                     db.execute(update(Task).where(Task.id == task.id).values(status="done"))
                     db.flush()
                     task_service.recompute_feat_status(db, task.feat_id)
+                    # §C.2 (CR-NS-054): per-task summary at the DONE settle. `attempt` = the passing try;
+                    # `result` is the passing Implementer report (its summary = "čo urobené").
+                    await _record_task_summary(
+                        db,
+                        version_id,
+                        task,
+                        status="done",
+                        attempts=attempt,
+                        work_summary=result.summary,
+                        attempt_errors=prior_failures,
+                        on_message=on_message,
+                    )
                     task_done = True
                     break
                 prior_failures.append(reason)
@@ -2570,6 +2673,18 @@ async def _run_build_round(
             db.execute(update(Task).where(Task.id == task.id).values(status="failed"))
             db.flush()
             task_service.recompute_feat_status(db, task.feat_id)
+            # §C.2 (CR-NS-054): per-task summary at the FAILED settle (all _AUTO_FIX_RETRIES tries used).
+            # `result` is the last attempt's output (a block → its summary; a ParseFailure → no summary).
+            await _record_task_summary(
+                db,
+                version_id,
+                task,
+                status="failed",
+                attempts=_AUTO_FIX_RETRIES,
+                work_summary=result.summary if isinstance(result, PipelineStatusBlock) else None,
+                attempt_errors=prior_failures,
+                on_message=on_message,
+            )
             # Coordinator relays the failure to the Director (hub-and-spoke; §3).
             relay = await invoke_agent_with_parse_retry(
                 db,

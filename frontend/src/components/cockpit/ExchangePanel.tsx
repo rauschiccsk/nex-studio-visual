@@ -12,6 +12,7 @@ import type {
 import PipelineActionBar from "./PipelineActionBar";
 import PipelineActivityFeed from "./PipelineActivityFeed";
 import PipelineMessageBubble from "./PipelineMessageBubble";
+import TaskSummaryCard from "./TaskSummaryCard";
 import WhosTurnBoard from "./WhosTurnBoard";
 import { PIPELINE_STATUS_TONE, ROLE_LABELS, STAGE_LABELS, TONE_BANNER } from "./labels";
 
@@ -145,7 +146,13 @@ export function ExchangePanel({ board, inFlight, activity, onAction }: Props) {
             Zatiaľ žiadne správy v pipeline.
           </div>
         ) : (
-          recent_messages.map((m) => <PipelineMessageBubble key={m.id} message={m} />)
+          recent_messages.map((m) =>
+            (m.payload as { is_task_summary?: boolean } | null)?.is_task_summary ? (
+              <TaskSummaryCard key={m.id} message={m} />
+            ) : (
+              <PipelineMessageBubble key={m.id} message={m} />
+            ),
+          )
         )}
       </div>
 
