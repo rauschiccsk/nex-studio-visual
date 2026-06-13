@@ -150,6 +150,12 @@ export const STAGE_ORDER: PipelineStage[] = [
   "done",
 ];
 
+// CR-NS-057 §F2.4: the stages a gate_g FAIL can re-gate to (override chips). Excludes kickoff / release /
+// done / gate_g — only the design + build stages (gate_a..build) are valid re-gate targets.
+export const REGATE_TARGETS: PipelineStage[] = STAGE_ORDER.filter(
+  (s) => s !== "kickoff" && s !== "release" && s !== "done" && s !== "gate_g",
+);
+
 // Human label of the stage that follows `stage` (clamped at the last). Drives the
 // "Schváliť → spustí sa ďalšia fáza (…)" consequence line.
 export function nextStageLabel(stage: PipelineStage): string {

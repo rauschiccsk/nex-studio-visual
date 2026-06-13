@@ -55,6 +55,15 @@ class BoardTask(BaseModel):
     title: str
 
 
+class RegateProposal(BaseModel):
+    """gate_g FAIL re-gate proposal (CR-NS-057 §F2.4): the Coordinator's inferred re-gate target for a FAIL
+    verdict + a short Slovak rationale, computed FRESH for the board. The Director one-click-confirms it or
+    overrides to any gate_a..build stage; the verdict stays the Director's."""
+
+    entry_stage: str
+    reason: Optional[str] = None
+
+
 class PipelineBoardRead(BaseModel):
     """Board snapshot: current state + the most recent messages.
 
@@ -79,6 +88,9 @@ class PipelineBoardRead(BaseModel):
     #: The build task currently in focus (WS-C2, CR-NS-035) — in_progress while building, else the held
     #: failed task at a HALT; the "kto je na rade" board shows "#N: title". ``None`` outside build.
     current_task: Optional[BoardTask] = None
+    #: gate_g FAIL re-gate proposal (CR-NS-057 §F2.4) — the inferred target + rationale, computed only at
+    #: gate_g / awaiting_director|blocked. ``None`` elsewhere; the FE renders the FAIL→target button + chips.
+    regate_proposal: Optional[RegateProposal] = None
 
 
 class PipelineActionRequest(BaseModel):

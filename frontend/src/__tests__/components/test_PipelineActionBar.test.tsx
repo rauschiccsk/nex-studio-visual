@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 import PipelineActionBar from "@/components/cockpit/PipelineActionBar";
@@ -596,5 +596,72 @@ describe("PipelineActionBar — Coordinator proposal (E7, CR-NS-032)", () => {
     expect(
       screen.getByRole("button", { name: /Schváliť Koordinátorov návrh.*opraviť spec cez Návrhára/ }),
     ).toBeInTheDocument();
+  });
+});
+
+describe("PipelineActionBar — gate_g FAIL re-gate (CR-NS-057 §F2.4)", () => {
+  const proposal = { entry_stage: "gate_a" as const, reason: "návrh/rozsah → späť na dizajn" };
+
+  it("at gate_g/awaiting with a regateProposal → PASS + 'Verdikt FAIL → Rozsah'; FAIL fires the inferred target", () => {
+    const onAction = vi.fn();
+    render(
+      <PipelineActionBar
+        state={mkState("gate_g", "awaiting_director")}
+        availableActions={["verdict", "ask"]}
+        regateProposal={proposal}
+        inFlight={false}
+        onAction={onAction}
+      />,
+    );
+    expect(screen.getByText("Verdikt PASS")).toBeInTheDocument();
+    screen.getByText(/Verdikt FAIL → Rozsah/).click();
+    expect(onAction).toHaveBeenCalledWith("verdict", { verdict: "FAIL", entry_stage: "gate_a" });
+  });
+
+  it("'Iná fáza' reveals override chips (gate_a..build, NOT kickoff) that fire FAIL with the chosen stage", () => {
+    const onAction = vi.fn();
+    render(
+      <PipelineActionBar
+        state={mkState("gate_g", "awaiting_director")}
+        availableActions={["verdict", "ask"]}
+        regateProposal={proposal}
+        inFlight={false}
+        onAction={onAction}
+      />,
+    );
+    fireEvent.click(screen.getByText("Iná fáza")); // toggles component state → wrap in act via fireEvent
+    expect(screen.getByText("Programovanie")).toBeInTheDocument(); // build chip
+    expect(screen.queryByText("Príprava")).not.toBeInTheDocument(); // kickoff excluded
+    expect(screen.queryByText("Vydanie")).not.toBeInTheDocument(); // release excluded
+    fireEvent.click(screen.getByText("Programovanie"));
+    expect(onAction).toHaveBeenCalledWith("verdict", { verdict: "FAIL", entry_stage: "build" });
+  });
+
+  it("at gate_g/blocked offers FAIL→target (verdict from blocked) but NOT PASS (PASS is awaiting-only)", () => {
+    render(
+      <PipelineActionBar
+        state={mkState("gate_g", "blocked")}
+        availableActions={["verdict", "answer", "ask"]}
+        regateProposal={proposal}
+        inFlight={false}
+        onAction={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/Verdikt FAIL → Rozsah/)).toBeInTheDocument();
+    expect(screen.queryByText("Verdikt PASS")).not.toBeInTheDocument();
+  });
+
+  it("absent regateProposal → plain 'Verdikt FAIL' firing {verdict:'FAIL'} (backward-compat)", () => {
+    const onAction = vi.fn();
+    render(
+      <PipelineActionBar
+        state={mkState("gate_g", "awaiting_director")}
+        availableActions={["verdict", "ask"]}
+        inFlight={false}
+        onAction={onAction}
+      />,
+    );
+    screen.getByText("Verdikt FAIL").click();
+    expect(onAction).toHaveBeenCalledWith("verdict", { verdict: "FAIL" });
   });
 });

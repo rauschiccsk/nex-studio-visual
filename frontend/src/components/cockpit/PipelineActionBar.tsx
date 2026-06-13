@@ -11,9 +11,10 @@ import { Loader2 } from "lucide-react";
 import type {
   CoordinatorDirective,
   PipelineActionName,
+  PipelineStage,
   PipelineState,
 } from "../../services/api/pipeline";
-import { COORDINATOR_ACTION_LABELS, nextStageLabel } from "./labels";
+import { COORDINATOR_ACTION_LABELS, nextStageLabel, REGATE_TARGETS, STAGE_LABELS } from "./labels";
 
 // Stages the Director ratifies with Schváliť/Vrátiť. kickoff is a ratification
 // gate too — the engine's approve advances kickoff→gate_a (NOT a `start`; the
@@ -38,6 +39,9 @@ interface Props {
   /** The latest EXECUTABLE Coordinator proposal (E7, F-008 §9) or null. Drives the build "Schváliť
    *  Koordinátorov návrh (<effect>)" button — approve → apply_coordinator_recommendation executes it. */
   coordinatorProposal?: CoordinatorDirective | null;
+  /** gate_g FAIL re-gate proposal (CR-NS-057 §F2.4): the inferred target + rationale; drives the
+   *  "Verdikt FAIL → <stage>" primary button + the "Iná fáza" override chips. Absent → plain "Verdikt FAIL". */
+  regateProposal?: { entry_stage: PipelineStage; reason?: string } | null;
   inFlight: boolean;
   /** Blocked due to an unexpected failure (agent crash/timeout) rather than an
    *  agent question — offer "Skús znova" instead of answer/approve (CR-NS-018). */
@@ -81,6 +85,7 @@ export function PipelineActionBar({
   allTasksDone,
   buildOpenFindings,
   coordinatorProposal,
+  regateProposal,
   inFlight,
   isErrorBlock = false,
   hasCoordinatorReport = false,
@@ -91,6 +96,7 @@ export function PipelineActionBar({
   onAction,
 }: Props) {
   const [composer, setComposer] = useState<Composer>(null);
+  const [showRegateChips, setShowRegateChips] = useState(false); // CR-NS-057 §F2.4: "Iná fáza" override chips
   const [text, setText] = useState("");
 
   if (!state) return null;
@@ -351,26 +357,63 @@ export function PipelineActionBar({
         </>
       )}
 
-      {current_stage === "gate_g" && awaiting && allowed("verdict") && (
+      {/* CR-NS-057 §F2.4: gate_g verdict — PASS at awaiting only; the FAIL→target group renders at gate_g
+          for BOTH awaiting AND blocked (the backend allows verdict from blocked too). */}
+      {current_stage === "gate_g" && allowed("verdict") && (
         <>
-          <ActionRow hint="Audit prešiel → pipeline pokračuje na vydanie.">
-            <button
-              onClick={() => onAction("verdict", { verdict: "PASS" })}
-              disabled={inFlight}
-              className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
-            >
-              Verdikt PASS
-            </button>
-          </ActionRow>
-          <ActionRow hint="Audit neprešiel → návrat na prepracovanie.">
-            <button
-              onClick={() => onAction("verdict", { verdict: "FAIL" })}
-              disabled={inFlight}
-              className={`${btn} bg-red-600 text-white hover:bg-red-500`}
-            >
-              Verdikt FAIL
-            </button>
-          </ActionRow>
+          {awaiting && (
+            <ActionRow hint="Audit prešiel → pipeline pokračuje na vydanie.">
+              <button
+                onClick={() => onAction("verdict", { verdict: "PASS" })}
+                disabled={inFlight}
+                className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
+              >
+                Verdikt PASS
+              </button>
+            </ActionRow>
+          )}
+          {regateProposal && STAGE_LABELS[regateProposal.entry_stage] ? (
+            <ActionRow hint={regateProposal.reason ?? "Audit neprešiel → návrat na navrhovanú fázu."}>
+              <button
+                onClick={() => onAction("verdict", { verdict: "FAIL", entry_stage: regateProposal.entry_stage })}
+                disabled={inFlight}
+                className={`${btn} bg-red-600 text-white hover:bg-red-500`}
+              >
+                Verdikt FAIL → {STAGE_LABELS[regateProposal.entry_stage]}
+              </button>
+              <button
+                onClick={() => setShowRegateChips((s) => !s)}
+                disabled={inFlight}
+                className={`${btn} border border-slate-700 text-slate-300 hover:bg-slate-800`}
+              >
+                Iná fáza
+              </button>
+              {showRegateChips && (
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {REGATE_TARGETS.map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => onAction("verdict", { verdict: "FAIL", entry_stage: s })}
+                      disabled={inFlight}
+                      className={`${btn} border border-slate-700 text-slate-300 hover:bg-slate-800`}
+                    >
+                      {STAGE_LABELS[s]}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </ActionRow>
+          ) : (
+            <ActionRow hint="Audit neprešiel → návrat na prepracovanie.">
+              <button
+                onClick={() => onAction("verdict", { verdict: "FAIL" })}
+                disabled={inFlight}
+                className={`${btn} bg-red-600 text-white hover:bg-red-500`}
+              >
+                Verdikt FAIL
+              </button>
+            </ActionRow>
+          )}
         </>
       )}
 

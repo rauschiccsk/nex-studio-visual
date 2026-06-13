@@ -2034,6 +2034,15 @@ def _reset_failed_tasks_to_todo(db: Session, version_id: uuid.UUID) -> None:
     db.flush()
 
 
+def _reset_done_tasks_for_regate(db: Session, version_id: uuid.UUID) -> None:
+    """gate_g FAIL Fix 2 (CR-NS-057 §F2.2): on a FAIL→build re-gate, flip the version's ``done`` tasks back to
+    ``todo`` (existing ``todo`` untouched) so the WHOLE build re-runs against the corrected understanding.
+    Re-run tasks keep their ``baseline_sha`` (a fresh anchor is a separate Director ``move_baseline``)."""
+    feat_ids = select(Feat.id).join(Epic, Epic.id == Feat.epic_id).where(Epic.version_id == version_id)
+    db.execute(update(Task).where(Task.feat_id.in_(feat_ids), Task.status == "done").values(status="todo"))
+    db.flush()
+
+
 def current_build_task(db: Session, version_id: uuid.UUID) -> Optional[Task]:
     """The build task currently in focus (WS-C2, CR-NS-035) for the "kto je na rade" board: the
     ``in_progress`` task while the Programmer works, else the ``failed`` (held) task at a HALT, else
@@ -2138,6 +2147,84 @@ def _latest_coordinator_directive(db: Session, version_id: uuid.UUID) -> Optiona
         .limit(1)
     ).scalar_one_or_none()
     return (row.payload or {}).get("coordinator_directive") if row is not None else None
+
+
+def _latest_gate_g_classifying_directive(db: Session, version_id: uuid.UUID) -> Optional[dict[str, Any]]:
+    """gate_g FAIL Fix 2 (CR-NS-057 §F2.1): the newest coordinator directive at stage ``gate_g`` — the
+    classifying directive for the re-gate target. KIND-AGNOSTIC: the gate_g FAIL directive rides a
+    ``kind="question"`` message (blocked→question), NOT a ``gate_report``, so ``_latest_coordinator_directive``
+    cannot see it. The non-null filter is in SQL BEFORE the LIMIT — ``invoke_agent`` ALWAYS writes the
+    ``coordinator_directive`` key (JSON-null for a directive-less synthesis turn), so a naive ORDER-BY-LIMIT-1
+    + Python check would grab a later synthesis row (value JSON-null) and SHADOW an older real directive.
+    ``payload['coordinator_directive'].astext.isnot(None)`` compiles to ``->> IS NOT NULL`` — TRUE for an
+    object value, excluded for JSON-null. (NOT ``.isnot(None)`` on the JSON expression — that tests SQL NULL /
+    key-absent, not JSON-null value.)"""
+    row = db.execute(
+        select(PipelineMessage)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.author == "coordinator",
+            PipelineMessage.stage == "gate_g",
+            PipelineMessage.payload["coordinator_directive"].astext.isnot(None),
+        )
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    return (row.payload or {}).get("coordinator_directive") if row is not None else None
+
+
+def _infer_regate_entry_stage(db: Session, version_id: uuid.UUID) -> str:
+    """gate_g FAIL Fix 2 (CR-NS-057 §F2.1): infer the re-gate target from the latest gate_g classifying
+    directive — design/scope class (spec_problem / director_decision / route_to_designer) → ``gate_a`` (full
+    design re-gate, the waterfall response); else (code-fixable, OR no gate_g directive = a Director-initiated
+    FAIL on a PASS-verified audit) → ``build`` (re-run the build). The Director always overrides via chips."""
+    d = _latest_gate_g_classifying_directive(db, version_id)
+    if d and (
+        d.get("triage_class") in ("spec_problem", "director_decision")
+        or d.get("proposed_action") == "coordinator_route_to_designer"
+    ):
+        return "gate_a"
+    return "build"
+
+
+def _latest_gate_g_findings(db: Session, version_id: uuid.UUID) -> Optional[str]:
+    """gate_g FAIL Fix 2 (CR-NS-057 §F2.2): the latest gate_g Auditor audit findings (+ the classifying
+    directive's rationale), formatted as a Slovak block to thread into a FAIL→build re-run brief — but ONLY
+    when no ``task_plan`` has run SINCE that audit (the sticky-``is_regate`` guard: a build reached via a
+    design-class FAIL→gate_a re-runs task_plan, so its pre-redesign findings are stale). Returns None when the
+    findings are superseded (task_plan newer) or absent."""
+    audit = db.execute(
+        select(PipelineMessage)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.author == "auditor",
+            PipelineMessage.stage == "gate_g",
+            PipelineMessage.kind == "gate_report",
+        )
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if audit is None:
+        return None
+    task_plan_seq = db.execute(
+        select(func.max(PipelineMessage.seq)).where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.stage == "task_plan",
+        )
+    ).scalar_one_or_none()
+    if task_plan_seq is not None and audit.seq <= task_plan_seq:
+        return None  # a task_plan ran after the audit → findings superseded (a gate_a-transitive build re-gate)
+    findings = (audit.payload or {}).get("findings") or []
+    directive = _latest_gate_g_classifying_directive(db, version_id)
+    rationale = (directive or {}).get("rationale") if directive else None
+    parts: list[str] = []
+    if findings:
+        parts.append("\n".join(f"- {f}" for f in findings))
+    if rationale:
+        parts.append(str(rationale))
+    if not parts:
+        return None
+    return "## Audit zistenia z gate_g (oprav v tomto buildu)\n" + "\n\n".join(parts)
 
 
 def _verify_reason_is_scope(directive: Optional[dict[str, Any]]) -> bool:
@@ -2768,6 +2855,14 @@ async def _run_build_round(
     db.flush()
 
     cross_cutting = _fetch_cross_cutting_rules(db, version_id)
+    # gate_g FAIL Fix 2 (CR-NS-057 §F2.2): on a direct FAIL→build re-gate, thread the gate_g audit findings
+    # into every task brief so the re-run is NOT blind. _latest_gate_g_findings self-guards staleness (returns
+    # None once a task_plan has run since the audit — i.e. a gate_a-transitive build), so the sticky is_regate
+    # flag can't leak pre-redesign findings. None ⇒ cross_cutting is untouched.
+    if state.is_regate and state.current_stage == "build":
+        _gg = _latest_gate_g_findings(db, version_id)
+        if _gg:
+            cross_cutting = _gg + ("\n\n" + cross_cutting if cross_cutting else "")
     # The Director's framed return/answer (if this is a re-dispatch) seeds the first attempt
     # of whichever task runs first in THIS dispatch — i.e. the resumed/returned task, NOT
     # necessarily the globally-first task — then is consumed so later turns use briefs.
@@ -3349,12 +3444,20 @@ async def apply_action(
             db.flush()
             _begin_dispatch(db, state)
         else:
-            entry = payload.get("entry_stage", "gate_a")
+            # gate_g FAIL Fix 2 (CR-NS-057 §F2.4): default to the INFERRED re-gate target (design/scope →
+            # gate_a; code-fixable / Director-initiated FAIL on a PASS audit → build) instead of a blind
+            # "gate_a". An explicit Director payload.entry_stage (a chip override) always wins; the verdict
+            # stays the Director's. The STAGE_ORDER guard is unchanged.
+            entry = payload.get("entry_stage") or _infer_regate_entry_stage(db, version_id)
             if entry not in STAGE_ORDER:
                 raise OrchestratorError(f"Invalid entry_stage: {entry!r}")
             state.is_regate = True
             state.iteration += 1
             state.current_stage = entry
+            # A build re-gate re-runs the WHOLE build → flip done→todo (a gate_a re-gate rebuilds the epics via
+            # the task_plan write-path, so it needs no reset). Sessions preserved on both targets.
+            if entry == "build":
+                _reset_done_tasks_for_regate(db, version_id)
             db.flush()
             _begin_dispatch(db, state)
         return state

@@ -2,7 +2,12 @@
 // faces, the relay chain (Director → Coordinator → worker), the current build task, and the Coordinator's
 // proposed action. Honest: derived from the LIVE state + available_actions, never a stale stage actor.
 
-import type { CoordinatorDirective, PipelineActionName, PipelineState } from "../../services/api/pipeline";
+import type {
+  CoordinatorDirective,
+  PipelineActionName,
+  PipelineStage,
+  PipelineState,
+} from "../../services/api/pipeline";
 import { COORDINATOR_ACTION_LABELS, ROLE_LABELS, STAGE_LABELS } from "./labels";
 
 // Stages where a Director decision (return/ask) is relayed Director → Coordinator → worker (F-007 §6 / E7).
@@ -27,9 +32,17 @@ interface Props {
   availableActions?: PipelineActionName[];
   currentTask?: { number: number; title: string } | null;
   coordinatorProposal?: CoordinatorDirective | null;
+  /** gate_g FAIL re-gate proposal (CR-NS-057 §F2.4) — shown as a one-liner at gate_g awaiting|blocked. */
+  regateProposal?: { entry_stage: PipelineStage; reason?: string } | null;
 }
 
-export function WhosTurnBoard({ state, availableActions, currentTask, coordinatorProposal }: Props) {
+export function WhosTurnBoard({
+  state,
+  availableActions,
+  currentTask,
+  coordinatorProposal,
+  regateProposal,
+}: Props) {
   const { current_stage, current_actor, status } = state;
   const actorLabel = ROLE_LABELS[current_actor] ?? current_actor;
   const stageLabel = STAGE_LABELS[current_stage] ?? current_stage;
@@ -84,6 +97,14 @@ export function WhosTurnBoard({ state, availableActions, currentTask, coordinato
           {coordinatorProposal.rationale ? (
             <span className="text-slate-500"> — {coordinatorProposal.rationale}</span>
           ) : null}
+        </div>
+      )}
+
+      {/* CR-NS-057 §F2.4: at gate_g (awaiting OR blocked) propose the FAIL re-gate target. */}
+      {regateProposal && (STAGE_LABELS[regateProposal.entry_stage] ?? null) && (
+        <div className="mt-1 text-[10px] text-indigo-300">
+          Navrhovaný návrat pri FAIL: {STAGE_LABELS[regateProposal.entry_stage]}
+          {regateProposal.reason ? <span className="text-slate-500"> — {regateProposal.reason}</span> : null}
         </div>
       )}
     </div>

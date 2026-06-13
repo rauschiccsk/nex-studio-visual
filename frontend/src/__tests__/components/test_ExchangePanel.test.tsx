@@ -47,6 +47,16 @@ describe("ExchangePanel banner", () => {
     render(<ExchangePanel board={mkBoard("gate_a", "designer", "blocked")} inFlight={false} activity={[]} onAction={vi.fn()} />);
     expect(screen.getByText("Na rade: Director — odpovedz Návrhár-ovi")).toBeInTheDocument();
   });
+
+  // CR-NS-057 §F2.4: ExchangePanel threads board.regate_proposal to the action bar + the whos-turn board.
+  it("gate_g with a regate_proposal → threads it (FAIL→target button + the whos-turn proposal line)", () => {
+    const board = mkBoard("gate_g", "auditor", "awaiting_director");
+    board.available_actions = ["verdict", "ask"];
+    board.regate_proposal = { entry_stage: "gate_a", reason: "návrh/rozsah → späť na dizajn" };
+    render(<ExchangePanel board={board} inFlight={false} activity={[]} onAction={vi.fn()} />);
+    expect(screen.getByText(/Verdikt FAIL → Rozsah/)).toBeInTheDocument(); // PipelineActionBar received it
+    expect(screen.getByText(/Navrhovaný návrat pri FAIL: Rozsah/)).toBeInTheDocument(); // WhosTurnBoard received it
+  });
 });
 
 describe("ExchangePanel — unified banner colours (CR-NS-028)", () => {

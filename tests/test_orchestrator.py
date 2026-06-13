@@ -3991,3 +3991,202 @@ async def test_verify_prompt_injects_prior_scope_block(db_session, monkeypatch):
     await orchestrator.verify_done(db_session, version.id, block)
     assert "A-vysvetlenie" in captured["prompt"]
     assert "NEoznačuj ich znova ako blocker" in captured["prompt"]
+
+
+# ── CR-NS-057 gate_g FAIL flow, Fix 2: Coordinator-inferred targeted re-gate (§F2.5) ──
+
+
+def _seed_gate_g_directive(db_session, version_id, **over):
+    """Seed a gate_g classifying directive the PRODUCTION way: on a coordinator kind='question' gate_g
+    message with the directive in payload (NOT a gate_report at build)."""
+    orchestrator._record_message(
+        db_session,
+        version_id=version_id,
+        stage="gate_g",
+        author="coordinator",
+        recipient="director",
+        kind="question",
+        content="otázka rozsahu",
+        payload={"coordinator_directive": _coord_directive(**over)},
+    )
+    db_session.flush()
+
+
+async def test_latest_gate_g_classifying_directive_reads_question_kind(db_session):
+    """§F2.1: the directive on a coordinator kind='question' gate_g message IS returned; a LATER
+    directive-less synthesis (gate_report, coordinator_directive JSON-null) does NOT shadow it."""
+    version, _ = _make_version(db_session)
+    _seed_gate_g_directive(db_session, version.id, triage_class="director_decision")
+    orchestrator._record_message(
+        db_session,
+        version_id=version.id,
+        stage="gate_g",
+        author="coordinator",
+        recipient="director",
+        kind="gate_report",
+        content="zhrnutie",
+        payload={"is_synthesis": True, "coordinator_directive": None},
+    )
+    db_session.flush()
+    d = orchestrator._latest_gate_g_classifying_directive(db_session, version.id)
+    assert d is not None and d["triage_class"] == "director_decision"
+
+
+async def test_infer_regate_entry_stage_design_class(db_session):
+    """§F2.1: a design/scope directive (director_decision / spec_problem / route_to_designer) → gate_a."""
+    for tc, pa in [
+        ("director_decision", "relay"),
+        ("spec_problem", "relay"),
+        ("programmer_guidance", "coordinator_route_to_designer"),
+    ]:
+        version, _ = _make_version(db_session)
+        _seed_gate_g_directive(db_session, version.id, triage_class=tc, proposed_action=pa)
+        assert orchestrator._infer_regate_entry_stage(db_session, version.id) == "gate_a"
+
+
+async def test_infer_regate_entry_stage_code_or_none_falls_to_build(db_session):
+    """§F2.1: a code-fixable directive → build; NO gate_g directive → build."""
+    version, _ = _make_version(db_session)
+    _seed_gate_g_directive(
+        db_session, version.id, triage_class="programmer_guidance", proposed_action="coordinator_reset_task"
+    )
+    assert orchestrator._infer_regate_entry_stage(db_session, version.id) == "build"
+    version2, _ = _make_version(db_session)
+    assert orchestrator._infer_regate_entry_stage(db_session, version2.id) == "build"
+
+
+async def test_reset_done_tasks_for_regate(db_session):
+    """§F2.2: done→todo (existing todo untouched, no failed left)."""
+    version, project = _make_version(db_session)
+    _epic, _feat, tasks = _seed_one_feat(db_session, version, project, ["A", "B"])
+    tasks[0].status = "done"
+    tasks[1].status = "todo"
+    db_session.flush()
+    orchestrator._reset_done_tasks_for_regate(db_session, version.id)
+    for t in tasks:
+        db_session.refresh(t)
+    assert all(t.status == "todo" for t in tasks)
+
+
+async def test_verdict_fail_infers_build_and_resets_done(db_session, fake_claude):
+    """§F2.4: FAIL (no entry_stage) + a code-class gate_g directive → build, done tasks reset, is_regate, iter+1."""
+    version, project = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _epic, _feat, (task,) = _seed_one_feat(db_session, version, project, ["T"])
+    task.status = "done"
+    _to_gate_g(db_session, version)
+    orchestrator._get_state(db_session, version.id).status = "awaiting_director"
+    db_session.flush()
+    _seed_gate_g_directive(
+        db_session, version.id, triage_class="programmer_guidance", proposed_action="coordinator_reset_task"
+    )
+
+    state = await orchestrator.apply_action(
+        db_session, version_id=version.id, action="verdict", payload={"verdict": "FAIL"}
+    )
+
+    assert state.current_stage == "build" and state.is_regate is True and state.iteration == 1
+    db_session.refresh(task)
+    assert task.status == "todo"  # done reset for the re-run
+
+
+async def test_verdict_fail_infers_gate_a_on_design_gap(db_session, fake_claude):
+    """§F2.4: FAIL (no entry_stage) + a design-class gate_g directive → gate_a, done tasks NOT reset."""
+    version, project = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _epic, _feat, (task,) = _seed_one_feat(db_session, version, project, ["T"])
+    task.status = "done"
+    _to_gate_g(db_session, version)
+    orchestrator._get_state(db_session, version.id).status = "awaiting_director"
+    db_session.flush()
+    _seed_gate_g_directive(db_session, version.id, triage_class="director_decision", proposed_action="relay")
+
+    state = await orchestrator.apply_action(
+        db_session, version_id=version.id, action="verdict", payload={"verdict": "FAIL"}
+    )
+
+    assert state.current_stage == "gate_a" and state.is_regate is True
+    db_session.refresh(task)
+    assert task.status == "done"  # a gate_a re-gate rebuilds the epics via task_plan — no reset
+
+
+async def test_verdict_fail_director_override_entry_stage(db_session, fake_claude):
+    """§F2.4: an explicit Director entry_stage beats the inference; an invalid one still raises."""
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _to_gate_g(db_session, version)
+    orchestrator._get_state(db_session, version.id).status = "awaiting_director"
+    db_session.flush()
+    _seed_gate_g_directive(db_session, version.id, triage_class="director_decision")  # would infer gate_a
+
+    state = await orchestrator.apply_action(
+        db_session, version_id=version.id, action="verdict", payload={"verdict": "FAIL", "entry_stage": "build"}
+    )
+    assert state.current_stage == "build"  # explicit override wins
+
+    orchestrator._get_state(db_session, version.id).status = "awaiting_director"
+    orchestrator._get_state(db_session, version.id).current_stage = "gate_g"
+    db_session.flush()
+    with pytest.raises(orchestrator.OrchestratorError):
+        await orchestrator.apply_action(
+            db_session, version_id=version.id, action="verdict", payload={"verdict": "FAIL", "entry_stage": "nonsense"}
+        )
+
+
+async def test_verdict_fail_from_pass_no_directive_infers_build(db_session, fake_claude):
+    """§F2.4: a Director-initiated FAIL on a PASS-verified audit (no gate_g directive) → build."""
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _to_gate_g(db_session, version)
+    orchestrator._get_state(db_session, version.id).status = "awaiting_director"
+    db_session.flush()
+
+    state = await orchestrator.apply_action(
+        db_session, version_id=version.id, action="verdict", payload={"verdict": "FAIL"}
+    )
+    assert state.current_stage == "build"  # no gate_g directive → build (conservative default)
+
+
+async def test_build_regate_brief_includes_gate_g_findings(db_session):
+    """§F2.2: a direct FAIL→build re-run's findings block carries the gate_g audit findings."""
+    version, _ = _make_version(db_session)
+    orchestrator._record_message(
+        db_session,
+        version_id=version.id,
+        stage="gate_g",
+        author="auditor",
+        recipient="director",
+        kind="gate_report",
+        content="audit",
+        payload={"findings": ["chýba DPH validácia"]},
+    )
+    db_session.flush()
+    block = orchestrator._latest_gate_g_findings(db_session, version.id)
+    assert block is not None and "chýba DPH validácia" in block
+
+
+async def test_gate_a_regate_build_excludes_stale_gate_g_findings(db_session):
+    """§F2.2 sticky-is_regate guard: a task_plan message newer than the audit → findings superseded → None."""
+    version, _ = _make_version(db_session)
+    orchestrator._record_message(
+        db_session,
+        version_id=version.id,
+        stage="gate_g",
+        author="auditor",
+        recipient="director",
+        kind="gate_report",
+        content="audit",
+        payload={"findings": ["staré zistenie"]},
+    )
+    orchestrator._record_message(
+        db_session,
+        version_id=version.id,
+        stage="task_plan",
+        author="designer",
+        recipient="director",
+        kind="gate_report",
+        content="nový plán",
+        payload={},
+    )
+    db_session.flush()
+    assert orchestrator._latest_gate_g_findings(db_session, version.id) is None

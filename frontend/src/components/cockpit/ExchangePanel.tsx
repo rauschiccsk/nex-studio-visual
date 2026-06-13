@@ -137,6 +137,7 @@ export function ExchangePanel({ board, inFlight, activity, onAction }: Props) {
           availableActions={board.available_actions}
           currentTask={board.current_task}
           coordinatorProposal={coordinatorProposal}
+          regateProposal={board.regate_proposal}
         />
       )}
 
@@ -171,6 +172,7 @@ export function ExchangePanel({ board, inFlight, activity, onAction }: Props) {
           allTasksDone={board.all_tasks_done}
           buildOpenFindings={board.build_open_findings}
           coordinatorProposal={coordinatorProposal}
+          regateProposal={board.regate_proposal}
           inFlight={inFlight}
           isErrorBlock={isErrorBlock}
           hasCoordinatorReport={hasCoordinatorReport}

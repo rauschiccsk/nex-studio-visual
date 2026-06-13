@@ -33,6 +33,7 @@ from backend.schemas.pipeline import (
     PipelineBoardRead,
     PipelineMessageRead,
     PipelineStateRead,
+    RegateProposal,
 )
 from backend.services import agent_terminal as agent_terminal_service
 from backend.services import orchestrator, pipeline_runner
@@ -77,6 +78,13 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         if (state is not None and state.current_stage == "build")
         else None
     )
+    # gate_g FAIL Fix 2 (CR-NS-057 §F2.4): propose the re-gate target, computed FRESH (no synthesis payload
+    # marker), only at gate_g / awaiting_director|blocked. None elsewhere → the FE shows a plain FAIL verdict.
+    regate_proposal = None
+    if state is not None and state.current_stage == "gate_g" and state.status in ("awaiting_director", "blocked"):
+        entry = orchestrator._infer_regate_entry_stage(db, version_id)
+        reason = "návrh/rozsah → späť na dizajn (gate_a)" if entry == "gate_a" else "oprava implementácie → znova build"
+        regate_proposal = RegateProposal(entry_stage=entry, reason=reason)
     return PipelineBoardRead(
         state=PipelineStateRead.model_validate(state) if state is not None else None,
         recent_messages=[PipelineMessageRead.model_validate(m) for m in _recent_messages(db, version_id, limit)],
@@ -86,6 +94,7 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         all_tasks_done=all_tasks_done,
         build_open_findings=build_open_findings,
         current_task=BoardTask(number=ct.number, title=ct.title) if ct is not None else None,
+        regate_proposal=regate_proposal,
     )
 
 

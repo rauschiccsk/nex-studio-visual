@@ -97,6 +97,9 @@ export interface PipelineBoard {
   build_open_findings?: number;
   // The build task currently in focus (WS-C2, CR-NS-035) — the "kto je na rade" board shows "#N: title".
   current_task?: { number: number; title: string } | null;
+  // gate_g FAIL re-gate proposal (CR-NS-057 §F2.4) — the inferred target + rationale, present only at
+  // gate_g / awaiting_director|blocked. Absent → the FE shows a plain "Verdikt FAIL".
+  regate_proposal?: { entry_stage: PipelineStage; reason?: string } | null;
 }
 
 // ── action requests ──────────────────────────────────────────────────────────
