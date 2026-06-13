@@ -93,7 +93,7 @@ services:
       - "127.0.0.1:{{ BACKEND_HOST_PORT }}:{{ BACKEND_PORT }}"
     networks:
       - uat-{{ SLUG }}-net
-{%- if EXTRA_HOSTS %}
+{%- if EXTRA_HOSTS is defined and EXTRA_HOSTS %}
     extra_hosts:
 {%- for host in EXTRA_HOSTS %}
       - "{{ host }}"
