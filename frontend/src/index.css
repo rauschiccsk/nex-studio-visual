@@ -21,7 +21,9 @@
   }
 
   body {
-    @apply bg-slate-950 text-slate-100 font-sans antialiased;
+    /* CR-NS-058: the shared theme-aware tokens (dark = slate-900/100 via the .dark default) — a ≤1-shade
+       shift from the old slate-950/100. Studio stays dark via <html class="dark">. */
+    @apply bg-[var(--color-canvas)] text-[var(--color-text-primary)] font-sans antialiased;
   }
 }
 
