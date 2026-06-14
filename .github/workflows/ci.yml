@@ -32,7 +32,10 @@ jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-latest
+    # Self-hosted: the create-project / set-module-status integration tests write live KB
+    # documents under /home/icc (the ANDROS KB), unavailable on ubuntu-latest. (Unrelated to
+    # nex-shared/host-build — a future improvement is a configurable KB root so tests are hermetic.)
+    runs-on: self-hosted
     needs: lint
     services:
       postgres:
