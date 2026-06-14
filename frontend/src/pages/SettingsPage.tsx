@@ -9,6 +9,7 @@ import {
   upsertUserAgentSettingApi,
 } from "@/services/api/userAgentSettings";
 import { useAuthStore } from "@/store/authStore";
+import { useTheme } from "@/contexts/ThemeContext";
 import { UserForm, type UserFormData } from "@/components/UserForm";
 import { ROLE_LABELS } from "@/components/cockpit/labels";
 import type { UserRead } from "@/types/user";
@@ -119,6 +120,8 @@ function _inputTypeFor(valueType: string): "number" | "checkbox" | "text" {
 
 export default function SettingsPage() {
   const user = useAuthStore((s) => s.user);
+  // CR-NS-065 §E3.4 — wire the Vzhľad dark-mode toggle to the existing per-user ThemeContext.
+  const { isDark, toggleDark } = useTheme();
   const [tab, setTab] = useState<SettingsTab>("appearance");
 
   // Appearance — dark mode is the app default; the language switch stub was removed (E4, CR-NS-046:
@@ -411,8 +414,21 @@ export default function SettingsPage() {
                   <div className="text-sm font-medium text-slate-200">Tmavý režim</div>
                   <div className="text-xs text-slate-500 mt-0.5">Použiť tmavú tému v celej aplikácii</div>
                 </div>
-                <button className="relative inline-flex h-6 w-11 items-center rounded-full bg-primary-600 transition-colors focus:outline-none">
-                  <span className="inline-block h-4 w-4 transform rounded-full bg-white transition-transform translate-x-6" />
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={isDark}
+                  aria-label="Tmavý režim"
+                  onClick={toggleDark}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+                    isDark ? "bg-primary-600" : "bg-slate-600"
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      isDark ? "translate-x-6" : "translate-x-1"
+                    }`}
+                  />
                 </button>
               </div>
             </div>

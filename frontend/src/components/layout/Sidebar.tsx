@@ -33,7 +33,6 @@ const IconKbBook = () => <Emoji glyph="📚" />;
 const IconProjectSpecsBook = () => <Emoji glyph="📖" />;
 
 const IconSettings = () => <Emoji glyph="⚙️" />;
-const IconAdmin = () => <Emoji glyph="🛡️" />;
 const IconLogout = () => <Emoji glyph="🚪" />;
 const IconKey = () => <Emoji glyph="🔑" />;
 
@@ -47,7 +46,6 @@ const IconKey = () => <Emoji glyph="🔑" />;
 
 export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
-  const [adminOpen, setAdminOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
@@ -214,40 +212,6 @@ export default function Sidebar() {
 
       <SectionLabel label="Nastavenia" />
       <NavItem icon={<IconSettings />} label="Nastavenia" active={isActive("/settings")} onClick={() => navigate("/settings")} />
-
-      {/* Admin */}
-      <div className="pt-2">
-        <button
-          onClick={() => setAdminOpen((o) => !o)}
-          className={`flex items-center gap-2.5 py-2 rounded-lg text-sm text-slate-500 hover:bg-slate-800/60 hover:text-slate-400 transition-colors w-full ${collapsed ? "px-0 justify-center" : "px-3"}`}
-          title={collapsed ? "Admin" : undefined}
-        >
-          <IconAdmin />
-          {!collapsed && (
-            <>
-              <span>Admin</span>
-              <svg
-                className={`w-3 h-3 ml-auto transition-transform ${adminOpen ? "rotate-90" : ""}`}
-                fill="none" stroke="currentColor" viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </>
-          )}
-        </button>
-        {adminOpen && !collapsed && (
-          <div className="pl-6 mt-0.5 space-y-0.5">
-            {["Používatelia", "Delegácie", "Protokoly vykonávania", "Guardian", "Migrácie"].map((item) => (
-              <button
-                key={item}
-                className="block w-full text-left px-3 py-1.5 rounded text-xs text-slate-500 hover:bg-slate-800/60 hover:text-slate-400 transition-colors"
-              >
-                {item}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
     </ShellSidebar>
   );
 }

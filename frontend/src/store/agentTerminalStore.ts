@@ -1,11 +1,11 @@
 /**
  * agentTerminalStore — Zustand store owning the lifecycle of the embedded
- * claude CLI sessions (Designer / Implementer / Auditor / Coordinator).
+ * claude CLI session (Coordinator only — the Designer/Implementer/Auditor
+ * spawn-terminals were removed in CR-NS-039).
  *
  * Single source of truth so the WebSocket + xterm.js instance hosted by
  * :file:`components/PersistentTerminalsLayer.tsx` survives React Router
- * navigation between ``/designer`` ↔ ``/implementer`` ↔ ``/auditor`` ↔
- * ``/coordinator`` (CR-NS-004, CR-NS-009). The page
+ * navigation to/from ``/coordinator`` (CR-NS-004, CR-NS-009). The page
  * :file:`pages/AgentTerminalPage.tsx` consumes this
  * store for chrome rendering and dispatches lifecycle actions; the layer
  * consumes it to know which slots to mount.

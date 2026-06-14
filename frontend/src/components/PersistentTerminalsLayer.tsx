@@ -1,11 +1,11 @@
 /**
- * PersistentTerminalsLayer — mounts the three claude CLI ``<AgentTerminal/>``
- * instances ABOVE :file:`pages/AgentTerminalPage.tsx` so their WebSocket
- * + xterm.js stay alive when React Router navigates between
- * ``/designer``, ``/implementer``, ``/auditor`` (CR-NS-004).
+ * PersistentTerminalsLayer — mounts the persistent claude CLI ``<AgentTerminal/>``
+ * instance ABOVE :file:`pages/AgentTerminalPage.tsx` so its WebSocket
+ * + xterm.js stay alive when React Router navigates to/from ``/coordinator``
+ * (CR-NS-004; narrowed to the single Coordinator terminal in CR-NS-039).
  *
  * Visibility is a pure CSS switch — the active route's slot is
- * ``display: block``; the other two are ``display: none`` (still in the
+ * ``display: block``; an inactive slot is ``display: none`` (still in the
  * DOM, WS still pumping, scrollback preserved).
  *
  * Lifecycle:

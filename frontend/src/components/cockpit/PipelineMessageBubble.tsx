@@ -1,7 +1,7 @@
 // Display-only message bubble for the orchestration cockpit (F-007 §7).
 //
-// Fresh component (not the Gate-E DialogueMessageBubble). Phase 5 cutover will
-// consolidate /dialogue onto the cockpit model and remove DialogueMessageBubble.
+// The cockpit's own message bubble. The legacy Gate-E DialogueMessageBubble + the standalone
+// /dialogue page were retired in CR-NS-065 — Gate E now runs per-question inside the cockpit.
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";

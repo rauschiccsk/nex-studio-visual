@@ -2,7 +2,7 @@
 @import "nex-shared/tokens.css";
 
 /* @tailwindcss/typography (v4 plugin form) — `prose` is used in markdown viewers
-   (KnowledgeBase / ProjectSpecs / Dialogue / Credentials / PipelineMessageBubble). */
+   (KnowledgeBase / ProjectSpecs / Credentials / PipelineMessageBubble). */
 @plugin "@tailwindcss/typography";
 
 /* Let Tailwind v4 scan nex-shared's built output so it generates the utility classes used by the

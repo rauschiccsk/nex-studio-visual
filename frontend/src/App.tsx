@@ -20,7 +20,6 @@ import MetricsPage from "./pages/MetricsPage";
 import KnowledgeBasePage from "./pages/KnowledgeBasePage";
 import ProjectSpecsPage from "./pages/ProjectSpecsPage";
 import AgentTerminalPage from "./pages/AgentTerminalPage";
-import DialoguePage from "./pages/DialoguePage";
 import CockpitPage from "./pages/CockpitPage";
 import CredentialsPage from "./pages/CredentialsPage";
 import SettingsPage from "./pages/SettingsPage";
@@ -54,10 +53,9 @@ function App() {
             <Route path="projects/:slug/metrics" element={<MetricsPage />} />
             <Route path="kb" element={<KnowledgeBasePage />} />
             <Route path="project-specs" element={<ProjectSpecsPage />} />
-            {/* E3(a) (CR-NS-039): only the Coordinator interactive terminal remains. /dialogue route
-                KEPT (standalone gate_e dialogue) — only its sidebar link was removed. */}
+            {/* E3(a) (CR-NS-039): only the Coordinator interactive terminal remains.
+                CR-NS-065: the standalone /dialogue page was retired — Gate E now runs per-question in the cockpit. */}
             <Route path="coordinator" element={<AgentTerminalPage role="coordinator" />} />
-            <Route path="dialogue" element={<DialoguePage />} />
             <Route path="cockpit" element={<CockpitPage />} />
             <Route path="credentials" element={<CredentialsPage />} />
             <Route path="settings" element={<SettingsPage />} />
