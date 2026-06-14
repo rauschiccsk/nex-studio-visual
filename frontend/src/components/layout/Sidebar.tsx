@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Sidebar as ShellSidebar, NavItem, SectionLabel } from "nex-shared";
+import { Sidebar as ShellSidebar, NavItem, SectionLabel, Brand, UserCard, NavIcon } from "nex-shared";
 import { useAuthStore } from "@/store/authStore";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import { usePresenceStore } from "@/store/usePresenceStore";
@@ -14,27 +14,21 @@ import { usePipelineWs } from "@/hooks/usePipelineWs";
 // any CSS class. ``aria-hidden`` because the NavItem text label is the
 // accessible name; emoji is decorative.
 
-const Emoji = ({ glyph }: { glyph: string }) => (
-  <span aria-hidden="true" className="text-base leading-none shrink-0 w-4 inline-flex items-center justify-center">
-    {glyph}
-  </span>
-);
+// Colored nav glyphs via the shared <NavIcon> (E1 chrome unification, CR-NS-067).
+const IconHome = () => <NavIcon glyph="🏠" />;
+const IconFolder = () => <NavIcon glyph="📁" />;
+const IconVersions = () => <NavIcon glyph="🌿" />;
+const IconBacklog = () => <NavIcon glyph="📋" />;
+const IconMetrics = () => <NavIcon glyph="📊" />;
 
-const IconHome = () => <Emoji glyph="🏠" />;
-const IconFolder = () => <Emoji glyph="📁" />;
-const IconVersions = () => <Emoji glyph="🌿" />;
-const IconBacklog = () => <Emoji glyph="📋" />;
-const IconMetrics = () => <Emoji glyph="📊" />;
+const IconCoordinator = () => <NavIcon glyph="🧭" />;
+const IconCockpit = () => <NavIcon glyph="🎛️" />;
 
-const IconCoordinator = () => <Emoji glyph="🧭" />;
-const IconCockpit = () => <Emoji glyph="🎛️" />;
+const IconKbBook = () => <NavIcon glyph="📚" />;
+const IconProjectSpecsBook = () => <NavIcon glyph="📖" />;
 
-const IconKbBook = () => <Emoji glyph="📚" />;
-const IconProjectSpecsBook = () => <Emoji glyph="📖" />;
-
-const IconSettings = () => <Emoji glyph="⚙️" />;
-const IconLogout = () => <Emoji glyph="🚪" />;
-const IconKey = () => <Emoji glyph="🔑" />;
+const IconSettings = () => <NavIcon glyph="⚙️" />;
+const IconKey = () => <NavIcon glyph="🔑" />;
 
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
 // Thin composition over the shared <Sidebar> shell (E1 Phase B2, CR-NS-049):
@@ -74,19 +68,9 @@ export default function Sidebar() {
   const hasProject = Boolean(selectedProject);
   const projectsFallback = "/projects";
 
-  // ─── Logo slot ───────────────────────────────────────────────────────────
+  // ─── Logo slot (shared Brand — E1 chrome unification, CR-NS-067) ───────────
   const logo = (
-    <>
-      <div className="w-8 h-8 rounded-lg bg-primary-600 flex items-center justify-center text-white font-black text-sm shrink-0">
-        NS
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-bold text-slate-100 leading-tight">NEX Studio</div>
-        <div className="text-[10px] text-primary-400 font-mono">
-          v{import.meta.env.VITE_APP_VERSION || "dev"}
-        </div>
-      </div>
-    </>
+    <Brand initials="NS" name="NEX Studio" version={`v${import.meta.env.VITE_APP_VERSION || "dev"}`} />
   );
 
   // ─── Footer slot ─────────────────────────────────────────────────────────
@@ -104,30 +88,20 @@ export default function Sidebar() {
           }
           className={`flex items-center gap-2 w-full rounded-lg px-2 py-1.5 mb-1 text-xs transition-colors ${
             isAway
-              ? "bg-amber-500/10 text-amber-300 hover:bg-amber-500/20"
-              : "text-slate-400 hover:bg-slate-800/60"
+              ? "bg-[var(--color-state-warning-bg)] text-[var(--color-state-warning-fg)]"
+              : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
           } ${collapsed ? "justify-center" : ""}`}
         >
           <span className="text-sm leading-none">{isAway ? "🌙" : "🟢"}</span>
           {!collapsed && <span>{isAway ? "Preč" : "Pri počítači"}</span>}
         </button>
       )}
-      <div className={`flex items-center gap-2.5 px-2 py-1.5 rounded-lg ${collapsed ? "justify-center" : ""}`}>
-        <div className="w-7 h-7 rounded-full bg-primary-600 flex items-center justify-center text-xs font-bold shrink-0">
-          {initials}
-        </div>
-        {!collapsed && (
-          <>
-            <div className="min-w-0 flex-1">
-              <div className="text-xs font-medium text-slate-200 truncate">{user?.username ?? "—"}</div>
-              <div className="text-[10px] text-slate-500">Director · Ri</div>
-            </div>
-            <button onClick={handleLogout} title="Odhlásiť sa" className="shrink-0 text-slate-600 hover:text-slate-400 transition-colors">
-              <IconLogout />
-            </button>
-          </>
-        )}
-      </div>
+      <UserCard
+        initials={initials}
+        name={user?.username ?? "—"}
+        subtitle="Director · Ri"
+        onLogout={handleLogout}
+      />
     </>
   );
 
@@ -147,20 +121,20 @@ export default function Sidebar() {
           project in /projects. Version suffix appears once the user
           opens a verzia (auto-set by useActiveContextSync). */}
       {hasProject && !collapsed && (
-        <div className="px-3 pb-1 flex items-center gap-1.5 text-[10px] text-slate-500 font-mono">
+        <div className="px-3 pb-1 flex items-center gap-1.5 text-[10px] text-[var(--color-text-muted)] font-mono">
           <svg className="w-3 h-3 shrink-0 text-primary-400" fill="currentColor" viewBox="0 0 24 24">
             <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
           </svg>
           <span className="truncate flex-1">
             {selectedProject!.name}
             {selectedVersion && (
-              <span className="text-slate-600"> · {selectedVersion.versionNumber}</span>
+              <span className="text-[var(--color-text-muted)]"> · {selectedVersion.versionNumber}</span>
             )}
           </span>
           <button
             onClick={() => setSelectedProject(null)}
             title="Zrušiť výber projektu"
-            className="text-slate-600 hover:text-slate-300 shrink-0"
+            className="text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] shrink-0"
           >
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

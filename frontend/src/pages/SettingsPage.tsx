@@ -9,7 +9,6 @@ import {
   upsertUserAgentSettingApi,
 } from "@/services/api/userAgentSettings";
 import { useAuthStore } from "@/store/authStore";
-import { useTheme } from "@/contexts/ThemeContext";
 import { UserForm, type UserFormData } from "@/components/UserForm";
 import { ROLE_LABELS } from "@/components/cockpit/labels";
 import type { UserRead } from "@/types/user";
@@ -22,7 +21,7 @@ import type {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-type SettingsTab = "appearance" | "system" | "agents" | "users" | "sessions";
+type SettingsTab = "system" | "agents" | "users" | "sessions";
 
 // ── Agenti tab (CR-NS-040): per-role model/effort the cockpit applies at dispatch ──
 // Labels come from the canonical ROLE_LABELS (labels.ts, CR-NS-018) — single source of
@@ -120,12 +119,9 @@ function _inputTypeFor(valueType: string): "number" | "checkbox" | "text" {
 
 export default function SettingsPage() {
   const user = useAuthStore((s) => s.user);
-  // CR-NS-065 §E3.4 — wire the Vzhľad dark-mode toggle to the existing per-user ThemeContext.
-  const { isDark, toggleDark } = useTheme();
-  const [tab, setTab] = useState<SettingsTab>("appearance");
-
-  // Appearance — dark mode is the app default; the language switch stub was removed (E4, CR-NS-046:
-  // the UI is Slovak-only, no i18n).
+  // E1 chrome unification (CR-NS-067): the dark-mode toggle moved to the top-bar
+  // (the NEX Inbox vzor) — the Settings "Vzhľad" tab is retired.
+  const [tab, setTab] = useState<SettingsTab>("system");
 
   // System settings — loaded once the System tab becomes visible. The
   // per-row editor state (draft + saving + flash) lives alongside the
@@ -362,7 +358,6 @@ export default function SettingsPage() {
   }
 
   const TABS: { id: SettingsTab; label: string }[] = [
-    { id: "appearance", label: "Vzhľad" },
     { id: "system", label: "Systém" },
     { id: "agents", label: "Agenti" },
     { id: "users", label: "Používatelia" },
@@ -403,37 +398,6 @@ export default function SettingsPage() {
 
       {/* Tab panels */}
       <div className="flex-1 overflow-y-auto">
-
-        {/* ── Appearance ── */}
-        {tab === "appearance" && (
-          <div className="p-6 max-w-lg">
-            <h2 className="text-sm font-semibold text-slate-300 mb-4">Vzhľad</h2>
-            <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 mb-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-sm font-medium text-slate-200">Tmavý režim</div>
-                  <div className="text-xs text-slate-500 mt-0.5">Použiť tmavú tému v celej aplikácii</div>
-                </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={isDark}
-                  aria-label="Tmavý režim"
-                  onClick={toggleDark}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
-                    isDark ? "bg-primary-600" : "bg-slate-600"
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                      isDark ? "translate-x-6" : "translate-x-1"
-                    }`}
-                  />
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* ── System settings ── */}
         {tab === "system" && (
