@@ -10,7 +10,7 @@ on:
 jobs:
   lint:
     name: Lint
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
@@ -32,7 +32,7 @@ jobs:
 
   test:
     name: Test
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: lint
     services:
       postgres:
@@ -88,7 +88,7 @@ jobs:
 
   build-frontend:
     name: Build Frontend
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: lint
     steps:
       - uses: actions/checkout@v6
@@ -115,27 +115,15 @@ jobs:
 
   build:
     name: Build Docker Images
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: [test, build-frontend]
     steps:
       - uses: actions/checkout@v6
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: "20"
-
       - name: Build backend image
         run: docker build -t nex-studio-backend:ci-${{ github.sha }} .
 
-      # The frontend is built on the HOST (resolves the private nex-shared git-dep
-      # as `andros`); the container only packages the pre-built dist (CR-NS-048).
-      - name: Build frontend dist (host)
-        working-directory: frontend
-        run: |
-          npm ci
-          VITE_API_BASE_URL="" VITE_APP_VERSION="ci-${{ github.sha }}" npm run build
-
+      # nex-shared is PUBLIC → the frontend builds IN-CONTAINER (multi-stage Dockerfile).
       - name: Build frontend image
         run: docker build -t nex-studio-frontend:ci-${{ github.sha }} frontend/
 
@@ -158,20 +146,14 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: "20"
-
       - name: Deploy with Docker Compose
         working-directory: /opt/projects/nex-studio
         env:
           VITE_APP_VERSION: "0.1.${{ github.run_number }}"
         run: |
           git pull origin main --ff-only
-          # Build the SPA on the host (resolves the private nex-shared git-dep as
-          # `andros`); `docker compose build` then just packages the pre-built dist.
-          ( cd frontend && npm ci && VITE_API_BASE_URL="" VITE_APP_VERSION="0.1.${{ github.run_number }}" npm run build )
+          # nex-shared is PUBLIC → `docker compose build` builds the SPA in-container
+          # (multi-stage Dockerfile); VITE_APP_VERSION flows via the compose build-arg.
           docker compose down --remove-orphans || true
           docker compose pull db
           docker compose build backend frontend

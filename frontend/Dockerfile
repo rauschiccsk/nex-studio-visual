@@ -1,12 +1,19 @@
 # syntax=docker/dockerfile:1.7
 
-# Frontend image = nginx serving a PRE-BUILT `dist/` (E1 B1 fix, CR-NS-048).
-# The SPA is built on the HOST (runner/server, where the private `nex-shared`
-# git dependency resolves as the `andros` user) BEFORE `docker build`. The
-# container intentionally does NOT run npm/git — a containerised `npm ci`
-# cannot authenticate to the private GitHub repo (no git/SSH creds inside).
-# The build context therefore MUST contain a fresh `dist/` (see ci.yml Build
-# Docker job + the Deploy step, which build it on the host first).
+# Frontend image: standard multi-stage build. nex-shared is PUBLIC (post-E1 cleanup), so the
+# in-container `npm ci` resolves the git-dep over HTTPS with ZERO auth — no host-build, no self-hosted runner.
+# Build context = ./frontend.
+
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+ARG VITE_API_BASE_URL=""
+ARG VITE_APP_VERSION="0.0.0-dev"
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL \
+    VITE_APP_VERSION=$VITE_APP_VERSION
+RUN npm run build
 
 FROM nginx:1.27-alpine AS production
 
@@ -14,7 +21,7 @@ FROM nginx:1.27-alpine AS production
 RUN rm /etc/nginx/conf.d/default.conf
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY dist /usr/share/nginx/html
+COPY --from=build /app/dist /usr/share/nginx/html
 
 # curl is used by the container healthcheck.
 RUN apk add --no-cache curl

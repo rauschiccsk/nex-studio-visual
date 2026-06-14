@@ -114,9 +114,10 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-      # No build args: the SPA is built on the HOST before `docker compose build`
-      # (the private nex-shared git-dep can't be fetched inside the container) — the
-      # Dockerfile just packages the pre-built dist into nginx. See the Deploy step.
+      # nex-shared is PUBLIC → the SPA builds IN-CONTAINER (multi-stage Dockerfile).
+      args:
+        VITE_API_BASE_URL: "${VITE_API_BASE_URL-}"
+        VITE_APP_VERSION: "${VITE_APP_VERSION:-0.0.0-dev}"
     restart: unless-stopped
     ports:
       - "9177:9177"
