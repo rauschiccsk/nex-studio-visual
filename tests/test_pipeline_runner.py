@@ -36,6 +36,11 @@ class _FakeRegistry:
         # present AND not away (E6) — what the notify gate reads
         return set() if self.away else self.present
 
+    def away_director_ids(self, vid):
+        # Class J (CR-NS-074): user ids with an away socket — the nudge recipients. The fake models
+        # away as a single bool over all present sockets, so away → every present id, else empty.
+        return self.present if self.away else set()
+
 
 def _make_version(db_session) -> Version:
     user = User(
@@ -229,20 +234,30 @@ async def test_notify_suppressed_when_director_present(db_session, monkeypatch):
 
 
 async def test_notify_fires_when_director_present_but_away(db_session, monkeypatch):
-    # E6 (CR-NS-038): board open but the Director marked "away" → active_director_ids is empty → the
-    # Telegram nudge fires anyway (the whole point of the away toggle).
+    # E6 (CR-NS-038) + Class J (CR-NS-074): board open but the Director marked "away" →
+    # active_director_ids is empty → the nudge fires to the AWAY Director's OWN chat (777),
+    # NOT the project owner (111). The away-target is the primary recipient; owner is fallback only.
     version = _make_version(db_session)
     _seed_working_state(db_session, version.id)
-    _set_owner_with_chat(db_session, version, chat_id="999")
+    _set_owner_with_chat(db_session, version, chat_id="111")  # a DIFFERENT owner chat
+    away_user = User(
+        username=f"away_{uuid.uuid4().hex[:8]}",
+        email=f"{uuid.uuid4().hex[:8]}@example.com",
+        password_hash="hashed_password_placeholder",
+        role="ri",
+        telegram_chat_id="777",
+    )
+    db_session.add(away_user)
+    db_session.flush()
     fake_reg = _wire_runner(db_session, monkeypatch)
-    fake_reg.present = {uuid.uuid4()}  # board socket open
-    fake_reg.away = True  # but stepped away
+    fake_reg.present = {away_user.id}  # board socket open …
+    fake_reg.away = True  # … but stepped away
     monkeypatch.setattr(orchestrator, "run_dispatch", _settle_awaiting)
     sent = _capture_sends(monkeypatch)
 
     await pipeline_runner._run(version.id)
 
-    assert len(sent) == 1 and sent[0][1] == "999"
+    assert len(sent) == 1 and sent[0][1] == "777"  # the away Director, not the owner
 
 
 async def test_notify_noop_when_no_chat_id(db_session, monkeypatch):

@@ -180,12 +180,37 @@ def _owner_chat_id(db, version_id: uuid.UUID) -> str | None:
     ).scalar_one_or_none()
 
 
+def _notify_chat_ids(db, version_id: uuid.UUID) -> list[str]:
+    """Distinct Telegram recipients for the out-of-band nudge (Class J fix, CR-NS-074).
+
+    Primary = the Director(s) who toggled **away** on an open board for this version (the registry
+    knows their ``user_id``) → ping their OWN ``telegram_chat_id``. That is the whole point of the
+    "Preč" toggle: get pinged when you stepped away, regardless of whether you own the project.
+    Fallback = the project owner's chat_id (the original F-007 §9 recipient) for the fully-absent
+    case — nobody has the board open at all.
+    """
+    away_ids = registry.away_director_ids(version_id)
+    if away_ids:
+        rows = db.execute(select(User.telegram_chat_id).where(User.id.in_(away_ids))).scalars().all()
+        seen: set[str] = set()
+        chat_ids: list[str] = []
+        for chat in rows:
+            if chat and chat not in seen:
+                seen.add(chat)
+                chat_ids.append(chat)
+        if chat_ids:
+            return chat_ids
+    owner = _owner_chat_id(db, version_id)
+    return [owner] if owner else []
+
+
 async def _maybe_notify(db, version_id: uuid.UUID, state: PipelineState) -> None:
     """Presence-aware Telegram nudge (F-007 §9). Never blocks dispatch.
 
     Fires only when the pipeline settled to a Director-actionable state AND no
-    Director has a live board WS for this version (presence = they'd already see
-    it). Recipient = version → project owner → ``telegram_chat_id``.
+    Director is actively watching the board (E6: an "away" Director counts as not
+    watching). Recipient = the away Director(s) on the board → project owner fallback
+    (see :func:`_notify_chat_ids`).
     """
     if state.status not in _NOTIFY_STATUSES:
         return
@@ -193,9 +218,9 @@ async def _maybe_notify(db, version_id: uuid.UUID, state: PipelineState) -> None
         # a Director is on the board AND not "away" (E6, CR-NS-038) — no out-of-band nudge. An away
         # Director (board open but stepped away) is NOT active, so the ping fires.
         return
-    chat_id = _owner_chat_id(db, version_id)
-    if not chat_id:
-        logger.info("version %s: no owner telegram_chat_id — skip notify", version_id)
+    chat_ids = _notify_chat_ids(db, version_id)
+    if not chat_ids:
+        logger.info("version %s: no telegram recipient — skip notify", version_id)
         return
     # Generic nudge only — NEVER embed the raw next_action (it carries machine
     # tokens like 'coordinator'/'gate_a'). Specifics live on the board.
@@ -207,7 +232,8 @@ async def _maybe_notify(db, version_id: uuid.UUID, state: PipelineState) -> None
     label = f"{proj_ver[0]} {proj_ver[1]}" if proj_ver else "NEX Studio"
     link = f"\n{settings.app_public_url.rstrip('/')}/cockpit" if settings.app_public_url else ""
     message = f"🔔 {label}: si na rade v NEX Studio cockpite{link}"
-    await notify.send_telegram(message, chat_id)
+    for chat_id in chat_ids:
+        await notify.send_telegram(message, chat_id)
 
 
 def _mark_blocked(

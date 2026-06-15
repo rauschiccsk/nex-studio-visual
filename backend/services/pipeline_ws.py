@@ -95,6 +95,12 @@ class PipelineWsRegistry:
         Telegram-nudge gate uses, so an away Director (board open but stepped away) is still pinged."""
         return {c.user_id for c in self._conns.get(version_id, {}).values() if not c.away}
 
+    def away_director_ids(self, version_id: UUID) -> set[UUID]:
+        """User ids with ≥1 live board socket explicitly toggled **away** (E6, CR-NS-038) — the
+        Director(s) who stepped away from an OPEN board and therefore want the out-of-band Telegram
+        nudge sent to their OWN chat (Class J fix). Same lock-free single-snapshot read as the siblings."""
+        return {c.user_id for c in self._conns.get(version_id, {}).values() if c.away}
+
 
 #: Process-global registry shared by the route handlers + the WS endpoint.
 registry = PipelineWsRegistry()
