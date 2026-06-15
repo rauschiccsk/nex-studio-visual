@@ -17,15 +17,24 @@ interface JustCreatedState {
 
 const STEPS = 7;
 
-function PipelineBar({ version }: { version: Version }) {
-  const done = Math.min(version.epics_done, STEPS);
+export function PipelineBar({ version }: { version: Version }) {
+  const released = version.status === "released";
+  // released = shipped = complete → every segment green.
+  // otherwise → green segments proportional to epics-done ratio.
+  const ratio = version.epic_count === 0 ? 0 : version.epics_done / version.epic_count;
+  const filled = released ? STEPS : Math.round(ratio * STEPS);
+  // The purple in-progress highlight sits on the single segment right after
+  // the filled ones — but only for an active version that has epics and is
+  // not yet full. planned / released / 0-epic never show it.
+  const inProgressIdx =
+    version.status === "active" && version.epic_count > 0 && filled < STEPS ? filled : -1;
+
   return (
     <div className="flex items-center gap-1 mb-3">
       {Array.from({ length: STEPS }, (_, i) => {
-        const n = i + 1;
         let cls = "h-1.5 flex-1 rounded-full ";
-        if (n < done) cls += "bg-[var(--color-status-success)]";
-        else if (n === done && done > 0) cls += "bg-primary-500 ring-1 ring-primary-400/40";
+        if (i < filled) cls += "bg-[var(--color-status-success)]";
+        else if (i === inProgressIdx) cls += "bg-primary-500 ring-1 ring-primary-400/40";
         else cls += "bg-[var(--color-surface-active)]";
         return <div key={i} className={cls} />;
       })}
