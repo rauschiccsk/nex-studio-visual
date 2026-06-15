@@ -8,14 +8,32 @@
  *   - mode="edit":   username disabled, password optional (empty=keep), Active checkbox
  *
  * Shared: identical layout + Tailwind, password min 5 validation, Cancel callback.
+ *
+ * CR-NS-079: UserForm moved to the shared SettingsKit (nex-shared) and became
+ * role-agnostic + field-driven, so the tests now import it from `nex-shared`
+ * and pass Studio's `roleOptions` (shu/ha/ri) + `fieldSchema` (all fields,
+ * password min 5). The behavioural assertions are unchanged — this is the
+ * regression proof that the extracted component behaves exactly as before.
  */
 
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-import { UserForm } from "@/components/UserForm";
-import type { UserRead } from "@/types/user";
+import { UserForm, type UserFieldSchema, type UserRead } from "nex-shared";
+
+// Studio's UserForm config — exactly what SettingsPage passes the kit form.
+const ROLE_OPTIONS = [
+  { value: "shu", label: "shu — Junior" },
+  { value: "ha", label: "ha — Medior" },
+  { value: "ri", label: "ri — Director" },
+];
+const FIELD_SCHEMA: UserFieldSchema = {
+  username: true,
+  names: true,
+  telegram: true,
+  passwordMinLength: 5,
+};
 
 function mkUser(overrides: Partial<UserRead> = {}): UserRead {
   return {
@@ -35,7 +53,7 @@ function mkUser(overrides: Partial<UserRead> = {}): UserRead {
 describe("UserForm — mode='create'", () => {
   it("renders all 6 input fields", () => {
     render(
-      <UserForm mode="create" submitting={false} error="" onSubmit={vi.fn()} onCancel={vi.fn()} />,
+      <UserForm mode="create" roleOptions={ROLE_OPTIONS} fieldSchema={FIELD_SCHEMA} submitting={false} error="" onSubmit={vi.fn()} onCancel={vi.fn()} />,
     );
     expect(screen.getByLabelText(/^meno$/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/priezvisko/i)).toBeInTheDocument();
@@ -47,21 +65,21 @@ describe("UserForm — mode='create'", () => {
 
   it("does not show the Active checkbox in create mode", () => {
     render(
-      <UserForm mode="create" submitting={false} error="" onSubmit={vi.fn()} onCancel={vi.fn()} />,
+      <UserForm mode="create" roleOptions={ROLE_OPTIONS} fieldSchema={FIELD_SCHEMA} submitting={false} error="" onSubmit={vi.fn()} onCancel={vi.fn()} />,
     );
     expect(screen.queryByLabelText(/aktívny/i)).not.toBeInTheDocument();
   });
 
   it("username input is enabled (editable) in create mode", () => {
     render(
-      <UserForm mode="create" submitting={false} error="" onSubmit={vi.fn()} onCancel={vi.fn()} />,
+      <UserForm mode="create" roleOptions={ROLE_OPTIONS} fieldSchema={FIELD_SCHEMA} submitting={false} error="" onSubmit={vi.fn()} onCancel={vi.fn()} />,
     );
     expect(screen.getByLabelText(/používateľské meno/i)).not.toBeDisabled();
   });
 
   it("disables Create button while password < 5 chars", () => {
     render(
-      <UserForm mode="create" submitting={false} error="" onSubmit={vi.fn()} onCancel={vi.fn()} />,
+      <UserForm mode="create" roleOptions={ROLE_OPTIONS} fieldSchema={FIELD_SCHEMA} submitting={false} error="" onSubmit={vi.fn()} onCancel={vi.fn()} />,
     );
     fireEvent.change(screen.getByLabelText(/používateľské meno/i), { target: { value: "tibi" } });
     fireEvent.change(screen.getByLabelText(/email/i), { target: { value: "tibi@icc.sk" } });
@@ -71,7 +89,7 @@ describe("UserForm — mode='create'", () => {
 
   it("enables Create button when all required fields valid", () => {
     render(
-      <UserForm mode="create" submitting={false} error="" onSubmit={vi.fn()} onCancel={vi.fn()} />,
+      <UserForm mode="create" roleOptions={ROLE_OPTIONS} fieldSchema={FIELD_SCHEMA} submitting={false} error="" onSubmit={vi.fn()} onCancel={vi.fn()} />,
     );
     fireEvent.change(screen.getByLabelText(/používateľské meno/i), { target: { value: "tibi" } });
     fireEvent.change(screen.getByLabelText(/email/i), { target: { value: "tibi@icc.sk" } });
@@ -82,7 +100,7 @@ describe("UserForm — mode='create'", () => {
   it("submits with is_active=true by default + collected form data", async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(
-      <UserForm mode="create" submitting={false} error="" onSubmit={onSubmit} onCancel={vi.fn()} />,
+      <UserForm mode="create" roleOptions={ROLE_OPTIONS} fieldSchema={FIELD_SCHEMA} submitting={false} error="" onSubmit={onSubmit} onCancel={vi.fn()} />,
     );
     fireEvent.change(screen.getByLabelText(/^meno$/i), { target: { value: "Tibor" } });
     fireEvent.change(screen.getByLabelText(/priezvisko/i), { target: { value: "Rausch" } });
@@ -106,7 +124,7 @@ describe("UserForm — mode='create'", () => {
   it("Cancel calls onCancel", () => {
     const onCancel = vi.fn();
     render(
-      <UserForm mode="create" submitting={false} error="" onSubmit={vi.fn()} onCancel={onCancel} />,
+      <UserForm mode="create" roleOptions={ROLE_OPTIONS} fieldSchema={FIELD_SCHEMA} submitting={false} error="" onSubmit={vi.fn()} onCancel={onCancel} />,
     );
     fireEvent.click(screen.getByRole("button", { name: /zrušiť/i }));
     expect(onCancel).toHaveBeenCalledTimes(1);
@@ -114,7 +132,7 @@ describe("UserForm — mode='create'", () => {
 
   it("shows the error message when provided", () => {
     render(
-      <UserForm mode="create" submitting={false} error="Email already exists" onSubmit={vi.fn()} onCancel={vi.fn()} />,
+      <UserForm mode="create" roleOptions={ROLE_OPTIONS} fieldSchema={FIELD_SCHEMA} submitting={false} error="Email already exists" onSubmit={vi.fn()} onCancel={vi.fn()} />,
     );
     expect(screen.getByText(/email already exists/i)).toBeInTheDocument();
   });
@@ -125,6 +143,8 @@ describe("UserForm — mode='edit'", () => {
     render(
       <UserForm
         mode="edit"
+        roleOptions={ROLE_OPTIONS}
+        fieldSchema={FIELD_SCHEMA}
         initial={mkUser()}
         submitting={false}
         error=""
@@ -142,6 +162,8 @@ describe("UserForm — mode='edit'", () => {
     render(
       <UserForm
         mode="edit"
+        roleOptions={ROLE_OPTIONS}
+        fieldSchema={FIELD_SCHEMA}
         initial={mkUser()}
         submitting={false}
         error=""
@@ -156,6 +178,8 @@ describe("UserForm — mode='edit'", () => {
     render(
       <UserForm
         mode="edit"
+        roleOptions={ROLE_OPTIONS}
+        fieldSchema={FIELD_SCHEMA}
         initial={mkUser({ is_active: false })}
         submitting={false}
         error=""
@@ -173,6 +197,8 @@ describe("UserForm — mode='edit'", () => {
     render(
       <UserForm
         mode="edit"
+        roleOptions={ROLE_OPTIONS}
+        fieldSchema={FIELD_SCHEMA}
         initial={mkUser()}
         submitting={false}
         error=""
@@ -191,6 +217,8 @@ describe("UserForm — mode='edit'", () => {
     render(
       <UserForm
         mode="edit"
+        roleOptions={ROLE_OPTIONS}
+        fieldSchema={FIELD_SCHEMA}
         initial={mkUser()}
         submitting={false}
         error=""
@@ -206,6 +234,8 @@ describe("UserForm — mode='edit'", () => {
     render(
       <UserForm
         mode="edit"
+        roleOptions={ROLE_OPTIONS}
+        fieldSchema={FIELD_SCHEMA}
         initial={mkUser()}
         submitting={false}
         error=""
@@ -222,6 +252,8 @@ describe("UserForm — mode='edit'", () => {
     render(
       <UserForm
         mode="edit"
+        roleOptions={ROLE_OPTIONS}
+        fieldSchema={FIELD_SCHEMA}
         initial={mkUser()}
         submitting={false}
         error=""

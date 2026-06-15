@@ -1,5 +1,25 @@
-import { useEffect, useMemo, useState } from "react";
-import { listUsersApi, createUserApi, updateUserApi, deleteUserApi, changePasswordApi } from "@/services/api/users";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  SettingsShell,
+  SystemSettingsPanel,
+  AgentsPanel,
+  UsersPanel,
+  SessionsPanel,
+  type SettingsKitConfig,
+  type SettingsCategory,
+  type UserFieldSchema,
+  type AgentDraft,
+  type UserFormData,
+  type UserRead as KitUserRead,
+  type UserSessionRead,
+} from "nex-shared";
+import {
+  listUsersApi,
+  createUserApi,
+  updateUserApi,
+  deleteUserApi,
+  changePasswordApi,
+} from "@/services/api/users";
 import {
   listSystemSettingsApi,
   updateSystemSettingApi,
@@ -8,10 +28,13 @@ import {
   listUserAgentSettingsApi,
   upsertUserAgentSettingApi,
 } from "@/services/api/userAgentSettings";
+import {
+  listUserSessionsApi,
+  deleteUserSessionApi,
+} from "@/services/api/userSessions";
 import { useAuthStore } from "@/store/authStore";
-import { UserForm, type UserFormData } from "@/components/UserForm";
 import { ROLE_LABELS } from "@/components/cockpit/labels";
-import type { UserRead } from "@/types/user";
+import type { UserRole, UserRead } from "@/types/user";
 import type { SystemSettingRead } from "@/types/system_setting";
 import type {
   AgentEffort,
@@ -19,13 +42,16 @@ import type {
   PipelineAgentRole,
 } from "@/types/user_agent_setting";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Static config — the role-agnostic kit fed Studio-specific props ──────────
+//
+// SettingsPage is now a thin adapter (CR-NS-079): the look + logic live in the
+// nex-shared SettingsKit (v0.9.0); this file owns ONLY data/IO (API calls +
+// stores) and the Studio capability config. Zero behaviour change vs the old
+// 813-line page — this is the vzor proof that the kit extraction is faithful.
 
-type SettingsTab = "system" | "agents" | "users" | "sessions";
-
-// ── Agenti tab (CR-NS-040): per-role model/effort the cockpit applies at dispatch ──
-// Labels come from the canonical ROLE_LABELS (labels.ts, CR-NS-018) — single source of
-// truth shared with the pipeline board, so the role names never drift out of Slovak.
+// Agenti tab (CR-NS-040): per-role model/effort the cockpit applies at dispatch.
+// Labels come from the canonical ROLE_LABELS (labels.ts, CR-NS-018) — single
+// source of truth shared with the pipeline board, so role names never drift.
 const AGENT_ROLES: { id: PipelineAgentRole; label: string }[] = [
   { id: "coordinator", label: ROLE_LABELS.coordinator },
   { id: "designer", label: ROLE_LABELS.designer },
@@ -40,32 +66,13 @@ const AGENT_MODELS: { id: AgentModel; label: string }[] = [
   { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
 ];
 
-// The 5 levels `claude --effort` accepts (no ultracode — see CR-NS-040 Effort policy).
+// The 5 levels `claude --effort` accepts (no ultracode — see CR-NS-040 policy).
 const AGENT_EFFORTS: AgentEffort[] = ["low", "medium", "high", "xhigh", "max"];
 
-interface AgentDraft {
-  model: AgentModel | "";
-  effort: AgentEffort | "";
-}
-
-function roleCls(role: string) {
-  if (role === "ri") return "text-[var(--color-accent-primary)]";
-  if (role === "ha") return "text-[var(--color-status-success)]";
-  return "text-[var(--color-status-warning)]";
-}
-
-/**
- * System-settings categories. Every ``system_settings`` key whose
- * prefix matches one of ``prefixes`` is rendered under the category.
- * Keys that fit none of the prefixes fall through into the trailing
- * "Ostatné" bucket so forward-compat additions stay visible.
- */
-const SETTINGS_CATEGORIES: {
-  id: string;
-  label: string;
-  description: string;
-  prefixes: string[];
-}[] = [
+// System-settings categories. Every key whose prefix matches one of `prefixes`
+// is rendered under the category; keys matching none fall into the trailing
+// "Ostatné" bucket the kit panel appends itself.
+const SETTINGS_CATEGORIES: SettingsCategory[] = [
   {
     id: "pipeline",
     label: "Pipeline / AI",
@@ -102,712 +109,434 @@ const SETTINGS_CATEGORIES: {
   },
 ];
 
-function _classifyKey(key: string): string {
-  for (const cat of SETTINGS_CATEGORIES) {
-    if (cat.prefixes.some((p) => key.startsWith(p))) return cat.id;
-  }
-  return "other";
+// Role options drive BOTH the Users filter and the create/edit form. Order
+// matters: the kit UserForm defaults to the first option → "shu", matching the
+// old form's hardcoded default.
+const ROLE_OPTIONS: { value: string; label: string }[] = [
+  { value: "shu", label: "shu — Junior" },
+  { value: "ha", label: "ha — Medior" },
+  { value: "ri", label: "ri — Director" },
+];
+
+// Studio renders the full user field set; password min 5 mirrors the backend
+// Pydantic constraint (Director directive 2026-05-13, internal app).
+const USER_FIELD_SCHEMA: UserFieldSchema = {
+  username: true,
+  names: true,
+  telegram: true,
+  passwordMinLength: 5,
+};
+
+const SETTINGS_KIT_CONFIG: SettingsKitConfig = {
+  tabs: ["system", "agents", "users", "sessions"],
+  labels: {
+    system: "Systém",
+    agents: "Agenti",
+    users: "Používatelia",
+    sessions: "Relácie",
+  },
+  // Sessions is admin/ha tooling — gated ha-or-above to match the backend's
+  // `require_ha_or_above` on /api/v1/user-sessions. The other three tabs are
+  // visible to every authenticated user (unchanged from the old page).
+  tabVisibleForRole: (tab, role) =>
+    tab === "sessions" ? role === "ri" || role === "ha" : true,
+};
+
+function roleCls(role: string) {
+  if (role === "ri") return "text-[var(--color-accent-primary)]";
+  if (role === "ha") return "text-[var(--color-status-success)]";
+  return "text-[var(--color-status-warning)]";
 }
 
-function _inputTypeFor(valueType: string): "number" | "checkbox" | "text" {
-  if (valueType === "int" || valueType === "float") return "number";
-  if (valueType === "bool") return "checkbox";
-  return "text";
+// ─── Per-tab adapters ─────────────────────────────────────────────────────────
+//
+// SettingsShell mounts only the active tab's panel, so each adapter fires its
+// data load on mount → lazy-first-load (matching the old page), while the
+// page-level `loaded` guards keep it load-once across tab switches.
+
+function SystemTab({
+  settings,
+  loaded,
+  loadError,
+  canEdit,
+  onLoad,
+  onSave,
+}: {
+  settings: SystemSettingRead[];
+  loaded: boolean;
+  loadError: string;
+  canEdit: boolean;
+  onLoad: () => void;
+  onSave: (key: string, value: string) => Promise<SystemSettingRead>;
+}) {
+  useEffect(() => {
+    onLoad();
+  }, [onLoad]);
+  return (
+    <SystemSettingsPanel
+      settings={settings}
+      categories={SETTINGS_CATEGORIES}
+      canEdit={canEdit}
+      onSave={onSave}
+      loading={!loaded}
+      loadError={loadError}
+    />
+  );
+}
+
+function AgentsTab({
+  drafts,
+  loadError,
+  saveErrors,
+  onLoad,
+  onSave,
+}: {
+  drafts: Record<string, AgentDraft>;
+  loadError: string;
+  saveErrors: Record<string, string>;
+  onLoad: () => void;
+  onSave: (roleId: string, draft: AgentDraft) => Promise<void>;
+}) {
+  useEffect(() => {
+    onLoad();
+  }, [onLoad]);
+  return (
+    <AgentsPanel
+      roles={AGENT_ROLES}
+      models={AGENT_MODELS}
+      efforts={AGENT_EFFORTS}
+      drafts={drafts}
+      onSave={onSave}
+      loadError={loadError}
+      saveErrors={saveErrors}
+    />
+  );
+}
+
+function UsersTab({
+  users,
+  canManage,
+  onLoad,
+  onCreate,
+  onUpdate,
+  onDelete,
+  onChangePassword,
+  onToggleActive,
+}: {
+  users: UserRead[];
+  canManage: boolean;
+  onLoad: () => void;
+  onCreate: (data: UserFormData) => Promise<void>;
+  onUpdate: (id: string, data: UserFormData) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+  onChangePassword: (id: string, password: string) => Promise<void>;
+  onToggleActive: (user: KitUserRead) => Promise<void>;
+}) {
+  useEffect(() => {
+    onLoad();
+  }, [onLoad]);
+  return (
+    <UsersPanel
+      users={users}
+      roleOptions={ROLE_OPTIONS}
+      canManage={canManage}
+      fieldSchema={USER_FIELD_SCHEMA}
+      onCreate={onCreate}
+      onUpdate={onUpdate}
+      onDelete={onDelete}
+      onChangePassword={onChangePassword}
+      onToggleActive={onToggleActive}
+      roleClass={roleCls}
+    />
+  );
+}
+
+function SessionsTab({
+  sessions,
+  loaded,
+  loadError,
+  canRevoke,
+  resolveUsername,
+  onLoad,
+  onRevoke,
+}: {
+  sessions: UserSessionRead[];
+  loaded: boolean;
+  loadError: string;
+  canRevoke: boolean;
+  resolveUsername: (userId: string) => string;
+  onLoad: () => void;
+  onRevoke: (id: string) => Promise<void>;
+}) {
+  useEffect(() => {
+    onLoad();
+  }, [onLoad]);
+  return (
+    <SessionsPanel
+      sessions={sessions}
+      resolveUsername={resolveUsername}
+      canRevoke={canRevoke}
+      onRevoke={onRevoke}
+      loading={!loaded}
+      loadError={loadError}
+    />
+  );
 }
 
 // ─── SettingsPage ─────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
   const user = useAuthStore((s) => s.user);
-  // E1 chrome unification (CR-NS-067): the dark-mode toggle moved to the top-bar
-  // (the NEX Inbox vzor) — the Settings "Vzhľad" tab is retired.
-  const [tab, setTab] = useState<SettingsTab>("system");
+  const role = user?.role ?? "";
+  const isRi = role === "ri";
+  const isHaOrAbove = role === "ri" || role === "ha";
 
-  // System settings — loaded once the System tab becomes visible. The
-  // per-row editor state (draft + saving + flash) lives alongside the
-  // settings list to keep handlers simple.
+  // ── System settings ──
   const [settings, setSettings] = useState<SystemSettingRead[]>([]);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [settingsLoadError, setSettingsLoadError] = useState("");
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const [savingKey, setSavingKey] = useState<string | null>(null);
-  const [saveErrors, setSaveErrors] = useState<Record<string, string>>({});
-  const [flashKey, setFlashKey] = useState<string | null>(null);
 
-  const isRi = user?.role === "ri";
-
-  useEffect(() => {
-    if (tab !== "system" || settingsLoaded) return;
+  const loadSettings = useCallback(() => {
+    if (settingsLoaded) return;
     listSystemSettingsApi()
       .then((rows) => {
         setSettings(rows);
-        const initialDrafts: Record<string, string> = {};
-        for (const r of rows) initialDrafts[r.key] = r.value;
-        setDrafts(initialDrafts);
         setSettingsLoaded(true);
       })
       .catch(() => setSettingsLoadError("Nepodarilo sa načítať nastavenia."));
-  }, [tab, settingsLoaded]);
+  }, [settingsLoaded]);
 
-  const groupedSettings = useMemo(() => {
-    const groups: Record<string, SystemSettingRead[]> = {};
-    for (const s of settings) {
-      const catId = _classifyKey(s.key);
-      (groups[catId] ||= []).push(s);
-    }
-    for (const list of Object.values(groups)) {
-      list.sort((a, b) => a.key.localeCompare(b.key));
-    }
-    return groups;
-  }, [settings]);
-
-  async function handleSaveSetting(key: string) {
-    const draft = (drafts[key] ?? "").toString();
-    if (!draft.trim() && draft !== "0" && draft.toLowerCase() !== "false") return;
-    setSavingKey(key);
-    setSaveErrors((prev) => ({ ...prev, [key]: "" }));
-    try {
-      const updated = await updateSystemSettingApi(key, draft);
+  const handleSaveSetting = useCallback(
+    async (key: string, value: string): Promise<SystemSettingRead> => {
+      // Returns the stored row so the panel can refresh its draft; we also
+      // update the list so the override/timestamp metadata reflects the save.
+      const updated = await updateSystemSettingApi(key, value);
       setSettings((prev) => prev.map((s) => (s.key === key ? updated : s)));
-      setDrafts((prev) => ({ ...prev, [key]: updated.value }));
-      setFlashKey(key);
-      setTimeout(() => setFlashKey((k) => (k === key ? null : k)), 2000);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Neznáma chyba.";
-      setSaveErrors((prev) => ({ ...prev, [key]: msg }));
-    } finally {
-      setSavingKey(null);
-    }
-  }
+      return updated;
+    },
+    [],
+  );
 
-  // Agenti — per-role model/effort config for the CURRENT user (CR-NS-040). Draft/save like System.
+  // ── Agents (per-user model/effort, CR-NS-040) ──
   const [agentDrafts, setAgentDrafts] = useState<Record<string, AgentDraft>>({});
   const [agentsLoaded, setAgentsLoaded] = useState(false);
   const [agentsLoadError, setAgentsLoadError] = useState("");
-  const [savingRole, setSavingRole] = useState<string | null>(null);
-  const [agentSaveErrors, setAgentSaveErrors] = useState<Record<string, string>>({});
-  const [flashRole, setFlashRole] = useState<string | null>(null);
+  const [agentSaveErrors, setAgentSaveErrors] = useState<Record<string, string>>(
+    {},
+  );
 
-  useEffect(() => {
-    if (tab !== "agents" || agentsLoaded) return;
+  const loadAgents = useCallback(() => {
+    if (agentsLoaded) return;
     listUserAgentSettingsApi()
       .then((rows) => {
         const initial: Record<string, AgentDraft> = {};
         for (const r of AGENT_ROLES) initial[r.id] = { model: "", effort: "" };
         for (const row of rows) {
-          initial[row.agent_role] = { model: row.model ?? "", effort: row.effort ?? "" };
+          initial[row.agent_role] = {
+            model: row.model ?? "",
+            effort: row.effort ?? "",
+          };
         }
         setAgentDrafts(initial);
         setAgentsLoaded(true);
       })
-      .catch(() => setAgentsLoadError("Nepodarilo sa načítať konfiguráciu agentov."));
-  }, [tab, agentsLoaded]);
+      .catch(() =>
+        setAgentsLoadError("Nepodarilo sa načítať konfiguráciu agentov."),
+      );
+  }, [agentsLoaded]);
 
-  async function handleSaveAgentSetting(role: PipelineAgentRole) {
-    const draft = agentDrafts[role] ?? { model: "", effort: "" };
-    setSavingRole(role);
-    setAgentSaveErrors((prev) => ({ ...prev, [role]: "" }));
-    try {
-      const saved = await upsertUserAgentSettingApi(role, {
-        model: draft.model || null,
-        effort: draft.effort || null,
-      });
-      setAgentDrafts((prev) => ({
-        ...prev,
-        [role]: { model: saved.model ?? "", effort: saved.effort ?? "" },
-      }));
-      setFlashRole(role);
-      setTimeout(() => setFlashRole((r) => (r === role ? null : r)), 2000);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Neznáma chyba.";
-      setAgentSaveErrors((prev) => ({ ...prev, [role]: msg }));
-    } finally {
-      setSavingRole(null);
-    }
-  }
+  const handleSaveAgent = useCallback(
+    async (roleId: string, draft: AgentDraft): Promise<void> => {
+      setAgentSaveErrors((prev) => ({ ...prev, [roleId]: "" }));
+      try {
+        await upsertUserAgentSettingApi(roleId as PipelineAgentRole, {
+          model: (draft.model || null) as AgentModel | null,
+          effort: (draft.effort || null) as AgentEffort | null,
+        });
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Neznáma chyba.";
+        setAgentSaveErrors((prev) => ({ ...prev, [roleId]: msg }));
+        throw e; // rethrow so the panel does not flash a false success
+      }
+    },
+    [],
+  );
 
-  // Users
+  // ── Users ──
   const [users, setUsers] = useState<UserRead[]>([]);
-  const [usersLoading, setUsersLoading] = useState(false);
-  const [roleFilter, setRoleFilter] = useState("");
-  const [activeFilter, setActiveFilter] = useState("");
-  const [showNewForm, setShowNewForm] = useState(false);
+  const [usersLoaded, setUsersLoaded] = useState(false);
 
-  // Create / edit / delete state. The form fields themselves live inside
-  // <UserForm /> — parent only tracks which flow is active and the
-  // in-flight + error state for the API call.
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState("");
+  const loadUsers = useCallback(() => {
+    if (usersLoaded) return;
+    listUsersApi({ limit: 100 })
+      .then((res) => {
+        setUsers(res.items);
+        setUsersLoaded(true);
+      })
+      .catch(() => {
+        /* matches the old page's silent failure → empty table */
+      });
+  }, [usersLoaded]);
 
-  const [editingUser, setEditingUser] = useState<UserRead | null>(null);
-  const [editing, setEditing] = useState(false);
-  const [editError, setEditError] = useState("");
-
-  // Inline delete confirmation: which row is currently asking "Áno/Nie?"
-  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState("");
-
-  useEffect(() => {
-    if (tab !== "users") return;
-    setUsersLoading(true);
-    const params: { role?: string; is_active?: boolean } = {};
-    if (roleFilter) params.role = roleFilter;
-    if (activeFilter === "active") params.is_active = true;
-    if (activeFilter === "inactive") params.is_active = false;
-    listUsersApi({ limit: 100, ...params })
-      .then((res) => setUsers(res.items))
-      .finally(() => setUsersLoading(false));
-  }, [tab, roleFilter, activeFilter]);
-
-  async function handleCreateUser(data: UserFormData) {
-    setCreating(true);
-    setCreateError("");
-    try {
+  const handleCreateUser = useCallback(
+    async (data: UserFormData): Promise<void> => {
       const u = await createUserApi({
         username: data.username,
         email: data.email,
         password: data.password,
-        role: data.role,
+        role: data.role as UserRole,
         first_name: data.first_name || null,
         last_name: data.last_name || null,
         telegram_chat_id: data.telegram_chat_id || null,
       });
       setUsers((prev) => [u, ...prev]);
-      setShowNewForm(false);
-    } catch (e) {
-      // Surface backend's specific error (e.g. "password too short",
-      // "username already exists") instead of a generic message.
-      const msg =
-        e instanceof Error && e.message
-          ? `Nepodarilo sa vytvoriť používateľa: ${e.message}`
-          : "Nepodarilo sa vytvoriť používateľa.";
-      setCreateError(msg);
-    } finally {
-      setCreating(false);
-    }
-  }
+    },
+    [],
+  );
 
-  async function handleToggleActive(u: UserRead) {
-    try {
-      const updated = await updateUserApi(u.id, { is_active: !u.is_active });
-      setUsers((prev) => prev.map((x) => x.id === u.id ? updated : x));
-    } catch { /* ignore */ }
-  }
-
-  function handleEditClick(u: UserRead) {
-    setEditingUser(u);
-    setEditError("");
-    // Close the create form + delete confirm if either is open.
-    setShowNewForm(false);
-    setConfirmingDeleteId(null);
-  }
-
-  async function handleSaveEdit(data: UserFormData) {
-    if (!editingUser) return;
-    setEditing(true);
-    setEditError("");
-    try {
-      // PATCH first — profile fields update independently of password.
-      const updated = await updateUserApi(editingUser.id, {
+  const handleUpdateUser = useCallback(
+    async (id: string, data: UserFormData): Promise<void> => {
+      const updated = await updateUserApi(id, {
         first_name: data.first_name || null,
         last_name: data.last_name || null,
         telegram_chat_id: data.telegram_chat_id || null,
         email: data.email,
-        role: data.role,
+        role: data.role as UserRole,
         is_active: data.is_active,
       });
-      // Optional password rotation. Empty input = keep current.
-      // Done after PATCH so a failing PATCH doesn't leave the user
-      // with a rotated password but stale profile.
-      if (data.password) {
-        await changePasswordApi(editingUser.id, data.password);
-      }
-      setUsers((prev) => prev.map((x) => x.id === updated.id ? updated : x));
-      setEditingUser(null);
-    } catch (e) {
-      const msg =
-        e instanceof Error && e.message
-          ? `Nepodarilo sa uložiť zmeny: ${e.message}`
-          : "Nepodarilo sa uložiť zmeny.";
-      setEditError(msg);
-    } finally {
-      setEditing(false);
-    }
-  }
+      setUsers((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+    },
+    [],
+  );
 
-  async function handleConfirmDelete(id: string) {
-    setDeleting(true);
-    setDeleteError("");
-    try {
-      await deleteUserApi(id);
-      setUsers((prev) => prev.filter((x) => x.id !== id));
-      setConfirmingDeleteId(null);
-    } catch (e) {
-      // Common case: backend returns 409 when the user is FK-referenced
-      // by projects/bugs/etc. Surface the message + soft-disable hint.
-      const msg =
-        e instanceof Error && e.message
-          ? `Nedá sa vymazať: ${e.message}. Skús miesto toho deaktivovať.`
-          : "Nedá sa vymazať. Skús miesto toho deaktivovať.";
-      setDeleteError(msg);
-      setConfirmingDeleteId(null);
-    } finally {
-      setDeleting(false);
-    }
-  }
+  const handleChangePassword = useCallback(
+    async (id: string, password: string): Promise<void> => {
+      await changePasswordApi(id, password);
+    },
+    [],
+  );
 
-  const TABS: { id: SettingsTab; label: string }[] = [
-    { id: "system", label: "Systém" },
-    { id: "agents", label: "Agenti" },
-    { id: "users", label: "Používatelia" },
-    { id: "sessions", label: "Relácie" },
-  ];
+  const handleDeleteUser = useCallback(async (id: string): Promise<void> => {
+    // Rejects (e.g. 409 FK conflict) propagate so the panel surfaces the
+    // "deaktivovať" hint; the row is only dropped on success.
+    await deleteUserApi(id);
+    setUsers((prev) => prev.filter((x) => x.id !== id));
+  }, []);
+
+  const handleToggleActive = useCallback(
+    async (u: KitUserRead): Promise<void> => {
+      const updated = await updateUserApi(u.id, { is_active: !u.is_active });
+      setUsers((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+    },
+    [],
+  );
+
+  // ── Sessions (ha-or-above; live /user-sessions, CR-NS-079) ──
+  const [sessions, setSessions] = useState<UserSessionRead[]>([]);
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
+  const [sessionsLoadError, setSessionsLoadError] = useState("");
+
+  const loadSessions = useCallback(() => {
+    if (sessionsLoaded) return;
+    listUserSessionsApi()
+      .then((res) => {
+        setSessions(res.items);
+        setSessionsLoaded(true);
+      })
+      .catch(() => setSessionsLoadError("Nepodarilo sa načítať relácie."));
+  }, [sessionsLoaded]);
+
+  // The Sessions panel resolves user ids → names from the users list, so make
+  // sure both are loaded when the tab opens.
+  const loadSessionsTab = useCallback(() => {
+    loadSessions();
+    loadUsers();
+  }, [loadSessions, loadUsers]);
+
+  const handleRevokeSession = useCallback(
+    async (id: string): Promise<void> => {
+      await deleteUserSessionApi(id);
+      setSessions((prev) => prev.filter((s) => s.id !== id));
+    },
+    [],
+  );
+
+  const usernameById = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const u of users) m[u.id] = u.username;
+    return m;
+  }, [users]);
+
+  const resolveUsername = useCallback(
+    (uid: string) => usernameById[uid] ?? uid,
+    [usernameById],
+  );
+
+  // ── Header badge (role coloring stays app-side; kit is role-agnostic) ──
+  const headerRight = user ? (
+    <span className="text-xs text-[var(--color-text-muted)]">
+      Prihlásený ako{" "}
+      <span className="text-[var(--color-text-secondary)] font-medium">
+        {user.username}
+      </span>
+      {" · "}
+      <span className={`font-mono text-[11px] ${roleCls(role)}`}>{role}</span>
+    </span>
+  ) : undefined;
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex-shrink-0 px-6 py-4 border-b border-[var(--color-border-default)] flex items-center justify-between">
-        <h1 className="text-base font-bold text-[var(--color-text-primary)]">Nastavenia</h1>
-        {user && (
-          <span className="text-xs text-[var(--color-text-muted)]">
-            Prihlásený ako{" "}
-            <span className="text-[var(--color-text-secondary)] font-medium">{user.username}</span>
-            {" · "}
-            <span className={`font-mono text-[11px] ${roleCls(user.role)}`}>{user.role}</span>
-          </span>
-        )}
-      </div>
-
-      {/* Tab bar */}
-      <div className="flex-shrink-0 flex gap-0 border-b border-[var(--color-border-default)] px-6">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
-              tab === t.id
-                ? "border-primary-500 text-primary-400"
-                : "border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Tab panels */}
-      <div className="flex-1 overflow-y-auto">
-
-        {/* ── System settings ── */}
-        {tab === "system" && (
-          <div className="p-6 max-w-3xl">
-            <h2 className="text-sm font-semibold text-[var(--color-text-secondary)] mb-1">Systémové nastavenia</h2>
-            <p className="text-xs text-[var(--color-text-muted)] mb-4">
-              Runtime-mutable ICC-wide settings. Editovateľné iba rolou <code>ri</code>; zmeny sa prejavia do 30 s (interná cache TTL).
-            </p>
-            {settingsLoadError && (
-              <div className="rounded-lg border border-[var(--color-state-error-bg)] bg-[var(--color-state-error-bg)] px-3 py-2 text-xs text-[var(--color-state-error-fg)] mb-4">
-                {settingsLoadError}
-              </div>
-            )}
-            {!settingsLoaded && !settingsLoadError && (
-              <div className="text-xs text-[var(--color-text-muted)]">Načítavam…</div>
-            )}
-            {settingsLoaded && (
-              <div className="space-y-6">
-                {[...SETTINGS_CATEGORIES, { id: "other", label: "Ostatné", description: "", prefixes: [] }].map((cat) => {
-                  const rows = groupedSettings[cat.id] ?? [];
-                  if (rows.length === 0) return null;
-                  return (
-                    <section key={cat.id}>
-                      <h3 className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-widest mb-1">{cat.label}</h3>
-                      {cat.description && (
-                        <p className="text-[11px] text-[var(--color-text-muted)] mb-2">{cat.description}</p>
-                      )}
-                      <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] divide-y divide-[var(--color-border-default)]">
-                        {rows.map((s) => {
-                          const draft = drafts[s.key] ?? s.value;
-                          const dirty = draft !== s.value;
-                          const inputType = _inputTypeFor(s.value_type);
-                          const saving = savingKey === s.key;
-                          const err = saveErrors[s.key];
-                          return (
-                            <div key={s.key} className="p-4">
-                              <div className="flex items-start justify-between gap-4 mb-1">
-                                <div className="min-w-0">
-                                  <div className="text-sm font-medium text-[var(--color-text-primary)] font-mono">{s.key}</div>
-                                  <div className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-widest mt-0.5">{s.value_type}</div>
-                                </div>
-                                {isRi && (
-                                  <button
-                                    onClick={() => handleSaveSetting(s.key)}
-                                    disabled={saving || !dirty}
-                                    className="shrink-0 px-3 py-1.5 text-xs font-medium text-white bg-primary-600 hover:bg-primary-500 disabled:opacity-40 disabled:cursor-not-allowed rounded transition-colors"
-                                  >
-                                    {saving ? "Ukladám…" : dirty ? "Uložiť" : "Uložené"}
-                                  </button>
-                                )}
-                              </div>
-                              {s.description && (
-                                <p className="text-xs text-[var(--color-text-muted)] mb-2 leading-relaxed">{s.description}</p>
-                              )}
-                              {inputType === "checkbox" ? (
-                                <label className="flex items-center gap-2 text-xs text-[var(--color-text-secondary)]">
-                                  <input
-                                    type="checkbox"
-                                    checked={draft.toLowerCase() === "true" || draft === "1"}
-                                    onChange={(e) =>
-                                      setDrafts((prev) => ({ ...prev, [s.key]: e.target.checked ? "true" : "false" }))
-                                    }
-                                    disabled={!isRi}
-                                    className="rounded border-[var(--color-border-default)] bg-[var(--color-surface)] text-primary-500 focus:ring-primary-500 disabled:opacity-50"
-                                  />
-                                  <span className="font-mono">{draft}</span>
-                                </label>
-                              ) : (
-                                <input
-                                  type={inputType}
-                                  value={draft}
-                                  onChange={(e) => setDrafts((prev) => ({ ...prev, [s.key]: e.target.value }))}
-                                  disabled={!isRi}
-                                  step={s.value_type === "float" ? "any" : undefined}
-                                  className="w-full bg-[var(--color-surface)] border border-[var(--color-border-default)] rounded px-3 py-1.5 text-xs text-[var(--color-text-primary)] font-mono focus:outline-none focus:border-primary-500 disabled:opacity-50"
-                                />
-                              )}
-                              <div className="mt-2 text-[11px] flex items-center gap-2 flex-wrap">
-                                {s.is_default ? (
-                                  <span className="text-[var(--color-text-muted)]">Predvolená hodnota.</span>
-                                ) : (
-                                  <span className="text-[var(--color-text-muted)]">
-                                    Uložený override
-                                    {s.updated_by_username && (
-                                      <> — <span className="text-[var(--color-text-secondary)] font-medium">{s.updated_by_username}</span></>
-                                    )}
-                                    {s.updated_at && (
-                                      <> · {new Date(s.updated_at).toLocaleString("sk-SK")}</>
-                                    )}
-                                  </span>
-                                )}
-                                {flashKey === s.key && <span className="text-[var(--color-status-success)]">✓ Uložené</span>}
-                                {err && <span className="text-[var(--color-status-error)]">{err}</span>}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </section>
-                  );
-                })}
-                {!isRi && (
-                  <p className="text-[11px] text-[var(--color-text-muted)] italic">
-                    Read-only — na úpravu je potrebná rola <code>ri</code>.
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── Agenti (per-user model/effort, CR-NS-040) ── */}
-        {tab === "agents" && (
-          <div className="p-6 max-w-3xl">
-            <h2 className="text-sm font-semibold text-[var(--color-text-secondary)] mb-1">Agenti — model a effort</h2>
-            <p className="text-xs text-[var(--color-text-muted)] mb-4">
-              Tvoja per-rola konfigurácia, ktorú cockpit aplikuje pri dispatchi agentov v <strong>tvojich</strong>{" "}
-              projektoch (<code>--model</code> / <code>--effort</code>). Nenastavené pole = predvolené správanie
-              (CLI default).
-            </p>
-            {agentsLoadError && (
-              <div className="rounded-lg border border-[var(--color-state-error-bg)] bg-[var(--color-state-error-bg)] px-3 py-2 text-xs text-[var(--color-state-error-fg)] mb-4">
-                {agentsLoadError}
-              </div>
-            )}
-            <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] divide-y divide-[var(--color-border-default)]">
-              {AGENT_ROLES.map((r) => {
-                const draft = agentDrafts[r.id] ?? { model: "", effort: "" };
-                const saving = savingRole === r.id;
-                const err = agentSaveErrors[r.id];
-                return (
-                  <div key={r.id} className="p-4">
-                    <div className="flex items-start justify-between gap-4 mb-2">
-                      <div>
-                        <div className="text-sm font-medium text-[var(--color-text-primary)]">{r.label}</div>
-                        {r.id === "coordinator" && !draft.effort && (
-                          <div className="text-[11px] text-[var(--color-text-muted)] mt-0.5">
-                            Predvolený effort: <span className="font-mono">max</span>
-                          </div>
-                        )}
-                      </div>
-                      <button
-                        onClick={() => handleSaveAgentSetting(r.id)}
-                        disabled={saving}
-                        className="shrink-0 px-3 py-1.5 text-xs font-medium text-white bg-primary-600 hover:bg-primary-500 disabled:opacity-40 disabled:cursor-not-allowed rounded transition-colors"
-                      >
-                        {saving ? "Ukladám…" : "Uložiť"}
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <label className="block">
-                        <span className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-widest">Model</span>
-                        <select
-                          value={draft.model}
-                          onChange={(e) =>
-                            setAgentDrafts((prev) => ({
-                              ...prev,
-                              [r.id]: { ...draft, model: e.target.value as AgentModel | "" },
-                            }))
-                          }
-                          className="mt-1 w-full bg-[var(--color-surface)] border border-[var(--color-border-default)] rounded px-3 py-1.5 text-xs text-[var(--color-text-primary)] focus:outline-none focus:border-primary-500"
-                        >
-                          <option value="">— Predvolený —</option>
-                          {AGENT_MODELS.map((m) => (
-                            <option key={m.id} value={m.id}>
-                              {m.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="block">
-                        <span className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-widest">Úroveň</span>
-                        <select
-                          value={draft.effort}
-                          onChange={(e) =>
-                            setAgentDrafts((prev) => ({
-                              ...prev,
-                              [r.id]: { ...draft, effort: e.target.value as AgentEffort | "" },
-                            }))
-                          }
-                          className="mt-1 w-full bg-[var(--color-surface)] border border-[var(--color-border-default)] rounded px-3 py-1.5 text-xs text-[var(--color-text-primary)] focus:outline-none focus:border-primary-500"
-                        >
-                          <option value="">— Predvolený —</option>
-                          {AGENT_EFFORTS.map((ef) => (
-                            <option key={ef} value={ef}>
-                              {ef}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    </div>
-                    <div className="mt-2 text-[11px] flex items-center gap-2">
-                      {flashRole === r.id && <span className="text-[var(--color-status-success)]">✓ Uložené</span>}
-                      {err && <span className="text-[var(--color-status-error)]">{err}</span>}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* ── Users ── */}
-        {tab === "users" && (
-          <div className="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-semibold text-[var(--color-text-secondary)]">Správa používateľov</h2>
-              <button
-                onClick={() => { setShowNewForm((v) => !v); setEditingUser(null); setConfirmingDeleteId(null); }}
-                className="flex items-center gap-1.5 bg-primary-600 hover:bg-primary-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                Nový používateľ
-              </button>
-            </div>
-
-            {/* Filters */}
-            <div className="flex items-center gap-3 mb-3">
-              <select
-                value={roleFilter}
-                onChange={(e) => setRoleFilter(e.target.value)}
-                className="bg-[var(--color-surface)] border border-[var(--color-border-default)] text-xs text-[var(--color-text-secondary)] rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-primary-500"
-              >
-                <option value="">Všetky role</option>
-                <option value="ri">ri — Director</option>
-                <option value="ha">ha — Medior</option>
-                <option value="shu">shu — Junior</option>
-              </select>
-              <select
-                value={activeFilter}
-                onChange={(e) => setActiveFilter(e.target.value)}
-                className="bg-[var(--color-surface)] border border-[var(--color-border-default)] text-xs text-[var(--color-text-secondary)] rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-primary-500"
-              >
-                <option value="">Akýkoľvek stav</option>
-                <option value="active">Len aktívni</option>
-                <option value="inactive">Len neaktívni</option>
-              </select>
-              <span className="ml-auto text-xs text-[var(--color-text-muted)]">
-                {usersLoading ? "Načítavam…" : `${users.length} používateľov`}
-              </span>
-            </div>
-
-            {/* Table */}
-            <div className="rounded-xl border border-[var(--color-border-default)] overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-[var(--color-surface-hover)]">
-                  <tr className="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
-                    <th className="px-4 py-2.5 text-left font-semibold">Meno</th>
-                    <th className="px-4 py-2.5 text-left font-semibold">Používateľské meno</th>
-                    <th className="px-4 py-2.5 text-left font-semibold">Email</th>
-                    <th className="px-4 py-2.5 text-left font-semibold">Rola</th>
-                    <th className="px-4 py-2.5 text-left font-semibold">Stav</th>
-                    <th className="px-4 py-2.5 text-right font-semibold">Akcie</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--color-border-default)]">
-                  {users.map((u) => {
-                    const fullName = [u.first_name, u.last_name]
-                      .filter(Boolean)
-                      .join(" ");
-                    return (
-                    <tr key={u.id} className="hover:bg-[var(--color-surface-hover)] transition-colors">
-                      <td className="px-4 py-3 text-sm text-[var(--color-text-secondary)]">
-                        {fullName || <span className="text-[var(--color-text-muted)]">—</span>}
-                      </td>
-                      <td className="px-4 py-3 text-sm font-medium text-[var(--color-text-primary)] font-mono">{u.username}</td>
-                      <td className="px-4 py-3 text-xs text-[var(--color-text-secondary)]">{u.email}</td>
-                      <td className="px-4 py-3">
-                        <span className={`text-[11px] font-mono font-medium ${roleCls(u.role)}`}>{u.role}</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        {u.is_active ? (
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--color-state-success-bg)] border border-[var(--color-state-success-bg)] text-[var(--color-state-success-fg)]">aktívny</span>
-                        ) : (
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--color-state-warning-bg)] border border-[var(--color-state-warning-bg)] text-[var(--color-state-warning-fg)]">neaktívny</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        {confirmingDeleteId === u.id ? (
-                          <div className="flex items-center justify-end gap-2 text-xs">
-                            <span className="text-[var(--color-text-secondary)]">Naozaj vymazať?</span>
-                            <button
-                              onClick={() => handleConfirmDelete(u.id)}
-                              disabled={deleting}
-                              className="px-2 py-0.5 text-[var(--color-status-error)] border border-[var(--color-state-error-bg)] rounded hover:bg-[var(--color-state-error-bg)] disabled:opacity-40"
-                            >
-                              Áno
-                            </button>
-                            <button
-                              onClick={() => setConfirmingDeleteId(null)}
-                              disabled={deleting}
-                              className="px-2 py-0.5 text-[var(--color-text-secondary)] border border-[var(--color-border-default)] rounded hover:bg-[var(--color-surface-hover)]"
-                            >
-                              Nie
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="flex items-center justify-end gap-3">
-                            {/* Edit (pencil) */}
-                            <button
-                              onClick={() => handleEditClick(u)}
-                              title="Upraviť"
-                              className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
-                            >
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                              </svg>
-                            </button>
-                            {/* Delete (trash) */}
-                            <button
-                              onClick={() => { setConfirmingDeleteId(u.id); setDeleteError(""); }}
-                              title="Vymazať"
-                              className="text-[var(--color-text-muted)] hover:text-[var(--color-status-error)] transition-colors"
-                            >
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                              </svg>
-                            </button>
-                            {/* Existing toggle (preserved per Director directive) */}
-                            <button
-                              onClick={() => handleToggleActive(u)}
-                              className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors"
-                            >
-                              {u.is_active ? "Deaktivovať" : "Aktivovať"}
-                            </button>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                    );
-                  })}
-                  {!usersLoading && users.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="px-4 py-6 text-center text-xs text-[var(--color-text-muted)]">Žiadni používatelia</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Delete error banner (shown after a failed DELETE — e.g. 409
-                FK conflict). Dismiss on next action. */}
-            {deleteError && (
-              <div className="mt-3 text-xs text-[var(--color-state-error-fg)] rounded bg-[var(--color-state-error-bg)] border border-[var(--color-state-error-bg)] px-3 py-2 flex items-center justify-between">
-                <span>{deleteError}</span>
-                <button onClick={() => setDeleteError("")} className="text-[var(--color-state-error-fg)] hover:opacity-80 ml-2">×</button>
-              </div>
-            )}
-
-            {/* Edit user form — same UserForm component as create, mode-driven. */}
-            {editingUser && (
-              <UserForm
-                key={`edit-${editingUser.id}`}
-                mode="edit"
-                initial={editingUser}
-                submitting={editing}
-                error={editError}
-                onSubmit={handleSaveEdit}
-                onCancel={() => { setEditingUser(null); setEditError(""); }}
-              />
-            )}
-
-            {/* New user form */}
-            {showNewForm && (
-              <UserForm
-                mode="create"
-                submitting={creating}
-                error={createError}
-                onSubmit={handleCreateUser}
-                onCancel={() => { setShowNewForm(false); setCreateError(""); }}
-              />
-            )}
-          </div>
-        )}
-
-        {/* ── Sessions ── */}
-        {tab === "sessions" && (
-          <div className="p-6">
-            <h2 className="text-sm font-semibold text-[var(--color-text-secondary)] mb-1">Relácie používateľa</h2>
-            <p className="text-xs text-[var(--color-text-muted)] mb-4">Kotvy životného cyklu JWT pre používateľa. Vymazanie relácie zneplatní všetky zostávajúce tokeny.</p>
-            <div className="rounded-xl border border-[var(--color-border-default)] overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-[var(--color-surface-hover)]">
-                  <tr className="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
-                    <th className="px-4 py-2.5 text-left font-semibold">Používateľ</th>
-                    <th className="px-4 py-2.5 text-left font-semibold">ID relácie</th>
-                    <th className="px-4 py-2.5 text-right font-semibold">tv</th>
-                    <th className="px-4 py-2.5 text-left font-semibold">Naposledy videný</th>
-                    <th className="px-4 py-2.5 text-right font-semibold">Akcie</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--color-border-default)]">
-                  <tr className="hover:bg-[var(--color-surface-hover)] transition-colors">
-                    <td className="px-4 py-3 text-sm font-medium text-[var(--color-text-primary)]">{user?.username ?? "—"}</td>
-                    <td className="px-4 py-3 font-mono text-[10px] text-[var(--color-text-muted)]">{user?.id?.slice(0, 22) ?? "—"}…</td>
-                    <td className="px-4 py-3 text-right font-mono text-xs text-[var(--color-text-secondary)]">—</td>
-                    <td className="px-4 py-3 text-xs text-[var(--color-text-muted)]">—</td>
-                    <td className="px-4 py-3 text-right">
-                      <span className="text-xs text-[var(--color-text-muted)]">aktuálna relácia</span>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <p className="text-[11px] text-[var(--color-text-muted)] mt-3">Koncový bod správy relácií zatiaľ nie je implementovaný v backende.</p>
-          </div>
-        )}
-      </div>
-    </div>
+    <SettingsShell
+      config={SETTINGS_KIT_CONFIG}
+      currentUserRole={role}
+      title="Nastavenia"
+      headerRight={headerRight}
+      panels={{
+        system: (
+          <SystemTab
+            settings={settings}
+            loaded={settingsLoaded}
+            loadError={settingsLoadError}
+            canEdit={isRi}
+            onLoad={loadSettings}
+            onSave={handleSaveSetting}
+          />
+        ),
+        agents: (
+          <AgentsTab
+            drafts={agentDrafts}
+            loadError={agentsLoadError}
+            saveErrors={agentSaveErrors}
+            onLoad={loadAgents}
+            onSave={handleSaveAgent}
+          />
+        ),
+        users: (
+          // canManage is unconditionally true: the old Users tab had no FE role
+          // gate (the backend enforces authz), so to keep zero behaviour change
+          // the management UI stays visible to every role.
+          <UsersTab
+            users={users}
+            canManage
+            onLoad={loadUsers}
+            onCreate={handleCreateUser}
+            onUpdate={handleUpdateUser}
+            onDelete={handleDeleteUser}
+            onChangePassword={handleChangePassword}
+            onToggleActive={handleToggleActive}
+          />
+        ),
+        sessions: (
+          <SessionsTab
+            sessions={sessions}
+            loaded={sessionsLoaded}
+            loadError={sessionsLoadError}
+            canRevoke={isHaOrAbove}
+            resolveUsername={resolveUsername}
+            onLoad={loadSessionsTab}
+            onRevoke={handleRevokeSession}
+          />
+        ),
+      }}
+    />
   );
 }
