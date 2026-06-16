@@ -21,6 +21,12 @@ python-multipart = "^0.0.20"
 httpx = "^0.28.1"
 qdrant-client = "^1.12"
 ptyprocess = "^0.7"
+# RUNTIME deps for scripts/uat-deploy.py + _uat_lib.py — the cockpit backend runs them in production for
+# the fast-fix auto-deploy (CR-NS-098/100), and the prod image is `poetry export --without dev`, so these
+# must be MAIN deps, not dev (else ModuleNotFoundError at deploy time).
+jinja2 = "^3.1.6"
+pyyaml = "^6.0"
+rich = "^15.0.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3"
@@ -28,8 +34,6 @@ pytest-cov = "^6.1"
 pytest-asyncio = "^0.24"
 ruff = "^0.11"
 python-frontmatter = "^1.3.0"
-rich = "^15.0.0"
-jinja2 = "^3.1.6"
 reportlab = "^4.5.1"
 
 [build-system]
