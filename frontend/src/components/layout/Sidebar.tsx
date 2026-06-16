@@ -5,6 +5,16 @@ import { useAuthStore } from "@/store/authStore";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import { usePresenceStore } from "@/store/usePresenceStore";
 import { usePipelineWs } from "@/hooks/usePipelineWs";
+import type { UserRole } from "@/types/user";
+
+// UserCard subtitle (CR-NS-093): derive the "<Title> · <Code>" label from the
+// logged-in user's role. Studio provisions all three roles (ri/ha/shu) — titles
+// match SettingsPage ROLE_OPTIONS (ri → Director, ha → Medior, shu → Junior).
+const ROLE_LABEL: Record<UserRole, string> = {
+  ri: "Director · Ri",
+  ha: "Medior · Ha",
+  shu: "Junior · Shu",
+};
 
 // ─── Icon helpers ───────────────────────────────────────────────────────────
 // Director directive 2026-05-15: full Unicode emoji glyphs instead of
@@ -107,7 +117,7 @@ export default function Sidebar() {
       <UserCard
         initials={initials}
         name={displayName}
-        subtitle="Director · Ri"
+        subtitle={user?.role ? ROLE_LABEL[user.role] : "—"}
         onLogout={handleLogout}
       />
     </>
