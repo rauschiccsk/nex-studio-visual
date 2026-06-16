@@ -4677,3 +4677,350 @@ def test_fe_app_version_falls_back_on_nonzero_git(monkeypatch):
 
     monkeypatch.setattr(orchestrator.subprocess, "run", lambda *a, **k: _R())
     assert orchestrator._fe_app_version("missing-repo") == "0.1.0"
+
+
+# ── CR-NS-103: autonomous Coordinator for the fast-fix lane (F-009 §3 D5) ───────
+
+
+def _answer_directive(confidence=0.9, rationale="Áno — slovo už je správne, pokračuj.", **over):
+    """A Coordinator `coordinator_answer_question` directive (routine build question → autonomous answer)."""
+    d = _coord_directive(
+        triage_class="programmer_routine_question",
+        proposed_action="coordinator_answer_question",
+        confidence=confidence,
+        rationale=rationale,
+    )
+    d.update(over)
+    return d
+
+
+async def _fast_fix_at_build_with_task(db_session, fake_claude, *, directive="Premenuj 'Firmy' na 'Dodávatelia'"):
+    """Start a fast_fix pipeline and put it at build with ONE todo Task (loop entry)."""
+    version, project = _make_version(db_session)
+    await orchestrator.apply_action(
+        db_session,
+        version_id=version.id,
+        action="start",
+        payload={"flow_type": "fast_fix", "directive": directive},
+    )
+    _epic, _feat, (task,) = _seed_one_feat(db_session, version, project, ["Rýchla oprava"])
+    state = _to_build(db_session, version)
+    assert state.flow_type == "fast_fix"
+    return version, project, state, task
+
+
+# ── Part 2: _maybe_autonomous_answer unit gate ──────────────────────────────────
+
+
+async def test_maybe_autonomous_answer_executes_high_conf(db_session, fake_claude):
+    """D5: a coordinator_answer_question, conf 0.9, fast_fix → AUTO-ANSWER: task reset to todo, re-dispatched,
+    a VISIBLE is_autonomous note recorded; returns the answer brief (mirrors the Director framed-return)."""
+    version, _project, state, task = await _fast_fix_at_build_with_task(db_session, fake_claude)
+    brief = await orchestrator._maybe_autonomous_answer(db_session, state, task, _answer_directive())
+
+    assert brief is not None and "Koordinátor odpovedal" in brief
+    db_session.refresh(task)
+    assert task.status == "todo"  # resumed for re-dispatch
+    notes = [m for m in _msgs(db_session, version.id) if (m.payload or {}).get("is_autonomous")]
+    assert len(notes) == 1
+    assert notes[0].author == "coordinator" and notes[0].recipient == "director"
+    assert notes[0].payload["action"] == "coordinator_answer_question"
+
+
+async def test_maybe_autonomous_answer_gated_to_fast_fix(db_session, fake_claude):
+    """No autonomy leak: a perfect answer directive on a new_version flow → None (escalate path unchanged)."""
+    version, project = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")  # new_version
+    _epic, _feat, (task,) = _seed_one_feat(db_session, version, project, ["T"])
+    state = _to_build(db_session, version)
+    assert state.flow_type == "new_version"
+    assert await orchestrator._maybe_autonomous_answer(db_session, state, task, _answer_directive()) is None
+    assert not any((m.payload or {}).get("is_autonomous") for m in _msgs(db_session, version.id))
+
+
+async def test_maybe_autonomous_answer_escalates_low_confidence(db_session, fake_claude):
+    """D5: confidence < 0.85 (the answer floor, above the 0.80 recovery floor) → None (escalate)."""
+    _v, _p, state, task = await _fast_fix_at_build_with_task(db_session, fake_claude)
+    assert (
+        await orchestrator._maybe_autonomous_answer(db_session, state, task, _answer_directive(confidence=0.82)) is None
+    )
+
+
+async def test_maybe_autonomous_answer_escalates_director_decision(db_session, fake_claude):
+    """D5: triage_class=director_decision → None (genuine scope is never auto-answered)."""
+    _v, _p, state, task = await _fast_fix_at_build_with_task(db_session, fake_claude)
+    d = _answer_directive(triage_class="director_decision")
+    assert await orchestrator._maybe_autonomous_answer(db_session, state, task, d) is None
+
+
+async def test_maybe_autonomous_answer_ignores_non_answer_action(db_session, fake_claude):
+    """Only coordinator_answer_question is auto-answered — a reset_task directive → None (recovery's job)."""
+    _v, _p, state, task = await _fast_fix_at_build_with_task(db_session, fake_claude)
+    d = _coord_directive(proposed_action="coordinator_reset_task", confidence=0.95)
+    assert await orchestrator._maybe_autonomous_answer(db_session, state, task, d) is None
+
+
+async def test_maybe_autonomous_answer_per_task_cap(db_session, fake_claude):
+    """D5 cap: ≤2 answers per task — the 3rd routine question on the same task → None (escalate)."""
+    _v, _p, state, task = await _fast_fix_at_build_with_task(db_session, fake_claude)
+    first = await orchestrator._maybe_autonomous_answer(db_session, state, task, _answer_directive())
+    # the helper resets task→todo; re-pick it as the loop would.
+    db_session.refresh(task)
+    second = await orchestrator._maybe_autonomous_answer(db_session, state, task, _answer_directive())
+    db_session.refresh(task)
+    third = await orchestrator._maybe_autonomous_answer(db_session, state, task, _answer_directive())
+    assert first is not None and second is not None and third is None  # cap = 2
+    notes = [m for m in _msgs(db_session, _v.id) if (m.payload or {}).get("is_autonomous")]
+    assert len(notes) == 2
+
+
+# ── Part 2: build-loop integration (autonomous answer re-dispatches the SAME task) ──
+
+
+def _fast_fix_answer_then_pass_fake():
+    """Build-loop fake: first Programmer dispatch → a routine question; the Coordinator relay → an
+    answer directive (conf 0.9); the resumed task brief (carries 'Koordinátor odpovedal') → a clean build;
+    the Coordinator verify → task_pass."""
+
+    def _resp(prompt: str) -> str:
+        if prompt.startswith("Koordinátor, nezávisle over"):
+            return _block(
+                stage="build", kind="gate_report", summary="overené", awaiting="director", task_pass=True, findings=[]
+            )
+        if prompt.startswith("Worker '"):
+            return _block(
+                stage="build",
+                kind="gate_report",
+                summary="odpoveď na rutinnú otázku",
+                awaiting="director",
+                coordinator_directive=_answer_directive(),
+            )
+        if "Koordinátor odpovedal" in prompt:  # resumed task → now builds clean
+            return _build_report()
+        # first Programmer dispatch → a routine question
+        return _block(
+            stage="build",
+            kind="question",
+            summary="otázka",
+            awaiting="director",
+            question="Slovo už je 'Dodávatelia' — mám pokračovať?",
+        )
+
+    return _resp
+
+
+async def test_build_autonomous_answer_redispatches_same_task(db_session, fake_claude, monkeypatch):
+    """Integration D5: a routine build question → the Coordinator AUTO-ANSWERS (is_autonomous) and the SAME
+    task is re-dispatched with the answer → it passes → fast_fix AUTO-advances to release. No Director gate."""
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "a" * 40)
+    version, _project, _state, task = await _fast_fix_at_build_with_task(db_session, fake_claude)
+    fake_claude.response = _fast_fix_answer_then_pass_fake()
+
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert state.current_stage == "release" and state.status == "agent_working"  # clean build → release
+    db_session.refresh(task)
+    assert task.status == "done"
+    notes = [m for m in _msgs(db_session, version.id) if (m.payload or {}).get("is_autonomous")]
+    assert len(notes) == 1 and notes[0].payload["action"] == "coordinator_answer_question"
+
+
+async def test_build_autonomous_answer_cap_escalates_third_question(db_session, fake_claude, monkeypatch):
+    """Integration D5 cap: the Programmer keeps asking → 2 autonomous answers, then the 3rd question escalates
+    (status=blocked, the Programmer question on the board). Exactly TWO autonomous notes."""
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "a" * 40)
+    version, _project, _state, task = await _fast_fix_at_build_with_task(db_session, fake_claude)
+
+    def _resp(prompt: str) -> str:
+        if prompt.startswith("Worker '"):
+            return _block(
+                stage="build",
+                kind="gate_report",
+                summary="odpoveď",
+                awaiting="director",
+                coordinator_directive=_answer_directive(),
+            )
+        # the Programmer NEVER settles — always a routine question (even after answers)
+        return _block(stage="build", kind="question", summary="otázka", awaiting="director", question="A čo toto pole?")
+
+    fake_claude.response = _resp
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert state.status == "blocked" and state.current_stage == "build"
+    assert "sa pýta" in state.next_action  # escalated to the Director
+    notes = [m for m in _msgs(db_session, version.id) if (m.payload or {}).get("is_autonomous")]
+    assert len(notes) == 2  # capped at 2 answers, then escalate
+    db_session.refresh(task)
+    assert task.status == "in_progress"  # never settled done/failed
+
+
+async def test_build_new_version_question_still_escalates_no_autonomy_leak(db_session, fake_claude, monkeypatch):
+    """No autonomy leak: a new_version build question — even WITH an answer directive — escalates to the
+    Director byte-for-byte (no auto-answer, no is_autonomous note)."""
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "a" * 40)
+    version, project = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")  # new_version
+    _seed_one_feat(db_session, version, project, ["T"])
+    _to_build(db_session, version)
+
+    def _resp(prompt: str) -> str:
+        if prompt.startswith("Worker '"):
+            return _block(
+                stage="build",
+                kind="gate_report",
+                summary="odpoveď",
+                awaiting="director",
+                coordinator_directive=_answer_directive(),
+            )
+        return _block(stage="build", kind="question", summary="otázka", awaiting="director", question="Ktorý helper?")
+
+    fake_claude.response = _resp
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert state.status == "blocked" and "sa pýta" in state.next_action
+    assert not any((m.payload or {}).get("is_autonomous") for m in _msgs(db_session, version.id))
+
+
+# ── Part 1: release-stage Coordinator-question carve-out (the PRIMARY live fix) ──
+
+
+async def test_release_coordinator_question_carveout_deploys_no_director_gate(db_session, fake_claude, monkeypatch):
+    """D5/Part 1: a routine Coordinator question at the fast_fix release turn does NOT escalate — control
+    falls through to the engine-owned auto-deploy (no 'third approval'). The stuck nex-ledger v0.1.2 fix."""
+    version, project = await _drive_fast_fix_to_release(db_session, fake_claude, monkeypatch)
+    project.uat_slug = "ledger"
+    db_session.flush()
+    calls = []
+
+    async def _fake_deploy(project_slug, uat_slug):
+        calls.append((project_slug, uat_slug))
+        return True, "OK"
+
+    monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: True)
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _fake_deploy)
+    # The Coordinator's release turn is a routine QUESTION (no director_decision) — the live "third approval".
+    fake_claude.response = _block(
+        stage="release",
+        kind="question",
+        summary="otázka o nasadení",
+        awaiting="director",
+        question="Mám spustiť automatické nasadenie na UAT?",
+    )
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert calls == [(project.slug, "ledger")]  # the deploy fired despite the question
+    assert state.current_stage == "release" and state.status == "awaiting_director"
+    assert "Nasadené na UAT" in state.next_action
+    assert "sa pýta" not in state.next_action  # NOT escalated as the third approval
+
+
+async def test_release_coordinator_director_decision_still_escalates(db_session, fake_claude, monkeypatch):
+    """D5/Part 1: a genuine director_decision scope at the fast_fix release turn DOES escalate (convert to a
+    full version) — the deploy is NOT run. Distinguishes a routine question from real scope."""
+    version, project = await _drive_fast_fix_to_release(db_session, fake_claude, monkeypatch)
+    project.uat_slug = "ledger"
+    db_session.flush()
+    called = False
+
+    async def _spy(project_slug, uat_slug):
+        nonlocal called
+        called = True
+        return True, "OK"
+
+    monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: True)
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _spy)
+    fake_claude.response = _block(
+        stage="release",
+        kind="question",
+        summary="vlastne väčšia zmena",
+        awaiting="director",
+        question="Toto je vlastne väčšia zmena — navrhujem konverziu na plnú verziu.",
+        coordinator_directive={
+            "triage_class": "director_decision",
+            "proposed_action": "convert_to_full_version",
+            "rationale": "multi-modul rozsah — treba Návrhára",
+            "confidence": 0.9,
+        },
+    )
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert called is False  # no deploy on a genuine scope
+    assert state.current_stage == "release" and state.status == "blocked"
+    assert "sa pýta" in state.next_action  # escalated to the Director
+
+
+# ── Part 3: engine-owned deploy locked — no-op build → release → deploy ──────────
+
+
+async def test_fast_fix_noop_build_still_releases_and_deploys(db_session, fake_claude, monkeypatch):
+    """D5/Part 3: a NO-OP build (empty diff — the word was already correct) still advances build → release and
+    the engine-owned deploy fires (--build --force-recreate is idempotent, so the Director SEES the UAT)."""
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "a" * 40)
+    version, project, _state, _task = await _fast_fix_at_build_with_task(db_session, fake_claude)
+    project.uat_slug = "ledger"
+    db_session.flush()
+    calls = []
+
+    async def _fake_deploy(project_slug, uat_slug):
+        calls.append((project_slug, uat_slug))
+        return True, "OK"
+
+    monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: True)
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _fake_deploy)
+
+    def _noop_build(prompt: str) -> str:
+        if prompt.startswith("Koordinátor, nezávisle over"):
+            return _block(
+                stage="build",
+                kind="gate_report",
+                summary="žiadna zmena — slovo už je správne",
+                awaiting="director",
+                task_pass=True,
+                findings=[],
+            )
+        # the Programmer reports a no-op (empty commits/deliverables)
+        return _block(
+            stage="build",
+            kind="gate_report",
+            summary="žiadna zmena potrebná",
+            awaiting="director",
+            commits=[],
+            deliverables=[],
+        )
+
+    # build (no-op) → AUTO-advances to release (agent_working)
+    fake_claude.response = _noop_build
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert state.current_stage == "release" and state.status == "agent_working"
+
+    # release turn → engine-owned deploy fires even on the no-op build
+    fake_claude.response = _block(stage="release", kind="done", summary="pripravené", awaiting="director")
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert calls == [(project.slug, "ledger")]
+    assert state.status == "awaiting_director" and "Nasadené na UAT" in state.next_action
+
+
+# ── Part 2: Director-approved answer execution (executable action handler) ───────
+
+
+async def test_apply_coordinator_recommendation_executes_answer_question(db_session, fake_claude):
+    """The new coordinator_answer_question is executable: a Director-approved answer resets the held task to
+    todo + re-dispatches (no OrchestratorError from the executor's else-branch)."""
+    version, project = _make_version(db_session)
+    await orchestrator.apply_action(
+        db_session, version_id=version.id, action="start", payload={"flow_type": "fast_fix", "directive": "x"}
+    )
+    _epic, _feat, (task,) = _seed_one_feat(db_session, version, project, ["T"])
+    task.status = "in_progress"
+    db_session.flush()
+    state = _to_build(db_session, version)
+    state.status = "awaiting_director"
+    db_session.flush()
+    _seed_coordinator_directive(db_session, version.id, _answer_directive(target={"task_id": str(task.id)}))
+    state = await orchestrator.apply_action(
+        db_session, version_id=version.id, action="apply_coordinator_recommendation"
+    )
+    db_session.refresh(task)
+    assert task.status == "todo"  # executed (reset for the answered retry), not relayed
+    assert state.status == "agent_working"  # re-dispatched
+    assert any(m.kind == "approval" and "odpoveď na otázku" in m.content for m in _msgs(db_session, version.id))

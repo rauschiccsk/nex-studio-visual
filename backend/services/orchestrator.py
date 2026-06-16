@@ -51,7 +51,12 @@ from backend.services import epic as epic_service
 from backend.services import feat as feat_service
 from backend.services import task as task_service
 from backend.services.claude_agent import ClaudeAgentError, invoke_claude
-from backend.services.pipeline_status import ParseFailure, PipelineStatusBlock, parse_status_block
+from backend.services.pipeline_status import (
+    CoordinatorDirective,
+    ParseFailure,
+    PipelineStatusBlock,
+    parse_status_block,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1544,6 +1549,9 @@ async def _coordinator_relay(
     """
     kind_label = "je blokovaný" if worker_block.kind == "blocked" else "položil otázku"
     asked = worker_block.question or worker_block.summary
+    # Fast-Fix Lane (F-009 §3 D5, CR-NS-103): append the operator brief on fast_fix only — at build a routine
+    # question → autonomous `coordinator_answer_question`; at release never ask about the engine-owned deploy.
+    fast_fix_relay = _FAST_FIX_RELAY_BRIEF if state.flow_type == "fast_fix" else ""
     relay = await invoke_agent_with_parse_retry(
         db,
         version_id=state.version_id,
@@ -1560,7 +1568,7 @@ async def _coordinator_relay(
             "Klasifikuj problém (triage podľa charteru §7.1 — spec_problem / programmer_guidance / "
             "nex_studio_bug / director_decision) a popri relayi pripoj štruktúrovaný `coordinator_directive` "
             "(proposed_action + úprimná confidence); Director ho schváli a engine vykoná. "
-            "Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)."
+            "Ukonči <<<PIPELINE_STATUS>>> blokom (§7.2)." + fast_fix_relay
         ),
         on_message=on_message,
     )
@@ -1860,18 +1868,36 @@ async def run_dispatch(
         return state
 
     if result.kind in ("question", "blocked"):
-        # Hub-and-spoke (CR-NS-018): a worker's question/blocked turn is reviewed
-        # by the Coordinator first, who relays it to the Director. The Coordinator's
-        # own question (kickoff) is surfaced directly — no double-review. On an
-        # unparseable relay, fall back to the worker's question (never a dead-end).
-        # Gate-level question (not the build loop) → relay + escalate, unchanged. The directive (2nd tuple
-        # element) is for the build loop's autonomous recovery (Pillar B) — ignored here.
-        relay_text = (await _coordinator_relay(db, state, result, on_message))[0] if actor != "coordinator" else None
-        question_text = relay_text if relay_text is not None else result.question
-        state.status = "blocked"
-        state.next_action = f"Agent '{actor}' sa pýta: {question_text}"
-        db.flush()
-        return state
+        # Fast-Fix Lane release carve-out (F-009 §3, CR-NS-103 — the PRIMARY live fix): the UAT auto-deploy is
+        # ENGINE-OWNED, so a routine Coordinator question at the fast_fix release turn (e.g. "mám spustiť
+        # automatické nasadenie?") must NOT become the "third approval". When flow_type=fast_fix ∧
+        # actor=coordinator ∧ stage=release and the turn is NOT a genuine director_decision scope, do NOT
+        # escalate — fall through to the fast_fix release block below → _fast_fix_auto_deploy. Escalate ONLY on
+        # a real director_decision (genuine scope → convert-to-full-version). The stuck nex-ledger `v0.1.2`
+        # (release/coordinator/blocked) was exactly this short-circuit reaching status=blocked here.
+        _fast_fix_release_carveout = (
+            state.flow_type == "fast_fix"
+            and actor == "coordinator"
+            and stage == "release"
+            and not _is_director_decision_directive(result.coordinator_directive)
+        )
+        if not _fast_fix_release_carveout:
+            # Hub-and-spoke (CR-NS-018): a worker's question/blocked turn is reviewed
+            # by the Coordinator first, who relays it to the Director. The Coordinator's
+            # own question (kickoff / a genuine release scope) is surfaced directly — no
+            # double-review. On an unparseable relay, fall back to the worker's question
+            # (never a dead-end). Gate-level question (not the build loop) → relay + escalate,
+            # unchanged. The directive (2nd tuple element) is for the build loop's autonomous
+            # recovery (Pillar B) — ignored here.
+            relay_text = (
+                (await _coordinator_relay(db, state, result, on_message))[0] if actor != "coordinator" else None
+            )
+            question_text = relay_text if relay_text is not None else result.question
+            state.status = "blocked"
+            state.next_action = f"Agent '{actor}' sa pýta: {question_text}"
+            db.flush()
+            return state
+        # carve-out applies: control falls through to the fast_fix release block → engine-owned auto-deploy.
 
     if stage == "kickoff" and state.flow_type == "fast_fix":
         # Fast-Fix Lane (F-009 §2, CR-NS-097): a fast_fix kickoff that did NOT escalate (the non-trivial
@@ -2335,6 +2361,10 @@ _EXECUTABLE_COORDINATOR_ACTIONS = frozenset(
         "coordinator_escalate_dedo",
         "coordinator_route_to_designer",
         "capture_backlog_item",
+        # Fast-Fix Lane (F-009 §3 D5, CR-NS-103): the Coordinator's autonomous answer to a routine build
+        # Programmer question. The AUTONOMOUS path runs it via _maybe_autonomous_answer (stricter 0.85 floor);
+        # listing it here also lets a Director-approved answer execute via apply_coordinator_recommendation.
+        "coordinator_answer_question",
     }
 )
 
@@ -2355,6 +2385,13 @@ _AUTONOMOUS_RECOVERY_ACTIONS = frozenset(
 # signal, not an auto-loop).
 _MAX_AUTONOMOUS_PER_TASK = 1
 
+# Fast-Fix Lane autonomous ANSWER bounds (F-009 §3 D5, CR-NS-103). Distinct from the recovery floor/cap above:
+# answering a routine Programmer question is LESS reversible than a task reset, so the confidence floor is
+# HIGHER (0.85 > the 0.80 recovery floor) and the per-task cap is 2 — the 3rd routine question on one task
+# signals the fix is not trivial after all → escalate → propose converting to a full version.
+_FAST_FIX_ANSWER_CONFIDENCE_FLOOR = 0.85
+_MAX_AUTONOMOUS_ANSWERS_PER_TASK = 2
+
 # Pillar B §B.2: the first-principles triage framework appended to the Coordinator's build HALT / question
 # prompt. Honest confidence is load-bearing — it gates auto-execution (bounded-recovery + conf ≥ floor + not
 # director_decision → applied without a Director click; ambiguity / design-scope / destructive → escalate).
@@ -2364,6 +2401,20 @@ _FIRST_PRINCIPLES_TRIAGE = (
     "session), navrhni ju s úprimnou VYSOKOU istotou — vykoná sa AUTOMATICKY bez Directora. Ak je to "
     "nejednoznačné, zmena dizajnu/rozsahu (route_to_designer) alebo deštruktívne → director_decision / nízka "
     "istota → eskaluje sa Directorovi. Genuine blocker = signál slabého dizajnu, eskaluj. "
+)
+
+# Fast-Fix Lane relay brief (F-009 §3 D5, CR-NS-103): appended to the Coordinator's relay prompt ONLY on a
+# fast_fix flow. At build, a ROUTINE Programmer question → emit `coordinator_answer_question`
+# (triage_class=programmer_routine_question) with honest HIGH confidence (≥0.85) and the answer in `rationale`
+# — the engine applies it automatically (no Director). At release NEVER ask about the deploy (it is
+# engine-owned) — emit a `gate_report` PASS, or a `director_decision` only for a genuine scope.
+_FAST_FIX_RELAY_BRIEF = (
+    " RÝCHLA OPRAVA (F-009): ak je to RUTINNÁ otázka Programátora vo fáze build (napr. „slovo už je X — "
+    "pokračovať?“, „použiť helper A alebo B?“), navrhni `coordinator_answer_question` "
+    "(triage_class=programmer_routine_question) s úprimnou VYSOKOU istotou (≥0.85) a samotnou odpoveďou v "
+    "`rationale` — engine ju vykoná automaticky, bez Directora. Vo fáze release sa NIKDY nepýtaj na "
+    "nasadenie (auto-deploy je engine-owned) — emit `gate_report` PASS, alebo `director_decision` len pri "
+    "genuine rozsahu (konverzia na plnú verziu)."
 )
 
 
@@ -2527,6 +2578,14 @@ def _coordinator_directive_executable(directive: Optional[dict[str, Any]]) -> bo
     return True
 
 
+def _is_director_decision_directive(directive: Optional[CoordinatorDirective]) -> bool:
+    """True iff a parsed ``coordinator_directive`` (carried on a worker question/blocked turn) is a genuine
+    ``director_decision`` scope. Fast-Fix Lane release carve-out (CR-NS-103): the ONLY case in which a
+    Coordinator release question still escalates (real scope → convert-to-full-version); ``None`` / any other
+    triage means a routine question → the carve-out applies (fall through to the engine-owned auto-deploy)."""
+    return directive is not None and directive.triage_class == "director_decision"
+
+
 def _directive_target_task(db: Session, version_id: uuid.UUID, directive: dict[str, Any]) -> Optional[Task]:
     """The task a directive operates on: ``target.task_id`` (if it belongs to the version), else the
     failed build task; ``None`` if neither resolves."""
@@ -2570,6 +2629,26 @@ def _coordinator_reset_task(db: Session, state: PipelineState, directive: dict[s
         db,
         state.version_id,
         f"Vykonaný Koordinátorov návrh: úloha #{task.number} resetovaná na todo (nový pokus).",
+        directive,
+    )
+
+
+def _coordinator_answer_question(db: Session, state: PipelineState, directive: dict[str, Any]) -> None:
+    """Director-approved variant of the fast_fix auto-answer (CR-NS-103): reset the held build task to todo so
+    the build loop re-attempts it (the Coordinator's answer rides in the recorded relay/directive rationale).
+    The AUTONOMOUS path (:func:`_maybe_autonomous_answer`) injects the answer as the resumed task's brief
+    directly; here the Director approved the proposal, so the task simply re-runs (a routine question is
+    non-destructive). Reached only when a Director explicitly applies an ESCALATED answer proposal."""
+    task = _directive_target_task(db, state.version_id, directive)
+    if task is None:
+        raise OrchestratorError("Koordinátorova odpoveď: žiadna cieľová úloha")
+    task.status = "todo"
+    db.flush()
+    task_service.recompute_feat_status(db, task.feat_id)
+    _coordinator_audit(
+        db,
+        state.version_id,
+        f"Vykonaný Koordinátorov návrh: odpoveď na otázku úlohy #{task.number} (build pokračuje).",
         directive,
     )
 
@@ -2707,6 +2786,8 @@ def _execute_coordinator_directive(db: Session, state: PipelineState, directive:
     proposed = directive.get("proposed_action")
     if proposed == "coordinator_reset_task":
         _coordinator_reset_task(db, state, directive)
+    elif proposed == "coordinator_answer_question":
+        _coordinator_answer_question(db, state, directive)
     elif proposed == "coordinator_move_baseline":
         _coordinator_move_baseline(db, state, directive)
     elif proposed == "coordinator_clear_session":
@@ -2744,6 +2825,31 @@ def _autonomous_count(db: Session, version_id: uuid.UUID, task_id: uuid.UUID) ->
         .all()
     )
     return sum(1 for p in rows if p and p.get("is_autonomous") and p.get("task_id") == str(task_id))
+
+
+def _autonomous_answer_count(db: Session, version_id: uuid.UUID, task_id: uuid.UUID) -> int:
+    """Fast-Fix autonomous-ANSWER count for a task (CR-NS-103 cap, ≤2). Like :func:`_autonomous_count` but
+    counts ONLY recorded autonomous *answers* (``action == 'coordinator_answer_question'``), so the answer cap
+    is independent of the recovery cap (§B.4) — a task may both be recovered AND answered without either
+    cap leaking into the other."""
+    rows = (
+        db.execute(
+            select(PipelineMessage.payload).where(
+                PipelineMessage.version_id == version_id,
+                PipelineMessage.author == "coordinator",
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return sum(
+        1
+        for p in rows
+        if p
+        and p.get("is_autonomous")
+        and p.get("task_id") == str(task_id)
+        and p.get("action") == "coordinator_answer_question"
+    )
 
 
 async def _record_autonomous_decision(
@@ -2806,6 +2912,60 @@ async def _maybe_autonomous_recovery(
     _execute_coordinator_directive(db, state, directive)  # mutates state + re-dispatches (agent_working)
     await _record_autonomous_decision(db, state.version_id, task, directive, on_message=on_message)
     return True
+
+
+def _fast_fix_answer_brief(task: Task, answer: str) -> str:
+    """The re-dispatch brief that resumes a fast_fix build task with the Coordinator's autonomous answer
+    (CR-NS-103). Used as the next attempt's ``pending_directive`` (mirrors the Director's framed-return path)."""
+    return (
+        f"Programátor, pokračuj v úlohe #{task.number} '{task.title}'. Koordinátor odpovedal na tvoju otázku "
+        f"(rýchla oprava, F-009): {answer} Vykonaj úlohu podľa tejto odpovede — NEPÝTAJ sa znova na to isté."
+    )
+
+
+async def _maybe_autonomous_answer(
+    db: Session,
+    state: PipelineState,
+    task: Task,
+    directive: Optional[dict[str, Any]],
+    *,
+    on_message: Optional[MessageCallback] = None,
+) -> Optional[str]:
+    """Fast-Fix Lane (F-009 §3 D5, CR-NS-103) — at a build-stage ROUTINE Programmer question, AUTO-ANSWER it
+    (no Director gate) instead of escalating, then resume the SAME task with the answer as its brief. Sibling
+    of :func:`_maybe_autonomous_recovery`. Returns the answer prompt for the caller to set as the resumed
+    task's first-attempt ``pending_directive`` when it fires (the task is reset to ``todo`` + re-dispatched
+    here), else ``None`` → the caller takes the EXISTING escalate path unchanged.
+
+    Guard: ``flow_type == 'fast_fix'`` ONLY — ``new_version`` / ``cr`` / ``bug`` keep escalating worker
+    questions byte-for-byte (no autonomy leak). Conservative bounds (D5): a ``coordinator_answer_question``
+    directive, ``triage_class != director_decision``, honest confidence ≥ 0.85 (above the 0.80 recovery floor
+    — an answer is less reversible than a task reset), within ≤2 answers per task. The 3rd routine question on
+    one task → ``None`` → escalate (signals not-trivial → convert-to-full). Every answer is recorded
+    Director-visibly (``is_autonomous=true``, reuse :func:`_record_autonomous_decision`)."""
+    if state.flow_type != "fast_fix":
+        return None
+    if not directive:
+        return None
+    if directive.get("proposed_action") != "coordinator_answer_question":
+        return None
+    if directive.get("triage_class") == "director_decision":
+        return None
+    if float(directive.get("confidence") or 0.0) < _FAST_FIX_ANSWER_CONFIDENCE_FLOOR:
+        return None
+    if _autonomous_answer_count(db, state.version_id, task.id) >= _MAX_AUTONOMOUS_ANSWERS_PER_TASK:
+        return None  # D5 cap: the 3rd routine question on one task → escalate (not trivial → convert-to-full)
+    answer = (directive.get("rationale") or "").strip()
+    if not answer:
+        return None  # no answer text to inject → escalate rather than resume the task blind
+    await _record_autonomous_decision(db, state.version_id, task, directive, on_message=on_message)
+    # Resume the SAME task: reset it to todo so the build loop re-picks it, hand back agent_working so the
+    # loop continues the chain. The caller injects the returned brief as attempt 1's prompt (pending_directive).
+    db.execute(update(Task).where(Task.id == task.id).values(status="todo"))
+    db.flush()
+    task_service.recompute_feat_status(db, task.feat_id)
+    _begin_dispatch(db, state)
+    return _fast_fix_answer_brief(task, answer)
 
 
 def recover_orphaned_builds_on_startup(db: Session) -> int:
@@ -3294,6 +3454,15 @@ async def _run_build_round(
                 # AUTO-EXECUTE it + re-loop — no Director click. Else relay + HALT (Director input needed).
                 relay_text, directive = await _coordinator_relay(db, state, result, on_message)
                 if await _maybe_autonomous_recovery(db, state, task, directive, on_message=on_message):
+                    autonomous_recovered = True
+                    break  # the while loop re-picks the reset task (no failed settle)
+                # Fast-Fix Lane (F-009 §3 D5, CR-NS-103): a routine question → the Coordinator AUTO-ANSWERS it
+                # (no Director gate) and we resume the SAME task with the answer as its brief (generalize the
+                # pending_directive injection above). fast_fix-gated inside the helper; both autonomy paths
+                # False → the EXISTING escalate path below, unchanged (new_version/cr/bug never auto-answer).
+                answer_prompt = await _maybe_autonomous_answer(db, state, task, directive, on_message=on_message)
+                if answer_prompt is not None:
+                    pending_directive = answer_prompt  # seeds attempt 1 of the resumed task (the answer brief)
                     autonomous_recovered = True
                     break  # the while loop re-picks the reset task (no failed settle)
                 question_text = relay_text if relay_text is not None else result.question

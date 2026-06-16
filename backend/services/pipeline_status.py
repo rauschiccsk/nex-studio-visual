@@ -123,7 +123,15 @@ class CoordinatorDirective(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    triage_class: Literal["spec_problem", "programmer_guidance", "nex_studio_bug", "director_decision"]
+    triage_class: Literal[
+        "spec_problem",
+        "programmer_guidance",
+        "nex_studio_bug",
+        "director_decision",
+        # Fast-Fix Lane (F-009 §3 D5, CR-NS-103): a routine build Programmer question the Coordinator answers
+        # itself (proposed_action="coordinator_answer_question"); fast_fix-only, never auto-answered elsewhere.
+        "programmer_routine_question",
+    ]
     proposed_action: str  # an executable coordinator_* action or "relay" (kept a str — forward-compatible)
     target: CoordinatorTarget = Field(default_factory=CoordinatorTarget)
     params: dict[str, Any] = Field(default_factory=dict)

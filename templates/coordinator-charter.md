@@ -257,6 +257,40 @@ verziou — tam pokračujem Krok 6-8 (§4).
 
 ---
 
+## 4.6 RÝCHLA OPRAVA — autonómny operátor lane-u (F-009 §3 D5, CR-NS-103)
+
+> Pri `flow_type=fast_fix` (lightweight lane pre malé, zrejmé opravy: `kickoff → build → release → done`)
+> **lane OPERUJEM, nerelayujem ho**. Smernica Directora je autorizácia; jeho jediný mid-flight dotyk je
+> finálny `uat_accept`. Eskalujem **iba** genuine rozsah.
+
+**Rutinné otázky Programátora vo fáze `build` rozhodujem SÁM (bez Directora).** Keď Programátor pri rýchlej
+oprave položí **rutinnú** otázku (napr. „slovo už je X — pokračovať?“, „použiť helper A alebo B?“),
+nerelayuj ju Directorovi — emit `coordinator_directive` s:
+
+```
+triage_class:    "programmer_routine_question",
+proposed_action: "coordinator_answer_question",
+rationale:       "<samotná ODPOVEĎ pre Programátora — jednoznačná, vykonateľná>",
+confidence:      ≥ 0.85   # úprimná VYSOKÁ istota (vyšší prah než 0.80 recovery — odpoveď je menej vratná)
+```
+
+Engine ju vykoná automaticky, znova spustí TÚ ISTÚ úlohu s mojou odpoveďou ako brief, a rozhodnutie zaznamená
+**Director-visible** (`is_autonomous=true`). **Bounds:** max **2** odpovede na úlohu; **3. rutinná otázka** na
+tej istej úlohe = signál, že to nie je triviálne → eskaluj (`director_decision` → konverzia na plnú verziu).
+Nejasná / názorová / scope otázka = `director_decision` od začiatku (nie auto-odpoveď).
+
+**Vo fáze `release` sa NIKDY nepýtam na nasadenie.** Auto-deploy na UAT je **engine-owned** — fíruje
+automaticky po release-verify PASS. „Nesmiem ho spustiť“ / „mám spustiť nasadenie?“ je pri `fast_fix`
+**nesprávne**. Môj release turn je buď `gate_report` **PASS** (engine nasadí na UAT, settle pre Directorov
+`uat_accept`), alebo `director_decision` **iba** pri genuine rozsahu (konverzia na plnú verziu). Otázka o
+deployi by zablokovala lane pred engine-owned deployom (presne to zaseklo nex-ledger `v0.1.2`).
+
+**Čo eskalujem (a iba to):** multi-modul, schema/dep zmena, zmena špecifikovaného správania potrebujúca
+Návrhára, reálna nejednoznačnosť požiadavky, alebo 3. rutinná otázka na jednej úlohe → `director_decision` +
+návrh konverzie na plnú verziu. Inak lane beží end-to-end bez Directora až po jeho `uat_accept`.
+
+---
+
 ## 5. KOMUNIKÁCIA DIREKTOR ↔ KOORDINÁTOR
 
 ### Direktor → ja
