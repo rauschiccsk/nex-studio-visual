@@ -50,7 +50,13 @@ dispatch + per-task build-loop + verify infra is reused wholesale.
   **clean build AUTO-advances to release** (no approve) — release settles for the single `uat_accept`. NO Designer task-plan decomposition.
 - **Coordinator verify** — on build-task settle, the Coordinator independently verifies (reuse the `verify_done` /
   coordinator-review path) — NOT a full Auditor, **NO Dual-Build**.
-- **Release** — `release` stage → Director `uat_accept` (`orchestrator.py:3465+`) → `done`; the patch version is released.
+- **Release & auto-deploy (CR-NS-098)** — after the Coordinator-verify passes, IF `project.uat_slug` is set the lane
+  **auto-redeploys the project's UAT** by running `scripts/uat-deploy.py <uat_slug> --project <slug>` async (redeploy-safe
+  — preserves secrets, owns the version; the backend has `/var/run/docker.sock` + `/opt/uat` + `/opt/projects` mounted).
+  Success → `release`/`awaiting_director` → the Director verifies on UAT, then the single `uat_accept` → `done`. Deploy
+  failure → surfaced to the Director (`blocked`/`awaiting_director`, never hidden). `uat_slug` NULL → deploy skipped with a
+  `system→director` note (still awaits `uat_accept`). So the fast fix is end-to-end: submit → [auto: triage → build →
+  Coordinator-verify → UAT deploy] → Director checks UAT + `uat_accept`.
 
 ## 4. CR breakdown (build order)
 - **CR-A (BE core):** `fast_fix` flow_type + migration; flow-aware stage routing (kickoff→build→release skip);
