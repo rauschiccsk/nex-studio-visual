@@ -71,3 +71,19 @@ describe("PipelineRail — fast_fix short stage path (CR-NS-095)", () => {
     expect(screen.queryByText("Rýchla oprava")).not.toBeInTheDocument();
   });
 });
+
+describe("PipelineRail — finished pipeline ticks the terminal stage (CR-NS-099)", () => {
+  it("a done fast_fix run shows 'Hotovo' as completed (✓), not the in-progress '>'", () => {
+    render(<PipelineRail state={mkState("done", { flow_type: "fast_fix", current_stage: "done" })} />);
+    const hotovo = screen.getByText("Hotovo").closest("li");
+    expect(hotovo).toHaveTextContent("✓"); // completed marker
+    expect(hotovo).not.toHaveTextContent(">"); // NOT the current/in-progress marker
+  });
+
+  it("a done new_version run also ticks its terminal 'Hotovo'", () => {
+    render(<PipelineRail state={mkState("done", { current_stage: "done" })} />);
+    const hotovo = screen.getByText("Hotovo").closest("li");
+    expect(hotovo).toHaveTextContent("✓");
+    expect(hotovo).not.toHaveTextContent(">");
+  });
+});

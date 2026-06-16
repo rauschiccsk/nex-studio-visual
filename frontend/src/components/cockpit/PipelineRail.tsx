@@ -102,10 +102,14 @@ export function PipelineRail({ state, activeAgent = null }: Props) {
         </h3>
         <ul className="space-y-1">
           {stageOrder.map((stage, idx) => {
-            const done = currentIdx >= 0 && idx < currentIdx;
-            const current = idx === currentIdx;
-            const marker = done ? "✓" : current ? ">" : "·";
-            const color = done
+            // A stage is completed (✓) when it's BEFORE the current stage, OR it IS the current stage
+            // and the pipeline has finished (status "done") — so the terminal "Hotovo" shows ✓, not the
+            // in-progress ">" marker, when the run is done (CR-NS-099).
+            const finished = state?.status === "done";
+            const completed = currentIdx >= 0 && (idx < currentIdx || (idx === currentIdx && finished));
+            const current = idx === currentIdx && !finished;
+            const marker = completed ? "✓" : current ? ">" : "·";
+            const color = completed
               ? "text-[var(--color-status-success)]"
               : current
                 ? "text-primary-400 font-semibold"
