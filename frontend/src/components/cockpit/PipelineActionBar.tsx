@@ -215,14 +215,18 @@ export function PipelineActionBar({
         <>
           {allowed("approve") && (
             <ActionRow
-              hint={`Prijme sa návrh Návrhára → spustí sa ďalšia fáza (${nextStageLabel(current_stage, state.flow_type)}).`}
+              hint={
+                state.flow_type === "fast_fix"
+                  ? `Koordinátor potvrdil rýchlu opravu → spustí sa ${nextStageLabel(current_stage, state.flow_type)}.`
+                  : `Prijme sa návrh Návrhára → spustí sa ďalšia fáza (${nextStageLabel(current_stage, state.flow_type)}).`
+              }
             >
               <button
                 onClick={() => onAction("approve")}
                 disabled={inFlight}
                 className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
               >
-                Schváliť podľa Návrhára
+                {state.flow_type === "fast_fix" ? "Schváliť rýchlu opravu" : "Schváliť podľa Návrhára"}
               </button>
             </ActionRow>
           )}
