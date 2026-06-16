@@ -18,6 +18,7 @@ convention (Phase 3).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
@@ -1601,6 +1602,103 @@ def _begin_dispatch(db: Session, state: PipelineState) -> None:
     db.flush()
 
 
+# Fast-Fix UAT auto-deploy (F-009, CR-NS-098). The lane redeploys UAT via the EXISTING tool
+# ``scripts/uat-deploy.py`` (redeploy-safe by default: preserves secrets, owns the version). The script
+# lives in THIS repo's tree; the backend image does not COPY scripts/, but ``/opt/projects`` is mounted
+# (with /var/run/docker.sock + /opt/uat), so it is reachable at the mounted repo path. Module-level so a
+# test can monkeypatch the path; the timeout is a backstop over the script's own waits (~1–2 min build).
+UAT_DEPLOY_SCRIPT: Path = claude_agent.PROJECTS_ROOT / "nex-studio" / "scripts" / "uat-deploy.py"
+UAT_DEPLOY_TIMEOUT = 900
+
+
+async def _run_uat_deploy(project_slug: str, uat_slug: str) -> tuple[bool, str]:
+    """Run ``scripts/uat-deploy.py <uat_slug> --project <project_slug>`` as an async subprocess.
+
+    Returns ``(ok, detail)``: ``ok`` is True on exit 0; ``detail`` is ``"OK"`` on success, else a short
+    tail of the combined output (the deploy error to surface to the Director). Never raises — a spawn
+    failure / timeout becomes ``(False, reason)`` so the caller settles to ``blocked`` rather than hanging.
+    Async (``create_subprocess_exec`` + ``await``) so the ~1–2 min docker build never blocks the event loop.
+    """
+    cmd = ["python3", str(UAT_DEPLOY_SCRIPT), uat_slug, "--project", project_slug]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
+        )
+    except OSError as exc:
+        return False, f"deploy sa nepodarilo spustiť: {exc}"
+    try:
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=UAT_DEPLOY_TIMEOUT)
+    except asyncio.TimeoutError:
+        proc.kill()
+        return False, f"deploy prekročil časový limit ({UAT_DEPLOY_TIMEOUT}s)"
+    if proc.returncode == 0:
+        return True, "OK"
+    tail = (stdout or b"").decode("utf-8", "replace").strip()[-300:]
+    return False, (f"exit {proc.returncode}: {tail}" if tail else f"exit {proc.returncode}")
+
+
+async def _fast_fix_auto_deploy(
+    db: Session, state: PipelineState, *, on_message: Optional[MessageCallback] = None
+) -> None:
+    """Redeploy the project's UAT after a fast_fix release-verify PASS (F-009, CR-NS-098).
+
+    The fast-fix lane is end-to-end ("zadáš → vidíš na UAT → akceptuješ") only if the Director SEES the
+    fix running on UAT before the single ``uat_accept`` touch. Resolves the version's ``project.uat_slug``:
+
+    * **NULL** (no UAT configured) → skip gracefully with a ``system→director`` note and settle to
+      ``awaiting_director`` (the Director still accepts; nothing was deployed — never silently blocked).
+    * **set** → run :func:`_run_uat_deploy`. Success → ``awaiting_director`` (the Director's ``uat_accept``).
+      Failure (non-zero / spawn error / timeout) → ``blocked`` with the deploy error in ``next_action`` —
+      surfaced to the Director, never hidden, never silently marked done.
+
+    Mutates ``state.status`` / ``state.next_action`` and records the outcome message; the caller flushes.
+    """
+    version_id = state.version_id
+    project = db.execute(
+        select(Project).join(Version, Version.project_id == Project.id).where(Version.id == version_id)
+    ).scalar_one_or_none()
+    uat_slug = project.uat_slug if project is not None else None
+    project_slug = project.slug if project is not None else _project_slug_for_version(db, version_id)
+
+    if not uat_slug:
+        msg = _record_message(
+            db,
+            version_id=version_id,
+            stage="release",
+            author="system",
+            recipient="director",
+            kind="notification",
+            content="UAT nie je pre projekt nakonfigurované — preskakujem deploy.",
+            payload={"uat_deploy": {"skipped": True}},
+        )
+        if on_message is not None:
+            await on_message(msg)
+        state.status = "awaiting_director"
+        state.next_action = "Director: over a akceptuj (UAT deploy preskočený — projekt nemá UAT)."
+        return
+
+    ok, detail = await _run_uat_deploy(project_slug, uat_slug)
+    content = f"UAT nasadené ({uat_slug}) — over a akceptuj." if ok else f"UAT deploy zlyhal ({uat_slug}): {detail}"
+    msg = _record_message(
+        db,
+        version_id=version_id,
+        stage="release",
+        author="system",
+        recipient="director",
+        kind="notification",
+        content=content,
+        payload={"uat_deploy": {"uat_slug": uat_slug, "ok": ok, "detail": detail}},
+    )
+    if on_message is not None:
+        await on_message(msg)
+    if ok:
+        state.status = "awaiting_director"
+        state.next_action = "Nasadené na UAT — over a akceptuj."
+    else:
+        state.status = "blocked"
+        state.next_action = f"UAT deploy zlyhal: {detail}. Skús znova alebo vráť."
+
+
 async def run_dispatch(
     db: Session,
     version_id: uuid.UUID,
@@ -1726,6 +1824,25 @@ async def run_dispatch(
         state.current_stage = _next_stage("kickoff", state.flow_type)  # → build
         fast_fix.ensure_build_task(db, state.version_id)
         _begin_dispatch(db, state)  # status=agent_working at build → pipeline_runner continues the chain
+        return state
+
+    if stage == "release" and state.flow_type == "fast_fix":
+        # Fast-Fix Lane release (F-009 §3, CR-NS-098): the release turn is the Coordinator's final verify.
+        # A gate_report runs the verify-retry loop first (a real FAIL → blocked, NO deploy); a done/answer-
+        # class turn is already the pass. On a PASS, AUTO-deploy the project's UAT so the Director SEES the
+        # fix running on UAT before the single uat_accept, then settle (the auto-deploy sets status +
+        # next_action: success → awaiting_director, failure → blocked, NULL uat_slug → skip + awaiting).
+        # new_version / cr / bug never reach here (flow_type guard) — their release stays the generic
+        # gate_report path below, byte-for-byte unchanged.
+        if result.kind == "gate_report":
+            reason, _is_scope = await _verify_with_retries(db, state, result, on_message=on_message)
+            if reason is not None:
+                state.status = "blocked"
+                state.next_action = "Fáza 'release' neprešla overením — pozri správy Koordinátora a rozhodni."
+                db.flush()
+                return state
+        await _fast_fix_auto_deploy(db, state, on_message=on_message)
+        db.flush()
         return state
 
     if stage == "task_plan" and result.kind == "gate_report":

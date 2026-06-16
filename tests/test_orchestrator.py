@@ -4413,3 +4413,196 @@ async def test_new_version_build_still_uses_auditor_regression(db_session, fake_
     # new_version build → gate_g (NOT release) on final approve.
     state = await orchestrator.apply_action(db_session, version_id=version.id, action="approve")
     assert state.current_stage == "gate_g"
+
+
+# ── Fast-Fix UAT auto-deploy (F-009, CR-NS-098) ────────────────────────────────
+
+
+async def _drive_fast_fix_to_release(db_session, fake_claude, monkeypatch, *, directive="Oprav drobnosť"):
+    """Drive a fresh fast_fix pipeline through kickoff + build so the NEXT run_dispatch is the release
+    (Coordinator-verify + auto-deploy) turn. Returns ``(version, project)``."""
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "a" * 40)
+    version, project = _make_version(db_session)
+    await orchestrator.apply_action(
+        db_session,
+        version_id=version.id,
+        action="start",
+        payload={"flow_type": "fast_fix", "directive": directive},
+    )
+    fake_claude.response = _fast_fix_kickoff_ok()
+    await orchestrator.run_dispatch(db_session, version.id)  # kickoff → build (auto)
+    fake_claude.response = _fast_fix_build_fake()
+    state = await orchestrator.run_dispatch(db_session, version.id)  # build → release (auto, agent_working)
+    assert state.current_stage == "release" and state.status == "agent_working"
+    return version, project
+
+
+def _uat_deploy_note(db_session, version_id):
+    """The latest system→director ``uat_deploy`` outcome note, or None."""
+    notes = [m for m in _msgs(db_session, version_id) if m.payload and m.payload.get("uat_deploy")]
+    return notes[-1] if notes else None
+
+
+async def test_fast_fix_release_auto_deploys_uat_when_slug_set(db_session, fake_claude, monkeypatch):
+    # CR-NS-098: uat_slug set → the release-verify PASS auto-redeploys UAT via the existing tool, then
+    # settles to the Director's single uat_accept ("Nasadené na UAT — over a akceptuj.").
+    version, project = await _drive_fast_fix_to_release(db_session, fake_claude, monkeypatch)
+    project.uat_slug = "ledger"
+    db_session.flush()
+    calls = []
+
+    async def _fake_deploy(project_slug, uat_slug):
+        calls.append((project_slug, uat_slug))
+        return True, "OK"
+
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _fake_deploy)
+    fake_claude.response = _block(stage="release", kind="done", summary="hotovo", awaiting="director")
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert calls == [(project.slug, "ledger")]  # invoked with <uat_slug> mapped to the project slug
+    assert state.current_stage == "release" and state.status == "awaiting_director"
+    assert "Nasadené na UAT" in state.next_action
+    note = _uat_deploy_note(db_session, version.id)
+    assert note is not None and note.payload["uat_deploy"]["ok"] is True
+    # the single Director touch still completes the lane.
+    state = await orchestrator.apply_action(db_session, version_id=version.id, action="uat_accept")
+    assert state.current_stage == "done" and state.status == "done"
+
+
+async def test_fast_fix_release_gate_report_verify_then_deploys(db_session, fake_claude, monkeypatch):
+    # CR-NS-098: a gate_report release turn runs the Coordinator-verify FIRST; on PASS it auto-deploys.
+    version, project = await _drive_fast_fix_to_release(db_session, fake_claude, monkeypatch)
+    project.uat_slug = "mager"
+    db_session.flush()
+    calls = []
+
+    async def _fake_deploy(project_slug, uat_slug):
+        calls.append((project_slug, uat_slug))
+        return True, "OK"
+
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _fake_deploy)
+    # release coordinator returns gate_report → verify judge (same fake, gate_report = PASS) → deploy.
+    fake_claude.response = _block(stage="release", kind="gate_report", summary="overené", awaiting="director")
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert calls == [(project.slug, "mager")]
+    assert state.status == "awaiting_director" and "Nasadené na UAT" in state.next_action
+
+
+async def test_fast_fix_release_skips_deploy_when_no_uat_slug(db_session, fake_claude, monkeypatch):
+    # CR-NS-098: uat_slug NULL → skip the deploy gracefully with a system→director note, still settle to
+    # await uat_accept (never silently blocked).
+    version, project = await _drive_fast_fix_to_release(db_session, fake_claude, monkeypatch)
+    assert project.uat_slug is None
+    called = False
+
+    async def _fake_deploy(project_slug, uat_slug):
+        nonlocal called
+        called = True
+        return True, "OK"
+
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _fake_deploy)
+    fake_claude.response = _block(stage="release", kind="done", summary="hotovo", awaiting="director")
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert called is False  # no deploy attempted
+    assert state.current_stage == "release" and state.status == "awaiting_director"
+    note = _uat_deploy_note(db_session, version.id)
+    assert note is not None and note.payload["uat_deploy"].get("skipped") is True
+    assert "nakonfigurované" in note.content
+
+
+async def test_fast_fix_release_deploy_failure_blocks(db_session, fake_claude, monkeypatch):
+    # CR-NS-098: a non-zero / unhealthy deploy is SURFACED to the Director (blocked + the error in
+    # next_action) — never hidden, never silently marked done.
+    version, project = await _drive_fast_fix_to_release(db_session, fake_claude, monkeypatch)
+    project.uat_slug = "ledger"
+    db_session.flush()
+
+    async def _fake_deploy(project_slug, uat_slug):
+        return False, "exit 1: docker build zlyhal"
+
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _fake_deploy)
+    fake_claude.response = _block(stage="release", kind="done", summary="hotovo", awaiting="director")
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert state.current_stage == "release" and state.status == "blocked"
+    assert "UAT deploy zlyhal" in state.next_action and "docker build zlyhal" in state.next_action
+    note = _uat_deploy_note(db_session, version.id)
+    assert note is not None and note.payload["uat_deploy"]["ok"] is False
+
+
+async def test_new_version_release_does_not_auto_deploy(db_session, fake_claude, monkeypatch):
+    # Regression: the auto-deploy hook is fast_fix-ONLY. A new_version release (generic gate_report path)
+    # must NOT invoke the deploy, even WITH a uat_slug set, and still offers uat_accept.
+    called = False
+
+    async def _spy(project_slug, uat_slug):
+        nonlocal called
+        called = True
+        return True, "OK"
+
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _spy)
+    version, project = _make_version(db_session)
+    project.uat_slug = "ledger"
+    db_session.flush()
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _settle(db_session, version.id)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="verdict", payload={"verdict": "PASS"})
+    fake_claude.response = _block(stage="release", kind="gate_report", summary="release ok", awaiting="director")
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert state.current_stage == "release" and state.status == "awaiting_director"
+    assert called is False  # fast_fix-only hook
+    assert "uat_accept" in orchestrator.determine_available_actions(state)
+
+
+class _FakeProc:
+    """Minimal async-subprocess stand-in for :func:`orchestrator._run_uat_deploy` tests."""
+
+    def __init__(self, returncode: int, output: bytes = b""):
+        self.returncode = returncode
+        self._output = output
+
+    async def communicate(self):
+        return self._output, b""
+
+    def kill(self):
+        pass
+
+
+async def test_run_uat_deploy_invokes_script_and_maps_success(monkeypatch):
+    # CR-NS-098: mock the subprocess — command = the EXISTING tool `<uat_slug> --project <slug>`; exit 0 → (True, "OK").
+    captured = {}
+
+    async def _fake_exec(*cmd, stdout=None, stderr=None):
+        captured["cmd"] = cmd
+        return _FakeProc(0, b"deploy log tail")
+
+    monkeypatch.setattr(orchestrator.asyncio, "create_subprocess_exec", _fake_exec)
+    ok, detail = await orchestrator._run_uat_deploy("nex-ledger", "ledger")
+
+    assert ok is True and detail == "OK"
+    assert str(orchestrator.UAT_DEPLOY_SCRIPT) in captured["cmd"]
+    assert "ledger" in captured["cmd"]
+    assert "--project" in captured["cmd"] and "nex-ledger" in captured["cmd"]
+
+
+async def test_run_uat_deploy_nonzero_exit_returns_failure(monkeypatch):
+    async def _fake_exec(*cmd, stdout=None, stderr=None):
+        return _FakeProc(2, b"boom: docker build failed")
+
+    monkeypatch.setattr(orchestrator.asyncio, "create_subprocess_exec", _fake_exec)
+    ok, detail = await orchestrator._run_uat_deploy("nex-ledger", "ledger")
+
+    assert ok is False and "exit 2" in detail and "docker build failed" in detail
+
+
+async def test_run_uat_deploy_spawn_failure_returns_failure(monkeypatch):
+    async def _fake_exec(*cmd, stdout=None, stderr=None):
+        raise OSError("python3 not found")
+
+    monkeypatch.setattr(orchestrator.asyncio, "create_subprocess_exec", _fake_exec)
+    ok, detail = await orchestrator._run_uat_deploy("nex-ledger", "ledger")
+
+    assert ok is False and "nepodarilo spustiť" in detail

@@ -32,6 +32,12 @@ class Project(Base, UUIDMixin, TimestampMixin):
     repo_url = Column(String(255), nullable=True)
     source_path = Column(Text, nullable=True)
     kb_path = Column(Text, nullable=True)
+    # UAT deploy mapping (F-009, CR-NS-098). Maps this project to its
+    # ``/opt/uat/<uat_slug>`` deploy (e.g. ``nex-ledger`` → ``"ledger"``,
+    # ``nex-inbox`` → ``"mager"``) so the Fast-Fix Lane can auto-redeploy UAT
+    # via ``scripts/uat-deploy.py <uat_slug> --project <slug>``. NULL = no UAT
+    # configured → the fast-fix auto-deploy is skipped gracefully.
+    uat_slug = Column(String(100), nullable=True)
     guardian_enabled = Column(Boolean, nullable=False, server_default="false")
     created_by = Column(
         UUID(as_uuid=True),
