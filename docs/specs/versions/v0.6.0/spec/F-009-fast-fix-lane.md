@@ -50,9 +50,12 @@ dispatch + per-task build-loop + verify infra is reused wholesale.
   **clean build AUTO-advances to release** (no approve) — release settles for the single `uat_accept`. NO Designer task-plan decomposition.
 - **Coordinator verify** — on build-task settle, the Coordinator independently verifies (reuse the `verify_done` /
   coordinator-review path) — NOT a full Auditor, **NO Dual-Build**.
-- **Release & auto-deploy (CR-NS-098)** — after the Coordinator-verify passes, IF `project.uat_slug` is set the lane
-  **auto-redeploys the project's UAT** by running `scripts/uat-deploy.py <uat_slug> --project <slug>` async (redeploy-safe
-  — preserves secrets, owns the version; the backend has `/var/run/docker.sock` + `/opt/uat` + `/opt/projects` mounted).
+- **Release & auto-deploy (CR-NS-098; mechanism revised CR-NS-101)** — after the Coordinator-verify passes, IF
+  `project.uat_slug` is set the lane **auto-redeploys the project's UAT** with a plain
+  `docker compose -f /opt/uat/<uat_slug>/docker-compose.yml up -d --build --force-recreate` (async; `VITE_APP_VERSION`
+  stamped from the repo's commit count). It runs against the UAT's OWN existing compose — **NOT `uat-deploy.py`**, which
+  is a PROVISIONER that re-renders the compose + reallocates ports + rewrites nginx (would clobber a hand-authored UAT
+  like NEX Ledger). The backend has `/var/run/docker.sock` + `/opt/uat` + `/opt/projects` mounted, so the compose is reachable.
   Success → `release`/`awaiting_director` → the Director verifies on UAT, then the single `uat_accept` → `done`. Deploy
   failure → surfaced to the Director (`blocked`/`awaiting_director`, never hidden). `uat_slug` NULL → deploy skipped with a
   `system→director` note (still awaits `uat_accept`). So the fast fix is end-to-end: submit → [auto: triage → build →
