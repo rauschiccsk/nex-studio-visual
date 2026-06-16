@@ -113,9 +113,13 @@ def create_patch_version(db: Session, *, project_id: UUID, user_id: UUID) -> Ver
     )
 
 
-def _kickoff_directive(db: Session, version_id: UUID) -> Optional[str]:
+def kickoff_directive(db: Session, version_id: UUID) -> Optional[str]:
     """The Director directive carried in the version's kickoff message payload (set by the
-    orchestrator ``start`` for a ``fast_fix`` flow), or ``None``."""
+    orchestrator ``start`` for a ``fast_fix`` flow), or ``None``.
+
+    Public (CR-NS-097): the orchestrator reads it to PREPEND the directive onto the Coordinator's
+    kickoff brief — the kickoff agent runs a fresh session (no thread to ``--resume``), so the brief is
+    its only context and the triage would otherwise be blind to what to fix."""
     msg = db.execute(
         select(PipelineMessage)
         .where(
@@ -170,7 +174,7 @@ def ensure_build_task(db: Session, version_id: UUID) -> Task:
     if existing is not None:
         return existing
 
-    directive = _kickoff_directive(db, version_id)
+    directive = kickoff_directive(db, version_id)
     epic = epic_service.create(
         db,
         EpicCreate(project_id=version.project_id, version_id=version_id, title="Rýchla oprava"),

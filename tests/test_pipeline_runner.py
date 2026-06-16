@@ -150,6 +150,60 @@ async def test_run_broadcasts_state_and_incremental_messages(db_session, monkeyp
     assert state_evt["state"]["status"] == "awaiting_director"
 
 
+async def test_run_fast_fix_auto_chain_continues_until_settled(db_session, monkeypatch):
+    """CR-NS-097: run_dispatch returning agent_working (a fast_fix auto-advance) makes _run CONTINUE the
+    chain in the SAME task — broadcasting each intermediate state — until it settles awaiting_director.
+    Models the one-touch flow: kickoff→build (agent_working) → build→release (agent_working) → release
+    settles (awaiting_director). The Director's only touch is the later uat_accept."""
+    version = _make_version(db_session)
+    state = _seed_working_state(db_session, version.id)
+    state.flow_type = "fast_fix"
+    db_session.flush()
+    fake_reg = _wire_runner(db_session, monkeypatch)
+
+    steps = iter([("build", "agent_working"), ("release", "agent_working"), ("release", "awaiting_director")])
+
+    async def fake_run_dispatch(db, vid, on_event=None, directive=None, gate_e_dispatch=None, on_message=None):
+        st = db.execute(select(PipelineState).where(PipelineState.version_id == vid)).scalar_one()
+        st.current_stage, st.status = next(steps)
+        db.flush()
+        return st
+
+    monkeypatch.setattr(orchestrator, "run_dispatch", fake_run_dispatch)
+
+    await pipeline_runner._run(version.id)
+
+    settled = db_session.execute(select(PipelineState).where(PipelineState.version_id == version.id)).scalar_one()
+    assert settled.current_stage == "release" and settled.status == "awaiting_director"
+    # one state_changed per advance (build, release) + the final settle — the board steps live.
+    state_evts = [p["state"] for _, p in fake_reg.events if p["type"] == "state_changed"]
+    assert [s["current_stage"] for s in state_evts] == ["build", "release", "release"]
+    assert [s["status"] for s in state_evts] == ["agent_working", "agent_working", "awaiting_director"]
+
+
+async def test_run_new_version_does_not_auto_chain(db_session, monkeypatch):
+    """Regression: a settled (awaiting_director) run_dispatch result never triggers the auto-chain loop —
+    exactly one dispatch, one state_changed (new_version/cr/bug are unaffected by CR-NS-097)."""
+    version = _make_version(db_session)
+    _seed_working_state(db_session, version.id)  # flow_type=new_version
+    fake_reg = _wire_runner(db_session, monkeypatch)
+    calls = {"n": 0}
+
+    async def fake_run_dispatch(db, vid, on_event=None, directive=None, gate_e_dispatch=None, on_message=None):
+        calls["n"] += 1
+        st = db.execute(select(PipelineState).where(PipelineState.version_id == vid)).scalar_one()
+        st.status = "awaiting_director"
+        db.flush()
+        return st
+
+    monkeypatch.setattr(orchestrator, "run_dispatch", fake_run_dispatch)
+
+    await pipeline_runner._run(version.id)
+
+    assert calls["n"] == 1  # no continuation loop
+    assert len([p for _, p in fake_reg.events if p["type"] == "state_changed"]) == 1
+
+
 async def test_run_unexpected_exception_marks_blocked(db_session, monkeypatch):
     version = _make_version(db_session)
     _seed_working_state(db_session, version.id)

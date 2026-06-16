@@ -434,11 +434,12 @@ def _directive_for(stage: str, flow_type: str = "new_version") -> str:
     # proceeding on its own (reuse the flag-the-gap-and-STOP pattern).
     if stage == "kickoff" and flow_type == "fast_fix":
         return (
-            "RÝCHLA OPRAVA (fast-fix lane, F-009): pokyn Directora (smernica) je v kickoff správe — je to "
-            "TVOJ celý zadanie. Najprv ho zatrieď (escalation guard §3): je malý a jednoznačný (jeden "
+            "RÝCHLA OPRAVA (fast-fix lane, F-009): pokyn Directora (smernica) je VYŠŠIE v tomto brífe — je "
+            "to TVOJ celý zadanie. Najprv ho zatrieď (escalation guard §3): je malý a jednoznačný (jeden "
             "koncept, žiadna multi-modul / schéma / nová závislosť zmena, žiadna nejasnosť požiadavky)?\n"
-            "- ÁNO → potvrď, že je vhodný pre rýchlu opravu, a čakaj na schválenie Directora na štart "
-            "buildu. NEDISPATCHUJ Návrhára ani task_plan.\n"
+            "- ÁNO → potvrď, že je vhodný pre rýchlu opravu (NEnastavuj kind=blocked). Engine ťa "
+            "AUTOMATICKY posunie do buildu — submission Directora JE autorizácia, NEčakaj na ďalšie "
+            "schválenie. NEDISPATCHUJ Návrhára ani task_plan.\n"
             "- NIE (netriviálny: nejednoznačný, multi-modul, mení špecifikované správanie vyžadujúce návrh, "
             "schéma/dependency zmena) → ZASTAV: nepokračuj, nastav kind=blocked a pripoj štruktúrovaný "
             "`coordinator_directive` (triage_class=director_decision, proposed_action="
@@ -458,6 +459,18 @@ def _directive_for(stage: str, flow_type: str = "new_version") -> str:
             "a NIKDY neblokuje build."
         )
     return base
+
+
+def _prepend_fast_fix_directive(db: Session, version_id: uuid.UUID, prompt: str) -> str:
+    """Prepend the Director's fast-fix directive onto the Coordinator's **kickoff** brief (F-009 §1,
+    CR-NS-097). The kickoff agent runs a FRESH session (start deletes the project's sessions, so there is
+    no thread to ``--resume``) — the brief is its ONLY context. Without the directive in the brief the
+    escalation-guard triage is blind (the live run asked "chýba samotný popis toho, čo mám opraviť"). A
+    no-op when no directive is recorded (the brief's generic triage instruction still stands)."""
+    directive = fast_fix.kickoff_directive(db, version_id)
+    if not directive:
+        return prompt
+    return f"## Pokyn Directora (smernica na rýchlu opravu)\n\n{directive}\n\n---\n\n{prompt}"
 
 
 def _augment_brief_with_backlog(db: Session, version_id: uuid.UUID, stage: str, prompt: str) -> str:
@@ -1658,6 +1671,10 @@ async def run_dispatch(
         prompt = directive
     else:
         prompt = _augment_brief_with_backlog(db, state.version_id, stage, _directive_for(stage, state.flow_type))
+        # Fast-Fix Lane (F-009 §1, CR-NS-097): the fresh-session kickoff agent's only context is this brief —
+        # prepend the Director directive so the escalation-guard triage acts on the ACTUAL fix, not blind.
+        if stage == "kickoff" and state.flow_type == "fast_fix":
+            prompt = _prepend_fast_fix_directive(db, state.version_id, prompt)
     result = await invoke_agent_with_parse_retry(
         db,
         version_id=state.version_id,
@@ -1697,6 +1714,18 @@ async def run_dispatch(
         state.status = "blocked"
         state.next_action = f"Agent '{actor}' sa pýta: {question_text}"
         db.flush()
+        return state
+
+    if stage == "kickoff" and state.flow_type == "fast_fix":
+        # Fast-Fix Lane (F-009 §2, CR-NS-097): a fast_fix kickoff that did NOT escalate (the non-trivial
+        # case is the question/blocked branch above — convert-to-full-version proposal) is the Coordinator's
+        # "trivial & clear" triage. The Director's submission IS the authorization, so AUTO-proceed to build
+        # with NO awaiting_director gate. Mirror the approve(kickoff→build) path: advance + materialize the
+        # single Task, then hand back agent_working so the runner runs the build round in THIS same
+        # single-flight dispatch (a fresh schedule_dispatch would be skipped by the single-flight guard).
+        state.current_stage = _next_stage("kickoff", state.flow_type)  # → build
+        fast_fix.ensure_build_task(db, state.version_id)
+        _begin_dispatch(db, state)  # status=agent_working at build → pipeline_runner continues the chain
         return state
 
     if stage == "task_plan" and result.kind == "gate_report":
@@ -2665,13 +2694,29 @@ def _fetch_cross_cutting_rules(db: Session, version_id: uuid.UUID) -> Optional[s
     return msg.payload.get("cross_cutting_rules")
 
 
-def _directive_for_build_task(task: Task, cross_cutting_rules: Optional[str], prior_failures: list[str]) -> str:
+def _directive_for_build_task(
+    task: Task, cross_cutting_rules: Optional[str], prior_failures: list[str], flow_type: str = "new_version"
+) -> str:
     """Per-task brief for the Programmer (§6): one task, its description, the authoritative
-    spec to consult, the cross-cutting block, and (on a retry) the prior attempts' reasons."""
+    spec to consult, the cross-cutting block, and (on a retry) the prior attempts' reasons.
+
+    ``flow_type='fast_fix'`` (F-009 §3, CR-NS-097): the Director directive (the task description) IS the
+    authority — there is no spec section to study, and the Programmer must EXECUTE it directly rather than
+    debate it on semantic/opinion grounds (the live run blocked asking "naozaj to chceš premenovať?")."""
     parts = [f"Programátor, postav JEDNU úlohu (TASK #{task.number}): {task.title}"]
     if task.description:
         parts.append(f"Popis úlohy: {task.description}")
-    parts.append("Naštuduj relevantnú sekciu autoritatívneho špecu (docs/specs/) pre túto úlohu — postav presne ju.")
+    if flow_type == "fast_fix":
+        parts.append(
+            "RÝCHLA OPRAVA (fast-fix lane, F-009): pokyn Directora vyššie je AUTORITATÍVNY — VYKONAJ ho "
+            "priamo. NESPOCHYBŇUJ ho z názorových / sémantických dôvodov (napr. „Firmy je správne, naozaj to "
+            "chceš premenovať?“). ZASTAV (kind=blocked) IBA ak je to technicky nemožné, alebo naozaj nevieš "
+            "identifikovať ČO zmeniť — NIE preto, že s pokynom nesúhlasíš."
+        )
+    else:
+        parts.append(
+            "Naštuduj relevantnú sekciu autoritatívneho špecu (docs/specs/) pre túto úlohu — postav presne ju."
+        )
     if cross_cutting_rules:
         parts.append(f"Prierezové pravidlá (platia pre KAŽDÚ úlohu, dodrž ich):\n{cross_cutting_rules}")
     if prior_failures:
@@ -2960,6 +3005,15 @@ async def _run_build_round(
             return state  # Director intervened (pause/return) — land cleanly at a task boundary
         task = task_service.get_next_todo_task(db, version_id)
         if task is None:  # no todo task remains → final build sign-off
+            # Fast-Fix Lane (F-009, CR-NS-097): a CLEAN fast_fix build AUTO-advances to release with NO
+            # Director approve gate — the one-touch flow ends at the Director's uat_accept. Reaching here for
+            # a fast_fix means the single Task is `done` (a failed task HALTs the loop earlier, never getting
+            # here), so there is no open finding to gate on. Hand back agent_working so the runner runs the
+            # release (Coordinator-verify) turn in THIS dispatch. Other flows settle for the final sign-off.
+            if state.flow_type == "fast_fix":
+                state.current_stage = _next_stage("build", state.flow_type)  # → release
+                _begin_dispatch(db, state)  # agent_working at release → pipeline_runner continues the chain
+                return state
             # §A.2 site 2 (build completion): Coordinator synthesis before settling.
             synthesis = await _coordinator_synthesis(db, state, trigger="build", completed=True, on_message=on_message)
             state.status = "awaiting_director"
@@ -3045,7 +3099,7 @@ async def _run_build_round(
                 prompt = pending_directive  # Director's framed return/answer for the resumed task
                 pending_directive = None  # consume once — later attempts/tasks use generated briefs
             else:
-                prompt = _directive_for_build_task(task, cross_cutting, prior_failures)
+                prompt = _directive_for_build_task(task, cross_cutting, prior_failures, state.flow_type)
             result = await invoke_agent_with_parse_retry(
                 db,
                 version_id=version_id,
@@ -3282,6 +3336,11 @@ async def apply_action(
         # in the kickoff payload so the Coordinator triages it and the build-reuse step can materialize
         # the single minimal Task from it. ``None`` for every other flow → kickoff payload unchanged.
         directive = payload.get("directive") if flow_type == "fast_fix" else None
+        # Fast-Fix Lane (F-009 §1, CR-NS-097): the Director directive IS the kickoff message the
+        # Coordinator triages — carry it in the human-readable CONTENT (not just the payload) so it shows
+        # on the board and the kickoff brief's "smernica je vyššie" claim is honoured. Other flows keep the
+        # generic kickoff content.
+        kickoff_content = directive if (flow_type == "fast_fix" and directive) else "Spustenie pipeline."
         state = PipelineState(
             version_id=version_id,
             flow_type=flow_type,
@@ -3299,7 +3358,7 @@ async def apply_action(
             author="director",
             recipient="coordinator",
             kind="kickoff",
-            content="Spustenie pipeline.",
+            content=kickoff_content,
             payload={"flow_type": flow_type, **({"directive": directive} if directive else {})},
         )
         # WS-B1 (CR-NS-029): a new-version kickoff starts every agent fresh — drop all of the project's

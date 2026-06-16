@@ -150,6 +150,24 @@ async def _run(version_id: uuid.UUID, directive: str | None = None, gate_e_dispa
                 db, version_id, on_event, directive, gate_e_dispatch=gate_e_dispatch, on_message=on_message
             )
             db.commit()
+            # Fast-Fix one-touch auto-chain (CR-NS-097): run_dispatch returns status=agent_working ONLY when
+            # it DELIBERATELY auto-advanced the stage (fast_fix: kickoff→build on a trivial triage,
+            # build→release on a clean build) and wants the next stage run in THIS same single-flight task —
+            # no Director gate between them. Continue dispatching with a stage-correct activity callback,
+            # broadcasting each intermediate state so the board steps kickoff→build→release live, until it
+            # settles (release → awaiting_director for the Director's single uat_accept). Bounded as a
+            # backstop: every other path always settles, so this never fires for new_version/cr/bug.
+            guard = 0
+            while (
+                state is not None and state.status == "agent_working" and guard < len(orchestrator.FAST_FIX_STAGE_ORDER)
+            ):
+                guard += 1
+                await _broadcast_state(version_id, state)
+                on_event = _activity_callback(version_id, state.current_stage, state.current_actor)
+                state = await orchestrator.run_dispatch(
+                    db, version_id, on_event, gate_e_dispatch=gate_e_dispatch, on_message=on_message
+                )
+                db.commit()
         except Exception as exc:  # noqa: BLE001 — unexpected; degrade to blocked, don't hang UI.
             logger.exception("run_dispatch failed for version %s", version_id)
             db.rollback()

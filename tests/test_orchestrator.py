@@ -4240,9 +4240,29 @@ async def test_fast_fix_start_records_directive_in_kickoff(db_session, fake_clau
     kickoff = [m for m in _msgs(db_session, version.id) if m.kind == "kickoff" and m.author == "director"][-1]
     assert kickoff.payload["flow_type"] == "fast_fix"
     assert kickoff.payload["directive"] == "Oprav preklep v hlavičke faktúry"
+    # CR-NS-097 §1: the directive is ALSO the human-readable kickoff content (not the generic placeholder).
+    assert kickoff.content == "Oprav preklep v hlavičke faktúry"
 
 
-async def test_fast_fix_kickoff_approve_advances_to_build_and_materializes_task(db_session, fake_claude):
+async def test_fast_fix_directive_reaches_kickoff_triage(db_session, fake_claude):
+    # CR-NS-097 §1: the kickoff agent runs a fresh session — the Director directive must be IN the brief
+    # (prompt) it triages, else the escalation guard is blind ("chýba samotný popis toho, čo mám opraviť").
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(
+        db_session,
+        version_id=version.id,
+        action="start",
+        payload={"flow_type": "fast_fix", "directive": "Premenuj 'Firmy' na 'Dodávatelia'"},
+    )
+    fake_claude.response = _fast_fix_kickoff_ok()
+    await orchestrator.run_dispatch(db_session, version.id)
+    # the FIRST (kickoff) claude call's prompt carries the directive verbatim
+    assert "Premenuj 'Firmy' na 'Dodávatelia'" in fake_claude.calls[0]["prompt"]
+
+
+async def test_fast_fix_kickoff_auto_advances_to_build_and_materializes_task(db_session, fake_claude):
+    # CR-NS-097 §2: a trivial+clear triage AUTO-proceeds to build — NO awaiting_director gate at kickoff
+    # (the Director's submission IS the authorization). The runner then continues the chain.
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(
         db_session,
@@ -4251,21 +4271,20 @@ async def test_fast_fix_kickoff_approve_advances_to_build_and_materializes_task(
         payload={"flow_type": "fast_fix", "directive": "Oprav preklep v hlavičke faktúry"},
     )
     fake_claude.response = _fast_fix_kickoff_ok()
-    await orchestrator.run_dispatch(db_session, version.id)
-    state = orchestrator._get_state(db_session, version.id)
-    assert state.status == "awaiting_director" and state.current_stage == "kickoff"
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    # auto-advanced to build, handed back agent_working for the runner — never settled at kickoff.
+    assert state.current_stage == "build" and state.status == "agent_working"
 
-    # approve → build (NOT gate_a) — the ONE minimal Task is materialized from the directive.
-    state = await orchestrator.apply_action(db_session, version_id=version.id, action="approve")
-    assert state.current_stage == "build"
+    # the ONE minimal Task is materialized from the directive (no Director approve, no task_plan).
     task = task_service.get_next_todo_task(db_session, version.id)
     assert task is not None
     assert "preklep" in task.description and task.task_type == "backend"
-    # exactly one task (no Designer task_plan decomposition)
     assert task_service.count_tasks(db_session, feat_id=task.feat_id) == 1
 
 
 async def test_fast_fix_skips_gates_kickoff_to_build_to_release(db_session, fake_claude, monkeypatch):
+    # CR-NS-097: the one-touch auto-chain. Each run_dispatch advances ONE stage and hands back
+    # agent_working (the pipeline_runner drives the loop in production); here we drive it manually.
     monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "a" * 40)
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(
@@ -4274,22 +4293,24 @@ async def test_fast_fix_skips_gates_kickoff_to_build_to_release(db_session, fake
         action="start",
         payload={"flow_type": "fast_fix", "directive": "Oprav zaokrúhľovanie DPH"},
     )
+    # kickoff trivial triage → AUTO-advance to build (skipped gate_a-e + task_plan; no Director approve).
     fake_claude.response = _fast_fix_kickoff_ok()
-    await orchestrator.run_dispatch(db_session, version.id)
-    state = await orchestrator.apply_action(db_session, version_id=version.id, action="approve")
-    assert state.current_stage == "build"  # skipped gate_a-e + task_plan
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert state.current_stage == "build" and state.status == "agent_working"
 
-    # build the single task (coordinator verify), settle, then approve → release (skips gate_g).
+    # build the single task (coordinator verify) → clean build AUTO-advances to release (skips gate_g; no
+    # approve). The Director never touches kickoff or build.
     fake_claude.response = _fast_fix_build_fake()
     state = await orchestrator.run_dispatch(db_session, version.id)
-    assert state.status == "awaiting_director" and state.current_stage == "build"
+    assert state.current_stage == "release" and state.status == "agent_working"  # NOT gate_g, NOT awaiting
     assert task_service.get_next_todo_task(db_session, version.id) is None  # the task is done
 
-    state = await orchestrator.apply_action(db_session, version_id=version.id, action="approve")
-    assert state.current_stage == "release"  # NOT gate_g
+    # release (coordinator) settles awaiting_director for the Director's SINGLE uat_accept touch.
+    fake_claude.response = _block(stage="release", kind="done", summary="pripravené na akceptáciu", awaiting="director")
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert state.current_stage == "release" and state.status == "awaiting_director"
 
-    # release → (coordinator settles) → uat_accept → done (the patch version is released).
-    _settle(db_session, version.id)  # the release dispatch would settle awaiting_director
+    # uat_accept → done (the patch version is released) — the ONE Director touch.
     state = await orchestrator.apply_action(db_session, version_id=version.id, action="uat_accept")
     assert state.current_stage == "done" and state.status == "done"
 
@@ -4304,8 +4325,7 @@ async def test_fast_fix_build_verify_uses_coordinator_not_auditor(db_session, fa
         payload={"flow_type": "fast_fix", "directive": "Oprav VS sanitizáciu"},
     )
     fake_claude.response = _fast_fix_kickoff_ok()
-    await orchestrator.run_dispatch(db_session, version.id)
-    await orchestrator.apply_action(db_session, version_id=version.id, action="approve")  # → build + task
+    await orchestrator.run_dispatch(db_session, version.id)  # kickoff → AUTO build + task (CR-NS-097 §2)
     task = task_service.get_next_todo_task(db_session, version.id)
 
     fake_claude.response = _fast_fix_build_fake()
@@ -4360,6 +4380,21 @@ async def test_fast_fix_escalation_blocks_and_proposes_convert(db_session, fake_
     assert coord.payload["coordinator_directive"]["proposed_action"] == "convert_to_full_version"
     # no build task was materialized (the escalation never reached build).
     assert task_service.get_next_todo_task(db_session, version.id) is None
+
+
+def test_fast_fix_build_brief_marks_directive_authoritative():
+    # CR-NS-097 §3: the fast_fix build brief tells the Programmer the directive is AUTHORITATIVE — execute
+    # it, do NOT debate semantics. The new_version brief is UNCHANGED (studies the spec, no such note).
+    from types import SimpleNamespace
+
+    task = SimpleNamespace(number=1, title="Premenuj 'Firmy' na 'Dodávatelia'", description="Premenuj label v UI.")
+    ff = orchestrator._directive_for_build_task(task, None, [], flow_type="fast_fix")
+    assert "AUTORITATÍVNY" in ff and "NESPOCHYBŇUJ" in ff
+    assert "docs/specs/" not in ff  # no spec section to study on a fast-fix
+
+    nv = orchestrator._directive_for_build_task(task, None, [])  # default new_version
+    assert "AUTORITATÍVNY" not in nv
+    assert "docs/specs/" in nv  # regression: full-pipeline brief still points at the authoritative spec
 
 
 async def test_new_version_build_still_uses_auditor_regression(db_session, fake_claude, monkeypatch):

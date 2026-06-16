@@ -185,3 +185,19 @@ def test_ensure_build_task_missing_directive_falls_back(db_session):
 def test_ensure_build_task_unknown_version_raises(db_session):
     with pytest.raises(ValueError):
         fast_fix.ensure_build_task(db_session, uuid.uuid4())
+
+
+# ── kickoff_directive (public — read by the orchestrator to seed the kickoff brief, CR-NS-097) ──
+
+
+def test_kickoff_directive_reads_payload(db_session):
+    version = _seed_version_with_kickoff(db_session, "Premenuj 'Firmy' na 'Dodávatelia'")
+    assert fast_fix.kickoff_directive(db_session, version.id) == "Premenuj 'Firmy' na 'Dodávatelia'"
+
+
+def test_kickoff_directive_none_without_kickoff(db_session):
+    project, _ = _make_project(db_session, version_numbers=["0.1.0"])
+    version = Version(project_id=project.id, version_number="0.1.1")
+    db_session.add(version)
+    db_session.flush()
+    assert fast_fix.kickoff_directive(db_session, version.id) is None
