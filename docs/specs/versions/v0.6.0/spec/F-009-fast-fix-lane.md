@@ -14,9 +14,12 @@ through the full pipeline costs ~10–20 min here.
 
 ## 2. Director-approved design decisions
 - **D1 — Shape:** the flow above; drop Designer/Customer/Auditor+Dual-Build.
-- **D2 — Entry:** Director flags the request as a fast fix; **Coordinator escalation guard** — if it proves
-  non-trivial (ambiguous, multi-module, changes spec'd behaviour needing Designer thought, schema/dep change), it
-  **STOPs and proposes converting to a full version/pipeline** (does not proceed on its own).
+- **D2 — Entry & one-touch (refined CR-NS-097):** the Director submits the fast fix **with the directive** — that
+  submission **IS the authorization** (no separate kickoff approval). The directive rides in the kickoff message
+  content + is prepended to the Coordinator's kickoff brief. The **Coordinator escalation guard** triages: trivial &
+  clear → **AUTO-advance to build (no Director gate)**; non-trivial (ambiguous, multi-module, changes spec'd behaviour
+  needing Designer thought, schema/dep change) → **STOP + propose converting to a full version** (never proceeds on its
+  own). Net: a single Director touch — `submit → [auto: triage → build → Coordinator-verify → release] → uat_accept`.
 - **D3 — Recording:** a **traceable PATCH version** (`vX.Y.Z → vX.Y.Z+1`) with the full trail (directive →
   Implementer report+self-verify → Coordinator verify → UAT/PROD); shown as a distinct fast-lane item on the board.
 - **D4 — UX:** a **"Rýchla oprava"** entry on the project page; one prompt → board shows live status + "kto je na rade".
@@ -34,14 +37,17 @@ dispatch + per-task build-loop + verify infra is reused wholesale.
   new_version.
 - **Entry** — FE "Rýchla oprava" → backend: **auto-create a PATCH version** (`vX.Y.Z+1` derived from the project's
   latest version_number; semver patch bump helper) → `apply_action(version_id, "start", {flow_type:"fast_fix",
-  directive:"<text>"})`.
+  directive:"<text>"})`. The directive is carried into the **kickoff message content** AND prepended to the
+  Coordinator's kickoff brief (CR-NS-097 — the fresh kickoff agent's only context), so it triages the actual fix.
 - **Escalation guard (kickoff/coordinator)** — the Coordinator triages: small & obvious? Heuristic = single concern,
-  no multi-module / schema / new-dep, no requirement ambiguity. **Non-trivial → `status=awaiting_director` + a
-  structured proposal to convert to a full version** (reuse the E7 `coordinator_directive` + the flag-the-gap-and-STOP
-  pattern). OK → proceed to build.
+  no multi-module / schema / new-dep, no requirement ambiguity. **Trivial & clear → AUTO-advance to build (NO
+  `awaiting_director` gate — the submission is the authorization, CR-NS-097)**. **Non-trivial → `status=awaiting_director`
+  + a structured proposal to convert to a full version** (reuse the E7 `coordinator_directive` + flag-the-gap-and-STOP).
 - **Build reuse** — auto-create **ONE minimal Task** from the Director directive (the directive = the task brief) so the
-  existing build loop (`_run_build_round`, per-task dispatch + verify + auto-fix ≤5) runs unchanged; the Implementer
-  self-verifies (build/lint/test) per its charter. NO Designer task-plan decomposition.
+  existing build loop (`_run_build_round`, per-task dispatch + verify + auto-fix ≤5) runs unchanged. The Programmer
+  brief marks the directive **AUTHORITATIVE** — execute it directly, do NOT debate/second-guess it (CR-NS-097); STOP
+  only if technically impossible or genuinely unclear WHAT to change. Self-verify (build/lint/test) per charter. A
+  **clean build AUTO-advances to release** (no approve) — release settles for the single `uat_accept`. NO Designer task-plan decomposition.
 - **Coordinator verify** — on build-task settle, the Coordinator independently verifies (reuse the `verify_done` /
   coordinator-review path) — NOT a full Auditor, **NO Dual-Build**.
 - **Release** — `release` stage → Director `uat_accept` (`orchestrator.py:3465+`) → `done`; the patch version is released.
