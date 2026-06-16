@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import subprocess
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
@@ -1602,27 +1604,67 @@ def _begin_dispatch(db: Session, state: PipelineState) -> None:
     db.flush()
 
 
-# Fast-Fix UAT auto-deploy (F-009, CR-NS-098). The lane redeploys UAT via the EXISTING tool
-# ``scripts/uat-deploy.py`` (redeploy-safe by default: preserves secrets, owns the version). The script
-# lives in THIS repo's tree; the backend image does not COPY scripts/, but ``/opt/projects`` is mounted
-# (with /var/run/docker.sock + /opt/uat), so it is reachable at the mounted repo path. Module-level so a
-# test can monkeypatch the path; the timeout is a backstop over the script's own waits (~1–2 min build).
-UAT_DEPLOY_SCRIPT: Path = claude_agent.PROJECTS_ROOT / "nex-studio" / "scripts" / "uat-deploy.py"
+# Fast-Fix UAT auto-deploy (F-009, CR-NS-098/-101). The lane REDEPLOYS an existing UAT — it does NOT
+# re-provision it. We run a plain ``docker compose up -d --build --force-recreate`` against the UAT's OWN
+# ``/opt/uat/<slug>/docker-compose.yml`` (hand-authored like NEX Ledger OR uat-deploy.py-provisioned like
+# NEX Inbox), so there is no template re-render, no port reallocation, no nginx rewrite — the working UAT
+# is preserved (uat-deploy.py is a PROVISIONER and would overwrite all three). ``/opt/uat`` +
+# /var/run/docker.sock are mounted into the backend image, so the compose is reachable. The FE build-arg
+# is stamped via ``VITE_APP_VERSION`` (post-commit version scheme). Module-level so tests can monkeypatch
+# the path/existence; the timeout backstops the docker build (~1–2 min).
+UAT_ROOT: Path = Path("/opt/uat")
 UAT_DEPLOY_TIMEOUT = 900
 
 
+def _uat_compose_path(uat_slug: str) -> Path:
+    """The UAT's existing compose file — ``/opt/uat/<uat_slug>/docker-compose.yml``."""
+    return UAT_ROOT / uat_slug / "docker-compose.yml"
+
+
+def _uat_compose_exists(uat_slug: str) -> bool:
+    """True if the UAT has a redeployable compose (hand-authored or provisioned)."""
+    return _uat_compose_path(uat_slug).is_file()
+
+
+def _fe_app_version(project_slug: str) -> str:
+    """``0.1.<commit-count>`` for the project repo — the post-commit version the FE build-arg stamps.
+
+    ``<commit-count>`` = ``git -C /opt/projects/<slug> rev-list --count HEAD``. Falls back to ``0.1.0`` if
+    git / the repo is unavailable — the redeploy still runs, only the FE version label is generic (never a
+    hard failure over a missing counter).
+    """
+    project_root = claude_agent.PROJECTS_ROOT / project_slug
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(project_root), "rev-list", "--count", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "0.1.0"
+    count = result.stdout.strip()
+    return f"0.1.{count}" if result.returncode == 0 and count.isdigit() else "0.1.0"
+
+
 async def _run_uat_deploy(project_slug: str, uat_slug: str) -> tuple[bool, str]:
-    """Run ``scripts/uat-deploy.py <uat_slug> --project <project_slug>`` as an async subprocess.
+    """Plain redeploy of the UAT's EXISTING compose (``docker compose -f … up -d --build --force-recreate``).
+
+    Respects ``/opt/uat/<uat_slug>/docker-compose.yml`` as-is — no re-render, no port reallocation, no
+    nginx rewrite (unlike the uat-deploy.py provisioner) — and stamps the FE build-arg via
+    ``VITE_APP_VERSION`` (post-commit version scheme).
 
     Returns ``(ok, detail)``: ``ok`` is True on exit 0; ``detail`` is ``"OK"`` on success, else a short
     tail of the combined output (the deploy error to surface to the Director). Never raises — a spawn
     failure / timeout becomes ``(False, reason)`` so the caller settles to ``blocked`` rather than hanging.
     Async (``create_subprocess_exec`` + ``await``) so the ~1–2 min docker build never blocks the event loop.
     """
-    cmd = ["python3", str(UAT_DEPLOY_SCRIPT), uat_slug, "--project", project_slug]
+    compose = _uat_compose_path(uat_slug)
+    cmd = ["docker", "compose", "-f", str(compose), "up", "-d", "--build", "--force-recreate"]
+    env = {**os.environ, "VITE_APP_VERSION": _fe_app_version(project_slug)}
     try:
         proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=env
         )
     except OSError as exc:
         return False, f"deploy sa nepodarilo spustiť: {exc}"
@@ -1675,6 +1717,23 @@ async def _fast_fix_auto_deploy(
             await on_message(msg)
         state.status = "awaiting_director"
         state.next_action = "Director: over a akceptuj (UAT deploy preskočený — projekt nemá UAT)."
+        return
+
+    if not _uat_compose_exists(uat_slug):
+        msg = _record_message(
+            db,
+            version_id=version_id,
+            stage="release",
+            author="system",
+            recipient="director",
+            kind="notification",
+            content=f"UAT compose pre '{uat_slug}' nenájdený — preskakujem deploy.",
+            payload={"uat_deploy": {"uat_slug": uat_slug, "skipped": True, "reason": "compose_missing"}},
+        )
+        if on_message is not None:
+            await on_message(msg)
+        state.status = "awaiting_director"
+        state.next_action = f"Director: over a akceptuj (UAT deploy preskočený — compose pre '{uat_slug}' chýba)."
         return
 
     ok, detail = await _run_uat_deploy(project_slug, uat_slug)

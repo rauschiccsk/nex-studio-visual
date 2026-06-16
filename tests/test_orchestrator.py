@@ -4455,6 +4455,7 @@ async def test_fast_fix_release_auto_deploys_uat_when_slug_set(db_session, fake_
         calls.append((project_slug, uat_slug))
         return True, "OK"
 
+    monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: True)
     monkeypatch.setattr(orchestrator, "_run_uat_deploy", _fake_deploy)
     fake_claude.response = _block(stage="release", kind="done", summary="hotovo", awaiting="director")
     state = await orchestrator.run_dispatch(db_session, version.id)
@@ -4480,6 +4481,7 @@ async def test_fast_fix_release_gate_report_verify_then_deploys(db_session, fake
         calls.append((project_slug, uat_slug))
         return True, "OK"
 
+    monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: True)
     monkeypatch.setattr(orchestrator, "_run_uat_deploy", _fake_deploy)
     # release coordinator returns gate_report → verify judge (same fake, gate_report = PASS) → deploy.
     fake_claude.response = _block(stage="release", kind="gate_report", summary="overené", awaiting="director")
@@ -4512,6 +4514,34 @@ async def test_fast_fix_release_skips_deploy_when_no_uat_slug(db_session, fake_c
     assert "nakonfigurované" in note.content
 
 
+async def test_fast_fix_release_skips_deploy_when_compose_missing(db_session, fake_claude, monkeypatch):
+    # CR-NS-101: uat_slug set but /opt/uat/<slug>/docker-compose.yml absent → skip gracefully (note +
+    # await uat_accept, never blocked) — a missing compose is not the fix's fault.
+    version, project = await _drive_fast_fix_to_release(db_session, fake_claude, monkeypatch)
+    project.uat_slug = "ledger"
+    db_session.flush()
+    called = False
+
+    async def _fake_deploy(project_slug, uat_slug):
+        nonlocal called
+        called = True
+        return True, "OK"
+
+    monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: False)
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _fake_deploy)
+    fake_claude.response = _block(stage="release", kind="done", summary="hotovo", awaiting="director")
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert called is False  # no redeploy attempted — compose missing
+    assert state.current_stage == "release" and state.status == "awaiting_director"
+    note = _uat_deploy_note(db_session, version.id)
+    assert note is not None and note.payload["uat_deploy"].get("skipped") is True
+    assert note.payload["uat_deploy"].get("reason") == "compose_missing"
+    # the single Director touch still completes the lane.
+    state = await orchestrator.apply_action(db_session, version_id=version.id, action="uat_accept")
+    assert state.current_stage == "done" and state.status == "done"
+
+
 async def test_fast_fix_release_deploy_failure_blocks(db_session, fake_claude, monkeypatch):
     # CR-NS-098: a non-zero / unhealthy deploy is SURFACED to the Director (blocked + the error in
     # next_action) — never hidden, never silently marked done.
@@ -4522,6 +4552,7 @@ async def test_fast_fix_release_deploy_failure_blocks(db_session, fake_claude, m
     async def _fake_deploy(project_slug, uat_slug):
         return False, "exit 1: docker build zlyhal"
 
+    monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: True)
     monkeypatch.setattr(orchestrator, "_run_uat_deploy", _fake_deploy)
     fake_claude.response = _block(stage="release", kind="done", summary="hotovo", awaiting="director")
     state = await orchestrator.run_dispatch(db_session, version.id)
@@ -4571,25 +4602,38 @@ class _FakeProc:
         pass
 
 
-async def test_run_uat_deploy_invokes_script_and_maps_success(monkeypatch):
-    # CR-NS-098: mock the subprocess — command = the EXISTING tool `<uat_slug> --project <slug>`; exit 0 → (True, "OK").
+async def test_run_uat_deploy_redeploys_existing_compose_with_version(monkeypatch):
+    # CR-NS-101: plain redeploy of the EXISTING compose (NOT uat-deploy.py) — exactly
+    # `docker compose -f /opt/uat/<slug>/docker-compose.yml up -d --build --force-recreate`, with the FE
+    # build-arg stamped via VITE_APP_VERSION. Exit 0 → (True, "OK").
     captured = {}
 
-    async def _fake_exec(*cmd, stdout=None, stderr=None):
+    async def _fake_exec(*cmd, stdout=None, stderr=None, env=None):
         captured["cmd"] = cmd
+        captured["env"] = env
         return _FakeProc(0, b"deploy log tail")
 
     monkeypatch.setattr(orchestrator.asyncio, "create_subprocess_exec", _fake_exec)
+    monkeypatch.setattr(orchestrator, "_fe_app_version", lambda slug: "0.1.42")
     ok, detail = await orchestrator._run_uat_deploy("nex-ledger", "ledger")
 
     assert ok is True and detail == "OK"
-    assert str(orchestrator.UAT_DEPLOY_SCRIPT) in captured["cmd"]
-    assert "ledger" in captured["cmd"]
-    assert "--project" in captured["cmd"] and "nex-ledger" in captured["cmd"]
+    assert list(captured["cmd"]) == [
+        "docker",
+        "compose",
+        "-f",
+        "/opt/uat/ledger/docker-compose.yml",
+        "up",
+        "-d",
+        "--build",
+        "--force-recreate",
+    ]
+    assert captured["env"]["VITE_APP_VERSION"] == "0.1.42"  # FE build-arg stamped
+    assert "uat-deploy.py" not in " ".join(captured["cmd"])  # no provisioner invocation
 
 
 async def test_run_uat_deploy_nonzero_exit_returns_failure(monkeypatch):
-    async def _fake_exec(*cmd, stdout=None, stderr=None):
+    async def _fake_exec(*cmd, stdout=None, stderr=None, env=None):
         return _FakeProc(2, b"boom: docker build failed")
 
     monkeypatch.setattr(orchestrator.asyncio, "create_subprocess_exec", _fake_exec)
@@ -4599,10 +4643,37 @@ async def test_run_uat_deploy_nonzero_exit_returns_failure(monkeypatch):
 
 
 async def test_run_uat_deploy_spawn_failure_returns_failure(monkeypatch):
-    async def _fake_exec(*cmd, stdout=None, stderr=None):
-        raise OSError("python3 not found")
+    async def _fake_exec(*cmd, stdout=None, stderr=None, env=None):
+        raise OSError("docker not found")
 
     monkeypatch.setattr(orchestrator.asyncio, "create_subprocess_exec", _fake_exec)
     ok, detail = await orchestrator._run_uat_deploy("nex-ledger", "ledger")
 
     assert ok is False and "nepodarilo spustiť" in detail
+
+
+def test_fe_app_version_from_git_count(monkeypatch):
+    # CR-NS-101: VITE_APP_VERSION = 0.1.<git rev-list --count HEAD>.
+    class _R:
+        returncode = 0
+        stdout = "123\n"
+
+    monkeypatch.setattr(orchestrator.subprocess, "run", lambda *a, **k: _R())
+    assert orchestrator._fe_app_version("nex-ledger") == "0.1.123"
+
+
+def test_fe_app_version_falls_back_when_git_unavailable(monkeypatch):
+    def _boom(*a, **k):
+        raise OSError("git not found")
+
+    monkeypatch.setattr(orchestrator.subprocess, "run", _boom)
+    assert orchestrator._fe_app_version("nex-ledger") == "0.1.0"
+
+
+def test_fe_app_version_falls_back_on_nonzero_git(monkeypatch):
+    class _R:
+        returncode = 128
+        stdout = ""
+
+    monkeypatch.setattr(orchestrator.subprocess, "run", lambda *a, **k: _R())
+    assert orchestrator._fe_app_version("missing-repo") == "0.1.0"
