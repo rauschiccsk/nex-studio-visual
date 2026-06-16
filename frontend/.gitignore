@@ -25,3 +25,7 @@ dist-ssr
 
 # TypeScript build info
 *.tsbuildinfo
+
+# Transient OpenAPI dump for FE codegen (v0.7.0 R2) — derived from the backend, never committed.
+# The committed contract artifact is src/services/api/pipeline.generated.ts (generated from this).
+openapi.json

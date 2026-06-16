@@ -4,6 +4,7 @@
 // mirror backend/schemas/pipeline.py exactly.
 
 import api from "../api";
+import type { components } from "./pipeline.generated";
 import type { PaginatedResponse } from "../../types/common";
 
 // Debug-attach (CR-NS-018 §10) targets ANY pipeline agent's orchestrator session — a deliberately
@@ -11,43 +12,26 @@ import type { PaginatedResponse } from "../../types/common";
 // `PipelineActor` (that includes customer/director, which have no attachable orchestrator session).
 export type DebugAttachRole = "coordinator" | "designer" | "implementer" | "auditor";
 
-// ── stage / actor / status enums (mirror backend CHECK constraints) ──────────
+// ── stage / actor / status enums (GENERATED — single source of truth, v0.7.0 R2) ─────────────
+//
+// These unions are no longer hand-mirrored from the backend CHECK constraints; they are derived
+// from `pipeline.generated.ts` (produced by `npm run codegen` ← OpenAPI ← the Pydantic `Literal`
+// schemas in backend/schemas/pipeline.py). `pipeline.ts` stays the stable import surface, so
+// consumers (ExchangePanel.tsx et al.) import these names unchanged while the VALUES track the
+// backend automatically — a BE change that isn't regenerated fails the CI drift-gate (R2-c).
+type PipelineSchemas = components["schemas"];
 
-export type PipelineStage =
-  | "kickoff"
-  | "gate_a"
-  | "gate_b"
-  | "gate_c"
-  | "gate_d"
-  | "gate_e"
-  | "task_plan"
-  | "build"
-  | "gate_g"
-  | "release"
-  | "done";
+export type PipelineStage = PipelineSchemas["PipelineStateRead"]["current_stage"];
 
-export type PipelineActor =
-  | "coordinator"
-  | "designer"
-  | "customer"
-  | "implementer"
-  | "auditor"
-  | "director";
+export type PipelineActor = PipelineSchemas["PipelineStateRead"]["current_actor"];
 
+// `system` is message-only (a participant, never a state actor) — the BE keeps author/recipient as
+// plain str (out of R2 scope), so this composite stays hand-written over the generated actor union.
 export type PipelineParticipant = PipelineActor | "system";
 
-export type PipelineStatus = "agent_working" | "awaiting_director" | "blocked" | "paused" | "done";
+export type PipelineStatus = PipelineSchemas["PipelineStateRead"]["status"];
 
-export type PipelineMessageKind =
-  | "kickoff"
-  | "question"
-  | "answer"
-  | "gate_report"
-  | "directive"
-  | "approval"
-  | "return"
-  | "verdict"
-  | "notification";
+export type PipelineMessageKind = PipelineSchemas["PipelineMessageRead"]["kind"];
 
 // ── row types ────────────────────────────────────────────────────────────────
 

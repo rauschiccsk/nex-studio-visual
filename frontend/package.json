@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
-    "type-check": "tsc -b --noEmit"
+    "type-check": "tsc -b --noEmit",
+    "codegen:dump": "cd .. && poetry run python -m backend.scripts.dump_openapi frontend/openapi.json",
+    "codegen": "npm run codegen:dump && openapi-typescript openapi.json -o src/services/api/pipeline.generated.ts"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
@@ -45,6 +47,7 @@
     "eslint-plugin-react-refresh": "^0.4.14",
     "globals": "^15.12.0",
     "jsdom": "^29.0.2",
+    "openapi-typescript": "7.13.0",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.15.0",

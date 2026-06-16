@@ -37,13 +37,52 @@ from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
 
 from backend.db.models.base import Base, TimestampMixin, UUIDMixin
 
-# Shared stage set (F-007 §3.1). String + CHECK rather than native enum.
-_STAGES = (
-    "'kickoff', 'gate_a', 'gate_b', 'gate_c', 'gate_d', 'gate_e', 'task_plan', 'build', 'gate_g', 'release', 'done'"
+# Canonical enum value tuples — the SINGLE SOURCE OF TRUTH for both the DB CHECK constraints
+# (below) and the Pydantic ``Literal`` schemas (``backend/schemas/pipeline.py`` imports these),
+# so the two can never drift (v0.7.0 R2, D2). String + CHECK rather than native PG enum follows
+# the codebase convention (F-007 §3.1, §12). Declaration order is meaningful — it is preserved
+# into the OpenAPI ``enum`` arrays and the generated FE union member order (R2-b).
+FLOW_TYPE_VALUES = ("new_version", "cr", "bug", "fast_fix")
+STAGE_VALUES = (
+    "kickoff",
+    "gate_a",
+    "gate_b",
+    "gate_c",
+    "gate_d",
+    "gate_e",
+    "task_plan",
+    "build",
+    "gate_g",
+    "release",
+    "done",
 )
-# Actors / message participants (F-007 §3.1, §4.2). ``system`` is message-only.
-_ACTORS = "'coordinator', 'designer', 'customer', 'implementer', 'auditor', 'director'"
-_PARTICIPANTS = "'coordinator', 'designer', 'customer', 'implementer', 'auditor', 'director', 'system'"
+# Actors (PipelineState.current_actor) vs participants (message author/recipient): ``system`` is
+# message-only (F-007 §3.1, §4.2), so it joins the participant set but never the actor set.
+ACTOR_VALUES = ("coordinator", "designer", "customer", "implementer", "auditor", "director")
+PARTICIPANT_VALUES = ACTOR_VALUES + ("system",)
+STATUS_VALUES = ("agent_working", "awaiting_director", "blocked", "paused", "done")
+MESSAGE_KIND_VALUES = (
+    "kickoff",
+    "question",
+    "answer",
+    "gate_report",
+    "directive",
+    "approval",
+    "return",
+    "verdict",
+    "notification",
+)
+MESSAGE_STATUS_VALUES = ("pending", "delivered", "answered", "archived")
+
+
+def _sql_in_list(values: tuple[str, ...]) -> str:
+    """Render a tuple of enum values as a SQL ``IN`` list fragment (``'a', 'b', 'c'``).
+
+    Builds the CHECK-constraint body from the canonical tuples above so the DB constraint and the
+    Pydantic ``Literal`` schema share one source. The output is byte-identical to the previously
+    hand-written fragments — no schema change, no migration (v0.7.0 R2).
+    """
+    return ", ".join(f"'{v}'" for v in values)
 
 
 class PipelineState(Base, UUIDMixin, TimestampMixin):
@@ -100,19 +139,19 @@ class PipelineState(Base, UUIDMixin, TimestampMixin):
             # 'fast_fix' (F-009, CR-NS-094): the lightweight fast-fix lane — a distinct flow_type
             # (NOT reusing cr/bug, which are full-pipeline labels today) that traverses the shorter
             # kickoff→build→release→done path. Additive; the existing three are unchanged.
-            "flow_type IN ('new_version', 'cr', 'bug', 'fast_fix')",
+            f"flow_type IN ({_sql_in_list(FLOW_TYPE_VALUES)})",
             name="ck_pipeline_state_flow_type",
         ),
         CheckConstraint(
-            f"current_stage IN ({_STAGES})",
+            f"current_stage IN ({_sql_in_list(STAGE_VALUES)})",
             name="ck_pipeline_state_current_stage",
         ),
         CheckConstraint(
-            f"current_actor IN ({_ACTORS})",
+            f"current_actor IN ({_sql_in_list(ACTOR_VALUES)})",
             name="ck_pipeline_state_current_actor",
         ),
         CheckConstraint(
-            "status IN ('agent_working', 'awaiting_director', 'blocked', 'paused', 'done')",
+            f"status IN ({_sql_in_list(STATUS_VALUES)})",
             name="ck_pipeline_state_status",
         ),
     )
@@ -153,24 +192,23 @@ class PipelineMessage(Base, UUIDMixin):
 
     __table_args__ = (
         CheckConstraint(
-            f"stage IN ({_STAGES})",
+            f"stage IN ({_sql_in_list(STAGE_VALUES)})",
             name="ck_pipeline_message_stage",
         ),
         CheckConstraint(
-            f"author IN ({_PARTICIPANTS})",
+            f"author IN ({_sql_in_list(PARTICIPANT_VALUES)})",
             name="ck_pipeline_message_author",
         ),
         CheckConstraint(
-            f"recipient IN ({_PARTICIPANTS})",
+            f"recipient IN ({_sql_in_list(PARTICIPANT_VALUES)})",
             name="ck_pipeline_message_recipient",
         ),
         CheckConstraint(
-            "kind IN ('kickoff', 'question', 'answer', 'gate_report', 'directive', "
-            "'approval', 'return', 'verdict', 'notification')",
+            f"kind IN ({_sql_in_list(MESSAGE_KIND_VALUES)})",
             name="ck_pipeline_message_kind",
         ),
         CheckConstraint(
-            "status IN ('pending', 'delivered', 'answered', 'archived')",
+            f"status IN ({_sql_in_list(MESSAGE_STATUS_VALUES)})",
             name="ck_pipeline_message_status",
         ),
         Index("ix_pipeline_message_version_created", "version_id", "created_at"),

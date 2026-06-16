@@ -116,10 +116,51 @@ jobs:
           VITE_APP_VERSION: "0.1.${{ github.run_number }}"
         run: npm run build
 
+  contract:
+    name: Contract Drift-Gate
+    # v0.7.0 R2-c: the BE↔FE contract single-source-of-truth gate. Regenerates the FE pipeline
+    # types from the backend OpenAPI schema and fails if the committed copy is stale (someone
+    # changed a BE schema without `npm run codegen`). Hermetic — no DB / no /home/icc KB — so it
+    # runs on ubuntu-latest (reliable npm + pip), unlike the self-hosted `test` job.
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+
+      - name: Install backend dependencies
+        run: |
+          pip install poetry
+          poetry install --no-interaction
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install
+
+      - name: Regenerate FE contract types
+        working-directory: frontend
+        # `npm run codegen` dumps the OpenAPI schema (poetry → backend.scripts.dump_openapi) and
+        # runs openapi-typescript → src/services/api/pipeline.generated.ts.
+        run: npm run codegen
+
+      - name: Fail on contract drift
+        run: |
+          git diff --exit-status frontend/src/services/api/pipeline.generated.ts \
+            || { echo "::error::pipeline.generated.ts is stale — run 'npm run codegen' in frontend/ and commit the result."; exit 1; }
+
   build:
     name: Build Docker Images
     runs-on: ubuntu-latest
-    needs: [test, build-frontend]
+    needs: [test, build-frontend, contract]
     steps:
       - uses: actions/checkout@v6
 

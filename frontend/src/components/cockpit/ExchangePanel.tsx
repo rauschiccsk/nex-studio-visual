@@ -24,6 +24,9 @@ const EXECUTABLE_COORDINATOR_ACTIONS = new Set([
   "coordinator_clear_session",
   "coordinator_escalate_dedo",
   "coordinator_route_to_designer",
+  // v0.7.0 R2 (D5): the proof-case fix — `capture_backlog_item` is in the BE _EXECUTABLE_COORDINATOR_ACTIONS
+  // but had drifted out of this Set (flagged by 3/4 auditors). The R2-c parity contract-test now guards it.
+  "capture_backlog_item",
   // CR-NS-103 (F-009 §4.6): the Coordinator's autonomous answer to a routine fast_fix build question —
   // executable (mirrors the BE _EXECUTABLE_COORDINATOR_ACTIONS) so a Director-approved answer is recognized.
   "coordinator_answer_question",

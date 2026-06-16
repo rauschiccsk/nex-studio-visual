@@ -3,10 +3,30 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from backend.db.models.pipeline import (
+    ACTOR_VALUES,
+    FLOW_TYPE_VALUES,
+    MESSAGE_KIND_VALUES,
+    STAGE_VALUES,
+    STATUS_VALUES,
+)
+
+# Literal aliases sourced from the DB CHECK value tuples (v0.7.0 R2, D2) — the response-schema enums
+# and the DB constraints share ONE source so they cannot drift. FastAPI introspects each ``Literal``
+# into an OpenAPI ``enum``, which drives the generated FE pipeline types (R2-b). ``Literal[<tuple>]``
+# is equivalent at runtime to spelling the members out (``Literal["a", "b"]`` already passes a tuple),
+# and Pydantic validates them; the backend uses no static type-checker (intentional), so the dynamic
+# construction needs no ``# type: ignore``.
+FlowType = Literal[FLOW_TYPE_VALUES]
+PipelineStage = Literal[STAGE_VALUES]
+PipelineActor = Literal[ACTOR_VALUES]
+PipelineStatus = Literal[STATUS_VALUES]
+MessageKind = Literal[MESSAGE_KIND_VALUES]
 
 
 class PipelineStateRead(BaseModel):
@@ -16,10 +36,10 @@ class PipelineStateRead(BaseModel):
 
     id: UUID
     version_id: UUID
-    flow_type: str
-    current_stage: str
-    current_actor: str
-    status: str
+    flow_type: FlowType
+    current_stage: PipelineStage
+    current_actor: PipelineActor
+    status: PipelineStatus
     next_action: str
     is_regate: bool
     iteration: int
@@ -37,7 +57,7 @@ class PipelineMessageRead(BaseModel):
     stage: str
     author: str
     recipient: str
-    kind: str
+    kind: MessageKind
     content: str
     status: str
     payload: Optional[dict[str, Any]] = None
