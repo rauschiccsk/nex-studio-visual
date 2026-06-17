@@ -2,9 +2,14 @@
  * Component tests for PipelineActionBar (CR-NS-018 — gate action clarity).
  *
  * kickoff is a ratification gate: at (kickoff, awaiting) the Director must see
- * Schváliť podľa Návrhára + Vrátiť (engine's approve advances kickoff→gate_a),
- * NOT the dead "Spustiť" button. Each primary action carries a consequence line,
- * and "Schváliť návrh Koordinátora" appears only when a Coordinator report exists.
+ * "Schváliť a pokračovať (Návrhár)" + Vrátiť (engine's approve advances kickoff→gate_a),
+ * NOT the dead "Spustiť" button. Each primary action carries a consequence line.
+ *
+ * v0.7.2 R-D: the design-gate ``approve`` button (advances) and the
+ * ``apply_coordinator_recommendation`` button (re-dispatches the Designer + waits, does NOT advance)
+ * used to both read "Schváliť…"; they now read "Schváliť a pokračovať (Návrhár)" vs "Vrátiť Návrhárovi
+ * s odporúčaniami Koordinátora" so the opposite effects are obvious at a glance. The latter appears only
+ * when a Coordinator report exists.
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -20,8 +25,9 @@ import type {
   CoordinatorDirective,
 } from "@/services/api/pipeline";
 
-const APPROVE = "Schváliť podľa Návrhára";
-const COORD = "Schváliť návrh Koordinátora";
+const APPROVE = "Schváliť a pokračovať (Návrhár)"; // v0.7.2 R-D: design-gate approve (advances)
+const APPLY_COORD = "Vrátiť Návrhárovi s odporúčaniami Koordinátora"; // v0.7.2 R-D: re-dispatch Designer (no advance)
+const COORD = "Schváliť návrh Koordinátora"; // gate-E "fix" button (unchanged by R-D)
 
 function mkState(stage: PipelineStage, status: PipelineStatus): PipelineState {
   return {
@@ -40,14 +46,14 @@ function mkState(stage: PipelineStage, status: PipelineStatus): PipelineState {
 }
 
 describe("PipelineActionBar — gate action clarity", () => {
-  it("at (kickoff, awaiting) shows Schváliť podľa Návrhára + Vrátiť, never Spustiť", () => {
+  it("at (kickoff, awaiting) shows Schváliť a pokračovať (Návrhár) + Vrátiť, never Spustiť", () => {
     render(<PipelineActionBar state={mkState("kickoff", "awaiting_director")} inFlight={false} onAction={vi.fn()} />);
     expect(screen.getByText(APPROVE)).toBeInTheDocument();
     expect(screen.getByText("Vrátiť")).toBeInTheDocument();
     expect(screen.queryByText("Spustiť")).not.toBeInTheDocument();
   });
 
-  it("at (gate_a, awaiting) still shows Schváliť podľa Návrhára + Vrátiť", () => {
+  it("at (gate_a, awaiting) still shows Schváliť a pokračovať (Návrhár) + Vrátiť", () => {
     render(<PipelineActionBar state={mkState("gate_a", "awaiting_director")} inFlight={false} onAction={vi.fn()} />);
     expect(screen.getByText(APPROVE)).toBeInTheDocument();
     expect(screen.getByText("Vrátiť")).toBeInTheDocument();
@@ -55,8 +61,8 @@ describe("PipelineActionBar — gate action clarity", () => {
 
   it("renders a consequence line naming the next stage under Schváliť", () => {
     render(<PipelineActionBar state={mkState("gate_a", "awaiting_director")} inFlight={false} onAction={vi.fn()} />);
-    // gate_a → gate_b = "Rozhranie (API)"
-    expect(screen.getByText(/spustí sa ďalšia fáza \(Rozhranie \(API\)\)/)).toBeInTheDocument();
+    // gate_a → gate_b = "Rozhranie (API)"; v0.7.2 R-D sharpened the verb to "POKRAČUJE do ďalšej fázy".
+    expect(screen.getByText(/POKRAČUJE do ďalšej fázy \(Rozhranie \(API\)\)/)).toBeInTheDocument();
   });
 
   it("relabeled approve still fires the 'approve' action", () => {
@@ -66,12 +72,12 @@ describe("PipelineActionBar — gate action clarity", () => {
     expect(onAction).toHaveBeenCalledWith("approve");
   });
 
-  it("hides 'Schváliť návrh Koordinátora' when there is no Coordinator report", () => {
+  it("hides 'Vrátiť Návrhárovi s odporúčaniami Koordinátora' when there is no Coordinator report", () => {
     render(<PipelineActionBar state={mkState("gate_a", "awaiting_director")} inFlight={false} onAction={vi.fn()} />);
-    expect(screen.queryByText(COORD)).not.toBeInTheDocument();
+    expect(screen.queryByText(APPLY_COORD)).not.toBeInTheDocument();
   });
 
-  it("shows 'Schváliť návrh Koordinátora' when a report exists and fires the new action", () => {
+  it("shows 'Vrátiť Návrhárovi s odporúčaniami Koordinátora' when a report exists and fires the new action", () => {
     const onAction = vi.fn();
     render(
       <PipelineActionBar
@@ -81,9 +87,32 @@ describe("PipelineActionBar — gate action clarity", () => {
         onAction={onAction}
       />,
     );
-    expect(screen.getByText(COORD)).toBeInTheDocument();
-    screen.getByText(COORD).click();
+    expect(screen.getByText(APPLY_COORD)).toBeInTheDocument();
+    screen.getByText(APPLY_COORD).click();
     expect(onAction).toHaveBeenCalledWith("apply_coordinator_recommendation");
+  });
+
+  // v0.7.2 R-D: at a design gate with a Coordinator report, BOTH buttons render with clearly distinct
+  // labels — green "Schváliť a pokračovať (Návrhár)" (advances) and indigo "Vrátiť Návrhárovi…" (re-dispatch).
+  it("renders the two design-gate buttons with distinct labels + distinct actions (R-D)", () => {
+    const onAction = vi.fn();
+    render(
+      <PipelineActionBar
+        state={mkState("gate_a", "awaiting_director")}
+        inFlight={false}
+        hasCoordinatorReport
+        onAction={onAction}
+      />,
+    );
+    const advance = screen.getByText(APPROVE);
+    const redispatch = screen.getByText(APPLY_COORD);
+    expect(advance).toBeInTheDocument();
+    expect(redispatch).toBeInTheDocument();
+    expect(advance.textContent).not.toEqual(redispatch.textContent); // unmistakably different at a glance
+    advance.click();
+    expect(onAction).toHaveBeenLastCalledWith("approve"); // advances
+    redispatch.click();
+    expect(onAction).toHaveBeenLastCalledWith("apply_coordinator_recommendation"); // re-dispatches, no advance
   });
 
   it("at (gate_g, awaiting) shows the PASS/FAIL verdict, not Schváliť", () => {
@@ -143,11 +172,12 @@ describe("PipelineActionBar — gate action clarity", () => {
         onAction={vi.fn()}
       />,
     );
-    expect(screen.getByText(APPROVE)).toBeInTheDocument(); // "Schváliť podľa Návrhára" is the affirmative here
-    expect(screen.queryByText("Schváliť a pokračovať")).not.toBeInTheDocument(); // no redundant button
+    expect(screen.getByText(APPROVE)).toBeInTheDocument(); // "Schváliť a pokračovať (Návrhár)" is the affirmative here
+    // the bare one-click "Schváliť a pokračovať" (answer affirmative) is NOT rendered — the ratify approve covers it.
+    expect(screen.queryByText("Schváliť a pokračovať")).not.toBeInTheDocument(); // exact match: distinct from APPROVE
   });
 
-  it("does not show 'Schváliť návrh Koordinátora' on a question-block (only awaiting ratify)", () => {
+  it("does not show 'Vrátiť Návrhárovi s odporúčaniami Koordinátora' on a question-block (only awaiting ratify)", () => {
     render(
       <PipelineActionBar
         state={mkState("kickoff", "blocked")}
@@ -156,7 +186,7 @@ describe("PipelineActionBar — gate action clarity", () => {
         onAction={vi.fn()}
       />,
     );
-    expect(screen.queryByText(COORD)).not.toBeInTheDocument();
+    expect(screen.queryByText(APPLY_COORD)).not.toBeInTheDocument();
   });
 
   it("error-block (agent crash) shows Skús znova, not Schváliť/Odpoveď", () => {
@@ -437,18 +467,18 @@ describe("PipelineActionBar — build controls (CR-NS-020 CR-5)", () => {
 });
 
 describe("PipelineActionBar — task_plan ratify gate (CR-NS-023)", () => {
-  it("offers Schváliť podľa Návrhára + Vrátiť at task_plan/awaiting_director", () => {
+  it("offers Schváliť a pokračovať (Návrhár) + Vrátiť at task_plan/awaiting_director", () => {
     const onAction = vi.fn();
     render(<PipelineActionBar state={mkState("task_plan", "awaiting_director")} inFlight={false} onAction={onAction} />);
-    expect(screen.getByText("Schváliť podľa Návrhára")).toBeInTheDocument();
+    expect(screen.getByText(APPROVE)).toBeInTheDocument();
     expect(screen.getByText("Vrátiť")).toBeInTheDocument();
-    screen.getByText("Schváliť podľa Návrhára").click();
+    screen.getByText(APPROVE).click();
     expect(onAction).toHaveBeenCalledWith("approve");
   });
 
   it("does not show the ratify gate while task_plan is agent_working", () => {
     render(<PipelineActionBar state={mkState("task_plan", "agent_working")} inFlight={false} onAction={vi.fn()} />);
-    expect(screen.queryByText("Schváliť podľa Návrhára")).not.toBeInTheDocument();
+    expect(screen.queryByText(APPROVE)).not.toBeInTheDocument();
   });
 });
 
@@ -478,7 +508,7 @@ describe("PipelineActionBar — backend-authoritative available_actions (CR-NS-0
       />,
     );
     // approve is NOT in available_actions at a build-blocked task → the no-op button is gone
-    expect(screen.queryByText("Schváliť podľa Návrhára")).not.toBeInTheDocument();
+    expect(screen.queryByText(APPROVE)).not.toBeInTheDocument();
     // a programmer-question still offers Odpoveď (answer ∈ available_actions)
     expect(screen.getByText("Odpoveď")).toBeInTheDocument();
   });
@@ -492,14 +522,14 @@ describe("PipelineActionBar — backend-authoritative available_actions (CR-NS-0
         onAction={vi.fn()}
       />,
     );
-    expect(screen.getByText("Schváliť podľa Návrhára")).toBeInTheDocument(); // approve allowed
+    expect(screen.getByText(APPROVE)).toBeInTheDocument(); // approve allowed
     expect(screen.queryByText("Vrátiť")).not.toBeInTheDocument(); // return NOT allowed → hidden
   });
 
   it("falls back to the FE's own logic when available_actions is absent (backward compat)", () => {
     // no availableActions prop → allowed() returns true → the legacy question-block still shows approve
     render(<PipelineActionBar state={mkState("build", "blocked")} inFlight={false} onAction={vi.fn()} />);
-    expect(screen.getByText("Schváliť podľa Návrhára")).toBeInTheDocument();
+    expect(screen.getByText(APPROVE)).toBeInTheDocument();
   });
 });
 

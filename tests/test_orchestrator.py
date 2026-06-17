@@ -3581,28 +3581,38 @@ async def test_halt_relay_parse_failure_visible_note(db_session, fake_claude, mo
 
 
 async def test_verify_done_judge_parse_failure_visible_note(db_session, monkeypatch):
-    """Site 5a — `verify_done` Coordinator judge exhausts → note + metrics; still returns a FAIL reason."""
-    seq = SequenceClaude([("garbage", _U(9, 4, "m"))])  # judge is a single invoke_agent (no parse-retry wrapper)
+    """Site 5a — `verify_done` Coordinator judge exhausts → note + metrics; still returns a FAIL reason.
+
+    v0.7.2 R-A: the judge now runs through `invoke_agent_with_parse_retry`, so it RETRIES (1 + _PARSE_RETRIES)
+    before exhausting — the visible note accumulates all attempts' tokens and the FAIL is flagged as a
+    Coordinator SYSTEM error (`is_coordinator_error=True`, the R-B escalation signal)."""
+    seq = SequenceClaude([("garbage", _U(9, 4, "m"))])  # last repeats → every retry re-fails the same way
     monkeypatch.setattr(orchestrator, "invoke_claude", seq)
     monkeypatch.setattr(orchestrator, "verify_mechanical", lambda slug, block: None)  # pass mechanical → reach judge
     version, _ = _make_version(db_session)
     block = parse_status_block(_block(stage="gate_a", kind="gate_report", summary="hotovo", awaiting="director"))
 
-    reason, _ = await orchestrator.verify_done(db_session, version.id, block)  # (reason, directive) — CR-NS-056
+    reason, _, is_coord_error = await orchestrator.verify_done(db_session, version.id, block)  # 3-tuple (R-B)
 
     assert reason is not None and "unparseable" in reason  # control flow UNCHANGED (non-None reason = FAIL)
+    assert is_coord_error is True  # R-B: a Coordinator's own unparseable verify is a SYSTEM error
     notes = [m for m in _msgs(db_session, version.id) if "Overenie DONE reportu Koordinátorom" in m.content]
     assert len(notes) == 1
-    assert notes[0].payload["usage"] == {"input_tokens": 9, "output_tokens": 4, "model": "m"}
-    assert notes[0].payload["timing"]["parse_attempts"] == 1
+    # 1 + _PARSE_RETRIES attempts, each (9,4) → accumulated; parse_attempts reflects the now-real retries.
+    expected = 1 + orchestrator._PARSE_RETRIES
+    assert notes[0].payload["usage"] == {"input_tokens": 9 * expected, "output_tokens": 4 * expected, "model": "m"}
+    assert notes[0].payload["timing"]["parse_attempts"] == expected
 
 
 async def test_verify_retry_reemit_parse_failure_visible_note(db_session, monkeypatch):
-    """Site 5b — `_verify_with_retries` worker re-emit can't parse → note + metrics; still returns reason."""
+    """Site 5b — `_verify_with_retries` worker re-emit can't parse → note + metrics; still returns reason.
+
+    v0.7.2 R-A: the worker re-emit now also runs through `invoke_agent_with_parse_retry`, so it retries
+    (1 + _PARSE_RETRIES) before exhausting — the note accumulates all attempts' tokens."""
     seq = SequenceClaude(
         [
             (_block(stage="gate_a", kind="blocked", summary="problém", question="treba viac dát"), _U(3, 1, "m")),
-            ("garbage", _U(9, 4, "m")),  # the worker re-emit (single invoke_agent) → ParseFailure
+            ("garbage", _U(9, 4, "m")),  # the worker re-emit now retries (last repeats) → ParseFailure each time
         ]
     )
     monkeypatch.setattr(orchestrator, "invoke_claude", seq)
@@ -3619,7 +3629,8 @@ async def test_verify_retry_reemit_parse_failure_visible_note(db_session, monkey
     assert reason is not None  # caller still blocks (control flow UNCHANGED)
     notes = [m for m in _msgs(db_session, version.id) if "Oprava po overení" in m.content]
     assert len(notes) == 1
-    assert notes[0].payload["usage"] == {"input_tokens": 9, "output_tokens": 4, "model": "m"}
+    expected = 1 + orchestrator._PARSE_RETRIES  # the re-emit retries are now real
+    assert notes[0].payload["usage"] == {"input_tokens": 9 * expected, "output_tokens": 4 * expected, "model": "m"}
 
 
 async def test_internal_turn_failure_timing_only_when_usage_none(db_session, monkeypatch):
@@ -3633,14 +3644,15 @@ async def test_internal_turn_failure_timing_only_when_usage_none(db_session, mon
     version, _ = _make_version(db_session)
     block = parse_status_block(_block(stage="gate_a", kind="gate_report", summary="hotovo", awaiting="director"))
 
-    reason, _ = await orchestrator.verify_done(db_session, version.id, block)  # (reason, directive) — CR-NS-056
+    reason, _, _ = await orchestrator.verify_done(db_session, version.id, block)  # 3-tuple (v0.7.2 R-B)
 
     assert reason is not None  # control flow unchanged
     notes = [m for m in _msgs(db_session, version.id) if "Overenie DONE reportu Koordinátorom" in m.content]
     assert len(notes) == 1
     assert notes[0].payload is not None  # NOT a NULL payload — timing is carried (not skipped in aggregation)
     assert "usage" not in notes[0].payload  # no fabricated usage
-    assert notes[0].payload["timing"]["parse_attempts"] == 1
+    # v0.7.2 R-A: the judge now retries (1 + _PARSE_RETRIES) before exhausting — timing counts each attempt.
+    assert notes[0].payload["timing"]["parse_attempts"] == 1 + orchestrator._PARSE_RETRIES
 
 
 async def test_verify_task_audit_judge_parse_failure_visible_note(db_session, monkeypatch):
@@ -3670,9 +3682,9 @@ async def test_verify_task_audit_judge_parse_failure_visible_note(db_session, mo
 
 async def _synthesis_verify_pass(*args, **kwargs):
     """Async stub for verify_done → PASS, so a gate_report settle reaches the synthesis turn without a real
-    Coordinator judge invocation consuming the fake's sequence. Returns the (reason, directive) 2-tuple
-    (CR-NS-056 §F1.1) — PASS = (None, None)."""
-    return None, None
+    Coordinator judge invocation consuming the fake's sequence. Returns the (reason, directive,
+    is_coordinator_error) 3-tuple (v0.7.2 R-B) — PASS = (None, None, False)."""
+    return None, None, False
 
 
 async def test_coordinator_synthesis_records_director_message(db_session, fake_claude):
@@ -4038,7 +4050,9 @@ def test_verify_reason_is_scope_predicate():
 
 
 async def test_verify_done_returns_directive(db_session, fake_claude):
-    """§F1.1: verify_done returns (reason, directive) — directive on a blocked verdict, (None,None) on PASS."""
+    """§F1.1 + v0.7.2 R-B: verify_done returns (reason, directive, is_coordinator_error) — directive on a
+    blocked verdict, (None, None, False) on PASS; is_coordinator_error True only for the Coordinator's own
+    unparseable verify (a "flagged" block is a real Coordinator verdict, not a system error → False)."""
     version, _ = _make_version(db_session)
     block = parse_status_block(_block(stage="gate_g", kind="gate_report", summary="audit", awaiting="director"))
     fake_claude.response = _block(
@@ -4049,12 +4063,13 @@ async def test_verify_done_returns_directive(db_session, fake_claude):
         question="je to v rozsahu?",
         coordinator_directive=_coord_directive(triage_class="director_decision", proposed_action="relay"),
     )
-    reason, directive = await orchestrator.verify_done(db_session, version.id, block)
+    reason, directive, is_coord_error = await orchestrator.verify_done(db_session, version.id, block)
     assert reason is not None and "flagged" in reason
     assert directive is not None and directive["triage_class"] == "director_decision"
+    assert is_coord_error is False  # v0.7.2 R-B: a real Coordinator "flagged" block is NOT a system error
 
     fake_claude.response = _block(stage="gate_g", kind="gate_report", summary="ok", awaiting="director")
-    assert await orchestrator.verify_done(db_session, version.id, block) == (None, None)
+    assert await orchestrator.verify_done(db_session, version.id, block) == (None, None, False)
 
 
 def _to_gate_g(db_session, version):

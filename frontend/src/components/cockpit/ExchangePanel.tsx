@@ -86,8 +86,8 @@ export function ExchangePanel({ board, inFlight, activity, onAction }: Props) {
   // legacy blocked rows. Drives the "Skús znova" retry vs answer/approve choice when block_reason is absent.
   const lastMessage = recent_messages[recent_messages.length - 1];
   const isErrorBlock = state?.status === "blocked" && lastMessage?.author === "system";
-  // Drives the "Schváliť návrh Koordinátora" button: only offer it when there is
-  // a Coordinator gate_report to apply (else the action would 400). CR-NS-018.
+  // Drives the "Vrátiť Návrhárovi s odporúčaniami Koordinátora" button (v0.7.2 R-D): only offer it when
+  // there is a Coordinator gate_report to apply (else the action would 400). CR-NS-018.
   const hasCoordinatorReport = recent_messages.some(
     (m) => m.author === "coordinator" && m.kind === "gate_report",
   );

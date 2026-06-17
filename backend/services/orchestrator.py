@@ -1115,6 +1115,7 @@ async def invoke_agent_with_parse_retry(
     role: str,
     stage: str,
     prompt: str,
+    timeout: Optional[int] = None,
     on_event: Optional[claude_agent.EventCallback] = None,
     recipient: str = "director",
     on_message: Optional[MessageCallback] = None,
@@ -1146,6 +1147,7 @@ async def invoke_agent_with_parse_retry(
         role=role,
         stage=stage,
         prompt=prompt,
+        timeout=timeout,
         on_event=on_event,
         recipient=recipient,
         on_message=on_message,
@@ -1160,6 +1162,7 @@ async def invoke_agent_with_parse_retry(
             version_id=version_id,
             role=role,
             stage=stage,
+            timeout=timeout,
             # R3 (v0.7.0): transport-agnostic — the status block may arrive as grammar-constrained
             # structured_output (--json-schema) OR the <<<PIPELINE_STATUS>>> fence fallback, so the
             # re-prompt names neither; it cites the validation reason and asks for a conforming object.
@@ -1602,20 +1605,25 @@ async def verify_done(
     version_id: uuid.UUID,
     block: PipelineStatusBlock,
     on_message: Optional[MessageCallback] = None,
-) -> tuple[Optional[str], Optional[dict[str, Any]]]:
-    """Verify a gate_report before awaiting the Director. ``(reason, directive)``: reason on FAIL else None;
-    the judge's ``coordinator_directive`` (dict) on a blocked verdict so the caller can classify scope vs
-    mechanical (CR-NS-056 §F1.1). Mirrors ``_coordinator_relay``'s ``(text, directive)`` contract.
+) -> tuple[Optional[str], Optional[dict[str, Any]], bool]:
+    """Verify a gate_report before awaiting the Director. ``(reason, directive, is_coordinator_error)``:
+    reason on FAIL else None; the judge's ``coordinator_directive`` (dict) on a blocked verdict so the caller
+    can classify scope vs mechanical (CR-NS-056 §F1.1); ``is_coordinator_error`` True ONLY when the FAIL is a
+    Coordinator SYSTEM error — its OWN verify output stayed unparseable after parse-retries (v0.7.2 R-B). The
+    caller (``_verify_with_retries``) uses that flag to escalate a Coordinator-system-error to the Director
+    instead of auto-returning the Designer (whose work is fine — re-running it can't fix the Coordinator's
+    parse problem). Mirrors ``_coordinator_relay``'s ``(text, directive)`` contract, plus the flag.
 
-    Mechanical checks first (deterministic); then a judgment check by invoking
-    the coordinator agent. The coordinator's block must report ``kind != blocked``
-    and ``awaiting='director'`` to count as a PASS. The Coordinator's judgment is a
-    real dispatch-path message → ``on_message`` streams it live (CR-NS-018).
+    Mechanical checks first (deterministic); then a judgment check by invoking the coordinator agent through
+    ``invoke_agent_with_parse_retry`` (v0.7.2 R-A — an unparseable Coordinator verify now self-corrects on a
+    bounded re-emit instead of failing immediately, like every other invocation site). The coordinator's block
+    must report ``kind != blocked`` and ``awaiting='director'`` to count as a PASS. The Coordinator's judgment
+    is a real dispatch-path message → ``on_message`` streams it live (CR-NS-018).
     """
     slug = _project_slug_for_version(db, version_id)
     mech = verify_mechanical(slug, block)
     if mech is not None:
-        return mech, None
+        return mech, None, False
 
     # §F1.6 (CR-NS-056): feed the Director's already-answered scope Q&A this iteration into the prompt so the
     # judge does not re-raise them. Empty ⇒ ``prior_scope_block`` is "" → the prompt is byte-identical to today.
@@ -1628,7 +1636,7 @@ async def verify_done(
             "nepribudol NOVÝ problém alebo mechanická chyba (chýbajúca citácia / P-2). "
         )
 
-    judgment = await invoke_agent(
+    judgment = await invoke_agent_with_parse_retry(
         db,
         version_id=version_id,
         role="coordinator",
@@ -1646,9 +1654,11 @@ async def verify_done(
         on_message=on_message,
     )
     if isinstance(judgment, ParseFailure):
-        # WS-E (CR-NS-037): the verify-judge turn exhausted parse-retries → no message recorded. Make
-        # it visible + count its tokens; the caller still treats the non-None reason as a verify FAIL
-        # (control flow unchanged).
+        # WS-E (CR-NS-037): the verify-judge turn exhausted parse-retries (v0.7.2 R-A: it now actually
+        # retries before landing here) → no message recorded. Make it visible + count its tokens; the
+        # caller still treats the non-None reason as a verify FAIL (control flow unchanged). The
+        # ``is_coordinator_error=True`` flag (3rd tuple slot, v0.7.2 R-B) tells the caller this FAIL is the
+        # Coordinator's OWN parse problem — escalate to the Director, never auto-return the Designer.
         await _record_internal_turn_parse_failure(
             db,
             version_id,
@@ -1657,16 +1667,18 @@ async def verify_done(
             failed=judgment,
             on_message=on_message,
         )
-        return f"coordinator verify unparseable: {judgment.reason}", None
+        return f"coordinator verify unparseable: {judgment.reason}", None, True
     if judgment.kind == "blocked":
         # §F1.1 (CR-NS-056): plumb the judge's directive out so the caller classifies scope vs mechanical.
+        # NOT a Coordinator-system-error (R-B): this is a real Coordinator block carrying a directive — keep
+        # the existing scope-vs-mechanical path (a genuine Designer-report defect still auto-returns).
         directive = (
             judgment.coordinator_directive.model_dump(mode="json")
             if judgment.coordinator_directive is not None
             else None
         )
-        return f"coordinator flagged: {judgment.question or judgment.summary}", directive
-    return None, None
+        return f"coordinator flagged: {judgment.question or judgment.summary}", directive, False
+    return None, None, False
 
 
 async def _coordinator_relay(
@@ -2385,10 +2397,19 @@ async def _verify_with_retries(
     instead of looping. A scope flag (before OR after a re-verify) STOPS the loop immediately. The mechanical
     path is behaviorally unchanged (the auto-return loop fires up to ``_VERIFY_RETRIES``).
 
+    v0.7.2 R-B: a Coordinator SYSTEM error (its OWN verify stayed unparseable after R-A's parse-retries —
+    ``is_coordinator_error`` from :func:`verify_done`) NEVER enters the auto-return loop. The Designer's work
+    is fine; re-dispatching it can't fix the Coordinator's parse problem (this caused the nex-asistent gate_b
+    loop). We return ``(reason, False)`` immediately so the caller blocks with ``system_error`` instead of
+    looping the Designer. A genuine Designer-report error (``is_coordinator_error`` False) keeps its
+    auto-return — behaviour there is unchanged.
+
     Every recorded turn here is a dispatch-path message → ``on_message`` streams each
     live (the Coordinator judgment via :func:`verify_done`, the system auto-return, and
     the worker's corrected report) so none is lost once the end batch is dropped."""
-    reason, directive = await verify_done(db, state.version_id, block, on_message)
+    reason, directive, is_coordinator_error = await verify_done(db, state.version_id, block, on_message)
+    if reason is not None and is_coordinator_error:
+        return reason, False  # R-B: Coordinator-system-error → escalate (caller blocks), never loop the Designer
     if reason is not None and _verify_reason_is_scope(directive):
         return reason, True  # scope/design → break the loop (caller escalates once per iteration)
     attempts = 0
@@ -2406,7 +2427,7 @@ async def _verify_with_retries(
         )
         if on_message is not None:
             await on_message(msg)
-        retry = await invoke_agent(
+        retry = await invoke_agent_with_parse_retry(
             db,
             version_id=state.version_id,
             role=state.current_actor,
@@ -2430,7 +2451,9 @@ async def _verify_with_retries(
         if retry.kind != "gate_report":
             return reason, False  # give up on non-report → caller escalates
         block = retry
-        reason, directive = await verify_done(db, state.version_id, block, on_message)
+        reason, directive, is_coordinator_error = await verify_done(db, state.version_id, block, on_message)
+        if reason is not None and is_coordinator_error:
+            return reason, False  # R-B: Coordinator-system-error on re-verify → escalate, don't keep looping
         if reason is not None and _verify_reason_is_scope(directive):
             return reason, True  # scope flagged on re-verify → break the loop
     return reason, False

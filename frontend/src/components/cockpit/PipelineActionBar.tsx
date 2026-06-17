@@ -223,7 +223,7 @@ export function PipelineActionBar({
               hint={
                 state.flow_type === "fast_fix"
                   ? `Koordinátor potvrdil rýchlu opravu → spustí sa ${nextStageLabel(current_stage, state.flow_type)}.`
-                  : `Prijme sa návrh Návrhára → spustí sa ďalšia fáza (${nextStageLabel(current_stage, state.flow_type)}).`
+                  : `Prijme sa návrh Návrhára → pipeline POKRAČUJE do ďalšej fázy (${nextStageLabel(current_stage, state.flow_type)}). Prácu NEvracia späť Návrhárovi.`
               }
             >
               <button
@@ -231,19 +231,23 @@ export function PipelineActionBar({
                 disabled={inFlight}
                 className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
               >
-                {state.flow_type === "fast_fix" ? "Schváliť rýchlu opravu" : "Schváliť podľa Návrhára"}
+                {/* v0.7.2 R-D: the verb names the effect (advance) so it's unmistakable next to the indigo
+                    "Vrátiť Návrhárovi…" button below, which re-dispatches instead of advancing. */}
+                {state.flow_type === "fast_fix" ? "Schváliť rýchlu opravu" : "Schváliť a pokračovať (Návrhár)"}
               </button>
             </ActionRow>
           )}
 
           {awaitingRatify && hasCoordinatorReport && allowed("apply_coordinator_recommendation") && (
-            <ActionRow hint="Návrhárovi sa pošlú odporúčania Koordinátora na zapracovanie. Pipeline počká.">
+            <ActionRow hint="NEPOSUNIE fázu — Návrhárovi sa VRÁTIA odporúčania Koordinátora na zapracovanie; pipeline počká na jeho prepracovaný návrh.">
               <button
                 onClick={() => onAction("apply_coordinator_recommendation")}
                 disabled={inFlight}
                 className={`${btn} bg-indigo-600 text-white hover:bg-indigo-500`}
               >
-                Schváliť návrh Koordinátora
+                {/* v0.7.2 R-D: this does NOT advance — it re-dispatches the Designer with the Coordinator's
+                    recommendations and waits. The verb "Vrátiť…" distinguishes it from green "Schváliť a pokračovať". */}
+                Vrátiť Návrhárovi s odporúčaniami Koordinátora
               </button>
             </ActionRow>
           )}
