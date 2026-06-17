@@ -2461,6 +2461,25 @@ async def test_task_plan_gate_report_without_plan_blocks(db_session, fake_claude
     assert _epics_of(db_session, version) == []  # nothing written
 
 
+async def test_task_plan_write_fail_blocks_system_error(db_session, fake_claude, monkeypatch):
+    # R4 (D1): a task_plan WRITE failure (engine-side, plan parsed OK but the materialize step failed) →
+    # blocked with block_reason=system_error.
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _to_task_plan(db_session, version)
+    monkeypatch.setattr(orchestrator, "_write_task_plan", lambda db, state, block: "simulovaná chyba zápisu plánu")
+    fake_claude.response = _block(
+        stage="task_plan",
+        kind="gate_report",
+        summary="plán",
+        awaiting="director",
+        plan=_plan(("E1", [("F1", [("T1", "backend")])])),
+    )
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert state.status == "blocked"
+    assert state.block_reason == "system_error"
+
+
 async def test_task_plan_replan_replaces_no_duplicates(db_session, fake_claude):
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
@@ -4073,6 +4092,7 @@ async def test_gate_g_verify_scope_question_escalates_once(db_session, monkeypat
     state = await orchestrator.run_dispatch(db_session, version.id)
 
     assert state.status == "blocked"
+    assert state.block_reason == "agent_question"  # R4 (D1, FIX 1): a gate_g scope escalation is a question
     assert state.current_actor == "auditor" and state.current_stage == "gate_g"
     returns = [m for m in _msgs(db_session, version.id) if m.author == "system" and m.kind == "return"]
     assert returns == []  # the loop was broken at the scope detection — no auto-return to the Auditor
@@ -4828,9 +4848,34 @@ async def test_fast_fix_release_deploy_failure_blocks(db_session, fake_claude, m
     state = await orchestrator.run_dispatch(db_session, version.id)
 
     assert state.current_stage == "release" and state.status == "blocked"
+    assert state.block_reason == "system_error"  # R4 (D1): engine-side UAT deploy failure
     assert "UAT deploy zlyhal" in state.next_action and "docker build zlyhal" in state.next_action
     note = _uat_deploy_note(db_session, version.id)
     assert note is not None and note.payload["uat_deploy"]["ok"] is False
+
+
+async def test_fast_fix_release_verify_fail_blocks_system_error(db_session, fake_claude, monkeypatch):
+    # R4 (D1): a fast_fix release gate_report that FAILS the Coordinator-verify (BEFORE deploy) → blocked with
+    # block_reason=system_error, and the auto-deploy is never reached.
+    version, _project = await _drive_fast_fix_to_release(db_session, fake_claude, monkeypatch)
+    deploy_called = False
+
+    async def _fake_deploy(project_slug, uat_slug):
+        nonlocal deploy_called
+        deploy_called = True
+        return True, "OK"
+
+    async def _fail_verify(db, state, result, *, on_message=None):
+        return "release neprešla overením", False  # (reason, is_scope)
+
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _fake_deploy)
+    monkeypatch.setattr(orchestrator, "_verify_with_retries", _fail_verify)
+    fake_claude.response = _block(stage="release", kind="gate_report", summary="overené", awaiting="director")
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert state.current_stage == "release" and state.status == "blocked"
+    assert state.block_reason == "system_error"
+    assert deploy_called is False  # blocked at verify → never deployed
 
 
 async def test_new_version_release_does_not_auto_deploy(db_session, fake_claude, monkeypatch):

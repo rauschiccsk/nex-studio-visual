@@ -246,6 +246,31 @@ describe("PipelineActionBar — R4 block_reason authoritative (D1)", () => {
     render(<PipelineActionBar state={mkState("gate_b", "blocked")} inFlight={false} isErrorBlock onAction={vi.fn()} />);
     expect(screen.getByText("Skús znova")).toBeInTheDocument();
   });
+
+  it("block_reason=NULL + heuristic isErrorBlock=true → error-block (Skús znova)", () => {
+    render(
+      <PipelineActionBar
+        state={{ ...mkState("gate_b", "blocked"), block_reason: null }}
+        inFlight={false}
+        isErrorBlock
+        onAction={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Skús znova")).toBeInTheDocument();
+    expect(screen.queryByText("Odpoveď")).not.toBeInTheDocument();
+  });
+
+  it("block_reason=NULL + heuristic isErrorBlock=false → question-block (Odpoveď)", () => {
+    render(
+      <PipelineActionBar
+        state={{ ...mkState("gate_b", "blocked"), block_reason: null }}
+        inFlight={false}
+        onAction={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Odpoveď")).toBeInTheDocument();
+    expect(screen.queryByText("Skús znova")).not.toBeInTheDocument();
+  });
 });
 
 describe("PipelineActionBar — Gate E per-question (revised §2)", () => {

@@ -2134,6 +2134,10 @@ async def run_dispatch(
                     db, state, trigger=f"fáza '{stage}' — otázka rozsahu", on_message=on_message
                 )
                 state.status = "blocked"
+                # R4 (D1): a gate_g scope/design escalation IS a question put to the Director (answer/decide) —
+                # same class as the worker/build-loop question sites, so the same authoritative reason (not the
+                # heuristic fallback). The Director-facing banner reads "Agent sa pýta", not an error.
+                state.block_reason = "agent_question"
                 state.next_action = (
                     "Audit položil otázku rozsahu — odpovedz (vysvetli) alebo rozhodni (PASS / FAIL → fáza)."
                 )
@@ -3079,31 +3083,39 @@ def coordinator_triage(db: Session, version_id: uuid.UUID, state: Optional[Pipel
 def autonomous_decisions_summary(db: Session, version_id: uuid.UUID) -> dict[str, Any]:
     """R4 (D4): board roll-up of the ``is_autonomous`` Coordinator→Director notes (Pillar B recoveries
     CR-055 + fast_fix answers CR-103) for this version — ``{count, recent:[{task, action, rationale,
-    confidence}]}``, newest first, capped at :data:`_AUTONOMOUS_SUMMARY_RECENT`. Reuses the ``is_autonomous``
-    predicate (the :func:`_autonomous_count` basis) bounded to the version; one indexed scan, no N+1."""
-    rows = (
+    confidence}]}``, newest first, capped at :data:`_AUTONOMOUS_SUMMARY_RECENT`. Bounded like
+    :func:`coordinator_triage` (§5: cheap, no N+1): the ``is_autonomous`` flag is filtered in SQL
+    (``payload ->> 'is_autonomous' = 'true'``) — a ``COUNT(*)`` for the total + a separate ``LIMIT``-ed query
+    for the recent few — so the board fetch never pulls every coordinator payload into Python. NOTE: this
+    reuses only the ``is_autonomous`` flag, NOT :func:`_autonomous_count` (which is per-task + action-filtered);
+    the roll-up spans BOTH recoveries and fast_fix answers."""
+    is_autonomous = PipelineMessage.payload["is_autonomous"].astext == "true"
+    base_where = (
+        PipelineMessage.version_id == version_id,
+        PipelineMessage.author == "coordinator",
+        is_autonomous,
+    )
+    count = db.execute(select(func.count()).select_from(PipelineMessage).where(*base_where)).scalar_one()
+    recent_rows = (
         db.execute(
             select(PipelineMessage.payload)
-            .where(
-                PipelineMessage.version_id == version_id,
-                PipelineMessage.author == "coordinator",
-            )
+            .where(*base_where)
             .order_by(PipelineMessage.seq.desc())
+            .limit(_AUTONOMOUS_SUMMARY_RECENT)
         )
         .scalars()
         .all()
     )
-    autonomous = [p for p in rows if p and p.get("is_autonomous")]
     recent = [
         {
-            "task": p.get("task_number"),
-            "action": p.get("action"),
-            "rationale": p.get("rationale"),
-            "confidence": p.get("confidence"),
+            "task": (p or {}).get("task_number"),
+            "action": (p or {}).get("action"),
+            "rationale": (p or {}).get("rationale"),
+            "confidence": (p or {}).get("confidence"),
         }
-        for p in autonomous[:_AUTONOMOUS_SUMMARY_RECENT]
+        for p in recent_rows
     ]
-    return {"count": len(autonomous), "recent": recent}
+    return {"count": count, "recent": recent}
 
 
 def agent_sessions(db: Session, version_id: uuid.UUID, state: Optional[PipelineState]) -> list[dict[str, Any]]:

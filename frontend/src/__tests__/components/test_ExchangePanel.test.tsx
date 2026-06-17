@@ -8,7 +8,31 @@ import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 import ExchangePanel from "@/components/cockpit/ExchangePanel";
-import type { PipelineBoard, PipelineStage, PipelineActor, PipelineStatus } from "@/services/api/pipeline";
+import type {
+  PipelineBoard,
+  PipelineMessage,
+  PipelineParticipant,
+  PipelineStage,
+  PipelineActor,
+  PipelineStatus,
+} from "@/services/api/pipeline";
+
+// Minimal message for the banner's NULL-fallback heuristic (lastMessage.author === "system").
+function mkMsg(author: PipelineParticipant): PipelineMessage {
+  return {
+    id: `m-${author}`,
+    version_id: "22222222-2222-2222-2222-222222222222",
+    stage: "gate_a",
+    author,
+    recipient: "director",
+    kind: author === "system" ? "notification" : "question",
+    content: "x",
+    status: "delivered",
+    payload: null,
+    created_at: "2026-06-04T00:00:00Z",
+    seq: 1,
+  };
+}
 
 function mkBoard(stage: PipelineStage, actor: PipelineActor, status: PipelineStatus): PipelineBoard {
   return {
@@ -75,6 +99,23 @@ describe("ExchangePanel banner", () => {
     board.state!.block_reason = "parse_exhaustion";
     render(<ExchangePanel board={board} inFlight={false} activity={[]} onAction={vi.fn()} />);
     expect(screen.getByText("Chyba spracovania výstupu vo fáze Rozsah — skús znova")).toBeInTheDocument();
+  });
+
+  // R4 (D1/D2) back-compat: block_reason=NULL → the banner falls back to the lastMessage.author heuristic.
+  it("blocked + block_reason=NULL + last message author=system → heuristic error banner", () => {
+    const board = mkBoard("gate_a", "designer", "blocked");
+    board.state!.block_reason = null;
+    board.recent_messages = [mkMsg("system")];
+    render(<ExchangePanel board={board} inFlight={false} activity={[]} onAction={vi.fn()} />);
+    expect(screen.getByText("Agent zlyhal vo fáze Rozsah — skús znova")).toBeInTheDocument();
+  });
+
+  it("blocked + block_reason=NULL + last message author=agent → heuristic question banner", () => {
+    const board = mkBoard("gate_a", "designer", "blocked");
+    board.state!.block_reason = null;
+    board.recent_messages = [mkMsg("designer")];
+    render(<ExchangePanel board={board} inFlight={false} activity={[]} onAction={vi.fn()} />);
+    expect(screen.getByText("Na rade: Director — odpovedz Návrhár-ovi")).toBeInTheDocument();
   });
 
   // CR-NS-057 §F2.4: ExchangePanel threads board.regate_proposal to the action bar + the whos-turn board.
