@@ -44,6 +44,48 @@ describe("PipelineRail — unified chip colours (CR-NS-028)", () => {
   });
 });
 
+describe("PipelineRail — R4 staleness chips + legend (D5/D6)", () => {
+  it("an otherwise-idle agent with a stale session shows the amber 'stale' chip", () => {
+    render(
+      <PipelineRail
+        state={mkState("agent_working")}
+        activeAgent="implementer"
+        agentSessions={[
+          { role: "implementer", status: "active" },
+          { role: "designer", status: "stale" },
+          { role: "auditor", status: "idle" },
+        ]}
+      />,
+    );
+    expect(screen.getByText("stale")).toHaveClass("text-amber-600"); // designer's stale session
+    expect(screen.getByText("working")).toBeInTheDocument(); // implementer is the active agent
+  });
+
+  it("the active agent keeps its live 'working' status even if its session reads idle", () => {
+    render(
+      <PipelineRail
+        state={mkState("agent_working")}
+        activeAgent="implementer"
+        agentSessions={[{ role: "implementer", status: "idle" }]}
+      />,
+    );
+    expect(screen.getByText("working")).toBeInTheDocument();
+    expect(screen.queryByText("stale")).not.toBeInTheDocument();
+  });
+
+  it("renders the D6 stage-marker legend", () => {
+    render(<PipelineRail state={mkState("agent_working")} activeAgent="implementer" />);
+    const legend = screen.getByText(/ešte neprešlo/);
+    expect(legend).toHaveTextContent("hotovo");
+    expect(legend).toHaveTextContent("práve");
+  });
+
+  it("no agentSessions prop → no stale chips (graceful on an older board)", () => {
+    render(<PipelineRail state={mkState("blocked")} activeAgent="implementer" />);
+    expect(screen.queryByText("stale")).not.toBeInTheDocument();
+  });
+});
+
 describe("PipelineRail — fast_fix short stage path (CR-NS-095)", () => {
   it("renders ONLY the short lane stages for a fast_fix flow, not the full waterfall", () => {
     render(<PipelineRail state={mkState("agent_working", { flow_type: "fast_fix", current_stage: "build" })} />);

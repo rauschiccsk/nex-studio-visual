@@ -199,6 +199,55 @@ describe("PipelineActionBar — gate action clarity", () => {
   });
 });
 
+describe("PipelineActionBar — R4 block_reason authoritative (D1)", () => {
+  it("block_reason=agent_error → error-block (Skús znova), no isErrorBlock prop needed", () => {
+    render(
+      <PipelineActionBar
+        state={{ ...mkState("gate_b", "blocked"), block_reason: "agent_error" }}
+        inFlight={false}
+        onAction={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Skús znova")).toBeInTheDocument();
+    expect(screen.queryByText("Odpoveď")).not.toBeInTheDocument();
+    expect(screen.queryByText(APPROVE)).not.toBeInTheDocument();
+  });
+
+  it("block_reason=system_error and parse_exhaustion both render the error-block (Skús znova)", () => {
+    for (const br of ["system_error", "parse_exhaustion"] as const) {
+      const { unmount } = render(
+        <PipelineActionBar
+          state={{ ...mkState("gate_b", "blocked"), block_reason: br }}
+          inFlight={false}
+          onAction={vi.fn()}
+        />,
+      );
+      expect(screen.getByText("Skús znova")).toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it("block_reason=agent_question → question-block (Odpoveď) even when the isErrorBlock heuristic is true", () => {
+    // Authoritative over the heuristic: a stale trailing system note (isErrorBlock) must NOT flip a real
+    // agent question into "Skús znova".
+    render(
+      <PipelineActionBar
+        state={{ ...mkState("gate_b", "blocked"), block_reason: "agent_question" }}
+        inFlight={false}
+        isErrorBlock
+        onAction={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Odpoveď")).toBeInTheDocument();
+    expect(screen.queryByText("Skús znova")).not.toBeInTheDocument();
+  });
+
+  it("absent block_reason falls back to the isErrorBlock heuristic (back-compat)", () => {
+    render(<PipelineActionBar state={mkState("gate_b", "blocked")} inFlight={false} isErrorBlock onAction={vi.fn()} />);
+    expect(screen.getByText("Skús znova")).toBeInTheDocument();
+  });
+});
+
 describe("PipelineActionBar — Gate E per-question (revised §2)", () => {
   const gateE = (props: { gateEMode?: "question" | "boundary"; gateEGap?: boolean; onAction?: () => void }) => (
     <PipelineActionBar

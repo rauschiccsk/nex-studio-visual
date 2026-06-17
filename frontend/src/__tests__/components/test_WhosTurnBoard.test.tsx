@@ -116,3 +116,64 @@ describe("WhosTurnBoard (WS-C2, CR-NS-035)", () => {
     expect(screen.getByText(/Návrh Koordinátora:.*posunúť baseline/)).toBeInTheDocument();
   });
 });
+
+describe("WhosTurnBoard — R4 coordinator triage + autonomous summary (D3/D4)", () => {
+  it("renders a NON-executable triage line (classified + confidence + proposed action)", () => {
+    render(
+      <WhosTurnBoard
+        state={mkState("build", "implementer", "blocked")}
+        availableActions={["answer", "return", "ask"]}
+        coordinatorTriage={{
+          triage_class: "director_decision",
+          confidence: 0.4,
+          proposed_action: "coordinator_escalate_dedo",
+        }}
+      />,
+    );
+    expect(
+      screen.getByText(/Koordinátor klasifikoval: rozhodnutie Directora \(istota 40 %\), navrhuje eskalovať Dedovi/),
+    ).toBeInTheDocument();
+  });
+
+  it("suppresses the triage line when an EXECUTABLE proposal is already shown (no duplicate)", () => {
+    render(
+      <WhosTurnBoard
+        state={mkState("build", "implementer", "awaiting_director")}
+        availableActions={["apply_coordinator_recommendation", "return", "ask"]}
+        coordinatorProposal={{
+          triage_class: "programmer_guidance",
+          proposed_action: "coordinator_reset_task",
+          rationale: "r",
+          confidence: 0.9,
+        }}
+        coordinatorTriage={{ triage_class: "programmer_guidance", confidence: 0.9, proposed_action: "coordinator_reset_task" }}
+      />,
+    );
+    expect(screen.getByText(/Návrh Koordinátora:/)).toBeInTheDocument();
+    expect(screen.queryByText(/Koordinátor klasifikoval:/)).not.toBeInTheDocument();
+  });
+
+  it("renders the autonomous-decisions roll-up line when count > 0", () => {
+    render(
+      <WhosTurnBoard
+        state={mkState("build", "implementer", "awaiting_director")}
+        availableActions={["approve", "return", "ask"]}
+        autonomousSummary={{ count: 3, recent: [{ task: 2, action: "coordinator_reset_task", rationale: "reset úlohy #2", confidence: 0.9 }] }}
+      />,
+    );
+    expect(screen.getByText(/Koordinátor rozhodol samostatne 3×/)).toBeInTheDocument();
+    expect(screen.getByText(/naposledy: reset úlohy #2/)).toBeInTheDocument();
+  });
+
+  it("renders nothing for an absent triage / zero-count summary (graceful)", () => {
+    render(
+      <WhosTurnBoard
+        state={mkState("build", "implementer", "awaiting_director")}
+        availableActions={["approve", "return", "ask"]}
+        autonomousSummary={{ count: 0, recent: [] }}
+      />,
+    );
+    expect(screen.queryByText(/Koordinátor klasifikoval:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Koordinátor rozhodol samostatne/)).not.toBeInTheDocument();
+  });
+});

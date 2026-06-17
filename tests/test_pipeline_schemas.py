@@ -15,6 +15,7 @@ from pydantic import ValidationError
 
 from backend.db.models.pipeline import (
     ACTOR_VALUES,
+    BLOCK_REASON_VALUES,
     FLOW_TYPE_VALUES,
     MESSAGE_KIND_VALUES,
     STAGE_VALUES,
@@ -82,6 +83,22 @@ def test_state_accepts_every_db_valid_status(status):
 @pytest.mark.parametrize("kind", MESSAGE_KIND_VALUES)
 def test_message_accepts_every_db_valid_kind(kind):
     assert PipelineMessageRead(**_message_kwargs(kind=kind)).kind == kind
+
+
+@pytest.mark.parametrize("block_reason", BLOCK_REASON_VALUES)
+def test_state_accepts_every_db_valid_block_reason(block_reason):
+    # R4 (D1): the Literal sourced from BLOCK_REASON_VALUES accepts exactly the DB-valid set.
+    assert PipelineStateRead(**_state_kwargs(status="blocked", block_reason=block_reason)).block_reason == block_reason
+
+
+def test_state_block_reason_defaults_to_none():
+    # R4 (D1): block_reason is Optional → absent ⇒ None (not blocked / legacy rows → FE heuristic fallback).
+    assert PipelineStateRead(**_state_kwargs()).block_reason is None
+
+
+def test_state_rejects_out_of_enum_block_reason():
+    with pytest.raises(ValidationError):
+        PipelineStateRead(**_state_kwargs(status="blocked", block_reason="meltdown"))
 
 
 @pytest.mark.parametrize(

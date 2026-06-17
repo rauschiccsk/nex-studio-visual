@@ -7,6 +7,7 @@ verify retries) is exercised against synthetic §5.3 blocks.
 
 import json
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import select, update
@@ -561,6 +562,7 @@ async def test_run_dispatch_unparseable_blocks(db_session, fake_claude):
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
     state = await orchestrator.run_dispatch(db_session, version.id)
     assert state.status == "blocked"
+    assert state.block_reason == "parse_exhaustion"  # R4 (D1): no parseable output after retries
 
 
 async def test_approve_advances_stage(db_session, fake_claude):
@@ -592,6 +594,7 @@ async def test_agent_question_blocks(db_session, fake_claude):
     await orchestrator.apply_action(db_session, version_id=version.id, action="approve")
     state = await orchestrator.run_dispatch(db_session, version.id)
     assert state.status == "blocked"
+    assert state.block_reason == "agent_question"  # R4 (D1): worker question→blocked
     assert "Ktorý port" in state.next_action
 
 
@@ -675,6 +678,7 @@ async def test_verify_failure_retries_then_blocks(db_session, monkeypatch):
     await orchestrator.apply_action(db_session, version_id=version.id, action="approve")
     state = await orchestrator.run_dispatch(db_session, version.id)
     assert state.status == "blocked"
+    assert state.block_reason == "system_error"  # R4 (D1): gate mechanical verify failed (engine-side)
     assert "neprešla overením" in state.next_action  # plain next_action (CR-NS-022 §2 — no raw reason)
     # auto-return messages were recorded (INTERNAL system→worker, unchanged)
     returns = [m for m in _msgs(db_session, version.id) if m.kind == "return" and m.author == "system"]
@@ -917,6 +921,7 @@ async def test_worker_question_routed_through_coordinator(db_session, monkeypatc
     state = await orchestrator.run_dispatch(db_session, version.id)
 
     assert state.status == "blocked"
+    assert state.block_reason == "agent_question"  # R4 (D1): worker question routed via the Coordinator
     # worker invoked, then the Coordinator reviewed (2 invocations)
     assert len(seq.prompts) == 2
     # the Coordinator's relay is recorded as a thread message…
@@ -1154,6 +1159,177 @@ def test_coordinator_directive_executable_gate():
     assert orchestrator._coordinator_directive_executable(None) is False
 
 
+# ── R4 operator-legibility board aggregations (v0.7.0, D3/D4/D5) ────────────────────────────────────
+
+
+def _state_row(db_session, version, **over):
+    defaults = dict(
+        version_id=version.id,
+        flow_type="new_version",
+        current_stage="build",
+        current_actor="implementer",
+        status="blocked",
+        next_action="",
+    )
+    defaults.update(over)
+    st = PipelineState(**defaults)
+    db_session.add(st)
+    db_session.flush()
+    return st
+
+
+def _seed_autonomous_note(
+    db_session, version_id, *, task_number, action="coordinator_reset_task", rationale="r", confidence=0.9
+):
+    return orchestrator._record_message(
+        db_session,
+        version_id=version_id,
+        stage="build",
+        author="coordinator",
+        recipient="director",
+        kind="notification",
+        content=f"Koordinátor rozhodol (úloha #{task_number}): {rationale}",
+        payload={
+            "is_autonomous": True,
+            "task_id": str(uuid.uuid4()),
+            "task_number": task_number,
+            "action": action,
+            "rationale": rationale,
+            "confidence": confidence,
+        },
+    )
+
+
+def test_coordinator_triage_latest_at_settled_state(db_session):
+    # D3: at a settled state the LATEST relay/escalation directive surfaces — even a NON-executable one
+    # (director_decision / low-confidence), unlike the executable proposal WhosTurnBoard already shows.
+    version, _ = _make_version(db_session)
+    st = _state_row(db_session, version, status="blocked")
+    _seed_coordinator_directive(
+        db_session, version.id, _coord_directive(proposed_action="coordinator_reset_task", confidence=0.95)
+    )
+    _seed_coordinator_directive(
+        db_session,
+        version.id,
+        _coord_directive(triage_class="director_decision", proposed_action="coordinator_escalate_dedo", confidence=0.4),
+    )
+    triage = orchestrator.coordinator_triage(db_session, version.id, st)
+    assert triage == {
+        "triage_class": "director_decision",
+        "proposed_action": "coordinator_escalate_dedo",
+        "confidence": 0.4,
+    }
+
+
+def test_coordinator_triage_absent_when_working(db_session):
+    # D3: present only at a settled (awaiting_director / blocked) state — not while an agent is working.
+    version, _ = _make_version(db_session)
+    st = _state_row(db_session, version, status="agent_working")
+    _seed_coordinator_directive(db_session, version.id, _coord_directive())
+    assert orchestrator.coordinator_triage(db_session, version.id, st) is None
+
+
+def test_coordinator_triage_none_without_directive(db_session):
+    # D3: a directive-less coordinator synthesis (JSON-null) must NOT surface as a triage.
+    version, _ = _make_version(db_session)
+    st = _state_row(db_session, version, status="blocked")
+    orchestrator._record_message(
+        db_session,
+        version_id=version.id,
+        stage="build",
+        author="coordinator",
+        recipient="director",
+        kind="gate_report",
+        content="synthesis",
+        payload={"coordinator_directive": None},
+    )
+    assert orchestrator.coordinator_triage(db_session, version.id, st) is None
+
+
+def test_autonomous_decisions_summary_counts_and_recent(db_session):
+    # D4: count = all is_autonomous coordinator notes; recent = newest-first, capped at 5.
+    version, _ = _make_version(db_session)
+    for i in range(1, 8):  # 7 autonomous notes
+        _seed_autonomous_note(db_session, version.id, task_number=i, rationale=f"r{i}")
+    # a non-autonomous coordinator note must NOT be counted
+    orchestrator._record_message(
+        db_session,
+        version_id=version.id,
+        stage="build",
+        author="coordinator",
+        recipient="director",
+        kind="gate_report",
+        content="not autonomous",
+        payload={"coordinator_directive": None},
+    )
+    summary = orchestrator.autonomous_decisions_summary(db_session, version.id)
+    assert summary["count"] == 7
+    assert len(summary["recent"]) == 5  # capped
+    assert summary["recent"][0]["task"] == 7  # newest first
+    assert summary["recent"][0]["rationale"] == "r7"
+
+
+def test_autonomous_decisions_summary_empty(db_session):
+    version, _ = _make_version(db_session)
+    assert orchestrator.autonomous_decisions_summary(db_session, version.id) == {"count": 0, "recent": []}
+
+
+def test_agent_sessions_active_idle_stale(db_session):
+    # D5: active = state is agent_working for the role; stale = last_input_at older than 30 min; else idle;
+    # a missing session → idle.
+    version, project = _make_version(db_session)
+    st = _state_row(db_session, version, status="agent_working", current_actor="implementer")
+    now = datetime.now(timezone.utc)
+    db_session.add_all(
+        [
+            # implementer last_input is recent, but it IS the working role → active
+            OrchestratorSession(
+                project_slug=project.slug, role="implementer", claude_session_id=uuid.uuid4(), last_input_at=now
+            ),
+            # designer idle for 45 min → stale
+            OrchestratorSession(
+                project_slug=project.slug,
+                role="designer",
+                claude_session_id=uuid.uuid4(),
+                last_input_at=now - timedelta(minutes=45),
+            ),
+            # auditor idle for 5 min → idle
+            OrchestratorSession(
+                project_slug=project.slug,
+                role="auditor",
+                claude_session_id=uuid.uuid4(),
+                last_input_at=now - timedelta(minutes=5),
+            ),
+        ]
+    )
+    db_session.flush()
+    sessions = {s["role"]: s["status"] for s in orchestrator.agent_sessions(db_session, version.id, st)}
+    assert sessions == {
+        "coordinator": "idle",  # missing session → idle
+        "designer": "stale",
+        "customer": "idle",  # missing session → idle
+        "implementer": "active",
+        "auditor": "idle",
+    }
+
+
+def test_agent_sessions_none_state_all_idle(db_session):
+    version, project = _make_version(db_session)
+    db_session.add(
+        OrchestratorSession(
+            project_slug=project.slug,
+            role="designer",
+            claude_session_id=uuid.uuid4(),
+            last_input_at=datetime.now(timezone.utc),
+        )
+    )
+    db_session.flush()
+    # No state → no working role; the recent designer session is idle (not active).
+    sessions = {s["role"]: s["status"] for s in orchestrator.agent_sessions(db_session, version.id, None)}
+    assert sessions["designer"] == "idle"
+    assert all(v == "idle" for v in sessions.values())
+
+
 async def _build_at_halt(db_session, fake_claude):
     version, project = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
@@ -1373,6 +1549,7 @@ async def test_route_to_designer_parse_failure_clears_marker_and_blocks(db_sessi
     state = await orchestrator.run_dispatch(db_session, version.id)
 
     assert state.status == "blocked"
+    assert state.block_reason == "agent_error"  # R4 (D1): _block_failed — the worker spec-fix turn failed
     assert state.returns_to is None  # cleared → return / continue_build now behave normally
     db_session.refresh(task)
     assert task.status == "failed"  # still held — the spec-fix didn't complete

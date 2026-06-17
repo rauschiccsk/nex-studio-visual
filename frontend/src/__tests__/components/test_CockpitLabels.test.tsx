@@ -10,7 +10,8 @@ import "@testing-library/jest-dom/vitest";
 
 import PipelineRail, { deriveActiveAgent } from "@/components/cockpit/PipelineRail";
 import PipelineMessageBubble from "@/components/cockpit/PipelineMessageBubble";
-import { nextStageLabel } from "@/components/cockpit/labels";
+import { BLOCK_REASON_LABELS, nextStageLabel, TRIAGE_CLASS_LABELS } from "@/components/cockpit/labels";
+import type { BlockReason } from "@/services/api/pipeline";
 import type { ActivityLine, PipelineBoard, PipelineMessage, PipelineState } from "@/services/api/pipeline";
 
 function mkState(): PipelineState {
@@ -76,6 +77,22 @@ describe("cockpit Slovak labels", () => {
     expect(nextStageLabel("task_plan")).toBe("Programovanie"); // build
     expect(nextStageLabel("release")).toBe("Hotovo"); // done
     expect(nextStageLabel("done")).toBe("Hotovo"); // clamped
+  });
+
+  it("R4 (D1/D2): every block_reason maps to a distinct Slovak phrase", () => {
+    const reasons: BlockReason[] = ["agent_question", "agent_error", "system_error", "parse_exhaustion"];
+    for (const r of reasons) {
+      expect(BLOCK_REASON_LABELS[r]).toBeTruthy();
+    }
+    expect(BLOCK_REASON_LABELS.agent_question).toBe("Agent sa pýta");
+    expect(BLOCK_REASON_LABELS.agent_error).toBe("Agent zlyhal");
+    // distinct phrases (no collisions)
+    expect(new Set(Object.values(BLOCK_REASON_LABELS)).size).toBe(reasons.length);
+  });
+
+  it("R4 (D3): triage_class labels read in Slovak", () => {
+    expect(TRIAGE_CLASS_LABELS.director_decision).toBe("rozhodnutie Directora");
+    expect(TRIAGE_CLASS_LABELS.spec_problem).toBe("problém v špecifikácii");
   });
 });
 

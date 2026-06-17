@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from backend.db.models.pipeline import (
     ACTOR_VALUES,
+    BLOCK_REASON_VALUES,
     FLOW_TYPE_VALUES,
     MESSAGE_KIND_VALUES,
     STAGE_VALUES,
@@ -26,6 +27,7 @@ FlowType = Literal[FLOW_TYPE_VALUES]
 PipelineStage = Literal[STAGE_VALUES]
 PipelineActor = Literal[ACTOR_VALUES]
 PipelineStatus = Literal[STATUS_VALUES]
+BlockReason = Literal[BLOCK_REASON_VALUES]
 MessageKind = Literal[MESSAGE_KIND_VALUES]
 
 
@@ -43,6 +45,9 @@ class PipelineStateRead(BaseModel):
     next_action: str
     is_regate: bool
     iteration: int
+    #: R4 (D1): why the pipeline is ``blocked`` (authoritative; replaces the FE ``isErrorBlock`` heuristic).
+    #: ``None`` whenever ``status != 'blocked'`` (and on legacy blocked rows pre-067 → FE heuristic fallback).
+    block_reason: Optional[BlockReason] = None
     created_at: datetime
     updated_at: datetime
 
@@ -84,6 +89,42 @@ class RegateProposal(BaseModel):
     reason: Optional[str] = None
 
 
+class CoordinatorTriage(BaseModel):
+    """R4 (D3): the LATEST Coordinator relay/escalation triage in front of the Director NOW — its
+    ``triage_class`` + ``confidence`` + ``proposed_action``. Surfaced even for a NON-executable relay
+    (``director_decision`` / low-confidence), unlike the executable proposal WhosTurnBoard already shows.
+    All optional — a directive may omit any field."""
+
+    triage_class: Optional[str] = None
+    confidence: Optional[float] = None
+    proposed_action: Optional[str] = None
+
+
+class AutonomousDecision(BaseModel):
+    """R4 (D4): one ``is_autonomous`` Coordinator decision in the board roll-up (task #, action, why)."""
+
+    task: Optional[int] = None
+    action: Optional[str] = None
+    rationale: Optional[str] = None
+    confidence: Optional[float] = None
+
+
+class AutonomousDecisionsSummary(BaseModel):
+    """R4 (D4): board-level roll-up of the ``is_autonomous`` Coordinator notes (CR-055 recoveries +
+    CR-103 fast_fix answers) — the total ``count`` + the ``recent`` few (newest first)."""
+
+    count: int = 0
+    recent: list[AutonomousDecision] = Field(default_factory=list)
+
+
+class AgentSession(BaseModel):
+    """R4 (D5): per-role agent liveness for the rail — ``idle`` / ``active`` / ``stale`` from R1's
+    ``OrchestratorSession.last_input_at`` heartbeat."""
+
+    role: str
+    status: Literal["idle", "active", "stale"]
+
+
 class PipelineBoardRead(BaseModel):
     """Board snapshot: current state + the most recent messages.
 
@@ -111,6 +152,16 @@ class PipelineBoardRead(BaseModel):
     #: gate_g FAIL re-gate proposal (CR-NS-057 §F2.4) — the inferred target + rationale, computed only at
     #: gate_g / awaiting_director|blocked. ``None`` elsewhere; the FE renders the FAIL→target button + chips.
     regate_proposal: Optional[RegateProposal] = None
+    #: R4 (D3): the latest Coordinator relay/escalation triage in front of the Director — present only at a
+    #: settled (awaiting_director / blocked) state with such a directive; ``None`` otherwise. The FE renders
+    #: "Koordinátor klasifikoval: X (istota Y %), navrhuje Z" even for a non-executable relay.
+    coordinator_triage: Optional[CoordinatorTriage] = None
+    #: R4 (D4): board roll-up of the autonomous Coordinator decisions for this version (count + recent few).
+    #: Always computed; the FE renders the line only when ``count > 0`` (absent / 0 → render nothing).
+    autonomous_decisions_summary: Optional[AutonomousDecisionsSummary] = None
+    #: R4 (D5): per-role agent liveness (idle / active / stale) for the rail's staleness chips. Always present
+    #: (one entry per agent role); an absent field on an older board → the FE renders no staleness indicator.
+    agent_sessions: list[AgentSession] = Field(default_factory=list)
 
 
 class PipelineActionRequest(BaseModel):

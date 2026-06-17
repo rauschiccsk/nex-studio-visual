@@ -31,6 +31,10 @@ export type PipelineParticipant = PipelineActor | "system";
 
 export type PipelineStatus = PipelineSchemas["PipelineStateRead"]["status"];
 
+// R4 (D1): the persisted reason a pipeline is `blocked` (generated → single source with the BE Literal +
+// DB CHECK). `NonNullable` strips the `| null` so the union is the four canonical values.
+export type BlockReason = NonNullable<PipelineSchemas["PipelineStateRead"]["block_reason"]>;
+
 export type PipelineMessageKind = PipelineSchemas["PipelineMessageRead"]["kind"];
 
 // ── row types ────────────────────────────────────────────────────────────────
@@ -45,8 +49,39 @@ export interface PipelineState {
   next_action: string;
   is_regate: boolean;
   iteration: number;
+  // R4 (D1): why the pipeline is `blocked` — authoritative; the banner + action bar derive question-vs-error
+  // from this. `null`/absent (legacy rows, or not blocked) → the FE falls back to the `isErrorBlock` heuristic.
+  block_reason?: BlockReason | null;
   created_at: string;
   updated_at: string;
+}
+
+// R4 (D3): the latest Coordinator relay/escalation triage in front of the Director (mirrors BE CoordinatorTriage).
+export interface CoordinatorTriage {
+  triage_class?: string | null;
+  confidence?: number | null;
+  proposed_action?: string | null;
+}
+
+// R4 (D4): one `is_autonomous` Coordinator decision in the board roll-up.
+export interface AutonomousDecision {
+  task?: number | null;
+  action?: string | null;
+  rationale?: string | null;
+  confidence?: number | null;
+}
+
+// R4 (D4): board roll-up of autonomous Coordinator decisions (count + the recent few).
+export interface AutonomousDecisionsSummary {
+  count: number;
+  recent: AutonomousDecision[];
+}
+
+// R4 (D5): per-role agent liveness for the rail staleness chips.
+export type AgentLiveness = "idle" | "active" | "stale";
+export interface AgentSession {
+  role: PipelineActor;
+  status: AgentLiveness;
 }
 
 export interface PipelineMessage {
@@ -84,6 +119,13 @@ export interface PipelineBoard {
   // gate_g FAIL re-gate proposal (CR-NS-057 §F2.4) — the inferred target + rationale, present only at
   // gate_g / awaiting_director|blocked. Absent → the FE shows a plain "Verdikt FAIL".
   regate_proposal?: { entry_stage: PipelineStage; reason?: string } | null;
+  // R4 (D3): the latest Coordinator relay/escalation triage in front of the Director — present only at a
+  // settled state with such a directive. Absent/null → render nothing.
+  coordinator_triage?: CoordinatorTriage | null;
+  // R4 (D4): board roll-up of autonomous Coordinator decisions; the FE renders the line only when count > 0.
+  autonomous_decisions_summary?: AutonomousDecisionsSummary | null;
+  // R4 (D5): per-role agent liveness for the rail staleness chips. Absent on an older board → no indicator.
+  agent_sessions?: AgentSession[];
 }
 
 // ── action requests ──────────────────────────────────────────────────────────

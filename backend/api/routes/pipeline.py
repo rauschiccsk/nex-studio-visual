@@ -29,7 +29,10 @@ from backend.db.session import SessionLocal, get_db
 from backend.schemas.agent_terminal import AgentTerminalSessionRead
 from backend.schemas.pagination import PaginatedResponse
 from backend.schemas.pipeline import (
+    AgentSession,
+    AutonomousDecisionsSummary,
     BoardTask,
+    CoordinatorTriage,
     FastFixStartRequest,
     FastFixStartResponse,
     PipelineActionRequest,
@@ -89,6 +92,11 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         entry = orchestrator._infer_regate_entry_stage(db, version_id)
         reason = "návrh/rozsah → späť na dizajn (gate_a)" if entry == "gate_a" else "oprava implementácie → znova build"
         regate_proposal = RegateProposal(entry_stage=entry, reason=reason)
+    # R4 operator legibility (v0.7.0, D3/D4/D5): the Coordinator's current triage, a board roll-up of
+    # autonomous decisions, and per-role agent liveness — each a bounded per-version scan / one query.
+    triage = orchestrator.coordinator_triage(db, version_id, state)
+    autonomous = orchestrator.autonomous_decisions_summary(db, version_id) if state is not None else None
+    sessions = orchestrator.agent_sessions(db, version_id, state) if state is not None else []
     return PipelineBoardRead(
         state=PipelineStateRead.model_validate(state) if state is not None else None,
         recent_messages=[PipelineMessageRead.model_validate(m) for m in _recent_messages(db, version_id, limit)],
@@ -99,6 +107,9 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         build_open_findings=build_open_findings,
         current_task=BoardTask(number=ct.number, title=ct.title) if ct is not None else None,
         regate_proposal=regate_proposal,
+        coordinator_triage=CoordinatorTriage(**triage) if triage is not None else None,
+        autonomous_decisions_summary=AutonomousDecisionsSummary(**autonomous) if autonomous is not None else None,
+        agent_sessions=[AgentSession(**s) for s in sessions],
     )
 
 

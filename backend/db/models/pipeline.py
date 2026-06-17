@@ -61,6 +61,14 @@ STAGE_VALUES = (
 ACTOR_VALUES = ("coordinator", "designer", "customer", "implementer", "auditor", "director")
 PARTICIPANT_VALUES = ACTOR_VALUES + ("system",)
 STATUS_VALUES = ("agent_working", "awaiting_director", "blocked", "paused", "done")
+# Why a ``blocked`` state happened (v0.7.0 R4, D1) — the authoritative, persisted reason the FE
+# reads INSTEAD of the fragile ``lastMessage.author == "system"`` heuristic. ``agent_question`` = the
+# worker asked something (Director answers); ``agent_error`` = the worker's turn failed
+# (``_block_failed`` build-task fail); ``parse_exhaustion`` = the worker produced no parseable output
+# after retries; ``system_error`` = an engine-side step failed (UAT deploy / release verify / task-plan
+# write / gate mechanical). SET deterministically at each block site (orchestrator), CLEARED when the
+# status leaves ``blocked`` (the set-listener below). NULL whenever the pipeline isn't blocked.
+BLOCK_REASON_VALUES = ("agent_question", "agent_error", "system_error", "parse_exhaustion")
 MESSAGE_KIND_VALUES = (
     "kickoff",
     "question",
@@ -132,6 +140,13 @@ class PipelineState(Base, UUIDMixin, TimestampMixin):
     #: the in-memory ``pipeline_runner._ACTIVE_DISPATCH`` guard. Set by ``_begin_dispatch``; cleared on every
     #: settle (the ``status`` listener below) + the ``_run`` backstop + startup orphan recovery.
     dispatch_in_flight = Column(Boolean, nullable=False, server_default="false")
+    #: R4 operator legibility (v0.7.0, D1): WHY the pipeline is ``blocked`` — one of ``BLOCK_REASON_VALUES``
+    #: (agent_question / agent_error / system_error / parse_exhaustion), SET deterministically at each block
+    #: site in the orchestrator and CLEARED to NULL by the ``status`` set-listener the moment the state leaves
+    #: ``blocked`` (never stale). Authoritative replacement for the FE ``isErrorBlock`` heuristic — the banner
+    #: + action-bar derive question-vs-error from this, falling back to the heuristic only for NULL (legacy)
+    #: rows. Nullable; NULL whenever ``status != 'blocked'``.
+    block_reason = Column(String(20), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("version_id", name="uq_pipeline_state_version_id"),
@@ -153,6 +168,13 @@ class PipelineState(Base, UUIDMixin, TimestampMixin):
         CheckConstraint(
             f"status IN ({_sql_in_list(STATUS_VALUES)})",
             name="ck_pipeline_state_status",
+        ),
+        CheckConstraint(
+            # Nullable enum (R4, D1): NULL is valid (not blocked); a non-NULL value must be in the canonical
+            # tuple. Single source via ``_sql_in_list`` (R2 pattern) so the DB CHECK + the Pydantic Literal
+            # never drift. (``X IN (...)`` already passes for NULL — the explicit ``IS NULL OR`` documents intent.)
+            f"block_reason IS NULL OR block_reason IN ({_sql_in_list(BLOCK_REASON_VALUES)})",
+            name="ck_pipeline_state_block_reason",
         ),
     )
 
@@ -264,3 +286,19 @@ def _clear_dispatch_on_settle(target, value, oldvalue, initiator):
         return
     target.dispatch_in_flight = False
     target.dispatch_baseline_sha = None
+
+
+@event.listens_for(PipelineState.status, "set")
+def _clear_block_reason_on_unblock(target, value, oldvalue, initiator):
+    """Clear :attr:`PipelineState.block_reason` the moment the status LEAVES ``blocked`` (R4, D1).
+
+    ``block_reason`` is meaningful only while ``status == 'blocked'``. Every block site sets it explicitly
+    alongside ``status = 'blocked'``; entering ``blocked`` (``value == 'blocked'``) is a no-op here so the
+    site's set survives regardless of write order, and any transition AWAY from ``blocked`` (settle /
+    re-dispatch / done) drops it to NULL so it can never be stale. All status writes go through this ORM
+    attribute (no bulk UPDATE bypass), so the ~18 transition sites need no individual touch — mirrors
+    :func:`_clear_dispatch_on_settle`. A ``blocked`` → ``blocked`` re-block (``value == oldvalue``) is a
+    no-op too; that site overwrites ``block_reason`` with the fresh reason itself."""
+    if value == oldvalue or value == "blocked":
+        return
+    target.block_reason = None

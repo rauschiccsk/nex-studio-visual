@@ -1916,6 +1916,7 @@ async def _fast_fix_auto_deploy(
         state.next_action = "Nasadené na UAT — over a akceptuj."
     else:
         state.status = "blocked"
+        state.block_reason = "system_error"  # R4 (D1): engine-side UAT deploy failure
         state.next_action = f"UAT deploy zlyhal: {detail}. Skús znova alebo vráť."
 
 
@@ -2027,6 +2028,7 @@ async def run_dispatch(
             failed=result,
         )
         state.status = "blocked"
+        state.block_reason = "parse_exhaustion"  # R4 (D1): worker produced no parseable output after retries
         state.next_action = "Blokované — Koordinátor poslal Directorovi vysvetlenie a ďalší krok."
         db.flush()
         return state
@@ -2058,6 +2060,7 @@ async def run_dispatch(
             )
             question_text = relay_text if relay_text is not None else result.question
             state.status = "blocked"
+            state.block_reason = "agent_question"  # R4 (D1): a worker question relayed for the Director
             state.next_action = f"Agent '{actor}' sa pýta: {question_text}"
             db.flush()
             return state
@@ -2087,6 +2090,7 @@ async def run_dispatch(
             reason, _is_scope = await _verify_with_retries(db, state, result, on_message=on_message)
             if reason is not None:
                 state.status = "blocked"
+                state.block_reason = "system_error"  # R4 (D1): fast_fix release verify failed (engine-side)
                 state.next_action = "Fáza 'release' neprešla overením — pozri správy Koordinátora a rozhodni."
                 db.flush()
                 return state
@@ -2105,6 +2109,7 @@ async def run_dispatch(
                 db, version_id, stage, f"plán úloh sa nepodarilo zapísať: {reason}", on_message
             )
             state.status = "blocked"
+            state.block_reason = "system_error"  # R4 (D1): task-plan write failed (engine-side)
             state.next_action = "Plán úloh zamietnutý — Koordinátor poslal Directorovi vysvetlenie."
         else:
             # §A.2 site 1 (gate_report PASS — task_plan): Coordinator synthesis before settling.
@@ -2142,6 +2147,7 @@ async def run_dispatch(
             # The Coordinator already judged this (verify_done) — keep a plain next_action, no raw
             # reason on the board (CR-NS-022 §2 refinement: no technical dump reaches the Director).
             state.status = "blocked"
+            state.block_reason = "system_error"  # R4 (D1): gate mechanical verify failed (engine-side)
             state.next_action = f"Fáza '{stage}' neprešla overením — pozri správy Koordinátora a rozhodni."
         else:
             # §A.2 site 1 (gate_report PASS — gates A–D, release): Coordinator synthesis before settling.
@@ -2178,6 +2184,7 @@ async def _block_failed(
     # ``reason`` is kept internal (logged); the Director acts via Vrátiť / Konzultovať.
     logger.info("pipeline %s blocked at %s: %s", state.version_id, state.current_stage, reason)
     state.status = "blocked"
+    state.block_reason = "agent_error"  # R4 (D1): a worker turn failed (build-task / sub-flow agent error)
     state.next_action = "Blokované — pozri priebeh a rozhodni (Vrátiť / Konzultovať)."
     # WS-D (CR-NS-036): this block path records no relay message of its own, so a worker
     # parse-exhaustion's tokens would otherwise be lost. When the failed turn carried usage, record a
@@ -3027,6 +3034,108 @@ def _autonomous_answer_count(db: Session, version_id: uuid.UUID, task_id: uuid.U
     )
 
 
+# ── R4 operator-legibility board aggregations (v0.7.0, D3/D4/D5) ───────────────────────────────────
+# Computed at board-fetch (api/routes/pipeline.py:_board) — each a bounded per-version scan / one query, no
+# N+1, mirroring the existing per-fetch board counts (build_readiness / _gate_e_open_findings).
+
+#: How many autonomous decisions the board roll-up surfaces (newest first); the full count is unbounded.
+_AUTONOMOUS_SUMMARY_RECENT = 5
+#: An OrchestratorSession idle longer than this reads as ``stale`` on the rail (R4, D5 — 30 min).
+_AGENT_STALE_SECONDS = 1800
+#: The agent roles shown on the rail — the OrchestratorSession.role set (ACTOR_VALUES minus the human director).
+_AGENT_SESSION_ROLES = ("coordinator", "designer", "customer", "implementer", "auditor")
+
+
+def coordinator_triage(db: Session, version_id: uuid.UUID, state: Optional[PipelineState]) -> Optional[dict[str, Any]]:
+    """R4 (D3): the LATEST Coordinator relay/escalation triage for the version — ``{triage_class, confidence,
+    proposed_action}`` — the single decision in front of the Director NOW. Present only at a settled,
+    Director-actionable state (``awaiting_director`` / ``blocked``); ``None`` otherwise or when no such
+    directive exists. Kind-agnostic (a relay rides ``kind='question'``, an escalation a ``'gate_report'``);
+    the non-null filter is in SQL BEFORE the LIMIT (mirrors :func:`_latest_gate_g_classifying_directive`) so a
+    later directive-less synthesis row never shadows a real triage. Distinct from the EXECUTABLE proposal
+    WhosTurnBoard already shows — this surfaces non-executable ones too (director_decision / low-confidence)."""
+    if state is None or state.status not in ("awaiting_director", "blocked"):
+        return None
+    row = db.execute(
+        select(PipelineMessage)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.author == "coordinator",
+            PipelineMessage.payload["coordinator_directive"].astext.isnot(None),
+        )
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    directive = (row.payload or {}).get("coordinator_directive") if row is not None else None
+    if not directive:
+        return None
+    return {
+        "triage_class": directive.get("triage_class"),
+        "confidence": directive.get("confidence"),
+        "proposed_action": directive.get("proposed_action"),
+    }
+
+
+def autonomous_decisions_summary(db: Session, version_id: uuid.UUID) -> dict[str, Any]:
+    """R4 (D4): board roll-up of the ``is_autonomous`` Coordinator→Director notes (Pillar B recoveries
+    CR-055 + fast_fix answers CR-103) for this version — ``{count, recent:[{task, action, rationale,
+    confidence}]}``, newest first, capped at :data:`_AUTONOMOUS_SUMMARY_RECENT`. Reuses the ``is_autonomous``
+    predicate (the :func:`_autonomous_count` basis) bounded to the version; one indexed scan, no N+1."""
+    rows = (
+        db.execute(
+            select(PipelineMessage.payload)
+            .where(
+                PipelineMessage.version_id == version_id,
+                PipelineMessage.author == "coordinator",
+            )
+            .order_by(PipelineMessage.seq.desc())
+        )
+        .scalars()
+        .all()
+    )
+    autonomous = [p for p in rows if p and p.get("is_autonomous")]
+    recent = [
+        {
+            "task": p.get("task_number"),
+            "action": p.get("action"),
+            "rationale": p.get("rationale"),
+            "confidence": p.get("confidence"),
+        }
+        for p in autonomous[:_AUTONOMOUS_SUMMARY_RECENT]
+    ]
+    return {"count": len(autonomous), "recent": recent}
+
+
+def agent_sessions(db: Session, version_id: uuid.UUID, state: Optional[PipelineState]) -> list[dict[str, Any]]:
+    """R4 (D5): per-role agent liveness for the rail, from R1's ``OrchestratorSession.last_input_at``
+    heartbeat. ``active`` = the state is ``agent_working`` for that role; ``stale`` = ``last_input_at`` older
+    than :data:`_AGENT_STALE_SECONDS`; else ``idle`` (a missing session → ``idle``). One query for the
+    version's project sessions; cheap."""
+    slug = _project_slug_for_version(db, version_id)
+    last_input = dict(
+        db.execute(
+            select(OrchestratorSession.role, OrchestratorSession.last_input_at).where(
+                OrchestratorSession.project_slug == slug
+            )
+        ).all()
+    )
+    now = datetime.now(timezone.utc)
+    working_role = state.current_actor if (state is not None and state.status == "agent_working") else None
+    sessions: list[dict[str, Any]] = []
+    for role in _AGENT_SESSION_ROLES:
+        ts = last_input.get(role)
+        if role == working_role:
+            session_status = "active"
+        elif ts is None:
+            session_status = "idle"
+        else:
+            if ts.tzinfo is None:  # be robust to a naive timestamp (DB stores tz-aware; guard anyway)
+                ts = ts.replace(tzinfo=timezone.utc)
+            session_status = "stale" if (now - ts).total_seconds() > _AGENT_STALE_SECONDS else "idle"
+        sessions.append({"role": role, "status": session_status})
+    return sessions
+
+
 async def _record_autonomous_decision(
     db: Session,
     version_id: uuid.UUID,
@@ -3682,6 +3791,9 @@ async def _run_build_round(
                     break  # the while loop re-picks the reset task (no failed settle)
                 question_text = relay_text if relay_text is not None else result.question
                 state.status = "blocked"
+                # R4 (D1): a build-loop Programmer question relayed for the Director — same category as the
+                # gate-level worker-question site (run_dispatch), so the same authoritative reason.
+                state.block_reason = "agent_question"
                 state.next_action = f"Programátor (úloha #{task.number}) sa pýta: {question_text}"
                 db.flush()
                 return state

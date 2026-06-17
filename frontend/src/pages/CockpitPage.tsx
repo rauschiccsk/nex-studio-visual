@@ -96,7 +96,11 @@ export default function CockpitPage() {
       <div className="flex min-h-0 flex-1">
         {/* Left rail */}
         <div className="w-56 flex-shrink-0 border-r border-[var(--color-border-default)]">
-          <PipelineRail state={board?.state ?? null} activeAgent={deriveActiveAgent(board ?? null, activity)} />
+          <PipelineRail
+            state={board?.state ?? null}
+            activeAgent={deriveActiveAgent(board ?? null, activity)}
+            agentSessions={board?.agent_sessions}
+          />
         </div>
 
         {/* Right column */}

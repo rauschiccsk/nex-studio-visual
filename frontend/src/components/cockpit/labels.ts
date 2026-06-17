@@ -6,7 +6,7 @@
 // literals). Director feedback: internal codes + English roles aren't
 // understandable, especially for Directors who don't know the ICC methodology.
 
-import type { PipelineParticipant, PipelineStage } from "../../services/api/pipeline";
+import type { BlockReason, PipelineParticipant, PipelineStage } from "../../services/api/pipeline";
 
 export const STAGE_LABELS: Record<PipelineStage, string> = {
   kickoff: "Príprava",
@@ -56,6 +56,15 @@ export const RAW_REPORT_LABEL = "pôvodný report";
 // CR-NS-055 Pillar B: an AUTONOMOUS Coordinator decision (payload.is_autonomous) auto-executed a bounded
 // recovery without a Director click — the Director SEES it (never silent), badged distinctly.
 export const AUTONOMOUS_LABEL = "Koordinátor rozhodol";
+
+// R4 (D1/D2): Slovak phrase per block_reason — the precise reason a pipeline is `blocked`, so the Director
+// distinguishes an agent QUESTION from an agent ERROR from a SYSTEM error from a parse failure at a glance.
+export const BLOCK_REASON_LABELS: Record<BlockReason, string> = {
+  agent_question: "Agent sa pýta",
+  agent_error: "Agent zlyhal",
+  system_error: "Systémová chyba",
+  parse_exhaustion: "Chyba spracovania výstupu",
+};
 
 // Slovak labels for EPIC/FEAT/TASK node statuses in the TaskPlanPanel tree (CR-NS-020 CR-5).
 // Union of epic (planned/in_progress/done) + feat/task (todo/in_progress/done/failed).
@@ -126,6 +135,16 @@ export const COORDINATOR_ACTION_LABELS: Record<string, string> = {
   coordinator_escalate_dedo: "eskalovať Dedovi",
   coordinator_route_to_designer: "opraviť spec cez Návrhára",
   capture_backlog_item: "Zaevidovať do backlogu",
+};
+
+// R4 (D3): Coordinator triage_class → Slovak phrase, so the board's "Koordinátor klasifikoval: X" line reads
+// legibly for a non-Dedo Director. Mirrors the BE CoordinatorDirective.triage_class Literal.
+export const TRIAGE_CLASS_LABELS: Record<string, string> = {
+  spec_problem: "problém v špecifikácii",
+  programmer_guidance: "vedenie programátora",
+  nex_studio_bug: "chyba NEX Studio",
+  director_decision: "rozhodnutie Directora",
+  programmer_routine_question: "rutinná otázka programátora",
 };
 
 // CR-NS-067c: light-readable + dark-identical (`text-X-700 dark:text-X-200`); the -200

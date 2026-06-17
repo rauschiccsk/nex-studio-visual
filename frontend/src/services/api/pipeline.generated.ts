@@ -1990,6 +1990,20 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * AgentSession
+         * @description R4 (D5): per-role agent liveness for the rail — ``idle`` / ``active`` / ``stale`` from R1's
+         *     ``OrchestratorSession.last_input_at`` heartbeat.
+         */
+        AgentSession: {
+            /** Role */
+            role: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "idle" | "active" | "stale";
+        };
+        /**
          * AgentTerminalSessionRead
          * @description Single agent terminal session row (active or historical).
          */
@@ -2078,6 +2092,34 @@ export interface components {
             updated_at: string;
             /** Username */
             username: string;
+        };
+        /**
+         * AutonomousDecision
+         * @description R4 (D4): one ``is_autonomous`` Coordinator decision in the board roll-up (task #, action, why).
+         */
+        AutonomousDecision: {
+            /** Action */
+            action?: string | null;
+            /** Confidence */
+            confidence?: number | null;
+            /** Rationale */
+            rationale?: string | null;
+            /** Task */
+            task?: number | null;
+        };
+        /**
+         * AutonomousDecisionsSummary
+         * @description R4 (D4): board-level roll-up of the ``is_autonomous`` Coordinator notes (CR-055 recoveries +
+         *     CR-103 fast_fix answers) — the total ``count`` + the ``recent`` few (newest first).
+         */
+        AutonomousDecisionsSummary: {
+            /**
+             * Count
+             * @default 0
+             */
+            count: number;
+            /** Recent */
+            recent?: components["schemas"]["AutonomousDecision"][];
         };
         /**
          * BacklogItemCreate
@@ -2413,6 +2455,21 @@ export interface components {
              * @description New plaintext password (min 5, max 128 characters). Min 5 — Director directive 2026-05-13, NEX Studio is internal.
              */
             new_password: string;
+        };
+        /**
+         * CoordinatorTriage
+         * @description R4 (D3): the LATEST Coordinator relay/escalation triage in front of the Director NOW — its
+         *     ``triage_class`` + ``confidence`` + ``proposed_action``. Surfaced even for a NON-executable relay
+         *     (``director_decision`` / low-confidence), unlike the executable proposal WhosTurnBoard already shows.
+         *     All optional — a directive may omit any field.
+         */
+        CoordinatorTriage: {
+            /** Confidence */
+            confidence?: number | null;
+            /** Proposed Action */
+            proposed_action?: string | null;
+            /** Triage Class */
+            triage_class?: string | null;
         };
         /** CreateDocumentRequest */
         CreateDocumentRequest: {
@@ -3240,11 +3297,14 @@ export interface components {
          *     ``state`` is ``None`` until the pipeline is ``start``ed (lazy creation).
          */
         PipelineBoardRead: {
+            /** Agent Sessions */
+            agent_sessions?: components["schemas"]["AgentSession"][];
             /**
              * All Tasks Done
              * @default true
              */
             all_tasks_done: boolean;
+            autonomous_decisions_summary?: components["schemas"]["AutonomousDecisionsSummary"] | null;
             /** Available Actions */
             available_actions?: string[];
             /**
@@ -3252,6 +3312,7 @@ export interface components {
              * @default 0
              */
             build_open_findings: number;
+            coordinator_triage?: components["schemas"]["CoordinatorTriage"] | null;
             current_task?: components["schemas"]["BoardTask"] | null;
             /**
              * Gate E Open Findings
@@ -3310,6 +3371,8 @@ export interface components {
          * @description Serialised ``pipeline_state`` row — "who is on turn and what's next".
          */
         PipelineStateRead: {
+            /** Block Reason */
+            block_reason?: ("agent_question" | "agent_error" | "system_error" | "parse_exhaustion") | null;
             /**
              * Created At
              * Format: date-time

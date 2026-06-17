@@ -125,6 +125,10 @@ def test_board_none_before_start(client, db_session):
     body = r.json()
     assert body["state"] is None
     assert body["recent_messages"] == []
+    # R4 (D3/D4/D5): the new board fields degrade gracefully before the pipeline starts.
+    assert body["coordinator_triage"] is None
+    assert body["autonomous_decisions_summary"] is None
+    assert body["agent_sessions"] == []
 
 
 def test_board_unknown_version_404(client):
@@ -483,3 +487,87 @@ def test_board_exposes_deterministic_gate_e_open_findings(client, db_session):
     db_session.flush()
     body = client.get(f"/api/v1/pipeline/{version.id}").json()
     assert body["gate_e_open_findings"] == 1  # deterministic (1 raised, 0 resolved), not 3 from the array
+
+
+def test_board_exposes_r4_legibility_fields(client, db_session):
+    """R4 (D3/D4/D5): the board surfaces the state's block_reason + coordinator_triage (latest relay) +
+    autonomous_decisions_summary + per-role agent_sessions."""
+    from datetime import datetime, timezone
+
+    from backend.db.models.orchestrator import OrchestratorSession
+
+    version = _make_version(db_session, client._ri)
+    project = db_session.get(Project, db_session.get(Version, version.id).project_id)
+    db_session.add(
+        PipelineState(
+            version_id=version.id,
+            flow_type="new_version",
+            current_stage="build",
+            current_actor="implementer",
+            status="blocked",
+            block_reason="agent_question",
+            next_action="Programátor (úloha #2) sa pýta: ktorý formát?",
+        )
+    )
+    db_session.add(
+        PipelineMessage(
+            version_id=version.id,
+            stage="build",
+            author="coordinator",
+            recipient="director",
+            kind="question",
+            content="relay",
+            payload={
+                "coordinator_directive": {
+                    "triage_class": "director_decision",
+                    "proposed_action": "coordinator_escalate_dedo",
+                    "confidence": 0.4,
+                }
+            },
+        )
+    )
+    db_session.add(
+        PipelineMessage(
+            version_id=version.id,
+            stage="build",
+            author="coordinator",
+            recipient="director",
+            kind="notification",
+            content="Koordinátor rozhodol",
+            payload={
+                "is_autonomous": True,
+                "task_id": str(uuid.uuid4()),
+                "task_number": 2,
+                "action": "coordinator_reset_task",
+                "rationale": "reset úlohy",
+                "confidence": 0.9,
+            },
+        )
+    )
+    db_session.add(
+        OrchestratorSession(
+            project_slug=project.slug,
+            role="implementer",
+            claude_session_id=uuid.uuid4(),
+            last_input_at=datetime.now(timezone.utc),
+        )
+    )
+    db_session.flush()
+
+    body = client.get(f"/api/v1/pipeline/{version.id}").json()
+    assert body["state"]["block_reason"] == "agent_question"
+    assert body["coordinator_triage"] == {
+        "triage_class": "director_decision",
+        "proposed_action": "coordinator_escalate_dedo",
+        "confidence": 0.4,
+    }
+    assert body["autonomous_decisions_summary"]["count"] == 1
+    assert body["autonomous_decisions_summary"]["recent"][0]["task"] == 2
+    roles = {s["role"]: s["status"] for s in body["agent_sessions"]}
+    assert roles == {
+        "coordinator": "idle",  # no session → idle
+        "designer": "idle",
+        "customer": "idle",
+        "implementer": "idle",  # recent session but state is blocked (not working) → idle
+        "auditor": "idle",
+    }

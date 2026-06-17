@@ -43,8 +43,9 @@ interface Props {
    *  "Verdikt FAIL → <stage>" primary button + the "Iná fáza" override chips. Absent → plain "Verdikt FAIL". */
   regateProposal?: { entry_stage: PipelineStage; reason?: string } | null;
   inFlight: boolean;
-  /** Blocked due to an unexpected failure (agent crash/timeout) rather than an
-   *  agent question — offer "Skús znova" instead of answer/approve (CR-NS-018). */
+  /** R4 (D1): the FALLBACK error-block heuristic — superseded by the authoritative `state.block_reason`
+   *  (read directly below). Used only when block_reason is absent (NULL / legacy rows): blocked due to an
+   *  unexpected failure (agent crash/timeout) rather than an agent question → offer "Skús znova" (CR-NS-018). */
   isErrorBlock?: boolean;
   /** A Coordinator gate_report exists to apply — gates the "Schváliť návrh
    *  Koordinátora" button (else the action would 400). CR-NS-018. */
@@ -101,7 +102,7 @@ export function PipelineActionBar({
 
   if (!state) return null;
 
-  const { current_stage, status } = state;
+  const { current_stage, status, block_reason } = state;
   // WS-C1 (CR-NS-030): the backend says which actions are valid to offer. A button renders only if
   // its action is allowed (AND its existing finer condition below). Absent field → fall back to the
   // FE's own logic (allow everything), so older boards / tests keep the current behaviour.
@@ -124,15 +125,19 @@ export function PipelineActionBar({
   // generic ratify / question-block paths (CR-NS-018 Phase 3).
   const gateE = current_stage === "gate_e";
 
+  // R4 (D1): block_reason is AUTHORITATIVE — an error-block is any NON-question block reason; fall back to the
+  // `isErrorBlock` heuristic prop only when block_reason is absent (NULL / legacy rows). Keeps the
+  // errorBlock("Skús znova") vs questionBlock("Odpoveď") distinction, now driven by the persisted reason.
+  const errorReason = block_reason ? block_reason !== "agent_question" : isErrorBlock;
   // An error-block (agent crash/timeout) produced no agent output — Schváliť
   // would wrongly skip the stage and Odpoveď answers a non-question. So in that
   // case offer only "Skús znova" (re-dispatch the current stage). A question-block
   // keeps the answer/approve/return choices (CR-NS-018).
-  const errorBlock = blocked && isErrorBlock;
+  const errorBlock = blocked && errorReason;
   // CR-NS-056 §F1.7: at gate_g a blocked state is ALWAYS a Coordinator scope escalation (answerable), so
-  // render "Odpoveď" even when a trailing system note (a synthesis ParseFailure) flipped isErrorBlock — else
-  // the Director would be stuck on "Skús znova". The stage proxy is exact (PipelineActionBar gets only state).
-  const questionBlock = blocked && !gateE && (!isErrorBlock || current_stage === "gate_g");
+  // render "Odpoveď" even when an error reason (a synthesis ParseFailure) would flip it — else the Director
+  // would be stuck on "Skús znova". The stage proxy is exact (PipelineActionBar gets only state).
+  const questionBlock = blocked && !gateE && (!errorReason || current_stage === "gate_g");
 
   // The full ratify gate (Schváliť podľa Návrhára / Koordinátora / Vrátiť) shows
   // at an awaiting ratify stage. Schváliť/Vrátiť also show on a question-block
@@ -437,7 +442,7 @@ export function PipelineActionBar({
           the Director approves it with ONE button labelled by the concrete effect (WS-C class-D) →
           apply_coordinator_recommendation runs the matching executor. Shown at a settled build only. */}
       {current_stage === "build" &&
-        (awaiting || (blocked && !isErrorBlock)) &&
+        (awaiting || (blocked && !errorReason)) &&
         coordinatorProposal &&
         allowed("apply_coordinator_recommendation") && (
           <ActionRow hint={coordinatorProposal.rationale}>

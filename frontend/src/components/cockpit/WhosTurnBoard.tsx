@@ -3,12 +3,14 @@
 // proposed action. Honest: derived from the LIVE state + available_actions, never a stale stage actor.
 
 import type {
+  AutonomousDecisionsSummary,
   CoordinatorDirective,
+  CoordinatorTriage,
   PipelineActionName,
   PipelineStage,
   PipelineState,
 } from "../../services/api/pipeline";
-import { COORDINATOR_ACTION_LABELS, ROLE_LABELS, STAGE_LABELS } from "./labels";
+import { COORDINATOR_ACTION_LABELS, ROLE_LABELS, STAGE_LABELS, TRIAGE_CLASS_LABELS } from "./labels";
 
 // Stages where a Director decision (return/ask) is relayed Director → Coordinator → worker (F-007 §6 / E7).
 const RELAYED_STAGES = new Set(["build", "task_plan", "gate_e"]);
@@ -34,6 +36,11 @@ interface Props {
   coordinatorProposal?: CoordinatorDirective | null;
   /** gate_g FAIL re-gate proposal (CR-NS-057 §F2.4) — shown as a one-liner at gate_g awaiting|blocked. */
   regateProposal?: { entry_stage: PipelineStage; reason?: string } | null;
+  /** R4 (D3): the latest Coordinator relay/escalation triage — surfaced for a NON-executable relay (the
+   *  executable proposal is already shown via coordinatorProposal). Absent/null → render nothing. */
+  coordinatorTriage?: CoordinatorTriage | null;
+  /** R4 (D4): board roll-up of autonomous Coordinator decisions — the line shows only when count > 0. */
+  autonomousSummary?: AutonomousDecisionsSummary | null;
 }
 
 export function WhosTurnBoard({
@@ -42,6 +49,8 @@ export function WhosTurnBoard({
   currentTask,
   coordinatorProposal,
   regateProposal,
+  coordinatorTriage,
+  autonomousSummary,
 }: Props) {
   const { current_stage, current_actor, status } = state;
   const actorLabel = ROLE_LABELS[current_actor] ?? current_actor;
@@ -105,6 +114,31 @@ export function WhosTurnBoard({
         <div className="mt-1 text-[10px] text-[var(--color-accent-primary)]">
           Navrhovaný návrat pri FAIL: {STAGE_LABELS[regateProposal.entry_stage]}
           {regateProposal.reason ? <span className="text-[var(--color-text-muted)]"> — {regateProposal.reason}</span> : null}
+        </div>
+      )}
+
+      {/* R4 (D3): the Coordinator's triage on a NON-executable relay (director_decision / low-confidence) —
+          the executable case is already shown above as "Návrh Koordinátora", so suppress this then to avoid
+          a duplicate line. */}
+      {!coordinatorProposal && coordinatorTriage?.triage_class && (
+        <div className="mt-1 text-[10px] text-[var(--color-text-secondary)]">
+          Koordinátor klasifikoval:{" "}
+          {TRIAGE_CLASS_LABELS[coordinatorTriage.triage_class] ?? coordinatorTriage.triage_class}
+          {typeof coordinatorTriage.confidence === "number"
+            ? ` (istota ${Math.round(coordinatorTriage.confidence * 100)} %)`
+            : ""}
+          {coordinatorTriage.proposed_action
+            ? `, navrhuje ${COORDINATOR_ACTION_LABELS[coordinatorTriage.proposed_action] ?? coordinatorTriage.proposed_action}`
+            : ""}
+        </div>
+      )}
+
+      {/* R4 (D4): at-a-glance roll-up of autonomous Coordinator decisions (the per-message amber bubbles stay
+          in the thread). Rendered only when there has been at least one. */}
+      {autonomousSummary && autonomousSummary.count > 0 && (
+        <div className="mt-1 text-[10px] text-[var(--color-text-muted)]">
+          Koordinátor rozhodol samostatne {autonomousSummary.count}×
+          {autonomousSummary.recent[0]?.rationale ? ` — naposledy: ${autonomousSummary.recent[0].rationale}` : ""}
         </div>
       )}
     </div>

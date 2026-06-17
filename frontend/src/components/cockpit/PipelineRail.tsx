@@ -2,6 +2,7 @@
 
 import type {
   ActivityLine,
+  AgentSession,
   PipelineActor,
   PipelineBoard,
   PipelineState,
@@ -37,15 +38,17 @@ const AGENTS: { actor: PipelineActor; emoji: string }[] = [
   { actor: "auditor", emoji: "🔍" },
 ];
 
-type ChipStatus = "idle" | "working" | "awaiting" | "blocked";
+// R4 (D5): "stale" = a session untouched > 30 min (from agent_sessions), surfaced on an otherwise-idle chip.
+type ChipStatus = "idle" | "working" | "awaiting" | "blocked" | "stale";
 
 // Chip colour from the unified palette (CR-NS-028): working=blue, awaiting=amber, blocked=red,
-// idle=neutral — never emerald-for-working.
+// idle=neutral — never emerald-for-working. stale=amber (an idle thread needing attention).
 const CHIP_TONE: Record<ChipStatus, StatusTone> = {
   idle: "neutral",
   working: "blue",
   awaiting: "amber",
   blocked: "red",
+  stale: "amber",
 };
 
 const CHIP_LABEL: Record<ChipStatus, string> = {
@@ -53,6 +56,7 @@ const CHIP_LABEL: Record<ChipStatus, string> = {
   working: "working",
   awaiting: "awaiting",
   blocked: "blocked",
+  stale: "stale",
 };
 
 function chipStatusFor(
@@ -80,9 +84,15 @@ interface Props {
   /** The agent actually active (working role, or latest message author at rest) —
    *  derived in CockpitPage from activity + messages. Falls back to current_actor. */
   activeAgent?: PipelineActor | null;
+  /** R4 (D5): per-role liveness from the board (idle/active/stale). An otherwise-idle chip whose session is
+   *  `stale` (untouched > 30 min) shows a "stale" indicator. Absent on an older board → no indicator. */
+  agentSessions?: AgentSession[];
 }
 
-export function PipelineRail({ state, activeAgent = null }: Props) {
+export function PipelineRail({ state, activeAgent = null, agentSessions }: Props) {
+  // R4 (D5): role → liveness lookup for the staleness chip.
+  const liveness: Partial<Record<PipelineActor, AgentSession["status"]>> = {};
+  for (const s of agentSessions ?? []) liveness[s.role] = s.status;
   // Flow-aware stage path (F-009): a fast_fix pipeline shows only the short lane
   // (kickoff → build → release → done), never the full 11-stage waterfall rail.
   const stageOrder = stageOrderForFlow(state?.flow_type);
@@ -127,6 +137,12 @@ export function PipelineRail({ state, activeAgent = null }: Props) {
             );
           })}
         </ul>
+        {/* R4 (D6): a one-line legend for the stage markers — the ✓/>/· render but had no key. */}
+        <p className="mt-2 text-[9px] leading-tight text-[var(--color-text-muted)]">
+          <span className="font-mono text-[var(--color-status-success)]">✓</span> hotovo ·{" "}
+          <span className="font-mono text-primary-400">{">"}</span> práve ·{" "}
+          <span className="font-mono">·</span> ešte neprešlo
+        </p>
       </section>
 
       <section>
@@ -135,7 +151,9 @@ export function PipelineRail({ state, activeAgent = null }: Props) {
         </h3>
         <ul className="space-y-1.5">
           {AGENTS.map(({ actor, emoji }) => {
-            const s = chipStatusFor(actor, state, activeAgent);
+            const base = chipStatusFor(actor, state, activeAgent);
+            // R4 (D5): an otherwise-idle agent whose session is stale (untouched > 30 min) shows "stale".
+            const s: ChipStatus = base === "idle" && liveness[actor] === "stale" ? "stale" : base;
             return (
               <li key={actor} className="flex items-center justify-between gap-2 text-xs">
                 <span className="flex items-center gap-1.5 text-[var(--color-text-secondary)]">

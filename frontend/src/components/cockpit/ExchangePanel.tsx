@@ -14,7 +14,7 @@ import PipelineActivityFeed from "./PipelineActivityFeed";
 import PipelineMessageBubble from "./PipelineMessageBubble";
 import TaskSummaryCard from "./TaskSummaryCard";
 import WhosTurnBoard from "./WhosTurnBoard";
-import { PIPELINE_STATUS_TONE, ROLE_LABELS, STAGE_LABELS, TONE_BANNER } from "./labels";
+import { BLOCK_REASON_LABELS, PIPELINE_STATUS_TONE, ROLE_LABELS, STAGE_LABELS, TONE_BANNER } from "./labels";
 
 // The Coordinator actions the orchestrator can EXECUTE on approval (F-008 §9) — used to decide whether
 // the latest directive is an executable proposal (drives the build approve button) vs a plain relay.
@@ -42,10 +42,17 @@ function bannerText(state: PipelineState, errorBlock: boolean): string {
       return `${role} pracuje na fáze ${stage}`;
     case "awaiting_director":
       return `Na rade: Director — posúď fázu ${stage}`;
-    case "blocked":
+    case "blocked": {
+      // R4 (D2): precise blocked banner from the AUTHORITATIVE block_reason — a question reads as a Director
+      // prompt; the three error reasons each read as a labelled "skús znova". NULL (legacy / unset) → the old
+      // `errorBlock` heuristic, byte-for-byte the prior behaviour.
+      const br = state.block_reason;
+      if (br === "agent_question") return `Na rade: Director — odpovedz ${role}-ovi`;
+      if (br) return `${BLOCK_REASON_LABELS[br]} vo fáze ${stage} — skús znova`;
       return errorBlock
         ? `Agent zlyhal vo fáze ${stage} — skús znova`
         : `Na rade: Director — odpovedz ${role}-ovi`;
+    }
     case "paused":
       return "Build pozastavený — pokračuj alebo ukonči";
     case "done":
@@ -73,9 +80,10 @@ export function ExchangePanel({ board, inFlight, activity, onAction }: Props) {
   // Banner tone from the unified palette (CR-NS-028): agent_working=blue, awaiting=amber, blocked=red,
   // done=green — never emerald-for-working.
   const banner = state ? TONE_BANNER[PIPELINE_STATUS_TONE[state.status] ?? "neutral"] : "";
-  // An error-block (agent crash/timeout) escalates via a system notification —
-  // its last message is authored by "system" (an agent question is authored by
-  // the agent role). Drives the "Skús znova" retry vs answer/approve choice.
+  // R4 (D1): the FALLBACK heuristic for an error-block (agent crash/timeout escalates via a system
+  // notification — its last message is authored by "system"). Now superseded by the authoritative
+  // `state.block_reason` (the banner above + PipelineActionBar derive from it); this stays only for NULL /
+  // legacy blocked rows. Drives the "Skús znova" retry vs answer/approve choice when block_reason is absent.
   const lastMessage = recent_messages[recent_messages.length - 1];
   const isErrorBlock = state?.status === "blocked" && lastMessage?.author === "system";
   // Drives the "Schváliť návrh Koordinátora" button: only offer it when there is
@@ -144,6 +152,8 @@ export function ExchangePanel({ board, inFlight, activity, onAction }: Props) {
           currentTask={board.current_task}
           coordinatorProposal={coordinatorProposal}
           regateProposal={board.regate_proposal}
+          coordinatorTriage={board.coordinator_triage}
+          autonomousSummary={board.autonomous_decisions_summary}
         />
       )}
 

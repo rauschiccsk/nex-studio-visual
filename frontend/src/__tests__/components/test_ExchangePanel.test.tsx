@@ -48,6 +48,35 @@ describe("ExchangePanel banner", () => {
     expect(screen.getByText("Na rade: Director — odpovedz Návrhár-ovi")).toBeInTheDocument();
   });
 
+  // R4 (D2): the blocked banner is precise from block_reason — question vs each error class.
+  it("blocked + block_reason=agent_question → Director prompt banner", () => {
+    const board = mkBoard("gate_a", "designer", "blocked");
+    board.state!.block_reason = "agent_question";
+    render(<ExchangePanel board={board} inFlight={false} activity={[]} onAction={vi.fn()} />);
+    expect(screen.getByText("Na rade: Director — odpovedz Návrhár-ovi")).toBeInTheDocument();
+  });
+
+  it("blocked + block_reason=agent_error → 'Agent zlyhal … skús znova'", () => {
+    const board = mkBoard("gate_a", "designer", "blocked");
+    board.state!.block_reason = "agent_error";
+    render(<ExchangePanel board={board} inFlight={false} activity={[]} onAction={vi.fn()} />);
+    expect(screen.getByText("Agent zlyhal vo fáze Rozsah — skús znova")).toBeInTheDocument();
+  });
+
+  it("blocked + block_reason=system_error → 'Systémová chyba … skús znova'", () => {
+    const board = mkBoard("gate_a", "designer", "blocked");
+    board.state!.block_reason = "system_error";
+    render(<ExchangePanel board={board} inFlight={false} activity={[]} onAction={vi.fn()} />);
+    expect(screen.getByText("Systémová chyba vo fáze Rozsah — skús znova")).toBeInTheDocument();
+  });
+
+  it("blocked + block_reason=parse_exhaustion → 'Chyba spracovania výstupu … skús znova'", () => {
+    const board = mkBoard("gate_a", "designer", "blocked");
+    board.state!.block_reason = "parse_exhaustion";
+    render(<ExchangePanel board={board} inFlight={false} activity={[]} onAction={vi.fn()} />);
+    expect(screen.getByText("Chyba spracovania výstupu vo fáze Rozsah — skús znova")).toBeInTheDocument();
+  });
+
   // CR-NS-057 §F2.4: ExchangePanel threads board.regate_proposal to the action bar + the whos-turn board.
   it("gate_g with a regate_proposal → threads it (FAIL→target button + the whos-turn proposal line)", () => {
     const board = mkBoard("gate_g", "auditor", "awaiting_director");

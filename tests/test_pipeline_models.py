@@ -154,6 +154,55 @@ class TestPipelineState:
 
         assert db_session.get(PipelineState, state_id) is None
 
+    def test_block_reason_check_accepts_valid_and_null(self, db_session):
+        # R4 (D1): ck_pipeline_state_block_reason accepts NULL (not blocked) + each canonical value.
+        version = _make_version(db_session)
+        state = _state(version, status="blocked", block_reason="parse_exhaustion")
+        db_session.add(state)
+        db_session.flush()  # no raise
+        state.status = "awaiting_director"  # leaving blocked clears it (listener) → NULL is valid
+        db_session.flush()
+        db_session.refresh(state)
+        assert state.block_reason is None
+
+    def test_block_reason_check_rejects_bad_value(self, db_session):
+        # R4 (D1): a value outside BLOCK_REASON_VALUES violates the CHECK.
+        version = _make_version(db_session)
+        db_session.add(_state(version, status="blocked", block_reason="meltdown"))
+        with pytest.raises((IntegrityError, ProgrammingError)):
+            db_session.flush()
+
+    def test_block_reason_cleared_on_leaving_blocked(self, db_session):
+        """R4 (D1): the status `set` listener clears block_reason the moment the state leaves `blocked`,
+        preserves it across a blocked→blocked re-block, and a fresh dispatch (→ agent_working) clears it."""
+        version = _make_version(db_session)
+        state = _state(version, status="agent_working")
+        db_session.add(state)
+        db_session.flush()
+        db_session.refresh(state)
+        assert state.block_reason is None  # not blocked → unset
+
+        state.status = "blocked"  # entering blocked must NOT clear the reason set alongside it
+        state.block_reason = "agent_question"
+        db_session.flush()
+        db_session.refresh(state)
+        assert state.block_reason == "agent_question"  # persisted
+
+        state.status = "blocked"  # blocked → blocked (value==oldvalue) is a no-op → reason preserved
+        assert state.block_reason == "agent_question"
+
+        state.status = "awaiting_director"  # leaving blocked clears it
+        assert state.block_reason is None
+        db_session.flush()
+        db_session.refresh(state)
+        assert state.block_reason is None
+
+        # A fresh dispatch (→ agent_working) also clears any prior reason (re-block re-captures cleanly).
+        state.status = "blocked"
+        state.block_reason = "agent_error"
+        state.status = "agent_working"
+        assert state.block_reason is None
+
 
 # ── PipelineMessage ───────────────────────────────────────────────────────────
 
