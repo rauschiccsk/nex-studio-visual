@@ -20,25 +20,30 @@ Generate incrementally, accumulate a full in-memory `TaskPlan`, then call the **
 2. **Pass 1 — skeleton:** Designer emits **EPIC + FEAT only** (epic title + `module_id`; feat title/description/estimated_minutes; plus `cross_cutting_rules`), **NO tasks**, validated against a narrowed `TaskPlanSkeleton` schema. Collect ordered `(epic_idx, feat_idx, feat_title)`.
 3. **Passes 2..N — per-feat tasks:** for **each** feat in skeleton order, one bounded `--resume` turn (keeps the full design + skeleton in context) emitting **only that feat's `tasks[]`** (title, task_type, description, checklist_type, priority, estimated_minutes) against a narrowed `TaskPlanFeatTasks` schema. Accumulate onto the in-memory feat.
 4. **Assemble** the full `TaskPlan` in **skeleton order** (not arrival order — `_write_task_plan`'s MAX+1 numbering must match what the Director reviews), synthesize a final `PipelineStatusBlock(stage="task_plan", kind="gate_report", plan=<full>, cross_cutting_rules=...)`, and call the **unchanged** `_write_task_plan` (`orchestrator.py:769`). Then run the existing settle (coordinator synthesis → `awaiting_director`, `orchestrator.py:~2127`).
-5. **Schema threading:** add a `json_schema_override` param to `invoke_agent` / `invoke_agent_with_parse_retry`, **defaulting to `PIPELINE_STATUS_JSON_SCHEMA`** so every other call-site is **byte-identical**. Use the narrowed schemas only for the task_plan passes.
+5. **Narrowed-pass plumbing — dedicated helper, `invoke_agent` UNTOUCHED** (resolves the parse-back / return / message-record gap the Implementer flagged 2026-06-18). The narrowed passes do **NOT** go through `invoke_agent` / `invoke_agent_with_parse_retry` (those assume a `PipelineStatusBlock` and record a standard message) — leave them **and `PIPELINE_STATUS_JSON_SCHEMA` byte-identical**. Instead add one helper used **only** by `_run_task_plan_round`:
+   - **`_invoke_plan_pass(db, state, *, prompt, json_schema, parser, label, on_event, on_message, resume_session)`** — calls the existing low-level `invoke_claude(... json_schema=<narrowed>, resume=<task_plan designer session>)` (R3 path, already supports `--json-schema`), extracts the `structured_output` envelope field, and parses it with `parser` under the **same parse-retry policy** (`_PARSE_RETRIES=2`, per pass).
+   - **Return:** the parsed **narrowed model** (`TaskPlanSkeleton` / `TaskPlanFeatTasks`) on success; on retry-exhaustion **`ParseFailure`** → the round's fail-closed HALT (point 6).
+   - **Parsers (new, `pipeline_status.py`):** `parse_task_plan_skeleton` + `parse_task_plan_feat_tasks`. The narrowed models are **separate types** (`TaskPlanSkeleton` has its own no-`tasks` feat type); **do NOT** relax `TaskPlanFeat.tasks min_length=1` (F-007 §9 "schéma nemení").
+   - **Message recording:** the helper records a concise **synthetic audit `pipeline_message` per pass** (author=`designer`, kind=`note`) carrying the same usage payload `invoke_agent` records (preserve `on_message` broadcast + WS-D metrics): skeleton → `"Plán — kostra: N epík, M funkcií; úlohy sa dopĺňajú per funkcia."`; per-feat → `"Plán — funkcia „<feat>": K úloh."`. No `summary`/`awaiting` (these are not status blocks).
+   - **No `json_schema_override` on `invoke_agent`** — that idea is dropped; the helper takes the schema directly, so `invoke_agent` keeps **zero** new params.
 6. **Limits / fail-closed:**
    - `MAX_PLAN_FEATS` cap (new constant) on total feats; if exceeded, HALT to `blocked` with a clear coordinator relay (consistent with F-007 coarse-grained "module ≈ task").
    - Per-pass parse-retry stays `_PARSE_RETRIES=2`, now applied **per bounded pass**.
    - **Skeleton** exhaustion → the **same `parse_exhaustion` relay** path as today.
    - A **single per-feat pass** exhausting → HALT to `blocked` via the engine-failure coordinator relay **naming the feat**, writing **nothing** (no half-plan).
-7. **Relax** the task_plan plan-required validator guard so the **partial** passes (skeleton with no tasks; per-feat tasks-only) validate; keep `_write_task_plan`'s own empty-plan backstop and **assert non-empty on the assembled block**.
+7. **No validator relax needed.** Because the narrowed passes use the dedicated helper (point 5), **not** `invoke_agent`, the `~283` task_plan plan-required guard is **never hit** during the passes. Only the **final assembled** `PipelineStatusBlock` (full non-empty plan) goes through the normal validate → `_write_task_plan` path — **guard unchanged**. Keep `_write_task_plan`'s empty-plan backstop and **assert non-empty on the assembled block**.
 
 ### Files (from grounded design)
 
-- `backend/services/orchestrator.py`: `~2009` single dispatch → early-return into `_run_task_plan_round`; `~470` `_directive_for` task_plan branch split into skeleton + per-feat prompts; `769` `_write_task_plan` **unchanged** (fed the accumulated full plan); `~998` thread `json_schema_override`; `~2113` settle reached only after assembly; `221` `_PARSE_RETRIES` semantics now per-pass.
-- `backend/services/pipeline_status.py`: add `TaskPlanSkeleton` (feats without tasks) + `TaskPlanFeatTasks` (tasks-only) models + their `model_json_schema()`; relax/branch the `~283` plan-required guard for partial passes.
+- `backend/services/orchestrator.py`: `~2009` single dispatch → early-return into `_run_task_plan_round`; `~470` `_directive_for` task_plan branch split into skeleton + per-feat prompts; `769` `_write_task_plan` **unchanged** (fed the accumulated full plan); **new `_invoke_plan_pass` helper** (point 5) — `invoke_agent`/`invoke_agent_with_parse_retry` **unchanged**; `~2113` settle reached only after assembly; `221` `_PARSE_RETRIES` semantics now per-pass.
+- `backend/services/pipeline_status.py`: add `TaskPlanSkeleton` (its own no-`tasks` feat type) + `TaskPlanFeatTasks` (tasks-only) models + their `model_json_schema()` + the two parsers `parse_task_plan_skeleton`/`parse_task_plan_feat_tasks`. `TaskPlanFeat` and the `~283` plan-required guard **unchanged**.
 - `backend/services/{epic,feat,task}.py`: `create()` reused **unchanged** after accumulation.
 
 ### Acceptance criteria
 
 - A large design (≥ the nex-asistent feat count) yields a **complete** EPIC→FEAT→TASK plan (every feat has ≥1 task), written by the unchanged `_write_task_plan`, settling to `awaiting_director`.
 - Per-pass parse-retry recovers a single-feat typo without re-emitting the whole tree.
-- Every non-task_plan agent invocation is byte-identical (the `json_schema_override` default equals `PIPELINE_STATUS_JSON_SCHEMA`).
+- `invoke_agent` / `invoke_agent_with_parse_retry` / `PIPELINE_STATUS_JSON_SCHEMA` are **byte-identical** (untouched); the narrowed passes go through the dedicated `_invoke_plan_pass` helper. Each pass records a synthetic audit message (skeleton + per-feat) so the trail/metrics are preserved.
 - Fail-closed verified: a forced per-feat failure HALTs to `blocked` naming the feat and writes **no** Epic/Feat/Task rows.
 - No DB schema / migration change. Existing task_plan tests updated; new tests for the multi-pass loop + fail-closed.
 
