@@ -43,6 +43,55 @@ const KIND_BADGE: Record<string, string> = {
   kickoff: "bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)]",
 };
 
+// Shared `prose` styling for the markdown body (used for both the brief body and a plain message).
+const PROSE_CLASS =
+  "prose prose-sm dark:prose-invert max-w-none leading-relaxed text-[var(--color-text-primary)] " +
+  "prose-headings:mt-3 prose-headings:font-semibold prose-headings:text-[var(--color-text-primary)] " +
+  "prose-p:my-1.5 prose-p:text-sm " +
+  "prose-strong:font-semibold prose-strong:text-[var(--color-text-primary)] " +
+  "prose-ul:my-1.5 prose-ul:list-disc prose-ul:pl-5 prose-li:my-0.5 " +
+  "prose-code:bg-[var(--color-surface-hover)] prose-code:px-1 prose-code:text-[var(--color-version-text)] " +
+  "prose-pre:bg-[var(--color-surface-hover)]";
+
+const HEADLINE_CAP = 140;
+
+// v0.7.4: guarantee a Director headline in the FE (the model systematically ignores the prompt nudge).
+// Derive a prominent lead from `content` and strip it from the body so it isn't shown twice:
+//   1. ATX markdown heading on the first line (`#`…`######`) → its text (without the `#`s);
+//   2. else a multi-line message → the first line;
+//   3. else (single line) → the first sentence (up to the first `. ` / end), capped at ~140 chars.
+function deriveBrief(content: string): { headline: string; body: string } {
+  const text = content.replace(/^\s+/, "");
+  const nl = text.indexOf("\n");
+  const firstLine = nl === -1 ? text : text.slice(0, nl);
+  const rest = nl === -1 ? "" : text.slice(nl + 1).trim();
+
+  // Rule 1: ATX heading → its text (drop leading `#`s and any closing `#`s).
+  const heading = firstLine.match(/^#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$/);
+  if (heading?.[1]) {
+    return { headline: heading[1].trim(), body: rest };
+  }
+
+  // Rule 2: multi-line → the first line leads, the remainder is the body.
+  if (nl !== -1) {
+    return { headline: firstLine.trim(), body: rest };
+  }
+
+  // Rule 3: single line → the first sentence (`. ` or end), capped at ~140 chars (word boundary preferred).
+  const sentence = firstLine.match(/^(.+?\.)(?:\s|$)/);
+  let cut = sentence?.[1] ? sentence[1].length : firstLine.length;
+  let ellipsis = false;
+  if (cut > HEADLINE_CAP) {
+    const lastSpace = firstLine.slice(0, HEADLINE_CAP).lastIndexOf(" ");
+    cut = lastSpace > 80 ? lastSpace : HEADLINE_CAP;
+    ellipsis = true;
+  }
+  return {
+    headline: firstLine.slice(0, cut).trimEnd() + (ellipsis ? "…" : ""),
+    body: firstLine.slice(cut).trim(),
+  };
+}
+
 interface Props {
   message: PipelineMessage;
 }
@@ -65,6 +114,8 @@ export function PipelineMessageBubble({ message }: Props) {
   const isDirectorBrief = Boolean((message.payload as { is_director_brief?: boolean } | null)?.is_director_brief);
   // Both is_synthesis and is_director_brief get the PRIMARY rail (mutually exclusive: synthesis vs relay/verify).
   const isPrimaryBrief = isSynthesis || isDirectorBrief;
+  // v0.7.4: the Director-facing briefs get a FE-guaranteed prominent headline + stripped markdown body.
+  const brief = isPrimaryBrief ? deriveBrief(message.content) : null;
   const isRawReport = message.kind === "gate_report" && message.author !== "coordinator" && !isSynthesis;
 
   const badge = KIND_BADGE[message.kind] ?? "bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)]";
@@ -107,17 +158,22 @@ export function PipelineMessageBubble({ message }: Props) {
           </span>
         )}
       </div>
-      <div
-        className="prose prose-sm dark:prose-invert max-w-none leading-relaxed text-[var(--color-text-primary)]
-                   prose-headings:mt-3 prose-headings:font-semibold prose-headings:text-[var(--color-text-primary)]
-                   prose-p:my-1.5 prose-p:text-sm
-                   prose-strong:font-semibold prose-strong:text-[var(--color-text-primary)]
-                   prose-ul:my-1.5 prose-ul:list-disc prose-ul:pl-5 prose-li:my-0.5
-                   prose-code:bg-[var(--color-surface-hover)] prose-code:px-1 prose-code:text-[var(--color-version-text)]
-                   prose-pre:bg-[var(--color-surface-hover)]"
-      >
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
-      </div>
+      {brief ? (
+        <>
+          <div className="text-[0.9375rem] font-semibold leading-snug text-[var(--color-text-primary)]">
+            {brief.headline}
+          </div>
+          {brief.body ? (
+            <div className={`${PROSE_CLASS} mt-1.5`}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{brief.body}</ReactMarkdown>
+            </div>
+          ) : null}
+        </>
+      ) : (
+        <div className={PROSE_CLASS}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+        </div>
+      )}
     </div>
   );
 }

@@ -1550,14 +1550,14 @@ async def _record_internal_turn_parse_failure(
         await on_message(msg)
 
 
-# CR-2 (v0.7.3): the shared Director-facing formatting brief — appended to ALL three Director-facing
-# Coordinator prompts (_coordinator_synthesis, verify_done judge, _coordinator_relay) so every message the
-# Director reads is headline-first + scannable, not a monolithic paragraph. The headline lives INLINE in the
-# rendered ``summary`` (the <<<PIPELINE_STATUS>>> contract / R3 grammar is UNCHANGED — no new schema field).
+# CR-2 (v0.7.3) → simplified v0.7.4: the shared Director-facing formatting nudge — appended to ALL three
+# Director-facing Coordinator prompts (_coordinator_synthesis, verify_done judge, _coordinator_relay). The
+# headline is now GUARANTEED by the FE (PipelineMessageBubble.deriveBrief), independent of model compliance
+# (the model systematically ignored the prior `## ` heading instruction — verified live v0.7.4), so this is a
+# best-effort nudge for a scannable body only. The <<<PIPELINE_STATUS>>> contract / R3 grammar is UNCHANGED.
 _DIRECTOR_FORMAT_BRIEF = (
-    " Začni **jednoriadkovým nadpisom** (`## `) — najpodstatnejšie rozhodnutie/stav v jednej vete (TL;DR). "
-    "Potom krátke sekcie, **tučným** zvýrazni kľúčové pojmy, a pre možnosti/kroky/riziká použi odrážkové "
-    "zoznamy. Nikdy nepíš jeden monolitný odsek. Slovensky. "
+    " Prvý riadok = krátke **jednovetové zhrnutie** (čo sa stalo / čo treba rozhodnúť). "
+    "Potom detaily; možnosti, kroky a riziká dávaj do **odrážkových zoznamov**. Slovensky. "
 )
 
 

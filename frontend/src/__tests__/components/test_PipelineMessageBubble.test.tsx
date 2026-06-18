@@ -102,3 +102,76 @@ describe("PipelineMessageBubble — synthesis rendering (CR-NS-053 §A.3)", () =
     expect((container.firstChild as HTMLElement).className).toContain("border-amber-500");
   });
 });
+
+// v0.7.4: the FE guarantees a prominent Director headline (model-independent) for the flagged briefs.
+describe("PipelineMessageBubble — FE-guaranteed Director headline (v0.7.4)", () => {
+  it("derives a bold first-sentence headline from prose + renders the rest as body (no duplication)", () => {
+    render(
+      <PipelineMessageBubble
+        message={mkMessage({
+          author: "coordinator",
+          kind: "answer",
+          payload: { is_synthesis: true },
+          content:
+            "Po tom zaseknutí sa rozpis práce nakoniec podaril v plnom rozsahu. Celý plán je teraz schválený a pokračujeme ďalej.",
+        })}
+      />,
+    );
+    const headline = screen.getByText("Po tom zaseknutí sa rozpis práce nakoniec podaril v plnom rozsahu.");
+    expect(headline.className).toContain("font-semibold");
+    // the remainder is the body — present exactly once (getByText throws on a duplicate)
+    expect(screen.getByText("Celý plán je teraz schválený a pokračujeme ďalej.")).toBeInTheDocument();
+  });
+
+  it("uses a markdown heading's text as the headline (no literal '##') + strips it from the body", () => {
+    render(
+      <PipelineMessageBubble
+        message={mkMessage({
+          author: "coordinator",
+          kind: "gate_report",
+          payload: { is_director_brief: true },
+          content: "## Gate A prešla\n\nŠpecifikácia je kompletná, čaká sa na schválenie.",
+        })}
+      />,
+    );
+    // heading text once, without the leading '##'; body present once, heading not duplicated into it
+    const headline = screen.getByText("Gate A prešla");
+    expect(headline.className).toContain("font-semibold");
+    expect(screen.queryByText(/##/)).not.toBeInTheDocument();
+    expect(screen.getByText("Špecifikácia je kompletná, čaká sa na schválenie.")).toBeInTheDocument();
+  });
+
+  it("renders headline-only when stripping leaves an empty body (single line, no trailing detail)", () => {
+    render(
+      <PipelineMessageBubble
+        message={mkMessage({
+          author: "coordinator",
+          kind: "gate_report",
+          payload: { is_director_brief: true },
+          content: "## Build dokončený",
+        })}
+      />,
+    );
+    const headline = screen.getByText("Build dokončený");
+    expect(headline.className).toContain("font-semibold");
+    expect(screen.queryByText(/##/)).not.toBeInTheDocument();
+    // no separate prose body rendered (nothing left after the headline)
+    expect(headline.parentElement?.querySelector(".prose")).toBeNull();
+  });
+
+  it("leaves non-flagged (worker/raw) messages unchanged — no derived headline", () => {
+    render(
+      <PipelineMessageBubble
+        message={mkMessage({
+          author: "designer",
+          kind: "gate_report",
+          payload: null,
+          content: "## Toto je nadpis\n\ntelo reportu",
+        })}
+      />,
+    );
+    // a raw report renders content verbatim through ReactMarkdown (heading stays a heading, no FE headline lead)
+    expect(screen.getByRole("heading", { name: "Toto je nadpis" })).toBeInTheDocument();
+    expect(screen.getByText("telo reportu")).toBeInTheDocument();
+  });
+});
