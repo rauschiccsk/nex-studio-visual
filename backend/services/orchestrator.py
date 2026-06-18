@@ -62,6 +62,7 @@ from backend.services.pipeline_status import (
     TaskPlan,
     TaskPlanEpic,
     TaskPlanFeat,
+    extract_task_plan_json,
     parse_status_block,
     parse_structured_output,
     parse_task_plan_feat_tasks,
@@ -492,23 +493,51 @@ _TASK_PLAN_ESTIMATE_NOTE = (
     "`estimated_minutes` = realistický odhad práce pre schopného ĽUDSKÉHO vývojára v minútach "
     "(NIE čas AI výpočtu); ADVISORY pole — chýbajúci odhad je povolený a NIKDY neblokuje build."
 )
+# TEXT/FENCE EXTRACTION (CR-1, live root-cause 2026-06-18): ``--json-schema`` does NOT yield a
+# ``structured_output`` field in this CLI — the model emits TEXT. So the narrowed passes carry their JSON
+# in a DEDICATED ``<<<TASK_PLAN_JSON>>>`` sentinel fence (extracted by ``extract_task_plan_json``). The
+# directive must pin the EXACT field names (the live model drifted to ``features``/``id``/``project``) and
+# forbid extras, or the tolerant parser would have nothing valid to map.
+_TASK_PLAN_FENCE_RULE = (
+    "Výstup vráť VÝHRADNE ako jeden JSON objekt vnútri tohto sentinel bloku (nič iné okolo, žiaden "
+    "markdown, žiaden komentár):\n<<<TASK_PLAN_JSON>>>\n{…}\n<<<END_TASK_PLAN_JSON>>>\n"
+    "Použi PRESNE tieto názvy polí a ŽIADNE iné — nikdy nie `project`/`version`/`level`/`id`/`features`."
+)
+# Concrete minimal examples (exact field names) — the model copies the SHAPE, not the content.
+_SKELETON_EXAMPLE = (
+    "Príklad tvaru:\n<<<TASK_PLAN_JSON>>>\n"
+    '{"epics":[{"title":"Foundation","module_id":null,"feats":['
+    '{"title":"Schéma a migrácie","description":"DB schéma + audit log","estimated_minutes":120}]}],'
+    '"cross_cutting_rules":"Spoločná transakčná hranica; immutable audit; scoping na firmu."}\n'
+    "<<<END_TASK_PLAN_JSON>>>"
+)
+_FEAT_TASKS_EXAMPLE = (
+    "Príklad tvaru:\n<<<TASK_PLAN_JSON>>>\n"
+    '{"tasks":[{"title":"GL tabuľky","task_type":"migration","description":"hlavná kniha + saldokonto",'
+    '"checklist_type":null,"priority":"normal","estimated_minutes":90}]}\n'
+    "<<<END_TASK_PLAN_JSON>>>"
+)
 
 
 def _task_plan_skeleton_directive(director_note: Optional[str] = None) -> str:
-    """Pass 1 prompt (v0.7.3, CR-1): the Designer emits the EPIC + FEAT **skeleton** only — NO tasks.
+    """Pass 1 prompt (v0.7.3, CR-1): the Designer emits the EPIC + FEAT **skeleton** only — NO tasks, in a
+    ``<<<TASK_PLAN_JSON>>>`` sentinel fence (``structured_output`` is dead in this CLI — see the fence rule).
 
-    Bounded so a large design's tree never overflows one structured-output turn (the per-feat tasks
-    come in their own passes). On a Director ``return`` (re-plan) the framed comment is prepended so
-    the Designer applies the edit on the resumed session, not a blind re-plan.
+    Bounded so a large design's tree never overflows one turn (the per-feat tasks come in their own
+    passes). On a Director ``return`` (re-plan) the framed comment is prepended so the Designer applies the
+    edit on the resumed session, not a blind re-plan.
     """
     base = (
-        "Vo fáze 'task_plan' najprv vytvor KOSTRU plánu: emituj IBA epiky a funkcie (EPIC + FEAT), "
-        "BEZ úloh. Pre KAŽDÝ epik uveď `title` a (ak relevantné, inak vynechaj) `module_id`. Pre KAŽDÚ "
-        "funkciu uveď `title`, `description` a `estimated_minutes` (Σ odhadov jej úloh). Doplň "
-        "`cross_cutting_rules` (regulované invarianty knihy, markdown, kodifikované RAZ). Úlohy "
-        "NEemituj — doplnia sa v ďalších prechodoch po jednej funkcii. "
+        "Vo fáze 'task_plan' najprv vytvor KOSTRU plánu: emituj IBA epiky a funkcie (EPIC + FEAT), BEZ úloh. "
+        "Objekt má pole `epics` (zoznam): KAŽDÝ epik má `title` a `module_id` (UUID alebo null), a pole "
+        "`feats` (zoznam, ≥1) — KAŽDÁ funkcia má `title`, `description` a `estimated_minutes` (Σ odhadov "
+        "jej úloh). Navrch objektu pole `cross_cutting_rules` (markdown, regulované invarianty knihy, "
+        "kodifikované RAZ). Úlohy NEemituj — doplnia sa v ďalších prechodoch po jednej funkcii. "
         + _TASK_PLAN_ESTIMATE_NOTE
-        + " Vráť LEN štruktúrovaný objekt podľa schémy (epics + cross_cutting_rules)."
+        + "\n\n"
+        + _TASK_PLAN_FENCE_RULE
+        + "\n\n"
+        + _SKELETON_EXAMPLE
     )
     if director_note:
         return f"{director_note}\n\n{base}"
@@ -516,17 +545,22 @@ def _task_plan_skeleton_directive(director_note: Optional[str] = None) -> str:
 
 
 def _task_plan_feat_directive(feat_title: str) -> str:
-    """Passes 2..N prompt (v0.7.3, CR-1): the Designer emits ONLY one feat's tasks.
+    """Passes 2..N prompt (v0.7.3, CR-1): the Designer emits ONLY one feat's tasks, in a
+    ``<<<TASK_PLAN_JSON>>>`` sentinel fence.
 
     Runs on the resumed Designer session, so the full design + the just-emitted skeleton stay in
     context; the orchestrator grafts the returned tasks onto the matching skeleton feat.
     """
     return (
-        f"Pre funkciu „{feat_title}“ z kostry plánu emituj IBA jej úlohy (`tasks`). Pre KAŽDÚ "
-        "úlohu uveď `title`, `task_type`, `description`, `checklist_type`, `priority` a `estimated_minutes`. "
-        "Granularita HRUBOZRNNÁ — modul ≈ úloha (F-007 §4); nedeľ koherentný modul. "
+        f"Pre funkciu „{feat_title}“ z kostry plánu emituj IBA jej úlohy. Objekt má jedno pole `tasks` "
+        "(zoznam, ≥1): KAŽDÁ úloha má `title`, `task_type` (jedno z: backend, frontend, migration, test, "
+        "docs), `description`, `checklist_type` (text alebo null), `priority` (normal | high | urgent) a "
+        "`estimated_minutes`. Granularita HRUBOZRNNÁ — modul ≈ úloha (F-007 §4); nedeľ koherentný modul. "
         + _TASK_PLAN_ESTIMATE_NOTE
-        + " Vráť LEN štruktúrovaný objekt podľa schémy s poľom `tasks` (≥1 úloha)."
+        + "\n\n"
+        + _TASK_PLAN_FENCE_RULE
+        + "\n\n"
+        + _FEAT_TASKS_EXAMPLE
     )
 
 
@@ -1286,7 +1320,7 @@ async def _plan_pass_once(
 
     _started = perf_counter()
     try:
-        _text, usage, structured = _split_claude_result(
+        text, usage, structured = _split_claude_result(
             await invoke_claude(
                 project_slug=slug,
                 claude_session_id=session_id,
@@ -1322,9 +1356,18 @@ async def _plan_pass_once(
             lost_work=lost_work,
         )
     metrics.record(usage, perf_counter() - _started)
-    if structured is None:  # narrowed passes are schema-driven — no structured object means no plan data
-        return ParseFailure("task_plan pass produced no structured_output")
-    return parser(structured)
+    # TEXT/FENCE EXTRACTION (CR-1, live root-cause 2026-06-18): ``--json-schema`` does NOT return a
+    # ``structured_output`` field in this CLI — the model emits the narrowed JSON as TEXT in a
+    # ``<<<TASK_PLAN_JSON>>>`` sentinel fence (the directives instruct it). Prefer ``structured_output``
+    # (forward-compat if a future CLI populates it), else fall back to extracting the fenced JSON from
+    # stdout — the SAME text/fence survival path ``invoke_agent`` uses (``parse_status_block``).
+    if structured is not None:
+        obj: Any = structured
+    else:
+        obj = extract_task_plan_json(text)
+        if isinstance(obj, ParseFailure):
+            return obj
+    return parser(obj)
 
 
 async def _invoke_plan_pass(
@@ -1371,8 +1414,9 @@ async def _invoke_plan_pass(
             db,
             state,
             prompt=(
-                f"Tvoj štruktúrovaný výstup sa nepodarilo spracovať: {result.reason}. "
-                "Pošli LEN platný objekt podľa schémy — rovnaký obsah, správne polia a hodnoty."
+                f"Tvoj výstup sa nepodarilo spracovať: {result.reason}. Pošli ho ZNOVA — rovnaký obsah, "
+                "ale VÝHRADNE ako jeden JSON objekt vnútri bloku <<<TASK_PLAN_JSON>>> … "
+                "<<<END_TASK_PLAN_JSON>>>, s presnými názvami polí a bez čohokoľvek navyše."
             ),
             json_schema=json_schema,
             parser=parser,

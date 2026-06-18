@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from backend.schemas.task import TaskPriority, TaskType
 
@@ -36,6 +36,18 @@ _FENCE_RE = re.compile(
     r"<<<PIPELINE_STATUS>>>\s*(.*?)\s*<<<END_PIPELINE_STATUS>>>",
     re.DOTALL,
 )
+
+# (v0.7.3 CR-1) The narrowed task_plan passes carry their JSON in a DEDICATED sentinel fence — distinct
+# from the PIPELINE_STATUS fence so a plan pass can never be mistaken for a status block. ``--json-schema``
+# does NOT return a ``structured_output`` field in this CLI (live root-cause 2026-06-18) — the model emits
+# the narrowed JSON as TEXT, so :func:`extract_task_plan_json` pulls it out the same way
+# :func:`parse_status_block` pulls the status block out of ``invoke_agent``'s stdout.
+_TASK_PLAN_FENCE_RE = re.compile(
+    r"<<<TASK_PLAN_JSON>>>\s*(.*?)\s*<<<END_TASK_PLAN_JSON>>>",
+    re.DOTALL,
+)
+#: Tolerate the model wrapping the sentinel-fenced JSON in an inner markdown ```json … ``` block.
+_MD_JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
 
 #: Stages an agent may report (F-007 §3.1).
 STAGES = frozenset(
@@ -131,6 +143,16 @@ class TaskPlanSkeletonEpic(BaseModel):
     title: str = Field(min_length=1, max_length=500)
     module_id: Optional[UUID] = None
     feats: list[TaskPlanSkeletonFeat] = Field(min_length=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_features_alias(cls, data: Any) -> Any:
+        """Tolerate the most likely real-claude drift: the model emits ``features`` instead of ``feats``
+        (observed in the live root-cause repro 2026-06-18). Normalise it to ``feats`` before validation;
+        unknown keys (``id``/``project``/…) are dropped by the model's default ``extra='ignore'``."""
+        if isinstance(data, dict) and "feats" not in data and "features" in data:
+            return {**data, "feats": data["features"]}
+        return data
 
 
 class TaskPlanSkeleton(BaseModel):
@@ -404,3 +426,28 @@ def parse_task_plan_feat_tasks(obj: dict) -> Union[TaskPlanFeatTasks, ParseFailu
         return TaskPlanFeatTasks.model_validate(obj)
     except ValidationError as exc:
         return ParseFailure(f"task_plan feat-tasks invalid — {_format_validation_errors(exc)}")
+
+
+def extract_task_plan_json(text: str) -> Union[dict, ParseFailure]:
+    """Pull the narrowed-pass JSON object out of a ``<<<TASK_PLAN_JSON>>>`` sentinel fence in ``text``
+    (v0.7.3, CR-1 — the TEXT/fence path the live CLI forces; ``structured_output`` is dead).
+
+    Returns the parsed ``dict`` (handed to :func:`parse_task_plan_skeleton` / :func:`parse_task_plan_feat_tasks`)
+    or a :class:`ParseFailure` (missing/duplicate fence, non-JSON, non-object). Tolerates an inner markdown
+    ```json … ``` wrapper. Deterministic — never raises, never infers."""
+    matches = _TASK_PLAN_FENCE_RE.findall(text or "")
+    if not matches:
+        return ParseFailure("no <<<TASK_PLAN_JSON>>> fence found")
+    if len(matches) > 1:
+        return ParseFailure(f"expected exactly one <<<TASK_PLAN_JSON>>> fence, found {len(matches)}")
+    raw = matches[0].strip()
+    inner = _MD_JSON_FENCE_RE.match(raw)
+    if inner:  # the model wrapped the JSON in a ```json … ``` block inside the sentinel
+        raw = inner.group(1).strip()
+    try:
+        obj = json.loads(raw)
+    except ValueError as exc:
+        return ParseFailure(f"task_plan fence is not valid JSON: {exc}")
+    if not isinstance(obj, dict):
+        return ParseFailure("task_plan fence JSON is not an object")
+    return obj

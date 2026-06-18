@@ -2405,12 +2405,23 @@ def _epics_of(db_session, version):
 
 
 # ── (v0.7.3) incremental task_plan generation — narrowed multi-pass fake (CR-1) ──
-# The task_plan stage now generates the plan in bounded passes (skeleton + per-feat), each a
-# grammar-constrained structured_output turn, NOT one whole-tree fence. These helpers drive
-# _run_task_plan_round: a single callable that returns the right narrowed structured_output per
-# pass (keyed on the prompt), and a valid status-block fence for the post-write Coordinator synthesis.
+# The task_plan stage generates the plan in bounded passes (skeleton + per-feat). In the REAL CLI
+# ``--json-schema`` yields NO structured_output — the model emits the narrowed JSON as TEXT in a
+# ``<<<TASK_PLAN_JSON>>>`` sentinel fence (live root-cause 2026-06-18). ``_plan_fake`` drives both:
+# ``text=False`` returns a structured_output dict (forward-compat path); ``text=True`` returns the
+# real-env TEXT+fence with structured=None. The post-write Coordinator synthesis gets a status-block fence.
 
 _DEFAULT_CROSS = "## Invarianty\n- spoločná transakčná hranica\n- immutable audit"
+
+
+def _task_plan_fence(obj: dict) -> str:
+    """Wrap a narrowed-pass dict in the ``<<<TASK_PLAN_JSON>>>`` sentinel fence, amid prose noise — the
+    shape real claude emits (the model writes commentary around the fenced JSON)."""
+    return (
+        "Tu je kostra/úlohy ako si žiadal:\n"
+        f"<<<TASK_PLAN_JSON>>>\n{json.dumps(obj, ensure_ascii=False)}\n<<<END_TASK_PLAN_JSON>>>\n"
+        "Hotovo."
+    )
 
 
 def _skeleton_dict(plan_spec, cross=_DEFAULT_CROSS) -> dict:
@@ -2440,20 +2451,27 @@ def _feat_tasks_dict(tasks) -> dict:
     return {"tasks": out}
 
 
-def _plan_fake(plan_spec, *, cross=_DEFAULT_CROSS, usage=None):
+def _plan_fake(plan_spec, *, cross=_DEFAULT_CROSS, usage=None, text=False):
     """A ``callable(prompt)`` stand-in for ``invoke_claude`` driving ``_run_task_plan_round``'s passes.
 
     Keys on the prompt: the skeleton pass (contains ``"KOSTRU"``) → EPIC+FEAT(no tasks)+cross; a per-feat
     pass (the feat title appears) → that feat's tasks; anything else (the post-write Coordinator synthesis)
-    → a valid task_plan status-block fence. Feat titles must be DISTINCT + non-substring within a spec."""
+    → a valid task_plan status-block fence. Feat titles must be DISTINCT + non-substring within a spec.
+
+    ``text=False`` returns the narrowed dict as ``structured_output`` (``("", usage, dict)`` — forward-compat
+    path). ``text=True`` returns the REAL-ENV shape: prose + a ``<<<TASK_PLAN_JSON>>>`` fence as the result
+    TEXT with ``structured_output=None`` (``(text, usage, None)``)."""
     feat_by_title = {f_title: tasks for _e, feats in plan_spec for f_title, tasks in feats}
+
+    def _emit(obj: dict):
+        return (_task_plan_fence(obj), usage, None) if text else ("", usage, obj)
 
     def _resp(prompt):
         if "KOSTRU" in prompt:
-            return ("", usage, _skeleton_dict(plan_spec, cross))
+            return _emit(_skeleton_dict(plan_spec, cross))
         for f_title, tasks in feat_by_title.items():
             if f_title in prompt:
-                return ("", usage, _feat_tasks_dict(tasks))
+                return _emit(_feat_tasks_dict(tasks))
         return _block(
             stage="task_plan", kind="done", summary="Plán pripravený — schváľ alebo vráť.", awaiting="director"
         )
@@ -2771,6 +2789,75 @@ async def test_task_plan_claude_error_no_baseline_blocks_agent_error(db_session,
     assert result.status == "blocked"
     assert result.block_reason == "agent_error"  # NOT parse_exhaustion
     assert _lost_work_notifs(db_session, version.id) == []  # no baseline → no lost-work audit
+
+
+async def test_task_plan_text_fence_path_materializes(db_session, fake_claude):
+    """REAL-ENV path (the gap that masked the live failure 2026-06-18): claude returns TEXT with a
+    <<<TASK_PLAN_JSON>>> fence and NO structured_output (structured=None) for BOTH the skeleton and every
+    per-feat pass. The fix extracts+parses the fenced JSON (mirroring invoke_agent's parse_status_block
+    fallback), yielding a complete materialized plan — pre-fix this blocked on parse_exhaustion."""
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _to_task_plan(db_session, version)
+    fake_claude.response = _plan_fake(
+        [
+            ("Foundation", [("Schema", [("GL tables", "migration", 90)])]),
+            ("Calc", [("Hlavná kniha", [("GL výpočet", "backend", 120)])]),
+        ],
+        text=True,  # TEXT + sentinel fence, structured_output=None — the real-env shape
+    )
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert state.status == "awaiting_director"  # NOT blocked — the text/fence path was exercised
+    epics = _epics_of(db_session, version)
+    assert {e.title for e in epics} == {"Foundation", "Calc"}
+    tasks = db_session.execute(select(Task)).scalars().all()
+    assert {t.title for t in tasks} == {"GL tables", "GL výpočet"}
+    # the narrowed schemas are STILL sent (forward-compat) even though structured_output came back None
+    assert fake_claude.calls[0]["json_schema"] == orchestrator.TASK_PLAN_SKELETON_JSON_SCHEMA
+    # cross_cutting_rules still persists on the designer gate_report (build loop re-reads it)
+    gr = [m for m in _msgs(db_session, version.id) if m.author == "designer" and m.kind == "gate_report"][-1]
+    assert "transakčná" in gr.payload["cross_cutting_rules"]
+
+
+async def test_task_plan_text_fence_tolerates_features_drift(db_session, fake_claude):
+    """Drift tolerance (the exact live model output): the skeleton fence uses `features` (not `feats`)
+    plus extra `id`/`project`/`version` keys — the parser normalises `features`→`feats` and drops the
+    unknowns, still materializing. Guards against the precise shape the live root-cause captured."""
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _to_task_plan(db_session, version)
+
+    def _fake(prompt):
+        if "KOSTRU" in prompt:
+            drift = {
+                "project": "nex-asistent",
+                "version": "0.1.0",
+                "level": "skeleton",
+                "epics": [{"id": "EPIC-1", "title": "Foundation", "features": [{"id": "FEAT-1", "title": "Schema"}]}],
+                "cross_cutting_rules": "invarianty",
+            }
+            return (_task_plan_fence(drift), None, None)
+        if "Schema" in prompt:
+            return (_task_plan_fence({"tasks": [{"title": "GL", "task_type": "migration"}]}), None, None)
+        return _block(stage="task_plan", kind="done", summary="ok", awaiting="director")
+
+    fake_claude.response = _fake
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert state.status == "awaiting_director"
+    assert [f.title for f in db_session.execute(select(Feat)).scalars().all()] == ["Schema"]  # features→feats
+    assert [t.title for t in db_session.execute(select(Task)).scalars().all()] == ["GL"]
+
+
+async def test_task_plan_text_no_fence_blocks_parse_exhaustion(db_session, fake_claude):
+    """A skeleton turn with NO <<<TASK_PLAN_JSON>>> fence (and no structured_output) → extraction fails →
+    parse_exhaustion (the text path's genuine-parse-failure branch), nothing written."""
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _to_task_plan(db_session, version)
+    fake_claude.response = lambda _p: ("Tu je plán, ale zabudol som sentinel blok.", None, None)
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert state.status == "blocked" and state.block_reason == "parse_exhaustion"
+    assert _epics_of(db_session, version) == []
 
 
 # ── build per-task loop (F-007 §6, CR-NS-020 CR-3) ──────────────────────────────

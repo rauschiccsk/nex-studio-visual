@@ -12,6 +12,7 @@ from backend.services.pipeline_status import (
     PipelineStatusBlock,
     TaskPlanFeatTasks,
     TaskPlanSkeleton,
+    extract_task_plan_json,
     parse_status_block,
     parse_task_plan_feat_tasks,
     parse_task_plan_skeleton,
@@ -387,3 +388,58 @@ def test_task_plan_plan_required_guard_unchanged():
     # (the narrowed passes never hit this guard; only the final assembled block does, and it has one).
     planless = _block(stage="task_plan", kind="gate_report", summary="x", awaiting="director")
     assert isinstance(parse_status_block(planless), ParseFailure)
+
+
+# ── (v0.7.3) TEXT/FENCE extraction — the real-CLI path (CR-1, point 8) ───────
+
+
+def _fence(payload: str) -> str:
+    return f"prose before\n<<<TASK_PLAN_JSON>>>\n{payload}\n<<<END_TASK_PLAN_JSON>>>\nprose after"
+
+
+def test_extract_task_plan_json_pulls_object_from_sentinel_fence():
+    obj = extract_task_plan_json(_fence('{"epics": [{"title": "E1", "feats": [{"title": "F1"}]}]}'))
+    assert isinstance(obj, dict) and obj["epics"][0]["title"] == "E1"
+
+
+def test_extract_task_plan_json_tolerates_inner_markdown_wrapper():
+    # the model wraps the JSON in a ```json … ``` block INSIDE the sentinel fence
+    obj = extract_task_plan_json(_fence('```json\n{"tasks": [{"title": "T", "task_type": "backend"}]}\n```'))
+    assert isinstance(obj, dict) and obj["tasks"][0]["task_type"] == "backend"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "no fence at all — just prose",  # missing fence
+        "<<<TASK_PLAN_JSON>>>\nnot json\n<<<END_TASK_PLAN_JSON>>>",  # invalid JSON
+        "<<<TASK_PLAN_JSON>>>\n[1, 2]\n<<<END_TASK_PLAN_JSON>>>",  # JSON but not an object
+        _fence("{}") + _fence("{}"),  # two fences
+    ],
+)
+def test_extract_task_plan_json_rejects_bad_input(text):
+    assert isinstance(extract_task_plan_json(text), ParseFailure)
+
+
+def test_parse_skeleton_accepts_features_alias_and_drops_unknown_keys():
+    # The exact live root-cause drift: `features` (not `feats`) + extra id/project/version/level keys.
+    drift = {
+        "project": "x",
+        "version": "1",
+        "level": "skeleton",
+        "epics": [{"id": "EPIC-1", "title": "Foundation", "features": [{"id": "FEAT-1", "title": "Schema"}]}],
+        "cross_cutting_rules": "inv",
+    }
+    res = parse_task_plan_skeleton(drift)
+    assert isinstance(res, TaskPlanSkeleton)
+    assert res.epics[0].feats[0].title == "Schema"  # features → feats normalised
+    # canonical `feats` still works (the alias does not break the normal name)
+    ok = parse_task_plan_skeleton({"epics": [{"title": "E", "feats": [{"title": "F"}]}]})
+    assert isinstance(ok, TaskPlanSkeleton) and ok.epics[0].feats[0].title == "F"
+
+
+def test_extract_then_parse_feat_tasks_round_trip():
+    obj = extract_task_plan_json(_fence('{"tasks": [{"title": "GL", "task_type": "migration", "id": "x"}]}'))
+    res = parse_task_plan_feat_tasks(obj)
+    assert isinstance(res, TaskPlanFeatTasks)
+    assert res.tasks[0].title == "GL" and res.tasks[0].task_type == "migration"
