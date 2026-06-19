@@ -435,12 +435,13 @@ export function PipelineActionBar({
         </>
       )}
 
-      {/* rerun_release_audit (v0.7.6): at a SETTLED gate_g verdict, re-run the release audit instead of
-          ratifying the settled one — the Auditor re-audits, the app really boots + the acceptance suite
+      {/* rerun_release_audit (v0.7.6; gating widened v0.7.8): at a SETTLED gate_g, re-run the release audit
+          instead of ratifying/answering — the Auditor re-audits, the app really boots + the acceptance suite
           runs (the v0.7.5 smoke), and the pipeline waits for a fresh verdict. A re-dispatch that does NOT
           advance, so it's indigo like the other re-dispatch controls — distinct from green PASS / red FAIL.
-          Offered only when the backend allows it (settled gate_g), so fast_fix (never at gate_g) never shows it. */}
-      {current_stage === "gate_g" && awaiting && allowed("rerun_release_audit") && (
+          The backend offered-set is the source of truth (awaiting_director OR a blocked Auditor question), so
+          render purely on allowed(...) — no awaiting-only sub-gate. fast_fix (never at gate_g) never shows it. */}
+      {current_stage === "gate_g" && allowed("rerun_release_audit") && (
         <ActionRow hint="Auditor spustí release audit znova — appka sa reálne nabootuje a prebehnú acceptance skúšky; pipeline počká na čerstvý verdikt.">
           <button
             onClick={() => onAction("rerun_release_audit")}

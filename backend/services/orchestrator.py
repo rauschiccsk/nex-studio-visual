@@ -347,11 +347,14 @@ def determine_available_actions(state: PipelineState) -> set[str]:
             actions.add("accept_merged")
     elif stage == "gate_g":  # fast_fix never at gate_g (FAST_FIX_STAGE_ORDER has no gate_g)
         actions.add("verdict")
-        if status == "awaiting_director":
-            # rerun_release_audit (v0.7.6): offered only at a SETTLED gate_g verdict the Director is
-            # looking at — re-dispatches the Auditor (re-runs the release audit) WITHOUT advancing; the
-            # fresh gate_g gate_report re-triggers the existing v0.7.5 verify_done app-starts smoke. Gated
-            # to gate_g, which fast_fix never reaches → byte-identical for the fast-fix lane.
+        if status in ("awaiting_director", "blocked"):
+            # rerun_release_audit (v0.7.6, gating widened v0.7.8): offered at a SETTLED gate_g — either a
+            # verdict the Director is looking at (awaiting_director) OR the Auditor blocked on a question,
+            # where the Director may choose to re-validate instead of answering. Re-dispatches the Auditor
+            # (re-runs the release audit) WITHOUT advancing; the fresh gate_g gate_report re-triggers the
+            # existing v0.7.5 verify_done app-starts smoke. The apply_action handler already accepts both
+            # (rerun_release_audit is in _ADVANCING_ACTIONS, whose guard treats awaiting_director/blocked/
+            # paused as settled). Gated to gate_g, which fast_fix never reaches → byte-identical for fast-fix.
             actions.add("rerun_release_audit")
     elif stage == "release":
         actions.add("uat_accept")

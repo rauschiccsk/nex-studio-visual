@@ -693,15 +693,16 @@ async def test_rerun_release_audit_rejected_while_auditor_working(db_session, fa
     assert st.status == "agent_working" and st.current_stage == "gate_g"  # unchanged
 
 
-def test_rerun_release_audit_offered_only_at_settled_gate_g():
-    # v0.7.6: offered at gate_g ONLY when settled (awaiting_director) — not while the Auditor works, not on
-    # a blocked scope-escalation, and never at another stage.
+def test_rerun_release_audit_offered_at_settled_gate_g():
+    # v0.7.6 + v0.7.8: offered at gate_g when SETTLED — both at a verdict (awaiting_director) AND when the
+    # Auditor is blocked on a question (the Director may re-validate instead of answering). Never while the
+    # Auditor works (agent_working) and never at another stage.
     def acts(stage, status):
         return orchestrator.determine_available_actions(PipelineState(current_stage=stage, status=status))
 
     assert "rerun_release_audit" in acts("gate_g", "awaiting_director")
+    assert "rerun_release_audit" in acts("gate_g", "blocked")  # v0.7.8: widened to blocked
     assert "rerun_release_audit" not in acts("gate_g", "agent_working")
-    assert "rerun_release_audit" not in acts("gate_g", "blocked")
     assert "rerun_release_audit" not in acts("release", "awaiting_director")
     assert "rerun_release_audit" not in acts("build", "awaiting_director")
 
