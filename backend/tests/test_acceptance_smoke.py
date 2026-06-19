@@ -1,12 +1,16 @@
-"""v0.7.5 CR-1 — App-starts acceptance smoke (HARD gate at full-flow ``gate_g``) unit tests.
+"""v0.7.5 CR-1 / v0.7.9 — App-starts smoke (HARD gate at full-flow ``gate_g``) unit tests.
+
+v0.7.9: the smoke is a deterministic BOOT check — build + boot the project's compose and confirm the
+deployed app BOOTS and RESPONDS to HTTP (the readiness poll). It NO LONGER runs the acceptance suite
+in-container (production images carry no pytest); behavioural depth is the Auditor's release oracle.
 
 Two layers:
 
-* **The runner** (:func:`orchestrator._run_acceptance_smoke` + helpers) — graceful SKIP when the
-  project has no compose / no acceptance suite, a non-zero step → ``(False, reason)``, a clean run →
-  ``(True, "OK")``, teardown ALWAYS runs (the ``finally``), and the ephemeral override strips
-  ``container_name`` + host ``ports`` via the Compose-Spec ``!reset`` tag. ``docker`` itself is never
-  invoked — the single ``_compose_smoke_step`` subprocess seam is faked.
+* **The runner** (:func:`orchestrator._run_app_starts_smoke` + helpers) — graceful SKIP when the
+  project has no compose, a non-zero ``up`` / not-responding → ``(False, reason)``, a ready app →
+  ``(True, "app booted + responds")`` with NO pytest run, teardown ALWAYS runs (the ``finally``), and
+  the ephemeral override strips ``container_name`` + host ``ports`` via the Compose-Spec ``!reset`` tag.
+  ``docker`` itself is never invoked — the single ``_compose_smoke_step`` subprocess seam is faked.
 
 * **The wiring** (:func:`orchestrator.verify_done`) — the smoke runs ONLY at ``gate_g``; a FAIL
   short-circuits BEFORE the Coordinator judgment (the HARD deterministic gate), a PASS feeds a verdict
@@ -49,24 +53,24 @@ services:
 
 
 # ---------------------------------------------------------------------------
-# Runner: _run_acceptance_smoke + helpers
+# Runner: _run_app_starts_smoke + helpers
 # ---------------------------------------------------------------------------
 
 
-def _make_project(root, slug: str, *, compose: bool, acceptance: bool) -> None:
-    """Materialise a fake project tree under *root*/<slug> for the discovery step."""
+def _make_project(root, slug: str, *, compose: bool = True) -> None:
+    """Materialise a fake project tree under *root*/<slug> for the discovery step (v0.7.9: the boot
+    check keys ONLY on docker-compose.yml — no acceptance suite is required or run)."""
     proj = root / slug
     proj.mkdir(parents=True, exist_ok=True)
     if compose:
         (proj / "docker-compose.yml").write_text(COMPOSE_YML)
-    if acceptance:
-        (proj / "backend" / "tests" / "acceptance").mkdir(parents=True, exist_ok=True)
 
 
 class _StepRecorder:
     """Fake for ``orchestrator._compose_smoke_step``: scripts ``(rc, out)`` per compose step
-    (``up`` / ``ready`` = the in-container ``python`` /health probe / ``pytest`` = the acceptance
-    suite / ``down``) and records every command it was asked to run. Unknown steps default to PASS."""
+    (``up`` / ``ready`` = the in-container ``python`` /health boot probe / ``down``) and records every
+    command it was asked to run. Unknown steps default to PASS. (v0.7.9: there is no longer a ``pytest``
+    step — ``ran("pytest")`` is the regression guard that the in-container acceptance run is gone.)"""
 
     def __init__(self, results: dict[str, tuple[int, str]]) -> None:
         self._results = results
@@ -76,8 +80,6 @@ class _StepRecorder:
         self.calls.append(cmd)
         if "python" in cmd:  # the readiness probe runs `exec -T backend python -c …`
             key = "ready"
-        elif "pytest" in cmd:
-            key = "pytest"
         elif "up" in cmd:
             key = "up"
         elif "down" in cmd:
@@ -97,79 +99,48 @@ class _StepRecorder:
 async def test_smoke_skips_without_compose(monkeypatch, tmp_path) -> None:
     """No ``docker-compose.yml`` → graceful SKIP (treated as PASS), never spawns docker."""
     monkeypatch.setattr(orchestrator.claude_agent, "PROJECTS_ROOT", tmp_path)
-    _make_project(tmp_path, "noc", compose=False, acceptance=True)
+    _make_project(tmp_path, "noc", compose=False)
     rec = _StepRecorder({})
     monkeypatch.setattr(orchestrator, "_compose_smoke_step", rec)
 
-    ok, detail = await orchestrator._run_acceptance_smoke("noc", "v0.7.5")
+    ok, detail = await orchestrator._run_app_starts_smoke("noc", "v0.7.9")
 
     assert ok is True
-    assert "SKIPPED" in detail
+    assert "SKIPPED" in detail and "docker-compose.yml" in detail
     assert rec.calls == [], "a skip must never spawn a docker subprocess"
 
 
 @pytest.mark.asyncio
-async def test_smoke_skips_without_acceptance_suite(monkeypatch, tmp_path) -> None:
-    """Compose present but no ``backend/tests/acceptance`` → graceful SKIP."""
-    monkeypatch.setattr(orchestrator.claude_agent, "PROJECTS_ROOT", tmp_path)
-    _make_project(tmp_path, "nosuite", compose=True, acceptance=False)
-    rec = _StepRecorder({})
-    monkeypatch.setattr(orchestrator, "_compose_smoke_step", rec)
-
-    ok, detail = await orchestrator._run_acceptance_smoke("nosuite", "v0.7.5")
-
-    assert ok is True
-    assert "SKIPPED" in detail
-    assert rec.calls == []
-
-
-@pytest.mark.asyncio
-async def test_smoke_fail_returns_reason_and_tears_down(monkeypatch, tmp_path) -> None:
+async def test_smoke_up_fail_returns_reason_and_tears_down(monkeypatch, tmp_path) -> None:
     """A non-zero ``up`` → ``(False, reason)`` carrying the tail, AND teardown still runs (finally)."""
     monkeypatch.setattr(orchestrator.claude_agent, "PROJECTS_ROOT", tmp_path)
-    _make_project(tmp_path, "boom", compose=True, acceptance=True)
+    _make_project(tmp_path, "boom")
     rec = _StepRecorder({"up": (1, "build error: missing base image")})
     monkeypatch.setattr(orchestrator, "_compose_smoke_step", rec)
 
-    ok, detail = await orchestrator._run_acceptance_smoke("boom", "v0.7.5")
+    ok, detail = await orchestrator._run_app_starts_smoke("boom", "v0.7.9")
 
     assert ok is False
     assert detail.startswith("up exit 1:")
     assert "build error" in detail
     assert rec.ran("down"), "the isolated stack must be torn down even when 'up' failed"
-    assert not rec.ran("pytest"), "a failed 'up' short-circuits before the acceptance suite"
     assert not rec.ran("python"), "a failed 'up' short-circuits before the readiness poll"
 
 
 @pytest.mark.asyncio
-async def test_smoke_acceptance_fail_returns_reason(monkeypatch, tmp_path) -> None:
-    """``up`` succeeds, the acceptance suite fails → ``(False, "acceptance exit …")`` + teardown."""
+async def test_smoke_pass_on_ready_no_pytest(monkeypatch, tmp_path) -> None:
+    """``up`` ok + app becomes ready → ``(True, "app booted + responds")``, teardown runs, and NO
+    in-container acceptance pytest is ever invoked (v0.7.9 — prod images have no pytest)."""
     monkeypatch.setattr(orchestrator.claude_agent, "PROJECTS_ROOT", tmp_path)
-    _make_project(tmp_path, "redtests", compose=True, acceptance=True)
-    rec = _StepRecorder({"up": (0, ""), "pytest": (1, "2 failed, 3 passed")})
+    _make_project(tmp_path, "green")
+    rec = _StepRecorder({"up": (0, "Started"), "ready": (0, "status 200"), "down": (0, "")})
     monkeypatch.setattr(orchestrator, "_compose_smoke_step", rec)
 
-    ok, detail = await orchestrator._run_acceptance_smoke("redtests", "v0.7.5")
+    ok, detail = await orchestrator._run_app_starts_smoke("green", "v0.7.9")
 
-    assert ok is False
-    assert detail.startswith("acceptance exit 1:")
-    assert "2 failed" in detail
-    assert rec.ran("python"), "the readiness poll runs before the suite"
-    assert rec.ran("down")
-
-
-@pytest.mark.asyncio
-async def test_smoke_pass(monkeypatch, tmp_path) -> None:
-    """``up`` + acceptance both green → ``(True, "OK")`` and teardown runs."""
-    monkeypatch.setattr(orchestrator.claude_agent, "PROJECTS_ROOT", tmp_path)
-    _make_project(tmp_path, "green", compose=True, acceptance=True)
-    rec = _StepRecorder({"up": (0, "Started"), "ready": (0, ""), "pytest": (0, "8 passed"), "down": (0, "")})
-    monkeypatch.setattr(orchestrator, "_compose_smoke_step", rec)
-
-    ok, detail = await orchestrator._run_acceptance_smoke("green", "v0.7.5")
-
-    assert (ok, detail) == (True, "OK")
-    assert rec.ran("up") and rec.ran("python") and rec.ran("pytest") and rec.ran("down")
+    assert (ok, detail) == (True, "app booted + responds")
+    assert rec.ran("up") and rec.ran("python") and rec.ran("down")
+    assert not rec.ran("pytest"), "v0.7.9: the smoke must NOT run the acceptance pytest in the prod container"
     # Isolation: the stack is brought up under the dedicated ``-p <slug>-smoke`` project.
     up_cmd = next(cmd for cmd in rec.calls if "up" in cmd)
     assert "-p" in up_cmd and "green-smoke" in up_cmd
@@ -190,11 +161,11 @@ def test_override_strips_container_name_and_ports(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_smoke_not_ready_timeout_returns_clear_fail(monkeypatch, tmp_path) -> None:
-    """``up`` ok but ``/health`` never answers within budget → a CLEAR ``(False, "App not ready …")``
-    FAIL (Director Obs-2: not a confusing mid-suite connection-refused), the acceptance suite is never
-    reached, and teardown still runs. The probe is polled for the full bounded budget."""
+    """``up`` ok but ``/health`` never answers within budget → a CLEAR ``(False, "app did not boot /
+    not responding …")`` FAIL, and teardown still runs. The probe is polled for the full bounded
+    budget."""
     monkeypatch.setattr(orchestrator.claude_agent, "PROJECTS_ROOT", tmp_path)
-    _make_project(tmp_path, "slowboot", compose=True, acceptance=True)
+    _make_project(tmp_path, "slowboot")
 
     async def _no_sleep(*_a, **_k):  # keep the bounded readiness loop instant
         return None
@@ -203,32 +174,31 @@ async def test_smoke_not_ready_timeout_returns_clear_fail(monkeypatch, tmp_path)
     rec = _StepRecorder({"up": (0, ""), "ready": (1, "URLError: <urlopen error [Errno 111] Connection refused>")})
     monkeypatch.setattr(orchestrator, "_compose_smoke_step", rec)
 
-    ok, detail = await orchestrator._run_acceptance_smoke("slowboot", "v0.7.5")
+    ok, detail = await orchestrator._run_app_starts_smoke("slowboot", "v0.7.9")
 
     assert ok is False
-    assert detail.startswith("App not ready within 120s:")
+    assert detail.startswith("app did not boot / not responding within 120s:")
     assert "Connection refused" in detail
-    assert not rec.ran("pytest"), "the acceptance suite must NOT run when the app never became ready"
     assert rec.ran("down"), "teardown runs even when readiness times out"
     expected = orchestrator.ACCEPTANCE_SMOKE_READY_TIMEOUT // orchestrator.ACCEPTANCE_SMOKE_READY_INTERVAL
     assert rec.count("python") == expected, "the readiness probe is polled for the full bounded budget"
 
 
 @pytest.mark.asyncio
-async def test_smoke_404_health_is_ready_and_proceeds(monkeypatch, tmp_path) -> None:
-    """LIVE nex-asistent v0.7.7 case: the probe path returns 404 (health is at the versioned route) →
-    READY on the FIRST poll (no looping to the budget) → the smoke proceeds to the acceptance run. The
-    404→exit-0 mapping lives in the probe; here it is modelled by the readiness step returning rc 0."""
+async def test_smoke_404_health_is_ready_pass(monkeypatch, tmp_path) -> None:
+    """LIVE nex-asistent case: the probe path returns 404 (health is at the versioned route) → READY on
+    the FIRST poll (no looping) → smoke PASS with NO pytest run. The 404→exit-0 mapping lives in the
+    probe; here it is modelled by the readiness step returning rc 0."""
     monkeypatch.setattr(orchestrator.claude_agent, "PROJECTS_ROOT", tmp_path)
-    _make_project(tmp_path, "v1health", compose=True, acceptance=True)
-    rec = _StepRecorder({"up": (0, ""), "ready": (0, "status 404"), "pytest": (0, "5 passed")})
+    _make_project(tmp_path, "v1health")
+    rec = _StepRecorder({"up": (0, ""), "ready": (0, "status 404"), "down": (0, "")})
     monkeypatch.setattr(orchestrator, "_compose_smoke_step", rec)
 
-    ok, detail = await orchestrator._run_acceptance_smoke("v1health", "v0.7.7")
+    ok, detail = await orchestrator._run_app_starts_smoke("v1health", "v0.7.9")
 
-    assert (ok, detail) == (True, "OK")
+    assert (ok, detail) == (True, "app booted + responds")
     assert rec.count("python") == 1, "a 404 (server up) is READY on the first poll — no looping"
-    assert rec.ran("pytest"), "a responding server (even 404 at the probe path) proceeds to the suite"
+    assert not rec.ran("pytest"), "v0.7.9: ready ⇒ PASS without any acceptance pytest run"
 
 
 # ---------------------------------------------------------------------------
@@ -380,7 +350,7 @@ async def test_verify_done_gate_g_smoke_fail_short_circuits(db_session, monkeypa
     async def _smoke(slug, version_label):
         return False, "up exit 1: boom"
 
-    monkeypatch.setattr(orchestrator, "_run_acceptance_smoke", _smoke)
+    monkeypatch.setattr(orchestrator, "_run_app_starts_smoke", _smoke)
     fake = _FakeAgent({"coordinator": _mk_block("gate_g")})
     monkeypatch.setattr(orchestrator, "invoke_agent", fake)
 
@@ -413,7 +383,7 @@ async def test_verify_done_gate_g_smoke_pass_runs_judgment_with_verdict(db_sessi
     async def _smoke(slug, version_label):
         return True, "OK"
 
-    monkeypatch.setattr(orchestrator, "_run_acceptance_smoke", _smoke)
+    monkeypatch.setattr(orchestrator, "_run_app_starts_smoke", _smoke)
     fake = _FakeAgent({"coordinator": _mk_block("gate_g")})
     monkeypatch.setattr(orchestrator, "invoke_agent", fake)
 
@@ -435,7 +405,7 @@ async def test_verify_done_non_gate_g_never_runs_smoke(db_session, monkeypatch) 
         called["smoke"] = True
         return True, "OK"
 
-    monkeypatch.setattr(orchestrator, "_run_acceptance_smoke", _smoke)
+    monkeypatch.setattr(orchestrator, "_run_app_starts_smoke", _smoke)
     fake = _FakeAgent({"coordinator": _mk_block("gate_b")})
     monkeypatch.setattr(orchestrator, "invoke_agent", fake)
 

@@ -1931,15 +1931,16 @@ async def verify_done(
     if mech is not None:
         return mech, None, False
 
-    # CR-1 (v0.7.5): App-starts acceptance smoke — a deterministic HARD gate, the sibling of
+    # CR-1 (v0.7.5; narrowed v0.7.9): App-starts smoke — a deterministic HARD gate, the sibling of
     # ``verify_mechanical``, invoked ONLY at full-flow ``gate_g``. full-flow only: fast_fix never reaches
     # gate_g (FAST_FIX_STAGE_ORDER has no gate_g), so this block is unreachable for a fast_fix version.
     # It runs BEFORE the Coordinator judgment turn, so a smoke FAIL short-circuits (returns a non-None
-    # reason) and prevents the judgment — exactly like a ``verify_mechanical`` fail.
+    # reason) and prevents the judgment — exactly like a ``verify_mechanical`` fail. v0.7.9: the smoke is
+    # a BOOT check (app boots + responds), NOT a runtime acceptance run (prod images carry no pytest).
     smoke_verdict_block = ""
     if block.stage == "gate_g":
         version_label = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
-        smoke_ok, smoke_detail = await _run_acceptance_smoke(slug, version_label)
+        smoke_ok, smoke_detail = await _run_app_starts_smoke(slug, version_label)
         smoke_msg = _record_message(
             db,
             version_id=version_id,
@@ -1958,11 +1959,12 @@ async def verify_done(
             # HARD gate: the non-None reason renders as a ``gate_g`` FAIL via the mechanical-block settle.
             return f"App-starts smoke FAIL: {smoke_detail}", None, False
         # PASS/SKIP → feed a one-line smoke verdict into the Auditor's verdict so the synthesis reflects
-        # "app actually boots + acceptance green", not only spec-compliance.
+        # the deterministic runtime floor (app boots + responds), not only spec-compliance. Behavioural
+        # acceptance depth is the Auditor's own release oracle, not this engine boot check (v0.7.9).
         smoke_verdict_block = (
-            f"Engine-overený app-starts smoke (deterministický, pred týmto verdiktom): {smoke_detail}. "
-            "Zohľadni to v synthéze — či aplikácia reálne nabootovala a acceptance suite je zelená, "
-            "nielen spec-compliance. "
+            f"Engine-overený app-starts smoke (deterministický boot check, pred týmto verdiktom): {smoke_detail}. "
+            "Zohľadni to v synthéze — aplikácia reálne nabootovala a odpovedá na HTTP; behaviorálnu "
+            "acceptance hĺbku drží tvoj release oracle, nie runtime pytest. "
         )
 
     # §F1.6 (CR-NS-056): feed the Director's already-answered scope Q&A this iteration into the prompt so the
@@ -2354,36 +2356,34 @@ async def _await_acceptance_app_ready(base: list[str], port: int) -> tuple[bool,
     return False, last
 
 
-async def _run_acceptance_smoke(project_slug: str, version_label: str) -> tuple[bool, str]:
-    """App-starts acceptance smoke (v0.7.5 CR-1): build + boot the project's compose under an ISOLATED
-    compose project (``-p <slug>-smoke``) and run its ``-m acceptance`` suite INSIDE the container —
-    proving the built app actually boots and its acceptance tests are green, not just spec-compliance.
+async def _run_app_starts_smoke(project_slug: str, version_label: str) -> tuple[bool, str]:
+    """App-starts smoke (v0.7.5 CR-1, narrowed v0.7.9): build + boot the project's compose under an
+    ISOLATED compose project (``-p <slug>-smoke``) and verify the deployed app actually BOOTS and
+    RESPONDS to HTTP (the v0.7.7 path-agnostic readiness poll) — the deterministic runtime floor behind
+    full-flow ``gate_g`` (unfakeable, no test env needed).
+
+    It does NOT run the acceptance suite (v0.7.9): the app's PRODUCTION image (``python:3.12-slim``)
+    carries no pytest / test deps, so an in-container ``pytest`` run can never work there and produced a
+    false FAIL. Behavioural acceptance depth stays with the Auditor's release oracle + build-time
+    validation, not a runtime pytest run.
 
     Returns ``(ok, detail)`` and NEVER raises (modelled on :func:`_run_uat_deploy`): a spawn failure /
-    timeout / non-zero step → ``(False, reason)`` so the caller settles ``gate_g`` to FAIL rather than
-    hanging. Graceful SKIP → ``(True, "smoke SKIPPED …")`` when the project has no ``docker-compose.yml``
-    OR no ``backend/tests/acceptance`` suite (same shape as the postscaffold "SKIPPED — no
-    docker-compose.yml" / the ``_fast_fix_auto_deploy`` NULL-slug skip). The caller records the
-    pass/fail/skip evidence as a ``system→director`` message.
-
-    Seed: the ``SEED_ADMIN_*`` admin the acceptance fixtures log in as is created by the app's OWN
-    env-driven idempotent startup migration (read from the project's ``.env``) — ``up --wait`` blocks
-    until the stack is healthy, so the seed is already applied before the acceptance suite runs. No
-    separate bootstrap command is invoked for such self-migrating apps.
+    timeout / ``up`` failure / app-not-responding → ``(False, reason)`` so the caller settles ``gate_g``
+    to FAIL rather than hanging. Graceful SKIP → ``(True, "SKIPPED …")`` when the project has no
+    ``docker-compose.yml`` (same shape as the postscaffold "SKIPPED — no docker-compose.yml" /
+    ``_fast_fix_auto_deploy`` NULL-slug skip). The caller records the pass/fail/skip evidence as a
+    ``system→director`` message.
     """
     root = claude_agent.PROJECTS_ROOT / project_slug
     compose = root / "docker-compose.yml"
-    acceptance = root / "backend" / "tests" / "acceptance"
-    # 1. Discover — graceful SKIP when the project has no compose / no acceptance suite.
-    if not compose.is_file() or not acceptance.is_dir():
+    # 1. Discover — graceful SKIP when the project has no compose (a boot check needs a compose to boot).
+    if not compose.is_file():
         logger.info(
-            "acceptance smoke SKIPPED (slug=%s, version=%s) — no compose / no acceptance suite",
-            project_slug,
-            version_label,
+            "app-starts smoke SKIPPED (slug=%s, version=%s) — no docker-compose.yml", project_slug, version_label
         )
-        return True, "smoke SKIPPED — no acceptance suite / no compose"
+        return True, "SKIPPED — no docker-compose.yml"
 
-    logger.info("acceptance smoke starting (slug=%s, version=%s)", project_slug, version_label)
+    logger.info("app-starts smoke starting (slug=%s, version=%s)", project_slug, version_label)
     project = f"{project_slug}-smoke"
     tmpdir = Path(tempfile.mkdtemp(prefix=f"{project_slug}-smoke-"))
     override = tmpdir / "smoke.override.yml"
@@ -2392,28 +2392,22 @@ async def _run_acceptance_smoke(project_slug: str, version_label: str) -> tuple[
         # 2. Isolate — ephemeral override stripping container_name + host ports.
         override.write_text(_acceptance_smoke_override(compose))
         # 3. Up — build + boot; ``--wait`` blocks until healthchecks pass (Ollama reached via the app's
-        #    own ``extra_hosts: host-gateway`` + ``OLLAMA_URL``). 4. Seed runs here at app boot.
+        #    own ``extra_hosts: host-gateway`` + ``OLLAMA_URL``).
         rc, out = await _compose_smoke_step(base + ["up", "-d", "--build", "--wait"], ACCEPTANCE_SMOKE_TIMEOUT)
         if rc != 0:
             return False, f"up exit {rc}: {out.strip()[-400:]}"
-        # 4b. Ready (robustness, Director Obs-2) — ``up --wait`` returns once the container RUNS; a backend
-        #     without a healthcheck may still be booting/migrating. Poll /health so the suite never races
-        #     the boot into a false connection-refused. Undeterminable port → skip (no NEW false FAIL).
+        # 4. Ready (the boot check) — ``up --wait`` returns once the container RUNS; a backend without a
+        #    healthcheck may still be booting/migrating. Poll /health until the server RESPONDS (status
+        #    <500; v0.7.7 path-agnostic). READY ⇒ PASS ("app booted + responds"). Undeterminable port →
+        #    skip the poll (no NEW false FAIL — ``up --wait`` already succeeded).
         port = _compose_backend_port(compose)
         if port is not None:
             ready, last = await _await_acceptance_app_ready(base, port)
             if not ready:
-                return False, f"App not ready within {ACCEPTANCE_SMOKE_READY_TIMEOUT}s: {last}"
-        # 5. Test — acceptance suite INSIDE the backend container (host ports stripped → exec only;
-        #    ``xfail strict=False`` is tolerated — pytest exits 0 on an xfail).
-        acceptance_cmd = ["exec", "-T", "backend", "poetry", "run", "pytest"]
-        acceptance_cmd += ["backend/tests/acceptance", "-m", "acceptance", "-q"]
-        rc, out = await _compose_smoke_step(base + acceptance_cmd, ACCEPTANCE_SMOKE_TIMEOUT)
-        if rc != 0:
-            return False, f"acceptance exit {rc}: {out.strip()[-400:]}"
-        return True, "OK"
+                return False, f"app did not boot / not responding within {ACCEPTANCE_SMOKE_READY_TIMEOUT}s: {last}"
+        return True, "app booted + responds"
     finally:
-        # 6. Teardown — ALWAYS: tear the isolated stack (+ its volumes) down and drop the temp override.
+        # 5. Teardown — ALWAYS: tear the isolated stack (+ its volumes) down and drop the temp override.
         await _compose_smoke_step(base + ["down", "-v"], 120)
         shutil.rmtree(tmpdir, ignore_errors=True)
 
