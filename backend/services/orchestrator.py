@@ -247,6 +247,7 @@ _ACTIONS = frozenset(
         "fix",
         "leave",
         "verdict",
+        "rerun_release_audit",
         "uat_accept",
         "end_gate_e",
         "end_build",
@@ -265,6 +266,7 @@ _ADVANCING_ACTIONS = frozenset(
         "fix",
         "leave",
         "verdict",
+        "rerun_release_audit",
         "uat_accept",
         "return",
         "end_gate_e",
@@ -343,8 +345,14 @@ def determine_available_actions(state: PipelineState) -> set[str]:
             # task to recognize). The FE further refines to "only when an open finding exists" via
             # build_open_findings, so it never shows on a clean build.
             actions.add("accept_merged")
-    elif stage == "gate_g":
+    elif stage == "gate_g":  # fast_fix never at gate_g (FAST_FIX_STAGE_ORDER has no gate_g)
         actions.add("verdict")
+        if status == "awaiting_director":
+            # rerun_release_audit (v0.7.6): offered only at a SETTLED gate_g verdict the Director is
+            # looking at — re-dispatches the Auditor (re-runs the release audit) WITHOUT advancing; the
+            # fresh gate_g gate_report re-triggers the existing v0.7.5 verify_done app-starts smoke. Gated
+            # to gate_g, which fast_fix never reaches → byte-identical for the fast-fix lane.
+            actions.add("rerun_release_audit")
     elif stage == "release":
         actions.add("uat_accept")
 
@@ -634,6 +642,17 @@ def directive_for_action(action: str, payload: dict[str, Any], stage: str) -> Op
     if action == "answer":
         text = str(payload.get("text", "")).strip()
         return f"Director odpovedal na tvoju otázku: {text}" if text else None
+    if action == "rerun_release_audit":
+        # v0.7.6: re-run the release audit at a settled gate_g — a static brief (no Director payload). The
+        # re-dispatched Auditor's fresh gate_g gate_report re-triggers the existing v0.7.5 verify_done
+        # app-starts smoke automatically. Ends with the status-block instruction because this directive IS
+        # the agent prompt (overrides the generic per-stage directive) when the route threads it.
+        return (
+            "Audítor, spusti ZNOVA kompletný release audit verzie podľa charteru §6 — behaviorálny "
+            "acceptance suite (appka reálne beží + `-m acceptance` proti bežiacej app) + spec-drift. "
+            "Toto je čerstvé prebehnutie release auditu, nie odpoveď na otázku. "
+            "Ukonči <<<PIPELINE_STATUS>>> blokom (F-007-orchestration-cockpit.md §5.3)."
+        )
     return None
 
 
@@ -5035,6 +5054,28 @@ async def apply_action(
             payload={"resolves_gap": True},  # deterministic open-finding gate marker (§5)
         )
         _begin_dispatch(db, state)
+        return state
+
+    if action == "rerun_release_audit":
+        # v0.7.6: re-run the release audit at a settled gate_g — re-dispatch the Auditor WITHOUT advancing
+        # the stage. Mirrors continue_build (re-dispatch via _begin_dispatch, stage unchanged), NOT verdict
+        # (which advances to release / re-gate). The re-dispatched Auditor's fresh gate_g gate_report
+        # re-triggers the existing v0.7.5 verify_done app-starts smoke automatically (no smoke code here).
+        # fast_fix never reaches gate_g (FAST_FIX_STAGE_ORDER has no gate_g) → unreachable for the fast-fix
+        # lane. _begin_dispatch sets current_actor=auditor (STAGE_ACTOR["gate_g"]) + status=agent_working.
+        if state.current_stage != "gate_g":
+            raise OrchestratorError("rerun_release_audit je platné len vo fáze gate_g")
+        _record_message(
+            db,
+            version_id=version_id,
+            stage="gate_g",
+            author="director",
+            recipient="auditor",
+            kind="directive",
+            content=directive_for_action("rerun_release_audit", payload, state.current_stage) or "",
+            payload={"rerun_release_audit": True},
+        )
+        _begin_dispatch(db, state)  # stage stays gate_g; current_actor→auditor; status→agent_working
         return state
 
     if action == "verdict":

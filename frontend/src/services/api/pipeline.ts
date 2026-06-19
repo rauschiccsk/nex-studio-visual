@@ -140,6 +140,7 @@ export type PipelineActionName =
   | "fix"
   | "leave"
   | "verdict"
+  | "rerun_release_audit"
   | "uat_accept"
   | "end_gate_e"
   | "end_build"

@@ -17,8 +17,10 @@
 
 ### 1. Action registration
 - Add `"rerun_release_audit"` to `_ACTIONS` (`backend/services/orchestrator.py:236`).
-- It does NOT advance the stage (re-dispatches at the SAME stage), so it is **NOT** in `_ADVANCING_ACTIONS`
-  (`:258`) — model it on `continue_build` (re-dispatch, stage unchanged), not on `verdict`.
+- It re-dispatches at the SAME stage (does not advance) — model it on `continue_build`. **Like `continue_build`,
+  ADD it to `_ADVANCING_ACTIONS` (`:258`).** That set is NOT a stage-advance marker — it is the `apply_action`
+  guard (`~:4836`) that REJECTS the action while `status == agent_working` (stale-board / double-click
+  protection, CR-NS-018 class). The awaiting_director path is unchanged; only a mid-audit re-POST gets rejected.
 
 ### 2. Offer it ONLY at a settled full-flow `gate_g`
 - In `determine_available_actions` (`:296`), the `elif stage == "gate_g":` branch (`~:343`) currently adds only

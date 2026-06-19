@@ -633,6 +633,99 @@ async def test_uat_accept_done(db_session, fake_claude):
     assert any(m.kind == "notification" for m in _msgs(db_session, version.id))
 
 
+# ── rerun_release_audit (v0.7.6: re-run the release audit at a settled gate_g) ───
+
+
+async def test_rerun_release_audit_redispatches_auditor_without_advancing(db_session, fake_claude):
+    # v0.7.6: at a settled gate_g the action re-dispatches the Auditor WITHOUT advancing the stage
+    # (mirrors continue_build, NOT verdict) — status→agent_working, stage stays gate_g, actor=auditor.
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    st = orchestrator._get_state(db_session, version.id)
+    st.current_stage = "gate_g"
+    st.current_actor = "auditor"
+    st.status = "awaiting_director"
+    db_session.flush()
+    state = await orchestrator.apply_action(db_session, version_id=version.id, action="rerun_release_audit")
+    assert state.current_stage == "gate_g"  # NOT advanced (unlike verdict PASS → release)
+    assert state.status == "agent_working"
+    assert state.current_actor == "auditor"
+    # a director→auditor directive message carrying the re-audit brief was recorded
+    directives = [
+        m
+        for m in _msgs(db_session, version.id)
+        if m.kind == "directive" and m.author == "director" and m.recipient == "auditor"
+    ]
+    assert len(directives) == 1
+    assert "release audit" in directives[0].content
+    assert directives[0].payload == {"rerun_release_audit": True}
+
+
+async def test_rerun_release_audit_rejected_off_gate_g(db_session, fake_claude):
+    # v0.7.6: the handler asserts current_stage == gate_g — invalid anywhere else (e.g. a settled gate_a).
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    st = orchestrator._get_state(db_session, version.id)
+    st.current_stage = "gate_a"
+    st.current_actor = "designer"
+    st.status = "awaiting_director"
+    db_session.flush()
+    with pytest.raises(orchestrator.OrchestratorError, match="gate_g"):
+        await orchestrator.apply_action(db_session, version_id=version.id, action="rerun_release_audit")
+    st = orchestrator._get_state(db_session, version.id)
+    assert st.current_stage == "gate_a" and st.status == "awaiting_director"  # unchanged
+
+
+async def test_rerun_release_audit_rejected_while_auditor_working(db_session, fake_claude):
+    # Stale-board guard: rerun_release_audit is in _ADVANCING_ACTIONS, so a stale/double-click POST at
+    # gate_g while the Auditor is mid-audit (agent_working) is rejected — never re-dispatches on top of a
+    # working agent (CR-NS-018 class). The FE never offers it there (determine_available_actions = {}).
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    st = orchestrator._get_state(db_session, version.id)
+    st.current_stage = "gate_g"
+    st.current_actor = "auditor"
+    st.status = "agent_working"
+    db_session.flush()
+    with pytest.raises(orchestrator.OrchestratorError, match="ešte pracuje"):
+        await orchestrator.apply_action(db_session, version_id=version.id, action="rerun_release_audit")
+    st = orchestrator._get_state(db_session, version.id)
+    assert st.status == "agent_working" and st.current_stage == "gate_g"  # unchanged
+
+
+def test_rerun_release_audit_offered_only_at_settled_gate_g():
+    # v0.7.6: offered at gate_g ONLY when settled (awaiting_director) — not while the Auditor works, not on
+    # a blocked scope-escalation, and never at another stage.
+    def acts(stage, status):
+        return orchestrator.determine_available_actions(PipelineState(current_stage=stage, status=status))
+
+    assert "rerun_release_audit" in acts("gate_g", "awaiting_director")
+    assert "rerun_release_audit" not in acts("gate_g", "agent_working")
+    assert "rerun_release_audit" not in acts("gate_g", "blocked")
+    assert "rerun_release_audit" not in acts("release", "awaiting_director")
+    assert "rerun_release_audit" not in acts("build", "awaiting_director")
+
+
+def test_rerun_release_audit_absent_for_fast_fix():
+    # v0.7.6 §6: gated to gate_g, which the fast-fix lane never reaches (FAST_FIX_STAGE_ORDER has no
+    # gate_g) → never offered anywhere on that lane → byte-identical for fast-fix.
+    for stage in orchestrator.FAST_FIX_STAGE_ORDER:
+        for status in ("agent_working", "awaiting_director", "blocked", "paused", "done"):
+            assert "rerun_release_audit" not in orchestrator.determine_available_actions(
+                PipelineState(current_stage=stage, status=status)
+            )
+
+
+def test_directive_for_action_rerun_release_audit():
+    # v0.7.6: a static re-audit brief (no payload), ending with the status-block instruction since it IS
+    # the agent prompt when the route threads it (overriding the generic per-stage directive).
+    directive = orchestrator.directive_for_action("rerun_release_audit", {}, "gate_g")
+    assert directive is not None
+    assert "release audit" in directive
+    assert "acceptance" in directive
+    assert "<<<PIPELINE_STATUS>>>" in directive
+
+
 async def test_pause_at_build_sets_paused(db_session, fake_claude):
     # CR-NS-027: pause at build/agent_working sets a genuine 'paused' status (not just a next_action
     # label) so the build loop stops at its next task boundary; leaving agent_working also stops the
