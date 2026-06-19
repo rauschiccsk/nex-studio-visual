@@ -710,6 +710,36 @@ def _latest_customer_gate_report(db: Session, version_id: uuid.UUID) -> Optional
     ).scalar_one_or_none()
 
 
+def _latest_uat_deploy(db: Session, version_id: uuid.UUID) -> Optional[dict[str, Any]]:
+    """The most recent ``uat_deploy`` notification payload for a version, or ``None`` if no UAT deploy was
+    ever attempted (v0.8.1 CR-2).
+
+    Both lanes record ``{"uat_deploy": {...}}`` ``system→director`` notifications — full flow:
+    :func:`_release_auto_uat_deploy`; fast-fix: :func:`_fast_fix_auto_deploy` — as a real success
+    (``{ok: True}``), a failure (``{ok: False}``), or a skip (``{skipped: True}``). ``uat_accept`` reads
+    this to report HONESTLY whether a UAT was ACTUALLY deployed, instead of the ``uat_slug`` proxy (which
+    lies when a configured slug's compose is gone — CR-1 honest-skips, yet the slug stays set). Ordered by
+    the monotonic ``seq`` so the latest deploy outcome wins; ``None`` when no deploy was ever recorded
+    (e.g. a ``cr``/``bug`` release, which never deploys to UAT)."""
+    rows = (
+        db.execute(
+            select(PipelineMessage.payload)
+            .where(
+                PipelineMessage.version_id == version_id,
+                PipelineMessage.author == "system",
+                PipelineMessage.kind == "notification",
+            )
+            .order_by(PipelineMessage.seq.desc())
+        )
+        .scalars()
+        .all()
+    )
+    for payload in rows:
+        if isinstance(payload, dict) and isinstance(payload.get("uat_deploy"), dict):
+            return payload["uat_deploy"]
+    return None
+
+
 def _gate_e_open_findings(db: Session, version_id: uuid.UUID) -> int:
     """Count of unresolved Gate E gaps — DETERMINISTIC from the orchestrator's own log,
     NOT the Customer's self-reported ``findings`` array (F-007-gate-e §5).
@@ -2639,9 +2669,10 @@ async def _release_auto_publish(
     * ``repo_url`` NULL (no GitHub repo) → skip gracefully with a ``system→director`` note and settle to
       ``awaiting_director`` (the Director still accepts; nothing was published — never silently blocked),
       mirroring the ``_fast_fix_auto_deploy`` NULL-slug skip.
-    * set → run :func:`_run_release_publish` (push + CI verify). Success → ``awaiting_director`` (the
-      Director's ``uat_accept``). Failure (push/CI failed) → ``blocked`` with the publish error in
-      ``next_action`` — surfaced to the Director, never hidden.
+    * set → run :func:`_run_release_publish` (push + CI verify). Success → chain the engine UAT-deploy
+      (:func:`_release_auto_uat_deploy`, v0.8.1 CR-1), which settles the state (UAT deployed → the
+      Director's ``uat_accept``; no UAT configured → an HONEST no-UAT completion). Failure (push/CI
+      failed) → ``blocked`` with the publish error in ``next_action`` — surfaced, never hidden.
 
     Records the outcome as a ``system→director`` notification (payload ``{"release_publish": {ok,
     detail}}``); mutates ``state.status`` / ``state.next_action``; the caller flushes."""
@@ -2685,12 +2716,87 @@ async def _release_auto_publish(
     if on_message is not None:
         await on_message(msg)
     if ok:
-        state.status = "awaiting_director"
-        state.next_action = "Publikované na GitHub + CI zelené — over a akceptuj (uat_accept)."
+        # v0.8.1 CR-1: publish succeeded → chain the engine UAT-deploy so the full flow reaches the
+        # Director's uat_accept with the release actually RUNNING on UAT (parity with the fast-fix lane),
+        # or an HONEST "no UAT configured" completion — never a hollow ~1s accept. It sets status +
+        # next_action (UAT deployed → awaiting_director; deploy failed → blocked; no UAT → awaiting_director
+        # honest). The publish-ok notification above is already on the board, so the Director sees both steps.
+        await _release_auto_uat_deploy(db, state, on_message=on_message)
     else:
         state.status = "blocked"
         state.block_reason = "system_error"  # R4 (D1): engine-side GitHub publish / CI failure
         state.next_action = f"GitHub publish/CI zlyhal: {detail}"
+
+
+async def _release_auto_uat_deploy(
+    db: Session, state: PipelineState, *, on_message: Optional[MessageCallback] = None
+) -> None:
+    """Engine UAT-deploy after a full-flow (new_version) release publish SUCCEEDS (v0.8.1 CR-1).
+
+    Brings the full flow in line with the fast-fix lane: the Director SEES the release running on UAT
+    before the single ``uat_accept`` (instead of a hollow ~1s accept that falsely claimed "UAT
+    akceptované" though no UAT existed). Reuses the SAME low-level :func:`_run_uat_deploy` the fast-fix
+    lane uses — :func:`_fast_fix_auto_deploy` itself is left UNTOUCHED (byte-identical). Resolves the
+    version's ``project.uat_slug``:
+
+    * **NULL / compose missing** → graceful, HONEST skip: a ``system→director`` note (``payload={"uat_deploy":
+      {"skipped": True, "reason": …}}``) + settle to ``awaiting_director`` with ``"Žiadny UAT
+      nakonfigurovaný — dokončíš bez UAT testu."`` — NO false "UAT akceptované" claim (the v0.8.1 honesty fix).
+    * **set + compose** → run :func:`_run_uat_deploy`. Success → ``awaiting_director`` (``"Nasadené na UAT
+      — over a akceptuj."``). Failure (non-zero / spawn error / timeout) → ``blocked`` with the deploy error
+      in ``next_action`` — surfaced to the Director, never hidden.
+
+    Mutates ``state.status`` / ``state.next_action`` and records the outcome message; the caller flushes."""
+    version_id = state.version_id
+    project = db.execute(
+        select(Project).join(Version, Version.project_id == Project.id).where(Version.id == version_id)
+    ).scalar_one_or_none()
+    uat_slug = project.uat_slug if project is not None else None
+    project_slug = project.slug if project is not None else _project_slug_for_version(db, version_id)
+
+    # Honest no-UAT skip (NULL slug OR a configured slug whose compose is gone): the Director finishes
+    # WITHOUT a UAT test — never a false "UAT akceptované" downstream (CR-2 reads the same uat_slug).
+    skip_reason = "no_uat_slug" if not uat_slug else ("compose_missing" if not _uat_compose_exists(uat_slug) else None)
+    if skip_reason is not None:
+        msg = _record_message(
+            db,
+            version_id=version_id,
+            stage="release",
+            author="system",
+            recipient="director",
+            kind="notification",
+            content="Žiadny UAT nakonfigurovaný — verziu dokončíš bez UAT testu.",
+            payload={
+                "uat_deploy": {"skipped": True, "reason": skip_reason, **({"uat_slug": uat_slug} if uat_slug else {})}
+            },
+        )
+        if on_message is not None:
+            await on_message(msg)
+        state.status = "awaiting_director"
+        state.next_action = "Žiadny UAT nakonfigurovaný — dokončíš bez UAT testu."
+        return
+
+    ok, detail = await _run_uat_deploy(project_slug, uat_slug)
+    content = f"UAT nasadené ({uat_slug}) — over a akceptuj." if ok else f"UAT deploy zlyhal ({uat_slug}): {detail}"
+    msg = _record_message(
+        db,
+        version_id=version_id,
+        stage="release",
+        author="system",
+        recipient="director",
+        kind="notification",
+        content=content,
+        payload={"uat_deploy": {"uat_slug": uat_slug, "ok": ok, "detail": detail}},
+    )
+    if on_message is not None:
+        await on_message(msg)
+    if ok:
+        state.status = "awaiting_director"
+        state.next_action = "Nasadené na UAT — over a akceptuj."
+    else:
+        state.status = "blocked"
+        state.block_reason = "system_error"  # R4 (D1): engine-side full-flow UAT deploy failure
+        state.next_action = f"UAT deploy zlyhal: {detail}. Skús znova alebo vráť."
 
 
 async def run_dispatch(
@@ -5346,10 +5452,22 @@ async def apply_action(
 
     if action == "uat_accept":
         # Phase 2: transition to done + notification; real prod-deploy hook is Phase 5.
+        # v0.8.1 CR-2: the completion message must be HONEST — claim a customer UAT acceptance ONLY when a
+        # UAT was ACTUALLY deployed (the version's latest uat_deploy notification shows a real success:
+        # ok=True, NOT skipped). Keying on the recorded deploy OUTCOME — not the uat_slug proxy — closes the
+        # edge where a configured slug's compose is missing (CR-1 honest-skips, yet the slug stays set):
+        # the no-UAT completion now stays consistent with that honest skip.
+        deploy = _latest_uat_deploy(db, version_id)
+        uat_deployed = deploy is not None and deploy.get("ok") is True and not deploy.get("skipped")
         state.current_stage = "done"
         state.current_actor = "director"
         state.status = "done"
-        state.next_action = "Verzia akceptovaná (UAT). Prod deploy hook príde vo Phase 5."
+        if uat_deployed:
+            content = "UAT akceptované zákazníkom — pipeline dokončená."
+            state.next_action = "Verzia akceptovaná (UAT). Prod deploy hook príde vo Phase 5."
+        else:
+            content = "Verzia akceptovaná a dokončená — bez UAT testu (projekt nemá nakonfigurovaný UAT)."
+            state.next_action = "Verzia akceptovaná a dokončená — bez UAT testu. Prod deploy hook príde vo Phase 5."
         _record_message(
             db,
             version_id=version_id,
@@ -5357,7 +5475,7 @@ async def apply_action(
             author="system",
             recipient="director",
             kind="notification",
-            content="UAT akceptované zákazníkom — pipeline dokončená.",
+            content=content,
         )
         db.flush()
         return state

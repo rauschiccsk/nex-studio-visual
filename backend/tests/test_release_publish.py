@@ -197,7 +197,15 @@ async def test_publish_no_token_value_in_calls(monkeypatch, _no_sleep) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _seed(db, *, repo_url, flow_type: str = "new_version", stage: str = "release", status: str = "agent_working"):
+def _seed(
+    db,
+    *,
+    repo_url,
+    uat_slug: str | None = None,
+    flow_type: str = "new_version",
+    stage: str = "release",
+    status: str = "agent_working",
+):
     creator = User(
         username=f"rp_{uuid.uuid4().hex[:8]}",
         email=f"rp_{uuid.uuid4().hex[:8]}@test.local",
@@ -212,6 +220,7 @@ def _seed(db, *, repo_url, flow_type: str = "new_version", stage: str = "release
         category="multimodule",
         description="v0.8.0 release-publish fixture.",
         repo_url=repo_url,
+        uat_slug=uat_slug,
         created_by=creator.id,
     )
     db.add(project)
@@ -247,36 +256,51 @@ def _director_notes(db, version_id):
 
 
 @pytest.mark.asyncio
-async def test_auto_publish_success_awaiting_director(db_session, monkeypatch) -> None:
-    """A successful publish settles to awaiting_director and records the green outcome for the Director."""
+async def test_auto_publish_success_records_note_and_chains_uat_deploy(db_session, monkeypatch) -> None:
+    """A successful publish records the green outcome AND chains the engine UAT-deploy (v0.8.1 CR-1) —
+    the chained step owns the final settle."""
     version_id, state = _seed(db_session, repo_url="https://github.com/rauschiccsk/nex-demo")
+    chained = {"called": False}
 
     async def _pub(slug, repo):
         assert repo == "rauschiccsk/nex-demo"
         return True, "published + CI green (123)"
 
+    async def _deploy(db, st, *, on_message=None):
+        chained["called"] = True
+        st.status = "awaiting_director"
+        st.next_action = "Nasadené na UAT — over a akceptuj."
+
     monkeypatch.setattr(orchestrator, "_run_release_publish", _pub)
+    monkeypatch.setattr(orchestrator, "_release_auto_uat_deploy", _deploy)
 
     await orchestrator._release_auto_publish(db_session, state)
 
+    assert chained["called"] is True, "publish-ok must chain the engine UAT-deploy"
     assert state.status == "awaiting_director"
-    assert "uat_accept" in state.next_action
+    # The publish-ok notification stays on the board (the chained deploy adds its own note).
     notes = _director_notes(db_session, version_id)
-    assert len(notes) == 1
-    assert notes[0].payload == {
-        "release_publish": {"repo": "rauschiccsk/nex-demo", "ok": True, "detail": "published + CI green (123)"}
-    }
+    assert any(
+        n.payload
+        == {"release_publish": {"repo": "rauschiccsk/nex-demo", "ok": True, "detail": "published + CI green (123)"}}
+        for n in notes
+    )
 
 
 @pytest.mark.asyncio
-async def test_auto_publish_failure_blocked(db_session, monkeypatch) -> None:
-    """A failed publish settles to blocked (block_reason=system_error) with the error surfaced."""
+async def test_auto_publish_failure_blocked_no_uat_deploy(db_session, monkeypatch) -> None:
+    """A failed publish settles to blocked (block_reason=system_error), surfaced, and NEVER chains the
+    UAT-deploy (the publish step blocks as before)."""
     version_id, state = _seed(db_session, repo_url="https://github.com/rauschiccsk/nex-demo")
 
     async def _pub(slug, repo):
         return False, "git push failed: fatal: Authentication failed"
 
+    async def _deploy(db, st, *, on_message=None):
+        raise AssertionError("a failed publish must NOT chain the UAT-deploy")
+
     monkeypatch.setattr(orchestrator, "_run_release_publish", _pub)
+    monkeypatch.setattr(orchestrator, "_release_auto_uat_deploy", _deploy)
 
     await orchestrator._release_auto_publish(db_session, state)
 
@@ -297,7 +321,11 @@ async def test_auto_publish_null_repo_url_skips_gracefully(db_session, monkeypat
         called["run"] = True
         return True, "x"
 
+    async def _deploy(db, st, *, on_message=None):
+        raise AssertionError("a NULL repo_url skips publish BEFORE the chain — the UAT-deploy must not run")
+
     monkeypatch.setattr(orchestrator, "_run_release_publish", _pub)
+    monkeypatch.setattr(orchestrator, "_release_auto_uat_deploy", _deploy)
 
     await orchestrator._release_auto_publish(db_session, state)
 
@@ -371,3 +399,256 @@ async def test_apply_action_retry_publish_rejected_for_fast_fix(db_session, monk
 
     with pytest.raises(orchestrator.OrchestratorError, match="new_version"):
         await orchestrator.apply_action(db_session, version_id=version_id, action="retry_publish")
+
+
+# ---------------------------------------------------------------------------
+# v0.8.1 CR-1: full-flow engine UAT-deploy (_release_auto_uat_deploy) + chaining
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_full_flow_uat_deploy_runs_then_awaiting(db_session, monkeypatch) -> None:
+    """uat_slug set + compose present → _run_uat_deploy runs → awaiting_director ('Nasadené na UAT')."""
+    version_id, state = _seed(db_session, repo_url="https://github.com/rauschiccsk/nex-demo", uat_slug="demo")
+    monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: True)
+    ran = {"slug": None}
+
+    async def _deploy(project_slug, uat_slug):
+        ran["slug"] = uat_slug
+        return True, "OK"
+
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _deploy)
+
+    await orchestrator._release_auto_uat_deploy(db_session, state)
+
+    assert ran["slug"] == "demo", "the shared _run_uat_deploy must run with the project's uat_slug"
+    assert state.status == "awaiting_director"
+    assert state.next_action == "Nasadené na UAT — over a akceptuj."
+    notes = _director_notes(db_session, version_id)
+    assert notes[-1].payload == {"uat_deploy": {"uat_slug": "demo", "ok": True, "detail": "OK"}}
+    assert "UAT akceptované" not in notes[-1].content
+
+
+@pytest.mark.asyncio
+async def test_full_flow_uat_deploy_failure_blocks(db_session, monkeypatch) -> None:
+    """A failed UAT-deploy → blocked (block_reason=system_error) with the deploy error surfaced."""
+    version_id, state = _seed(db_session, repo_url="https://github.com/rauschiccsk/nex-demo", uat_slug="demo")
+    monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: True)
+
+    async def _deploy(project_slug, uat_slug):
+        return False, "exit 1: docker build failed"
+
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _deploy)
+
+    await orchestrator._release_auto_uat_deploy(db_session, state)
+
+    assert state.status == "blocked"
+    assert state.block_reason == "system_error"
+    assert "UAT deploy zlyhal" in state.next_action and "docker build failed" in state.next_action
+
+
+@pytest.mark.asyncio
+async def test_full_flow_uat_deploy_null_slug_honest_skip(db_session, monkeypatch) -> None:
+    """uat_slug NULL → HONEST skip: awaiting_director with 'Žiadny UAT …', the deploy NEVER runs, and the
+    note NEVER claims 'UAT akceptované' (the v0.8.1 honesty fix)."""
+    version_id, state = _seed(db_session, repo_url="https://github.com/rauschiccsk/nex-demo", uat_slug=None)
+
+    async def _deploy(project_slug, uat_slug):
+        raise AssertionError("a NULL uat_slug must skip the deploy, not run it")
+
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _deploy)
+
+    await orchestrator._release_auto_uat_deploy(db_session, state)
+
+    assert state.status == "awaiting_director"
+    assert state.next_action == "Žiadny UAT nakonfigurovaný — dokončíš bez UAT testu."
+    note = _director_notes(db_session, version_id)[-1]
+    assert note.payload == {"uat_deploy": {"skipped": True, "reason": "no_uat_slug"}}
+    assert "UAT akceptované" not in note.content
+
+
+@pytest.mark.asyncio
+async def test_full_flow_uat_deploy_compose_missing_honest_skip(db_session, monkeypatch) -> None:
+    """uat_slug set but compose missing → HONEST skip (reason compose_missing), deploy never runs."""
+    version_id, state = _seed(db_session, repo_url="https://github.com/rauschiccsk/nex-demo", uat_slug="gone")
+    monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: False)
+
+    async def _deploy(project_slug, uat_slug):
+        raise AssertionError("a missing compose must skip the deploy")
+
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _deploy)
+
+    await orchestrator._release_auto_uat_deploy(db_session, state)
+
+    assert state.status == "awaiting_director"
+    assert state.next_action == "Žiadny UAT nakonfigurovaný — dokončíš bez UAT testu."
+    note = _director_notes(db_session, version_id)[-1]
+    assert note.payload == {"uat_deploy": {"skipped": True, "reason": "compose_missing", "uat_slug": "gone"}}
+
+
+@pytest.mark.asyncio
+async def test_publish_ok_chains_real_uat_deploy_end_to_end(db_session, monkeypatch) -> None:
+    """End-to-end: _release_auto_publish (publish-ok) chains the REAL _release_auto_uat_deploy → with a
+    uat_slug set + deploy ok, the final settle is 'Nasadené na UAT' and BOTH notes are on the board."""
+    version_id, state = _seed(db_session, repo_url="https://github.com/rauschiccsk/nex-demo", uat_slug="demo")
+    monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: True)
+
+    async def _pub(slug, repo):
+        return True, "published + CI green (5)"
+
+    async def _deploy(project_slug, uat_slug):
+        return True, "OK"
+
+    monkeypatch.setattr(orchestrator, "_run_release_publish", _pub)
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _deploy)
+
+    await orchestrator._release_auto_publish(db_session, state)
+
+    assert state.status == "awaiting_director"
+    assert state.next_action == "Nasadené na UAT — over a akceptuj."
+    payloads = [n.payload for n in _director_notes(db_session, version_id)]
+    assert {
+        "release_publish": {"repo": "rauschiccsk/nex-demo", "ok": True, "detail": "published + CI green (5)"}
+    } in payloads
+    assert {"uat_deploy": {"uat_slug": "demo", "ok": True, "detail": "OK"}} in payloads
+
+
+# ---------------------------------------------------------------------------
+# v0.8.1 CR-2: honest uat_accept completion message — keyed on the ACTUAL deploy outcome
+# (the latest uat_deploy notification), NOT the uat_slug proxy.
+# ---------------------------------------------------------------------------
+
+UAT_MSG = "UAT akceptované zákazníkom — pipeline dokončená."
+NO_UAT_MSG = "Verzia akceptovaná a dokončená — bez UAT testu (projekt nemá nakonfigurovaný UAT)."
+
+
+def _last_completion_content(db, version_id) -> str:
+    return _director_notes(db, version_id)[-1].content
+
+
+@pytest.mark.asyncio
+async def test_uat_accept_after_successful_deploy_claims_uat(db_session, monkeypatch) -> None:
+    """A REAL UAT deploy (ok=True) recorded → uat_accept keeps 'UAT akceptované zákazníkom …'."""
+    version_id, state = _seed(db_session, repo_url="https://github.com/x/y", uat_slug="demo")
+    monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: True)
+
+    async def _deploy(project_slug, uat_slug):
+        return True, "OK"
+
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _deploy)
+    await orchestrator._release_auto_uat_deploy(db_session, state)  # records {uat_deploy: {ok: True}} + awaiting
+
+    out = await orchestrator.apply_action(db_session, version_id=version_id, action="uat_accept")
+
+    assert out.status == "done"
+    assert _last_completion_content(db_session, version_id) == UAT_MSG
+
+
+@pytest.mark.asyncio
+async def test_uat_accept_compose_missing_edge_is_honest(db_session, monkeypatch) -> None:
+    """THE EDGE (Director 2026-06-19): uat_slug SET but compose MISSING → CR-1 honest-skips AND uat_accept
+    is ALSO honest (no false 'UAT akceptované') — the uat_slug proxy would have lied here."""
+    version_id, state = _seed(db_session, repo_url="https://github.com/x/y", uat_slug="gone")
+    monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: False)
+
+    async def _deploy(project_slug, uat_slug):
+        raise AssertionError("a missing compose must skip the deploy")
+
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _deploy)
+    await orchestrator._release_auto_uat_deploy(db_session, state)  # honest skip: {uat_deploy: {skipped: True}}
+
+    out = await orchestrator.apply_action(db_session, version_id=version_id, action="uat_accept")
+
+    assert out.status == "done"
+    content = _last_completion_content(db_session, version_id)
+    assert content == NO_UAT_MSG
+    assert "UAT akceptované" not in content
+
+
+@pytest.mark.asyncio
+async def test_uat_accept_uat_slug_set_but_no_deploy_is_honest(db_session) -> None:
+    """uat_slug SET but NO uat_deploy ever recorded → honest no-UAT message (proves it keys on the deploy
+    OUTCOME, not the slug proxy — the proxy would falsely claim 'UAT akceptované' here)."""
+    version_id, _state = _seed(
+        db_session, repo_url="https://github.com/x/y", uat_slug="demo", status="awaiting_director"
+    )
+
+    out = await orchestrator.apply_action(db_session, version_id=version_id, action="uat_accept")
+
+    assert out.status == "done"
+    content = _last_completion_content(db_session, version_id)
+    assert content == NO_UAT_MSG
+    assert "UAT akceptované" not in content
+
+
+@pytest.mark.asyncio
+async def test_uat_accept_after_failed_deploy_is_honest(db_session, monkeypatch) -> None:
+    """A FAILED UAT deploy (ok=False) → uat_accept is honest (no false 'UAT akceptované')."""
+    version_id, state = _seed(db_session, repo_url="https://github.com/x/y", uat_slug="demo")
+    monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: True)
+
+    async def _deploy(project_slug, uat_slug):
+        return False, "exit 1: boom"
+
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _deploy)
+    await orchestrator._release_auto_uat_deploy(db_session, state)  # blocked + {uat_deploy: {ok: False}}
+
+    out = await orchestrator.apply_action(db_session, version_id=version_id, action="uat_accept")
+
+    assert out.status == "done"
+    assert "UAT akceptované" not in _last_completion_content(db_session, version_id)
+
+
+@pytest.mark.asyncio
+async def test_uat_accept_without_uat_slug_is_honest(db_session) -> None:
+    """uat_slug NULL → completion is HONEST: no false 'UAT akceptované', states it finished without UAT."""
+    version_id, _state = _seed(db_session, repo_url="https://github.com/x/y", uat_slug=None, status="awaiting_director")
+
+    out = await orchestrator.apply_action(db_session, version_id=version_id, action="uat_accept")
+
+    assert out.status == "done"
+    content = _last_completion_content(db_session, version_id)
+    assert content == NO_UAT_MSG
+    assert "UAT akceptované" not in content
+
+
+# ---------------------------------------------------------------------------
+# Fast-fix lane UNTOUCHED — _fast_fix_auto_deploy behaviour locked byte-identical (v0.8.1 scope/safety)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_fast_fix_deploy_runs_and_awaits_unchanged(db_session, monkeypatch) -> None:
+    """fast_fix: uat_slug set + compose → _run_uat_deploy runs → awaiting 'Nasadené na UAT' (unchanged)."""
+    version_id, state = _seed(db_session, repo_url=None, uat_slug="demo", flow_type="fast_fix")
+    monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: True)
+
+    async def _deploy(project_slug, uat_slug):
+        return True, "OK"
+
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _deploy)
+
+    await orchestrator._fast_fix_auto_deploy(db_session, state)
+
+    assert state.status == "awaiting_director"
+    assert state.next_action == "Nasadené na UAT — over a akceptuj."
+    assert _director_notes(db_session, version_id)[-1].payload == {
+        "uat_deploy": {"uat_slug": "demo", "ok": True, "detail": "OK"}
+    }
+
+
+@pytest.mark.asyncio
+async def test_fast_fix_deploy_null_slug_keeps_its_own_skip_message(db_session) -> None:
+    """fast_fix NULL skip keeps its ORIGINAL message — DISTINCT from the full-flow honest 'Žiadny UAT'
+    skip — proving v0.8.1 left the fast-fix path byte-identical."""
+    version_id, state = _seed(db_session, repo_url=None, uat_slug=None, flow_type="fast_fix")
+
+    await orchestrator._fast_fix_auto_deploy(db_session, state)
+
+    assert state.status == "awaiting_director"
+    assert state.next_action == "Director: over a akceptuj (UAT deploy preskočený — projekt nemá UAT)."
+    note = _director_notes(db_session, version_id)[-1]
+    assert note.content == "UAT nie je pre projekt nakonfigurované — preskakujem deploy."
+    assert note.payload == {"uat_deploy": {"skipped": True}}
+    # The fast-fix skip must NOT use the full-flow wording.
+    assert "Žiadny UAT nakonfigurovaný" not in state.next_action
