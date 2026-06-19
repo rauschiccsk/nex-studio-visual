@@ -3,13 +3,20 @@
 Per F-003 §3-§4 spec + Sub-round 4 O-DS-2 (Python + rich) + O-003-2 (forever
 snapshot retention).
 
+v0.9.0 Phase 2 (CR-2): the per-project provisioning logic (source-compose
+detection, synthetic-secret/.env synthesis, redeploy preservation, compose
+rendering) MOVED to the importable :mod:`backend.services.uat_provisioner` so
+the engine can provision in-process. This module now keeps only the shared
+**ops** helpers used by the manual CLIs (uat-deploy / uat-teardown /
+uat-snapshot / uat-status).
+
 Public API:
 - Slug validation: validate_slug()
 - Path utilities: uat_dir, snapshots_dir, project_dir, uat_compose_path,
-  nginx_config_path
+  uat_env_path, read_uat_env, nginx_config_path, local_nginx_config_path
 - Port allocation: allocate_port, release_port, get_allocated_port
 - Snapshot filenames: snapshot_filename
-- Subprocess wrappers: docker_compose, docker_exec, wait_healthy
+- Subprocess wrappers: docker_compose, docker_exec, wait_healthy, git_describe
 - Template rendering: render_template
 - Rich UI: console, confirm, status_table, print_url
 
@@ -20,11 +27,9 @@ State files:
 
 from __future__ import annotations
 
-import base64
 import json
 import os
 import re
-import secrets
 import subprocess
 import sys
 import time
@@ -35,7 +40,6 @@ from pathlib import Path
 from typing import Any
 
 import jinja2
-import yaml
 from rich.console import Console
 from rich.table import Table
 
@@ -131,8 +135,8 @@ def read_uat_env(slug: str) -> dict[str, str]:
 def nginx_config_path(slug: str) -> Path:
     """Final NGINX sites-available path (root-owned — sudo required to write).
 
-    Used as documentation target for Direktor manual sudo cp. Skripty NIKDY
-    nezapisujú priamo sem — používajú local_nginx_config_path() (user-writable).
+    Legacy (pre-Traefik) UATs: used by ``uat-teardown.py`` to clean up an old
+    vhost. The provisioner no longer renders nginx (Traefik replaces it).
     """
     validate_slug(slug)
     return Path("/etc/nginx/sites-available") / f"uat-{slug}.conf"
@@ -141,523 +145,10 @@ def nginx_config_path(slug: str) -> Path:
 def local_nginx_config_path(slug: str) -> Path:
     """User-writable nginx config path: /opt/uat/<slug>/nginx-uat-vhost.conf.
 
-    Skripty zapisujú sem (Implementer scope = no sudo). Direktor manuálne
-    `sudo cp` do nginx_config_path() pri NGINX aktivácii (per F-003 §10).
+    Legacy (pre-Traefik) UATs only — kept so ``uat-teardown.py`` can remove a
+    leftover vhost from a UAT provisioned before the Traefik migration.
     """
     return uat_dir(slug) / "nginx-uat-vhost.conf"
-
-
-# ---------- Per-projekt auto-detection helpers (CR-021 + CR-022) ----------
-
-
-def _load_source_compose(source_project_path: Path) -> dict[str, Any] | None:
-    """Load source docker-compose.yml. Returns None ak missing alebo parse error.
-
-    Shared utility for all detect_* helpers (DRY pattern).
-    """
-    compose_path = source_project_path / "docker-compose.yml"
-    if not compose_path.exists():
-        return None
-    try:
-        return yaml.safe_load(compose_path.read_text(encoding="utf-8")) or None
-    except yaml.YAMLError:
-        return None
-
-
-def detect_backend_config(source_project_path: Path) -> dict[str, Any]:
-    """Auto-detect backend port + healthcheck + dockerfile from source compose.
-
-    Per F-003 §4.1 + CR-021 amendment.
-
-    Defaults: {"backend_port": 8000, "healthcheck_test": None, "dockerfile": "Dockerfile"}
-    """
-    defaults: dict[str, Any] = {
-        "backend_port": 8000,
-        "healthcheck_test": None,
-        "dockerfile": "Dockerfile",
-    }
-
-    data = _load_source_compose(source_project_path)
-    if data is None:
-        return defaults
-
-    backend = data.get("services", {}).get("backend") or {}
-
-    # Port: first mapping → container side is LAST segment of "host:container"
-    backend_port = defaults["backend_port"]
-    for mapping in backend.get("ports", []) or []:
-        if isinstance(mapping, str):
-            backend_port = int(mapping.split(":")[-1])
-            break
-        if isinstance(mapping, dict) and "target" in mapping:
-            backend_port = int(mapping["target"])
-            break
-
-    # Healthcheck (re-use source-defined test as-is)
-    healthcheck = backend.get("healthcheck") or {}
-    healthcheck_test = healthcheck.get("test")
-
-    # Dockerfile path (build.dockerfile, fallback "Dockerfile")
-    build = backend.get("build") or {}
-    dockerfile = build.get("dockerfile", defaults["dockerfile"]) if isinstance(build, dict) else defaults["dockerfile"]
-
-    return {
-        "backend_port": backend_port,
-        "healthcheck_test": healthcheck_test,
-        "dockerfile": dockerfile,
-    }
-
-
-# Extract the URL path from an `http(s)://host[:port]/PATH` occurrence (CR-NS-062).
-_HEALTH_URL_PATH = re.compile(r"https?://[^/\s\"']+(/[^\s\"']*)")
-
-
-def _extract_url_path(text: str) -> str | None:
-    """Return the path component of the first http(s) URL in ``text`` (``/api/v1/health`` …)."""
-    m = _HEALTH_URL_PATH.search(text)
-    return m.group(1) if m else None
-
-
-def extract_health_path(healthcheck_test: Any) -> str | None:
-    """Extract the URL path from a compose ``healthcheck.test`` (list-of-args or a string). None if no URL."""
-    if not healthcheck_test:
-        return None
-    text = " ".join(str(x) for x in healthcheck_test) if isinstance(healthcheck_test, list) else str(healthcheck_test)
-    return _extract_url_path(text)
-
-
-def detect_dockerfile_healthcheck_path(dockerfile_path: Path) -> str | None:
-    """Parse the backend Dockerfile ``HEALTHCHECK`` instruction for its URL path (CR-NS-062).
-
-    nex-inbox declares its health probe ONLY in the Dockerfile (``HEALTHCHECK … curl …
-    http://127.0.0.1:8000/api/v1/health``), not the compose — so uat-deploy used to default to a
-    404ing ``/health``. Returns the path (``/api/v1/health``) or ``None`` when the file is missing,
-    has no ``HEALTHCHECK``, or the instruction carries no URL (e.g. ``HEALTHCHECK NONE``).
-    """
-    if not dockerfile_path.is_file():
-        return None
-    text = dockerfile_path.read_text(encoding="utf-8")
-    m = re.search(r"\bHEALTHCHECK\b", text, re.IGNORECASE)
-    if m is None:
-        return None
-    # Search from the HEALTHCHECK keyword onward — its CMD URL may sit on a `\` continuation line.
-    return _extract_url_path(text[m.start() :])
-
-
-def resolve_health_path(
-    *,
-    override: str | None,
-    compose_test: Any,
-    dockerfile_path: Path | None,
-) -> str:
-    """Resolve the backend health endpoint PATH by precedence (CR-NS-062).
-
-    ``--health-endpoint`` override → source-compose ``healthcheck.test`` path → backend Dockerfile
-    ``HEALTHCHECK`` path → ``/health`` (last-resort default). Used for BOTH the rendered compose
-    healthcheck and the wait-healthy probe so they always agree.
-    """
-    if override:
-        return override
-    from_compose = extract_health_path(compose_test)
-    if from_compose:
-        return from_compose
-    if dockerfile_path is not None:
-        from_dockerfile = detect_dockerfile_healthcheck_path(dockerfile_path)
-        if from_dockerfile:
-            return from_dockerfile
-    return "/health"
-
-
-# ---------- CR-022: DB credentials, env vars, frontend, alembic ----------
-
-
-def detect_db_credentials(source_project_path: Path) -> dict[str, Any]:
-    """Parse services.db.environment from source compose.
-
-    Returns dict with keys POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB.
-    Defaults: {"postgres", None, None} (None means caller derives).
-    """
-    defaults: dict[str, Any] = {
-        "POSTGRES_USER": "postgres",
-        "POSTGRES_PASSWORD": None,
-        "POSTGRES_DB": None,
-    }
-
-    data = _load_source_compose(source_project_path)
-    if data is None:
-        return defaults
-
-    db = data.get("services", {}).get("db") or {}
-    env = db.get("environment") or {}
-    if not isinstance(env, dict):
-        return defaults
-
-    return {
-        "POSTGRES_USER": env.get("POSTGRES_USER", defaults["POSTGRES_USER"]),
-        "POSTGRES_PASSWORD": env.get("POSTGRES_PASSWORD"),
-        "POSTGRES_DB": env.get("POSTGRES_DB"),
-    }
-
-
-# Synthetic secret detection (case-insensitive suffix match).
-SECRET_SUFFIXES = ("_password", "_secret", "_key", "_token")
-
-# DB connection vars — explicit whitelist (per Dedo Q4 drobnosť).
-# Pattern matching would catch false positives like PRODUCTION_DB_BACKUP_URL.
-DB_CONNECTION_VARS = {
-    "DATABASE_URL",
-    "DB_HOST",
-    "DB_PORT",
-    "DB_NAME",
-    "DB_USER",
-    "DB_PASSWORD",
-    "POSTGRES_HOST",
-    "POSTGRES_PORT",
-    "POSTGRES_DB",
-    "POSTGRES_USER",
-    "POSTGRES_PASSWORD",
-}
-
-# Host UAT-internal hostname for postgres service (matches UAT compose template service name).
-UAT_DB_HOSTNAME = "postgres"
-UAT_DB_PORT = "5432"
-
-USER_SECRET_PLACEHOLDER = "__UAT_SYNTHETIC__"
-
-
-def _synthetic_secret(key: str) -> str:
-    """Generate synthetic value for a secret env var (CR-027 format heuristic).
-
-    Suffix-based dispatch:
-
-    - ``_KEY`` (case-insensitive) → ``base64.b64encode(secrets.token_bytes(32))``.
-      Standard base64 alphabet (``+/``), 44 ASCII chars, decodes to 32 bytes.
-      Compatible with ``base64.b64decode(..., validate=True)`` strict readers
-      (e.g. nex-inbox ``CredsCipher`` AES-256-GCM key) AND urlsafe decoders
-      (``urlsafe_b64decode`` accepts standard alphabet too — see Python docs).
-      Avoid urlsafe encoding here: strict standard decoders reject ``-_``.
-    - All other suffixes (``_PASSWORD``, ``_SECRET``, ``_TOKEN``) →
-      ``secrets.token_hex(32)``. 64 hex chars; never decoded; safe for
-      password / API-token / random-secret usage.
-
-    Per-project format overrides deferred to CR-028+ (no universal standard).
-    """
-    if key.lower().endswith("_key"):
-        return base64.b64encode(secrets.token_bytes(32)).decode("ascii")
-    return secrets.token_hex(32)
-
-
-def _is_var_expansion(value: Any) -> bool:
-    """Return True for ${VAR} or ${VAR:-default} env-var expansion notation."""
-    return isinstance(value, str) and value.startswith("${") and value.endswith("}")
-
-
-def _rewrite_db_connection_var(
-    key: str,
-    value: Any,
-    *,
-    db_creds: dict[str, Any],
-    db_name: str,
-    synthetic_password: str,
-) -> str:
-    """Rewrite DB connection env vars to UAT db hostname + detected/derived creds.
-
-    ``synthetic_password`` must be the **shared** UAT DB password (single value
-    reused across POSTGRES_PASSWORD, DB_PASSWORD, and DATABASE_URL embedded
-    password) — per F-003 §11 CR-023. Caller (e.g. ``detect_backend_env_vars``
-    or ``uat-deploy.generate_uat_env``) precomputes this once per env build.
-    """
-    if key in {"DB_HOST", "POSTGRES_HOST"}:
-        return UAT_DB_HOSTNAME
-    if key in {"DB_PORT", "POSTGRES_PORT"}:
-        return UAT_DB_PORT
-    if key in {"DB_NAME", "POSTGRES_DB"}:
-        return db_name
-    if key in {"DB_USER", "POSTGRES_USER"}:
-        return db_creds["POSTGRES_USER"]
-    if key in {"DB_PASSWORD", "POSTGRES_PASSWORD"}:
-        return synthetic_password
-    if key == "DATABASE_URL":
-        user = db_creds["POSTGRES_USER"]
-        return f"postgresql://{user}:{synthetic_password}@{UAT_DB_HOSTNAME}:{UAT_DB_PORT}/{db_name}"
-    return str(value)
-
-
-def detect_env_example(source_project_path: Path) -> dict[str, str]:
-    """Parse <source>/.env.example into a dict (CR-026).
-
-    Same key=value parser ako :func:`read_uat_env` (CR-025), ale point at the
-    SOURCE repo's ``.env.example`` rather than ``/opt/uat/<slug>/.env``.
-    Ignores blank lines + ``#`` comments; values returned as raw strings (no
-    quote stripping, no ``${VAR}`` expansion — caller's downstream logic
-    handles `${VAR}` placeholder substitution).
-
-    Returns empty dict if ``.env.example`` is missing (caller falls back to
-    compose.environment-only behaviour).
-    """
-    path = source_project_path / ".env.example"
-    if not path.is_file():
-        return {}
-    out: dict[str, str] = {}
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        out[key.strip()] = value
-    return out
-
-
-def detect_backend_env_vars(
-    source_project_path: Path,
-    *,
-    synthetic_db_password: str | None = None,
-    preserved_secrets: dict[str, str] | None = None,
-) -> dict[str, str]:
-    """Parse `.env.example` + services.backend.environment and produce synthetic UAT env.
-
-    Per F-003 §11 + CR-022 §C-1 (synthetic credentials generation):
-    - Keys ending _PASSWORD/_SECRET/_KEY/_TOKEN (case-insensitive) → random hex32
-    - DB connection vars (explicit whitelist) → rewritten to UAT container hostname
-    - Values with ${VAR} expansion notation → __UAT_SYNTHETIC__ placeholder
-    - Other plain vars → copy as-is (string-ified)
-
-    Per F-003 §11 CR-023: ``synthetic_db_password`` (if provided) is the shared
-    UAT DB password threaded into every DB credential consumer (POSTGRES_PASSWORD,
-    DB_PASSWORD, DATABASE_URL embedded password). When ``None``, a single value
-    is precomputed once per call so DB consumers within this env map agree.
-    Caller (``uat-deploy.generate_uat_env``) should pass the same value it
-    writes to the top-level ``POSTGRES_PASSWORD`` .env line so the postgres
-    container init and the backend connect agree.
-
-    Per F-003 §11 CR-026: ``.env.example`` is the baseline (lists ALL env vars
-    backend reads, including secrets like LAUNCH_TOKEN/JWT_SECRET_KEY only set
-    at runtime via env_file: - .env). ``services.backend.environment`` from
-    compose UNION-MERGES on top, taking precedence for overlapping keys (compose
-    has authoritative DB host/port overrides). Returns empty dict only when
-    BOTH sources are empty/absent.
-
-    Per CR-NS-061: ``preserved_secrets`` (if given) maps secret keys → their existing UAT value;
-    on a redeploy each matching secret REUSES that value instead of being regenerated (so a
-    data-bearing instance keeps its JWT/encryption/launch secrets). The DB password is preserved
-    via ``synthetic_db_password`` (the caller threads the existing one).
-    """
-    # Baseline: .env.example (CR-026). Cast to mutable dict for compose update.
-    raw_env: dict[str, Any] = dict(detect_env_example(source_project_path))
-
-    # Overlay: compose.environment (overrides for shared keys).
-    data = _load_source_compose(source_project_path)
-    if data is not None:
-        backend = data.get("services", {}).get("backend") or {}
-        compose_env = backend.get("environment") or {}
-        if isinstance(compose_env, dict):
-            raw_env.update(compose_env)
-
-    if not raw_env:
-        return {}
-
-    # Derive DB credentials + db name (used for DB connection rewrite)
-    db_creds = detect_db_credentials(source_project_path)
-    db_name = db_creds["POSTGRES_DB"] or "uat_db"
-
-    # Shared synthetic DB password (CR-023). Precompute once so every DB
-    # consumer within this env map agrees.
-    shared_password = synthetic_db_password or secrets.token_hex(32)
-
-    out: dict[str, str] = {}
-    for key, value in raw_env.items():
-        key_str = str(key)
-
-        # Priority 1: ${VAR} expansion → placeholder (cannot read host env per §4)
-        if _is_var_expansion(value):
-            out[key_str] = USER_SECRET_PLACEHOLDER
-            continue
-
-        # Priority 2: DB connection rewrite (explicit whitelist)
-        if key_str in DB_CONNECTION_VARS:
-            out[key_str] = _rewrite_db_connection_var(
-                key_str,
-                value,
-                db_creds=db_creds,
-                db_name=db_name,
-                synthetic_password=shared_password,
-            )
-            continue
-
-        # Priority 3: secret suffix — on redeploy REUSE the preserved value (CR-NS-061) so a
-        # data-bearing instance keeps its JWT/encryption/launch secrets; else synthesise (CR-027).
-        if key_str.lower().endswith(SECRET_SUFFIXES):
-            if preserved_secrets and key_str in preserved_secrets:
-                out[key_str] = preserved_secrets[key_str]
-            else:
-                out[key_str] = _synthetic_secret(key_str)
-            continue
-
-        # Priority 4: plain value (string-ified for .env file compatibility)
-        out[key_str] = str(value)
-
-    return out
-
-
-def load_existing_env_secrets(uat_dir: Path) -> dict[str, str]:
-    """Return the secret-bearing key→value pairs from an existing UAT ``.env`` (CR-NS-061 redeploy).
-
-    Secrets = keys whose lowercased name ends with :data:`SECRET_SUFFIXES`, PLUS the DB password
-    keys ``DB_PASSWORD`` / ``POSTGRES_PASSWORD``. Used to PRESERVE secrets across a redeploy so a
-    data-bearing instance keeps its DB password, email-cred encryption key, launch token, JWT
-    secret, etc. Returns ``{}`` when ``uat_dir/.env`` is absent. Same line parser as
-    :func:`read_uat_env` (no quote stripping / ``${VAR}`` expansion — UAT ``.env`` has neither).
-    """
-    env_path = uat_dir / ".env"
-    if not env_path.is_file():
-        return {}
-    out: dict[str, str] = {}
-    for raw in env_path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        if key.lower().endswith(SECRET_SUFFIXES) or key in {"DB_PASSWORD", "POSTGRES_PASSWORD"}:
-            out[key] = value
-    return out
-
-
-def parse_compose_extra_hosts(uat_dir: Path) -> list[str]:
-    """Return the backend service's ``extra_hosts`` from an existing UAT compose (CR-NS-061 redeploy).
-
-    Preserves host-gateway / hairpin entries (e.g. ``mail.isnex.eu:192.168.55.250``,
-    ``host.docker.internal:host-gateway``) that were added to a live instance but are NOT emitted by
-    the generated template — so a redeploy doesn't drop IMAP / Ollama connectivity. Returns ``[]``
-    when ``uat_dir/docker-compose.yml`` is absent / unparseable / has none. Handles both the list
-    (``- "h:ip"``) and mapping (``h: ip``) compose forms.
-    """
-    compose_path = uat_dir / "docker-compose.yml"
-    if not compose_path.is_file():
-        return []
-    try:
-        data = yaml.safe_load(compose_path.read_text(encoding="utf-8")) or {}
-    except yaml.YAMLError:
-        return []
-    backend = (data.get("services") or {}).get("backend") or {}
-    raw = backend.get("extra_hosts") or []
-    if isinstance(raw, dict):
-        return [f"{k}:{v}" for k, v in raw.items()]
-    if isinstance(raw, list):
-        return [str(h) for h in raw]
-    return []
-
-
-def resolve_redeploy_preservation(uat_dir: Path, *, rotate_secrets: bool) -> tuple[bool, dict[str, str], list[str]]:
-    """Decide what this deploy PRESERVES (CR-NS-061). Returns ``(is_redeploy, secrets, extra_hosts)``.
-
-    REDEPLOY (preserve) iff the instance already exists (``uat_dir/.env`` present) AND not
-    ``rotate_secrets`` → carry over its secrets + backend ``extra_hosts`` so a data-bearing instance
-    keeps its DB password / encryption key / launch token + IMAP/Ollama host routes. A FRESH deploy
-    (no ``.env``) or an explicit ``--rotate-secrets`` re-provision returns ``(False, {}, [])`` so
-    everything is generated fresh.
-    """
-    is_redeploy = (uat_dir / ".env").is_file() and not rotate_secrets
-    if not is_redeploy:
-        return False, {}, []
-    return True, load_existing_env_secrets(uat_dir), parse_compose_extra_hosts(uat_dir)
-
-
-def _parse_compose_port_container_side(port_entry: Any) -> int | None:
-    """Extract the container-side port from a compose ``ports`` entry.
-
-    Compose port syntax (per spec):
-    - Short ``"HOST:CONTAINER"`` (e.g. ``"9177:9177"``)
-    - Short ``"IP:HOST:CONTAINER"`` (e.g. ``"127.0.0.1:5173:80"``)
-    - Short with protocol suffix ``"8080:80/tcp"`` — strip the ``/...`` tail
-    - Long-form dict ``{"target": 80, "published": 5173, ...}`` — take ``target``
-    - Single ``"CONTAINER"`` (random host port) — take the value
-
-    Returns ``None`` on parse failure (caller falls back to default 80).
-    """
-    if isinstance(port_entry, dict):
-        target = port_entry.get("target")
-        if isinstance(target, int):
-            return target
-        if isinstance(target, str) and target.isdigit():
-            return int(target)
-        return None
-    if isinstance(port_entry, int):
-        return port_entry
-    if not isinstance(port_entry, str):
-        return None
-    spec = port_entry.split("/", 1)[0]  # strip "/tcp" or "/udp" protocol suffix
-    last_segment = spec.rsplit(":", 1)[-1].strip()
-    if last_segment.isdigit():
-        return int(last_segment)
-    return None
-
-
-def detect_frontend_config(source_project_path: Path) -> dict[str, Any] | None:
-    """Parse services.frontend.{build,ports} from source compose.
-
-    Returns dict {context, dockerfile, build_args, container_port} alebo None
-    ak no frontend service. ``container_port`` (CR-024) — detected z prvého
-    ``services.frontend.ports`` entry; default 80 ak chýba alebo neparseable.
-    """
-    data = _load_source_compose(source_project_path)
-    if data is None:
-        return None
-
-    frontend = data.get("services", {}).get("frontend")
-    if not frontend:
-        return None
-
-    build = frontend.get("build") or {}
-    if not isinstance(build, dict):
-        return None
-
-    args = build.get("args") or {}
-    if not isinstance(args, dict):
-        args = {}
-
-    # CR-024: container port detection from ports[0]; fallback 80
-    container_port = 80
-    ports = frontend.get("ports") or []
-    if isinstance(ports, list) and ports:
-        detected = _parse_compose_port_container_side(ports[0])
-        if detected is not None:
-            container_port = detected
-
-    return {
-        "context": build.get("context", "."),
-        "dockerfile": build.get("dockerfile", "Dockerfile"),
-        "build_args": {str(k): str(v) for k, v in args.items()},
-        "container_port": container_port,
-    }
-
-
-# Alembic command.upgrade detection patterns (covers both `command.upgrade(...)`
-# and fully-qualified `alembic.command.upgrade(...)`).
-_ALEMBIC_UPGRADE_PATTERN = re.compile(r"(?:alembic\.)?command\.upgrade\s*\(")
-
-
-def detect_alembic_strategy(source_project_path: Path) -> str:
-    """Detect alembic invocation mode for the source project.
-
-    Returns "self-bootstrap" | "external" | "skip".
-
-    Logic:
-    1. Read backend/main.py — grep `command.upgrade` pattern → "self-bootstrap"
-    2. backend/alembic/ exists + no self-bootstrap → "external"
-    3. No backend/alembic/ → "skip" (graceful degradation)
-    """
-    main_py = source_project_path / "backend" / "main.py"
-    if main_py.exists():
-        if _ALEMBIC_UPGRADE_PATTERN.search(main_py.read_text(encoding="utf-8")):
-            return "self-bootstrap"
-
-    if (source_project_path / "backend" / "alembic").is_dir():
-        return "external"
-
-    return "skip"
 
 
 # ---------- Port allocation ----------
@@ -820,7 +311,8 @@ def wait_healthy(
 def render_template(template_name: str, context: dict[str, str]) -> str:
     """Render Jinja2 template from TEMPLATES_DIR with given context.
 
-    template_name is relative to TEMPLATES_DIR (e.g. "uat/docker-compose.yml.j2").
+    template_name is relative to TEMPLATES_DIR (e.g. "uat/test.conf"). Generic helper used by the
+    UAT CLIs; the compose template is rendered by :mod:`backend.services.uat_provisioner`.
     """
     env = jinja2.Environment(
         loader=jinja2.FileSystemLoader(str(TEMPLATES_DIR)),

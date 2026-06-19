@@ -273,6 +273,47 @@ def update(db: Session, project_id: UUID, data: ProjectUpdate) -> Project:
     return project
 
 
+def set_uat_slug(
+    db: Session,
+    project: Project,
+    uat_slug: Optional[str] = None,
+    *,
+    force: bool = False,
+) -> Project:
+    """Set ``project.uat_slug`` — the autonomous UAT-slug write path (v0.9.0 Phase 2, CR-3).
+
+    The ``uat_slug`` column was previously hand-edited only; Phase 3 calls this at first-release so
+    the engine can provision ``/opt/uat/<uat_slug>``. Behaviour:
+
+    * ``uat_slug=None`` → derive it from the project slug (``nex-ledger`` → ``ledger``) via
+      :func:`backend.services.uat_provisioner.derive_uat_slug`.
+    * **Idempotent + non-destructive:** a manually-set non-NULL ``uat_slug`` is NOT overwritten
+      unless ``force=True`` — so an operator's deliberate mapping survives the engine's auto-set.
+      Re-setting the same value is always a no-op.
+    * The value is validated (lowercase kebab UAT slug) before assignment.
+
+    Follows the service convention: ``session.flush()`` only — the router owns the commit.
+
+    Raises:
+        ValueError: If the derived/supplied ``uat_slug`` is not a valid UAT slug.
+    """
+    # Imported lazily so the project service has no import-time dependency on the UAT provisioner
+    # (which pulls in yaml/jinja) — keeps the common project CRUD path light.
+    from backend.services.uat_provisioner import derive_uat_slug, validate_uat_slug
+
+    target = uat_slug if uat_slug is not None else derive_uat_slug(project)
+    validate_uat_slug(target)
+
+    if project.uat_slug and project.uat_slug != target and not force:
+        # A deliberate manual mapping already exists — preserve it (non-destructive).
+        return project
+
+    if project.uat_slug != target:
+        project.uat_slug = target
+        db.flush()
+    return project
+
+
 def delete(db: Session, project_id: UUID) -> None:
     """Hard-delete a project.
 
