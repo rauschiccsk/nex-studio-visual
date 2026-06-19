@@ -433,3 +433,93 @@ def test_resolve_health_path_from_dockerfile(tmp_path):
 def test_resolve_health_path_defaults(tmp_path):
     assert P.resolve_be_health_path({}, tmp_path) == "/health"
     assert P.resolve_be_health_path(None, tmp_path) == "/health"
+
+
+# ---------- CR-2: teardown_uat + reclaim_port (project-delete orphan prevention) ----------
+
+
+class _Proc:
+    def __init__(self, returncode=0, stdout=""):
+        self.returncode = returncode
+        self.stdout = stdout
+
+
+def test_teardown_uat_compose_present_runs_down_and_reclaims(tmp_path, monkeypatch):
+    import json
+
+    uat_root = tmp_path / "uat"
+    (uat_root / "asistent").mkdir(parents=True)
+    (uat_root / "asistent" / "docker-compose.yml").write_text("name: uat-asistent\nservices: {}\n")
+    state = tmp_path / ".uat-ports.json"
+    state.write_text('{"asistent": 19500, "other": 19501}')
+
+    captured = {}
+
+    def _run(cmd, **kw):
+        captured["cmd"] = cmd
+        return _Proc(returncode=0)
+
+    monkeypatch.setattr(P.subprocess, "run", _run)
+    ok, detail = P.teardown_uat("asistent", uat_root=uat_root, port_state_file=state)
+
+    assert ok is True and detail == "OK"
+    assert captured["cmd"][:3] == ["docker", "compose", "-f"]
+    assert "down" in captured["cmd"] and "-v" in captured["cmd"]
+    assert str(uat_root / "asistent" / "docker-compose.yml") in captured["cmd"]
+    remaining = json.loads(state.read_text())
+    assert "asistent" not in remaining and remaining == {"other": 19501}  # only this slug's port reclaimed
+
+
+def test_teardown_uat_compose_absent_is_noop_but_reclaims_port(tmp_path, monkeypatch):
+    import json
+
+    uat_root = tmp_path / "uat"  # no compose at all
+    state = tmp_path / ".uat-ports.json"
+    state.write_text('{"gone": 19500}')
+
+    def _run(*a, **kw):
+        raise AssertionError("docker must NOT run when there is no compose")
+
+    monkeypatch.setattr(P.subprocess, "run", _run)
+    ok, detail = P.teardown_uat("gone", uat_root=uat_root, port_state_file=state)
+
+    assert ok is True and "nothing to tear down" in detail
+    assert json.loads(state.read_text()) == {}  # port still reclaimed
+
+
+def test_teardown_uat_nonzero_returns_failure(tmp_path, monkeypatch):
+    uat_root = tmp_path / "uat"
+    (uat_root / "x").mkdir(parents=True)
+    (uat_root / "x" / "docker-compose.yml").write_text("services: {}\n")
+    monkeypatch.setattr(P.subprocess, "run", lambda *a, **kw: _Proc(returncode=1, stdout="boom failure"))
+    ok, detail = P.teardown_uat("x", uat_root=uat_root, port_state_file=tmp_path / ".p.json")
+    assert ok is False and "exit 1" in detail and "boom failure" in detail
+
+
+def test_teardown_uat_spawn_error_never_raises(tmp_path, monkeypatch):
+    uat_root = tmp_path / "uat"
+    (uat_root / "x").mkdir(parents=True)
+    (uat_root / "x" / "docker-compose.yml").write_text("services: {}\n")
+
+    def _boom(*a, **kw):
+        raise OSError("docker binary missing")
+
+    monkeypatch.setattr(P.subprocess, "run", _boom)
+    ok, detail = P.teardown_uat("x", uat_root=uat_root, port_state_file=tmp_path / ".p.json")
+    assert ok is False and "failed to run" in detail
+
+
+def test_teardown_uat_invalid_slug_returns_false(tmp_path):
+    ok, detail = P.teardown_uat("BAD/slug", uat_root=tmp_path)
+    assert ok is False and "invalid uat_slug" in detail
+
+
+def test_reclaim_port_removes_and_handles_missing(tmp_path):
+    import json
+
+    state = tmp_path / ".uat-ports.json"
+    state.write_text('{"a": 19500, "b": 19501}')
+    assert P.reclaim_port("a", port_state_file=state) is True
+    assert json.loads(state.read_text()) == {"b": 19501}
+    assert P.reclaim_port("missing", port_state_file=state) is False  # slug not present
+    assert P.reclaim_port("a", port_state_file=tmp_path / "nope.json") is False  # no state file

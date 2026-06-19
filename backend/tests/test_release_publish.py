@@ -368,6 +368,13 @@ async def test_apply_action_retry_publish_reruns_publish(db_session, monkeypatch
         return True, "published + CI green (321)"
 
     monkeypatch.setattr(orchestrator, "_run_release_publish", _pub)
+    # publish-ok chains into _release_auto_uat_deploy — keep that an existing-compose redeploy (no provision).
+    monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: True)
+
+    async def _deploy(project_slug, uat_slug):
+        return True, "OK"
+
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _deploy)
 
     out = await orchestrator.apply_action(db_session, version_id=version_id, action="retry_publish")
 
@@ -408,9 +415,17 @@ async def test_apply_action_retry_publish_rejected_for_fast_fix(db_session, monk
 
 @pytest.mark.asyncio
 async def test_full_flow_uat_deploy_runs_then_awaiting(db_session, monkeypatch) -> None:
-    """uat_slug set + compose present → _run_uat_deploy runs → awaiting_director ('Nasadené na UAT')."""
+    """uat_slug set + compose present → redeploy only (NO provision) → _run_uat_deploy runs → awaiting_director.
+
+    CR-1: the notification content carries the uat-<slug>.isnex.eu URL; the payload shape is unchanged
+    (ok / no skipped) so the v0.8.1 honest uat_accept keys on it."""
     version_id, state = _seed(db_session, repo_url="https://github.com/rauschiccsk/nex-demo", uat_slug="demo")
     monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: True)
+
+    def _no_provision(*a, **kw):
+        raise AssertionError("an existing compose must NOT be re-provisioned (redeploy only)")
+
+    monkeypatch.setattr(orchestrator.uat_provisioner, "provision_uat", _no_provision)
     ran = {"slug": None}
 
     async def _deploy(project_slug, uat_slug):
@@ -426,6 +441,7 @@ async def test_full_flow_uat_deploy_runs_then_awaiting(db_session, monkeypatch) 
     assert state.next_action == "Nasadené na UAT — over a akceptuj."
     notes = _director_notes(db_session, version_id)
     assert notes[-1].payload == {"uat_deploy": {"uat_slug": "demo", "ok": True, "detail": "OK"}}
+    assert "https://uat-demo.isnex.eu" in notes[-1].content  # CR-1: URL surfaced to the Director
     assert "UAT akceptované" not in notes[-1].content
 
 
@@ -448,42 +464,100 @@ async def test_full_flow_uat_deploy_failure_blocks(db_session, monkeypatch) -> N
 
 
 @pytest.mark.asyncio
-async def test_full_flow_uat_deploy_null_slug_honest_skip(db_session, monkeypatch) -> None:
-    """uat_slug NULL → HONEST skip: awaiting_director with 'Žiadny UAT …', the deploy NEVER runs, and the
-    note NEVER claims 'UAT akceptované' (the v0.8.1 honesty fix)."""
+async def test_full_flow_uat_deploy_null_slug_auto_provisions(db_session, monkeypatch) -> None:
+    """v0.9.0 CR-1: uat_slug NULL → derive + PERSIST uat_slug, provision the UAT, then deploy → awaiting_director
+    with the URL (replaces the old honest-skip)."""
     version_id, state = _seed(db_session, repo_url="https://github.com/rauschiccsk/nex-demo", uat_slug=None)
+    project = db_session.execute(
+        select(Project).join(Version, Version.project_id == Project.id).where(Version.id == version_id)
+    ).scalar_one()
+    expected_slug = project.slug  # no leading nex- → derive returns it unchanged
+    monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: False)  # first release → provision
+
+    prov = {"args": None}
+
+    def _provision(project_slug, uat_slug, *, version):
+        prov["args"] = (project_slug, uat_slug, version)
+        return object()  # return value unused by CR-1
+
+    monkeypatch.setattr(orchestrator.uat_provisioner, "provision_uat", _provision)
+
+    ran = {"slug": None}
 
     async def _deploy(project_slug, uat_slug):
-        raise AssertionError("a NULL uat_slug must skip the deploy, not run it")
+        ran["slug"] = uat_slug
+        return True, "OK"
 
     monkeypatch.setattr(orchestrator, "_run_uat_deploy", _deploy)
 
     await orchestrator._release_auto_uat_deploy(db_session, state)
 
+    # uat_slug derived + persisted on the Project row.
+    db_session.refresh(project)
+    assert project.uat_slug == expected_slug
+    # provision_uat called with the derived slug + the version label, then _run_uat_deploy.
+    assert prov["args"] == (expected_slug, expected_slug, "v0.8.0")
+    assert ran["slug"] == expected_slug
     assert state.status == "awaiting_director"
-    assert state.next_action == "Žiadny UAT nakonfigurovaný — dokončíš bez UAT testu."
+    assert state.next_action == "Nasadené na UAT — over a akceptuj."
     note = _director_notes(db_session, version_id)[-1]
-    assert note.payload == {"uat_deploy": {"skipped": True, "reason": "no_uat_slug"}}
-    assert "UAT akceptované" not in note.content
+    assert note.payload == {"uat_deploy": {"uat_slug": expected_slug, "ok": True, "detail": "OK"}}
+    assert f"https://uat-{expected_slug}.isnex.eu" in note.content
 
 
 @pytest.mark.asyncio
-async def test_full_flow_uat_deploy_compose_missing_honest_skip(db_session, monkeypatch) -> None:
-    """uat_slug set but compose missing → HONEST skip (reason compose_missing), deploy never runs."""
+async def test_full_flow_uat_deploy_compose_missing_provisions(db_session, monkeypatch) -> None:
+    """v0.9.0 CR-1: uat_slug set but compose missing → provision (NOT skip) then deploy → awaiting_director."""
     version_id, state = _seed(db_session, repo_url="https://github.com/rauschiccsk/nex-demo", uat_slug="gone")
     monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: False)
 
+    prov = {"called": False}
+
+    def _provision(project_slug, uat_slug, *, version):
+        prov["called"] = True
+        assert uat_slug == "gone"
+        return object()
+
+    monkeypatch.setattr(orchestrator.uat_provisioner, "provision_uat", _provision)
+
     async def _deploy(project_slug, uat_slug):
-        raise AssertionError("a missing compose must skip the deploy")
+        return True, "OK"
 
     monkeypatch.setattr(orchestrator, "_run_uat_deploy", _deploy)
 
     await orchestrator._release_auto_uat_deploy(db_session, state)
 
+    assert prov["called"] is True
     assert state.status == "awaiting_director"
-    assert state.next_action == "Žiadny UAT nakonfigurovaný — dokončíš bez UAT testu."
     note = _director_notes(db_session, version_id)[-1]
-    assert note.payload == {"uat_deploy": {"skipped": True, "reason": "compose_missing", "uat_slug": "gone"}}
+    assert note.payload == {"uat_deploy": {"uat_slug": "gone", "ok": True, "detail": "OK"}}
+    assert "https://uat-gone.isnex.eu" in note.content
+
+
+@pytest.mark.asyncio
+async def test_full_flow_uat_provision_failure_blocks(db_session, monkeypatch) -> None:
+    """v0.9.0 CR-1: a provision failure → blocked (block_reason=system_error), the deploy NEVER runs, never silent."""
+    version_id, state = _seed(db_session, repo_url="https://github.com/rauschiccsk/nex-demo", uat_slug="gone")
+    monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: False)
+
+    def _provision(project_slug, uat_slug, *, version):
+        raise RuntimeError("source docker-compose.yml not found")
+
+    monkeypatch.setattr(orchestrator.uat_provisioner, "provision_uat", _provision)
+
+    async def _deploy(project_slug, uat_slug):
+        raise AssertionError("a provision failure must NOT proceed to deploy")
+
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _deploy)
+
+    await orchestrator._release_auto_uat_deploy(db_session, state)
+
+    assert state.status == "blocked"
+    assert state.block_reason == "system_error"
+    assert "UAT provisioning zlyhal" in state.next_action and "not found" in state.next_action
+    note = _director_notes(db_session, version_id)[-1]
+    assert note.payload["uat_deploy"]["ok"] is False
+    assert note.payload["uat_deploy"]["provisioned"] is False
 
 
 @pytest.mark.asyncio
@@ -545,24 +619,23 @@ async def test_uat_accept_after_successful_deploy_claims_uat(db_session, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_uat_accept_compose_missing_edge_is_honest(db_session, monkeypatch) -> None:
-    """THE EDGE (Director 2026-06-19): uat_slug SET but compose MISSING → CR-1 honest-skips AND uat_accept
-    is ALSO honest (no false 'UAT akceptované') — the uat_slug proxy would have lied here."""
+async def test_uat_accept_after_compose_missing_provision_claims_uat(db_session, monkeypatch) -> None:
+    """v0.9.0 CR-1: uat_slug SET but compose MISSING now PROVISIONS + deploys (no longer an honest-skip) →
+    a REAL deploy is recorded → uat_accept legitimately claims 'UAT akceptované zákazníkom …'."""
     version_id, state = _seed(db_session, repo_url="https://github.com/x/y", uat_slug="gone")
     monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: False)
+    monkeypatch.setattr(orchestrator.uat_provisioner, "provision_uat", lambda *a, **kw: object())
 
     async def _deploy(project_slug, uat_slug):
-        raise AssertionError("a missing compose must skip the deploy")
+        return True, "OK"
 
     monkeypatch.setattr(orchestrator, "_run_uat_deploy", _deploy)
-    await orchestrator._release_auto_uat_deploy(db_session, state)  # honest skip: {uat_deploy: {skipped: True}}
+    await orchestrator._release_auto_uat_deploy(db_session, state)  # provision + real deploy: {uat_deploy: {ok: True}}
 
     out = await orchestrator.apply_action(db_session, version_id=version_id, action="uat_accept")
 
     assert out.status == "done"
-    content = _last_completion_content(db_session, version_id)
-    assert content == NO_UAT_MSG
-    assert "UAT akceptované" not in content
+    assert _last_completion_content(db_session, version_id) == UAT_MSG
 
 
 @pytest.mark.asyncio

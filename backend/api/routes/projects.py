@@ -54,6 +54,7 @@ from backend.services import github_validation as github_validation_service
 from backend.services import port_registry as port_registry_service
 from backend.services import project as project_service
 from backend.services import system_setting as system_setting_service
+from backend.services import uat_provisioner
 from backend.services import version as version_service
 from backend.services.knowledge_base_writer import KnowledgeBaseWriter
 from backend.services.live_documents import LiveDocumentService
@@ -647,6 +648,7 @@ def delete_project(
 
     slug = project.slug
     repo_url = project.repo_url
+    uat_slug = project.uat_slug  # capture before delete for UAT teardown (v0.9.0 Phase 3 CR-2)
 
     try:
         project_service.delete(db, project_id)
@@ -654,6 +656,15 @@ def delete_project(
     except ValueError as exc:
         db.rollback()
         raise _map_value_error(exc) from exc
+
+    # UAT teardown — orphan prevention (v0.9.0 Phase 3 CR-2). A deleted project's UAT is orphaned:
+    # tear down its containers (`docker compose down -v`) + reclaim the allocated port. Best-effort,
+    # never raises, never undoes the committed delete — mirrors the KB / GitHub cleanups below.
+    # (Version supersede is NOT a teardown — a new version of a LIVE project redeploys the same UAT.)
+    if uat_slug:
+        ok, detail = uat_provisioner.teardown_uat(uat_slug)
+        if not ok:
+            logger.warning("UAT teardown failed for deleted project %r (uat_slug=%r): %s", slug, uat_slug, detail)
 
     # KB cleanup — best-effort. A failure here does not undo the DB
     # delete (that has already committed); we log and return 204 so

@@ -358,6 +358,40 @@ class TestProjectRouter:
         resp = router_client.delete(f"/api/v1/projects/{uuid.uuid4()}")
         assert resp.status_code == 404
 
+    def test_delete_tears_down_uat_when_uat_slug_set(self, router_client, creator, db_session, monkeypatch):
+        """v0.9.0 Phase 3 CR-2: deleting a project with a UAT tears it down (orphan prevention)."""
+        from backend.db.models.projects import Project as _Project
+
+        created = router_client.post("/api/v1/projects", json=_payload(creator.id)).json()
+        # uat_slug has no create/update API surface — set it directly on the row.
+        proj = db_session.get(_Project, uuid.UUID(created["id"]))
+        proj.uat_slug = "tear-slug"
+        db_session.flush()
+
+        calls = []
+        monkeypatch.setattr(
+            "backend.services.uat_provisioner.teardown_uat",
+            lambda slug, **kw: (calls.append(slug), (True, "OK"))[1],
+        )
+
+        resp = router_client.delete(f"/api/v1/projects/{created['id']}")
+        assert resp.status_code == 204
+        assert calls == ["tear-slug"]  # teardown invoked with the project's uat_slug
+
+    def test_delete_without_uat_slug_skips_teardown(self, router_client, creator, monkeypatch):
+        """No uat_slug → no UAT to tear down (no-op, never calls teardown)."""
+        created = router_client.post("/api/v1/projects", json=_payload(creator.id)).json()
+
+        calls = []
+        monkeypatch.setattr(
+            "backend.services.uat_provisioner.teardown_uat",
+            lambda slug, **kw: (calls.append(slug), (True, "OK"))[1],
+        )
+
+        resp = router_client.delete(f"/api/v1/projects/{created['id']}")
+        assert resp.status_code == 204
+        assert calls == []
+
     # ---------------------------------------------------------------- live docs
 
     def test_create_seeds_two_live_documents(self, router_client, creator, tmp_path):

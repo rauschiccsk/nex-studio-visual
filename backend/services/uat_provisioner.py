@@ -35,9 +35,11 @@ from __future__ import annotations
 
 import base64
 import copy
+import json
 import os
 import re
 import secrets
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -51,6 +53,11 @@ TEMPLATES_DIR = NEX_STUDIO_ROOT / "templates"
 
 UAT_ROOT = Path("/opt/uat")
 PROJECTS_ROOT = Path("/opt/projects")
+
+# Port-allocation state file (shared with scripts/_uat_lib.allocate_port — same repo-root path) so a
+# teardown can reclaim the slug's port. ``TEARDOWN_TIMEOUT`` bounds the ``docker compose down`` shellout.
+PORT_STATE_FILE = NEX_STUDIO_ROOT / ".uat-ports.json"
+TEARDOWN_TIMEOUT = 180
 
 # Phase-1 infra: the external Traefik docker network + the public UAT domain suffix.
 PROXY_NETWORK = "nex-proxy-net"
@@ -809,3 +816,69 @@ def provision_uat(
         is_redeploy=is_redeploy,
         warnings=warnings,
     )
+
+
+# ---------------------------------------------------------------------------
+# Teardown (v0.9.0 Phase 3, CR-2) — orphan prevention on project delete
+# ---------------------------------------------------------------------------
+
+
+def reclaim_port(uat_slug: str, *, port_state_file: Path = PORT_STATE_FILE) -> bool:
+    """Remove ``uat_slug`` from the ``.uat-ports.json`` allocation. Returns True if a port was reclaimed.
+
+    NEVER raises (a malformed/absent state file just yields ``False``) — port reclamation must never
+    block a project delete.
+    """
+    try:
+        if not port_state_file.is_file():
+            return False
+        state = json.loads(port_state_file.read_text(encoding="utf-8"))
+        if not isinstance(state, dict) or uat_slug not in state:
+            return False
+        del state[uat_slug]
+        port_state_file.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def teardown_uat(
+    uat_slug: str,
+    *,
+    uat_root: Path = UAT_ROOT,
+    port_state_file: Path = PORT_STATE_FILE,
+    timeout: int = TEARDOWN_TIMEOUT,
+) -> tuple[bool, str]:
+    """Tear down an orphaned UAT when its project is deleted (CR-2). Returns ``(ok, detail)``; NEVER raises.
+
+    ``docker compose -f /opt/uat/<uat_slug>/docker-compose.yml down -v`` (sync subprocess — mirrors
+    :func:`backend.services.orchestrator._run_uat_deploy`'s shellout, sync because the delete route is
+    sync) + reclaim the allocated ``.uat-ports.json`` port. Traefik auto-de-routes once the containers are
+    gone (no host/nginx change). A missing compose is a no-op success (nothing to tear down) — the port is
+    still reclaimed. **Version supersede is NOT a teardown**; this runs only on project delete.
+    """
+    try:
+        validate_uat_slug(uat_slug)
+    except ValueError as exc:
+        return False, f"invalid uat_slug: {exc}"
+
+    compose_path = uat_root / uat_slug / "docker-compose.yml"
+    if not compose_path.is_file():
+        reclaim_port(uat_slug, port_state_file=port_state_file)
+        return True, "no compose — nothing to tear down"
+
+    try:
+        proc = subprocess.run(
+            ["docker", "compose", "-f", str(compose_path), "down", "-v"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"teardown failed to run: {exc}"
+
+    reclaim_port(uat_slug, port_state_file=port_state_file)
+    if proc.returncode == 0:
+        return True, "OK"
+    tail = (proc.stdout or "").strip()[-300:]
+    return False, (f"exit {proc.returncode}: {tail}" if tail else f"exit {proc.returncode}")

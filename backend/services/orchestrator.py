@@ -51,9 +51,10 @@ from backend.schemas.epic import EpicCreate
 from backend.schemas.feat import FeatCreate
 from backend.schemas.task import TaskCreate
 from backend.services import backlog as backlog_service
-from backend.services import claude_agent, fast_fix, template_bootstrap
+from backend.services import claude_agent, fast_fix, template_bootstrap, uat_provisioner
 from backend.services import epic as epic_service
 from backend.services import feat as feat_service
+from backend.services import project as project_service
 from backend.services import task as task_service
 from backend.services.claude_agent import ClaudeAgentError, invoke_claude
 from backend.services.pipeline_status import (
@@ -2746,18 +2747,29 @@ async def _release_auto_uat_deploy(
       — over a akceptuj."``). Failure (non-zero / spawn error / timeout) → ``blocked`` with the deploy error
       in ``next_action`` — surfaced to the Director, never hidden.
 
-    Mutates ``state.status`` / ``state.next_action`` and records the outcome message; the caller flushes."""
+    v0.9.0 Phase 3 (CR-1): the missing-UAT honest-skip is REPLACED with autonomous provisioning — a
+    full-flow release whose project has no UAT yet now derives + persists ``uat_slug``, provisions
+    ``/opt/uat/<uat_slug>`` from the source compose (Phase-2 ``uat_provisioner.provision_uat`` — Traefik
+    labels baked in), then deploys, so the Director ALWAYS gets a real UAT to accept:
+
+    * **uat_slug NULL** → ``derive_uat_slug(project)`` + ``project_service.set_uat_slug`` (persist; idempotent).
+    * **compose missing** → ``provision_uat`` in a thread; a provision failure → ``blocked`` (never silent).
+    * then the EXISTING-compose redeploy path: ``_run_uat_deploy`` (build + up). Success → ``awaiting_director``
+      with the ``https://uat-<uat_slug>.isnex.eu`` URL in the notification; failure → ``blocked``.
+
+    The ``{"uat_deploy": {...}}`` payload shape is preserved (``ok`` / no ``skipped`` on success) so the
+    v0.8.1 honest ``uat_accept`` keys on a real deploy. Full-flow only; fast-fix's ``_fast_fix_auto_deploy``
+    is untouched. Mutates ``state.status`` / ``state.next_action`` and records the outcome; the caller flushes."""
     version_id = state.version_id
     project = db.execute(
         select(Project).join(Version, Version.project_id == Project.id).where(Version.id == version_id)
     ).scalar_one_or_none()
-    uat_slug = project.uat_slug if project is not None else None
     project_slug = project.slug if project is not None else _project_slug_for_version(db, version_id)
+    version_label = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
 
-    # Honest no-UAT skip (NULL slug OR a configured slug whose compose is gone): the Director finishes
-    # WITHOUT a UAT test — never a false "UAT akceptované" downstream (CR-2 reads the same uat_slug).
-    skip_reason = "no_uat_slug" if not uat_slug else ("compose_missing" if not _uat_compose_exists(uat_slug) else None)
-    if skip_reason is not None:
+    # Defensive edge (version with no project — an FK should make this unreachable): cannot derive/provision
+    # a UAT without a project → honest no-UAT finish, never a crash.
+    if project is None:
         msg = _record_message(
             db,
             version_id=version_id,
@@ -2766,9 +2778,7 @@ async def _release_auto_uat_deploy(
             recipient="director",
             kind="notification",
             content="Žiadny UAT nakonfigurovaný — verziu dokončíš bez UAT testu.",
-            payload={
-                "uat_deploy": {"skipped": True, "reason": skip_reason, **({"uat_slug": uat_slug} if uat_slug else {})}
-            },
+            payload={"uat_deploy": {"skipped": True, "reason": "no_project"}},
         )
         if on_message is not None:
             await on_message(msg)
@@ -2776,8 +2786,42 @@ async def _release_auto_uat_deploy(
         state.next_action = "Žiadny UAT nakonfigurovaný — dokončíš bez UAT testu."
         return
 
+    # 1. Derive + persist uat_slug when NULL (autonomous, idempotent — a manual non-null is kept).
+    uat_slug = project.uat_slug
+    if not uat_slug:
+        uat_slug = uat_provisioner.derive_uat_slug(project)
+        project_service.set_uat_slug(db, project, uat_slug)
+
+    # 2. Provision the UAT if its compose does not exist yet (first release). An existing compose is a
+    #    redeploy — skip provisioning, go straight to _run_uat_deploy (preserves the live instance).
+    if not _uat_compose_exists(uat_slug):
+        try:
+            await asyncio.to_thread(uat_provisioner.provision_uat, project_slug, uat_slug, version=version_label)
+        except Exception as exc:  # noqa: BLE001 — any provision failure must surface as blocked, never crash.
+            detail = str(exc)
+            msg = _record_message(
+                db,
+                version_id=version_id,
+                stage="release",
+                author="system",
+                recipient="director",
+                kind="notification",
+                content=f"UAT provisioning zlyhal ({uat_slug}): {detail}",
+                payload={"uat_deploy": {"uat_slug": uat_slug, "ok": False, "provisioned": False, "detail": detail}},
+            )
+            if on_message is not None:
+                await on_message(msg)
+            state.status = "blocked"
+            state.block_reason = "system_error"  # R4 (D1): engine-side full-flow UAT provisioning failure
+            state.next_action = f"UAT provisioning zlyhal: {detail}. Skús znova alebo vráť."
+            return
+
+    # 3. Deploy (build + up). Traefik auto-routes via the labels the provisioner baked in (no host change).
     ok, detail = await _run_uat_deploy(project_slug, uat_slug)
-    content = f"UAT nasadené ({uat_slug}) — over a akceptuj." if ok else f"UAT deploy zlyhal ({uat_slug}): {detail}"
+    url = f"https://uat-{uat_slug}.isnex.eu"
+    content = (
+        f"UAT nasadené ({uat_slug}) — {url} — over a akceptuj." if ok else f"UAT deploy zlyhal ({uat_slug}): {detail}"
+    )
     msg = _record_message(
         db,
         version_id=version_id,
