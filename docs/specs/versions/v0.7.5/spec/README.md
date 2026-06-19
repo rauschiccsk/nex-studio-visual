@@ -1,9 +1,17 @@
 # v0.7.5 — Full-flow release verification (app-starts smoke + Director-triggered dual-build)
 
-> **Status:** spec ready for implementation.
+> **Status:** CR-1 BUILT + SHIPPED. **CR-2 DROPPED (Director decision 2026-06-19).**
 > **Owner:** Dedo (design) → nex-implementer (build) → independent verify → CI → deploy.
-> **Scope:** restores the executable Tiborov **dual-build** + adds an always-on **app-starts smoke**, BOTH at
-> the **full-flow `gate_g` ONLY**. The fast-fix lane (`flow_type='fast_fix'`) MUST stay byte-identical.
+> **Scope (final):** adds an always-on **app-starts behavioural smoke** at the **full-flow `gate_g` ONLY** (CR-1).
+> The fast-fix lane (`flow_type='fast_fix'`) stays byte-identical.
+>
+> **CR-2 (Director-triggered dual-build / Tiborov test) was DROPPED before its execution core was built.**
+> Rationale: the dual-build is the most expensive (a full 2nd build), noisiest (two independent LLM builds of a
+> complex spec always diverge legitimately → false alarms + costly triage) and latest way to assure spec
+> quality. It predates the **Customer agent** (Gate E), which now covers upfront spec-completeness cheaper +
+> earlier, and the **behavioural acceptance suite** (CR-1) gives the independent release oracle without a 2nd
+> build. The cwd-seam plumbing (CR-2.1/2.2) the Implementer had started was reverted. The CR-2 sections below
+> are retained for decision history only — **not to be implemented.** See `CLAUDE.md §2.5` (Release Verification).
 
 ---
 

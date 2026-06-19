@@ -52,29 +52,24 @@ Implementácia, ktorá historicky trvala mesiace, sa stáva otázkou hodín až 
 |---|---|
 | **Designer** | Profesionál, ktorý preberá amatérsky zákaznícky vstup, vniká do problematiky, identifikuje skutočné problémy a produkuje úplnú špecifikáciu **pred** implementáciou. |
 | **Implementer** | Deterministický vykonateľ špecifikácie. **Nesmie kreatívne dopĺňať** — ak špec niečo neuvádza, STOP a hlásiť Designerovi pre doplnenie. |
-| **Auditor** | Systematic verification, vrátane **Dual-Build Auditu** (§2.5). |
+| **Auditor** | Systematic verification — **behaviorálne release overenie** (§2.5). |
 
 Doc tree (`customer-requirements.md` → `development-spec.md` → BE/FE špec) je priama realizácia tohto princípu na úrovni dokumentov:
 - `customer-requirements.md` = amatérsky vstup (zákazník/Zoltán)
 - `development-spec.md` a všetko nadväzujúce = profesionálna transformácia (Designer)
 
-### 2.5 Dual-Build Audit (Tiborov test)
+### 2.5 Release Verification (behaviorálne overenie + upfront spec audit)
 
-**Validácia kvality špecifikácie cez nedeterminizmus implementácie.**
+**Validácia, že z dokumentácie vznikla správna appka — lacno, skoro, s vysokým signálom.**
 
-Postup:
-1. Implementer dostane spec → postaví projekt (**Build A**) v isolated worktree
-2. **Čerstvá** Implementer inštancia dostane **TEN ISTÝ** spec → postaví projekt (**Build B**) v inom isolated worktree, bez akejkoľvek znalosti Build A
-3. Auditor porovná Build A a Build B:
-   - **Štruktúrny diff** — organizácia modulov, mená komponentov, súborová štruktúra
-   - **Testový diff** — pokrytie, edge cases
-   - **Funkčný diff** — behavioral testy: pre rovnaký vstup produkujú oba buildy rovnaký výstup?
+Release verification stojí na dvoch lacných, opakovateľných pilieroch:
 
-**Interpretácia:**
-- **Build A ≡ Build B (funkčne)** → špec je dostatočne deterministická ✅. Drobné štruktúrne rozdiely sú akceptovateľné, kým správanie je identické.
-- **Build A ≢ Build B (funkčne)** → ROLLBACK. Buď špec má diery (Designer doplní), alebo Implementer kreatívne dopĺňal mimo spec (Implementer porušuje §2.4). V oboch prípadoch fix pred release.
+1. **Upfront — agent Zákazník (Gate E):** systematicky vyhľadáva nedomyslené a nejednoznačné časti zadania **pred** implementáciou. Diery v dokumentácii sa chytia skôr, než sa minie build.
+2. **Pri vydaní — behaviorálne overenie:** appka sa reálne spustí (`docker compose up`) a beží proti nej spec-odvodená sada akceptačných (behaviorálnych) skúšok — testujú cez rozhranie, či robí to, čo dokumentácia sľubuje (nezávisle od vnútornej stavby). Nezávislý posudok, lacný a opakovateľne použiteľný. Plus per-task Auditor v build slučke chytá odchýlky od spec priebežne (kreatívne dopĺňanie mimo §2.4).
 
-Dual-Build Audit je súčasť **release verification protokolu** — Auditorova primárna úloha pred povolením `released` stavu verzie. Detail mechaniky je v `.claude/agents/auditor/CLAUDE.md`.
+Release verification je Auditorova primárna úloha pred povolením `released` stavu verzie.
+
+**Retired (2026-06-19): Dual-Build Audit (Tiborov test).** Pôvodný princíp — postaviť projekt druhýkrát nezávisle (Build B) a porovnať s Build A — bol najdrahší (celý druhý build), najšumivejší (dve nezávislé AI stavby zložitého zadania sa vždy legitímne líšia → falošné poplachy + drahé triedenie) a najneskorší (spätná väzba až po builde A) spôsob kontroly kvality dokumentácie. Vznikol v čase **pred** agentom Zákazníkom; ten dnes pokrýva upfront spec-completeness lacnejšie a skôr, a behaviorálne overenie dáva nezávislý posudok bez druhého buildu. Director decision 2026-06-19.
 
 ---
 
@@ -436,7 +431,7 @@ PIV je RECOMMENDED pre:
 
 ### Kto vykonáva
 - **Implementer**: self-PIV pri MANDATORY úlohách po self-verification, pred reportom DONE
-- **Auditor**: systematic PIV pri každom release ako primárnu aktivitu, plus Dual-Build Audit (§2.5)
+- **Auditor**: systematic PIV pri každom release ako primárnu aktivitu, plus behaviorálne release overenie (§2.5)
 - **Designer**: žiadne PIV (kód neimplementuje)
 
 Mechanika PIV (spec compliance check, field-level verification, dead code detection) je v príslušnom `.claude/agents/<role>/CLAUDE.md`.
