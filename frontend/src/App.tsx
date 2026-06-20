@@ -19,6 +19,7 @@ import BacklogPage from "./pages/BacklogPage";
 import MetricsPage from "./pages/MetricsPage";
 import KnowledgeBasePage from "./pages/KnowledgeBasePage";
 import ProjectSpecsPage from "./pages/ProjectSpecsPage";
+import UpdatesPage from "./pages/UpdatesPage";
 import AgentTerminalPage from "./pages/AgentTerminalPage";
 import CockpitPage from "./pages/CockpitPage";
 import CredentialsPage from "./pages/CredentialsPage";
@@ -58,6 +59,7 @@ function App() {
             <Route path="coordinator" element={<AgentTerminalPage role="coordinator" />} />
             <Route path="cockpit" element={<CockpitPage />} />
             <Route path="credentials" element={<CredentialsPage />} />
+            <Route path="updates" element={<UpdatesPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
 

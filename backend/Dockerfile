@@ -20,6 +20,30 @@ RUN poetry export --without dev -f requirements.txt -o requirements.txt \
     && pip install --no-cache-dir -r requirements.txt
 
 # ---------------------------------------------------------------------------
+# Stage 1b: Release notes — isolate ONLY the per-version RELEASE_NOTES.md
+# files (the "Aktualizácie" changelog, served by GET /api/v1/release-notes).
+#
+# A flat `COPY docs/specs/versions/*/RELEASE_NOTES.md ./...` would collapse
+# every match into a single dir by basename and collide (Docker copies
+# multiple file sources by basename) — losing the v<X>/ parent the service
+# reads as the version. Copying the tree here then pruning everything except
+# RELEASE_NOTES.md preserves that structure. Crucially, the rest of
+# docs/specs (development-spec, customer-dialogue, F-xxx internal dev docs —
+# ~960K) lives ONLY in this throwaway stage and never reaches the runtime
+# image: the runtime COPY --from below takes just the cleaned subset.
+# ---------------------------------------------------------------------------
+FROM python:3.12-slim AS release-notes
+
+WORKDIR /notes
+COPY docs/specs/versions/ ./docs/specs/versions/
+# Drop every file that is not a RELEASE_NOTES.md, then prune the now-empty
+# version dirs. `-mindepth 1` keeps the `versions/` root itself even when NO
+# RELEASE_NOTES.md exists yet, so the runtime `COPY --from` below never fails
+# on a missing source (it just copies an empty dir → endpoint returns []).
+RUN find docs/specs/versions -type f ! -name 'RELEASE_NOTES.md' -delete \
+    && find docs/specs/versions -mindepth 1 -type d -empty -delete
+
+# ---------------------------------------------------------------------------
 # Stage 2: Runtime — Python + Node.js 20 + Claude CLI
 # ---------------------------------------------------------------------------
 FROM python:3.12-slim AS runtime
@@ -146,6 +170,11 @@ ENV PATH="/home/andros/.local/bin:${PATH}"
 COPY --chown=andros:andros backend/ ./backend/
 COPY --chown=andros:andros alembic.ini ./alembic.ini
 COPY --chown=andros:andros migrations/ ./migrations/
+
+# Bake ONLY the per-version RELEASE_NOTES.md files (the "Aktualizácie"
+# changelog) from the pruned stage above — NEVER the full docs/specs tree.
+# Read by backend.services.release_notes via GET /api/v1/release-notes.
+COPY --from=release-notes --chown=andros:andros /notes/docs/specs/versions/ ./docs/specs/versions/
 
 USER andros
 

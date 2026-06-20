@@ -25,6 +25,7 @@ from backend.api.routes.project_modules import router as project_modules_router
 from backend.api.routes.project_specs import router as project_specs_router
 from backend.api.routes.projects import router as projects_router
 from backend.api.routes.rag import router as rag_router
+from backend.api.routes.release_notes import router as release_notes_router
 from backend.api.routes.system_settings import router as system_settings_router
 from backend.api.routes.tasks import router as tasks_router
 from backend.api.routes.uploads import router as uploads_router
@@ -229,6 +230,9 @@ app.include_router(backlog_router, prefix="/api/v1/backlog")
 app.include_router(versions_router, prefix="/api/v1")
 app.include_router(metrics_router, prefix="/api/v1")
 app.include_router(uploads_router, prefix="/api/v1")
+# Public (no-auth) per-version changelog — the *Aktualizácie* feature. Mounted
+# under the bare ``/api/v1`` prefix; the route path is ``/release-notes``.
+app.include_router(release_notes_router, prefix="/api/v1")
 app.include_router(system_settings_router, prefix="/api/v1/system-settings")
 app.include_router(user_agent_settings_router, prefix="/api/v1/user-agent-settings")
 app.include_router(agent_terminal_router, prefix="/api/v1/agent-terminal")

@@ -37,6 +37,7 @@ const IconCockpit = () => <NavIcon glyph="🎛️" />;
 const IconKbBook = () => <NavIcon glyph="📚" />;
 const IconProjectSpecsBook = () => <NavIcon glyph="📖" />;
 
+const IconUpdates = () => <NavIcon glyph="✨" />;
 const IconSettings = () => <NavIcon glyph="⚙️" />;
 const IconKey = () => <NavIcon glyph="🔑" />;
 
@@ -201,6 +202,10 @@ export default function Sidebar() {
       {user?.role === "ri" && (
         <NavItem icon={<IconKey />} label="Prístupy" active={isActive("/credentials")} onClick={() => navigate("/credentials")} />
       )}
+
+      {/* "Aktualizácie" — user-facing changelog. Sits as the last item of the
+          group directly ABOVE the Settings section header (Director directive). */}
+      <NavItem icon={<IconUpdates />} label="Aktualizácie" active={isActive("/updates")} onClick={() => navigate("/updates")} />
 
       <SectionLabel label="Nastavenia" />
       <NavItem icon={<IconSettings />} label="Nastavenia" active={isActive("/settings")} onClick={() => navigate("/settings")} />
