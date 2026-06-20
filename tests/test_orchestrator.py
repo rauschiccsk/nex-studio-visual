@@ -1368,6 +1368,126 @@ def test_autonomous_decisions_summary_empty(db_session):
     assert orchestrator.autonomous_decisions_summary(db_session, version.id) == {"count": 0, "recent": []}
 
 
+# ── PIPELINE-AUTONOMY Phase 1: routine-gate auto-ratify (gates a–d) ──────────────
+
+
+def _autos(db_session, version_id):
+    """The Director-visible ``is_autonomous`` Coordinator notes for a version, seq-ordered."""
+    return [m for m in _msgs(db_session, version_id) if (m.payload or {}).get("is_autonomous")]
+
+
+async def test_new_version_gate_a_pass_auto_ratifies(db_session, fake_claude):
+    """A deterministically-clean gate_a PASS (verify clean ∧ not scope) on a new_version flow auto-ratifies:
+    advance to gate_b (agent_working, so the runner continues the chain) + a Director-visible is_autonomous
+    record carrying stage=gate_a + NO task_id (Issue 6)."""
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _settle(db_session, version.id)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="approve")  # → gate_a, agent_working
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert state.current_stage == "gate_b"
+    assert state.status == "agent_working"
+    autos = _autos(db_session, version.id)
+    assert len(autos) == 1
+    assert autos[0].payload["stage"] == "gate_a"
+    assert autos[0].payload["action"] == "auto_ratify_gate"
+    assert autos[0].payload.get("confidence") is None  # no confidence on a PASS site (§0.1)
+    assert "task_id" not in autos[0].payload  # gate-level record → per-task caps exclude it
+
+
+async def test_new_version_gates_a_to_d_auto_ratify_full_chain(db_session, fake_claude):
+    """The full routine-gate chain auto-advances a→b→c→d→gate_e within the runner's auto-chain guard
+    (len(FAST_FIX_STAGE_ORDER)=4 iterations — the chain fits). Mirrors pipeline_runner._run's loop. Gate E
+    (Phase 3, not in scope) settles awaiting_director, so exactly the 4 a–d gates auto-ratify."""
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _settle(db_session, version.id)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="approve")  # → gate_a, agent_working
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    guard = 0
+    while state is not None and state.status == "agent_working" and guard < len(orchestrator.FAST_FIX_STAGE_ORDER):
+        guard += 1
+        state = await orchestrator.run_dispatch(db_session, version.id)
+    assert state.current_stage == "gate_e"
+    assert state.status == "awaiting_director"
+    assert [m.payload["stage"] for m in _autos(db_session, version.id)] == ["gate_a", "gate_b", "gate_c", "gate_d"]
+    # the board roll-up surfaces which gates auto-ratified (deterministic, §3.3)
+    summary = orchestrator.autonomous_decisions_summary(db_session, version.id)
+    assert summary["count"] == 4
+    assert {d["stage"] for d in summary["recent"]} == {"gate_a", "gate_b", "gate_c", "gate_d"}
+
+
+async def test_new_version_gate_fail_still_blocks_no_auto(db_session, fake_claude, monkeypatch):
+    """A verify FAIL pre-empts the PASS branch → blocked at gate_a, never advanced, no auto-ratify record."""
+    monkeypatch.setattr(orchestrator, "verify_mechanical", lambda slug, block, baseline_sha=None: "deliverable missing")
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    _settle(db_session, version.id)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="approve")  # → gate_a
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert state.status == "blocked"
+    assert state.current_stage == "gate_a"  # NOT advanced
+    assert _autos(db_session, version.id) == []
+
+
+async def test_kickoff_toggle_off_keeps_per_gate_signoff(db_session, fake_claude):
+    """autonomy_enabled=false at kickoff → a clean gate_a PASS settles awaiting_director (no auto-advance)."""
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(
+        db_session, version_id=version.id, action="start", payload={"autonomy_enabled": False}
+    )
+    _settle(db_session, version.id)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="approve")  # → gate_a
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert state.current_stage == "gate_a"  # NOT advanced
+    assert state.status == "awaiting_director"
+    assert _autos(db_session, version.id) == []
+
+
+def _ratify_state(version_id, flow_type, stage):
+    return PipelineState(
+        version_id=version_id,
+        flow_type=flow_type,
+        current_stage=stage,
+        current_actor="coordinator",
+        status="awaiting_director",
+        next_action="",
+    )
+
+
+async def test_maybe_autonomous_gate_ratify_guard_excludes(db_session):
+    """The deterministic guard rejects every non-routine-gate case (release/gate_g excluded per Issue 10;
+    fast_fix/cr/bug never auto; gate_e is Phase 3; a scope flag or FAIL reason never auto-ratifies)."""
+    version, _ = _make_version(db_session)
+    mar = orchestrator._maybe_autonomous_gate_ratify
+    # non-new_version flows never auto-ratify (fast_fix / cr / bug stay byte-identical)
+    for ft in ("fast_fix", "cr", "bug"):
+        assert await mar(db_session, _ratify_state(version.id, ft, "gate_a"), None, False) is False
+    # release / gate_g excluded even on new_version (engine-owned publish / KEY release verdict)
+    for stage in ("release", "gate_g"):
+        assert await mar(db_session, _ratify_state(version.id, "new_version", stage), None, False) is False
+    # gate_e is not a routine gate (Gate E bounding is Phase 3)
+    assert await mar(db_session, _ratify_state(version.id, "new_version", "gate_e"), None, False) is False
+    # a scope flag or a non-None fail reason never auto-ratifies
+    assert await mar(db_session, _ratify_state(version.id, "new_version", "gate_a"), None, True) is False
+    assert await mar(db_session, _ratify_state(version.id, "new_version", "gate_a"), "boom", False) is False
+
+
+async def test_record_autonomous_gate_excluded_from_per_task_caps(db_session):
+    """A gate-level record (no task_id) is excluded from both per-task caps but IS in the board roll-up."""
+    version, _ = _make_version(db_session)
+    await orchestrator._record_autonomous_gate(
+        db_session, version.id, stage="gate_b", action="auto_ratify_gate", rationale="clean"
+    )
+    some_task_id = uuid.uuid4()
+    assert orchestrator._autonomous_count(db_session, version.id, some_task_id) == 0
+    assert orchestrator._autonomous_answer_count(db_session, version.id, some_task_id) == 0
+    summary = orchestrator.autonomous_decisions_summary(db_session, version.id)
+    assert summary["count"] == 1
+    assert summary["recent"][0]["stage"] == "gate_b"
+    assert summary["recent"][0]["task"] is None
+
+
 def test_agent_sessions_active_idle_stale(db_session):
     # D5: active = state is agent_working for the role; stale = last_input_at older than 30 min; else idle;
     # a missing session → idle.
@@ -4179,7 +4299,13 @@ async def test_synthesis_at_gate_report_pass(db_session, monkeypatch):
     )
     monkeypatch.setattr(orchestrator, "invoke_claude", seq)
     version, _ = _make_version(db_session)
-    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    # PIPELINE-AUTONOMY Phase 1: this test asserts the awaiting_director SETTLE path (synthesis as the
+    # primary Director-facing next_action) — disable routine-gate auto-ratify so the clean gate_a PASS
+    # settles instead of auto-advancing. The synthesis emission this verifies is unchanged either way; the
+    # auto-ratify advance is covered separately in test_new_version_gate_a_pass_auto_ratifies.
+    await orchestrator.apply_action(
+        db_session, version_id=version.id, action="start", payload={"autonomy_enabled": False}
+    )
     state = orchestrator._get_state(db_session, version.id)
     state.current_stage = "gate_a"
     state.current_actor = "designer"

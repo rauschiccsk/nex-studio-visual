@@ -242,13 +242,18 @@ def _seed(
 
 
 def _director_notes(db, version_id):
+    # seq-ordered (insertion order) like every production query — created_at ties within a transaction
+    # (func.now() is constant), so a bare SELECT returns same-timestamp rows in a non-deterministic order
+    # and ``[-1]`` (latest note) flakes. The seq tie-break makes "the last director note" deterministic.
     return (
         db.execute(
-            select(PipelineMessage).where(
+            select(PipelineMessage)
+            .where(
                 PipelineMessage.version_id == version_id,
                 PipelineMessage.author == "system",
                 PipelineMessage.recipient == "director",
             )
+            .order_by(PipelineMessage.seq.asc())
         )
         .scalars()
         .all()

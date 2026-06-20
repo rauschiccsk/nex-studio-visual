@@ -65,6 +65,18 @@ export function WhosTurnBoard({
           : "Na rade: Director";
   const decision = decisionType(status, current_stage, availableActions ?? []);
   const relayed = RELAYED_STAGES.has(current_stage) && status !== "agent_working" && status !== "done";
+  // PIPELINE-AUTONOMY §3.3: the distinct routine gates the engine auto-ratified (newest-first in the feed),
+  // labelled for the roll-up. Gate-level records carry `stage`; task-scoped recoveries/answers don't.
+  const autoRatifiedStages = autonomousSummary
+    ? [
+        ...new Set(
+          autonomousSummary.recent
+            .map((d) => d.stage)
+            .filter((s): s is string => Boolean(s))
+            .map((s) => STAGE_LABELS[s as PipelineStage] ?? s),
+        ),
+      ]
+    : [];
 
   return (
     <div className="flex-shrink-0 border-b border-[var(--color-border-default)] px-4 py-2 text-[11px]">
@@ -138,7 +150,11 @@ export function WhosTurnBoard({
       {autonomousSummary && autonomousSummary.count > 0 && (
         <div className="mt-1 text-[10px] text-[var(--color-text-muted)]">
           Koordinátor rozhodol samostatne {autonomousSummary.count}×
-          {autonomousSummary.recent[0]?.rationale ? ` — naposledy: ${autonomousSummary.recent[0].rationale}` : ""}
+          {autoRatifiedStages.length > 0
+            ? ` — auto-ratifikované brány: ${autoRatifiedStages.join(", ")}`
+            : autonomousSummary.recent[0]?.rationale
+              ? ` — naposledy: ${autonomousSummary.recent[0].rationale}`
+              : ""}
         </div>
       )}
     </div>

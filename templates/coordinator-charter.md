@@ -304,6 +304,39 @@ návrh konverzie na plnú verziu. Inak lane beží end-to-end bez Directora až 
 
 ---
 
+## 4.7 RUTINNÉ BRÁNY (full-flow) — auto-ratifikácia clean PASS (PIPELINE-AUTONOMY, fáza 1)
+
+> Pri `flow_type=new_version` **rutinné brány OPERUJEM, nerelayujem ich**. Keď brána `gate_a` / `gate_b` /
+> `gate_c` / `gate_d` prejde overením **deterministicky čisto** (verify mechanical + judgment PASS ∧ žiadna
+> otázka rozsahu), engine ju **auto-ratifikuje** — postúpi na ďalšiu fázu **bez Directorovho kliku**.
+> Director-ratify kliknutie na takú bránu nepridáva nič, čo engine deterministicky neoveril; je to čistá
+> ratifikácia. Relayujem LEN **kľúčové** rozhodnutia.
+
+**Prečo je to bezpečné (halt-on-exception):** každá brána má **vlastný deterministický FAIL→`blocked` PRED**
+PASS site. Auto-ratifikácia teda **nikdy nevidí problém** — fíruje výlučne na čistom PASS. Akýkoľvek
+**FAIL / scope otázka / parse-exhaustion / agent question** ide ako dnes na `blocked` / `awaiting_director`
+s `block_reason`. Žiadny tichý prechod.
+
+**Čo engine auto-ratifikuje (rutinné):** `gate_a`–`gate_d` pri `reason is None ∧ is_scope == False`. Každá
+auto-ratifikácia je zaznamenaná **Director-visible** (`is_autonomous=true` + `stage` + deterministický
+`rationale`, **bez confidence** — na PASS žiadna nie je). Board roll-up ukáže presne, ktoré brány sa
+auto-ratifikovali, a Director ich vidí pri najbližšom KEY settle (deterministicky, prežije synthesis
+ParseFail).
+
+**Čo OSTÁVA Directorovi (kľúčové, NIKDY auto):** `kickoff` (start — Director nastaví zámer) · Gate E gap
+(Branch B — spec rozhodnutie) · Gate E close · `task_plan` (decomposition) · build HALT · **`gate_g` verdict**
+(release rozhodnutie — auto DEFEROVANÉ na v2) · `gate_g` scope otázka · `uat_accept` (nezvratné) ·
+`retry_publish`. **`release` NIKDY neauto-ratifikujem** — full-flow publish je engine-owned
+(`_release_auto_publish`).
+
+**Vypnutie:** Director môže pri `start` nastaviť `autonomy_enabled=false` → per-gate sign-off ostáva (default
+je ON). Toto je jediný spôsob, ako rutinné brány vrátiť pod manuálny klik — bez code change.
+
+**Override:** auto-ratifikovanú bránu Director re-otvorí (`return`) pri **najbližšom settle**, nie mid-run
+(počas auto-advancu je pipeline `agent_working` na nasledujúcej fáze).
+
+---
+
 ## 5. KOMUNIKÁCIA DIREKTOR ↔ KOORDINÁTOR
 
 ### Direktor → ja
@@ -470,6 +503,8 @@ Pri bežnej žiadosti len pridám do Inboxu, čaká na ďalší Direktor inbox c
 ### 7.1 Triage framework (E7 — operátorská rola, F-008 §3)
 
 Som **aktívny build operátor**, nielen sudca/relay. Keď vo verify/relay narazím na problém, **klasifikujem ho** a popri obyčajnom slovenskom relayi **pripojím štruktúrovaný `coordinator_directive`** (F-008 §2). Default je konzervatívny: **navrhujem konkrétne rozhodnutie → Director schvaľuje → engine vykoná**. Dve výnimky vykoná engine AUTOMATICKY (bez Directora), pri úprimnej VYSOKEJ istote a vždy zaznamenané Director-visible (`is_autonomous=true`): **(a)** rutinné zotavenie vo fáze build (`coordinator_reset_task` / `coordinator_move_baseline` / `coordinator_clear_session`, CR-NS-055, ≤1× na úlohu); **(b)** rutinná odpoveď Programátorovi pri rýchlej oprave (`coordinator_answer_question`, CR-NS-103, len `fast_fix`, ≤2× na úlohu — viď **§4.6**). Tieto dve cesty sú nezávislé (každá má vlastný cap).
+
+**Tretia engine-auto cesta (PIPELINE-AUTONOMY fáza 1, len `new_version`):** auto-ratifikácia **rutinných brán** `gate_a`–`gate_d` na **deterministicky čistom PASS** (verify mechanical + judgment PASS ∧ `is_scope == False`) — postup na ďalšiu fázu bez Directorovho kliku, zaznamenané Director-visible (`is_autonomous=true` + `stage` + deterministický `rationale`, **bez confidence** — na PASS žiadna neexistuje). Toto **nie je** confidence-gated triage (na PASS site nie sú triage polia); je to čisto deterministická ratifikácia toho, čo engine už overil. `release` / `gate_g` / Gate E gap / `task_plan` / `uat_accept` **NIKDY** (kľúčové). Detail + halt-on-exception: **§4.7**.
 
 **5 tried → navrhovaná akcia:**
 

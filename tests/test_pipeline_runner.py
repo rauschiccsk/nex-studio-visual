@@ -455,6 +455,11 @@ async def test_run_streams_dispatch_messages_in_order_with_parity(db_session, mo
     (the parity check that guards the dropped end-batch from silently losing a message)."""
     version = _make_version(db_session)
     _seed_state(db_session, version.id, "gate_a", "designer")
+    # PIPELINE-AUTONOMY Phase 1: disable routine-gate auto-ratify so this stays a SINGLE gate_a dispatch
+    # that settles (the parity/streaming behaviour under test); with autonomy on, a clean gate_a PASS would
+    # auto-advance and the runner would chain into gate_b. Patched (not a seeded kickoff message) so the
+    # message-count parity assertion below is unaffected. Auto-ratify itself is covered in test_orchestrator.
+    monkeypatch.setattr(orchestrator, "_autonomy_enabled", lambda db, version_id: False)
     fake_reg = _wire_runner(db_session, monkeypatch)
     seq = _SeqClaude(
         [

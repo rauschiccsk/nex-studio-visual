@@ -105,9 +105,14 @@ class CoordinatorTriage(BaseModel):
 
 
 class AutonomousDecision(BaseModel):
-    """R4 (D4): one ``is_autonomous`` Coordinator decision in the board roll-up (task #, action, why)."""
+    """R4 (D4): one ``is_autonomous`` Coordinator decision in the board roll-up (task #, action, why).
+
+    PIPELINE-AUTONOMY §3.3: a gate-level routine auto-ratify carries ``stage`` (which gate auto-advanced,
+    e.g. ``gate_a``) and no ``task``; a task-scoped recovery/answer carries ``task`` and no ``stage`` — both
+    Optional, so the roll-up surfaces "which gates auto-ratified" without a contract break."""
 
     task: Optional[int] = None
+    stage: Optional[str] = None
     action: Optional[str] = None
     rationale: Optional[str] = None
     confidence: Optional[float] = None

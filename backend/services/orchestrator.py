@@ -3225,6 +3225,17 @@ async def run_dispatch(
         else:
             # §A.2 site 1 (gate_report PASS — gates A–D, release): Coordinator synthesis before settling.
             synthesis = await _coordinator_synthesis(db, state, trigger=f"fáza '{stage}'", on_message=on_message)
+            # PIPELINE-AUTONOMY Phase 1 (design §5.1): a deterministically-clean routine gate (a–d) on a
+            # new_version flow AUTO-RATIFIES — advance + re-dispatch instead of settling awaiting_director.
+            # The synthesis above STILL runs + records (additive observability: the Director reads it in the
+            # roll-up at the next KEY settle, §3.3). Returns True only when it advanced (status now
+            # agent_working at the next stage → the runner's auto-chain continues it); False → fall through to
+            # the existing awaiting_director settle below, byte-for-byte unchanged. release / gate_g are NEVER
+            # auto-ratified (excluded inside the helper, Issue 10) — the release settle stays engine-owned
+            # publish; any FAIL/scope already pre-empted this branch (reason is not None).
+            if await _maybe_autonomous_gate_ratify(db, state, reason, is_scope, on_message=on_message):
+                db.flush()
+                return state
             state.status = "awaiting_director"
             state.next_action = synthesis or f"Director: schváliť/vrátiť fázu '{stage}'."
             # v0.8.0 CR-2: the FULL-FLOW (new_version) release settle is ENGINE-OWNED publish. The
@@ -3873,6 +3884,16 @@ _MAX_AUTONOMOUS_PER_TASK = 1
 _FAST_FIX_ANSWER_CONFIDENCE_FLOOR = 0.85
 _MAX_AUTONOMOUS_ANSWERS_PER_TASK = 2
 
+# PIPELINE-AUTONOMY Phase 1 (design docs/architecture/pipeline-autonomy.md §1/§5.1): the routine full-flow
+# gates the engine auto-ratifies on a deterministically-clean PASS (verify clean ∧ not scope) — a–d only.
+# Each has its own deterministic FAIL→blocked pre-empt BEFORE the PASS site, so auto-ratify never sees a
+# problem. NOT a confidence gate (there is no confidence on a PASS site — §0.1); purely deterministic.
+_AUTO_RATIFY_GATES = frozenset({"gate_a", "gate_b", "gate_c", "gate_d"})
+# Stages a routine-gate auto-ratify must NEVER advance (design §1.1 / Issue 10), even if a future edit
+# widens _AUTO_RATIFY_GATES: ``release`` is the engine-owned _release_auto_publish path; ``gate_g`` is the
+# KEY release verdict (auto DEFERRED to v2). Explicit exclusion = belt-and-suspenders.
+_NEVER_AUTO_RATIFY_STAGES = frozenset({"release", "gate_g"})
+
 # Pillar B §B.2: the first-principles triage framework appended to the Coordinator's build HALT / question
 # prompt. Honest confidence is load-bearing — it gates auto-execution (bounded-recovery + conf ≥ floor + not
 # director_decision → applied without a Director click; ambiguity / design-scope / destructive → escalate).
@@ -4415,6 +4436,10 @@ def autonomous_decisions_summary(db: Session, version_id: uuid.UUID) -> dict[str
     recent = [
         {
             "task": (p or {}).get("task_number"),
+            # PIPELINE-AUTONOMY §3.3: gate-level auto-ratify records carry ``stage`` (which gate auto-advanced)
+            # and no ``task_id``; task-scoped recovery/answer records carry ``task`` and no ``stage`` — both
+            # Optional in the schema, so the roll-up shows "which gates auto-ratified" deterministically.
+            "stage": (p or {}).get("stage"),
             "action": (p or {}).get("action"),
             "rationale": (p or {}).get("rationale"),
             "confidence": (p or {}).get("confidence"),
@@ -4489,6 +4514,45 @@ async def _record_autonomous_decision(
         await on_message(msg)
 
 
+async def _record_autonomous_gate(
+    db: Session,
+    version_id: uuid.UUID,
+    *,
+    stage: str,
+    action: str,
+    rationale: str,
+    on_message: Optional[MessageCallback] = None,
+) -> None:
+    """PIPELINE-AUTONOMY §3.1 VISIBILITY — record a Director-facing note that the engine AUTONOMOUSLY
+    ratified a routine GATE (never silent). SEPARATE from :func:`_record_autonomous_decision` (Issue 6):
+    that one is task-scoped — it hardcodes ``stage="build"``, requires a ``Task``, and writes ``task_id``
+    so the per-task caps (:func:`_autonomous_count` / :func:`_autonomous_answer_count`, which filter on
+    ``task_id ==``) can bound it. THIS gate-level record carries the gate ``stage`` and **NO ``task_id``**,
+    so those per-task caps exclude it by construction (a null ``task_id`` never equals a task uuid).
+
+    Marked ``is_autonomous=true`` (the board roll-up + FE key off it) + ``stage`` + ``action`` + a
+    DETERMINISTIC ``rationale`` (computed by the caller from the verify signals — NOT riding on the
+    synthesis LLM turn, which may ParseFail to None, Issue 7). No ``confidence`` is written (there is none
+    on a PASS site — §0.1). Every routine-gate auto-ratify MUST go through here — no silent advance."""
+    msg = _record_message(
+        db,
+        version_id=version_id,
+        stage=stage,
+        author="coordinator",
+        recipient="director",
+        kind="notification",
+        content=f"Koordinátor auto-ratifikoval rutinnú bránu '{stage}': {rationale}",
+        payload={
+            "is_autonomous": True,
+            "stage": stage,
+            "action": action,
+            "rationale": rationale,
+        },
+    )
+    if on_message is not None:
+        await on_message(msg)
+
+
 async def _maybe_autonomous_recovery(
     db: Session,
     state: PipelineState,
@@ -4513,6 +4577,79 @@ async def _maybe_autonomous_recovery(
         return False  # §B.4 cap: a repeat HALT after a clean fix is a design-quality signal → escalate
     _execute_coordinator_directive(db, state, directive)  # mutates state + re-dispatches (agent_working)
     await _record_autonomous_decision(db, state.version_id, task, directive, on_message=on_message)
+    return True
+
+
+def _autonomy_enabled(db: Session, version_id: uuid.UUID) -> bool:
+    """The version's kickoff routine-gate-autonomy toggle (design §4.1). Default ON — the Director may set
+    ``autonomy_enabled=false`` in the ``start`` payload to KEEP per-gate sign-off for a high-stakes build.
+    Read from the durable kickoff ``notification`` payload (no schema column needed — the kickoff message is
+    append-only and always present), so a version started before this flag existed has no key → defaults to
+    True (autonomy on). Only ``False`` (the explicit opt-out) disables it; any other / missing value is ON."""
+    payload = db.execute(
+        select(PipelineMessage.payload)
+        .where(PipelineMessage.version_id == version_id, PipelineMessage.kind == "kickoff")
+        .order_by(PipelineMessage.seq.asc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if not payload:
+        return True
+    return payload.get("autonomy_enabled", True) is not False
+
+
+async def _maybe_autonomous_gate_ratify(
+    db: Session,
+    state: PipelineState,
+    reason: Optional[str],
+    is_scope: bool,
+    *,
+    on_message: Optional[MessageCallback] = None,
+) -> bool:
+    """PIPELINE-AUTONOMY Phase 1 (design §5.1) — at a full-flow routine gate (a–d) PASS, AUTO-RATIFY with
+    NO Director click: advance to the next stage + re-dispatch, instead of settling ``awaiting_director``.
+    Sibling of :func:`_maybe_autonomous_recovery`. Returns ``True`` when it advanced (the caller returns the
+    now-``agent_working`` state; the runner's auto-chain loop dispatches the next stage in the SAME task),
+    ``False`` → the caller takes the existing ``awaiting_director`` settle unchanged.
+
+    The guard is purely DETERMINISTIC (design §0.1 — there is NO confidence/triage on a PASS site): the
+    Coordinator already ran verify (mechanical + judgment) and it came back clean, so the Director's ratify
+    click adds nothing the engine didn't deterministically verify. ALL must hold:
+
+    * ``flow_type == 'new_version'`` — fast_fix / cr / bug keep their generic settle byte-for-byte;
+    * ``reason is None`` ∧ ``is_scope is False`` — verify PASS, no scope/design question (from
+      :func:`_verify_with_retries`); a FAIL or scope flag already pre-empted this PASS branch upstream;
+    * ``current_stage`` ∈ the routine gates a–d AND explicitly NOT ``release`` / ``gate_g`` (Issue 10 —
+      engine-owned publish / a release verdict are KEY, never auto);
+    * the version's kickoff autonomy toggle is ON (:func:`_autonomy_enabled`, default).
+
+    Every auto-ratify is recorded Director-visibly via :func:`_record_autonomous_gate`
+    (``is_autonomous=true`` + ``stage`` + a deterministic rationale) so the board roll-up shows exactly
+    which gates auto-advanced. No silent advance is possible."""
+    if state.flow_type != "new_version":
+        return False
+    if reason is not None or is_scope:
+        return False
+    if state.current_stage in _NEVER_AUTO_RATIFY_STAGES:
+        return False  # belt-and-suspenders (Issue 10): never auto-advance release / gate_g
+    if state.current_stage not in _AUTO_RATIFY_GATES:
+        return False
+    if not _autonomy_enabled(db, state.version_id):
+        return False  # kickoff opt-out → the Director wants per-gate sign-off
+    ratified_stage = state.current_stage
+    rationale = (
+        f"Brána '{ratified_stage}' prešla overením (mechanical + judgment) bez otázky rozsahu — "
+        "auto-ratifikované, postup na ďalšiu fázu."
+    )
+    state.current_stage = _next_stage(ratified_stage, state.flow_type)
+    _begin_dispatch(db, state)  # status=agent_working at the next stage → the runner continues the chain
+    await _record_autonomous_gate(
+        db,
+        state.version_id,
+        stage=ratified_stage,
+        action="auto_ratify_gate",
+        rationale=rationale,
+        on_message=on_message,
+    )
     return True
 
 
@@ -5347,6 +5484,13 @@ async def apply_action(
         # on the board and the kickoff brief's "smernica je vyššie" claim is honoured. Other flows keep the
         # generic kickoff content.
         kickoff_content = directive if (flow_type == "fast_fix" and directive) else "Spustenie pipeline."
+        # PIPELINE-AUTONOMY Phase 1 (design §4.1): persist the routine-gate-autonomy toggle (default ON) in
+        # the durable kickoff payload so :func:`_autonomy_enabled` can read it at each gate-PASS settle —
+        # no schema column. Only for new_version (the only flow that auto-ratifies); fast_fix / cr / bug
+        # kickoff payloads stay byte-identical (the key is simply absent → no behaviour change).
+        kickoff_extra: dict[str, Any] = {}
+        if flow_type == "new_version":
+            kickoff_extra["autonomy_enabled"] = payload.get("autonomy_enabled", True) is not False
         state = PipelineState(
             version_id=version_id,
             flow_type=flow_type,
@@ -5365,7 +5509,11 @@ async def apply_action(
             recipient="coordinator",
             kind="kickoff",
             content=kickoff_content,
-            payload={"flow_type": flow_type, **({"directive": directive} if directive else {})},
+            payload={
+                "flow_type": flow_type,
+                **kickoff_extra,
+                **({"directive": directive} if directive else {}),
+            },
         )
         # WS-B1 (CR-NS-029): a new-version kickoff starts every agent fresh — drop all of the project's
         # OrchestratorSession rows so no stale cross-version --resume context leaks in. Per Director

@@ -64,8 +64,11 @@ export interface CoordinatorTriage {
 }
 
 // R4 (D4): one `is_autonomous` Coordinator decision in the board roll-up.
+// PIPELINE-AUTONOMY §3.3: gate-level auto-ratify records carry `stage` (which gate), task-scoped
+// recovery/answer records carry `task` — both optional.
 export interface AutonomousDecision {
   task?: number | null;
+  stage?: string | null;
   action?: string | null;
   rationale?: string | null;
   confidence?: number | null;

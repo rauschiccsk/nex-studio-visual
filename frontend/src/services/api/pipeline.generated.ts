@@ -1981,6 +1981,10 @@ export interface components {
         /**
          * AutonomousDecision
          * @description R4 (D4): one ``is_autonomous`` Coordinator decision in the board roll-up (task #, action, why).
+         *
+         *     PIPELINE-AUTONOMY §3.3: a gate-level routine auto-ratify carries ``stage`` (which gate auto-advanced,
+         *     e.g. ``gate_a``) and no ``task``; a task-scoped recovery/answer carries ``task`` and no ``stage`` — both
+         *     Optional, so the roll-up surfaces "which gates auto-ratified" without a contract break.
          */
         AutonomousDecision: {
             /** Action */
@@ -1989,6 +1993,8 @@ export interface components {
             confidence?: number | null;
             /** Rationale */
             rationale?: string | null;
+            /** Stage */
+            stage?: string | null;
             /** Task */
             task?: number | null;
         };
