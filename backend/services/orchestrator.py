@@ -162,6 +162,20 @@ def _failure_metrics_payload(result: object) -> dict[str, Any]:
     return out
 
 
+def _relay_fallback_payload(result: object, metrics_role: Optional[str]) -> Optional[dict[str, Any]]:
+    """The fallback ``system→director`` note's payload when a Coordinator relay itself parse-fails:
+    the failed worker's usage/timing (:func:`_failure_metrics_payload`) plus a ``metrics_role``
+    role-of-origin tag (metrics redesign §1.1) so those tokens are attributed to the worker rather than
+    the excluded ``system`` bucket. ``None`` when there is nothing to carry (keeps the note's payload
+    NULL, unchanged from before)."""
+    payload = _failure_metrics_payload(result)
+    if not payload:
+        return None
+    if metrics_role is not None:
+        payload = {**payload, "metrics_role": metrics_role}
+    return payload
+
+
 def _seed_metrics_from_failure(result: object) -> Optional["_DispatchMetrics"]:
     """A :class:`_DispatchMetrics` pre-loaded with a failed worker turn's captured usage/timing (WS-D),
     so a Coordinator relay invoked to escalate that failure accumulates ON TOP and its recorded relay
@@ -1528,6 +1542,15 @@ async def _coordinator_relay_engine_failure(
     lost tokens, so the recorded relay message counts worker + Coordinator (no extra notification, no
     undercount); the fallback note carries them too."""
     seed = _seed_metrics_from_failure(failed)
+    # Metrics redesign §1.1: the seeded worker tokens (and the timing carried on the fallback note)
+    # belong to the FAILED WORKER's role-of-origin, not the relaying Coordinator. The worker's role is
+    # the actor of the stage the failure happened in (STAGE_ACTOR). Tag the recorded message with
+    # ``metrics_role`` (top-level payload) so aggregate_usage_by_role attributes those tokens to the
+    # worker, not coordinator/system. Only when there is actually a worker turn to carry.
+    failed_role = STAGE_ACTOR.get(stage)
+    relay_extra: dict[str, Any] = {"is_director_brief": True}
+    if seed is not None and failed_role is not None:
+        relay_extra["metrics_role"] = failed_role
     relay = await invoke_agent_with_parse_retry(
         db,
         version_id=version_id,
@@ -1548,8 +1571,8 @@ async def _coordinator_relay_engine_failure(
         ),
         on_message=on_message,
         # CR-2: an engine-failure/HALT escalation the Director reads at a block → Director-facing by
-        # construction → always the prominent rail.
-        extra_payload={"is_director_brief": True},
+        # construction → always the prominent rail. Metrics redesign §1.1: + role-of-origin tag.
+        extra_payload=relay_extra,
     )
     if isinstance(relay, ParseFailure):
         # Even the fallback must NOT leak the raw reason to the Director (CR-NS-022 §2) — keep it
@@ -1568,7 +1591,9 @@ async def _coordinator_relay_engine_failure(
             ),
             # WS-D (CR-NS-036): even when the Coordinator relay itself fails to parse, the failed
             # worker's lost tokens ride on this fallback note so aggregate_pipeline_usage counts them.
-            payload=_failure_metrics_payload(failed) or None,
+            # Metrics redesign §1.1: tag the same role-of-origin so they don't fall into the excluded
+            # ``system`` bucket (this note is author="system").
+            payload=_relay_fallback_payload(failed, failed_role),
         )
         if on_message is not None:
             await on_message(msg)
@@ -5114,6 +5139,7 @@ async def _run_build_round(
                     break
                 prior_failures.append(reason)
             # failed this attempt → record an auto-return + bump the feat's auto-fix counter
+            fail_metrics = _failure_metrics_payload(result)
             msg = _record_message(
                 db,
                 version_id=version_id,
@@ -5130,7 +5156,13 @@ async def _run_build_round(
                     # Programmer produced no message of its own), carry its tokens here — keyed by
                     # task_id so aggregate_pipeline_usage rolls them up to the task. A verify-failed
                     # gate_report attempt already recorded its own metric-bearing message → no-op.
-                    **_failure_metrics_payload(result),
+                    **fail_metrics,
+                    # Metrics redesign §1.1: this failed Implementer attempt is recorded under
+                    # author="system"; tag its role-of-origin so aggregate_usage_by_role lands the
+                    # tokens in the Programmer bucket, not the excluded system one. Only when this note
+                    # actually carries the attempt's metrics (a verify-failed gate_report already
+                    # recorded its own implementer-authored message → no tokens here → no tag needed).
+                    **({"metrics_role": "implementer"} if fail_metrics else {}),
                 },
             )
             if on_message is not None:

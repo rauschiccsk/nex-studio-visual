@@ -3796,11 +3796,18 @@ async def test_build_parsefailure_attempts_carry_worker_metrics(db_session, fake
         assert m.payload["usage"] == {"input_tokens": 24, "output_tokens": 9, "model": "m"}
         assert m.payload["timing"]["parse_attempts"] == 3
         assert m.payload["task_id"] == str(task.id)
+        # Metrics redesign §1.1: a failed Implementer attempt recorded under author="system" carries a
+        # role-of-origin tag so it lands in the Programmer bucket, not the excluded system one.
+        assert m.payload["metrics_role"] == "implementer"
 
-    from backend.services.pipeline_metrics import aggregate_pipeline_usage
+    from backend.services.pipeline_metrics import aggregate_usage_by_role
 
-    agg = aggregate_pipeline_usage(db_session, version.id)
-    assert agg.by_task[task.id].input_tokens == 24 * orchestrator._AUTO_FIX_RETRIES
+    by_role = aggregate_usage_by_role(db_session, version.id)
+    # the failed Implementer tokens (the 5 auto-fix returns) are attributed to "implementer" (via
+    # metrics_role), NOT to coordinator/system. (A genuinely system-authored residual note from the HALT
+    # relay legitimately remains in the system bucket — §1.4 — so we assert only the worker attribution.)
+    assert by_role["implementer"].input_tokens == 24 * orchestrator._AUTO_FIX_RETRIES
+    assert "coordinator" not in by_role or by_role["coordinator"].input_tokens == 0
 
 
 async def test_gate_e_block_records_worker_metrics(db_session, monkeypatch):

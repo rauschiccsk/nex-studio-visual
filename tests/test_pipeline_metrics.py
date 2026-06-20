@@ -1,8 +1,9 @@
-"""WS-D usage/time aggregation (CR-NS-036) — ``pipeline_metrics.aggregate_pipeline_usage``.
+"""WS-D usage/time aggregation (CR-NS-036; metrics redesign) — ``pipeline_metrics``.
 
-Builds a version with one EPIC → FEAT → two TASKs, seeds ``PipelineMessage`` payloads carrying the
-WS-D ``usage`` / ``timing`` blocks the orchestrator writes, and asserts the roll-up sums correctly
-per TASK → FEAT → EPIC plus the version grand total (including gate overhead that has no task_id).
+The per-EPIC/FEAT/TASK scope roll-up was retired in the metrics redesign in favour of the per-role
+model. These cover what remains: the version grand total (:func:`aggregate_pipeline_usage`) and the
+per-ROLE-OF-ORIGIN split (:func:`aggregate_usage_by_role`) — including the ``metrics_role`` override
+(a record whose ``author`` is not the role whose tokens these are) and the per-model token split.
 """
 
 import uuid
@@ -10,9 +11,8 @@ import uuid
 from backend.db.models.foundation import User
 from backend.db.models.pipeline import PipelineMessage
 from backend.db.models.projects import Project
-from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.versions import Version
-from backend.services.pipeline_metrics import aggregate_pipeline_usage
+from backend.services.pipeline_metrics import aggregate_pipeline_usage, aggregate_usage_by_role
 
 
 def _project_version(db_session):
@@ -54,25 +54,13 @@ def _msg(db_session, version_id, *, payload, stage="build", author="implementer"
     return m
 
 
-def test_aggregate_rolls_up_task_feat_epic_and_version(db_session):
-    project, version = _project_version(db_session)
-    epic = Epic(project_id=project.id, version_id=version.id, number=1, title="E1")
-    db_session.add(epic)
-    db_session.flush()
-    feat = Feat(epic_id=epic.id, number=1, title="F1")
-    db_session.add(feat)
-    db_session.flush()
-    t1 = Task(feat_id=feat.id, number=1, title="T1", task_type="backend")
-    t2 = Task(feat_id=feat.id, number=2, title="T2", task_type="backend")
-    db_session.add_all([t1, t2])
-    db_session.flush()
-
-    # two build turns for t1 (one of them a parse-retry → parse_attempts 2), one for t2
+def test_aggregate_version_grand_total(db_session):
+    _, version = _project_version(db_session)
+    # two build turns (one a parse-retry → parse_attempts 2)
     _msg(
         db_session,
         version.id,
         payload={
-            "task_id": str(t1.id),
             "usage": {"input_tokens": 100, "output_tokens": 40, "model": "m"},
             "timing": {"duration_seconds": 5.0, "parse_attempts": 1},
         },
@@ -81,21 +69,11 @@ def test_aggregate_rolls_up_task_feat_epic_and_version(db_session):
         db_session,
         version.id,
         payload={
-            "task_id": str(t1.id),
             "usage": {"input_tokens": 50, "output_tokens": 20, "model": "m"},
             "timing": {"duration_seconds": 3.0, "parse_attempts": 2},
         },
     )
-    _msg(
-        db_session,
-        version.id,
-        payload={
-            "task_id": str(t2.id),
-            "usage": {"input_tokens": 10, "output_tokens": 5, "model": "m"},
-            "timing": {"duration_seconds": 1.0, "parse_attempts": 1},
-        },
-    )
-    # a gate turn: usage None (envelope carried none) + timing, no task_id → version overhead only
+    # a gate turn: usage None (envelope carried none) + timing → counts timing only (0 tokens, +7s)
     _msg(
         db_session,
         version.id,
@@ -108,28 +86,14 @@ def test_aggregate_rolls_up_task_feat_epic_and_version(db_session):
 
     agg = aggregate_pipeline_usage(db_session, version.id)
 
-    # TASK roll-up: t1 = sum of its two turns
-    assert agg.by_task[t1.id].input_tokens == 150
-    assert agg.by_task[t1.id].output_tokens == 60
-    assert agg.by_task[t1.id].duration_seconds == 8.0
-    assert agg.by_task[t1.id].messages == 2
-    assert agg.by_task[t2.id].input_tokens == 10
-
-    # FEAT roll-up: t1 + t2
-    assert agg.by_feat[feat.id].input_tokens == 160
-    assert agg.by_feat[feat.id].output_tokens == 65
-    assert agg.by_feat[feat.id].duration_seconds == 9.0
-    assert agg.by_feat[feat.id].messages == 3
-
-    # EPIC roll-up: == the one feat
-    assert agg.by_epic[epic.id].input_tokens == 160
-    assert agg.by_epic[epic.id].messages == 3
-
-    # VERSION total: every metered message incl. the gate overhead (0 tokens, +7s); system note skipped
-    assert agg.version.input_tokens == 160  # gate message's usage was None
-    assert agg.version.output_tokens == 65
-    assert agg.version.duration_seconds == 16.0  # 8 + 1 + 7
-    assert agg.version.messages == 4  # 3 build + 1 gate; the plain system note is not counted
+    assert agg.version.input_tokens == 150  # gate message's usage was None
+    assert agg.version.output_tokens == 60
+    assert agg.version.duration_seconds == 15.0  # 5 + 3 + 7
+    assert agg.version.messages == 3  # 2 build + 1 gate; the plain system note is not counted
+    assert agg.version.parse_attempts == 4  # 1 + 2 + 1
+    # per-model split: the gate's None usage folds 0 tokens under "_unknown"; the build turns under "m"
+    assert agg.version.by_model["m"].input_tokens == 150
+    assert agg.version.by_model["_unknown"].input_tokens == 0
 
 
 def test_aggregate_empty_version_is_zero(db_session):
@@ -139,4 +103,73 @@ def test_aggregate_empty_version_is_zero(db_session):
     assert agg.version.output_tokens == 0
     assert agg.version.duration_seconds == 0.0
     assert agg.version.messages == 0
-    assert agg.by_task == {} and agg.by_feat == {} and agg.by_epic == {}
+    assert agg.version.parse_attempts == 0
+    assert agg.version.by_model == {}
+    assert aggregate_usage_by_role(db_session, version.id) == {}
+
+
+def test_aggregate_by_role_groups_by_author_and_model(db_session):
+    _, version = _project_version(db_session)
+    _msg(
+        db_session,
+        version.id,
+        author="implementer",
+        payload={
+            "usage": {"input_tokens": 100, "output_tokens": 40, "model": "claude-opus-4-8"},
+            "timing": {"duration_seconds": 5.0, "parse_attempts": 1},
+        },
+    )
+    _msg(
+        db_session,
+        version.id,
+        author="designer",
+        stage="gate_a",
+        payload={
+            "usage": {"input_tokens": 200, "output_tokens": 80, "model": "claude-sonnet-4-6"},
+            "timing": {"duration_seconds": 9.0, "parse_attempts": 1},
+        },
+    )
+
+    by_role = aggregate_usage_by_role(db_session, version.id)
+    assert set(by_role) == {"implementer", "designer"}
+    assert by_role["implementer"].input_tokens == 100
+    assert by_role["implementer"].by_model["claude-opus-4-8"].output_tokens == 40
+    assert by_role["designer"].duration_seconds == 9.0
+    assert by_role["designer"].by_model["claude-sonnet-4-6"].input_tokens == 200
+
+
+def test_aggregate_by_role_metrics_role_override(db_session):
+    """Role-of-origin (``payload.metrics_role``) wins over the record's ``author`` — the engine fold/seed
+    sites tag the worker whose tokens these are so they don't leak to coordinator/system (§1.1)."""
+    _, version = _project_version(db_session)
+    # a Coordinator-authored relay carrying a failed Designer's seeded tokens
+    _msg(
+        db_session,
+        version.id,
+        author="coordinator",
+        payload={
+            "usage": {"input_tokens": 70, "output_tokens": 30, "model": "m"},
+            "timing": {"duration_seconds": 4.0, "parse_attempts": 1},
+            "metrics_role": "designer",
+        },
+    )
+    # a failed Implementer attempt recorded under author="system"
+    _msg(
+        db_session,
+        version.id,
+        author="system",
+        payload={
+            "usage": {"input_tokens": 24, "output_tokens": 9, "model": "m"},
+            "timing": {"duration_seconds": 2.0, "parse_attempts": 3},
+            "metrics_role": "implementer",
+        },
+    )
+
+    by_role = aggregate_usage_by_role(db_session, version.id)
+    # NOT attributed to coordinator / system — attributed to the role of origin
+    assert "coordinator" not in by_role
+    assert "system" not in by_role
+    assert by_role["designer"].input_tokens == 70
+    assert by_role["implementer"].input_tokens == 24
+    # the version grand total is unchanged by the regrouping (same scan rule)
+    assert aggregate_pipeline_usage(db_session, version.id).version.input_tokens == 94

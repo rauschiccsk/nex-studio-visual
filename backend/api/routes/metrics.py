@@ -1,7 +1,7 @@
 """REST router for the project metrics / ROI page (E5, CR-NS-043).
 
-* ``GET /api/v1/projects/{slug}/metrics`` → the aggregated metrics shape (cumulative + per-version +
-  per-EPIC/FEAT/TASK + cost-by-role + Director-wait + ROI).
+* ``GET /api/v1/projects/{slug}/metrics`` → the role-based metrics shape (cumulative + per-version,
+  per-role agent-vs-human + system overhead + Director overhead + idle split + ROI).
 
 Read-only (no pipeline mutation). ``require_shu_or_above`` — any authenticated user. The router is
 mounted under the bare ``/api/v1`` prefix in ``backend/main.py`` (the path is ``/projects/{slug}/…``,

@@ -107,6 +107,15 @@ const SETTINGS_CATEGORIES: SettingsCategory[] = [
       "Defaultné šablóny pre ``source_path`` a KB cestu pri vytvorení projektu. ``{slug}`` sa nahradí slugom projektu.",
     prefixes: ["default_source_path", "default_kb_path"],
   },
+  {
+    id: "metrics",
+    label: "Metriky / ROI (kurzy a mzdy)",
+    description:
+      "Per-rola kurz tokeny→minúty (human-time), per-rola hodinová mzda, Director mzda + kurz, API ceny per model. 0 = nenastavené → ROI sa nezobrazí vymyslené.",
+    // `developer_hourly_rate` is matched as a whole-string prefix (same pattern as the paths category's
+    // exact-key prefixes) so it joins this category without a kit `keys` field.
+    prefixes: ["metrics_", "api_price_", "developer_hourly_rate"],
+  },
 ];
 
 // Role options drive BOTH the Users filter and the create/edit form. Order

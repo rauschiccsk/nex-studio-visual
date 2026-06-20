@@ -15,15 +15,17 @@ import {
 import { getProjectMetricsApi } from "@/services/api/metrics";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useActiveContextStore } from "@/store/activeContextStore";
-import type { ProjectMetrics, ScopeUsage, VersionMetrics } from "@/types/metrics";
+import { ROLE_LABELS } from "@/components/cockpit/labels";
+import type {
+  DirectorMetric,
+  ProjectMetrics,
+  RoiHeadline,
+  RoleMetric,
+  SystemOverheadRow,
+  VersionMetrics,
+} from "@/types/metrics";
 
-type ScopeLevel = "by_epic" | "by_feat" | "by_task";
-
-const SCOPE_LABEL: Record<ScopeLevel, string> = {
-  by_epic: "EPIC",
-  by_feat: "FEAT",
-  by_task: "TASK",
-};
+type View = "version" | "cumulative";
 
 // ─── formatting (honest: null → dash, never a fabricated number) ─────────────
 
@@ -45,6 +47,18 @@ function fmtDuration(seconds: number): string {
 
 function fmtCost(n: number | null): string {
   return n === null ? "—" : n.toLocaleString("sk-SK", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function fmtRatio(n: number | null): string {
+  return n === null ? "—" : `${n.toLocaleString("sk-SK", { maximumFractionDigits: 1 })}×`;
+}
+
+function fmtMinutes(min: number | null): string {
+  return min === null ? "—" : fmtDuration(min * 60);
+}
+
+function roleLabel(role: string): string {
+  return ROLE_LABELS[role as keyof typeof ROLE_LABELS] ?? role;
 }
 
 // ─── small presentational pieces ─────────────────────────────────────────────
@@ -75,13 +89,55 @@ function Card({
   );
 }
 
+const TD = "px-2 py-1.5 align-top";
+const TH = "px-2 py-1.5 text-left font-semibold text-[var(--color-text-muted)] whitespace-nowrap";
+
+function RoleRow({ r }: { r: RoleMetric }) {
+  const valuePair =
+    r.agent_cost === null
+      ? "— / —"
+      : `${fmtCost(r.agent_value_in)} / ${fmtCost(r.agent_value_out)}`;
+  return (
+    <tr className="border-t border-[var(--color-border-default)]">
+      <td className={`${TD} font-medium text-[var(--color-text-secondary)]`}>{roleLabel(r.role)}</td>
+      <td className={TD}>{fmtDuration(r.active_seconds)}</td>
+      <td className={`${TD} text-[var(--color-text-muted)]`}>{fmtInt(r.input_tokens)} / {fmtInt(r.output_tokens)}</td>
+      <td className={`${TD} text-[var(--color-text-muted)]`}>{r.parse_attempts > 0 ? r.parse_attempts : "—"}</td>
+      <td className={TD}>
+        {valuePair}
+        {r.agent_cost === null && r.unpriced_model_keys.length > 0 && (
+          <div className="text-[10px] text-[var(--color-status-warning)] mt-0.5">
+            AI cena chýba: model {r.unpriced_model_keys.join(", ")}
+          </div>
+        )}
+      </td>
+      <td className={TD}>{fmtMinutes(r.human_minutes)}</td>
+      <td className={TD}>{fmtCost(r.human_cost)}</td>
+      <td className={TD}>{fmtRatio(r.x_faster)}</td>
+      <td className={TD}>{fmtRatio(r.m_cheaper)}</td>
+      <td className={`${TD} ${r.eur_saved !== null ? "text-[var(--color-status-success)]" : ""}`}>{fmtCost(r.eur_saved)}</td>
+    </tr>
+  );
+}
+
+// ─── view-scoped slice (a version OR the cumulative project) ─────────────────
+
+interface Scope {
+  by_role: RoleMetric[];
+  system_overhead: SystemOverheadRow;
+  director: DirectorMetric;
+  roi: RoiHeadline;
+  director_wait_seconds: number;
+  internal_idle_seconds: number | null;
+  total_time_seconds: number | null;
+}
+
 export default function MetricsPage() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
   const { isDark } = useTheme();
   const selectedProject = useActiveContextStore((s) => s.selectedProject);
 
-  // ─── theme-aware chart chrome colors (data-series Bar fills stay fixed) ─────
   const gridStroke = isDark ? "#334155" : "#e2e8f0";
   const tickFill = isDark ? "#94a3b8" : "#64748b";
   const tooltipBg = isDark ? "#1e293b" : "#ffffff";
@@ -91,7 +147,7 @@ export default function MetricsPage() {
   const [metrics, setMetrics] = useState<ProjectMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [scopeLevel, setScopeLevel] = useState<ScopeLevel>("by_epic");
+  const [view, setView] = useState<View>("version");
   const [selectedVersionId, setSelectedVersionId] = useState<string>("");
 
   useEffect(() => {
@@ -121,25 +177,48 @@ export default function MetricsPage() {
     [metrics, selectedVersionId],
   );
 
-  const scopeChartData = useMemo(() => {
-    if (!selectedVersion) return [];
-    return (selectedVersion[scopeLevel] as ScopeUsage[]).map((s) => ({
-      name: `#${s.number} ${s.title}`,
-      vstup: s.usage.input_tokens,
-      výstup: s.usage.output_tokens,
-      "čas (min)": Math.round((s.usage.duration_seconds / 60) * 10) / 10,
-    }));
-  }, [selectedVersion, scopeLevel]);
+  const scope: Scope | null = useMemo(() => {
+    if (!metrics) return null;
+    if (view === "cumulative") {
+      return {
+        by_role: metrics.by_role,
+        system_overhead: metrics.system_overhead,
+        director: metrics.director,
+        roi: metrics.roi,
+        director_wait_seconds: metrics.director.agent_wait_seconds,
+        internal_idle_seconds: null, // wall-clock idle is a per-version figure (not summed cumulatively)
+        total_time_seconds: null,
+      };
+    }
+    if (!selectedVersion) return null;
+    return {
+      by_role: selectedVersion.by_role,
+      system_overhead: selectedVersion.system_overhead,
+      director: selectedVersion.director,
+      roi: selectedVersion.roi,
+      director_wait_seconds: selectedVersion.director_wait_seconds,
+      internal_idle_seconds: selectedVersion.internal_idle_seconds,
+      total_time_seconds: selectedVersion.total_time_seconds,
+    };
+  }, [metrics, view, selectedVersion]);
 
-  const roleChartData = useMemo(() => {
-    if (!selectedVersion) return [];
-    return selectedVersion.by_role.map((r) => ({
-      name: r.role,
-      vstup: r.usage.input_tokens,
-      výstup: r.usage.output_tokens,
-      "čas (min)": Math.round((r.usage.duration_seconds / 60) * 10) / 10,
+  const roleMinChartData = useMemo(() => {
+    if (!scope) return [];
+    return scope.by_role.map((r) => ({
+      name: roleLabel(r.role),
+      "AI (min)": Math.round((r.active_seconds / 60) * 10) / 10,
+      "človek (min)": r.human_minutes === null ? 0 : Math.round(r.human_minutes * 10) / 10,
     }));
-  }, [selectedVersion]);
+  }, [scope]);
+
+  const roleCostChartData = useMemo(() => {
+    if (!scope) return [];
+    return scope.by_role.map((r) => ({
+      name: roleLabel(r.role),
+      "AI (€)": r.agent_cost ?? 0,
+      "človek (€)": r.human_cost ?? 0,
+    }));
+  }, [scope]);
 
   if (loading) {
     return (
@@ -159,172 +238,249 @@ export default function MetricsPage() {
     );
   }
 
-  const { roi, usage } = metrics;
   const projectName = selectedProject?.slug === slug ? selectedProject?.name : slug;
   const settingsLink = (
     <button onClick={() => navigate("/settings")} className="text-primary-400 hover:text-primary-300 underline">
       Nastavenia
     </button>
   );
+  const roi = scope?.roi ?? metrics.roi;
+  const perBuildSaved = selectedVersion?.roi.eur_saved ?? null;
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
-      <h1 className="text-base font-bold text-[var(--color-text-primary)] mb-1">Metriky &amp; ROI</h1>
+      <div className="flex items-center justify-between mb-1">
+        <h1 className="text-base font-bold text-[var(--color-text-primary)]">Metriky &amp; ROI — podľa roly</h1>
+        <div className="flex rounded border border-[var(--color-border-default)] overflow-hidden text-[11px]">
+          {(["version", "cumulative"] as View[]).map((v) => (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              className={`px-2.5 py-1 ${
+                view === v
+                  ? "bg-primary-600 text-white"
+                  : "bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+              }`}
+            >
+              {v === "version" ? "Verzia" : "Kumulatívne"}
+            </button>
+          ))}
+        </div>
+      </div>
       <p className="text-xs text-[var(--color-text-muted)] mb-4">
-        Nameraná AI práca pre <span className="text-[var(--color-text-secondary)]">{projectName}</span> (tokeny + čas) + odhad
-        ľudskej náročnosti z plánu. Čísla, ktoré chýbajú (ceny / odhady), sa nezobrazujú vymyslené.
+        Nameraná práca agenta vs. ekvivalentný ľudský čas pre{" "}
+        <span className="text-[var(--color-text-secondary)]">{projectName}</span> — z tej istej bázy (všetky tokeny per
+        rola). Čísla, ktoré chýbajú (ceny / kurzy / mzdy), sa nezobrazujú vymyslené.
       </p>
 
       {/* Headline ROI */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
         <Card
           label="Rýchlejšie ako človek"
-          value={roi.x_faster !== null ? `${roi.x_faster.toLocaleString("sk-SK", { maximumFractionDigits: 1 })}×` : "—"}
-          hint={roi.x_faster === null ? "Odhady nenastavené" : "odhad z plánu vs. nameraný AI čas"}
+          value={fmtRatio(roi.x_faster)}
+          hint={roi.x_faster === null ? "Kurzy nenastavené" : "ľudský čas (z tokenov) vs. aktívny AI čas"}
           tone={roi.x_faster !== null ? "good" : "muted"}
         />
         <Card
           label="Lacnejšie ako človek"
-          value={roi.y_cheaper_pct !== null ? `${roi.y_cheaper_pct.toLocaleString("sk-SK", { maximumFractionDigits: 1 })} %` : "—"}
-          hint={roi.y_cheaper_pct === null ? "Ceny / odhady nenastavené" : "ľudská vs. API cena"}
-          tone={roi.y_cheaper_pct !== null ? "good" : "muted"}
+          value={fmtRatio(roi.m_cheaper)}
+          hint={roi.m_cheaper === null ? "Ceny / kurzy / mzdy nenastavené" : "ľudská cena vs. API cena (hodnota compute)"}
+          tone={roi.m_cheaper !== null ? "good" : "muted"}
         />
         <Card
-          label="API náklady (spolu)"
-          value={fmtCost(metrics.api_cost)}
-          hint={metrics.api_cost === null ? "Ceny nenastavené" : undefined}
-          tone={metrics.api_cost === null ? "muted" : "default"}
+          label="Ušetrené € (tento build)"
+          value={fmtCost(perBuildSaved)}
+          hint={selectedVersion ? selectedVersion.version_number : undefined}
+          tone={perBuildSaved !== null ? "good" : "muted"}
         />
         <Card
-          label="Čas start → PROD"
-          value={metrics.total_time_seconds !== null ? fmtDuration(metrics.total_time_seconds) : "—"}
+          label="Ušetrené € (kumulatívne)"
+          value={fmtCost(metrics.roi.eur_saved)}
+          hint={`za ${metrics.roi.covered_versions} z ${metrics.roi.total_versions} verzií`}
+          tone={metrics.roi.eur_saved !== null ? "good" : "muted"}
         />
       </div>
 
-      {/* Unset-config banner */}
-      {(!metrics.pricing_configured || !metrics.estimates_configured) && (
+      {/* ROI-angle + model-drift badges */}
+      <div className="flex flex-wrap gap-2 mb-3 text-[11px]">
+        <span className="rounded border border-[var(--color-border-default)] bg-[var(--color-canvas)] px-2 py-1 text-[var(--color-text-muted)]">
+          Platíme flat Claude MAX → marginálny náklad ~0; vyššie je trhová hodnota spotrebovaného compute.
+        </span>
+        {roi.unknown_model_token_pct > 0 && (
+          <span className="rounded border border-[var(--color-state-warning-bg)] bg-[var(--color-state-warning-bg)] px-2 py-1 text-[var(--color-state-warning-fg)]">
+            {roi.unknown_model_token_pct.toLocaleString("sk-SK", { maximumFractionDigits: 1 })} % tokenov bez
+            rozpoznaného modelu — cena flat.
+          </span>
+        )}
+      </div>
+
+      {/* Unset-config banner (per dimension) */}
+      {!roi.configured && (
         <div className="rounded-lg border border-[var(--color-state-warning-bg)] bg-[var(--color-state-warning-bg)] px-3 py-2 text-xs text-[var(--color-state-warning-fg)] mb-4">
-          {!metrics.pricing_configured && <>Ceny nenastavené — doplň sadzby v {settingsLink} pre výpočet nákladov a ROI. </>}
-          {!metrics.estimates_configured && <>Odhady nenastavené — task-plan zatiaľ neobsahuje odhad ľudskej náročnosti (ROI sa zobrazí po doplnení).</>}
+          {!roi.pricing_configured && <>Ceny modelov nenastavené. </>}
+          {!roi.rates_configured && <>Kurzy (tokeny→minúty) nenastavené. </>}
+          {!roi.wages_configured && <>Mzdy nenastavené. </>}
+          Ľudská / AI strana sa zobrazí až po doplnení v {settingsLink} → Metriky / ROI.
         </div>
       )}
 
-      {/* Director-wait (separate — never mixed into AI time) + cumulative AI + human baseline */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        <Card
-          label="AI výpočtový čas"
-          value={fmtDuration(usage.duration_seconds)}
-          hint={`${fmtInt(usage.input_tokens)} vstup / ${fmtInt(usage.output_tokens)} výstup tokenov`}
-        />
-        <Card
-          label="Čakanie na Directora (prestoje)"
-          value={fmtDuration(metrics.director_wait_seconds)}
-          hint="NEzapočítané do AI času"
-          tone="muted"
-        />
-        <Card
-          label="Odhad ľudskej práce"
-          value={metrics.estimates_configured ? fmtDuration(roi.human_minutes * 60) : "—"}
-          hint={metrics.estimates_configured ? "odhad z plánu" : "Odhady nenastavené"}
-          tone={metrics.estimates_configured ? "default" : "muted"}
-        />
-        <Card
-          label="Ľudská cena (odhad)"
-          value={fmtCost(roi.human_cost)}
-          hint={roi.human_cost === null ? "Ceny / odhady nenastavené" : "odhad z plánu × sadzba"}
-          tone={roi.human_cost === null ? "muted" : "default"}
-        />
+      {/* Version selector */}
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-sm font-semibold text-[var(--color-text-secondary)]">
+          {view === "cumulative" ? "Podľa roly — kumulatívne" : `Podľa roly — ${selectedVersion?.version_number ?? ""}`}
+        </h2>
+        <select
+          value={selectedVersionId}
+          onChange={(e) => setSelectedVersionId(e.target.value)}
+          disabled={view === "cumulative"}
+          className="bg-[var(--color-surface)] border border-[var(--color-border-default)] rounded px-2 py-1 text-xs text-[var(--color-text-primary)] disabled:opacity-40"
+        >
+          {metrics.by_version.map((v) => (
+            <option key={v.version_id} value={v.version_id}>
+              {v.version_number}
+            </option>
+          ))}
+        </select>
       </div>
 
-      {/* Per-version breakdown table */}
+      {/* Per-role table */}
+      {scope && (
+        <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] overflow-x-auto mb-4">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-[var(--color-surface)]">
+                <th className={TH}>Rola</th>
+                <th className={TH}>AI čas</th>
+                <th className={TH}>tokeny IN/OUT</th>
+                <th className={TH}>rework</th>
+                <th className={TH}>hodnota IN/OUT (€)</th>
+                <th className={TH}>človek čas</th>
+                <th className={TH}>človek (€)</th>
+                <th className={TH}>N×</th>
+                <th className={TH}>M×</th>
+                <th className={TH}>ušetrené €</th>
+              </tr>
+            </thead>
+            <tbody>
+              {scope.by_role.map((r) => (
+                <RoleRow key={r.role} r={r} />
+              ))}
+              {/* Director overhead row */}
+              <tr className="border-t border-[var(--color-border-default)] bg-[var(--color-surface)]">
+                <td className={`${TD} font-medium text-[var(--color-text-secondary)]`}>
+                  {roleLabel("director")} (overhead)
+                </td>
+                <td className={`${TD} text-[var(--color-text-muted)]`} colSpan={3}>
+                  čakanie {fmtDuration(scope.director.agent_wait_seconds)} · intervencie {scope.director.interventions}
+                </td>
+                <td className={TD}>
+                  agent {fmtCost(scope.director.agent_director_cost)} / človek {fmtCost(scope.director.human_director_cost)}
+                </td>
+                <td className={`${TD} text-[var(--color-text-muted)]`}>{fmtMinutes(scope.director.human_director_minutes)}</td>
+                <td className={TD}>—</td>
+                <td className={TD}>—</td>
+                <td className={TD}>—</td>
+                <td className={TD}>—</td>
+              </tr>
+              {/* System / engine row — info-only, foots the table */}
+              <tr className="border-t border-[var(--color-border-default)] italic text-[var(--color-text-muted)]">
+                <td className={TD}>{roleLabel("system")} / engine (neporovnané)</td>
+                <td className={TD}>{fmtDuration(scope.system_overhead.active_seconds)}</td>
+                <td className={TD}>
+                  {fmtInt(scope.system_overhead.input_tokens)} / {fmtInt(scope.system_overhead.output_tokens)}
+                </td>
+                <td className={TD}>—</td>
+                <td className={TD}>{fmtCost(scope.system_overhead.agent_cost)}</td>
+                <td className={TD}>—</td>
+                <td className={TD}>—</td>
+                <td className={TD}>—</td>
+                <td className={TD}>—</td>
+                <td className={TD}>—</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Idle panel — separate, NEVER mixed into AI time */}
+      {scope && (
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
+          <Card
+            label="Čakanie na Directora (prestoj A)"
+            value={fmtDuration(scope.director_wait_seconds)}
+            hint="human-in-the-loop overhead, cieľ → 0"
+            tone="muted"
+          />
+          <Card
+            label="Interný idle (prestoj B)"
+            value={scope.internal_idle_seconds === null ? "—" : fmtDuration(scope.internal_idle_seconds)}
+            hint={scope.internal_idle_seconds === null ? "rozpätie neznáme" : "reálny wall-clock medzi ťahmi"}
+            tone="muted"
+          />
+          <Card
+            label="Čas start → koniec"
+            value={scope.total_time_seconds === null ? "—" : fmtDuration(scope.total_time_seconds)}
+            hint={view === "cumulative" ? "per verzia (vyber verziu)" : "wall-clock verzie"}
+            tone="muted"
+          />
+        </div>
+      )}
+
+      {/* Per-version breakdown */}
       <h2 className="text-sm font-semibold text-[var(--color-text-secondary)] mb-2">Podľa verzie</h2>
       <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] divide-y divide-[var(--color-border-default)] mb-6">
         {metrics.by_version.length === 0 ? (
-          <div className="p-4 text-sm text-[var(--color-text-muted)]">Žiadne pipeline dáta — metriky sa naplnia po prvom builde.</div>
+          <div className="p-4 text-sm text-[var(--color-text-muted)]">
+            Žiadne pipeline dáta — metriky sa naplnia po prvom builde.
+          </div>
         ) : (
           metrics.by_version.map((v) => (
             <div key={v.version_id} className="p-3 grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
               <div className="font-mono text-[var(--color-text-secondary)]">{v.version_number}</div>
-              <div className="text-[var(--color-text-secondary)]">{fmtInt(v.usage.input_tokens + v.usage.output_tokens)} tokenov</div>
+              <div className="text-[var(--color-text-secondary)]">
+                {fmtInt(v.usage.input_tokens + v.usage.output_tokens)} tokenov
+              </div>
               <div className="text-[var(--color-text-secondary)]">{fmtDuration(v.usage.duration_seconds)} AI</div>
-              <div className="text-[var(--color-text-muted)]">prestoje {fmtDuration(v.director_wait_seconds)}</div>
-              <div className="text-[var(--color-text-secondary)]">{v.api_cost !== null ? `${fmtCost(v.api_cost)} API` : "cena —"}</div>
+              <div className="text-[var(--color-text-muted)]">{fmtRatio(v.roi.m_cheaper)} lacnejšie</div>
+              <div className={v.roi.eur_saved !== null ? "text-[var(--color-status-success)]" : "text-[var(--color-text-muted)]"}>
+                {v.roi.eur_saved !== null ? `${fmtCost(v.roi.eur_saved)} € ušetrené` : "ROI —"}
+              </div>
             </div>
           ))
         )}
       </div>
 
-      {/* Per-scope + per-role charts (for the selected version) */}
-      {metrics.by_version.length > 0 && selectedVersion && (
+      {/* Per-role charts (active scope) */}
+      {scope && (
         <>
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-sm font-semibold text-[var(--color-text-secondary)]">Rozpad — {selectedVersion.version_number}</h2>
-            <div className="flex items-center gap-2">
-              <select
-                value={selectedVersionId}
-                onChange={(e) => setSelectedVersionId(e.target.value)}
-                className="bg-[var(--color-surface)] border border-[var(--color-border-default)] rounded px-2 py-1 text-xs text-[var(--color-text-primary)]"
-              >
-                {metrics.by_version.map((v) => (
-                  <option key={v.version_id} value={v.version_id}>
-                    {v.version_number}
-                  </option>
-                ))}
-              </select>
-              <div className="flex rounded border border-[var(--color-border-default)] overflow-hidden">
-                {(["by_epic", "by_feat", "by_task"] as ScopeLevel[]).map((lvl) => (
-                  <button
-                    key={lvl}
-                    onClick={() => setScopeLevel(lvl)}
-                    className={`px-2.5 py-1 text-[11px] ${
-                      scopeLevel === lvl ? "bg-primary-600 text-white" : "bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-                    }`}
-                  >
-                    {SCOPE_LABEL[lvl]}
-                  </button>
-                ))}
-              </div>
-            </div>
+          <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] p-3 mb-4">
+            <div className="text-[11px] text-[var(--color-text-muted)] mb-2">Čas podľa roly — AI vs. človek (min)</div>
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart data={roleMinChartData} margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} />
+                <XAxis dataKey="name" tick={{ fontSize: 10, fill: tickFill }} />
+                <YAxis tick={{ fontSize: 10, fill: tickFill }} />
+                <Tooltip contentStyle={{ background: tooltipBg, border: `1px solid ${tooltipBorder}`, color: tooltipColor, fontSize: 12 }} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Bar dataKey="AI (min)" fill="#38bdf8" />
+                <Bar dataKey="človek (min)" fill="#f59e0b" />
+              </BarChart>
+            </ResponsiveContainer>
           </div>
 
           <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] p-3 mb-4">
-            <div className="text-[11px] text-[var(--color-text-muted)] mb-2">Tokeny + čas podľa {SCOPE_LABEL[scopeLevel]}</div>
-            {scopeChartData.length === 0 ? (
-              <div className="text-xs text-[var(--color-text-muted)] py-8 text-center">Žiadne dáta na tejto úrovni.</div>
-            ) : (
-              <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={scopeChartData} margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} />
-                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: tickFill }} interval={0} angle={-15} height={50} />
-                  <YAxis tick={{ fontSize: 10, fill: tickFill }} />
-                  <Tooltip contentStyle={{ background: tooltipBg, border: `1px solid ${tooltipBorder}`, color: tooltipColor, fontSize: 12 }} />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Bar dataKey="vstup" stackId="tok" fill="#38bdf8" />
-                  <Bar dataKey="výstup" stackId="tok" fill="#818cf8" />
-                  <Bar dataKey="čas (min)" fill="#34d399" />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-
-          <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] p-3 mb-4">
-            <div className="text-[11px] text-[var(--color-text-muted)] mb-2">Náklady / práca podľa roly</div>
-            {roleChartData.length === 0 ? (
-              <div className="text-xs text-[var(--color-text-muted)] py-8 text-center">Žiadne dáta.</div>
-            ) : (
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={roleChartData} margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} />
-                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: tickFill }} />
-                  <YAxis tick={{ fontSize: 10, fill: tickFill }} />
-                  <Tooltip contentStyle={{ background: tooltipBg, border: `1px solid ${tooltipBorder}`, color: tooltipColor, fontSize: 12 }} />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Bar dataKey="vstup" stackId="tok" fill="#38bdf8" />
-                  <Bar dataKey="výstup" stackId="tok" fill="#818cf8" />
-                  <Bar dataKey="čas (min)" fill="#34d399" />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
+            <div className="text-[11px] text-[var(--color-text-muted)] mb-2">Cena podľa roly — AI vs. človek (€)</div>
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart data={roleCostChartData} margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} />
+                <XAxis dataKey="name" tick={{ fontSize: 10, fill: tickFill }} />
+                <YAxis tick={{ fontSize: 10, fill: tickFill }} />
+                <Tooltip contentStyle={{ background: tooltipBg, border: `1px solid ${tooltipBorder}`, color: tooltipColor, fontSize: 12 }} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Bar dataKey="AI (€)" fill="#818cf8" />
+                <Bar dataKey="človek (€)" fill="#34d399" />
+              </BarChart>
+            </ResponsiveContainer>
           </div>
         </>
       )}

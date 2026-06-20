@@ -2437,6 +2437,22 @@ export interface components {
             title?: string | null;
         };
         /**
+         * DirectorMetricRead
+         * @description Director overhead: count + measured agent-side wait cost + symmetric human-side director cost.
+         */
+        DirectorMetricRead: {
+            /** Agent Director Cost */
+            agent_director_cost: number | null;
+            /** Agent Wait Seconds */
+            agent_wait_seconds: number;
+            /** Human Director Cost */
+            human_director_cost: number | null;
+            /** Human Director Minutes */
+            human_director_minutes: number | null;
+            /** Interventions */
+            interventions: number;
+        };
+        /**
          * EpicCreate
          * @description Payload for creating a new epic.
          *
@@ -2789,6 +2805,16 @@ export interface components {
             token_type: "bearer";
             /** @description Authenticated user details. */
             user: components["schemas"]["AuthUser"];
+        };
+        /**
+         * ModelTokensRead
+         * @description Token usage attributed to one model family/id within a role's usage.
+         */
+        ModelTokensRead: {
+            /** Input Tokens */
+            input_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
         };
         /**
          * ModuleDependencyCreate
@@ -3364,26 +3390,20 @@ export interface components {
         };
         /** ProjectMetricsRead */
         ProjectMetricsRead: {
-            /** Api Cost */
-            api_cost: number | null;
+            /** By Role */
+            by_role: components["schemas"]["RoleMetricRead"][];
             /** By Version */
             by_version: components["schemas"]["VersionMetricsRead"][];
-            /** Director Wait Seconds */
-            director_wait_seconds: number;
-            /** Estimates Configured */
-            estimates_configured: boolean;
-            /** Pricing Configured */
-            pricing_configured: boolean;
+            director: components["schemas"]["DirectorMetricRead"];
             /**
              * Project Id
              * Format: uuid
              */
             project_id: string;
-            roi: components["schemas"]["RoiRead"];
+            roi: components["schemas"]["RoiHeadlineRead"];
             /** Slug */
             slug: string;
-            /** Total Time Seconds */
-            total_time_seconds: number | null;
+            system_overhead: components["schemas"]["SystemOverheadRead"];
             usage: components["schemas"]["UsageTotalsRead"];
         };
         /**
@@ -3732,49 +3752,97 @@ export interface components {
             reason?: string | null;
         };
         /**
-         * RoiRead
-         * @description Honest ROI: AI MEASURED, human ESTIMATED-from-plan; Director-wait NOT counted as AI time.
+         * RoiHeadlineRead
+         * @description Headline ROI over the comparison roles + Director (NOT incl. the ``system`` row).
          */
-        RoiRead: {
-            /** Ai Compute Minutes */
-            ai_compute_minutes: number;
-            /** Api Cost */
-            api_cost: number | null;
+        RoiHeadlineRead: {
+            /** Agent Active Minutes */
+            agent_active_minutes: number;
+            /** Agent Cost Total */
+            agent_cost_total: number | null;
             /** Configured */
             configured: boolean;
+            /** Covered Versions */
+            covered_versions: number;
+            /** Eur Saved */
+            eur_saved: number | null;
+            /** Flat Subscription */
+            flat_subscription: boolean;
+            /** Human Cost Total */
+            human_cost_total: number | null;
+            /** Human Minutes Total */
+            human_minutes_total: number | null;
+            /** M Cheaper */
+            m_cheaper: number | null;
+            /** Marginal Cost Eur */
+            marginal_cost_eur: number;
+            /** Pricing Configured */
+            pricing_configured: boolean;
+            /** Rates Configured */
+            rates_configured: boolean;
+            /** Total Versions */
+            total_versions: number;
+            /** Unknown Model Token Pct */
+            unknown_model_token_pct: number;
+            /** Wages Configured */
+            wages_configured: boolean;
+            /** X Faster */
+            x_faster: number | null;
+        };
+        /**
+         * RoleMetricRead
+         * @description One comparison role's agent side (measured) vs human side (token-derived) within a scope.
+         */
+        RoleMetricRead: {
+            /** Active Seconds */
+            active_seconds: number;
+            /** Agent Cost */
+            agent_cost: number | null;
+            /** Agent Value In */
+            agent_value_in: number | null;
+            /** Agent Value Out */
+            agent_value_out: number | null;
+            /** By Model */
+            by_model: {
+                [key: string]: components["schemas"]["ModelTokensRead"];
+            };
+            /** Eur Saved */
+            eur_saved: number | null;
             /** Human Cost */
             human_cost: number | null;
             /** Human Minutes */
-            human_minutes: number;
-            /** X Faster */
-            x_faster: number | null;
-            /** Y Cheaper Pct */
-            y_cheaper_pct: number | null;
-        };
-        /**
-         * RoleUsageRead
-         * @description Per-role (cost-by-role) usage slice within a version.
-         */
-        RoleUsageRead: {
+            human_minutes: number | null;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Internal Idle Seconds */
+            internal_idle_seconds: number | null;
+            /** M Cheaper */
+            m_cheaper: number | null;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Parse Attempts */
+            parse_attempts: number;
             /** Role */
             role: string;
-            usage: components["schemas"]["UsageTotalsRead"];
+            /** Unpriced Model Keys */
+            unpriced_model_keys: string[];
+            /** X Faster */
+            x_faster: number | null;
         };
         /**
-         * ScopeUsageRead
-         * @description Per-EPIC/FEAT/TASK usage row (entity identity + its roll-up).
+         * SystemOverheadRead
+         * @description Un-compared engine (``system``) tokens — info-only; foots the per-role table but never enters
+         *     the headline ROI (metrics redesign §1.4).
          */
-        ScopeUsageRead: {
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /** Number */
-            number: number;
-            /** Title */
-            title: string;
-            usage: components["schemas"]["UsageTotalsRead"];
+        SystemOverheadRead: {
+            /** Active Seconds */
+            active_seconds: number;
+            /** Agent Cost */
+            agent_cost: number | null;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
         };
         /**
          * SystemSettingRead
@@ -4022,7 +4090,7 @@ export interface components {
         };
         /**
          * UsageTotalsRead
-         * @description Summed token usage + active-compute time for a scope (task / feat / epic / version / project).
+         * @description Summed token usage + active-compute time for a scope (role / version / project).
          */
         UsageTotalsRead: {
             /** Duration Seconds */
@@ -4344,20 +4412,17 @@ export interface components {
         };
         /** VersionMetricsRead */
         VersionMetricsRead: {
-            /** Api Cost */
-            api_cost: number | null;
-            /** By Epic */
-            by_epic: components["schemas"]["ScopeUsageRead"][];
-            /** By Feat */
-            by_feat: components["schemas"]["ScopeUsageRead"][];
             /** By Role */
-            by_role: components["schemas"]["RoleUsageRead"][];
-            /** By Task */
-            by_task: components["schemas"]["ScopeUsageRead"][];
+            by_role: components["schemas"]["RoleMetricRead"][];
+            director: components["schemas"]["DirectorMetricRead"];
             /** Director Wait Seconds */
             director_wait_seconds: number;
+            /** Internal Idle Seconds */
+            internal_idle_seconds: number | null;
+            roi: components["schemas"]["RoiHeadlineRead"];
             /** Status */
             status: string;
+            system_overhead: components["schemas"]["SystemOverheadRead"];
             /** Total Time Seconds */
             total_time_seconds: number | null;
             usage: components["schemas"]["UsageTotalsRead"];
