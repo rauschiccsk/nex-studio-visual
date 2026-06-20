@@ -3,9 +3,13 @@
 // The cockpit's own message bubble. The legacy Gate-E DialogueMessageBubble + the standalone
 // /dialogue page were retired in CR-NS-065 — Gate E now runs per-question inside the cockpit.
 
-import ReactMarkdown from "react-markdown";
+import { useState } from "react";
+import { Check, ChevronDown, ChevronUp, Copy } from "lucide-react";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { CodeBlock } from "../markdown/CodeBlock";
+import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import type { PipelineMessage, PipelineParticipant } from "../../services/api/pipeline";
 import { ROLE_LABELS, SYNTHESIS_LABEL, RAW_REPORT_LABEL, AUTONOMOUS_LABEL, DIRECTOR_BRIEF_LABEL } from "./labels";
 
@@ -52,6 +56,126 @@ const PROSE_CLASS =
   "prose-ul:my-1.5 prose-ul:list-disc prose-ul:pl-5 prose-li:my-0.5 " +
   "prose-code:bg-[var(--color-surface-hover)] prose-code:px-1 prose-code:text-[var(--color-version-text)] " +
   "prose-pre:bg-[var(--color-surface-hover)]";
+
+// Rich-report prose: ordered lists + clean inline code (drop the prose backtick ::before/::after) + a
+// flat pre (the fenced-code component below owns the box). Used only for the recovered agent report body.
+const REPORT_PROSE_CLASS =
+  "prose prose-sm dark:prose-invert max-w-none leading-relaxed text-[var(--color-text-primary)] " +
+  "prose-headings:mt-3 prose-headings:mb-1 prose-headings:font-semibold prose-headings:text-[var(--color-text-primary)] " +
+  "prose-p:my-1.5 prose-p:text-sm " +
+  "prose-strong:font-semibold prose-strong:text-[var(--color-text-primary)] " +
+  "prose-ul:my-1.5 prose-ul:list-disc prose-ul:pl-5 prose-ol:my-1.5 prose-ol:list-decimal prose-ol:pl-5 prose-li:my-0.5 " +
+  "prose-code:before:content-none prose-code:after:content-none " +
+  "prose-pre:bg-transparent prose-pre:p-0 prose-pre:my-0";
+
+// Markdown component overrides for the report body: fenced code → the shared CodeBlock (language label +
+// copy button), inline code → a subtle-highlight monospace chip (file paths + identifiers). Mirrors the
+// established in-repo idiom (ProjectSpecsPage / KnowledgeBasePage). Module-level so it isn't re-created.
+const REPORT_MARKDOWN_COMPONENTS: Components = {
+  code({ className, children, ...props }) {
+    const match = /language-(\w+)/.exec(className || "");
+    const isInline = !className && typeof children === "string" && !children.includes("\n");
+    if (!isInline && match) {
+      return <CodeBlock language={match[1]}>{String(children)}</CodeBlock>;
+    }
+    if (!isInline && typeof children === "string" && children.includes("\n")) {
+      return <CodeBlock>{String(children)}</CodeBlock>;
+    }
+    return (
+      <code
+        className="rounded bg-[var(--color-surface-hover)] px-1 py-0.5 font-mono text-[0.85em] text-[var(--color-version-text)]"
+        {...props}
+      >
+        {children}
+      </code>
+    );
+  },
+  pre({ children }) {
+    return <>{children}</>;
+  },
+};
+
+// Beyond this many lines a recovered report is collapsed by default ("CC výstup"-style); shorter reports
+// render expanded (still inside the labelled card so the copy affordance + provenance stay consistent).
+const REPORT_COLLAPSE_LINES = 12;
+
+// Collapsible "CC výstup" card holding the agent's full markdown report (payload.report). Mirrors the
+// TaskSummaryCard collapse pattern; long reports start collapsed so a thread of reports stays scannable.
+function CCReport({ report }: { report: string }) {
+  const lineCount = report.split("\n").length;
+  const collapsible = lineCount > REPORT_COLLAPSE_LINES;
+  const [expanded, setExpanded] = useState(!collapsible);
+  const [copy, isCopied] = useCopyToClipboard();
+
+  return (
+    <div className="mt-2 overflow-hidden rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-hover)]">
+      <div className="flex items-center justify-between gap-2 border-b border-[var(--color-border-default)] px-3 py-1.5">
+        <button
+          type="button"
+          onClick={() => setExpanded((e) => !e)}
+          className="flex items-center gap-1.5 text-left"
+          aria-expanded={expanded}
+        >
+          {expanded ? (
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[var(--color-text-muted)]" />
+          ) : (
+            <ChevronUp className="h-3.5 w-3.5 shrink-0 text-[var(--color-text-muted)]" />
+          )}
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+            CC výstup
+          </span>
+          {collapsible ? (
+            <span className="text-[10px] text-[var(--color-text-muted)]">· {lineCount} riadkov</span>
+          ) : null}
+        </button>
+        <button
+          type="button"
+          onClick={() => copy(report)}
+          className="flex items-center gap-1 text-[10px] text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-primary)]"
+          title={isCopied ? "Skopírované" : "Kopírovať"}
+        >
+          {isCopied ? (
+            <>
+              <Check className="h-3 w-3 text-[var(--color-status-success)]" />
+              <span className="text-[var(--color-status-success)]">Skopírované</span>
+            </>
+          ) : (
+            <>
+              <Copy className="h-3 w-3" />
+              <span>Kopírovať</span>
+            </>
+          )}
+        </button>
+      </div>
+      {expanded ? (
+        <div className={`${REPORT_PROSE_CLASS} px-3 py-2`}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={REPORT_MARKDOWN_COMPONENTS}>
+            {report}
+          </ReactMarkdown>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// One labelled list section beneath the body (deliverables / findings / commits) — mirrors the
+// TaskSummaryCard section styling (uppercase micro-label + bulleted list).
+function ReportSection({ label, items, mono = false }: { label: string; items: string[]; mono?: boolean }) {
+  return (
+    <div>
+      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+        {label}
+      </div>
+      <ul className="list-disc space-y-0.5 pl-4 text-xs text-[var(--color-text-secondary)]">
+        {items.map((item, i) => (
+          <li key={i} className={mono ? "break-all font-mono" : undefined}>
+            {item}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 const HEADLINE_CAP = 140;
 
@@ -118,6 +242,18 @@ export function PipelineMessageBubble({ message }: Props) {
   const brief = isPrimaryBrief ? deriveBrief(message.content) : null;
   const isRawReport = message.kind === "gate_report" && message.author !== "coordinator" && !isSynthesis;
 
+  // Legible-cockpit-output fix: the agent's recovered full markdown report (payload.report) is the rich
+  // body source; the structured payload arrays render as labelled sections beneath it. All additive — a
+  // message without them keeps the exact prior content/summary rendering.
+  const payload = message.payload as Record<string, unknown> | null;
+  const report = typeof payload?.report === "string" ? payload.report.trim() : "";
+  const asStrings = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.trim() !== "") : [];
+  const deliverables = asStrings(payload?.deliverables);
+  const commits = asStrings(payload?.commits);
+  const findings = asStrings(payload?.findings);
+  const hasSections = deliverables.length > 0 || commits.length > 0 || findings.length > 0;
+
   const badge = KIND_BADGE[message.kind] ?? "bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)]";
   // Synthesis / Director-brief → prominent primary rail; autonomous decision → amber attention rail; else the
   // per-author accent (dimmed for a raw report).
@@ -158,22 +294,37 @@ export function PipelineMessageBubble({ message }: Props) {
           </span>
         )}
       </div>
+      {/* Director-facing briefs keep their FE-guaranteed prominent headline above the body. */}
       {brief ? (
-        <>
-          <div className="text-[0.9375rem] font-semibold leading-snug text-[var(--color-text-primary)]">
-            {brief.headline}
+        <div className="text-[0.9375rem] font-semibold leading-snug text-[var(--color-text-primary)]">
+          {brief.headline}
+        </div>
+      ) : null}
+
+      {/* Body: the recovered full agent report (rich + collapsible "CC výstup") takes precedence; else the
+          brief's stripped markdown body; else the plain message content. */}
+      {report ? (
+        <CCReport report={report} />
+      ) : brief ? (
+        brief.body ? (
+          <div className={`${PROSE_CLASS} mt-1.5`}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{brief.body}</ReactMarkdown>
           </div>
-          {brief.body ? (
-            <div className={`${PROSE_CLASS} mt-1.5`}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{brief.body}</ReactMarkdown>
-            </div>
-          ) : null}
-        </>
+        ) : null
       ) : (
         <div className={PROSE_CLASS}>
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
         </div>
       )}
+
+      {/* Structured payload sections beneath the body — labelled, mirrors TaskSummaryCard. */}
+      {hasSections ? (
+        <div className="mt-2 space-y-2">
+          {deliverables.length > 0 ? <ReportSection label="Výstupy" items={deliverables} /> : null}
+          {findings.length > 0 ? <ReportSection label="Zistenia" items={findings} /> : null}
+          {commits.length > 0 ? <ReportSection label="Commity" items={commits} mono /> : null}
+        </div>
+      ) : null}
     </div>
   );
 }

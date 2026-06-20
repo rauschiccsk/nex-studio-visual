@@ -65,6 +65,10 @@ class PipelineMessageRead(BaseModel):
     kind: MessageKind
     content: str
     status: str
+    #: Free-form per-message structured data (deliverables / commits / findings / usage / timing / the
+    #: synthesis & autonomous markers …). Legible-cockpit-output fix adds ``report``: the agent's full
+    #: human-readable markdown report body — the rich source the cockpit bubble renders, while ``content``
+    #: stays the one-line summary. Additive within the existing freeform dict — no schema / codegen change.
     payload: Optional[dict[str, Any]] = None
     created_at: datetime
     #: Monotonic insertion order (CR-NS-018). Carried in the payload so both the REST

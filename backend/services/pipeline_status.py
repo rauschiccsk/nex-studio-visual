@@ -398,6 +398,30 @@ def parse_structured_output(obj: dict) -> ParseResult:
     return _validate_block(obj)
 
 
+def extract_report_body(text: str) -> str:
+    """Return the agent's human-readable markdown report — everything in its raw output EXCEPT the
+    machine sentinel fences (legible-cockpit-output fix).
+
+    Every orchestrated agent writes a full structured report (e.g. the Implementer's ``## Dokončené``
+    with bold section headings, numbered/bulleted lists, inline code + code blocks) and THEN the
+    ``<<<PIPELINE_STATUS>>>`` status block. :func:`invoke_agent` records only the block's one-line
+    ``summary`` as the message ``content`` (the FE ``deriveBrief`` / preview source); the rich report
+    body was parsed for the status block and otherwise DISCARDED. This recovers it so the cockpit
+    bubble can render the report richly (persisted, additively, as ``payload['report']``).
+
+    Strips BOTH sentinel fences — the ``<<<PIPELINE_STATUS>>>`` status block and, defensively, a
+    ``<<<TASK_PLAN_JSON>>>`` fence — wherever they sit, and returns the remaining markdown trimmed.
+    Returns ``""`` when the agent emitted nothing but the fence(s). Deterministic; never raises.
+
+    NOTE: deliberately a standalone extractor, NOT a field on :class:`PipelineStatusBlock` — the model
+    IS the schema (:data:`PIPELINE_STATUS_JSON_SCHEMA` = ``PipelineStatusBlock.model_json_schema()``),
+    so a model field would tell the agent to cram the whole markdown report INTO the status JSON (the
+    very monolithic block this fix removes). The body is the surrounding TEXT, not a JSON field."""
+    body = _FENCE_RE.sub("", text or "")
+    body = _TASK_PLAN_FENCE_RE.sub("", body)
+    return body.strip()
+
+
 # ── (v0.7.3) narrowed task_plan-pass parsers (CR-1) ──────────────────────────
 # The narrowed passes emit a :class:`TaskPlanSkeleton` / :class:`TaskPlanFeatTasks` object
 # (NOT a :class:`PipelineStatusBlock`), so they do NOT go through ``_validate_block`` and

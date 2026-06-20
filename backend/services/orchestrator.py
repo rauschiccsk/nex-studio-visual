@@ -67,6 +67,7 @@ from backend.services.pipeline_status import (
     TaskPlan,
     TaskPlanEpic,
     TaskPlanFeat,
+    extract_report_body,
     extract_task_plan_json,
     parse_status_block,
     parse_structured_output,
@@ -1231,6 +1232,12 @@ async def invoke_agent(
         kind=msg_kind,
         content=parsed.summary,
         payload={
+            # Legible-cockpit-output fix: the agent's FULL human-readable markdown report — the text
+            # BEFORE the machine status fence (## headings, lists, code, ✅). ``content`` stays the
+            # one-line ``summary`` (deriveBrief / previews / every existing consumer); this ADDITIVE key
+            # lets the cockpit bubble render the rich report instead of the discarded monolithic block.
+            # ``None`` when the agent emitted nothing but the fence (FE falls back to content/summary).
+            "report": extract_report_body(stdout) or None,
             "deliverables": parsed.deliverables,
             "commits": parsed.commits,
             "question": parsed.question,

@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 
 import PipelineMessageBubble from "@/components/cockpit/PipelineMessageBubble";
 import type { PipelineMessage } from "@/services/api/pipeline";
@@ -173,5 +173,73 @@ describe("PipelineMessageBubble — FE-guaranteed Director headline (v0.7.4)", (
     // a raw report renders content verbatim through ReactMarkdown (heading stays a heading, no FE headline lead)
     expect(screen.getByRole("heading", { name: "Toto je nadpis" })).toBeInTheDocument();
     expect(screen.getByText("telo reportu")).toBeInTheDocument();
+  });
+});
+
+// Legible-cockpit-output fix: the agent's full markdown report (payload.report) renders richly in a
+// collapsible "CC výstup" card, with the structured payload arrays as labelled sections beneath.
+describe("PipelineMessageBubble — rich report rendering (payload.report)", () => {
+  it("renders a short report in an expanded 'CC výstup' card with structured markdown", () => {
+    render(
+      <PipelineMessageBubble
+        message={mkMessage({
+          payload: { report: "## Dokončené\n\n- Pridaný `export` endpoint\n- Testy zelené" },
+        })}
+      />,
+    );
+    expect(screen.getByText("CC výstup")).toBeInTheDocument();
+    // markdown is structured: heading + list item with inline code (short → expanded by default)
+    expect(screen.getByRole("heading", { name: "Dokončené" })).toBeInTheDocument();
+    expect(screen.getByText("export")).toBeInTheDocument(); // inline-code chip
+    expect(screen.getByText("Testy zelené")).toBeInTheDocument();
+  });
+
+  it("collapses a long report by default and reveals it on toggle", () => {
+    const longReport = "## Dokončené\n\n" + Array.from({ length: 20 }, (_, i) => `- riadok ${i}`).join("\n");
+    render(<PipelineMessageBubble message={mkMessage({ payload: { report: longReport } })} />);
+    // collapsed by default → the body heading is NOT in the DOM yet
+    expect(screen.queryByRole("heading", { name: "Dokončené" })).not.toBeInTheDocument();
+    const toggle = screen.getByRole("button", { name: /CC výstup/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(screen.getByRole("heading", { name: "Dokončené" })).toBeInTheDocument();
+  });
+
+  it("routes a fenced code block to a CodeBlock with a language label", () => {
+    render(
+      <PipelineMessageBubble
+        message={mkMessage({
+          payload: { report: "Pozri:\n\n```python\nprint('hi')\n```" },
+        })}
+      />,
+    );
+    expect(screen.getByText("python")).toBeInTheDocument(); // CodeBlock language label
+    expect(screen.getByText("print('hi')")).toBeInTheDocument();
+  });
+
+  it("renders deliverables / findings / commits as labelled sections beneath the body", () => {
+    render(
+      <PipelineMessageBubble
+        message={mkMessage({
+          payload: {
+            report: "## Hotovo",
+            deliverables: ["backend/services/x.py"],
+            findings: ["žiadne"],
+            commits: ["abc123 feat: x"],
+          },
+        })}
+      />,
+    );
+    expect(screen.getByText("Výstupy")).toBeInTheDocument();
+    expect(screen.getByText("backend/services/x.py")).toBeInTheDocument();
+    expect(screen.getByText("Zistenia")).toBeInTheDocument();
+    expect(screen.getByText("Commity")).toBeInTheDocument();
+    expect(screen.getByText("abc123 feat: x")).toBeInTheDocument();
+  });
+
+  it("falls back to plain content when no report is present (no 'CC výstup' card)", () => {
+    render(<PipelineMessageBubble message={mkMessage({ content: "iba zhrnutie", payload: null })} />);
+    expect(screen.queryByText("CC výstup")).not.toBeInTheDocument();
+    expect(screen.getByText("iba zhrnutie")).toBeInTheDocument();
   });
 });
