@@ -43,11 +43,15 @@ else to avoid false-positives.
 2. **New helper `detect_sqlalchemy_pg_drivers(project_path: Path) -> Optional[set[str]]`** (after `_parse_env_file`):
    read `<project>/backend/pyproject.toml` first, else `<project>/pyproject.toml` (nex-asistent/nex-studio
    keep it at root). Parse with `tomllib.loads(path.read_text())` in `try/except (tomllib.TOMLDecodeError, OSError)`.
-   Collect dependency names from BOTH `data["tool"]["poetry"]["dependencies"]` (dict keys) AND
-   `data["project"]["dependencies"]` (PEP-621 list; split on first of `[<>=!~ ` for the bare name). Lowercase,
-   strip extras `name[extra]→name`, map via `_PG_DEP_TO_DRIVER`, collect into a set. Return the set (possibly
-   empty) on success; **return `None`** when no pyproject was found / parse failed (→ caller WARNs).
-   **NEVER read `.env`/secret files. NEVER raise.**
+   Collect dependency names from ALL of: `data["tool"]["poetry"]["dependencies"]` (dict keys) **and every
+   `data["tool"]["poetry"]["group"][*]["dependencies"]`** (dict keys — Poetry 1.2+ groups); `data["project"]["dependencies"]`
+   (PEP-621 list) **and every list in `data["project"]["optional-dependencies"]`** (PEP-621 extras); **and every list
+   in `data["dependency-groups"]`** (PEP-735). For each PEP-621/735 requirement string split on the first of
+   `[<>=!~; ` for the bare name. Lowercase, strip extras `name[extra]→name`, map via `_PG_DEP_TO_DRIVER`, collect
+   into a set. Return the set (possibly empty) on success; **return `None`** when no pyproject was found / parse
+   failed (→ caller WARNs). **NEVER read `.env`/secret files. NEVER raise.**
+   *(Scope widened per Director 2026-06-23: the original main-table-only scope would downgrade a real bare-URL +
+   pg8000 bug to a WARN when the driver is declared in a group/extra — a hole in the very guard meant to catch it.)*
 
 3. **New helper `validate_rendered_db_drivers(env_content, declared_drivers, *, project_slug) -> tuple[list[str], list[str]]`**
    (after `generate_uat_env`). **Return a TYPED result `(fail_msgs, warn_msgs)`** — NOT a string-`"FAIL:"`-prefix
@@ -86,6 +90,7 @@ Add a `pyproject`/`backend_pyproject` kwarg to `_make_project`+`_provision` (see
 7. `test_validate_rendered_db_drivers_multiple_db_url_vars` — unit call with `DATABASE_URL=postgresql+pg8000://` (ok) + `READ_DATABASE_URL=postgresql://` (bare) + declared `{pg8000}` → second yields a fail msg.
 8. `test_detect_sqlalchemy_pg_drivers_root_pyproject_fallback` — root pyproject (nex-asistent layout) parses.
 9. `test_detect_sqlalchemy_pg_drivers_pep621` — `[project] dependencies=["pg8000>=1.31"]` parses.
+10. `test_detect_sqlalchemy_pg_drivers_poetry_group_and_pep621_extra` — pg8000 declared in `[tool.poetry.group.db.dependencies]` (and, separately, a PEP-621 `[project.optional-dependencies]` extra) is detected → a bare `DATABASE_URL` then **FAILs (not WARN)**.
 
 **Self-verify (shared module):** run FULL `pytest` (not just this file) + `grep -rl uat_provisioner tests/` siblings
 (`test_uat_deploy.py`, `test_orchestrator.py`) — `provision_uat`'s behaviour is consumed by the engine + CLI.
@@ -134,7 +139,8 @@ no re-render") holds for a successful current-iteration deploy.
 2. `test_full_flow_retry_after_failed_deploy_reprovisions` — compose present + prior `{ok:False}` → `provision_uat` IS called → `_run_uat_deploy` → `awaiting_director`.
 3. **`test_full_flow_redeploy_after_success_does_not_reprovision`** — compose present + prior `{ok:True}` (current iter) → `provision_uat` NEVER called (reuse the `_no_provision` `AssertionError` monkeypatch). **The preserve-working-UAT regression guard — mandatory.**
 4. Fast-fix mirrors: `test_fast_fix_retry_after_failed_deploy_reprovisions` + `test_fast_fix_redeploy_after_success_does_not_reprovision`.
-5. Confirm the existing `test_full_flow_uat_deploy_runs_then_awaiting` (no prior deploy recorded) still passes (predicate False → no provision).
+5. **`test_fast_fix_provision_failure_blocks`** — fast-fix `provision_uat` raises → state `blocked` + `block_reason='system_error'` + a `{uat_deploy:{ok:False,provisioned:False,...}}` note recorded + `_run_uat_deploy` **NEVER** called (mirror the full-flow twin `test_full_flow_uat_provision_failure_blocks`). Closes the only new uncovered branch in `a1cf3ec`.
+6. Confirm the existing `test_full_flow_uat_deploy_runs_then_awaiting` (no prior deploy recorded) still passes (predicate False → no provision).
 
 **Self-verify:** full `pytest` (orchestrator.py is broadly consumed).
 
