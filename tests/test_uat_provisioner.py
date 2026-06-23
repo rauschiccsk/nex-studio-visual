@@ -303,6 +303,26 @@ def test_env_has_synthetic_db_creds_and_chmod_600(tmp_path):
     assert oct(res.env_path.stat().st_mode)[-3:] == "600"
 
 
+def test_database_url_preserves_source_sqlalchemy_dialect():
+    """The rewritten UAT DATABASE_URL keeps the source dialect (e.g. ``+pg8000``). A bare
+    ``postgresql://`` makes SQLAlchemy default to psycopg2 → a pg8000-only project's migrate
+    service dies "No module named 'psycopg2'" (gate-g-hardening followup, nex-manager dogfood)."""
+    pg8000 = P._rewrite_db_connection_var(
+        "DATABASE_URL",
+        "postgresql+pg8000://old:oldpw@db:5432/nexmanager",
+        user="u",
+        db_name="nexmanager",
+        password="newpw",
+        db_host="db",
+    )
+    assert pg8000 == f"postgresql+pg8000://u:newpw@db:{P.UAT_DB_PORT}/nexmanager"
+    assert "oldpw" not in pg8000  # source creds rewritten, dialect preserved
+    bare = P._rewrite_db_connection_var(
+        "DATABASE_URL", "postgresql://u:p@db/x", user="u", db_name="x", password="p", db_host="db"
+    )
+    assert bare.startswith("postgresql://") and "+pg8000" not in bare  # bare source stays bare
+
+
 def test_env_secrets_synthetic_and_var_placeholder(tmp_path):
     env_example = "JWT_SECRET_KEY=\nLLM_API_TOKEN=${LLM_API_TOKEN}\nPLAIN_SETTING=keepme\n"
     res = _provision(tmp_path, "nex-asistent", "asistent", ASISTENT_COMPOSE, env_example=env_example)

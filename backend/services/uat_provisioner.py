@@ -359,7 +359,11 @@ def _rewrite_db_connection_var(key: str, value: Any, *, user: str, db_name: str,
     if key in {"DB_PASSWORD", "POSTGRES_PASSWORD"}:
         return password
     if key == "DATABASE_URL":
-        return f"postgresql://{user}:{password}@{db_host}:{UAT_DB_PORT}/{db_name}"
+        # Preserve the source SQLAlchemy dialect (e.g. ``postgresql+pg8000``) — hardcoding bare
+        # ``postgresql://`` makes SQLAlchemy default to psycopg2, which a pg8000-only project (no
+        # psycopg2 dep) can't import → the UAT migrate service dies "No module named 'psycopg2'".
+        scheme = str(value).split("://", 1)[0] if "://" in str(value) else "postgresql"
+        return f"{scheme}://{user}:{password}@{db_host}:{UAT_DB_PORT}/{db_name}"
     return str(value)
 
 
