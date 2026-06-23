@@ -769,6 +769,47 @@ def _latest_uat_deploy(db: Session, version_id: uuid.UUID) -> Optional[dict[str,
     return None
 
 
+def _uat_render_needs_reprovision(db: Session, version_id: uuid.UUID) -> bool:
+    """Whether the engine must RE-PROVISION (not just re-``up``) the UAT render before redeploying (H2, CR-2).
+
+    Today an EXISTING-but-broken render is re-``up``-ed verbatim on every retry → identical failure (the
+    nex-manager dogfood case). This self-heals it WITHOUT clobbering a working UAT. Reads the LATEST
+    ``uat_deploy`` notification (the same one :func:`_latest_uat_deploy` surfaces) plus its ``seq``:
+
+    * no deploy ever recorded / a ``skipped`` deploy → ``False`` (nothing to heal).
+    * ``ok is False`` (the deploy FAILED — the proven broken-render case) → ``True`` (NARROW core).
+    * ``ok is True`` → ``True`` **iff** the deploy note's seq is BEFORE the current iteration boundary
+      (:func:`_iteration_boundary_seq`, the latest ``verdict`` seq — the SAME anchor
+      :func:`_release_acceptance_satisfied` uses). A current-iteration successful deploy is recorded AFTER
+      that boundary verdict, so its seq > boundary → ``False`` (the working UAT is preserved); a successful
+      deploy from a PRIOR iteration has a newer verdict past it → seq < boundary → ``True`` (the render is
+      stale w.r.t. the new code → re-render, idempotent, secrets preserved). For the fast-fix lane (no
+      gate_g verdict) the boundary is 0, so any ``ok is True`` note is treated as current-iteration → preserved.
+    """
+    rows = db.execute(
+        select(PipelineMessage.seq, PipelineMessage.payload)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.author == "system",
+            PipelineMessage.kind == "notification",
+        )
+        .order_by(PipelineMessage.seq.desc())
+    ).all()
+    deploy_seq: Optional[int] = None
+    deploy: Optional[dict[str, Any]] = None
+    for seq, payload in rows:
+        if isinstance(payload, dict) and isinstance(payload.get("uat_deploy"), dict):
+            deploy_seq, deploy = seq, payload["uat_deploy"]
+            break
+    if deploy is None or deploy.get("skipped"):
+        return False
+    if deploy.get("ok") is False:
+        return True
+    if deploy.get("ok") is True:
+        return deploy_seq < _iteration_boundary_seq(db, version_id)
+    return False
+
+
 def _gate_e_open_findings(db: Session, version_id: uuid.UUID) -> int:
     """Count of unresolved Gate E gaps — DETERMINISTIC from the orchestrator's own log,
     NOT the Customer's self-reported ``findings`` array (F-007-gate-e §5).
@@ -3144,6 +3185,33 @@ async def _fast_fix_auto_deploy(
         state.next_action = f"Director: over a akceptuj (UAT deploy preskočený — compose pre '{uat_slug}' chýba)."
         return
 
+    # H2 (CR-2): self-heal a stale/broken existing render before redeploy — the fast-fix lane had no
+    # provisioning path, so a failed/stale render was re-`up`-ed verbatim. Re-PROVISION (rotate_secrets
+    # default False → secrets + extra_hosts preserved) only when the render needs it; a working
+    # current-iteration render is left untouched. A provision failure → blocked, never a silent re-`up`.
+    if _uat_compose_exists(uat_slug) and _uat_render_needs_reprovision(db, version_id):
+        version_label = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
+        try:
+            await asyncio.to_thread(uat_provisioner.provision_uat, project_slug, uat_slug, version=version_label)
+        except Exception as exc:  # noqa: BLE001 — any provision failure must surface as blocked, never re-`up`.
+            detail = str(exc)
+            msg = _record_message(
+                db,
+                version_id=version_id,
+                stage="release",
+                author="system",
+                recipient="director",
+                kind="notification",
+                content=f"UAT provisioning zlyhal ({uat_slug}): {detail}",
+                payload={"uat_deploy": {"uat_slug": uat_slug, "ok": False, "provisioned": False, "detail": detail}},
+            )
+            if on_message is not None:
+                await on_message(msg)
+            state.status = "blocked"
+            state.block_reason = "system_error"  # R4 (D1): engine-side fast-fix UAT provisioning failure
+            state.next_action = f"UAT provisioning zlyhal: {detail}. Skús znova alebo vráť."
+            return
+
     ok, detail = await _run_uat_deploy(project_slug, uat_slug)
     content = f"UAT nasadené ({uat_slug}) — over a akceptuj." if ok else f"UAT deploy zlyhal ({uat_slug}): {detail}"
     msg = _record_message(
@@ -3302,9 +3370,12 @@ async def _release_auto_uat_deploy(
         uat_slug = uat_provisioner.derive_uat_slug(project)
         project_service.set_uat_slug(db, project, uat_slug)
 
-    # 2. Provision the UAT if its compose does not exist yet (first release). An existing compose is a
-    #    redeploy — skip provisioning, go straight to _run_uat_deploy (preserves the live instance).
-    if not _uat_compose_exists(uat_slug):
+    # 2. Provision the UAT if its compose does not exist yet (first release) OR the existing render is
+    #    stale/broken (H2 CR-2 self-heal: a failed deploy or a prior-iteration success → re-render instead of
+    #    re-`up`-ing a render the image can't import). A WORKING current-iteration render is preserved — the
+    #    predicate returns False, so the redeploy goes straight to _run_uat_deploy (live instance untouched).
+    #    rotate_secrets stays default False → secrets + extra_hosts are preserved across the re-provision.
+    if not _uat_compose_exists(uat_slug) or _uat_render_needs_reprovision(db, version_id):
         try:
             await asyncio.to_thread(uat_provisioner.provision_uat, project_slug, uat_slug, version=version_label)
         except Exception as exc:  # noqa: BLE001 — any provision failure must surface as blocked, never crash.

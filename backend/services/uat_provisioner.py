@@ -42,6 +42,7 @@ import os
 import re
 import secrets
 import subprocess
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -91,6 +92,25 @@ DB_CONNECTION_VARS = {
     "POSTGRES_USER",
     "POSTGRES_PASSWORD",
 }
+
+# H1 (CR-1): driver↔URL self-validation. SQLAlchemy **sync** postgres DBAPIs a ``postgresql+<driver>://``
+# URL can name — asyncpg is deliberately EXCLUDED (it is async, reached via ``postgresql+asyncpg://`` or — as
+# in nex-ledger — raw ``asyncpg`` with a bare URL and NO SQLAlchemy create_engine lookup). A bare
+# ``postgresql://`` makes SQLAlchemy default to psycopg2, so a project that ships ONLY pg8000/psycopg crashes
+# at migrate (ModuleNotFoundError) — the nex-manager dogfood bug.
+SQLALCHEMY_PG_DRIVERS = {"psycopg2", "psycopg", "pg8000"}
+
+# pyproject dependency name → SQLAlchemy driver token (both extras-stripped and extras-bearing forms).
+_PG_DEP_TO_DRIVER = {
+    "psycopg2": "psycopg2",
+    "psycopg2-binary": "psycopg2",
+    "psycopg": "psycopg",
+    "psycopg[binary]": "psycopg",
+    "pg8000": "pg8000",
+}
+
+# Multi-var detection: ``DATABASE_URL`` plus any ``*_DATABASE_URL`` (e.g. ``READ_DATABASE_URL``).
+DB_URL_SUFFIX = "_database_url"
 
 SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
@@ -329,6 +349,42 @@ def _parse_env_file(path: Path) -> dict[str, str]:
     return out
 
 
+def detect_sqlalchemy_pg_drivers(project_path: Path) -> Optional[set[str]]:
+    """The SQLAlchemy sync postgres driver tokens the source project DECLARES as dependencies (H1, CR-1).
+
+    Reads ``<project>/backend/pyproject.toml`` first, else ``<project>/pyproject.toml`` (nex-asistent /
+    nex-studio keep it at root). Collects dependency names from BOTH ``[tool.poetry.dependencies]`` (dict
+    keys) AND ``[project].dependencies`` (PEP-621 list; the bare name is taken up to the first of
+    ``[<>=!~`` or a space), lowercases + extras-strips them, and maps via :data:`_PG_DEP_TO_DRIVER`.
+
+    Returns the resolved set (possibly EMPTY — e.g. an asyncpg-only project with no SQLAlchemy pg driver) on
+    success; returns ``None`` when NO pyproject was found / it failed to parse (→ the caller WARNs rather than
+    fails). NEVER reads ``.env``/secret files; NEVER raises.
+    """
+    for candidate in (project_path / "backend" / "pyproject.toml", project_path / "pyproject.toml"):
+        if not candidate.is_file():
+            continue
+        try:
+            data = tomllib.loads(candidate.read_text(encoding="utf-8"))
+        except (tomllib.TOMLDecodeError, OSError):
+            return None
+        names: list[str] = []
+        poetry_deps = (((data.get("tool") or {}).get("poetry") or {}).get("dependencies")) or {}
+        if isinstance(poetry_deps, dict):
+            names.extend(str(k) for k in poetry_deps)
+        pep621_deps = (data.get("project") or {}).get("dependencies") or []
+        if isinstance(pep621_deps, list):
+            names.extend(re.split(r"[\[<>=!~ ]", str(d))[0] for d in pep621_deps)
+        drivers: set[str] = set()
+        for name in names:
+            norm = name.strip().lower()
+            token = _PG_DEP_TO_DRIVER.get(norm) or _PG_DEP_TO_DRIVER.get(norm.split("[", 1)[0])
+            if token:
+                drivers.add(token)
+        return drivers
+    return None
+
+
 def detect_db_credentials(services: dict[str, Any], db_service: Optional[str], project: str) -> dict[str, str]:
     """Detect ``POSTGRES_USER`` / ``POSTGRES_DB`` from the source DB service environment.
 
@@ -436,6 +492,72 @@ def generate_uat_env(
             lines.append(f"{key}={rendered[key]}")
 
     return "\n".join(lines) + "\n"
+
+
+def validate_rendered_db_drivers(
+    env_content: str, declared_drivers: Optional[set[str]], *, project_slug: str
+) -> tuple[list[str], list[str]]:
+    """Assert the rendered UAT ``.env`` carries an importable postgres ``DATABASE_URL`` (H1, CR-1).
+
+    Returns a TYPED ``(fail_msgs, warn_msgs)`` — NOT a string-``"FAIL:"``-prefix sentinel — so the caller
+    drives control flow on the list, never on string parsing. Inspects every ``DATABASE_URL`` /
+    ``*_DATABASE_URL`` value; non-postgres schemes (sqlite/mysql/…) and empty / ``__UAT_SYNTHETIC__`` values
+    are out of scope and skipped. The ONLY hard FAIL is the unambiguous bug signature — a bare
+    ``postgresql://`` while the project ships a sync SQLAlchemy driver that is NOT psycopg2 (create_engine
+    would default to the absent psycopg2 → ModuleNotFoundError at migrate). Everything ambiguous WARNs.
+    """
+    fail_msgs: list[str] = []
+    warn_msgs: list[str] = []
+    for raw in env_content.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key_lower = key.strip().lower()
+        if not (key_lower == "database_url" or key_lower.endswith(DB_URL_SUFFIX)):
+            continue
+        value = value.strip()
+        if not value or value == USER_SECRET_PLACEHOLDER:
+            continue
+        scheme = value.split("://", 1)[0]
+        backend = scheme.split("+", 1)[0].lower()
+        if backend != "postgresql":
+            continue  # sqlite / mysql / etc. — out of scope
+        if "+" in scheme:
+            # Explicit +driver — OK. Optional signal: a sync driver named but not declared as a dependency.
+            named = scheme.split("+", 1)[1].lower()
+            if declared_drivers and named in SQLALCHEMY_PG_DRIVERS and named not in declared_drivers:
+                warn_msgs.append(
+                    f"DATABASE_URL for '{project_slug}' names +{named} but it is not a declared dependency "
+                    f"({_fmt_drivers(declared_drivers)}) — verify the source pyproject"
+                )
+            continue
+        # Bare ``postgresql://`` (no explicit driver) — SQLAlchemy defaults to psycopg2.
+        if declared_drivers is None:
+            warn_msgs.append(
+                f"could not verify DB driver for '{project_slug}' (no parsable pyproject); "
+                f"bare postgresql:// defaults to psycopg2"
+            )
+        elif "psycopg2" in declared_drivers:
+            continue  # legitimate — psycopg2 is the SQLAlchemy default for a bare URL
+        elif declared_drivers:
+            fail_msgs.append(
+                f"bare 'postgresql://' DATABASE_URL but project ships SQLAlchemy driver(s) "
+                f"{_fmt_drivers(declared_drivers)} and NOT psycopg2 — create_engine would default to the "
+                f"absent psycopg2 (ModuleNotFoundError at migrate). SOURCE FIX REQUIRED (not transient): the "
+                f"source DATABASE_URL must declare the +driver, e.g. postgresql+pg8000://."
+            )
+        else:
+            warn_msgs.append(
+                f"could not confirm a SQLAlchemy pg driver for '{project_slug}' (none declared — e.g. "
+                f"asyncpg-only); bare postgresql:// assumed intentional"
+            )
+    return fail_msgs, warn_msgs
+
+
+def _fmt_drivers(drivers: set[str]) -> str:
+    """Deterministic ``{a, b}`` rendering of a driver set (sorted — set repr order is non-deterministic)."""
+    return "{" + ", ".join(sorted(drivers)) + "}"
 
 
 # ---------------------------------------------------------------------------
@@ -796,6 +918,17 @@ def provision_uat(
         preserved_secrets=preserved_secrets,
     )
 
+    # H1 (CR-1): driver↔URL self-validation BEFORE any file is written — fail LOUD at provision time for
+    # the unambiguous bug signature (bare postgresql:// while the project ships a sync driver ≠ psycopg2),
+    # leaving NOTHING on disk; WARN for every ambiguous case. The source DATABASE_URL must be fixed, not the
+    # render — so the message says SOURCE FIX REQUIRED.
+    warnings: list[str] = []
+    declared_drivers = detect_sqlalchemy_pg_drivers(project_path)
+    fail_msgs, warn_msgs = validate_rendered_db_drivers(env_content, declared_drivers, project_slug=project_slug)
+    if fail_msgs:
+        raise ValueError("; ".join(fail_msgs))
+    warnings.extend(warn_msgs)
+
     # Write: dirs first, then compose + chmod-600 .env.
     uat_dir.mkdir(parents=True, exist_ok=True)
     (uat_dir / "snapshots").mkdir(exist_ok=True)
@@ -808,7 +941,6 @@ def provision_uat(
     env_path.write_text(env_content, encoding="utf-8")
     env_path.chmod(0o600)
 
-    warnings: list[str] = []
     if roles["frontend"] is None:
         warnings.append(
             f"no frontend service detected in {project_slug}'s compose — Traefik has no default "

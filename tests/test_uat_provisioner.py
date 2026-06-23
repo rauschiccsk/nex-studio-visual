@@ -125,17 +125,37 @@ THREE_SERVICE_COMPOSE = textwrap.dedent(
 )
 
 
-def _make_project(tmp_path: Path, slug: str, compose: str, *, env_example: str | None = None) -> Path:
+def _make_project(
+    tmp_path: Path,
+    slug: str,
+    compose: str,
+    *,
+    env_example: str | None = None,
+    pyproject: str | None = None,
+    backend_pyproject: str | None = None,
+) -> Path:
     project_path = tmp_path / "projects" / slug
     project_path.mkdir(parents=True)
     (project_path / "docker-compose.yml").write_text(compose)
     if env_example is not None:
         (project_path / ".env.example").write_text(env_example)
+    if pyproject is not None:
+        (project_path / "pyproject.toml").write_text(pyproject)
+    if backend_pyproject is not None:
+        (project_path / "backend").mkdir(parents=True, exist_ok=True)
+        (project_path / "backend" / "pyproject.toml").write_text(backend_pyproject)
     return project_path
 
 
 def _provision(tmp_path, project_slug, uat_slug, compose, **kw):
-    _make_project(tmp_path, project_slug, compose, env_example=kw.pop("env_example", None))
+    _make_project(
+        tmp_path,
+        project_slug,
+        compose,
+        env_example=kw.pop("env_example", None),
+        pyproject=kw.pop("pyproject", None),
+        backend_pyproject=kw.pop("backend_pyproject", None),
+    )
     return P.provision_uat(
         project_slug,
         uat_slug,
@@ -573,3 +593,152 @@ def test_reclaim_port_removes_and_handles_missing(tmp_path):
     assert json.loads(state.read_text()) == {"b": 19501}
     assert P.reclaim_port("missing", port_state_file=state) is False  # slug not present
     assert P.reclaim_port("a", port_state_file=tmp_path / "nope.json") is False  # no state file
+
+
+# ---------- CR-1 (H1): driver↔URL self-validation guard ----------
+#
+# The nex-manager dogfood bug: the app ships pg8000 only, but a bare ``postgresql://`` makes SQLAlchemy
+# default to the absent psycopg2 → the UAT migrate service dies "No module named 'psycopg2'". The guard
+# fails LOUD at provision time for that unambiguous signature and WARNs everywhere ambiguous.
+
+_PG8000_PYPROJECT = textwrap.dedent(
+    """
+    [tool.poetry.dependencies]
+    python = "^3.12"
+    sqlalchemy = "^2.0"
+    pg8000 = "^1.31"
+    """
+)
+_PSYCOPG2_PYPROJECT = textwrap.dedent(
+    """
+    [tool.poetry.dependencies]
+    python = "^3.12"
+    psycopg2-binary = "^2.9"
+    """
+)
+_ASYNCPG_PYPROJECT = textwrap.dedent(
+    """
+    [tool.poetry.dependencies]
+    python = "^3.12"
+    asyncpg = "^0.29"
+    """
+)
+_BARE_URL_ENV = "DATABASE_URL=postgresql://app:secret@db:5432/app\n"
+_PG8000_URL_ENV = "DATABASE_URL=postgresql+pg8000://app:secret@db:5432/app\n"
+
+
+def test_provision_fails_when_bare_url_but_project_ships_pg8000_only(tmp_path):
+    """The exact nex-manager bug: pg8000-only project + a bare postgresql:// source URL → FAIL at provision
+    time, and NOTHING is written (fail-before-write)."""
+    with pytest.raises(ValueError, match="pg8000"):
+        _provision(
+            tmp_path,
+            "nex-manager",
+            "manager",
+            THREE_SERVICE_COMPOSE,
+            env_example=_BARE_URL_ENV,
+            backend_pyproject=_PG8000_PYPROJECT,
+        )
+    # Fail-before-write: no UAT .env / compose was rendered.
+    assert not (tmp_path / "uat" / "manager" / ".env").exists()
+    assert not (tmp_path / "uat" / "manager" / "docker-compose.yml").exists()
+
+
+def test_provision_ok_when_source_url_has_pg8000_driver(tmp_path):
+    """The post-0033d36 happy path: pg8000 declared + ``postgresql+pg8000://`` source → succeeds, no warning."""
+    res = _provision(
+        tmp_path,
+        "nex-manager",
+        "manager",
+        THREE_SERVICE_COMPOSE,
+        env_example=_PG8000_URL_ENV,
+        backend_pyproject=_PG8000_PYPROJECT,
+    )
+    assert (res.uat_dir / ".env").is_file()
+    assert not any("pg8000" in w or "driver" in w.lower() for w in res.warnings)
+    # The rendered URL keeps the +pg8000 dialect.
+    env = res.env_path.read_text()
+    assert "DATABASE_URL=postgresql+pg8000://" in env
+
+
+def test_provision_allows_bare_url_for_asyncpg_only_project(tmp_path):
+    """nex-ledger regression guard: an asyncpg-only project (no SQLAlchemy pg driver) + a bare URL → the set
+    is EMPTY, so it WARNs but NEVER fails."""
+    res = _provision(
+        tmp_path,
+        "nex-ledger",
+        "ledger",
+        THREE_SERVICE_COMPOSE,
+        env_example=_BARE_URL_ENV,
+        backend_pyproject=_ASYNCPG_PYPROJECT,
+    )
+    assert (res.uat_dir / ".env").is_file()  # no raise — provisioned
+
+
+def test_provision_allows_bare_url_when_psycopg2_shipped(tmp_path):
+    """psycopg2-binary declared + a bare URL → legitimate (psycopg2 IS the SQLAlchemy default) → no warning."""
+    res = _provision(
+        tmp_path,
+        "demo",
+        "demo",
+        THREE_SERVICE_COMPOSE,
+        env_example=_BARE_URL_ENV,
+        backend_pyproject=_PSYCOPG2_PYPROJECT,
+    )
+    assert (res.uat_dir / ".env").is_file()
+    assert res.warnings == []
+
+
+def test_provision_warns_when_pyproject_undetectable(tmp_path):
+    """No parsable pyproject + a bare URL → succeeds with a "could not verify" warning (no false FAIL)."""
+    res = _provision(tmp_path, "demo", "demo", THREE_SERVICE_COMPOSE, env_example=_BARE_URL_ENV)
+    assert (res.uat_dir / ".env").is_file()
+    assert any("could not verify" in w for w in res.warnings)
+
+
+def test_provision_skips_non_postgres_urls(tmp_path):
+    """A sqlite:// URL is out of scope even with a pg8000 pyproject → no raise, no driver warning."""
+    res = _provision(
+        tmp_path,
+        "demo",
+        "demo",
+        THREE_SERVICE_COMPOSE,
+        env_example="DATABASE_URL=sqlite:///./app.db\n",
+        backend_pyproject=_PG8000_PYPROJECT,
+    )
+    assert (res.uat_dir / ".env").is_file()
+    assert res.warnings == []
+
+
+def test_validate_rendered_db_drivers_multiple_db_url_vars():
+    """A second ``*_DATABASE_URL`` var is checked too: a bare READ_DATABASE_URL with a pg8000-only project
+    yields exactly one FAIL; the primary +pg8000 DATABASE_URL is fine."""
+    env = "DATABASE_URL=postgresql+pg8000://u:p@db:5432/x\nREAD_DATABASE_URL=postgresql://u:p@db:5432/x\n"
+    fails, warns = P.validate_rendered_db_drivers(env, {"pg8000"}, project_slug="nex-manager")
+    assert len(fails) == 1
+    assert "pg8000" in fails[0]
+    assert warns == []
+
+
+def test_detect_sqlalchemy_pg_drivers_root_pyproject_fallback(tmp_path):
+    """No backend/pyproject.toml → fall back to the root pyproject (nex-asistent/nex-studio layout)."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / "pyproject.toml").write_text(_PG8000_PYPROJECT)
+    assert P.detect_sqlalchemy_pg_drivers(project) == {"pg8000"}
+
+
+def test_detect_sqlalchemy_pg_drivers_pep621(tmp_path):
+    """A PEP-621 ``[project].dependencies`` list parses (bare name taken up to the first version specifier)."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / "pyproject.toml").write_text(
+        textwrap.dedent(
+            """
+            [project]
+            name = "demo"
+            dependencies = ["pg8000>=1.31", "fastapi"]
+            """
+        )
+    )
+    assert P.detect_sqlalchemy_pg_drivers(project) == {"pg8000"}

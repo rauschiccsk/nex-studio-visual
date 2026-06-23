@@ -730,3 +730,172 @@ async def test_fast_fix_deploy_null_slug_keeps_its_own_skip_message(db_session) 
     assert note.payload == {"uat_deploy": {"skipped": True}}
     # The fast-fix skip must NOT use the full-flow wording.
     assert "Žiadny UAT nakonfigurovaný" not in state.next_action
+
+
+# ---------------------------------------------------------------------------
+# H2 (CR-2): the engine RE-PROVISIONS a failed/stale UAT render on retry (self-heal) instead of re-`up`-ing a
+# render the image can't import — while PRESERVING a working current-iteration UAT (the regression guard).
+# ---------------------------------------------------------------------------
+
+
+def _uat_note(db, version_id, payload, stage: str = "release"):
+    return orchestrator._record_message(
+        db,
+        version_id=version_id,
+        stage=stage,
+        author="system",
+        recipient="director",
+        kind="notification",
+        content="uat_deploy note",
+        payload=payload,
+    )
+
+
+def _verdict(db, version_id, verdict: str = "PASS"):
+    """Record a gate_g verdict — this is what moves :func:`_iteration_boundary_seq`."""
+    return orchestrator._record_message(
+        db,
+        version_id=version_id,
+        stage="gate_g",
+        author="director",
+        recipient="auditor",
+        kind="verdict",
+        content=verdict,
+        payload={"verdict": verdict},
+    )
+
+
+def test_prior_uat_deploy_failed_predicate(db_session) -> None:
+    """Unit the predicate across every branch: None→False, skipped→False, ok:False→True, ok:True (current
+    iteration)→False, ok:True (prior iteration)→True. seq is DB-assigned (Identity), so recording order ⇒
+    seq order: a verdict recorded AFTER a deploy note moves the iteration boundary PAST it (→ stale)."""
+    R = orchestrator._uat_render_needs_reprovision
+
+    # (a) no deploy ever recorded → nothing to heal.
+    v_none, _ = _seed(db_session, repo_url="https://github.com/x/y", uat_slug="demo")
+    assert R(db_session, v_none) is False
+
+    # (b) a skipped deploy → nothing to heal.
+    v_skip, _ = _seed(db_session, repo_url="https://github.com/x/y", uat_slug="demo")
+    _uat_note(db_session, v_skip, {"uat_deploy": {"skipped": True}})
+    assert R(db_session, v_skip) is False
+
+    # (c) the latest deploy FAILED (NARROW core) → reprovision.
+    v_fail, _ = _seed(db_session, repo_url="https://github.com/x/y", uat_slug="demo")
+    _uat_note(db_session, v_fail, {"uat_deploy": {"uat_slug": "demo", "ok": False, "detail": "boom"}})
+    assert R(db_session, v_fail) is True
+
+    # (d) ok:True recorded AFTER the boundary verdict (current iteration) → preserve the working UAT.
+    v_cur, _ = _seed(db_session, repo_url="https://github.com/x/y", uat_slug="demo")
+    _verdict(db_session, v_cur)  # boundary
+    _uat_note(db_session, v_cur, {"uat_deploy": {"uat_slug": "demo", "ok": True, "detail": "OK"}})
+    assert R(db_session, v_cur) is False
+
+    # (e) ok:True from a PRIOR iteration (a newer verdict moved the boundary past it) → stale → reprovision.
+    v_prior, _ = _seed(db_session, repo_url="https://github.com/x/y", uat_slug="demo")
+    _uat_note(db_session, v_prior, {"uat_deploy": {"uat_slug": "demo", "ok": True, "detail": "OK"}})
+    _verdict(db_session, v_prior)  # new iteration boundary, seq > the deploy note
+    assert R(db_session, v_prior) is True
+
+
+@pytest.mark.asyncio
+async def test_full_flow_retry_after_failed_deploy_reprovisions(db_session, monkeypatch) -> None:
+    """Full-flow: compose present + a prior FAILED deploy → provision_uat IS called (re-render the broken
+    render) → _run_uat_deploy → awaiting_director."""
+    version_id, state = _seed(db_session, repo_url="https://github.com/rauschiccsk/nex-demo", uat_slug="demo")
+    _uat_note(db_session, version_id, {"uat_deploy": {"uat_slug": "demo", "ok": False, "detail": "boom"}})
+    monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: True)
+
+    prov = {"called": False}
+
+    def _provision(project_slug, uat_slug, *, version):
+        prov["called"] = True
+        return object()
+
+    monkeypatch.setattr(orchestrator.uat_provisioner, "provision_uat", _provision)
+
+    async def _deploy(project_slug, uat_slug):
+        return True, "OK"
+
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _deploy)
+
+    await orchestrator._release_auto_uat_deploy(db_session, state)
+
+    assert prov["called"] is True, "a failed render must be re-provisioned, not re-`up`-ed verbatim"
+    assert state.status == "awaiting_director"
+    assert _director_notes(db_session, version_id)[-1].payload == {
+        "uat_deploy": {"uat_slug": "demo", "ok": True, "detail": "OK"}
+    }
+
+
+@pytest.mark.asyncio
+async def test_full_flow_redeploy_after_success_does_not_reprovision(db_session, monkeypatch) -> None:
+    """The preserve-working-UAT regression guard (MANDATORY): compose present + a prior SUCCESSFUL
+    current-iteration deploy → provision_uat is NEVER called (redeploy only)."""
+    version_id, state = _seed(db_session, repo_url="https://github.com/rauschiccsk/nex-demo", uat_slug="demo")
+    _uat_note(db_session, version_id, {"uat_deploy": {"uat_slug": "demo", "ok": True, "detail": "OK"}})
+    monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: True)
+
+    def _no_provision(*a, **kw):
+        raise AssertionError("a working current-iteration UAT must NOT be re-provisioned")
+
+    monkeypatch.setattr(orchestrator.uat_provisioner, "provision_uat", _no_provision)
+
+    async def _deploy(project_slug, uat_slug):
+        return True, "OK"
+
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _deploy)
+
+    await orchestrator._release_auto_uat_deploy(db_session, state)
+
+    assert state.status == "awaiting_director"
+    assert state.next_action == "Nasadené na UAT — over a akceptuj."
+
+
+@pytest.mark.asyncio
+async def test_fast_fix_retry_after_failed_deploy_reprovisions(db_session, monkeypatch) -> None:
+    """Fast-fix mirror: compose present + a prior FAILED deploy → provision_uat IS called before redeploy."""
+    version_id, state = _seed(db_session, repo_url=None, uat_slug="demo", flow_type="fast_fix")
+    _uat_note(db_session, version_id, {"uat_deploy": {"uat_slug": "demo", "ok": False, "detail": "boom"}})
+    monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: True)
+
+    prov = {"called": False}
+
+    def _provision(project_slug, uat_slug, *, version):
+        prov["called"] = True
+        return object()
+
+    monkeypatch.setattr(orchestrator.uat_provisioner, "provision_uat", _provision)
+
+    async def _deploy(project_slug, uat_slug):
+        return True, "OK"
+
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _deploy)
+
+    await orchestrator._fast_fix_auto_deploy(db_session, state)
+
+    assert prov["called"] is True
+    assert state.status == "awaiting_director"
+
+
+@pytest.mark.asyncio
+async def test_fast_fix_redeploy_after_success_does_not_reprovision(db_session, monkeypatch) -> None:
+    """Fast-fix mirror of the regression guard: a prior SUCCESSFUL current-iteration deploy → no re-provision."""
+    version_id, state = _seed(db_session, repo_url=None, uat_slug="demo", flow_type="fast_fix")
+    _uat_note(db_session, version_id, {"uat_deploy": {"uat_slug": "demo", "ok": True, "detail": "OK"}})
+    monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: True)
+
+    def _no_provision(*a, **kw):
+        raise AssertionError("a working current-iteration fast-fix UAT must NOT be re-provisioned")
+
+    monkeypatch.setattr(orchestrator.uat_provisioner, "provision_uat", _no_provision)
+
+    async def _deploy(project_slug, uat_slug):
+        return True, "OK"
+
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _deploy)
+
+    await orchestrator._fast_fix_auto_deploy(db_session, state)
+
+    assert state.status == "awaiting_director"
+    assert state.next_action == "Nasadené na UAT — over a akceptuj."
