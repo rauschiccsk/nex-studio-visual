@@ -776,7 +776,6 @@ def _uat_render_needs_reprovision(db: Session, version_id: uuid.UUID) -> bool:
     nex-manager dogfood case). This self-heals it WITHOUT clobbering a working UAT. Reads the LATEST
     ``uat_deploy`` notification (the same one :func:`_latest_uat_deploy` surfaces) plus its ``seq``:
 
-    * no deploy ever recorded / a ``skipped`` deploy → ``False`` (nothing to heal).
     * ``ok is False`` (the deploy FAILED — the proven broken-render case) → ``True`` (NARROW core).
     * ``ok is True`` → ``True`` **iff** the deploy note's seq is BEFORE the current iteration boundary
       (:func:`_iteration_boundary_seq`, the latest ``verdict`` seq — the SAME anchor
@@ -785,6 +784,10 @@ def _uat_render_needs_reprovision(db: Session, version_id: uuid.UUID) -> bool:
       deploy from a PRIOR iteration has a newer verdict past it → seq < boundary → ``True`` (the render is
       stale w.r.t. the new code → re-render, idempotent, secrets preserved). For the fast-fix lane (no
       gate_g verdict) the boundary is 0, so any ``ok is True`` note is treated as current-iteration → preserved.
+    * no deploy ever recorded / a ``skipped`` / an indeterminate note → the note says nothing about the
+      on-disk render, so the **3rd trigger** (CR-R2-2, :func:`_existing_render_fails_h1`) self-heals the
+      nex-manager orphan: an EXISTING render whose on-disk ``.env`` fails the H1 driver↔URL pair → ``True``;
+      a render that PASSES H1 (or no render on disk) → ``False`` (nothing to heal).
     """
     rows = db.execute(
         select(PipelineMessage.seq, PipelineMessage.payload)
@@ -801,13 +804,74 @@ def _uat_render_needs_reprovision(db: Session, version_id: uuid.UUID) -> bool:
         if isinstance(payload, dict) and isinstance(payload.get("uat_deploy"), dict):
             deploy_seq, deploy = seq, payload["uat_deploy"]
             break
-    if deploy is None or deploy.get("skipped"):
+    if deploy is not None and not deploy.get("skipped"):
+        if deploy.get("ok") is False:
+            return True  # the deploy FAILED — re-render the broken render (NARROW core).
+        if deploy.get("ok") is True:
+            # A current-iteration success is recorded AFTER the boundary verdict (seq > boundary) → preserved
+            # (working UAT); a prior-iteration success has a newer verdict past it (seq < boundary) → stale.
+            return deploy_seq < _iteration_boundary_seq(db, version_id)
+    # 3rd trigger (CR-R2-2): no deploy note / a skip note / an indeterminate note — the note tells us nothing
+    # about the on-disk render. Self-heal the nex-manager orphan: an EXISTING render whose on-disk .env FAILS
+    # the H1 driver↔URL pair (a skip note but a non-importable DATABASE_URL that would otherwise be re-`up`-ed
+    # verbatim). Reuses H1 verbatim; a render that PASSES H1 stays untouched (predicate stays False).
+    return _existing_render_fails_h1(db, version_id)
+
+
+def _existing_render_fails_h1(db: Session, version_id: uuid.UUID) -> bool:
+    """Whether an EXISTING UAT render's on-disk ``.env`` FAILS the H1 driver↔URL validator pair (CR-R2-2).
+
+    The 3rd :func:`_uat_render_needs_reprovision` trigger — the nex-manager orphan signature: a skip / no
+    deploy note, yet ``/opt/uat/<uat_slug>/.env`` carries a non-importable ``DATABASE_URL`` (bare
+    ``postgresql://`` while the source ships pg8000) that :func:`_run_uat_deploy` would re-``up`` verbatim →
+    identical failure. Reuses H1 VERBATIM (``detect_sqlalchemy_pg_drivers`` on the source project +
+    ``validate_rendered_db_drivers`` on the rendered ``.env``) — no new validation logic. ``False`` when the
+    project is unresolvable, the UAT compose / ``.env`` is absent or unreadable, or the render PASSES H1
+    (preserve-working-UAT). NEVER raises."""
+    project = db.execute(
+        select(Project).join(Version, Version.project_id == Project.id).where(Version.id == version_id)
+    ).scalar_one_or_none()
+    if project is None:
         return False
-    if deploy.get("ok") is False:
-        return True
-    if deploy.get("ok") is True:
-        return deploy_seq < _iteration_boundary_seq(db, version_id)
-    return False
+    try:
+        uat_slug = project.uat_slug or uat_provisioner.derive_uat_slug(project)
+    except (ValueError, TypeError):
+        return False
+    if not _uat_compose_exists(uat_slug):
+        return False
+    env_path = UAT_ROOT / uat_slug / ".env"
+    if not env_path.is_file():
+        return False
+    try:
+        env_text = env_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    declared = uat_provisioner.detect_sqlalchemy_pg_drivers(claude_agent.PROJECTS_ROOT / project.slug)
+    fail_msgs, _ = uat_provisioner.validate_rendered_db_drivers(env_text, declared, project_slug=project.slug)
+    return bool(fail_msgs)
+
+
+def _project_is_deployable(db: Session, version_id: uuid.UUID) -> bool:
+    """Whether the version's project is STRUCTURALLY deployable — its source compose ships BOTH a backend
+    and a db service (CR-R2-1 #1b).
+
+    Deployability is keyed on the actual compose structure, NOT the ``uat_slug`` proxy: after #1a every
+    project carries a ``uat_slug``, so the proxy would over-block a pure-CLI/lib project. A backend+db stack
+    is the signature of an app that MUST have a live UAT before it can be marked done; a pure-lib project
+    (no backend+db) returns ``False`` → it completes normally (the honest "bez UAT testu" branch). Any
+    resolution / parse failure (no project, no ``source_path``, missing or unparseable compose) → ``False``
+    (never block on an indeterminate structure)."""
+    project = db.execute(
+        select(Project).join(Version, Version.project_id == Project.id).where(Version.id == version_id)
+    ).scalar_one_or_none()
+    if project is None or not project.source_path:
+        return False
+    try:
+        compose = uat_provisioner.load_source_compose(Path(project.source_path))
+        roles = uat_provisioner.identify_service_roles(compose["services"])
+    except Exception:  # noqa: BLE001 — an indeterminate compose must never block completion.
+        return False
+    return roles["backend"] is not None and roles["db"] is not None
 
 
 def _gate_e_open_findings(db: Session, version_id: uuid.UUID) -> int:
@@ -6355,6 +6419,16 @@ async def apply_action(
         if state.flow_type == "fast_fix" and prev_stage == "kickoff" and state.current_stage == "build":
             fast_fix.ensure_build_task(db, version_id)
         if state.current_stage == "done":
+            # CR-R2-1 (#1b): the SAME no-silent-done-without-UAT guard as uat_accept — applied here too,
+            # else a Director who `approve`s their way to done bypasses it. A structurally-deployable app
+            # (backend+db) must have a real UAT deploy recorded; a pure-CLI/lib project completes normally.
+            deploy = _latest_uat_deploy(db, version_id)
+            uat_deployed = deploy is not None and deploy.get("ok") is True and not deploy.get("skipped")
+            if not uat_deployed and _project_is_deployable(db, version_id):
+                raise OrchestratorError(
+                    "Reálny UAT nebol nasadený — najprv provision + deploy (alebo retry). "
+                    "Bez živého UAT nemožno dokončiť nasaditeľný projekt."
+                )
             state.current_actor = "director"
             state.status = "done"
             state.next_action = "Pipeline dokončená."
@@ -6619,6 +6693,13 @@ async def apply_action(
         # the no-UAT completion now stays consistent with that honest skip.
         deploy = _latest_uat_deploy(db, version_id)
         uat_deployed = deploy is not None and deploy.get("ok") is True and not deploy.get("skipped")
+        # CR-R2-1 (#1b): never silently finish a STRUCTURALLY-deployable app (backend+db) without a real
+        # UAT deploy — fail loud (no override). A pure-CLI/lib project (not deployable) completes normally.
+        if not uat_deployed and _project_is_deployable(db, version_id):
+            raise OrchestratorError(
+                "Reálny UAT nebol nasadený — najprv provision + deploy (alebo retry). "
+                "Bez živého UAT nemožno dokončiť nasaditeľný projekt."
+            )
         state.current_stage = "done"
         state.current_actor = "director"
         state.status = "done"

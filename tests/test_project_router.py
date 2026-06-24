@@ -163,6 +163,29 @@ class TestProjectRouter:
         assert body["created_at"]
         assert body["updated_at"]
 
+    def test_create_project_sets_derivable_uat_slug(self, router_client, creator, db_session):
+        """CR-R2-1 (#1a): Create-Project sets uat_slug at creation (nex- prefix stripped) so a deployable
+        app carries its UAT target from the start."""
+        from sqlalchemy import select
+
+        from backend.db.models.projects import Project
+
+        resp = router_client.post("/api/v1/projects", json=_payload(creator.id, name="Nex Foo", slug="nex-foo"))
+        assert resp.status_code == 201, resp.text
+        project = db_session.execute(select(Project).where(Project.slug == "nex-foo")).scalar_one()
+        assert project.uat_slug == "foo"
+
+    def test_create_project_underivable_uat_slug_does_not_500(self, router_client, creator, monkeypatch):
+        """CR-R2-1 (#1a): an underivable uat_slug must NOT 500 the create — the ValueError is logged +
+        swallowed (the Phase-3 lazy derive stays the safety net)."""
+
+        def _raise(*_a, **_k):
+            raise ValueError("underivable slug")
+
+        monkeypatch.setattr("backend.services.project.set_uat_slug", _raise)
+        resp = router_client.post("/api/v1/projects", json=_payload(creator.id, name="Beta", slug="beta-proj"))
+        assert resp.status_code == 201, resp.text
+
     def test_create_duplicate_name_returns_409(self, router_client, creator):
         base = _payload(creator.id, name="DupName")
         assert router_client.post("/api/v1/projects", json=base).status_code == 201
@@ -378,9 +401,17 @@ class TestProjectRouter:
         assert resp.status_code == 204
         assert calls == ["tear-slug"]  # teardown invoked with the project's uat_slug
 
-    def test_delete_without_uat_slug_skips_teardown(self, router_client, creator, monkeypatch):
-        """No uat_slug → no UAT to tear down (no-op, never calls teardown)."""
+    def test_delete_without_uat_slug_skips_teardown(self, router_client, creator, db_session, monkeypatch):
+        """No uat_slug → no UAT to tear down (no-op, never calls teardown).
+
+        CR-R2-1 (#1a) sets a uat_slug at creation, so the None branch is exercised by explicitly clearing it
+        on the row (mirrors the sibling's direct-row set — uat_slug has no create/update API surface)."""
+        from backend.db.models.projects import Project
+
         created = router_client.post("/api/v1/projects", json=_payload(creator.id)).json()
+        proj = db_session.get(Project, uuid.UUID(created["id"]))
+        proj.uat_slug = None
+        db_session.flush()
 
         calls = []
         monkeypatch.setattr(

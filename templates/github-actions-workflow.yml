@@ -1,7 +1,11 @@
 # CI workflow template — bootstrapped via NEX Studio Create Project K-005.
 #
-# Default 3-job pipeline: lint + test + build. Adjust per-project as needed.
+# Default 4-job pipeline: lint + test + build + migrate. Adjust per-project as needed.
 # Triggers on push to main + pull_request to main.
+#
+# `{{PROJECT_SLUG}}` is substituted by NEX Studio's _wire_cicd_workflow at scaffold
+# time → `runs-on: andros-ubuntu-<slug>` (ICC D-009: all CI on self-hosted runners;
+# the label is the one registered via `--labels andros-ubuntu-<slug>`).
 #
 # Per F-004 K-005 spec §3.5 — copied to new project as
 # `.github/workflows/ci.yml` when "Enable CI/CD" checkbox is selected.
@@ -17,7 +21,7 @@ on:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: andros-ubuntu-{{PROJECT_SLUG}}
     steps:
       - uses: actions/checkout@v6
 
@@ -65,7 +69,7 @@ jobs:
           npm run lint
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: andros-ubuntu-{{PROJECT_SLUG}}
     needs: lint
     steps:
       - uses: actions/checkout@v6
@@ -107,7 +111,7 @@ jobs:
         run: cd frontend && npm test -- --run
 
   build:
-    runs-on: ubuntu-latest
+    runs-on: andros-ubuntu-{{PROJECT_SLUG}}
     needs: test
     steps:
       - uses: actions/checkout@v6
@@ -115,3 +119,42 @@ jobs:
       - name: Docker compose build
         if: ${{ hashFiles('docker-compose.yml') != '' }}
         run: docker compose build
+
+  # migrate — boots the compose `db` + runs the `migrate` service (alembic upgrade
+  # head) against a REAL Postgres. Catches a DB driver<->URL mismatch (the
+  # pg8000/psycopg2 dogfood bug) that unit fixtures miss: alembic runs ONLINE here,
+  # so the rendered `postgresql+pg8000://` DSN is actually dialed (CR-R2-3 / H3).
+  # Double-guarded: hashFiles('docker-compose.yml') (no-compose scaffolds skip) AND
+  # the compose actually defining a `migrate` service — a scaffold stub may not ship
+  # one, so the gate skips cleanly (never false-red).
+  migrate:
+    runs-on: andros-ubuntu-{{PROJECT_SLUG}}
+    needs: build
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Migrate against real Postgres (alembic online — exercises the rendered DB driver)
+        if: ${{ hashFiles('docker-compose.yml') != '' }}
+        run: |
+          set -euo pipefail
+          # A scaffold stub may not define a `migrate` service — skip cleanly (never false-red).
+          if ! docker compose config --services | grep -qx migrate; then
+            echo "no 'migrate' service in compose — skipping migrate gate"
+            exit 0
+          fi
+          # Render a CI .env from .env.example: keep the DATABASE_URL scheme verbatim
+          # (the +driver is what we exercise), rewrite only host/creds to the `db` service.
+          python3 scripts/ci_render_dotenv.py
+          docker compose up -d db
+          cid=$(docker compose ps -q db)
+          for i in $(seq 1 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' "$cid" 2>/dev/null || echo unknown)
+            echo "db health [$i]: $status"
+            [ "$status" = healthy ] && break
+            sleep 2
+          done
+          docker compose run --rm migrate
+
+      - name: Tear down
+        if: ${{ always() && hashFiles('docker-compose.yml') != '' }}
+        run: docker compose down -v

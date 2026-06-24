@@ -21,6 +21,8 @@ NEX_STUDIO_TEMPLATES = Path("/opt/projects/nex-studio/templates")
 CICD_TEMPLATE = NEX_STUDIO_TEMPLATES / "github-actions-workflow.yml"
 # gate-g-hardening GAP 1 (CR-B): the behavioural release-acceptance script the engine runs at gate_g.
 RELEASE_SMOKE_TEMPLATE = NEX_STUDIO_TEMPLATES / "release_smoke_test.sh"
+# CR-R2-3 (#3): the CI `migrate` job's dotenv renderer — shipped alongside ci.yml so the gate can run.
+CI_RENDER_HELPER_TEMPLATE = NEX_STUDIO_TEMPLATES / "ci_render_dotenv.py"
 SMOKE_BUILD_TIMEOUT = 300  # 5 min — minimal smoke is docker compose build only
 SMOKE_FULL_TIMEOUT = 600  # 10 min — full smoke incl up + health
 CICD_TIMEOUT = 60
@@ -208,8 +210,41 @@ def _seed_release_smoke_test(target: Path, slug: str) -> None:
     logger.info("release_smoke_test.sh seeded (slug=%s)", slug)
 
 
+def _seed_ci_render_helper(target: Path, slug: str) -> None:
+    """CR-R2-3 (#3): seed ``scripts/ci_render_dotenv.py`` into the new project (mirrors the
+    ``_seed_release_smoke_test`` copy-pattern). The CI ``migrate`` job runs it to render a CI ``.env`` from
+    ``.env.example`` with the ``DATABASE_URL`` scheme preserved verbatim (the ``+pg8000`` driver is what the
+    online alembic migrate exercises). Best-effort — a missing template or a copy error is logged as a
+    warning, never raised. Idempotent: an existing project helper is preserved (never clobber a hand-tuned
+    one)."""
+    if not CI_RENDER_HELPER_TEMPLATE.is_file():
+        logger.warning("ci_render_dotenv.py seed SKIPPED — template missing at %s", CI_RENDER_HELPER_TEMPLATE)
+        return
+
+    scripts_dir = target / "scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    dest = scripts_dir / "ci_render_dotenv.py"
+    if dest.is_file():
+        logger.info("ci_render_dotenv.py seed SKIPPED — already exists (slug=%s)", slug)
+        return
+
+    try:
+        shutil.copy2(CI_RENDER_HELPER_TEMPLATE, dest)
+        dest.chmod(dest.stat().st_mode | 0o111)  # +x (CI invokes it via `python3`, but keep it executable)
+    except OSError as exc:
+        logger.warning("ci_render_dotenv.py seed failed (slug=%s): %s", slug, exc)
+        return
+
+    logger.info("ci_render_dotenv.py seeded (slug=%s)", slug)
+
+
 def _wire_cicd_workflow(target: Path, slug: str) -> None:
-    """K-005: copy CI template + commit + push."""
+    """K-005: render the CI template (substitute ``{{PROJECT_SLUG}}`` → self-hosted ``runs-on``), seed the
+    ``migrate`` job's dotenv helper, commit + push.
+
+    CR-R2-3 (#3): the template is RENDERED, not flat-copied — its ``runs-on`` carries a ``{{PROJECT_SLUG}}``
+    token that becomes ``andros-ubuntu-<slug>`` (ICC D-009: all CI on self-hosted runners). The ``migrate``
+    job runs ``scripts/ci_render_dotenv.py``, so that helper is seeded + committed alongside ``ci.yml``."""
     if not CICD_TEMPLATE.is_file():
         logger.warning(
             "K-005 CI/CD wire-up SKIPPED — template missing at %s",
@@ -225,11 +260,22 @@ def _wire_cicd_workflow(target: Path, slug: str) -> None:
         logger.info("K-005 CI/CD SKIPPED — ci.yml already exists (slug=%s)", slug)
         return
 
-    shutil.copy2(CICD_TEMPLATE, ci_yml)
+    # Render (not flat-copy): substitute the {{PROJECT_SLUG}} token so runs-on targets the project's
+    # registered self-hosted label (andros-ubuntu-<slug>). A naive literal replace leaves GitHub's own
+    # `${{ … }}` / Go-template `{{.State.…}}` expressions untouched (the token is the exact {{PROJECT_SLUG}}).
+    rendered = CICD_TEMPLATE.read_text(encoding="utf-8").replace("{{PROJECT_SLUG}}", slug)
+    ci_yml.write_text(rendered, encoding="utf-8")
+
+    # Seed the migrate job's dotenv helper so the CI `migrate` step (`python3 scripts/ci_render_dotenv.py`)
+    # has it in the repo. Committed below alongside ci.yml only if it actually landed (best-effort seed).
+    _seed_ci_render_helper(target, slug)
+    paths_to_add = [".github/workflows/ci.yml"]
+    if (target / "scripts" / "ci_render_dotenv.py").is_file():
+        paths_to_add.append("scripts/ci_render_dotenv.py")
 
     # Commit + push
     add_result = subprocess.run(
-        ["git", "-C", str(target), "add", ".github/workflows/ci.yml"],
+        ["git", "-C", str(target), "add", *paths_to_add],
         capture_output=True,
         text=True,
         timeout=CICD_TIMEOUT,

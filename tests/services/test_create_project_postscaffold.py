@@ -269,6 +269,70 @@ def test_cicd_push_failure_logged_not_raised(
     assert any("git push failed" in r.message for r in caplog.records)
 
 
+# ─── CR-R2-3 (#3): render self-hosted runs-on + migrate job + seed ci_render_dotenv.py ──────────
+
+
+def test_cicd_renders_self_hosted_runner_and_seeds_migrate_helper(tmp_path: Path) -> None:
+    """The wired ci.yml is RENDERED (runs-on: andros-ubuntu-<slug>), carries the guarded migrate job, and
+    scripts/ci_render_dotenv.py is seeded executable. Uses the REAL templates (no stub patch)."""
+    import stat
+
+    import yaml
+
+    target = tmp_path / "project"
+    target.mkdir()
+
+    with patch.object(mod, "subprocess") as ps:
+        ps.run.return_value = subprocess.CompletedProcess(args=["git"], returncode=0, stdout="", stderr="")
+        mod._wire_cicd_workflow(target, "demo-app")
+
+    ci_yml = target / ".github" / "workflows" / "ci.yml"
+    assert ci_yml.is_file()
+    text = ci_yml.read_text()
+    # D-009: self-hosted runner label, token fully substituted, no ubuntu-latest left.
+    assert "runs-on: andros-ubuntu-demo-app" in text
+    assert "ubuntu-latest" not in text
+    assert "{{PROJECT_SLUG}}" not in text
+    # migrate job present + double-guarded, and the rendered YAML still parses.
+    data = yaml.safe_load(text)
+    assert "migrate" in data["jobs"]
+    assert "grep -qx migrate" in text
+    assert "docker compose run --rm migrate" in text
+    # the migrate job's helper is seeded + executable.
+    helper = target / "scripts" / "ci_render_dotenv.py"
+    assert helper.is_file()
+    assert helper.stat().st_mode & stat.S_IXUSR
+    # the helper is git-added alongside ci.yml.
+    add_cmds = [c.args[0] for c in ps.run.call_args_list if "add" in c.args[0]]
+    assert add_cmds and "scripts/ci_render_dotenv.py" in add_cmds[0]
+
+
+def test_ci_render_helper_idempotent_when_exists(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """An existing scripts/ci_render_dotenv.py is preserved (never clobber a hand-tuned helper)."""
+    target = tmp_path / "project"
+    (target / "scripts").mkdir(parents=True)
+    (target / "scripts" / "ci_render_dotenv.py").write_text("# hand-tuned\n")
+
+    with caplog.at_level("INFO", logger="backend.services.create_project_postscaffold"):
+        mod._seed_ci_render_helper(target, "demo-app")
+
+    assert (target / "scripts" / "ci_render_dotenv.py").read_text() == "# hand-tuned\n"
+    assert any("already exists" in r.message for r in caplog.records)
+
+
+def test_ci_render_helper_template_missing(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Missing helper template → seed skipped (logged warning, never raised)."""
+    target = tmp_path / "project"
+    target.mkdir()
+
+    with patch.object(mod, "CI_RENDER_HELPER_TEMPLATE", tmp_path / "nonexistent.py"):
+        with caplog.at_level("WARNING", logger="backend.services.create_project_postscaffold"):
+            mod._seed_ci_render_helper(target, "demo-app")
+
+    assert any("template missing" in r.message for r in caplog.records)
+    assert not (target / "scripts" / "ci_render_dotenv.py").exists()
+
+
 # ─── _enable_branch_protection (O-3) ─────────────────────────────────────────
 
 

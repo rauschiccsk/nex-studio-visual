@@ -492,6 +492,15 @@ def create_project(
             VersionCreate(version_number="0.1.0", name="Initial prototype"),
             user_id=payload.created_by,
         )
+        # CR-R2-1 (#1a): set uat_slug at creation so a deployable app carries its UAT target from the
+        # start (early visibility — the completion guard + UAT board no longer wait for the Phase-3 lazy
+        # derive at first release). Idempotent (set_uat_slug flushes; the route's db.commit() persists it).
+        # An underivable slug must NOT 500 the create — log + continue; the Phase-3 lazy derive stays the
+        # safety net.
+        try:
+            project_service.set_uat_slug(db, project)
+        except ValueError as exc:
+            logger.warning("uat_slug not set at create for slug=%s: %s", project.slug, exc)
         # Stage 3 — filesystem bootstrap via icc-claude-template/init.sh.
         # Runs BEFORE db.commit() so a bootstrap failure rolls back the
         # DB row cleanly. KB live docs are already on disk at this point;

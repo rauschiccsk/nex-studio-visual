@@ -928,3 +928,151 @@ async def test_fast_fix_provision_failure_blocks(db_session, monkeypatch) -> Non
     note = _director_notes(db_session, version_id)[-1]
     assert note.payload["uat_deploy"]["ok"] is False
     assert note.payload["uat_deploy"]["provisioned"] is False
+
+
+# ---------------------------------------------------------------------------
+# CR-R2-2 (#2): the H2 3rd trigger self-heals a broken EXISTING render (a skip / no deploy note but a
+# non-importable on-disk DATABASE_URL) — keyed on the H1 validator pair, reused verbatim.
+# ---------------------------------------------------------------------------
+
+# A pg8000-only project's correct (driver-carrying) vs broken (bare) rendered DATABASE_URL.
+_BROKEN_ENV = "DATABASE_URL=postgresql://u:p@db:5432/d\nSECRET=x\n"
+_VALID_ENV = "DATABASE_URL=postgresql+pg8000://u:p@db:5432/d\nSECRET=x\n"
+
+
+def _arm_existing_render(monkeypatch, tmp_path, env_text: str, *, drivers) -> None:
+    """Arrange an on-disk UAT render under a tmp UAT_ROOT + a stubbed source-driver set (H1 reused verbatim)."""
+    uat_dir = tmp_path / "uat" / "demo"
+    uat_dir.mkdir(parents=True)
+    (uat_dir / ".env").write_text(env_text)
+    monkeypatch.setattr(orchestrator, "UAT_ROOT", tmp_path / "uat")
+    monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: True)
+    monkeypatch.setattr(orchestrator.uat_provisioner, "detect_sqlalchemy_pg_drivers", lambda p: drivers)
+
+
+def test_render_needs_reprovision_self_heals_broken_existing_env(db_session, monkeypatch, tmp_path) -> None:
+    """3rd trigger: NO deploy note, but the on-disk .env is a bare postgresql:// while the source ships
+    pg8000-only (the nex-manager orphan) → the H1 pair FAILs → re-provision (predicate True)."""
+    version_id, _ = _seed(db_session, repo_url="https://github.com/x/y", uat_slug="demo")
+    _arm_existing_render(monkeypatch, tmp_path, _BROKEN_ENV, drivers={"pg8000"})
+    assert orchestrator._uat_render_needs_reprovision(db_session, version_id) is True
+
+
+def test_render_needs_reprovision_keeps_valid_existing_env(db_session, monkeypatch, tmp_path) -> None:
+    """3rd trigger: an existing .env that PASSES H1 (postgresql+pg8000://) → no needless re-provision (False)."""
+    version_id, _ = _seed(db_session, repo_url="https://github.com/x/y", uat_slug="demo")
+    _arm_existing_render(monkeypatch, tmp_path, _VALID_ENV, drivers={"pg8000"})
+    assert orchestrator._uat_render_needs_reprovision(db_session, version_id) is False
+
+
+def test_render_needs_reprovision_skip_note_unchanged_when_no_env_on_disk(db_session, monkeypatch, tmp_path) -> None:
+    """A skip note with NO render on disk → nothing to heal (predicate stays False — note-based branch intact)."""
+    version_id, _ = _seed(db_session, repo_url="https://github.com/x/y", uat_slug="demo")
+    _uat_note(db_session, version_id, {"uat_deploy": {"skipped": True}})
+    # compose exists but there is no .env under the tmp UAT_ROOT → False.
+    monkeypatch.setattr(orchestrator, "UAT_ROOT", tmp_path / "uat")
+    monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: True)
+    assert orchestrator._uat_render_needs_reprovision(db_session, version_id) is False
+
+
+# ---------------------------------------------------------------------------
+# CR-R2-1 (#1b): no silent "done without UAT" for a STRUCTURALLY-deployable app (backend+db). The guard is
+# applied on BOTH paths to done — uat_accept AND the generic approve→done advance.
+# ---------------------------------------------------------------------------
+
+_DEPLOYABLE_COMPOSE = "services:\n  backend:\n    build: ./backend\n  db:\n    image: postgres:16\n"
+_BACKEND_ONLY_COMPOSE = "services:\n  backend:\n    build: ./backend\n"
+
+
+def _seed_with_source(db, src_dir, *, compose, uat_slug="demo", stage="release", status="awaiting_director"):
+    """Seed a release-stage version whose project has a source_path (optionally with a docker-compose.yml)."""
+    version_id, state = _seed(db, repo_url="https://github.com/x/y", uat_slug=uat_slug, stage=stage, status=status)
+    project = db.execute(
+        select(Project).join(Version, Version.project_id == Project.id).where(Version.id == version_id)
+    ).scalar_one()
+    src_dir.mkdir(parents=True, exist_ok=True)
+    if compose is not None:
+        (src_dir / "docker-compose.yml").write_text(compose)
+    project.source_path = str(src_dir)
+    db.flush()
+    return version_id, state
+
+
+def test_project_is_deployable_matrix(db_session, tmp_path) -> None:
+    """STRUCTURAL deployability = source compose ships BOTH backend + db; everything else → False."""
+    D = orchestrator._project_is_deployable
+
+    v_dep, _ = _seed_with_source(db_session, tmp_path / "dep", compose=_DEPLOYABLE_COMPOSE)
+    assert D(db_session, v_dep) is True
+
+    v_nodb, _ = _seed_with_source(db_session, tmp_path / "nodb", compose=_BACKEND_ONLY_COMPOSE)
+    assert D(db_session, v_nodb) is False
+
+    v_nocompose, _ = _seed_with_source(db_session, tmp_path / "empty", compose=None)
+    assert D(db_session, v_nocompose) is False
+
+    v_bad, _ = _seed_with_source(db_session, tmp_path / "bad", compose=": : not yaml : :\n  - [\n")
+    assert D(db_session, v_bad) is False
+
+    v_nosrc, _ = _seed(db_session, repo_url="https://github.com/x/y", uat_slug="demo")
+    assert D(db_session, v_nosrc) is False  # no source_path
+
+
+@pytest.mark.asyncio
+async def test_uat_accept_blocks_deployable_app_without_real_uat(db_session, tmp_path) -> None:
+    """A deployable app (backend+db) with NO successful deploy note → uat_accept FAILS LOUD (no silent done)."""
+    version_id, _ = _seed_with_source(db_session, tmp_path / "dep", compose=_DEPLOYABLE_COMPOSE)
+    with pytest.raises(orchestrator.OrchestratorError, match="Reálny UAT nebol nasadený"):
+        await orchestrator.apply_action(db_session, version_id=version_id, action="uat_accept")
+
+
+@pytest.mark.asyncio
+async def test_uat_accept_completes_non_deployable_lib_project(db_session, tmp_path) -> None:
+    """A pure-lib project (backend-only, no db) with no deploy → uat_accept completes normally (honest no-UAT)."""
+    version_id, _ = _seed_with_source(db_session, tmp_path / "lib", compose=_BACKEND_ONLY_COMPOSE)
+    out = await orchestrator.apply_action(db_session, version_id=version_id, action="uat_accept")
+    assert out.status == "done"
+    assert _last_completion_content(db_session, version_id) == NO_UAT_MSG
+
+
+@pytest.mark.asyncio
+async def test_uat_accept_deployable_with_real_uat_reaches_done(db_session, monkeypatch, tmp_path) -> None:
+    """The happy path on the uat_accept route: a deployable app WITH a real ok:True deploy → done (UAT claimed)."""
+    version_id, state = _seed_with_source(db_session, tmp_path / "dep", compose=_DEPLOYABLE_COMPOSE)
+    monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: True)
+
+    async def _deploy(project_slug, uat_slug):
+        return True, "OK"
+
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _deploy)
+    await orchestrator._release_auto_uat_deploy(db_session, state)  # records {uat_deploy: {ok: True}}
+
+    out = await orchestrator.apply_action(db_session, version_id=version_id, action="uat_accept")
+    assert out.status == "done"
+    assert _last_completion_content(db_session, version_id) == UAT_MSG
+
+
+@pytest.mark.asyncio
+async def test_generic_approve_blocks_deployable_app_without_real_uat(db_session, tmp_path) -> None:
+    """The SAME guard on the generic approve→done advance (else bypassable): release-stage deployable app
+    with no deploy → approve FAILS LOUD."""
+    version_id, _ = _seed_with_source(db_session, tmp_path / "dep", compose=_DEPLOYABLE_COMPOSE)
+    with pytest.raises(orchestrator.OrchestratorError, match="Reálny UAT nebol nasadený"):
+        await orchestrator.apply_action(db_session, version_id=version_id, action="approve")
+
+
+@pytest.mark.asyncio
+async def test_generic_approve_completes_deployable_with_real_uat(db_session, monkeypatch, tmp_path) -> None:
+    """The happy path on the generic approve→done advance: a deployable app WITH a real ok:True deploy → done."""
+    version_id, state = _seed_with_source(db_session, tmp_path / "dep", compose=_DEPLOYABLE_COMPOSE)
+    monkeypatch.setattr(orchestrator, "_uat_compose_exists", lambda slug: True)
+
+    async def _deploy(project_slug, uat_slug):
+        return True, "OK"
+
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _deploy)
+    await orchestrator._release_auto_uat_deploy(db_session, state)  # records {uat_deploy: {ok: True}}, awaiting
+
+    out = await orchestrator.apply_action(db_session, version_id=version_id, action="approve")
+    assert out.current_stage == "done"
+    assert out.status == "done"
