@@ -1,0 +1,14 @@
+# PROD override — pins NEX Studio to v1.0.0 images (no rebuild from source).
+# Run: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# Base compose (docker-compose.yml) provides all mounts/env/volumes/ports;
+# this override only PINS the images + sets APP_VERSION. Same project ("nex-studio")
+# + same volumes → cockpit data preserved.
+# Created 2026-06-25 (Dedo) — NEX Studio v1.0.0 stable PROD baseline.
+# v2.0.0 (Builder+Gate) development uses the base (build:) compose; do NOT `up --build` this prod view.
+services:
+  backend:
+    image: nex-studio-backend:v1.0.0
+    environment:
+      APP_VERSION: "1.0.0"
+  frontend:
+    image: nex-studio-frontend:v1.0.0
