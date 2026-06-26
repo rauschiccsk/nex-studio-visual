@@ -47,33 +47,33 @@ function mkState(stage: PipelineStage, status: PipelineStatus): PipelineState {
 
 describe("PipelineActionBar — gate action clarity", () => {
   it("at (kickoff, awaiting) shows Schváliť a pokračovať (Návrhár) + Vrátiť, never Spustiť", () => {
-    render(<PipelineActionBar state={mkState("kickoff", "awaiting_director")} inFlight={false} onAction={vi.fn()} />);
+    render(<PipelineActionBar state={mkState("kickoff", "awaiting_manazer")} inFlight={false} onAction={vi.fn()} />);
     expect(screen.getByText(APPROVE)).toBeInTheDocument();
     expect(screen.getByText("Vrátiť")).toBeInTheDocument();
     expect(screen.queryByText("Spustiť")).not.toBeInTheDocument();
   });
 
   it("at (gate_a, awaiting) still shows Schváliť a pokračovať (Návrhár) + Vrátiť", () => {
-    render(<PipelineActionBar state={mkState("gate_a", "awaiting_director")} inFlight={false} onAction={vi.fn()} />);
+    render(<PipelineActionBar state={mkState("gate_a", "awaiting_manazer")} inFlight={false} onAction={vi.fn()} />);
     expect(screen.getByText(APPROVE)).toBeInTheDocument();
     expect(screen.getByText("Vrátiť")).toBeInTheDocument();
   });
 
   it("renders a consequence line naming the next stage under Schváliť", () => {
-    render(<PipelineActionBar state={mkState("gate_a", "awaiting_director")} inFlight={false} onAction={vi.fn()} />);
+    render(<PipelineActionBar state={mkState("gate_a", "awaiting_manazer")} inFlight={false} onAction={vi.fn()} />);
     // gate_a → gate_b = "Rozhranie (API)"; v0.7.2 R-D sharpened the verb to "POKRAČUJE do ďalšej fázy".
     expect(screen.getByText(/POKRAČUJE do ďalšej fázy \(Rozhranie \(API\)\)/)).toBeInTheDocument();
   });
 
   it("relabeled approve still fires the 'approve' action", () => {
     const onAction = vi.fn();
-    render(<PipelineActionBar state={mkState("gate_a", "awaiting_director")} inFlight={false} onAction={onAction} />);
+    render(<PipelineActionBar state={mkState("gate_a", "awaiting_manazer")} inFlight={false} onAction={onAction} />);
     screen.getByText(APPROVE).click();
     expect(onAction).toHaveBeenCalledWith("approve");
   });
 
   it("hides 'Vrátiť Návrhárovi s odporúčaniami Koordinátora' when there is no Coordinator report", () => {
-    render(<PipelineActionBar state={mkState("gate_a", "awaiting_director")} inFlight={false} onAction={vi.fn()} />);
+    render(<PipelineActionBar state={mkState("gate_a", "awaiting_manazer")} inFlight={false} onAction={vi.fn()} />);
     expect(screen.queryByText(APPLY_COORD)).not.toBeInTheDocument();
   });
 
@@ -81,7 +81,7 @@ describe("PipelineActionBar — gate action clarity", () => {
     const onAction = vi.fn();
     render(
       <PipelineActionBar
-        state={mkState("gate_a", "awaiting_director")}
+        state={mkState("gate_a", "awaiting_manazer")}
         inFlight={false}
         hasCoordinatorReport
         onAction={onAction}
@@ -98,7 +98,7 @@ describe("PipelineActionBar — gate action clarity", () => {
     const onAction = vi.fn();
     render(
       <PipelineActionBar
-        state={mkState("gate_a", "awaiting_director")}
+        state={mkState("gate_a", "awaiting_manazer")}
         inFlight={false}
         hasCoordinatorReport
         onAction={onAction}
@@ -116,7 +116,7 @@ describe("PipelineActionBar — gate action clarity", () => {
   });
 
   it("at (gate_g, awaiting) shows the PASS/FAIL verdict, not Schváliť", () => {
-    render(<PipelineActionBar state={mkState("gate_g", "awaiting_director")} inFlight={false} onAction={vi.fn()} />);
+    render(<PipelineActionBar state={mkState("gate_g", "awaiting_manazer")} inFlight={false} onAction={vi.fn()} />);
     expect(screen.getByText("Verdikt PASS")).toBeInTheDocument();
     expect(screen.getByText("Verdikt FAIL")).toBeInTheDocument();
     expect(screen.queryByText(APPROVE)).not.toBeInTheDocument();
@@ -235,7 +235,7 @@ describe("PipelineActionBar — gate action clarity", () => {
     const onAction = vi.fn();
     const { rerender } = render(
       <PipelineActionBar
-        state={mkState("gate_g", "awaiting_director")}
+        state={mkState("gate_g", "awaiting_manazer")}
         inFlight={false}
         availableActions={["ask", "verdict"]} // NOT offered → button absent
         releaseAcceptanceSatisfied
@@ -246,7 +246,7 @@ describe("PipelineActionBar — gate action clarity", () => {
 
     rerender(
       <PipelineActionBar
-        state={mkState("gate_g", "awaiting_director")}
+        state={mkState("gate_g", "awaiting_manazer")}
         inFlight={false}
         availableActions={["ask", "verdict", "surgical_fix"]}
         releaseAcceptanceSatisfied
@@ -347,7 +347,7 @@ describe("PipelineActionBar — R4 block_reason authoritative (D1)", () => {
 describe("PipelineActionBar — Gate E per-question (revised §2)", () => {
   const gateE = (props: { gateEMode?: "question" | "boundary"; gateEGap?: boolean; onAction?: () => void }) => (
     <PipelineActionBar
-      state={mkState("gate_e", "awaiting_director")}
+      state={mkState("gate_e", "awaiting_manazer")}
       inFlight={false}
       gateEMode={props.gateEMode}
       gateEGap={props.gateEGap}
@@ -393,7 +393,7 @@ describe("PipelineActionBar — Gate E topic boundary (Phase 3)", () => {
   it("topic boundary shows continue + Ukončiť Gate E, not the generic ratify buttons", () => {
     render(
       <PipelineActionBar
-        state={mkState("gate_e", "awaiting_director")}
+        state={mkState("gate_e", "awaiting_manazer")}
         inFlight={false}
         gateEMode="boundary"
         onAction={vi.fn()}
@@ -410,7 +410,7 @@ describe("PipelineActionBar — Gate E topic boundary (Phase 3)", () => {
     const onAction = vi.fn();
     render(
       <PipelineActionBar
-        state={mkState("gate_e", "awaiting_director")}
+        state={mkState("gate_e", "awaiting_manazer")}
         inFlight={false}
         gateEMode="boundary"
         onAction={onAction}
@@ -423,7 +423,7 @@ describe("PipelineActionBar — Gate E topic boundary (Phase 3)", () => {
   it("Ukončiť Gate E is disabled while findings are open", () => {
     render(
       <PipelineActionBar
-        state={mkState("gate_e", "awaiting_director")}
+        state={mkState("gate_e", "awaiting_manazer")}
         inFlight={false}
         gateEMode="boundary"
         gateEOpenFindings={2}
@@ -437,7 +437,7 @@ describe("PipelineActionBar — Gate E topic boundary (Phase 3)", () => {
     const onAction = vi.fn();
     render(
       <PipelineActionBar
-        state={mkState("gate_e", "awaiting_director")}
+        state={mkState("gate_e", "awaiting_manazer")}
         inFlight={false}
         gateEMode="boundary"
         onAction={onAction}
@@ -451,7 +451,7 @@ describe("PipelineActionBar — Gate E topic boundary (Phase 3)", () => {
     const onAction = vi.fn();
     render(
       <PipelineActionBar
-        state={mkState("gate_e", "awaiting_director")}
+        state={mkState("gate_e", "awaiting_manazer")}
         inFlight={false}
         gateEMode="boundary"
         gateECoverageComplete
@@ -468,7 +468,7 @@ describe("PipelineActionBar — Gate E topic boundary (Phase 3)", () => {
   it("final sign-off is disabled while findings are open", () => {
     render(
       <PipelineActionBar
-        state={mkState("gate_e", "awaiting_director")}
+        state={mkState("gate_e", "awaiting_manazer")}
         inFlight={false}
         gateEMode="boundary"
         gateECoverageComplete
@@ -481,8 +481,8 @@ describe("PipelineActionBar — Gate E topic boundary (Phase 3)", () => {
 });
 
 describe("PipelineActionBar — build controls (CR-NS-020 CR-5)", () => {
-  it("offers the full build control set at build/awaiting_director", () => {
-    render(<PipelineActionBar state={mkState("build", "awaiting_director")} inFlight={false} onAction={vi.fn()} />);
+  it("offers the full build control set at build/awaiting_manazer", () => {
+    render(<PipelineActionBar state={mkState("build", "awaiting_manazer")} inFlight={false} onAction={vi.fn()} />);
     expect(screen.getByText("Schváliť build → Audit")).toBeInTheDocument();
     expect(screen.getByText("Pokračovať v builde")).toBeInTheDocument();
     expect(screen.getByText("Vrátiť úlohu")).toBeInTheDocument();
@@ -491,7 +491,7 @@ describe("PipelineActionBar — build controls (CR-NS-020 CR-5)", () => {
 
   it("fires continue_build / approve / end_build with no payload", () => {
     const onAction = vi.fn();
-    render(<PipelineActionBar state={mkState("build", "awaiting_director")} inFlight={false} onAction={onAction} />);
+    render(<PipelineActionBar state={mkState("build", "awaiting_manazer")} inFlight={false} onAction={onAction} />);
     screen.getByText("Pokračovať v builde").click();
     expect(onAction).toHaveBeenCalledWith("continue_build");
     screen.getByText("Schváliť build → Audit").click();
@@ -508,9 +508,9 @@ describe("PipelineActionBar — build controls (CR-NS-020 CR-5)", () => {
 });
 
 describe("PipelineActionBar — task_plan ratify gate (CR-NS-023)", () => {
-  it("offers Schváliť a pokračovať (Návrhár) + Vrátiť at task_plan/awaiting_director", () => {
+  it("offers Schváliť a pokračovať (Návrhár) + Vrátiť at task_plan/awaiting_manazer", () => {
     const onAction = vi.fn();
-    render(<PipelineActionBar state={mkState("task_plan", "awaiting_director")} inFlight={false} onAction={onAction} />);
+    render(<PipelineActionBar state={mkState("task_plan", "awaiting_manazer")} inFlight={false} onAction={onAction} />);
     expect(screen.getByText(APPROVE)).toBeInTheDocument();
     expect(screen.getByText("Vrátiť")).toBeInTheDocument();
     screen.getByText(APPROVE).click();
@@ -557,7 +557,7 @@ describe("PipelineActionBar — backend-authoritative available_actions (CR-NS-0
   it("renders only the backend-allowed buttons (drops Vrátiť when not allowed)", () => {
     render(
       <PipelineActionBar
-        state={mkState("gate_a", "awaiting_director")}
+        state={mkState("gate_a", "awaiting_manazer")}
         availableActions={["approve", "ask"]} // return deliberately omitted
         inFlight={false}
         onAction={vi.fn()}
@@ -580,7 +580,7 @@ describe("PipelineActionBar — build readiness + paused (CR-NS-030 fold)", () =
   it("disables 'Schváliť build → Audit' while tasks remain, enables it when all done", () => {
     const { rerender } = render(
       <PipelineActionBar
-        state={mkState("build", "awaiting_director")}
+        state={mkState("build", "awaiting_manazer")}
         availableActions={buildActions}
         allTasksDone={false}
         buildOpenFindings={0}
@@ -591,7 +591,7 @@ describe("PipelineActionBar — build readiness + paused (CR-NS-030 fold)", () =
     expect(screen.getByText("Schváliť build → Audit").closest("button")).toBeDisabled();
     rerender(
       <PipelineActionBar
-        state={mkState("build", "awaiting_director")}
+        state={mkState("build", "awaiting_manazer")}
         availableActions={buildActions}
         allTasksDone={true}
         buildOpenFindings={0}
@@ -605,7 +605,7 @@ describe("PipelineActionBar — build readiness + paused (CR-NS-030 fold)", () =
   it("disables 'Ukončiť build' while open findings remain", () => {
     render(
       <PipelineActionBar
-        state={mkState("build", "awaiting_director")}
+        state={mkState("build", "awaiting_manazer")}
         availableActions={buildActions}
         allTasksDone={true}
         buildOpenFindings={2}
@@ -647,7 +647,7 @@ describe("PipelineActionBar — accept_merged (WS-B2, CR-NS-031)", () => {
     const onAction = vi.fn();
     render(
       <PipelineActionBar
-        state={mkState("build", "awaiting_director")}
+        state={mkState("build", "awaiting_manazer")}
         availableActions={buildActions}
         allTasksDone={true}
         buildOpenFindings={1}
@@ -664,7 +664,7 @@ describe("PipelineActionBar — accept_merged (WS-B2, CR-NS-031)", () => {
   it("hides 'Uznať spoločný commit' on a clean build (no open findings)", () => {
     render(
       <PipelineActionBar
-        state={mkState("build", "awaiting_director")}
+        state={mkState("build", "awaiting_manazer")}
         availableActions={buildActions}
         allTasksDone={true}
         buildOpenFindings={0}
@@ -678,7 +678,7 @@ describe("PipelineActionBar — accept_merged (WS-B2, CR-NS-031)", () => {
   it("hides 'Uznať spoločný commit' when the backend omits accept_merged (allowed() gate)", () => {
     render(
       <PipelineActionBar
-        state={mkState("build", "awaiting_director")}
+        state={mkState("build", "awaiting_manazer")}
         availableActions={["approve", "continue_build", "return", "end_build", "ask"]} // accept_merged omitted
         allTasksDone={true}
         buildOpenFindings={1} // would show on findings alone — but the backend doesn't allow it
@@ -702,7 +702,7 @@ describe("PipelineActionBar — Coordinator proposal (E7, CR-NS-032)", () => {
     const onAction = vi.fn();
     render(
       <PipelineActionBar
-        state={mkState("build", "awaiting_director")}
+        state={mkState("build", "awaiting_manazer")}
         availableActions={["apply_coordinator_recommendation", "continue_build", "end_build", "return", "ask"]}
         coordinatorProposal={mkDirective("coordinator_move_baseline")}
         inFlight={false}
@@ -718,7 +718,7 @@ describe("PipelineActionBar — Coordinator proposal (E7, CR-NS-032)", () => {
   it("hides the proposal button when there is no executable proposal", () => {
     render(
       <PipelineActionBar
-        state={mkState("build", "awaiting_director")}
+        state={mkState("build", "awaiting_manazer")}
         availableActions={["apply_coordinator_recommendation", "continue_build", "end_build", "return", "ask"]}
         coordinatorProposal={null}
         inFlight={false}
@@ -731,7 +731,7 @@ describe("PipelineActionBar — Coordinator proposal (E7, CR-NS-032)", () => {
   it("labels a route_to_designer proposal by its effect (CR-NS-034)", () => {
     render(
       <PipelineActionBar
-        state={mkState("build", "awaiting_director")}
+        state={mkState("build", "awaiting_manazer")}
         availableActions={["apply_coordinator_recommendation", "continue_build", "end_build", "return", "ask"]}
         coordinatorProposal={mkDirective("coordinator_route_to_designer")}
         inFlight={false}
@@ -751,7 +751,7 @@ describe("PipelineActionBar — gate_g FAIL re-gate (CR-NS-057 §F2.4)", () => {
     const onAction = vi.fn();
     render(
       <PipelineActionBar
-        state={mkState("gate_g", "awaiting_director")}
+        state={mkState("gate_g", "awaiting_manazer")}
         availableActions={["verdict", "ask"]}
         regateProposal={proposal}
         inFlight={false}
@@ -767,7 +767,7 @@ describe("PipelineActionBar — gate_g FAIL re-gate (CR-NS-057 §F2.4)", () => {
     const onAction = vi.fn();
     render(
       <PipelineActionBar
-        state={mkState("gate_g", "awaiting_director")}
+        state={mkState("gate_g", "awaiting_manazer")}
         availableActions={["verdict", "ask"]}
         regateProposal={proposal}
         inFlight={false}
@@ -800,7 +800,7 @@ describe("PipelineActionBar — gate_g FAIL re-gate (CR-NS-057 §F2.4)", () => {
     const onAction = vi.fn();
     render(
       <PipelineActionBar
-        state={mkState("gate_g", "awaiting_director")}
+        state={mkState("gate_g", "awaiting_manazer")}
         availableActions={["verdict", "ask"]}
         inFlight={false}
         onAction={onAction}
@@ -816,7 +816,7 @@ describe("PipelineActionBar — gate_g release-acceptance PASS gate (gate-g-hard
     const onAction = vi.fn();
     render(
       <PipelineActionBar
-        state={mkState("gate_g", "awaiting_director")}
+        state={mkState("gate_g", "awaiting_manazer")}
         availableActions={["verdict", "rerun_release_audit"]}
         releaseAcceptanceSatisfied={false}
         inFlight={false}
@@ -835,7 +835,7 @@ describe("PipelineActionBar — gate_g release-acceptance PASS gate (gate-g-hard
     const onAction = vi.fn();
     render(
       <PipelineActionBar
-        state={mkState("gate_g", "awaiting_director")}
+        state={mkState("gate_g", "awaiting_manazer")}
         availableActions={["verdict"]}
         releaseAcceptanceSatisfied={true}
         inFlight={false}
@@ -851,7 +851,7 @@ describe("PipelineActionBar — gate_g release-acceptance PASS gate (gate-g-hard
   it("absent releaseAcceptanceSatisfied → permissive (PASS enabled), for backward-compat", () => {
     render(
       <PipelineActionBar
-        state={mkState("gate_g", "awaiting_director")}
+        state={mkState("gate_g", "awaiting_manazer")}
         availableActions={["verdict"]}
         inFlight={false}
         onAction={vi.fn()}
@@ -877,10 +877,10 @@ describe("PipelineActionBar — retry_publish (release publish)", () => {
     expect(onAction).toHaveBeenCalledWith("retry_publish");
   });
 
-  it("at (release, awaiting_director) shows 'Akceptovať UAT', never the publish button", () => {
+  it("at (release, awaiting_manazer) shows 'Akceptovať UAT', never the publish button", () => {
     render(
       <PipelineActionBar
-        state={mkState("release", "awaiting_director")}
+        state={mkState("release", "awaiting_manazer")}
         availableActions={["uat_accept", "ask", "return"]}
         inFlight={false}
         onAction={vi.fn()}

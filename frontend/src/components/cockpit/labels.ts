@@ -43,7 +43,7 @@ export const ROLE_LABELS: Record<PipelineParticipant, string> = {
   customer: "Zákazník",
   implementer: "Programátor",
   auditor: "Audítor",
-  director: "Director",
+  manazer: "Manažér",
   system: "Systém",
 };
 
@@ -84,7 +84,7 @@ export const TASK_STATUS_LABELS: Record<string, string> = {
 // ONE colour means exactly one thing across the whole cockpit, so it can't drift:
 //   green (emerald) = done / ok / pass
 //   blue  (sky)     = in_progress / working / currently active
-//   amber (yellow)  = waiting / todo / planned / awaiting_director
+//   amber (yellow)  = waiting / todo / planned / awaiting_manazer
 //   red             = error / fail / blocked
 //   neutral (slate) = idle / inactive
 // Components map a status → a tone here (single source of truth), then a tone → their
@@ -103,9 +103,9 @@ export const TASK_STATUS_TONE: Record<string, StatusTone> = {
 // Pipeline state status (pipeline_state.status) → tone.
 export const PIPELINE_STATUS_TONE: Record<string, StatusTone> = {
   agent_working: "blue",
-  awaiting_director: "amber",
+  awaiting_manazer: "amber",
   blocked: "red",
-  paused: "amber", // waiting on the Director to resume/end (CR-NS-035)
+  paused: "amber", // waiting on the Manažér to resume/end (CR-NS-035)
   done: "green",
 };
 
@@ -162,7 +162,7 @@ export const TONE_BANNER: Record<StatusTone, string> = {
 };
 
 // CR-2 (v0.7.3): the HIGH-CONTRAST sticky decision CTA banner — used (instead of the low-key TONE_BANNER) only
-// when status is awaiting_director / blocked, so a "your turn" board never reads as "stuck". Solid state-token
+// when status is awaiting_manazer / blocked, so a "your turn" board never reads as "stuck". Solid state-token
 // bg + fg + a left accent in the same fg (token-disciplined: the shared --color-state-* pairs carry light+dark,
 // no raw pastels). Tone-aware so it stays inside the unified palette (CR-NS-028): amber = awaiting, red = blocked.
 export const DECISION_BANNER: Partial<Record<StatusTone, string>> = {

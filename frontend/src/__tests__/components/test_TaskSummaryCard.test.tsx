@@ -17,7 +17,7 @@ function mkSummary(taskSummary: Record<string, unknown>): PipelineMessage {
     version_id: "22222222-2222-2222-2222-222222222222",
     stage: "build",
     author: "system",
-    recipient: "director",
+    recipient: "manazer",
     kind: "notification",
     content: "Úloha #5 — hotovo",
     status: "delivered",

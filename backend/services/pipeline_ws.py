@@ -4,7 +4,9 @@ A process-global, in-memory registry of live board connections per version. The
 ``POST /pipeline/{version_id}/action`` handler broadcasts ``state_changed`` /
 ``message_added`` to all sockets of that version; the same registry is the §9
 **presence signal** — Phase 5 reads ``present_director_ids`` to decide whether a
-Director needs a Telegram nudge (only when they have no live board socket).
+Manažér needs a Telegram nudge (only when they have no live board socket). (The
+method names keep the ``director`` slug — operator/status-VALUE relabel only,
+CR-V2-004; the engine-consumer re-wire is owned by CR-V2-009.)
 
 Single backend process is assumed (NEX Studio runs one); a multi-worker
 deployment would need an external pub/sub — explicitly out of scope.
@@ -28,7 +30,7 @@ logger = logging.getLogger(__name__)
 class _Conn:
     """One live board connection: the user + their current ``away`` annotation (E6, CR-NS-038).
 
-    ``away`` is the Director's explicit "stepped away from the computer" toggle — set via an inbound
+    ``away`` is the Manažér's explicit "stepped away from the computer" toggle — set via an inbound
     WS presence message; it does NOT affect presence/broadcast, only whether the Telegram nudge gate
     treats this connection as active."""
 
@@ -92,12 +94,12 @@ class PipelineWsRegistry:
 
     def active_director_ids(self, version_id: UUID) -> set[UUID]:
         """User ids with ≥1 **non-away** live board socket (E6, CR-NS-038) — the presence read the
-        Telegram-nudge gate uses, so an away Director (board open but stepped away) is still pinged."""
+        Telegram-nudge gate uses, so an away Manažér (board open but stepped away) is still pinged."""
         return {c.user_id for c in self._conns.get(version_id, {}).values() if not c.away}
 
     def away_director_ids(self, version_id: UUID) -> set[UUID]:
         """User ids with ≥1 live board socket explicitly toggled **away** (E6, CR-NS-038) — the
-        Director(s) who stepped away from an OPEN board and therefore want the out-of-band Telegram
+        Manažér(s) who stepped away from an OPEN board and therefore want the out-of-band Telegram
         nudge sent to their OWN chat (Class J fix). Same lock-free single-snapshot read as the siblings."""
         return {c.user_id for c in self._conns.get(version_id, {}).values() if c.away}
 

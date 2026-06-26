@@ -1,5 +1,5 @@
 // Orchestration Cockpit (F-007 §7). Backend owns the pipeline; this board is a
-// live view + Director action surface over it.
+// live view + Manažér action surface over it.
 
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -27,7 +27,7 @@ export default function CockpitPage() {
   const [inFlight, setInFlight] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  // CR-2 (v0.7.3): mark the browser tab when the Director must act, so a backgrounded "your turn" board is
+  // CR-2 (v0.7.3): mark the browser tab when the Manažér must act, so a backgrounded "your turn" board is
   // noticeable (a decision-needed state was too subdued — a healthy board read as "stuck"). Capture the app's
   // base title ONCE (ref) and restore it on a non-decision status + on cleanup/unmount, so the "(•) Na rade"
   // marker never leaks to another page.
@@ -36,8 +36,8 @@ export default function CockpitPage() {
   const titleStage = board?.state?.current_stage ?? null;
   useEffect(() => {
     const base = baseTitleRef.current;
-    if ((titleStatus === "awaiting_director" || titleStatus === "blocked") && titleStage) {
-      document.title = `(•) Na rade: Director — ${STAGE_LABELS[titleStage]}`;
+    if ((titleStatus === "awaiting_manazer" || titleStatus === "blocked") && titleStage) {
+      document.title = `(•) Na rade: Manažér — ${STAGE_LABELS[titleStage]}`;
     } else {
       document.title = base;
     }
@@ -96,7 +96,7 @@ export default function CockpitPage() {
 
       {/* A board-load error is suppressed while reconnecting — during a redeploy the snapshot fetch
           ALSO fails, and stacking a red error under the amber "reconnecting" banner is contradictory.
-          An actionError (a Director action that genuinely failed) always shows. */}
+          An actionError (a Manažér action that genuinely failed) always shows. */}
       {(actionError || (error && !reconnecting)) && (
         <div className="flex-shrink-0 border-b border-[var(--color-state-error-bg)] bg-[var(--color-state-error-bg)] px-4 py-2 text-xs text-[var(--color-state-error-fg)]">
           {actionError ?? error}

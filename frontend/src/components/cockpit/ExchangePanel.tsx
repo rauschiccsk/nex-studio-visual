@@ -48,18 +48,18 @@ function bannerText(state: PipelineState, errorBlock: boolean): string {
   switch (state.status) {
     case "agent_working":
       return `${role} pracuje na fáze ${stage}`;
-    case "awaiting_director":
-      return `Na rade: Director — posúď fázu ${stage}`;
+    case "awaiting_manazer":
+      return `Na rade: Manažér — posúď fázu ${stage}`;
     case "blocked": {
-      // R4 (D2): precise blocked banner from the AUTHORITATIVE block_reason — a question reads as a Director
+      // R4 (D2): precise blocked banner from the AUTHORITATIVE block_reason — a question reads as a Manažér
       // prompt; the three error reasons each read as a labelled "skús znova". NULL (legacy / unset) → the old
       // `errorBlock` heuristic, byte-for-byte the prior behaviour.
       const br = state.block_reason;
-      if (br === "agent_question") return `Na rade: Director — odpovedz ${role}-ovi`;
+      if (br === "agent_question") return `Na rade: Manažér — odpovedz ${role}-ovi`;
       if (br) return `${BLOCK_REASON_LABELS[br]} vo fáze ${stage} — skús znova`;
       return errorBlock
         ? `Agent zlyhal vo fáze ${stage} — skús znova`
-        : `Na rade: Director — odpovedz ${role}-ovi`;
+        : `Na rade: Manažér — odpovedz ${role}-ovi`;
     }
     case "paused":
       return "Build pozastavený — pokračuj alebo ukonči";
@@ -89,11 +89,11 @@ export function ExchangePanel({ board, inFlight, activity, onAction }: Props) {
   // done=green — never emerald-for-working.
   const tone = state ? PIPELINE_STATUS_TONE[state.status] ?? "neutral" : "neutral";
   const banner = state ? TONE_BANNER[tone] : "";
-  // CR-2 (v0.7.3): at awaiting_director / blocked the Director must act → render a HIGH-CONTRAST sticky CTA
+  // CR-2 (v0.7.3): at awaiting_manazer / blocked the Manažér must act → render a HIGH-CONTRAST sticky CTA
   // (instead of the low-key tonal banner) so a healthy "your turn" board never reads as "stuck".
   // agent_working / done / paused keep the low-key banner (no false alarm). DECISION_BANNER is tone-aware
   // (amber awaiting / red blocked) so the CTA stays inside the unified palette.
-  const decisionNeeded = state?.status === "awaiting_director" || state?.status === "blocked";
+  const decisionNeeded = state?.status === "awaiting_manazer" || state?.status === "blocked";
   const decisionBanner = DECISION_BANNER[tone];
   // R4 (D1): the FALLBACK heuristic for an error-block (agent crash/timeout escalates via a system
   // notification — its last message is authored by "system"). Now superseded by the authoritative

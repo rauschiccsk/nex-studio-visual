@@ -18,7 +18,7 @@ function mkMessage(overrides: Partial<PipelineMessage> = {}): PipelineMessage {
     version_id: "22222222-2222-2222-2222-222222222222",
     stage: "gate_a",
     author: "designer",
-    recipient: "director",
+    recipient: "manazer",
     kind: "gate_report",
     content: "hotovo",
     status: "delivered",

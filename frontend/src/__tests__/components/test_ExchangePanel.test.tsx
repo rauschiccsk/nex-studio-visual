@@ -24,7 +24,7 @@ function mkMsg(author: PipelineParticipant): PipelineMessage {
     version_id: "22222222-2222-2222-2222-222222222222",
     stage: "gate_a",
     author,
-    recipient: "director",
+    recipient: "manazer",
     kind: author === "system" ? "notification" : "question",
     content: "x",
     status: "delivered",
@@ -62,14 +62,14 @@ describe("ExchangePanel banner", () => {
     expect(screen.queryByText(/gate_a/)).not.toBeInTheDocument();
   });
 
-  it("awaiting_director → 'Na rade: Director — posúď fázu {stage}'", () => {
-    render(<ExchangePanel board={mkBoard("gate_g", "auditor", "awaiting_director")} inFlight={false} activity={[]} onAction={vi.fn()} />);
-    expect(screen.getByText("Na rade: Director — posúď fázu Audit")).toBeInTheDocument();
+  it("awaiting_manazer → 'Na rade: Manažér — posúď fázu {stage}'", () => {
+    render(<ExchangePanel board={mkBoard("gate_g", "auditor", "awaiting_manazer")} inFlight={false} activity={[]} onAction={vi.fn()} />);
+    expect(screen.getByText("Na rade: Manažér — posúď fázu Audit")).toBeInTheDocument();
   });
 
   it("blocked → 'odpovedz {role}-ovi' (question stays in the thread)", () => {
     render(<ExchangePanel board={mkBoard("gate_a", "designer", "blocked")} inFlight={false} activity={[]} onAction={vi.fn()} />);
-    expect(screen.getByText("Na rade: Director — odpovedz Návrhár-ovi")).toBeInTheDocument();
+    expect(screen.getByText("Na rade: Manažér — odpovedz Návrhár-ovi")).toBeInTheDocument();
   });
 
   // R4 (D2): the blocked banner is precise from block_reason — question vs each error class.
@@ -77,7 +77,7 @@ describe("ExchangePanel banner", () => {
     const board = mkBoard("gate_a", "designer", "blocked");
     board.state!.block_reason = "agent_question";
     render(<ExchangePanel board={board} inFlight={false} activity={[]} onAction={vi.fn()} />);
-    expect(screen.getByText("Na rade: Director — odpovedz Návrhár-ovi")).toBeInTheDocument();
+    expect(screen.getByText("Na rade: Manažér — odpovedz Návrhár-ovi")).toBeInTheDocument();
   });
 
   it("blocked + block_reason=agent_error → 'Agent zlyhal … skús znova'", () => {
@@ -115,12 +115,12 @@ describe("ExchangePanel banner", () => {
     board.state!.block_reason = null;
     board.recent_messages = [mkMsg("designer")];
     render(<ExchangePanel board={board} inFlight={false} activity={[]} onAction={vi.fn()} />);
-    expect(screen.getByText("Na rade: Director — odpovedz Návrhár-ovi")).toBeInTheDocument();
+    expect(screen.getByText("Na rade: Manažér — odpovedz Návrhár-ovi")).toBeInTheDocument();
   });
 
   // CR-NS-057 §F2.4: ExchangePanel threads board.regate_proposal to the action bar + the whos-turn board.
   it("gate_g with a regate_proposal → threads it (FAIL→target button + the whos-turn proposal line)", () => {
-    const board = mkBoard("gate_g", "auditor", "awaiting_director");
+    const board = mkBoard("gate_g", "auditor", "awaiting_manazer");
     board.available_actions = ["verdict", "ask"];
     board.regate_proposal = { entry_stage: "gate_a", reason: "návrh/rozsah → späť na dizajn" };
     render(<ExchangePanel board={board} inFlight={false} activity={[]} onAction={vi.fn()} />);
@@ -138,7 +138,7 @@ describe("ExchangePanel — unified banner colours (CR-NS-028)", () => {
   });
 
   it("done banner uses the green tone + the whos-turn board is gated off (no turn at done)", () => {
-    render(<ExchangePanel board={mkBoard("release", "director", "done")} inFlight={false} activity={[]} onAction={vi.fn()} />);
+    render(<ExchangePanel board={mkBoard("release", "manazer", "done")} inFlight={false} activity={[]} onAction={vi.fn()} />);
     const banner = screen.getByText("Hotovo").closest("div")!;
     expect(banner).toHaveClass("bg-emerald-500/10"); // green = done
     // WhosTurnBoard (CR-NS-035) is not rendered at done — its markers are absent
@@ -147,12 +147,12 @@ describe("ExchangePanel — unified banner colours (CR-NS-028)", () => {
   });
 });
 
-// CR-2 (v0.7.3): at awaiting_director / blocked the banner becomes a HIGH-CONTRAST sticky decision CTA so a
+// CR-2 (v0.7.3): at awaiting_manazer / blocked the banner becomes a HIGH-CONTRAST sticky decision CTA so a
 // "your turn" board never reads as "stuck"; agent_working / done keep the low-key tonal banner (no false alarm).
 describe("ExchangePanel — decision-needed CTA (CR-2)", () => {
-  it("awaiting_director → sticky high-contrast CTA (warning tokens, font-semibold)", () => {
-    render(<ExchangePanel board={mkBoard("gate_g", "auditor", "awaiting_director")} inFlight={false} activity={[]} onAction={vi.fn()} />);
-    const banner = screen.getByText("Na rade: Director — posúď fázu Audit").closest("div")!;
+  it("awaiting_manazer → sticky high-contrast CTA (warning tokens, font-semibold)", () => {
+    render(<ExchangePanel board={mkBoard("gate_g", "auditor", "awaiting_manazer")} inFlight={false} activity={[]} onAction={vi.fn()} />);
+    const banner = screen.getByText("Na rade: Manažér — posúď fázu Audit").closest("div")!;
     expect(banner).toHaveClass("sticky");
     expect(banner).toHaveClass("font-semibold");
     expect(banner).toHaveClass("bg-[var(--color-state-warning-bg)]"); // amber = awaiting, token-disciplined
@@ -160,7 +160,7 @@ describe("ExchangePanel — decision-needed CTA (CR-2)", () => {
 
   it("blocked → sticky high-contrast CTA in the error (red) tone", () => {
     render(<ExchangePanel board={mkBoard("gate_a", "designer", "blocked")} inFlight={false} activity={[]} onAction={vi.fn()} />);
-    const banner = screen.getByText("Na rade: Director — odpovedz Návrhár-ovi").closest("div")!;
+    const banner = screen.getByText("Na rade: Manažér — odpovedz Návrhár-ovi").closest("div")!;
     expect(banner).toHaveClass("sticky");
     expect(banner).toHaveClass("bg-[var(--color-state-error-bg)]"); // red = blocked
   });
@@ -194,7 +194,7 @@ describe("ExchangePanel — live activity feed below the thread (CR-NS-026)", ()
   it("does not render the activity feed when not agent_working", () => {
     render(
       <ExchangePanel
-        board={mkBoard("build", "implementer", "awaiting_director")}
+        board={mkBoard("build", "implementer", "awaiting_manazer")}
         inFlight={false}
         activity={[{ stage: "build", actor: "implementer", kind: "tool", line: "x" }]}
         onAction={vi.fn()}

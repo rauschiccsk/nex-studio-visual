@@ -49,7 +49,7 @@ function mkMsg(over: Partial<PipelineMessage>): PipelineMessage {
     version_id: "v1",
     stage: "build",
     author: "auditor",
-    recipient: "director",
+    recipient: "manazer",
     kind: "gate_report",
     content: "",
     status: "delivered",

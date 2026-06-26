@@ -37,7 +37,7 @@ describe("PipelineRail — unified chip colours (CR-NS-028)", () => {
   });
 
   it("awaiting chip = amber, blocked chip = red", () => {
-    const { rerender } = render(<PipelineRail state={mkState("awaiting_director")} activeAgent="implementer" />);
+    const { rerender } = render(<PipelineRail state={mkState("awaiting_manazer")} activeAgent="implementer" />);
     expect(screen.getByText("awaiting")).toHaveClass("text-amber-600");
     rerender(<PipelineRail state={mkState("blocked")} activeAgent="implementer" />);
     expect(screen.getByText("blocked")).toHaveClass("text-red-600");

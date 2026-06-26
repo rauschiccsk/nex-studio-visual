@@ -368,7 +368,7 @@ export default function MetricsPage() {
               {/* Director overhead row */}
               <tr className="border-t border-[var(--color-border-default)] bg-[var(--color-surface)]">
                 <td className={`${TD} font-medium text-[var(--color-text-secondary)]`}>
-                  {roleLabel("director")} (overhead)
+                  {roleLabel("manazer")} (overhead)
                 </td>
                 <td className={`${TD} text-[var(--color-text-muted)]`} colSpan={3}>
                   čakanie {fmtDuration(scope.director.agent_wait_seconds)} · intervencie {scope.director.interventions}

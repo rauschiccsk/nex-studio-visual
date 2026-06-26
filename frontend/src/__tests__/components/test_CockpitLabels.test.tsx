@@ -63,7 +63,7 @@ describe("cockpit Slovak labels", () => {
       version_id: "22222222-2222-2222-2222-222222222222",
       stage: "gate_a",
       author: "designer",
-      recipient: "director",
+      recipient: "manazer",
       kind: "gate_report",
       content: "hotovo",
       status: "delivered",
@@ -73,7 +73,7 @@ describe("cockpit Slovak labels", () => {
     };
     render(<PipelineMessageBubble message={msg} />);
     expect(screen.getByText("Návrhár")).toBeInTheDocument();
-    expect(screen.getByText("Director")).toBeInTheDocument();
+    expect(screen.getByText("Manažér")).toBeInTheDocument();
     expect(screen.queryByText("Designer")).not.toBeInTheDocument();
   });
 
@@ -125,7 +125,7 @@ describe("deriveActiveAgent (real active agent, not current_actor)", () => {
     version_id: "2",
     stage: "gate_e",
     author,
-    recipient: "director",
+    recipient: "manazer",
     kind: "answer",
     content: "x",
     status: "delivered",
@@ -146,8 +146,8 @@ describe("deriveActiveAgent (real active agent, not current_actor)", () => {
     expect(deriveActiveAgent(board(gateEState("agent_working")), [])).toBe("customer");
   });
 
-  it("at awaiting_director = the latest message author (who just acted)", () => {
-    expect(deriveActiveAgent(board(gateEState("awaiting_director"), [msg("coordinator")]), [])).toBe("coordinator");
+  it("at awaiting_manazer = the latest message author (who just acted)", () => {
+    expect(deriveActiveAgent(board(gateEState("awaiting_manazer"), [msg("coordinator")]), [])).toBe("coordinator");
   });
 
   it("ignores a system/director latest message at rest", () => {

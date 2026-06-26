@@ -9,9 +9,11 @@ import type { UserRole } from "@/types/user";
 
 // UserCard subtitle (CR-NS-093): derive the "<Title> · <Code>" label from the
 // logged-in user's role. Studio provisions all three roles (ri/ha/shu) — titles
-// match SettingsPage ROLE_OPTIONS (ri → Director, ha → Medior, shu → Junior).
+// match SettingsPage ROLE_OPTIONS (ri → Manažér, ha → Medior, shu → Junior).
+// CR-V2-004: operator label Director → Manažér (the ``ri`` ACCESS-ROLE token is
+// unchanged — auth gate stays per design §8; this is a display relabel only).
 const ROLE_LABEL: Record<UserRole, string> = {
-  ri: "Director · Ri",
+  ri: "Manažér · Ri",
   ha: "Medior · Ha",
   shu: "Junior · Shu",
 };
@@ -62,9 +64,9 @@ export default function Sidebar() {
   const setSelectedProject = useActiveContextStore((s) => s.setSelectedProject);
 
   // Sidebar-level pipeline WS on the pinned version (F-007 §7). Doubles as the
-  // §9 Director-presence signal; drives the cockpit "awaiting" attention dot.
+  // §9 Manažér-presence signal; drives the cockpit "awaiting" attention dot.
   const { board: pipelineBoard } = usePipelineWs(selectedVersion?.versionId ?? null);
-  const cockpitAwaiting = pipelineBoard?.state?.status === "awaiting_director";
+  const cockpitAwaiting = pipelineBoard?.state?.status === "awaiting_manazer";
 
   const isActive = (path: string) =>
     path === "/" ? location.pathname === "/" : location.pathname.startsWith(path);
@@ -95,7 +97,7 @@ export default function Sidebar() {
   // ─── Footer slot ─────────────────────────────────────────────────────────
   const footer = (
     <>
-      {/* E6 (CR-NS-038): Director-only Telegram presence toggle. "Preč" → agent-needs-Director
+      {/* E6 (CR-NS-038): Manažér-only Telegram presence toggle. "Preč" → agent-needs-Manažér
           events ping Telegram even with the cockpit open. Collapsed sidebar → icon only. */}
       {user?.role === "ri" && (
         <button
@@ -193,7 +195,7 @@ export default function Sidebar() {
           Implementer / Auditor sidebar terminals were removed; the pipeline still dispatches all
           roles internally. */}
       <NavItem icon={<IconCoordinator />} label="AG Koordinátor" active={isActive("/coordinator")} onClick={() => navigate("/coordinator")} />
-      <NavItem icon={<IconCockpit />} label="Orchestrácia" active={isActive("/cockpit")} onClick={() => navigate("/cockpit")} badge={cockpitAwaiting} badgeLabel="čaká na Director-a" />
+      <NavItem icon={<IconCockpit />} label="Orchestrácia" active={isActive("/cockpit")} onClick={() => navigate("/cockpit")} badge={cockpitAwaiting} badgeLabel="čaká na Manažéra" />
 
       <NavItem icon={<IconKbBook />} label="Dokumentácia" active={isActive("/kb")} onClick={() => navigate("/kb")} />
       <NavItem icon={<IconProjectSpecsBook />} label="Špecifikácie" active={isActive("/project-specs")} onClick={() => navigate("/project-specs")} />

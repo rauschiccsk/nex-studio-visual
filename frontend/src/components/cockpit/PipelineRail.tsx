@@ -20,15 +20,15 @@ export function deriveActiveAgent(board: PipelineBoard | null, activity: Activit
     const last = activity[activity.length - 1];
     return (last?.actor as PipelineActor) ?? state.current_actor;
   }
-  if (state.status === "awaiting_director" || state.status === "blocked") {
+  if (state.status === "awaiting_manazer" || state.status === "blocked") {
     const msgs = board?.recent_messages ?? [];
     const author = msgs[msgs.length - 1]?.author;
-    return author && author !== "director" && author !== "system" ? (author as PipelineActor) : null;
+    return author && author !== "manazer" && author !== "system" ? (author as PipelineActor) : null;
   }
   return null;
 }
 
-// Agent chips (director is the human, not an agent chip). Labels from the shared
+// Agent chips (manazer is the human operator, not an agent chip). Labels from the shared
 // ROLE_LABELS map; emoji is decorative.
 const AGENTS: { actor: PipelineActor; emoji: string }[] = [
   { actor: "coordinator", emoji: "🧭" },
@@ -70,7 +70,7 @@ function chipStatusFor(
   switch (state.status) {
     case "agent_working":
       return "working";
-    case "awaiting_director":
+    case "awaiting_manazer":
       return "awaiting";
     case "blocked":
       return "blocked";

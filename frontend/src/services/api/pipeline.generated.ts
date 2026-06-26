@@ -3148,7 +3148,7 @@ export interface components {
              * Current Actor
              * @enum {string}
              */
-            current_actor: "coordinator" | "designer" | "customer" | "implementer" | "auditor" | "director";
+            current_actor: "coordinator" | "designer" | "customer" | "implementer" | "auditor" | "manazer";
             /**
              * Current Stage
              * @enum {string}
@@ -3174,7 +3174,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "agent_working" | "awaiting_director" | "blocked" | "paused" | "done";
+            status: "agent_working" | "awaiting_manazer" | "blocked" | "paused" | "done";
             /**
              * Updated At
              * Format: date-time

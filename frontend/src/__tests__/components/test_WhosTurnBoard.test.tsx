@@ -34,8 +34,8 @@ function mkState(stage: PipelineStage, actor: PipelineActor, status: PipelineSta
 
 describe("WhosTurnBoard (WS-C2, CR-NS-035)", () => {
   it("a ratify gate awaiting → Director's turn + 'Schváliť alebo vrátiť', no relay breadcrumb", () => {
-    render(<WhosTurnBoard state={mkState("gate_a", "designer", "awaiting_director")} availableActions={["approve", "return", "ask"]} />);
-    expect(screen.getByText("Na rade: Director")).toBeInTheDocument();
+    render(<WhosTurnBoard state={mkState("gate_a", "designer", "awaiting_manazer")} availableActions={["approve", "return", "ask"]} />);
+    expect(screen.getByText("Na rade: Manažér")).toBeInTheDocument();
     expect(screen.getByText("Schváliť alebo vrátiť")).toBeInTheDocument();
     expect(screen.queryByText("cez Koordinátora")).not.toBeInTheDocument(); // gate_a is not relayed
   });
@@ -43,7 +43,7 @@ describe("WhosTurnBoard (WS-C2, CR-NS-035)", () => {
   it("build awaiting → relay breadcrumb (cez Koordinátora) + current task + build decision", () => {
     render(
       <WhosTurnBoard
-        state={mkState("build", "implementer", "awaiting_director")}
+        state={mkState("build", "implementer", "awaiting_manazer")}
         availableActions={["approve", "continue_build", "return", "end_build", "ask"]}
         currentTask={{ number: 3, title: "AP tables" }}
       />,
@@ -54,19 +54,19 @@ describe("WhosTurnBoard (WS-C2, CR-NS-035)", () => {
   });
 
   it("gate_g awaiting → the verdict decision", () => {
-    render(<WhosTurnBoard state={mkState("gate_g", "auditor", "awaiting_director")} availableActions={["verdict", "ask"]} />);
+    render(<WhosTurnBoard state={mkState("gate_g", "auditor", "awaiting_manazer")} availableActions={["verdict", "ask"]} />);
     expect(screen.getByText("Verdikt auditu (PASS / FAIL)")).toBeInTheDocument();
   });
 
   it("release awaiting → the UAT-accept decision", () => {
-    render(<WhosTurnBoard state={mkState("release", "director", "awaiting_director")} availableActions={["uat_accept", "ask"]} />);
+    render(<WhosTurnBoard state={mkState("release", "manazer", "awaiting_manazer")} availableActions={["uat_accept", "ask"]} />);
     expect(screen.getByText("Akceptovať verziu (UAT)")).toBeInTheDocument();
   });
 
   it("gate_e awaiting → relay breadcrumb (gate_e is relayed) + ratify decision", () => {
     render(
       <WhosTurnBoard
-        state={mkState("gate_e", "customer", "awaiting_director")}
+        state={mkState("gate_e", "customer", "awaiting_manazer")}
         availableActions={["approve", "fix", "leave", "end_gate_e", "ask"]}
       />,
     );
@@ -108,7 +108,7 @@ describe("WhosTurnBoard (WS-C2, CR-NS-035)", () => {
     };
     render(
       <WhosTurnBoard
-        state={mkState("build", "implementer", "awaiting_director")}
+        state={mkState("build", "implementer", "awaiting_manazer")}
         availableActions={["apply_coordinator_recommendation", "return", "ask"]}
         coordinatorProposal={proposal}
       />,
@@ -138,7 +138,7 @@ describe("WhosTurnBoard — R4 coordinator triage + autonomous summary (D3/D4)",
   it("suppresses the triage line when an EXECUTABLE proposal is already shown (no duplicate)", () => {
     render(
       <WhosTurnBoard
-        state={mkState("build", "implementer", "awaiting_director")}
+        state={mkState("build", "implementer", "awaiting_manazer")}
         availableActions={["apply_coordinator_recommendation", "return", "ask"]}
         coordinatorProposal={{
           triage_class: "programmer_guidance",
@@ -156,7 +156,7 @@ describe("WhosTurnBoard — R4 coordinator triage + autonomous summary (D3/D4)",
   it("renders the autonomous-decisions roll-up line when count > 0", () => {
     render(
       <WhosTurnBoard
-        state={mkState("build", "implementer", "awaiting_director")}
+        state={mkState("build", "implementer", "awaiting_manazer")}
         availableActions={["approve", "return", "ask"]}
         autonomousSummary={{ count: 3, recent: [{ task: 2, action: "coordinator_reset_task", rationale: "reset úlohy #2", confidence: 0.9 }] }}
       />,
@@ -168,7 +168,7 @@ describe("WhosTurnBoard — R4 coordinator triage + autonomous summary (D3/D4)",
   it("renders nothing for an absent triage / zero-count summary (graceful)", () => {
     render(
       <WhosTurnBoard
-        state={mkState("build", "implementer", "awaiting_director")}
+        state={mkState("build", "implementer", "awaiting_manazer")}
         availableActions={["approve", "return", "ask"]}
         autonomousSummary={{ count: 0, recent: [] }}
       />,

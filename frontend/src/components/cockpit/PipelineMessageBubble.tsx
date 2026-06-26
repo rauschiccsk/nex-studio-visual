@@ -19,7 +19,7 @@ const PARTICIPANT_EMOJI: Record<PipelineParticipant, string> = {
   customer: "🧑‍💼",
   implementer: "🔨",
   auditor: "🔍",
-  director: "👔",
+  manazer: "👔",
   system: "⚙️",
 };
 
@@ -29,7 +29,7 @@ const PARTICIPANT_ACCENT: Record<PipelineParticipant, string> = {
   customer: "border-amber-500/60 bg-amber-500/5",
   implementer: "border-emerald-500/60 bg-emerald-500/5",
   auditor: "border-violet-500/60 bg-violet-500/5",
-  director: "border-primary-500/60 bg-primary-500/5",
+  manazer: "border-primary-500/60 bg-primary-500/5",
   system: "border-[var(--color-border-strong)] bg-[var(--color-surface-hover)]",
 };
 

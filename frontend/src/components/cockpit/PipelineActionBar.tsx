@@ -123,7 +123,7 @@ export function PipelineActionBar({
   // its action is allowed (AND its existing finer condition below). Absent field → fall back to the
   // FE's own logic (allow everything), so older boards / tests keep the current behaviour.
   const allowed = (a: PipelineActionName) => (availableActions ? availableActions.includes(a) : true);
-  const awaiting = status === "awaiting_director";
+  const awaiting = status === "awaiting_manazer";
   const blocked = status === "blocked";
   const working = status === "agent_working";
   const paused = status === "paused";
@@ -490,7 +490,7 @@ export function PipelineActionBar({
           instead of ratifying/answering — the Auditor re-audits, the app really boots + the acceptance suite
           runs (the v0.7.5 smoke), and the pipeline waits for a fresh verdict. A re-dispatch that does NOT
           advance, so it's indigo like the other re-dispatch controls — distinct from green PASS / red FAIL.
-          The backend offered-set is the source of truth (awaiting_director OR a blocked Auditor question), so
+          The backend offered-set is the source of truth (awaiting_manazer OR a blocked Auditor question), so
           render purely on allowed(...) — no awaiting-only sub-gate. fast_fix (never at gate_g) never shows it. */}
       {current_stage === "gate_g" && allowed("rerun_release_audit") && (
         <ActionRow hint="Auditor spustí release audit znova — appka sa reálne nabootuje a prebehnú acceptance skúšky; pipeline počká na čerstvý verdikt.">
@@ -508,7 +508,7 @@ export function PipelineActionBar({
           an EXPLICIT Director directive to correct targeted task(s), WITHOUT the full FAIL→build reset of every
           done task. The re-built version still re-enters a FULL re-gate (Auditor + the GAP 1 acceptance gate),
           so surgery never skips the release oracle. Amber to set it apart from indigo rerun / red FAIL. Backend
-          offers it only at a settled gate_g (awaiting_director OR a blocked Auditor question); fast_fix never
+          offers it only at a settled gate_g (awaiting_manazer OR a blocked Auditor question); fast_fix never
           reaches gate_g, so it never shows it. Composer collects a REQUIRED scope (hierarchical task ids) +
           the fix directive. */}
       {current_stage === "gate_g" && allowed("surgical_fix") && (

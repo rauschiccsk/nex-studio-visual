@@ -1,7 +1,7 @@
 """F-004 Stage 5+6: K-004 smoke test + K-005 CI/CD wire-up + branch protection.
 
 Both stages sú best-effort — partial success acceptable. Failure logged ako
-warning, NIE 500. Director môže re-run / wire manually ak treba.
+warning, NIE 500. Manažér môže re-run / wire manually ak treba.
 
 Per F-004 spec §3.4 + §3.5 + spec O-3 (branch protection opt-in).
 """
@@ -41,7 +41,7 @@ def run_post_scaffold_steps(
     """Orchestrate K-004 (smoke) + K-005 (CI/CD) + branch protection post-scaffold.
 
     Best-effort — every step caught + logged as warning. Žiadny step nezdvíha
-    HTTPException; partial success je acceptable (Director can finish manually).
+    HTTPException; partial success je acceptable (Manažér can finish manually).
     """
     target_path = Path(target) if target else None
 
@@ -189,7 +189,7 @@ def _seed_release_smoke_test(target: Path, slug: str) -> None:
     """gate-g-hardening GAP 1 (CR-B): seed ``release_smoke_test.sh`` into the new project (mirrors the
     K-005 CI copy-pattern). The engine runs it at full-flow gate_g as the behavioural release-acceptance
     gate; a web app without it FAILs the gate ("required but missing"). Best-effort — a missing template or
-    a copy error is logged as a warning, never raised (the Director can add the script manually). Idempotent:
+    a copy error is logged as a warning, never raised (the Manažér can add the script manually). Idempotent:
     an existing project script is preserved (never clobber a hand-tuned acceptance suite)."""
     if not RELEASE_SMOKE_TEMPLATE.is_file():
         logger.warning("release_smoke_test.sh seed SKIPPED — template missing at %s", RELEASE_SMOKE_TEMPLATE)
@@ -360,7 +360,7 @@ def _enable_branch_protection(repo_url: str, slug: str) -> None:
     )
     if result.returncode != 0:
         logger.warning(
-            "Branch protection setup failed (repo=%s): %s — Director can configure manually",
+            "Branch protection setup failed (repo=%s): %s — Manažér can configure manually",
             repo_full_name,
             result.stderr.strip(),
         )

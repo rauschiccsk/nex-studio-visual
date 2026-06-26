@@ -55,11 +55,11 @@ STAGE_VALUES = (
     "done",
 )
 # Actors (PipelineState.current_actor) = the AGENTS on turn: AI Agent + Auditor. Participants
-# (message author/recipient) additionally include the human operator (``director`` — renamed to
-# ``manazer`` in CR-V2-004) and ``system`` (message-only). (F-007 §3.1, §4.2.)
+# (message author/recipient) additionally include the human operator (``manazer`` — renamed from
+# ``director`` in CR-V2-004) and ``system`` (message-only). (F-007 §3.1, §4.2.)
 ACTOR_VALUES = ("ai_agent", "auditor")
-PARTICIPANT_VALUES = ACTOR_VALUES + ("director", "system")
-STATUS_VALUES = ("agent_working", "awaiting_director", "blocked", "paused", "done")
+PARTICIPANT_VALUES = ACTOR_VALUES + ("manazer", "system")
+STATUS_VALUES = ("agent_working", "awaiting_manazer", "blocked", "paused", "done")
 # Why a ``blocked`` state happened (v0.7.0 R4, D1) — the authoritative, persisted reason the FE
 # reads INSTEAD of the fragile ``lastMessage.author == "system"`` heuristic. ``agent_question`` = the
 # worker asked something (Director answers); ``agent_error`` = the worker's turn failed
@@ -105,7 +105,8 @@ class PipelineState(Base, UUIDMixin, TimestampMixin):
     flow_type = Column(String(16), nullable=False)
     current_stage = Column(String(16), nullable=False)
     current_actor = Column(String(16), nullable=False)
-    # 'awaiting_director' is 17 chars — needs > 16.
+    # The longest status value ('agent_working' / 'awaiting_manazer') needs > 16. Kept String(20)
+    # (CR-V2-004 renamed the value, not the width — 'awaiting_director' was 17, 'awaiting_manazer' is 16).
     status = Column(String(20), nullable=False)
     #: Human-readable "what happens next" sentence rendered on the board.
     next_action = Column(Text, nullable=False, server_default="")
@@ -116,16 +117,18 @@ class PipelineState(Base, UUIDMixin, TimestampMixin):
     #: gate); cleared on the Designer's DONE. Persisted (not in-memory like gate_e_dispatch) because the
     #: route is an internal executor — the action route can't compute a transient marker for it.
     returns_to = Column(String(20), nullable=True)
-    #: WS-D (CR-NS-036): when the pipeline ENTERED its current Director-wait status
-    #: (``awaiting_director`` / ``blocked``). Maintained by the ``status`` ``set`` event listener
+    #: WS-D (CR-NS-036): when the pipeline ENTERED its current Manažér-wait status
+    #: (``awaiting_manazer`` / ``blocked``). Maintained by the ``status`` ``set`` event listener
     #: below — set on entry, preserved across wait→wait, cleared on leaving. Powers the future
-    #: metrics page's Director-wait time (now − ``awaiting_director_since``). Nullable; NULL whenever
-    #: the pipeline isn't waiting on the Director.
+    #: metrics page's Manažér-wait time (now − ``awaiting_director_since``). Nullable; NULL whenever
+    #: the pipeline isn't waiting on the Manažér. (Column name kept as ``awaiting_director_since`` —
+    #: CR-V2-004 renamed the operator label + status VALUE, not the live column, to avoid needless DDL churn.)
     awaiting_director_since = Column(TIMESTAMP(timezone=True), nullable=True)
-    #: E5 (CR-NS-043): accumulated total Director-wait time for this version (seconds). The status
+    #: E5 (CR-NS-043): accumulated total Manažér-wait time for this version (seconds). The status
     #: listener folds each finished wait interval (now − awaiting_director_since) in here on EXIT, so
     #: the metrics page has the lifetime total; a live open wait is added on top at read time. Starts
-    #: fresh — versions finished before this column show 0 (no backfill, documented).
+    #: fresh — versions finished before this column show 0 (no backfill, documented). (Column name kept
+    #: as ``total_director_wait_seconds`` — operator/status relabel only, no column rename DDL; CR-V2-004.)
     total_director_wait_seconds = Column(Float, nullable=False, server_default="0")
     #: R1 dispatch resilience (v0.7.0, D1/D2). Repo HEAD captured at the START of a dispatch
     #: (``_begin_dispatch``), FROZEN across that dispatch's parse-retries (Seam #4) and reset to NULL on
@@ -236,16 +239,21 @@ class PipelineMessage(Base, UUIDMixin):
     )
 
 
-#: Statuses in which the pipeline is waiting on a Director decision (WS-D, CR-NS-036).
-_DIRECTOR_WAIT_STATUSES = frozenset({"awaiting_director", "blocked"})
+#: Statuses in which the pipeline is waiting on a Manažér decision (WS-D, CR-NS-036). CR-V2-004
+#: renamed the operator status VALUE ``awaiting_director`` → ``awaiting_manazer``; the frozenset
+#: membership is updated in lock-step so the 3 status listeners below keep firing on the renamed
+#: value (a value rename WITHOUT this update would silently stop them). The listener BODIES key on
+#: this frozenset by name and are otherwise untouched here — their semantic re-wire to the new-status
+#: engine logic is owned by CR-V2-009 (R-LISTENERS).
+_DIRECTOR_WAIT_STATUSES = frozenset({"awaiting_manazer", "blocked"})
 
 
 @event.listens_for(PipelineState.status, "set")
 def _stamp_awaiting_director_since(target, value, oldvalue, initiator):
     """Maintain :attr:`PipelineState.awaiting_director_since` on every ``status`` change (WS-D).
 
-    * ENTER a Director-wait status from a non-wait status → stamp ``now``.
-    * wait → wait (e.g. ``blocked`` → ``awaiting_director``) → keep the original clock (don't reset).
+    * ENTER a Manažér-wait status from a non-wait status → stamp ``now``.
+    * wait → wait (e.g. ``blocked`` → ``awaiting_manazer``) → keep the original clock (don't reset).
     * LEAVE to any non-wait status → clear (``None``).
 
     All status writes go through this ORM attribute (no bulk ``UPDATE`` bypasses it), so this is the
@@ -272,7 +280,7 @@ def _stamp_awaiting_director_since(target, value, oldvalue, initiator):
 def _clear_dispatch_on_settle(target, value, oldvalue, initiator):
     """Clear the durable single-flight flag + dispatch baseline the moment the pipeline SETTLES (R1, D2).
 
-    A dispatch is in flight only while ``status == 'agent_working'``. Any settle (``awaiting_director`` /
+    A dispatch is in flight only while ``status == 'agent_working'``. Any settle (``awaiting_manazer`` /
     ``blocked`` / ``paused`` / ``done``) means the dispatch has ended → drop ``dispatch_in_flight`` and reset
     ``dispatch_baseline_sha`` to NULL. This is the DRY "settle paths" clear the design calls for: every status
     write goes through this ORM attribute, so the ~18 transition sites need no individual touch, and a fresh
