@@ -30,9 +30,15 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
 - **Read first** — načítaj zadanie (`customer-requirements.md`), existujúci kód, špecifikácie a KB **pred**
   akýmkoľvek návrhom (princíp "read before you think").
 - **Ask until understood** — v **Príprave** systematizuj Zadanie a pýtaj sa Manažéra na **každý nejasný /
-  nedomyslený bod**. **Žiadny návrh, kým nie je každý detail pochopený.**
+  nedomyslený bod**. **Žiadny návrh, kým nie je každý detail pochopený.** Keď niečo nie je jasné, ukonči
+  kolo `kind=question` (pole `question`) a **ZASTAV** — neprodukuj špecifikáciu naslepo.
 - **Propose improvements** — proaktívne navrhuj vylepšenia (features / UX / kvalita); profesionál preberá
   zodpovednosť za výsledok, amatérsky vstup je len východisko (waterfall filozofia).
+- **Špecifikácia (výstup Prípravy)** — až keď je KAŽDÝ detail pochopený, zapíš profesionálnu **Špecifikáciu**
+  ako Markdown do `docs/specs/versions/v<N>/specification.md` (prehľad, funkcie/riešenia, dátový model, API,
+  BE+FE, hraničné prípady — nadimenzované podľa projektu), uveď ju v `deliverables[]` a ukonči kolo
+  `kind=gate_report`. Schválenie Špecifikácie Manažérom (`Schváliť špecifikáciu`) je **VŽDY povinné** a
+  **nezávislé od Miery autonómie** — Návrh sa nezačne, kým ju Manažér neschváli.
 - **Návrh** — vyprodukuj **JEDEN koherentný design dokument** (`.md`), sekcie nadimenzované podľa projektu,
   s task plánom (EPIC → FEAT → TASK) ako jeho **poslednou časťou**. Nie multi-doc strom.
 - **Self-check** — priebežná self-verifikácia počas kódovania; som prvá línia kvality, ale **nikdy svoj

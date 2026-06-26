@@ -564,6 +564,63 @@ def _directive_for(stage: str, flow_type: str = "new_version") -> str:
     return base
 
 
+def _version_spec_rel(version_number: str) -> str:
+    """Relative repo path of a version's spec directory (``docs/specs/versions/v<N>``).
+
+    Single source for the version-scoped spec-tree location the build artifacts live under (the
+    ``customer-requirements.md`` Zadanie, the Príprava ``specification.md`` Špecifikácia, and the
+    Návrh design doc + task plan). Mirrors the convention the metrics/footprint reads already use
+    (:func:`_gate_e_question_budget`, ``_write_task_plan_doc``)."""
+    return f"docs/specs/versions/v{version_number}"
+
+
+#: Relative repo path of the Špecifikácia artifact the Príprava phase produces (CR-V2-010, PREP-3).
+#: The AI Agent (which has Write tools in its warm ``claude`` session) writes the Markdown spec here at
+#: the end of the Príprava dialogue and lists it in ``deliverables[]``; the engine verifies it exists +
+#: records it as the durable Príprava artifact (the manager's reading view in the Vývoj → Príprava tab).
+def _priprava_spec_rel(version_number: str) -> str:
+    return f"{_version_spec_rel(version_number)}/specification.md"
+
+
+def _priprava_directive(db: Session, version_id: uuid.UUID) -> str:
+    """The Príprava phase brief (CR-V2-010; PREP-1..PREP-4, RULES-3 read-first/ask-until-understood).
+
+    DESIGN-BEARING (flagged for the Manažér): this prompt DEFINES the AI Agent's Príprava behaviour —
+    the interactive Zadanie→Špecifikácia dialogue. Drafted from ``nex-studio-v2-design.md`` §2.1 / §5.1(1).
+    The agent's own ``Pravidlá agenta`` charter (templates/ai-agent-charter.md §2) carries the matching
+    rules; this is the per-turn orchestrator injection that names the concrete Zadanie + Špecifikácia paths.
+
+    The init prompt ("Načítaj zadanie a začni prípravu špecifikácie" — design §2.1) tells the AI Agent to:
+      1. READ the Zadanie (``customer-requirements.md``) + existing code / specs / KB (read-before-you-think);
+      2. systematize the requirements and ASK the Manažér clarifying questions on EVERY unclear /
+         under-thought point — NO design until every detail is understood (set ``kind=question`` and STOP);
+      3. proactively PROPOSE improvements (features / UX / quality), the professional taking responsibility;
+      4. when (and only when) every detail is understood, WRITE the Špecifikácia as Markdown to the version
+         spec path and list it in ``deliverables[]``, closing the phase with ``kind=gate_report``. The
+         end-Príprava ``Schváliť špecifikáciu`` stop is ALWAYS mandatory (dial-independent) — Návrh cannot
+         begin until the Manažér approves the Špecifikácia.
+    """
+    version_number = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
+    zadanie_rel = f"{_version_spec_rel(version_number)}/customer-requirements.md"
+    spec_rel = _priprava_spec_rel(version_number)
+    return (
+        "Načítaj zadanie a začni prípravu špecifikácie (fáza Príprava).\n"
+        f"1. NAČÍTAJ Zadanie (`{zadanie_rel}`) + existujúci kód, špecifikácie a KB — read before you think.\n"
+        "2. SYSTEMATIZUJ požiadavky a pýtaj sa Manažéra objasňujúce otázky na KAŽDÝ nejasný / nedomyslený "
+        "bod. ŽIADNY návrh, kým nie je každý detail pochopený — keď niečo nie je jasné, nastav "
+        "`kind=question`, polož otázku (`question`) a ZASTAV (neprodukuj špecifikáciu naslepo).\n"
+        "3. PROAKTÍVNE navrhni vylepšenia (features / UX / kvalita) — profesionál preberá zodpovednosť za "
+        "výsledok, amatérsky vstup (Zadanie) je len východisko (waterfall filozofia).\n"
+        "4. Až keď je KAŽDÝ detail pochopený: zapíš Špecifikáciu ako Markdown do "
+        f"`{spec_rel}` (vytvor adresár ak treba) a uveď ju v `deliverables[]`. Špecifikácia je profesionálny "
+        "dokument (prehľad, funkcie/riešenia, dátový model, API, BE+FE, hraničné prípady) nadimenzovaný "
+        "podľa projektu. Ukonči kolo `kind=gate_report`.\n"
+        "Schválenie Špecifikácie Manažérom (`Schváliť špecifikáciu`) je VŽDY povinné a nezávislé od Miery "
+        "autonómie — Návrh sa nezačne, kým ju Manažér neschváli.\n"
+        "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
+    )
+
+
 # E5 (CR-NS-045): the per-task human-effort estimate is the metrics page's human-baseline source — kept
 # in BOTH task_plan prompts below (skeleton → feat-level Σ; per-feat → per-task), advisory, never blocking.
 _TASK_PLAN_ESTIMATE_NOTE = (
@@ -1246,6 +1303,55 @@ def _write_task_plan_doc(db: Session, version: Version) -> Optional[str]:
         doc_path.write_text(md, encoding="utf-8")
     except OSError as exc:
         return f"task-plan doc write failed: {exc}"
+    return None
+
+
+def _persist_priprava_spec(db: Session, state: PipelineState, block: PipelineStatusBlock) -> Optional[str]:
+    """Persist + verify the Príprava Špecifikácia artifact at the end of the Príprava dialogue (CR-V2-010,
+    PREP-3). Returns a failure reason (→ caller settles ``blocked``, the phase does NOT close) or ``None``.
+
+    The AI Agent writes the Špecifikácia Markdown to disk itself (it has Write tools in its warm session)
+    and lists it in ``deliverables[]``; this is the deterministic mechanical gate that the artifact is real
+    + readable (the Vývoj → Príprava tab reads this record), the Príprava analogue of ``_write_task_plan``
+    for Návrh. The on-disk verify reuses the spec-tree convention (:func:`_priprava_spec_rel`).
+
+    No-op pass (``None``) when the project has no checkout to write into (tests / library projects) — the
+    spec then lives only as the recorded ``report`` payload of the gate_report message (DB audit trail),
+    which is still readable. A checkout that EXISTS but is missing the spec file is a real failure: the
+    Špecifikácia phase is not "done" without its reviewable artifact.
+    """
+    version = db.get(Version, state.version_id)
+    if version is None:
+        return "version not found for Špecifikácia write"
+    rel = _priprava_spec_rel(version.version_number)
+    project = db.get(Project, version.project_id)
+    if project is None or not project.source_path:
+        # No checkout — the spec is captured in the gate_report ``report`` payload (DB audit trail); record
+        # the (DB-only) artifact note so the Príprava tab + audit trail still surface it.
+        _record_message(
+            db,
+            version_id=state.version_id,
+            stage="priprava",
+            author="system",
+            recipient="manazer",
+            kind="notification",
+            content="Špecifikácia pripravená (záznam v priebehu — projekt nemá checkout na zápis súboru).",
+            payload={"phase": "priprava", "priprava_spec": True, "path": rel},
+        )
+        return None
+    spec_path = Path(project.source_path) / rel
+    if not spec_path.exists():
+        return f"Špecifikácia artifact missing on disk: {rel}"
+    _record_message(
+        db,
+        version_id=state.version_id,
+        stage="priprava",
+        author="system",
+        recipient="manazer",
+        kind="notification",
+        content=f"Špecifikácia uložená: {rel}. Schváľ ju v Vývoj → Príprava (Schváliť špecifikáciu).",
+        payload={"phase": "priprava", "priprava_spec": True, "path": rel},
+    )
     return None
 
 
@@ -3513,7 +3619,9 @@ async def run_dispatch(
     """Run the working agent for a phase and settle its status (background); CR-V2-009 4-phase rebuild.
 
     Reloads the (already ``agent_working``) state, invokes the phase's actor headless via the shared
-    parse-retry invoke, and settles ``status`` to ``blocked`` or ``awaiting_manazer``. Runs in
+    parse-retry invoke, and settles ``status`` to ``blocked`` / ``awaiting_manazer`` — OR, when the Miera
+    autonómie dial does not stop at this phase boundary, AUTO-CONTINUES to the next phase (returns
+    ``agent_working`` so the runner's auto-chain loop runs it; CR-V2-010 dial-settle wiring). Runs in
     :mod:`backend.services.pipeline_runner`'s background task against a fresh session — never inside the
     request. Returns the settled state (``None`` if the version/state vanished).
 
@@ -3539,14 +3647,19 @@ async def run_dispatch(
     if STAGE_ACTOR.get(stage) is None:  # terminal (``done``) — nothing to run.
         return state
 
-    # 4-phase generic dispatch (CR-V2-009). The v1 stage-specific routing (gate_e per-question round /
-    # build per-task loop / task_plan incremental passes / kickoff triage / release publish) is collapsed:
-    # in Milestone B every phase runs as ONE generic agent turn through the shared invoke path. The rich
-    # per-phase behaviours are rebuilt in Milestone C (Príprava/Návrh/Programovanie) + D (Verifikácia) —
-    # the v1 round-runners (``_run_build_round`` / ``_run_task_plan_round`` / ``_run_gate_e_round``) survive
-    # as deferred-RED helpers C/D re-points, but are NOT reachable from this 4-phase routing.
+    # 4-phase dispatch. The v1 stage-specific routing (gate_e per-question round / build per-task loop /
+    # task_plan incremental passes / kickoff triage / release publish) is collapsed: each phase runs as a
+    # generic agent turn through the shared invoke path, with a per-phase BRIEF. Milestone C/D give each
+    # phase its rich brief — Príprava (the interactive Zadanie→Špecifikácia dialogue, CR-V2-010) here; Návrh
+    # (CR-V2-011) / Programovanie (CR-V2-012) / Verifikácia (CR-V2-014) next. The v1 round-runners
+    # (``_run_build_round`` / ``_run_task_plan_round`` / ``_run_gate_e_round``) survive as deferred-RED
+    # helpers C/D re-points, but are NOT reachable from this 4-phase routing.
     if directive is not None:
-        prompt = directive
+        prompt = directive  # the Manažér's framed uprav/ask/answer message IS the prompt (direct comms)
+    elif stage == "priprava":
+        # Príprava round (CR-V2-010): the init prompt + the interactive spec-dialogue brief (read Zadanie →
+        # systematize → ask until understood → propose → write the Špecifikácia .md). DESIGN-BEARING prompt.
+        prompt = _priprava_directive(db, state.version_id)
     else:
         prompt = _augment_brief_with_backlog(db, state.version_id, stage, _directive_for(stage, state.flow_type))
     result = await invoke_agent_with_parse_retry(
@@ -3589,12 +3702,33 @@ async def run_dispatch(
         db.flush()
         return state
 
-    # gate_report / done / answer-class agent output → settle awaiting the Manažér's schvaľovací bod for
-    # this phase. Whether the dial actually STOPS here (vs auto-continue at higher autonomy) is applied in
-    # the dispatch/auto-chain path in Milestone C/D; the state-machine settle is the same awaiting_manazer.
-    state.status = "awaiting_manazer"
-    state.next_action = f"Manažér: posúdiť výstup fázy '{stage}'."
-    db.flush()
+    # gate_report / done / answer-class agent output → the phase produced its final output.
+    # Príprava artifact persistence (CR-V2-010): on the Príprava gate_report that CLOSES the phase, persist
+    # + verify the Špecifikácia .md artifact before settling. A missing artifact (checkout exists but the
+    # spec file was not written) is a real failure → blocked, the phase does NOT advance to its approval.
+    if stage == "priprava" and result.kind == "gate_report":
+        spec_err = _persist_priprava_spec(db, state, result)
+        if spec_err is not None:
+            state.status = "blocked"
+            state.block_reason = "agent_error"  # R4 (D1): the phase deliverable is missing on disk
+            state.next_action = "Špecifikácia nebola zapísaná — usmerni agenta (Uprav) a zopakuj prípravu."
+            db.flush()
+            return state
+
+    # Dial-settle wiring (Milestone-C SHARED — CR-V2-010, inherited by 011/012). At a settled phase
+    # boundary the Miera autonómie dial governs auto-continue vs stop. ``_settle_phase_boundary`` returns
+    # True when it AUTO-ADVANCED the phase (status is now ``agent_working`` at the next phase → the runner's
+    # auto-chain loop runs it in this same single-flight task). The two always-stops (the end-Príprava
+    # ``approve_spec`` Špecifikácia approval + deploy) are NEVER auto-continued (Príprava is not a
+    # dial-governed boundary), and the Verifikácia end sign-off preserves the no-silent-done invariant.
+    if _settle_phase_boundary(db, state):
+        return state  # agent_working at the next phase — the auto-chain loop continues the build
+    # The dial stopped here (or this is a non-boundary / always-stop phase, or Verifikácia auto-signed-off
+    # to ``done``): settle for the Manažér's schvaľovací bod, unless already terminal (Hotovo).
+    if state.status != "done":
+        state.status = "awaiting_manazer"
+        state.next_action = f"Manažér: posúdiť výstup fázy '{stage}'."
+        db.flush()
     return state
 
 
@@ -5210,6 +5344,55 @@ def auditor_effort_for_level(level: str) -> str:
     consumed by :func:`_resolve_dispatch_overrides`."""
     lvl = level if level in MIERA_AUTONOMIE_VALUES else _MIERA_AUTONOMIE_DEFAULT
     return _AUDITOR_EFFORT_FOR_LEVEL[lvl]
+
+
+def _settle_phase_boundary(db: Session, state: PipelineState) -> bool:
+    """Apply the Miera autonómie dial at a SETTLED phase boundary (Milestone-C SHARED dial-settle wiring;
+    CR-V2-010, owned here + inherited by CR-V2-011/012). The agent for ``state.current_stage`` produced
+    final phase output (a gate_report / done-class turn); decide STOP-for-the-Manažér vs AUTO-CONTINUE.
+
+    Returns:
+      * ``True``  → AUTO-CONTINUE: the build advanced to the next phase and is now ``agent_working``; the
+        runner's auto-chain loop dispatches it in the SAME single-flight task (no Manažér gate between).
+      * ``False`` → STOP: the boundary halts for the Manažér; the caller settles ``awaiting_manazer``.
+
+    The dial governs ONLY the three dial-governed schvaľovacie body (after Návrh / Programovanie /
+    Verifikácia — :data:`DIAL_GOVERNED_BOUNDARIES`). Two boundaries are ALWAYS outside the dial and ALWAYS
+    stop (:data:`ALWAYS_STOP_BOUNDARIES`, design §2.3 D3/D6):
+      * **Príprava → Schváliť špecifikáciu** — the Špecifikácia approval is dial-INDEPENDENT and ALWAYS
+        mandatory: Príprava is NOT in ``DIAL_GOVERNED_BOUNDARIES``, so :func:`dial_stops_at` is never even
+        consulted for it here → it always returns ``False`` (STOP). Návrh cannot begin until the Manažér
+        clicks ``approve_spec``.
+      * **Verifikácia end sign-off** — at a non-stopping dial level a PASS verdict auto-signs-off to Hotovo,
+        but ONLY through the recorded Auditor PASS verdict (no-silent-done invariant, safeguard #5): if no
+        PASS is on record the boundary STOPS regardless of the dial (never a silent done without
+        verification). The full Verifikácia behaviour (verdict emission, fix-loop) is CR-V2-014; this wiring
+        only governs the dial half of the end stop + preserves the invariant.
+
+    Auto-continue advances ``current_stage`` via :func:`_next_stage` + :func:`_begin_dispatch` (which sets
+    ``agent_working`` at the next phase). The sole-mutator invariant is preserved: this runs inside the
+    dispatch path, always as a consequence of an action already routed through :func:`apply_action`."""
+    stage = state.current_stage
+    if stage not in DIAL_GOVERNED_BOUNDARIES:
+        # Príprava (approve_spec — always-stop) + any non-boundary phase: never auto-continue here.
+        return False
+    level = resolve_miera_autonomie(db, state.version_id)
+    if dial_stops_at(level, stage):
+        return False  # the dial halts this schvaľovací bod for the Manažér
+    # Auto-continue (the dial does NOT stop here). The Verifikácia end stop additionally guards the
+    # no-silent-done invariant: Hotovo is reachable ONLY through a recorded Auditor PASS verdict.
+    if stage == SCHVALOVACI_BOD_VERIFIKACIA and not _verifikacia_passed(db, state.version_id):
+        return False  # no PASS on record → STOP (never a silent done without verification)
+    state.current_stage = _next_stage(stage, state.flow_type)
+    if state.current_stage == "done":
+        # Verifikácia auto-sign-off at a non-stopping dial level → Hotovo (terminal; deploy is OUT, D6).
+        state.current_actor = "ai_agent"  # terminal — no agent on turn; kept a valid ACTOR value
+        state.status = "done"
+        state.next_action = "Pipeline dokončená (Hotovo). Nasadenie je samostatná akcia per zákazník."
+        db.flush()
+        return False  # terminal — nothing left to auto-chain (status is 'done', not 'agent_working')
+    _begin_dispatch(db, state)  # agent_working at the next phase → the runner's auto-chain runs it
+    return True
 
 
 def _autonomy_enabled(db: Session, version_id: uuid.UUID) -> bool:
