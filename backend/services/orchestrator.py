@@ -296,10 +296,8 @@ _VERIFY_RETRIES = 2
 # STOPS and escalates to the Manažér (design §2.2 (i)). PROVISIONAL home of the named constant
 # CR-V2-014 wires into the runner's auto-chain backstop (R-AUTOCHAIN) once the Verifikácia loop exists.
 AUDITOR_LOOP_MAX = 5
-# Per-task auto-fix bound (CR-NS-020 CR-3) for the v1 Programovanie self-check loop. DISTINCT from the
-# Auditor fix-loop above: this caps the AI Agent's WITHIN-Programovanie re-attempts on a single failed
-# task. Kept for the deferred-RED ``_run_build_round`` (rebuilt as the self-checking loop in CR-V2-012).
-_AUTO_FIX_RETRIES = 5
+# (The v1 per-task ``_AUTO_FIX_RETRIES`` is RETIRED — CR-V2-012 replaced the per-task-audited build loop with
+# the AI-Agent self-checking loop, whose own bound is :data:`_SELF_CHECK_RETRIES` defined beside it.)
 # gate_g FAIL scope-escalation cap (CR-NS-056 §F1.5) — kept for the deferred-RED gate_g/Verifikácia
 # round-runner (rebuilt in CR-V2-014). DISTINCT from the loop bounds above.
 _MAX_SCOPE_ESCALATIONS_PER_ITERATION = 1
@@ -3754,14 +3752,22 @@ async def run_dispatch(
     if stage == "navrh":
         return await _run_navrh_round(db, state, on_event=on_event, directive=directive, on_message=on_message)
 
+    # Programovanie round (CR-V2-012): the AI Agent's SELF-CHECKING coding loop executing the Návrh task plan
+    # (implement + own tests/verification per task; NO per-task Auditor — the independent Auditor verifies once
+    # at Verifikácia). Owns its own multi-task lifecycle + the SHARED dial-settle at the end, so it
+    # early-returns here. ``directive`` (an uprav/answer/pokracovat re-dispatch) seeds attempt 1 of the resumed
+    # task (two-way comms — the Coordinator relay is retired in v2).
+    if stage == "programovanie":
+        return await _run_build_round(db, state, on_event=on_event, directive=directive, on_message=on_message)
+
     # 4-phase dispatch. The v1 stage-specific routing (gate_e per-question round / build per-task loop /
     # task_plan incremental passes / kickoff triage / release publish) is collapsed: each phase runs as a
     # generic agent turn through the shared invoke path, with a per-phase BRIEF. Milestone C/D give each
     # phase its rich brief — Príprava (the interactive Zadanie→Špecifikácia dialogue, CR-V2-010) + Návrh
-    # (the design doc + task plan, CR-V2-011 above) here; Programovanie (CR-V2-012) / Verifikácia
-    # (CR-V2-014) next. The v1 round-runners (``_run_build_round`` / ``_run_gate_e_round``) survive as
-    # deferred-RED helpers C/D re-points, but are NOT reachable from this 4-phase routing
-    # (``_run_task_plan_round`` is REMOVED — it folded into the Návrh round above, CR-V2-011).
+    # (the design doc + task plan, CR-V2-011) + Programovanie (the self-checking loop, CR-V2-012 above)
+    # here; Verifikácia (CR-V2-014) next. The v1 ``_run_gate_e_round`` survives as a deferred-RED helper
+    # CR-V2-013 re-points, but is NOT reachable from this 4-phase routing (``_run_task_plan_round`` folded
+    # into Návrh, CR-V2-011; ``_run_build_round`` was rebuilt + re-homed to Programovanie, CR-V2-012).
     if directive is not None:
         prompt = directive  # the Manažér's framed uprav/ask/answer message IS the prompt (direct comms)
     elif stage == "priprava":
@@ -5750,59 +5756,11 @@ async def _maybe_autonomous_gate_ratify(
     return True
 
 
-async def _maybe_autonomous_build_ratify(
-    db: Session,
-    state: PipelineState,
-    *,
-    on_message: Optional[MessageCallback] = None,
-) -> bool:
-    """PIPELINE-AUTONOMY Phase 2 (design §5.1 / §1 row #12) — at the new_version BUILD completion, AUTO-RATIFY
-    the final build sign-off with NO Director click: advance build→gate_g + re-dispatch (the runner's
-    auto-chain runs the Auditor), instead of settling ``awaiting_director`` for the build-approve click.
-    Sibling of :func:`_maybe_autonomous_gate_ratify` — but the build-completion seam has no gate_report verify
-    (no ``reason``/``is_scope``); its deterministic readiness IS the structural ``Task.status``, so the guard
-    is :func:`build_readiness` clean (design §0.1), not a verify reason.
-
-    Returns ``True`` when it advanced (the caller returns the now-``agent_working`` state at gate_g);
-    ``False`` → the caller takes the existing ``awaiting_director`` build sign-off settle unchanged. ALL must
-    hold:
-
-    * ``flow_type == 'new_version'`` — fast_fix has its OWN build→release auto-advance (handled above this
-      seam); cr / bug keep the generic awaiting_director build sign-off byte-for-byte;
-    * ``current_stage == 'build'`` — defensive (only ever called from the build-completion seam);
-    * :func:`build_readiness` clean — all tasks done (0 todo) ∧ 0 open findings (no ``failed`` /
-      ``in_progress`` task). ANY todo / failed / in_progress task → NOT clean → settle as today (never auto;
-      the Director addresses the open task). This is the deterministic readiness HALT-on-exception (design §4);
-    * the version's kickoff autonomy toggle is ON (:func:`_autonomy_enabled`, default).
-
-    gate_g itself is NEVER auto-ratified (the KEY release verdict, design §1.1 — :func:`_maybe_autonomous_gate_ratify`
-    excludes it), so this advance lands at a Director-gated verdict, never an unsupervised publish. Recorded
-    Director-visibly via :func:`_record_autonomous_gate` (``is_autonomous=true`` + ``stage='build'`` + a
-    deterministic rationale) so the board roll-up shows the build auto-ratified. No silent advance is possible."""
-    if state.flow_type != "new_version":
-        return False
-    if state.current_stage != "build":
-        return False  # defensive: only the build-completion seam calls this
-    all_tasks_done, open_findings = build_readiness(db, state.version_id)
-    if not all_tasks_done or open_findings != 0:
-        return False  # a todo / failed / in_progress task → build not clean → settle for the Director
-    if not _autonomy_enabled(db, state.version_id):
-        return False  # kickoff opt-out → the Director wants the build sign-off click
-    rationale = (
-        "Build dokončený — všetky úlohy hotové, žiadne otvorené nálezy (0 todo ∧ 0 zlyhaných) — "
-        "auto-ratifikované, postup na Audit (gate_g)."
-    )
-    state.current_stage = _next_stage("build", state.flow_type)  # → gate_g
-    _begin_dispatch(db, state)  # status=agent_working at gate_g → the runner continues the chain
-    await _record_autonomous_gate(
-        db,
-        state.version_id,
-        stage="build",
-        action="auto_ratify_build",
-        rationale=rationale,
-        on_message=on_message,
-    )
-    return True
+# (The v1 ``_maybe_autonomous_build_ratify`` — auto-ratify the build→gate_g sign-off — is RETIRED with
+# CR-V2-012's build-round rebuild: it was build-completion-only, referenced the retired v1 ``build``/``gate_g``
+# stages, and is subsumed by the Miera autonómie dial (the Programovanie schvaľovací bod auto-continues to
+# Verifikácia at a non-stopping level via :func:`_settle_phase_boundary`). The remaining ``_maybe_autonomous_*``
+# helpers stay only on the deferred-RED gate-e path CR-V2-013 re-points.)
 
 
 def _gate_e_budget_reached(db: Session, version_id: uuid.UUID) -> bool:
@@ -6034,20 +5992,27 @@ def _fetch_cross_cutting_rules(db: Session, version_id: uuid.UUID) -> Optional[s
 def _directive_for_build_task(
     task: Task, cross_cutting_rules: Optional[str], prior_failures: list[str], flow_type: str = "new_version"
 ) -> str:
-    """Per-task brief for the Programmer (§6): one task, its description, the authoritative
-    spec to consult, the cross-cutting block, and (on a retry) the prior attempts' reasons.
+    """Per-task brief for the AI Agent's Programovanie SELF-CHECKING loop (CR-V2-012; design §2.1 / §5.1(1)
+    "self-check — continuous self-verification while coding, like Dedo").
 
-    ``flow_type='fast_fix'`` (F-009 §3, CR-NS-097): the Director directive (the task description) IS the
-    authority — there is no spec section to study, and the Programmer must EXECUTE it directly rather than
-    debate it on semantic/opinion grounds (the live run blocked asking "naozaj to chceš premenovať?")."""
-    parts = [f"Programátor, postav JEDNU úlohu (TASK #{task.number}): {task.title}"]
+    DESIGN-BEARING (flagged for the Manažér): this prompt DEFINES the AI Agent's per-task Programovanie
+    behaviour — implement ONE task from the Návrh plan AND run its own tests/verification before reporting
+    done. There is NO per-task Auditor in v2 (the AI Agent is its own first line of quality; the independent
+    Auditor verifies once at Verifikácia, not per task — design §2.2 / D5). The brief carries: the task +
+    its description, the authoritative spec section to consult, the cross-cutting invariants, and (on a
+    retry) the prior attempts' reasons.
+
+    ``flow_type='fast_fix'`` (design §2.4): the Manažér's directive (the task description) IS the authority —
+    there is no spec section to study, and the AI Agent must EXECUTE it directly rather than debate it on
+    semantic/opinion grounds (the live v1 run blocked asking "naozaj to chceš premenovať?")."""
+    parts = [f"AI Agent, postav JEDNU úlohu (TASK #{task.number}): {task.title}"]
     if task.description:
         parts.append(f"Popis úlohy: {task.description}")
     if flow_type == "fast_fix":
         parts.append(
-            "RÝCHLA OPRAVA (fast-fix lane, F-009): pokyn Directora vyššie je AUTORITATÍVNY — VYKONAJ ho "
-            "priamo. NESPOCHYBŇUJ ho z názorových / sémantických dôvodov (napr. „Firmy je správne, naozaj to "
-            "chceš premenovať?“). ZASTAV (kind=blocked) IBA ak je to technicky nemožné, alebo naozaj nevieš "
+            "RÝCHLA OPRAVA (fast-fix lane): pokyn Manažéra vyššie je AUTORITATÍVNY — VYKONAJ ho priamo. "
+            "NESPOCHYBŇUJ ho z názorových / sémantických dôvodov (napr. „Firmy je správne, naozaj to chceš "
+            "premenovať?“). ZASTAV (kind=blocked) IBA ak je to technicky nemožné, alebo naozaj nevieš "
             "identifikovať ČO zmeniť — NIE preto, že s pokynom nesúhlasíš."
         )
     else:
@@ -6059,134 +6024,17 @@ def _directive_for_build_task(
     if prior_failures:
         joined = "\n".join(f"- pokus {i}: {r}" for i, r in enumerate(prior_failures, 1))
         parts.append(f"Predošlé NEÚSPEŠNÉ pokusy o túto úlohu — oprav uvedené:\n{joined}")
+    # The v2 self-check: the AI Agent runs its OWN tests/verification before reporting done (design §2.1 —
+    # "never its own final judge" is the Auditor at Verifikácia, but it IS its own first line of quality).
+    # NO per-task Auditor turn follows; the engine's per-task gate is the deterministic mechanical commit
+    # verify (verify_mechanical), so the agent MUST commit + report commits[]/deliverables[] honestly.
     parts.append(
+        "Implementuj úlohu a PRIEBEŽNE si sám over výsledok (spusti vlastné testy / verifikáciu — si prvá "
+        "línia kvality; nezávislý Auditor príde až raz vo Verifikácii, NIE po každej úlohe). "
         "Commitni zmeny a ukonči <<<PIPELINE_STATUS>>> blokom s commits[] + deliverables[] "
         "(F-007-orchestration-cockpit.md §5.3)."
     )
     return "\n\n".join(parts)
-
-
-def _audit_prompt_for_task(task: Task, block: PipelineStatusBlock, cross_cutting_rules: Optional[str]) -> str:
-    """Per-task Auditor brief (§6, CR-NS-020 CR-4): audit-vs-spec scoped to ONE task — its
-    deliverables + the diff ``baseline_sha..HEAD`` + the relevant spec section + cross-cutting.
-    Lighter than the release audit (the Dual-Build / Tibor audit stays at gate_g)."""
-    parts = [f"Audítor, sprav audit-vs-spec JEDNEJ úlohy (TASK #{task.number}): {task.title}."]
-    if task.description:
-        parts.append(f"Popis úlohy: {task.description}")
-    parts.append(f"Deliverables Programátora: {', '.join(block.deliverables) if block.deliverables else '(žiadne)'}.")
-    if task.baseline_sha:
-        parts.append(f"Audituj IBA túto úlohu — preskúmaj diff `{task.baseline_sha}..HEAD` (git), nie celý projekt.")
-    parts.append(
-        "Over: spec compliance deliverables voči relevantnej sekcii autoritatívneho špecu "
-        "(docs/specs/), konzistenciu a dodržanie prierezových pravidiel."
-    )
-    if cross_cutting_rules:
-        parts.append(f"Prierezové pravidlá (musia byť dodržané):\n{cross_cutting_rules}")
-    parts.append(
-        "Ukonči <<<PIPELINE_STATUS>>> blokom: task_pass (true/false) + findings[] (čo treba opraviť). "
-        "(F-007-orchestration-cockpit.md §5.3)"
-    )
-    return "\n\n".join(parts)
-
-
-def _coordinator_verify_prompt_for_task(
-    task: Task, block: PipelineStatusBlock, cross_cutting_rules: Optional[str]
-) -> str:
-    """Fast-Fix per-task verify brief for the COORDINATOR (F-009 §3, CR-NS-094): the independent
-    verify of the single fast-fix Task — NO Auditor, NO Dual-Build. The Coordinator checks the
-    Implementer's deliverables against the Director directive (the task brief) + P-2 (no claim without
-    an authoritative source), scoped to the task diff, and emits the same ``task_pass`` + ``findings``
-    contract the build loop's auto-fix already consumes (so the ≤5 bound / done-failed / HALT seam is
-    untouched — only the verifying agent differs)."""
-    parts = [f"Koordinátor, nezávisle over JEDNU rýchlu opravu (TASK #{task.number}): {task.title}."]
-    if task.description:
-        parts.append(f"Smernica Directora (zadanie úlohy): {task.description}")
-    parts.append(f"Deliverables Implementéra: {', '.join(block.deliverables) if block.deliverables else '(žiadne)'}.")
-    if task.baseline_sha:
-        parts.append(f"Over IBA túto opravu — preskúmaj diff `{task.baseline_sha}..HEAD` (git), nie celý projekt.")
-    parts.append(
-        "Over: rieši zmena smernicu Directora, je konzistentná a bez claimu bez authoritative source "
-        "(P-2)? Toto je rýchla oprava — žiadny plný Auditor, žiadny Dual-Build."
-    )
-    if cross_cutting_rules:
-        parts.append(f"Prierezové pravidlá (musia byť dodržané):\n{cross_cutting_rules}")
-    parts.append(
-        "Ukonči <<<PIPELINE_STATUS>>> blokom: task_pass (true/false) + findings[] (čo treba opraviť). "
-        "(F-007-orchestration-cockpit.md §5.3)"
-    )
-    return "\n\n".join(parts)
-
-
-async def _verify_task(
-    db: Session,
-    state: PipelineState,
-    task: Task,
-    block: PipelineStatusBlock,
-    on_message: Optional[MessageCallback] = None,
-) -> Optional[str]:
-    """Per-task quality gate (§6). Returns a failure reason or ``None`` (pass).
-
-    **CR-3: deterministic mechanical verify** scoped to the task's ``baseline_sha`` (commit
-    exists + deliverables on disk + commits in ``baseline..HEAD``). **CR-4: + the Auditor
-    audit-vs-spec turn** after a mechanical pass — scoped to this ONE task, emitting
-    ``task_pass`` + per-task ``findings``. The findings-summary returned here is what the
-    CR-3 auto-fix loop escalates into the next brief + the HALT path relays; the loop, the
-    ≤5 bound, the done/failed transitions and the HALT stay untouched (the seam).
-
-    **Fast-Fix Lane (F-009, CR-NS-094):** the verifying agent is the **Coordinator** (independent
-    verify, reuse the verify_done path — NO Auditor, NO Dual-Build), not the Auditor. Only the
-    verify *agent* + prompt differ; the mechanical check, the ``task_pass`` contract, the auto-fix
-    loop and every transition stay identical — so ``new_version`` / ``cr`` / ``bug`` are unchanged."""
-    slug = _project_slug_for_version(db, state.version_id)
-    mech = verify_mechanical(slug, block, task.baseline_sha)
-    if mech is not None:
-        return mech  # mechanical fail short-circuits — no point auditing a missing commit (saves a turn)
-    cross_cutting = _fetch_cross_cutting_rules(db, state.version_id)
-    # Fast-Fix routes the per-task verify to the Coordinator (NO Auditor); every other flow keeps the
-    # Auditor audit-vs-spec turn. Both emit the identical task_pass + findings contract below.
-    fast_fix_flow = state.flow_type == "fast_fix"
-    verify_role = "coordinator" if fast_fix_flow else "auditor"
-    verify_prompt = (
-        _coordinator_verify_prompt_for_task(task, block, cross_cutting)
-        if fast_fix_flow
-        else _audit_prompt_for_task(task, block, cross_cutting)
-    )
-    # Parse-retry on the VERIFIER (not the Programmer): an unparseable verify block is the verifier's
-    # own formatting bug (e.g. an unescaped quote in a Slovak summary), so the fix is to re-ask it to
-    # re-emit valid JSON — NOT to bounce a failure into the auto-fix loop, which would re-run the
-    # Programmer's (correct) work on the wrong target (Dedo 2026-06-10: per-task verify JSON-robustness).
-    audit = await invoke_agent_with_parse_retry(
-        db,
-        version_id=state.version_id,
-        role=verify_role,
-        stage="build",
-        prompt=verify_prompt,
-        on_message=on_message,
-        # Tag the verify message so the FE per-task audit panel can match it to its task
-        # (CR-NS-020 CR-5 — mirrors the Programmer turn's tag; payload merges it at invoke_agent).
-        extra_payload={"task_id": str(task.id), "task_number": task.number},
-    )
-    if isinstance(audit, ParseFailure):
-        # WS-E (CR-NS-037 addendum — the 6th + FINAL Class-F site, §WS-E amended 5→6): the Auditor
-        # judge exhausted parse-retries → its tokens would leak + the failure was invisible. Make it
-        # visible + count it, then return the IDENTICAL reason so the auto-fix loop / ≤5 bound /
-        # failed+awaiting_director HALT stay byte-for-byte preserved (pure observability, no control-flow
-        # change).
-        await _record_internal_turn_parse_failure(
-            db,
-            state.version_id,
-            "build",
-            turn_label="Audítorov verdikt úlohy",
-            failed=audit,
-            on_message=on_message,
-        )
-        return f"audit nečitateľný: {audit.reason}"
-    if audit.kind == "blocked":
-        return f"audit blokovaný: {audit.question or audit.summary}"
-    if not audit.task_pass:  # fail-closed: absent / None / false → FAIL (never pass without an explicit verdict)
-        findings = "; ".join(audit.findings) if audit.findings else (audit.summary or "audit zlyhal")
-        return f"audit zlyhal: {findings}"
-    return None
 
 
 def _pokusy(n: int) -> str:
@@ -6196,42 +6044,6 @@ def _pokusy(n: int) -> str:
     if 2 <= n <= 4:
         return f"{n} pokusy"
     return f"{n} pokusov"
-
-
-def _task_audit_verdict(db: Session, version_id: uuid.UUID, task_id: uuid.UUID) -> Optional[dict[str, Any]]:
-    """Surface the EXISTING per-task verify verdict (``task_pass`` + ``findings``) from its tagged build
-    message (CR-NS-054). Returns the latest such verdict for the task, or ``None`` when no verify message
-    exists (a mechanical-only fail, or a verifier ParseFailure that produced no parsed block — both handled
-    by the caller's degraded note).
-
-    The verifying agent is the **Auditor** for full flows (preferred — byte-identical to CR-NS-054) and the
-    **Coordinator** for the Fast-Fix Lane (F-009, CR-NS-094 — NO Auditor). The Coordinator authors many
-    build messages (relays, synthesis), so its fallback requires a non-NULL ``task_pass`` to pick out the
-    verify turn — a relay carries ``task_pass=None`` and is correctly skipped."""
-    rows = db.execute(
-        select(PipelineMessage.author, PipelineMessage.payload)
-        .where(
-            PipelineMessage.version_id == version_id,
-            PipelineMessage.author.in_(("auditor", "coordinator")),
-            PipelineMessage.stage == "build",
-        )
-        .order_by(PipelineMessage.seq.asc())
-    ).all()
-    # Prefer the Auditor verdict (full flows) — keeps CR-NS-054 behavior exact, including an Auditor
-    # block that omitted task_pass (None). Only when no Auditor verdict exists for the task does the
-    # Coordinator (fast_fix) verdict apply — and only a real verdict (task_pass not None), never a relay.
-    for author, payload in reversed(rows):
-        if author == "auditor" and payload and payload.get("task_id") == str(task_id):
-            return {"task_pass": payload.get("task_pass"), "findings": payload.get("findings") or []}
-    for author, payload in reversed(rows):
-        if (
-            author == "coordinator"
-            and payload
-            and payload.get("task_id") == str(task_id)
-            and payload.get("task_pass") is not None
-        ):
-            return {"task_pass": payload.get("task_pass"), "findings": payload.get("findings") or []}
-    return None
 
 
 async def _record_task_summary(
@@ -6245,43 +6057,37 @@ async def _record_task_summary(
     attempt_errors: Optional[list[str]] = None,
     on_message: Optional[MessageCallback] = None,
 ) -> None:
-    """§C.1/§C.2 (CR-NS-054, Pillar C) — record ONE factual per-task summary for the Director at a build-task
-    settle (``done`` | ``failed``). NEX Command parity: what was done + the audit verdict + how many ATTEMPTS
-    + the exact error for drill-down. Pure surfacing of EXISTING loop data (no LLM turn — keeps the build cheap
-    + automated); marked ``payload.is_task_summary=true`` (the FE keys off it — mirrors Pillar A's
-    ``is_synthesis``). The payload extends §C.1's listed fields with ``work_summary`` (the Implementer's final
-    report summary — §C.3a) and ``attempt_errors`` (every auto-fix attempt's reason — §C.3c per-pokus
-    drill-down) so the FE card is self-contained. **Additive: never gates the loop;** partial data (no /
-    unreadable audit) degrades to a clear note, never blocks."""
+    """Record ONE factual per-task summary for the Manažér at a Programovanie task settle (``done`` |
+    ``failed``) — CR-V2-012. What was done + how many self-check ATTEMPTS + the exact last error for
+    drill-down. Pure surfacing of EXISTING loop data (no LLM turn — keeps the build cheap + automated);
+    marked ``payload.is_task_summary=true`` (the FE keys off it).
+
+    **CR-V2-012 — NO per-task Auditor verdict.** v1 folded a per-task ``audit_verdict`` (``task_pass`` +
+    Auditor ``findings``) into this card; v2 drops it entirely. The AI Agent self-checks its own work
+    (design §2.1 / §5.1(1)); the independent Auditor verifies ONCE at Verifikácia, not per task (§2.2 /
+    D5). So this card carries only the AI Agent's own work summary + the engine's deterministic
+    mechanical-verify outcome — never a per-task audit verdict message. **Additive: never gates the loop.**"""
     errors = attempt_errors or []
     last_error = errors[-1] if errors else None
-    verdict = _task_audit_verdict(db, version_id, task.id)
-    if verdict is not None:
-        audit_verdict: dict[str, Any] = {"task_pass": verdict["task_pass"], "findings": verdict["findings"]}
-    elif last_error and "audit nečitateľný" in last_error:
-        audit_verdict = {"task_pass": None, "findings": [], "note": "(audit nečitateľný)"}
-    else:
-        audit_verdict = {"task_pass": None, "findings": [], "note": "(audit neprebehol)"}
-
     done = status == "done"
     content = f"Úloha #{task.number} „{task.title}“ — {'hotovo' if done else 'zlyhalo'} ({_pokusy(attempts)})"
     msg = _record_message(
         db,
         version_id=version_id,
-        stage="build",
+        stage="programovanie",
         author="system",
-        recipient="director",
+        recipient="manazer",
         kind="notification",
         content=content,
         payload={
             "is_task_summary": True,
+            "phase": "programovanie",  # per-turn phase stamp (CR-V2-009; consumed by CR-V2-029 metrics)
             "task_summary": {
                 "task_id": str(task.id),
                 "task_number": task.number,
                 "title": task.title,
                 "final_status": status,
                 "attempts": attempts,
-                "audit_verdict": audit_verdict,
                 "last_error": last_error,
                 "work_summary": work_summary,
                 "attempt_errors": errors,
@@ -6292,6 +6098,16 @@ async def _record_task_summary(
         await on_message(msg)
 
 
+#: Per-task SELF-CHECK re-attempt bound for the Programovanie loop (CR-V2-012; replaces the v1 per-task
+#: ``_AUTO_FIX_RETRIES``). The AI Agent self-checks its own work as it codes (design §2.1); if a task's
+#: deterministic mechanical verify (commit exists + deliverables on disk + in baseline..HEAD) fails, the
+#: engine returns the task to the AI Agent with the reason, bounded to this many re-attempts. On exhaustion
+#: the build STOPS and surfaces it to the Manažér DIRECTLY (no Coordinator relay — retired in v2, the AI
+#: Agent reports to the Manažér itself, design §2.2). DISTINCT from :data:`AUDITOR_LOOP_MAX`, which bounds
+#: the Auditor↔AI-Agent fix↔re-verify rounds at Verifikácia (CR-V2-014).
+_SELF_CHECK_RETRIES = 5
+
+
 async def _run_build_round(
     db: Session,
     state: PipelineState,
@@ -6300,215 +6116,164 @@ async def _run_build_round(
     directive: Optional[str] = None,
     on_message: Optional[MessageCallback] = None,
 ) -> PipelineState:
-    """The continuous per-task build loop (F-007 §6).
+    """The Programovanie phase — the AI Agent's SELF-CHECKING coding loop (CR-V2-012; PROG-1, ARCH-5).
 
-    Unlike a gate, build does NOT stop between successful tasks: it dispatches the
-    Programmer task-by-task in plan order, mechanically verifies each (auto-fix up to
-    ``_AUTO_FIX_RETRIES`` with escalating context), and settles to ``awaiting_director``
-    only at the end (all tasks ``done`` → final build sign-off) or on a HALT (a task
-    ``failed`` after the bound → Coordinator relays). Every turn streams live via
-    ``on_message``. ``baseline_sha`` is captured (repo HEAD) BEFORE each task's first
-    dispatch and held immutable across its retries (never build on an unverified base).
+    Rebuilds the v1 per-task-audited build loop (Designer→Implementer→Auditor→Coordinator hub-and-spoke,
+    per-task Auditor verdict, HALT→Coordinator relay) as ONE agent (``ai_agent``) executing the Návrh task
+    plan task-by-task with its OWN continuous self-verification — "like Dedo" (design §2.1 / §5.1(1) / D5).
+    Per task the AI Agent implements + runs its own tests/verification, commits, and reports; **there is NO
+    per-task Auditor** — the independent Auditor verifies ONCE at Verifikácia (§2.2). The engine's per-task
+    gate is the deterministic **mechanical commit verify** (:func:`verify_mechanical` scoped to the task
+    baseline: commit exists + deliverables on disk + in ``baseline..HEAD``) — never an LLM audit turn.
 
-    Resume-safe (Dedo 2026-06-08): a task left ``in_progress`` by a dispatch that died
-    mid-loop (e.g. a backend restart) is reclaimed to ``todo`` on entry and re-run from its
-    persisted ``baseline_sha`` (``done`` stays done; ``failed`` stays for the Director)."""
+    Like v1, build does NOT stop between successful tasks: it loops in plan order, mechanically verifies each
+    (bounded self-check re-attempts up to :data:`_SELF_CHECK_RETRIES` with the prior reasons threaded into
+    the next brief), and only at the END applies the **Miera autonómie dial** (:func:`_settle_phase_boundary`)
+    — auto-continue to Verifikácia (``plna``) or STOP ``awaiting_manazer`` at the Programovanie schvaľovací
+    bod. A mid-loop AI-Agent question / a self-check exhaustion / an unreadable baseline settles for the
+    Manažér DIRECTLY (``awaiting_manazer`` / ``blocked``) — the Coordinator hub-and-spoke relay is RETIRED
+    in v2 (the AI Agent reports to the Manažér itself, §2.2).
+
+    **Safeguards preserved (R-BLAST):** the lost-work audit (``dispatch_baseline_sha`` → :func:`_audit_lost_work`
+    fires inside :func:`invoke_agent` on an envelope-loss; surfaced via ``ParseFailure.lost_work`` →
+    ``awaiting_manazer``, committed-but-lost work never silently dropped — safeguard #3); mechanical commit
+    verify (safeguard backing #1's deliverable honesty); resume-safety (an orphaned ``in_progress`` task is
+    reclaimed to ``todo`` and re-run from its persisted ``baseline_sha``); single-flight (this runs inside the
+    dispatch path, never re-entered concurrently); cooperative pause (a Manažér ``pause`` lands cleanly at a
+    task boundary via the READ-COMMITTED refresh).
+
+    **Helper seam (CR-V2-018):** the AI Agent may spawn ephemeral helpers via its own ``claude`` session's
+    sub-agent tool during a bulk task — internal to the turn; CR-V2-018 surfaces them in the Helpers panel.
+    No backend helper orchestrator exists here.
+    """
     version_id = state.version_id
     slug = _project_slug_for_version(db, version_id)
     project_root = claude_agent.PROJECTS_ROOT / slug
     feat_ids_of_version = select(Feat.id).join(Epic, Epic.id == Feat.epic_id).where(Epic.version_id == version_id)
 
-    # Resume-safety: reclaim a task orphaned mid-build.
+    # Resume-safety: reclaim a task orphaned mid-build (an in_progress task left by a dispatch that died).
     db.execute(
         update(Task).where(Task.feat_id.in_(feat_ids_of_version), Task.status == "in_progress").values(status="todo")
     )
     db.flush()
 
+    # Cross-cutting invariants the AI Agent codified once in the Návrh gate_report (re-read each round, threaded
+    # into every task brief). The v1 gate_g/surgical-fix re-gate threading is GONE — the Verifikácia FAIL fix
+    # loop (the Auditor's findings → AI-Agent fix scope) is owned by CR-V2-014, not the per-task build loop.
     cross_cutting = _fetch_cross_cutting_rules(db, version_id)
-    # gate_g FAIL Fix 2 (CR-NS-057 §F2.2): on a direct FAIL→build re-gate, thread the gate_g audit findings
-    # into every task brief so the re-run is NOT blind. _latest_gate_g_findings self-guards staleness (returns
-    # None once a task_plan has run since the audit — i.e. a gate_a-transitive build), so the sticky is_regate
-    # flag can't leak pre-redesign findings. None ⇒ cross_cutting is untouched.
-    if state.is_regate and state.current_stage == "build":
-        _gg = _latest_gate_g_findings(db, version_id)
-        if _gg:
-            cross_cutting = _gg + ("\n\n" + cross_cutting if cross_cutting else "")
-        # gate-g-hardening GAP 2 (CR-D, korekcia #1): a surgical_fix re-run threads the Director's EXPLICIT fix
-        # directive AHEAD of the Auditor findings (prepended last → renders first). Boundary-anchored, so it
-        # self-clears once the next verdict lands. None ⇒ this is a plain FAIL→build re-gate, brief untouched.
-        _sfd = _latest_surgical_fix_directive(db, version_id)
-        if _sfd:
-            cross_cutting = _sfd + ("\n\n" + cross_cutting if cross_cutting else "")
-    # The Director's framed return/answer (if this is a re-dispatch) seeds the first attempt
-    # of whichever task runs first in THIS dispatch — i.e. the resumed/returned task, NOT
-    # necessarily the globally-first task — then is consumed so later turns use briefs.
+    # The Manažér's framed return/answer (an ``uprav`` / ``answer`` re-dispatch) seeds attempt 1 of whichever
+    # task runs first in THIS dispatch (the resumed task), then is consumed so later turns use generated briefs.
     pending_directive = directive
 
     while True:
-        # CR-NS-027 visibility crux: SessionLocal is expire_on_commit=False, so after the loop's
-        # per-message commits the identity-mapped PipelineState keeps its STALE attributes — a plain
-        # _get_state returns the cached object and would never observe a Director's mid-build commit.
-        # db.refresh forces a fresh row read; Postgres READ COMMITTED then sees the committed status
-        # (e.g. a 'paused' set by the Director's separate request session) → the loop stops cleanly.
+        # CR-NS-027 visibility crux: SessionLocal is expire_on_commit=False, so after the loop's per-message
+        # commits the identity-mapped PipelineState keeps STALE attributes. db.refresh forces a fresh row read;
+        # Postgres READ COMMITTED then sees a 'paused' the Manažér set in a separate request session → the loop
+        # stops cleanly at this task boundary (cooperative pause, never a mid-task kill).
         state = _get_state(db, version_id)
         if state is not None:
             db.refresh(state)
         if state is None or state.status != "agent_working":
-            return state  # Director intervened (pause/return) — land cleanly at a task boundary
+            return state  # Manažér intervened (pause / steer) — land cleanly at a task boundary
+
         task = task_service.get_next_todo_task(db, version_id)
-        if task is None:  # no todo task remains → final build sign-off
-            # Fast-Fix Lane (F-009, CR-NS-097): a CLEAN fast_fix build AUTO-advances to release with NO
-            # Director approve gate — the one-touch flow ends at the Director's uat_accept. Reaching here for
-            # a fast_fix means the single Task is `done` (a failed task HALTs the loop earlier, never getting
-            # here), so there is no open finding to gate on. Hand back agent_working so the runner runs the
-            # release (Coordinator-verify) turn in THIS dispatch. Other flows settle for the final sign-off.
-            if state.flow_type == "fast_fix":
-                state.current_stage = _next_stage("build", state.flow_type)  # → release
-                _begin_dispatch(db, state)  # agent_working at release → pipeline_runner continues the chain
-                return state
-            # §A.2 site 2 (build completion): Coordinator synthesis before settling.
-            synthesis = await _coordinator_synthesis(db, state, trigger="build", completed=True, on_message=on_message)
-            # PIPELINE-AUTONOMY Phase 2 (design §5.1 / §1 row #12): a CLEAN new_version build (build_readiness
-            # clean — 0 todo ∧ 0 failed) AUTO-RATIFIES the final sign-off → advance build→gate_g + re-dispatch
-            # (the runner's auto-chain runs the Auditor) instead of settling awaiting_director for a build-approve
-            # click. Synthesis above STILL runs + records (additive observability: the Director reads it in the
-            # roll-up at the next KEY settle — the gate_g verdict). Returns True only when it advanced (status now
-            # agent_working at gate_g); False → fall through to the existing awaiting_director settle below,
-            # byte-for-byte unchanged. Reaching here already means no todo task remains; a failed/in_progress task
-            # would make build_readiness not clean → settle as today (never auto). gate_g is NEVER auto-ratified
-            # (KEY release verdict) so this lands at a Director-gated verdict, never an unsupervised publish.
-            if await _maybe_autonomous_build_ratify(db, state, on_message=on_message):
+        if task is None:
+            # No todo task remains → the phase produced its output. Apply the Miera autonómie dial at the
+            # Programovanie schvaľovací bod (SHARED dial-settle, CR-V2-010, inherited here): auto-continue to
+            # Verifikácia (``plna`` / fast_fix) or STOP ``awaiting_manazer`` for the Manažér to review. NO
+            # Coordinator synthesis / build-ratify (retired — the dial governs the stop; design §2.2 / §2.3).
+            if _settle_phase_boundary(db, state):
+                return state  # agent_working at Verifikácia — the auto-chain loop continues the build
+            if state.status != "done":
+                state.status = "awaiting_manazer"
+                state.next_action = "Manažér: posúdiť výsledok Programovania (Schváliť / Uprav)."
                 db.flush()
-                return state
-            state.status = "awaiting_director"
-            state.next_action = synthesis or "Director: finálne schválenie buildu (→ Audit)."
-            db.flush()
             return state
 
-        # Baseline BEFORE dispatch — captured once and immutable across the task's whole
-        # lifecycle (auto-fix retries + resume/return). A fresh task anchors to repo HEAD
-        # now; a reclaimed (orphaned in_progress) or a returned task keeps its PERSISTED
-        # baseline_sha so it re-runs against the SAME anchor (Dedo 2026-06-08), never against
-        # a moved HEAD. ORM assignment (not a Core UPDATE) keeps the in-memory object in sync
-        # so _verify_task passes the real baseline — not a stale None — to verify_mechanical.
+        # Baseline BEFORE dispatch — captured once, immutable across the task's self-check re-attempts. A fresh
+        # task anchors to repo HEAD now; a reclaimed (orphaned in_progress) task keeps its PERSISTED baseline_sha
+        # so it re-runs against the SAME anchor, never a moved HEAD (never build on an unverified base). ORM
+        # assignment keeps the in-memory object in sync so verify_mechanical gets the real baseline, not None.
         if task.baseline_sha is None:
             task.baseline_sha = _repo_head(project_root)
         if task.baseline_sha is None:
-            # Fail-closed (CR-NS-020 CR-4.1): repo HEAD unreadable → cannot anchor the diff →
-            # NEVER dispatch on an unknowable base. The task STAYS todo (a precondition failure,
-            # not a failed attempt) so it auto-retries on resume once HEAD is readable; the
-            # Coordinator relays to the Director (mirrors the 5-fail HALT path).
-            relay = await invoke_agent_with_parse_retry(
-                db,
-                version_id=version_id,
-                role="coordinator",
-                stage="build",
-                prompt=(
-                    f"Úloha #{task.number} '{task.title}': nepodarilo sa zachytiť baseline — repo HEAD "
-                    "je nečitateľný (git zlyhal). Priprav pre Directora relay: treba opraviť repo a "
-                    "pokračovať. "
-                    # E7 (F-008 §3, CR-NS-033): triage this build HALT + append a directive (typically
-                    # nex_studio_bug / director_decision — a repo/environment problem).
-                    "Klasifikuj problém (triage podľa charteru §7.1) a popri slovenskom relayi pripoj "
-                    "štruktúrovaný `coordinator_directive` (proposed_action + úprimná confidence). "
-                    "Ukonči <<<PIPELINE_STATUS>>> blokom (F-007-orchestration-cockpit.md §5.3)."
-                ),
-                on_event=on_event,
-                on_message=on_message,
-            )
-            if isinstance(relay, ParseFailure):
-                # WS-E (CR-NS-037): relay result was unchecked → silent. Make it visible + count its
-                # tokens; the settled awaiting_director outcome below is UNCHANGED.
-                await _record_internal_turn_parse_failure(
-                    db,
-                    version_id,
-                    "build",
-                    turn_label="Relay Koordinátora (baseline nečitateľný)",
-                    failed=relay,
-                    on_message=on_message,
-                )
-            state.status = "awaiting_director"
+            # Fail-closed: repo HEAD unreadable → cannot anchor the diff → NEVER dispatch on an unknowable base.
+            # The task STAYS todo (a precondition failure, not a failed attempt) so it auto-retries on resume
+            # once HEAD is readable; surface to the Manažér DIRECTLY (no Coordinator relay — retired in v2).
+            state.status = "awaiting_manazer"
             state.next_action = (
-                f"Úloha #{task.number}: baseline nečitateľný (repo HEAD) — Director: oprav repo a pokračuj."
+                f"Úloha #{task.number}: baseline nečitateľný (repo HEAD) — Manažér: oprav repo a pokračuj."
             )
             db.flush()
             return state
         task.status = "in_progress"
         db.flush()
-        # CR-NS-025 Part 1: live current-task breadcrumb. The task is in_progress NOW, but the
-        # Programmer's first gate_report (the next recorded message) can be a long turn away — and
-        # TaskPlanPanel only refetches the plan when messages.length changes. Record ONE task-start
-        # notification per task (here, before the attempt loop) and broadcast it, so the panel
-        # refetches immediately and the in_progress task shows live. Auto-fix retries and the
-        # completion gate_report record their own messages → only the START was missing. Placed
-        # after the fail-closed baseline guard so a never-dispatched task emits no "začal" breadcrumb.
+        # Live current-task breadcrumb (CR-NS-025): the task is in_progress NOW, but the AI Agent's first
+        # gate_report can be a long turn away — and TaskPlanPanel only refetches when messages.length changes.
+        # Record + broadcast ONE task-start notification so the panel refetches immediately. Placed after the
+        # fail-closed baseline guard so a never-dispatched task emits no "začal" breadcrumb.
         start_msg = _record_message(
             db,
             version_id=version_id,
-            stage="build",
+            stage="programovanie",
             author="system",
-            recipient="director",
+            recipient="manazer",
             kind="notification",
-            content=f"▶ Úloha #{task.number}: {task.title} — Programátor začal.",
-            payload={"task_id": str(task.id), "task_number": task.number},
+            content=f"▶ Úloha #{task.number}: {task.title} — AI Agent začal.",
+            payload={"task_id": str(task.id), "task_number": task.number, "phase": "programovanie"},
         )
         if on_message is not None:
             await on_message(start_msg)
 
         prior_failures: list[str] = []
         task_done = False
-        autonomous_recovered = False  # Pillar B (CR-NS-055): the Coordinator auto-recovered this task → re-loop
-        for attempt in range(1, _AUTO_FIX_RETRIES + 1):
+        for attempt in range(1, _SELF_CHECK_RETRIES + 1):
             if attempt == 1 and pending_directive is not None:
-                prompt = pending_directive  # Director's framed return/answer for the resumed task
+                prompt = pending_directive  # the Manažér's framed return/answer for the resumed task
                 pending_directive = None  # consume once — later attempts/tasks use generated briefs
             else:
                 prompt = _directive_for_build_task(task, cross_cutting, prior_failures, state.flow_type)
             result = await invoke_agent_with_parse_retry(
                 db,
                 version_id=version_id,
-                role="implementer",
-                stage="build",
+                role=AI_AGENT_ROLE,
+                stage="programovanie",
                 prompt=prompt,
                 on_event=on_event,
                 on_message=on_message,
                 extra_payload={"task_id": str(task.id), "task_number": task.number, "attempt": attempt},
             )
             if isinstance(result, ParseFailure):
+                if result.lost_work is not None:
+                    # Lost-work audit (R-BLAST safeguard #3): the AI Agent's envelope was lost (timeout/crash)
+                    # but the commit audit ran (inside invoke_agent). Work may have committed — surface "review
+                    # & continue" DIRECTLY to the Manažér; the audit notification is already recorded. The task
+                    # stays in_progress (reclaimed to todo on the next resume) — committed-but-lost work is
+                    # surfaced, NEVER silently dropped or blindly redone.
+                    state.status = "awaiting_manazer"
+                    state.next_action = result.lost_work["next_action"]
+                    db.flush()
+                    return state
                 prior_failures.append(f"neplatný status blok: {result.reason}")
             elif result.kind in ("question", "blocked"):
-                # The Programmer cannot proceed → the Coordinator reviews. Pillar B (CR-NS-055, §B.1): if it
-                # proposes a clear bounded recovery with honest high confidence (within the per-task cap),
-                # AUTO-EXECUTE it + re-loop — no Director click. Else relay + HALT (Director input needed).
-                relay_text, directive = await _coordinator_relay(db, state, result, on_message)
-                if await _maybe_autonomous_recovery(db, state, task, directive, on_message=on_message):
-                    autonomous_recovered = True
-                    break  # the while loop re-picks the reset task (no failed settle)
-                # Fast-Fix Lane (F-009 §3 D5, CR-NS-103): a routine question → the Coordinator AUTO-ANSWERS it
-                # (no Director gate) and we resume the SAME task with the answer as its brief (generalize the
-                # pending_directive injection above). fast_fix-gated inside the helper; both autonomy paths
-                # False → the EXISTING escalate path below, unchanged (new_version/cr/bug never auto-answer).
-                answer_prompt = await _maybe_autonomous_answer(db, state, task, directive, on_message=on_message)
-                if answer_prompt is not None:
-                    pending_directive = answer_prompt  # seeds attempt 1 of the resumed task (the answer brief)
-                    autonomous_recovered = True
-                    break  # the while loop re-picks the reset task (no failed settle)
-                question_text = relay_text if relay_text is not None else result.question
+                # The AI Agent cannot proceed → it asks the Manažér DIRECTLY (no Coordinator relay — design
+                # §2.2). Settle blocked with an agent_question reason so the board offers ``answer``; the
+                # answer threads back into the resumed task on the next dispatch.
                 state.status = "blocked"
-                # R4 (D1): a build-loop Programmer question relayed for the Director — same category as the
-                # gate-level worker-question site (run_dispatch), so the same authoritative reason.
                 state.block_reason = "agent_question"
-                state.next_action = f"Programátor (úloha #{task.number}) sa pýta: {question_text}"
+                state.next_action = f"AI Agent (úloha #{task.number}) sa pýta: {result.question}"
                 db.flush()
                 return state
             else:
-                reason = await _verify_task(db, state, task, result, on_message)
-                if reason is None:
+                # A gate_report/done-class turn → the AI Agent self-checked + committed. The engine's per-task
+                # gate is the DETERMINISTIC mechanical commit verify ONLY (no Auditor turn — design §2.2 / D5).
+                mech = verify_mechanical(slug, result, task.baseline_sha)
+                if mech is None:
                     db.execute(update(Task).where(Task.id == task.id).values(status="done"))
                     db.flush()
                     task_service.recompute_feat_status(db, task.feat_id)
-                    # §C.2 (CR-NS-054): per-task summary at the DONE settle. `attempt` = the passing try;
-                    # `result` is the passing Implementer report (its summary = "čo urobené").
+                    # Factual per-task summary at the DONE settle — the AI Agent's own work summary + attempts
+                    # (NO per-task audit verdict; CR-V2-012). `attempt` = the passing try.
                     await _record_task_summary(
                         db,
                         version_id,
@@ -6521,32 +6286,26 @@ async def _run_build_round(
                     )
                     task_done = True
                     break
-                prior_failures.append(reason)
-            # failed this attempt → record an auto-return + bump the feat's auto-fix counter
+                prior_failures.append(mech)
+            # failed this attempt (parse failure / mechanical-verify fail) → record a self-check return + bump
+            # the feat's auto-fix counter; the reason threads into the next brief (escalating context).
             fail_metrics = _failure_metrics_payload(result)
             msg = _record_message(
                 db,
                 version_id=version_id,
-                stage="build",
+                stage="programovanie",
                 author="system",
-                recipient="implementer",
+                recipient=AI_AGENT_ROLE,
                 kind="return",
-                content=f"Auto-fix {attempt}/{_AUTO_FIX_RETRIES} (úloha #{task.number}): {prior_failures[-1]}",
+                content=f"Self-check {attempt}/{_SELF_CHECK_RETRIES} (úloha #{task.number}): {prior_failures[-1]}",
                 payload={
                     "verify_reason": prior_failures[-1],
                     "auto_fix_attempt": attempt,
                     "task_id": str(task.id),
-                    # WS-D (CR-NS-036): when this attempt's failure was a terminal ParseFailure (the
-                    # Programmer produced no message of its own), carry its tokens here — keyed by
-                    # task_id so aggregate_pipeline_usage rolls them up to the task. A verify-failed
-                    # gate_report attempt already recorded its own metric-bearing message → no-op.
+                    "phase": "programovanie",  # per-turn phase stamp (CR-V2-009; CR-V2-029 metrics)
+                    # WS-D: when this attempt's failure was a terminal ParseFailure (the AI Agent produced no
+                    # message of its own), carry its tokens here so aggregate_pipeline_usage rolls them up.
                     **fail_metrics,
-                    # Metrics redesign §1.1: this failed Implementer attempt is recorded under
-                    # author="system"; tag its role-of-origin so aggregate_usage_by_role lands the
-                    # tokens in the Programmer bucket, not the excluded system one. Only when this note
-                    # actually carries the attempt's metrics (a verify-failed gate_report already
-                    # recorded its own implementer-authored message → no tokens here → no tag needed).
-                    **({"metrics_role": "implementer"} if fail_metrics else {}),
                 },
             )
             if on_message is not None:
@@ -6554,133 +6313,31 @@ async def _run_build_round(
             db.execute(update(Feat).where(Feat.id == task.feat_id).values(auto_fix_count=Feat.auto_fix_count + 1))
             db.flush()
 
-        if autonomous_recovered:
-            # Pillar B (CR-NS-055): the Coordinator auto-recovered this task at an Implementer question
-            # (executor already reset it + set agent_working) → re-run the build loop, no failed settle.
-            continue
-
-        if not task_done:  # auto-fix bound exhausted → task failed → HALT
+        if not task_done:  # self-check bound exhausted → task failed → STOP + surface to the Manažér directly
             db.execute(update(Task).where(Task.id == task.id).values(status="failed"))
             db.flush()
             task_service.recompute_feat_status(db, task.feat_id)
-            # §C.2 (CR-NS-054): per-task summary at the FAILED settle (all _AUTO_FIX_RETRIES tries used).
-            # `result` is the last attempt's output (a block → its summary; a ParseFailure → no summary).
+            # Factual per-task summary at the FAILED settle (all _SELF_CHECK_RETRIES tries used).
             await _record_task_summary(
                 db,
                 version_id,
                 task,
                 status="failed",
-                attempts=_AUTO_FIX_RETRIES,
+                attempts=_SELF_CHECK_RETRIES,
                 work_summary=result.summary if isinstance(result, PipelineStatusBlock) else None,
                 attempt_errors=prior_failures,
                 on_message=on_message,
             )
-            # Coordinator relays the failure to the Director (hub-and-spoke; §3).
-            relay = await invoke_agent_with_parse_retry(
-                db,
-                version_id=version_id,
-                role="coordinator",
-                stage="build",
-                prompt=(
-                    f"Úloha #{task.number} '{task.title}' zlyhala po {_AUTO_FIX_RETRIES} auto-fix pokusoch. "
-                    f"Posledný dôvod: {prior_failures[-1]}. Priprav pre Directora relay — čo treba rozhodnúť "
-                    "(vrátiť na prepracovanie / konzultovať). " + _FIRST_PRINCIPLES_TRIAGE +
-                    # Pillar B (CR-NS-055 §B.2): first-principles triage — a clear bounded recovery with honest
-                    # high confidence auto-executes (no Director click); ambiguity / design-scope / destructive
-                    # escalates.
-                    # E7 (F-008 §3, CR-NS-033): this failed-task HALT is the PRIME triage point — classify
-                    # it and propose a concrete fix (reset_task / move_baseline / route_to_designer /
-                    # escalate_dedo) the Director approves + the engine executes.
-                    "Klasifikuj problém (triage podľa charteru §7.1) a popri relayi pripoj štruktúrovaný "
-                    "`coordinator_directive` (proposed_action + úprimná confidence). "
-                    "Ukonči <<<PIPELINE_STATUS>>> blokom (F-007-orchestration-cockpit.md §5.3)."
-                ),
-                on_event=on_event,
-                on_message=on_message,
-            )
-            if isinstance(relay, ParseFailure):
-                # WS-E (CR-NS-037): relay result was unchecked → silent on the PRIME triage point. Make
-                # it visible + count its tokens; the settled awaiting_director HALT below is UNCHANGED.
-                await _record_internal_turn_parse_failure(
-                    db,
-                    version_id,
-                    "build",
-                    turn_label="Relay Koordinátora (úloha zlyhala)",
-                    failed=relay,
-                    on_message=on_message,
-                )
-            else:
-                # Pillar B (CR-NS-055, §B.1): if the Coordinator proposes a clear bounded recovery with honest
-                # high confidence (within the per-task cap), AUTO-EXECUTE it + continue the build — no Director
-                # click. Else fall through to the existing escalate (awaiting_director).
-                directive = (
-                    relay.coordinator_directive.model_dump(mode="json")
-                    if relay.coordinator_directive is not None
-                    else None
-                )
-                if await _maybe_autonomous_recovery(db, state, task, directive, on_message=on_message):
-                    continue
-            state.status = "awaiting_director"
+            # No Coordinator relay (retired in v2) — settle ``awaiting_manazer`` DIRECTLY. The Manažér steers
+            # the AI Agent (``uprav``) or re-runs; the AI Agent fixes (design §2.2, division of labour).
+            state.status = "awaiting_manazer"
             state.next_action = (
-                f"Úloha #{task.number} zlyhala po {_AUTO_FIX_RETRIES} pokusoch — Director: vrátiť / konzultovať."
+                f"Úloha #{task.number} zlyhala po {_pokusy(_SELF_CHECK_RETRIES)} self-check — "
+                "Manažér: usmerni AI Agenta (Uprav) alebo rozhodni o ďalšom kroku."
             )
             db.flush()
             return state
-        # task done → continue the loop to the next todo task (no Director click; §6)
-
-
-async def _run_designer_spec_fix(
-    db: Session,
-    state: PipelineState,
-    *,
-    on_event: Optional[claude_agent.EventCallback] = None,
-    on_message: Optional[MessageCallback] = None,
-) -> PipelineState:
-    """E7 route_to_designer (F-008 §10, CR-NS-034): a mid-build Designer spec-fix turn. The Designer fixes
-    the spec/design for the held failed task (per the latest coordinator_directive's params/rationale) and
-    reports DONE; we then reset that task → todo (fresh ≤5 budget, corrected spec), clear the returns_to
-    marker, hand current_actor back to the Implementer, and re-enter _run_build_round so the Programmer
-    re-attempts. Mirrors the gate_e Branch B designer_edit precedent, adapted to build."""
-    version_id = state.version_id
-    task = _failed_build_task(db, version_id)
-    directive = _latest_coordinator_directive(db, version_id) or {}
-    section = (directive.get("params") or {}).get("section")
-    rationale = directive.get("rationale") or "spec problém pri build úlohe"
-    task_label = f"#{task.number} '{task.title}'" if task is not None else "build úloha"
-    prompt = (
-        f"Build úloha {task_label} narazila na problém v spec/dizajne: {rationale}. "
-        + (f"Týka sa to sekcie: {section}. " if section else "")
-        + "Oprav príslušnú spec/dizajn v `docs/specs/…` (si jediný s právom editovať spec), aby build "
-        "úloha mohla prejsť. Ukonči <<<PIPELINE_STATUS>>> blokom (F-007-orchestration-cockpit.md §5.3)."
-    )
-    edit = await invoke_agent_with_parse_retry(
-        db,
-        version_id=version_id,
-        role="designer",
-        stage="build",
-        prompt=prompt,
-        on_event=on_event,
-        recipient="coordinator",
-        on_message=on_message,
-    )
-    if isinstance(edit, ParseFailure):
-        # Designer turn unparseable → CLEAR the marker (returns_to is for the duration of ONE Designer
-        # dispatch only) and block. The build returns to its HALT (the task stays failed); the Director's
-        # normal build/blocked actions work, and a re-route needs a FRESH Coordinator directive (re-triaged)
-        # — never a blind, unbounded Designer re-run, and never a dangling marker that hijacks return/ask.
-        state.returns_to = None
-        state.current_actor = "implementer"
-        db.flush()
-        return await _block_failed(state, db, edit.reason, failed=edit, on_message=on_message)
-    # Designer DONE → reset the held failed task (corrected spec), clear the marker, hand back to build.
-    if task is not None:
-        task.status = "todo"
-        db.flush()
-        task_service.recompute_feat_status(db, task.feat_id)
-    state.returns_to = None
-    state.current_actor = "implementer"
-    db.flush()
-    return await _run_build_round(db, state, on_event=on_event, on_message=on_message)
+        # task done → continue the loop to the next todo task (no Manažér stop between successful tasks)
 
 
 def _stage_order_for(flow_type: str) -> tuple[str, ...]:

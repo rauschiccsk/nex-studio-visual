@@ -1907,38 +1907,12 @@ async def test_new_version_build_failed_task_no_auto_ratify(db_session, fake_cla
     assert _autos(db_session, version.id) == []  # no auto-ratify on a non-clean build
 
 
-async def test_maybe_autonomous_build_ratify_guard(db_session, fake_claude, monkeypatch):
-    """The deterministic build-ratify guard rejects every non-clean / non-routine case (the happy advance is
-    covered end-to-end by test_new_version_build_auto_ratifies_to_gate_g): a todo task and a failed task both
-    leave build_readiness un-clean; a non-new_version flow, a non-build stage, and the kickoff opt-out all
-    reject — settle as today, never auto."""
-    monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "a" * 40)
-    version, project = _make_version(db_session)
-    await orchestrator.apply_action(db_session, version_id=version.id, action="start")  # new_version, autonomy ON
-    _epic, _feat, (task,) = _seed_one_feat(db_session, version, project, ["T"])
-    state = _to_build(db_session, version)
-    mbr = orchestrator._maybe_autonomous_build_ratify
-
-    # a todo task → build_readiness not clean (all_tasks_done False) → no auto
-    assert await mbr(db_session, state) is False and state.current_stage == "build"
-    # a failed task → 0 todo but an open finding → not clean → no auto (the defensive seam branch)
-    db_session.execute(update(Task).where(Task.id == task.id).values(status="failed"))
-    db_session.flush()
-    assert await mbr(db_session, state) is False and state.current_stage == "build"
-    # mark all done so ONLY the next guard under test rejects
-    db_session.execute(update(Task).where(Task.id == task.id).values(status="done"))
-    db_session.flush()
-    # wrong flow (cr / bug / fast_fix never build-ratify — fast_fix has its own build→release advance)
-    state.flow_type = "cr"
-    assert await mbr(db_session, state) is False
-    state.flow_type = "new_version"
-    # wrong stage (only the build-completion seam ever calls this)
-    state.current_stage = "gate_d"
-    assert await mbr(db_session, state) is False
-    state.current_stage = "build"
-    # kickoff opt-out → the Director wants the manual build sign-off
-    monkeypatch.setattr(orchestrator, "_autonomy_enabled", lambda db, version_id: False)
-    assert await mbr(db_session, state) is False and state.current_stage == "build"
+# RETIRED (CR-V2-012): test_maybe_autonomous_build_ratify_guard exercised the v1
+# ``_maybe_autonomous_build_ratify`` build→gate_g auto-ratify helper. CR-V2-012 removed that helper (it is
+# subsumed by the Miera autonómie dial — the Programovanie schvaľovací bod auto-continues to Verifikácia at a
+# non-stopping level via ``_settle_phase_boundary``, covered by the v2 Programovanie dial tests in
+# tests/test_orchestrator_v2_programovanie.py). There is no v2 analogue to defer this test to — it is retired,
+# not re-keyed.
 
 
 async def test_new_version_build_to_gate_g_chain_within_widened_bound(db_session, fake_claude, monkeypatch):
@@ -1948,8 +1922,8 @@ async def test_new_version_build_to_gate_g_chain_within_widened_bound(db_session
     single verdict click. Exactly one auto-advance (build), well within the widened bound."""
     monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "a" * 40)
     # gate_g's verify (verify_done = mechanical + smoke) → PASS stub so the gate_g dispatch settles for the
-    # verdict without a real smoke run. The build round uses _verify_task (verify_mechanical + Auditor turn),
-    # NOT verify_done, so the build loop is unaffected by this stub.
+    # verdict without a real smoke run. (The v1 build round's per-task verify was retired in CR-V2-012 — the
+    # v2 self-checking loop uses verify_mechanical only — so this stub never touched the build loop anyway.)
     monkeypatch.setattr(orchestrator, "verify_done", _synthesis_verify_pass)
     version, project = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")  # new_version, autonomy ON
@@ -4137,7 +4111,7 @@ async def test_build_auto_fix_exhausted_marks_failed_and_halts(db_session, fake_
     db_session.refresh(task)
     assert task.status == "failed"
     returns = [m for m in _msgs(db_session, version.id) if m.author == "system" and m.kind == "return"]
-    assert len(returns) == orchestrator._AUTO_FIX_RETRIES  # exactly 5 attempts
+    assert len(returns) == 5  # exactly 5 attempts (v1 _AUTO_FIX_RETRIES; retired in CR-V2-012)
     assert orchestrator._build_open_findings(db_session, version.id) == 1
     # a Coordinator relay message was recorded for the Director
     assert any(m.author == "coordinator" and m.stage == "build" for m in _msgs(db_session, version.id))
@@ -4744,7 +4718,7 @@ async def test_build_parsefailure_attempts_carry_worker_metrics(db_session, fake
     db_session.refresh(task)
     assert task.status == "failed"
     returns = [m for m in _msgs(db_session, version.id) if m.author == "system" and m.kind == "return"]
-    assert len(returns) == orchestrator._AUTO_FIX_RETRIES
+    assert len(returns) == 5  # v1 _AUTO_FIX_RETRIES (retired in CR-V2-012)
     for m in returns:
         # each attempt exhausted its 3 parse-retries → accumulated 3×(8,3); attributed to the task
         assert m.payload["usage"] == {"input_tokens": 24, "output_tokens": 9, "model": "m"}
@@ -4760,7 +4734,7 @@ async def test_build_parsefailure_attempts_carry_worker_metrics(db_session, fake
     # the failed Implementer tokens (the 5 auto-fix returns) are attributed to "implementer" (via
     # metrics_role), NOT to coordinator/system. (A genuinely system-authored residual note from the HALT
     # relay legitimately remains in the system bucket — §1.4 — so we assert only the worker attribution.)
-    assert by_role["implementer"].input_tokens == 24 * orchestrator._AUTO_FIX_RETRIES
+    assert by_role["implementer"].input_tokens == 24 * 5  # v1 _AUTO_FIX_RETRIES (retired in CR-V2-012)
     assert "coordinator" not in by_role or by_role["coordinator"].input_tokens == 0
 
 
@@ -5044,26 +5018,12 @@ async def test_internal_turn_failure_timing_only_when_usage_none(db_session, mon
     assert notes[0].payload["timing"]["parse_attempts"] == 1 + orchestrator._PARSE_RETRIES
 
 
-async def test_verify_task_audit_judge_parse_failure_visible_note(db_session, monkeypatch):
-    """Site 6 (WS-E addendum, CR-NS-037) — `_verify_task` Auditor judge exhausts parse-retries → note +
-    metrics; returns the IDENTICAL `audit nečitateľný:` reason so the auto-fix loop / ≤5 bound / HALT
-    are byte-for-byte preserved (no control-flow change)."""
-    monkeypatch.setattr(orchestrator, "verify_mechanical", lambda slug, block, baseline_sha=None: None)
-    seq = SequenceClaude([("garbage", _U(9, 4, "m")), ("garbage", _U(9, 4, "m")), ("garbage", _U(9, 4, "m"))])
-    monkeypatch.setattr(orchestrator, "invoke_claude", seq)
-    version, project = _make_version(db_session)
-    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
-    _epic, _feat, (task,) = _seed_one_feat(db_session, version, project, ["T"])
-    state = _to_build(db_session, version)
-    block = parse_status_block(_block(stage="build", kind="gate_report", summary="hotovo", awaiting="director"))
-
-    reason = await orchestrator._verify_task(db_session, state, task, block)
-
-    assert reason is not None and reason.startswith("audit nečitateľný:")  # IDENTICAL return UNCHANGED
-    notes = [m for m in _msgs(db_session, version.id) if "Audítorov verdikt úlohy" in m.content]
-    assert len(notes) == 1 and notes[0].author == "system" and notes[0].recipient == "director"
-    assert notes[0].payload["usage"] == {"input_tokens": 27, "output_tokens": 12, "model": "m"}  # 3×(9,4)
-    assert notes[0].payload["timing"]["parse_attempts"] == 3
+# RETIRED (CR-V2-012): test_verify_task_audit_judge_parse_failure_visible_note exercised the v1 per-task
+# Auditor verify (``_verify_task`` — mechanical verify + an Auditor audit-vs-spec turn per task). CR-V2-012
+# removed the per-task Auditor entirely: the AI Agent self-checks its own work, and the engine's per-task gate
+# is the deterministic ``verify_mechanical`` ONLY (the independent Auditor verifies once at Verifikácia,
+# CR-V2-014). There is no per-task audit turn to defer this test to — it is retired, not re-keyed. The v2
+# self-checking loop is covered in tests/test_orchestrator_v2_programovanie.py.
 
 
 # ── CR-NS-053 Pillar A: Coordinator synthesis turn (§A.1–§A.2) ──────────────────
@@ -5246,49 +5206,12 @@ async def test_synthesis_at_task_plan_pass(db_session, fake_claude, monkeypatch)
 # ── CR-NS-054 Pillar C: per-task Director reporting (§C.1–§C.2) ──────────────────
 
 
-async def test_task_summary_recorded_on_done(db_session, fake_claude, monkeypatch):
-    """§C.1/§C.2: a passing build task records ONE per-task summary (is_task_summary) — done, 1 attempt,
-    audit_verdict.task_pass=True, no last_error."""
-    monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "a" * 40)
-    version, project = _make_version(db_session)
-    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
-    _epic, _feat, (task,) = _seed_one_feat(db_session, version, project, ["Auth modul"])
-    _to_build(db_session, version)
-    fake_claude.response = _build_fake(audit_pass=True)
-
-    await orchestrator.run_dispatch(db_session, version.id)
-
-    summaries = [m for m in _msgs(db_session, version.id) if (m.payload or {}).get("is_task_summary")]
-    assert len(summaries) == 1
-    assert summaries[0].author == "system" and summaries[0].recipient == "director"
-    ts = summaries[0].payload["task_summary"]
-    assert ts["final_status"] == "done"
-    assert ts["attempts"] == 1
-    assert ts["audit_verdict"]["task_pass"] is True
-    assert ts["last_error"] is None
-    assert ts["task_number"] == task.number and ts["title"] == "Auth modul"
-
-
-async def test_task_summary_recorded_on_failed(db_session, fake_claude, monkeypatch):
-    """§C.1/§C.2: a failing build task (audit never passes) records ONE per-task summary — failed,
-    _AUTO_FIX_RETRIES attempts, audit_verdict.task_pass=False, last_error = the verbatim audit reason."""
-    monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "b" * 40)
-    version, project = _make_version(db_session)
-    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
-    _epic, _feat, (task,) = _seed_one_feat(db_session, version, project, ["Broken modul"])
-    _to_build(db_session, version)
-    fake_claude.response = _build_fake(audit_pass=False, audit_findings=["chýba validácia DPH"])
-
-    await orchestrator.run_dispatch(db_session, version.id)
-
-    summaries = [m for m in _msgs(db_session, version.id) if (m.payload or {}).get("is_task_summary")]
-    assert len(summaries) == 1
-    ts = summaries[0].payload["task_summary"]
-    assert ts["final_status"] == "failed"
-    assert ts["attempts"] == orchestrator._AUTO_FIX_RETRIES
-    assert ts["audit_verdict"]["task_pass"] is False
-    assert "chýba validácia DPH" in (ts["last_error"] or "")
-    assert ts["task_number"] == task.number
+# RETIRED (CR-V2-012): test_task_summary_recorded_on_done / _on_failed specced the v1 per-task summary that
+# folded a per-task ``audit_verdict`` (task_pass + Auditor findings) into the card. CR-V2-012 dropped the
+# per-task Auditor: the v2 ``_record_task_summary`` carries only the AI Agent's own work summary + attempts
+# (NO audit_verdict) and lives under the ``programovanie`` stage. There is no per-task audit verdict to defer
+# these to — retired, not re-keyed. The v2 summary shape (no audit_verdict, attempts) is asserted in
+# tests/test_orchestrator_v2_programovanie.py::test_multi_task_build_self_checks_each_no_per_task_audit.
 
 
 # ── CR-NS-055 Pillar B: Coordinator autonomous first-principles decision (§B.1–§B.4) ──
