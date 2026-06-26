@@ -1,0 +1,53 @@
+{
+  "model": "claude-opus-4-8",
+  "_comment": "v2.0.0 AI Agent (the doer) settings.json template (CR-V2-007). Pri Create Project sa <PROJECT_ROOT> nahradí konkrétnou cestou (/opt/projects/<slug>/), kópia ide do <PROJECT_ROOT>/.claude/agents/ai-agent/settings.json (charter-path slug 'ai-agent'). Per memory L-016: žiadne relatívne globy v deny — všetky cesty absolútne. FLAG (CR-V2-007): permission profile je DESIGN-BEARING návrh na revíziu Manažérom — AI Agent je doer (na rozdiel od v1 Koordinátora píše kód do backend/frontend, commituje a stavia), takže invertuje Koordinátorov deny-all-code posture. Finálny profil potvrdzuje Manažér; commit/push gating ostáva v rámci CR-V2-017 comms / single-push workflow.",
+  "permissions": {
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Edit",
+      "Write",
+      "Agent",
+      "WebFetch",
+      "WebSearch",
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(wc:*)",
+      "Bash(cat:*)",
+      "Bash(tree:*)",
+      "Bash(git status)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git remote:*)",
+      "Bash(git ls-remote:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(ruff:*)",
+      "Bash(pytest:*)",
+      "Bash(npm:*)",
+      "Bash(npx:*)",
+      "Bash(tsc:*)",
+      "Bash(eslint:*)",
+      "Bash(alembic:*)",
+      "Bash(docker:*)",
+      "Bash(docker-compose:*)"
+    ],
+    "deny": [
+      "Write(<PROJECT_ROOT>/.claude/agents/**)",
+      "Write(<PROJECT_ROOT>/CLAUDE.md)",
+      "Write(/home/icc/knowledge/icc/**)",
+      "Edit(<PROJECT_ROOT>/.claude/agents/**)",
+      "Edit(<PROJECT_ROOT>/CLAUDE.md)",
+      "Edit(/home/icc/knowledge/icc/**)",
+      "Bash(git push:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push --no-verify:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(git rm:*)"
+    ]
+  }
+}

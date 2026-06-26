@@ -303,18 +303,22 @@ async def open_debug_terminal(
     if not _version_exists(db, version_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
 
-    # Debug-attach accepts the 4 orchestrator roles (CR-NS-039 BE decouple) — NOT the spawn-API's
-    # coordinator-only set. Validate up front so a bad role is a clean 422, not a misleading 404.
+    # Debug-attach accepts the orchestrator roles (CR-V2-007: ai-agent / auditor) — NOT just the
+    # spawn-API's AI-Agent-only set. Validate up front so a bad role is a clean 422, not a misleading 404.
     try:
         agent_terminal_service._validate_debug_attach_role(role)
     except AgentTerminalError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
     slug = orchestrator._project_slug_for_version(db, version_id)
+    # CR-V2-007: the debug-attach param is a charter-path slug (hyphen, ``ai-agent``); the
+    # OrchestratorSession.role column holds the DB value (underscore, ``ai_agent``). Bridge them via the
+    # single orchestrator mapper so the two spellings never diverge.
+    db_role = orchestrator.db_role_for_charter_slug(role)
     orch = db.execute(
         select(OrchestratorSession).where(
             OrchestratorSession.project_slug == slug,
-            OrchestratorSession.role == role,
+            OrchestratorSession.role == db_role,
         )
     ).scalar_one_or_none()
     if orch is None:

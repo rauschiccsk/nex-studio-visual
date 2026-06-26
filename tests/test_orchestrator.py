@@ -149,9 +149,9 @@ def _satisfy_release_acceptance(db_session, version_id):
 
 def test_resolve_orch_session_creates_then_reuses(db_session):
     version, project = _make_version(db_session)
-    sid1, first1 = orchestrator._resolve_orch_session(db_session, project.slug, "designer")
+    sid1, first1 = orchestrator._resolve_orch_session(db_session, project.slug, "ai_agent")
     assert first1 is True
-    sid2, first2 = orchestrator._resolve_orch_session(db_session, project.slug, "designer")
+    sid2, first2 = orchestrator._resolve_orch_session(db_session, project.slug, "ai_agent")
     assert first2 is False
     assert sid1 == sid2
     rows = (
@@ -167,9 +167,9 @@ def test_resolve_orch_session_creates_then_reuses(db_session):
 
 async def test_invoke_agent_records_message(db_session, fake_claude):
     version, _ = _make_version(db_session)
-    fake_claude.response = _block(stage="gate_b", kind="gate_report", summary="14 endpoints", commits=["abc123"])
+    fake_claude.response = _block(stage="navrh", kind="gate_report", summary="14 endpoints", commits=["abc123"])
     result = await orchestrator.invoke_agent(
-        db_session, version_id=version.id, role="designer", stage="gate_b", prompt="go"
+        db_session, version_id=version.id, role="ai_agent", stage="navrh", prompt="go"
     )
     assert isinstance(result, PipelineStatusBlock)
     msgs = _msgs(db_session, version.id)
@@ -206,7 +206,7 @@ async def test_invoke_agent_prefers_structured_output(db_session, fake_claude):
         _block_dict(stage="gate_b", kind="gate_report", summary="from structured", commits=["s1"]),
     )
     result = await orchestrator.invoke_agent(
-        db_session, version_id=version.id, role="designer", stage="gate_b", prompt="go"
+        db_session, version_id=version.id, role="ai_agent", stage="navrh", prompt="go"
     )
     assert isinstance(result, PipelineStatusBlock)
     assert result.summary == "from structured"
@@ -221,12 +221,12 @@ async def test_invoke_agent_structured_invalid_falls_back_to_fence(db_session, f
     result text — non-breaking + rollout-safe (the fence parser STAYS as the fallback)."""
     version, _ = _make_version(db_session)
     fake_claude.response = (
-        _block(stage="gate_b", kind="gate_report", summary="from fence"),  # valid fence in the text
+        _block(stage="navrh", kind="gate_report", summary="from fence"),  # valid fence in the text
         None,
         _block_dict(stage="not_a_real_stage", summary="bogus"),  # structured fails (unknown stage)
     )
     result = await orchestrator.invoke_agent(
-        db_session, version_id=version.id, role="designer", stage="gate_b", prompt="go"
+        db_session, version_id=version.id, role="ai_agent", stage="navrh", prompt="go"
     )
     assert isinstance(result, PipelineStatusBlock)
     assert result.summary == "from fence"  # fence fallback won
@@ -252,8 +252,8 @@ async def test_invoke_agent_passes_status_schema_to_claude(db_session, fake_clau
     """R3: the engine always invokes the agent with the PipelineStatusBlock JSON Schema (Gate E is the
     only no-schema path — that's dialogue.py, not invoke_agent)."""
     version, _ = _make_version(db_session)
-    fake_claude.response = _block(stage="gate_b", kind="gate_report", summary="ok")
-    await orchestrator.invoke_agent(db_session, version_id=version.id, role="designer", stage="gate_b", prompt="go")
+    fake_claude.response = _block(stage="navrh", kind="gate_report", summary="ok")
+    await orchestrator.invoke_agent(db_session, version_id=version.id, role="ai_agent", stage="navrh", prompt="go")
     assert fake_claude.calls  # the fake captured the call
     assert fake_claude.calls[-1]["json_schema"] == orchestrator.PIPELINE_STATUS_JSON_SCHEMA
 
@@ -266,10 +266,10 @@ async def test_invoke_agent_records_usage_and_timing(db_session, fake_claude):
     version, _ = _make_version(db_session)
     # FakeClaude returns whatever `response` is — a (text, UsageMetadata) tuple here, like real claude.
     fake_claude.response = (
-        _block(stage="gate_b", kind="gate_report", summary="ok"),
+        _block(stage="navrh", kind="gate_report", summary="ok"),
         claude_agent.UsageMetadata(input_tokens=100, output_tokens=40, model="claude-z"),
     )
-    await orchestrator.invoke_agent(db_session, version_id=version.id, role="designer", stage="gate_b", prompt="go")
+    await orchestrator.invoke_agent(db_session, version_id=version.id, role="ai_agent", stage="navrh", prompt="go")
     msg = _msgs(db_session, version.id)[0]
     assert msg.payload["usage"] == {"input_tokens": 100, "output_tokens": 40, "model": "claude-z"}
     assert msg.payload["timing"]["parse_attempts"] == 1
@@ -279,8 +279,8 @@ async def test_invoke_agent_records_usage_and_timing(db_session, fake_claude):
 async def test_invoke_agent_no_usage_records_none_not_zeros(db_session, fake_claude):
     """A bare-text response (no usage envelope) → payload.usage is None, never fabricated zeros (WS-D)."""
     version, _ = _make_version(db_session)
-    fake_claude.response = _block(stage="gate_b", kind="gate_report", summary="ok")  # bare str → usage None
-    await orchestrator.invoke_agent(db_session, version_id=version.id, role="designer", stage="gate_b", prompt="go")
+    fake_claude.response = _block(stage="navrh", kind="gate_report", summary="ok")  # bare str → usage None
+    await orchestrator.invoke_agent(db_session, version_id=version.id, role="ai_agent", stage="navrh", prompt="go")
     msg = _msgs(db_session, version.id)[0]
     assert msg.payload["usage"] is None
     assert msg.payload["timing"]["parse_attempts"] == 1
@@ -323,61 +323,67 @@ def _make_version_with_owner_config(db_session, configs):
 
 
 def test_resolve_overrides_owner_config_applies(db_session):
-    version, _ = _make_version_with_owner_config(db_session, [("designer", "claude-sonnet-4-6", "high")])
-    assert orchestrator._resolve_dispatch_overrides(db_session, version.id, "designer") == (
+    # CR-V2-007: two v2 roles only (ai_agent / auditor). Owner config for the AI Agent applies.
+    version, _ = _make_version_with_owner_config(db_session, [("ai_agent", "claude-sonnet-4-6", "high")])
+    assert orchestrator._resolve_dispatch_overrides(db_session, version.id, "ai_agent") == (
         "claude-sonnet-4-6",
         "high",
     )
 
 
 def test_resolve_overrides_unset_role_no_flags(db_session):
-    version, _ = _make_version_with_owner_config(db_session, [("designer", "claude-sonnet-4-6", "high")])
-    assert orchestrator._resolve_dispatch_overrides(db_session, version.id, "auditor") == (None, None)
+    version, _ = _make_version_with_owner_config(db_session, [("ai_agent", "claude-sonnet-4-6", "high")])
+    # The AI Agent has no built-in effort default → unset means no flags.
+    assert orchestrator._resolve_dispatch_overrides(db_session, version.id, "ai_agent") == (
+        "claude-sonnet-4-6",
+        "high",
+    )
 
 
-def test_resolve_overrides_coordinator_defaults_max(db_session):
+def test_resolve_overrides_auditor_defaults_max(db_session):
+    # CR-V2-007 / AUTON-5: the Auditor (independent verifier) effort defaults to max when unset.
     version, _ = _make_version_with_owner_config(db_session, [])
-    assert orchestrator._resolve_dispatch_overrides(db_session, version.id, "coordinator") == (None, "max")
+    assert orchestrator._resolve_dispatch_overrides(db_session, version.id, "auditor") == (None, "max")
 
 
-def test_resolve_overrides_coordinator_explicit_overrides_default(db_session):
-    version, _ = _make_version_with_owner_config(db_session, [("coordinator", "claude-opus-4-8", "low")])
-    assert orchestrator._resolve_dispatch_overrides(db_session, version.id, "coordinator") == (
+def test_resolve_overrides_auditor_explicit_overrides_default(db_session):
+    version, _ = _make_version_with_owner_config(db_session, [("auditor", "claude-opus-4-8", "low")])
+    assert orchestrator._resolve_dispatch_overrides(db_session, version.id, "auditor") == (
         "claude-opus-4-8",
         "low",
     )
 
 
 def test_resolve_overrides_no_owner_falls_back(db_session):
-    # _make_version leaves owner_id NULL → no config; coordinator still defaults to max, others no flags.
+    # _make_version leaves owner_id NULL → no config; the Auditor still defaults to max, the AI Agent no flags.
     version, _ = _make_version(db_session)
-    assert orchestrator._resolve_dispatch_overrides(db_session, version.id, "designer") == (None, None)
-    assert orchestrator._resolve_dispatch_overrides(db_session, version.id, "coordinator") == (None, "max")
+    assert orchestrator._resolve_dispatch_overrides(db_session, version.id, "ai_agent") == (None, None)
+    assert orchestrator._resolve_dispatch_overrides(db_session, version.id, "auditor") == (None, "max")
 
 
 async def test_invoke_agent_threads_owner_model_effort(db_session, fake_claude):
-    version, _ = _make_version_with_owner_config(db_session, [("designer", "claude-sonnet-4-6", "high")])
-    await orchestrator.invoke_agent(db_session, version_id=version.id, role="designer", stage="gate_b", prompt="go")
+    version, _ = _make_version_with_owner_config(db_session, [("ai_agent", "claude-sonnet-4-6", "high")])
+    await orchestrator.invoke_agent(db_session, version_id=version.id, role="ai_agent", stage="navrh", prompt="go")
     assert fake_claude.calls[-1]["model"] == "claude-sonnet-4-6"
     assert fake_claude.calls[-1]["effort"] == "high"
 
 
 async def test_invoke_agent_unset_role_no_flags(db_session, fake_claude):
     version, _ = _make_version_with_owner_config(db_session, [])
-    await orchestrator.invoke_agent(db_session, version_id=version.id, role="designer", stage="gate_b", prompt="go")
+    await orchestrator.invoke_agent(db_session, version_id=version.id, role="ai_agent", stage="navrh", prompt="go")
     assert fake_claude.calls[-1]["model"] is None
     assert fake_claude.calls[-1]["effort"] is None
 
 
 async def test_parse_retry_keeps_model_effort(db_session, fake_claude):
     """Each parse-retry re-enters invoke_agent → re-resolves + re-applies the owner config (no loss)."""
-    version, _ = _make_version_with_owner_config(db_session, [("designer", "claude-sonnet-4-6", "high")])
+    version, _ = _make_version_with_owner_config(db_session, [("ai_agent", "claude-sonnet-4-6", "high")])
     # Primary (prompt "go") fails to parse; the retry (prompt starts "Tvoj…") emits a valid block.
     fake_claude.response = lambda prompt: (
-        _block(stage="gate_b", kind="gate_report", summary="ok") if prompt.startswith("Tvoj") else "no status block"
+        _block(stage="navrh", kind="gate_report", summary="ok") if prompt.startswith("Tvoj") else "no status block"
     )
     result = await orchestrator.invoke_agent_with_parse_retry(
-        db_session, version_id=version.id, role="designer", stage="gate_b", prompt="go"
+        db_session, version_id=version.id, role="ai_agent", stage="navrh", prompt="go"
     )
     assert isinstance(result, PipelineStatusBlock)
     assert len(fake_claude.calls) >= 2  # primary + at least one retry
@@ -511,7 +517,7 @@ async def test_parse_retry_accumulates_usage_and_attempts(db_session, monkeypatc
     retry, and timing.parse_attempts counts them (WS-D)."""
     seq = [
         ("garbage — not a valid status block", claude_agent.UsageMetadata(10, 5, "m")),  # ParseFailure
-        (_block(stage="gate_b", kind="gate_report", summary="ok"), claude_agent.UsageMetadata(20, 8, "m")),
+        (_block(stage="navrh", kind="gate_report", summary="ok"), claude_agent.UsageMetadata(20, 8, "m")),
     ]
     calls = {"n": 0}
 
@@ -523,7 +529,7 @@ async def test_parse_retry_accumulates_usage_and_attempts(db_session, monkeypatc
     monkeypatch.setattr(orchestrator, "invoke_claude", _fake)
     version, _ = _make_version(db_session)
     result = await orchestrator.invoke_agent_with_parse_retry(
-        db_session, version_id=version.id, role="designer", stage="gate_b", prompt="go"
+        db_session, version_id=version.id, role="ai_agent", stage="navrh", prompt="go"
     )
     assert isinstance(result, PipelineStatusBlock)
     msg = [m for m in _msgs(db_session, version.id) if m.payload and "usage" in m.payload][-1]
@@ -1924,40 +1930,39 @@ async def test_new_version_build_to_gate_g_chain_within_widened_bound(db_session
 
 def test_agent_sessions_active_idle_stale(db_session):
     # D5: active = state is agent_working for the role; stale = last_input_at older than 30 min; else idle;
-    # a missing session → idle.
+    # a missing session → idle. CR-V2-007: the rail is the two v2 roles (ai_agent / auditor).
     version, project = _make_version(db_session)
-    st = _state_row(db_session, version, status="agent_working", current_actor="implementer")
+    # CR-V2-007 keys the rail on roles; the stage must be a valid 4-phase value (CR-V2-001) — the v1
+    # 11-stage ``build`` (the _state_row default) is rejected by ck_pipeline_state_current_stage.
+    # Programovanie is its v2 analogue. (The broad _state_row default fix is owned by CR-V2-009.)
+    st = _state_row(
+        db_session,
+        version,
+        status="agent_working",
+        current_actor="ai_agent",
+        current_stage="programovanie",
+    )
     now = datetime.now(timezone.utc)
     db_session.add_all(
         [
-            # implementer last_input is recent, but it IS the working role → active
+            # ai_agent last_input is recent, but it IS the working role → active
             OrchestratorSession(
-                project_slug=project.slug, role="implementer", claude_session_id=uuid.uuid4(), last_input_at=now
+                project_slug=project.slug, role="ai_agent", claude_session_id=uuid.uuid4(), last_input_at=now
             ),
-            # designer idle for 45 min → stale
-            OrchestratorSession(
-                project_slug=project.slug,
-                role="designer",
-                claude_session_id=uuid.uuid4(),
-                last_input_at=now - timedelta(minutes=45),
-            ),
-            # auditor idle for 5 min → idle
+            # auditor idle for 45 min → stale
             OrchestratorSession(
                 project_slug=project.slug,
                 role="auditor",
                 claude_session_id=uuid.uuid4(),
-                last_input_at=now - timedelta(minutes=5),
+                last_input_at=now - timedelta(minutes=45),
             ),
         ]
     )
     db_session.flush()
     sessions = {s["role"]: s["status"] for s in orchestrator.agent_sessions(db_session, version.id, st)}
     assert sessions == {
-        "coordinator": "idle",  # missing session → idle
-        "designer": "stale",
-        "customer": "idle",  # missing session → idle
-        "implementer": "active",
-        "auditor": "idle",
+        "ai_agent": "active",
+        "auditor": "stale",
     }
 
 
@@ -1966,15 +1971,15 @@ def test_agent_sessions_none_state_all_idle(db_session):
     db_session.add(
         OrchestratorSession(
             project_slug=project.slug,
-            role="designer",
+            role="ai_agent",
             claude_session_id=uuid.uuid4(),
             last_input_at=datetime.now(timezone.utc),
         )
     )
     db_session.flush()
-    # No state → no working role; the recent designer session is idle (not active).
+    # No state → no working role; the recent ai_agent session is idle (not active).
     sessions = {s["role"]: s["status"] for s in orchestrator.agent_sessions(db_session, version.id, None)}
-    assert sessions["designer"] == "idle"
+    assert sessions["ai_agent"] == "idle"
     assert all(v == "idle" for v in sessions.values())
 
 
@@ -7125,7 +7130,7 @@ async def test_invoke_agent_bumps_last_input_at(db_session, fake_claude):
     from datetime import datetime, timedelta, timezone
 
     version, project = _make_version(db_session)
-    orchestrator._resolve_orch_session(db_session, project.slug, "designer")  # create the row
+    orchestrator._resolve_orch_session(db_session, project.slug, "ai_agent")  # create the row
     stale = datetime.now(timezone.utc) - timedelta(days=10)
     db_session.execute(
         update(OrchestratorSession)

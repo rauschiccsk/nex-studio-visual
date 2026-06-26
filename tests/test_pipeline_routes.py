@@ -416,7 +416,7 @@ def test_debug_terminal_resumes_orchestrator_session(client, db_session, monkeyp
     version = _make_version(db_session, client._ri)
     slug = db_session.get(Project, db_session.get(Version, version.id).project_id).slug
     orch_uuid = uuid.uuid4()
-    db_session.add(OrchestratorSession(project_slug=slug, role="implementer", claude_session_id=orch_uuid))
+    db_session.add(OrchestratorSession(project_slug=slug, role="ai_agent", claude_session_id=orch_uuid))
     db_session.flush()
 
     captured = {}
@@ -438,23 +438,23 @@ def test_debug_terminal_resumes_orchestrator_session(client, db_session, monkeyp
 
     monkeypatch.setattr(agent_terminal_module, "spawn", _fake_spawn)
 
-    r = client.post(f"/api/v1/pipeline/{version.id}/debug-terminal?role=implementer")
+    r = client.post(f"/api/v1/pipeline/{version.id}/debug-terminal?role=ai-agent")
     assert r.status_code == 200, r.text
     # the existing orchestrator UUID is resumed, not a fresh one
     assert captured["claude_session_id"] == orch_uuid
-    assert captured["role"] == "implementer"
+    assert captured["role"] == "ai-agent"
     assert captured["project_slug"] == slug
-    assert r.json()["role"] == "implementer"
+    assert r.json()["role"] == "ai-agent"
 
 
 def test_debug_terminal_no_orchestrator_session_404(client, db_session):
     version = _make_version(db_session, client._ri)
-    r = client.post(f"/api/v1/pipeline/{version.id}/debug-terminal?role=implementer")
+    r = client.post(f"/api/v1/pipeline/{version.id}/debug-terminal?role=ai-agent")
     assert r.status_code == 404
 
 
 def test_debug_terminal_unknown_version_404(client):
-    r = client.post(f"/api/v1/pipeline/{uuid.uuid4()}/debug-terminal?role=implementer")
+    r = client.post(f"/api/v1/pipeline/{uuid.uuid4()}/debug-terminal?role=ai-agent")
     assert r.status_code == 404
 
 

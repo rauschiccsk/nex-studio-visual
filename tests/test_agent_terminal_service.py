@@ -42,7 +42,8 @@ def fake_project(tmp_path, monkeypatch):
     """
     slug = "sample-project"
     project_root = tmp_path / slug
-    for role in ("designer", "implementer", "auditor", "coordinator"):
+    # CR-V2-007: two v2 agents, charter-path slugs (hyphen) ai-agent + auditor.
+    for role in ("ai-agent", "auditor"):
         agent_dir = project_root / ".claude" / "agents" / role
         agent_dir.mkdir(parents=True)
         (agent_dir / "CLAUDE.md").write_text(f"# {role} agent\nTest prompt.\n")
@@ -97,14 +98,14 @@ class TestSpawn:
 
         row = await service.spawn(
             user_id=user.id,
-            role="coordinator",
+            role="ai-agent",
             project_slug=fake_project,
             db=db_session,
         )
 
         assert row.id is not None
         assert row.user_id == user.id
-        assert row.role == "coordinator"
+        assert row.role == "ai-agent"
         assert row.project_slug == fake_project
         assert row.pid > 0
         assert row.ended_at is None
@@ -117,24 +118,24 @@ class TestSpawn:
         await service.end_session(row.id, terminated_by="user", db=db_session)
 
     @pytest.mark.asyncio
-    async def test_spawn_coordinator_role(
+    async def test_spawn_ai_agent_role(
         self,
         db_session,
         fake_project,
         cat_spawn,
     ):
-        """The coordinator role (CR-NS-009) spawns like any other valid role."""
-        user = seed_user(db_session, username="ri_spawn_coord", role="ri")
+        """The AI Agent role (CR-V2-007) is the spawnable interactive terminal."""
+        user = seed_user(db_session, username="ri_spawn_aiagent", role="ri")
 
         row = await service.spawn(
             user_id=user.id,
-            role="coordinator",
+            role="ai-agent",
             project_slug=fake_project,
             db=db_session,
         )
 
         assert row.id is not None
-        assert row.role == "coordinator"
+        assert row.role == "ai-agent"
         assert row.ended_at is None
 
         runtime = service._get_runtime_for_test(row.id)
@@ -154,7 +155,7 @@ class TestSpawn:
 
         first = await service.spawn(
             user_id=user.id,
-            role="coordinator",
+            role="ai-agent",
             project_slug=fake_project,
             db=db_session,
         )
@@ -162,7 +163,7 @@ class TestSpawn:
         with pytest.raises(service.SessionConflictError):
             await service.spawn(
                 user_id=user.id,
-                role="coordinator",
+                role="ai-agent",
                 project_slug=fake_project,
                 db=db_session,
             )
@@ -193,7 +194,7 @@ class TestValidation:
         with pytest.raises(service.AgentTerminalError):
             await service.spawn(
                 user_id=user.id,
-                role="coordinator",
+                role="ai-agent",
                 project_slug="../escape",
                 db=db_session,
             )
@@ -204,7 +205,7 @@ class TestValidation:
         with pytest.raises(service.AgentTerminalError):
             await service.spawn(
                 user_id=user.id,
-                role="coordinator",
+                role="ai-agent",
                 project_slug="nonexistent-project",
                 db=db_session,
             )
@@ -228,7 +229,7 @@ class TestValidation:
         with pytest.raises(service.AgentTerminalError):
             await service.spawn(
                 user_id=user.id,
-                role="coordinator",
+                role="ai-agent",
                 project_slug="bare-project",
                 db=db_session,
             )
@@ -247,7 +248,7 @@ class TestEndSession:
         user = seed_user(db_session, username="ri_end", role="ri")
         row = await service.spawn(
             user_id=user.id,
-            role="coordinator",
+            role="ai-agent",
             project_slug=fake_project,
             db=db_session,
         )
@@ -273,7 +274,7 @@ class TestEndSession:
         user = seed_user(db_session, username="ri_end_idem", role="ri")
         row = await service.spawn(
             user_id=user.id,
-            role="coordinator",
+            role="ai-agent",
             project_slug=fake_project,
             db=db_session,
         )
@@ -297,7 +298,7 @@ class TestStartupOrphans:
         # Simulate leftover row from a prior boot.
         orphan = AgentTerminalSession(
             user_id=user.id,
-            role="coordinator",
+            role="ai-agent",
             project_slug="any-project",
             pid=99999,
         )
@@ -314,26 +315,26 @@ class TestStartupOrphans:
 
 
 class TestDebugAttachResume:
-    """CR-NS-039 BE decouple: a NON-coordinator debug-attach session resumes.
+    """CR-V2-007 (was CR-NS-039 BE decouple): a non-spawn debug-attach session resumes.
 
-    The spawn API is coordinator-only, but ``_respawn_for_resume`` (WS reconnect
-    after a BE restart) must re-attach a failed Implementer/Auditor debug session.
-    The coordinator-only gate was moved OUT of ``_resolve_agent_spec`` to the
-    spawn-API entry, so all four debug-attach roles resolve + resume.
+    The spawn API is AI-Agent-only, but ``_respawn_for_resume`` (WS reconnect
+    after a BE restart) must re-attach a debug session for the independent Auditor.
+    The spawn-only gate lives at the spawn-API entry, not in ``_resolve_agent_spec``,
+    so both debug-attach roles (ai-agent, auditor) resolve + resume.
     """
 
     @pytest.mark.asyncio
-    async def test_respawn_resumes_non_coordinator_session(
+    async def test_respawn_resumes_auditor_session(
         self,
         db_session,
         fake_project,
         cat_spawn,
     ):
         user = seed_user(db_session, username="ri_dbg_resume", role="ri")
-        # A debug-attach row for a failed Implementer session (non-coordinator).
+        # A debug-attach row for the independent Auditor session (non-spawn role).
         row = AgentTerminalSession(
             user_id=user.id,
-            role="implementer",
+            role="auditor",
             project_slug=fake_project,
             pid=12345,
             claude_session_id=uuid.uuid4(),
@@ -344,7 +345,7 @@ class TestDebugAttachResume:
         runtime = await service._respawn_for_resume(row=row, db=db_session)
 
         assert runtime is not None
-        assert runtime.role == "implementer"
+        assert runtime.role == "auditor"
         assert runtime.process.isalive()
         assert row.pid == runtime.process.pid  # pid updated to the new PTY
 
@@ -366,7 +367,7 @@ class TestIdleCleanup:
         user = seed_user(db_session, username="ri_idle", role="ri")
         row = await service.spawn(
             user_id=user.id,
-            role="coordinator",
+            role="ai-agent",
             project_slug=fake_project,
             db=db_session,
         )
@@ -395,7 +396,7 @@ class TestIdleCleanup:
         user = seed_user(db_session, username="ri_active", role="ri")
         row = await service.spawn(
             user_id=user.id,
-            role="coordinator",
+            role="ai-agent",
             project_slug=fake_project,
             db=db_session,
         )
@@ -410,13 +411,13 @@ class TestSchemas:
     """Pydantic input validation."""
 
     def test_spawn_request_accepts_valid(self):
-        req = AgentTerminalSpawnRequest(role="coordinator", project_slug="nex-inbox")
-        assert req.role == "coordinator"
+        req = AgentTerminalSpawnRequest(role="ai-agent", project_slug="nex-inbox")
+        assert req.role == "ai-agent"
         assert req.project_slug == "nex-inbox"
 
     def test_spawn_request_rejects_invalid_slug(self):
         with pytest.raises(ValueError):
-            AgentTerminalSpawnRequest(role="coordinator", project_slug="../escape")
+            AgentTerminalSpawnRequest(role="ai-agent", project_slug="../escape")
 
     def test_spawn_request_rejects_invalid_role(self):
         with pytest.raises(ValueError):
@@ -430,23 +431,23 @@ class TestAvailableRoles:
     """``available_roles`` reports per-role charter presence (non-raising)."""
 
     def test_reports_present_and_absent_roles(self, tmp_path, monkeypatch):
-        # E3(a) (CR-NS-039): available_roles now reports ONLY the Coordinator (the sole spawnable role).
-        # A non-coordinator charter present but coordinator deliberately absent → {"coordinator": False}.
+        # CR-V2-007: available_roles reports ONLY the AI Agent (the sole spawnable role).
+        # The Auditor charter present but the AI-Agent charter deliberately absent → {"ai-agent": False}.
         slug = "partial-project"
         project_root = tmp_path / slug
-        agent_dir = project_root / ".claude" / "agents" / "designer"
+        agent_dir = project_root / ".claude" / "agents" / "auditor"
         agent_dir.mkdir(parents=True)
-        (agent_dir / "CLAUDE.md").write_text("# designer\n")
+        (agent_dir / "CLAUDE.md").write_text("# auditor\n")
         monkeypatch.setattr(service, "PROJECTS_ROOT", tmp_path)
 
         result = service.available_roles(slug)
 
-        assert result == {"coordinator": False}
+        assert result == {"ai-agent": False}
 
     def test_all_present(self, tmp_path, monkeypatch):
         slug = "full-project"
         project_root = tmp_path / slug
-        for role in ("designer", "implementer", "auditor", "coordinator"):
+        for role in ("ai-agent", "auditor"):
             agent_dir = project_root / ".claude" / "agents" / role
             agent_dir.mkdir(parents=True)
             (agent_dir / "CLAUDE.md").write_text(f"# {role}\n")
@@ -454,7 +455,7 @@ class TestAvailableRoles:
 
         result = service.available_roles(slug)
 
-        assert result["coordinator"] is True
+        assert result["ai-agent"] is True
         assert all(result.values())
 
     def test_unknown_project_raises(self, tmp_path, monkeypatch):

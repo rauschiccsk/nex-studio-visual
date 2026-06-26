@@ -112,8 +112,8 @@ def available_roles(
 ) -> dict[str, bool]:
     """Return per-role charter availability for ``project_slug``.
 
-    Since E3(a) (CR-NS-039) the spawn API is Coordinator-only, so this reports just
-    ``{"coordinator": <bool>}`` — true when ``.claude/agents/coordinator/CLAUDE.md``
+    Since CR-V2-007 the spawn API is AI-Agent-only, so this reports just
+    ``{"ai-agent": <bool>}`` — true when ``.claude/agents/ai-agent/CLAUDE.md``
     exists in the project (the set mirrors ``_VALID_ROLES``). An invalid slug or
     unknown project → 404.
     """

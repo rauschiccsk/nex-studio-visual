@@ -65,14 +65,20 @@ logger = logging.getLogger(__name__)
 
 PROJECTS_ROOT = Path("/opt/projects")
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9-]*[a-z0-9]$|^[a-z]$")
-# E3(a) (CR-NS-039): SPAWN set — only the Coordinator interactive terminal can be spawned (hub-and-spoke).
-# Enforced at the spawn-API entry (AgentTerminalSpawnRequest.role = Literal["coordinator"]); also drives
-# `available_roles`. NOT enforced inside spawn()/_resolve_agent_spec — those are shared with debug-attach.
-_VALID_ROLES = frozenset({"coordinator"})
-# Debug-attach (CR-NS-018 §10): a Director attaches an interactive terminal to ANY orchestrator-backed
-# agent's headless session (you debug a failed Implementer/Auditor). This is the superset of legitimate
-# roles for spec-path resolution + auto-resume; the spawn API stays coordinator-only via _VALID_ROLES.
-_DEBUG_ATTACH_ROLES = frozenset({"coordinator", "designer", "implementer", "auditor"})
+# CR-V2-007: SPAWN set — the AI Agent's interactive terminal is the spawnable session (replaces the v1
+# Coordinator; the AI Agent IS the doer the Manažér watches/talks to live). Enforced at the spawn-API
+# entry (AgentTerminalSpawnRequest.role = Literal["ai-agent"]); also drives `available_roles`. NOT
+# enforced inside spawn()/_resolve_agent_spec — those are shared with debug-attach.
+#
+# NOTE: these are CHARTER-PATH SLUGS (hyphen) — `_agent_spec_path` builds `.claude/agents/<role>/CLAUDE.md`
+# directly from them, so the on-disk slug spelling (``ai-agent``) is used here, mapped from the DB value
+# ``ai_agent`` by orchestrator._charter_slug_for_role at the engine boundary.
+_VALID_ROLES = frozenset({"ai-agent"})
+# Debug-attach (CR-NS-018 §10): a Director attaches an interactive terminal to an orchestrator-backed
+# agent's headless session (you debug the AI Agent or the independent Auditor). Superset of legitimate
+# roles for spec-path resolution + auto-resume; the spawn API stays AI-Agent-only via _VALID_ROLES.
+# (Role-keyed debug-attach is promoted to a first-class AI Agent PTY session in CR-V2-015.)
+_DEBUG_ATTACH_ROLES = frozenset({"ai-agent", "auditor"})
 
 # Output ring buffer (RAM) — fast replay for rapid re-attach. Disk log
 # is authoritative for long-term history.
@@ -146,8 +152,8 @@ def _validate_debug_attach_role(role: str) -> None:
     """Path-safety + debug-attach gate: accept any legitimate orchestrator role.
 
     Shared by `_resolve_agent_spec` (spawn + auto-resume) and the debug-terminal
-    endpoint. The coordinator-only SPAWN restriction is enforced separately at the
-    spawn-API entry (`AgentTerminalSpawnRequest`), NOT here (CR-NS-039 BE decouple).
+    endpoint. The AI-Agent-only SPAWN restriction is enforced separately at the
+    spawn-API entry (`AgentTerminalSpawnRequest`), NOT here (CR-V2-007 / CR-NS-039 BE decouple).
     """
     if role not in _DEBUG_ATTACH_ROLES:
         raise AgentTerminalError(f"Invalid role: {role!r}")

@@ -15,13 +15,16 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9-]*[a-z0-9]$|^[a-z]$")
 
-# E3(a) (CR-NS-039): SPAWN role — the interactive sidebar terminal is Coordinator-only (hub-and-spoke).
-# Used by AgentTerminalSpawnRequest so the spawn API rejects every other role at the request boundary.
-AgentRole = Literal["coordinator"]
-# Debug-attach (CR-NS-018 §10) targets ANY orchestrator-backed pipeline role — you attach to a failed
-# Implementer/Auditor session. A deliberately SEPARATE type from the spawn AgentRole (spawn ≠ debug-attach);
+# CR-V2-007: SPAWN role — the interactive terminal is the AI Agent (the doer; replaces the v1
+# Coordinator). Used by AgentTerminalSpawnRequest so the spawn API rejects every other role at the
+# request boundary. These are CHARTER-PATH SLUGS (hyphen) — ``role`` flows straight to the filesystem
+# charter path ``.claude/agents/<role>/CLAUDE.md``; the DB-side ``ai_agent`` (underscore) maps to it via
+# orchestrator._charter_slug_for_role.
+AgentRole = Literal["ai-agent"]
+# Debug-attach (CR-NS-018 §10) targets an orchestrator-backed agent session — you attach to the AI Agent
+# or the independent Auditor. A deliberately SEPARATE type from the spawn AgentRole (spawn ≠ debug-attach);
 # this is also the READ type, because the SAME agent_terminal_sessions table holds debug-attach rows.
-DebugAttachRole = Literal["coordinator", "designer", "implementer", "auditor"]
+DebugAttachRole = Literal["ai-agent", "auditor"]
 TerminatedBy = Literal["idle", "user", "crash", "server_restart"]
 
 
@@ -32,8 +35,8 @@ class AgentTerminalSessionRead(BaseModel):
 
     id: uuid.UUID
     user_id: uuid.UUID
-    # READ accepts all debug-attach roles: this row may be a coordinator spawn OR a non-coordinator
-    # debug-attach session (CR-NS-039 BE decouple). Coordinator-only lives on the SpawnRequest, not here.
+    # READ accepts all debug-attach roles: this row may be an AI-Agent spawn OR an Auditor debug-attach
+    # session (CR-V2-007). AI-Agent-only lives on the SpawnRequest, not here.
     role: DebugAttachRole
     project_slug: str
     pid: int

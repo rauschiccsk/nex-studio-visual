@@ -87,6 +87,46 @@ from backend.services.pipeline_status import (
 
 logger = logging.getLogger(__name__)
 
+# ── v2.0.0 two-agent role identity (CR-V2-007) ─────────────────────────────────────────────────────
+# The build engine drives exactly two agents: the AI Agent (the doer) + the independent Auditor (the
+# verifier). The DB enum/CHECK values (``OrchestratorSession.role``, ``PipelineState.current_actor``,
+# ``UserAgentSettings.agent_role`` — all landed by CR-V2-001) use UNDERSCORE spelling, matching the
+# snake_case DB convention; the charter filesystem path uses HYPHEN
+# (``.claude/agents/ai-agent/CLAUDE.md``). The two spellings MUST map explicitly and never diverge
+# (R-SWEEP). :func:`_charter_slug_for_role` is the single bridge — every charter-path build goes through
+# it so a DB value can never silently become a filesystem path.
+AI_AGENT_ROLE = "ai_agent"
+AUDITOR_ROLE = "auditor"
+#: DB role value → charter-path slug (underscore → hyphen). Identity for ``auditor``; explicit for the
+#: AI Agent (``ai_agent`` → ``ai-agent``). The ONLY place the two spellings are reconciled.
+_CHARTER_PATH_SLUG: dict[str, str] = {
+    AI_AGENT_ROLE: "ai-agent",
+    AUDITOR_ROLE: "auditor",
+}
+
+
+#: Charter-path slug (hyphen) → DB role value (underscore) — the inverse of :data:`_CHARTER_PATH_SLUG`,
+#: built from the same single source so the two spellings can never drift apart.
+_DB_ROLE_FROM_SLUG: dict[str, str] = {slug: role for role, slug in _CHARTER_PATH_SLUG.items()}
+
+
+def _charter_slug_for_role(role: str) -> str:
+    """Map a DB role value (underscore) to its charter-path slug (hyphen).
+
+    ``ai_agent`` → ``ai-agent``; ``auditor`` → ``auditor``. Unknown roles fall back to the value
+    unchanged (defensive — a mis-keyed dispatch would then miss its charter file rather than crash,
+    surfacing as a 'spec missing' error instead of a silent path divergence)."""
+    return _CHARTER_PATH_SLUG.get(role, role)
+
+
+def db_role_for_charter_slug(slug: str) -> str:
+    """Map a charter-path slug (hyphen) to its DB role value (underscore) — inverse of
+    :func:`_charter_slug_for_role`. ``ai-agent`` → ``ai_agent``; ``auditor`` → ``auditor``. Used at the
+    debug-attach boundary, which speaks charter-path slugs but looks up the underscore-keyed
+    ``OrchestratorSession.role`` (CR-V2-007). Unknown slugs pass through unchanged."""
+    return _DB_ROLE_FROM_SLUG.get(slug, slug)
+
+
 #: Per-message hook for incremental broadcast (CR-NS-018): the orchestrator calls it
 #: right after recording a dispatch-path message; the runner commits + broadcasts that
 #: one message (the engine stays WS-free). Defined here so ``claude_agent`` stays model-free.
@@ -444,10 +484,11 @@ def _resolve_dispatch_overrides(db: Session, version_id: uuid.UUID, role: str) -
     The version's project owner's ``user_agent_settings(role)`` row drives ``--model`` / ``--effort``
     (attribution = project owner: stable, reuses the existing owner join, aligns with the future
     per-user subscription). Graceful fallback — no owner / no row / unset field → no flag (today's
-    exact behavior, ``scalar``-safe, never crashes) — EXCEPT the **Coordinator effort defaults to
-    ``max``** (Director-approved Effort policy 2026-06-13: the one operator/judgment role, differentiated
-    up; it does not participate in Dual-Build, so non-deterministic depth is fine, and its output stays a
-    Director-gated proposal). Re-resolved on every :func:`invoke_agent` call, so parse-retries keep it.
+    exact behavior, ``scalar``-safe, never crashes) — EXCEPT the **Auditor effort defaults to ``max``**
+    (CR-V2-007 / AUTON-5: the independent verifier is the safety net that compensates for fewer human
+    stops, so it is the one judgment role differentiated up on effort; its depth further scales with the
+    Miera autonómie dial — OQ-9 — wired in CR-V2-008/013/014). Re-resolved on every :func:`invoke_agent`
+    call, so parse-retries keep it.
     """
     row = db.execute(
         select(UserAgentSettings.model, UserAgentSettings.effort)
@@ -457,7 +498,7 @@ def _resolve_dispatch_overrides(db: Session, version_id: uuid.UUID, role: str) -
     ).first()
     model = row.model if row is not None else None
     effort = row.effort if row is not None else None
-    if effort is None and role == "coordinator":
+    if effort is None and role == AUDITOR_ROLE:
         effort = "max"
     return model, effort
 
@@ -1434,7 +1475,12 @@ async def invoke_agent(
     model_override, effort_override = _resolve_dispatch_overrides(db, version_id, role)
     charter_path: Optional[Path] = None
     if is_first:
-        charter_path = claude_agent.PROJECTS_ROOT / slug / ".claude" / "agents" / role / "CLAUDE.md"
+        # CR-V2-007: DB role value (underscore) → charter-path slug (hyphen) via the single bridge, so
+        # the on-disk ``Pravidlá agenta`` path (``.claude/agents/ai-agent/CLAUDE.md``) never diverges
+        # from the DB ``ai_agent``.
+        charter_path = (
+            claude_agent.PROJECTS_ROOT / slug / ".claude" / "agents" / _charter_slug_for_role(role) / "CLAUDE.md"
+        )
 
     tagged_on_event: Optional[claude_agent.EventCallback] = None
     if on_event is not None:
@@ -1670,7 +1716,7 @@ async def _plan_pass_once(
 ) -> Any:
     """One ``claude`` invocation for a task_plan generation pass (v0.7.3, CR-1).
 
-    Resumes the SAME ``(project, designer)`` claude session the gate stages used (so the full design
+    Resumes the SAME ``(project, ai_agent)`` claude session the design phase used (so the full design
     + the just-emitted skeleton stay in context), grammar-constrains the output to the **narrowed**
     ``json_schema``, meters the turn into ``metrics``, and parses the ``structured_output`` envelope
     field with ``parser``. Returns the parsed narrowed model or a :class:`ParseFailure` — it records
@@ -1682,22 +1728,31 @@ async def _plan_pass_once(
     not emit one — that is why they cannot use ``invoke_agent``, which stays byte-identical)."""
     version_id = state.version_id
     slug = _project_slug_for_version(db, version_id)
-    session_id, is_first = _resolve_orch_session(db, slug, "designer")
+    # CR-V2-007: the task_plan generation passes run inside the AI Agent's warm session (they fold into
+    # the Návrh phase in CR-V2-011); re-keyed off the retired ``designer`` role to ``ai_agent`` (DB value).
+    session_id, is_first = _resolve_orch_session(db, slug, AI_AGENT_ROLE)
     db.execute(
         update(OrchestratorSession)
-        .where(OrchestratorSession.project_slug == slug, OrchestratorSession.role == "designer")
+        .where(OrchestratorSession.project_slug == slug, OrchestratorSession.role == AI_AGENT_ROLE)
         .values(last_input_at=datetime.now(timezone.utc))
     )
-    model_override, effort_override = _resolve_dispatch_overrides(db, version_id, "designer")
+    model_override, effort_override = _resolve_dispatch_overrides(db, version_id, AI_AGENT_ROLE)
     charter_path: Optional[Path] = None
-    if is_first:  # task_plan normally runs after the gate stages (session exists → resume); defensive.
-        charter_path = claude_agent.PROJECTS_ROOT / slug / ".claude" / "agents" / "designer" / "CLAUDE.md"
+    if is_first:  # task_plan normally runs after the design phase (session exists → resume); defensive.
+        charter_path = (
+            claude_agent.PROJECTS_ROOT
+            / slug
+            / ".claude"
+            / "agents"
+            / _charter_slug_for_role(AI_AGENT_ROLE)
+            / "CLAUDE.md"
+        )
 
     tagged_on_event: Optional[claude_agent.EventCallback] = None
     if on_event is not None:
 
         async def tagged_on_event(evt: dict) -> None:
-            await on_event({**evt, "_role": "designer"} if isinstance(evt, dict) else evt)
+            await on_event({**evt, "_role": AI_AGENT_ROLE} if isinstance(evt, dict) else evt)
 
         await tagged_on_event({"type": "active_role"})
 
@@ -5052,8 +5107,9 @@ def _autonomous_answer_count(db: Session, version_id: uuid.UUID, task_id: uuid.U
 _AUTONOMOUS_SUMMARY_RECENT = 5
 #: An OrchestratorSession idle longer than this reads as ``stale`` on the rail (R4, D5 — 30 min).
 _AGENT_STALE_SECONDS = 1800
-#: The agent roles shown on the rail — the OrchestratorSession.role set (ACTOR_VALUES minus the human director).
-_AGENT_SESSION_ROLES = ("coordinator", "designer", "customer", "implementer", "auditor")
+#: The agent roles shown on the rail — the OrchestratorSession.role set = ACTOR_VALUES (CR-V2-001),
+#: i.e. the two v2 agents (DB values, underscore). CR-V2-007 collapsed the v1 5-role set to these.
+_AGENT_SESSION_ROLES = (AI_AGENT_ROLE, AUDITOR_ROLE)
 
 
 def coordinator_triage(db: Session, version_id: uuid.UUID, state: Optional[PipelineState]) -> Optional[dict[str, Any]]:

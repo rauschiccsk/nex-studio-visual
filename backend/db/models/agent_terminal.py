@@ -63,7 +63,10 @@ class AgentTerminalSession(Base, UUIDMixin, TimestampMixin):
 
     __table_args__ = (
         CheckConstraint(
-            "role IN ('designer', 'implementer', 'auditor', 'coordinator')",
+            # v2.0.0 (CR-V2-007): the two v2 agents. NOTE these are CHARTER-PATH SLUGS (hyphen) —
+            # ``agent_terminal_sessions.role`` stores the spawn/debug-attach path slug used for
+            # ``.claude/agents/<role>/CLAUDE.md``, so ``ai-agent`` (NOT the DB enum ``ai_agent``).
+            "role IN ('ai-agent', 'auditor')",
             name="ck_ats_role",
         ),
         CheckConstraint(
