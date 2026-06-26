@@ -62,7 +62,7 @@ export function WhosTurnBoard({
         ? "Build pozastavený"
         : status === "done"
           ? "Hotovo"
-          : "Na rade: Director";
+          : "Na rade: Manažér";
   const decision = decisionType(status, current_stage, availableActions ?? []);
   const relayed = RELAYED_STAGES.has(current_stage) && status !== "agent_working" && status !== "done";
   // PIPELINE-AUTONOMY §3.3: the distinct routine gates the engine auto-ratified (newest-first in the feed),
@@ -102,7 +102,7 @@ export function WhosTurnBoard({
 
       {relayed && (
         <div className="mt-1 flex items-center gap-1 text-[10px] text-[var(--color-text-muted)]">
-          <span>Director</span>
+          <span>Manažér</span>
           <span className="text-[var(--color-text-muted)]">→</span>
           <span className="text-[var(--color-text-secondary)]">Koordinátor</span>
           <span className="text-[var(--color-text-muted)]">→</span>
