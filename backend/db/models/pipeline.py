@@ -250,9 +250,13 @@ class PipelineMessage(Base, UUIDMixin):
 #: Statuses in which the pipeline is waiting on a Manažér decision (WS-D, CR-NS-036). CR-V2-004
 #: renamed the operator status VALUE ``awaiting_director`` → ``awaiting_manazer``; the frozenset
 #: membership is updated in lock-step so the 3 status listeners below keep firing on the renamed
-#: value (a value rename WITHOUT this update would silently stop them). The listener BODIES key on
-#: this frozenset by name and are otherwise untouched here — their semantic re-wire to the new-status
-#: engine logic is owned by CR-V2-009 (R-LISTENERS).
+#: value (a value rename WITHOUT this update would silently stop them). R-LISTENERS re-wire COMPLETE
+#: (CR-V2-009): the 4-phase engine (``orchestrator.run_dispatch`` / ``apply_action``) now WRITES the
+#: renamed ``awaiting_manazer`` value, so all three sync, lock-free listeners — the Manažér-wait timer
+#: (:func:`_stamp_awaiting_director_since`), the single-flight clear (:func:`_clear_dispatch_on_settle`)
+#: and the block_reason clear (:func:`_clear_block_reason_on_unblock`) — fire on the new value. The
+#: listener BODIES key only on this frozenset + the UNCHANGED literals (``agent_working`` / ``blocked``),
+#: so no body edit was needed; the sync iteration / lock-free invariant is preserved (no async refactor).
 _DIRECTOR_WAIT_STATUSES = frozenset({"awaiting_manazer", "blocked"})
 
 

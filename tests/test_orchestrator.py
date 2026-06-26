@@ -131,9 +131,9 @@ def _msgs(db_session, version_id):
     )
 
 
-def _settle(db_session, version_id, status="awaiting_director"):
-    """Mark the pipeline as settled (agent done) so a Director advancing action is
-    valid — the status guard rejects acting while ``agent_working`` (CR-NS-018)."""
+def _settle(db_session, version_id, status="awaiting_manazer"):
+    """Mark the pipeline as settled (agent done) so a Manažér advancing action is
+    valid — the status guard rejects acting while ``agent_working`` (CR-NS-018; v2 status CR-V2-009)."""
     st = orchestrator._get_state(db_session, version_id)
     st.status = status
     db_session.flush()
@@ -4419,57 +4419,64 @@ async def test_continue_build_rejected_outside_build(db_session, fake_claude):
 
 
 async def test_recover_orphaned_build_at_agent_working(db_session, fake_claude):
+    # R-BLAST safeguard #4 (resume-safety), v2 4-phase form (CR-V2-009): a Programovanie phase stranded
+    # at agent_working by a restart recovers to awaiting_manazer with the "Pokračovať" resume CTA.
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
-    state = _to_build(db_session, version)  # build / agent_working (stranded by a restart)
+    state = orchestrator._get_state(db_session, version.id)
+    state.current_stage = "programovanie"  # stranded mid-coding by a restart
+    state.current_actor = "ai_agent"
+    db_session.flush()
     assert state.status == "agent_working"
 
     n = orchestrator.recover_orphaned_builds_on_startup(db_session)
 
     assert n == 1
     state = orchestrator._get_state(db_session, version.id)
-    assert state.current_stage == "build"
-    assert state.status == "awaiting_director"
-    assert "Pokračovať v builde" in state.next_action
+    assert state.current_stage == "programovanie"
+    assert state.status == "awaiting_manazer"
+    assert "Pokračovať" in state.next_action
     notif = [
         m
         for m in _msgs(db_session, version.id)
-        if m.author == "system" and m.recipient == "director" and m.kind == "notification" and m.stage == "build"
+        if m.author == "system" and m.recipient == "manazer" and m.kind == "notification" and m.stage == "programovanie"
     ]
     assert notif and "reštartom" in notif[-1].content
 
 
-async def test_recover_leaves_awaiting_director_build_untouched(db_session, fake_claude):
+async def test_recover_leaves_awaiting_manazer_build_untouched(db_session, fake_claude):
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
-    state = _to_build(db_session, version)
-    state.status = "awaiting_director"  # already settled — not stranded
+    state = orchestrator._get_state(db_session, version.id)
+    state.current_stage = "programovanie"
+    state.status = "awaiting_manazer"  # already settled — not stranded
     db_session.flush()
     assert orchestrator.recover_orphaned_builds_on_startup(db_session) == 0
 
 
 async def test_recover_orphaned_non_build_stage_recovered(db_session, fake_claude):
-    # R1-d (D4): orphan recovery now covers ALL stages, not just build. A kickoff/agent_working stranded
-    # by a restart is flipped to awaiting_director with a generic stage-parametrized message + commit audit,
-    # and the durable single-flight flag is cleared (a killed process left it set — Seam #2).
+    # R1-d (D4); v2 CR-V2-009: orphan recovery covers ALL phases. A priprava/agent_working stranded by a
+    # restart is flipped to awaiting_manazer with a generic phase-parametrized message + commit audit, and
+    # the durable single-flight flag is cleared (a killed process left it set — Seam #2).
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
     state = orchestrator._get_state(db_session, version.id)
+    assert state.current_stage == "priprava"
     assert state.status == "agent_working" and state.dispatch_in_flight is True
 
     assert orchestrator.recover_orphaned_builds_on_startup(db_session) == 1
 
     state = orchestrator._get_state(db_session, version.id)
-    assert state.current_stage == "kickoff"
-    assert state.status == "awaiting_director"
-    assert "kickoff" in state.next_action and "prerušená" in state.next_action
+    assert state.current_stage == "priprava"
+    assert state.status == "awaiting_manazer"
+    assert "priprava" in state.next_action and "prerušená" in state.next_action
     assert state.dispatch_in_flight is False  # cleared on recovery
     notif = [
         m
         for m in _msgs(db_session, version.id)
         if m.author == "system"
         and m.kind == "notification"
-        and m.stage == "kickoff"
+        and m.stage == "priprava"
         and (m.payload or {}).get("recovery_audit")
     ]
     assert notif and "reštartom" in notif[-1].content
@@ -6942,7 +6949,7 @@ async def test_settle_clears_dispatch_flag_and_baseline(db_session, fake_claude,
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
     state = orchestrator._get_state(db_session, version.id)
     assert state.dispatch_in_flight is True and state.dispatch_baseline_sha == "b" * 40
-    state.status = "awaiting_director"  # settle
+    state.status = "awaiting_manazer"  # settle (v2 status CR-V2-009)
     assert state.dispatch_in_flight is False
     assert state.dispatch_baseline_sha is None
 
@@ -6954,16 +6961,16 @@ async def test_apply_action_durable_single_flight_guard(db_session, fake_claude)
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
     state = orchestrator._get_state(db_session, version.id)
-    state.status = "awaiting_director"
+    state.status = "awaiting_manazer"
     state.dispatch_in_flight = True
     db_session.flush()
     with pytest.raises(orchestrator.OrchestratorError, match="Dispečer už beží"):
-        await orchestrator.apply_action(db_session, version_id=version.id, action="approve")
-    # not mutated past the guard
-    assert orchestrator._get_state(db_session, version.id).current_stage == "kickoff"
+        await orchestrator.apply_action(db_session, version_id=version.id, action="approve_spec")
+    # not mutated past the guard (still in the first phase — Príprava)
+    assert orchestrator._get_state(db_session, version.id).current_stage == "priprava"
 
 
-def _arm_dispatch_state(db_session, version, stage="kickoff", actor="coordinator", baseline="b" * 40):
+def _arm_dispatch_state(db_session, version, stage="programovanie", actor="ai_agent", baseline="b" * 40):
     """Seed a PipelineState as a live dispatch (agent_working + a frozen baseline)."""
     state = PipelineState(
         version_id=version.id,
@@ -7002,7 +7009,7 @@ async def test_invoke_agent_timeout_records_lost_work_audit_with_commits(db_sess
     _arm_dispatch_state(db_session, version)
 
     result = await orchestrator.invoke_agent(
-        db_session, version_id=version.id, role="coordinator", stage="kickoff", prompt="x"
+        db_session, version_id=version.id, role="ai_agent", stage="programovanie", prompt="x"
     )
 
     assert isinstance(result, ParseFailure)
@@ -7027,7 +7034,7 @@ async def test_invoke_agent_timeout_records_lost_work_audit_no_commits(db_sessio
     _arm_dispatch_state(db_session, version)
 
     result = await orchestrator.invoke_agent(
-        db_session, version_id=version.id, role="coordinator", stage="kickoff", prompt="x"
+        db_session, version_id=version.id, role="ai_agent", stage="programovanie", prompt="x"
     )
 
     assert isinstance(result, ParseFailure)
@@ -7046,8 +7053,8 @@ async def test_invoke_agent_timeout_no_baseline_no_audit(db_session, monkeypatch
     state = PipelineState(
         version_id=version.id,
         flow_type="new_version",
-        current_stage="kickoff",
-        current_actor="coordinator",
+        current_stage="programovanie",
+        current_actor="ai_agent",
         status="agent_working",
         next_action="working",
     )
@@ -7055,7 +7062,7 @@ async def test_invoke_agent_timeout_no_baseline_no_audit(db_session, monkeypatch
     db_session.flush()  # dispatch_baseline_sha stays NULL
 
     result = await orchestrator.invoke_agent(
-        db_session, version_id=version.id, role="coordinator", stage="kickoff", prompt="x"
+        db_session, version_id=version.id, role="ai_agent", stage="programovanie", prompt="x"
     )
     assert isinstance(result, ParseFailure)
     assert result.lost_work is None
@@ -7076,7 +7083,7 @@ async def test_run_dispatch_timeout_with_commits_surfaces_lost_work(db_session, 
 
     state = await orchestrator.run_dispatch(db_session, version.id)
 
-    assert state.status == "awaiting_director"  # never a bare blocked, never auto-proceeds
+    assert state.status == "awaiting_manazer"  # never a bare blocked, never auto-proceeds
     assert "2 commitov" in state.next_action
     assert len(_lost_work_notifs(db_session, version.id)) == 1  # idempotent across parse-retries
 
@@ -7094,26 +7101,26 @@ async def test_run_dispatch_timeout_no_commits_surfaces_no_change(db_session, mo
 
     state = await orchestrator.run_dispatch(db_session, version.id)
 
-    assert state.status == "awaiting_director"
+    assert state.status == "awaiting_manazer"
     assert "žiadna zmena" in state.next_action
 
 
 async def test_recover_orphaned_release_with_commits(db_session, monkeypatch):
-    # R1-d INTEGRATION: a restart at release/agent_working → recovery flips to awaiting_director, records the
-    # commit audit (generic stage message), and clears the durable flag.
+    # R1-d INTEGRATION; v2 CR-V2-009: a restart at verifikacia/agent_working → recovery flips to
+    # awaiting_manazer, records the commit audit (generic phase message), and clears the durable flag.
     monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "h" * 40)
     monkeypatch.setattr(orchestrator, "_rev_list_count", lambda root, baseline: 4)
     version, _ = _make_version(db_session)
-    _arm_dispatch_state(db_session, version, stage="release", actor="coordinator", baseline="h" * 40)
+    _arm_dispatch_state(db_session, version, stage="verifikacia", actor="auditor", baseline="h" * 40)
 
     assert orchestrator.recover_orphaned_builds_on_startup(db_session) == 1
 
     state = orchestrator._get_state(db_session, version.id)
-    assert state.current_stage == "release"
-    assert state.status == "awaiting_director"
+    assert state.current_stage == "verifikacia"
+    assert state.status == "awaiting_manazer"
     assert state.dispatch_in_flight is False
     assert state.dispatch_baseline_sha is None
-    assert "release" in state.next_action and "4 commitov" in state.next_action
+    assert "verifikacia" in state.next_action and "4 commitov" in state.next_action
     notif = [m for m in _msgs(db_session, version.id) if (m.payload or {}).get("recovery_audit")]
     assert notif and notif[-1].payload["detected_commit_count"] == 4
 
@@ -7130,7 +7137,7 @@ async def test_dispatch_baseline_independent_of_task_baseline(db_session, fake_c
     task.baseline_sha = "t" * 40
     db_session.flush()
 
-    state.status = "awaiting_director"  # settle → dispatch baseline reset
+    state.status = "awaiting_manazer"  # settle → dispatch baseline reset (v2 status CR-V2-009)
     db_session.flush()
     db_session.refresh(task)
     assert state.dispatch_baseline_sha is None  # dispatch baseline cleared
@@ -7141,8 +7148,8 @@ def test_cleanup_old_orchestrator_sessions_prunes_idle(db_session, monkeypatch):
     # R1-d UNIT (D3): rows untouched > 7d on last_input_at are pruned; fresh rows survive.
     from datetime import datetime, timedelta, timezone
 
-    old = OrchestratorSession(project_slug="p-old", role="designer", claude_session_id=uuid.uuid4())
-    fresh = OrchestratorSession(project_slug="p-fresh", role="designer", claude_session_id=uuid.uuid4())
+    old = OrchestratorSession(project_slug="p-old", role="ai_agent", claude_session_id=uuid.uuid4())
+    fresh = OrchestratorSession(project_slug="p-fresh", role="ai_agent", claude_session_id=uuid.uuid4())
     db_session.add_all([old, fresh])
     db_session.flush()
     db_session.execute(

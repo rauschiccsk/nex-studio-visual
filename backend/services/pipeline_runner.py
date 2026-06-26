@@ -32,8 +32,8 @@ from backend.services.pipeline_ws import registry
 
 logger = logging.getLogger(__name__)
 
-# Settled states that warrant a Director nudge (F-007 §9). Never agent_working.
-_NOTIFY_STATUSES = ("awaiting_director", "blocked")
+# Settled states that warrant a Manažér nudge (F-007 §9; CR-V2-009 status rename). Never agent_working.
+_NOTIFY_STATUSES = ("awaiting_manazer", "blocked")
 
 # Strong refs to in-flight tasks so the event loop doesn't GC them mid-run
 # (mirrors the idle/retention tasks in ``main.py``). Discarded on completion.
@@ -59,9 +59,9 @@ def schedule_dispatch(
     directive blind. The value is captured in-memory at schedule time (same
     process/event loop) — no DB round-trip needed.
 
-    ``gate_e_dispatch`` selects the Gate E sub-flow: ``"designer_edit"`` (Branch B
-    ``fix`` — Designer edits then continues), ``"coordinator_consult"`` (``ask`` /
-    ``return`` @ gate_e — the Coordinator revises its recommendation), or ``None``.
+    ``gate_e_dispatch`` — DEFERRED no-op (CR-V2-009): the v1 Gate-E sub-flow selector. The 4-phase model
+    has no Gate E (the Auditor's upfront review replaces it, CR-V2-013), so the route always passes
+    ``None`` now. Kept for signature stability until the FE-contract CRs drop it.
 
     Single-flight per version (CR-NS-027): if a dispatch for ``version_id`` is already
     in-flight, skip this one (log + return) rather than starting a second concurrent loop.
@@ -150,27 +150,20 @@ async def _run(version_id: uuid.UUID, directive: str | None = None, gate_e_dispa
                 db, version_id, on_event, directive, gate_e_dispatch=gate_e_dispatch, on_message=on_message
             )
             db.commit()
-            # Engine auto-chain (CR-NS-097 fast-fix + PIPELINE-AUTONOMY new_version routine-gate auto-ratify):
-            # run_dispatch returns status=agent_working ONLY when it DELIBERATELY auto-advanced the stage and
-            # wants the next stage run in THIS same single-flight task — no Director gate between them. Cases:
-            #   • fast_fix one-touch lane: kickoff→build on a trivial triage, build→release on a clean build;
-            #   • new_version Phase 1: routine gates a→d auto-ratify on a deterministically-clean PASS (the
-            #     chain then settles at gate_e — Gate E bounding is Phase 3, not yet auto-ratified);
-            #   • new_version Phase 2: a clean build (build_readiness clean — 0 todo ∧ 0 failed) auto-ratifies
-            #     build→gate_g (the release verdict at gate_g stays a KEY Director click, never auto).
-            #   • new_version Phase 3: Gate E auto-continues each clean Branch-A question / topic boundary
-            #     (gap_found False, under the scope-scaled budget) — the gate_e stage SELF-LOOPS one Customer
-            #     turn per iteration until coverage_complete / the ceiling escalates.
-            # Continue dispatching with a stage-correct activity callback, broadcasting each intermediate state
-            # so the board steps through the auto-advanced stages live, until it settles. Bounded as a backstop
-            # by orchestrator.auto_chain_limit — the full waterfall PLUS the version's Gate E question ceiling +
-            # topic slack (Phase 3 made the chain non-monotonic: gate_e self-loops, so len(STAGE_ORDER) alone
-            # would strand a legitimately deep but bounded Gate E review). Every real path settles (status !=
-            # agent_working) well before the bound, so it only stops a hypothetical runaway. fast_fix is
-            # unaffected (its chain is ≤3, far under any bound — the one-touch outcome is byte-identical).
+            # Engine auto-chain (CR-NS-097; v2 4-phase CR-V2-009): run_dispatch returns status=agent_working
+            # ONLY when it DELIBERATELY auto-advanced the phase and wants the next phase run in THIS same
+            # single-flight task — no Manažér gate between them. In the 4-phase model the chain advances
+            # monotonically across STAGE_ORDER (Príprava → Návrh → Programovanie → Verifikácia) under the
+            # Miera autonómie dial, plus the Auditor's bounded fix↔re-verify self-loop (Verifikácia FAIL →
+            # Programovanie → Verifikácia), which is wired in CR-V2-014. The Gate-E self-loop is GONE.
+            # Continue dispatching with a phase-correct activity callback, broadcasting each intermediate
+            # state so the board steps through the auto-advanced phases live, until it settles. Bounded as a
+            # backstop by orchestrator.auto_chain_limit = len(STAGE_ORDER) + the Auditor-loop margin (the
+            # provisional 4-phase bound — R-AUTOCHAIN, finalized with AUDITOR_LOOP_MAX in CR-V2-014). Every
+            # real path settles (status != agent_working) well before the bound — it only stops a runaway.
             guard = 0
-            # Compute the backstop ONLY when we're actually about to auto-chain — avoids the spec-tree read on
-            # a plain settle and the version-vanished (state is None) edge.
+            # Compute the backstop ONLY when we're actually about to auto-chain — avoids the read on a plain
+            # settle and the version-vanished (state is None) edge.
             chain_limit = (
                 orchestrator.auto_chain_limit(db, version_id)
                 if state is not None and state.status == "agent_working"
@@ -180,11 +173,8 @@ async def _run(version_id: uuid.UUID, directive: str | None = None, gate_e_dispa
                 guard += 1
                 await _broadcast_state(version_id, state)
                 on_event = _activity_callback(version_id, state.current_stage, state.current_actor)
-                # gate_e_dispatch=None for EVERY auto-chained turn: the route's sub-flow (designer_edit /
-                # coordinator_consult) is one-shot — it applies only to the FIRST dispatch. An auto-continued
-                # Gate E turn (Phase 3) is always a FRESH Customer turn; carrying a stale "designer_edit" here
-                # would re-run the edit path with a None prompt. (Pre-Phase-3 chains never set it, so this is a
-                # no-op for fast_fix / gates a–d / build — the one-touch outcomes stay byte-identical.)
+                # gate_e_dispatch=None for every auto-chained turn (DEFERRED no-op in v2 — there is no Gate E;
+                # CR-V2-009). The parameter is kept until the FE-contract CRs drop it from the route/runner.
                 state = await orchestrator.run_dispatch(
                     db, version_id, on_event, gate_e_dispatch=None, on_message=on_message
                 )
@@ -283,7 +273,7 @@ async def _maybe_notify(db, version_id: uuid.UUID, state: PipelineState) -> None
         logger.info("version %s: no telegram recipient — skip notify", version_id)
         return
     # Generic nudge only — NEVER embed the raw next_action (it carries machine
-    # tokens like 'coordinator'/'gate_a'). Specifics live on the board.
+    # tokens like the phase id / actor). Specifics live on the board.
     proj_ver = db.execute(
         select(Project.name, Version.version_number)
         .join(Version, Version.project_id == Project.id)
@@ -313,12 +303,12 @@ def _mark_blocked(
         return None, None
     detail = f": {reason[:300]}" if reason else ""
     state.status = "blocked"
-    state.next_action = f"Dispatch zlyhal{detail}. Skús znova alebo vráť."
+    state.next_action = f"Dispatch zlyhal{detail}. Skús znova alebo usmerni (Uprav)."
     msg = PipelineMessage(
         version_id=version_id,
         stage=state.current_stage,
         author="system",
-        recipient="director",
+        recipient="manazer",  # CR-V2-009: Director → Manažér participant rename (matches PARTICIPANT_VALUES)
         kind="notification",
         content=f"Agent dispatch failed{detail} — pipeline blocked.",
     )

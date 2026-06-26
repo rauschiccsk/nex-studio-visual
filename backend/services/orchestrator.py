@@ -247,124 +247,126 @@ def _seed_metrics_from_failure(result: object) -> Optional["_DispatchMetrics"]:
     return seed
 
 
-# Ordered stages and the agent responsible for each (F-007 §3.1).
+# Ordered phases and the agent responsible for each (v2.0.0 design §2.1; CR-V2-009).
+# The v1 11-stage 5-role serial waterfall (kickoff/gate_a..gate_e/task_plan/build/gate_g/release)
+# collapses to the FOUR v2 phases the AI Agent walks with one warm context, plus the terminal ``done``
+# (= "Hotovo"). Single source of truth shared with the DB ``STAGE_VALUES`` tuple
+# (``backend/db/models/pipeline.py``) and ``pipeline_status.STAGES``:
+#   * ``priprava``      — Príprava: interactive Zadanie→Špecifikácia dialogue (CR-V2-010); ends at the
+#                         ALWAYS-mandatory ``approve_spec`` stop (dial-independent).
+#   * ``navrh``         — Návrh: one design doc + the EPIC→FEAT→TASK task plan (CR-V2-011); the Auditor's
+#                         upfront review (CR-V2-013) surfaces at the post-Návrh schvaľovací bod.
+#   * ``programovanie`` — Programovanie: the AI Agent's self-checking coding loop (CR-V2-012).
+#   * ``verifikacia``   — Verifikácia: the Auditor's end verification — release-acceptance + adversarial
+#                         spot-checks (CR-V2-014); a FAIL loops the fix back to the AI Agent.
+#   * ``done``          — Hotovo (terminal; no actor). Deploy is OUT of the pipeline (per-customer, D6).
 STAGE_ORDER: tuple[str, ...] = (
-    "kickoff",
-    "gate_a",
-    "gate_b",
-    "gate_c",
-    "gate_d",
-    "gate_e",
-    "task_plan",
-    "build",
-    "gate_g",
-    "release",
+    "priprava",
+    "navrh",
+    "programovanie",
+    "verifikacia",
     "done",
 )
-# Fast-Fix Lane stage path (F-009, CR-NS-094): the lightweight lane skips the full waterfall
-# (gate_a-e / task_plan / gate_g). ``kickoff`` advances straight to ``build`` (after the Coordinator's
-# escalation-guard triage), and a settled ``build`` advances to ``release`` — never to a gate. A subset
-# of :data:`STAGE_ORDER`, so every member reuses the same :data:`STAGE_ACTOR` mapping below.
+# Fast-Fix Lane phase path (design §2.4 "Fast-fix = dial at full-auto"): the lightweight lane skips the
+# heavy Návrh + per-task work — the Manažér's directive IS the brief, so Príprava advances straight to
+# Programovanie, and a settled Programovanie advances to a LIGHT Verifikácia (fix-works + no-regression,
+# not the full release oracle). A subset of :data:`STAGE_ORDER`, so every member reuses the same
+# :data:`STAGE_ACTOR` mapping below. (OQ-1: ``cr``/``bug`` flow_types dropped — only ``new_version`` +
+# ``fast_fix`` survive.)
 FAST_FIX_STAGE_ORDER: tuple[str, ...] = (
-    "kickoff",
-    "build",
-    "release",
+    "priprava",
+    "programovanie",
+    "verifikacia",
     "done",
 )
+# The AGENT on turn for each phase (design §2.1/§2.2). The AI Agent (doer) owns Príprava/Návrh/
+# Programovanie with one warm context; the Auditor (independent verifier) owns Verifikácia. ``done`` has
+# no actor (terminal). DB enum values use underscore (``ai_agent``/``auditor`` — CR-V2-001 ACTOR_VALUES);
+# the charter filesystem slug uses a hyphen (``ai-agent``) — mapped in CR-V2-007, kept distinct here.
 STAGE_ACTOR: dict[str, str] = {
-    "kickoff": "coordinator",
-    "gate_a": "designer",
-    "gate_b": "designer",
-    "gate_c": "designer",
-    "gate_d": "designer",
-    "gate_e": "customer",
-    "task_plan": "designer",
-    "build": "implementer",
-    "gate_g": "auditor",
-    "release": "coordinator",
+    "priprava": "ai_agent",
+    "navrh": "ai_agent",
+    "programovanie": "ai_agent",
+    "verifikacia": "auditor",
 }
 _VERIFY_RETRIES = 2
-# gate_g FAIL flow Fix 1 (CR-NS-056 §F1.5): a scope/design question escalates to the Director at most ONCE
-# per gate_g iteration. A 2nd scope flag in the same iteration settles to awaiting_director (no loop).
-_MAX_SCOPE_ESCALATIONS_PER_ITERATION = 1
-# Per-task auto-fix bound (F-007 §6, CR-NS-020 CR-3): on a failed task the build loop
-# re-dispatches the Programmer with escalating context up to this many times; after the
-# last failure the task is marked ``failed`` and the pipeline HALTs for the Director.
-# Distinct from ``_VERIFY_RETRIES`` (a within-turn verify retry) and ``_PARSE_RETRIES``.
+# Auditor fix-loop bound (v2 design §2.2 "Division of labour"; CR-V2-009). At Verifikácia, an Auditor FAIL
+# verdict loops the fix back to the AI Agent (the Auditor only finds; the AI Agent fixes), the Auditor
+# re-verifies, bounded to this many fix↔re-verify rounds; on the (n+1)-th still-failing round the build
+# STOPS and escalates to the Manažér (design §2.2 (i)). PROVISIONAL home of the named constant
+# CR-V2-014 wires into the runner's auto-chain backstop (R-AUTOCHAIN) once the Verifikácia loop exists.
+AUDITOR_LOOP_MAX = 5
+# Per-task auto-fix bound (CR-NS-020 CR-3) for the v1 Programovanie self-check loop. DISTINCT from the
+# Auditor fix-loop above: this caps the AI Agent's WITHIN-Programovanie re-attempts on a single failed
+# task. Kept for the deferred-RED ``_run_build_round`` (rebuilt as the self-checking loop in CR-V2-012).
 _AUTO_FIX_RETRIES = 5
+# gate_g FAIL scope-escalation cap (CR-NS-056 §F1.5) — kept for the deferred-RED gate_g/Verifikácia
+# round-runner (rebuilt in CR-V2-014). DISTINCT from the loop bounds above.
+_MAX_SCOPE_ESCALATIONS_PER_ITERATION = 1
 # Bounded re-invokes when the agent emits an unparseable <<<PIPELINE_STATUS>>>
 # block (CR-NS-018). A single LLM JSON typo must not halt the pipeline; the
 # agent runs ``--resume`` so a retry is a cheap re-emit, not a redo of the work.
 # Distinct from ``_VERIFY_RETRIES`` (which retries a *valid* report that failed
 # verification).
 _PARSE_RETRIES = 2
-# Upper bound on the total feats in an incrementally-generated task_plan (v0.7.3, CR-1). Each feat
-# costs one bounded ``--resume`` per-feat pass, so this caps the multi-pass loop. A coarse-grained plan
-# (module ≈ task, F-007 §4) is well under this even for a large multi-module app; exceeding it signals
-# an over-fine decomposition → fail-closed HALT (``blocked``) with a Coordinator relay, never a runaway
-# loop. Generous on purpose (the cap is a backstop, not a design target).
+# Upper bound on the total feats in an incrementally-generated task plan (v0.7.3, CR-1; v2 the plan folds
+# into the Návrh phase — CR-V2-011). Each feat costs one bounded ``--resume`` per-feat pass, so this caps
+# the multi-pass loop. A coarse-grained plan (module ≈ task) is well under this even for a large app;
+# exceeding it signals an over-fine decomposition → fail-closed HALT (``blocked``), never a runaway loop.
 MAX_PLAN_FEATS = 40
+# The Manažér actions ``apply_action`` accepts (v2 design §4.4; CR-V2-009). The v1 11-stage/5-role verb
+# set (approve / fix / leave / end_gate_e / end_build / continue_build / apply_coordinator_recommendation
+# / rerun_release_audit / surgical_fix / uat_accept / retry_publish / accept_merged) collapses to the
+# 4-phase schvaľovacie body:
+#   * ``start``        — "Spustiť tvorbu špecifikácie": create the pipeline + begin Príprava.
+#   * ``approve_spec`` — the ALWAYS-mandatory end-Príprava Špecifikácia approval (dial-independent; design
+#                        §2.3, D3). Advances Príprava → Návrh.
+#   * ``schvalit``     — "Schváliť": approve the current phase's output at a dial-governed schvaľovací bod
+#                        (after Návrh / Programovanie / Verifikácia) → advance to the next phase / Hotovo.
+#   * ``uprav``        — "Uprav": send the Manažér's correction back to the AI Agent at a schvaľovací bod
+#                        (re-work the current phase); the phase does NOT advance.
+#   * ``pokracovat``   — "Pokračovať": resume a build the Manažér paused (cooperative pause boundary).
+#   * ``verdict``      — the Auditor's Verifikácia verdict (PASS → Hotovo; FAIL → loop fix to the AI Agent,
+#                        bounded by :data:`AUDITOR_LOOP_MAX`, then escalate to the Manažér).
+#   * ``ask``/``answer`` — direct Manažér↔AI Agent comms (the Coordinator relay is retired; design §2.2).
+#   * ``pause``        — cooperatively pause the Programovanie loop at a task boundary.
+# (Deploy is OUT of the pipeline — per-customer UAT/PROD actions live in the deploy subsystem, D6.)
 _ACTIONS = frozenset(
     {
         "start",
-        "approve",
-        "return",
+        "approve_spec",
+        "schvalit",
+        "uprav",
+        "pokracovat",
+        "verdict",
         "ask",
         "answer",
-        "apply_coordinator_recommendation",
-        "fix",
-        "leave",
-        "verdict",
-        "rerun_release_audit",
-        "surgical_fix",
-        "uat_accept",
-        "retry_publish",
-        "end_gate_e",
-        "end_build",
-        "continue_build",
-        "accept_merged",
         "pause",
     }
 )
-# Actions that act on / advance past an agent's output — only valid once the
-# agent has settled (CR-NS-018). Guarding these stops a stale board / double-click
-# from advancing while the agent is mid-work (which skipped a mandatory gate).
+# Actions that act on / advance past an agent's output — only valid once the agent has SETTLED
+# (CR-NS-018). Guarding these stops a stale board / double-click from advancing while the agent is
+# mid-work (which would skip a mandatory schvaľovací bod). ``ask``/``answer``/``pause`` are NOT advancing
+# (ask/answer thread input without advancing; pause is only meaningful while the agent works).
 _ADVANCING_ACTIONS = frozenset(
     {
-        "approve",
-        "apply_coordinator_recommendation",
-        "fix",
-        "leave",
+        "approve_spec",
+        "schvalit",
+        "uprav",
         "verdict",
-        "rerun_release_audit",
-        # gate-g-hardening GAP 2 (CR-D): the surgical post-audit fix re-enters the build → an advancing
-        # action (needs a settled gate_g — awaiting_director / blocked).
-        "surgical_fix",
-        "uat_accept",
-        "retry_publish",
-        "return",
-        "end_gate_e",
-        "end_build",
-        "continue_build",
-        "accept_merged",
+        "pokracovat",
     }
 )
 
-# Per-stage backstop timeouts (seconds) for a single headless agent turn
-# (CR-NS-018 fix-round). Dispatch is async, so these only guard a *hung* agent.
-# Build is the heaviest single turn; gates/kickoff are read+produce. Unknown
-# stages fall back to the env-tunable ``claude_agent.CLAUDE_INVOKE_TIMEOUT``.
+# Per-phase backstop timeouts (seconds) for a single headless agent turn (CR-NS-018 fix-round; v2 4-phase
+# CR-V2-009). Dispatch is async, so these only guard a *hung* agent. Programovanie is the heaviest single
+# turn; Príprava/Návrh are read+produce; Verifikácia runs the release-acceptance smoke. Unknown phases
+# fall back to the env-tunable ``claude_agent.CLAUDE_INVOKE_TIMEOUT``.
 STAGE_TIMEOUT: dict[str, int] = {
-    "kickoff": 900,
-    "gate_a": 900,
-    "gate_b": 900,
-    "gate_c": 900,
-    "gate_d": 900,
-    "gate_e": 900,
-    "task_plan": 1200,
-    "build": 2400,
-    "gate_g": 1200,
-    "release": 900,
+    "priprava": 900,
+    "navrh": 1200,
+    "programovanie": 2400,
+    "verifikacia": 1200,
 }
 
 
@@ -373,77 +375,48 @@ def _timeout_for(stage: str) -> int:
 
 
 def determine_available_actions(state: PipelineState) -> set[str]:
-    """The Director actions valid to OFFER right now, derived from (current_stage, status) — WS-C1
-    (CR-NS-030). The single backend source of truth for button presence, so the FE can't drift into
-    no-op buttons (the live bug: an "approve" rendered on a build-blocked task, where it is a no-op).
+    """The Manažér actions valid to OFFER right now, derived from (current_stage, status) — WS-C1
+    (CR-NS-030); rebuilt to the 4-phase model in CR-V2-009. The single backend source of truth for
+    button presence, so the FE can't drift into no-op buttons.
 
-    This is the (stage, status)-level offerable set — a subset of what :func:`apply_action` accepts.
-    Finer payload/DB preconditions stay in apply_action and are refined by the FE's message-derived
-    signals: a non-empty comment (return), all-tasks-done (approve@build), no open finding
-    (end_build / end_gate_e / final approve@gate_e), an open Designer gap (fix/leave), a Coordinator
-    report (apply_coordinator_recommendation). This set only removes the GROSS (stage, status)
-    mismatches; the FE intersects it with those finer conditions and falls back to its own logic when
-    the field is absent."""
+    This is the (phase, status)-level offerable set — a subset of what :func:`apply_action` accepts.
+    Finer payload/DB preconditions stay in apply_action (a non-empty comment for ``uprav``; a settled
+    Auditor verdict). This set only removes the GROSS (phase, status) mismatches; the FE intersects it
+    with finer message-derived conditions and falls back to its own logic when a field is absent.
+
+    The schvaľovacie body the dial GOVERNS (``schvalit`` after Návrh / Programovanie / Verifikácia) are
+    always OFFERED here at a settled phase — whether the build actually STOPS at one is the dial's call
+    (:func:`dial_stops_at`, applied in the dispatch path), but once it has stopped the Manažér can act."""
     stage, status = state.current_stage, state.status
 
     if status == "agent_working":
-        # Nothing to ratify while the agent works; only a build loop has a cooperative pause boundary.
-        return {"pause"} if stage == "build" else set()
+        # Nothing to ratify while the agent works; only the Programovanie loop has a cooperative pause boundary.
+        return {"pause"} if stage == "programovanie" else set()
     if status == "done":
         return set()
     if status == "paused":
-        # CR-NS-027: from a paused build, ONLY the resume pair.
-        return {"continue_build", "end_build"}
+        # A paused Programovanie loop: only the resume verb (CR-V2-009 collapses end_build away — a
+        # paused build resumes via ``pokracovat`` or the Manažér steers it with ``uprav``).
+        return {"pokracovat", "uprav"}
 
-    # Settled (awaiting_director / blocked): ask + return are universally valid (return has no stage
-    # guard in apply_action — it's also the error-block "Skús znova" recovery at any stage).
-    actions: set[str] = {"ask", "return"}
+    # Settled (awaiting_manazer / blocked): ask + uprav are universally valid — ``uprav`` doubles as the
+    # error-block "Skús znova" / re-work recovery at any phase, and ``ask`` opens a direct AI-Agent
+    # consult. A blocked state is an agent QUESTION → the Manažér can ``answer`` it.
+    actions: set[str] = {"ask", "uprav"}
     if status == "blocked":
-        actions.add("answer")  # a blocked state is an agent question — the Director can answer it
+        actions.add("answer")
 
-    if stage in ("kickoff", "gate_a", "gate_b", "gate_c", "gate_d", "task_plan"):
-        actions.update({"approve", "apply_coordinator_recommendation"})
-    elif stage == "gate_e":
-        actions.update({"approve", "fix", "leave", "end_gate_e"})
-    elif stage == "build":
-        actions.update({"continue_build", "end_build"})
-        # apply_coordinator_recommendation (E7, F-008 §9): the Director approves the Coordinator's
-        # proposal → the orchestrator executes the matching action. Offered at a settled build; the FE
-        # refines to "only when an EXECUTABLE coordinator_directive exists" (message-derived) and labels
-        # the button from proposed_action — so it never shows without a live proposal.
-        actions.add("apply_coordinator_recommendation")
-        if status == "awaiting_director":
-            actions.add("approve")  # final sign-off only at a settled build — never on a blocked task
-            # accept_merged (WS-B2, CR-NS-031): a merged task dead-ends at a HALT, which settles to
-            # awaiting_director (never blocked — a blocked build is a programmer QUESTION, with no failed
-            # task to recognize). The FE further refines to "only when an open finding exists" via
-            # build_open_findings, so it never shows on a clean build.
-            actions.add("accept_merged")
-    elif stage == "gate_g":  # fast_fix never at gate_g (FAST_FIX_STAGE_ORDER has no gate_g)
-        actions.add("verdict")
-        if status in ("awaiting_director", "blocked"):
-            # rerun_release_audit (v0.7.6, gating widened v0.7.8): offered at a SETTLED gate_g — either a
-            # verdict the Director is looking at (awaiting_director) OR the Auditor blocked on a question,
-            # where the Director may choose to re-validate instead of answering. Re-dispatches the Auditor
-            # (re-runs the release audit) WITHOUT advancing; the fresh gate_g gate_report re-triggers the
-            # existing v0.7.5 verify_done app-starts smoke. The apply_action handler already accepts both
-            # (rerun_release_audit is in _ADVANCING_ACTIONS, whose guard treats awaiting_director/blocked/
-            # paused as settled). Gated to gate_g, which fast_fix never reaches → byte-identical for fast-fix.
-            actions.add("rerun_release_audit")
-            # surgical_fix (gate-g-hardening GAP 2, CR-D): the chirurgical post-audit fix path — re-enter the
-            # build to correct targeted task(s) per a Director directive, WITHOUT the full FAIL→build reset of
-            # every done task. Offered at the same SETTLED gate_g as rerun_release_audit (awaiting_director OR a
-            # blocked Auditor question). Gated to gate_g → fast_fix (no gate_g stage) never sees it. The re-built
-            # version still re-enters a FULL re-gate (Auditor + the GAP 1 acceptance gate), so surgery never
-            # bypasses the release oracle.
-            actions.add("surgical_fix")
-    elif stage == "release":
-        actions.add("uat_accept")
-        # v0.8.0 CR-3: a FULL-FLOW (new_version) release whose ENGINE publish failed settles to blocked —
-        # offer "retry_publish" (re-attempt the engine push + CI) ONLY there. Gated to new_version so it is
-        # ABSENT for fast_fix (its release never engine-publishes — out of scope) and for cr/bug.
-        if status == "blocked" and state.flow_type == "new_version":
-            actions.add("retry_publish")
+    if stage == "priprava":
+        # End-Príprava: the ALWAYS-mandatory Špecifikácia approval (dial-independent, design §2.3/D3).
+        actions.add("approve_spec")
+    elif stage in ("navrh", "programovanie"):
+        # The dial-governed schvaľovacie body after Návrh / Programovanie — ``schvalit`` advances to the
+        # next phase. (Whether the build HALTED here at all is the dial's call; once settled, it's offered.)
+        actions.add("schvalit")
+    elif stage == "verifikacia":
+        # Verifikácia is the Auditor's phase: the Manažér ratifies the Auditor's verdict (``verdict``) and,
+        # at the dial-governed end stop, signs off with ``schvalit`` → Hotovo.
+        actions.update({"verdict", "schvalit"})
 
     return actions
 
@@ -716,49 +689,31 @@ def _augment_brief_with_backlog(db: Session, version_id: uuid.UUID, stage: str, 
 
 
 def directive_for_action(action: str, payload: dict[str, Any], stage: str) -> Optional[str]:
-    """Frame the Director's interactive message for the re-dispatch prompt, else ``None``.
+    """Frame the Manažér's interactive message for the re-dispatch prompt, else ``None`` (CR-V2-009).
 
-    For ``return`` / ``ask`` / ``answer`` the Director's content MUST reach the
-    agent (CR-NS-018) — otherwise the re-dispatched agent re-runs blind on the
-    generic stage directive ("nič sa nezmenilo, nemám čo prerábať"). For a
-    fresh-stage dispatch (``start`` / ``approve`` / ``verdict``) there is no
-    Director-specific instruction → ``None``, and the caller falls back to
-    :func:`_directive_for`. The agent runs ``--resume`` (full thread), so the
-    framed line lands in the right context.
+    For ``uprav`` / ``ask`` / ``answer`` the Manažér's content MUST reach the agent (CR-NS-018) —
+    otherwise the re-dispatched agent re-runs blind on the generic phase directive ("nič sa nezmenilo").
+    For a fresh-phase dispatch (``start`` / ``approve_spec`` / ``schvalit`` / ``verdict`` / ``pokracovat``)
+    there is no Manažér-specific instruction → ``None``, and the caller falls back to
+    :func:`_directive_for`. The agent runs ``--resume`` (full thread), so the framed line lands in context.
     """
-    if action == "return":
+    if action == "uprav":
         comment = str(payload.get("comment", "")).strip()
-        return f"Director ťa vrátil na opravu fázy '{stage}': {comment}" if comment else None
+        return f"Manažér ťa vrátil na úpravu fázy '{stage}': {comment}" if comment else None
     if action == "ask":
         text = str(payload.get("text", "")).strip()
-        return f"Director sa pýta: {text}" if text else None
+        return f"Manažér sa pýta: {text}" if text else None
     if action == "answer":
         text = str(payload.get("text", "")).strip()
-        return f"Director odpovedal na tvoju otázku: {text}" if text else None
-    if action == "rerun_release_audit":
-        # v0.7.6: re-run the release audit at a settled gate_g — a static brief (no Director payload). The
-        # re-dispatched Auditor's fresh gate_g gate_report re-triggers the existing v0.7.5 verify_done
-        # app-starts smoke automatically. Ends with the status-block instruction because this directive IS
-        # the agent prompt (overrides the generic per-stage directive) when the route threads it.
-        return (
-            "Audítor, spusti ZNOVA kompletný release audit verzie podľa charteru §6 — behaviorálny "
-            "acceptance suite (appka reálne beží + `-m acceptance` proti bežiacej app) + spec-drift. "
-            "Toto je čerstvé prebehnutie release auditu, nie odpoveď na otázku. "
-            "Ukonči <<<PIPELINE_STATUS>>> blokom (F-007-orchestration-cockpit.md §5.3)."
-        )
+        return f"Manažér odpovedal na tvoju otázku: {text}" if text else None
     return None
 
 
 def latest_coordinator_report(db: Session, version_id: uuid.UUID) -> Optional[str]:
-    """Content of the most recent Coordinator ``gate_report`` for a version, or ``None``.
-
-    Author-filtered (``coordinator`` + ``gate_report``) and ordered by the
-    monotonic ``seq`` (not ``created_at``, which ties within a transaction), so
-    the most recent Coordinator report is unambiguous. Feeds the
-    "Schváliť návrh Koordinátora" action (``apply_coordinator_recommendation``):
-    its content becomes the re-dispatch directive so the Director accepts the
-    Coordinator's recommended fix without retyping it.
-    """
+    """RETIRED in v2 (CR-V2-009): always ``None`` for a 4-phase build. Queries for an ``author=coordinator``
+    message — a participant value that no longer exists (CR-V2-001 collapsed to ai_agent/auditor/manazer/
+    system), so it never matches a v2 message. The v1 ``apply_coordinator_recommendation`` action it fed is
+    removed; this symbol is kept only so the deferred-RED v1 tests still collect (C/D drops both)."""
     return db.execute(
         select(PipelineMessage.content)
         .where(
@@ -1046,15 +1001,40 @@ def _gate_e_question_count(db: Session, version_id: uuid.UUID) -> int:
 def auto_chain_limit(db: Session, version_id: uuid.UUID) -> int:
     """Upper bound for the runner's auto-chain backstop (:mod:`backend.services.pipeline_runner`).
 
-    The auto-chain advances monotonically across :data:`STAGE_ORDER` EXCEPT Gate E, which self-loops one
-    Customer turn per autonomous continue (Phase 3) until ``coverage_complete`` / the budget ceiling escalates.
-    So the backstop must clear the full waterfall PLUS the version's Gate E question ceiling PLUS topic-boundary
-    slack — otherwise a legitimately deep (but bounded) Gate E review would strand the pipeline at
-    ``agent_working`` mid-loop. A pure runaway backstop: every real path settles well before it (gate_e escalates
-    at the ceiling; ``coverage_complete`` closes; gates a–d + build are monotonic). fast_fix is unaffected — its
-    chain is ≤3, far under any bound."""
-    _, ceiling = _gate_e_question_budget(db, version_id)
-    return len(STAGE_ORDER) + ceiling + _GATE_E_TOPIC_SLACK
+    PROVISIONAL 4-phase bound (CR-V2-009, R-AUTOCHAIN). The v1 bound budgeted the full 11-stage waterfall
+    PLUS the Gate-E self-loop question ceiling PLUS topic slack — but the 4-phase model has NO Gate-E
+    self-loop, so that slack is dropped. The new non-monotonic loop is the Auditor's bounded fix↔re-verify
+    cycle (Verifikácia FAIL → Programovanie → Verifikácia, up to :data:`AUDITOR_LOOP_MAX` rounds), which
+    only fully exists after CR-V2-014. So this CR sets a provisional bound = ``len(STAGE_ORDER)`` (the
+    monotonic phase advance) + an Auditor-loop margin; **CR-V2-014 finalizes it** by wiring the named
+    ``AUDITOR_LOOP_MAX`` term once the Verifikácia loop is implemented, so a legitimately deep (but bounded)
+    Auditor loop does not mis-trip the backstop. A pure runaway backstop — every real path settles well
+    before it. fast_fix is unaffected (its chain is ≤3, far under any bound). The ``db``/``version_id`` args
+    are kept (the runner calls it per-version) for CR-V2-014, which may scale the margin per build."""
+    # Each Auditor FAIL round re-enters Programovanie then Verifikácia → 2 phase steps per round; budget
+    # AUDITOR_LOOP_MAX such rounds on top of the monotonic phase advance.
+    return len(STAGE_ORDER) + 2 * AUDITOR_LOOP_MAX
+
+
+def _verifikacia_passed(db: Session, version_id: uuid.UUID) -> bool:
+    """Whether the Auditor's LATEST Verifikácia verdict is PASS (CR-V2-009 — no-silent-done invariant).
+
+    Hotovo is reachable ONLY through a recorded Auditor PASS verdict at Verifikácia: ``schvalit`` at the
+    Verifikácia end-stop is gated on this, never a silent sign-off. Deterministic from the message log —
+    the most recent ``stage=verifikacia`` ∧ ``kind=verdict`` message whose ``payload.verdict == 'PASS'``.
+    (v2 form of the v1 ``no-silent-done-without-UAT`` safeguard: deploy is OUT of the pipeline — D6/OQ-3 —
+    so the gate becomes ``no-silent-done-without-VERIFICATION``.)"""
+    latest = db.execute(
+        select(PipelineMessage)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.stage == "verifikacia",
+            PipelineMessage.kind == "verdict",
+        )
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    return bool(latest and latest.payload and latest.payload.get("verdict") == "PASS")
 
 
 def _gate_e_coverage_complete(report: Optional[PipelineMessage]) -> bool:
@@ -1357,67 +1337,16 @@ def _write_task_plan(db: Session, state: PipelineState, block: PipelineStatusBlo
 def dispatch_directive(
     db: Session, version_id: uuid.UUID, action: str, payload: dict[str, Any], stage: str
 ) -> Optional[str]:
-    """Resolve the re-dispatch prompt for an ``agent_working`` transition, else ``None``.
+    """Resolve the re-dispatch prompt for an ``agent_working`` transition, else ``None`` (CR-V2-009).
 
-    Single entry point for the route (CR-NS-018): payload-framed for
-    ``return`` / ``ask`` / ``answer`` (delegates to :func:`directive_for_action`),
-    DB-fetched + framed for ``apply_coordinator_recommendation``, ``None`` for a
-    fresh-stage dispatch (``start`` / ``approve`` / ``verdict``).
+    Single entry point for the route (CR-NS-018): payload-framed for ``uprav`` / ``ask`` / ``answer``
+    (delegates to :func:`directive_for_action`), ``None`` for a fresh-phase dispatch (``start`` /
+    ``approve_spec`` / ``schvalit`` / ``verdict`` / ``pokracovat``). The v1 ``apply_coordinator_recommendation``
+    DB-fetch + the Gate-E sub-flow relay branches are REMOVED — the Coordinator hub-and-spoke is retired
+    (design §2.2) and the 4-phase model has no Gate E (the Auditor's upfront review replaces it, CR-V2-013).
+    ``db`` / ``version_id`` are kept (route call signature) for forward use; currently unused here.
     """
-    if action == "apply_coordinator_recommendation":
-        content = latest_coordinator_report(db, version_id)
-        if content is None:
-            return None
-        return f"Director schválil odporúčania Koordinátora. Zapracuj ich podľa jeho hlásenia: {content}"
-    # Gate E (F-007-gate-e §5): symmetric relay — the continue-directive to the Customer
-    # MUST carry the Designer's reply, else the Customer (separate session) re-asks and
-    # logs a false open finding. A final approve has already advanced past gate_e
-    # (→ task_plan), so stage != gate_e and this does not fire.
-    if action == "leave" and stage == "gate_e":
-        return (
-            "Director rozhodol nález ponechať (podľa odporúčania Koordinátora). "
-            "Pokračuj ďalšou otázkou previerky Gate E. Ukonči <<<PIPELINE_STATUS>>> "
-            "blokom (F-007-orchestration-cockpit.md §5.3)."
-        )
-    if action == "approve" and stage == "gate_e":
-        milestone = _latest_gate_e_milestone(db, version_id)
-        if milestone is not None and milestone.author == "designer":  # per-question (Branch A)
-            return (
-                f"Návrhár odpovedal na tvoju otázku: «{milestone.content}». Director to schválil. "
-                "Pokračuj ďalšou otázkou previerky Gate E. Ukonči <<<PIPELINE_STATUS>>> "
-                "blokom (F-007-orchestration-cockpit.md §5.3)."
-            )
-        # topic boundary (latest = Customer gate_report, or none) — no stale answer
-        return (
-            "Director schválil — pokračuj v previerke Gate E ďalším okruhom "
-            "(alebo ďalšou otázkou). Ukonči <<<PIPELINE_STATUS>>> blokom (F-007-orchestration-cockpit.md §5.3)."
-        )
-    # Director ↔ Coordinator only (§2): ask / return @ gate_e are Coordinator-relayed —
-    # the Coordinator revises its recommendation (NOT a message to the Customer/Designer).
-    if action == "ask" and stage == "gate_e":
-        text = str(payload.get("text", "")).strip()
-        return (
-            f"Director konzultuje s Koordinátorom: {text}. Prepracuj svoje odporúčanie. "
-            "Ukonči <<<PIPELINE_STATUS>>> blokom (F-007-orchestration-cockpit.md §5.3)."
-        )
-    if action == "return" and stage == "gate_e":
-        comment = str(payload.get("comment", "")).strip()
-        return (
-            f"Director vrátil (cez Koordinátora): {comment}. Prepracuj svoje odporúčanie. "
-            "Ukonči <<<PIPELINE_STATUS>>> blokom (F-007-orchestration-cockpit.md §5.3)."
-        )
-    # Branch B fix: "Schváliť návrh Koordinátora" → the edit instruction is the Coordinator's
-    # LATEST (possibly consult-revised) recommendation — Coordinator-relayed to the Designer
-    # (§2). The Designer's stale ``proposed_fix`` is NOT mixed in (it can contradict a revised
-    # recommendation — e.g. proposed 6 cols, revised to 7).
-    if action == "fix" and stage == "gate_e":
-        recommendation = _latest_coordinator_message_content(db, version_id) or "(bez poznámky)"
-        return (
-            "Koordinátor odovzdáva Directorom schválené odporúčanie na zapracovanie: "
-            f"{recommendation}. Uprav návrh podľa neho. Toto je vykonanie schválenej opravy — "
-            "NEhodnoť nové medzery (gap_found nech ostane false). Ukonči <<<PIPELINE_STATUS>>> "
-            "blokom (F-007-orchestration-cockpit.md §5.3)."
-        )
+    del db, version_id  # route-call signature parity; the v1 DB-fetch relay paths are retired (CR-V2-009)
     return directive_for_action(action, payload, stage)
 
 
@@ -2269,11 +2198,12 @@ async def _audit_lost_work(
             version_id=version_id,
             stage=stage,
             author="system",
-            recipient="director",
+            recipient="manazer",  # CR-V2-009: lost-work audit (safeguard #3) re-pointed to the Manažér
             kind="notification",
             content=next_action,
             payload={
                 "lost_work_audit": True,
+                "phase": stage,  # per-turn phase stamp (CR-V2-009)
                 "dispatch_baseline_sha": baseline,
                 "post_timeout_head_sha": head,
                 "timeout_seconds": timeout_seconds,
@@ -3580,78 +3510,45 @@ async def run_dispatch(
     gate_e_dispatch: Optional[str] = None,
     on_message: Optional[MessageCallback] = None,
 ) -> Optional[PipelineState]:
-    """Run the working agent for a version and settle its status (background).
+    """Run the working agent for a phase and settle its status (background); CR-V2-009 4-phase rebuild.
 
-    ``on_message`` (CR-NS-018) is the incremental-broadcast hook: it fires right after
-    each dispatch-path message is recorded so the runner commits + streams it live,
-    instead of batching at round end. Threaded into EVERY message-recording invoke site
-    reachable from here (the worker turn, the Coordinator relay, the verify judgment +
-    retries) — the end-of-run batch is dropped, so a missed thread = a lost message.
+    Reloads the (already ``agent_working``) state, invokes the phase's actor headless via the shared
+    parse-retry invoke, and settles ``status`` to ``blocked`` or ``awaiting_manazer``. Runs in
+    :mod:`backend.services.pipeline_runner`'s background task against a fresh session — never inside the
+    request. Returns the settled state (``None`` if the version/state vanished).
 
-    ``gate_e_dispatch`` selects the Gate E sub-flow (F-007-gate-e §2/§5):
-    ``"designer_edit"`` (Branch B ``fix`` — Coordinator-relayed edit, Designer edits
-    then the round continues to the next Customer question), ``"coordinator_consult"``
-    (``ask`` / ``return`` @ gate_e — the Coordinator revises its recommendation; the
-    Director never addresses the Customer/Designer directly), or ``None``.
+    ``on_message`` (CR-NS-018) is the incremental-broadcast hook: it fires right after each dispatch-path
+    message is recorded so the runner commits + streams it live, instead of batching at round end.
 
-    Second half of the old ``_dispatch``: reloads the (already ``agent_working``)
-    state, invokes the actor headless, and settles ``status`` to ``blocked`` or
-    ``awaiting_director``. Runs in :mod:`backend.services.pipeline_runner`'s
-    background task against a fresh session — never inside the request. Returns
-    the settled state (``None`` if the version/state vanished).
+    ``on_event`` (CR-NS-018) streams the agent's activity to the rail.
 
-    ``on_event`` (CR-NS-018) streams the **primary** agent's activity; the
-    secondary verify/retry invocations don't stream (short, secondary).
+    ``directive`` (CR-NS-018) is the Manažér's framed message for an ``uprav`` / ``ask`` / ``answer``
+    re-dispatch (see :func:`directive_for_action`). When present it IS the agent's prompt; otherwise the
+    generic :func:`_directive_for` is used. Threading it here makes the Manažér↔agent loop two-way.
 
-    ``directive`` (CR-NS-018) is the Director's framed message for ``return`` /
-    ``ask`` / ``answer`` re-dispatch (see :func:`directive_for_action`). When
-    present it IS the agent's prompt; otherwise the generic
-    :func:`_directive_for` is used (fresh-stage ``start`` / ``approve`` /
-    ``verdict``). Threading it here is what makes the Director↔agent loop
-    two-way: without it the agent re-runs blind on the generic directive.
+    ``gate_e_dispatch`` — DEFERRED no-op (CR-V2-009): the v1 Gate-E sub-flow selector. The 4-phase model
+    has no Gate E (the Auditor's upfront review replaces it in CR-V2-013), so this is always ``None`` from
+    the route now. The parameter is kept for signature stability with the runner/route until those FE
+    contract CRs drop it.
     """
     state = _get_state(db, version_id)
     if state is None:
         return None
     stage = state.current_stage
     actor = state.current_actor
-    if STAGE_ACTOR.get(stage) is None:  # terminal — nothing to run.
+    if STAGE_ACTOR.get(stage) is None:  # terminal (``done``) — nothing to run.
         return state
 
-    # Gate E (F-007-gate-e revised §2): per-question, Director-gated Customer↔Designer
-    # exchange — one Q&A then STOP. Not a single generic agent turn.
-    if stage == "gate_e":
-        return await _run_gate_e_round(
-            db, state, on_event=on_event, directive=directive, gate_e_dispatch=gate_e_dispatch, on_message=on_message
-        )
-
-    # Build (F-007 §6, CR-NS-020 CR-3): the continuous per-task loop — dispatches the
-    # Programmer task-by-task with mechanical verify + auto-fix, not a single opaque turn.
-    if stage == "build":
-        # E7 route_to_designer (F-008 §10, CR-NS-034): a Designer spec-fix turn is pending mid-build —
-        # run it instead of the Programmer loop; it resets the held task + re-enters the loop on DONE.
-        if state.returns_to == "build":
-            return await _run_designer_spec_fix(db, state, on_event=on_event, on_message=on_message)
-        return await _run_build_round(db, state, on_event=on_event, directive=directive, on_message=on_message)
-
-    # task_plan (F-007 §5, v0.7.3 CR-1): the plan is generated INCREMENTALLY — a bounded skeleton +
-    # per-feat multi-pass loop (not the single whole-tree turn that overflowed on a large design) — then
-    # the UNCHANGED single write. A dedicated round (mirror _run_gate_e_round), so the generic invoke
-    # below never handles task_plan.
-    if stage == "task_plan":
-        return await _run_task_plan_round(db, state, on_event=on_event, directive=directive, on_message=on_message)
-
-    # E2 (CR-NS-042): on the FRESH gate_a dispatch (directive is None), prepend the version's included
-    # backlog items so the Designer authors them as the version's requirements (no-op for other stages /
-    # no items). A Director return/ask (directive set) does NOT re-inject — once-only, same --resume thread.
+    # 4-phase generic dispatch (CR-V2-009). The v1 stage-specific routing (gate_e per-question round /
+    # build per-task loop / task_plan incremental passes / kickoff triage / release publish) is collapsed:
+    # in Milestone B every phase runs as ONE generic agent turn through the shared invoke path. The rich
+    # per-phase behaviours are rebuilt in Milestone C (Príprava/Návrh/Programovanie) + D (Verifikácia) —
+    # the v1 round-runners (``_run_build_round`` / ``_run_task_plan_round`` / ``_run_gate_e_round``) survive
+    # as deferred-RED helpers C/D re-points, but are NOT reachable from this 4-phase routing.
     if directive is not None:
         prompt = directive
     else:
         prompt = _augment_brief_with_backlog(db, state.version_id, stage, _directive_for(stage, state.flow_type))
-        # Fast-Fix Lane (F-009 §1, CR-NS-097): the fresh-session kickoff agent's only context is this brief —
-        # prepend the Director directive so the escalation-guard triage acts on the ACTUAL fix, not blind.
-        if stage == "kickoff" and state.flow_type == "fast_fix":
-            prompt = _prepend_fast_fix_directive(db, state.version_id, prompt)
     result = await invoke_agent_with_parse_retry(
         db,
         version_id=state.version_id,
@@ -3664,171 +3561,39 @@ async def run_dispatch(
 
     if isinstance(result, ParseFailure):
         if result.lost_work is not None:
-            # R1-c (D1): the agent's envelope was lost (timeout/crash) but the commit audit ran. Surface
-            # "work may have landed — review & continue" instead of a bare ``blocked`` relay: the audit
-            # notification is already recorded (by the timeout catch), so settle to ``awaiting_director``
-            # with the audit next_action. Never auto-proceeds (the stage does NOT advance); the Director
-            # reviews ``git log`` and continues. NOT routed through the Coordinator relay — that would
-            # dispatch a SECOND agent turn (which could itself time out); the audit note IS the message.
-            state.status = "awaiting_director"
+            # R1-c lost-work audit (R-BLAST safeguard #3): the agent's envelope was lost (timeout/crash) but
+            # the commit audit ran. Surface "work may have landed — review & continue" instead of a bare
+            # blocked: the audit notification is already recorded (by the timeout catch), so settle to
+            # ``awaiting_manazer`` with the audit next_action. Never auto-proceeds (the phase does NOT
+            # advance); the Manažér reviews ``git log`` and continues. Committed-but-lost work is surfaced,
+            # never silently dropped.
+            state.status = "awaiting_manazer"
             state.next_action = result.lost_work["next_action"]
             db.flush()
             return state
-        # Parse-retries exhausted (CR-NS-022 §2): the Coordinator relays it to the Director in
-        # plain Slovak; the board shows a plain next_action, never the raw parser error.
-        await _coordinator_relay_engine_failure(
-            db,
-            version_id,
-            stage,
-            f"agent '{actor}' nevrátil platný výstup ani po opravách: {result.reason}",
-            on_message,
-            # WS-D (CR-NS-036): the worker produced no message — carry its lost tokens into the relay.
-            failed=result,
-        )
+        # Parse-retries exhausted (CR-NS-022 §2): settle blocked directly (no Coordinator relay — retired in
+        # v2; the AI Agent reports to the Manažér itself, design §2.2). The board shows a plain next_action,
+        # never the raw parser error.
         state.status = "blocked"
         state.block_reason = "parse_exhaustion"  # R4 (D1): worker produced no parseable output after retries
-        state.next_action = "Blokované — Koordinátor poslal Directorovi vysvetlenie a ďalší krok."
+        state.next_action = "Blokované — agent nevrátil platný výstup. Usmerni (Uprav) alebo odpovedz."
         db.flush()
         return state
 
     if result.kind in ("question", "blocked"):
-        # Fast-Fix Lane release carve-out (F-009 §3, CR-NS-103 — the PRIMARY live fix): the UAT auto-deploy is
-        # ENGINE-OWNED, so a routine Coordinator question at the fast_fix release turn (e.g. "mám spustiť
-        # automatické nasadenie?") must NOT become the "third approval". When flow_type=fast_fix ∧
-        # actor=coordinator ∧ stage=release and the turn is NOT a genuine director_decision scope, do NOT
-        # escalate — fall through to the fast_fix release block below → _fast_fix_auto_deploy. Escalate ONLY on
-        # a real director_decision (genuine scope → convert-to-full-version). The stuck nex-ledger `v0.1.2`
-        # (release/coordinator/blocked) was exactly this short-circuit reaching status=blocked here.
-        _fast_fix_release_carveout = (
-            state.flow_type == "fast_fix"
-            and actor == "coordinator"
-            and stage == "release"
-            and not _is_director_decision_directive(result.coordinator_directive)
-        )
-        if not _fast_fix_release_carveout:
-            # Hub-and-spoke (CR-NS-018): a worker's question/blocked turn is reviewed
-            # by the Coordinator first, who relays it to the Director. The Coordinator's
-            # own question (kickoff / a genuine release scope) is surfaced directly — no
-            # double-review. On an unparseable relay, fall back to the worker's question
-            # (never a dead-end). Gate-level question (not the build loop) → relay + escalate,
-            # unchanged. The directive (2nd tuple element) is for the build loop's autonomous
-            # recovery (Pillar B) — ignored here.
-            relay_text = (
-                (await _coordinator_relay(db, state, result, on_message))[0] if actor != "coordinator" else None
-            )
-            question_text = relay_text if relay_text is not None else result.question
-            state.status = "blocked"
-            state.block_reason = "agent_question"  # R4 (D1): a worker question relayed for the Director
-            state.next_action = f"Agent '{actor}' sa pýta: {question_text}"
-            db.flush()
-            return state
-        # carve-out applies: control falls through to the fast_fix release block → engine-owned auto-deploy.
-
-    if stage == "kickoff" and state.flow_type == "fast_fix":
-        # Fast-Fix Lane (F-009 §2, CR-NS-097): a fast_fix kickoff that did NOT escalate (the non-trivial
-        # case is the question/blocked branch above — convert-to-full-version proposal) is the Coordinator's
-        # "trivial & clear" triage. The Director's submission IS the authorization, so AUTO-proceed to build
-        # with NO awaiting_director gate. Mirror the approve(kickoff→build) path: advance + materialize the
-        # single Task, then hand back agent_working so the runner runs the build round in THIS same
-        # single-flight dispatch (a fresh schedule_dispatch would be skipped by the single-flight guard).
-        state.current_stage = _next_stage("kickoff", state.flow_type)  # → build
-        fast_fix.ensure_build_task(db, state.version_id)
-        _begin_dispatch(db, state)  # status=agent_working at build → pipeline_runner continues the chain
-        return state
-
-    if stage == "release" and state.flow_type == "fast_fix":
-        # Fast-Fix Lane release (F-009 §3, CR-NS-098): the release turn is the Coordinator's final verify.
-        # A gate_report runs the verify-retry loop first (a real FAIL → blocked, NO deploy); a done/answer-
-        # class turn is already the pass. On a PASS, AUTO-deploy the project's UAT so the Director SEES the
-        # fix running on UAT before the single uat_accept, then settle (the auto-deploy sets status +
-        # next_action: success → awaiting_director, failure → blocked, NULL uat_slug → skip + awaiting).
-        # new_version / cr / bug never reach here (flow_type guard) — their release stays the generic
-        # gate_report path below, byte-for-byte unchanged.
-        if result.kind == "gate_report":
-            reason, _is_scope = await _verify_with_retries(db, state, result, on_message=on_message)
-            if reason is not None:
-                state.status = "blocked"
-                state.block_reason = "system_error"  # R4 (D1): fast_fix release verify failed (engine-side)
-                state.next_action = "Fáza 'release' neprešla overením — pozri správy Koordinátora a rozhodni."
-                # CR-2: the Director reads the terminal verify turn directly here (no synthesis) → prominent rail.
-                _mark_latest_coordinator_brief(db, state.version_id, state.current_stage)
-                db.flush()
-                return state
-        await _fast_fix_auto_deploy(db, state, on_message=on_message)
+        # The agent asked the Manažér something (direct comms — no Coordinator relay, design §2.2). Settle
+        # blocked with an agent_question reason so the board offers ``answer``.
+        state.status = "blocked"
+        state.block_reason = "agent_question"  # R4 (D1): a worker question for the Manažér
+        state.next_action = f"Agent '{actor}' sa pýta: {result.question}"
         db.flush()
         return state
 
-    if result.kind == "gate_report":
-        reason, is_scope = await _verify_with_retries(db, state, result, on_message=on_message)
-        if reason is not None and is_scope and state.current_stage == "gate_g":
-            # §F1.4 (CR-NS-056): a gate_g SCOPE/DESIGN question — escalate ONCE per iteration, never loop it
-            # against the Auditor. The cap counter INCLUDES this turn's just-recorded scope question (recorded
-            # by invoke_agent inside verify_done BEFORE this caller), so the guard is <= (the current question
-            # is the one allowed escalation): 1st flag count==1 (1<=1 escalate); 2nd flag count==2 (2<=1 cap).
-            if _scope_escalations_this_iteration(db, state.version_id) <= _MAX_SCOPE_ESCALATIONS_PER_ITERATION:
-                # Synthesis FIRST while current_actor is still 'auditor' (the §B guard lets it fire), THEN settle
-                # blocked — current_actor STAYS auditor, current_stage STAYS gate_g (the scope question is on the
-                # board as a coordinator→director message; answerable even if the synthesis ParseFails, per §F1.7).
-                await _coordinator_synthesis(
-                    db, state, trigger=f"fáza '{stage}' — otázka rozsahu", on_message=on_message
-                )
-                state.status = "blocked"
-                # R4 (D1): a gate_g scope/design escalation IS a question put to the Director (answer/decide) —
-                # same class as the worker/build-loop question sites, so the same authoritative reason (not the
-                # heuristic fallback). The Director-facing banner reads "Agent sa pýta", not an error.
-                state.block_reason = "agent_question"
-                state.next_action = (
-                    "Audit položil otázku rozsahu — odpovedz (vysvetli) alebo rozhodni (PASS / FAIL → fáza)."
-                )
-            else:
-                # 2nd scope flag this iteration (the Director already responded once) → do NOT loop; the
-                # Director makes the definitive call (the FAIL→target verdict renders here — Fix 2).
-                state.status = "awaiting_director"
-                state.next_action = "Audit označil otázku rozsahu druhýkrát — rozhodni: PASS alebo FAIL → fáza."
-                # CR-2: no synthesis on this branch → the Director reads the verify scope turn directly.
-                _mark_latest_coordinator_brief(db, state.version_id, state.current_stage)
-        elif reason is not None:
-            # Mechanical fail (or a scope flag at a non-gate_g gate — falls through to today's behavior).
-            # The Coordinator already judged this (verify_done) — keep a plain next_action, no raw
-            # reason on the board (CR-NS-022 §2 refinement: no technical dump reaches the Director).
-            state.status = "blocked"
-            state.block_reason = "system_error"  # R4 (D1): gate mechanical verify failed (engine-side)
-            state.next_action = f"Fáza '{stage}' neprešla overením — pozri správy Koordinátora a rozhodni."
-            # CR-2: the terminal verify turn (no synthesis on the mechanical-block path) IS what the Director
-            # reads → prominent rail. Tags ONLY this terminal turn — auto-return intermediates stay untagged.
-            _mark_latest_coordinator_brief(db, state.version_id, state.current_stage)
-        else:
-            # §A.2 site 1 (gate_report PASS — gates A–D, release): Coordinator synthesis before settling.
-            synthesis = await _coordinator_synthesis(db, state, trigger=f"fáza '{stage}'", on_message=on_message)
-            # PIPELINE-AUTONOMY Phase 1 (design §5.1): a deterministically-clean routine gate (a–d) on a
-            # new_version flow AUTO-RATIFIES — advance + re-dispatch instead of settling awaiting_director.
-            # The synthesis above STILL runs + records (additive observability: the Director reads it in the
-            # roll-up at the next KEY settle, §3.3). Returns True only when it advanced (status now
-            # agent_working at the next stage → the runner's auto-chain continues it); False → fall through to
-            # the existing awaiting_director settle below, byte-for-byte unchanged. release / gate_g are NEVER
-            # auto-ratified (excluded inside the helper, Issue 10) — the release settle stays engine-owned
-            # publish; any FAIL/scope already pre-empted this branch (reason is not None).
-            if await _maybe_autonomous_gate_ratify(db, state, reason, is_scope, on_message=on_message):
-                db.flush()
-                return state
-            state.status = "awaiting_director"
-            state.next_action = synthesis or f"Director: schváliť/vrátiť fázu '{stage}'."
-            # v0.8.0 CR-2: the FULL-FLOW (new_version) release settle is ENGINE-OWNED publish. The
-            # Coordinator finalized LOCALLY (clean + secure) but has no GitHub creds; the engine (with
-            # GH_TOKEN) pushes + verifies CI HERE, overriding the awaiting_director settle above with the
-            # publish outcome (success → awaiting_director for uat_accept, failure → blocked, surfaced).
-            # Gated to new_version so the fast_fix release block (its own early return above) stays
-            # UNTOUCHED; cr/bug keep the generic awaiting_director settle (their publish is out of scope).
-            if stage == "release" and state.flow_type == "new_version":
-                await _release_auto_publish(db, state, on_message=on_message)
-        db.flush()
-        return state
-
-    # kickoff / answer / done-class agent output → await the Director.
-    # §A.2 site 4 (kickoff/answer/fallback completion): Coordinator synthesis before settling.
-    synthesis = await _coordinator_synthesis(db, state, trigger=f"fáza '{stage}'", on_message=on_message)
-    state.status = "awaiting_director"
-    state.next_action = synthesis or f"Director: posúdiť výstup fázy '{stage}'."
+    # gate_report / done / answer-class agent output → settle awaiting the Manažér's schvaľovací bod for
+    # this phase. Whether the dial actually STOPS here (vs auto-continue at higher autonomy) is applied in
+    # the dispatch/auto-chain path in Milestone C/D; the state-machine settle is the same awaiting_manazer.
+    state.status = "awaiting_manazer"
+    state.next_action = f"Manažér: posúdiť výstup fázy '{stage}'."
     db.flush()
     return state
 
@@ -5126,33 +4891,14 @@ _AGENT_SESSION_ROLES = (AI_AGENT_ROLE, AUDITOR_ROLE)
 
 
 def coordinator_triage(db: Session, version_id: uuid.UUID, state: Optional[PipelineState]) -> Optional[dict[str, Any]]:
-    """R4 (D3): the LATEST Coordinator relay/escalation triage for the version — ``{triage_class, confidence,
-    proposed_action}`` — the single decision in front of the Director NOW. Present only at a settled,
-    Director-actionable state (``awaiting_director`` / ``blocked``); ``None`` otherwise or when no such
-    directive exists. Kind-agnostic (a relay rides ``kind='question'``, an escalation a ``'gate_report'``);
-    the non-null filter is in SQL BEFORE the LIMIT (mirrors :func:`_latest_gate_g_classifying_directive`) so a
-    later directive-less synthesis row never shadows a real triage. Distinct from the EXECUTABLE proposal
-    WhosTurnBoard already shows — this surfaces non-executable ones too (director_decision / low-confidence)."""
-    if state is None or state.status not in ("awaiting_director", "blocked"):
-        return None
-    row = db.execute(
-        select(PipelineMessage)
-        .where(
-            PipelineMessage.version_id == version_id,
-            PipelineMessage.author == "coordinator",
-            PipelineMessage.payload["coordinator_directive"].astext.isnot(None),
-        )
-        .order_by(PipelineMessage.seq.desc())
-        .limit(1)
-    ).scalar_one_or_none()
-    directive = (row.payload or {}).get("coordinator_directive") if row is not None else None
-    if not directive:
-        return None
-    return {
-        "triage_class": directive.get("triage_class"),
-        "confidence": directive.get("confidence"),
-        "proposed_action": directive.get("proposed_action"),
-    }
+    """RETIRED in v2 (CR-V2-009): always ``None``. The Coordinator hub-and-spoke is gone (design §2.2) —
+    there is no relay/escalation triage to surface; the AI Agent reports to the Manažér directly and the
+    Auditor's verdict is the only second voice. Kept as a symbol the cockpit board route still reads
+    (``backend/api/routes/pipeline.py``) until the FE-contract CRs (CR-V2-021/022) drop the field; the
+    ``CoordinatorTriage`` board slot then renders empty. ``db`` / ``version_id`` / ``state`` are kept for
+    the route call signature."""
+    del db, version_id, state
+    return None
 
 
 def autonomous_decisions_summary(db: Session, version_id: uuid.UUID) -> dict[str, Any]:
@@ -5715,18 +5461,18 @@ async def _maybe_autonomous_answer(
 
 def recover_orphaned_builds_on_startup(db: Session) -> int:
     """On BE startup, recover pipelines stranded at ``agent_working`` by a restart (F-007 §7.3,
-    CR-NS-021; **all stages** since R1-d / D4). Returns the number recovered.
+    CR-NS-021; all phases since R1-d / D4). Returns the number recovered. R-BLAST safeguard #4
+    (resume-safety / startup orphan recovery) — preserved + re-pointed to the 4-phase model in CR-V2-009.
 
     A dispatch runs as a background task; a backend restart kills it, stranding the pipeline at
-    ``<stage>`` / ``agent_working`` with no auto-resume. For every such row this flips to
-    ``awaiting_director``, records a ``system→director`` ``notification`` carrying a ``baseline..HEAD``
-    commit audit (so committed-but-lost work is surfaced — D1/D4), and clears the durable single-flight
-    flag + resets the dispatch baseline (the killed process left them set — Seam #2: a crash self-heals on
-    startup). ``build`` keeps its existing wording + the in-``_run_build_round`` task-reclaim (additive,
-    not a replacement) so the Director resumes via "Pokračovať v builde" (``continue_build``); other stages
-    get a generic stage-parametrized message. ``Task.status`` is untouched, so a build's orphaned
-    ``in_progress`` task stays counted by :func:`_build_open_findings` and ``approve`` stays blocked until
-    ``continue_build`` runs.
+    ``<phase>`` / ``agent_working`` with no auto-resume. For every such row this flips to
+    ``awaiting_manazer``, records a ``system→manazer`` ``notification`` carrying a ``baseline..HEAD``
+    commit audit (so committed-but-lost work is surfaced — the lost-work safeguard #3 on the recovery
+    path), and clears the durable single-flight flag + resets the dispatch baseline (the killed process
+    left them set — Seam #2: a crash self-heals on startup). A stranded ``programovanie`` phase keeps the
+    resume CTA (the Manažér resumes via "Pokračovať" → ``pokracovat``); other phases get a generic
+    phase-parametrized message. ``Task.status`` is untouched, so a stranded ``in_progress`` task stays
+    counted and the schvaľovací bod stays gated until the loop resumes.
     """
     rows = db.execute(select(PipelineState).where(PipelineState.status == "agent_working")).scalars().all()
     for state in rows:
@@ -5739,35 +5485,36 @@ def recover_orphaned_builds_on_startup(db: Session) -> int:
         audit = (
             f"môžu byť zapísané zmeny ({count} commitov), over 'git log'" if count >= 1 else "žiadna zmena nezistená"
         )
-        if stage == "build":
-            # Back-compat: keep the existing BUILD next_action + content verbatim (the "Pokračovať v builde" CTA).
-            state.next_action = "Build prerušený reštartom backendu — pokračuj cez 'Pokračovať v builde'."
+        if stage == "programovanie":
+            # The coding loop keeps the resume CTA ("Pokračovať" = pokracovat); the per-task reclaim is
+            # additive (CR-V2-012's self-checking loop owns it), not replaced here.
+            state.next_action = "Programovanie prerušené reštartom backendu — pokračuj cez 'Pokračovať'."
             content = (
-                "Build bol prerušený reštartom backendu — obnovený do stavu 'čaká na Directora'. "
-                "Pokračuj cez 'Pokračovať v builde'."
+                "Programovanie bolo prerušené reštartom backendu — obnovené do stavu 'čaká na Manažéra'. "
+                "Pokračuj cez 'Pokračovať'."
             )
         else:
             state.next_action = f"Fáza '{stage}' prerušená reštartom — {audit}. Pokračuj."
             content = (
-                f"Fáza '{stage}' bola prerušená reštartom backendu — {audit}. Obnovené do stavu 'čaká na Directora'."
+                f"Fáza '{stage}' bola prerušená reštartom backendu — {audit}. Obnovené do stavu 'čaká na Manažéra'."
             )
         _record_message(
             db,
             version_id=state.version_id,
             stage=stage,
             author="system",
-            recipient="director",
+            recipient="manazer",
             kind="notification",
             content=content,
             payload={
                 "recovery_audit": True,
-                "stage": stage,
+                "phase": stage,  # per-turn phase stamp (CR-V2-009)
                 "dispatch_baseline_sha": baseline,
                 "post_restart_head_sha": head,
                 "detected_commit_count": count,
             },
         )
-        state.status = "awaiting_director"  # the set listener also clears the flag + baseline …
+        state.status = "awaiting_manazer"  # the set listener also clears the flag + baseline …
         state.dispatch_in_flight = False  # … cleared explicitly too for robustness (Seam #2).
         state.dispatch_baseline_sha = None
     db.commit()
@@ -6468,13 +6215,15 @@ async def _run_designer_spec_fix(
 
 
 def _stage_order_for(flow_type: str) -> tuple[str, ...]:
-    """The ordered stage path for a flow. Fast-Fix (F-009, CR-NS-094) takes the shorter
-    ``kickoff → build → release → done`` path (skips gate_a-e / task_plan / gate_g); every other
-    flow (``new_version`` / ``cr`` / ``bug``) keeps the full :data:`STAGE_ORDER` unchanged."""
+    """The ordered phase path for a flow (CR-V2-009). ``fast_fix`` takes the shorter
+    ``priprava → programovanie → verifikacia → done`` path (skips the heavy Návrh); ``new_version``
+    walks the full 4-phase :data:`STAGE_ORDER`. (OQ-1: only these two flow_types survive — ``cr``/``bug``
+    are dropped, so no third variant is needed.)"""
     return FAST_FIX_STAGE_ORDER if flow_type == "fast_fix" else STAGE_ORDER
 
 
 def _next_stage(stage: str, flow_type: str = "new_version") -> str:
+    """The phase that follows ``stage`` in this flow's path; clamps at the terminal ``done``."""
     order = _stage_order_for(flow_type)
     idx = order.index(stage)
     return order[min(idx + 1, len(order) - 1)]
@@ -6487,7 +6236,18 @@ async def apply_action(
     action: str,
     payload: Optional[dict[str, Any]] = None,
 ) -> PipelineState:
-    """Apply a Director action (F-007 §5.2). Sole mutator of ``pipeline_state``."""
+    """Apply a Manažér action against the 4-phase build pipeline (v2 design §4.4; CR-V2-009).
+
+    **SOLE-MUTATOR invariant (R-BLAST safeguard #1):** this is the ONLY function that mutates
+    ``pipeline_state`` rows in response to a Manažér action. The dispatch path (``run_dispatch`` /
+    ``_begin_dispatch``) mutates state too, but always as a CONSEQUENCE of an action routed here. No
+    other code path writes ``current_stage`` / ``current_actor`` / ``status`` on a Manažér action.
+
+    The 4 phases (priprava → navrh → programovanie → verifikacia → done) collapse the v1 11-stage
+    waterfall. The action verbs (:data:`_ACTIONS`): ``start``, the always-mandatory ``approve_spec``
+    end-Príprava stop, the dial-governed ``schvalit``/``uprav`` schvaľovacie body, ``pokracovat`` (resume
+    a paused build), the Auditor ``verdict`` (PASS→Hotovo / FAIL→bounded AI-Agent fix loop), ``ask`` /
+    ``answer`` direct comms, and ``pause``."""
     if action not in _ACTIONS:
         raise OrchestratorError(f"Unknown action: {action!r}")
     payload = payload or {}
@@ -6496,55 +6256,52 @@ async def apply_action(
     if action == "start":
         if state is not None:
             raise OrchestratorError("Pipeline already started for this version")
+        # OQ-1: only two flow_types survive — a full ``new_version`` (4-phase) or a ``fast_fix`` short path.
         flow_type = payload.get("flow_type", "new_version")
-        if flow_type not in ("new_version", "cr", "bug", "fast_fix"):
+        if flow_type not in ("new_version", "fast_fix"):
             raise OrchestratorError(f"Invalid flow_type: {flow_type!r}")
-        # Fast-Fix Lane (F-009, CR-NS-094): the Director's directive is the whole task brief — carry it
-        # in the kickoff payload so the Coordinator triages it and the build-reuse step can materialize
-        # the single minimal Task from it. ``None`` for every other flow → kickoff payload unchanged.
+        # Fast-fix lane (design §2.4): the Manažér's directive IS the whole brief — carry it in BOTH the
+        # human-readable kickoff content (so it shows on the board) and the payload (so the Príprava round
+        # can seed from it). ``None`` for new_version → the Príprava dialogue starts from the saved Zadanie.
         directive = payload.get("directive") if flow_type == "fast_fix" else None
-        # Fast-Fix Lane (F-009 §1, CR-NS-097): the Director directive IS the kickoff message the
-        # Coordinator triages — carry it in the human-readable CONTENT (not just the payload) so it shows
-        # on the board and the kickoff brief's "smernica je vyššie" claim is honoured. Other flows keep the
-        # generic kickoff content.
-        kickoff_content = directive if (flow_type == "fast_fix" and directive) else "Spustenie pipeline."
-        # ORPHANED (CR-V2-008): the v1 binary ``autonomy_enabled`` kickoff toggle is SUPERSEDED by the
-        # Miera autonómie dial — :func:`_autonomy_enabled` now reads :func:`resolve_miera_autonomie`
-        # (per-build → per-project → global), NOT this payload key. The write is kept here only so the
-        # v1 ``start`` flow stays byte-identical until CR-V2-009 rebuilds ``apply_action`` (which will
-        # write the per-build override to ``pipeline_state.miera_autonomie`` instead). Harmless dead key.
-        kickoff_extra: dict[str, Any] = {}
-        if flow_type == "new_version":
-            kickoff_extra["autonomy_enabled"] = payload.get("autonomy_enabled", True) is not False
+        # "Spustiť tvorbu špecifikácie" (design §2.1): the kickoff message is recorded in the Príprava
+        # phase — Príprava is the first phase the AI Agent enters. For new_version the content is generic;
+        # for fast_fix it carries the directive so the kickoff brief is honoured.
+        kickoff_content = directive if (flow_type == "fast_fix" and directive) else "Spustiť tvorbu špecifikácie."
+        # Per-build Miera autonómie override (AUTON-6, CR-V2-008): an explicit ``miera_autonomie`` in the
+        # start payload is persisted on the build as the TOP resolution layer (per-build → per-project →
+        # global). Validated against the preset set; an unrecognised value degrades to inherit (NULL), it
+        # never crashes the start. NULL (the default) inherits the per-project / global dial.
+        per_build_dial = _normalize_miera_autonomie(payload.get("miera_autonomie"))
         state = PipelineState(
             version_id=version_id,
             flow_type=flow_type,
-            current_stage="kickoff",
-            current_actor="coordinator",
+            current_stage="priprava",
+            current_actor="ai_agent",
             status="agent_working",
-            next_action="Coordinator robí discovery.",
+            next_action="AI Agent pripravuje špecifikáciu.",
+            miera_autonomie=per_build_dial,
         )
         db.add(state)
         db.flush()
         _record_message(
             db,
             version_id=version_id,
-            stage="kickoff",
-            author="director",
-            recipient="coordinator",
+            stage="priprava",
+            author="manazer",
+            recipient="ai_agent",
             kind="kickoff",
             content=kickoff_content,
             payload={
                 "flow_type": flow_type,
-                **kickoff_extra,
+                "phase": "priprava",  # per-turn phase stamp (CR-V2-009; consumed by CR-V2-029 metrics)
                 **({"directive": directive} if directive else {}),
             },
         )
-        # WS-B1 (CR-NS-029): a new-version kickoff starts every agent fresh — drop all of the project's
-        # OrchestratorSession rows so no stale cross-version --resume context leaks in. Per Director
-        # decision D2, a re-gate (verdict FAIL → rewind, below) must PRESERVE sessions — and it does
-        # automatically: re-gate mutates existing state, it never reaches this "start" branch (which is
-        # gated on state is None), so only a genuine kickoff resets.
+        # WS-B1 (CR-NS-029): a fresh ``start`` resets every agent session — drop the project's
+        # OrchestratorSession rows so no stale cross-version --resume context leaks in. A verdict FAIL
+        # re-loop (below) PRESERVES sessions: it mutates existing state and never reaches this branch
+        # (gated on ``state is None``), so only a genuine kickoff resets.
         db.execute(
             delete(OrchestratorSession).where(
                 OrchestratorSession.project_slug == _project_slug_for_version(db, version_id)
@@ -6557,158 +6314,138 @@ async def apply_action(
     if state is None:
         raise OrchestratorError("Pipeline not started for this version")
 
-    # Status guard (CR-NS-018): never act on / advance past an agent that is still
-    # working. The advancing actions need a settled agent (awaiting_director or a
-    # blocked ratify-out-of-a-question); answer needs an actual question (blocked);
-    # pause is only meaningful while the agent works.
-    # 'paused' (CR-NS-027) is a settled, Director-actionable state — the build loop has stopped at a
-    # task boundary — so the advancing-action guard lets it through (the resume pair continue_build /
-    # end_build live in _ADVANCING_ACTIONS); the dedicated paused guard just below restricts WHICH.
-    if action in _ADVANCING_ACTIONS and state.status not in ("awaiting_director", "blocked", "paused"):
+    # Status guard (CR-NS-018): never act on / advance past an agent that is still working. The advancing
+    # actions need a SETTLED agent (awaiting_manazer or a blocked ratify-out-of-a-question); answer needs
+    # an actual question (blocked); pause is only meaningful while the agent works. 'paused' (CR-NS-027)
+    # is a settled, Manažér-actionable state — the Programovanie loop stopped at a task boundary — so the
+    # advancing-action guard lets it through (``pokracovat`` is advancing); the paused guard below
+    # restricts WHICH actions are valid from there.
+    if action in _ADVANCING_ACTIONS and state.status not in ("awaiting_manazer", "blocked", "paused"):
         raise OrchestratorError("Agent ešte pracuje — počkaj na jeho výstup")
     if action == "answer" and state.status != "blocked":
         raise OrchestratorError("Agent sa na nič nepýta — odpoveď nie je na mieste")
     if action == "pause" and state.status != "agent_working":
         raise OrchestratorError("Pauza je možná len počas práce agenta")
-    # Pause is build-only (CR-NS-027 decision A): only the build loop has a cooperative task boundary
-    # to stop at — a single-turn gate has no boundary, so a gate-pause would be a silent no-op.
-    if action == "pause" and state.current_stage != "build":
-        raise OrchestratorError("Pauza je možná len počas buildu")
-    # From 'paused' (CR-NS-027) ONLY the resume pair is valid: continue_build (re-dispatch the loop) or
-    # end_build (skip the rest → gate_g). Everything else must NOT silently un-pause — in particular
-    # 'ask' is not in _ADVANCING_ACTIONS, so without this it would fall through to its handler, call
-    # _begin_dispatch and flip the status back to agent_working (the route would then re-dispatch).
-    # The Director resumes deliberately, never as a side effect of asking/answering/returning.
-    if state.status == "paused" and action not in ("continue_build", "end_build"):
-        raise OrchestratorError(
-            "Build je pozastavený — pokračuj cez 'Pokračovať v builde' alebo ho ukonči (Ukončiť build)"
-        )
-    # Durable single-flight (R1-b / D2, CR-NS-027 hardening): refuse to start a SECOND agent turn while a
-    # dispatch is already in flight for this version. The DB flag survives a backend restart (unlike the
-    # in-memory ``_ACTIVE_DISPATCH``), and the settle listener clears it the moment the dispatch ends — so in
-    # the normal flow this only fires for a genuine in-flight overlap (e.g. a stale flag a restart left set
-    # before orphan recovery, or a double-submit). ``pause`` is the one exception: it stops the running build
-    # loop, it never dispatches.
+    # Pause is Programovanie-only (CR-NS-027 decision A): only the coding loop has a cooperative task
+    # boundary to stop at — a single-turn phase has no boundary, so a pause there would be a silent no-op.
+    if action == "pause" and state.current_stage != "programovanie":
+        raise OrchestratorError("Pauza je možná len počas fázy Programovanie")
+    # From 'paused' (CR-NS-027) only the resume verb (``pokracovat``) or a steer (``uprav``) is valid:
+    # everything else must NOT silently un-pause. In particular ``ask`` is not advancing, so without this
+    # guard it would fall through to its handler, call _begin_dispatch and flip the status back to
+    # agent_working. The Manažér resumes deliberately, never as a side effect of asking/answering.
+    if state.status == "paused" and action not in ("pokracovat", "uprav"):
+        raise OrchestratorError("Build je pozastavený — pokračuj cez 'Pokračovať' alebo ho usmerni (Uprav).")
+    # Durable single-flight dispatch guard (R-BLAST safeguard #2; R1-b / D2, CR-NS-027 hardening):
+    # refuse to start a SECOND agent turn while a dispatch is already in flight for this version. The DB
+    # flag survives a backend restart (unlike the in-memory ``_ACTIVE_DISPATCH``), and the settle listener
+    # clears it the moment the dispatch ends — so in the normal flow this only fires for a genuine
+    # in-flight overlap (a stale flag a restart left set before orphan recovery, or a double-submit).
+    # ``pause`` is the one exception: it stops the running build loop, it never dispatches.
     if state.dispatch_in_flight and action != "pause":
         raise OrchestratorError("Dispečer už beží pre túto verziu")
 
-    if action == "approve":
+    if action == "approve_spec":
+        # End-Príprava: the ALWAYS-mandatory Špecifikácia approval (design §2.3, D3 — dial-INDEPENDENT, it
+        # fires at every autonomy level including ``plna``). Advances Príprava → Návrh. Only valid in
+        # Príprava; the Manažér has read the Špecifikácia in the Príprava tab and signs it off.
+        if state.current_stage != "priprava":
+            raise OrchestratorError("Schváliť špecifikáciu je platné len vo fáze Príprava")
+        _record_message(
+            db,
+            version_id=version_id,
+            stage="priprava",
+            author="manazer",
+            recipient="ai_agent",
+            kind="approval",
+            content=payload.get("comment", "Špecifikácia schválená."),
+            payload={"phase": "priprava", "approve_spec": True},
+        )
+        state.current_stage = _next_stage("priprava", state.flow_type)  # new_version → navrh; fast_fix → programovanie
+        db.flush()
+        _begin_dispatch(db, state)
+        return state
+
+    if action == "schvalit":
+        # "Schváliť" — the Manažér ratifies the current phase's output at a dial-governed schvaľovací bod
+        # (after Návrh / Programovanie / Verifikácia) → advance to the next phase / Hotovo. The dial decides
+        # whether the build STOPPED here for the Manažér at all; once it has, this signs it off.
+        if state.current_stage not in ("navrh", "programovanie", "verifikacia"):
+            raise OrchestratorError("Schváliť je platné len na schvaľovacom bode (Návrh / Programovanie / Verifikácia)")
+        # no-silent-done-without-verification (R-BLAST safeguard #5, v2 form): the build may reach Hotovo
+        # ONLY through a recorded Auditor PASS verdict at Verifikácia — never a silent sign-off. (v1's
+        # "no-silent-done-without-UAT" gate is superseded: deploy is OUT of the pipeline — per-customer,
+        # D6/OQ-3 — so Hotovo means "verified", not "deployed". The verification invariant is preserved.)
+        if state.current_stage == "verifikacia" and not _verifikacia_passed(db, version_id):
+            raise OrchestratorError(
+                "Hotovo nedovolené: Auditor ešte nevydal PASS vo Verifikácii — najprv over verdiktom PASS."
+            )
         _record_message(
             db,
             version_id=version_id,
             stage=state.current_stage,
-            author="director",
+            author="manazer",
             recipient=state.current_actor,
             kind="approval",
             content=payload.get("comment", "Schválené."),
+            payload={"phase": state.current_stage},
         )
-        # Gate E (F-007-gate-e §3/§4): a topic boundary ratifies + continues to the
-        # NEXT okruh (stage STAYS gate_e); only a final boundary (coverage_complete +
-        # no open finding) signs off → task_plan. An open finding blocks the final close.
-        if state.current_stage == "gate_e":
-            report = _latest_customer_gate_report(db, version_id)
-            if _gate_e_coverage_complete(report):
-                if _gate_e_open_findings(db, version_id) > 0:
-                    raise OrchestratorError("Otvorené nálezy blokujú uzavretie Gate E — najprv ich vyrieš")
-                _write_gate_e_audit(db, version_id)  # §4 audit record before closing
-                state.current_stage = _next_stage("gate_e", state.flow_type)  # → task_plan
-                db.flush()
-                _begin_dispatch(db, state)
-            else:
-                _begin_dispatch(db, state)  # next topic — stage unchanged
-            return state
-        # Build (F-007 §6): the final sign-off advances build → gate_g. The invariant (CR-4.1
-        # option B): you cannot finally sign off a build with tasks still unbuilt — so a remaining
-        # `todo` task blocks `approve` (this also closes the baseline-HALT hole, where a task left
-        # todo is NOT counted by _build_open_findings). A failed / unverified (in_progress) task
-        # blocks too (the deterministic gate). `end_build` is the separate, deliberate early exit.
-        if state.current_stage == "build":
-            if task_service.get_next_todo_task(db, version_id) is not None:
-                raise OrchestratorError(
-                    "Build nie je hotový — ostávajú nepostavené úlohy (todo); finálne schválenie nie je možné"
-                )
-            if _build_open_findings(db, version_id) > 0:
-                raise OrchestratorError(
-                    "Otvorené úlohy (failed/neoverené) blokujú uzavretie buildu — najprv ich vyrieš"
-                )
-        prev_stage = state.current_stage
         state.current_stage = _next_stage(state.current_stage, state.flow_type)
         db.flush()
-        # Fast-Fix Lane (F-009, CR-NS-094): entering build (kickoff→build) materializes the ONE minimal
-        # Task from the Director directive so the existing per-task build loop runs unchanged. Idempotent
-        # (no-op if the Task already exists). Other flows decompose tasks via the Designer's task_plan.
-        if state.flow_type == "fast_fix" and prev_stage == "kickoff" and state.current_stage == "build":
-            fast_fix.ensure_build_task(db, version_id)
         if state.current_stage == "done":
-            # CR-R2-1 (#1b): the SAME no-silent-done-without-UAT guard as uat_accept — applied here too,
-            # else a Director who `approve`s their way to done bypasses it. Fires ONLY for UAT-deploying flows
-            # (new_version / fast_fix); a structurally-deployable app (backend+db) must then have a real UAT
-            # deploy recorded. cr/bug + pure-CLI/lib projects complete normally.
-            deploy = _latest_uat_deploy(db, version_id)
-            uat_deployed = deploy is not None and deploy.get("ok") is True and not deploy.get("skipped")
-            if not uat_deployed and state.flow_type in _UAT_DEPLOYING_FLOWS and _project_is_deployable(db, version_id):
-                raise OrchestratorError(
-                    "Reálny UAT nebol nasadený — najprv provision + deploy (alebo retry). "
-                    "Bez živého UAT nemožno dokončiť nasaditeľný projekt."
-                )
-            state.current_actor = "director"
+            state.current_actor = "ai_agent"  # terminal — no agent on turn; kept a valid ACTOR value
             state.status = "done"
-            state.next_action = "Pipeline dokončená."
+            state.next_action = "Pipeline dokončená (Hotovo). Nasadenie je samostatná akcia per zákazník."
             db.flush()
         else:
             _begin_dispatch(db, state)
         return state
 
-    if action == "return":
+    if action == "uprav":
+        # "Uprav" — the Manažér's correction back to the AI Agent at a schvaľovací bod (re-work the current
+        # phase) OR the error-block recovery ("Skús znova") at any settled phase. The phase does NOT
+        # advance; the AI Agent re-runs with the Manažér's comment threaded into its brief (direct comms —
+        # the Coordinator relay is retired, design §2.2). A comment is REQUIRED so the agent has guidance.
         comment = payload.get("comment")
         if not comment or not str(comment).strip():
-            raise OrchestratorError("return requires a non-empty payload.comment")
-        # Gate E + task_plan + build (§2/§5/§6): Director ↔ Coordinator only — a return is
-        # Coordinator-relayed, never addressed to the worker directly.
-        recipient = "coordinator" if state.current_stage in ("gate_e", "task_plan", "build") else state.current_actor
+            raise OrchestratorError("uprav requires a non-empty payload.comment")
+        # A paused Programovanie loop steered by ``uprav`` resumes from the pause (re-dispatch the loop).
+        recipient = state.current_actor
         _record_message(
             db,
             version_id=version_id,
             stage=state.current_stage,
-            author="director",
+            author="manazer",
             recipient=recipient,
             kind="return",
             content=str(comment),
+            payload={"phase": state.current_stage},
         )
-        # Build HALT (§6/§7): a return reworks the failed task — reset it to todo so the
-        # build loop re-attempts it (fresh ≤5 budget) with the Director's comment threaded in.
-        if state.current_stage == "build":
-            _reset_failed_tasks_to_todo(db, version_id)
-        # task_plan refine (CR-NS-024): a return KEEPS the Designer's (slug, designer) --resume
-        # session, so the next dispatch remembers the prior plan and applies just the Director's
-        # edit (the comment threads into the brief) — incremental refinement, not a from-scratch
-        # re-decompose. The Designer still re-reads the on-disk spec each turn, so an explicit
-        # "re-plan from scratch" comment is still honoured. (CR-NS-022 §3 deleted the session to
-        # force a one-time charter reload; that need is satisfied. Reloading a fixed charter is now
-        # a deliberate maintenance concern, never an implicit cost of every refine-return.)
         _begin_dispatch(db, state)
         return state
 
     if action == "ask":
+        # Direct Manažér → AI Agent / Auditor consult (design §2.2 — no Coordinator relay): the Manažér's
+        # question is threaded into the current actor's next turn. The phase does NOT advance.
         text = payload.get("text")
         if not text or not str(text).strip():
             raise OrchestratorError("ask requires a non-empty payload.text")
-        # Gate E + task_plan + build (§2/§5/§6): "Konzultovať s Koordinátorom" — the Director's
-        # input (question or constatation) goes to the Coordinator, never to the worker directly.
-        recipient = "coordinator" if state.current_stage in ("gate_e", "task_plan", "build") else state.current_actor
         _record_message(
             db,
             version_id=version_id,
             stage=state.current_stage,
-            author="director",
-            recipient=recipient,
+            author="manazer",
+            recipient=state.current_actor,
             kind="question",
             content=str(text),
+            payload={"phase": state.current_stage},
         )
         _begin_dispatch(db, state)
         return state
 
     if action == "answer":
+        # The Manažér answers the agent's blocked question (block_reason=agent_question) — threaded into the
+        # resumed turn. The status guard above already required ``blocked``.
         text = payload.get("text")
         if not text or not str(text).strip():
             raise OrchestratorError("answer requires a non-empty payload.text")
@@ -6716,372 +6453,105 @@ async def apply_action(
             db,
             version_id=version_id,
             stage=state.current_stage,
-            author="director",
+            author="manazer",
             recipient=state.current_actor,
             kind="answer",
             content=str(text),
+            payload={"phase": state.current_stage},
         )
-        _begin_dispatch(db, state)
-        return state
-
-    if action == "apply_coordinator_recommendation":
-        if latest_coordinator_report(db, version_id) is None:
-            raise OrchestratorError("Žiadne odporúčanie Koordinátora na zapracovanie")
-        # E7 (F-008 §9, contract A — the no-op fix): at build, an EXECUTABLE coordinator_directive runs
-        # its matching internal executor (reset_task / move_baseline / clear_session / escalate_dedo)
-        # instead of threading advisory text. A relay / low-confidence / director_decision directive (or
-        # any non-build stage) falls through to the advisory re-dispatch below.
-        if state.current_stage == "build":
-            directive = _latest_coordinator_directive(db, version_id)
-            if _coordinator_directive_executable(directive):
-                return _execute_coordinator_directive(db, state, directive)
-        if STAGE_ACTOR.get(state.current_stage) is None:
-            raise OrchestratorError("Aktuálna fáza nemá agenta na re-dispatch")
-        # Advisory relay (unchanged): the Coordinator's report is threaded as the re-dispatch directive
-        # by ``dispatch_directive`` (route). Stage does NOT advance.
-        _record_message(
-            db,
-            version_id=version_id,
-            stage=state.current_stage,
-            author="director",
-            recipient=state.current_actor,
-            kind="approval",
-            content="Schválené odporúčania Koordinátora.",
-        )
-        _begin_dispatch(db, state)
-        return state
-
-    if action in ("fix", "leave"):
-        # Gate E Branch B (F-007-gate-e §2): only at a per-question stop with a Designer
-        # gap. The decision travels Director→Coordinator→Designer (never direct): we
-        # record it as director→coordinator; `fix` then re-dispatches with a
-        # Coordinator-relayed edit directive (designer_edit), `leave` continues to the
-        # next question with no edit.
-        if state.current_stage != "gate_e":
-            raise OrchestratorError(f"{action} je platné len vo fáze Gate E")
-        if not _gate_e_gap_open(db, version_id):
-            raise OrchestratorError("Žiadny návrh Návrhára na rozhodnutie (gap_found)")
-        content = (
-            "Director schválil opravu — Koordinátor odovzdá pokyn Návrhárovi."
-            if action == "fix"
-            else "Director ponechal bez úpravy — podľa odporúčania Koordinátora."
-        )
-        _record_message(
-            db,
-            version_id=version_id,
-            stage="gate_e",
-            author="director",
-            recipient="coordinator",
-            kind="approval",
-            content=content,
-            payload={"resolves_gap": True},  # deterministic open-finding gate marker (§5)
-        )
-        _begin_dispatch(db, state)
-        return state
-
-    if action == "rerun_release_audit":
-        # v0.7.6: re-run the release audit at a settled gate_g — re-dispatch the Auditor WITHOUT advancing
-        # the stage. Mirrors continue_build (re-dispatch via _begin_dispatch, stage unchanged), NOT verdict
-        # (which advances to release / re-gate). The re-dispatched Auditor's fresh gate_g gate_report
-        # re-triggers the existing v0.7.5 verify_done app-starts smoke automatically (no smoke code here).
-        # fast_fix never reaches gate_g (FAST_FIX_STAGE_ORDER has no gate_g) → unreachable for the fast-fix
-        # lane. _begin_dispatch sets current_actor=auditor (STAGE_ACTOR["gate_g"]) + status=agent_working.
-        if state.current_stage != "gate_g":
-            raise OrchestratorError("rerun_release_audit je platné len vo fáze gate_g")
-        _record_message(
-            db,
-            version_id=version_id,
-            stage="gate_g",
-            author="director",
-            recipient="auditor",
-            kind="directive",
-            content=directive_for_action("rerun_release_audit", payload, state.current_stage) or "",
-            payload={"rerun_release_audit": True},
-        )
-        _begin_dispatch(db, state)  # stage stays gate_g; current_actor→auditor; status→agent_working
-        return state
-
-    if action == "surgical_fix":
-        # gate-g-hardening GAP 2 (CR-D): the chirurgical post-audit fix path. Distinct from a FAIL→build
-        # re-gate (which resets EVERY done task via _reset_done_tasks_for_regate = full rebuild) and from the
-        # Fast-Fix Lane (a separate flow, Coordinator-verify + auto-deploy, no gate_g). A surgical_fix re-runs
-        # ONLY the Director-scoped task(s) with an EXPLICIT fix directive, then re-enters a FULL re-gate — so it
-        # never bypasses the GAP 1 release-acceptance oracle (the key intersection, design §3.6).
-        if state.current_stage != "gate_g":
-            raise OrchestratorError("surgical_fix je platné len vo fáze gate_g")
-        fix_directive = str(payload.get("fix_directive") or "").strip()
-        if not fix_directive:
-            raise OrchestratorError("surgical_fix requires a non-empty payload.fix_directive")
-        # Scope is the Director's EXPLICIT, REQUIRED target_task_numbers — hierarchical '<epic>.<feat>.<task>'
-        # ids (from spec/task-plan.md). This is what makes the path CHIRURGICAL: only the named tasks re-run.
-        # An empty/absent scope is REJECTED (NOT a full-build fallback — that is Verdikt FAIL→Programovanie).
-        raw_targets = payload.get("target_task_numbers")
-        if not isinstance(raw_targets, list) or not all(isinstance(n, str) for n in raw_targets):
-            raise OrchestratorError(
-                "surgical_fix payload.target_task_numbers must be a list of '<epic>.<feat>.<task>' strings"
-            )
-        target_task_numbers = [n.strip() for n in raw_targets if n.strip()]
-        if not target_task_numbers:
-            raise OrchestratorError(
-                "surgical_fix vyžaduje target_task_numbers — čísla úloh na opravu; pre full rebuild použi "
-                "Verdikt FAIL→Programovanie"
-            )
-        # Selective reset FIRST so a bad scope (unknown id, OR resolved tasks none of which are 'done') is
-        # rejected BEFORE anything is recorded/mutated — the raise leaves state pristine (resolve is read-only,
-        # the per-row reset only mutates after the unresolved check passes).
-        reset_count = _reset_tasks_for_surgical_fix(db, version_id, target_task_numbers)
-        if reset_count == 0:
-            raise OrchestratorError(
-                "surgical_fix: žiadna z cielených úloh nie je v stave 'done' — over čísla úloh "
-                f"({', '.join(target_task_numbers)})."
-            )
-        # Record the directive (audit trail + the source _latest_surgical_fix_directive reads). It is a
-        # `directive` (not a verdict), so _iteration_boundary_seq is unmoved and the helper can read it back in
-        # the build loop. Recorded after the reset so a rejected scope leaves NO stray directive.
-        _record_message(
-            db,
-            version_id=version_id,
-            stage="gate_g",
-            author="director",
-            recipient="implementer",
-            kind="directive",
-            content=fix_directive,
-            payload={"surgical_fix": True, "target_task_numbers": target_task_numbers},
-        )
-        # Re-enter the build (NOT ensure_build_task — its idempotency would return task #1; the selective
-        # reset already armed the todo set). is_regate routes _run_build_round's brief-threading + the post-
-        # build path lands at gate_g again (Auditor full re-gate + the acceptance gate). iteration++ marks the
-        # new cycle on the board.
-        state.is_regate = True
-        state.iteration += 1
-        state.current_stage = "build"
-        db.flush()
         _begin_dispatch(db, state)
         return state
 
     if action == "verdict":
+        # The Auditor's Verifikácia verdict (design §2.2 (b)). Only valid at Verifikácia. PASS → settle for
+        # the Manažér's end sign-off (``schvalit`` → Hotovo); FAIL → loop the fix back to the AI Agent (the
+        # Auditor finds, the AI Agent fixes — §2.2 "Division of labour"), bounded by :data:`AUDITOR_LOOP_MAX`
+        # fix↔re-verify rounds, then STOP and escalate to the Manažér (§2.2 (i)). The verdict is the Manažér's
+        # ratification of the Auditor's finding (or, autonomously, the engine's at a non-stopping dial level).
+        if state.current_stage != "verifikacia":
+            raise OrchestratorError("verdict je platné len vo fáze Verifikácia")
         verdict = payload.get("verdict")
         if verdict not in ("PASS", "FAIL"):
             raise OrchestratorError("verdict requires payload.verdict in {PASS, FAIL}")
-        # gate-g-hardening GAP 1 (A3): the engine refuses a PASS until the release acceptance actually reached
-        # exit-0 (or a legit non-web SKIP) THIS iteration. Checked BEFORE recording the verdict message —
-        # _iteration_boundary_seq keys on the latest verdict seq, so recording first would move the freshness
-        # anchor PAST the acceptance notification and the guard could never read it. A FAIL is always allowed
-        # (it returns the version to fix); only the PASS is gated.
-        if verdict == "PASS" and not _release_acceptance_satisfied(db, version_id):
-            raise OrchestratorError(
-                "PASS nedovolený: acceptance nedobehla do exit-0 (release_smoke_test.sh) — spusti "
-                "rerun_release_audit po oprave, alebo vráť verdiktom FAIL."
-            )
         _record_message(
             db,
             version_id=version_id,
-            stage=state.current_stage,
-            author="director",
-            recipient="auditor",
+            stage="verifikacia",
+            author="auditor",
+            recipient="manazer",
             kind="verdict",
             content=verdict,
-            payload={"verdict": verdict},
+            payload={"verdict": verdict, "phase": "verifikacia"},
         )
         if verdict == "PASS":
-            state.current_stage = "release"
+            # Verified. SETTLE at Verifikácia awaiting the Manažér's end sign-off (``schvalit`` → Hotovo) —
+            # the dial-governed end schvaľovací bod. The phase does NOT auto-advance to Hotovo here: whether
+            # the build stops for the Manažér or the engine auto-signs-off (``plna``) is the dial's call,
+            # applied in the dispatch path (CR-V2-014). Keeping the PASS-then-sign-off split preserves the
+            # no-silent-done invariant — Hotovo is only ever reached through this recorded PASS verdict.
+            state.status = "awaiting_manazer"
+            state.next_action = "Verifikácia PASS — schváľ na Hotovo (nasadenie je samostatná akcia per zákazník)."
             db.flush()
-            _begin_dispatch(db, state)
-        else:
-            # gate_g FAIL Fix 2 (CR-NS-057 §F2.4): default to the INFERRED re-gate target (design/scope →
-            # gate_a; code-fixable / Director-initiated FAIL on a PASS audit → build) instead of a blind
-            # "gate_a". An explicit Director payload.entry_stage (a chip override) always wins; the verdict
-            # stays the Director's. The STAGE_ORDER guard is unchanged.
-            entry = payload.get("entry_stage") or _infer_regate_entry_stage(db, version_id)
-            if entry not in STAGE_ORDER:
-                raise OrchestratorError(f"Invalid entry_stage: {entry!r}")
-            state.is_regate = True
-            state.iteration += 1
-            state.current_stage = entry
-            # A build re-gate re-runs the WHOLE build → flip done→todo (a gate_a re-gate rebuilds the epics via
-            # the task_plan write-path, so it needs no reset). Sessions preserved on both targets.
-            if entry == "build":
-                _reset_done_tasks_for_regate(db, version_id)
-            db.flush()
-            _begin_dispatch(db, state)
-        return state
-
-    if action == "uat_accept":
-        # Phase 2: transition to done + notification; real prod-deploy hook is Phase 5.
-        # v0.8.1 CR-2: the completion message must be HONEST — claim a customer UAT acceptance ONLY when a
-        # UAT was ACTUALLY deployed (the version's latest uat_deploy notification shows a real success:
-        # ok=True, NOT skipped). Keying on the recorded deploy OUTCOME — not the uat_slug proxy — closes the
-        # edge where a configured slug's compose is missing (CR-1 honest-skips, yet the slug stays set):
-        # the no-UAT completion now stays consistent with that honest skip.
-        deploy = _latest_uat_deploy(db, version_id)
-        uat_deployed = deploy is not None and deploy.get("ok") is True and not deploy.get("skipped")
-        # CR-R2-1 (#1b): never silently finish a STRUCTURALLY-deployable app (backend+db) without a real UAT
-        # deploy — fail loud (no override). Gated on the UAT-deploying flows (new_version / fast_fix); cr/bug
-        # never deploy a UAT and a pure-CLI/lib project (not deployable) completes normally.
-        if not uat_deployed and state.flow_type in _UAT_DEPLOYING_FLOWS and _project_is_deployable(db, version_id):
-            raise OrchestratorError(
-                "Reálny UAT nebol nasadený — najprv provision + deploy (alebo retry). "
-                "Bez živého UAT nemožno dokončiť nasaditeľný projekt."
+            return state
+        # FAIL → bounded fix loop. ``iteration`` counts the fix↔re-verify rounds the Auditor has driven.
+        if state.iteration >= AUDITOR_LOOP_MAX:
+            # Exhausted the bounded loop → STOP + escalate to the Manažér (§2.2 (i)). Settle to blocked with
+            # an agent_error reason so the board surfaces it; the Manažér steers via ``uprav`` or re-runs.
+            state.status = "blocked"
+            state.block_reason = "agent_error"
+            state.next_action = (
+                f"Auditor po {AUDITOR_LOOP_MAX} kolách stále FAIL — eskalované Manažérovi. "
+                "Usmerni opravu (Uprav) alebo rozhodni o ďalšom kroku."
             )
-        state.current_stage = "done"
-        state.current_actor = "director"
-        state.status = "done"
-        if uat_deployed:
-            content = "UAT akceptované zákazníkom — pipeline dokončená."
-            state.next_action = "Verzia akceptovaná (UAT). Prod deploy hook príde vo Phase 5."
-        else:
-            content = "Verzia akceptovaná a dokončená — bez UAT testu (projekt nemá nakonfigurovaný UAT)."
-            state.next_action = "Verzia akceptovaná a dokončená — bez UAT testu. Prod deploy hook príde vo Phase 5."
-        _record_message(
-            db,
-            version_id=version_id,
-            stage="release",
-            author="system",
-            recipient="director",
-            kind="notification",
-            content=content,
-        )
-        db.flush()
-        return state
-
-    if action == "retry_publish":
-        # v0.8.0 CR-3: re-attempt the engine-owned GitHub publish for a FULL-FLOW release whose publish
-        # failed (release/blocked). Re-runs _release_auto_publish (re-push + CI verify) synchronously
-        # within the action — an engine step like uat_accept, NOT a stage advance; the result sets the
-        # status (success → awaiting_director for uat_accept, failure → blocked, surfaced). Scoped to a
-        # new_version release: fast_fix never engine-publishes (out of scope), so it stays UNTOUCHED.
-        if state.current_stage != "release":
-            raise OrchestratorError("retry_publish je platné len vo fáze release")
-        if state.flow_type != "new_version":
-            raise OrchestratorError("retry_publish je platné len pre plnú verziu (new_version)")
-        _record_message(
-            db,
-            version_id=version_id,
-            stage="release",
-            author="director",
-            recipient="system",
-            kind="directive",
-            content="Publikovať na GitHub (znova) — engine push + CI.",
-            payload={"retry_publish": True},
-        )
-        await _release_auto_publish(db, state)
-        db.flush()
-        return state
-
-    if action == "end_gate_e":
-        # Director ends Gate E early ("pokrytie stačí", F-007-gate-e §4) → advance to
-        # build. Skips remaining COVERAGE, but any open finding of a covered topic
-        # still blocks closing — no unresolved finding may pass to Build.
-        if state.current_stage != "gate_e":
-            raise OrchestratorError("end_gate_e je platné len vo fáze Gate E")
-        if _gate_e_open_findings(db, version_id) > 0:
-            raise OrchestratorError("Otvorené nálezy blokujú uzavretie Gate E — najprv ich vyrieš")
-        _record_message(
-            db,
-            version_id=version_id,
-            stage="gate_e",
-            author="director",
-            recipient="customer",
-            kind="approval",
-            content="Gate E ukončené Directorom (pokrytie stačí).",
-        )
-        _write_gate_e_audit(db, version_id)  # §4 audit record before closing
-        state.current_stage = _next_stage("gate_e", state.flow_type)  # → task_plan
+            db.flush()
+            _record_message(
+                db,
+                version_id=version_id,
+                stage="verifikacia",
+                author="system",
+                recipient="manazer",
+                kind="notification",
+                content=(
+                    f"Verifikácia zlyhala {AUDITOR_LOOP_MAX}× — bounded fix-loop vyčerpaný, eskalované Manažérovi."
+                ),
+                payload={"phase": "verifikacia", "auditor_loop_exhausted": True},
+            )
+            return state
+        # Loop the fix back to the AI Agent: re-enter Programovanie (the AI Agent fixes), bump the round
+        # counter, preserve sessions (warm context — never reset mid-loop). The Auditor re-verifies on the
+        # next Verifikácia turn. ``is_regate`` marks the re-loop for the dispatch path.
+        state.is_regate = True
+        state.iteration += 1
+        state.current_stage = "programovanie"
         db.flush()
         _begin_dispatch(db, state)
         return state
 
-    if action == "end_build":
-        # Director ends build early ("zvyšok do auditu", F-007 §6) → advance to gate_g.
-        # Early end, but any failed/unverified task still blocks the close — no unresolved
-        # task may pass to the Auditor (deterministic gate from the orchestrator's record).
-        if state.current_stage != "build":
-            raise OrchestratorError("end_build je platné len vo fáze build")
-        if _build_open_findings(db, version_id) > 0:
-            raise OrchestratorError("Otvorené úlohy (failed/neoverené) blokujú uzavretie buildu — najprv ich vyrieš")
+    if action == "pokracovat":
+        # Resume a Programovanie loop the Manažér paused (cooperative pause boundary) — no comment, no phase
+        # change: just re-dispatch the loop (it re-picks the next todo task). The record is Manažér→AI Agent
+        # (direct comms). Only valid in Programovanie (the only phase with a pause boundary).
+        if state.current_stage != "programovanie":
+            raise OrchestratorError("Pokračovať je platné len vo fáze Programovanie")
         _record_message(
             db,
             version_id=version_id,
-            stage="build",
-            author="director",
-            recipient="implementer",
+            stage="programovanie",
+            author="manazer",
+            recipient="ai_agent",
             kind="approval",
-            content="Build ukončený Directorom (zvyšok do auditu).",
+            content="Build pokračuje.",
+            payload={"phase": "programovanie"},
         )
-        # Fast-Fix Lane (F-009, CR-NS-094): build → release (skips gate_g); full flows → gate_g.
-        state.current_stage = _next_stage("build", state.flow_type)
-        db.flush()
-        _begin_dispatch(db, state)
+        _begin_dispatch(db, state)  # phase stays programovanie; status → agent_working
         return state
 
-    if action == "continue_build":
-        # Director resumes the build loop after a HALT ("prostredie opravené, pokračuj", F-007 §7.2)
-        # — no comment, no stage change: just re-dispatch _run_build_round (it re-picks the next
-        # todo task). Distinct from `return` (rework a failed task, comment required) and `end_build`
-        # (skip the rest → gate_g). The record is Director↔Coordinator (§6/§7 — the Director never
-        # addresses the worker directly; the engine re-dispatches the Implementer via _begin_dispatch).
-        if state.current_stage != "build":
-            raise OrchestratorError("continue_build je platné len vo fáze build")
-        _record_message(
-            db,
-            version_id=version_id,
-            stage="build",
-            author="director",
-            recipient="coordinator",
-            kind="approval",
-            content="Build pokračuje (prostredie opravené).",
-        )
-        _begin_dispatch(db, state)  # stage stays build; status → agent_working; the route schedules it
-        return state
-
-    if action == "accept_merged":
-        # WS-B2 (CR-NS-031): a legitimately-MERGED task dead-ends because its work sits in a commit
-        # at/before its baseline (verify_mechanical: "commit predates the task baseline" — e.g. status +
-        # transitions committed together, so task #3's work is in task #2's commit = task #3's baseline).
-        # The Director recognizes the Programmer's reported commit by moving the task's baseline to that
-        # commit's PARENT, so it falls back inside baseline..HEAD; the task resets to todo and the build
-        # loop re-verifies it (the Auditor checks the content as usual). Explicit Director action only —
-        # never silent auto-recognition (a task must never silently claim a prior commit).
-        if state.current_stage != "build":
-            raise OrchestratorError("accept_merged je platné len vo fáze build")
-        task = _failed_build_task(db, version_id)
-        if task is None:
-            raise OrchestratorError("Žiadna zlyhaná úloha — niet pri ktorej uznať spoločný commit")
-        commit = _latest_reported_commit(db, version_id, task.id)
-        if commit is None:
-            raise OrchestratorError("Programátor nenahlásil commit pre túto úlohu — nemožno uznať spoločný commit")
-        project_root = claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id)
-        parent = _repo_parent(project_root, commit)
-        if parent is None:
-            raise OrchestratorError(
-                f"Nepodarilo sa zistiť rodičovský commit pre {commit[:8]} — repo nečitateľné alebo koreňový commit"
-            )
-        task.baseline_sha = parent  # ORM assignment keeps the in-memory object in sync (CR-3 lesson)
-        task.status = "todo"  # re-attempt → the loop re-verifies against the moved baseline
-        db.flush()
-        task_service.recompute_feat_status(db, task.feat_id)
-        _record_message(
-            db,
-            version_id=version_id,
-            stage="build",
-            author="director",
-            recipient="coordinator",
-            kind="approval",
-            content=(
-                f"Uznaný spoločný commit pre úlohu #{task.number}: baseline presunutý na {parent[:8]} "
-                f"(rodič nahláseného commitu {commit[:8]}) — úloha sa znova overí."
-            ),
-            payload={"task_id": str(task.id), "accept_merged_commit": commit, "new_baseline": parent},
-        )
-        _begin_dispatch(db, state)  # re-run the build loop → re-verify the merged task against the moved baseline
-        return state
-
-    # action == "pause" (CR-NS-027): a genuine paused status, not just a label. The running build
-    # loop re-reads state at its next task boundary (db.refresh, READ COMMITTED) and, seeing a status
-    # other than agent_working, settles + stops cleanly — the current task finishes, no mid-task kill.
-    # Leaving agent_working also stops the action route from re-dispatching (the no-op-pause bug that
-    # spawned a 2nd loop). Resume via continue_build.
+    # action == "pause" (CR-NS-027): a genuine paused status, not just a label. The running Programovanie
+    # loop re-reads state at its next task boundary (db.refresh, READ COMMITTED) and, seeing a status other
+    # than agent_working, settles + stops cleanly — the current task finishes, no mid-task kill. Leaving
+    # agent_working also stops the action route from re-dispatching (the no-op-pause bug that spawned a 2nd
+    # loop). Resume via ``pokracovat``.
     state.status = "paused"
-    state.next_action = "Pozastavené Directorom — pokračuj cez 'Pokračovať v builde'."
+    state.next_action = "Pozastavené Manažérom — pokračuj cez 'Pokračovať'."
     db.flush()
     return state
