@@ -10,8 +10,7 @@ column is a ``String`` type guarded by a DB-level CHECK rather than a
 Python Enum, so ``Literal`` is the narrowest faithful representation —
 consistent with the approach used in :mod:`backend.schemas.epic`,
 :mod:`backend.schemas.bug`, :mod:`backend.schemas.bug_fix_task`,
-:mod:`backend.schemas.project_module`, :mod:`backend.schemas.project`
-and :mod:`backend.schemas.user`.
+:mod:`backend.schemas.project` and :mod:`backend.schemas.user`.
 """
 
 from __future__ import annotations

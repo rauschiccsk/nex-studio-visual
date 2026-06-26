@@ -101,13 +101,9 @@ class TaskPlanFeat(BaseModel):
 
 
 class TaskPlanEpic(BaseModel):
-    """An epic groups ≥1 feat. ``module_id`` is optional (project-level when null)."""
+    """An epic groups ≥1 feat (always project-level — multi-module removed in v2)."""
 
     title: str = Field(min_length=1, max_length=500)
-    # Must be a UUID (or omitted) to match EpicCreate.module_id — CR-NS-022 parse↔write parity:
-    # a stray label (e.g. "backend") now fails at PARSE with a clear error, never a cryptic
-    # write→blocked. Epics are project-level when null (NEX Ledger has no modules).
-    module_id: Optional[UUID] = None
     feats: list[TaskPlanFeat] = Field(min_length=1)
 
 
@@ -138,10 +134,9 @@ class TaskPlanSkeletonFeat(BaseModel):
 
 
 class TaskPlanSkeletonEpic(BaseModel):
-    """An epic in the skeleton pass — title + optional ``module_id`` + ≥1 (task-less) feat."""
+    """An epic in the skeleton pass — title + ≥1 (task-less) feat."""
 
     title: str = Field(min_length=1, max_length=500)
-    module_id: Optional[UUID] = None
     feats: list[TaskPlanSkeletonFeat] = Field(min_length=1)
 
     @model_validator(mode="before")

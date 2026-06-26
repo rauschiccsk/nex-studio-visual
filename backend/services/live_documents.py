@@ -36,12 +36,11 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.db.models.projects import Project, ProjectModule
+from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.versions import Version
 from backend.schemas.live_documents import (
     FeatCompletionData,
-    ModuleEventData,
     TaskCompletionData,
 )
 from backend.services.knowledge_base_writer import KnowledgeBaseWriter
@@ -147,17 +146,6 @@ class LiveDocumentService:
 
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-        # Modules section — only rendered for multi-module projects.
-        # A single-module project has at most one module and does not
-        # benefit from a dedicated list.
-        modules: list[ProjectModule] = []
-        if project.category == "multimodule":
-            modules = list(
-                db.execute(
-                    select(ProjectModule).where(ProjectModule.project_id == project_id).order_by(ProjectModule.code)
-                ).scalars()
-            )
-
         epics_rows = list(
             db.execute(
                 select(Epic, Version)
@@ -167,10 +155,8 @@ class LiveDocumentService:
             ).all()
         )
 
-        # Short-circuit "empty project" render — but only when there are
-        # also no modules. Multi-module projects with modules but no
-        # epics yet still deserve the modules section.
-        if not epics_rows and not modules:
+        # Short-circuit "empty project" render.
+        if not epics_rows:
             return f"# {project.name} — Status\nUpdated: {now}\n\nNo epics planned yet.\n"
 
         epic_ids = [epic.id for epic, _ in epics_rows]
@@ -183,20 +169,6 @@ class LiveDocumentService:
         commit_by_task: dict[UUID, str] = {}
 
         lines: list[str] = [f"# {project.name} — Status", f"Updated: {now}", ""]
-
-        # Modules (multi-module projects only).
-        modules_done = sum(1 for m in modules if m.status == "done")
-        if modules:
-            lines.append(f"## Modules ({len(modules)})")
-            for m in modules:
-                lines.append(f"- [{m.status}] {m.code} · {m.name} · {m.category}")
-            lines.append("")
-        elif project.category == "multimodule":
-            # Multi-module project with no modules yet — leave an explicit
-            # heading so the STATUS isn't misleadingly "empty".
-            lines.append("## Modules (0)")
-            lines.append("No modules planned yet.")
-            lines.append("")
 
         epics_done = 0
         feats_total = 0
@@ -240,8 +212,6 @@ class LiveDocumentService:
 
         lines.append("## Summary")
         summary_parts = []
-        if project.category == "multimodule":
-            summary_parts.append(f"Modules: {modules_done}/{len(modules)} done")
         summary_parts.append(f"Epics: {epics_done}/{len(epics_rows)}")
         summary_parts.append(f"Feats: {feats_done}/{feats_total}")
         summary_parts.append(f"Tasks: {tasks_done}/{tasks_total}")
@@ -249,25 +219,6 @@ class LiveDocumentService:
         lines.append("")
 
         return "\n".join(lines)
-
-    def generate_module_event_entry(self, data: ModuleEventData) -> str:
-        """Return a single ``HISTORY.md`` line describing a module event.
-
-        Format matches the task-completion / phase-summary entries —
-        ``HH:MM`` prefix, single verb-form sentence:
-
-            HH:MM Module MM created — Manažér modulov (Systém)
-            HH:MM Module MM status planned → in_development
-            HH:MM Module MM deleted — Manažér modulov
-        """
-        ts = data.timestamp.strftime("%H:%M")
-        code = data.module_code
-        if data.event_type == "created":
-            return f"{ts} Module {code} created — {data.module_name} ({data.category})\n"
-        if data.event_type == "deleted":
-            return f"{ts} Module {code} deleted — {data.module_name}\n"
-        # status_changed
-        return f"{ts} Module {code} status {data.old_status} → {data.new_status}\n"
 
     def generate_phase_summary_entry(self, data: FeatCompletionData) -> str:
         """Return the phase-closing entry appended to ``HISTORY.md``.
@@ -347,22 +298,6 @@ class LiveDocumentService:
         self._writer.save(self._slug, "STATUS.md", status_md)
         self._reindex("STATUS.md")
         self._writer.save(self._slug, "HISTORY.md", self._history_header())
-        self._reindex("HISTORY.md")
-
-    def append_module_event(self, data: ModuleEventData) -> None:
-        """Persist a module-lifecycle entry to ``HISTORY.md``.
-
-        No-op when the writer is not configured.
-        """
-        entry = self.generate_module_event_entry(data)
-        if not entry or self._writer is None:
-            return
-        self._writer.append(
-            self._slug,
-            "HISTORY.md",
-            entry,
-            header_if_new=self._history_header(),
-        )
         self._reindex("HISTORY.md")
 
     def append_phase_summary(self, data: FeatCompletionData) -> None:

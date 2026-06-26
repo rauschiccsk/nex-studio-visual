@@ -14,8 +14,7 @@ Design notes (per DESIGN.md §1.3 / §2.2 and :mod:`backend.db.models.projects`)
       so the router receives a clean :class:`ValueError` rather than a raw
       :class:`~sqlalchemy.exc.IntegrityError`.
     * ``category`` is constrained by a CHECK (``singlemodule`` |
-      ``multimodule``) and is immutable after creation — it drives the
-      module-registry seeding at creation time (see D-10) and cannot be
+      ``multimodule``) and is immutable after creation — it cannot be
       swapped later. The Pydantic ``ProjectCategory`` literal mirrors the
       DB constraint.
     * ``status`` is constrained by a CHECK (``active`` | ``archived`` |
@@ -29,7 +28,7 @@ Design notes (per DESIGN.md §1.3 / §2.2 and :mod:`backend.db.models.projects`)
       depend on slug).
     * ``created_by`` is an audit column — immutable after creation.
     * Every inbound FK to ``projects.id`` uses ``ON DELETE CASCADE``
-      (``project_modules``, ``raw_specifications``,
+      (``raw_specifications``,
       ``professional_specifications``, ``design_documents``, ``kb_documents``,
       ``architect_sessions``, ``epics``, ``bugs``, ``delegations``,
       ``report_configs``). No RESTRICT

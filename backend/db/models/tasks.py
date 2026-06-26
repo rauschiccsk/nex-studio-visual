@@ -27,12 +27,6 @@ class Epic(Base, UUIDMixin, TimestampMixin):
         nullable=False,
         index=True,
     )
-    module_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("project_modules.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
     version_id = Column(
         UUID(as_uuid=True),
         ForeignKey("versions.id", ondelete="RESTRICT"),

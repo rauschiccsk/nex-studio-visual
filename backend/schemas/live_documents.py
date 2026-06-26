@@ -17,7 +17,7 @@ moment in time and must not mutate after being captured.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -29,13 +29,6 @@ TaskStatus = Literal["done", "failed"]
 #: legitimate for NEX Studio until a remote repo exists, see
 #: ``CLAUDE.md §2.4``).
 PhaseResult = Literal["pass", "fail", "na"]
-
-#: Module lifecycle event types emitted to ``HISTORY.md``.
-ModuleEventType = Literal["created", "status_changed", "deleted"]
-
-#: Module lifecycle statuses — mirrors the DB CHECK constraint on
-#: ``project_modules.status``.
-ModuleStatus = Literal["planned", "in_design", "in_development", "done"]
 
 
 class TaskCompletionData(BaseModel):
@@ -72,29 +65,6 @@ class TaskCompletionData(BaseModel):
     audit_passed: bool = True
     audit_findings: list[str] = Field(default_factory=list)
     auto_fix_attempts: int = Field(default=0, ge=0)
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-class ModuleEventData(BaseModel):
-    """Immutable record of a lifecycle event on a project module.
-
-    Emitted from the project-modules router after create / status
-    change / delete; consumed by
-    :meth:`LiveDocumentService.generate_module_event_entry` to emit
-    a line into ``HISTORY.md``. Only events that are meaningful for
-    audit reviewers land here — pure metadata edits (renames,
-    category tweaks) are skipped so HISTORY does not fill with
-    noise.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    event_type: ModuleEventType
-    module_code: str
-    module_name: str
-    category: str
-    old_status: Optional[ModuleStatus] = None
-    new_status: Optional[ModuleStatus] = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 

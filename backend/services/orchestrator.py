@@ -557,7 +557,7 @@ _TASK_PLAN_FENCE_RULE = (
 # Concrete minimal examples (exact field names) — the model copies the SHAPE, not the content.
 _SKELETON_EXAMPLE = (
     "Príklad tvaru:\n<<<TASK_PLAN_JSON>>>\n"
-    '{"epics":[{"title":"Foundation","module_id":null,"feats":['
+    '{"epics":[{"title":"Foundation","feats":['
     '{"title":"Schéma a migrácie","description":"DB schéma + audit log","estimated_minutes":120}]}],'
     '"cross_cutting_rules":"Spoločná transakčná hranica; immutable audit; scoping na firmu."}\n'
     "<<<END_TASK_PLAN_JSON>>>"
@@ -580,7 +580,7 @@ def _task_plan_skeleton_directive(director_note: Optional[str] = None) -> str:
     """
     base = (
         "Vo fáze 'task_plan' najprv vytvor KOSTRU plánu: emituj IBA epiky a funkcie (EPIC + FEAT), BEZ úloh. "
-        "Objekt má pole `epics` (zoznam): KAŽDÝ epik má `title` a `module_id` (UUID alebo null), a pole "
+        "Objekt má pole `epics` (zoznam): KAŽDÝ epik má `title` a pole "
         "`feats` (zoznam, ≥1) — KAŽDÁ funkcia má `title`, `description` a `estimated_minutes` (Σ odhadov "
         "jej úloh). Navrch objektu pole `cross_cutting_rules` (markdown, regulované invarianty knihy, "
         "kodifikované RAZ). Úlohy NEemituj — doplnia sa v ďalších prechodoch po jednej funkcii. "
@@ -1251,7 +1251,6 @@ def _write_task_plan(db: Session, state: PipelineState, block: PipelineStatusBlo
                         project_id=version.project_id,
                         version_id=state.version_id,
                         title=epic_in.title,
-                        module_id=epic_in.module_id,
                     ),
                 )
                 n_epics += 1
@@ -1545,7 +1544,7 @@ async def invoke_agent(
             # task_plan decomposition (F-007 §4/§5, CR-NS-020 CR-2). Persisted so the
             # audit trail / TaskPlanPanel can show the plan and CR-3 can re-read the
             # cross-cutting rules from this gate_report payload.
-            # mode="json" so a TaskPlanEpic.module_id UUID (CR-NS-022) serializes to a str for JSONB.
+            # mode="json" so any UUID in the plan serializes to a str for JSONB.
             "plan": parsed.plan.model_dump(mode="json") if parsed.plan is not None else None,
             "cross_cutting_rules": parsed.cross_cutting_rules,
             # Per-task Auditor verdict (F-007 §6, CR-NS-020 CR-4) — persisted for CR-5's
@@ -4176,7 +4175,6 @@ async def _run_task_plan_round(
             epics=[
                 TaskPlanEpic(
                     title=epic.title,
-                    module_id=epic.module_id,
                     feats=[
                         TaskPlanFeat(
                             title=feat.title,
@@ -4211,7 +4209,7 @@ async def _run_task_plan_round(
     # Record the Designer gate_report carrying the assembled plan + cross_cutting_rules: the build loop
     # re-reads the rules from THIS message (_fetch_cross_cutting_rules), and it is the audit-trail record
     # of the plan the Director reviews. No usage of its own (orchestrator-synthesized — the per-pass notes
-    # already accounted the agent tokens); mode="json" so a TaskPlanEpic.module_id UUID serializes for JSONB.
+    # already accounted the agent tokens); mode="json" so any UUID in the plan serializes for JSONB.
     plan_msg = _record_message(
         db,
         version_id=version_id,

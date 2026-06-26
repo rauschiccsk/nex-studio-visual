@@ -17,7 +17,7 @@ from backend.db.models.foundation import User, UserAgentSettings, UserSession
 from backend.db.models.orchestrator import OrchestratorSession
 from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.project_member import ProjectMember
-from backend.db.models.projects import ModuleDependency, Project, ProjectModule
+from backend.db.models.projects import Project
 from backend.db.models.system_settings import SystemSetting
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.versions import Version
@@ -30,11 +30,9 @@ ALL_MODELS: tuple[type, ...] = (
     Project,
     Bug,
     BacklogItem,
-    ProjectModule,
     ProjectMember,
     Epic,
     Feat,
-    ModuleDependency,
     Task,
     UserSession,
     Version,
@@ -52,13 +50,11 @@ __all__ = [
     "Bug",
     "Epic",
     "Feat",
-    "ModuleDependency",
     "OrchestratorSession",
     "PipelineMessage",
     "PipelineState",
     "Project",
     "ProjectMember",
-    "ProjectModule",
     "SystemSetting",
     "Task",
     "TimestampMixin",

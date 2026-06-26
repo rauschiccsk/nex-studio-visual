@@ -1,4 +1,4 @@
-"""Project domain models — projects and project modules."""
+"""Project domain models — projects."""
 
 from sqlalchemy import (
     Boolean,
@@ -85,67 +85,4 @@ class Project(Base, UUIDMixin, TimestampMixin):
         back_populates="project",
         cascade="all, delete-orphan",
         passive_deletes=True,
-    )
-
-
-class ProjectModule(Base, UUIDMixin, TimestampMixin):
-    """Module within a multimodule project."""
-
-    __tablename__ = "project_modules"
-
-    project_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("projects.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    code = Column(String(50), nullable=False)
-    name = Column(String(255), nullable=False)
-    category = Column(String(50), nullable=False)
-    status = Column(String(20), nullable=False, server_default="planned")
-    design_doc_path = Column(Text, nullable=True)
-
-    __table_args__ = (
-        UniqueConstraint("project_id", "code", name="uq_project_modules_project_id_code"),
-        CheckConstraint(
-            "status IN ('planned', 'in_design', 'in_development', 'done')",
-            name="ck_project_modules_status",
-        ),
-        CheckConstraint(
-            "category IN ('Systém', 'Katalógy', 'Sklad', 'Predaj', 'Nákup', 'Účtovníctvo', 'Pokladňa')",
-            name="ck_project_modules_category",
-        ),
-        # Kebab-case, matches backend.schemas.project_module.MODULE_CODE_PATTERN
-        # and the CHECK added by migration 032.
-        CheckConstraint(
-            r"code ~ '^[a-z][a-z0-9-]*[a-z0-9]$'",
-            name="ck_project_modules_code_format",
-        ),
-    )
-
-
-class ModuleDependency(Base, UUIDMixin, TimestampMixin):
-    """Dependency edge between two modules within the same project."""
-
-    __tablename__ = "module_dependencies"
-
-    module_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("project_modules.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    depends_on_module_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("project_modules.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-
-    __table_args__ = (
-        UniqueConstraint(
-            "module_id",
-            "depends_on_module_id",
-            name="uq_module_dependencies_module_id_depends_on_module_id",
-        ),
     )

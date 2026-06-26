@@ -1,7 +1,7 @@
 """Pydantic schemas package.
 
 Request/response DTOs used by FastAPI routes. Domain-specific schemas live in
-sibling modules (e.g. ``project_module.py``) and are re-exported from here for
+sibling modules (e.g. ``project.py``) and are re-exported from here for
 convenient consumption by API routers.
 """
 
@@ -25,23 +25,12 @@ from backend.schemas.feat import (
     FeatStatus,
     FeatUpdate,
 )
-from backend.schemas.module_dependency import (
-    ModuleDependencyCreate,
-    ModuleDependencyRead,
-    ModuleDependencyUpdate,
-)
 from backend.schemas.project import (
     ProjectCategory,
     ProjectCreate,
     ProjectRead,
     ProjectStatus,
     ProjectUpdate,
-)
-from backend.schemas.project_module import (
-    ProjectModuleCreate,
-    ProjectModuleRead,
-    ProjectModuleStatus,
-    ProjectModuleUpdate,
 )
 from backend.schemas.task import (
     TaskCreate,
@@ -84,18 +73,11 @@ __all__ = [
     "FeatRead",
     "FeatStatus",
     "FeatUpdate",
-    "ModuleDependencyCreate",
-    "ModuleDependencyRead",
-    "ModuleDependencyUpdate",
     "ProjectCategory",
     "ProjectCreate",
     "ProjectRead",
     "ProjectStatus",
     "ProjectUpdate",
-    "ProjectModuleCreate",
-    "ProjectModuleRead",
-    "ProjectModuleStatus",
-    "ProjectModuleUpdate",
     "TaskCreate",
     "TaskRead",
     "TaskStatus",

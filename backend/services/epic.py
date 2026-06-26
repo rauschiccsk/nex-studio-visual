@@ -48,24 +48,17 @@ Lifecycle Rules, §6.6 list filters, §6.8 Service Layer Extension and
       idempotent — already-``active`` / ``released`` versions are a
       no-op — so double-firing the trigger on repeated patches does
       nothing unsafe.
-    * ``module_id`` remains mutable: ``NULL`` denotes a project-level
-      epic (used by single-module projects — see schema docstring and
-      DESIGN.md §1.9) and the DB-level ``ON DELETE SET NULL`` naturally
-      expresses the same transition when the referenced module is
-      removed. In-place re-scoping of an existing epic is rare but
-      expressible.
     * ``epics`` has a single inbound FK (``feats.epic_id``) with
       ``ON DELETE CASCADE`` — :func:`delete` therefore needs no
       RESTRICT dependency check; dependent feats (and the tasks under
       them, via ``tasks.feat_id ON DELETE CASCADE``) are removed
       automatically at the DB level.
-    * List filters (``project_id``, ``module_id``, ``status``) match
-      the indexed columns (``ix_epics_project_id``,
-      ``ix_epics_module_id``) and support the Tasks UI (DESIGN.md §3.1
-      ``TasksPage`` / ``EpicList`` with "filterable by module") and
+    * List filters (``project_id``, ``status``) match
+      the indexed columns (``ix_epics_project_id``)
+      and support the Tasks UI (DESIGN.md §3.1
+      ``TasksPage`` / ``EpicList``) and
       reporting (DESIGN.md §3.1 ``ReportsPage``) — "show every epic in
-      this project", "show every epic scoped to this module", "show
-      every in-progress epic".
+      this project", "show every in-progress epic".
     * List ordering is ``number ASC`` — epics display in creation
       order (epic 1, epic 2, …) to match the hierarchical-numbering
       convention described in DESIGN.md §1.9 and the ``EpicList``
@@ -96,7 +89,6 @@ def list_epics(
     db: Session,
     *,
     project_id: Optional[UUID] = None,
-    module_id: Optional[UUID] = None,
     status: Optional[EpicStatus] = None,
     limit: int = 100,
     offset: int = 0,
@@ -113,10 +105,6 @@ def list_epics(
         project_id: Optional project filter — restrict to epics
             belonging to a specific project (the core Tasks-page query,
             DESIGN.md §3.1 ``TasksPage``).
-        module_id: Optional module filter — restrict to epics scoped
-            to a specific module. Pass the module UUID to fetch
-            module-scoped epics; project-level epics (``module_id IS
-            NULL``) are filtered out when this argument is supplied.
         status: Optional lifecycle-status filter (``planned`` |
             ``in_progress`` | ``done``).
         limit: Maximum number of rows to return.
@@ -128,8 +116,6 @@ def list_epics(
     stmt = select(Epic)
     if project_id is not None:
         stmt = stmt.where(Epic.project_id == project_id)
-    if module_id is not None:
-        stmt = stmt.where(Epic.module_id == module_id)
     if status is not None:
         stmt = stmt.where(Epic.status == status)
     stmt = stmt.order_by(Epic.number.asc()).limit(limit).offset(offset)
@@ -140,12 +126,11 @@ def count_epics(
     db: Session,
     *,
     project_id: Optional[UUID] = None,
-    module_id: Optional[UUID] = None,
     status: Optional[EpicStatus] = None,
 ) -> int:
     """Return the total number of epics matching the given filters.
 
-    Mirrors the ``project_id`` / ``module_id`` / ``status`` filters of
+    Mirrors the ``project_id`` / ``status`` filters of
     :func:`list_epics` so a paginated response can report the unfiltered
     total alongside the current page of items (same pattern as
     :func:`~backend.services.bug.count_bugs` and
@@ -154,9 +139,6 @@ def count_epics(
     Args:
         db: Active SQLAlchemy session.
         project_id: Optional project filter.
-        module_id: Optional module-scope filter. Passing a module UUID
-            counts only module-scoped epics; project-level epics
-            (``module_id IS NULL``) are excluded.
         status: Optional lifecycle-status filter (``planned`` |
             ``in_progress`` | ``done``).
 
@@ -166,8 +148,6 @@ def count_epics(
     stmt = select(func.count()).select_from(Epic)
     if project_id is not None:
         stmt = stmt.where(Epic.project_id == project_id)
-    if module_id is not None:
-        stmt = stmt.where(Epic.module_id == module_id)
     if status is not None:
         stmt = stmt.where(Epic.status == status)
     return int(db.execute(stmt).scalar_one())
@@ -233,10 +213,8 @@ def create(db: Session, data: EpicCreate) -> Epic:
 
     ``status`` defaults to ``planned`` via the Pydantic schema / DB
     ``server_default`` when omitted, matching the model declaration.
-    ``module_id`` may be ``None`` to register a project-level epic (used
-    by single-module projects).
 
-    If the supplied ``project_id``, ``module_id`` or ``version_id``
+    If the supplied ``project_id`` or ``version_id``
     foreign keys do not match existing rows the DB-level FK rejects the
     flush and the error propagates as-is (routed at the API layer as a
     409/422).
@@ -264,7 +242,6 @@ def create(db: Session, data: EpicCreate) -> Epic:
 
     epic = Epic(
         project_id=data.project_id,
-        module_id=data.module_id,
         version_id=data.version_id,
         number=number,
         title=data.title,
@@ -278,7 +255,7 @@ def create(db: Session, data: EpicCreate) -> Epic:
 def update(db: Session, epic_id: UUID, data: EpicUpdate) -> Epic:
     """Partially update an epic.
 
-    Only ``module_id``, ``title`` and ``status`` may be changed. ``id``,
+    Only ``title`` and ``status`` may be changed. ``id``,
     ``project_id``, ``number`` and ``created_at`` are immutable — an
     epic belongs to exactly one project for its lifetime, its position
     within the project (``number``) must not be rewritten after the
@@ -286,10 +263,7 @@ def update(db: Session, epic_id: UUID, data: EpicUpdate) -> Epic:
     ``onupdate=func.now()``.
 
     Fields that are ``None`` in the payload are treated as "leave
-    unchanged" to support PATCH semantics — ``module_id`` is therefore
-    sticky once set. The explicit-null "downgrade to project-level"
-    transition is not expressible through this service; it is a rare
-    correction that belongs to admin tooling rather than the UI.
+    unchanged" to support PATCH semantics.
 
     Version lifecycle trigger (DESIGN.md §4.0 Rule 4): when ``status``
     transitions **into** ``in_progress`` and the epic carries a
@@ -310,7 +284,6 @@ def update(db: Session, epic_id: UUID, data: EpicUpdate) -> Epic:
     # but silently dropping any that slip through keeps the service
     # honest.
     allowed_fields = {
-        "module_id",
         "title",
         "status",
     }

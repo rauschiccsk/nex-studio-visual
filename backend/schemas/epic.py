@@ -10,7 +10,6 @@ is a ``String`` type guarded by a DB-level CHECK rather than a Python
 Enum, so ``Literal`` is the narrowest faithful representation —
 consistent with the approach used in :mod:`backend.schemas.bug`,
 :mod:`backend.schemas.bug_fix_task`,
-:mod:`backend.schemas.project_module`,
 :mod:`backend.schemas.project` and :mod:`backend.schemas.user`.
 """
 
@@ -36,10 +35,8 @@ class EpicCreate(BaseModel):
     auto-assigned as ``max(number) + 1`` per project by the service
     layer (see DESIGN.md §2.6 ``POST /projects/{id}/epics``).
     ``status`` defaults to the value set by the DB-level
-    ``server_default`` (``planned``) so callers may omit it.  Nullable
-    columns default to ``None`` — ``module_id`` is optional because a
-    project-level epic (no specific module scope) is permitted for
-    single-module projects.  ``version_id`` is typed as ``Optional`` so
+    ``server_default`` (``planned``) so callers may omit it.
+    ``version_id`` is typed as ``Optional`` so
     the schema can also serve patch-style payload helpers, but the
     service layer (DESIGN.md §4.0 Rule 2) **requires** a non-null value
     on create and raises ``ValueError("version_id required for new
@@ -51,13 +48,6 @@ class EpicCreate(BaseModel):
     project_id: UUID = Field(
         ...,
         description="Project the epic belongs to.",
-    )
-    module_id: Optional[UUID] = Field(
-        default=None,
-        description=(
-            "Optional project module the epic is scoped to. ``None`` denotes a "
-            "project-level epic (used by single-module projects)."
-        ),
     )
     version_id: Optional[UUID] = Field(
         default=None,
@@ -87,16 +77,9 @@ class EpicUpdate(BaseModel):
     the epic identity and its position within the project must not be
     rewritten after the fact.  ``updated_at`` is managed by the ORM via
     ``onupdate=func.now()`` and must not be set by clients.
-    ``module_id`` remains mutable because the DB-level
-    ``ON DELETE SET NULL`` semantics and project-level epics are
-    expressed through the same column.  All remaining fields are
-    optional to support PATCH-style semantics.
+    All remaining fields are optional to support PATCH-style semantics.
     """
 
-    module_id: Optional[UUID] = Field(
-        default=None,
-        description=("Updated module scope for the epic. ``None`` denotes a project-level epic."),
-    )
     title: Optional[str] = Field(
         default=None,
         min_length=1,
@@ -121,7 +104,6 @@ class EpicRead(BaseModel):
 
     id: UUID
     project_id: UUID
-    module_id: Optional[UUID] = None
     version_id: Optional[UUID] = None
     number: int
     title: str = Field(..., min_length=1, max_length=500)

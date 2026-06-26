@@ -4,8 +4,8 @@ Exposes the standard CRUD surface for epics — the top level of the
 Epic/Feat/Task hierarchy (DESIGN.md §1.9 Tasks hierarchy) — that backs
 the ``TasksPage`` / ``EpicList`` UI (DESIGN.md §3.1):
 
-* ``GET    /``          → paginated list (filter by ``project_id``,
-  ``module_id`` and ``status``).
+* ``GET    /``          → paginated list (filter by ``project_id``
+  and ``status``).
 * ``GET    /{epic_id}`` → single epic by primary key.
 * ``POST   /``          → create a new epic (``number`` is auto-assigned
   by the service layer as ``MAX(number) + 1`` per project).
@@ -37,18 +37,14 @@ Design notes (per DESIGN.md §1.9 Tasks (Epic/Feat/Task hierarchy), §2
 * ``status`` is constrained by the ``ck_epics_status`` DB CHECK
   (``planned | in_progress | done``). Invalid values surface at
   schema-validation time (HTTP 422) via the Pydantic ``Literal``.
-* ``module_id`` is nullable: ``NULL`` denotes a project-level epic (used
-  by single-module projects — DESIGN.md §1.9). The FK uses
-  ``ON DELETE SET NULL`` so the epic gracefully downgrades to
-  project-level when the referenced module is removed.
 * ``epics`` has a single inbound FK (``feats.epic_id``) with ``ON DELETE
   CASCADE`` — dependent feats (and the tasks under them, via
   ``tasks.feat_id ON DELETE CASCADE``) are removed automatically at the
   DB level. No RESTRICT dependency check is required.
-* List filters (``project_id``, ``module_id``, ``status``) match the
-  indexed columns (``ix_epics_project_id``, ``ix_epics_module_id``) and
+* List filters (``project_id``, ``status``) match the
+  indexed columns (``ix_epics_project_id``) and
   back the Tasks UI ("show every epic in this project", "show every
-  epic scoped to this module", "show every in-progress epic").
+  in-progress epic").
 * List ordering (``number ASC``) is owned by the service so epics
   appear in their stable, human-readable numbering sequence (epic 1,
   epic 2, …) matching the ``EpicList`` UI convention.
@@ -105,15 +101,6 @@ def list_epics(
             "(DESIGN.md §3.1 ``TasksPage``)."
         ),
     ),
-    module_id: Optional[UUID] = Query(
-        default=None,
-        description=(
-            "Filter by the project module the epic is scoped to. Passing "
-            "a module UUID returns module-scoped epics only; project-level "
-            "(``module_id IS NULL``) epics are filtered out when this "
-            "argument is supplied."
-        ),
-    ),
     status_filter: Optional[EpicStatus] = Query(
         default=None,
         alias="status",
@@ -133,7 +120,6 @@ def list_epics(
         rows = epic_service.list_epics(
             db,
             project_id=project_id,
-            module_id=module_id,
             status=status_filter,
             limit=limit,
             offset=skip,
@@ -141,7 +127,6 @@ def list_epics(
         total = epic_service.count_epics(
             db,
             project_id=project_id,
-            module_id=module_id,
             status=status_filter,
         )
     except ValueError as exc:
@@ -182,11 +167,10 @@ def create_epic(
     ``number`` is auto-assigned by the service layer as
     ``MAX(number) + 1`` for the supplied ``project_id`` (starts at ``1``
     for the first epic). ``status`` defaults to ``planned`` via the
-    Pydantic schema / DB ``server_default`` when omitted. ``module_id``
-    may be ``None`` to register a project-level epic (used by
-    single-module projects — DESIGN.md §1.9). Concurrent-create races
+    Pydantic schema / DB ``server_default`` when omitted.
+    Concurrent-create races
     on the same project surface as HTTP 409. Missing or invalid foreign
-    keys (``project_id``, ``module_id``) are rejected by the DB-level FK
+    keys (``project_id``, ``version_id``) are rejected by the DB-level FK
     and surface as HTTP 422.
     """
     try:
@@ -207,7 +191,7 @@ def update_epic(
 ) -> EpicRead:
     """Partially update an epic's mutable fields.
 
-    Only ``module_id``, ``title`` and ``status`` are mutable. ``id``,
+    Only ``title`` and ``status`` are mutable. ``id``,
     ``project_id``, ``number`` and ``created_at`` are immutable — the
     epic identity and its position within the project must not be
     rewritten after the fact; ``updated_at`` is refreshed by the ORM on

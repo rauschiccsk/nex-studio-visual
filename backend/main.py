@@ -18,10 +18,8 @@ from backend.api.routes.feats import router as feats_router
 from backend.api.routes.health import health_check as _health_check_handler
 from backend.api.routes.knowledge import router as knowledge_router
 from backend.api.routes.metrics import router as metrics_router
-from backend.api.routes.module_dependencies import router as module_dependencies_router
 from backend.api.routes.pipeline import router as pipeline_router
 from backend.api.routes.project_members import router as project_members_router
-from backend.api.routes.project_modules import router as project_modules_router
 from backend.api.routes.project_specs import router as project_specs_router
 from backend.api.routes.projects import router as projects_router
 from backend.api.routes.rag import router as rag_router
@@ -212,8 +210,6 @@ app.include_router(auth_router, prefix="/api/v1/auth")
 app.include_router(users_router, prefix="/api/v1/users")
 app.include_router(user_sessions_router, prefix="/api/v1/user-sessions")
 app.include_router(projects_router, prefix="/api/v1/projects")
-app.include_router(project_modules_router, prefix="/api/v1/project-modules")
-app.include_router(module_dependencies_router, prefix="/api/v1/module-dependencies")
 app.include_router(knowledge_router, prefix="/api/v1/knowledge")
 app.include_router(project_specs_router, prefix="/api/v1/project-specs")
 app.include_router(rag_router, prefix="/api/v1/rag")
