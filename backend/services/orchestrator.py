@@ -1431,7 +1431,7 @@ async def invoke_agent(
     prompt: str,
     timeout: Optional[int] = None,
     on_event: Optional[claude_agent.EventCallback] = None,
-    recipient: str = "director",
+    recipient: str = "manazer",
     on_message: Optional[MessageCallback] = None,
     extra_payload: Optional[dict[str, Any]] = None,
     metrics: Optional["_DispatchMetrics"] = None,
@@ -1447,8 +1447,11 @@ async def invoke_agent(
     default (:func:`_timeout_for`).
 
     ``recipient`` (F-007-gate-e §5) is who the agent's message is addressed to —
-    the next in the chain (default ``"director"``; the gate_e round passes
-    ``designer`` / ``coordinator`` per Z→N→K→D). System escalations stay → Director.
+    the next in the chain. CR-V2-004 renamed the operator participant token
+    ``director`` → ``manazer`` (migration 071 ``ck_pipeline_message_recipient``), so the
+    default is now ``"manazer"``; ``director`` is no longer a valid DB participant. (The
+    v1 gate_e round's ``designer`` / ``coordinator`` recipients live on dead Coordinator/
+    Gate-E paths removed wholesale by CR-V2-009 / CR-V2-013.)
 
     When ``on_event`` is set, each streamed event (and a one-shot ``active_role``
     signal at the start) is tagged with ``_role=role`` so the cockpit rail shows the
@@ -1587,28 +1590,34 @@ async def invoke_agent(
             "question": parsed.question,
             "awaiting": parsed.awaiting,
             "block_kind": parsed.kind,
-            # Gate E signals (F-007-gate-e) — let apply_action/the FE derive the
-            # boundary type (topic vs final), the open-finding gate, and Branch A/B.
-            "topic": parsed.topic,
-            "topic_done": parsed.topic_done,
-            "coverage_complete": parsed.coverage_complete,
+            # CR-V2-006 dropped the v1 Gate-E / Coordinator / per-task-audit status-block fields
+            # (topic / topic_done / coverage_complete / gap_found / task_pass / coordinator_directive)
+            # from ``PipelineStatusBlock``. ``invoke_agent``'s per-turn payload write runs on EVERY
+            # turn (incl. the AI-Agent units this CR re-keys), so a bare ``parsed.<removed>`` raises
+            # AttributeError here. Read them defensively via ``getattr(..., None)`` so they degrade to
+            # the same ``None`` they will become once the writers/payload keys are removed wholesale by
+            # CR-V2-009 (apply_action rebuild) / CR-V2-013 (Gate-E → Auditor upfront review). This is the
+            # minimal CR-V2-007-local unblock — NOT the Coordinator-relay removal those CRs own. The
+            # repurposed-and-kept ``findings`` / ``proposed_fix`` (CR-V2-006 Auditor verdict) stay direct.
+            "topic": getattr(parsed, "topic", None),
+            "topic_done": getattr(parsed, "topic_done", None),
+            "coverage_complete": getattr(parsed, "coverage_complete", None),
             "findings": parsed.findings,
-            "gap_found": parsed.gap_found,
+            "gap_found": getattr(parsed, "gap_found", None),
             "proposed_fix": parsed.proposed_fix,
-            # task_plan decomposition (F-007 §4/§5, CR-NS-020 CR-2). Persisted so the
-            # audit trail / TaskPlanPanel can show the plan and CR-3 can re-read the
+            # task_plan decomposition (F-007 §4/§5, CR-NS-020 CR-2; v2: folds into Návrh — CR-V2-011).
+            # Persisted so the audit trail / TaskPlanPanel can show the plan and CR-3 can re-read the
             # cross-cutting rules from this gate_report payload.
             # mode="json" so any UUID in the plan serializes to a str for JSONB.
             "plan": parsed.plan.model_dump(mode="json") if parsed.plan is not None else None,
             "cross_cutting_rules": parsed.cross_cutting_rules,
-            # Per-task Auditor verdict (F-007 §6, CR-NS-020 CR-4) — persisted for CR-5's
-            # per-task audit panel (the diff + findings the Director can drill into).
-            "task_pass": parsed.task_pass,
-            # Structured Coordinator proposal (F-008 §2 A1, E7) — persisted so apply_coordinator_
-            # recommendation can read + execute it and the FE can show + label the proposal.
+            # v1 per-task Auditor verdict (removed by CR-V2-006; defensive read — see note above).
+            "task_pass": getattr(parsed, "task_pass", None),
+            # v1 structured Coordinator proposal (removed by CR-V2-006; defensive read — see note above).
+            # The relay executor (apply_coordinator_recommendation) is removed wholesale by CR-V2-009.
             "coordinator_directive": (
-                parsed.coordinator_directive.model_dump(mode="json")
-                if parsed.coordinator_directive is not None
+                _cd.model_dump(mode="json")
+                if (_cd := getattr(parsed, "coordinator_directive", None)) is not None
                 else None
             ),
             # Caller-supplied structural markers (e.g. is_fix_edit) for the deterministic
@@ -1635,7 +1644,7 @@ async def invoke_agent_with_parse_retry(
     prompt: str,
     timeout: Optional[int] = None,
     on_event: Optional[claude_agent.EventCallback] = None,
-    recipient: str = "director",
+    recipient: str = "manazer",
     on_message: Optional[MessageCallback] = None,
     extra_payload: Optional[dict[str, Any]] = None,
     metrics: Optional["_DispatchMetrics"] = None,

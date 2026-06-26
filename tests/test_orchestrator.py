@@ -37,6 +37,18 @@ def _block_dict(stage="gate_a", kind="gate_report", summary="ok", awaiting="dire
     return body
 
 
+# CR-V2-007: a minimal valid Návrh task plan. The CR-V2-006 content contract requires a non-empty
+# ``plan`` (EPIC→FEAT→TASK) on a ``stage=navrh`` + ``kind=gate_report`` block (the turn that closes
+# the Návrh phase, per CR-V2-011), and CR-V2-004 narrowed ``awaiting`` to ``{manazer, none}``. The
+# AI-Agent invoke_agent units below therefore pass ``awaiting="manazer", plan=_NAVRH_PLAN`` rather
+# than relying on the v1-era ``_block`` defaults (``awaiting="director"``, no plan), which those two
+# sibling validators now reject FIRST. (``_block``'s defaults stay v1 for the deferred-RED
+# Gate-E/11-stage integration tests that still assert the old shape — re-pointed in CR-V2-009..014.)
+_NAVRH_PLAN = {
+    "epics": [{"title": "E1", "feats": [{"title": "F1", "tasks": [{"title": "T1", "task_type": "backend"}]}]}]
+}
+
+
 def _make_version(db_session):
     user = User(
         username=f"u_{uuid.uuid4().hex[:8]}",
@@ -167,14 +179,21 @@ def test_resolve_orch_session_creates_then_reuses(db_session):
 
 async def test_invoke_agent_records_message(db_session, fake_claude):
     version, _ = _make_version(db_session)
-    fake_claude.response = _block(stage="navrh", kind="gate_report", summary="14 endpoints", commits=["abc123"])
+    fake_claude.response = _block(
+        stage="navrh",
+        kind="gate_report",
+        summary="14 endpoints",
+        awaiting="manazer",
+        commits=["abc123"],
+        plan=_NAVRH_PLAN,
+    )
     result = await orchestrator.invoke_agent(
         db_session, version_id=version.id, role="ai_agent", stage="navrh", prompt="go"
     )
     assert isinstance(result, PipelineStatusBlock)
     msgs = _msgs(db_session, version.id)
     assert len(msgs) == 1
-    assert msgs[0].author == "designer"
+    assert msgs[0].author == "ai_agent"  # invoke_agent records author=role (CR-V2-007: the AI Agent)
     assert msgs[0].kind == "gate_report"
     assert msgs[0].payload["commits"] == ["abc123"]
 
@@ -203,7 +222,14 @@ async def test_invoke_agent_prefers_structured_output(db_session, fake_claude):
     fake_claude.response = (
         "no fence here — just prose",
         None,
-        _block_dict(stage="gate_b", kind="gate_report", summary="from structured", commits=["s1"]),
+        _block_dict(
+            stage="navrh",
+            kind="gate_report",
+            summary="from structured",
+            awaiting="manazer",
+            commits=["s1"],
+            plan=_NAVRH_PLAN,
+        ),
     )
     result = await orchestrator.invoke_agent(
         db_session, version_id=version.id, role="ai_agent", stage="navrh", prompt="go"
@@ -221,7 +247,9 @@ async def test_invoke_agent_structured_invalid_falls_back_to_fence(db_session, f
     result text — non-breaking + rollout-safe (the fence parser STAYS as the fallback)."""
     version, _ = _make_version(db_session)
     fake_claude.response = (
-        _block(stage="navrh", kind="gate_report", summary="from fence"),  # valid fence in the text
+        _block(
+            stage="navrh", kind="gate_report", summary="from fence", awaiting="manazer", plan=_NAVRH_PLAN
+        ),  # valid fence in the text
         None,
         _block_dict(stage="not_a_real_stage", summary="bogus"),  # structured fails (unknown stage)
     )
@@ -252,7 +280,7 @@ async def test_invoke_agent_passes_status_schema_to_claude(db_session, fake_clau
     """R3: the engine always invokes the agent with the PipelineStatusBlock JSON Schema (Gate E is the
     only no-schema path — that's dialogue.py, not invoke_agent)."""
     version, _ = _make_version(db_session)
-    fake_claude.response = _block(stage="navrh", kind="gate_report", summary="ok")
+    fake_claude.response = _block(stage="navrh", kind="gate_report", summary="ok", awaiting="manazer", plan=_NAVRH_PLAN)
     await orchestrator.invoke_agent(db_session, version_id=version.id, role="ai_agent", stage="navrh", prompt="go")
     assert fake_claude.calls  # the fake captured the call
     assert fake_claude.calls[-1]["json_schema"] == orchestrator.PIPELINE_STATUS_JSON_SCHEMA
@@ -266,7 +294,7 @@ async def test_invoke_agent_records_usage_and_timing(db_session, fake_claude):
     version, _ = _make_version(db_session)
     # FakeClaude returns whatever `response` is — a (text, UsageMetadata) tuple here, like real claude.
     fake_claude.response = (
-        _block(stage="navrh", kind="gate_report", summary="ok"),
+        _block(stage="navrh", kind="gate_report", summary="ok", awaiting="manazer", plan=_NAVRH_PLAN),
         claude_agent.UsageMetadata(input_tokens=100, output_tokens=40, model="claude-z"),
     )
     await orchestrator.invoke_agent(db_session, version_id=version.id, role="ai_agent", stage="navrh", prompt="go")
@@ -279,7 +307,9 @@ async def test_invoke_agent_records_usage_and_timing(db_session, fake_claude):
 async def test_invoke_agent_no_usage_records_none_not_zeros(db_session, fake_claude):
     """A bare-text response (no usage envelope) → payload.usage is None, never fabricated zeros (WS-D)."""
     version, _ = _make_version(db_session)
-    fake_claude.response = _block(stage="navrh", kind="gate_report", summary="ok")  # bare str → usage None
+    fake_claude.response = _block(
+        stage="navrh", kind="gate_report", summary="ok", awaiting="manazer", plan=_NAVRH_PLAN
+    )  # bare str → usage None
     await orchestrator.invoke_agent(db_session, version_id=version.id, role="ai_agent", stage="navrh", prompt="go")
     msg = _msgs(db_session, version.id)[0]
     assert msg.payload["usage"] is None
@@ -380,7 +410,9 @@ async def test_parse_retry_keeps_model_effort(db_session, fake_claude):
     version, _ = _make_version_with_owner_config(db_session, [("ai_agent", "claude-sonnet-4-6", "high")])
     # Primary (prompt "go") fails to parse; the retry (prompt starts "Tvoj…") emits a valid block.
     fake_claude.response = lambda prompt: (
-        _block(stage="navrh", kind="gate_report", summary="ok") if prompt.startswith("Tvoj") else "no status block"
+        _block(stage="navrh", kind="gate_report", summary="ok", awaiting="manazer", plan=_NAVRH_PLAN)
+        if prompt.startswith("Tvoj")
+        else "no status block"
     )
     result = await orchestrator.invoke_agent_with_parse_retry(
         db_session, version_id=version.id, role="ai_agent", stage="navrh", prompt="go"
@@ -517,7 +549,10 @@ async def test_parse_retry_accumulates_usage_and_attempts(db_session, monkeypatc
     retry, and timing.parse_attempts counts them (WS-D)."""
     seq = [
         ("garbage — not a valid status block", claude_agent.UsageMetadata(10, 5, "m")),  # ParseFailure
-        (_block(stage="navrh", kind="gate_report", summary="ok"), claude_agent.UsageMetadata(20, 8, "m")),
+        (
+            _block(stage="navrh", kind="gate_report", summary="ok", awaiting="manazer", plan=_NAVRH_PLAN),
+            claude_agent.UsageMetadata(20, 8, "m"),
+        ),
     ]
     calls = {"n": 0}
 
@@ -7134,16 +7169,16 @@ async def test_invoke_agent_bumps_last_input_at(db_session, fake_claude):
     stale = datetime.now(timezone.utc) - timedelta(days=10)
     db_session.execute(
         update(OrchestratorSession)
-        .where(OrchestratorSession.project_slug == project.slug, OrchestratorSession.role == "designer")
+        .where(OrchestratorSession.project_slug == project.slug, OrchestratorSession.role == "ai_agent")
         .values(last_input_at=stale)
     )
     db_session.flush()
 
-    await orchestrator.invoke_agent(db_session, version_id=version.id, role="designer", stage="gate_a", prompt="x")
+    await orchestrator.invoke_agent(db_session, version_id=version.id, role="ai_agent", stage="navrh", prompt="x")
 
     row = db_session.execute(
         select(OrchestratorSession).where(
-            OrchestratorSession.project_slug == project.slug, OrchestratorSession.role == "designer"
+            OrchestratorSession.project_slug == project.slug, OrchestratorSession.role == "ai_agent"
         )
     ).scalar_one()
     assert row.last_input_at > stale  # bumped on the turn
