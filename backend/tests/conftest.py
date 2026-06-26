@@ -39,7 +39,7 @@ from backend.core.security import (
 )
 from backend.db.models.bugs import Bug  # noqa: F401
 from backend.db.models.foundation import User
-from backend.db.models.projects import ModuleDependency, Project, ProjectModule  # noqa: F401
+from backend.db.models.projects import Project  # noqa: F401
 from backend.db.models.system_settings import SystemSetting  # noqa: F401
 from backend.db.models.tasks import Epic  # noqa: F401
 from backend.db.models.versions import Version  # noqa: F401
