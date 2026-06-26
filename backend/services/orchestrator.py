@@ -37,7 +37,7 @@ from typing import Any, Optional
 
 import yaml
 from pydantic import ValidationError
-from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -567,8 +567,8 @@ def _version_spec_rel(version_number: str) -> str:
 
     Single source for the version-scoped spec-tree location the build artifacts live under (the
     ``customer-requirements.md`` Zadanie, the Príprava ``specification.md`` Špecifikácia, and the
-    Návrh design doc + task plan). Mirrors the convention the metrics/footprint reads already use
-    (:func:`_gate_e_question_budget`, ``_write_task_plan_doc``)."""
+    Návrh design doc + task plan). Mirrors the convention the Auditor's upfront review reads from
+    (:func:`_auditor_upfront_directive`) + ``_write_task_plan_doc``."""
     return f"docs/specs/versions/v{version_number}"
 
 
@@ -667,6 +667,72 @@ def _navrh_directive(db: Session, version_id: uuid.UUID) -> str:
         "nezlomil. Tento ťah UZAVRI `kind=done` (návrhový dokument je hotový).\n"
         "4. Ak je akýkoľvek detail návrhu ešte nejednoznačný, nastav `kind=question`, polož otázku Manažérovi "
         "a ZASTAV — schvaľovací bod po Návrhu tvoje otázky vynesie.\n"
+        "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
+    )
+
+
+def _auditor_upfront_directive(db: Session, version_id: uuid.UUID) -> str:
+    """The Auditor's UPFRONT spec/design review brief (CR-V2-013; AUD-1(a), AUD-5, NAVRH-4, AUTON-5).
+
+    DESIGN-BEARING (flagged for the Manažér): this prompt DEFINES the independent Auditor's upfront-review
+    behaviour — the OLD Customer agent's Gate-E function, now done by the independent Auditor. Drafted from
+    ``nex-studio-v2-design.md`` §5.1(2) (Auditor rules → "Upfront spec-completeness") + the design doc
+    §3.x.79(a). The Auditor's ``Pravidlá agenta`` charter (``templates/auditor-charter.md``) carries the
+    matching standing rules; this is the per-turn orchestrator injection naming the concrete Špecifikácia +
+    design-doc paths the Auditor reads.
+
+    After Návrh — before the build commits to coding — the independent Auditor scans the brief
+    (``specification.md``) + the AI Agent's design doc (``design.md``) for **holes / ambiguities /
+    contradictions** and emits ONE ``verdict`` (the CR-V2-006 repurposed findings shape):
+
+      * **READ + RUN-ONLY (independence):** the Auditor READS the artifacts (and may run the app) — it
+        NEVER writes code, edits a file, or commits. It FINDS; the AI Agent FIXES (D2/D5 blind-spot
+        safeguard). The brief forbids any edit/commit explicitly.
+      * **verdict=true (PASS)** — the spec + design are sound enough to build; ``findings`` may still carry
+        non-blocking notes. The post-Návrh schvaľovací bod is then governed by the Miera autonómie dial.
+      * **verdict=false (FAIL = a spec/design HOLE)** — list the concrete holes in ``findings`` and the
+        targeted clarification/revision scope in ``proposed_fix``. A hole ESCALATES to the Manažér (AUD-4):
+        the build STOPS at the post-Návrh schvaľovací bod regardless of the dial; the Manažér clarifies /
+        revises the Špecifikácia / Návrh, then re-approves. (Independence: the Auditor proposes the fix
+        scope, it never applies it.)
+      * **Dial-scaled depth (OQ-9 / AUTON-5):** review intensity scales INVERSELY with human oversight —
+        higher autonomy → deeper, more adversarial review (the Auditor is the safety net that compensates
+        for fewer human stops); lower autonomy → lighter. The ``--effort`` flag is already coupled to the
+        dial in :func:`_resolve_dispatch_overrides` for the Auditor role; the prose below tells the Auditor
+        to MATCH its scrutiny to that level.
+
+    Its findings surface at the post-Návrh stop ALONGSIDE the AI Agent's own clarification questions — no
+    per-question Customer↔Designer ping-pong (the old Gate-E loop is retired; this is ONE invocation)."""
+    version_number = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
+    spec_rel = _priprava_spec_rel(version_number)
+    design_rel = _navrh_design_doc_rel(version_number)
+    level = resolve_miera_autonomie(db, version_id)
+    # Dial → review-depth instruction (OQ-9): higher autonomy (fewer Manažér stops) → deeper, more
+    # adversarial review; lower autonomy → lighter (the Manažér + self-check carry more of the load).
+    depth = (
+        "Miera autonómie je VYSOKÁ (Manažér je málokedy v slučke) — rob DÔKLADNÚ, adverzariálnu previerku: "
+        "si jediné nezávislé oči, kompenzuješ menej ľudských kontrol."
+        if level in ("plna", "len_na_konci")
+        else "Miera autonómie je nižšia (Manažér kontroluje často) — rob ZAMERANÚ, ľahšiu previerku na "
+        "rizikové miesta; ťažšiu kontrolu nesie Manažér + self-check AI Agenta."
+    )
+    return (
+        "UPFRONT PREVIERKA (nezávislý Auditor, po fáze Návrh, pred začatím programovania).\n"
+        f"1. NAČÍTAJ schválenú Špecifikáciu (`{spec_rel}`) + návrhový dokument (`{design_rel}`) + Zadanie a "
+        "existujúci kód/KB. Si NEZÁVISLÝ overovateľ MIMO tímu AI Agenta — kontroluj z VONKU (žiadny agent "
+        "nedokáže auditovať sám seba).\n"
+        "2. Hľadaj MEDZERY / nejednoznačnosti / protirečenia v Špecifikácii a Návrhu: chýbajúce detaily, "
+        "rozpory medzi zadaním a návrhom, nepokryté hraničné prípady, rizikové predpoklady (bezpečnosť, "
+        "peniaze, hlavný kontrakt). Buď adverzariálny — aktívne hľadaj diery, nepotvrdzuj happy-path.\n"
+        f"3. {depth}\n"
+        "4. SI READ + RUN-ONLY: smieš ČÍTAŤ (a prípadne spustiť aplikáciu na overenie), ale NIKDY neupravuj "
+        "súbor, nepíš kód ani necommituj. TY NÁJDEŠ — opravuje AI Agent (zachovaná nezávislosť).\n"
+        "5. Vráť `kind=verdict`:\n"
+        "   - ak je Špecifikácia + Návrh bez blokujúcej medzery → `verdict=true` (PASS); do `findings` daj "
+        "prípadné neblokujúce poznámky (alebo prázdne).\n"
+        "   - ak nájdeš medzeru (HOLE) → `verdict=false` (FAIL); konkrétne diery vymenuj v `findings` a do "
+        "`proposed_fix` napíš ZAMERANÝ rozsah vyjasnenia/úpravy pre Manažéra (NEvykonávaj ho). Medzera sa "
+        "eskaluje Manažérovi — build sa zastaví na schvaľovacom bode po Návrhu.\n"
         "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
     )
 
@@ -1032,79 +1098,11 @@ def _gate_e_open_findings(db: Session, version_id: uuid.UUID) -> int:
     return max(0, raised - resolved)
 
 
-# PIPELINE-AUTONOMY Phase 3 (design docs/architecture/pipeline-autonomy.md §2.1): the Gate E question
-# budget scales with the version's SPEC footprint — the only artifact that exists at gate_e (task_plan is
-# the NEXT stage, so it CANNOT drive the depth — adversarial Issue 8). A small tweak → a few questions to
-# the touched spots; a greenfield → a full walk, capped by the ceiling. floor = the MINIMUM review depth
-# (Gate E exists to catch spec gaps — under-review is the opposite failure); ceiling = the upper bound on
-# the AUTONOMOUS Branch-A run — reaching it ESCALATES to the Director (extend or close), NEVER silent-closes
-# (§2.1, the threshold-downgrade anti-pattern). Both clamp to absolute floors/caps, so a missing/unreadable
-# spec tree (tests / no repo) degrades to a sane small budget — never 0, never unbounded.
-_GATE_E_SPEC_LINES_PER_FLOOR_Q = 500  # one floor question per ~500 lines of spec footprint
-_GATE_E_FLOOR_MIN = 3
-_GATE_E_FLOOR_MAX = 10
-_GATE_E_CEILING_MULTIPLE = 3  # ceiling = floor × 3 — headroom for legitimate deep review before escalating
-_GATE_E_CEILING_MIN = 6
-_GATE_E_CEILING_MAX = 30
-# Topic-boundary slack for the runner's auto-chain backstop (:func:`auto_chain_limit`): the Customer also
-# auto-continues across clean topic boundaries (not just questions), and a boundary is not a question, so it
-# does not consume the question budget. This bounds how many boundary continues the backstop tolerates above
-# the question ceiling before it trips — a degenerate boundary-only loop (no questions, no coverage_complete)
-# is an agent bug, caught here exactly as a runaway chain is today.
-_GATE_E_TOPIC_SLACK = 12
-
-
-def _gate_e_spec_footprint_lines(db: Session, version_id: uuid.UUID) -> int:
-    """Total line count of the version's spec markdown tree — a DETERMINISTIC scope proxy for the Gate E
-    question budget (§2.1). Reads ``docs/specs/versions/v<X>/**/*.md`` in the orchestrated repo (the Gate A
-    ``development-spec.md`` + the BE/FE spec package + ``customer-requirements.md``). Returns 0 when the repo
-    or the spec dir is absent (tests / fresh project) — the caller clamps that to the floor, never crashes."""
-    slug = _project_slug_for_version(db, version_id)
-    version_number = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one_or_none()
-    if version_number is None:
-        return 0
-    spec_dir = claude_agent.PROJECTS_ROOT / slug / "docs" / "specs" / "versions" / f"v{version_number}"
-    if not spec_dir.exists():
-        return 0
-    total = 0
-    for path in sorted(spec_dir.rglob("*.md")):
-        try:
-            with path.open("r", encoding="utf-8", errors="ignore") as fh:
-                total += sum(1 for _ in fh)
-        except OSError:  # an unreadable file degrades to skip, never crashes the budget
-            continue
-    return total
-
-
-def _gate_e_question_budget(db: Session, version_id: uuid.UUID) -> tuple[int, int]:
-    """``(floor, ceiling)`` for the Gate E question budget, scaled to the version's spec footprint (§2.1).
-
-    floor = the minimum questions a healthy review asks (clamped to ``[_GATE_E_FLOOR_MIN, _GATE_E_FLOOR_MAX]``);
-    ceiling = the upper bound on the autonomous Branch-A run (``floor × _GATE_E_CEILING_MULTIPLE``, clamped to
-    ``[_GATE_E_CEILING_MIN, _GATE_E_CEILING_MAX]`` and never below ``floor``). A small spec → small floor + small
-    ceiling (few questions); a large spec → larger budget, still bounded. Reaching the ceiling ESCALATES to the
-    Director, it never silent-closes (the floor/ceiling-with-escalation semantics, design §2.1)."""
-    lines = _gate_e_spec_footprint_lines(db, version_id)
-    floor = min(_GATE_E_FLOOR_MAX, max(_GATE_E_FLOOR_MIN, lines // _GATE_E_SPEC_LINES_PER_FLOOR_Q))
-    ceiling = min(_GATE_E_CEILING_MAX, max(_GATE_E_CEILING_MIN, floor * _GATE_E_CEILING_MULTIPLE))
-    return floor, max(ceiling, floor)
-
-
-def _gate_e_question_count(db: Session, version_id: uuid.UUID) -> int:
-    """How many Customer questions Gate E has asked so far — the budget unit (§2.1). A Customer ``question``
-    turn is recorded ``author='customer'`` ∧ ``kind='question'`` (a ``blocked`` Customer block maps to
-    ``question`` too, :func:`invoke_agent`); topic boundaries (``gate_report``) are NOT questions and never
-    count. Deterministic from the message log, like :func:`_gate_e_open_findings`."""
-    return db.execute(
-        select(func.count())
-        .select_from(PipelineMessage)
-        .where(
-            PipelineMessage.version_id == version_id,
-            PipelineMessage.stage == "gate_e",
-            PipelineMessage.author == "customer",
-            PipelineMessage.kind == "question",
-        )
-    ).scalar_one()
+# (CR-V2-013: the Gate-E per-question budget machinery — ``_gate_e_spec_footprint_lines`` /
+# ``_gate_e_question_budget`` / ``_gate_e_question_count`` + the ``_GATE_E_*`` floor/ceiling/topic-slack
+# constants — is REMOVED with the rest of the Gate-E sub-state-machine. The v2 Auditor's UPFRONT review
+# (after Návrh) is ONE invocation, not a budgeted Customer↔Designer question loop, so there is no
+# per-question budget to scale; its DEPTH scales with the dial via :func:`auditor_effort_for_level`.)
 
 
 def auto_chain_limit(db: Session, version_id: uuid.UUID) -> int:
@@ -1146,146 +1144,14 @@ def _verifikacia_passed(db: Session, version_id: uuid.UUID) -> bool:
     return bool(latest and latest.payload and latest.payload.get("verdict") == "PASS")
 
 
-def _gate_e_coverage_complete(report: Optional[PipelineMessage]) -> bool:
-    """Whether the latest Customer boundary signalled all 7 okruhy covered (§4)."""
-    return bool(report and report.payload and report.payload.get("coverage_complete"))
-
-
-def _latest_designer_answer(db: Session, version_id: uuid.UUID) -> Optional[PipelineMessage]:
-    """Most recent Designer answer in Gate E (or ``None``) — carries ``gap_found`` /
-    ``proposed_fix`` in its payload, which gate the Branch B ``fix`` / ``leave`` actions."""
-    return db.execute(
-        select(PipelineMessage)
-        .where(
-            PipelineMessage.version_id == version_id,
-            PipelineMessage.author == "designer",
-            PipelineMessage.stage == "gate_e",
-            PipelineMessage.kind == "answer",
-        )
-        .order_by(PipelineMessage.seq.desc())
-        .limit(1)
-    ).scalar_one_or_none()
-
-
-def _latest_gate_e_milestone(db: Session, version_id: uuid.UUID) -> Optional[PipelineMessage]:
-    """Latest gate_e milestone — a Designer ``answer`` or a Customer ``gate_report`` (by ``seq``).
-
-    Distinguishes a per-question continue (latest = Designer answer → relay the answer
-    back to the Customer) from a topic-boundary continue (latest = Customer gate_report
-    → generic, no stale answer leaked into the next okruh). Symmetric relay (§5)."""
-    return db.execute(
-        select(PipelineMessage)
-        .where(
-            PipelineMessage.version_id == version_id,
-            PipelineMessage.stage == "gate_e",
-            or_(
-                and_(PipelineMessage.author == "designer", PipelineMessage.kind == "answer"),
-                and_(PipelineMessage.author == "customer", PipelineMessage.kind == "gate_report"),
-            ),
-        )
-        .order_by(PipelineMessage.seq.desc())
-        .limit(1)
-    ).scalar_one_or_none()
-
-
-def _latest_coordinator_message_content(db: Session, version_id: uuid.UUID) -> Optional[str]:
-    """Content of the most recent Coordinator message (any kind) for a version.
-
-    In Gate E Branch B this is the Coordinator's recommendation on a proposed fix —
-    composed into the Coordinator-relayed ``fix`` directive so the decision travels
-    Director→Coordinator→Designer (the Coordinator never drops out, §2)."""
-    return db.execute(
-        select(PipelineMessage.content)
-        .where(PipelineMessage.version_id == version_id, PipelineMessage.author == "coordinator")
-        .order_by(PipelineMessage.seq.desc())
-        .limit(1)
-    ).scalar_one_or_none()
-
-
-def _gate_e_gap_open(db: Session, version_id: uuid.UUID) -> bool:
-    """Whether the latest Designer answer flagged a gap (Branch B) — gates ``fix``/``leave``."""
-    ans = _latest_designer_answer(db, version_id)
-    return bool(ans and ans.payload and ans.payload.get("gap_found"))
-
-
-_GATE_E_ROLE_SK = {
-    "customer": "Zákazník",
-    "designer": "Návrhár",
-    "director": "Director",
-    "coordinator": "Koordinátor",
-    "system": "Systém",
-}
-
-
-def gate_e_audit_markdown(messages: list[PipelineMessage], version_number: str) -> str:
-    """Assemble the Gate E audit record (F-007-gate-e §4) from the stage=gate_e thread.
-
-    Pure (no DB/FS): covered okruhy + findings recorded during the review + the
-    full Customer↔Designer↔Director transcript (seq-ordered). Written on final
-    sign-off — by then the open-finding gate has passed, so closure is clean.
-    """
-    topics: list[str] = []
-    findings: list[str] = []
-    for m in messages:
-        if not m.payload:
-            continue
-        if m.author == "customer" and m.kind == "gate_report" and m.payload.get("topic_done"):
-            topic = m.payload.get("topic")
-            if topic and topic not in topics:
-                topics.append(topic)
-        for finding in m.payload.get("findings") or []:
-            if finding not in findings:
-                findings.append(finding)
-
-    lines = [f"# Gate E — zákaznícka previerka (audit) — v{version_number}", ""]
-    lines += ["## Pokryté okruhy", ""]
-    lines += ([f"- {t}" for t in topics] if topics else ["(žiadne zaznamenané)"]) + [""]
-    lines += ["## Nálezy zaznamenané počas previerky", ""]
-    lines += ([f"- {f}" for f in findings] if findings else ["Žiadne otvorené nálezy."]) + [""]
-    lines += ["## Priebeh previerky (riešenia v poradí)", ""]
-    for m in messages:
-        who = _GATE_E_ROLE_SK.get(m.author, m.author)
-        lines.append(f"**{who}:** {m.content}")
-    lines.append("")
-    return "\n".join(lines)
-
-
-def _write_gate_e_audit(db: Session, version_id: uuid.UUID) -> str:
-    """Persist the Gate E audit at final sign-off (F-007-gate-e §4) → returns the rel path.
-
-    Records the summary as a ``pipeline_message`` (FS-independent audit trail) and
-    best-effort writes ``docs/specs/versions/v<X>/customer-dialogue.md`` into the
-    orchestrated project's repo (only when that repo exists — tests/no-repo skip).
-    """
-    slug = _project_slug_for_version(db, version_id)
-    version_number = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
-    messages = (
-        db.execute(
-            select(PipelineMessage)
-            .where(PipelineMessage.version_id == version_id, PipelineMessage.stage == "gate_e")
-            .order_by(PipelineMessage.seq.asc())
-        )
-        .scalars()
-        .all()
-    )
-    md = gate_e_audit_markdown(messages, version_number)
-    rel = f"docs/specs/versions/v{version_number}/customer-dialogue.md"
-    _record_message(
-        db,
-        version_id=version_id,
-        stage="gate_e",
-        author="system",
-        recipient="director",
-        kind="notification",
-        content=f"Gate E audit uložený: {rel}",
-        payload={"path": rel, "gate_e_audit": md},
-    )
-    project_root = claude_agent.PROJECTS_ROOT / slug
-    if project_root.exists():  # real orchestrated repo — write the spec-tree artifact
-        out = project_root / rel
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(md, encoding="utf-8")
-    return rel
+# (CR-V2-013: the Gate-E milestone / gap / coverage helpers — ``_gate_e_coverage_complete``,
+# ``_latest_designer_answer``, ``_latest_gate_e_milestone``, ``_latest_coordinator_message_content``,
+# ``_gate_e_gap_open`` — and the Gate-E audit-markdown writers — ``_GATE_E_ROLE_SK``,
+# ``gate_e_audit_markdown``, ``_write_gate_e_audit`` — are REMOVED with the rest of the Gate-E
+# sub-state-machine. The 4-phase model has no Customer↔Designer↔Director Gate-E thread to mine: the v2
+# Auditor's upfront review (after Návrh) emits its findings as ONE ``verdict`` message — see
+# :func:`_run_auditor_upfront_review` — and the durable record is that message + the Návrh tab, not a
+# separate customer-dialogue.md.)
 
 
 def _render_task_plan_md(db: Session, version: Version, project: Project) -> str:
@@ -1696,13 +1562,18 @@ async def invoke_agent(
         # escalation (which records the only message for this no-message turn) can fold them in.
         return replace(parsed, usage=turn_metrics.usage_payload(), timing=turn_metrics.timing_payload())
 
-    # Map the agent block.kind → message kind (question/blocked → question).
+    # Map the agent block.kind → message kind (question/blocked → question). The Auditor's ``verdict``
+    # block (CR-V2-006 repurposed shape; emitted by the upfront review CR-V2-013 + the end Verifikácia
+    # CR-V2-014) is preserved as a ``verdict`` message kind (a valid ``ck_pipeline_message_kind`` value),
+    # so the Manažér's review view / the Verifikácia tab can read the structured verdict + findings
+    # instead of a downgraded gate_report.
     msg_kind = "question" if parsed.kind in ("question", "blocked") else parsed.kind
     if msg_kind not in (
         "kickoff",
         "question",
         "answer",
         "gate_report",
+        "verdict",
         "notification",
     ):
         msg_kind = "gate_report"
@@ -3732,10 +3603,11 @@ async def run_dispatch(
     re-dispatch (see :func:`directive_for_action`). When present it IS the agent's prompt; otherwise the
     generic :func:`_directive_for` is used. Threading it here makes the Manažér↔agent loop two-way.
 
-    ``gate_e_dispatch`` — DEFERRED no-op (CR-V2-009): the v1 Gate-E sub-flow selector. The 4-phase model
-    has no Gate E (the Auditor's upfront review replaces it in CR-V2-013), so this is always ``None`` from
-    the route now. The parameter is kept for signature stability with the runner/route until those FE
-    contract CRs drop it.
+    ``gate_e_dispatch`` — VESTIGIAL no-op: the v1 Gate-E sub-flow selector. CR-V2-013 REMOVED the Gate-E
+    machinery wholesale (the Auditor's upfront review after Návrh replaces it — :func:`_run_navrh_round`
+    invokes :func:`_run_auditor_upfront_review`), so this is always ``None`` and reaches no Gate-E code. The
+    parameter is kept ONLY for signature stability with the runner/route (out of this CR's file scope) until
+    the FE-contract CR (CR-V2-021) drops it from ``pipeline.py``/``pipeline_runner.py``.
     """
     state = _get_state(db, version_id)
     if state is None:
@@ -3764,10 +3636,11 @@ async def run_dispatch(
     # task_plan incremental passes / kickoff triage / release publish) is collapsed: each phase runs as a
     # generic agent turn through the shared invoke path, with a per-phase BRIEF. Milestone C/D give each
     # phase its rich brief — Príprava (the interactive Zadanie→Špecifikácia dialogue, CR-V2-010) + Návrh
-    # (the design doc + task plan, CR-V2-011) + Programovanie (the self-checking loop, CR-V2-012 above)
-    # here; Verifikácia (CR-V2-014) next. The v1 ``_run_gate_e_round`` survives as a deferred-RED helper
-    # CR-V2-013 re-points, but is NOT reachable from this 4-phase routing (``_run_task_plan_round`` folded
-    # into Návrh, CR-V2-011; ``_run_build_round`` was rebuilt + re-homed to Programovanie, CR-V2-012).
+    # (the design doc + task plan, CR-V2-011, which also runs the Auditor's upfront review, CR-V2-013) +
+    # Programovanie (the self-checking loop, CR-V2-012 above) here; Verifikácia (CR-V2-014) next. The v1
+    # ``_run_gate_e_round`` per-question machinery is REMOVED wholesale (CR-V2-013) — there is no Gate-E
+    # routing anywhere in this 4-phase dispatch (``_run_task_plan_round`` folded into Návrh, CR-V2-011;
+    # ``_run_build_round`` was rebuilt + re-homed to Programovanie, CR-V2-012).
     if directive is not None:
         prompt = directive  # the Manažér's framed uprav/ask/answer message IS the prompt (direct comms)
     elif stage == "priprava":
@@ -3846,279 +3719,11 @@ async def run_dispatch(
     return state
 
 
-_GATE_E_NO_EDIT = (
-    "odpovedz — vysvetli, či je to pokryté; ak je to medzera, LEN navrhni riešenie "
-    "(nastav gap_found=true + proposed_fix), NEUPRAVUJ žiadny súbor"
-)
-
-
-async def _block_failed(
-    state: PipelineState,
-    db: Session,
-    reason: str,
-    *,
-    failed: Optional[ParseFailure] = None,
-    on_message: Optional[MessageCallback] = None,
-) -> PipelineState:
-    # Plain next_action — no raw technical reason on the board (CR-NS-022 §2 refinement). The
-    # ``reason`` is kept internal (logged); the Director acts via Vrátiť / Konzultovať.
-    logger.info("pipeline %s blocked at %s: %s", state.version_id, state.current_stage, reason)
-    state.status = "blocked"
-    state.block_reason = "agent_error"  # R4 (D1): a worker turn failed (build-task / sub-flow agent error)
-    state.next_action = "Blokované — pozri priebeh a rozhodni (Vrátiť / Konzultovať)."
-    # WS-D (CR-NS-036): this block path records no relay message of its own, so a worker
-    # parse-exhaustion's tokens would otherwise be lost. When the failed turn carried usage, record a
-    # plain system→director note carrying it (the ONLY message on this path — not a duplicate) so
-    # aggregate_pipeline_usage counts it; the note also gives the Director a reason this blocked.
-    # Gated explicitly on usage (CR-036 behavior) — NOT on _failure_metrics_payload being non-empty,
-    # which since WS-E (CR-NS-037) also returns timing-only; this preserves the original usage-gating.
-    if failed is not None and failed.usage is not None:
-        msg = _record_message(
-            db,
-            version_id=state.version_id,
-            stage=state.current_stage,
-            author="system",
-            recipient="director",
-            kind="notification",
-            content="Fáza zablokovaná — agent nevrátil platný výstup ani po opravách; pozri priebeh a rozhodni.",
-            payload=_failure_metrics_payload(failed),
-        )
-        if on_message is not None:
-            await on_message(msg)
-    db.flush()
-    return state
-
-
-async def _coordinator_review_gap(
-    db: Session,
-    state: PipelineState,
-    designer_block: PipelineStatusBlock,
-    on_message: Optional[MessageCallback] = None,
-) -> None:
-    """Branch B upward leg (§2): the Coordinator reviews the Designer's proposed fix and
-    records a recommendation for the Director. Reuses the parse-retry; its message is the
-    recommendation later composed into the Coordinator-relayed ``fix`` directive."""
-    review = await invoke_agent_with_parse_retry(
-        db,
-        version_id=state.version_id,
-        role="coordinator",
-        stage="gate_e",
-        prompt=(
-            f"Návrhár našiel medzeru a navrhol opravu (bez editu): {designer_block.proposed_fix}. "
-            "Prekontroluj návrh a daj Directorovi odporúčanie (opraviť / ponechať + prečo)."
-            + _DIRECTOR_FORMAT_BRIEF
-            + "Ukonči <<<PIPELINE_STATUS>>> blokom (F-007-orchestration-cockpit.md §5.3)."
-        ),
-        on_message=on_message,
-        # CR-2: the Gate-E gap recommendation the Director reads at the per-question stop → Director-facing
-        # by construction → always the prominent rail.
-        extra_payload={"is_director_brief": True},
-    )
-    if isinstance(review, ParseFailure):
-        # WS-E (CR-NS-037): a discarded gap-review parse-failure was a fully silent no-op → make it
-        # visible + count its tokens. Still non-blocking advisory (the function returns None as before).
-        await _record_internal_turn_parse_failure(
-            db,
-            state.version_id,
-            "gate_e",
-            turn_label="Revízia navrhovanej opravy Koordinátorom",
-            failed=review,
-            on_message=on_message,
-        )
-
-
-def _gate_e_scope_directive(db: Session, version_id: uuid.UUID) -> str:
-    """The scope/budget prefix injected on EVERY Customer Gate E turn (design §2.1, Phase 3 — orchestrator
-    side; the per-project Customer charter carries the matching depth rules). Tells the Customer to walk ONLY
-    the okruhy/screens this version actually touches (small change → a few targeted questions, greenfield →
-    a full walk) and the scope-scaled question budget (floor target + ceiling). Derived deterministically from
-    the version's spec footprint (:func:`_gate_e_question_budget`)."""
-    floor, ceiling = _gate_e_question_budget(db, version_id)
-    asked = _gate_e_question_count(db, version_id)
-    return (
-        "ROZSAH PREVIERKY (Gate E, škálovaný podľa footprintu špecifikácie tejto verzie): choď LEN cez "
-        "okruhy/obrazovky, ktoré táto verzia REÁLNE dotýka — malá zmena = pár cielených otázok k dotknutým "
-        "miestam, greenfield = plná previerka. Rozpočet otázok: aspoň "
-        f"{floor} (Gate E existuje na chytenie spec medzier — pod-previerka je opačné zlyhanie), strop {ceiling}. "
-        f"Doteraz položených: {asked}. Keď je dotknutý rozsah pokrytý, signalizuj coverage_complete. "
-    )
-
-
-def _gate_e_continue_prompt(db: Session, version_id: uuid.UUID) -> str:
-    """The Customer's next-turn base prompt when re-dispatched WITHOUT a Director directive — the FIRST gate_e
-    turn OR an autonomous Branch-A / topic-boundary continue (Phase 3, §5.2). Mirrors the manual approve@gate_e
-    relay (:func:`dispatch_directive`) so the Customer (a separate session) SEES the Designer's reply and never
-    re-asks a covered point as a false finding — the relay the auto-chain loop cannot carry (it dispatches with
-    ``directive=None``). The scope/budget prefix is added by the caller, so this returns only the relay base."""
-    milestone = _latest_gate_e_milestone(db, version_id)
-    if milestone is not None and milestone.author == "designer":  # auto-continued past a Branch-A answer
-        return (
-            f"Návrhár odpovedal na tvoju otázku: «{milestone.content}». Odpoveď je bez medzery "
-            "(Koordinátor ju auto-ratifikoval). Pokračuj ďalšou otázkou previerky Gate E. "
-            "Ukonči <<<PIPELINE_STATUS>>> blokom (F-007-orchestration-cockpit.md §5.3)."
-        )
-    if milestone is not None:  # auto-continued past a clean topic boundary (latest = Customer gate_report)
-        return (
-            "Okruh je uzavretý bez otvorených nálezov — pokračuj v previerke Gate E ďalším okruhom "
-            "(alebo ďalšou otázkou). Ukonči <<<PIPELINE_STATUS>>> blokom (F-007-orchestration-cockpit.md §5.3)."
-        )
-    return _directive_for("gate_e")  # first gate_e turn — no prior milestone to relay
-
-
-async def _run_gate_e_round(
-    db: Session,
-    state: PipelineState,
-    *,
-    on_event: Optional[claude_agent.EventCallback] = None,
-    directive: Optional[str] = None,
-    gate_e_dispatch: Optional[str] = None,
-    on_message: Optional[MessageCallback] = None,
-) -> PipelineState:
-    """One Gate E per-question exchange (F-007-gate-e revised §2/§5): Director-gated.
-
-    Hub-and-spoke, **one question at a time** — never chains the next question without
-    the Director. Per re-dispatch (by ``gate_e_dispatch``):
-
-    * ``"coordinator_consult"`` (``ask`` / ``return`` @ gate_e): invoke ONLY the
-      **Coordinator** with the Director's input → it revises its recommendation →
-      STOP (``awaiting_director``). The Director never addresses the worker directly.
-    * ``"designer_edit"`` (Branch B ``fix``): the Designer first edits per the
-      Coordinator-relayed directive, then the round continues to the next question.
-    * ``None``: one Customer turn — ``gate_report``+``topic_done`` → round boundary;
-      a ``question`` → one Designer answer (no-edit: explain / on a gap only PROPOSE)
-      → if ``gap_found`` the Coordinator reviews the proposal → STOP.
-
-    Each turn is a ``pipeline_message`` (stage=gate_e, ``seq``-ordered) with the chain
-    ``recipient`` (Z→N→K→D, §5), and every turn streams with its real ``_role`` so the
-    rail steps Customer→Designer→Coordinator. Parse failure → ``blocked`` (never guess).
-    """
-    if gate_e_dispatch == "coordinator_consult":  # ask/return @ gate_e — Coordinator revises
-        revised = await invoke_agent_with_parse_retry(
-            db,
-            version_id=state.version_id,
-            role="coordinator",
-            stage="gate_e",
-            prompt=directive,
-            on_event=on_event,
-            on_message=on_message,
-        )
-        if isinstance(revised, ParseFailure):
-            return await _block_failed(state, db, revised.reason, failed=revised, on_message=on_message)
-        state.status = "awaiting_director"
-        state.next_action = "Director: posúď prepracované odporúčanie Koordinátora (Schváliť návrh / Ponechať)."
-        db.flush()
-        return state
-
-    if gate_e_dispatch == "designer_edit":  # Branch B: the Designer applies the approved fix, then continue
-        edit = await invoke_agent_with_parse_retry(
-            db,
-            version_id=state.version_id,
-            role="designer",
-            stage="gate_e",
-            prompt=directive,
-            on_event=on_event,
-            recipient="coordinator",
-            on_message=on_message,
-            # Mark the edit turn so it can NEVER raise a gap in the deterministic count
-            # (§5): it executes an approved fix; new gaps come only via the Q&A loop.
-            extra_payload={"is_fix_edit": True},
-        )
-        if isinstance(edit, ParseFailure):
-            return await _block_failed(state, db, edit.reason, failed=edit, on_message=on_message)
-        # Symmetric relay (§5): tell the Customer what was fixed before its next question.
-        customer_prompt = (
-            f"Tvoj nález Návrhár opravil podľa schváleného riešenia: «{edit.summary}». "
-            "Pokračuj ďalšou otázkou previerky Gate E. Ukonči <<<PIPELINE_STATUS>>> "
-            "blokom (F-007-orchestration-cockpit.md §5.3)."
-        )
-    else:
-        # directive set = a Director-framed relay (manual approve/leave); None = the first turn OR an
-        # autonomous continue (Phase 3) — reconstruct the Designer-answer relay the auto-chain can't carry.
-        customer_prompt = directive if directive is not None else _gate_e_continue_prompt(db, state.version_id)
-
-    # §2.1 (Phase 3): every Customer turn carries the scope/budget context (touched okruhy + floor/ceiling).
-    customer_prompt = _gate_e_scope_directive(db, state.version_id) + customer_prompt
-
-    cust = await invoke_agent_with_parse_retry(
-        db,
-        version_id=state.version_id,
-        role="customer",
-        stage="gate_e",
-        prompt=customer_prompt,
-        on_event=on_event,
-        recipient="designer",  # Z→N: the Customer's question is for the Designer
-        on_message=on_message,
-    )
-    if isinstance(cust, ParseFailure):
-        return await _block_failed(state, db, cust.reason, failed=cust, on_message=on_message)
-
-    if cust.kind == "gate_report" and cust.topic_done:  # round boundary
-        # §A.2 site 3 (Gate E topic boundary): Coordinator synthesis before settling. The per-topic report is
-        # ALWAYS recorded (durable on the board, §2.3) — even when we auto-continue and don't use it as the
-        # next_action.
-        synthesis = await _coordinator_synthesis(
-            db, state, trigger=f"okruh '{cust.topic or 'okruh'}'", on_message=on_message
-        )
-        # Phase 3 (§2.3): a CLEAN intermediate topic boundary (NOT coverage_complete) auto-continues to the
-        # next okruh — the per-topic report stays durable above. coverage_complete is the FINAL close: the ONE
-        # bounded Director sign-off (KEY), never auto-continued.
-        if not cust.coverage_complete and await _maybe_autonomous_gate_e_continue(
-            db, state, boundary="topic", on_message=on_message
-        ):
-            return state  # agent_working — the runner auto-chain runs the next okruh
-        state.status = "awaiting_director"
-        if cust.coverage_complete:
-            state.next_action = synthesis or "Director: Gate E pokrytá — posúď a uzavri previerku (jeden podpis)."
-        elif _gate_e_budget_reached(db, state.version_id):
-            state.next_action = "Director: Gate E dosiahol strop otázok — predĺž previerku alebo ju uzavri."
-        else:
-            state.next_action = (
-                synthesis or f"Director: posúď okruh '{cust.topic or 'okruh'}' (nálezy + riešenia Návrhára)."
-            )
-        db.flush()
-        return state
-
-    if cust.kind in ("question", "blocked"):  # one Customer question → one Designer answer
-        designer = await invoke_agent_with_parse_retry(
-            db,
-            version_id=state.version_id,
-            role="designer",
-            stage="gate_e",
-            prompt=(
-                f"Zákazník vo fáze Gate E sa pýta: {cust.question}. {_GATE_E_NO_EDIT}. "
-                "Ukonči <<<PIPELINE_STATUS>>> blokom (F-007-orchestration-cockpit.md §5.3)."
-            ),
-            on_event=on_event,
-            recipient="coordinator",  # N→K: the Designer's answer is for the Coordinator
-            on_message=on_message,
-        )
-        if isinstance(designer, ParseFailure):
-            return await _block_failed(state, db, designer.reason, failed=designer, on_message=on_message)
-        if designer.gap_found:  # Branch B upward leg — Coordinator reviews; a gap is ALWAYS the Director (§2.4)
-            state.status = "awaiting_director"
-            await _coordinator_review_gap(db, state, designer, on_message)
-            state.next_action = "Director: Návrhár našiel medzeru a navrhol opravu — rozhodni Opraviť/Ponechať."
-            db.flush()
-            return state
-        # Branch A — routine answer, no gap: AUTO-CONTINUE to the next question (Phase 3, §2.2) when
-        # deterministically clean (0 open findings) and under the scope-scaled budget; else settle.
-        if await _maybe_autonomous_gate_e_continue(db, state, boundary="question", on_message=on_message):
-            return state  # agent_working — the runner auto-chain runs the next Customer question
-        state.status = "awaiting_director"
-        if _gate_e_budget_reached(db, state.version_id):
-            state.next_action = (
-                "Director: Gate E dosiahol strop otázok — predĺž previerku (schváliť → ďalšia otázka) alebo ju uzavri."
-            )
-        else:
-            state.next_action = "Director: posúď odpoveď Návrhára (schváliť → ďalšia otázka)."
-        db.flush()
-        return state
-
-    # Unexpected Customer output → let the Director judge.
-    state.status = "awaiting_director"
-    state.next_action = "Director: posúď výstup fázy gate_e."
-    db.flush()
-    return state
+# (CR-V2-013: ``_GATE_E_NO_EDIT`` + ``_block_failed`` + ``_coordinator_review_gap`` +
+# ``_gate_e_scope_directive`` + ``_gate_e_continue_prompt`` + the ``_run_gate_e_round`` per-question
+# sub-state-machine are REMOVED with the rest of the Gate-E machinery. The v2 Auditor's UPFRONT review
+# replaces the Customer↔Designer↔Director Gate-E loop with ONE independent invocation after Návrh —
+# see :func:`_run_auditor_upfront_review`, wired into :func:`_run_navrh_round`.)
 
 
 async def _settle_plan_pass_failure(
@@ -4365,6 +3970,95 @@ async def _fold_task_plan_into_navrh(
     return None  # success — the caller runs the SHARED dial-settle
 
 
+async def _run_auditor_upfront_review(
+    db: Session,
+    state: PipelineState,
+    *,
+    on_event: Optional[claude_agent.EventCallback] = None,
+    on_message: Optional[MessageCallback] = None,
+) -> bool:
+    """The Auditor's UPFRONT spec/design review (CR-V2-013; AUD-1(a), AUD-5, NAVRH-4, AUTON-5) — replaces
+    the Gate-E Customer function. Runs ONCE inside :func:`_run_navrh_round` after the design doc + task plan
+    are persisted, before the post-Návrh dial-settle.
+
+    The independent Auditor (``role=AUDITOR_ROLE``, READ + RUN-ONLY — its charter forbids edits/commits)
+    scans the Špecifikácia + design doc for holes / ambiguities / contradictions and emits ONE
+    ``kind=verdict`` block (the CR-V2-006 repurposed ``verdict``/``findings``/``proposed_fix`` shape). The
+    verdict message is recorded ``author=auditor`` → ``recipient=manazer`` at ``stage=navrh`` (all valid v2
+    DB CHECK values — no ``director``/``coordinator``/``gate_e`` tokens), so the Manažér's review view at the
+    post-Návrh schvaľovací bod shows the Auditor's findings ALONGSIDE the AI Agent's own clarification
+    questions. Review DEPTH scales with the dial via :func:`_resolve_dispatch_overrides` (Auditor effort
+    coupling, OQ-9); the brief (:func:`_auditor_upfront_directive`) tells the Auditor to match its scrutiny.
+
+    Returns ``True`` when the Auditor found a HOLE (``verdict`` block with ``verdict`` not True) — the caller
+    FORCES the post-Návrh stop regardless of the dial (AUD-4: a spec/design hole escalates to the Manažér).
+    Returns ``False`` when the review PASSED (or could not be completed) — the caller lets the dial govern
+    the stop normally; the AI Agent's own questions + the Manažér still gate Programovanie.
+
+    A parse failure of the review is NON-BLOCKING (fail-open for control flow, fail-CLOSED on the verdict is
+    not appropriate here — the upfront review is an EARLY safety net, not the release gate; the Manažér still
+    sees the design at the dial-governed stop). It is recorded visibly + metered (``system→manazer`` note)
+    and treated as "no hole found" so a flaky Auditor turn can never wedge the build. The sole-mutator
+    invariant holds: this runs inside the dispatch path, always a consequence of an action routed through
+    :func:`apply_action`."""
+    review = await invoke_agent_with_parse_retry(
+        db,
+        version_id=state.version_id,
+        role=AUDITOR_ROLE,
+        stage="navrh",
+        prompt=_auditor_upfront_directive(db, state.version_id),
+        on_event=on_event,
+        recipient="manazer",  # the Auditor's findings are for the Manažér at the post-Návrh stop
+        on_message=on_message,
+        # Structural marker (orchestrator record, not agent self-report): this verdict is the UPFRONT review
+        # (vs the end Verifikácia check), so the Návrh tab / Manažér review view can label it.
+        extra_payload={"upfront_review": True},
+    )
+    if isinstance(review, ParseFailure):
+        # Non-blocking observability: make the failed review visible + count its tokens, then proceed as if
+        # clean. NEVER use the deferred-RED ``_record_internal_turn_parse_failure`` here — it writes
+        # ``recipient="director"`` (a token the v2 CHECK rejects); record a v2 ``system→manazer`` note.
+        msg = _record_message(
+            db,
+            version_id=state.version_id,
+            stage="navrh",
+            author="system",
+            recipient="manazer",
+            kind="notification",
+            content=(
+                "Upfront previerka Auditora sa nepodarila ani po opakovaných pokusoch — pokračuje sa bez nej "
+                "(Manažér aj tak posúdi návrh na schvaľovacom bode). Pozri priebeh."
+            ),
+            payload=_failure_metrics_payload(review) or None,
+        )
+        if on_message is not None:
+            await on_message(msg)
+        return False  # no hole on record → the dial governs the stop normally
+    # A clean review with no hole → verdict True (PASS). A hole → verdict not True (fail-closed on the
+    # finding: an absent/False verdict on a verdict turn is a hole, mirroring _verifikacia_passed). The
+    # ``kind=verdict`` message was already recorded by invoke_agent with author=auditor / recipient=manazer.
+    hole_found = review.kind == "verdict" and not review.verdict
+    if hole_found:
+        # AUD-4: a spec/design hole escalates to the Manažér — record the escalation note (system→manazer)
+        # so the board / Telegram surfaces it; the caller forces the post-Návrh stop regardless of the dial.
+        note = _record_message(
+            db,
+            version_id=state.version_id,
+            stage="navrh",
+            author="system",
+            recipient="manazer",
+            kind="notification",
+            content=(
+                "Auditor našiel medzeru v Špecifikácii/Návrhu (upfront previerka) — eskalované Manažérovi; "
+                "build sa zastaví na schvaľovacom bode po Návrhu na vyjasnenie."
+            ),
+            payload={"phase": "navrh", "upfront_review_hole": True},
+        )
+        if on_message is not None:
+            await on_message(note)
+    return hole_found
+
+
 async def _run_navrh_round(
     db: Session,
     state: PipelineState,
@@ -4444,13 +4138,28 @@ async def _run_navrh_round(
     if settled is not None:
         return settled  # a fold/materialize failure already settled (blocked / awaiting_manazer)
 
-    # 4. SHARED dial-settle (Milestone-C): auto-continue to Programovanie vs stop at the post-Návrh
-    # schvaľovací bod (where the Manažér reviews the design + plan + the AI Agent's clarification questions).
-    if _settle_phase_boundary(db, state):
+    # 4. AUDITOR UPFRONT REVIEW (CR-V2-013; AUD-1(a)/AUD-5/NAVRH-4 — replaces the Gate-E Customer function).
+    # The independent Auditor (READ + RUN-ONLY, no write/commit) scans the Špecifikácia + the design doc for
+    # holes / ambiguities / contradictions and emits ONE ``verdict`` (findings + proposed_fix). Its findings
+    # surface at the post-Návrh schvaľovací bod ALONGSIDE the AI Agent's own clarification questions. A
+    # spec/design HOLE (verdict FAIL) ESCALATES to the Manažér (AUD-4): the review forces the post-Návrh stop
+    # regardless of the dial, so a hole can never auto-continue into Programovanie. A parse failure of the
+    # review is non-blocking (visible + metered) — it must never wedge the build; the dial then governs the
+    # stop as if the review were clean (the AI Agent's own questions + the Manažér still gate Programovanie).
+    hole_found = await _run_auditor_upfront_review(db, state, on_event=on_event, on_message=on_message)
+
+    # 5. SHARED dial-settle (Milestone-C): auto-continue to Programovanie vs stop at the post-Návrh
+    # schvaľovací bod (where the Manažér reviews the design + plan + the AI Agent's clarification questions +
+    # the Auditor's upfront findings). A hole the Auditor found OVERRIDES the dial → always stop (AUD-4).
+    if not hole_found and _settle_phase_boundary(db, state):
         return state  # agent_working at Programovanie — the auto-chain loop continues the build
     if state.status != "done":
         state.status = "awaiting_manazer"
-        state.next_action = "Manažér: posúdiť návrh + plán úloh (Schváliť / Uprav)."
+        state.next_action = (
+            "Manažér: Auditor našiel medzeru v Špecifikácii/Návrhu — vyjasni a oprav, potom schváľ (Uprav / Schváliť)."
+            if hole_found
+            else "Manažér: posúdiť návrh + plán úloh (Schváliť / Uprav)."
+        )
         db.flush()
     return state
 
@@ -5759,76 +5468,12 @@ async def _maybe_autonomous_gate_ratify(
 # (The v1 ``_maybe_autonomous_build_ratify`` — auto-ratify the build→gate_g sign-off — is RETIRED with
 # CR-V2-012's build-round rebuild: it was build-completion-only, referenced the retired v1 ``build``/``gate_g``
 # stages, and is subsumed by the Miera autonómie dial (the Programovanie schvaľovací bod auto-continues to
-# Verifikácia at a non-stopping level via :func:`_settle_phase_boundary`). The remaining ``_maybe_autonomous_*``
-# helpers stay only on the deferred-RED gate-e path CR-V2-013 re-points.)
-
-
-def _gate_e_budget_reached(db: Session, version_id: uuid.UUID) -> bool:
-    """True when Gate E has asked at least the ceiling number of questions (§2.1) — the signal the caller
-    uses to ESCALATE to the Director with an extend-or-close ``next_action`` (never a silent close)."""
-    _, ceiling = _gate_e_question_budget(db, version_id)
-    return _gate_e_question_count(db, version_id) >= ceiling
-
-
-async def _maybe_autonomous_gate_e_continue(
-    db: Session,
-    state: PipelineState,
-    *,
-    boundary: str,
-    on_message: Optional[MessageCallback] = None,
-) -> bool:
-    """PIPELINE-AUTONOMY Phase 3 (design §2.2/§5.2) — at a Gate E per-question (Branch A) or a CLEAN topic
-    boundary, AUTO-CONTINUE to the next Customer turn with NO Director click: self-issue ``_begin_dispatch``
-    (status=agent_working at gate_e, so the runner auto-chain runs the next Customer turn) instead of settling
-    ``awaiting_director``. Returns ``True`` when it continued (the caller returns the now-``agent_working``
-    state), ``False`` → the caller takes the existing ``awaiting_director`` settle.
-
-    Sibling of :func:`_maybe_autonomous_gate_ratify`, with the SAME purely DETERMINISTIC discipline (design
-    §0.1 — there is NO confidence on the Designer status block; the guard reads only real booleans/counts):
-
-    * ``flow_type == 'new_version'`` — fast_fix / cr / bug never reach Gate E this way, byte-for-byte;
-    * 0 open Gate E findings (deterministic :func:`_gate_e_open_findings`, never the Customer's self-report) —
-      an open gap blocks any continue, mirroring the close gate;
-    * the question count is UNDER the scope-scaled ceiling (§2.1) — reaching the ceiling makes this return
-      ``False`` so the caller ESCALATES to the Director (extend or close), it NEVER silent-closes;
-    * the kickoff autonomy toggle is ON (:func:`_autonomy_enabled`, default).
-
-    The CALLER gates the two KEY exclusions BEFORE calling this (so they are unmistakable at the settle site):
-    ``gap_found`` (Branch B — a genuine spec decision, always the Director, design §2.4) and
-    ``coverage_complete`` (the FINAL close — the ONE bounded Director sign-off, design §2.3). A ParseFailure
-    can never reach here (it already settled ``blocked`` upstream). Every continue is recorded
-    Director-visibly via :func:`_record_autonomous_gate` (``is_autonomous=true`` + ``stage='gate_e'`` + a
-    deterministic rationale), so the board roll-up shows the Gate E questions/topics that auto-continued."""
-    if state.flow_type != "new_version":
-        return False
-    if _gate_e_open_findings(db, state.version_id) > 0:
-        return False  # an open finding blocks any continue (mirror the deterministic close gate)
-    asked = _gate_e_question_count(db, state.version_id)
-    _, ceiling = _gate_e_question_budget(db, state.version_id)
-    if asked >= ceiling:
-        return False  # budget ceiling → the caller escalates to the Director (never silent-close, §2.1)
-    if not _autonomy_enabled(db, state.version_id):
-        return False  # kickoff opt-out → the Director wants per-question / per-topic sign-off
-    if boundary == "topic":
-        rationale = (
-            f"Okruh Gate E uzavretý bez otvorených nálezov (0 medzier, {asked}/{ceiling} otázok) — "
-            "auto-pokračovanie na ďalší okruh previerky."
-        )
-    else:  # "question" — Branch A
-        rationale = (
-            f"Odpoveď Návrhára bez medzery ({asked}/{ceiling} otázok, 0 otvorených nálezov) — "
-            "auto-pokračovanie na ďalšiu otázku Gate E."
-        )
-    _begin_dispatch(db, state)  # status=agent_working at gate_e → the runner continues the chain
-    await _record_autonomous_gate(
-        db,
-        state.version_id,
-        stage="gate_e",
-        action=f"auto_continue_gate_e_{boundary}",
-        rationale=rationale,
-        on_message=on_message,
-    )
-    return True
+# Verifikácia at a non-stopping level via :func:`_settle_phase_boundary`).
+# CR-V2-013 RETIRES the Gate-E auto-continue helpers ``_gate_e_budget_reached`` +
+# ``_maybe_autonomous_gate_e_continue`` with the rest of the Gate-E machinery: the v2 Auditor upfront review
+# is ONE invocation (no per-question Branch-A/topic auto-continue loop), and the post-Návrh stop is governed
+# by the Miera autonómie dial (:func:`dial_stops_at`) — a found HOLE forces the stop regardless of the dial,
+# see :func:`_run_auditor_upfront_review`.)
 
 
 def _fast_fix_answer_brief(task: Task, answer: str) -> str:

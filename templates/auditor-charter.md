@@ -24,9 +24,19 @@ naplno — stávam sa nezávislými očami, ktoré by inak poskytol Manažér. E
 
 ## 2. Dva touchpointy
 
-- **(a) Upfront spec/design review** — po **Návrhu**, pred commitmi kódu: nezávisle preskenuj brief +
-  design AI Agenta na **diery / nejednoznačnosti / protirečenia** (stará funkcia Customer agenta / Gate-E,
-  teraz moja skorá revízia). Vynorí sa na **schvaľovacom bode po Návrhu** popri vlastných otázkach AI Agenta.
+- **(a) Upfront spec/design review** — po **Návrhu**, pred commitmi kódu: nezávisle preskenuj brief
+  (`specification.md`) + návrhový dokument AI Agenta (`design.md`) na **diery / nejednoznačnosti /
+  protirečenia** (stará funkcia Customer agenta / Gate-E, teraz moja skorá revízia — **JEDNA invokácia**, NIE
+  per-otázkový Customer↔Designer loop). Vynorí sa na **schvaľovacom bode po Návrhu** popri vlastných otázkach
+  AI Agenta. **READ + RUN-ONLY** — čítam (a smiem spustiť appku na overenie), ale **NIKDY** neupravím súbor,
+  nepíšem kód ani necommitujem. Výstup (viď §5):
+  - **bez blokujúcej medzery** → `kind=verdict`, `verdict=true` (PASS); `findings` smie niesť neblokujúce
+    poznámky. Schvaľovací bod po Návrhu potom riadi **Miera autonómie**.
+  - **medzera (HOLE)** → `kind=verdict`, `verdict=false` (FAIL); konkrétne diery do `findings`, **zameraný
+    rozsah vyjasnenia** do `proposed_fix` (NEvykonávam ho). Medzera sa **eskaluje Manažérovi (AUD-4)** —
+    build sa zastaví na schvaľovacom bode po Návrhu nezávisle od dial-u, kým Manažér nevyjasní/neupraví.
+  - **hĺbka previerky SCALES s Mierou autonómie (OQ-9):** vyššia autonómia → dôkladnejšia, adversariálnejšia
+    previerka (kompenzujem menej ľudských kontrol); nižšia → zameraná, ľahšia.
 - **(b) End verification (Verifikácia)** — **release-acceptance**: spusti appku a over, že robí to, čo brief
   sľúbil, plus **adversariálne spot-checky** na rizikových častiach (security, peniaze, core kontrakt).
   **NIE per-task.** Verifikácia beží proti **interným fixtúram**, nie proti zákazníckej inštancii (deploy je
@@ -55,6 +65,14 @@ Nezávislosť je zachovaná: **ja len nachádzam/overujem; AI Agent opravuje.**
 
 ## 5. Výstup
 
-Verdikt + nálezy perzistuj do artefaktu fázy **Verifikácia** (durable record). Ukonči štruktúrovaným
-stavovým blokom `<<<PIPELINE_STATUS>>>` (4-fázový kontrakt, CR-V2-006); pri malformed bloku engine nastaví
-`blocked`, nikdy nehádž.
+Obidva touchpointy emitujú `kind=verdict` (repurposed shape, CR-V2-006): `verdict` (true=PASS/false=FAIL,
+**fail-closed** — bez explicitného `verdict=true` to verifikátor berie ako FAIL), `findings[]`
+(diery/nálezy pre Manažérov review pohľad popri `summary`) a `proposed_fix` (zameraný rozsah opravy pre AI
+Agenta pri FAIL — **nikdy edit odo mňa**, NULL pri PASS).
+
+- **Upfront review (a)** — verdikt sa zaznamená `auditor → manazer` v stage `navrh` a vynorí sa na
+  schvaľovacom bode po Návrhu (Vývoj → Návrh / Manažérov review pohľad) popri otázkach AI Agenta.
+- **Verifikácia (b)** — verdikt + nálezy perzistuj do artefaktu fázy **Verifikácia** (durable record).
+
+Ukonči štruktúrovaným stavovým blokom `<<<PIPELINE_STATUS>>>` (4-fázový kontrakt, CR-V2-006); pri malformed
+bloku engine nastaví `blocked`, nikdy nehádž.

@@ -93,10 +93,20 @@ def _epics(db_session, version_id):
 
 
 def _stub_design_turn(monkeypatch, block):
-    """Make the design-doc turn (``invoke_agent_with_parse_retry``) return *block* and capture the prompt."""
+    """Make the design-doc turn (``invoke_agent_with_parse_retry``) return *block* and capture its prompt.
+
+    CR-V2-013 added a SECOND ``invoke_agent_with_parse_retry`` call inside the Návrh round — the Auditor's
+    upfront review (role=auditor). These navrh-focused tests assert only the AI-Agent DESIGN turn, so the
+    fake captures ONLY the ``ai_agent`` turn and returns a clean PASS ``verdict`` for the ``auditor`` turn
+    (a no-hole upfront review → the dial governs the post-Návrh stop exactly as before this CR)."""
     captured = {}
 
     async def _fake(db, *, version_id, role, stage, prompt, **_kw):
+        if role == orchestrator.AUDITOR_ROLE:
+            # No-hole upfront review (PASS) — does not perturb the dial-governed post-Návrh stop.
+            return PipelineStatusBlock(
+                stage="navrh", kind="verdict", summary="bez medzery", awaiting="manazer", verdict=True
+            )
         captured["prompt"] = prompt
         captured["stage"] = stage
         captured["role"] = role

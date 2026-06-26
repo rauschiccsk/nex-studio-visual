@@ -62,8 +62,8 @@ PARTICIPANT_VALUES = ACTOR_VALUES + ("manazer", "system")
 STATUS_VALUES = ("agent_working", "awaiting_manazer", "blocked", "paused", "done")
 # Why a ``blocked`` state happened (v0.7.0 R4, D1) — the authoritative, persisted reason the FE
 # reads INSTEAD of the fragile ``lastMessage.author == "system"`` heuristic. ``agent_question`` = the
-# worker asked something (Director answers); ``agent_error`` = the worker's turn failed
-# (``_block_failed`` build-task fail); ``parse_exhaustion`` = the worker produced no parseable output
+# worker asked something (Manažér answers); ``agent_error`` = the worker's turn failed
+# (a build-task / phase deliverable fail); ``parse_exhaustion`` = the worker produced no parseable output
 # after retries; ``system_error`` = an engine-side step failed (UAT deploy / release verify / task-plan
 # write / gate mechanical). SET deterministically at each block site (orchestrator), CLEARED when the
 # status leaves ``blocked`` (the set-listener below). NULL whenever the pipeline isn't blocked.
