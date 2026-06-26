@@ -1,6 +1,8 @@
-"""Deterministic parser for the agent status block (F-007 §5.3, CR-NS-018 Phase 2).
+"""Deterministic parser for the agent status block (F-007 §5.3, CR-NS-018 Phase 2; v2 CR-V2-006).
 
-Every orchestrated agent response ends with a machine-readable block::
+Every orchestrated agent (the AI Agent or the Auditor — v2's two roles) ends a
+response with a machine-readable block (OQ-10: this block SURVIVES into v2; we do
+NOT infer phase/await from live PTY text)::
 
     <<<PIPELINE_STATUS>>>
     { "stage": "...", "kind": "...", "summary": "...", "awaiting": "...",
@@ -12,12 +14,18 @@ invalid JSON, schema/enum violation, ``question``-required-but-absent) returns
 a :class:`ParseFailure`. The orchestrator maps that to ``status=blocked`` +
 escalation and **never guesses** (F-007 §5.3, §11.3).
 
+``stage`` is one of the **4 v2 phases** (Príprava → Návrh → Programovanie →
+Verifikácia) + ``done`` (CR-V2-006, matching the DB ``STAGE_VALUES`` tuple); the
+v1 11-stage gate path (``gate_a``…``gate_g``/``release``) is gone.
+
 Charter §5.3 contract (per Dedo 2026-06-03):
 * ``recipient`` is NOT emitted by agents — derived by the orchestrator. Any
   extra field is ignored, not required.
 * ``kind=blocked`` carries the blocker in ``question`` (authoritative);
   ``summary`` is human context.
 * ``commits`` / ``deliverables`` may be omitted or empty — default to ``[]``.
+* ``awaiting`` is one of ``{manazer, none}`` (the operator was renamed
+  Director → Manažér in CR-V2-004).
 """
 
 from __future__ import annotations
@@ -25,10 +33,9 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, Union
-from uuid import UUID
+from typing import Any, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from backend.schemas.task import TaskPriority, TaskType
 
@@ -49,35 +56,34 @@ _TASK_PLAN_FENCE_RE = re.compile(
 #: Tolerate the model wrapping the sentinel-fenced JSON in an inner markdown ```json … ``` block.
 _MD_JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
 
-#: Stages an agent may report (F-007 §3.1).
+#: Phases an agent may report (CR-V2-006 — the 4 v2 phases + ``done``; matches the DB
+#: ``STAGE_VALUES`` tuple in ``backend/db/models/pipeline.py``, the single source). The v1
+#: 11-stage gate path (kickoff/gate_a…gate_g/release/task_plan/build) is removed.
 STAGES = frozenset(
     {
-        "kickoff",
-        "gate_a",
-        "gate_b",
-        "gate_c",
-        "gate_d",
-        "gate_e",
-        "task_plan",
-        "build",
-        "gate_g",
-        "release",
+        "priprava",
+        "navrh",
+        "programovanie",
+        "verifikacia",
         "done",
     }
 )
 #: Kinds an *agent* may emit in a status block (subset of pipeline_message.kind;
-#: directive/approval/return/verdict/notification are orchestrator/director-authored).
-BLOCK_KINDS = frozenset({"kickoff", "question", "answer", "gate_report", "done", "blocked"})
-_AWAITING = frozenset({"director", "none"})
+#: directive/approval/return/notification are orchestrator/Manažér-authored). ``verdict`` is
+#: the Auditor's Verifikácia/upfront-review verdict (CR-V2-006 repurposes the findings shape).
+BLOCK_KINDS = frozenset({"question", "answer", "gate_report", "verdict", "done", "blocked"})
+#: ``awaiting`` targets (CR-V2-004: Director → Manažér). The agent either hands back to the
+#: operator (``manazer``) or signals it keeps the turn (``none``).
+_AWAITING = frozenset({"manazer", "none"})
 _QUESTION_KINDS = frozenset({"question", "blocked"})
 
 
-# ── task_plan decomposition (F-007 §4/§5, CR-NS-020 CR-2) ────────────────────
-# The Designer emits the EPIC→FEAT→TASK breakdown of the final design as a typed
+# ── task_plan decomposition (F-007 §4/§5, CR-NS-020 CR-2; v2 CR-V2-011) ──────
+# The AI Agent emits the EPIC→FEAT→TASK breakdown of the final design as a typed
 # tree on the status block (NOT a free-form payload — PipelineStatusBlock ignores
 # extras, so the contract must be declared). Numbers are NOT emitted (the
 # epic/feat/task services auto-assign MAX+1); status is NOT emitted (the write-path
-# forces planned/todo — the Designer never pre-marks anything done).
+# forces planned/todo — the AI Agent never pre-marks anything done).
 
 
 class TaskPlanTask(BaseModel):
@@ -115,11 +121,12 @@ class TaskPlan(BaseModel):
 
 # ── (v0.7.3) incremental task_plan generation — narrowed per-pass schemas (CR-1) ──
 # A large design's full EPIC→FEAT→TASK tree overflows ONE structured-output turn (the
-# model drops the per-feat tasks → ``parse_exhaustion``). The Designer instead emits the
+# model drops the per-feat tasks → ``parse_exhaustion``). The AI Agent instead emits the
 # plan in bounded passes: a skeleton (EPIC + FEAT, NO tasks) then one pass per feat (that
 # feat's tasks). These narrowed models constrain each pass; the orchestrator
-# (``_run_task_plan_round``) accumulates them into ONE full :class:`TaskPlan` (above) and
-# writes it via the UNCHANGED ``_write_task_plan``. They are SEPARATE types — the full-plan
+# accumulates them into ONE full :class:`TaskPlan` (above) and writes it via the existing
+# task-plan write-path (the incremental passes fold into the Návrh phase — CR-V2-011). They
+# are SEPARATE types — the full-plan
 # models are deliberately NOT relaxed (F-007 §9 "schéma nemení"); ``TaskPlanFeat.tasks``
 # keeps ``min_length=1`` so the assembled plan is always non-empty.
 
@@ -174,56 +181,15 @@ TASK_PLAN_SKELETON_JSON_SCHEMA = TaskPlanSkeleton.model_json_schema()
 TASK_PLAN_FEAT_TASKS_JSON_SCHEMA = TaskPlanFeatTasks.model_json_schema()
 
 
-class CoordinatorTarget(BaseModel):
-    """What a ``coordinator_directive``'s action operates on (F-008 §2, A1)."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    task_id: Optional[UUID] = None
-    role: Optional[str] = None
-    commit: Optional[str] = None
-
-
-class CoordinatorDirective(BaseModel):
-    """Structured Coordinator proposal (F-008 §2 A1 / §9, E7). Emitted alongside the plain-Slovak relay;
-    the Director approves via ``apply_coordinator_recommendation`` and the orchestrator EXECUTES the
-    matching internal action (F-008 §9 contract A). Conservative bound (enforced by the executor gate):
-    ``confidence < 0.80`` OR ``triage_class == 'director_decision'`` → a pure relay (no execution)."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    triage_class: Literal[
-        "spec_problem",
-        "programmer_guidance",
-        "nex_studio_bug",
-        "director_decision",
-        # Fast-Fix Lane (F-009 §3 D5, CR-NS-103): a routine build Programmer question the Coordinator answers
-        # itself (proposed_action="coordinator_answer_question"); fast_fix-only, never auto-answered elsewhere.
-        "programmer_routine_question",
-    ]
-    proposed_action: str  # an executable coordinator_* action or "relay" (kept a str — forward-compatible)
-    target: CoordinatorTarget = Field(default_factory=CoordinatorTarget)
-    params: dict[str, Any] = Field(default_factory=dict)
-    rationale: str
-    confidence: float = Field(ge=0.0, le=1.0)
-
-    @field_validator("target", mode="before")
-    @classmethod
-    def _tolerate_nonobject_target(cls, v: Any) -> Any:
-        """Degrade a non-object ``target`` to empty so a malformed value never crashes the parse.
-
-        Found via NEX Test (CR 2026-06-13): a gate_g FAIL gate_report's Coordinator verify-judge
-        auto-returned because the Coordinator (LLM) emitted ``target`` as prose / ``null`` instead of
-        the ``{task_id?, role?, commit?}`` object → ``target: Input should be a valid dictionary or
-        instance of CoordinatorTarget`` → ParseFailure → the FAIL verdict couldn't route. The
-        directive's meaning rides in ``rationale`` + ``proposed_action``; ``target`` is best-effort
-        execution metadata the executor reads conservatively, so empty is a safe degradation.
-        """
-        return v if isinstance(v, (dict, CoordinatorTarget)) else {}
-
-
 class PipelineStatusBlock(BaseModel):
-    """Validated agent status block. ``extra='ignore'`` drops derived fields."""
+    """Validated agent status block. ``extra='ignore'`` drops derived fields.
+
+    In v2 (CR-V2-006) only TWO roles emit this block — the **AI Agent** (Príprava/Návrh/
+    Programovanie turns) and the **Auditor** (the upfront design review + the end Verifikácia
+    check). The v1 Coordinator-relay (``coordinator_directive``), per-task audit (``task_pass``)
+    and Gate-E Customer↔Designer signals (``topic``/``topic_done``/``coverage_complete``/
+    ``gap_found``) are removed; the **Auditor verdict** repurposes the ``findings``/``proposed_fix``
+    shape (see the Auditor-verdict block below)."""
 
     model_config = ConfigDict(extra="ignore")
 
@@ -235,41 +201,31 @@ class PipelineStatusBlock(BaseModel):
     commits: list[str] = Field(default_factory=list)
     question: Optional[str] = None
 
-    # task_plan decomposition (F-007 §4/§5, CR-NS-020 CR-2). Only the Designer at
-    # stage=task_plan emits these; other stages leave them unset.
+    # task_plan decomposition (F-007 §4/§5, CR-NS-020 CR-2; v2: folds into the Návrh phase —
+    # CR-V2-011). The AI Agent emits the EPIC→FEAT→TASK tree as the last part of the Návrh design
+    # doc; other phases leave it unset.
     #: Structured EPIC→FEAT→TASK tree the orchestrator write-path materializes.
     plan: Optional[TaskPlan] = None
-    #: Cross-cutting regulated-ledger invariants (markdown), codified once by the
-    #: Designer; CR-3 re-reads this from the gate_report payload and injects it into
-    #: every per-task build brief.
+    #: Cross-cutting invariants (markdown) codified once with the plan; re-read from the
+    #: gate_report payload and injected into every per-task build brief.
     cross_cutting_rules: Optional[str] = None
-    #: Per-task Auditor verdict (F-007 §6, CR-NS-020 CR-4). Only the Auditor's build-stage
-    #: audit turn emits it; ``None`` (absent) is treated as FAIL by ``_verify_task``
-    #: (fail-closed — a task never passes without an explicit ``task_pass=true``). The
-    #: per-task audit findings ride in the reused ``findings`` field below.
-    task_pass: Optional[bool] = None
 
-    # Gate E signals (F-007-gate-e §5/§7.2, CR-NS-018). All optional; only the
-    # Customer↔Designer loop (stage=gate_e) emits them, so non-gate-E blocks are
-    # unaffected. The Customer/Designer charters §7.2 are aligned to exactly these.
-    #: Which of the 7 review okruhov this block concerns (Customer).
-    topic: Optional[str] = None
-    #: Customer signals the current okruh is finished → round boundary (with kind=gate_report).
-    topic_done: bool = False
-    #: All 7 okruhy covered → final boundary; the Director's approve advances to task_plan (Customer).
-    coverage_complete: bool = False
-    #: Structured findings for the Director's boundary view (alongside ``summary``).
+    # ── Auditor verdict (CR-V2-006 — repurposes the v1 Gate-E findings/proposed_fix shape) ──
+    # The Auditor is v2's independent verifier with two touchpoints: an UPFRONT design/spec
+    # review (after Návrh — replaces the Gate-E Customer function) and the END Verifikácia check
+    # (replaces gate_g). Both emit ``kind="verdict"`` carrying these fields; the verdict + findings
+    # fill the Verifikácia tab as a durable record (design §4.4.2). Absent on AI-Agent turns.
+    #: PASS/FAIL of the Auditor's review. ``None`` on a non-verdict block. ``False`` (or absent on a
+    #: verdict turn) is treated as FAIL by the verifier (fail-closed — nothing passes without an
+    #: explicit ``verdict=true``).
+    verdict: Optional[bool] = None
+    #: Structured findings for the Manažér's review view (alongside ``summary``) — the holes /
+    #: ambiguities / contradictions (upfront) or behavioural / security / contract failures (end check).
     findings: list[str] = Field(default_factory=list)
-    #: Designer answer (revised flow): a gap was found → Branch B (propose-only, no edit).
-    gap_found: bool = False
-    #: Designer's proposed fix TEXT when ``gap_found`` — never an edit (edit happens only
-    #: on a Director-approved, Coordinator-relayed ``fix`` directive).
+    #: The Auditor's proposed fix scope TEXT when the verdict is FAIL — the targeted scope the AI Agent
+    #: re-runs in the bounded fix↔re-verify loop (CR-V2-014). Never an edit by the Auditor itself
+    #: (independence); ``None`` on a PASS verdict.
     proposed_fix: Optional[str] = None
-
-    #: Structured Coordinator proposal (F-008 §2 A1 / §9, E7). Only the Coordinator emits it (CR-NS-033
-    #: charter/prompts); the Director approves via apply_coordinator_recommendation and the orchestrator
-    #: executes the matching action. Absent on every other block.
-    coordinator_directive: Optional[CoordinatorDirective] = None
 
 
 @dataclass(frozen=True)
@@ -319,7 +275,7 @@ def _format_validation_errors(exc: ValidationError) -> str:
 #: IS the schema (single source, no hand-written drift). Passed to ``claude --json-schema`` so the
 #: runtime grammar-constrains the agent's output to a conforming object (returned in the envelope's
 #: ``structured_output`` field), making a malformed block impossible at the source. The imperative
-#: enum/cross-field checks below (STAGES / BLOCK_KINDS / question-required / task_plan-plan) are NOT
+#: enum/cross-field checks below (STAGES / BLOCK_KINDS / question-required / navrh-plan) are NOT
 #: expressible as the model's plain ``str`` fields, so :func:`_validate_block` still enforces them on
 #: BOTH transports — the schema is the first line of defense, not the only one.
 PIPELINE_STATUS_JSON_SCHEMA = PipelineStatusBlock.model_json_schema()
@@ -346,11 +302,13 @@ def _validate_block(data: dict) -> ParseResult:
         return ParseFailure(f"unknown awaiting {block.awaiting!r}")
     if block.kind in _QUESTION_KINDS and not (block.question and block.question.strip()):
         return ParseFailure(f"kind={block.kind!r} requires a non-empty 'question'")
-    # task_plan close (F-007 §5, CR-NS-020 CR-2): the Designer's gate_report must carry the
-    # decomposition. A question/blocked turn is still allowed (re-plan dialogue); only the
-    # gate_report — the turn that closes the stage — requires a non-empty 'plan'.
-    if block.stage == "task_plan" and block.kind == "gate_report" and (block.plan is None or not block.plan.epics):
-        return ParseFailure("task_plan gate_report requires a non-empty 'plan' (EPIC→FEAT→TASK)")
+    # Návrh close (CR-V2-011 — the task plan folds into the Návrh phase): the AI Agent's Návrh
+    # gate_report must carry the EPIC→FEAT→TASK decomposition. A question/blocked turn is still
+    # allowed (re-plan dialogue); only the gate_report — the turn that closes the phase — requires
+    # a non-empty 'plan'. (The narrowed skeleton/per-feat passes never hit this guard — they emit
+    # a TaskPlanSkeleton/TaskPlanFeatTasks object, not a PipelineStatusBlock.)
+    if block.stage == "navrh" and block.kind == "gate_report" and (block.plan is None or not block.plan.epics):
+        return ParseFailure("navrh gate_report requires a non-empty 'plan' (EPIC→FEAT→TASK)")
 
     return block
 
@@ -420,7 +378,7 @@ def extract_report_body(text: str) -> str:
 # ── (v0.7.3) narrowed task_plan-pass parsers (CR-1) ──────────────────────────
 # The narrowed passes emit a :class:`TaskPlanSkeleton` / :class:`TaskPlanFeatTasks` object
 # (NOT a :class:`PipelineStatusBlock`), so they do NOT go through ``_validate_block`` and
-# therefore never hit the ``stage==task_plan`` plan-required guard above (it stays unchanged
+# therefore never hit the ``stage==navrh`` plan-required guard above (it stays unchanged
 # and only fires for the FINAL assembled status block). These parsers mirror
 # :func:`parse_structured_output`'s shape: validate the grammar-constrained structured_output
 # against the narrowed model, returning the model or a :class:`ParseFailure` (the per-pass

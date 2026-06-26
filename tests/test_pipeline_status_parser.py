@@ -1,6 +1,13 @@
-"""Tests for the §5.3 status-block parser (CR-NS-018 Phase 2).
+"""Tests for the §5.3 status-block parser (CR-NS-018 Phase 2; v2 CR-V2-006).
 
 Deterministic: any deviation → ParseFailure, never a guess.
+
+v2 (CR-V2-006): the block is emitted by the two v2 roles (AI Agent + Auditor); ``stage`` is one
+of the 4 phases (priprava/navrh/programovanie/verifikacia) + done; ``awaiting`` is manazer/none
+(Director → Manažér, CR-V2-004). The v1 Coordinator-relay (``coordinator_directive``), per-task
+audit (``task_pass``) and Gate-E Customer↔Designer signals are dropped; the Auditor verdict
+repurposes the ``findings``/``proposed_fix`` shape (+ a PASS/FAIL ``verdict``). The task_plan tree +
+narrowed skeleton/per-feat passes + ``extract_task_plan_json`` + dual transport are KEPT.
 """
 
 import json
@@ -14,6 +21,7 @@ from backend.services.pipeline_status import (
     TaskPlanSkeleton,
     extract_task_plan_json,
     parse_status_block,
+    parse_structured_output,
     parse_task_plan_feat_tasks,
     parse_task_plan_skeleton,
 )
@@ -30,31 +38,31 @@ def test_parses_valid_block_amid_noise():
     out = (
         "blah blah\n"
         + _block(
-            stage="gate_b",
+            stage="programovanie",
             kind="gate_report",
-            summary="openapi + summary done",
-            awaiting="director",
-            deliverables=["a.yaml", "b.md"],
+            summary="tasks committed",
+            awaiting="manazer",
+            deliverables=["services/foo.py"],
             commits=["abc1234"],
         )
         + "\ntrailing"
     )
     res = parse_status_block(out)
     assert isinstance(res, PipelineStatusBlock)
-    assert res.stage == "gate_b"
+    assert res.stage == "programovanie"
     assert res.kind == "gate_report"
-    assert res.deliverables == ["a.yaml", "b.md"]
+    assert res.deliverables == ["services/foo.py"]
     assert res.commits == ["abc1234"]
 
 
 def test_recipient_is_ignored_not_required():
-    res = parse_status_block(_block(stage="gate_a", kind="answer", summary="s", awaiting="none", recipient="director"))
+    res = parse_status_block(_block(stage="priprava", kind="answer", summary="s", awaiting="none", recipient="manazer"))
     assert isinstance(res, PipelineStatusBlock)
     assert not hasattr(res, "recipient")
 
 
 def test_commits_and_deliverables_default_to_empty():
-    res = parse_status_block(_block(stage="build", kind="gate_report", summary="s", awaiting="director"))
+    res = parse_status_block(_block(stage="programovanie", kind="gate_report", summary="s", awaiting="manazer"))
     assert isinstance(res, PipelineStatusBlock)
     assert res.deliverables == []
     assert res.commits == []
@@ -62,61 +70,34 @@ def test_commits_and_deliverables_default_to_empty():
 
 def test_blocked_carries_question():
     res = parse_status_block(
-        _block(stage="gate_c", kind="blocked", summary="ctx", awaiting="director", question="Ktorý port?")
+        _block(stage="programovanie", kind="blocked", summary="ctx", awaiting="manazer", question="Ktorý port?")
     )
     assert isinstance(res, PipelineStatusBlock)
     assert res.question == "Ktorý port?"
 
 
-# ── coordinator_directive.target tolerance (NEX Test regression, CR 2026-06-13) ─
+def test_all_four_phases_plus_done_parse():
+    for stage in ("priprava", "navrh", "programovanie", "verifikacia", "done"):
+        res = parse_status_block(_block(stage=stage, kind="answer", summary="s", awaiting="none"))
+        assert isinstance(res, PipelineStatusBlock), stage
+        assert res.stage == stage
 
 
-def _directive(target):
-    return {
-        "triage_class": "spec_problem",
-        "proposed_action": "relay",
-        "target": target,
-        "rationale": "r",
-        "confidence": 0.5,
-    }
+# ── dual transport: structured_output runs the SAME validation as the fence (R3 D1) ──
 
 
-@pytest.mark.parametrize("bad_target", ["frontend serializer cr014", None, ["a", "b"]])
-def test_coordinator_directive_tolerates_nonobject_target(bad_target):
-    # The Coordinator (LLM) emitted `target` as prose/null on a gate_g FAIL → the verify-judge parse
-    # auto-returned ("target: Input should be a valid dictionary…"), so the FAIL verdict couldn't route.
-    # A non-object target must NOT crash the parse — it degrades to an empty CoordinatorTarget.
-    res = parse_status_block(
-        _block(
-            stage="gate_g",
-            kind="gate_report",
-            summary="s",
-            awaiting="director",
-            coordinator_directive=_directive(bad_target),
-        )
-    )
-    assert isinstance(res, PipelineStatusBlock), res
-    assert res.coordinator_directive is not None
-    t = res.coordinator_directive.target
-    assert (t.task_id, t.role, t.commit) == (None, None, None)  # degraded to empty
+def test_structured_output_validates_like_the_fence():
+    ok = parse_structured_output({"stage": "navrh", "kind": "answer", "summary": "s", "awaiting": "none"})
+    assert isinstance(ok, PipelineStatusBlock)
+    bad = parse_structured_output({"stage": "gate_a", "kind": "answer", "summary": "s", "awaiting": "none"})
+    assert isinstance(bad, ParseFailure)  # v1 stage rejected on BOTH transports
 
 
-def test_coordinator_directive_preserves_valid_object_target():
-    res = parse_status_block(
-        _block(
-            stage="gate_g",
-            kind="gate_report",
-            summary="s",
-            awaiting="director",
-            coordinator_directive=_directive({"role": "implementer", "commit": "abc1234"}),
-        )
-    )
-    assert isinstance(res, PipelineStatusBlock), res
-    assert res.coordinator_directive.target.role == "implementer"
-    assert res.coordinator_directive.target.commit == "abc1234"
+def test_structured_output_not_an_object():
+    assert isinstance(parse_structured_output([1, 2, 3]), ParseFailure)
 
 
-# ── failure modes ─────────────────────────────────────────────────────────────
+# ── failure modes — a malformed block degrades to ParseFailure (→ blocked), NEVER a guess ──
 
 
 def test_no_fence():
@@ -125,9 +106,9 @@ def test_no_fence():
 
 def test_double_fence():
     out = (
-        _block(stage="gate_a", kind="answer", summary="s", awaiting="none")
+        _block(stage="priprava", kind="answer", summary="s", awaiting="none")
         + "\n"
-        + _block(stage="gate_b", kind="answer", summary="s", awaiting="none")
+        + _block(stage="navrh", kind="answer", summary="s", awaiting="none")
     )
     res = parse_status_block(out)
     assert isinstance(res, ParseFailure)
@@ -147,177 +128,161 @@ def test_json_not_object():
 
 @pytest.mark.parametrize("missing", ["stage", "kind", "summary", "awaiting"])
 def test_missing_required_field(missing):
-    fields = {"stage": "gate_a", "kind": "answer", "summary": "s", "awaiting": "none"}
+    fields = {"stage": "navrh", "kind": "answer", "summary": "s", "awaiting": "none"}
     del fields[missing]
     assert isinstance(parse_status_block(_block(**fields)), ParseFailure)
 
 
-def test_unknown_stage():
-    res = parse_status_block(_block(stage="gate_x", kind="answer", summary="s", awaiting="none"))
-    assert isinstance(res, ParseFailure)
-    assert "stage" in res.reason
+def test_unknown_stage_rejects_v1_gate():
+    # the v1 gate path (gate_a … gate_g / task_plan / build / release / kickoff) is gone in v2
+    for stale in ("gate_a", "gate_e", "gate_g", "task_plan", "build", "release", "kickoff"):
+        res = parse_status_block(_block(stage=stale, kind="answer", summary="s", awaiting="none"))
+        assert isinstance(res, ParseFailure), stale
+        assert "stage" in res.reason
 
 
 def test_unknown_kind():
-    res = parse_status_block(_block(stage="gate_a", kind="gossip", summary="s", awaiting="none"))
+    res = parse_status_block(_block(stage="navrh", kind="gossip", summary="s", awaiting="none"))
     assert isinstance(res, ParseFailure)
     assert "kind" in res.reason
 
 
-def test_unknown_awaiting():
-    res = parse_status_block(_block(stage="gate_a", kind="answer", summary="s", awaiting="maybe"))
-    assert isinstance(res, ParseFailure)
-    assert "awaiting" in res.reason
+def test_unknown_awaiting_rejects_v1_director():
+    # the operator was renamed Director → Manažér (CR-V2-004): ``awaiting`` is manazer/none
+    for stale in ("director", "maybe"):
+        res = parse_status_block(_block(stage="navrh", kind="answer", summary="s", awaiting=stale))
+        assert isinstance(res, ParseFailure), stale
+        assert "awaiting" in res.reason
+
+
+def test_awaiting_manazer_accepted():
+    res = parse_status_block(_block(stage="programovanie", kind="gate_report", summary="s", awaiting="manazer"))
+    assert isinstance(res, PipelineStatusBlock)
+    assert res.awaiting == "manazer"
 
 
 @pytest.mark.parametrize("kind", ["question", "blocked"])
 def test_question_required_for_question_kinds(kind):
-    res = parse_status_block(_block(stage="gate_a", kind=kind, summary="s", awaiting="director"))
+    res = parse_status_block(_block(stage="priprava", kind=kind, summary="s", awaiting="manazer"))
     assert isinstance(res, ParseFailure)
     assert "question" in res.reason
 
 
 @pytest.mark.parametrize("kind", ["question", "blocked"])
 def test_question_blank_rejected(kind):
-    res = parse_status_block(_block(stage="gate_a", kind=kind, summary="s", awaiting="director", question="   "))
+    res = parse_status_block(_block(stage="priprava", kind=kind, summary="s", awaiting="manazer", question="   "))
     assert isinstance(res, ParseFailure)
 
 
-# ── Gate E signals (F-007-gate-e §5/§7.2, CR-NS-018 Phase 1) ────────────────────
+# ── Auditor verdict (CR-V2-006 — repurposes the v1 findings/proposed_fix shape) ────
 
 
-def test_gate_e_signals_default_when_absent():
-    """Non-gate-E blocks (and gate_e blocks not emitting them) get safe defaults."""
-    res = parse_status_block(_block(stage="gate_a", kind="answer", summary="s", awaiting="none"))
+def test_auditor_verdict_signals_default_when_absent():
+    """An AI-Agent (non-verdict) block gets safe verdict-field defaults."""
+    res = parse_status_block(_block(stage="programovanie", kind="answer", summary="s", awaiting="none"))
     assert isinstance(res, PipelineStatusBlock)
-    assert res.topic is None
-    assert res.topic_done is False
-    assert res.coverage_complete is False
+    assert res.verdict is None
     assert res.findings == []
-    assert res.gap_found is False
     assert res.proposed_fix is None
 
 
-def test_gate_e_designer_answer_gap_parses():
+def test_auditor_pass_verdict_parses():
     res = parse_status_block(
         _block(
-            stage="gate_e",
-            kind="answer",
-            summary="medzera: chýba reset hesla",
+            stage="verifikacia",
+            kind="verdict",
+            summary="release acceptance PASS — app behaves per spec",
+            awaiting="manazer",
+            verdict=True,
+            findings=[],
+        )
+    )
+    assert isinstance(res, PipelineStatusBlock)
+    assert res.verdict is True
+    assert res.findings == []
+    assert res.proposed_fix is None
+
+
+def test_auditor_fail_verdict_carries_findings_and_fix_scope():
+    res = parse_status_block(
+        _block(
+            stage="verifikacia",
+            kind="verdict",
+            summary="FAIL — money rounding off by 0.01",
             awaiting="none",
-            gap_found=True,
-            proposed_fix="Pridať tok reset hesla cez email do §4.2.",
+            verdict=False,
+            findings=["DPH rounding accumulates per line, not on the cumulative total"],
+            proposed_fix="Round on the cumulative total in services/invoice.py compute_totals().",
         )
     )
     assert isinstance(res, PipelineStatusBlock)
-    assert res.gap_found is True
-    assert res.proposed_fix == "Pridať tok reset hesla cez email do §4.2."
+    assert res.verdict is False
+    assert res.findings == ["DPH rounding accumulates per line, not on the cumulative total"]
+    assert res.proposed_fix.startswith("Round on the cumulative total")
 
 
-def test_gate_e_topic_boundary_block_parses():
+def test_auditor_upfront_review_findings_after_navrh():
+    # the upfront design/spec review (replaces the Gate-E Customer function) surfaces holes at the
+    # post-Návrh schvaľovací bod via the SAME findings shape.
     res = parse_status_block(
         _block(
-            stage="gate_e",
-            kind="gate_report",
-            summary="okruh prihlásenie dokončený",
-            awaiting="director",
-            topic="prihlasenie",
-            topic_done=True,
-            findings=["chýba reset hesla", "2FA nedefinované"],
+            stage="navrh",
+            kind="verdict",
+            summary="upfront review — 2 holes",
+            awaiting="manazer",
+            verdict=False,
+            findings=["password reset flow undefined", "no rate-limit on login"],
+            plan={
+                "epics": [
+                    {"title": "E1", "feats": [{"title": "F1", "tasks": [{"title": "T1", "task_type": "backend"}]}]}
+                ]
+            },
         )
     )
     assert isinstance(res, PipelineStatusBlock)
-    assert res.topic == "prihlasenie"
-    assert res.topic_done is True
-    assert res.findings == ["chýba reset hesla", "2FA nedefinované"]
+    assert res.findings == ["password reset flow undefined", "no rate-limit on login"]
 
 
-def test_gate_e_coverage_complete_block_parses():
-    res = parse_status_block(
-        _block(
-            stage="gate_e",
-            kind="gate_report",
-            summary="všetkých 7 okruhov pokrytých",
-            awaiting="director",
-            topic_done=True,
-            coverage_complete=True,
-        )
-    )
-    assert isinstance(res, PipelineStatusBlock)
-    assert res.coverage_complete is True
+# ── task_plan plan parse↔write parity (CR-NS-020 / CR-NS-022 §1; v2: folds into Návrh) ──
 
 
-# ── task_plan plan parse↔write parity (CR-NS-020 / CR-NS-022 §1) ─────────────────
-
-
-def _task_plan_block() -> str:
+def _navrh_plan_block() -> str:
     epic = {"title": "E1", "feats": [{"title": "F1", "tasks": [{"title": "T1", "task_type": "backend"}]}]}
     return _block(
-        stage="task_plan",
+        stage="navrh",
         kind="gate_report",
         summary="plán",
-        awaiting="director",
+        awaiting="manazer",
         plan={"epics": [epic]},
     )
 
 
-def test_task_plan_parses_project_level_epic():
-    # v2 (CR-V2-001..005): epics are always project-level (multi-module removed). A plain epic
-    # (no module scoping) parses into a valid PipelineStatusBlock.
-    res = parse_status_block(_task_plan_block())
+def test_navrh_gate_report_parses_project_level_epic():
+    # v2: epics are always project-level (multi-module removed). The plan folds into the Návrh phase
+    # (CR-V2-011) — a navrh gate_report carries the EPIC→FEAT→TASK tree.
+    res = parse_status_block(_navrh_plan_block())
     assert isinstance(res, PipelineStatusBlock)
     assert res.plan.epics[0].title == "E1"
 
 
-def _coordinator_block(directive) -> str:
-    return _block(
-        stage="build", kind="gate_report", summary="relay", awaiting="director", coordinator_directive=directive
-    )
+def test_navrh_gate_report_requires_a_plan():
+    # the Návrh-close guard (was stage==task_plan in v1): a navrh gate_report with no plan → ParseFailure
+    planless = _block(stage="navrh", kind="gate_report", summary="x", awaiting="manazer")
+    assert isinstance(parse_status_block(planless), ParseFailure)
 
 
-def test_coordinator_directive_parses():
-    # A1 (F-008 §2, CR-NS-032): the structured Coordinator proposal parses + validates on the block.
-    directive = {
-        "triage_class": "programmer_guidance",
-        "proposed_action": "coordinator_move_baseline",
-        "target": {"commit": "abc123"},
-        "params": {},
-        "rationale": "task #3 work sits in the merged commit",
-        "confidence": 0.9,
-    }
-    res = parse_status_block(_coordinator_block(directive))
+def test_non_navrh_gate_report_does_not_require_a_plan():
+    # a programovanie/verifikacia gate_report has no plan-required guard
+    res = parse_status_block(_block(stage="programovanie", kind="gate_report", summary="ok", awaiting="manazer"))
     assert isinstance(res, PipelineStatusBlock)
-    assert res.coordinator_directive is not None
-    assert res.coordinator_directive.proposed_action == "coordinator_move_baseline"
-    assert res.coordinator_directive.target.commit == "abc123"
-    assert res.coordinator_directive.confidence == 0.9
-
-
-def test_coordinator_directive_absent_is_none():
-    res = parse_status_block(_block(stage="build", kind="gate_report", summary="ok", awaiting="director"))
-    assert isinstance(res, PipelineStatusBlock)
-    assert res.coordinator_directive is None
-
-
-@pytest.mark.parametrize(
-    "bad",
-    [
-        {"triage_class": "nonsense", "proposed_action": "relay", "rationale": "x", "confidence": 0.5},  # bad enum
-        {"triage_class": "director_decision", "proposed_action": "relay", "rationale": "x", "confidence": 1.5},  # >1
-        {"triage_class": "spec_problem", "proposed_action": "relay", "rationale": "x", "confidence": -0.1},  # <0
-        {"proposed_action": "relay", "rationale": "x", "confidence": 0.5},  # missing triage_class
-    ],
-)
-def test_coordinator_directive_rejects_invalid(bad):
-    assert isinstance(parse_status_block(_coordinator_block(bad)), ParseFailure)
+    assert res.plan is None
 
 
 def test_parse_failure_names_the_exact_missing_field():
     # WS-B3 (CR-NS-029): a task_type omission → the ParseFailure reason names the EXACT field + index
-    # (so the parse-retry re-prompt is actionable and the agent fixes it on the first retry), not a
-    # raw stringified Pydantic error array.
+    # (so the parse-retry re-prompt is actionable), not a raw stringified Pydantic error array.
     epic = {"title": "E1", "feats": [{"title": "F1", "tasks": [{"title": "T1"}]}]}  # task_type omitted
-    block = _block(stage="task_plan", kind="gate_report", summary="plán", awaiting="director", plan={"epics": [epic]})
+    block = _block(stage="navrh", kind="gate_report", summary="plán", awaiting="manazer", plan={"epics": [epic]})
     res = parse_status_block(block)
     assert isinstance(res, ParseFailure)
     # the exact dotted+indexed path, not a stringified error array
@@ -325,7 +290,7 @@ def test_parse_failure_names_the_exact_missing_field():
     assert "[{" not in res.reason  # NOT the raw `exc.errors()` list dump
 
 
-# ── (v0.7.3) narrowed task_plan-pass parsers (CR-1) ──────────────────────────
+# ── (v0.7.3) narrowed task_plan-pass parsers (CR-1) — KEPT verbatim in v2 ──────
 
 
 def test_parse_task_plan_skeleton_accepts_feats_without_tasks():
@@ -365,14 +330,14 @@ def test_parse_task_plan_feat_tasks_rejects_empty_and_bad_task():
     assert isinstance(parse_task_plan_feat_tasks("nope"), ParseFailure)  # not an object
 
 
-def test_task_plan_plan_required_guard_unchanged():
-    # Point 7: the ~283 plan-required guard is UNTOUCHED — a task_plan gate_report STILL needs a plan
-    # (the narrowed passes never hit this guard; only the final assembled block does, and it has one).
-    planless = _block(stage="task_plan", kind="gate_report", summary="x", awaiting="director")
+def test_task_plan_plan_required_guard_unchanged_for_narrowed_passes():
+    # The narrowed passes never hit the navrh plan-required guard — only the final assembled
+    # navrh gate_report does, and it has a plan.
+    planless = _block(stage="navrh", kind="gate_report", summary="x", awaiting="manazer")
     assert isinstance(parse_status_block(planless), ParseFailure)
 
 
-# ── (v0.7.3) TEXT/FENCE extraction — the real-CLI path (CR-1, point 8) ───────
+# ── (v0.7.3) TEXT/FENCE extraction — the real-CLI path (CR-1, point 8) — KEPT ──
 
 
 def _fence(payload: str) -> str:

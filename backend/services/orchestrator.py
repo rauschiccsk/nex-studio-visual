@@ -63,7 +63,6 @@ from backend.services.pipeline_status import (
     PIPELINE_STATUS_JSON_SCHEMA,
     TASK_PLAN_FEAT_TASKS_JSON_SCHEMA,
     TASK_PLAN_SKELETON_JSON_SCHEMA,
-    CoordinatorDirective,
     ParseFailure,
     PipelineStatusBlock,
     TaskPlan,
@@ -76,6 +75,15 @@ from backend.services.pipeline_status import (
     parse_task_plan_feat_tasks,
     parse_task_plan_skeleton,
 )
+
+# NOTE (CR-V2-006): the v1 ``CoordinatorDirective`` / ``CoordinatorTarget`` / ``task_pass`` status-block
+# shapes were DROPPED from ``pipeline_status``. The Coordinator-relay + per-task-audit + Gate-E engine
+# code below still REFERENCES the removed ``parsed.coordinator_directive`` / ``parsed.task_pass`` /
+# Gate-E signals; those code paths are dead in v2 and are removed wholesale by CR-V2-009 (apply_action
+# rebuild) / CR-V2-013 (Gate-E → Auditor upfront review). They are intentionally left in place here
+# (writer-deferral, per the build plan §2.1/§3 ordering + R-BLAST "don't re-author orchestrator.py
+# wholesale") and would only raise if actually invoked — the engine-integration tests that exercise them
+# are deferred to Milestones C/D. This CR (Milestone B) only lands the status-block CONTRACT.
 
 logger = logging.getLogger(__name__)
 
@@ -4749,7 +4757,9 @@ def _coordinator_directive_executable(directive: Optional[dict[str, Any]]) -> bo
     return True
 
 
-def _is_director_decision_directive(directive: Optional[CoordinatorDirective]) -> bool:
+# CR-V2-006: ``directive`` was ``Optional[CoordinatorDirective]`` (the dropped v1 model); annotated
+# ``Optional[Any]`` here — this is dead Coordinator-relay code removed wholesale by CR-V2-009.
+def _is_director_decision_directive(directive: Optional[Any]) -> bool:
     """True iff a parsed ``coordinator_directive`` (carried on a worker question/blocked turn) is a genuine
     ``director_decision`` scope. Fast-Fix Lane release carve-out (CR-NS-103): the ONLY case in which a
     Coordinator release question still escalates (real scope → convert-to-full-version); ``None`` / any other
