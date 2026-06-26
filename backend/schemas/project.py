@@ -4,12 +4,12 @@ Mirrors :mod:`backend.db.models.projects.Project`.  Field names, max
 lengths and default values match the SQLAlchemy model exactly so that
 ``ProjectRead.model_validate(project_orm_instance)`` round-trips cleanly.
 
-Category and status values correspond to the ``ck_projects_category`` and
-``ck_projects_status`` CHECK constraints on the ``projects`` table
-(``singlemodule | multimodule`` and ``active | archived | paused``
-respectively).  The ORM columns are ``String`` types guarded by DB-level
-CHECKs rather than Python Enums, so ``Literal`` is the narrowest faithful
-representation — consistent with the approach used in
+Type, auth-mode and status values correspond to the ``ck_projects_type``,
+``ck_projects_auth_mode`` and ``ck_projects_status`` CHECK constraints on the
+``projects`` table (``standard | web``, ``password | token`` and
+``active | archived | paused`` respectively).  The ORM columns are ``String``
+types guarded by DB-level CHECKs rather than Python Enums, so ``Literal`` is the
+narrowest faithful representation — consistent with the approach used in
 :mod:`backend.schemas.guardian` and :mod:`backend.schemas.user`.
 """
 
@@ -21,9 +21,13 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# Mirrors the CHECK constraint `category IN ('singlemodule', 'multimodule')`
-# on the ``projects`` table.
-ProjectCategory = Literal["singlemodule", "multimodule"]
+# Mirrors the CHECK constraint `type IN ('standard', 'web')` on the
+# ``projects`` table — the project archetype (preset surface composition).
+ProjectType = Literal["standard", "web"]
+
+# Mirrors the CHECK constraint `auth_mode IN ('password', 'token')` on the
+# ``projects`` table — the login flavour wired onto every surface.
+ProjectAuthMode = Literal["password", "token"]
 
 # Mirrors the CHECK constraint `status IN ('active', 'archived', 'paused')`
 # on the ``projects`` table.
@@ -100,9 +104,13 @@ class ProjectCreate(BaseModel):
         max_length=100,
         description="URL-safe identifier, unique across the system.",
     )
-    category: ProjectCategory = Field(
+    type: ProjectType = Field(
         ...,
-        description="Project category: singlemodule | multimodule.",
+        description="Project archetype (surface composition): standard | web.",
+    )
+    auth_mode: ProjectAuthMode = Field(
+        ...,
+        description="Login flavour wired onto every surface: password | token. Required.",
     )
     description: str = Field(
         ...,
@@ -153,13 +161,6 @@ class ProjectCreate(BaseModel):
         ),
     )
     # F-004 flags — frontend Create Project form (default per spec §4):
-    enable_coordinator: bool = Field(
-        default=True,
-        description=(
-            "F-004 K-003: bootstrap Koordinátor agent (charter + settings + dedo-inbox + "
-            "state file). Default True per spec §4 form. Opt-out via False."
-        ),
-    )
     enable_cicd: bool = Field(
         default=False,
         description=(
@@ -189,10 +190,10 @@ class ProjectUpdate(BaseModel):
     ``id`` and ``created_at`` are immutable.  ``updated_at`` is managed
     by the ORM via ``onupdate=func.now()`` and must not be set by
     clients.  ``created_by`` is an audit column and must not be
-    rewritten after the fact.  ``slug`` is auto-generated from ``name``
-    and ``category`` cannot be changed once the project is created, so
-    both are excluded.  All remaining fields are optional to support
-    PATCH-style semantics.
+    rewritten after the fact.  ``slug`` is auto-generated from ``name``;
+    ``type`` and ``auth_mode`` are archetype/login presets fixed at
+    creation, so all three are excluded.  All remaining fields are optional
+    to support PATCH-style semantics.
     """
 
     name: Optional[str] = Field(
@@ -253,7 +254,8 @@ class ProjectRead(BaseModel):
     id: UUID
     name: str = Field(..., min_length=1, max_length=255)
     slug: str = Field(..., min_length=1, max_length=100)
-    category: ProjectCategory
+    type: ProjectType
+    auth_mode: ProjectAuthMode
     description: str
     status: ProjectStatus
     backend_port: Optional[int] = None

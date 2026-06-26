@@ -26,10 +26,11 @@ from backend.schemas.feat import (
     FeatUpdate,
 )
 from backend.schemas.project import (
-    ProjectCategory,
+    ProjectAuthMode,
     ProjectCreate,
     ProjectRead,
     ProjectStatus,
+    ProjectType,
     ProjectUpdate,
 )
 from backend.schemas.task import (
@@ -73,10 +74,11 @@ __all__ = [
     "FeatRead",
     "FeatStatus",
     "FeatUpdate",
-    "ProjectCategory",
+    "ProjectAuthMode",
     "ProjectCreate",
     "ProjectRead",
     "ProjectStatus",
+    "ProjectType",
     "ProjectUpdate",
     "TaskCreate",
     "TaskRead",

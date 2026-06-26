@@ -3,7 +3,7 @@
 Exposes the standard CRUD surface for projects:
 
 * ``GET    /``              → paginated list (filter by ``status``,
-  ``category`` and ``created_by``).
+  ``type`` and ``created_by``).
 * ``GET    /{project_id}``  → single project by primary key.
 * ``POST   /``              → create a new project (with port and GitHub
   repo validation).
@@ -43,10 +43,10 @@ from backend.schemas.project import (
     PortCheckResponse,
     PortConflictError,
     PortSuggestResponse,
-    ProjectCategory,
     ProjectCreate,
     ProjectRead,
     ProjectStatus,
+    ProjectType,
     ProjectUpdate,
 )
 from backend.schemas.version import VersionCreate
@@ -281,9 +281,9 @@ def list_projects(
         alias="status",
         description="Filter by lifecycle status (active | archived | paused).",
     ),
-    category: Optional[ProjectCategory] = Query(
+    type: Optional[ProjectType] = Query(
         default=None,
-        description="Filter by category (singlemodule | multimodule).",
+        description="Filter by archetype (standard | web).",
     ),
     created_by: Optional[UUID] = Query(
         default=None,
@@ -298,7 +298,7 @@ def list_projects(
         rows = project_service.list_projects(
             db,
             status=status_filter,
-            category=category,
+            type=type,
             created_by=created_by,
             limit=limit,
             offset=skip,
@@ -306,7 +306,7 @@ def list_projects(
         total = project_service.count_projects(
             db,
             status=status_filter,
-            category=category,
+            type=type,
             created_by=created_by,
         )
     except ValueError as exc:
@@ -508,7 +508,7 @@ def create_project(
         # alongside the GitHub-repo dangling case (see docstring above).
         # Disabled when template_init_script_path is empty.
         try:
-            invoke_init_script(db, project, enable_coordinator=payload.enable_coordinator)
+            invoke_init_script(db, project)
         except TemplateBootstrapError as exc:
             db.rollback()
             raise HTTPException(
@@ -568,6 +568,8 @@ def create_project(
             target=project.source_path or "",
             slug=project.slug,
             repo_url=payload.repo_url,
+            project_type=project.type,
+            auth_mode=project.auth_mode,
             enable_cicd=payload.enable_cicd,
             full_smoke=payload.full_smoke,
             enable_branch_protection=payload.enable_branch_protection,
@@ -595,8 +597,8 @@ def update_project(
 ) -> ProjectRead:
     """Partially update a project's mutable fields.
 
-    ``id``, ``slug``, ``category``, ``created_by`` and ``created_at`` are
-    immutable; ``updated_at`` is refreshed by the ORM. Fields omitted from
+    ``id``, ``slug``, ``type``, ``auth_mode``, ``created_by`` and
+    ``created_at`` are immutable; ``updated_at`` is refreshed by the ORM. Fields omitted from
     the payload are left unchanged.
     """
     try:

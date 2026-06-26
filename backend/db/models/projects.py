@@ -23,7 +23,20 @@ class Project(Base, UUIDMixin, TimestampMixin):
 
     name = Column(String(255), nullable=False)
     slug = Column(String(100), nullable=False)
-    category = Column(String(20), nullable=False)
+    # Project archetype (CR-V2-005, replaces v1 ``category``). A ``type`` is a
+    # preset SURFACE COMPOSITION / scaffold template (design §4.2):
+    #   * ``standard`` → backend + a single app-frontend surface.
+    #   * ``web``      → backend + an admin-frontend surface + a public-site
+    #     surface (a managed/monitored site). The Web eshop/commerce add-on is
+    #     DEFERRED (§7 Open #11) — no commerce code is scaffolded in v2.0.0.
+    # Mobil is a deferred future archetype (§8 Open #1) — the enum ships only
+    # ``standard``/``web``.
+    type = Column(String(20), nullable=False)
+    # Mandatory authentication mode (CR-V2-005). Picks the login flavour the
+    # scaffolder wires onto the backend + each frontend surface:
+    #   * ``password`` → username+password login (like NEX Studio).
+    #   * ``token``    → token-launch (like NEX Inbox).
+    auth_mode = Column(String(20), nullable=False)
     description = Column(Text, nullable=False)
     status = Column(String(20), nullable=False, server_default="active")
     backend_port = Column(Integer, nullable=True)
@@ -59,8 +72,12 @@ class Project(Base, UUIDMixin, TimestampMixin):
         UniqueConstraint("name", name="uq_projects_name"),
         UniqueConstraint("slug", name="uq_projects_slug"),
         CheckConstraint(
-            "category IN ('singlemodule', 'multimodule')",
-            name="ck_projects_category",
+            "type IN ('standard', 'web')",
+            name="ck_projects_type",
+        ),
+        CheckConstraint(
+            "auth_mode IN ('password', 'token')",
+            name="ck_projects_auth_mode",
         ),
         CheckConstraint(
             "status IN ('active', 'archived', 'paused')",

@@ -13,10 +13,14 @@ Design notes (per DESIGN.md §1.3 / §2.2 and :mod:`backend.db.models.projects`)
       :func:`update` validate these constraints before :meth:`Session.flush`
       so the router receives a clean :class:`ValueError` rather than a raw
       :class:`~sqlalchemy.exc.IntegrityError`.
-    * ``category`` is constrained by a CHECK (``singlemodule`` |
-      ``multimodule``) and is immutable after creation — it cannot be
-      swapped later. The Pydantic ``ProjectCategory`` literal mirrors the
+    * ``type`` is constrained by a CHECK (``standard`` | ``web``) and is
+      immutable after creation — the archetype/surface composition cannot
+      be swapped later. The Pydantic ``ProjectType`` literal mirrors the
       DB constraint.
+    * ``auth_mode`` is constrained by a CHECK (``password`` | ``token``),
+      mandatory at creation and immutable thereafter — it fixes the login
+      flavour wired onto every surface. The Pydantic ``ProjectAuthMode``
+      literal mirrors the DB constraint.
     * ``status`` is constrained by a CHECK (``active`` | ``archived`` |
       ``paused``). The Pydantic ``ProjectStatus`` literal mirrors the DB
       constraint, so the service does not need to revalidate it — if an
@@ -26,6 +30,8 @@ Design notes (per DESIGN.md §1.3 / §2.2 and :mod:`backend.db.models.projects`)
       §2.2 specifies slugs are auto-generated from ``name`` at creation
       and stable thereafter (URLs, filesystem paths, KB locations all
       depend on slug).
+    * ``type`` and ``auth_mode`` are archetype/login presets — immutable
+      after creation (excluded from :class:`ProjectUpdate`).
     * ``created_by`` is an audit column — immutable after creation.
     * Every inbound FK to ``projects.id`` uses ``ON DELETE CASCADE``
       (``raw_specifications``,
@@ -34,9 +40,9 @@ Design notes (per DESIGN.md §1.3 / §2.2 and :mod:`backend.db.models.projects`)
       ``report_configs``). No RESTRICT
       dependency checks are required — deleting a project cleanly
       removes every dependent row via DB-level cascade.
-    * List filters (``status``, ``category``, ``created_by``) support the
-      dashboard / settings-page project list UI — "show all active
-      multimodule projects", "show all projects owned by a user", etc.
+    * List filters (``status``, ``type``, ``created_by``) support the
+      dashboard / settings-page project list UI — "show all active web
+      projects", "show all projects owned by a user", etc.
 """
 
 from __future__ import annotations
@@ -49,9 +55,9 @@ from sqlalchemy.orm import Session
 
 from backend.db.models.projects import Project
 from backend.schemas.project import (
-    ProjectCategory,
     ProjectCreate,
     ProjectStatus,
+    ProjectType,
     ProjectUpdate,
 )
 from backend.services import system_setting as system_setting_service
@@ -61,7 +67,7 @@ def list_projects(
     db: Session,
     *,
     status: Optional[ProjectStatus] = None,
-    category: Optional[ProjectCategory] = None,
+    type: Optional[ProjectType] = None,
     created_by: Optional[UUID] = None,
     limit: int = 100,
     offset: int = 0,
@@ -75,8 +81,7 @@ def list_projects(
         db: Active SQLAlchemy session.
         status: Optional lifecycle-status filter (``active`` | ``archived``
             | ``paused``).
-        category: Optional category filter (``singlemodule`` |
-            ``multimodule``).
+        type: Optional archetype filter (``standard`` | ``web``).
         created_by: Optional filter restricting results to projects
             created by a specific user.
         limit: Maximum number of rows to return.
@@ -88,8 +93,8 @@ def list_projects(
     stmt = select(Project)
     if status is not None:
         stmt = stmt.where(Project.status == status)
-    if category is not None:
-        stmt = stmt.where(Project.category == category)
+    if type is not None:
+        stmt = stmt.where(Project.type == type)
     if created_by is not None:
         stmt = stmt.where(Project.created_by == created_by)
     stmt = stmt.order_by(Project.created_at.desc()).limit(limit).offset(offset)
@@ -100,12 +105,12 @@ def count_projects(
     db: Session,
     *,
     status: Optional[ProjectStatus] = None,
-    category: Optional[ProjectCategory] = None,
+    type: Optional[ProjectType] = None,
     created_by: Optional[UUID] = None,
 ) -> int:
     """Return the total number of projects matching the given filters.
 
-    Mirrors the ``status`` / ``category`` / ``created_by`` filters of
+    Mirrors the ``status`` / ``type`` / ``created_by`` filters of
     :func:`list_projects` so a paginated response can report the unfiltered
     total alongside the current page of items.
 
@@ -113,8 +118,7 @@ def count_projects(
         db: Active SQLAlchemy session.
         status: Optional lifecycle-status filter (``active`` | ``archived``
             | ``paused``).
-        category: Optional category filter (``singlemodule`` |
-            ``multimodule``).
+        type: Optional archetype filter (``standard`` | ``web``).
         created_by: Optional filter restricting results to projects
             created by a specific user.
 
@@ -124,8 +128,8 @@ def count_projects(
     stmt = select(func.count()).select_from(Project)
     if status is not None:
         stmt = stmt.where(Project.status == status)
-    if category is not None:
-        stmt = stmt.where(Project.category == category)
+    if type is not None:
+        stmt = stmt.where(Project.type == type)
     if created_by is not None:
         stmt = stmt.where(Project.created_by == created_by)
     return int(db.execute(stmt).scalar_one())
@@ -201,7 +205,8 @@ def create(db: Session, data: ProjectCreate) -> Project:
     project = Project(
         name=data.name,
         slug=data.slug,
-        category=data.category,
+        type=data.type,
+        auth_mode=data.auth_mode,
         description=data.description,
         status=data.status,
         backend_port=data.backend_port,
@@ -225,8 +230,8 @@ def update(db: Session, project_id: UUID, data: ProjectUpdate) -> Project:
     Only the fields listed in DESIGN.md §2.2 (``name``, ``description``,
     ``status``, ``backend_port``, ``frontend_port``, ``db_port``,
     ``repo_url``, ``source_path``, ``kb_path``, ``guardian_enabled``) may
-    be changed. ``id``, ``slug``, ``category``, ``created_by`` and
-    ``created_at`` are immutable; ``updated_at`` is refreshed automatically
+    be changed. ``id``, ``slug``, ``type``, ``auth_mode``, ``created_by``
+    and ``created_at`` are immutable; ``updated_at`` is refreshed automatically
     by the ORM ``onupdate=func.now()`` trigger. Fields that are ``None``
     in the payload are treated as "leave unchanged" to support PATCH
     semantics.

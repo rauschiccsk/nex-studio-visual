@@ -102,7 +102,6 @@ def invoke_init_script(
     project: Project,
     *,
     dry_run: bool = False,
-    enable_coordinator: bool = True,
 ) -> BootstrapResult:
     """Run the icc-claude-template init.sh for the given project.
 
@@ -186,9 +185,10 @@ def invoke_init_script(
     ]
     if dry_run:
         args.append("--dry-run")
-    if not enable_coordinator:
-        # F-004 K-003 opt-out (default in init.sh is enabled)
-        args.append("--no-coordinator")
+    # v2.0.0 (CR-V2-005): the v1 Koordinátor role is retired — the two-agent
+    # model is AI Agent + Auditor. Never bootstrap a coordinator; init.sh's
+    # default is opted out unconditionally.
+    args.append("--no-coordinator")
 
     # CR-NS-012: route agent notifications to the project owner. init.sh
     # writes the value into the new project's .env as TELEGRAM_NOTIFY_CHAT_ID.

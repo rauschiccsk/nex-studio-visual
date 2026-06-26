@@ -10,7 +10,7 @@ of the ProjectMember model elimination — project membership is no longer
 tracked. The remaining public surface is pure project CRUD:
 
 * :func:`list_projects` — returns **all** projects (no member filtering),
-  with optional status / category / created_by filters and pagination.
+  with optional status / type / created_by filters and pagination.
 * :func:`count_projects` — total count matching the same filters.
 * :func:`get_by_id` — single project by primary key.
 * :func:`create` — create a new project (validates unique name + slug).
