@@ -6,11 +6,14 @@ keeping the test database clean without costly create/drop cycles.
 """
 
 import os
+from pathlib import Path
 
 # Set required env vars BEFORE any backend imports trigger Settings() instantiation
 os.environ.setdefault("GITHUB_TOKEN", "ghp_test_dummy_token")
 
 import pytest
+from alembic import command
+from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
@@ -18,8 +21,11 @@ from sqlalchemy.orm import Session
 from backend.api.dependencies import get_rag_indexer
 
 # ``backend.db.base`` imports every ORM model — importing it here populates
-# ``Base.metadata`` with every table before ``create_all`` runs.
-from backend.db.base import Base
+# ``Base.metadata`` with every table at collection time, so a model missing from
+# the registry surfaces as an import error here. The test schema itself is now
+# built from the migration chain (``_reset_test_schema_to_head``), not
+# ``Base.metadata.create_all``; the import is kept for that registration guard.
+from backend.db.base import Base  # noqa: F401
 
 # Explicit model imports for ``Base.metadata`` awareness — required by the
 # Model Generation Checklist. ``backend.db.base`` re-exports these, but each
@@ -62,34 +68,88 @@ def _ensure_test_database_exists(test_url: str) -> None:
     admin_engine.dispose()
 
 
+def _reset_test_schema_to_head(url: str) -> None:
+    """Reset the test DB to the v2 migration head (drop public schema + upgrade).
+
+    The test database is a PERSISTENT/shared Postgres. ``Base.metadata.create_all``
+    is a NO-OP for any table that already exists and never ALTERs a stale
+    constraint, so a pre-existing v1 schema (e.g. the 2026-05-03
+    ``ck_projects_category`` constraint) would survive untouched — tests would
+    then run against a v1 schema while the models + migrations describe v2.
+
+    Instead we make the schema authoritative against the migration chain:
+
+    1. DROP + CREATE the ``public`` schema — wipes ANY stale tables/constraints
+       (including ``alembic_version``) so there is no leftover v1 state.
+    2. ``alembic upgrade head`` — replays migrations 001..074 (v2 head) against
+       the SEPARATE test DB via the ``-x url=...`` override honoured by
+       ``migrations/env.py``. The schema therefore matches exactly what a
+       production migration produces, not merely the current ORM metadata.
+    """
+    admin_engine = create_engine(url, isolation_level="AUTOCOMMIT")
+    with admin_engine.connect() as conn:
+        conn.execute(text("DROP SCHEMA public CASCADE"))
+        conn.execute(text("CREATE SCHEMA public"))
+    admin_engine.dispose()
+
+    repo_root = Path(__file__).resolve().parent.parent
+    alembic_cfg = Config(str(repo_root / "alembic.ini"))
+    alembic_cfg.set_main_option("script_location", str(repo_root / "migrations"))
+    # Routed to the test DB (NOT settings.database_url) via env.py's -x override.
+    alembic_cfg.cmd_opts = type("opts", (), {"x": [f"url={url}"]})()
+    command.upgrade(alembic_cfg, "head")
+
+    # Purge the migration-seeded baseline data (migration 024 seeds the default
+    # ``admin`` user + its ``user_sessions`` row). The migration chain gives us
+    # the authoritative v2 SCHEMA; the seeded ADMIN ROW is production
+    # environment data, not a test baseline. The whole suite is built on a
+    # SAVEPOINT-per-test model where each test seeds the users/projects it
+    # needs (``seed_user``, ``_seed_admin``, ``make_user``) into an otherwise
+    # EMPTY DB — leaving the seeded ``admin`` in place would collide with every
+    # ``seed_user(username="admin")``. Truncate it once here so each test starts
+    # from "v2 schema + empty data", exactly as the fixtures expect.
+    admin_engine = create_engine(url, isolation_level="AUTOCOMMIT")
+    with admin_engine.connect() as conn:
+        conn.execute(text("DELETE FROM user_sessions"))
+        conn.execute(text("DELETE FROM users"))
+    admin_engine.dispose()
+
+
 @pytest.fixture(scope="session")
 def test_engine():
-    """Create a SQLAlchemy engine for the test database (session-scoped)."""
+    """Create a SQLAlchemy engine for the test database (session-scoped).
+
+    The schema is brought to the v2 migration head (see
+    ``_reset_test_schema_to_head``) rather than via ``Base.metadata.create_all``,
+    so the persistent test DB always reflects migrations 001..074 and never a
+    stale v1 schema.
+    """
     from backend.config.settings import settings
 
     url = _get_test_database_url()
 
     # CR-NS-076: refuse to even connect if the test DB is not a DISTINCT
-    # database from production. This MUST run before ``_ensure_test_database_exists``
-    # / ``create_all`` / ``drop_all`` below — otherwise a mis-set
-    # ``TEST_DATABASE_URL`` pointing at the cockpit DB would have its tables
-    # created and then DROPPED at session teardown. Guarding here (rather than
-    # only in the autouse fixture, which depends on this fixture and therefore
-    # runs after setup) closes that window and also covers ``backend/tests``,
-    # which re-imports this fixture but not the autouse one below.
+    # database from production. This MUST run before
+    # ``_ensure_test_database_exists`` / the schema reset below — otherwise a
+    # mis-set ``TEST_DATABASE_URL`` pointing at the cockpit DB would have its
+    # schema DROPPED and re-migrated. Guarding here (rather than only in the
+    # autouse fixture, which depends on this fixture and therefore runs after
+    # setup) closes that window and also covers ``backend/tests``, which
+    # re-imports this fixture but not the autouse one below.
     assert_test_db_distinct(settings.database_url, url)
 
     _ensure_test_database_exists(url)
 
-    engine = create_engine(url, pool_pre_ping=True)
+    # Reset the persistent test DB to the v2 migration head before any test
+    # touches it. ``Base`` is imported above purely so every ORM model is
+    # registered on import (collection-time guard); the schema itself comes
+    # from the migration chain, not ``create_all``.
+    _reset_test_schema_to_head(url)
 
-    # Create all tables
-    Base.metadata.create_all(bind=engine)
+    engine = create_engine(url, pool_pre_ping=True)
 
     yield engine
 
-    # Drop all tables after all tests
-    Base.metadata.drop_all(bind=engine)
     engine.dispose()
 
 
@@ -113,9 +173,22 @@ def _guard_prod_db_isolation(test_engine):
     ``backend/db/session.py`` behaviour is untouched — only the live, shared
     object is reconfigured for the duration of the test session and restored
     on teardown.
+
+    3. Neutralise the FastAPI lifespan's ``_run_alembic_upgrade``. Every
+       ``TestClient(app)`` enters the app lifespan, which calls
+       ``backend.main._run_alembic_upgrade`` — and that builds its OWN Alembic
+       ``Config("alembic.ini")`` that resolves to the PRODUCTION
+       ``settings.database_url`` (it does NOT go through the rebind above).
+       During tests that both (a) runs migrations against the cockpit/PROD DB
+       and (b) explodes on the legacy ``ck_projects_category`` row, which is
+       exactly the v1 schema the v2 migrations remove. The test DB is already
+       brought to head by ``test_engine`` (``_reset_test_schema_to_head``), so
+       the lifespan migration is redundant here — replace it with a no-op for
+       the session. Production startup behaviour is untouched.
     """
     from backend.config.settings import settings
     from backend.db import session as db_session_module
+    from backend.main import _run_alembic_upgrade as _orig_run_alembic_upgrade
 
     assert_test_db_distinct(settings.database_url, _get_test_database_url())
 
@@ -123,9 +196,14 @@ def _guard_prod_db_isolation(test_engine):
     db_session_module.SessionLocal.configure(bind=test_engine)
     db_session_module.engine = test_engine
 
+    import backend.main as _main_module
+
+    _main_module._run_alembic_upgrade = lambda: None
+
     yield
 
-    # Restore the production bind so process-global state is left as we found it.
+    # Restore process-global state exactly as we found it.
+    _main_module._run_alembic_upgrade = _orig_run_alembic_upgrade
     db_session_module.SessionLocal.configure(bind=original_engine)
     db_session_module.engine = original_engine
 

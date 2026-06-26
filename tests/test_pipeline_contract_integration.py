@@ -54,10 +54,10 @@ def test_real_state_row_serialises_within_generated_contract(db_session):
     state = PipelineState(
         version_id=version.id,
         flow_type="fast_fix",
-        current_stage="build",
-        current_actor="implementer",
-        status="awaiting_director",
-        next_action="Director posúdi build.",
+        current_stage="programovanie",
+        current_actor="ai_agent",
+        status="awaiting_manazer",
+        next_action="Manažér posúdi build.",
     )
     db_session.add(state)
     db_session.flush()  # fires the DB CHECK constraints
@@ -69,18 +69,18 @@ def test_real_state_row_serialises_within_generated_contract(db_session):
     assert read.current_stage in STAGE_VALUES
     assert read.current_actor in ACTOR_VALUES
     assert read.status in STATUS_VALUES
-    assert read.current_stage == "build"
-    assert read.current_actor == "implementer"
-    assert read.status == "awaiting_director"
+    assert read.current_stage == "programovanie"
+    assert read.current_actor == "ai_agent"
+    assert read.status == "awaiting_manazer"
 
 
 def test_real_message_row_serialises_within_generated_contract(db_session):
     version = _make_version(db_session)
     message = PipelineMessage(
         version_id=version.id,
-        stage="gate_g",
+        stage="verifikacia",
         author="auditor",
-        recipient="director",
+        recipient="manazer",
         kind="verdict",
         content="Audit PASS.",
         status="delivered",

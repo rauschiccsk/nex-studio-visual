@@ -23,6 +23,15 @@ from backend.services import claude_agent, orchestrator
 from backend.services import task as task_service
 from backend.services.pipeline_status import ParseFailure, PipelineStatusBlock, parse_status_block
 
+# v2.0.0-dev: this whole module exercises the v1 orchestration ENGINE — the round-runners, the
+# coordinator relay, per-task audit (verify_*), the gate verdicts (verdict_*), the task-plan node,
+# surgical-fix / rerun-release-audit, the 11-stage gate flow and release auto-deploy. v2 collapses the
+# v1 5-role / 11-stage waterfall to 2 agents (ai_agent/auditor) + 4 phases, so the v2 CHECK constraints
+# reject the v1 stage/actor/role vocabulary these tests construct, and removed actions (e.g. 'approve')
+# raise OrchestratorError. The replacing v2 engine behaviour is built in Milestone C (phase behaviours)
+# and D (Auditor). These tests are the SPEC of what C/D must re-build — kept (not deleted) and deferred.
+pytestmark = pytest.mark.skip(reason="v1 engine behaviour — replaced by v2 in Milestone C/D")
+
 
 def _block(stage="gate_a", kind="gate_report", summary="ok", awaiting="director", **extra) -> str:
     body = {"stage": stage, "kind": kind, "summary": summary, "awaiting": awaiting}

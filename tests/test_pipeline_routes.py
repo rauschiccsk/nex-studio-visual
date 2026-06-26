@@ -19,6 +19,12 @@ from backend.db.session import get_db
 from backend.services import orchestrator, pipeline_runner
 from backend.services.pipeline_ws import _Conn, registry
 
+# v2.0.0-dev: the pipeline cockpit REST routes are the HTTP surface of the v1 orchestration engine
+# (start / action / coordinator-recommendation / board with gate_e + r4 fields). They drive v1 engine
+# flow and assert the v1 stage/actor vocabulary the v2 CHECKs reject. The v2 cockpit routes follow the
+# Milestone C/D engine. Kept as the SPEC of the cockpit behaviour C/D must re-build; deferred meanwhile.
+pytestmark = pytest.mark.skip(reason="v1 engine behaviour — replaced by v2 in Milestone C/D")
+
 
 def _block(stage="kickoff", kind="done", summary="ok", awaiting="director", **extra) -> str:
     body = {"stage": stage, "kind": kind, "summary": summary, "awaiting": awaiting}

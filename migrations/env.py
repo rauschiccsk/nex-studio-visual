@@ -29,7 +29,14 @@ def _setup_config() -> None:
         # during Zoltán's "žiadna reakcia" incident.
         fileConfig(config.config_file_name, disable_existing_loggers=False)
 
-    config.set_main_option("sqlalchemy.url", _ensure_pg8000_driver(settings.database_url))
+    # An explicit URL passed via ``-x url=...`` wins over the configured
+    # production ``settings.database_url``. The test harness uses this to
+    # migrate the SEPARATE test database to head (see ``tests/conftest.py``);
+    # production / CLI runs pass no override and keep targeting the cockpit DB.
+    x_args = context.get_x_argument(as_dictionary=True)
+    override_url = x_args.get("url")
+    url = override_url if override_url else settings.database_url
+    config.set_main_option("sqlalchemy.url", _ensure_pg8000_driver(url))
 
 
 def run_migrations_offline() -> None:

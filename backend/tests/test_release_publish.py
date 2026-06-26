@@ -32,6 +32,12 @@ from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.services import orchestrator
 
+# v2.0.0-dev: the release auto-deploy / publish flow (``_run_release_publish``, UAT deploy/provision,
+# uat-accept, retry-publish) is v1 engine behaviour driven off v1 ``release``-stage pipeline_state rows
+# the v2 CHECKs reject. The v2 release path follows the engine rebuild in Milestone C/D. Kept as the
+# SPEC of the publish behaviour C/D must re-build; deferred meanwhile.
+pytestmark = pytest.mark.skip(reason="v1 engine behaviour — replaced by v2 in Milestone C/D")
+
 # ---------------------------------------------------------------------------
 # Runner: _run_release_publish + helpers (the _run_publish_step subprocess seam is faked)
 # ---------------------------------------------------------------------------

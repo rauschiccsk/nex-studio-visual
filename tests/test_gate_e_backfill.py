@@ -19,11 +19,18 @@ import importlib.util
 import uuid
 from pathlib import Path
 
+import pytest
 from sqlalchemy import text
 
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
+
+# v2.0.0-dev: this exercises the Gate E backfill (migration 052) which writes v1 ``gate_e`` /
+# ``customer`` / ``designer`` pipeline_message rows the v2 CHECKs reject. Gate E + its dialogue layer are
+# v1 engine behaviour (the dialogue tables were already dropped in 068); the v2 upfront-completeness pass
+# is rebuilt in Milestone C/D. Kept as the SPEC of that backfill; deferred meanwhile.
+pytestmark = pytest.mark.skip(reason="v1 engine behaviour — replaced by v2 in Milestone C/D")
 
 _MIG = Path(__file__).resolve().parents[1] / "migrations" / "versions" / "052_gate_e_backfill.py"
 _spec = importlib.util.spec_from_file_location("gate_e_backfill_migration", _MIG)

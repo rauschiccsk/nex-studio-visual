@@ -81,7 +81,7 @@ async def test_away_director_pinged_when_project_has_no_owner(db_session, monkey
     monkeypatch.setattr(pipeline_runner.notify, "send_telegram", fake_send)
 
     try:
-        await pipeline_runner._maybe_notify(db_session, version.id, types.SimpleNamespace(status="awaiting_director"))
+        await pipeline_runner._maybe_notify(db_session, version.id, types.SimpleNamespace(status="awaiting_manazer"))
     finally:
         await registry.disconnect(version.id, ws)
 
@@ -106,7 +106,7 @@ async def test_active_director_suppresses_nudge(monkeypatch) -> None:
 
     try:
         # db is never touched — the active-director gate returns first.
-        await pipeline_runner._maybe_notify(None, vid, types.SimpleNamespace(status="awaiting_director"))
+        await pipeline_runner._maybe_notify(None, vid, types.SimpleNamespace(status="awaiting_manazer"))
     finally:
         await registry.disconnect(vid, ws)
 

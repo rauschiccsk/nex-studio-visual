@@ -31,6 +31,12 @@ from backend.db.models.versions import Version
 from backend.services import orchestrator
 from backend.services.pipeline_status import ParseFailure, PipelineStatusBlock
 
+# v2.0.0-dev: this whole module drives the v1 ENGINE verify path (Coordinator relay of a worker's
+# parse-failure, the gate_b designer-report verify/auto-return) off v1 gate-flow pipeline_state rows the
+# v2 CHECKs reject. The v2 verify path follows the Auditor / per-phase rebuild in Milestone C/D. Kept as
+# the SPEC of the verify behaviour C/D must re-build; deferred meanwhile.
+pytestmark = pytest.mark.skip(reason="v1 engine behaviour — replaced by v2 in Milestone C/D")
+
 STAGE = "gate_b"
 
 

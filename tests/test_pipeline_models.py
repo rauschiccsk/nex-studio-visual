@@ -10,6 +10,12 @@ from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 
+# The ``task_plan`` stage was a v1 11-stage-flow value (CR-NS-020); the v2.0.0 4-phase model
+# (priprava/navrh/programovanie/verifikacia/done — migration 069) removed it, so the v2 CHECK
+# correctly rejects it. The behaviour these two tests assert (a ``task_plan`` stage being accepted)
+# is gone; the per-task-plan node is re-designed for the v2 engine in Milestone C/D.
+_V1_TASK_PLAN_STAGE = "v1 engine behaviour — replaced by v2 in Milestone C/D"
+
 
 def _make_version(db_session) -> Version:
     user = User(
@@ -40,10 +46,10 @@ def _state(version, **overrides) -> PipelineState:
     defaults = {
         "version_id": version.id,
         "flow_type": "new_version",
-        "current_stage": "kickoff",
-        "current_actor": "coordinator",
+        "current_stage": "priprava",
+        "current_actor": "ai_agent",
         "status": "agent_working",
-        "next_action": "Coordinator robí discovery.",
+        "next_action": "AI Agent robí discovery.",
     }
     defaults.update(overrides)
     return PipelineState(**defaults)
@@ -52,9 +58,9 @@ def _state(version, **overrides) -> PipelineState:
 def _message(version, **overrides) -> PipelineMessage:
     defaults = {
         "version_id": version.id,
-        "stage": "gate_a",
-        "author": "designer",
-        "recipient": "director",
+        "stage": "priprava",
+        "author": "ai_agent",
+        "recipient": "manazer",
         "kind": "gate_report",
         "content": "development-spec.md hotové",
         "status": "delivered",
@@ -82,7 +88,7 @@ class TestPipelineState:
         version = _make_version(db_session)
         db_session.add(_state(version))
         db_session.flush()
-        db_session.add(_state(version, current_stage="gate_a"))
+        db_session.add(_state(version, current_stage="navrh"))
         with pytest.raises(IntegrityError):
             db_session.flush()
 
@@ -107,6 +113,7 @@ class TestPipelineState:
         db_session.add(_state(version, flow_type="fast_fix"))
         db_session.flush()
 
+    @pytest.mark.skip(reason=_V1_TASK_PLAN_STAGE)
     def test_accepts_task_plan_stage(self, db_session):
         # CR-NS-020 CR-1: 'task_plan' is a permissive value (foundation) — the
         # widened ck_pipeline_state_current_stage must accept it even though the
@@ -126,7 +133,7 @@ class TestPipelineState:
         db_session.refresh(state)
         assert state.awaiting_director_since is None  # not waiting → unset
 
-        state.status = "awaiting_director"
+        state.status = "awaiting_manazer"
         assert state.awaiting_director_since is not None  # stamped on entry
         db_session.flush()
         db_session.refresh(state)
@@ -161,7 +168,7 @@ class TestPipelineState:
         state = _state(version, status="blocked", block_reason="parse_exhaustion")
         db_session.add(state)
         db_session.flush()  # no raise
-        state.status = "awaiting_director"  # leaving blocked clears it (listener) → NULL is valid
+        state.status = "awaiting_manazer"  # leaving blocked clears it (listener) → NULL is valid
         db_session.flush()
         db_session.refresh(state)
         assert state.block_reason is None
@@ -192,7 +199,7 @@ class TestPipelineState:
         state.status = "blocked"  # blocked → blocked (value==oldvalue) is a no-op → reason preserved
         assert state.block_reason == "agent_question"
 
-        state.status = "awaiting_director"  # leaving blocked clears it
+        state.status = "awaiting_manazer"  # leaving blocked clears it
         assert state.block_reason is None
         db_session.flush()
         db_session.refresh(state)
@@ -240,6 +247,7 @@ class TestPipelineMessage:
         db_session.add(_message(version, author="system", kind="notification"))
         db_session.flush()  # no raise
 
+    @pytest.mark.skip(reason=_V1_TASK_PLAN_STAGE)
     def test_accepts_task_plan_stage(self, db_session):
         # CR-NS-020 CR-1: widened ck_pipeline_message_stage accepts 'task_plan'.
         version = _make_version(db_session)
@@ -262,14 +270,14 @@ class TestPipelineMessage:
     def test_seq_orders_same_transaction_messages_by_insertion(self, db_session):
         """CR-NS-018: two messages in ONE transaction tie on created_at (func.now)
         but order deterministically by the monotonic ``seq`` — worker report first,
-        then the coordinator's verify of it."""
+        then the Auditor's verify of it."""
         from sqlalchemy import select
 
         version = _make_version(db_session)
-        worker = _message(version, author="designer", kind="gate_report", content="spec hotové")
+        worker = _message(version, author="ai_agent", kind="gate_report", content="spec hotové")
         db_session.add(worker)
         db_session.flush()
-        verify = _message(version, author="coordinator", kind="gate_report", content="verifikácia OK")
+        verify = _message(version, author="auditor", kind="gate_report", content="verifikácia OK")
         db_session.add(verify)
         db_session.flush()
         db_session.refresh(worker)

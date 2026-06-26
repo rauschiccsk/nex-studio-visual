@@ -8,11 +8,19 @@ per-ROLE-OF-ORIGIN split (:func:`aggregate_usage_by_role`) — including the ``m
 
 import uuid
 
+import pytest
+
 from backend.db.models.foundation import User
 from backend.db.models.pipeline import PipelineMessage
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.services.pipeline_metrics import aggregate_pipeline_usage, aggregate_usage_by_role
+
+# v2.0.0-dev: these aggregate over v1 pipeline_message rows whose author/stage vocabulary
+# (implementer/build, designer/gate_a) the v2 CHECKs reject, and assert the v1 per-role-of-origin model
+# the v2 2-role (ai_agent/auditor) redesign supersedes. The v2 metrics aggregation follows the engine
+# rebuild in Milestone C/D. Kept as the SPEC of the aggregation C/D must re-key; deferred meanwhile.
+pytestmark = pytest.mark.skip(reason="v1 engine behaviour — replaced by v2 in Milestone C/D")
 
 
 def _project_version(db_session):

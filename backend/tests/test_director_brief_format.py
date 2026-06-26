@@ -35,6 +35,12 @@ from backend.db.models.versions import Version
 from backend.services import orchestrator
 from backend.services.pipeline_status import PipelineStatusBlock
 
+# v2.0.0-dev: this whole module formats the Director(Manažér) brief from v1 gate-flow pipeline_state rows
+# (gate_b/designer) the v2 CHECKs reject — it tests the v1 ENGINE's gate-report→brief rendering. The v2
+# brief is re-derived from the 4-phase model in Milestone C/D. Kept as the SPEC of the brief C/D must
+# re-build; deferred meanwhile.
+pytestmark = pytest.mark.skip(reason="v1 engine behaviour — replaced by v2 in Milestone C/D")
+
 STAGE = "gate_b"
 
 

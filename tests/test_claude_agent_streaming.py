@@ -59,7 +59,7 @@ def _patch_exec(monkeypatch, proc):
 
 
 def _status_block() -> str:
-    body = {"stage": "gate_a", "kind": "gate_report", "summary": "14 endpoints", "awaiting": "director"}
+    body = {"stage": "priprava", "kind": "gate_report", "summary": "14 endpoints", "awaiting": "manazer"}
     return f"<<<PIPELINE_STATUS>>>\n{json.dumps(body)}\n<<<END_PIPELINE_STATUS>>>"
 
 

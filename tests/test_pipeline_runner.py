@@ -11,6 +11,7 @@ the runner's *logic*: new-message diff broadcasting + the unexpected-exception �
 import json
 import uuid
 
+import pytest
 from sqlalchemy import select
 
 from backend.db.models.foundation import User
@@ -18,6 +19,12 @@ from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.services import claude_agent, notify, orchestrator, pipeline_runner
+
+# v2.0.0-dev: this module drives the v1 dispatch background runner (``pipeline_runner._run``) end to end
+# — it writes v1 pipeline_state/message rows (kickoff/coordinator/designer/implementer) the v2 CHECKs
+# reject and calls the v1 ``orchestrator.run_dispatch`` round logic. The v2 engine dispatch is built in
+# Milestone C/D. Kept as the SPEC of the runner behaviour C/D must re-build; deferred meanwhile.
+pytestmark = pytest.mark.skip(reason="v1 engine behaviour — replaced by v2 in Milestone C/D")
 
 
 class _FakeRegistry:
