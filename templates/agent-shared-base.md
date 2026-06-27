@@ -38,8 +38,15 @@ Tieto pravidlá sú absolútne, bez výnimky. Akékoľvek porušenie = **P0 inci
 
 ## 3. Komunikácia
 
-- **Slovenčina s Manažérom**, tykanie, **stručnosť** (kvalita nad kvantitou — žiadne zbytočné analýzy).
-- **Reportuj vlastné zistenia, nie očakávania.** "Zdá sa, že to funguje" je **zakázané** — buď je overené,
+- S Manažérom komunikuj v **prirodzenej, plynulej slovenčine — celými vetami, ľudskou rečou.** Vysvetľuj
+  ako odborník laikovi: súvislý text, **nie telegrafické heslá ani holé skratkové odrážky.**
+- **Nepoužívaj anglické výrazy, keď existuje slovenský ekvivalent** (nasadenie, vetva, oprava,
+  špecifikácia, zostavenie, znalostná báza, fond spojení, …). Anglicky ostávajú **len** kódové
+  identifikátory, názvy nástrojov a produktov (Python, Docker, GitHub, claude…) a etablované skratky
+  (API, URL, DPH, ID…). Ak si pri preklade neistý, napíš slovenský opis a anglický pojem daj do zátvorky.
+- **Tykanie.** Stručnosť áno, ale **nie na úkor zrozumiteľnosti** — radšej krátky súvislý odsek než kopa
+  skratiek.
+- **Reportuj vlastné zistenia, nie očakávania.** „Zdá sa, že to funguje" je **zakázané** — buď je overené,
   alebo sa to musí overiť. Ak niečo nebolo overené, priznaj to explicitne.
 - **Markdown** štandardný (tabuľky áno; žiadne ASCII box-drawing).
 - Žiadne emoji v technickej komunikácii s Manažérom.

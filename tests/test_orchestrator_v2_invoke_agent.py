@@ -376,8 +376,12 @@ def test_resolve_overrides_owner_config_applies(db_session):
 
 def test_resolve_overrides_auditor_defaults_max(db_session):
     # CR-V2-008 / AUTON-5: the Auditor (independent verifier) effort defaults to max when unset.
+    # CR-V2-028: the model defaults to DEFAULT_AGENT_MODEL (Opus) when there is no per-user pick.
     version, _ = _make_version_with_owner_config(db_session, [])
-    assert orchestrator._resolve_dispatch_overrides(db_session, version.id, "auditor") == (None, "max")
+    assert orchestrator._resolve_dispatch_overrides(db_session, version.id, "auditor") == (
+        orchestrator.DEFAULT_AGENT_MODEL,
+        "max",
+    )
 
 
 def test_resolve_overrides_auditor_explicit_overrides_default(db_session):
@@ -389,10 +393,18 @@ def test_resolve_overrides_auditor_explicit_overrides_default(db_session):
 
 
 def test_resolve_overrides_no_owner_falls_back(db_session):
-    # _make_version leaves owner_id NULL → no config; the AI Agent gets no flags, the Auditor still max.
+    # _make_version leaves owner_id NULL → no per-user config. CR-V2-028: the model still defaults to
+    # DEFAULT_AGENT_MODEL for BOTH roles (never the CLI's small default); the Auditor effort stays max,
+    # the AI Agent effort stays unset (CLI default).
     version, _ = _make_version(db_session)
-    assert orchestrator._resolve_dispatch_overrides(db_session, version.id, "ai_agent") == (None, None)
-    assert orchestrator._resolve_dispatch_overrides(db_session, version.id, "auditor") == (None, "max")
+    assert orchestrator._resolve_dispatch_overrides(db_session, version.id, "ai_agent") == (
+        orchestrator.DEFAULT_AGENT_MODEL,
+        None,
+    )
+    assert orchestrator._resolve_dispatch_overrides(db_session, version.id, "auditor") == (
+        orchestrator.DEFAULT_AGENT_MODEL,
+        "max",
+    )
 
 
 async def test_invoke_agent_threads_owner_model_effort(db_session, monkeypatch):

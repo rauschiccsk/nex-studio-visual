@@ -95,6 +95,13 @@ logger = logging.getLogger(__name__)
 # it so a DB value can never silently become a filesystem path.
 AI_AGENT_ROLE = "ai_agent"
 AUDITOR_ROLE = "auditor"
+
+#: Default model for BOTH v2 agents when the project owner has no explicit per-role pick in Nastavenia
+#: (CR-V2-028). Both the AI Agent (the doer) and the Auditor (the verifier) are strong roles that own /
+#: verify the whole build, so the unconfigured default must be the strongest model — NOT the CLI's own
+#: default (which is a small/fast model). A per-user ``user_agent_settings`` row still overrides this.
+DEFAULT_AGENT_MODEL = "claude-opus-4-8"
+
 #: DB role value → charter-path slug (underscore → hyphen). Identity for ``auditor``; explicit for the
 #: AI Agent (``ai_agent`` → ``ai-agent``). The ONLY place the two spellings are reconciled.
 _CHARTER_PATH_SLUG: dict[str, str] = {
@@ -506,9 +513,10 @@ def _resolve_dispatch_overrides(db: Session, version_id: uuid.UUID, role: str) -
 
     The version's project owner's ``user_agent_settings(role)`` row drives ``--model`` / ``--effort``
     (attribution = project owner: stable, reuses the existing owner join, aligns with the future
-    per-user subscription). Graceful fallback — no owner / no row / unset field → no flag (today's
-    exact behavior, ``scalar``-safe, never crashes) — EXCEPT the **Auditor effort, which scales with the
-    Miera autonómie dial** (CR-V2-008 / AUTON-5 / OQ-9): when no explicit per-user effort is set, the
+    per-user subscription). Graceful fallbacks when there is no owner / no row / unset field:
+    **model → :data:`DEFAULT_AGENT_MODEL`** (CR-V2-028 — the doer/verifier must never silently run on the
+    CLI's small default), and the **Auditor effort scales with the Miera autonómie dial** (CR-V2-008 /
+    AUTON-5 / OQ-9): when no explicit per-user effort is set, the
     Auditor's effort is :func:`auditor_effort_for_level` of the resolved dial (higher autonomy → deeper
     Auditor; the independent verifier is the safety net that compensates for fewer human stops). An
     explicit per-user Auditor effort still wins (the Manažér's deliberate choice overrides the coupling).
@@ -522,6 +530,12 @@ def _resolve_dispatch_overrides(db: Session, version_id: uuid.UUID, role: str) -
     ).first()
     model = row.model if row is not None else None
     effort = row.effort if row is not None else None
+    if model is None:
+        # CR-V2-028: no explicit per-user pick → default BOTH agents to the strongest model
+        # (DEFAULT_AGENT_MODEL), NOT the CLI's small/fast default. The AI Agent owns the whole build and
+        # the Auditor independently verifies it; a freshly-created project must not silently run the doer
+        # on an underpowered model. A per-user ``user_agent_settings`` row still wins.
+        model = DEFAULT_AGENT_MODEL
     if effort is None and role == AUDITOR_ROLE:
         # OQ-9: no explicit per-user Auditor effort → derive it from the autonomy dial (inverse to human
         # oversight). Falls back to the dial default's effort (``max``) when the dial itself is unset.
