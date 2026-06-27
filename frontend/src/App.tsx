@@ -20,6 +20,7 @@ import UpdatesPage from "./pages/UpdatesPage";
 import AgentTerminalPage from "./pages/AgentTerminalPage";
 import CockpitPage from "./pages/CockpitPage";
 import CredentialsPage from "./pages/CredentialsPage";
+import CustomersPage from "./pages/CustomersPage";
 import SettingsPage from "./pages/SettingsPage";
 
 function App() {
@@ -68,19 +69,10 @@ function App() {
                 interim shell. Old /cockpit path redirects. */}
             <Route path="vyvoj" element={<CockpitPage />} />
             <Route path="cockpit" element={<Navigate to="/vyvoj" replace />} />
-            {/* v2 (CR-V2-019): per-customer deploy nav surfaces (design §3 / §4.1).
-                Routes resolve to a lightweight "pripravuje sa" placeholder so the
-                new nav items never 404; their real pages land in Milestone G —
-                Zákazníci = CR-V2-025, UAT / PROD = CR-V2-027. */}
-            <Route
-              path="zakaznici"
-              element={
-                <ComingSoonPage
-                  title="Zákazníci"
-                  description="Register zákazníkov projektu — pridávanie cez formulár, integrácie a per-zákazník nasadenie. Pripravuje sa."
-                />
-              }
-            />
+            {/* v2: per-customer deploy nav surfaces (design §3 / §4.1).
+                Zákazníci = CR-V2-025 (live page below, project-scoped registry).
+                UAT / PROD = CR-V2-027 (still "pripravuje sa" placeholders). */}
+            <Route path="zakaznici" element={<CustomersPage />} />
             <Route
               path="uat"
               element={

@@ -5,6 +5,7 @@ from backend.db.models.backlog import BacklogItem
 from backend.db.models.base import Base, TimestampMixin, UUIDMixin
 from backend.db.models.bugs import Bug
 from backend.db.models.credentials import Credential
+from backend.db.models.customers import Customer
 from backend.db.models.foundation import User, UserAgentSettings, UserSession
 from backend.db.models.orchestrator import OrchestratorSession
 from backend.db.models.pipeline import PipelineMessage, PipelineState
@@ -21,6 +22,7 @@ __all__ = [
     "TimestampMixin",
     "Bug",
     "Credential",
+    "Customer",
     "OrchestratorSession",
     "PipelineMessage",
     "PipelineState",

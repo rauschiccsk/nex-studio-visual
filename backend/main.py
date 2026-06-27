@@ -13,6 +13,7 @@ from backend.api.routes.auth import router as auth_router
 from backend.api.routes.backlog import router as backlog_router
 from backend.api.routes.bugs import router as bugs_router
 from backend.api.routes.credentials import router as credentials_router
+from backend.api.routes.customers import router as customers_router
 from backend.api.routes.epics import router as epics_router
 from backend.api.routes.feats import router as feats_router
 from backend.api.routes.health import health_check as _health_check_handler
@@ -224,6 +225,10 @@ app.include_router(backlog_router, prefix="/api/v1/backlog")
 # because it spans two URL families (``/projects/{id}/versions`` and
 # ``/versions/{id}``) — see DESIGN.md §2.6 Version Management.
 app.include_router(versions_router, prefix="/api/v1")
+# The customers router (CR-V2-025) also mounts under the bare ``/api/v1`` prefix
+# because it spans two URL families (``/projects/{slug}/customers`` and
+# ``/customers/{id}``) — see design §3.2 Zákazníci.
+app.include_router(customers_router, prefix="/api/v1")
 app.include_router(metrics_router, prefix="/api/v1")
 app.include_router(uploads_router, prefix="/api/v1")
 # Public (no-auth) per-version changelog — the *Aktualizácie* feature. Mounted
