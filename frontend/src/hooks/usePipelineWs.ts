@@ -12,11 +12,15 @@ import {
   buildPipelineWsUrl,
   getPipelineBoardApi,
   type ActivityLine,
+  type HelpersFeed,
   type PipelineBoard,
   type PipelineWsFrame,
 } from "../services/api/pipeline";
 
 const _MAX_ACTIVITY = 50;
+
+// CR-V2-018: an empty helper feed (count 0) ⇒ the Helpers panel hides.
+const _EMPTY_HELPERS: HelpersFeed = { stage: "priprava", count: 0, line: "", helpers: [] };
 
 export interface UsePipelineWs {
   board: PipelineBoard | null;
@@ -24,6 +28,14 @@ export interface UsePipelineWs {
   error: string | null;
   /** Live agent activity for the current run; reset on every state change. */
   activity: ActivityLine[];
+  /** CR-V2-018: the AI Agent's ephemeral helper feed; ``count === 0`` ⇒ no helpers active (panel hidden).
+   *  Reset on every state change (helpers belong to one run/turn). */
+  helpers: HelpersFeed;
+  /** CR-V2-015: the latest raw-PTY ``write_rejected`` reason (single-writer guard), or ``null``. Transient —
+   *  the AI Agent tab shows a brief "engine práve pracuje" hint, then clears it. */
+  writeRejected: string | null;
+  /** Clear the transient ``writeRejected`` signal (after the hint has been shown). */
+  clearWriteRejected: () => void;
   /** The socket dropped AFTER being established and is auto-reconnecting — drives a "stale" banner
    *  (false during the initial connect, so it never flashes on load). */
   reconnecting: boolean;
@@ -38,6 +50,8 @@ export function usePipelineWs(versionId: string | null): UsePipelineWs {
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activity, setActivity] = useState<ActivityLine[]>([]);
+  const [helpers, setHelpers] = useState<HelpersFeed>(_EMPTY_HELPERS);
+  const [writeRejected, setWriteRejected] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const everConnectedRef = useRef(false);
@@ -48,6 +62,8 @@ export function usePipelineWs(versionId: string | null): UsePipelineWs {
       setConnected(false);
       setReconnecting(false);
       setActivity([]);
+      setHelpers(_EMPTY_HELPERS);
+      setWriteRejected(null);
       return;
     }
 
@@ -106,11 +122,13 @@ export function usePipelineWs(versionId: string | null): UsePipelineWs {
         if (frame.type === "state_changed" && "board" in frame) {
           setBoard(frame.board);
           setActivity([]); // activity belongs to one run; a state change ends/starts it
+          setHelpers(_EMPTY_HELPERS); // helpers belong to one turn; a settled state ends them
         } else if (frame.type === "state_changed" && "state" in frame) {
           setBoard((prev) =>
             prev ? { ...prev, state: frame.state } : { state: frame.state, recent_messages: [] },
           );
           setActivity([]);
+          setHelpers(_EMPTY_HELPERS);
         } else if (frame.type === "message_added") {
           setBoard((prev) => {
             if (!prev) return { state: null, recent_messages: [frame.message] };
@@ -122,6 +140,15 @@ export function usePipelineWs(versionId: string | null): UsePipelineWs {
         } else if (frame.type === "agent_activity") {
           const { stage, actor, kind, line } = frame;
           setActivity((prev) => [...prev, { stage, actor, kind, line }].slice(-_MAX_ACTIVITY));
+        } else if (frame.type === "helpers") {
+          // CR-V2-018: replace the live helper feed (count 0 ⇒ panel hides). The frame is authoritative —
+          // it carries the FULL active set on every change, so we replace rather than accumulate.
+          const { stage, count, line, helpers: descs } = frame;
+          setHelpers({ stage, count, line, helpers: descs });
+        } else if (frame.type === "write_rejected") {
+          // CR-V2-015: the raw-PTY single-writer guard fired (break-glass keystroke during an engine turn).
+          // Surface a transient hint; the AI Agent tab steers the Manažér to the relay instead.
+          setWriteRejected(frame.reason || "engine práve pracuje");
         }
       };
 
@@ -206,6 +233,17 @@ export function usePipelineWs(versionId: string | null): UsePipelineWs {
   }, [isAway]);
 
   const replaceBoard = useCallback((b: PipelineBoard) => setBoard(b), []);
+  const clearWriteRejected = useCallback(() => setWriteRejected(null), []);
 
-  return { board, connected, error, activity, reconnecting, setBoard: replaceBoard };
+  return {
+    board,
+    connected,
+    error,
+    activity,
+    helpers,
+    writeRejected,
+    clearWriteRejected,
+    reconnecting,
+    setBoard: replaceBoard,
+  };
 }

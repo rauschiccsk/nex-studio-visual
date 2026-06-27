@@ -1,17 +1,20 @@
 /**
  * agentTerminalStore — Zustand store owning the lifecycle of the embedded
- * claude CLI session (Coordinator only — the Designer/Implementer/Auditor
- * spawn-terminals were removed in CR-NS-039).
+ * claude CLI session (the AI Agent — the single v2 doer; the v1 Coordinator
+ * spawn role was re-keyed to ``ai-agent`` in CR-V2-022, the Designer/
+ * Implementer/Auditor spawn-terminals were removed in CR-NS-039).
  *
- * Single source of truth so the WebSocket + xterm.js instance hosted by
- * :file:`components/PersistentTerminalsLayer.tsx` survives React Router
- * navigation to/from ``/coordinator`` (CR-NS-004, CR-NS-009). The page
- * :file:`pages/AgentTerminalPage.tsx` consumes this
- * store for chrome rendering and dispatches lifecycle actions; the layer
- * consumes it to know which slots to mount.
+ * In v2.0.0 this raw PTY session is the **break-glass debug** path
+ * (CR-V2-015): the first-class Manažér↔AI-Agent surface is the AI Agent tab's
+ * event-rendered transcript + engine relay (:file:`pages/AgentTerminalPage.tsx`).
+ * This store still owns the PTY lifecycle so the break-glass console (hosted by
+ * :file:`components/PersistentTerminalsLayer.tsx`) survives React Router
+ * navigation to/from ``/ai-agent`` (CR-NS-004, CR-NS-009, OQ-7 rename).
  *
  * No ``persist`` middleware — session rows live in the backend; the
- * store is rebuilt by :func:`refresh` after every cold start.
+ * store is rebuilt by :func:`refresh` after every cold start. The slot key is
+ * the ``AgentRole`` value (``"ai-agent"``, the backend wire/charter slug) so
+ * dynamic ``state[role]`` indexing matches the backend row ``role`` verbatim.
  */
 
 import { create } from "zustand";
@@ -36,11 +39,18 @@ export interface SlotState {
 const EMPTY_SLOT: SlotState = { session: null, status: "idle", error: "" };
 
 export interface AgentTerminalState {
-  // E3(a) (CR-NS-039): Coordinator is the only spawnable interactive terminal.
-  coordinator: SlotState;
+  // CR-V2-022 (OQ-7 follow-on): the AI Agent is the only spawnable interactive (break-glass) terminal.
+  // Keyed by the ``AgentRole`` value (``"ai-agent"``) so it matches the backend row ``role`` for dynamic
+  // ``state[role]`` access (refresh/spawn/end). Quoted because the slug carries a hyphen.
+  "ai-agent": SlotState;
   /** ``true`` once :func:`refresh` has completed at least once. Layer
    *  uses this to gate "first fetch after login" logic. */
   initialized: boolean;
+
+  /** CR-V2-022: whether the break-glass raw-PTY console is revealed. The AI Agent tab's primary surface is
+   *  the event-rendered transcript; the raw xterm (owned by PersistentTerminalsLayer) bleeds through ONLY
+   *  when the Manažér opts in. ``false`` keeps the raw PTY mounted+pumping but hidden behind the transcript. */
+  breakGlassOpen: boolean;
 
   /** Fetch active sessions for the current user and distribute by role. */
   refresh: () => Promise<void>;
@@ -48,11 +58,13 @@ export interface AgentTerminalState {
   spawn: (role: AgentRole, projectSlug: string) => Promise<void>;
   /** End the active session for ``role`` (idempotent) and clear slot. */
   end: (role: AgentRole) => Promise<void>;
+  /** Toggle the break-glass raw-PTY console reveal (CR-V2-022). */
+  setBreakGlassOpen: (open: boolean) => void;
   /** Wipe all slots and reset ``initialized`` — call on logout. */
   reset: () => void;
 }
 
-const ROLES: readonly AgentRole[] = ["coordinator"];
+const ROLES: readonly AgentRole[] = ["ai-agent"];
 
 function setSlot(
   state: AgentTerminalState,
@@ -63,12 +75,13 @@ function setSlot(
 }
 
 export const useAgentTerminalStore = create<AgentTerminalState>()((set, get) => ({
-  coordinator: EMPTY_SLOT,
+  "ai-agent": EMPTY_SLOT,
   initialized: false,
+  breakGlassOpen: false,
 
   async refresh(): Promise<void> {
     set((s) => ({
-      coordinator: { ...s.coordinator, status: "loading", error: "" },
+      "ai-agent": { ...s["ai-agent"], status: "loading", error: "" },
     }));
     try {
       const rows = await listAgentTerminalSessionsApi();
@@ -90,7 +103,7 @@ export const useAgentTerminalStore = create<AgentTerminalState>()((set, get) => 
       const msg =
         e instanceof ApiError ? e.message : "Nepodarilo sa načítať sessions.";
       set((s) => ({
-        coordinator: { ...s.coordinator, status: "idle", error: msg },
+        "ai-agent": { ...s["ai-agent"], status: "idle", error: msg },
         initialized: true,
       }));
     }
@@ -127,10 +140,15 @@ export const useAgentTerminalStore = create<AgentTerminalState>()((set, get) => 
     }
   },
 
+  setBreakGlassOpen(open: boolean): void {
+    set({ breakGlassOpen: open });
+  },
+
   reset(): void {
     set({
-      coordinator: EMPTY_SLOT,
+      "ai-agent": EMPTY_SLOT,
       initialized: false,
+      breakGlassOpen: false,
     });
   },
 }));

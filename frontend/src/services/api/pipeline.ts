@@ -134,6 +134,15 @@ export interface FastFixStartResponse {
   board: PipelineBoard;
 }
 
+// CR-V2-015 / SPIKE-IO Model B: the result of relaying a Manažér message to the AI Agent. The engine is the
+// SOLE writer to the warm `claude` session — the message becomes the next `--resume` turn (never a raw
+// keystroke). `deferred === true` ⇒ a turn was in flight and the message was ENQUEUED behind it (it lands at
+// the next turn boundary); `false` ⇒ it dispatched immediately. Mirrors backend PipelineRelayResponse.
+export interface PipelineRelayResponse {
+  deferred: boolean;
+  board: PipelineBoard;
+}
+
 // ── REST ─────────────────────────────────────────────────────────────────────
 
 export function getPipelineBoardApi(versionId: string, limit = 50): Promise<PipelineBoard> {
@@ -176,6 +185,17 @@ export function openDebugTerminalApi(
   );
 }
 
+// CR-V2-015 / SPIKE-IO Model B: relay a Manažér message to the AI Agent as the engine's next turn. This is
+// the canonical Manažér→AI-Agent channel for the read-only AI Agent tab — the message is RELAYED by the
+// engine (the sole writer to the warm `claude` session), never keystroked into the PTY. `deferred === true`
+// means a turn was in flight and the message is queued behind it.
+export function relayPipelineMessageApi(
+  versionId: string,
+  text: string,
+): Promise<PipelineRelayResponse> {
+  return api.post<PipelineRelayResponse>(`/pipeline/${versionId}/relay`, { text });
+}
+
 // ── WebSocket ────────────────────────────────────────────────────────────────
 
 export function buildPipelineWsUrl(versionId: string, token: string): string {
@@ -197,9 +217,25 @@ export interface ActivityLine {
   line: string;
 }
 
-// WS frame shapes pushed by the backend (backend/api/routes/pipeline.py).
+// CR-V2-018 Helpers feed — the AI Agent's ephemeral sub-agent (Task) spawns, captured from the stream-json
+// and broadcast over the pipeline WS whenever the active set changes. `count === 0` ⇒ the panel HIDES (the
+// last helper finished). `line` is the Slovak "+ N pomocníci" header; `helpers` are the per-helper one-liners
+// (spawn order). The Auditor is never a helper (independence — enforced backend-side).
+export interface HelpersFeed {
+  stage: PipelineStage;
+  count: number;
+  line: string;
+  helpers: string[];
+}
+
+// WS frame shapes pushed by the backend (backend/api/routes/pipeline.py + services/pipeline_runner.py).
 export type PipelineWsFrame =
   | { type: "state_changed"; board: PipelineBoard } // initial snapshot on connect
   | { type: "state_changed"; state: PipelineState } // delta after an action
   | { type: "message_added"; message: PipelineMessage }
-  | ({ type: "agent_activity" } & ActivityLine); // live stream while agent_working
+  | ({ type: "agent_activity" } & ActivityLine) // live stream while agent_working
+  | ({ type: "helpers" } & HelpersFeed) // CR-V2-018: ephemeral helper feed (panel hides at count 0)
+  // CR-V2-015: the raw-PTY single-writer guard frame. The AI Agent tab relays through the engine (never raw
+  // keystrokes), so this is mainly the break-glass console's signal; surfaced here so a frame on the shared
+  // socket is handled gracefully rather than silently dropped.
+  | { type: "write_rejected"; reason: string };

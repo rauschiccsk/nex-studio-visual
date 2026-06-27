@@ -2,8 +2,11 @@
  * API client for ``/api/v1/agent-terminal/*``.
  *
  * Backend: :file:`backend/api/routes/agent_terminal.py`. Surfaces the
- * embedded PTY-backed claude CLI sessions used by Designer / Implementer
- * / Auditor pages — REST for lifecycle, WebSocket for IO streaming.
+ * embedded PTY-backed claude CLI sessions — REST for lifecycle, WebSocket
+ * for IO streaming. In v2.0.0 this raw PTY is the **break-glass debug**
+ * path only (CR-V2-015): the first-class Manažér↔AI-Agent channel is the
+ * event-rendered transcript + engine relay on the AI Agent tab
+ * (:file:`pages/AgentTerminalPage.tsx`), NOT this raw byte stream.
  *
  * All endpoints require the ``ri`` role; the auth wrapper in ``api.ts``
  * surfaces 403 as a thrown ``ApiError`` the page can render as a Lock
@@ -12,10 +15,15 @@
 
 import api from "../api";
 
-// E3(a) (CR-NS-039): the interactive sidebar terminal is Coordinator-only (hub-and-spoke). This is the
-// SPAWN role. The debug-attach (CR-NS-018 §10) targets any pipeline role via `DebugAttachRole` in
-// `pipeline.ts` — a deliberately separate type (spawn ≠ debug-attach).
-export type AgentRole = "coordinator";
+// CR-V2-022 (OQ-7 follow-on): the v1 spawn role ``"coordinator"`` is re-keyed to the v2 AI Agent across the
+// store/api/PersistentTerminalsLayer — the v2 vocabulary has ONE doer (the AI Agent), no Coordinator. The
+// VALUE is the HYPHEN charter-path slug ``"ai-agent"`` to match the backend wire contract verbatim
+// (``AgentTerminalSpawnRequest.role`` + ``AgentTerminalSessionRead.role`` are ``Literal["ai-agent"]``, the
+// on-disk charter slug — CR-V2-007/015); keeping the same value is what "sweep without breaking sessions"
+// requires, so a cold-start ``refresh()`` re-matches existing rows and a spawn POST stays valid. This is the
+// SPAWN role for the warm `claude` session; the debug-attach (CR-V2-015 §10) targets a pipeline role via
+// `DebugAttachRole` in `pipeline.ts` — a deliberately separate type (spawn ≠ debug-attach).
+export type AgentRole = "ai-agent";
 
 export type TerminatedBy = "idle" | "user" | "crash" | "server_restart";
 
@@ -50,7 +58,8 @@ export function listAgentTerminalSessionsApi(): Promise<AgentTerminalSession[]> 
 }
 
 /** Per-role charter availability for a project (CR-NS-014). A role is
- *  available when its ``.claude/agents/<role>/CLAUDE.md`` exists. */
+ *  available when its ``.claude/agents/<role>/CLAUDE.md`` exists. In v2 the
+ *  only spawnable role is the AI Agent (CR-V2-007). */
 export type AvailableRoles = Record<AgentRole, boolean>;
 
 export function getAvailableRolesApi(projectSlug: string): Promise<AvailableRoles> {

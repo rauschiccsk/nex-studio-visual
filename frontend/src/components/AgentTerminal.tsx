@@ -21,8 +21,14 @@
  *
  *   ←  ``{"type": "output", "data": "<utf-8 string>"}``
  *   ←  ``{"type": "end", "exit_code": int|null, "terminated_by": str}``
+ *   ←  ``{"type": "write_rejected", "reason": str}``  (CR-V2-015 single-writer guard)
  *   →  ``{"type": "input", "data": "<utf-8 string>"}``
  *   →  ``{"type": "resize", "rows": int, "cols": int}``
+ *
+ * v2.0.0 (CR-V2-015/022): this raw-PTY xterm is the BREAK-GLASS debug path only — the first-class
+ * Manažér↔AI-Agent channel is the AI Agent tab's event-rendered transcript + engine relay. When the engine
+ * is driving the warm ``claude`` session, a raw keystroke here is refused (single-writer guard) and the
+ * server sends a ``write_rejected`` frame; we surface it inline and steer the Manažér to the relay.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -126,6 +132,12 @@ export function AgentTerminal({ sessionId, token, onEnded }: AgentTerminalProps)
           const reason: string = msg.terminated_by ?? "exited";
           term.write(`\r\n\x1b[33m[session ended: ${reason}]\x1b[0m\r\n`);
           onEnded?.(reason);
+        } else if (msg.type === "write_rejected") {
+          // CR-V2-015 single-writer guard: the engine is driving this session, so the raw keystroke was
+          // dropped. Surface the design-mandated hint inline and point the Manažér at the engine relay.
+          term.write(
+            "\r\n\x1b[33m[engine práve pracuje — správa sa pošle po dokončení ťahu; použi vstupné pole AI Agenta (relay)]\x1b[0m\r\n",
+          );
         }
       } catch {
         // Malformed frame — ignore.

@@ -199,10 +199,10 @@ export default function Sidebar() {
         disabled={!hasProject}
         disabledTitle="Vyber projekt pre prístup k zásobníku"
       />
-      {/* v2 (CR-V2-019): the AI Agent — the doer's live Claude Code terminal (was AG Koordinátor).
+      {/* v2 (CR-V2-019): the AI Agent — the doer's live Claude Code session (was AG Koordinátor).
           Project-scoped per design §4.1 — disabled when no project is pinned. Route /ai-agent
-          (renamed from /coordinator, CR-V2-019 OQ-7); the interactive AI Agent chrome lands in
-          CR-V2-022. */}
+          (renamed from /coordinator, CR-V2-019 OQ-7); the event-rendered AI Agent chrome (transcript +
+          4-phase strip + relay + Helpers panel) landed in CR-V2-022. */}
       <NavItem
         icon={<IconAiAgent />}
         label="AI Agent"

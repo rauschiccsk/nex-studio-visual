@@ -1,8 +1,16 @@
 /**
- * PersistentTerminalsLayer — mounts the persistent claude CLI ``<AgentTerminal/>``
- * instance ABOVE :file:`pages/AgentTerminalPage.tsx` so its WebSocket
- * + xterm.js stay alive when React Router navigates to/from ``/coordinator``
- * (CR-NS-004; narrowed to the single Coordinator terminal in CR-NS-039).
+ * PersistentTerminalsLayer — mounts the persistent **break-glass** claude CLI
+ * ``<AgentTerminal/>`` (raw xterm PTY) ABOVE :file:`pages/AgentTerminalPage.tsx`
+ * so its WebSocket + xterm.js stay alive when React Router navigates to/from
+ * ``/ai-agent`` (CR-NS-004; narrowed to the single terminal in CR-NS-039;
+ * route + slot re-keyed ``/coordinator``→``/ai-agent`` / ``coordinator``→
+ * ``ai-agent`` in CR-V2-022, OQ-7).
+ *
+ * v2.0.0 (CR-V2-015/022): the AI Agent tab's PRIMARY surface is the
+ * event-rendered transcript + relay rendered by the page itself — NOT this raw
+ * byte stream. This layer keeps the raw xterm alive only for the break-glass
+ * debug PTY, mounted at z-0 beneath the page and revealed when the page asks for
+ * it; the page header chrome + transcript sit on top.
  *
  * Visibility is a pure CSS switch — the active route's slot is
  * ``display: block``; an inactive slot is ``display: none`` (still in the
@@ -37,12 +45,11 @@ import {
 import { useAuthStore } from "@/store/authStore";
 
 function matchActiveRole(pathname: string): AgentRole | null {
-  // E3(a) (CR-NS-039): the AI Agent is the only interactive terminal route.
-  // CR-V2-019 (OQ-7): the route was renamed /coordinator → /ai-agent; the old
-  // path now redirects there (App.tsx). Match the live /ai-agent path so the
-  // persistent terminal (WS + xterm scrollback) survives the rename. The store
-  // AgentRole key stays "coordinator" until CR-V2-022 re-keys it to ai_agent.
-  if (pathname === "/ai-agent") return "coordinator";
+  // E3(a) (CR-NS-039): the AI Agent is the only interactive (break-glass) terminal route.
+  // CR-V2-019 (OQ-7): the route was renamed /coordinator → /ai-agent; the old path now redirects there
+  // (App.tsx). CR-V2-022 re-keyed the store AgentRole to "ai-agent" (the backend wire/charter slug). Match
+  // the live /ai-agent path so the persistent break-glass terminal (WS + xterm scrollback) survives.
+  if (pathname === "/ai-agent") return "ai-agent";
   return null;
 }
 
@@ -50,8 +57,9 @@ export function PersistentTerminalsLayer() {
   const location = useLocation();
   const user = useAuthStore((s) => s.user);
 
-  const coordinator = useAgentTerminalStore((s) => s.coordinator);
+  const aiAgent = useAgentTerminalStore((s) => s["ai-agent"]);
   const initialized = useAgentTerminalStore((s) => s.initialized);
+  const breakGlassOpen = useAgentTerminalStore((s) => s.breakGlassOpen);
   const refresh = useAgentTerminalStore((s) => s.refresh);
   const reset = useAgentTerminalStore((s) => s.reset);
 
@@ -84,14 +92,17 @@ export function PersistentTerminalsLayer() {
   if (!isDirector || !token) return null;
 
   const activeRole = matchActiveRole(location.pathname);
-  const entries: Array<[AgentRole, SlotState]> = [["coordinator", coordinator]];
+  const entries: Array<[AgentRole, SlotState]> = [["ai-agent", aiAgent]];
 
   return (
     <>
       {entries.map(([role, slot]) => {
         if (!slot.session) return null;
         if (!visited.has(role)) return null;
-        const visible = activeRole === role;
+        // v2 (CR-V2-022): the raw xterm reveals only on the AI Agent route AND when the Manažér opted into
+        // the break-glass console; otherwise it stays mounted (WS pumping, scrollback alive) but hidden
+        // behind the page's event-rendered transcript.
+        const visible = activeRole === role && breakGlassOpen;
         return (
           <div
             key={role}

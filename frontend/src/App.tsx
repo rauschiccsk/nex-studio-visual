@@ -53,13 +53,14 @@ function App() {
                 wildcard route below redirects any stale /project-specs link
                 to the dashboard. */}
             {/* v2 (CR-V2-019, OQ-7): the AI Agent live terminal route renamed
-                /coordinator → /ai-agent (matches the new vocabulary); the
-                interactive AI Agent chrome lands in CR-V2-022. The page still
-                receives role="coordinator" — the AgentRole store-key re-key to
-                ai_agent is CR-V2-022's job (sweep without breaking sessions).
-                The old /coordinator path redirects so live links/bookmarks
-                survive. CR-NS-065: the standalone /dialogue page was retired. */}
-            <Route path="ai-agent" element={<AgentTerminalPage role="coordinator" />} />
+                /coordinator → /ai-agent (matches the new vocabulary). CR-V2-022
+                landed the event-rendered AI Agent chrome (transcript + 4-phase
+                strip + relay + Helpers panel) and re-keyed the AgentRole store
+                slot "coordinator" → "ai-agent" (the backend wire/charter slug,
+                so sessions are not broken). The old /coordinator path redirects
+                so live links/bookmarks survive. CR-NS-065: the standalone
+                /dialogue page was retired. */}
+            <Route path="ai-agent" element={<AgentTerminalPage role="ai-agent" />} />
             <Route path="coordinator" element={<Navigate to="/ai-agent" replace />} />
             {/* v2 (CR-V2-019, OQ-7): the build board route renamed
                 /cockpit → /vyvoj (Orchestrácia → Vývoj). The horizontal
