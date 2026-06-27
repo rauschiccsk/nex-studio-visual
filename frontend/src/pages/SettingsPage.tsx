@@ -108,7 +108,7 @@ const SETTINGS_CATEGORIES: SettingsCategory[] = [
     id: "metrics",
     label: "Metriky / ROI (kurzy a mzdy)",
     description:
-      "Per-rola kurz tokeny→minúty (human-time), per-rola hodinová mzda, Director mzda + kurz, API ceny per model. 0 = nenastavené → ROI sa nezobrazí vymyslené.",
+      "Per-fáza kurz tokeny→minúty (human-time) a hodinová mzda (Príprava / Návrh / Programovanie / Verifikácia), API ceny per model. 0 = nenastavené → ROI sa nezobrazí vymyslené.",
     // `developer_hourly_rate` is matched as a whole-string prefix (same pattern as the paths category's
     // exact-key prefixes) so it joins this category without a kit `keys` field.
     prefixes: ["metrics_", "api_price_", "developer_hourly_rate"],

@@ -1,14 +1,15 @@
-"""Pydantic schemas for the role-based metrics / ROI page (E5; metrics redesign).
+"""Pydantic schemas for the per-phase metrics / ROI page (E5; v2 metrics per-phase basis, CR-V2-029).
 
-A computed read-only aggregate over the WS-D capture (`PipelineMessage.payload.usage`/`.timing`) +
-Director-wait accumulation + per-role rates/wages + per-model pricing. HONEST by construction: every
-figure that depends on an unconfigured input (price / rate / wage) is ``None`` — never a fabricated
-number; a ratio is ``None`` whenever EITHER side is ``None``.
+A computed read-only aggregate over the WS-D capture (`PipelineMessage.payload.usage`/`.timing`,
+grouped by the per-turn `phase` stamp) + Manažér-wait accumulation + per-phase rates/wages + per-model
+pricing. HONEST by construction: every figure that depends on an unconfigured input (price / rate /
+wage) is ``None`` — never a fabricated number; a ratio is ``None`` whenever EITHER side is ``None``.
 
-Single reproducible base = all tokens (IN+OUT, incl. retries/failed) per ROLE-OF-ORIGIN per version.
-From it: the agent side (tokens × per-model API price), the human side (tokens × per-role rate × per-
-role wage), the idle split (real wall-clock), the Director overhead (measured agent-side + symmetric
-human-side), and the headline ROI (N× faster, M× cheaper, EUR saved) per version + cumulative.
+Single reproducible base = all tokens (IN+OUT, incl. retries/failed) per PHASE per version. From it:
+the agent side (tokens × per-model API price), the human side (tokens × per-phase rate × per-phase
+wage), the idle split (real wall-clock), the Manažér overhead (measured wait, info-only), and the
+headline ROI (N× faster, M× cheaper, EUR saved) per version + cumulative. (Replaces the v1 per-role
+model; per-customer deploy is a separate ops cost, not part of the build-pipeline ROI here.)
 """
 
 from __future__ import annotations
@@ -20,14 +21,14 @@ from pydantic import BaseModel
 
 
 class ModelTokensRead(BaseModel):
-    """Token usage attributed to one model family/id within a role's usage."""
+    """Token usage attributed to one model family/id within a phase's usage."""
 
     input_tokens: int
     output_tokens: int
 
 
 class UsageTotalsRead(BaseModel):
-    """Summed token usage + active-compute time for a scope (role / version / project)."""
+    """Summed token usage + active-compute time for a scope (phase / version / project)."""
 
     input_tokens: int
     output_tokens: int
@@ -35,13 +36,13 @@ class UsageTotalsRead(BaseModel):
     messages: int
 
 
-class RoleMetricRead(BaseModel):
-    """One comparison role's agent side (measured) vs human side (token-derived) within a scope."""
+class PhaseMetricRead(BaseModel):
+    """One build phase's agent side (measured) vs human side (token-derived) within a scope."""
 
-    role: str
+    phase: str
     # AGENT (measured)
     active_seconds: float
-    #: inter-turn idle is not attributable to a single role → always None (the real internal idle is a
+    #: inter-turn idle is not attributable to a single phase → always None (the real internal idle is a
     #: version-level wall-clock figure on VersionMetricsRead). Field kept for table-layout symmetry.
     internal_idle_seconds: Optional[float]
     input_tokens: int
@@ -55,19 +56,20 @@ class RoleMetricRead(BaseModel):
     #: model keys with no resolvable price (drives the per-row "AI cena chýba: model X" badge).
     unpriced_model_keys: list[str]
     # HUMAN (token-derived)
-    #: tokens × per-role rate (minutes per 1M tokens) — None when the rate is unset.
+    #: tokens × per-phase rate (minutes per 1M tokens) — None when the rate is unset.
     human_minutes: Optional[float]
-    #: human_minutes × per-role wage — None when either input is unset.
+    #: human_minutes × per-phase wage — None when either input is unset.
     human_cost: Optional[float]
-    # RATIOS — None whenever EITHER side is None (honest coherence, metrics redesign §2.7).
+    # RATIOS — None whenever EITHER side is None (honest coherence).
     x_faster: Optional[float]
     m_cheaper: Optional[float]
     eur_saved: Optional[float]
 
 
 class SystemOverheadRead(BaseModel):
-    """Un-compared engine (``system``) tokens — info-only; foots the per-role table but never enters
-    the headline ROI (metrics redesign §1.4)."""
+    """Un-phased engine (``system`` author with no phase stamp) tokens — info-only; foots the per-phase
+    table but never enters the headline ROI. (In the v2 engine virtually every message carries a phase
+    stamp, so this row is usually empty; kept for completeness + back-compat.)"""
 
     input_tokens: int
     output_tokens: int
@@ -75,26 +77,24 @@ class SystemOverheadRead(BaseModel):
     agent_cost: Optional[float]
 
 
-class DirectorMetricRead(BaseModel):
-    """Director overhead: count + measured agent-side wait cost + symmetric human-side director cost."""
+class ManagerOverheadRead(BaseModel):
+    """Manažér (human-in-the-loop) overhead: count of interventions + measured wait time (info-only).
+
+    The wait is measured (real seconds the build sat at a schvaľovací bod / blocked). It is shown as a
+    pure overhead figure — the v1 per-role Director wage/rate model is retired (CR-V2-029), so this row
+    carries no priced cost: the agent-vs-human comparison is purely per-phase now."""
 
     interventions: int
-    #: measured Director-wait (idle-a), seconds.
-    agent_wait_seconds: float
-    #: agent_wait × director wage — empirical (measured) agent-side director cost; None when wage unset.
-    agent_director_cost: Optional[float]
-    #: human-side director minutes (Σ human role-minutes × director_minutes_per_human_role_hour).
-    human_director_minutes: Optional[float]
-    #: human_director_minutes × director wage — same rate model as the agent side (metrics redesign §2.5).
-    human_director_cost: Optional[float]
+    #: measured Manažér-wait (idle-a), seconds.
+    wait_seconds: float
 
 
 class RoiHeadlineRead(BaseModel):
-    """Headline ROI over the comparison roles + Director (NOT incl. the ``system`` row)."""
+    """Headline ROI over the comparison phases (NOT incl. the ``system`` row)."""
 
     agent_active_minutes: float
     human_minutes_total: Optional[float]
-    #: Σ comparison-role agent cost + Director agent cost — None when pricing is incomplete.
+    #: Σ comparison-phase agent cost — None when pricing is incomplete.
     agent_cost_total: Optional[float]
     human_cost_total: Optional[float]
     #: human-time vs agent ACTIVE time.
@@ -120,15 +120,15 @@ class VersionMetricsRead(BaseModel):
     version_id: UUID
     version_number: str
     status: str
-    #: version grand total (all roles + director + system).
+    #: version grand total (all phases + manager + system).
     usage: UsageTotalsRead
-    #: the 5 comparison (agent) roles.
-    by_role: list[RoleMetricRead]
+    #: the 4 comparison (agent) phases.
+    by_phase: list[PhaseMetricRead]
     system_overhead: SystemOverheadRead
-    director: DirectorMetricRead
-    #: accumulated Director-wait + any live open wait (idle-a), seconds.
-    director_wait_seconds: float
-    #: total wall-clock − active − director-wait (idle-b); None when the message span is 0/unknown.
+    manager: ManagerOverheadRead
+    #: accumulated Manažér-wait + any live open wait (idle-a), seconds.
+    manager_wait_seconds: float
+    #: total wall-clock − active − manager-wait (idle-b); None when the message span is 0/unknown.
     internal_idle_seconds: Optional[float]
     #: real wall-clock span from min/max(message created_at); release_date fallback; None if unknowable.
     total_time_seconds: Optional[float]
@@ -140,10 +140,10 @@ class ProjectMetricsRead(BaseModel):
     slug: str
     #: cumulative grand total across all versions.
     usage: UsageTotalsRead
-    #: cumulative per comparison role.
-    by_role: list[RoleMetricRead]
+    #: cumulative per comparison phase.
+    by_phase: list[PhaseMetricRead]
     system_overhead: SystemOverheadRead
-    director: DirectorMetricRead
+    manager: ManagerOverheadRead
     by_version: list[VersionMetricsRead]
     #: cumulative headline (None-safe coverage across versions).
     roi: RoiHeadlineRead

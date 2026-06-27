@@ -1,9 +1,9 @@
-"""Role-based project metrics / ROI backend (E5; metrics redesign).
+"""Per-phase project metrics / ROI backend (E5; v2 metrics per-phase basis, CR-V2-029).
 
-Covers: the Director-wait accumulation listener (enter/exit/total, wait→wait keep, no-accum on a
-non-wait set); the per-role aggregation + role-of-origin attribution; per-model pricing; the agent-vs-
+Covers: the Manažér-wait accumulation listener (enter/exit/total, wait→wait keep, no-accum on a
+non-wait set); the per-PHASE aggregation + phase-stamp attribution; per-model pricing; the agent-vs-
 human cost + ROI when prices/rates/wages are unset (→ null, never fabricated) and when configured; the
-endpoint + 404; the settings keys.
+endpoint + 404; the per-phase settings keys (+ the v1 per-role keys retired).
 """
 
 from __future__ import annotations
@@ -26,17 +26,7 @@ from backend.db.models.versions import Version
 from backend.db.session import get_db
 from backend.services import metrics as metrics_service
 from backend.services import system_setting
-from backend.services.metrics import COMPARISON_ROLES
-
-# v2.0.0-dev DRIFT (flagged): the metrics MODEL layer is already v2 (``ACTOR_VALUES`` = ai_agent/auditor,
-# so ``COMPARISON_ROLES`` is the 2-role set), but the metrics SERVICE is still v1 — ``system_setting.py``
-# DEFAULT_SETTINGS carries v1 per-role keys (metrics_minutes_per_mtok_{coordinator,designer,customer,
-# implementer}) with NO ai_agent key, and the role-of-origin aggregation here is written for the removed
-# v1 5-role model. The tests also build fixtures from v1 pipeline_message authors/stages + the
-# awaiting_director status the v2 CHECKs reject. Making these green requires the v2 metrics REDESIGN
-# (2-role keys + role-of-origin over v2 engine output), which is Milestone-C/D work, NOT test hygiene.
-# Deferred and flagged as real service↔model drift rather than re-keyed or silently re-implemented.
-pytestmark = pytest.mark.skip(reason="v2 metrics redesign pending (service still v1) — Milestone C/D")
+from backend.services.metrics import COMPARISON_PHASES
 
 # ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -74,18 +64,18 @@ def _make_version(db_session, project, version_number="1.0.0"):
     return v
 
 
-def _msg(db_session, version_id, author, stage, *, in_tok, out_tok, dur, model="m", metrics_role=None):
+def _msg(db_session, version_id, author, stage, *, in_tok, out_tok, dur, model="m", phase=None):
     payload: dict[str, Any] = {
         "usage": {"input_tokens": in_tok, "output_tokens": out_tok, "model": model},
         "timing": {"duration_seconds": dur, "parse_attempts": 1},
     }
-    if metrics_role is not None:
-        payload["metrics_role"] = metrics_role
+    if phase is not None:
+        payload["phase"] = phase
     m = PipelineMessage(
         version_id=version_id,
         stage=stage,
         author=author,
-        recipient="director",
+        recipient="manazer",
         kind="gate_report",
         content="x",
         payload=payload,
@@ -117,39 +107,55 @@ def _client(db_session, current):
 
 def test_pricing_settings_keys_present(db_session):
     flat = ("developer_hourly_rate", "api_price_input_per_mtok", "api_price_output_per_mtok")
-    per_role = [f"metrics_minutes_per_mtok_{r}" for r in COMPARISON_ROLES]
-    per_role += [f"metrics_hourly_wage_{r}" for r in COMPARISON_ROLES]
-    director = ("metrics_hourly_wage_director", "metrics_director_minutes_per_human_role_hour")
+    per_phase = [f"metrics_minutes_per_mtok_{p}" for p in COMPARISON_PHASES]
+    per_phase += [f"metrics_hourly_wage_{p}" for p in COMPARISON_PHASES]
     families = tuple(
         f"api_price_{d}_per_mtok_{fam}" for d in ("input", "output") for fam in ("opus", "sonnet", "haiku")
     )
-    for key in (*flat, *per_role, *director, *families):
+    for key in (*flat, *per_phase, *families):
         assert key in system_setting.DEFAULT_SETTINGS, key
         assert system_setting.DEFAULT_SETTINGS[key].value_type == "float"
         assert system_setting.DEFAULT_SETTINGS[key].value == "0.0" or key.startswith("developer") or key in flat
+    # the 4 per-phase rate + 4 per-phase wage keys exist (8 total)
+    assert len(per_phase) == 8
     system_setting._cache.clear()
-    # every new metrics key resolves to 0.0 (unset) without a seed row
-    assert system_setting.get_float(db_session, "metrics_minutes_per_mtok_designer") == 0.0
-    assert system_setting.get_float(db_session, "metrics_hourly_wage_director") == 0.0
+    # every new per-phase metrics key resolves to 0.0 (unset) without a seed row
+    assert system_setting.get_float(db_session, "metrics_minutes_per_mtok_navrh") == 0.0
+    assert system_setting.get_float(db_session, "metrics_hourly_wage_verifikacia") == 0.0
+
+
+def test_v1_per_role_keys_retired(db_session):
+    """CR-V2-029 OWNS retiring the 11 v1 per-role keys (+ the dead director-rate) from DEFAULT_SETTINGS."""
+    retired = [
+        f"metrics_minutes_per_mtok_{r}" for r in ("coordinator", "designer", "customer", "implementer", "auditor")
+    ]
+    retired += [
+        f"metrics_hourly_wage_{r}"
+        for r in ("coordinator", "designer", "customer", "implementer", "auditor", "director")
+    ]
+    assert len(retired) == 11
+    retired.append("metrics_director_minutes_per_human_role_hour")  # dead with the priced Director overhead
+    for key in retired:
+        assert key not in system_setting.DEFAULT_SETTINGS, key
 
 
 def test_get_float_or_none_distinguishes_unset_from_explicit_zero(db_session):
     system_setting._cache.clear()
-    assert system_setting.get_float_or_none(db_session, "metrics_hourly_wage_implementer") is None  # no row
-    _set(db_session, "metrics_hourly_wage_implementer", "0.0")  # explicit 0
-    assert system_setting.get_float_or_none(db_session, "metrics_hourly_wage_implementer") == 0.0
+    assert system_setting.get_float_or_none(db_session, "metrics_hourly_wage_programovanie") is None  # no row
+    _set(db_session, "metrics_hourly_wage_programovanie", "0.0")  # explicit 0
+    assert system_setting.get_float_or_none(db_session, "metrics_hourly_wage_programovanie") == 0.0
     system_setting._cache.clear()
 
 
-# ── Director-wait accumulation listener ──────────────────────────────────────
+# ── Manažér-wait accumulation listener ───────────────────────────────────────
 
 
 def _state(db_session, version):
     st = PipelineState(
         version_id=version.id,
         flow_type="new_version",
-        current_stage="kickoff",
-        current_actor="coordinator",
+        current_stage="priprava",
+        current_actor="ai_agent",
         status="agent_working",
         next_action="x",
     )
@@ -158,14 +164,14 @@ def _state(db_session, version):
     return st
 
 
-def test_director_wait_accumulates_on_exit(db_session):
+def test_manager_wait_accumulates_on_exit(db_session):
     user = _make_user(db_session)
     project = _make_project(db_session, user)
     version = _make_version(db_session, project)
     st = _state(db_session, version)
     assert (st.total_director_wait_seconds or 0.0) == 0.0
 
-    st.status = "awaiting_director"  # ENTER → stamp
+    st.status = "awaiting_manazer"  # ENTER → stamp
     db_session.flush()
     assert st.awaiting_director_since is not None
     st.awaiting_director_since = datetime.now(timezone.utc) - timedelta(seconds=60)  # backdate 60s
@@ -176,13 +182,13 @@ def test_director_wait_accumulates_on_exit(db_session):
     assert st.total_director_wait_seconds >= 60
 
 
-def test_director_wait_wait_to_wait_keeps_clock_no_accum(db_session):
+def test_manager_wait_wait_to_wait_keeps_clock_no_accum(db_session):
     user = _make_user(db_session)
     project = _make_project(db_session, user)
     version = _make_version(db_session, project)
     st = _state(db_session, version)
 
-    st.status = "awaiting_director"
+    st.status = "awaiting_manazer"
     db_session.flush()
     stamped = st.awaiting_director_since
     st.status = "blocked"  # wait → wait: keep clock, do NOT accumulate
@@ -191,14 +197,14 @@ def test_director_wait_wait_to_wait_keeps_clock_no_accum(db_session):
     assert (st.total_director_wait_seconds or 0.0) == 0.0
 
 
-def test_director_wait_two_intervals_sum(db_session):
+def test_manager_wait_two_intervals_sum(db_session):
     user = _make_user(db_session)
     project = _make_project(db_session, user)
     version = _make_version(db_session, project)
     st = _state(db_session, version)
 
     for _ in range(2):
-        st.status = "awaiting_director"
+        st.status = "awaiting_manazer"
         db_session.flush()
         st.awaiting_director_since = datetime.now(timezone.utc) - timedelta(seconds=30)
         st.status = "agent_working"
@@ -206,15 +212,15 @@ def test_director_wait_two_intervals_sum(db_session):
     assert st.total_director_wait_seconds >= 60  # two 30s intervals
 
 
-# ── aggregation + per-role breakdown ─────────────────────────────────────────
+# ── aggregation + per-phase breakdown ────────────────────────────────────────
 
 
 def test_metrics_aggregation_and_breakdown(db_session):
     user = _make_user(db_session)
     project = _make_project(db_session, user)
     version = _make_version(db_session, project)
-    _msg(db_session, version.id, "implementer", "build", in_tok=1000, out_tok=500, dur=10.0)
-    _msg(db_session, version.id, "designer", "gate_a", in_tok=2000, out_tok=800, dur=20.0)
+    _msg(db_session, version.id, "ai_agent", "programovanie", in_tok=1000, out_tok=500, dur=10.0, phase="programovanie")
+    _msg(db_session, version.id, "ai_agent", "navrh", in_tok=2000, out_tok=800, dur=20.0, phase="navrh")
 
     m = metrics_service.compute_project_metrics(db_session, project)
 
@@ -223,29 +229,65 @@ def test_metrics_aggregation_and_breakdown(db_session):
     assert m.usage.duration_seconds == 30.0
     assert m.usage.messages == 2
     v = m.by_version[0]
-    # always all 5 comparison-role rows, in canonical order; non-participating roles are present at 0
-    assert [r.role for r in v.by_role] == list(COMPARISON_ROLES)
-    rows = {r.role: r for r in v.by_role}
-    assert rows["implementer"].input_tokens == 1000
-    assert rows["designer"].input_tokens == 2000
-    assert rows["auditor"].input_tokens == 0
-    # no system-authored messages → the engine-overhead row foots at 0
+    # always all 4 comparison-phase rows, in canonical order; non-running phases are present at 0
+    assert [r.phase for r in v.by_phase] == list(COMPARISON_PHASES)
+    rows = {r.phase: r for r in v.by_phase}
+    assert rows["programovanie"].input_tokens == 1000
+    assert rows["navrh"].input_tokens == 2000
+    assert rows["priprava"].input_tokens == 0
+    assert rows["verifikacia"].input_tokens == 0
+    # no un-phased system-authored messages → the engine-overhead row foots at 0
     assert v.system_overhead.input_tokens == 0
 
 
-def test_metrics_role_of_origin_attribution(db_session):
-    """A failed Implementer attempt recorded under author="system" but tagged metrics_role lands in the
-    Programmer row — NOT the excluded system-overhead row (§1.1)."""
+def test_metrics_phase_stamp_attribution(db_session):
+    """A turn recorded under one DB stage but carrying a ``phase`` stamp lands in the STAMPED phase; a
+    genuinely-system, un-phased message foots the system-overhead row (CR-V2-029)."""
     user = _make_user(db_session)
     project = _make_project(db_session, user)
     version = _make_version(db_session, project)
-    _msg(db_session, version.id, "system", "build", in_tok=300, out_tok=120, dur=4.0, metrics_role="implementer")
-    _msg(db_session, version.id, "system", "release", in_tok=10, out_tok=5, dur=1.0)  # genuinely system
+    # a helper turn recorded under stage=verifikacia but stamped phase=programovanie (its spawning phase)
+    _msg(db_session, version.id, "ai_agent", "verifikacia", in_tok=300, out_tok=120, dur=4.0, phase="programovanie")
+    # a genuinely-system message with NO phase stamp → falls back to its stage (priprava) bucket
+    _msg(db_session, version.id, "system", "priprava", in_tok=10, out_tok=5, dur=1.0)
 
     m = metrics_service.compute_project_metrics(db_session, project)
-    rows = {r.role: r for r in m.by_version[0].by_role}
-    assert rows["implementer"].input_tokens == 300  # tagged tokens attributed to the worker
-    assert m.by_version[0].system_overhead.input_tokens == 10  # only the genuinely-system message
+    rows = {r.phase: r for r in m.by_version[0].by_phase}
+    assert rows["programovanie"].input_tokens == 300  # stamp wins over stage
+    assert rows["priprava"].input_tokens == 10  # un-stamped system note → its stage bucket
+    # no message carried the "system" bucket key (no system-stamped, un-staged record) → system row 0
+    assert m.by_version[0].system_overhead.input_tokens == 0
+
+
+def test_metrics_manager_overhead_measured_only(db_session):
+    """The Manažér overhead is measured (wait + interventions) only — no priced cost in v2."""
+    user = _make_user(db_session)
+    project = _make_project(db_session, user)
+    version = _make_version(db_session, project)
+    st = _state(db_session, version)
+    st.status = "awaiting_manazer"
+    db_session.flush()
+    st.awaiting_director_since = datetime.now(timezone.utc) - timedelta(seconds=45)
+    st.status = "agent_working"
+    db_session.flush()
+    # a Manažér-authored message counts as one intervention
+    db_session.add(
+        PipelineMessage(
+            version_id=version.id,
+            stage="navrh",
+            author="manazer",
+            recipient="ai_agent",
+            kind="approval",
+            content="ok",
+            payload={"phase": "navrh"},
+        )
+    )
+    db_session.flush()
+
+    v = metrics_service.compute_project_metrics(db_session, project).by_version[0]
+    assert v.manager.interventions == 1
+    assert v.manager.wait_seconds >= 45
+    assert v.manager_wait_seconds >= 45
 
 
 # ── cost + ROI: unconfigured → null (never fabricated) ───────────────────────
@@ -260,13 +302,13 @@ def test_metrics_unconfigured_returns_nulls(db_session, monkeypatch):
     user = _make_user(db_session)
     project = _make_project(db_session, user)
     version = _make_version(db_session, project)
-    _msg(db_session, version.id, "implementer", "build", in_tok=1000, out_tok=500, dur=10.0)
+    _msg(db_session, version.id, "ai_agent", "programovanie", in_tok=1000, out_tok=500, dur=10.0, phase="programovanie")
 
     m = metrics_service.compute_project_metrics(db_session, project)
-    impl = {r.role: r for r in m.by_version[0].by_role}["implementer"]
-    assert impl.agent_cost is None  # "m" → _unknown, flat unset → unpriced
-    assert impl.human_cost is None
-    assert impl.x_faster is None and impl.m_cheaper is None and impl.eur_saved is None
+    prog = {r.phase: r for r in m.by_version[0].by_phase}["programovanie"]
+    assert prog.agent_cost is None  # "m" → _unknown, flat unset → unpriced
+    assert prog.human_cost is None
+    assert prog.x_faster is None and prog.m_cheaper is None and prog.eur_saved is None
     roi = m.roi
     assert roi.agent_cost_total is None
     assert roi.human_cost_total is None
@@ -286,30 +328,30 @@ def test_metrics_configured_computes_cost_and_roi(db_session, monkeypatch):
     monkeypatch.setattr(metrics_service.settings, "developer_hourly_rate", 0.0)
     _set(db_session, "api_price_input_per_mtok", "3.0")
     _set(db_session, "api_price_output_per_mtok", "15.0")
-    _set(db_session, "metrics_minutes_per_mtok_implementer", "240")
-    _set(db_session, "metrics_minutes_per_mtok_designer", "520")
-    _set(db_session, "metrics_hourly_wage_implementer", "60")
-    _set(db_session, "metrics_hourly_wage_designer", "100")
+    _set(db_session, "metrics_minutes_per_mtok_programovanie", "240")
+    _set(db_session, "metrics_minutes_per_mtok_navrh", "520")
+    _set(db_session, "metrics_hourly_wage_programovanie", "60")
+    _set(db_session, "metrics_hourly_wage_navrh", "100")
     system_setting._cache.clear()
 
     user = _make_user(db_session)
     project = _make_project(db_session, user)
     version = _make_version(db_session, project)
-    _msg(db_session, version.id, "implementer", "build", in_tok=1000, out_tok=500, dur=10.0)
-    _msg(db_session, version.id, "designer", "gate_a", in_tok=2000, out_tok=800, dur=20.0)
+    _msg(db_session, version.id, "ai_agent", "programovanie", in_tok=1000, out_tok=500, dur=10.0, phase="programovanie")
+    _msg(db_session, version.id, "ai_agent", "navrh", in_tok=2000, out_tok=800, dur=20.0, phase="navrh")
 
     m = metrics_service.compute_project_metrics(db_session, project)
-    rows = {r.role: r for r in m.by_version[0].by_role}
+    rows = {r.phase: r for r in m.by_version[0].by_phase}
 
-    # implementer: agent (1000×3 + 500×15)/1e6 = 0.0105; human 1500/1e6×240 = 0.36 min → /60×60 = 0.36
-    assert rows["implementer"].agent_cost == pytest.approx(0.0105)
-    assert rows["implementer"].human_minutes == pytest.approx(0.36)
-    assert rows["implementer"].human_cost == pytest.approx(0.36)
-    # designer: agent (2000×3 + 800×15)/1e6 = 0.018
-    assert rows["designer"].agent_cost == pytest.approx(0.018)
+    # programovanie: agent (1000×3 + 500×15)/1e6 = 0.0105; human 1500/1e6×240 = 0.36 min → /60×60 = 0.36
+    assert rows["programovanie"].agent_cost == pytest.approx(0.0105)
+    assert rows["programovanie"].human_minutes == pytest.approx(0.36)
+    assert rows["programovanie"].human_cost == pytest.approx(0.36)
+    # navrh: agent (2000×3 + 800×15)/1e6 = 0.018
+    assert rows["navrh"].agent_cost == pytest.approx(0.018)
 
     roi = m.roi
-    assert roi.agent_cost_total == pytest.approx(0.0285)  # 0.0105 + 0.018 (others 0 tokens; director unset)
+    assert roi.agent_cost_total == pytest.approx(0.0285)  # 0.0105 + 0.018 (other phases 0 tokens)
     assert roi.human_cost_total == pytest.approx(0.36 + 1.456 / 60 * 100)
     # speed: human-minutes (0.36 + 1.456) vs agent ACTIVE minutes (30/60 = 0.5)
     assert roi.x_faster == pytest.approx(1.816 / 0.5)
@@ -325,7 +367,7 @@ def test_metrics_configured_computes_cost_and_roi(db_session, monkeypatch):
 
 def test_metrics_per_model_family_pricing(db_session, monkeypatch):
     """Per-family price prices a named family; an un-named/unkeyed model with no flat fallback is left
-    unpriced (agent_cost None + the key surfaced for the per-row badge) — §2.1."""
+    unpriced (agent_cost None + the key surfaced for the per-row badge)."""
     monkeypatch.setattr(metrics_service.settings, "api_price_input_per_mtok", 0.0)
     monkeypatch.setattr(metrics_service.settings, "api_price_output_per_mtok", 0.0)
     _set(db_session, "api_price_input_per_mtok_opus", "5.0")
@@ -335,14 +377,34 @@ def test_metrics_per_model_family_pricing(db_session, monkeypatch):
     user = _make_user(db_session)
     project = _make_project(db_session, user)
     version = _make_version(db_session, project)
-    _msg(db_session, version.id, "implementer", "build", in_tok=1000, out_tok=400, dur=5.0, model="claude-opus-4-8")
-    _msg(db_session, version.id, "designer", "gate_a", in_tok=1000, out_tok=400, dur=5.0, model="claude-zeta-9")
+    _msg(
+        db_session,
+        version.id,
+        "ai_agent",
+        "programovanie",
+        in_tok=1000,
+        out_tok=400,
+        dur=5.0,
+        model="claude-opus-4-8",
+        phase="programovanie",
+    )
+    _msg(
+        db_session,
+        version.id,
+        "ai_agent",
+        "navrh",
+        in_tok=1000,
+        out_tok=400,
+        dur=5.0,
+        model="claude-zeta-9",
+        phase="navrh",
+    )
 
     m = metrics_service.compute_project_metrics(db_session, project)
-    rows = {r.role: r for r in m.by_version[0].by_role}
-    assert rows["implementer"].agent_cost == pytest.approx((1000 * 5 + 400 * 25) / 1e6)  # 0.015
-    assert rows["designer"].agent_cost is None  # _unknown, no flat fallback → unpriced
-    assert "claude-zeta-9" in rows["designer"].unpriced_model_keys
+    rows = {r.phase: r for r in m.by_version[0].by_phase}
+    assert rows["programovanie"].agent_cost == pytest.approx((1000 * 5 + 400 * 25) / 1e6)  # 0.015
+    assert rows["navrh"].agent_cost is None  # _unknown, no flat fallback → unpriced
+    assert "claude-zeta-9" in rows["navrh"].unpriced_model_keys
     # headline agent cost is None — the comparison set is not fully priced (honest, not a partial)
     assert m.roi.agent_cost_total is None
     system_setting._cache.clear()
@@ -355,7 +417,7 @@ def test_endpoint_returns_shape_and_404(db_session):
     user = _make_user(db_session)
     project = _make_project(db_session, user)
     version = _make_version(db_session, project)
-    _msg(db_session, version.id, "coordinator", "kickoff", in_tok=100, out_tok=50, dur=5.0)
+    _msg(db_session, version.id, "ai_agent", "priprava", in_tok=100, out_tok=50, dur=5.0, phase="priprava")
     client = _client(db_session, user)
 
     r = client.get(f"/api/v1/projects/{project.slug}/metrics")
@@ -364,8 +426,8 @@ def test_endpoint_returns_shape_and_404(db_session):
     assert body["slug"] == project.slug
     assert body["usage"]["input_tokens"] == 100
     assert len(body["by_version"]) == 1
-    assert len(body["by_role"]) == len(COMPARISON_ROLES)
-    assert "system_overhead" in body and "director" in body and "roi" in body
+    assert len(body["by_phase"]) == len(COMPARISON_PHASES)
+    assert "system_overhead" in body and "manager" in body and "roi" in body
     assert body["roi"]["total_versions"] == 1
 
     assert client.get("/api/v1/projects/does-not-exist/metrics").status_code == 404

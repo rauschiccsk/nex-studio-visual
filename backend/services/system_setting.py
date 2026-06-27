@@ -222,84 +222,63 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
             "0 = unset → cost null. Falls back to the API_PRICE_OUTPUT_PER_MTOK env value."
         ),
     ),
-    # ── Metrics / ROI — role-based agent-vs-human model (metrics redesign) ─────
-    # Per-role token→minutes conversion (human-time): minutes of equivalent human work per
-    # 1,000,000 total tokens (IN+OUT) for that role. 0 = unset → that role's human-time/cost is
-    # null (never fabricated). Seeded via the Settings UI by Dedo (NOT here — defaults stay 0.0 so a
-    # fresh install reads "not configured", not a fake number).
-    "metrics_minutes_per_mtok_coordinator": _Default(
+    # ── Metrics / ROI — per-PHASE agent-vs-human model (v2 metrics per-phase basis, CR-V2-029) ─────
+    # The v1 11 per-role keys (metrics_minutes_per_mtok_{coordinator,designer,customer,implementer,
+    # auditor} + metrics_hourly_wage_{coordinator,designer,customer,implementer,auditor,director}) and
+    # the now-dead director-rate (metrics_director_minutes_per_human_role_hour) are RETIRED here — the
+    # v2 AI-Agent + Auditor engine has no fixed roles, only the four visible build phases, and the priced
+    # Director overhead is gone (the Manažér overhead is info-only now). Replaced by per-PHASE rate +
+    # wage keys (4 phases × {rate, wage}), feeding services.metrics.compute_project_metrics.
+    #
+    # Per-phase token→minutes conversion (human-time): minutes of equivalent human work per 1,000,000
+    # total tokens (IN+OUT) for that phase. 0 = unset → that phase's human-time/cost is null (never
+    # fabricated). Seeded via the Settings UI (NOT here — defaults stay 0.0 so a fresh install reads
+    # "not configured", not a fake number).
+    "metrics_minutes_per_mtok_priprava": _Default(
         value="0.0",
         value_type="float",
         description=(
-            "Human-equivalent minutes per 1,000,000 total tokens for the Coordinator role. "
-            "0 = unset → that role's human-time/cost null (never fabricated)."
+            "Human-equivalent minutes per 1,000,000 total tokens for the Príprava phase. "
+            "0 = unset → that phase's human-time/cost null (never fabricated)."
         ),
     ),
-    "metrics_minutes_per_mtok_designer": _Default(
+    "metrics_minutes_per_mtok_navrh": _Default(
         value="0.0",
         value_type="float",
-        description="Human-equivalent minutes per 1,000,000 total tokens for the Designer role. 0 = unset → null.",
+        description="Human-equivalent minutes per 1,000,000 total tokens for the Návrh phase. 0 = unset → null.",
     ),
-    "metrics_minutes_per_mtok_customer": _Default(
-        value="0.0",
-        value_type="float",
-        description="Human-equivalent minutes per 1,000,000 total tokens for the Customer role. 0 = unset → null.",
-    ),
-    "metrics_minutes_per_mtok_implementer": _Default(
-        value="0.0",
-        value_type="float",
-        description="Human-equivalent minutes per 1,000,000 total tokens for the Implementer role. 0 = unset → null.",
-    ),
-    "metrics_minutes_per_mtok_auditor": _Default(
-        value="0.0",
-        value_type="float",
-        description="Human-equivalent minutes per 1,000,000 total tokens for the Auditor role. 0 = unset → null.",
-    ),
-    # Per-role hourly wage (currency-agnostic) for the human-cost side (human-time × wage). 0 = unset → null.
-    "metrics_hourly_wage_coordinator": _Default(
-        value="0.0",
-        value_type="float",
-        description="Hourly wage, Coordinator-equivalent human role. 0 = unset → null.",
-    ),
-    "metrics_hourly_wage_designer": _Default(
-        value="0.0",
-        value_type="float",
-        description="Hourly wage, Designer-equivalent human role. 0 = unset → null.",
-    ),
-    "metrics_hourly_wage_customer": _Default(
-        value="0.0",
-        value_type="float",
-        description="Hourly wage, Customer-equivalent human role. 0 = unset → null.",
-    ),
-    "metrics_hourly_wage_implementer": _Default(
+    "metrics_minutes_per_mtok_programovanie": _Default(
         value="0.0",
         value_type="float",
         description=(
-            "Hourly wage, Implementer/Programmer-equivalent. SUPERSEDES developer_hourly_rate "
-            "(read as fallback ONLY when this key has no row; an explicit 0 here is honored as unset)."
+            "Human-equivalent minutes per 1,000,000 total tokens for the Programovanie phase. 0 = unset → null."
         ),
     ),
-    "metrics_hourly_wage_auditor": _Default(
+    "metrics_minutes_per_mtok_verifikacia": _Default(
         value="0.0",
         value_type="float",
-        description="Hourly wage, Auditor-equivalent human role. 0 = unset → null.",
+        description="Human-equivalent minutes per 1,000,000 total tokens for the Verifikácia phase. 0 = unset → null.",
     ),
-    "metrics_hourly_wage_director": _Default(
+    # Per-phase hourly wage (currency-agnostic) for the human-cost side (human-time × wage). 0 = unset → null.
+    "metrics_hourly_wage_priprava": _Default(
         value="0.0",
         value_type="float",
-        description=(
-            "Hourly wage of the human Director — costs BOTH the measured agent-side director-wait AND "
-            "the human-side director time. 0 = unset → director cost null."
-        ),
+        description="Hourly wage, Príprava-phase human-equivalent. 0 = unset → null.",
     ),
-    "metrics_director_minutes_per_human_role_hour": _Default(
+    "metrics_hourly_wage_navrh": _Default(
         value="0.0",
         value_type="float",
-        description=(
-            "Human-side Director minutes per hour of human role-work (the human team also has a "
-            "director). Same intervention-rate model as the measured agent-side director-wait. "
-            "0 = unset → human-side director null."
-        ),
+        description="Hourly wage, Návrh-phase human-equivalent. 0 = unset → null.",
+    ),
+    "metrics_hourly_wage_programovanie": _Default(
+        value="0.0",
+        value_type="float",
+        description="Hourly wage, Programovanie-phase human-equivalent. 0 = unset → null.",
+    ),
+    "metrics_hourly_wage_verifikacia": _Default(
+        value="0.0",
+        value_type="float",
+        description="Hourly wage, Verifikácia-phase human-equivalent. 0 = unset → null.",
     ),
     # Per-family API price (IN/OUT per 1,000,000 tokens). Falls back to the flat api_price_*_per_mtok
     # pair (which itself falls back to env) for the _unknown family + any family left at 0.

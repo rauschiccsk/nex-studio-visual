@@ -337,6 +337,102 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/customers/{customer_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Customer */
+        get: operations["get_customer_api_v1_customers__customer_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Customer
+         * @description Delete a customer and its stored secret (if any). ``ri`` role only.
+         */
+        delete: operations["delete_customer_api_v1_customers__customer_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Customer
+         * @description Partially update a customer / rotate its secret. ``ri`` role only.
+         *
+         *     A supplied ``secret`` overwrites the stored credentials-store content; the
+         *     response never echoes it back.
+         */
+        patch: operations["update_customer_api_v1_customers__customer_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/customers/{customer_id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept Customer Uat
+         * @description Akceptovať — record a Manažér's UAT acceptance, opening PROD (§3.5).
+         *
+         *     Logs who/when/version/customer. Requires the version to have been deployed to
+         *     this customer's UAT first.
+         */
+        post: operations["accept_customer_uat_api_v1_customers__customer_id__accept_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/customers/{customer_id}/deploy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Deploy Customer
+         * @description Nasadiť — deploy a verified version to a customer's UAT/PROD instance (§3.4).
+         *
+         *     A PROD deploy is rejected (409) unless the customer's UAT of that version was
+         *     accepted (§3.5). The first PROD deploy of a project bumps it to v1.0.0 (§3.6).
+         *     A redeploy PRESERVES data + secrets + extra_hosts by default; ``force_fresh``
+         *     opts into a fresh re-provision (§3.7).
+         */
+        post: operations["deploy_customer_api_v1_customers__customer_id__deploy_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/customers/{customer_id}/deploy-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Customer Deploy Events
+         * @description Return every deploy/accept event for one customer (newest first).
+         */
+        get: operations["list_customer_deploy_events_api_v1_customers__customer_id__deploy_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/epics": {
         parameters: {
             query?: never;
@@ -586,11 +682,14 @@ export interface paths {
         put?: never;
         /**
          * Start Fast Fix
-         * @description Fast-Fix Lane entry (F-009, CR-NS-094) — the "Rýchla oprava" one-prompt action.
+         * @description Fast-Fix Lane entry (F-009, CR-NS-094; v2 short path CR-V2-028) — the "Rýchla oprava" one-prompt action.
          *
          *     Auto-creates the next PATCH version (``vX.Y.Z+1`` from the project's semver max) and starts a
-         *     ``fast_fix`` pipeline carrying the Director directive; the kickoff Coordinator triages it
-         *     (escalation guard) and the board then shows the short fast-lane path. Declared before the
+         *     ``fast_fix`` pipeline carrying the Manažér's directive (which IS the brief). The lane runs the v2 SHORT
+         *     path autonomously to the verified boundary — lightweight Príprava (no spec dialogue) → AI Agent
+         *     self-checking Programovanie → a LIGHT focused Auditor Verifikácia (fix works + no regression) → Hotovo
+         *     — with ZERO mid-flight approvals by default. It STOPS at verified; it does NOT auto-deploy (OQ-3/D6 —
+         *     deploy is the normal manual per-customer Nasadiť in the UAT/PROD tabs, CR-V2-027). Declared before the
          *     ``/{version_id}`` routes so ``fast-fix`` is never parsed as a version id.
          */
         post: operations["start_fast_fix_api_v1_pipeline_fast_fix_post"];
@@ -1021,6 +1120,79 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{slug}/customers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Customers
+         * @description Return every customer registered for the project ``slug`` (newest first).
+         */
+        get: operations["list_customers_api_v1_projects__slug__customers_get"];
+        put?: never;
+        /**
+         * Create Customer
+         * @description Register a customer through the form (design §3.2). ``ri`` role only.
+         *
+         *     Internal apps register **ICC s.r.o.** through this same endpoint — one code
+         *     path, no internal/external branch. A supplied ``secret`` is written to the
+         *     credentials store; the response never echoes it back.
+         */
+        post: operations["create_customer_api_v1_projects__slug__customers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{slug}/deploy-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Project Deploy Events
+         * @description Return every deploy/accept event for the project ``slug`` (newest first).
+         */
+        get: operations["list_project_deploy_events_api_v1_projects__slug__deploy_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{slug}/deploy-matrix": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Deploy Matrix
+         * @description Return the version × customer matrix for the project ``slug`` (design §3.3).
+         *
+         *     One read feeds both the UAT and PROD tabs: the deployable (verified / Hotovo)
+         *     versions for the Nasadiť dropdown, plus per-customer current UAT/PROD versions
+         *     and the accepted-for-PROD set (so the PROD tab disables Nasadiť until the
+         *     (version, customer) pair is accepted — the never-bypassed gate).
+         */
+        get: operations["get_deploy_matrix_api_v1_projects__slug__deploy_matrix_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{slug}/metrics": {
         parameters: {
             query?: never;
@@ -1030,7 +1202,7 @@ export interface paths {
         };
         /**
          * Get Project Metrics
-         * @description Return the project's measured AI effort + cost + human-baseline ROI (E5).
+         * @description Return the project's measured AI effort + cost + human-baseline ROI, per phase (E5).
          */
         get: operations["get_project_metrics_api_v1_projects__slug__metrics_get"];
         put?: never;
@@ -1700,6 +1872,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/versions/{version_id}/zadanie": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Write Zadanie
+         * @description Save a version's free-text Zadanie to ``customer-requirements.md`` (CR-V2-024, design §4.3).
+         *
+         *     The New-Version flow saves the brief here on "Uložiť Zadanie"; the Príprava phase (CR-V2-010)
+         *     reads exactly this file when the build starts. Create-or-overwrite — the version's spec
+         *     directory is created if it does not yet exist. ``ri`` role only.
+         *
+         *     * **404** — the version (or its project) does not exist.
+         */
+        put: operations["write_zadanie_api_v1_versions__version_id__zadanie_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -1724,6 +1922,21 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AcceptRequest
+         * @description Payload for the Akceptovať action — record a Manažér's UAT acceptance.
+         *
+         *     ``customer_id`` is supplied by the route path; the actor is the authenticated
+         *     user. The body carries the accepted ``version_number``. Recording an
+         *     acceptance opens the PROD deploy for that (version, customer) pair (§3.5).
+         */
+        AcceptRequest: {
+            /**
+             * Version Number
+             * @description The UAT version being accepted.
+             */
+            version_number: string;
+        };
         /**
          * AgentSession
          * @description Per-agent liveness for the who's-up status — ``idle`` / ``active`` / ``stale`` from R1's
@@ -2264,20 +2477,298 @@ export interface components {
             title?: string | null;
         };
         /**
-         * DirectorMetricRead
-         * @description Director overhead: count + measured agent-side wait cost + symmetric human-side director cost.
+         * CustomerCreate
+         * @description Payload for registering a new customer via the form (design §3.2).
+         *
+         *     Internal apps register **ICC s.r.o.** through this same payload — there is
+         *     no internal/external branch. ``project_id`` is supplied by the route path,
+         *     not the body. The optional ``secret`` is write-only: the service writes it
+         *     to the credentials store and records only the resulting ``credential_id``;
+         *     it is never stored on the customer row and never returned.
          */
-        DirectorMetricRead: {
-            /** Agent Director Cost */
-            agent_director_cost: number | null;
-            /** Agent Wait Seconds */
-            agent_wait_seconds: number;
-            /** Human Director Cost */
-            human_director_cost: number | null;
-            /** Human Director Minutes */
-            human_director_minutes: number | null;
-            /** Interventions */
-            interventions: number;
+        CustomerCreate: {
+            /**
+             * Integrations
+             * @description Per-customer external systems config (non-secret). Secrets go to the secret field.
+             */
+            integrations?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Name
+             * @description Customer name, e.g. 'ICC s.r.o.'.
+             */
+            name: string;
+            /**
+             * Notes
+             * @description Optional free-text note.
+             */
+            notes?: string | null;
+            /**
+             * Secret
+             * @description Write-only per-customer secret material. Handed to the credentials store; NEVER stored on the customer row and NEVER returned in any response.
+             */
+            secret?: string | null;
+            /**
+             * Slug
+             * @description URL-safe customer slug, unique within the project.
+             */
+            slug: string;
+            /**
+             * Subdomain
+             * @description Customer URL host label (e.g. 'andros').
+             */
+            subdomain?: string | null;
+        };
+        /**
+         * CustomerRead
+         * @description Serialised customer row. Carries NO secret material.
+         *
+         *     ``has_secret`` is derived from ``credential_id`` (non-NULL) so the UI can
+         *     show whether a secret is recorded WITHOUT ever transmitting it. The raw
+         *     ``credential_id`` is intentionally omitted from the public read shape — the
+         *     secret is reachable only through the separate ``ri``-gated credentials API,
+         *     not via the customer registry.
+         */
+        CustomerRead: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Has Secret
+             * @description True iff a per-customer secret is recorded in the store.
+             * @default false
+             */
+            has_secret: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Integrations */
+            integrations?: {
+                [key: string]: unknown;
+            } | null;
+            /** Name */
+            name: string;
+            /** Notes */
+            notes?: string | null;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Slug */
+            slug: string;
+            /** Subdomain */
+            subdomain?: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * CustomerUpdate
+         * @description Partial update for an existing customer.
+         *
+         *     ``id`` / ``project_id`` / ``created_at`` / ``updated_at`` are immutable.
+         *     Supplying ``secret`` rotates the per-customer credentials-store content
+         *     (write-only, never persisted on the row, never echoed back).
+         */
+        CustomerUpdate: {
+            /** Integrations */
+            integrations?: {
+                [key: string]: unknown;
+            } | null;
+            /** Name */
+            name?: string | null;
+            /** Notes */
+            notes?: string | null;
+            /**
+             * Secret
+             * @description Write-only — rotates the stored per-customer secret. Never persisted on the row / echoed.
+             */
+            secret?: string | null;
+            /** Slug */
+            slug?: string | null;
+            /** Subdomain */
+            subdomain?: string | null;
+        };
+        /**
+         * DeployEventRead
+         * @description Serialised deploy/accept audit-log row (who / when / version / customer).
+         *
+         *     ``detail`` is a non-secret human-readable summary only.
+         */
+        DeployEventRead: {
+            /** Actor Id */
+            actor_id?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Customer Id
+             * Format: uuid
+             */
+            customer_id: string;
+            /** Detail */
+            detail?: string | null;
+            /**
+             * Environment
+             * @enum {string}
+             */
+            environment: "uat" | "prod";
+            /**
+             * Event Type
+             * @enum {string}
+             */
+            event_type: "deploy" | "accept";
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Seq */
+            seq: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "failed";
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version Number */
+            version_number: string;
+        };
+        /**
+         * DeployMatrix
+         * @description The full version × customer matrix payload for a project's UAT/PROD tabs.
+         *
+         *     One read feeds both tabs: ``verified_versions`` populates the Nasadiť
+         *     dropdown (only Hotovo/verified versions are deployable, §3.4/CR-V2-014), and
+         *     ``rows`` carries each customer's per-environment deployed version + the
+         *     accepted-for-PROD set (§3.3/§3.5).
+         */
+        DeployMatrix: {
+            /** Project Slug */
+            project_slug: string;
+            /** Rows */
+            rows?: components["schemas"]["DeployMatrixRow"][];
+            /**
+             * Verified Versions
+             * @description Deployable (verified / Hotovo) version_numbers — the Nasadiť dropdown options.
+             */
+            verified_versions?: string[];
+        };
+        /**
+         * DeployMatrixRow
+         * @description One customer's row in the version × customer matrix (design §3.3).
+         *
+         *     ``uat_version`` / ``prod_version`` are the customer's currently-deployed
+         *     versions per environment (None = never deployed there). Different customers
+         *     may carry different versions simultaneously. ``accepted_versions`` lists the
+         *     versions this customer has a recorded UAT acceptance for — the PROD tab uses
+         *     it to keep Nasadiť disabled until the (version, customer) pair is accepted
+         *     (the never-bypassed gate, §3.5). Carries NO secret material (§4/OQ-5).
+         */
+        DeployMatrixRow: {
+            /**
+             * Accepted Versions
+             * @description Versions accepted-for-PROD for this customer — the only versions whose PROD Nasadiť is open.
+             */
+            accepted_versions?: string[];
+            /**
+             * Customer Id
+             * Format: uuid
+             */
+            customer_id: string;
+            /** Customer Name */
+            customer_name: string;
+            /** Customer Slug */
+            customer_slug: string;
+            /**
+             * Prod Version
+             * @description Currently deployed PROD version (None = never).
+             */
+            prod_version?: string | null;
+            /** Subdomain */
+            subdomain?: string | null;
+            /**
+             * Uat Url
+             * @description Link to the customer's live UAT instance (the UAT tab link, §3.5); None until a UAT deploy.
+             */
+            uat_url?: string | null;
+            /**
+             * Uat Version
+             * @description Currently deployed UAT version (None = never).
+             */
+            uat_version?: string | null;
+        };
+        /**
+         * DeployRequest
+         * @description Payload for the Nasadiť action — deploy a verified version to a customer.
+         *
+         *     ``customer_id`` is supplied by the route path. The body carries the chosen
+         *     verified ``version_number`` and the target ``environment`` (uat | prod).
+         *     ``force_fresh`` is the explicit, opt-in escape hatch that re-provisions the
+         *     instance from scratch (rotating secrets, wiping data); it defaults to False
+         *     so EVERY redeploy preserves data + secrets + extra_hosts (§3.7, the
+         *     inbox-UAT lesson). It maps to ``uat_provisioner.provision_uat(rotate_secrets=...)``.
+         */
+        DeployRequest: {
+            /**
+             * Environment
+             * @description Target environment: uat | prod.
+             * @enum {string}
+             */
+            environment: "uat" | "prod";
+            /**
+             * Force Fresh
+             * @description Opt-in: re-provision from scratch (rotate secrets, fresh data). Default False — a redeploy PRESERVES data + secrets + extra_hosts and runs migrations (§3.7).
+             * @default false
+             */
+            force_fresh: boolean;
+            /**
+             * Version Number
+             * @description The verified version to deploy.
+             */
+            version_number: string;
+        };
+        /**
+         * DeployResult
+         * @description Outcome of a deploy action — the recorded event + the deployed URL.
+         *
+         *     ``ok`` mirrors the recorded event status; ``detail`` is a non-secret
+         *     summary. ``url`` is the customer instance's public URL (None when no
+         *     frontend route exists). ``bumped_to`` carries the new version_number when a
+         *     first-PROD deploy bumped the project to v1.0.0 (§3.6), else None.
+         */
+        DeployResult: {
+            /**
+             * Bumped To
+             * @description Set when a first-PROD deploy bumped the project version (e.g. 'v1.0.0'); else None.
+             */
+            bumped_to?: string | null;
+            event: components["schemas"]["DeployEventRead"];
+            /** Ok */
+            ok: boolean;
+            /** Url */
+            url?: string | null;
+            /** Warnings */
+            warnings?: string[];
         };
         /**
          * EpicCreate
@@ -2617,8 +3108,22 @@ export interface components {
             user: components["schemas"]["AuthUser"];
         };
         /**
+         * ManagerOverheadRead
+         * @description Manažér (human-in-the-loop) overhead: count of interventions + measured wait time (info-only).
+         *
+         *     The wait is measured (real seconds the build sat at a schvaľovací bod / blocked). It is shown as a
+         *     pure overhead figure — the v1 per-role Director wage/rate model is retired (CR-V2-029), so this row
+         *     carries no priced cost: the agent-vs-human comparison is purely per-phase now.
+         */
+        ManagerOverheadRead: {
+            /** Interventions */
+            interventions: number;
+            /** Wait Seconds */
+            wait_seconds: number;
+        };
+        /**
          * ModelTokensRead
-         * @description Token usage attributed to one model family/id within a role's usage.
+         * @description Token usage attributed to one model family/id within a phase's usage.
          */
         ModelTokensRead: {
             /** Input Tokens */
@@ -2724,6 +3229,46 @@ export interface components {
             skip: number;
             /** Total */
             total: number;
+        };
+        /**
+         * PhaseMetricRead
+         * @description One build phase's agent side (measured) vs human side (token-derived) within a scope.
+         */
+        PhaseMetricRead: {
+            /** Active Seconds */
+            active_seconds: number;
+            /** Agent Cost */
+            agent_cost: number | null;
+            /** Agent Value In */
+            agent_value_in: number | null;
+            /** Agent Value Out */
+            agent_value_out: number | null;
+            /** By Model */
+            by_model: {
+                [key: string]: components["schemas"]["ModelTokensRead"];
+            };
+            /** Eur Saved */
+            eur_saved: number | null;
+            /** Human Cost */
+            human_cost: number | null;
+            /** Human Minutes */
+            human_minutes: number | null;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Internal Idle Seconds */
+            internal_idle_seconds: number | null;
+            /** M Cheaper */
+            m_cheaper: number | null;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Parse Attempts */
+            parse_attempts: number;
+            /** Phase */
+            phase: string;
+            /** Unpriced Model Keys */
+            unpriced_model_keys: string[];
+            /** X Faster */
+            x_faster: number | null;
         };
         /**
          * PipelineActionRequest
@@ -3130,11 +3675,11 @@ export interface components {
         };
         /** ProjectMetricsRead */
         ProjectMetricsRead: {
-            /** By Role */
-            by_role: components["schemas"]["RoleMetricRead"][];
+            /** By Phase */
+            by_phase: components["schemas"]["PhaseMetricRead"][];
             /** By Version */
             by_version: components["schemas"]["VersionMetricsRead"][];
-            director: components["schemas"]["DirectorMetricRead"];
+            manager: components["schemas"]["ManagerOverheadRead"];
             /**
              * Project Id
              * Format: uuid
@@ -3378,7 +3923,7 @@ export interface components {
         };
         /**
          * RoiHeadlineRead
-         * @description Headline ROI over the comparison roles + Director (NOT incl. the ``system`` row).
+         * @description Headline ROI over the comparison phases (NOT incl. the ``system`` row).
          */
         RoiHeadlineRead: {
             /** Agent Active Minutes */
@@ -3415,49 +3960,10 @@ export interface components {
             x_faster: number | null;
         };
         /**
-         * RoleMetricRead
-         * @description One comparison role's agent side (measured) vs human side (token-derived) within a scope.
-         */
-        RoleMetricRead: {
-            /** Active Seconds */
-            active_seconds: number;
-            /** Agent Cost */
-            agent_cost: number | null;
-            /** Agent Value In */
-            agent_value_in: number | null;
-            /** Agent Value Out */
-            agent_value_out: number | null;
-            /** By Model */
-            by_model: {
-                [key: string]: components["schemas"]["ModelTokensRead"];
-            };
-            /** Eur Saved */
-            eur_saved: number | null;
-            /** Human Cost */
-            human_cost: number | null;
-            /** Human Minutes */
-            human_minutes: number | null;
-            /** Input Tokens */
-            input_tokens: number;
-            /** Internal Idle Seconds */
-            internal_idle_seconds: number | null;
-            /** M Cheaper */
-            m_cheaper: number | null;
-            /** Output Tokens */
-            output_tokens: number;
-            /** Parse Attempts */
-            parse_attempts: number;
-            /** Role */
-            role: string;
-            /** Unpriced Model Keys */
-            unpriced_model_keys: string[];
-            /** X Faster */
-            x_faster: number | null;
-        };
-        /**
          * SystemOverheadRead
-         * @description Un-compared engine (``system``) tokens — info-only; foots the per-role table but never enters
-         *     the headline ROI (metrics redesign §1.4).
+         * @description Un-phased engine (``system`` author with no phase stamp) tokens — info-only; foots the per-phase
+         *     table but never enters the headline ROI. (In the v2 engine virtually every message carries a phase
+         *     stamp, so this row is usually empty; kept for completeness + back-compat.)
          */
         SystemOverheadRead: {
             /** Active Seconds */
@@ -3715,7 +4221,7 @@ export interface components {
         };
         /**
          * UsageTotalsRead
-         * @description Summed token usage + active-compute time for a scope (role / version / project).
+         * @description Summed token usage + active-compute time for a scope (phase / version / project).
          */
         UsageTotalsRead: {
             /** Duration Seconds */
@@ -4037,13 +4543,13 @@ export interface components {
         };
         /** VersionMetricsRead */
         VersionMetricsRead: {
-            /** By Role */
-            by_role: components["schemas"]["RoleMetricRead"][];
-            director: components["schemas"]["DirectorMetricRead"];
-            /** Director Wait Seconds */
-            director_wait_seconds: number;
+            /** By Phase */
+            by_phase: components["schemas"]["PhaseMetricRead"][];
             /** Internal Idle Seconds */
             internal_idle_seconds: number | null;
+            manager: components["schemas"]["ManagerOverheadRead"];
+            /** Manager Wait Seconds */
+            manager_wait_seconds: number;
             roi: components["schemas"]["RoiHeadlineRead"];
             /** Status */
             status: string;
@@ -4184,6 +4690,24 @@ export interface components {
             }[];
             /** Task Count */
             task_count: number;
+        };
+        /**
+         * _ZadanieWrite
+         * @description Request body for ``PUT /versions/{version_id}/zadanie``.
+         */
+        _ZadanieWrite: {
+            /** Content */
+            content: string;
+        };
+        /**
+         * _ZadanieWriteResponse
+         * @description Response for ``PUT /versions/{version_id}/zadanie``.
+         */
+        _ZadanieWriteResponse: {
+            /** Relative Path */
+            relative_path: string;
+            /** Status */
+            status: string;
         };
     };
     responses: never;
@@ -4918,6 +5442,202 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CredentialContent"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_customer_api_v1_customers__customer_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                customer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_customer_api_v1_customers__customer_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                customer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_customer_api_v1_customers__customer_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                customer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomerUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    accept_customer_uat_api_v1_customers__customer_id__accept_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                customer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcceptRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeployEventRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deploy_customer_api_v1_customers__customer_id__deploy_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                customer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeployRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeployResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_customer_deploy_events_api_v1_customers__customer_id__deploy_events_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                customer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeployEventRead"][];
                 };
             };
             /** @description Validation Error */
@@ -6239,6 +6959,134 @@ export interface operations {
             };
         };
     };
+    list_customers_api_v1_projects__slug__customers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_customer_api_v1_projects__slug__customers_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomerCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_project_deploy_events_api_v1_projects__slug__deploy_events_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeployEventRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_deploy_matrix_api_v1_projects__slug__deploy_matrix_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeployMatrix"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_project_metrics_api_v1_projects__slug__metrics_get: {
         parameters: {
             query?: never;
@@ -7367,6 +8215,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["_TaskPlanResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    write_zadanie_api_v1_versions__version_id__zadanie_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_ZadanieWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["_ZadanieWriteResponse"];
                 };
             };
             /** @description Validation Error */

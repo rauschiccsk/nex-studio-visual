@@ -15,12 +15,12 @@ import {
 import { getProjectMetricsApi } from "@/services/api/metrics";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useActiveContextStore } from "@/store/activeContextStore";
-import { ROLE_LABELS } from "@/components/cockpit/labels";
+import { PHASE_LABELS, type BuildPhase } from "@/components/cockpit/labels";
 import type {
-  DirectorMetric,
+  ManagerOverhead,
   ProjectMetrics,
   RoiHeadline,
-  RoleMetric,
+  PhaseMetric,
   SystemOverheadRow,
   VersionMetrics,
 } from "@/types/metrics";
@@ -57,8 +57,8 @@ function fmtMinutes(min: number | null): string {
   return min === null ? "—" : fmtDuration(min * 60);
 }
 
-function roleLabel(role: string): string {
-  return ROLE_LABELS[role as keyof typeof ROLE_LABELS] ?? role;
+function phaseLabel(phase: string): string {
+  return PHASE_LABELS[phase as BuildPhase] ?? phase;
 }
 
 // ─── small presentational pieces ─────────────────────────────────────────────
@@ -92,14 +92,14 @@ function Card({
 const TD = "px-2 py-1.5 align-top";
 const TH = "px-2 py-1.5 text-left font-semibold text-[var(--color-text-muted)] whitespace-nowrap";
 
-function RoleRow({ r }: { r: RoleMetric }) {
+function PhaseRow({ r }: { r: PhaseMetric }) {
   const valuePair =
     r.agent_cost === null
       ? "— / —"
       : `${fmtCost(r.agent_value_in)} / ${fmtCost(r.agent_value_out)}`;
   return (
     <tr className="border-t border-[var(--color-border-default)]">
-      <td className={`${TD} font-medium text-[var(--color-text-secondary)]`}>{roleLabel(r.role)}</td>
+      <td className={`${TD} font-medium text-[var(--color-text-secondary)]`}>{phaseLabel(r.phase)}</td>
       <td className={TD}>{fmtDuration(r.active_seconds)}</td>
       <td className={`${TD} text-[var(--color-text-muted)]`}>{fmtInt(r.input_tokens)} / {fmtInt(r.output_tokens)}</td>
       <td className={`${TD} text-[var(--color-text-muted)]`}>{r.parse_attempts > 0 ? r.parse_attempts : "—"}</td>
@@ -123,11 +123,11 @@ function RoleRow({ r }: { r: RoleMetric }) {
 // ─── view-scoped slice (a version OR the cumulative project) ─────────────────
 
 interface Scope {
-  by_role: RoleMetric[];
+  by_phase: PhaseMetric[];
   system_overhead: SystemOverheadRow;
-  director: DirectorMetric;
+  manager: ManagerOverhead;
   roi: RoiHeadline;
-  director_wait_seconds: number;
+  manager_wait_seconds: number;
   internal_idle_seconds: number | null;
   total_time_seconds: number | null;
 }
@@ -181,40 +181,40 @@ export default function MetricsPage() {
     if (!metrics) return null;
     if (view === "cumulative") {
       return {
-        by_role: metrics.by_role,
+        by_phase: metrics.by_phase,
         system_overhead: metrics.system_overhead,
-        director: metrics.director,
+        manager: metrics.manager,
         roi: metrics.roi,
-        director_wait_seconds: metrics.director.agent_wait_seconds,
+        manager_wait_seconds: metrics.manager.wait_seconds,
         internal_idle_seconds: null, // wall-clock idle is a per-version figure (not summed cumulatively)
         total_time_seconds: null,
       };
     }
     if (!selectedVersion) return null;
     return {
-      by_role: selectedVersion.by_role,
+      by_phase: selectedVersion.by_phase,
       system_overhead: selectedVersion.system_overhead,
-      director: selectedVersion.director,
+      manager: selectedVersion.manager,
       roi: selectedVersion.roi,
-      director_wait_seconds: selectedVersion.director_wait_seconds,
+      manager_wait_seconds: selectedVersion.manager_wait_seconds,
       internal_idle_seconds: selectedVersion.internal_idle_seconds,
       total_time_seconds: selectedVersion.total_time_seconds,
     };
   }, [metrics, view, selectedVersion]);
 
-  const roleMinChartData = useMemo(() => {
+  const phaseMinChartData = useMemo(() => {
     if (!scope) return [];
-    return scope.by_role.map((r) => ({
-      name: roleLabel(r.role),
+    return scope.by_phase.map((r) => ({
+      name: phaseLabel(r.phase),
       "AI (min)": Math.round((r.active_seconds / 60) * 10) / 10,
       "človek (min)": r.human_minutes === null ? 0 : Math.round(r.human_minutes * 10) / 10,
     }));
   }, [scope]);
 
-  const roleCostChartData = useMemo(() => {
+  const phaseCostChartData = useMemo(() => {
     if (!scope) return [];
-    return scope.by_role.map((r) => ({
-      name: roleLabel(r.role),
+    return scope.by_phase.map((r) => ({
+      name: phaseLabel(r.phase),
       "AI (€)": r.agent_cost ?? 0,
       "človek (€)": r.human_cost ?? 0,
     }));
@@ -250,7 +250,7 @@ export default function MetricsPage() {
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-1">
-        <h1 className="text-base font-bold text-[var(--color-text-primary)]">Metriky &amp; ROI — podľa roly</h1>
+        <h1 className="text-base font-bold text-[var(--color-text-primary)]">Metriky &amp; ROI — podľa fázy</h1>
         <div className="flex rounded border border-[var(--color-border-default)] overflow-hidden text-[11px]">
           {(["version", "cumulative"] as View[]).map((v) => (
             <button
@@ -270,7 +270,7 @@ export default function MetricsPage() {
       <p className="text-xs text-[var(--color-text-muted)] mb-4">
         Nameraná práca agenta vs. ekvivalentný ľudský čas pre{" "}
         <span className="text-[var(--color-text-secondary)]">{projectName}</span> — z tej istej bázy (všetky tokeny per
-        rola). Čísla, ktoré chýbajú (ceny / kurzy / mzdy), sa nezobrazujú vymyslené.
+        fáza). Čísla, ktoré chýbajú (ceny / kurzy / mzdy), sa nezobrazujú vymyslené.
       </p>
 
       {/* Headline ROI */}
@@ -327,7 +327,7 @@ export default function MetricsPage() {
       {/* Version selector */}
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-sm font-semibold text-[var(--color-text-secondary)]">
-          {view === "cumulative" ? "Podľa roly — kumulatívne" : `Podľa roly — ${selectedVersion?.version_number ?? ""}`}
+          {view === "cumulative" ? "Podľa fázy — kumulatívne" : `Podľa fázy — ${selectedVersion?.version_number ?? ""}`}
         </h2>
         <select
           value={selectedVersionId}
@@ -349,7 +349,7 @@ export default function MetricsPage() {
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-[var(--color-surface)]">
-                <th className={TH}>Rola</th>
+                <th className={TH}>Fáza</th>
                 <th className={TH}>AI čas</th>
                 <th className={TH}>tokeny IN/OUT</th>
                 <th className={TH}>rework</th>
@@ -362,29 +362,21 @@ export default function MetricsPage() {
               </tr>
             </thead>
             <tbody>
-              {scope.by_role.map((r) => (
-                <RoleRow key={r.role} r={r} />
+              {scope.by_phase.map((r) => (
+                <PhaseRow key={r.phase} r={r} />
               ))}
-              {/* Director overhead row */}
+              {/* Manažér overhead row — measured only (info-only; the v1 priced Director cost is retired) */}
               <tr className="border-t border-[var(--color-border-default)] bg-[var(--color-surface)]">
                 <td className={`${TD} font-medium text-[var(--color-text-secondary)]`}>
-                  {roleLabel("manazer")} (overhead)
+                  Manažér (overhead)
                 </td>
-                <td className={`${TD} text-[var(--color-text-muted)]`} colSpan={3}>
-                  čakanie {fmtDuration(scope.director.agent_wait_seconds)} · intervencie {scope.director.interventions}
+                <td className={`${TD} text-[var(--color-text-muted)]`} colSpan={9}>
+                  čakanie {fmtDuration(scope.manager.wait_seconds)} · intervencie {scope.manager.interventions}
                 </td>
-                <td className={TD}>
-                  agent {fmtCost(scope.director.agent_director_cost)} / človek {fmtCost(scope.director.human_director_cost)}
-                </td>
-                <td className={`${TD} text-[var(--color-text-muted)]`}>{fmtMinutes(scope.director.human_director_minutes)}</td>
-                <td className={TD}>—</td>
-                <td className={TD}>—</td>
-                <td className={TD}>—</td>
-                <td className={TD}>—</td>
               </tr>
               {/* System / engine row — info-only, foots the table */}
               <tr className="border-t border-[var(--color-border-default)] italic text-[var(--color-text-muted)]">
-                <td className={TD}>{roleLabel("system")} / engine (neporovnané)</td>
+                <td className={TD}>Systém / engine (neporovnané)</td>
                 <td className={TD}>{fmtDuration(scope.system_overhead.active_seconds)}</td>
                 <td className={TD}>
                   {fmtInt(scope.system_overhead.input_tokens)} / {fmtInt(scope.system_overhead.output_tokens)}
@@ -406,8 +398,8 @@ export default function MetricsPage() {
       {scope && (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
           <Card
-            label="Čakanie na Directora (prestoj A)"
-            value={fmtDuration(scope.director_wait_seconds)}
+            label="Čakanie na Manažéra (prestoj A)"
+            value={fmtDuration(scope.manager_wait_seconds)}
             hint="human-in-the-loop overhead, cieľ → 0"
             tone="muted"
           />
@@ -454,9 +446,9 @@ export default function MetricsPage() {
       {scope && (
         <>
           <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] p-3 mb-4">
-            <div className="text-[11px] text-[var(--color-text-muted)] mb-2">Čas podľa roly — AI vs. človek (min)</div>
+            <div className="text-[11px] text-[var(--color-text-muted)] mb-2">Čas podľa fázy — AI vs. človek (min)</div>
             <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={roleMinChartData} margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+              <BarChart data={phaseMinChartData} margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} />
                 <XAxis dataKey="name" tick={{ fontSize: 10, fill: tickFill }} />
                 <YAxis tick={{ fontSize: 10, fill: tickFill }} />
@@ -469,9 +461,9 @@ export default function MetricsPage() {
           </div>
 
           <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] p-3 mb-4">
-            <div className="text-[11px] text-[var(--color-text-muted)] mb-2">Cena podľa roly — AI vs. človek (€)</div>
+            <div className="text-[11px] text-[var(--color-text-muted)] mb-2">Cena podľa fázy — AI vs. človek (€)</div>
             <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={roleCostChartData} margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+              <BarChart data={phaseCostChartData} margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} />
                 <XAxis dataKey="name" tick={{ fontSize: 10, fill: tickFill }} />
                 <YAxis tick={{ fontSize: 10, fill: tickFill }} />

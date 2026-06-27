@@ -1,7 +1,7 @@
-"""REST router for the project metrics / ROI page (E5, CR-NS-043).
+"""REST router for the project metrics / ROI page (E5; v2 per-phase basis, CR-V2-029).
 
-* ``GET /api/v1/projects/{slug}/metrics`` → the role-based metrics shape (cumulative + per-version,
-  per-role agent-vs-human + system overhead + Director overhead + idle split + ROI).
+* ``GET /api/v1/projects/{slug}/metrics`` → the per-phase metrics shape (cumulative + per-version,
+  per-phase agent-vs-human + system overhead + Manažér overhead + idle split + ROI).
 
 Read-only (no pipeline mutation). ``require_shu_or_above`` — any authenticated user. The router is
 mounted under the bare ``/api/v1`` prefix in ``backend/main.py`` (the path is ``/projects/{slug}/…``,
@@ -29,7 +29,7 @@ router = APIRouter(tags=["Metrics"])
     dependencies=[Depends(require_shu_or_above)],
 )
 def get_project_metrics(slug: str, db: Session = Depends(get_db)) -> ProjectMetricsRead:
-    """Return the project's measured AI effort + cost + human-baseline ROI (E5)."""
+    """Return the project's measured AI effort + cost + human-baseline ROI, per phase (E5)."""
     project = db.execute(select(Project).where(Project.slug == slug)).scalar_one_or_none()
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Project not found: {slug}")

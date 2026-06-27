@@ -1,6 +1,6 @@
-// Role-based project metrics / ROI (E5; metrics redesign). Mirrors backend/schemas/metrics.py
-// (ProjectMetricsRead). Honest by construction: any figure depending on an unset price/rate/wage is
-// null, never fabricated; a ratio is null whenever EITHER side is null.
+// Per-phase project metrics / ROI (E5; v2 metrics per-phase basis, CR-V2-029). Mirrors
+// backend/schemas/metrics.py (ProjectMetricsRead). Honest by construction: any figure depending on an
+// unset price/rate/wage is null, never fabricated; a ratio is null whenever EITHER side is null.
 
 export interface UsageTotals {
   input_tokens: number;
@@ -14,11 +14,11 @@ export interface ModelTokens {
   output_tokens: number;
 }
 
-export interface RoleMetric {
-  role: string; // one of COMPARISON_ROLES
+export interface PhaseMetric {
+  phase: string; // one of COMPARISON_PHASES (priprava / navrh / programovanie / verifikacia)
   // AGENT (measured)
   active_seconds: number;
-  internal_idle_seconds: number | null; // inter-turn idle is not role-attributable → always null
+  internal_idle_seconds: number | null; // inter-turn idle is not phase-attributable → always null
   input_tokens: number;
   output_tokens: number;
   parse_attempts: number; // rework evidence
@@ -28,8 +28,8 @@ export interface RoleMetric {
   by_model: Record<string, ModelTokens>;
   unpriced_model_keys: string[]; // drives the per-row "AI cena chýba: model X" badge
   // HUMAN (token-derived)
-  human_minutes: number | null; // tokens × per-role rate
-  human_cost: number | null; // human_minutes × per-role wage
+  human_minutes: number | null; // tokens × per-phase rate
+  human_cost: number | null; // human_minutes × per-phase wage
   // ratios — null when EITHER side is null
   x_faster: number | null;
   m_cheaper: number | null;
@@ -37,25 +37,23 @@ export interface RoleMetric {
 }
 
 export interface SystemOverheadRow {
-  // un-compared engine tokens; info-only; foots the per-role table
+  // un-phased engine tokens; info-only; foots the per-phase table
   input_tokens: number;
   output_tokens: number;
   active_seconds: number;
   agent_cost: number | null;
 }
 
-export interface DirectorMetric {
+export interface ManagerOverhead {
+  // Manažér (human-in-the-loop) overhead — measured wait + intervention count, info-only.
   interventions: number;
-  agent_wait_seconds: number; // measured (idle-a)
-  agent_director_cost: number | null; // wait × director wage (empirical, agent side)
-  human_director_minutes: number | null;
-  human_director_cost: number | null; // human-side, same rate model
+  wait_seconds: number; // measured (idle-a)
 }
 
 export interface RoiHeadline {
   agent_active_minutes: number;
   human_minutes_total: number | null;
-  agent_cost_total: number | null; // Σ role agent cost + director (NOT incl. system)
+  agent_cost_total: number | null; // Σ phase agent cost (NOT incl. system)
   human_cost_total: number | null;
   x_faster: number | null; // human-time vs agent ACTIVE time
   m_cheaper: number | null;
@@ -76,10 +74,10 @@ export interface VersionMetrics {
   version_number: string;
   status: string;
   usage: UsageTotals;
-  by_role: RoleMetric[]; // 5 agent roles
+  by_phase: PhaseMetric[]; // 4 build phases
   system_overhead: SystemOverheadRow;
-  director: DirectorMetric;
-  director_wait_seconds: number;
+  manager: ManagerOverhead;
+  manager_wait_seconds: number;
   internal_idle_seconds: number | null;
   total_time_seconds: number | null;
   roi: RoiHeadline;
@@ -89,9 +87,9 @@ export interface ProjectMetrics {
   project_id: string;
   slug: string;
   usage: UsageTotals; // cumulative grand total
-  by_role: RoleMetric[]; // cumulative per role
+  by_phase: PhaseMetric[]; // cumulative per phase
   system_overhead: SystemOverheadRow;
-  director: DirectorMetric;
+  manager: ManagerOverhead;
   by_version: VersionMetrics[];
   roi: RoiHeadline; // cumulative
 }

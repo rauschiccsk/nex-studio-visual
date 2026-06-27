@@ -1,15 +1,15 @@
 /**
- * E5 (metrics redesign) — MetricsPage renders the role-based ROI shape and is HONEST: unset
- * pricing/rates/wages show "nenastavené" with a Settings link, never a fabricated number.
+ * E5 (v2 metrics per-phase basis, CR-V2-029) — MetricsPage renders the per-phase ROI shape and is
+ * HONEST: unset pricing/rates/wages show "nenastavené" with a Settings link, never a fabricated number.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import type {
-  DirectorMetric,
+  ManagerOverhead,
   ProjectMetrics,
   RoiHeadline,
-  RoleMetric,
+  PhaseMetric,
   SystemOverheadRow,
 } from "@/types/metrics";
 
@@ -48,9 +48,9 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 
 const usage = { input_tokens: 1000, output_tokens: 500, duration_seconds: 600, messages: 3 };
 
-function role(r: string, over: Partial<RoleMetric> = {}): RoleMetric {
+function phase(p: string, over: Partial<PhaseMetric> = {}): PhaseMetric {
   return {
-    role: r,
+    phase: p,
     active_seconds: 600,
     internal_idle_seconds: null,
     input_tokens: 1000,
@@ -71,15 +71,9 @@ function role(r: string, over: Partial<RoleMetric> = {}): RoleMetric {
 }
 
 const sysOverhead: SystemOverheadRow = { input_tokens: 0, output_tokens: 0, active_seconds: 0, agent_cost: null };
-const director: DirectorMetric = {
-  interventions: 2,
-  agent_wait_seconds: 120,
-  agent_director_cost: null,
-  human_director_minutes: null,
-  human_director_cost: null,
-};
+const manager: ManagerOverhead = { interventions: 2, wait_seconds: 120 };
 
-const ROLES = ["coordinator", "designer", "customer", "implementer", "auditor"];
+const PHASES = ["priprava", "navrh", "programovanie", "verifikacia"];
 
 const UNSET_ROI: RoiHeadline = {
   agent_active_minutes: 10,
@@ -115,24 +109,24 @@ const CONFIGURED_ROI: RoiHeadline = {
   covered_versions: 1,
 };
 
-function project(roi: RoiHeadline, byRole: RoleMetric[]): ProjectMetrics {
+function project(roi: RoiHeadline, byPhase: PhaseMetric[]): ProjectMetrics {
   return {
     project_id: "pid",
     slug: "p1",
     usage,
-    by_role: byRole,
+    by_phase: byPhase,
     system_overhead: sysOverhead,
-    director,
+    manager,
     by_version: [
       {
         version_id: "v1",
         version_number: "1.0.0",
         status: "active",
         usage,
-        by_role: byRole,
+        by_phase: byPhase,
         system_overhead: sysOverhead,
-        director,
-        director_wait_seconds: 120,
+        manager,
+        manager_wait_seconds: 120,
         internal_idle_seconds: null,
         total_time_seconds: null,
         roi,
@@ -142,13 +136,13 @@ function project(roi: RoiHeadline, byRole: RoleMetric[]): ProjectMetrics {
   };
 }
 
-const UNSET = project(UNSET_ROI, ROLES.map((r) => role(r)));
+const UNSET = project(UNSET_ROI, PHASES.map((p) => phase(p)));
 const CONFIGURED = project(
   CONFIGURED_ROI,
-  ROLES.map((r) => role(r, { agent_cost: 0.0105, human_minutes: 60, human_cost: 60, x_faster: 240, m_cheaper: 97.7, eur_saved: 59.9 })),
+  PHASES.map((p) => phase(p, { agent_cost: 0.0105, human_minutes: 60, human_cost: 60, x_faster: 240, m_cheaper: 97.7, eur_saved: 59.9 })),
 );
 
-describe("MetricsPage (metrics redesign)", () => {
+describe("MetricsPage (v2 per-phase metrics)", () => {
   beforeEach(() => mockGetMetrics.mockReset());
 
   it("renders the headline ROI when configured", async () => {
@@ -159,8 +153,10 @@ describe("MetricsPage (metrics redesign)", () => {
       </ThemeProvider>,
     );
     await waitFor(() => expect(screen.getByRole("heading", { name: /Metriky/i })).toBeInTheDocument());
-    // 240× appears in the headline card AND the per-role table — at least one is enough
+    // 240× appears in the headline card AND the per-phase table — at least one is enough
     expect(screen.getAllByText(/240×/).length).toBeGreaterThan(0);
+    // the per-phase table shows the phase labels (not v1 roles)
+    expect(screen.getAllByText(/Programovanie/i).length).toBeGreaterThan(0);
     // the per-dimension unset banner is absent when everything is configured
     expect(screen.queryByText(/Mzdy nenastavené/i)).toBeNull();
   });
@@ -176,7 +172,7 @@ describe("MetricsPage (metrics redesign)", () => {
     // the unset banner + a Settings link, not a fabricated cost
     expect(screen.getAllByText(/nenastavené/i).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /Nastavenia/i })).toBeInTheDocument();
-    // Director-wait is still shown (it's measured, not priced)
-    expect(screen.getByText(/Čakanie na Directora/i)).toBeInTheDocument();
+    // Manažér-wait is still shown (it's measured, not priced)
+    expect(screen.getByText(/Čakanie na Manažéra/i)).toBeInTheDocument();
   });
 });

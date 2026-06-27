@@ -1,20 +1,23 @@
-"""Pipeline token-usage + dispatch-time aggregation (WS-D, CR-NS-036; metrics redesign).
+"""Pipeline token-usage + dispatch-time aggregation (WS-D, CR-NS-036; v2 metrics per-phase basis).
 
 Rolls up the per-turn metrics that :func:`orchestrator.invoke_agent` captures into each
 ``PipelineMessage.payload`` (``usage`` ``{input_tokens, output_tokens, model}`` + ``timing``
 ``{duration_seconds, parse_attempts}``) into a version grand total (:func:`aggregate_pipeline_usage`)
-and a per-ROLE-OF-ORIGIN split (:func:`aggregate_usage_by_role`) — the single reproducible base for the
-role-based agent-vs-human metrics page.
+and a per-PHASE split (:func:`aggregate_usage_by_phase`) — the single reproducible base for the
+per-phase agent-vs-human metrics page.
 
-This is the **data layer** for the metrics page (E5); there is intentionally no cost calculation or UI
-here (the per-role rate/wage + per-model price settings live in ``system_settings`` for that later
-comparison in ``services.metrics``). Pure read — no live ``claude`` call, no mutation.
+This is the **data layer** for the metrics page (E5; per-phase recompute in CR-V2-029); there is
+intentionally no cost calculation or UI here (the per-phase rate/wage + per-model price settings live
+in ``system_settings`` for that later comparison in ``services.metrics``). Pure read — no live
+``claude`` call, no mutation.
 
-Attribution: messages are grouped by ROLE-OF-ORIGIN = ``payload.metrics_role`` (an optional top-level
-key the orchestrator sets on the few engine fold/seed sites where the record's ``author`` is not the
-role whose tokens these are — a Coordinator relay seeded with a worker's lost tokens, a failed
-Implementer attempt recorded under ``author="system"``) ELSE ``author``. The vast majority of turns
-carry no ``metrics_role`` → they fall back to ``author`` = unchanged behaviour (metrics redesign §1.1).
+Attribution (CR-V2-029): messages are grouped by PHASE = ``payload.phase`` (the per-turn phase stamp
+the engine writes on every fold/seed message in CR-V2-009 — AI Agent → its current phase, helpers →
+their spawning phase, Auditor → ``verifikacia``) ELSE ``msg.stage`` (the message's DB stage, which is
+itself the canonical 4-phase value). Both resolve to one of the four phases (``priprava`` / ``navrh`` /
+``programovanie`` / ``verifikacia``), so summing the returned buckets reproduces the version grand
+total. (This replaces the v1 ``payload.metrics_role`` role-of-origin grouping — there are no fixed
+roles left to attribute to in the v2 AI-Agent + Auditor engine.)
 """
 
 from __future__ import annotations
@@ -38,7 +41,7 @@ class ModelTokens:
 
 @dataclass
 class UsageTotals:
-    """Summed token usage + wall-clock for one scope (a role / the whole version).
+    """Summed token usage + wall-clock for one scope (a phase / the whole version).
 
     ``by_model`` splits the tokens per ``payload.usage.model`` (full model id, or ``"_unknown"`` when
     the envelope carried usage but no model) so the cost layer can price each family separately;
@@ -128,16 +131,20 @@ def aggregate_pipeline_usage(db: Session, version_id: uuid.UUID) -> PipelineUsag
     return agg
 
 
-def aggregate_usage_by_role(db: Session, version_id: uuid.UUID) -> dict[str, UsageTotals]:
-    """Single reproducible base: all metered messages grouped by ROLE-OF-ORIGIN, tokens split by model.
+def aggregate_usage_by_phase(db: Session, version_id: uuid.UUID) -> dict[str, UsageTotals]:
+    """Single reproducible base: all metered messages grouped by PHASE, tokens split by model (CR-V2-029).
 
-    Role-of-origin = ``payload.metrics_role`` (an orchestrator-set override on the engine fold/seed
-    sites) ELSE ``msg.author`` (metrics redesign §1.1). The scan rule is byte-identical to
-    :func:`aggregate_pipeline_usage` (counts any payload bearing ``usage`` OR ``timing`` — including
-    0-token/real-wall-clock failed turns), so summing the returned buckets reproduces the version grand
-    total and retries/failed attempts are in the base by construction.
+    Phase = ``payload.phase`` (the per-turn phase stamp the engine writes on every fold/seed message,
+    CR-V2-009) ELSE ``msg.stage`` (the message's DB stage, itself the canonical 4-phase value). Both
+    resolve to one of ``priprava`` / ``navrh`` / ``programovanie`` / ``verifikacia``. The scan rule is
+    byte-identical to :func:`aggregate_pipeline_usage` (counts any payload bearing ``usage`` OR
+    ``timing`` — including 0-token/real-wall-clock failed turns), so summing the returned buckets
+    reproduces the version grand total and retries/failed attempts are in the base by construction.
+
+    (Replaces the v1 ``aggregate_usage_by_role`` role-of-origin grouping — the v2 engine has no fixed
+    roles, only the four visible phases.)
     """
-    by_role: dict[str, UsageTotals] = {}
+    by_phase: dict[str, UsageTotals] = {}
     messages = (
         db.execute(
             select(PipelineMessage).where(PipelineMessage.version_id == version_id).order_by(PipelineMessage.seq.asc())
@@ -151,14 +158,14 @@ def aggregate_usage_by_role(db: Session, version_id: uuid.UUID) -> dict[str, Usa
             continue
         usage = payload.get("usage") or {}
         timing = payload.get("timing") or {}
-        role_override = payload.get("metrics_role")
-        role = role_override if isinstance(role_override, str) else msg.author
+        phase_stamp = payload.get("phase")
+        phase = phase_stamp if isinstance(phase_stamp, str) else msg.stage
         model = usage.get("model")
-        by_role.setdefault(role, UsageTotals()).add(
+        by_phase.setdefault(phase, UsageTotals()).add(
             input_tokens=int(usage.get("input_tokens") or 0),
             output_tokens=int(usage.get("output_tokens") or 0),
             duration_seconds=float(timing.get("duration_seconds") or 0.0),
             parse_attempts=int(timing.get("parse_attempts") or 0),
             model=model if isinstance(model, str) else None,
         )
-    return by_role
+    return by_phase
