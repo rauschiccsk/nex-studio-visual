@@ -27,7 +27,7 @@ from backend.db.models.versions import Version
 from backend.db.session import SessionLocal
 from backend.schemas.pipeline import PipelineMessageRead, PipelineStateRead
 from backend.services import notify, orchestrator
-from backend.services.pipeline_activity import activity_line
+from backend.services.pipeline_activity import HelperTracker, activity_line
 from backend.services.pipeline_ws import registry
 
 logger = logging.getLogger(__name__)
@@ -123,15 +123,38 @@ def _message_callback(db, version_id: uuid.UUID):
 
 
 def _activity_callback(version_id: uuid.UUID, stage: str, fallback_actor: str):
-    """Build the streaming callback that broadcasts ``agent_activity`` frames.
+    """Build the streaming callback that broadcasts ``agent_activity`` + ``helpers`` frames.
 
     The frame ``actor`` is the **real** invoked role (``evt["_role"]`` tagged by
     :func:`orchestrator.invoke_agent`), so the rail shows the live AI Agent / Auditor;
     falls back to the nominal phase actor. A one-shot ``active_role`` event (no tool
-    line) still emits a frame so a tool-less turn steps the rail."""
+    line) still emits a frame so a tool-less turn steps the rail.
+
+    CR-V2-018 Helpers feed: a per-dispatch :class:`HelperTracker` watches the same
+    stream-json for ephemeral helper (sub-agent / ``Task``) spawn+finish and broadcasts
+    a ``helpers`` frame whenever the active set changes (``count == 0`` → panel hides).
+    The Auditor is **excluded from helpers** (independence): the tracker is only fed
+    events whose real role is the AI Agent, so the Auditor can never register a helper
+    even if a future Auditor charter were to spawn a sub-agent."""
+
+    helpers = HelperTracker()
 
     async def _cb(evt: dict) -> None:
         role = (evt.get("_role") if isinstance(evt, dict) else None) or fallback_actor
+        # Auditor exclusion (independence): only the AI Agent's events feed the helper tracker.
+        if role == orchestrator.AI_AGENT_ROLE:
+            feed = helpers.observe(evt)
+            if feed is not None:
+                await registry.broadcast(
+                    version_id,
+                    {
+                        "type": "helpers",
+                        "stage": stage,
+                        "count": feed.count,
+                        "line": feed.line,
+                        "helpers": list(feed.descriptions),
+                    },
+                )
         if isinstance(evt, dict) and evt.get("type") == "active_role":
             line, kind = "pracuje…", "status"
         else:
