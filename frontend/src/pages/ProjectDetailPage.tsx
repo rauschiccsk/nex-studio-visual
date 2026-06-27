@@ -131,7 +131,8 @@ export default function ProjectDetailPage() {
       // the cockpit opens with full context on it.
       setSelectedProject({ slug: project.slug, name: project.name });
       setSelectedVersion({ versionId: version.id, versionNumber: version.version_number });
-      navigate("/cockpit");
+      // CR-V2-019 (OQ-7): the build board route is /vyvoj (renamed from /cockpit).
+      navigate("/vyvoj");
     } catch (e: unknown) {
       setFastFixError(e instanceof Error ? e.message : "Rýchlu opravu sa nepodarilo spustiť.");
       setFastFixSubmitting(false);

@@ -27,17 +27,24 @@ const ROLE_LABEL: Record<UserRole, string> = {
 // accessible name; emoji is decorative.
 
 // Colored nav glyphs via the shared <NavIcon> (E1 chrome unification, CR-NS-067).
+// FINAL v2.0.0 sidebar glyphs (CR-V2-019, design §4.1).
 const IconHome = () => <NavIcon glyph="🏠" />;
 const IconFolder = () => <NavIcon glyph="📁" />;
 const IconVersions = () => <NavIcon glyph="🌿" />;
 const IconBacklog = () => <NavIcon glyph="📋" />;
 const IconMetrics = () => <NavIcon glyph="📊" />;
 
-const IconCoordinator = () => <NavIcon glyph="🧭" />;
-const IconCockpit = () => <NavIcon glyph="🎛️" />;
+// v2 build surfaces: AI Agent = the doer's live terminal (was AG Koordinátor);
+// Vývoj = the 4-phase build board (was Orchestrácia).
+const IconAiAgent = () => <NavIcon glyph="👨‍💻" />;
+const IconVyvoj = () => <NavIcon glyph="🔄" />;
+
+// v2 per-customer deploy surfaces (pages land in Milestone G — CR-V2-025/027).
+const IconCustomers = () => <NavIcon glyph="👥" />;
+const IconUat = () => <NavIcon glyph="🧪" />;
+const IconProd = () => <NavIcon glyph="🚀" />;
 
 const IconKbBook = () => <NavIcon glyph="📚" />;
-const IconProjectSpecsBook = () => <NavIcon glyph="📖" />;
 
 const IconUpdates = () => <NavIcon glyph="✨" />;
 const IconSettings = () => <NavIcon glyph="⚙️" />;
@@ -127,6 +134,16 @@ export default function Sidebar() {
   );
 
   return (
+    // FINAL v2.0.0 navigation (CR-V2-019, design §4.1). Order top-to-bottom:
+    //   Prehľad · Projekty[📌 pin] · Verzie · Zásobník · AI Agent · Vývoj ·
+    //   Zákazníci · UAT · PROD · Metriky · Dokumentácia · Prístupy ·
+    //   Aktualizácie · Nastavenia.  Footer: presence 🟢/🌙 + user card.
+    //
+    // AUD-7 — INVARIANT (do NOT violate): there is intentionally NO Auditor /
+    // Audítor nav item. The Auditor's verdict and findings are reachable ONLY
+    // via Vývoj → Verifikácia (CR-V2-021). A future edit must never add an
+    // Auditor entry here — the verifier is independent and surfaces inside the
+    // build board, not as a standalone destination (design §4.1, §2.4).
     <ShellSidebar
       collapsed={collapsed}
       onToggleCollapse={() => setCollapsed((c) => !c)}
@@ -169,6 +186,8 @@ export default function Sidebar() {
         label="Verzie"
         active={hasProject ? location.pathname === `/projects/${selectedProject!.slug}` : false}
         onClick={() => navigate(hasProject ? `/projects/${selectedProject!.slug}` : projectsFallback)}
+        disabled={!hasProject}
+        disabledTitle="Vyber projekt pre prístup k verziám"
       />
       {/* E2 (CR-NS-041): per-project Backlog. Project-scoped — disabled (not cross-domain fallback)
           when no project is selected. */}
@@ -180,6 +199,60 @@ export default function Sidebar() {
         disabled={!hasProject}
         disabledTitle="Vyber projekt pre prístup k zásobníku"
       />
+      {/* v2 (CR-V2-019): the AI Agent — the doer's live Claude Code terminal (was AG Koordinátor).
+          Project-scoped per design §4.1 — disabled when no project is pinned. Route /ai-agent
+          (renamed from /coordinator, CR-V2-019 OQ-7); the interactive AI Agent chrome lands in
+          CR-V2-022. */}
+      <NavItem
+        icon={<IconAiAgent />}
+        label="AI Agent"
+        active={hasProject ? isActive("/ai-agent") : false}
+        onClick={() => navigate(hasProject ? "/ai-agent" : projectsFallback)}
+        disabled={!hasProject}
+        disabledTitle="Vyber projekt pre prístup k AI Agentovi"
+      />
+      {/* v2 (CR-V2-019): Vývoj — the 4-phase build board (was Orchestrácia). Version-scoped; the
+          board reads the active-project/version pin. Route /vyvoj (renamed from /cockpit). The
+          "čaká na Manažéra" attention dot stays here. The horizontal 4-phase board lands in
+          CR-V2-021. */}
+      <NavItem
+        icon={<IconVyvoj />}
+        label="Vývoj"
+        active={hasProject ? isActive("/vyvoj") : false}
+        onClick={() => navigate(hasProject ? "/vyvoj" : projectsFallback)}
+        disabled={!hasProject}
+        disabledTitle="Vyber projekt pre prístup k Vývoju"
+        badge={hasProject && cockpitAwaiting}
+        badgeLabel="čaká na Manažéra"
+      />
+      {/* v2 (CR-V2-019): per-customer deploy surfaces (design §3 / §4.1). Nav items are added now;
+          their PAGES land in Milestone G (Zákazníci = CR-V2-025, UAT/PROD = CR-V2-027). Until then
+          the routes resolve to a lightweight "pripravuje sa" placeholder (App.tsx) so they never
+          404; project-scoped → disabled when no pin. */}
+      <NavItem
+        icon={<IconCustomers />}
+        label="Zákazníci"
+        active={hasProject ? isActive("/zakaznici") : false}
+        onClick={() => navigate(hasProject ? "/zakaznici" : projectsFallback)}
+        disabled={!hasProject}
+        disabledTitle="Vyber projekt pre prístup k Zákazníkom"
+      />
+      <NavItem
+        icon={<IconUat />}
+        label="UAT"
+        active={hasProject ? isActive("/uat") : false}
+        onClick={() => navigate(hasProject ? "/uat" : projectsFallback)}
+        disabled={!hasProject}
+        disabledTitle="Vyber projekt pre prístup k UAT"
+      />
+      <NavItem
+        icon={<IconProd />}
+        label="PROD"
+        active={hasProject ? isActive("/prod") : false}
+        onClick={() => navigate(hasProject ? "/prod" : projectsFallback)}
+        disabled={!hasProject}
+        disabledTitle="Vyber projekt pre prístup k PROD"
+      />
       {/* E5 (CR-NS-044): per-project metrics / ROI. Project-scoped — disabled (not cross-domain
           fallback) when no project is selected. */}
       <NavItem
@@ -190,15 +263,8 @@ export default function Sidebar() {
         disabled={!hasProject}
         disabledTitle="Vyber projekt pre prístup k metrikám"
       />
-      {/* E3(a) (CR-NS-039): hub-and-spoke — the Coordinator is the Director's single ad-hoc
-          consult terminal (has READ docs/specs + schemas, CR-033). The Designer / Customer /
-          Implementer / Auditor sidebar terminals were removed; the pipeline still dispatches all
-          roles internally. */}
-      <NavItem icon={<IconCoordinator />} label="AG Koordinátor" active={isActive("/coordinator")} onClick={() => navigate("/coordinator")} />
-      <NavItem icon={<IconCockpit />} label="Orchestrácia" active={isActive("/cockpit")} onClick={() => navigate("/cockpit")} badge={cockpitAwaiting} badgeLabel="čaká na Manažéra" />
 
       <NavItem icon={<IconKbBook />} label="Dokumentácia" active={isActive("/kb")} onClick={() => navigate("/kb")} />
-      <NavItem icon={<IconProjectSpecsBook />} label="Špecifikácie" active={isActive("/project-specs")} onClick={() => navigate("/project-specs")} />
       {/* E4 (CR-NS-046): Credentials nav gated to Ri (mirrors the backend JWT-ri restriction + the
           presence toggle gate); nav visibility only. */}
       {user?.role === "ri" && (

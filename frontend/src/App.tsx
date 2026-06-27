@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import AppLayout from "./components/layout/AppLayout";
+import ComingSoonPage from "./pages/ComingSoonPage";
 import ProtectedRoute from "./components/auth/ProtectedRoute";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { useAuthStore } from "./store/authStore";
@@ -48,10 +49,52 @@ function App() {
             <Route path="projects/:slug/metrics" element={<MetricsPage />} />
             <Route path="kb" element={<KnowledgeBasePage />} />
             <Route path="project-specs" element={<ProjectSpecsPage />} />
-            {/* E3(a) (CR-NS-039): only the Coordinator interactive terminal remains.
-                CR-NS-065: the standalone /dialogue page was retired — Gate E now runs per-question in the cockpit. */}
-            <Route path="coordinator" element={<AgentTerminalPage role="coordinator" />} />
-            <Route path="cockpit" element={<CockpitPage />} />
+            {/* v2 (CR-V2-019, OQ-7): the AI Agent live terminal route renamed
+                /coordinator → /ai-agent (matches the new vocabulary); the
+                interactive AI Agent chrome lands in CR-V2-022. The page still
+                receives role="coordinator" — the AgentRole store-key re-key to
+                ai_agent is CR-V2-022's job (sweep without breaking sessions).
+                The old /coordinator path redirects so live links/bookmarks
+                survive. CR-NS-065: the standalone /dialogue page was retired. */}
+            <Route path="ai-agent" element={<AgentTerminalPage role="coordinator" />} />
+            <Route path="coordinator" element={<Navigate to="/ai-agent" replace />} />
+            {/* v2 (CR-V2-019, OQ-7): the build board route renamed
+                /cockpit → /vyvoj (Orchestrácia → Vývoj). The horizontal
+                4-phase Vývoj board lands in CR-V2-021; CockpitPage is the
+                interim shell. Old /cockpit path redirects. */}
+            <Route path="vyvoj" element={<CockpitPage />} />
+            <Route path="cockpit" element={<Navigate to="/vyvoj" replace />} />
+            {/* v2 (CR-V2-019): per-customer deploy nav surfaces (design §3 / §4.1).
+                Routes resolve to a lightweight "pripravuje sa" placeholder so the
+                new nav items never 404; their real pages land in Milestone G —
+                Zákazníci = CR-V2-025, UAT / PROD = CR-V2-027. */}
+            <Route
+              path="zakaznici"
+              element={
+                <ComingSoonPage
+                  title="Zákazníci"
+                  description="Register zákazníkov projektu — pridávanie cez formulár, integrácie a per-zákazník nasadenie. Pripravuje sa."
+                />
+              }
+            />
+            <Route
+              path="uat"
+              element={
+                <ComingSoonPage
+                  title="UAT"
+                  description="Per-zákazník UAT nasadenie a akceptácia (verzia × zákazník). Pripravuje sa."
+                />
+              }
+            />
+            <Route
+              path="prod"
+              element={
+                <ComingSoonPage
+                  title="PROD"
+                  description="Per-zákazník produkčné nasadenie (verzia × zákazník). Pripravuje sa."
+                />
+              }
+            />
             <Route path="credentials" element={<CredentialsPage />} />
             <Route path="updates" element={<UpdatesPage />} />
             <Route path="settings" element={<SettingsPage />} />

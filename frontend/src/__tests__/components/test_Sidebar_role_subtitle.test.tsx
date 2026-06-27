@@ -1,8 +1,8 @@
 /**
  * Sidebar UserCard subtitle (CR-NS-093) — the subtitle must derive from the
- * logged-in user's role, not be hardcoded "Director · Ri". Studio provisions all
- * three roles (ri/ha/shu); the "<Title> · <Code>" style is kept (ri → Director,
- * ha → Medior, shu → Junior).
+ * logged-in user's role, not be hardcoded. Studio provisions all three roles
+ * (ri/ha/shu); the "<Title> · <Code>" style is kept (ri → Manažér, ha → Medior,
+ * shu → Junior). CR-V2-004 renamed the operator Director → Manažér.
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -30,10 +30,10 @@ function renderSidebar() {
 }
 
 describe("Sidebar — UserCard subtitle from role (CR-NS-093)", () => {
-  it("ri → 'Director · Ri'", () => {
+  it("ri → 'Manažér · Ri'", () => {
     mockState.user = { username: "ri-user", role: "ri" };
     renderSidebar();
-    expect(screen.getByText("Director · Ri")).toBeInTheDocument();
+    expect(screen.getByText("Manažér · Ri")).toBeInTheDocument();
   });
 
   it("ha → 'Medior · Ha'", () => {

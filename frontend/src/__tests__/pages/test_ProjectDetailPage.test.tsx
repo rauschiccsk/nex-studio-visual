@@ -3,7 +3,8 @@
  *
  * The "Rýchla oprava" button opens a modal; submitting the directive POSTs to
  * /pipeline/fast-fix, pins the auto-created PATCH version into the active context
- * (project FIRST, then version), and navigates to the cockpit board.
+ * (project FIRST, then version), and navigates to the Vývoj board (/vyvoj,
+ * renamed from /cockpit in CR-V2-019).
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -119,7 +120,8 @@ describe("ProjectDetailPage — Fast-Fix Lane (CR-NS-095)", () => {
     await waitFor(() =>
       expect(startFastFixApiMock).toHaveBeenCalledWith("p1", "Oprav preklep v sidebare."),
     );
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/cockpit"));
+    // CR-V2-019 (OQ-7): the build board route is /vyvoj (renamed from /cockpit).
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/vyvoj"));
 
     expect(getVersionMock).toHaveBeenCalledWith("v2");
     expect(setSelectedProjectMock).toHaveBeenCalledWith({ slug: "demo", name: "Demo" });

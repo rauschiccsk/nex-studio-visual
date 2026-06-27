@@ -37,8 +37,12 @@ import {
 import { useAuthStore } from "@/store/authStore";
 
 function matchActiveRole(pathname: string): AgentRole | null {
-  // E3(a) (CR-NS-039): Coordinator is the only interactive terminal route.
-  if (pathname === "/coordinator") return "coordinator";
+  // E3(a) (CR-NS-039): the AI Agent is the only interactive terminal route.
+  // CR-V2-019 (OQ-7): the route was renamed /coordinator → /ai-agent; the old
+  // path now redirects there (App.tsx). Match the live /ai-agent path so the
+  // persistent terminal (WS + xterm scrollback) survives the rename. The store
+  // AgentRole key stays "coordinator" until CR-V2-022 re-keys it to ai_agent.
+  if (pathname === "/ai-agent") return "coordinator";
   return null;
 }
 
