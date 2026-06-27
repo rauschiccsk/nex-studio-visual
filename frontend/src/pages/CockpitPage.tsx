@@ -10,6 +10,7 @@ import { FolderOpen, Loader2, Play } from "lucide-react";
 import { useActiveContextStore } from "../store/activeContextStore";
 import { usePipelineWs } from "../hooks/usePipelineWs";
 import { postPipelineActionApi, type PipelineActionName } from "../services/api/pipeline";
+import { writeZadanie } from "../services/api/versions";
 import PipelineRail, { deriveActiveAgent, WhosUp } from "../components/cockpit/PipelineRail";
 import ExchangePanel from "../components/cockpit/ExchangePanel";
 import PipelineActionBar from "../components/cockpit/PipelineActionBar";
@@ -26,6 +27,14 @@ export default function CockpitPage() {
   const { board, error, activity, reconnecting, setBoard } = usePipelineWs(versionId);
   const [inFlight, setInFlight] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // Pre-start Zadanie editor (CR-V2-024 follow-up): an auto-created version (v0.1.0 is auto-created at
+  // project creation) never passes through NewVersionPage, so its Zadanie had no entry point. The board's
+  // "pipeline never ran" state now carries the Zadanie editor — enter the brief, Uložiť, then Spustiť.
+  const [zadanie, setZadanie] = useState("");
+  const [zadanieSaved, setZadanieSaved] = useState(false);
+  const [savingZadanie, setSavingZadanie] = useState(false);
+  const [zadanieError, setZadanieError] = useState<string | null>(null);
 
   // The phase tab the Manažér is VIEWING. Two coexisting states on the bar (design §4.4.2): ● = where the
   // build IS (state.current_stage, auto-advances); highlighted = the viewed tab. They can differ — the
@@ -76,6 +85,22 @@ export default function CockpitPage() {
     }
   };
 
+  // Persist the version's Zadanie to docs/specs/versions/v<N>/customer-requirements.md (the file the
+  // Príprava phase reads), then reveal "Spustiť tvorbu špecifikácie". Two-step, no autopilot (design §4.3).
+  const handleSaveZadanie = async () => {
+    if (!versionId || !zadanie.trim()) return;
+    setSavingZadanie(true);
+    setZadanieError(null);
+    try {
+      await writeZadanie(versionId, zadanie.trim());
+      setZadanieSaved(true);
+    } catch (e: unknown) {
+      setZadanieError(e instanceof Error ? e.message : "Nepodarilo sa uložiť Zadanie.");
+    } finally {
+      setSavingZadanie(false);
+    }
+  };
+
   // State A — no project/version pinned.
   if (!selectedProject || !selectedVersion) {
     return (
@@ -122,18 +147,46 @@ export default function CockpitPage() {
       )}
 
       {board && board.state === null ? (
-        // The pipeline never ran for this version — the single Spustiť entry.
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
-          <Play className="h-8 w-8 text-[var(--color-text-muted)]" />
-          <p className="text-xs text-[var(--color-text-muted)]">Vývoj tejto verzie ešte nezačal.</p>
-          <button
-            onClick={() => handleAction("start")}
-            disabled={inFlight}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500 disabled:opacity-50"
-          >
-            {inFlight ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
-            Spustiť tvorbu špecifikácie
-          </button>
+        // The pipeline never ran for this version — enter the Zadanie, Uložiť, then Spustiť.
+        <div className="flex flex-1 flex-col items-center justify-center p-6">
+          <div className="flex w-full max-w-2xl flex-col gap-3">
+            <p className="text-center text-xs text-[var(--color-text-muted)]">
+              Vývoj tejto verzie ešte nezačal. Zadaj <span className="font-medium text-[var(--color-text-secondary)]">Zadanie</span>{" "}
+              (voľný text — hlavný vstup pre Prípravu), ulož ho a spusti tvorbu špecifikácie.
+            </p>
+            <textarea
+              value={zadanie}
+              onChange={(e) => {
+                setZadanie(e.target.value);
+                setZadanieSaved(false);
+              }}
+              rows={10}
+              placeholder="Opíš, čo má aplikácia robiť — ciele, funkcie, hraničné prípady… AI Agent to v Príprave doladí otázkami."
+              className="w-full resize-y rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] transition-colors focus:border-primary-500 focus:outline-none"
+            />
+            {zadanieError && (
+              <p className="text-xs text-[var(--color-state-error-fg)]">{zadanieError}</p>
+            )}
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={handleSaveZadanie}
+                disabled={savingZadanie || !zadanie.trim()}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border-strong)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface)] disabled:opacity-50"
+              >
+                {savingZadanie ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                {zadanieSaved ? "Zadanie uložené ✓" : "Uložiť Zadanie"}
+              </button>
+              <button
+                onClick={() => handleAction("start")}
+                disabled={inFlight || !zadanieSaved}
+                title={!zadanieSaved ? "Najprv ulož Zadanie" : undefined}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500 disabled:opacity-50"
+              >
+                {inFlight ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+                Spustiť tvorbu špecifikácie
+              </button>
+            </div>
+          </div>
         </div>
       ) : board ? (
         <>
