@@ -32,6 +32,10 @@ import {
   listUserSessionsApi,
   deleteUserSessionApi,
 } from "@/services/api/userSessions";
+import {
+  AutonomyDialPanel,
+  type MieraAutonomieLevel,
+} from "@/components/settings/AutonomyDialPanel";
 import { useAuthStore } from "@/store/authStore";
 import { ROLE_LABELS } from "@/components/cockpit/labels";
 import type { UserRole, UserRead } from "@/types/user";
@@ -160,6 +164,12 @@ function roleCls(role: string) {
 // data load on mount → lazy-first-load (matching the old page), while the
 // page-level `loaded` guards keep it load-once across tab switches.
 
+// The Miera autonómie dial (CR-V2-030 / SET-1) is the `miera_autonomie` system
+// setting, but rendered as a dedicated 4-preset widget (not a raw text field), so
+// it is split out of the generic SystemSettingsPanel here and surfaced via
+// AutonomyDialPanel at the TOP of the Systém tab (matching design §4.6 ordering).
+const MIERA_AUTONOMIE_KEY = "miera_autonomie";
+
 function SystemTab({
   settings,
   loaded,
@@ -178,15 +188,36 @@ function SystemTab({
   useEffect(() => {
     onLoad();
   }, [onLoad]);
+
+  const dial = settings.find((s) => s.key === MIERA_AUTONOMIE_KEY);
+  // Keep the dial out of the generic KV list so it never double-renders as a
+  // free-text "Ostatné" row.
+  const rest = settings.filter((s) => s.key !== MIERA_AUTONOMIE_KEY);
+
   return (
-    <SystemSettingsPanel
-      settings={settings}
-      categories={SETTINGS_CATEGORIES}
-      canEdit={canEdit}
-      onSave={onSave}
-      loading={!loaded}
-      loadError={loadError}
-    />
+    <div>
+      <AutonomyDialPanel
+        value={dial?.value ?? "plna"}
+        isDefault={dial?.is_default ?? true}
+        updatedByUsername={dial?.updated_by_username ?? null}
+        updatedAt={dial?.updated_at ?? null}
+        canEdit={canEdit}
+        onSave={(level: MieraAutonomieLevel) =>
+          onSave(MIERA_AUTONOMIE_KEY, level).then(() => undefined)
+        }
+        loading={!loaded}
+        loadError={loadError}
+      />
+      <div className="border-t border-[var(--color-border-default)]" />
+      <SystemSettingsPanel
+        settings={rest}
+        categories={SETTINGS_CATEGORIES}
+        canEdit={canEdit}
+        onSave={onSave}
+        loading={!loaded}
+        loadError={loadError}
+      />
+    </div>
   );
 }
 
