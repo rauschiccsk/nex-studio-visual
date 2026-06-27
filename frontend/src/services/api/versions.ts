@@ -35,6 +35,23 @@ export function createVersion(
   return api.post<Version>(`/projects/${projectId}/versions`, data);
 }
 
+/**
+ * Persist a version's free-text **Zadanie** (CR-V2-024, design §4.3).
+ *
+ * Saves the brief to ``docs/specs/versions/v<N>/customer-requirements.md``
+ * in the project workspace — the exact file the Príprava phase reads when
+ * the Manažér clicks "Spustiť tvorbu špecifikácie". Create-or-overwrite.
+ */
+export function writeZadanie(
+  versionId: string,
+  content: string,
+): Promise<{ relative_path: string; status: string }> {
+  return api.put<{ relative_path: string; status: string }>(
+    `/versions/${versionId}/zadanie`,
+    { content },
+  );
+}
+
 /** Partially update a version's mutable fields. */
 export function updateVersion(
   id: string,

@@ -19,7 +19,8 @@ describe("ProjectCreationFormData", () => {
     const form: ProjectCreationFormData = {
       name: "My Project",
       slug: "my-project",
-      category: "singlemodule",
+      type: "standard",
+      auth_mode: "password",
       description: "A test project",
       github_repo: "https://github.com/org/repo",
       backend_port: 10100,
@@ -29,7 +30,8 @@ describe("ProjectCreationFormData", () => {
 
     expect(form.name).toBe("My Project");
     expect(form.slug).toBe("my-project");
-    expect(form.category).toBe("singlemodule");
+    expect(form.type).toBe("standard");
+    expect(form.auth_mode).toBe("password");
     expect(form.description).toBe("A test project");
     expect(form.github_repo).toBe("https://github.com/org/repo");
     expect(form.backend_port).toBe(10100);
@@ -41,7 +43,8 @@ describe("ProjectCreationFormData", () => {
     const form: ProjectCreationFormData = {
       name: "No Ports",
       slug: "no-ports",
-      category: "multimodule",
+      type: "web",
+      auth_mode: "token",
       description: "",
       github_repo: "",
       backend_port: null,
@@ -54,11 +57,12 @@ describe("ProjectCreationFormData", () => {
     expect(form.db_port).toBeNull();
   });
 
-  it("accepts multimodule category", () => {
+  it("accepts the web archetype with token auth", () => {
     const form: ProjectCreationFormData = {
-      name: "Multi",
-      slug: "multi",
-      category: "multimodule",
+      name: "Web",
+      slug: "web",
+      type: "web",
+      auth_mode: "token",
       description: "",
       github_repo: "",
       backend_port: null,
@@ -66,14 +70,16 @@ describe("ProjectCreationFormData", () => {
       db_port: null,
     };
 
-    expect(form.category).toBe("multimodule");
+    expect(form.type).toBe("web");
+    expect(form.auth_mode).toBe("token");
   });
 
   it("has all expected keys", () => {
     const form: ProjectCreationFormData = {
       name: "",
       slug: "",
-      category: "singlemodule",
+      type: "standard",
+      auth_mode: "password",
       description: "",
       github_repo: "",
       backend_port: null,
@@ -83,14 +89,15 @@ describe("ProjectCreationFormData", () => {
 
     const keys = Object.keys(form).sort();
     expect(keys).toEqual([
+      "auth_mode",
       "backend_port",
-      "category",
       "db_port",
       "description",
       "frontend_port",
       "github_repo",
       "name",
       "slug",
+      "type",
     ]);
   });
 });

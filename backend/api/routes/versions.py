@@ -339,6 +339,46 @@ def get_task_plan(
     )
 
 
+class _ZadanieWrite(BaseModel):
+    """Request body for ``PUT /versions/{version_id}/zadanie``."""
+
+    content: str
+
+
+class _ZadanieWriteResponse(BaseModel):
+    """Response for ``PUT /versions/{version_id}/zadanie``."""
+
+    relative_path: str
+    status: str
+
+
+@router.put(
+    "/versions/{version_id}/zadanie",
+    response_model=_ZadanieWriteResponse,
+)
+def write_zadanie(
+    version_id: UUID,
+    payload: _ZadanieWrite,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(require_ri_role),
+) -> _ZadanieWriteResponse:
+    """Save a version's free-text Zadanie to ``customer-requirements.md`` (CR-V2-024, design §4.3).
+
+    The New-Version flow saves the brief here on "Uložiť Zadanie"; the Príprava phase (CR-V2-010)
+    reads exactly this file when the build starts. Create-or-overwrite — the version's spec
+    directory is created if it does not yet exist. ``ri`` role only.
+
+    * **404** — the version (or its project) does not exist.
+    """
+    try:
+        rel = version_service.write_zadanie(db, version_id, payload.content)
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        raise _map_value_error(exc) from exc
+    return _ZadanieWriteResponse(relative_path=rel, status="saved")
+
+
 @router.post("/versions/{version_id}/reset-tasks", status_code=status.HTTP_200_OK)
 def reset_tasks(
     version_id: UUID,

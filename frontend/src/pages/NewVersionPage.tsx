@@ -1,24 +1,31 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { listProjectsApi } from "@/services/api/projects";
-import { listVersions, createVersion } from "@/services/api/versions";
+import { listVersions, createVersion, writeZadanie } from "@/services/api/versions";
+import { postPipelineActionApi } from "@/services/api/pipeline";
+import { useActiveContextStore } from "@/store/activeContextStore";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// Suggest the next version number. Stored WITHOUT a leading "v": the canonical format is bare
+// semver (the post-scaffold seeds the first version as "0.1.0"), and the orchestrator's spec-tree
+// path helper prepends the "v" itself (docs/specs/versions/v<version_number>/…) — so a stored "v"
+// would double it. The first version produced by the v2 pipeline is v0.1.0 (design §4.3 / DEPLOY-9).
 function nextVersionNumber(versions: Version[]): string {
-  if (versions.length === 0) return "v0.1";
+  if (versions.length === 0) return "0.1.0";
   const last = [...versions].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   )[0];
-  if (!last) return "v0.1";
-  const m = last.version_number.match(/^v?(\d+)\.(\d+)$/);
+  if (!last) return "0.1.0";
+  // Accept an optional leading "v" + an optional patch segment (semver or the older major.minor).
+  const m = last.version_number.match(/^v?(\d+)\.(\d+)(?:\.(\d+))?$/);
   if (!m || !m[1] || !m[2]) return "";
-  const maj = m[1];
-  const min = m[2];
-  const nextMin = parseInt(min) + 1;
-  return nextMin >= 10 ? `v${parseInt(maj) + 1}.0` : `v${maj}.${nextMin}`;
+  const maj = parseInt(m[1]);
+  const min = parseInt(m[2]);
+  const nextMin = min + 1;
+  return nextMin >= 10 ? `${maj + 1}.0.0` : `${maj}.${nextMin}.0`;
 }
 
 // ─── Input style ──────────────────────────────────────────────────────────────
@@ -31,6 +38,8 @@ const inputCls =
 export default function NewVersionPage() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
+  const setSelectedProject = useActiveContextStore((s) => s.setSelectedProject);
+  const setSelectedVersion = useActiveContextStore((s) => s.setSelectedVersion);
 
   const [project, setProject] = useState<ProjectRead | null>(null);
   const [prevVersions, setPrevVersions] = useState<Version[]>([]);
@@ -40,11 +49,19 @@ export default function NewVersionPage() {
   const [versionManual, setVersionManual] = useState(false);
   const [name, setName] = useState("");
   const [targetDate, setTargetDate] = useState("");
-  const [description, setDescription] = useState("");
+  // The Zadanie — the free-text brief, the MAIN input (design §4.3). Persisted on save to
+  // docs/specs/versions/v<N>/customer-requirements.md; the Príprava phase reads it.
+  const [zadanie, setZadanie] = useState("");
+
+  // Two-step flow (design §4.3, "no autopilot"): (1) "Uložiť Zadanie" creates the version row +
+  // writes customer-requirements.md → reveals (2) "Spustiť tvorbu špecifikácie" which begins the
+  // Príprava phase. ``savedVersion`` is the created row once step 1 succeeds.
+  const [savedVersion, setSavedVersion] = useState<Version | null>(null);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [starting, setStarting] = useState(false);
 
   const verRef = useRef<HTMLInputElement>(null);
 
@@ -77,28 +94,54 @@ export default function NewVersionPage() {
   function validate(): boolean {
     const next: Record<string, string> = {};
     if (!versionNumber.trim()) next.versionNumber = "Číslo verzie je povinné.";
+    if (!zadanie.trim()) next.zadanie = "Zadanie je povinné — je to hlavný vstup pre prípravu špecifikácie.";
     setErrors(next);
     return Object.keys(next).length === 0;
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  // Step 1 (design §4.3): create the version row + persist the Zadanie to customer-requirements.md.
+  // Reveals the "Spustiť tvorbu špecifikácie" action; does NOT auto-start the build ("no autopilot").
+  async function handleSaveZadanie(e: React.FormEvent) {
     e.preventDefault();
     if (!project || !validate()) return;
     setFormError("");
-    setLoading(true);
+    setSaving(true);
     try {
       const v = await createVersion(project.id, {
         version_number: versionNumber.trim(),
         name: name.trim() || undefined,
-        description: description.trim() || undefined,
+        // The version's free-text intent mirrors the Zadanie so the version list shows a summary.
+        description: zadanie.trim() || undefined,
         target_date: targetDate || undefined,
       });
-      navigate(`/projects/${slug}/versions/${v.id}`);
+      // Persist the brief to the spec tree the Príprava phase reads.
+      await writeZadanie(v.id, zadanie.trim());
+      setSavedVersion(v);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Nepodarilo sa vytvoriť verziu.";
+      const msg = err instanceof Error ? err.message : "Nepodarilo sa uložiť Zadanie.";
       setFormError(msg);
     } finally {
-      setLoading(false);
+      setSaving(false);
+    }
+  }
+
+  // Step 2 (design §2.1 / §4.3): begin the Príprava phase — pin the project+version (the AI Agent
+  // tab + Vývoj board are pin-scoped), trigger the engine ``start`` action (which injects the
+  // Príprava init prompt "Načítaj zadanie a začni prípravu špecifikácie"), then open the AI Agent
+  // tab so the Manažér watches the interactive spec dialogue live.
+  async function handleStart() {
+    if (!project || !savedVersion) return;
+    setFormError("");
+    setStarting(true);
+    try {
+      await postPipelineActionApi(savedVersion.id, { action: "start" });
+      setSelectedProject({ slug: project.slug, name: project.name });
+      setSelectedVersion({ versionId: savedVersion.id, versionNumber: savedVersion.version_number });
+      navigate("/ai-agent");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Nepodarilo sa spustiť tvorbu špecifikácie.";
+      setFormError(msg);
+      setStarting(false);
     }
   }
 
@@ -143,7 +186,7 @@ export default function NewVersionPage() {
       {/* Scrollable form */}
       <div className="flex-1 overflow-y-auto px-6 py-6">
         <div className="max-w-xl mx-auto">
-          <form onSubmit={handleSubmit} noValidate className="space-y-5">
+          <form onSubmit={handleSaveZadanie} noValidate className="space-y-5">
 
             {/* Version number + Name */}
             <div className="grid grid-cols-2 gap-3">
@@ -152,28 +195,29 @@ export default function NewVersionPage() {
                   <label className="block text-sm font-medium text-[var(--color-text-secondary)]">
                     Číslo verzie *
                   </label>
-                  {!versionManual && versionNumber && (
+                  {!versionManual && versionNumber && !savedVersion && (
                     <span className="text-[10px] text-primary-400/70 font-normal">automaticky navrhnuté</span>
                   )}
                 </div>
                 <input
                   ref={verRef}
                   type="text"
-                  placeholder="v0.1"
+                  placeholder="0.1.0"
                   autoComplete="off"
                   spellCheck={false}
+                  disabled={!!savedVersion}
                   value={versionNumber}
                   onChange={(e) => {
                     setVersionNumber(e.target.value);
                     setVersionManual(true);
                     if (errors.versionNumber) setErrors((er) => ({ ...er, versionNumber: "" }));
                   }}
-                  className={`${inputCls} font-mono ${errors.versionNumber ? "border-[var(--color-state-error-bg)]" : ""}`}
+                  className={`${inputCls} font-mono disabled:opacity-60 ${errors.versionNumber ? "border-[var(--color-state-error-bg)]" : ""}`}
                 />
                 {errors.versionNumber && (
                   <p className="mt-1 text-xs text-[var(--color-status-error)]">{errors.versionNumber}</p>
                 )}
-                <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">Začnite na v0.1 · v1.0 = prvé produkčné vydanie</p>
+                <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">Prvá verzia = 0.1.0 · 1.0.0 = prvé produkčné vydanie</p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
@@ -183,8 +227,9 @@ export default function NewVersionPage() {
                   type="text"
                   placeholder="napr. platobný modul"
                   value={name}
+                  disabled={!!savedVersion}
                   onChange={(e) => setName(e.target.value)}
-                  className={inputCls}
+                  className={`${inputCls} disabled:opacity-60`}
                 />
               </div>
             </div>
@@ -197,55 +242,38 @@ export default function NewVersionPage() {
               <input
                 type="date"
                 value={targetDate}
+                disabled={!!savedVersion}
                 onChange={(e) => setTargetDate(e.target.value)}
-                className={inputCls}
+                className={`${inputCls} disabled:opacity-60`}
               />
             </div>
 
-            {/* Previous version context */}
-            {lastVersion && (
-              <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-hover)] p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs text-[var(--color-text-muted)]">Predchádzajúca verzia</span>
-                  <span className="text-xs font-medium text-[var(--color-text-secondary)] bg-[var(--color-surface-active)] px-2.5 py-1 rounded font-mono">
-                    {lastVersion.version_number}
-                  </span>
-                </div>
-                <div className="flex items-start gap-3 pt-3 border-t border-[var(--color-border-default)]">
-                  <input
-                    type="checkbox"
-                    id="inherit-design"
-                    defaultChecked
-                    className="mt-0.5 accent-indigo-500 shrink-0 cursor-pointer"
-                  />
-                  <label htmlFor="inherit-design" className="cursor-pointer">
-                    <div className="text-xs text-[var(--color-text-secondary)] font-medium">
-                      Zdediť DESIGN.md z {lastVersion.version_number}
-                    </div>
-                    <div className="text-[11px] text-[var(--color-text-muted)] mt-0.5">
-                      AI použije predchádzajúcu architektúru ako východiskový bod
-                    </div>
-                  </label>
-                </div>
-              </div>
-            )}
-
-            {/* Description / Intent */}
+            {/* Zadanie — the free-text brief, the MAIN input (design §4.3). Saved to
+                docs/specs/versions/v<N>/customer-requirements.md; the Príprava phase reads it. */}
             <div>
               <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                Zámer verzie{" "}
-                <span className="ml-1 text-[var(--color-text-muted)] font-normal text-xs">(3–5 viet, nie celá špecifikácia)</span>
+                Zadanie *{" "}
+                <span className="ml-1 text-[var(--color-text-muted)] font-normal text-xs">(brief — hlavný vstup; voľný text)</span>
               </label>
               <textarea
-                rows={4}
-                placeholder="Príklad: Pridať platobný modul cez Tatra banku. Zákazník potrebuje automatické párovanie platieb s faktúrami a emailové notifikácie. Cieľ: funkčné platby pre pilotného zákazníka do konca mája."
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                className={`${inputCls} resize-none leading-relaxed`}
+                rows={8}
+                placeholder="Opíš, čo má verzia priniesť. Napr.: Pridať platobný modul cez Tatra banku. Zákazník potrebuje automatické párovanie platieb s faktúrami a emailové notifikácie. Cieľ: funkčné platby pre pilotného zákazníka do konca mája. (AI Agent zadanie systematizuje a v Príprave sa doptá na nejasnosti.)"
+                value={zadanie}
+                disabled={!!savedVersion}
+                onChange={(e) => {
+                  setZadanie(e.target.value);
+                  if (errors.zadanie) setErrors((er) => ({ ...er, zadanie: "" }));
+                }}
+                className={`${inputCls} resize-none leading-relaxed disabled:opacity-60 ${errors.zadanie ? "border-[var(--color-state-error-bg)]" : ""}`}
               />
-              <p className="text-[11px] text-[var(--color-text-muted)] mt-1.5">
-                Raw Spec sa zadáva v kroku 1 pipeline po vytvorení verzie.
-              </p>
+              {errors.zadanie ? (
+                <p className="mt-1 text-xs text-[var(--color-status-error)]">{errors.zadanie}</p>
+              ) : (
+                <p className="text-[11px] text-[var(--color-text-muted)] mt-1.5">
+                  Po uložení sa Zadanie zapíše do <span className="font-mono">customer-requirements.md</span>; špecifikáciu z neho
+                  vytvorí AI Agent vo fáze Príprava.
+                </p>
+              )}
             </div>
 
             {/* Error banner */}
@@ -255,38 +283,87 @@ export default function NewVersionPage() {
               </div>
             )}
 
+            {/* Saved confirmation — shown after step 1 succeeds. */}
+            {savedVersion && (
+              <div className="flex items-center gap-2 rounded-lg bg-[var(--color-state-success-bg)] border border-[var(--color-state-success-bg)] p-3 text-sm text-[var(--color-state-success-fg)]">
+                <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                Zadanie uložené pre verziu <span className="font-mono">{savedVersion.version_number}</span>. Spusti tvorbu
+                špecifikácie alebo otvor verziu.
+              </div>
+            )}
+
             {/* Actions */}
-            <div className="flex gap-3 pt-1">
-              <button
-                type="button"
-                onClick={() => navigate(`/projects/${slug}`)}
-                className="flex-1 px-4 py-2 text-sm text-[var(--color-text-secondary)] border border-[var(--color-border-default)] rounded-lg hover:bg-[var(--color-surface-hover)] transition-colors"
-              >
-                Zrušiť
-              </button>
-              <button
-                type="submit"
-                disabled={loading || !project}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
-              >
-                {loading ? (
-                  <>
-                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                    Vytváram…
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                    </svg>
-                    Vytvoriť verziu
-                  </>
-                )}
-              </button>
-            </div>
+            {!savedVersion ? (
+              // Step 1 — save the Zadanie.
+              <div className="flex gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => navigate(`/projects/${slug}`)}
+                  className="flex-1 px-4 py-2 text-sm text-[var(--color-text-secondary)] border border-[var(--color-border-default)] rounded-lg hover:bg-[var(--color-surface-hover)] transition-colors"
+                >
+                  Zrušiť
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving || !project}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
+                >
+                  {saving ? (
+                    <>
+                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      Ukladám…
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      Uložiť Zadanie
+                    </>
+                  )}
+                </button>
+              </div>
+            ) : (
+              // Step 2 — begin Príprava (no autopilot — design §4.3).
+              <div className="flex gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => navigate(`/projects/${slug}/versions/${savedVersion.id}`)}
+                  className="flex-1 px-4 py-2 text-sm text-[var(--color-text-secondary)] border border-[var(--color-border-default)] rounded-lg hover:bg-[var(--color-surface-hover)] transition-colors"
+                >
+                  Otvoriť verziu
+                </button>
+                <button
+                  type="button"
+                  onClick={handleStart}
+                  disabled={starting}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
+                >
+                  {starting ? (
+                    <>
+                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      Spúšťam…
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      Spustiť tvorbu špecifikácie
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
 
           </form>
         </div>

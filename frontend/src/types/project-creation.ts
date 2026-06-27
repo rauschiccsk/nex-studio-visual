@@ -7,7 +7,7 @@
  * API layer keeps its own contract.
  */
 
-import type { ProjectCategory } from "./project";
+import type { ProjectAuthMode, ProjectType } from "./project";
 
 // ---------------------------------------------------------------------------
 // Form data
@@ -25,8 +25,10 @@ export interface ProjectCreationFormData {
   name: string;
   /** URL-safe slug (auto-generated from name, editable). */
   slug: string;
-  /** Single-module or multi-module project. */
-  category: ProjectCategory;
+  /** Project archetype (surface composition): standard | web. */
+  type: ProjectType;
+  /** Login flavour wired onto every surface: password | token. */
+  auth_mode: ProjectAuthMode;
   /** Free-text project description. */
   description: string;
   /** GitHub repository URL (e.g. ``https://github.com/org/repo``). */

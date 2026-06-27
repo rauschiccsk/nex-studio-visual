@@ -4,7 +4,7 @@ import { createProjectApi, suggestPortBlockApi } from "@/services/api/projects";
 import { getSystemSettingApi } from "@/services/api/systemSettings";
 import { listUsersApi } from "@/services/api/users";
 import { useAuthStore } from "@/store/authStore";
-import type { ProjectCategory } from "@/types";
+import type { ProjectAuthMode, ProjectType } from "@/types";
 import type { UserRead } from "@/types/user";
 
 // ─── Slug helper ─────────────────────────────────────────────────────────────
@@ -55,7 +55,13 @@ export default function NewProjectPage() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
 
-  const [category, setCategory] = useState<ProjectCategory>("singlemodule");
+  // Archetype (CR-V2-005, design §4.2): the preset surface composition that replaces the retired
+  // single/multi-module category. Štandardný = BE + app-FE; Web = BE + admin-FE + public-site.
+  const [type, setType] = useState<ProjectType>("standard");
+  // Auth mode (CR-V2-005, design §4.2): MANDATORY — shapes the project's auth structure (BE login +
+  // FE login flow). No default is pre-selected so the Manažér makes a deliberate choice; submit is
+  // blocked until one is picked.
+  const [authMode, setAuthMode] = useState<ProjectAuthMode | "">("");
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [slugManual, setSlugManual] = useState(false);
@@ -68,7 +74,6 @@ export default function NewProjectPage() {
   const [dbPort, setDbPort] = useState<string>("");
 
   // F-004 flags
-  const [enableCoordinator, setEnableCoordinator] = useState(true);
   const [enableCicd, setEnableCicd] = useState(false);
   const [fullSmoke, setFullSmoke] = useState(false);
   const [enableBranchProtection, setEnableBranchProtection] = useState(false);
@@ -158,6 +163,8 @@ export default function NewProjectPage() {
     if (!name.trim()) next.name = "Názov projektu je povinný.";
     if (!slug.trim()) next.slug = "Slug je povinný.";
     else if (!/^[a-z0-9-]+$/.test(slug)) next.slug = "Slug: iba malé písmená, čísla a pomlčky.";
+    // Auth mode is MANDATORY (design §4.2) — it shapes the project's auth structure.
+    if (!authMode) next.authMode = "Spôsob prihlásenia je povinný.";
     setErrors(next);
     return Object.keys(next).length === 0;
   }
@@ -171,7 +178,9 @@ export default function NewProjectPage() {
       const project = await createProjectApi({
         name: name.trim(),
         slug: slug.trim(),
-        category,
+        type,
+        // Guarded by validate() — authMode is non-empty here.
+        auth_mode: authMode as ProjectAuthMode,
         description: description.trim(),
         repo_url: repo.trim() || null,
         backend_port: backendPort ? Number(backendPort) : null,
@@ -180,7 +189,6 @@ export default function NewProjectPage() {
         created_by: user?.id ?? "",
         owner_id: ownerId || null,
         // F-004 flags
-        enable_coordinator: enableCoordinator,
         enable_cicd: enableCicd,
         full_smoke: fullSmoke,
         enable_branch_protection: enableBranchProtection,
@@ -222,15 +230,15 @@ export default function NewProjectPage() {
         <div className="max-w-xl mx-auto">
           <form onSubmit={handleSubmit} noValidate className="space-y-5">
 
-            {/* Category */}
+            {/* Archetype (CR-V2-005, design §4.2): Štandardný / Web */}
             <div>
               <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-2">Typ projektu</label>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  onClick={() => setCategory("singlemodule")}
+                  onClick={() => setType("standard")}
                   className={`p-3 rounded-lg border text-left transition-colors ${
-                    category === "singlemodule"
+                    type === "standard"
                       ? "border-primary-500 bg-primary-500/10 text-primary-400"
                       : "border-[var(--color-border-strong)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-strong)]"
                   }`}
@@ -238,25 +246,75 @@ export default function NewProjectPage() {
                   <svg className="w-4 h-4 mb-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
                   </svg>
-                  <div className="text-sm font-medium">Jeden modul</div>
-                  <div className="text-[10px] opacity-70 mt-0.5">Jedno úložisko, priamy vývoj</div>
+                  <div className="text-sm font-medium">Štandardný</div>
+                  <div className="text-[10px] opacity-70 mt-0.5">Backend + aplikačné rozhranie</div>
                 </button>
                 <button
                   type="button"
-                  onClick={() => setCategory("multimodule")}
+                  onClick={() => setType("web")}
                   className={`p-3 rounded-lg border text-left transition-colors ${
-                    category === "multimodule"
+                    type === "web"
                       ? "border-primary-500 bg-primary-500/10 text-primary-400"
                       : "border-[var(--color-border-strong)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-strong)]"
                   }`}
                 >
                   <svg className="w-4 h-4 mb-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-9a14.5 14.5 0 000 18m0-18a14.5 14.5 0 010 18M3.6 9h16.8M3.6 15h16.8" />
                   </svg>
-                  <div className="text-sm font-medium">Viacero modulov</div>
-                  <div className="text-[10px] opacity-70 mt-0.5">Viacero úložísk, komplexný projekt</div>
+                  <div className="text-sm font-medium">Web</div>
+                  <div className="text-[10px] opacity-70 mt-0.5">Backend + admin + verejná stránka</div>
                 </button>
               </div>
+            </div>
+
+            {/* Auth mode (CR-V2-005, design §4.2): MANDATORY — shapes the project's auth structure. */}
+            <div>
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-2">
+                Spôsob prihlásenia *
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode("password");
+                    if (errors.authMode) setErrors((e) => ({ ...e, authMode: "" }));
+                  }}
+                  className={`p-3 rounded-lg border text-left transition-colors ${
+                    authMode === "password"
+                      ? "border-primary-500 bg-primary-500/10 text-primary-400"
+                      : `text-[var(--color-text-secondary)] hover:border-[var(--color-border-strong)] ${
+                          errors.authMode ? "border-[var(--color-status-error)]" : "border-[var(--color-border-strong)]"
+                        }`
+                  }`}
+                >
+                  <svg className="w-4 h-4 mb-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 11c0-1.105.895-2 2-2s2 .895 2 2m-9 0h10a2 2 0 012 2v6a2 2 0 01-2 2H7a2 2 0 01-2-2v-6a2 2 0 012-2zm5-7a4 4 0 014 4v3H8V8a4 4 0 014-4z" />
+                  </svg>
+                  <div className="text-sm font-medium">Meno a heslo</div>
+                  <div className="text-[10px] opacity-70 mt-0.5">Prihlásenie ako NEX Studio</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode("token");
+                    if (errors.authMode) setErrors((e) => ({ ...e, authMode: "" }));
+                  }}
+                  className={`p-3 rounded-lg border text-left transition-colors ${
+                    authMode === "token"
+                      ? "border-primary-500 bg-primary-500/10 text-primary-400"
+                      : `text-[var(--color-text-secondary)] hover:border-[var(--color-border-strong)] ${
+                          errors.authMode ? "border-[var(--color-status-error)]" : "border-[var(--color-border-strong)]"
+                        }`
+                  }`}
+                >
+                  <svg className="w-4 h-4 mb-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                  </svg>
+                  <div className="text-sm font-medium">Token</div>
+                  <div className="text-[10px] opacity-70 mt-0.5">Spustenie tokenom ako NEX Inbox</div>
+                </button>
+              </div>
+              {errors.authMode && <p className="mt-1 text-xs text-[var(--color-status-error)]">{errors.authMode}</p>}
             </div>
 
             {/* Name */}
@@ -383,16 +441,6 @@ export default function NewProjectPage() {
               <h3 className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wide">
                 Možnosti nastavenia
               </h3>
-              <label className="flex items-center gap-3 text-sm text-[var(--color-text-primary)] cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={enableCoordinator}
-                  onChange={(e) => setEnableCoordinator(e.target.checked)}
-                  className="w-4 h-4 rounded border-[var(--color-border-default)] bg-[var(--color-canvas)] text-primary-500 focus:ring-primary-500"
-                />
-                <span>Povoliť agenta Koordinátor</span>
-                <span className="text-xs text-[var(--color-text-muted)]">(predvolene zapnuté)</span>
-              </label>
               <label className="flex items-center gap-3 text-sm text-[var(--color-text-primary)] cursor-pointer">
                 <input
                   type="checkbox"

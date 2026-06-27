@@ -63,6 +63,7 @@ Management and §4.0 Version Lifecycle Rules, and
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
@@ -70,10 +71,15 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from backend.db.models.bugs import Bug
+from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic
 from backend.db.models.versions import Version
 from backend.schemas.version import VersionCreate, VersionUpdate
 from backend.services import backlog as backlog_service
+
+#: Filesystem root every project workspace lives under (mirrors
+#: :data:`backend.services.project_specs.PROJECTS_ROOT`).
+_PROJECTS_ROOT = Path("/opt/projects")
 
 
 def list_versions(db: Session, project_id: UUID) -> list[Version]:
@@ -227,6 +233,52 @@ def create(
     db.add(version)
     db.flush()
     return version
+
+
+def write_zadanie(db: Session, version_id: UUID, content: str) -> str:
+    """Persist a version's free-text **Zadanie** to ``customer-requirements.md`` (CR-V2-024).
+
+    The New-Version flow (design §4.3) lets the Manažér enter the brief as free text and saves it
+    to ``docs/specs/versions/v<N>/customer-requirements.md`` inside the project workspace. The
+    Príprava phase (CR-V2-010) reads exactly this file when the Manažér clicks "Spustiť tvorbu
+    špecifikácie", so the write path is computed to MATCH the orchestrator's
+    ``_version_spec_rel`` convention (``docs/specs/versions/v{version_number}``) — the two must
+    never diverge or the AI Agent reads an empty Zadanie.
+
+    Unlike the edit-only ``project_specs`` browser write, this is a deliberate CREATE-or-overwrite:
+    the version's spec directory does not exist yet at this point in the flow, so parent directories
+    are created.
+
+    Returns the repo-relative path that was written (e.g.
+    ``docs/specs/versions/v0.1.0/customer-requirements.md``).
+
+    Raises:
+        ValueError: the version (or its project) does not exist. The router maps this to HTTP 404.
+    """
+    row = db.execute(
+        select(Version.version_number, Project.slug)
+        .join(Project, Project.id == Version.project_id)
+        .where(Version.id == version_id)
+    ).first()
+    if row is None:
+        raise ValueError(f"Version {version_id} not found")
+    version_number, slug = row
+
+    # Mirrors orchestrator._version_spec_rel / _priprava_directive: the Zadanie lives at
+    # docs/specs/versions/v<version_number>/customer-requirements.md.
+    rel_path = f"docs/specs/versions/v{version_number}/customer-requirements.md"
+    abs_path = (_PROJECTS_ROOT / slug / rel_path).resolve()
+
+    # Defense in depth: the resolved path must stay within the project workspace.
+    project_root = (_PROJECTS_ROOT / slug).resolve()
+    try:
+        abs_path.relative_to(project_root)
+    except ValueError as exc:
+        raise ValueError("Resolved Zadanie path escapes the project root") from exc
+
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    abs_path.write_text(content, encoding="utf-8")
+    return rel_path
 
 
 def update(db: Session, version_id: UUID, data: VersionUpdate) -> Version:

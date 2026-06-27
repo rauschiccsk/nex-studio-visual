@@ -5,7 +5,7 @@ export interface ListProjectsParams {
   skip?: number;
   limit?: number;
   status?: string;
-  category?: string;
+  type?: string;
   [key: string]: string | number | boolean | null | undefined;
 }
 
