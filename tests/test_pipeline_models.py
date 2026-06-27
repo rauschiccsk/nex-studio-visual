@@ -10,12 +10,6 @@ from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 
-# The ``task_plan`` stage was a v1 11-stage-flow value (CR-NS-020); the v2.0.0 4-phase model
-# (priprava/navrh/programovanie/verifikacia/done — migration 069) removed it, so the v2 CHECK
-# correctly rejects it. The behaviour these two tests assert (a ``task_plan`` stage being accepted)
-# is gone; the per-task-plan node is re-designed for the v2 engine in Milestone C/D.
-_V1_TASK_PLAN_STAGE = "v1 engine behaviour — replaced by v2 in Milestone C/D"
-
 
 def _make_version(db_session) -> Version:
     user = User(
@@ -113,14 +107,14 @@ class TestPipelineState:
         db_session.add(_state(version, flow_type="fast_fix"))
         db_session.flush()
 
-    @pytest.mark.skip(reason=_V1_TASK_PLAN_STAGE)
-    def test_accepts_task_plan_stage(self, db_session):
-        # CR-NS-020 CR-1: 'task_plan' is a permissive value (foundation) — the
-        # widened ck_pipeline_state_current_stage must accept it even though the
-        # flow does not route there yet.
+    def test_rejects_task_plan_stage(self, db_session):
+        # The v1 11-stage ``task_plan`` value (CR-NS-020) was REMOVED by the v2 4-phase model (it folded
+        # into Návrh — CR-V2-011); ``ck_pipeline_state_current_stage`` must now REJECT it (the opposite of
+        # the deferred v1 ``test_accepts_task_plan_stage``).
         version = _make_version(db_session)
         db_session.add(_state(version, current_stage="task_plan"))
-        db_session.flush()
+        with pytest.raises((IntegrityError, ProgrammingError)):
+            db_session.flush()
 
     def test_awaiting_director_since_lifecycle(self, db_session):
         """WS-D (CR-NS-036): the status `set` event stamps awaiting_director_since on ENTERING a
@@ -247,12 +241,12 @@ class TestPipelineMessage:
         db_session.add(_message(version, author="system", kind="notification"))
         db_session.flush()  # no raise
 
-    @pytest.mark.skip(reason=_V1_TASK_PLAN_STAGE)
-    def test_accepts_task_plan_stage(self, db_session):
-        # CR-NS-020 CR-1: widened ck_pipeline_message_stage accepts 'task_plan'.
+    def test_rejects_task_plan_stage(self, db_session):
+        # v2 4-phase model: ``ck_pipeline_message_stage`` REJECTS the removed v1 ``task_plan`` stage.
         version = _make_version(db_session)
         db_session.add(_message(version, stage="task_plan"))
-        db_session.flush()  # no raise
+        with pytest.raises((IntegrityError, ProgrammingError)):
+            db_session.flush()
 
     def test_fk_cascade_on_version_delete(self, db_session):
         version = _make_version(db_session)

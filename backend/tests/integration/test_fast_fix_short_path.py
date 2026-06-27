@@ -166,6 +166,35 @@ async def test_ensure_build_task_reads_v2_kickoff_directive(db_session) -> None:
     assert len(count) == 1
 
 
+@pytest.mark.asyncio
+async def test_ensure_build_task_multiline_directive_titles_from_first_line(db_session) -> None:
+    """A MULTI-line directive → the Task title is the trimmed FIRST line while the description keeps the
+    full multi-line text, and ``task_type`` defaults to ``backend`` (the neutral default).
+
+    Covers the v1 ``test_ensure_build_task_materializes_from_directive`` nuance the single-line short-path
+    test never exercised (single-line → title==description so the first-line trim was untested)."""
+    creator = _seed_user(db_session)
+    project = _seed_project(db_session, creator=creator)
+    _seed_base_version(db_session, project, "v1.0.0")
+    patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id)
+    directive = (
+        "  Fix the IBAN validator off-by-one  \nIt drops the last check digit on 24-char IBANs.\nAdd a regression test."
+    )
+    await orchestrator.apply_action(
+        db_session,
+        version_id=patch.id,
+        action="start",
+        payload={"flow_type": "fast_fix", "directive": directive},
+    )
+
+    task = fast_fix.ensure_build_task(db_session, patch.id)
+    # Title = the trimmed FIRST non-empty line; description keeps the FULL multi-line directive.
+    assert task.title == "Fix the IBAN validator off-by-one"
+    assert task.description == directive
+    assert "regression test" in task.description  # later lines survive in the description, not the title
+    assert task.task_type == "backend"
+
+
 # ---------------------------------------------------------------------------
 # 3. Lightweight Príprava auto-continues (no approve_spec) for fast-fix only
 # ---------------------------------------------------------------------------
