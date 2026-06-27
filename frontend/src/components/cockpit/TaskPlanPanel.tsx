@@ -1,9 +1,16 @@
-// Task-plan tree + per-task audit panel (F-007 §7, CR-NS-020 CR-5). Right column of the
-// cockpit during task_plan/build: the Director sees the EPIC→FEAT→TASK decomposition with
-// live per-node status, which task the Programmer is on, and (on click) the per-task audit
-// verdict + findings read from the live PipelineMessage stream.
+// Task-plan tree (NEX Studio v2, CR-V2-023; design §4.5). The task plan (EPIC → FEAT → TASK) is the
+// last part of the Návrh design document and also drives the Programovanie split view (plan on the
+// RIGHT). The Manažér sees the decomposition with live per-node status and which task is underway.
+//
+// v2 changes vs v1 (CR-NS-020 CR-5):
+//   - The per-task TaskAuditPanel / readTaskAudit are REMOVED — v2 has NO per-task Auditor (design §2.2);
+//     the Auditor verdict is a single end-of-build artifact in the Verifikácia tab, not per task.
+//   - Expand/collapse state PERSISTS across navigation + reload via localStorage, per browser, per
+//     version (OQ-8: per-browser localStorage is sufficient for a UI convenience — zero backend).
+//   - Level colour-coding: EPIC = purple, FEAT = yellow, TASK = blue (design §4.5). These are the
+//     node-LEVEL colours (on the title text); the status DOT keeps the unified status palette (CR-NS-028).
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 
 import { getTaskPlan } from "../../services/api/versions";
@@ -18,8 +25,45 @@ import { TASK_STATUS_LABELS, TASK_STATUS_TONE, TONE_DOT } from "./labels";
 
 interface Props {
   versionId: string;
-  /** Live message stream (board.recent_messages) — the audit panel reads from it. */
+  /** Live message stream (board.recent_messages) — the debounce key for tree-freshness refetch. */
   messages: PipelineMessage[];
+}
+
+// Level colour-coding (design §4.5): EPIC = purple, FEAT = yellow, TASK = blue. Applied to the node
+// TITLE text (the status dot stays on the unified status palette — CR-NS-028). Each colour is
+// light-readable + dark-readable via `text-X-700 dark:text-X-300` (the CR-NS-067c convention) — the
+// -300/-400 shades are too faint on the white light-theme surface, so light mode uses the darker -700.
+// Yellow is the worst offender on white (design §4.5 calls it out): yellow-700 is a legible amber-brown
+// on light, yellow-300 a bright gold on dark.
+const EPIC_LEVEL_COLOR = "text-purple-700 dark:text-purple-300";
+const FEAT_LEVEL_COLOR = "text-yellow-700 dark:text-yellow-300";
+const TASK_LEVEL_COLOR = "text-blue-700 dark:text-blue-300";
+
+// localStorage key for the collapsed-node set, scoped per version so each version's tree remembers its
+// own expand/collapse state independently (per browser — OQ-8).
+function collapsedStorageKey(versionId: string): string {
+  return `nex_taskplan_collapsed_${versionId}`;
+}
+
+function readCollapsed(versionId: string): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = window.localStorage.getItem(collapsedStorageKey(versionId));
+    if (!raw) return new Set();
+    const ids = JSON.parse(raw) as unknown;
+    return Array.isArray(ids) ? new Set(ids.filter((id): id is string => typeof id === "string")) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function writeCollapsed(versionId: string, collapsed: Set<string>): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(collapsedStorageKey(versionId), JSON.stringify([...collapsed]));
+  } catch {
+    // Quota / disabled storage — the tree still works in-session, just doesn't persist.
+  }
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -54,41 +98,16 @@ function rollupStatus(tasks: TaskPlanTaskNode[], dbStatus: string, resting: stri
   return resting;
 }
 
-interface AuditView {
-  task_pass?: boolean;
-  findings?: string[];
-}
-
-// Read the per-task audit verdict (latest Auditor turn) + auto-fix reasons for a task from the
-// live message stream — matched by payload.task_id, scoped to the Programovanie phase.
-// NOTE: v2 has NO per-task Auditor (design §2.2); this per-task audit view + readTaskAudit are RETIRED by
-// CR-V2-023. The stage filter is re-pointed to the v2 ``programovanie`` phase only to keep it compiling
-// against the 4-phase enum until CR-V2-023 removes it.
-function readTaskAudit(messages: PipelineMessage[], taskId: string): { audit?: AuditView; reasons: string[] } {
-  const forTask = messages.filter((m) => {
-    const p = m.payload as { task_id?: string } | null;
-    return p?.task_id === taskId && m.stage === "programovanie";
-  });
-  const auditorMsgs = forTask.filter((m) => m.author === "auditor");
-  const latest = auditorMsgs[auditorMsgs.length - 1];
-  const audit = latest
-    ? {
-        task_pass: (latest.payload as { task_pass?: boolean }).task_pass,
-        findings: (latest.payload as { findings?: string[] }).findings,
-      }
-    : undefined;
-  const reasons = forTask
-    .filter((m) => m.author === "system" && m.kind === "return")
-    .map((m) => (m.payload as { verify_reason?: string }).verify_reason)
-    .filter((r): r is string => Boolean(r));
-  return { audit, reasons };
-}
-
 export default function TaskPlanPanel({ versionId, messages }: Props) {
   const [plan, setPlan] = useState<TaskPlanResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  // Expand/collapse state is hydrated from localStorage (per version, per browser — OQ-8) so it
+  // survives navigation away+back AND a page reload. Re-init on version change so each version's tree
+  // restores its own remembered state.
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => readCollapsed(versionId));
+  useEffect(() => {
+    setCollapsed(readCollapsed(versionId));
+  }, [versionId]);
 
   // Tree-freshness (spec §7.1): refetch on mount, on version change, and whenever the live message
   // stream grows, so node statuses track the build loop without a new endpoint/WS field.
@@ -110,16 +129,21 @@ export default function TaskPlanPanel({ versionId, messages }: Props) {
     };
   }, [versionId, messages.length]);
 
-  const toggle = (id: string) =>
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  // Toggle a node's collapsed state and persist the new set to localStorage so the choice survives
+  // navigation + reload (per version, per browser — OQ-8).
+  const toggle = useCallback(
+    (id: string) =>
+      setCollapsed((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        writeCollapsed(versionId, next);
+        return next;
+      }),
+    [versionId],
+  );
 
   const allTasks: TaskPlanTaskNode[] = (plan?.plan ?? []).flatMap((e) => e.feats.flatMap((f) => f.tasks));
-  const selectedTask = allTasks.find((t) => t.id === selectedTaskId) ?? null;
 
   // Build-progress indicator (CR-NS-025 Part 2): % of tasks done, live for free off the same fetched
   // plan as the tree (Part 1's task-start refetch updates it as tasks finish — no new data/endpoint).
@@ -186,7 +210,7 @@ export default function TaskPlanPanel({ versionId, messages }: Props) {
                   onClick={() => toggle(epic.id)}
                   className="flex w-full items-center justify-between gap-2 rounded px-1 py-1 text-left hover:bg-[var(--color-surface-hover)]"
                 >
-                  <span className="flex min-w-0 items-center gap-1 text-[var(--color-text-primary)]">
+                  <span className={`flex min-w-0 items-center gap-1 ${EPIC_LEVEL_COLOR}`}>
                     {epicCollapsed ? <ChevronRight className="h-3 w-3 flex-shrink-0" /> : <ChevronDown className="h-3 w-3 flex-shrink-0" />}
                     <span className="truncate font-medium">
                       {epic.number}. {epic.title}
@@ -205,7 +229,7 @@ export default function TaskPlanPanel({ versionId, messages }: Props) {
                           onClick={() => toggle(feat.id)}
                           className="flex w-full items-center justify-between gap-2 rounded px-1 py-0.5 text-left hover:bg-[var(--color-surface-hover)]"
                         >
-                          <span className="flex min-w-0 items-center gap-1 text-[var(--color-text-secondary)]">
+                          <span className={`flex min-w-0 items-center gap-1 ${FEAT_LEVEL_COLOR}`}>
                             {featCollapsed ? <ChevronRight className="h-3 w-3 flex-shrink-0" /> : <ChevronDown className="h-3 w-3 flex-shrink-0" />}
                             <span className="truncate">
                               {feat.number}. {feat.title}
@@ -216,24 +240,24 @@ export default function TaskPlanPanel({ versionId, messages }: Props) {
 
                         {!featCollapsed &&
                           feat.tasks.map((task: TaskPlanTaskNode) => {
+                            // Tasks are leaf rows — display only (v2 has no per-task audit panel to open).
+                            // The in_progress task gets a subtle ring so the Manažér sees which one is underway.
                             const isCurrent = task.status === "in_progress";
-                            const isSelected = task.id === selectedTaskId;
                             return (
-                              <button
+                              <div
                                 key={task.id}
-                                onClick={() => setSelectedTaskId(isSelected ? null : task.id)}
-                                className={`ml-6 flex w-[calc(100%-1.5rem)] items-center justify-between gap-2 rounded px-1 py-0.5 text-left hover:bg-[var(--color-surface-hover)] ${
-                                  isSelected ? "bg-[var(--color-surface-active)]" : ""
-                                } ${isCurrent ? "ring-1 ring-[var(--color-status-info)]/40" : ""}`}
+                                className={`ml-6 flex w-[calc(100%-1.5rem)] items-center justify-between gap-2 rounded px-1 py-0.5 ${
+                                  isCurrent ? "ring-1 ring-[var(--color-status-info)]/40" : ""
+                                }`}
                               >
-                                <span className="flex min-w-0 items-center gap-1.5 text-[var(--color-text-secondary)]">
+                                <span className={`flex min-w-0 items-center gap-1.5 ${TASK_LEVEL_COLOR}`}>
                                   <span className="truncate">
                                     {task.number}. {task.title}
                                   </span>
                                   <span className="flex-shrink-0 text-[9px] uppercase text-[var(--color-text-muted)]">{task.task_type}</span>
                                 </span>
                                 <StatusBadge status={task.status} />
-                              </button>
+                              </div>
                             );
                           })}
                       </div>
@@ -244,46 +268,6 @@ export default function TaskPlanPanel({ versionId, messages }: Props) {
           })
         )}
       </div>
-
-      {selectedTask && <TaskAuditPanel task={selectedTask} messages={messages} />}
-    </div>
-  );
-}
-
-function TaskAuditPanel({ task, messages }: { task: TaskPlanTaskNode; messages: PipelineMessage[] }) {
-  const { audit, reasons } = readTaskAudit(messages, task.id);
-  return (
-    <div className="flex-shrink-0 border-t border-[var(--color-border-default)] px-3 py-2 text-xs">
-      <div className="mb-1 flex items-center justify-between">
-        <span className="truncate font-medium text-[var(--color-text-secondary)]">
-          Audit — {task.number}. {task.title}
-        </span>
-        <StatusBadge status={task.status} />
-      </div>
-      {!audit ? (
-        <p className="text-[11px] text-[var(--color-text-muted)]">Úloha ešte nebola auditovaná.</p>
-      ) : (
-        <p className={`text-[11px] ${audit.task_pass ? "text-[var(--color-status-success)]" : "text-[var(--color-status-error)]"}`}>
-          {audit.task_pass ? "Audit PASS" : "Audit FAIL"}
-        </p>
-      )}
-      {audit?.findings && audit.findings.length > 0 && (
-        <ul className="mt-1 list-disc pl-4 text-[11px] text-[var(--color-text-secondary)]">
-          {audit.findings.map((f, i) => (
-            <li key={i}>{f}</li>
-          ))}
-        </ul>
-      )}
-      {reasons.length > 0 && (
-        <div className="mt-1.5">
-          <span className="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">Auto-fix dôvody</span>
-          <ul className="mt-0.5 list-disc pl-4 text-[11px] text-[var(--color-text-muted)]">
-            {reasons.map((r, i) => (
-              <li key={i}>{r}</li>
-            ))}
-          </ul>
-        </div>
-      )}
     </div>
   );
 }

@@ -1,13 +1,14 @@
 /**
- * Component tests for TaskPlanPanel (CR-NS-020 CR-5).
+ * Component tests for TaskPlanPanel.
  *
- * Renders the EPIC→FEAT→TASK tree (with per-node status) from getTaskPlan, and on a task
- * click shows the per-task audit verdict matched from the live message stream by
- * payload.task_id (the Auditor turn's tag).
+ * v1 (CR-NS-020 CR-5): renders the EPIC→FEAT→TASK tree with per-node status from getTaskPlan.
+ * v2 (CR-V2-023, design §4.5): per-task audit panel REMOVED (no per-task Auditor in v2); expand/collapse
+ * persists via localStorage (per version, per browser — OQ-8); level colour-coding EPIC=purple /
+ * FEAT=yellow / TASK=blue on the node title text (the status DOT keeps the unified palette, CR-NS-028).
  */
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 import TaskPlanPanel from "@/components/cockpit/TaskPlanPanel";
@@ -60,7 +61,7 @@ function mkMsg(over: Partial<PipelineMessage>): PipelineMessage {
   };
 }
 
-describe("TaskPlanPanel (CR-NS-020 CR-5)", () => {
+describe("TaskPlanPanel (CR-NS-020 CR-5 / CR-V2-023)", () => {
   beforeEach(() => {
     vi.mocked(getTaskPlan).mockResolvedValue(PLAN);
   });
@@ -75,15 +76,52 @@ describe("TaskPlanPanel (CR-NS-020 CR-5)", () => {
     expect(screen.getByText("Čaká")).toBeInTheDocument(); // todo
   });
 
-  it("shows the per-task audit verdict matched by payload.task_id on task click", async () => {
+  it("has NO per-task audit panel — clicking a task does not open one (v2: no per-task Auditor)", async () => {
+    // The v1 audit message that used to surface "Audit FAIL" on click must now be inert.
     const messages = [
       mkMsg({ author: "auditor", stage: "programovanie", payload: { task_id: "t1", task_pass: false, findings: ["chýba podvojnosť"] } }),
     ];
     render(<TaskPlanPanel versionId="v1" messages={messages} />);
     const task = await screen.findByText(/GL tables/);
-    task.closest("button")!.click();
-    expect(await screen.findByText("Audit FAIL")).toBeInTheDocument();
-    expect(screen.getByText("chýba podvojnosť")).toBeInTheDocument();
+    // A task row is a non-interactive <div> now (no enclosing <button>).
+    expect(task.closest("button")).toBeNull();
+    fireEvent.click(task);
+    expect(screen.queryByText("Audit FAIL")).not.toBeInTheDocument();
+    expect(screen.queryByText("chýba podvojnosť")).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Audit —/)).not.toBeInTheDocument();
+  });
+
+  it("level-colour-codes the node titles: EPIC=purple, FEAT=yellow, TASK=blue (design §4.5)", async () => {
+    const { container } = render(<TaskPlanPanel versionId="v1" messages={[]} />);
+    await screen.findByText(/Foundation/);
+    // Light-readable + dark-readable shades (text-X-700 dark:text-X-300) on the title rows.
+    expect(container.querySelector(".text-purple-700")).toBeInTheDocument(); // EPIC
+    expect(container.querySelector(".text-yellow-700")).toBeInTheDocument(); // FEAT
+    expect(container.querySelector(".text-blue-700")).toBeInTheDocument(); // TASK
+  });
+
+  it("persists expand/collapse to localStorage (per version) and re-hydrates on remount (OQ-8)", async () => {
+    const { unmount } = render(<TaskPlanPanel versionId="v1" messages={[]} />);
+    // Collapse the EPIC → its FEAT child disappears.
+    const epicToggle = (await screen.findByText(/Foundation/)).closest("button")!;
+    fireEvent.click(epicToggle);
+    expect(screen.queryByText(/Schema/)).not.toBeInTheDocument();
+    // The collapsed-set is written to localStorage under the version-scoped key.
+    expect(window.localStorage.getItem("nex_taskplan_collapsed_v1")).toContain("e1");
+
+    // A fresh mount (= navigate away + back, or reload) restores the collapsed state from storage.
+    unmount();
+    render(<TaskPlanPanel versionId="v1" messages={[]} />);
+    expect(await screen.findByText(/Foundation/)).toBeInTheDocument();
+    expect(screen.queryByText(/Schema/)).not.toBeInTheDocument(); // still collapsed
+  });
+
+  it("scopes persisted collapse per version (v2's state does not leak into v1)", async () => {
+    // Pre-seed v2 as collapsed; v1 has nothing stored → v1 renders expanded.
+    window.localStorage.setItem("nex_taskplan_collapsed_v2", JSON.stringify(["e1"]));
+    render(<TaskPlanPanel versionId="v1" messages={[]} />);
+    expect(await screen.findByText(/Foundation/)).toBeInTheDocument();
+    expect(screen.getByText(/Schema/)).toBeInTheDocument(); // v1 expanded — unaffected by v2's key
   });
 });
 

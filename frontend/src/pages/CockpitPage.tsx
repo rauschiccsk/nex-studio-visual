@@ -155,7 +155,10 @@ export default function CockpitPage() {
               viewedPhase={viewedPhase}
               activity={activity}
               taskPlanSlot={
-                versionId && viewedPhase === "programovanie" ? (
+                // The interactive task-plan tree lives in the Návrh tab (as the last part of the design
+                // doc) AND drives the Programovanie split view (CR-V2-023, design §4.5). One panel
+                // instance per render; ExchangePanel places it per phase.
+                versionId && (viewedPhase === "navrh" || viewedPhase === "programovanie") ? (
                   <TaskPlanPanel versionId={versionId} messages={board.recent_messages} />
                 ) : undefined
               }

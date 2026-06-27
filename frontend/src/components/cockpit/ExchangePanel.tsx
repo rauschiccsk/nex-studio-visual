@@ -3,10 +3,14 @@
 // activity feed. Permanent content persists after the build completes — a finished phase stays viewable.
 //
 //   Príprava      → Špecifikácia .md (the manager's reading view)
-//   Návrh         → the design document incl. the task plan
+//   Návrh         → the design document (.md) + the interactive task-plan tree as its last part
 //   Programovanie → split view: coding activity LEFT + the task plan RIGHT (the task-plan slot is owned by
 //                   CR-V2-023; this panel hosts it)
 //   Verifikácia   → the Auditor's verdict + findings
+//
+// The task-plan tree (CR-V2-023) is supplied via ``taskPlanSlot`` and placed by phase: appended BELOW the
+// Návrh design doc (its last part, durable after the build), and as the RIGHT pane of the Programovanie
+// split. The slot is rendered for both phases by ``CockpitPage``.
 
 import { useEffect, useRef, type ReactNode } from "react";
 import { Bell } from "lucide-react";
@@ -73,6 +77,9 @@ export function ExchangePanel({ board, viewedPhase, activity, taskPlanSlot }: Pr
 
   // Programovanie split view (design §4.5): coding activity LEFT + task plan RIGHT.
   const programovanieSplit = viewedPhase === "programovanie";
+  // Návrh: the design doc + the interactive task-plan tree as its last part (design §4.4.2 / §4.5). The
+  // slot is supplied by CockpitPage for this phase too; render it below the doc.
+  const navrhWithPlan = viewedPhase === "navrh" && taskPlanSlot != null;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -109,6 +116,21 @@ export function ExchangePanel({ board, viewedPhase, activity, taskPlanSlot }: Pr
               {taskPlanSlot}
             </div>
           )}
+        </div>
+      ) : navrhWithPlan ? (
+        // Návrh: the design doc (scrolls) + the interactive task-plan tree as its last part (durable).
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div ref={feedRef} className="min-h-0 flex-1 overflow-y-auto">
+            <PhaseArtifact phase="navrh" messages={recent_messages} placeholder={PHASE_PLACEHOLDER.navrh} />
+            {isLivePhase && state?.status === "agent_working" && (
+              <div className="flex-shrink-0">
+                <PipelineActivityFeed activity={activity} />
+              </div>
+            )}
+          </div>
+          <div className="flex h-64 flex-shrink-0 flex-col border-t border-[var(--color-border-default)]">
+            {taskPlanSlot}
+          </div>
         </div>
       ) : (
         <div ref={feedRef} className="min-h-0 flex-1 overflow-y-auto">
