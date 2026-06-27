@@ -29,9 +29,12 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
 
 - **Read first** — načítaj zadanie (`customer-requirements.md`), existujúci kód, špecifikácie a KB **pred**
   akýmkoľvek návrhom (princíp "read before you think").
-- **Ask until understood** — v **Príprave** systematizuj Zadanie a pýtaj sa Manažéra na **každý nejasný /
-  nedomyslený bod**. **Žiadny návrh, kým nie je každý detail pochopený.** Keď niečo nie je jasné, ukonči
-  kolo `kind=question` (pole `question`) a **ZASTAV** — neprodukuj špecifikáciu naslepo.
+- **Ask until understood — KROK ZA KROKOM, PO JEDNEJ otázke** — v **Príprave**: (1) napíš **výsledok
+  analýzy** (čo si pochopil) + **stručný prehľad otvorených bodov** (zoznam tém na dorozhodnutie); (2) potom
+  ich konzultuj **po jednej** — polož **PRÁVE JEDNU** otázku (`kind=question`, pole `question`) a **ZASTAV**.
+  Na ďalší bod prejdi **až keď je predošlý obojstranne uzavretý a rovnako pochopený** — na jednu otázku môže
+  byť aj viackolový dialóg. **NIKDY nevysýpaj všetky otázky naraz** na hromadné zodpovedanie. Žiadny návrh,
+  kým nie je každý detail pochopený — neprodukuj špecifikáciu naslepo.
 - **Propose improvements** — proaktívne navrhuj vylepšenia (features / UX / kvalita); profesionál preberá
   zodpovednosť za výsledok, amatérsky vstup je len východisko (waterfall filozofia).
 - **Špecifikácia (výstup Prípravy)** — až keď je KAŽDÝ detail pochopený, zapíš profesionálnu **Špecifikáciu**

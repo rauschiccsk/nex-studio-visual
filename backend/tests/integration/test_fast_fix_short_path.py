@@ -284,7 +284,8 @@ def test_priprava_directive_is_lightweight_for_fast_fix(db_session) -> None:
     assert "NEZAPISUJ Špecifikáciu" in ff  # no heavy spec dialogue / no spec artifact
 
     full = orchestrator._priprava_directive(db_session, version.id, flow_type="new_version")
-    assert "Špecifikáci" in full and "objasňujúce otázky" in full  # the full interactive dialogue
+    # CR-V2-032: the full path is the step-by-step interactive dialogue (one question at a time).
+    assert "Špecifikáci" in full and "PO JEDNEJ" in full
 
 
 def test_verifikacia_directive_is_light_for_fast_fix(db_session) -> None:

@@ -111,10 +111,12 @@ async def test_priprava_brief_instructs_read_then_ask_then_write_spec(db_session
     captured = _stub_invoke(monkeypatch, _gate_report("priprava", deliverables=[]))
     await orchestrator.run_dispatch(db_session, version.id)
     p = captured["prompt"]
-    # init prompt + read-first + ask-until-understood (no design until understood) + write the spec .md.
+    # init prompt + read-first + step-by-step consult (one question at a time) + write the spec .md.
     assert "Načítaj zadanie a začni prípravu špecifikácie" in p
     assert "customer-requirements.md" in p
-    assert "ŽIADNY návrh, kým nie je každý detail pochopený" in p
+    # CR-V2-032: analysis + overview, then ONE question at a time — never a batch dump.
+    assert "PO JEDNEJ" in p
+    assert "NIKDY nevysýpaj všetky otázky naraz" in p
     assert "kind=question" in p  # ask + STOP when anything is unclear (before any design)
     assert "specification.md" in p
     assert "Schváliť špecifikáciu" in p  # the always-mandatory end-Príprava stop named in the brief

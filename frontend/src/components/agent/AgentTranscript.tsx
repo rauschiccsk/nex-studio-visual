@@ -85,6 +85,13 @@ export function AgentTranscript({ messages, activity, working }: Props) {
         <ul className="space-y-3">
           {messages.map((m) => {
             const right = isOperator(m.author);
+            // CR-V2-032: render the agent's FULL human-readable body (``payload.report``) — ``content`` is
+            // only the one-line summary (deriveBrief / previews / lists). When the turn is a question, the
+            // actual ask lives in ``payload.question``; surface it as a highlighted "your turn" block so the
+            // AI Agent tab reads like a real dialogue (the questions were previously invisible).
+            const report = typeof m.payload?.report === "string" ? (m.payload.report as string) : "";
+            const question = typeof m.payload?.question === "string" ? (m.payload.question as string) : "";
+            const body = report.trim() || m.content;
             return (
               <li key={m.id} className={`flex ${right ? "justify-end" : "justify-start"}`}>
                 <div className={`max-w-[85%] rounded-lg border px-3 py-2 ${bubbleClass(m.author)}`}>
@@ -93,9 +100,21 @@ export function AgentTranscript({ messages, activity, working }: Props) {
                   </div>
                   <div className="prose prose-sm dark:prose-invert max-w-none text-sm text-[var(--color-text-primary)]">
                     <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
-                      {m.content}
+                      {body}
                     </ReactMarkdown>
                   </div>
+                  {question.trim() && (
+                    <div className="mt-2 rounded-md border-l-2 border-[var(--color-accent-primary)] bg-[var(--color-accent-primary)]/5 px-3 py-2">
+                      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-accent-primary)]">
+                        Otázka — na rade si ty
+                      </div>
+                      <div className="prose prose-sm dark:prose-invert max-w-none text-sm text-[var(--color-text-primary)]">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
+                          {question}
+                        </ReactMarkdown>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </li>
             );
