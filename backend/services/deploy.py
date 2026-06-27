@@ -54,9 +54,15 @@ from sqlalchemy.orm import Session
 
 from backend.db.models.customers import Customer
 from backend.db.models.deploy import DeployEvent
+from backend.db.models.pipeline import PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.services import uat_provisioner
+
+# The terminal pipeline stage = "Hotovo" = a version is VERIFIED (design §3.1,
+# CR-V2-014: reaching ``done`` means *verified*, not *deployed*). Only a verified
+# version may be deployed to a customer — the Nasadiť dropdown lists exactly these.
+VERIFIED_STAGE = "done"
 
 # The version a first PROD deploy bumps the project to (§3.6).
 FIRST_PROD_VERSION = "v1.0.0"
@@ -173,6 +179,104 @@ def _project_had_prod_deploy(db: Session, project_id: UUID) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# The version × customer matrix feed (drives the UAT / PROD tabs, CR-V2-027)
+# ---------------------------------------------------------------------------
+
+
+def list_verified_versions(db: Session, project_id: UUID) -> list[str]:
+    """The project's VERIFIED version_numbers — deployable via Nasadiť (design §3.4).
+
+    A version is deployable only once the pipeline has carried it to **Hotovo**
+    (``pipeline_state.current_stage == 'done'``) — "verified", per CR-V2-014's
+    "Hotovo ≠ deployed" boundary. The Nasadiť dropdown in the UAT/PROD tabs lists
+    exactly these; a non-verified (still in-flight) version is never offered.
+
+    Ordered ``version_number`` descending so the newest verified version is the
+    natural default. A version with no pipeline_state row is NOT verified (it has
+    never run), so the INNER join is intentional.
+    """
+    stmt = (
+        select(Version.version_number)
+        .join(PipelineState, PipelineState.version_id == Version.id)
+        .where(
+            Version.project_id == project_id,
+            PipelineState.current_stage == VERIFIED_STAGE,
+        )
+        .order_by(Version.version_number.desc())
+    )
+    return list(db.execute(stmt).scalars().all())
+
+
+def accepted_versions(db: Session, customer_id: UUID) -> list[str]:
+    """The version_numbers a customer has a recorded UAT acceptance for (§3.5).
+
+    These are the ONLY versions whose PROD deploy is open for this customer — the
+    never-bypassed acceptance gate, surfaced to the PROD tab so a blocked Nasadiť
+    is shown disabled rather than failing on submit. Deduplicated, newest first.
+    """
+    stmt = (
+        select(DeployEvent.version_number)
+        .where(
+            DeployEvent.customer_id == customer_id,
+            DeployEvent.event_type == "accept",
+        )
+        .order_by(DeployEvent.seq.desc())
+    )
+    # Preserve newest-first order while de-duplicating repeat acceptances.
+    seen: set[str] = set()
+    result: list[str] = []
+    for version_number in db.execute(stmt).scalars().all():
+        if version_number not in seen:
+            seen.add(version_number)
+            result.append(version_number)
+    return result
+
+
+def build_matrix(db: Session, project: Project) -> dict:
+    """Assemble the version × customer matrix for a project's UAT/PROD tabs (§3.3).
+
+    One read returns everything both tabs render:
+      * ``verified_versions`` — the deployable version_numbers (Nasadiť dropdown).
+      * ``rows`` — per customer: the currently-deployed UAT and PROD versions plus
+        the versions accepted-for-PROD (so the PROD tab can disable Nasadiť until
+        that (version, customer) is accepted — the never-bypassed gate).
+
+    Because deployment is per customer, different customers may carry different
+    ``uat_version`` / ``prod_version`` at the same time (§3.3). The shape is a
+    plain dict the route serialises via the Pydantic response model.
+    """
+    customers = (
+        db.execute(select(Customer).where(Customer.project_id == project.id).order_by(Customer.created_at.desc()))
+        .scalars()
+        .all()
+    )
+
+    rows = []
+    for customer in customers:
+        uat_version = current_version(db, customer.id, "uat")
+        rows.append(
+            {
+                "customer_id": customer.id,
+                "customer_name": customer.name,
+                "customer_slug": customer.slug,
+                "subdomain": customer.subdomain,
+                "uat_version": uat_version,
+                "prod_version": current_version(db, customer.id, "prod"),
+                "accepted_versions": accepted_versions(db, customer.id),
+                # The UAT tab links to the live instance only once it has a UAT
+                # deploy (§3.5 "link to the UAT URL"); None hides the link.
+                "uat_url": _instance_url(customer, "uat") if uat_version else None,
+            }
+        )
+
+    return {
+        "project_slug": project.slug,
+        "verified_versions": list_verified_versions(db, project.id),
+        "rows": rows,
+    }
+
+
+# ---------------------------------------------------------------------------
 # The default deploy runner (real provision + docker compose up)
 # ---------------------------------------------------------------------------
 
@@ -213,7 +317,7 @@ async def _default_deploy_runner(
         return False, f"provision failed: {exc}", None
 
     ok, detail = await orchestrator._run_uat_deploy(project_slug, uat_slug)
-    url = f"https://uat-{uat_slug}.{uat_provisioner.UAT_DOMAIN_SUFFIX}" if result.fe_service else None
+    url = _url_for_instance_slug(uat_slug) if result.fe_service else None
     # Surface any provision warnings in the recorded (non-secret) detail.
     if result.warnings:
         detail = f"{detail} | warnings: {'; '.join(result.warnings)}"
@@ -386,6 +490,21 @@ def _instance_slug(customer: Customer, environment: str) -> str:
     """
     base = (customer.subdomain or customer.slug).strip().lower()
     return f"{base}-{environment}"
+
+
+def _url_for_instance_slug(instance_slug: str) -> str:
+    """The public URL for a provisioned instance slug (single source of truth).
+
+    ``https://uat-<instance_slug>.<UAT_DOMAIN_SUFFIX>`` — used by BOTH the deploy
+    runner (post-provision URL) and the matrix (the UAT tab's link), so they can
+    never drift (§3.4/§3.5).
+    """
+    return f"https://uat-{instance_slug}.{uat_provisioner.UAT_DOMAIN_SUFFIX}"
+
+
+def _instance_url(customer: Customer, environment: str) -> str:
+    """The public URL of a customer's per-environment instance (design §3.5 link)."""
+    return _url_for_instance_slug(_instance_slug(customer, environment))
 
 
 def _ensure_version(db: Session, project_id: UUID, version_number: str, *, source: str) -> Version:

@@ -96,3 +96,52 @@ class DeployResult(BaseModel):
         description="Set when a first-PROD deploy bumped the project version (e.g. 'v1.0.0'); else None.",
     )
     warnings: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# The version × customer matrix (drives the UAT / PROD tabs — CR-V2-027, §3.3)
+# ---------------------------------------------------------------------------
+
+
+class DeployMatrixRow(BaseModel):
+    """One customer's row in the version × customer matrix (design §3.3).
+
+    ``uat_version`` / ``prod_version`` are the customer's currently-deployed
+    versions per environment (None = never deployed there). Different customers
+    may carry different versions simultaneously. ``accepted_versions`` lists the
+    versions this customer has a recorded UAT acceptance for — the PROD tab uses
+    it to keep Nasadiť disabled until the (version, customer) pair is accepted
+    (the never-bypassed gate, §3.5). Carries NO secret material (§4/OQ-5).
+    """
+
+    customer_id: UUID
+    customer_name: str
+    customer_slug: str
+    subdomain: Optional[str] = None
+    uat_version: Optional[str] = Field(default=None, description="Currently deployed UAT version (None = never).")
+    prod_version: Optional[str] = Field(default=None, description="Currently deployed PROD version (None = never).")
+    accepted_versions: list[str] = Field(
+        default_factory=list,
+        description="Versions accepted-for-PROD for this customer — the only versions whose PROD Nasadiť is open.",
+    )
+    uat_url: Optional[str] = Field(
+        default=None,
+        description="Link to the customer's live UAT instance (the UAT tab link, §3.5); None until a UAT deploy.",
+    )
+
+
+class DeployMatrix(BaseModel):
+    """The full version × customer matrix payload for a project's UAT/PROD tabs.
+
+    One read feeds both tabs: ``verified_versions`` populates the Nasadiť
+    dropdown (only Hotovo/verified versions are deployable, §3.4/CR-V2-014), and
+    ``rows`` carries each customer's per-environment deployed version + the
+    accepted-for-PROD set (§3.3/§3.5).
+    """
+
+    project_slug: str
+    verified_versions: list[str] = Field(
+        default_factory=list,
+        description="Deployable (verified / Hotovo) version_numbers — the Nasadiť dropdown options.",
+    )
+    rows: list[DeployMatrixRow] = Field(default_factory=list)

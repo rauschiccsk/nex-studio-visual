@@ -36,6 +36,7 @@ from backend.db.session import get_db
 from backend.schemas.deploy import (
     AcceptRequest,
     DeployEventRead,
+    DeployMatrix,
     DeployRequest,
     DeployResult,
 )
@@ -64,6 +65,23 @@ def _resolve_project(db: Session, slug: str) -> Project:
 # ---------------------------------------------------------------------------
 # Audit-log reads (the version × customer matrix feed)
 # ---------------------------------------------------------------------------
+
+
+@router.get("/projects/{slug}/deploy-matrix", response_model=DeployMatrix)
+def get_deploy_matrix(
+    slug: str,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+) -> DeployMatrix:
+    """Return the version × customer matrix for the project ``slug`` (design §3.3).
+
+    One read feeds both the UAT and PROD tabs: the deployable (verified / Hotovo)
+    versions for the Nasadiť dropdown, plus per-customer current UAT/PROD versions
+    and the accepted-for-PROD set (so the PROD tab disables Nasadiť until the
+    (version, customer) pair is accepted — the never-bypassed gate).
+    """
+    project = _resolve_project(db, slug)
+    return DeployMatrix.model_validate(deploy_service.build_matrix(db, project))
 
 
 @router.get("/projects/{slug}/deploy-events", response_model=list[DeployEventRead])

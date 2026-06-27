@@ -1,7 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import AppLayout from "./components/layout/AppLayout";
-import ComingSoonPage from "./pages/ComingSoonPage";
 import ProtectedRoute from "./components/auth/ProtectedRoute";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { useAuthStore } from "./store/authStore";
@@ -21,6 +20,8 @@ import AgentTerminalPage from "./pages/AgentTerminalPage";
 import CockpitPage from "./pages/CockpitPage";
 import CredentialsPage from "./pages/CredentialsPage";
 import CustomersPage from "./pages/CustomersPage";
+import UatPage from "./pages/UatPage";
+import ProdPage from "./pages/ProdPage";
 import SettingsPage from "./pages/SettingsPage";
 
 function App() {
@@ -70,27 +71,11 @@ function App() {
             <Route path="vyvoj" element={<CockpitPage />} />
             <Route path="cockpit" element={<Navigate to="/vyvoj" replace />} />
             {/* v2: per-customer deploy nav surfaces (design §3 / §4.1).
-                Zákazníci = CR-V2-025 (live page below, project-scoped registry).
-                UAT / PROD = CR-V2-027 (still "pripravuje sa" placeholders). */}
+                Zákazníci = CR-V2-025 (project-scoped registry).
+                UAT / PROD = CR-V2-027 (version × customer matrix + Nasadiť + Akceptovať gate). */}
             <Route path="zakaznici" element={<CustomersPage />} />
-            <Route
-              path="uat"
-              element={
-                <ComingSoonPage
-                  title="UAT"
-                  description="Per-zákazník UAT nasadenie a akceptácia (verzia × zákazník). Pripravuje sa."
-                />
-              }
-            />
-            <Route
-              path="prod"
-              element={
-                <ComingSoonPage
-                  title="PROD"
-                  description="Per-zákazník produkčné nasadenie (verzia × zákazník). Pripravuje sa."
-                />
-              }
-            />
+            <Route path="uat" element={<UatPage />} />
+            <Route path="prod" element={<ProdPage />} />
             <Route path="credentials" element={<CredentialsPage />} />
             <Route path="updates" element={<UpdatesPage />} />
             <Route path="settings" element={<SettingsPage />} />
