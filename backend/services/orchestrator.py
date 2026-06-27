@@ -1005,42 +1005,10 @@ def directive_for_action(action: str, payload: dict[str, Any], stage: str) -> Op
     return None
 
 
-def latest_coordinator_report(db: Session, version_id: uuid.UUID) -> Optional[str]:
-    """RETIRED in v2 (CR-V2-009): always ``None`` for a 4-phase build. Queries for an ``author=coordinator``
-    message — a participant value that no longer exists (CR-V2-001 collapsed to ai_agent/auditor/manazer/
-    system), so it never matches a v2 message. The v1 ``apply_coordinator_recommendation`` action it fed is
-    removed; this symbol is kept only so the deferred-RED v1 tests still collect (C/D drops both)."""
-    return db.execute(
-        select(PipelineMessage.content)
-        .where(
-            PipelineMessage.version_id == version_id,
-            PipelineMessage.author == "coordinator",
-            PipelineMessage.kind == "gate_report",
-        )
-        .order_by(PipelineMessage.seq.desc())
-        .limit(1)
-    ).scalar_one_or_none()
-
-
-def _latest_customer_gate_report(db: Session, version_id: uuid.UUID) -> Optional[PipelineMessage]:
-    """Most recent Customer ``gate_report`` for a version's Gate E (or ``None``).
-
-    Author + stage filtered, ordered by the monotonic ``seq``. Its payload carries
-    the Gate E boundary signals (``coverage_complete``, ``findings``, ``topic_done``)
-    that drive the boundary actions (F-007-gate-e §3/§4): topic boundary vs final
-    sign-off, and the open-finding gate that blocks closing.
-    """
-    return db.execute(
-        select(PipelineMessage)
-        .where(
-            PipelineMessage.version_id == version_id,
-            PipelineMessage.author == "customer",
-            PipelineMessage.stage == "gate_e",
-            PipelineMessage.kind == "gate_report",
-        )
-        .order_by(PipelineMessage.seq.desc())
-        .limit(1)
-    ).scalar_one_or_none()
+# NOTE (CR-V2-021): the v1 ``latest_coordinator_report`` (Coordinator gate_report, fed the removed
+# ``apply_coordinator_recommendation`` action) and ``_latest_customer_gate_report`` (Customer ``gate_e``
+# boundary signals) are REMOVED with the v1 board route — both queried retired ``coordinator``/``customer``
+# author + ``gate_e`` stage tokens the v2 DB CHECK rejects, and neither had a live referrer.
 
 
 def _latest_uat_deploy(db: Session, version_id: uuid.UUID) -> Optional[dict[str, Any]]:
@@ -1186,37 +1154,10 @@ def _project_is_deployable(db: Session, version_id: uuid.UUID) -> bool:
     return roles["backend"] is not None and roles["db"] is not None
 
 
-def _gate_e_open_findings(db: Session, version_id: uuid.UUID) -> int:
-    """Count of unresolved Gate E gaps — DETERMINISTIC from the orchestrator's own log,
-    NOT the Customer's self-reported ``findings`` array (F-007-gate-e §5).
-
-    A gap is RAISED by a Designer answer with ``payload.gap_found`` and RESOLVED by a
-    Director ``fix`` / ``leave`` decision (tagged ``payload.resolves_gap``). open =
-    ``max(0, raised − resolved)``. Consults (Coordinator revise) set neither marker, so
-    they never perturb the count; content strings are never matched. A non-zero count
-    blocks closing Gate E (final approve or early-end) — the gate no longer depends on
-    how the Customer phrases its summary."""
-    rows = (
-        db.execute(
-            select(PipelineMessage).where(PipelineMessage.version_id == version_id, PipelineMessage.stage == "gate_e")
-        )
-        .scalars()
-        .all()
-    )
-    # A gap is raised only by a Designer's REVIEW answer (Q&A loop) — never by the fix
-    # EDIT turn (``is_fix_edit``), which merely applies an approved fix. This makes the
-    # count robust even if the edit turn's status block erroneously carries gap_found (§5).
-    raised = sum(
-        1
-        for m in rows
-        if m.author == "designer"
-        and m.kind == "answer"
-        and m.payload
-        and m.payload.get("gap_found")
-        and not m.payload.get("is_fix_edit")
-    )
-    resolved = sum(1 for m in rows if m.author == "director" and m.payload and m.payload.get("resolves_gap"))
-    return max(0, raised - resolved)
+# NOTE (CR-V2-021): the v1 ``_gate_e_open_findings`` deterministic gap counter (raised by a Designer
+# ``gap_found`` answer, resolved by a Director ``fix``/``leave``) is REMOVED with the v1 board route — it read
+# the retired ``gate_e`` stage + ``designer``/``director`` author tokens the v2 DB CHECK rejects, and its only
+# referrer was the v1 ``_board()`` close-gate. The v2 Auditor upfront review surfaces findings on its own turn.
 
 
 # (CR-V2-013: the Gate-E per-question budget machinery — ``_gate_e_spec_footprint_lines`` /
@@ -2314,29 +2255,9 @@ def _iteration_boundary_seq(db: Session, version_id: uuid.UUID) -> int:
     return int(seq or 0)
 
 
-def _mark_latest_coordinator_brief(db: Session, version_id: uuid.UUID, stage: str) -> None:
-    """CR-2 (v0.7.3) — tag the most recent Coordinator turn at ``stage`` as a Director-facing brief
-    (``payload.is_director_brief=true`` → the FE prominent rail).
-
-    Called from a settle that puts the Director directly on the Coordinator's verify turn (a mechanical /
-    scope block that records NO synthesis). Because it tags only the LATEST Coordinator turn at the settle
-    point, it never touches a gate_report PASS (the synthesis fired after it is the Director-facing turn) nor
-    an auto-return-loop intermediate verify (older Coordinator turns stay untagged) — exactly the audit gate.
-    """
-    msg = db.execute(
-        select(PipelineMessage)
-        .where(
-            PipelineMessage.version_id == version_id,
-            PipelineMessage.stage == stage,
-            PipelineMessage.author == "coordinator",
-        )
-        .order_by(PipelineMessage.seq.desc())
-        .limit(1)
-    ).scalar_one_or_none()
-    if msg is not None:
-        # Reassign (not in-place mutate) so SQLAlchemy flags the JSONB column dirty.
-        msg.payload = {**(msg.payload or {}), "is_director_brief": True}
-        db.flush()
+# NOTE (CR-V2-021): the v1 ``_mark_latest_coordinator_brief`` (tagged the latest Coordinator turn
+# ``is_director_brief`` for the FE prominent rail) is REMOVED — the Coordinator hub-and-spoke is gone
+# (design §2.2); there is no Coordinator turn to tag, and it had no live caller.
 
 
 # ---------------------------------------------------------------------------
@@ -2984,37 +2905,10 @@ async def _run_release_smoke(
         return (boot_ok, boot_detail), acceptance
 
 
-def _release_acceptance_satisfied(db: Session, version_id: uuid.UUID) -> bool:
-    """gate-g-hardening GAP 1 (A3): the engine release-acceptance gate behind a gate_g PASS.
-
-    ``True`` only when the LATEST ``release_acceptance`` notification of THIS iteration reports a real
-    exit-0 (``pass==True``) or a legit non-web SKIP (``skipped==True`` — a pure lib/worker / no-compose
-    project with no running app to assert against). A recorded FAIL (``pass==False`` and not skipped) or NO
-    acceptance notification at all ⇒ ``False`` ⇒ the verdict handler refuses the PASS.
-
-    Freshness is anchored on the iteration boundary — :func:`_iteration_boundary_seq` (the latest
-    ``verdict`` seq) — NOT the gate_report: the acceptance notification is recorded BEFORE the Auditor's
-    gate_report, so an "after gate_report" anchor would never see it and a PASS could never unlock."""
-    boundary = _iteration_boundary_seq(db, version_id)
-    rows = (
-        db.execute(
-            select(PipelineMessage.payload)
-            .where(
-                PipelineMessage.version_id == version_id,
-                PipelineMessage.author == "system",
-                PipelineMessage.kind == "notification",
-                PipelineMessage.seq > boundary,
-            )
-            .order_by(PipelineMessage.seq.desc())
-        )
-        .scalars()
-        .all()
-    )
-    for payload in rows:
-        if isinstance(payload, dict) and isinstance(payload.get("release_acceptance"), dict):
-            acc = payload["release_acceptance"]
-            return acc.get("pass") is True or acc.get("skipped") is True
-    return False
+# NOTE (CR-V2-021): the v1 ``_release_acceptance_satisfied`` (the gate_g PASS-button gate the v1 ``_board()``
+# exposed) is REMOVED with the v1 board route. In v2 the release-acceptance smoke runs INSIDE the Auditor's
+# Verifikácia round (:func:`_run_release_acceptance` in :func:`_settle_verifikacia_verdict`) and gates the
+# PASS verdict THERE — the board no longer needs a separate gate_g PASS-button predicate.
 
 
 async def run_dispatch(
@@ -4027,124 +3921,13 @@ def current_build_task(db: Session, version_id: uuid.UUID) -> Optional[Task]:
 
 
 # ---------------------------------------------------------------------------
-# gate_g re-gate inference (v1 board-route remnant — CR-V2-017 FLAG): these helpers are still read by the v1
-# cockpit ``_board()`` route (``backend/api/routes/pipeline.py``) until the FE-contract CRs (CR-V2-021/022)
-# re-author the board to the 4-phase model. They reference the retired ``gate_g`` stage + ``coordinator``
-# author token via SQL filters ONLY (no new writes) — they emit nothing against a v2 build. Kept (not
-# excised) because they have a LIVE referrer; removed when the board route drops them.
+# Verifikácia FAIL fix-scope (v2; CR-V2-014, AUD-3). The v1 gate_g re-gate-inference family
+# (``_latest_gate_g_classifying_directive`` / ``_infer_regate_entry_stage`` / ``_latest_gate_g_findings`` /
+# ``_latest_surgical_fix_directive``) is REMOVED with the v1 board route (CR-V2-021): it read the retired
+# ``gate_g`` stage + ``coordinator``/``director`` author tokens the v2 DB CHECK rejects, and its only live
+# referrer was the v1 ``_board()`` regate proposal — dropped here. The v2 source of a fix scope is the
+# Auditor's own Verifikácia verdict (:func:`_latest_verifikacia_fix_scope`).
 # ---------------------------------------------------------------------------
-
-
-def _latest_gate_g_classifying_directive(db: Session, version_id: uuid.UUID) -> Optional[dict[str, Any]]:
-    """gate_g FAIL Fix 2 (CR-NS-057 §F2.1): the newest coordinator directive at stage ``gate_g`` — the
-    classifying directive for the re-gate target. KIND-AGNOSTIC: the gate_g FAIL directive rides a
-    ``kind="question"`` message (blocked→question), NOT a ``gate_report``, so ``_latest_coordinator_directive``
-    cannot see it. The non-null filter is in SQL BEFORE the LIMIT — ``invoke_agent`` ALWAYS writes the
-    ``coordinator_directive`` key (JSON-null for a directive-less synthesis turn), so a naive ORDER-BY-LIMIT-1
-    + Python check would grab a later synthesis row (value JSON-null) and SHADOW an older real directive.
-    ``payload['coordinator_directive'].astext.isnot(None)`` compiles to ``->> IS NOT NULL`` — TRUE for an
-    object value, excluded for JSON-null. (NOT ``.isnot(None)`` on the JSON expression — that tests SQL NULL /
-    key-absent, not JSON-null value.)"""
-    row = db.execute(
-        select(PipelineMessage)
-        .where(
-            PipelineMessage.version_id == version_id,
-            PipelineMessage.author == "coordinator",
-            PipelineMessage.stage == "gate_g",
-            PipelineMessage.payload["coordinator_directive"].astext.isnot(None),
-        )
-        .order_by(PipelineMessage.seq.desc())
-        .limit(1)
-    ).scalar_one_or_none()
-    return (row.payload or {}).get("coordinator_directive") if row is not None else None
-
-
-def _infer_regate_entry_stage(db: Session, version_id: uuid.UUID) -> str:
-    """gate_g FAIL Fix 2 (CR-NS-057 §F2.1): infer the re-gate target from the latest gate_g classifying
-    directive — design/scope class (spec_problem / director_decision / route_to_designer) → ``gate_a`` (full
-    design re-gate, the waterfall response); else (code-fixable, OR no gate_g directive = a Director-initiated
-    FAIL on a PASS-verified audit) → ``build`` (re-run the build). The Director always overrides via chips."""
-    d = _latest_gate_g_classifying_directive(db, version_id)
-    if d and (
-        d.get("triage_class") in ("spec_problem", "director_decision")
-        or d.get("proposed_action") == "coordinator_route_to_designer"
-    ):
-        return "gate_a"
-    return "build"
-
-
-def _latest_gate_g_findings(db: Session, version_id: uuid.UUID) -> Optional[str]:
-    """gate_g FAIL Fix 2 (CR-NS-057 §F2.2): the latest gate_g Auditor audit findings (+ the classifying
-    directive's rationale), formatted as a Slovak block to thread into a FAIL→build re-run brief — but ONLY
-    when no ``task_plan`` has run SINCE that audit (the sticky-``is_regate`` guard: a build reached via a
-    design-class FAIL→gate_a re-runs task_plan, so its pre-redesign findings are stale). Returns None when the
-    findings are superseded (task_plan newer) or absent."""
-    audit = db.execute(
-        select(PipelineMessage)
-        .where(
-            PipelineMessage.version_id == version_id,
-            PipelineMessage.author == "auditor",
-            PipelineMessage.stage == "gate_g",
-            PipelineMessage.kind == "gate_report",
-        )
-        .order_by(PipelineMessage.seq.desc())
-        .limit(1)
-    ).scalar_one_or_none()
-    if audit is None:
-        return None
-    task_plan_seq = db.execute(
-        select(func.max(PipelineMessage.seq)).where(
-            PipelineMessage.version_id == version_id,
-            PipelineMessage.stage == "task_plan",
-        )
-    ).scalar_one_or_none()
-    if task_plan_seq is not None and audit.seq <= task_plan_seq:
-        return None  # a task_plan ran after the audit → findings superseded (a gate_a-transitive build re-gate)
-    findings = (audit.payload or {}).get("findings") or []
-    directive = _latest_gate_g_classifying_directive(db, version_id)
-    rationale = (directive or {}).get("rationale") if directive else None
-    parts: list[str] = []
-    if findings:
-        parts.append("\n".join(f"- {f}" for f in findings))
-    if rationale:
-        parts.append(str(rationale))
-    if not parts:
-        return None
-    return "## Audit zistenia z gate_g (oprav v tomto buildu)\n" + "\n\n".join(parts)
-
-
-def _latest_surgical_fix_directive(db: Session, version_id: uuid.UUID) -> Optional[str]:
-    """gate-g-hardening GAP 2 (CR-D, korekcia #1): the Director's latest ``surgical_fix`` fix directive,
-    formatted as a Slovak block to PREPEND (ahead of :func:`_latest_gate_g_findings`) into the surgical re-run
-    brief — so the build loop carries the Director's EXPLICIT instruction, not just the Auditor's findings.
-
-    Reads the latest ``director→implementer`` ``directive`` message of THIS iteration — seq strictly past
-    :func:`_iteration_boundary_seq` (the latest ``verdict`` seq). ``surgical_fix`` records a ``directive`` (NOT
-    a verdict), so it never moves that boundary; the next PASS/FAIL verdict does, which is exactly when the
-    directive becomes stale → this returns ``None`` (mirrors the boundary-anchored freshness of
-    :func:`_release_acceptance_satisfied`). The ``surgical_fix`` payload marker disambiguates it from any other
-    Director→Implementer directive. ``None`` when there is no fresh surgical directive."""
-    boundary = _iteration_boundary_seq(db, version_id)
-    msg = db.execute(
-        select(PipelineMessage)
-        .where(
-            PipelineMessage.version_id == version_id,
-            PipelineMessage.author == "director",
-            PipelineMessage.recipient == "implementer",
-            PipelineMessage.kind == "directive",
-            PipelineMessage.seq > boundary,
-        )
-        .order_by(PipelineMessage.seq.desc())
-        .limit(1)
-    ).scalar_one_or_none()
-    if msg is None:
-        return None
-    if not (msg.payload or {}).get("surgical_fix"):
-        return None
-    directive = (msg.content or "").strip()
-    if not directive:
-        return None
-    return "## Cielená oprava od Directora (vykonaj v tomto buildu)\n" + directive
 
 
 def _latest_verifikacia_fix_scope(db: Session, version_id: uuid.UUID) -> Optional[str]:
@@ -4186,102 +3969,20 @@ def _latest_verifikacia_fix_scope(db: Session, version_id: uuid.UUID) -> Optiona
     )
 
 
-def _scope_escalations_this_iteration(db: Session, version_id: uuid.UUID) -> int:
-    """Count gate_g coordinator scope-questions in the CURRENT iteration (CR-NS-056 §F1.5) — the per-iteration
-    cap. A coordinator ``kind=="question"`` message at stage ``gate_g``, seq past the iteration boundary
-    (latest verdict seq), whose directive is a scope class. INCLUDES this turn's just-recorded question (it was
-    recorded by ``invoke_agent`` inside ``verify_done`` BEFORE the caller runs), so §F1.4's guard is ``<=``.
-    Null-safe: the ``coordinator_directive`` key is always present (JSON-null for a directive-less turn) —
-    ``(payload or {}).get('coordinator_directive') or {}`` (never ``.get(k, {}).get(...)``)."""
-    boundary = _iteration_boundary_seq(db, version_id)
-    rows = (
-        db.execute(
-            select(PipelineMessage.payload).where(
-                PipelineMessage.version_id == version_id,
-                PipelineMessage.author == "coordinator",
-                PipelineMessage.kind == "question",
-                PipelineMessage.stage == "gate_g",
-                PipelineMessage.seq > boundary,
-            )
-        )
-        .scalars()
-        .all()
-    )
-    count = 0
-    for payload in rows:
-        directive = (payload or {}).get("coordinator_directive") or {}
-        if (
-            directive.get("triage_class") == "director_decision"
-            or directive.get("proposed_action") == "coordinator_route_to_designer"
-        ):
-            count += 1
-    return count
+# ── v2 board aggregation (CR-V2-021) ───────────────────────────────────────────────────────────────
+# Computed at board-fetch (api/routes/pipeline.py:_board) — a bounded per-version scan, no N+1, mirroring
+# the existing per-fetch build_readiness count. The v1 R4 operator-legibility roll-ups (``coordinator_triage``
+# / ``autonomous_decisions_summary`` + ``_scope_escalations_this_iteration``) are REMOVED here with the v1
+# board route: they read the retired ``coordinator``/``gate_g`` tokens the v2 DB CHECK rejects (the Coordinator
+# hub-and-spoke is gone, design §2.2 — the AI Agent reports to the Manažér directly, the Auditor's verdict is
+# the only second voice). Only the per-agent liveness chip (:func:`agent_sessions`) survives for the who's-up
+# status of the two v2 agents.
 
-
-# ── R4 operator-legibility board aggregations (v0.7.0, D3/D4/D5) ───────────────────────────────────
-# Computed at board-fetch (api/routes/pipeline.py:_board) — each a bounded per-version scan / one query, no
-# N+1, mirroring the existing per-fetch board counts (build_readiness / _gate_e_open_findings).
-
-#: How many autonomous decisions the board roll-up surfaces (newest first); the full count is unbounded.
-_AUTONOMOUS_SUMMARY_RECENT = 5
-#: An OrchestratorSession idle longer than this reads as ``stale`` on the rail (R4, D5 — 30 min).
+#: An OrchestratorSession idle longer than this reads as ``stale`` on the rail (D5 — 30 min).
 _AGENT_STALE_SECONDS = 1800
 #: The agent roles shown on the rail — the OrchestratorSession.role set = ACTOR_VALUES (CR-V2-001),
 #: i.e. the two v2 agents (DB values, underscore). CR-V2-007 collapsed the v1 5-role set to these.
 _AGENT_SESSION_ROLES = (AI_AGENT_ROLE, AUDITOR_ROLE)
-
-
-def coordinator_triage(db: Session, version_id: uuid.UUID, state: Optional[PipelineState]) -> Optional[dict[str, Any]]:
-    """RETIRED in v2 (CR-V2-009): always ``None``. The Coordinator hub-and-spoke is gone (design §2.2) —
-    there is no relay/escalation triage to surface; the AI Agent reports to the Manažér directly and the
-    Auditor's verdict is the only second voice. Kept as a symbol the cockpit board route still reads
-    (``backend/api/routes/pipeline.py``) until the FE-contract CRs (CR-V2-021/022) drop the field; the
-    ``CoordinatorTriage`` board slot then renders empty. ``db`` / ``version_id`` / ``state`` are kept for
-    the route call signature."""
-    del db, version_id, state
-    return None
-
-
-def autonomous_decisions_summary(db: Session, version_id: uuid.UUID) -> dict[str, Any]:
-    """R4 (D4): board roll-up of the ``is_autonomous`` Coordinator→Director notes (Pillar B recoveries
-    CR-055 + fast_fix answers CR-103) for this version — ``{count, recent:[{task, action, rationale,
-    confidence}]}``, newest first, capped at :data:`_AUTONOMOUS_SUMMARY_RECENT`. Bounded like
-    :func:`coordinator_triage` (§5: cheap, no N+1): the ``is_autonomous`` flag is filtered in SQL
-    (``payload ->> 'is_autonomous' = 'true'``) — a ``COUNT(*)`` for the total + a separate ``LIMIT``-ed query
-    for the recent few — so the board fetch never pulls every coordinator payload into Python. NOTE: this
-    reuses only the ``is_autonomous`` flag, NOT :func:`_autonomous_count` (which is per-task + action-filtered);
-    the roll-up spans BOTH recoveries and fast_fix answers."""
-    is_autonomous = PipelineMessage.payload["is_autonomous"].astext == "true"
-    base_where = (
-        PipelineMessage.version_id == version_id,
-        PipelineMessage.author == "coordinator",
-        is_autonomous,
-    )
-    count = db.execute(select(func.count()).select_from(PipelineMessage).where(*base_where)).scalar_one()
-    recent_rows = (
-        db.execute(
-            select(PipelineMessage.payload)
-            .where(*base_where)
-            .order_by(PipelineMessage.seq.desc())
-            .limit(_AUTONOMOUS_SUMMARY_RECENT)
-        )
-        .scalars()
-        .all()
-    )
-    recent = [
-        {
-            "task": (p or {}).get("task_number"),
-            # PIPELINE-AUTONOMY §3.3: gate-level auto-ratify records carry ``stage`` (which gate auto-advanced)
-            # and no ``task_id``; task-scoped recovery/answer records carry ``task`` and no ``stage`` — both
-            # Optional in the schema, so the roll-up shows "which gates auto-ratified" deterministically.
-            "stage": (p or {}).get("stage"),
-            "action": (p or {}).get("action"),
-            "rationale": (p or {}).get("rationale"),
-            "confidence": (p or {}).get("confidence"),
-        }
-        for p in recent_rows
-    ]
-    return {"count": count, "recent": recent}
 
 
 def agent_sessions(db: Session, version_id: uuid.UUID, state: Optional[PipelineState]) -> list[dict[str, Any]]:

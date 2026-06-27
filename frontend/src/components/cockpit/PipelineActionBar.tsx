@@ -1,239 +1,94 @@
-// Context-aware Director action buttons (F-007 §8, CR-NS-018).
+// Schvaľovacie body — the Manažér's approval-point buttons (CR-V2-021, design §4.4.2).
 //
-// Buttons are derived from current_stage + status. Each primary action carries a
-// muted consequence line so the outcome is unmistakable (Director feedback:
-// approving past a flagged "needs fixing" was too easy). Actions needing free
-// text (return/ask/answer) open an inline composer; verdict offers PASS/FAIL.
+// Lean v2 surface (replaces the 767-LOC v1 gate-action bar). Which buttons appear is backend-authoritative:
+// the board's dial-governed ``available_actions`` (orchestrator.determine_available_actions) is the single
+// source of truth — the bar renders ONLY those, so it can never offer a no-op verb. Build-readiness facts
+// (all_tasks_done / build_open_findings) DISABLE the Programovanie sign-off when a task is unfinished.
 
 import { useState, type ReactNode } from "react";
-import { Loader2 } from "lucide-react";
+import {
+  ArrowRight,
+  Check,
+  Loader2,
+  MessageCircleQuestion,
+  Pause,
+  Pencil,
+  Play,
+  ThumbsDown,
+  ThumbsUp,
+} from "lucide-react";
 
-import type {
-  CoordinatorDirective,
-  PipelineActionName,
-  PipelineStage,
-  PipelineState,
-} from "../../services/api/pipeline";
-import { COORDINATOR_ACTION_LABELS, nextStageLabel, REGATE_TARGETS, STAGE_LABELS } from "./labels";
-
-// Stages the Director ratifies with Schváliť/Vrátiť. kickoff is a ratification
-// gate too — the engine's approve advances kickoff→gate_a (NOT a `start`; the
-// real start is the state===null CTA on CockpitPage). gate_g (PASS/FAIL verdict)
-// and gate_e (its own Customer-loop boundary actions) are excluded.
-// task_plan is a plain ratify gate (CR-NS-023): approve → task_plan→build (starts the per-task
-// loop); return → re-decompose (CR-NS-022 §3 resets the Designer session). build has its own block.
-const RATIFY_STAGES = new Set(["kickoff", "gate_a", "gate_b", "gate_c", "gate_d", "task_plan"]);
+import type { BuildPhase } from "./labels";
+import { nextPhaseLabel } from "./labels";
+import type { PipelineActionName, PipelineState } from "../../services/api/pipeline";
 
 interface Props {
   state: PipelineState | null;
-  /** Backend-authoritative offerable actions (WS-C1, CR-NS-030). When present, a button renders only
-   *  if its action is in this set (AND its existing finer condition holds); when absent, the FE falls
-   *  back to its own hardcoded logic. Ends no-op buttons like approve on a build-blocked task. */
+  /** Backend-authoritative offerable actions (dial-governed); the bar renders only these. */
   availableActions?: PipelineActionName[];
-  /** Build readiness (WS-C1, CR-NS-030): false → a todo task remains (final approve@build blocked).
-   *  Absent → permissive (don't disable). */
+  /** Programovanie sign-off gate: a todo remaining / an open finding disables ``schvalit`` at Programovanie. */
   allTasksDone?: boolean;
-  /** Build open findings (WS-C1, CR-NS-030): > 0 → a failed/unverified task (approve + end_build
-   *  blocked). Mirrors gateEOpenFindings. */
   buildOpenFindings?: number;
-  /** gate-g-hardening GAP 1 (A4): false → the engine release acceptance hasn't reached exit-0 / a legit
-   *  non-web SKIP this iteration, so a PASS verdict would 400. DISABLE the "Verdikt PASS" button + show a
-   *  tooltip. Absent → permissive (don't disable), for backward-compat. Mirrors buildOpenFindings. */
-  releaseAcceptanceSatisfied?: boolean;
-  /** The latest EXECUTABLE Coordinator proposal (E7, F-008 §9) or null. Drives the build "Schváliť
-   *  Koordinátorov návrh (<effect>)" button — approve → apply_coordinator_recommendation executes it. */
-  coordinatorProposal?: CoordinatorDirective | null;
-  /** gate_g FAIL re-gate proposal (CR-NS-057 §F2.4): the inferred target + rationale; drives the
-   *  "Verdikt FAIL → <stage>" primary button + the "Iná fáza" override chips. Absent → plain "Verdikt FAIL". */
-  regateProposal?: { entry_stage: PipelineStage; reason?: string } | null;
   inFlight: boolean;
-  /** R4 (D1): the FALLBACK error-block heuristic — superseded by the authoritative `state.block_reason`
-   *  (read directly below). Used only when block_reason is absent (NULL / legacy rows): blocked due to an
-   *  unexpected failure (agent crash/timeout) rather than an agent question → offer "Skús znova" (CR-NS-018). */
-  isErrorBlock?: boolean;
-  /** A Coordinator gate_report exists to apply — gates the "Schváliť návrh
-   *  Koordinátora" button (else the action would 400). CR-NS-018. */
-  hasCoordinatorReport?: boolean;
-  /** Gate E: the Customer signalled all 7 okruhy covered → the boundary is the
-   *  FINAL sign-off (approve → Build), not a topic-continue. CR-NS-018 Phase 3. */
-  gateECoverageComplete?: boolean;
-  /** Gate E: count of open (unresolved) findings — any blocks closing (final /
-   *  early-end). CR-NS-018 Phase 3. */
-  gateEOpenFindings?: number;
-  /** Gate E (revised §2): the latest milestone — a per-question stop (Designer
-   *  answer) or a topic boundary (Customer gate_report). */
-  gateEMode?: "question" | "boundary" | null;
-  /** Gate E per-question: the Designer flagged a gap → Branch B (Opraviť/Ponechať). */
-  gateEGap?: boolean;
   onAction: (action: PipelineActionName, payload?: Record<string, unknown>) => void;
-}
-
-type Composer = {
-  action: PipelineActionName;
-  label: string;
-  field: string;
-  // gate-g-hardening GAP 2 (CR-D): an optional SECOND, REQUIRED input collected alongside `field`. surgical_fix
-  // uses it to gather comma-separated hierarchical task ids ('1.3.1, 10.2.2') parsed into a string[] payload —
-  // what makes the fix CHIRURGICAL (only the named tasks re-run). Absent for every other composer (single-field
-  // — return/answer/ask unchanged).
-  tasksField?: string;
-  tasksLabel?: string;
-} | null;
-
-const btn =
-  "inline-flex w-fit items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium disabled:opacity-50";
-const hintCls = "pl-0.5 text-[10px] leading-tight text-[var(--color-text-muted)]";
-
-// One action = button + its consequence line, stacked.
-function ActionRow({ hint, children }: { hint?: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      {children}
-      {hint ? <span className={hintCls}>{hint}</span> : null}
-    </div>
-  );
 }
 
 export function PipelineActionBar({
   state,
   availableActions,
-  allTasksDone,
-  buildOpenFindings,
-  releaseAcceptanceSatisfied,
-  coordinatorProposal,
-  regateProposal,
+  allTasksDone = true,
+  buildOpenFindings = 0,
   inFlight,
-  isErrorBlock = false,
-  hasCoordinatorReport = false,
-  gateECoverageComplete = false,
-  gateEOpenFindings = 0,
-  gateEMode = null,
-  gateEGap = false,
   onAction,
 }: Props) {
-  const [composer, setComposer] = useState<Composer>(null);
-  const [showRegateChips, setShowRegateChips] = useState(false); // CR-NS-057 §F2.4: "Iná fáza" override chips
+  // The Manažér's free-text for uprav (rework instruction) / ask (consult) / answer (reply to a question).
   const [text, setText] = useState("");
-  const [tasksText, setTasksText] = useState(""); // GAP 2 (CR-D): surgical_fix's task-ids input
+  const [mode, setMode] = useState<"uprav" | "ask" | "answer" | null>(null);
 
   if (!state) return null;
 
-  const { current_stage, status, block_reason } = state;
-  // WS-C1 (CR-NS-030): the backend says which actions are valid to offer. A button renders only if
-  // its action is allowed (AND its existing finer condition below). Absent field → fall back to the
-  // FE's own logic (allow everything), so older boards / tests keep the current behaviour.
-  const allowed = (a: PipelineActionName) => (availableActions ? availableActions.includes(a) : true);
-  const awaiting = status === "awaiting_manazer";
-  const blocked = status === "blocked";
-  const working = status === "agent_working";
-  const paused = status === "paused";
-  const isDone = status === "done";
+  const offered = new Set(availableActions ?? []);
+  const stage = state.current_stage as BuildPhase;
+  const programovanieBlocked = stage === "programovanie" && (!allTasksDone || buildOpenFindings > 0);
 
-  // Build readiness (WS-C1, CR-NS-030): the state-only available_actions OFFERS approve/end_build at a
-  // settled build, but apply_action rejects them while a todo remains (approve) or a finding is open
-  // (approve + end_build). Disable the buttons in those cases — like the Gate E open-finding gate —
-  // instead of letting them 400. Absent fields → permissive (don't disable), for backward-compat.
-  const buildHasOpenFindings = (buildOpenFindings ?? 0) > 0;
-  const buildEndReady = !buildHasOpenFindings; // end_build blocks only on open findings (todos are fine)
-  const buildApproveReady = allTasksDone !== false && !buildHasOpenFindings; // final sign-off: all done + clean
-
-  // gate-g-hardening GAP 1 (A4): the gate_g "Verdikt PASS" is blocked until the engine release acceptance
-  // reached exit-0 (or a legit non-web SKIP) this iteration — else the verdict handler 400s. Absent field →
-  // permissive (don't disable), for backward-compat. Mirrors the build readiness gate above.
-  const releasePassBlocked = releaseAcceptanceSatisfied === false;
-
-  // Gate E has its own boundary actions (Customer↔Designer loop) — kept out of the
-  // generic ratify / question-block paths (CR-NS-018 Phase 3).
-  const gateE = current_stage === "gate_e";
-
-  // R4 (D1): block_reason is AUTHORITATIVE — an error-block is any NON-question block reason; fall back to the
-  // `isErrorBlock` heuristic prop only when block_reason is absent (NULL / legacy rows). Keeps the
-  // errorBlock("Skús znova") vs questionBlock("Odpoveď") distinction, now driven by the persisted reason.
-  const errorReason = block_reason ? block_reason !== "agent_question" : isErrorBlock;
-  // An error-block (agent crash/timeout) produced no agent output — Schváliť
-  // would wrongly skip the stage and Odpoveď answers a non-question. So in that
-  // case offer only "Skús znova" (re-dispatch the current stage). A question-block
-  // keeps the answer/approve/return choices (CR-NS-018).
-  const errorBlock = blocked && errorReason;
-  // CR-NS-056 §F1.7: at gate_g a blocked state is ALWAYS a Coordinator scope escalation (answerable), so
-  // render "Odpoveď" even when an error reason (a synthesis ParseFailure) would flip it — else the Director
-  // would be stuck on "Skús znova". The stage proxy is exact (PipelineActionBar gets only state).
-  const questionBlock = blocked && !gateE && (!errorReason || current_stage === "gate_g");
-
-  // The full ratify gate (Schváliť podľa Návrhára / Koordinátora / Vrátiť) shows
-  // at an awaiting ratify stage. Schváliť/Vrátiť also show on a question-block
-  // (never a dead-end ask-loop) — the engine's approve/return have no status
-  // guard, so they work from blocked too.
-  const awaitingRatify = RATIFY_STAGES.has(current_stage) && awaiting;
-  const canRatify = awaitingRatify || questionBlock;
-  const gateEOpen = gateEOpenFindings > 0;
-  const gateEQuestion = gateE && awaiting && gateEMode === "question";
-  const gateEBoundary = gateE && awaiting && gateEMode === "boundary";
-
-  const openComposer = (c: NonNullable<Composer>) => {
-    setComposer(c);
+  const submitText = (action: "uprav" | "ask" | "answer") => {
+    const value = text.trim();
+    if (!value) return;
+    onAction(action, action === "uprav" ? { comment: value } : { text: value });
     setText("");
-    setTasksText("");
-  };
-  // GAP 2 (CR-D): a composer may collect a SECOND structured field (tasksField) — for surgical_fix the
-  // comma-separated hierarchical task ids parsed into a string[] payload. When present it is REQUIRED: the
-  // submit button stays disabled until at least one id is entered (mirrors the backend's required scope).
-  const taskIds = tasksText
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const composerReady = !!composer && !!text.trim() && (!composer.tasksField || taskIds.length > 0);
-  const submitComposer = () => {
-    if (!composer || !composerReady) return;
-    const payload: Record<string, unknown> = { [composer.field]: text.trim() };
-    if (composer.tasksField) payload[composer.tasksField] = taskIds;
-    onAction(composer.action, payload);
-    setComposer(null);
-    setText("");
-    setTasksText("");
+    setMode(null);
   };
 
-  if (composer) {
+  // The text-entry actions (uprav / ask / answer) open an inline editor before dispatch.
+  if (mode) {
+    const label =
+      mode === "uprav" ? "Inštrukcia na úpravu" : mode === "ask" ? "Otázka pre AI Agenta" : "Odpoveď AI Agentovi";
     return (
       <div className="flex flex-col gap-2">
-        {/* GAP 2 (CR-D): surgical_fix's REQUIRED task-ids field. Comma-separated hierarchical ids
-            ('1.3.1, 10.2.2') from spec/task-plan.md → string[]. Rendered first (the scope) and autofocused;
-            absent (and the textarea keeps autofocus) for every other single-field composer. */}
-        {composer.tasksField && (
-          <input
-            autoFocus
-            value={tasksText}
-            onChange={(e) => setTasksText(e.target.value)}
-            placeholder={composer.tasksLabel}
-            className="w-full rounded border border-[var(--color-border-default)] bg-[var(--color-canvas)] px-2 py-1.5 text-xs text-[var(--color-text-primary)] focus:border-primary-500 focus:outline-none"
-          />
-        )}
+        <label className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">{label}</label>
         <textarea
-          autoFocus={!composer.tasksField}
-          // CR-2 (v0.7.3): the single Director composer — return/answer/ask/return-with-comment all share it.
-          // `lang="sk"` is the correct app-side declaration so the browser spell-checks Slovak (not English);
-          // actual underlining depends on the browser having a SK dictionary installed.
-          lang="sk"
-          spellCheck
+          autoFocus
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder={composer.label}
           rows={3}
-          className="w-full resize-none rounded border border-[var(--color-border-default)] bg-[var(--color-canvas)] px-2 py-1.5 text-xs text-[var(--color-text-primary)] focus:border-primary-500 focus:outline-none"
+          className="w-full resize-none rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] px-2.5 py-1.5 text-xs text-[var(--color-text-primary)] focus:border-[var(--color-accent-primary)] focus:outline-none"
+          placeholder="Napíš správu…"
         />
         <div className="flex items-center gap-2">
           <button
-            onClick={submitComposer}
-            disabled={inFlight || !composerReady}
-            className={`${btn} bg-primary-600 text-white hover:bg-primary-500`}
+            onClick={() => submitText(mode)}
+            disabled={inFlight || !text.trim()}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500 disabled:opacity-50"
           >
-            {inFlight ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-            {composer.label}
+            {inFlight ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArrowRight className="h-3 w-3" />}
+            Odoslať
           </button>
           <button
-            onClick={() => setComposer(null)}
-            disabled={inFlight}
-            className={`${btn} border border-[var(--color-border-default)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]`}
+            onClick={() => {
+              setMode(null);
+              setText("");
+            }}
+            className="rounded-lg px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
           >
             Zrušiť
           </button>
@@ -243,524 +98,108 @@ export function PipelineActionBar({
   }
 
   return (
-    <div className="flex flex-col gap-2.5">
-      {inFlight && <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--color-text-muted)]" />}
-
-      {/* One-click affirmative for an AGENT question with no ratify gate (CR 2026-06-12): a build
-          question-block offers no "Schváliť podľa Návrhára" (approve@build = sign off the WHOLE build,
-          only at awaiting — never on a mid-build question), so the Coordinator's "odporúčam schváliť"
-          had no matching button and the Director had to type it via Odpoveď. Show it ONLY when answer
-          is offered but approve is NOT — i.e. exactly where the ratify approve is absent — so it never
-          duplicates it (at a gate question-block the approve button already covers this). */}
-      {/* CR-NS-056 §F1.7: NEVER offer the rubber-stamp one-click at gate_g — a scope/design question must get
-          a real typed answer (or a FAIL→target verdict), never a blind "Schvaľujem, pokračuj". */}
-      {questionBlock && allowed("answer") && !allowed("approve") && current_stage !== "gate_g" && (
-        <ActionRow hint="Schváliš agentov plán → pokračuje vo fáze (afirmatívna odpoveď jedným klikom).">
-          <button
-            onClick={() => onAction("answer", { text: "Schvaľujem, pokračuj podľa plánu." })}
-            disabled={inFlight}
-            className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
-          >
-            Schváliť a pokračovať
-          </button>
-        </ActionRow>
+    <div className="flex flex-wrap items-center gap-2">
+      {offered.has("start") && (
+        <ActionButton onClick={() => onAction("start")} disabled={inFlight} icon={Play} primary>
+          Spustiť tvorbu špecifikácie
+        </ActionButton>
       )}
 
-      {canRatify && (
-        <>
-          {allowed("approve") && (
-            <ActionRow
-              hint={
-                state.flow_type === "fast_fix"
-                  ? `Koordinátor potvrdil rýchlu opravu → spustí sa ${nextStageLabel(current_stage, state.flow_type)}.`
-                  : `Prijme sa návrh Návrhára → pipeline POKRAČUJE do ďalšej fázy (${nextStageLabel(current_stage, state.flow_type)}). Prácu NEvracia späť Návrhárovi.`
-              }
-            >
-              <button
-                onClick={() => onAction("approve")}
-                disabled={inFlight}
-                className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
-              >
-                {/* v0.7.2 R-D: the verb names the effect (advance) so it's unmistakable next to the indigo
-                    "Vrátiť Návrhárovi…" button below, which re-dispatches instead of advancing. */}
-                {state.flow_type === "fast_fix" ? "Schváliť rýchlu opravu" : "Schváliť a pokračovať (Návrhár)"}
-              </button>
-            </ActionRow>
-          )}
-
-          {awaitingRatify && hasCoordinatorReport && allowed("apply_coordinator_recommendation") && (
-            <ActionRow hint="NEPOSUNIE fázu — Návrhárovi sa VRÁTIA odporúčania Koordinátora na zapracovanie; pipeline počká na jeho prepracovaný návrh.">
-              <button
-                onClick={() => onAction("apply_coordinator_recommendation")}
-                disabled={inFlight}
-                className={`${btn} bg-indigo-600 text-white hover:bg-indigo-500`}
-              >
-                {/* v0.7.2 R-D: this does NOT advance — it re-dispatches the Designer with the Coordinator's
-                    recommendations and waits. The verb "Vrátiť…" distinguishes it from green "Schváliť a pokračovať". */}
-                Vrátiť Návrhárovi s odporúčaniami Koordinátora
-              </button>
-            </ActionRow>
-          )}
-
-          {allowed("return") && (
-            <ActionRow hint="Napíšeš vlastnú pripomienku → Návrhár prepracuje.">
-              <button
-                onClick={() => openComposer({ action: "return", label: "Vrátiť s komentárom", field: "comment" })}
-                disabled={inFlight}
-                className={`${btn} border border-[var(--color-state-error-bg)] text-[var(--color-state-error-fg)] hover:bg-[var(--color-state-error-bg)]`}
-              >
-                Vrátiť
-              </button>
-            </ActionRow>
-          )}
-        </>
+      {offered.has("approve_spec") && (
+        <ActionButton onClick={() => onAction("approve_spec")} disabled={inFlight} icon={Check} primary>
+          Schváliť špecifikáciu
+        </ActionButton>
       )}
 
-      {/* Gate E per-question stop (revised §2): Branch A approve, or Branch B Opraviť/Ponechať. */}
-      {gateEQuestion && !gateEGap && (
-        <ActionRow hint="Odpoveď je v poriadku → Zákazník pokračuje ďalšou otázkou.">
-          <button
-            onClick={() => onAction("approve")}
-            disabled={inFlight}
-            className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
-          >
-            Schváliť odpoveď
-          </button>
-        </ActionRow>
-      )}
-
-      {gateEQuestion && gateEGap && (
-        <>
-          <ActionRow hint="Odporúčanie Koordinátora sa pošle cez neho Návrhárovi → opraví → ďalšia otázka.">
-            <button
-              onClick={() => onAction("fix")}
-              disabled={inFlight}
-              className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
-            >
-              Schváliť návrh Koordinátora
-            </button>
-          </ActionRow>
-          <ActionRow hint="Medzera sa ponechá bez úpravy (podľa odporúčania Koordinátora) → ďalšia otázka.">
-            <button
-              onClick={() => onAction("leave")}
-              disabled={inFlight}
-              className={`${btn} border border-[var(--color-border-strong)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]`}
-            >
-              Ponechať
-            </button>
-          </ActionRow>
-        </>
-      )}
-
-      {/* Gate E topic boundary — topic-continue vs final sign-off. */}
-      {gateEBoundary && !gateECoverageComplete && (
-        <>
-          <ActionRow hint="Okruh sa uzavrie → Zákazník pokračuje ďalším okruhom previerky.">
-            <button
-              onClick={() => onAction("approve")}
-              disabled={inFlight}
-              className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
-            >
-              Schváliť okruh a pokračovať
-            </button>
-          </ActionRow>
-          <ActionRow hint="Vrátiš okruh Návrhárovi na prepracovanie.">
-            <button
-              onClick={() => openComposer({ action: "return", label: "Vrátiť s komentárom", field: "comment" })}
-              disabled={inFlight}
-              className={`${btn} border border-[var(--color-state-error-bg)] text-[var(--color-state-error-fg)] hover:bg-[var(--color-state-error-bg)]`}
-            >
-              Vrátiť
-            </button>
-          </ActionRow>
-          <ActionRow
-            hint={
-              gateEOpen
-                ? `Najprv vyrieš otvorené nálezy (${gateEOpenFindings}) — blokujú uzavretie.`
-                : `Pokrytie stačí → uzavrie Gate E a posunie na ${nextStageLabel(current_stage, state.flow_type)}.`
-            }
-          >
-            <button
-              onClick={() => onAction("end_gate_e")}
-              disabled={inFlight || gateEOpen}
-              className={`${btn} border border-[var(--color-border-strong)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]`}
-            >
-              Ukončiť Gate E
-            </button>
-          </ActionRow>
-        </>
-      )}
-
-      {gateEBoundary && gateECoverageComplete && (
-        <>
-          <ActionRow
-            hint={
-              gateEOpen
-                ? `Otvorené nálezy (${gateEOpenFindings}) blokujú uzavretie — najprv ich vyrieš.`
-                : `Všetkých 7 okruhov pokrytých, nálezy vyriešené → posun na ${nextStageLabel(current_stage, state.flow_type)}.`
-            }
-          >
-            <button
-              onClick={() => onAction("approve")}
-              disabled={inFlight || gateEOpen}
-              className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
-            >
-              Finálne schválenie → {nextStageLabel(current_stage, state.flow_type)}
-            </button>
-          </ActionRow>
-          <ActionRow hint="Vrátiš poslednému okruhu Návrhárovi na prepracovanie.">
-            <button
-              onClick={() => openComposer({ action: "return", label: "Vrátiť s komentárom", field: "comment" })}
-              disabled={inFlight}
-              className={`${btn} border border-[var(--color-state-error-bg)] text-[var(--color-state-error-fg)] hover:bg-[var(--color-state-error-bg)]`}
-            >
-              Vrátiť
-            </button>
-          </ActionRow>
-        </>
-      )}
-
-      {/* CR-NS-057 §F2.4: gate_g verdict — PASS at awaiting only; the FAIL→target group renders at gate_g
-          for BOTH awaiting AND blocked (the backend allows verdict from blocked too). */}
-      {current_stage === "gate_g" && allowed("verdict") && (
-        <>
-          {awaiting && (
-            <ActionRow
-              hint={
-                releasePassBlocked
-                  ? "PASS zablokovaný — release acceptance (release_smoke_test.sh) ešte nedobehla do exit-0; spusti audit znova alebo vráť FAIL."
-                  : "Audit prešiel → pipeline pokračuje na vydanie."
-              }
-            >
-              <button
-                onClick={() => onAction("verdict", { verdict: "PASS" })}
-                disabled={inFlight || releasePassBlocked}
-                className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
-              >
-                Verdikt PASS
-              </button>
-            </ActionRow>
-          )}
-          {regateProposal && STAGE_LABELS[regateProposal.entry_stage] ? (
-            <ActionRow hint={regateProposal.reason ?? "Audit neprešiel → návrat na navrhovanú fázu."}>
-              <button
-                onClick={() => onAction("verdict", { verdict: "FAIL", entry_stage: regateProposal.entry_stage })}
-                disabled={inFlight}
-                className={`${btn} bg-red-600 text-white hover:bg-red-500`}
-              >
-                Verdikt FAIL → {STAGE_LABELS[regateProposal.entry_stage]}
-              </button>
-              <button
-                onClick={() => setShowRegateChips((s) => !s)}
-                disabled={inFlight}
-                className={`${btn} border border-[var(--color-border-default)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]`}
-              >
-                Iná fáza
-              </button>
-              {showRegateChips && (
-                <div className="mt-1 flex flex-wrap gap-1.5">
-                  {REGATE_TARGETS.map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => onAction("verdict", { verdict: "FAIL", entry_stage: s })}
-                      disabled={inFlight}
-                      className={`${btn} border border-[var(--color-border-default)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]`}
-                    >
-                      {STAGE_LABELS[s]}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </ActionRow>
-          ) : (
-            <ActionRow hint="Audit neprešiel → návrat na prepracovanie.">
-              <button
-                onClick={() => onAction("verdict", { verdict: "FAIL" })}
-                disabled={inFlight}
-                className={`${btn} bg-red-600 text-white hover:bg-red-500`}
-              >
-                Verdikt FAIL
-              </button>
-            </ActionRow>
-          )}
-        </>
-      )}
-
-      {/* rerun_release_audit (v0.7.6; gating widened v0.7.8): at a SETTLED gate_g, re-run the release audit
-          instead of ratifying/answering — the Auditor re-audits, the app really boots + the acceptance suite
-          runs (the v0.7.5 smoke), and the pipeline waits for a fresh verdict. A re-dispatch that does NOT
-          advance, so it's indigo like the other re-dispatch controls — distinct from green PASS / red FAIL.
-          The backend offered-set is the source of truth (awaiting_manazer OR a blocked Auditor question), so
-          render purely on allowed(...) — no awaiting-only sub-gate. fast_fix (never at gate_g) never shows it. */}
-      {current_stage === "gate_g" && allowed("rerun_release_audit") && (
-        <ActionRow hint="Auditor spustí release audit znova — appka sa reálne nabootuje a prebehnú acceptance skúšky; pipeline počká na čerstvý verdikt.">
-          <button
-            onClick={() => onAction("rerun_release_audit")}
-            disabled={inFlight}
-            className={`${btn} bg-indigo-600 text-white hover:bg-indigo-500`}
-          >
-            Znova spustiť release audit
-          </button>
-        </ActionRow>
-      )}
-
-      {/* surgical_fix (gate-g-hardening GAP 2, CR-D): a chirurgical post-audit fix — re-enter the build with
-          an EXPLICIT Director directive to correct targeted task(s), WITHOUT the full FAIL→build reset of every
-          done task. The re-built version still re-enters a FULL re-gate (Auditor + the GAP 1 acceptance gate),
-          so surgery never skips the release oracle. Amber to set it apart from indigo rerun / red FAIL. Backend
-          offers it only at a settled gate_g (awaiting_manazer OR a blocked Auditor question); fast_fix never
-          reaches gate_g, so it never shows it. Composer collects a REQUIRED scope (hierarchical task ids) +
-          the fix directive. */}
-      {current_stage === "gate_g" && allowed("surgical_fix") && (
-        <ActionRow hint="Zadaj čísla úloh (z spec/task-plan.md) + čo opraviť — prebuilduje LEN tie, nie celý build; potom prebehne plný re-audit (vrátane acceptance skúšok).">
-          <button
-            onClick={() =>
-              openComposer({
-                action: "surgical_fix",
-                label: "Cielená oprava (bez prebuildu)",
-                field: "fix_directive",
-                tasksField: "target_task_numbers",
-                tasksLabel: "Čísla úloh na opravu (napr. 1.3.1, 10.2.2)",
-              })
-            }
-            disabled={inFlight}
-            className={`${btn} bg-amber-600 text-white hover:bg-amber-500`}
-          >
-            Cielená oprava (bez prebuildu)
-          </button>
-        </ActionRow>
-      )}
-
-      {current_stage === "release" && awaiting && allowed("uat_accept") && (
-        <ActionRow hint="Verzia sa akceptuje zákazníkom (UAT) → hotovo.">
-          <button
-            onClick={() => onAction("uat_accept")}
-            disabled={inFlight}
-            className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
-          >
-            Akceptovať UAT
-          </button>
-        </ActionRow>
-      )}
-
-      {/* v0.8.0 CR-3: a FULL-FLOW release whose ENGINE publish failed settles to blocked — the engine
-          re-pushes the local commits to GitHub and watches CI (no agent re-run). Backend offers it only at
-          a new_version release/blocked, so render purely on allowed(...) (absent for fast_fix / cr / bug). */}
-      {current_stage === "release" && blocked && allowed("retry_publish") && (
-        <ActionRow hint="Engine pushne lokálne commity na GitHub a sleduje CI.">
-          <button
-            onClick={() => onAction("retry_publish")}
-            disabled={inFlight}
-            className={`${btn} bg-primary-600 text-white hover:bg-primary-500`}
-          >
-            Publikovať na GitHub
-          </button>
-        </ActionRow>
-      )}
-
-      {/* Coordinator proposal (E7, F-008 §9): when the Coordinator has emitted an EXECUTABLE directive,
-          the Director approves it with ONE button labelled by the concrete effect (WS-C class-D) →
-          apply_coordinator_recommendation runs the matching executor. Shown at a settled build only. */}
-      {current_stage === "build" &&
-        (awaiting || (blocked && !errorReason)) &&
-        coordinatorProposal &&
-        allowed("apply_coordinator_recommendation") && (
-          <ActionRow hint={coordinatorProposal.rationale}>
-            <button
-              onClick={() => onAction("apply_coordinator_recommendation")}
-              disabled={inFlight}
-              className={`${btn} bg-indigo-600 text-white hover:bg-indigo-500`}
-            >
-              Schváliť Koordinátorov návrh (
-              {COORDINATOR_ACTION_LABELS[coordinatorProposal.proposed_action] ?? coordinatorProposal.proposed_action})
-            </button>
-          </ActionRow>
-        )}
-
-      {/* Build per-task loop (F-007 §6/§7): the Director's controls at a build awaiting-director
-          stop — sign-off, resume, rework a failed task, or early-end. The backend guards enforce
-          readiness (approve blocks while todo/open findings remain; end_build blocks on a failed
-          task), so the buttons are offered and the engine returns a clear error if not ready. */}
-      {current_stage === "build" && awaiting && (
-        <>
-          {allowed("approve") && (
-            <ActionRow
-              hint={
-                buildApproveReady
-                  ? "Všetky úlohy hotové → uzavrie build a posunie na Audit."
-                  : "Build ešte nie je hotový (ostávajú nepostavené alebo neoverené úlohy) — najprv ich dokonči."
-              }
-            >
-              <button
-                onClick={() => onAction("approve")}
-                disabled={inFlight || !buildApproveReady}
-                className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
-              >
-                Schváliť build → Audit
-              </button>
-            </ActionRow>
-          )}
-          {allowed("continue_build") && (
-            <ActionRow hint="Prostredie opravené → pokračuj v stavaní úloh (bez komentára).">
-              <button
-                onClick={() => onAction("continue_build")}
-                disabled={inFlight}
-                className={`${btn} bg-primary-600 text-white hover:bg-primary-500`}
-              >
-                Pokračovať v builde
-              </button>
-            </ActionRow>
-          )}
-          {allowed("return") && (
-            <ActionRow hint="Vrátiš zlyhanú úlohu (cez Koordinátora) → nový pokus s pripomienkou.">
-              <button
-                onClick={() => openComposer({ action: "return", label: "Vrátiť úlohu s komentárom", field: "comment" })}
-                disabled={inFlight}
-                className={`${btn} border border-[var(--color-state-error-bg)] text-[var(--color-state-error-fg)] hover:bg-[var(--color-state-error-bg)]`}
-              >
-                Vrátiť úlohu
-              </button>
-            </ActionRow>
-          )}
-          {allowed("end_build") && (
-            <ActionRow
-              hint={
-                buildEndReady
-                  ? "Zvyšok (nepostavené úlohy) pošleš do auditu."
-                  : `Otvorené úlohy (${buildOpenFindings} zlyhané/neoverené) blokujú uzavretie — najprv ich vyrieš.`
-              }
-            >
-              <button
-                onClick={() => onAction("end_build")}
-                disabled={inFlight || !buildEndReady}
-                className={`${btn} border border-[var(--color-border-strong)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]`}
-              >
-                Ukončiť build (zvyšok do auditu)
-              </button>
-            </ActionRow>
-          )}
-          {/* accept_merged (WS-B2, CR-NS-031): a merged task dead-ended on "commit predates baseline".
-              Offered only when a task actually failed (buildHasOpenFindings) — moves the baseline to the
-              reported commit's parent and re-verifies. */}
-          {allowed("accept_merged") && buildHasOpenFindings && (
-            <ActionRow hint="Práca úlohy je v spoločnom (skoršom) commite → uzná ho a úlohu znova overí.">
-              <button
-                onClick={() => onAction("accept_merged")}
-                disabled={inFlight}
-                className={`${btn} border border-[var(--color-state-info-bg)] text-[var(--color-state-info-fg)] hover:bg-[var(--color-state-info-bg)]`}
-              >
-                Uznať spoločný commit
-              </button>
-            </ActionRow>
-          )}
-        </>
-      )}
-
-      {/* Build paused (CR-NS-027 + CR-NS-030): a cooperatively-paused build resumes via continue_build
-          or ends early via end_build. Without this block a paused build renders no controls — the pause
-          feature would be unusable from the UI (status=paused is neither awaiting nor blocked). */}
-      {current_stage === "build" && paused && (
-        <>
-          {allowed("continue_build") && (
-            <ActionRow hint="Build je pozastavený → pokračuj v stavaní úloh.">
-              <button
-                onClick={() => onAction("continue_build")}
-                disabled={inFlight}
-                className={`${btn} bg-primary-600 text-white hover:bg-primary-500`}
-              >
-                Pokračovať v builde
-              </button>
-            </ActionRow>
-          )}
-          {allowed("end_build") && (
-            <ActionRow
-              hint={
-                buildEndReady
-                  ? "Build ukončíš → zvyšok do auditu."
-                  : `Otvorené úlohy (${buildOpenFindings} zlyhané/neoverené) blokujú uzavretie — najprv ich vyrieš.`
-              }
-            >
-              <button
-                onClick={() => onAction("end_build")}
-                disabled={inFlight || !buildEndReady}
-                className={`${btn} border border-[var(--color-border-strong)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]`}
-              >
-                Ukončiť build (zvyšok do auditu)
-              </button>
-            </ActionRow>
-          )}
-        </>
-      )}
-
-      {questionBlock && allowed("answer") && (
-        <ActionRow hint="Napíšeš agentovi vlastnú odpoveď → pokračuje vo fáze.">
-          <button
-            onClick={() => openComposer({ action: "answer", label: "Odpovedať agentovi", field: "text" })}
-            disabled={inFlight}
-            className={`${btn} bg-sky-600 text-white hover:bg-sky-500`}
-          >
-            Odpoveď
-          </button>
-        </ActionRow>
-      )}
-
-      {/* CR-NS-056 §F1.7 #1b: never offer "Skús znova" at gate_g — a scope escalation + a synthesis
-          ParseFailure (trailing system note → isErrorBlock) must show ONLY the answer/verdict path, not a
-          re-dispatch of the audit. (errorBlock is a separate render block from questionBlock.) */}
-      {errorBlock && allowed("return") && current_stage !== "gate_g" && (
-        <ActionRow hint="Znovu spustí agenta v aktuálnej fáze.">
-          <button
-            onClick={() => onAction("return", { comment: "Skús znova." })}
-            disabled={inFlight}
-            className={`${btn} bg-primary-600 text-white hover:bg-primary-500`}
-          >
-            Skús znova
-          </button>
-        </ActionRow>
-      )}
-
-      {/* Pause is build-only (CR-NS-027): only the build loop has a cooperative task boundary to
-          stop at — a single-turn gate would silently complete, so we don't offer Pauza there. */}
-      {working && current_stage === "build" && allowed("pause") && (
-        <ActionRow hint="Pozastaví build po dokončení aktuálnej úlohy.">
-          <button
-            onClick={() => onAction("pause")}
-            disabled={inFlight}
-            className={`${btn} border border-[var(--color-border-default)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]`}
-          >
-            Pauza
-          </button>
-        </ActionRow>
-      )}
-
-      {!isDone && allowed("ask") && (
-        // At gate_e the Director communicates only with the Coordinator (§2): the
-        // input (a question OR a constatation) goes to the Coordinator, who revises
-        // its recommendation. Elsewhere it stays the plain "Otázka" (its reroute is a
-        // separate CR) — no lying button.
-        <ActionRow
-          hint={
-            gateE
-              ? "Otázka alebo konštatovanie → ide Koordinátorovi, ktorý prepracuje odporúčanie."
-              : "Spýtaš sa, pipeline počká."
+      {offered.has("schvalit") && (
+        <ActionButton
+          onClick={() => onAction("schvalit")}
+          disabled={inFlight || programovanieBlocked}
+          icon={Check}
+          primary
+          title={
+            programovanieBlocked
+              ? "Programovanie ešte nie je dokončené (zostáva úloha alebo otvorený nález)"
+              : undefined
           }
         >
-          <button
-            onClick={() =>
-              openComposer({
-                action: "ask",
-                label: gateE ? "Konzultovať s Koordinátorom" : "Položiť otázku",
-                field: "text",
-              })
-            }
+          Schváliť → {nextPhaseLabel(stage)}
+        </ActionButton>
+      )}
+
+      {offered.has("verdict") && (
+        <>
+          <ActionButton
+            onClick={() => onAction("verdict", { verdict: "PASS" })}
             disabled={inFlight}
-            className={`${btn} border border-[var(--color-border-default)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]`}
+            icon={ThumbsUp}
+            primary
           >
-            {gateE ? "Konzultovať s Koordinátorom" : "Otázka"}
-          </button>
-        </ActionRow>
+            Verdikt PASS
+          </ActionButton>
+          <ActionButton onClick={() => onAction("verdict", { verdict: "FAIL" })} disabled={inFlight} icon={ThumbsDown}>
+            Verdikt FAIL
+          </ActionButton>
+        </>
+      )}
+
+      {offered.has("pokracovat") && (
+        <ActionButton onClick={() => onAction("pokracovat")} disabled={inFlight} icon={Play} primary>
+          Pokračovať
+        </ActionButton>
+      )}
+
+      {offered.has("uprav") && (
+        <ActionButton onClick={() => setMode("uprav")} disabled={inFlight} icon={Pencil}>
+          Uprav
+        </ActionButton>
+      )}
+
+      {offered.has("answer") && (
+        <ActionButton onClick={() => setMode("answer")} disabled={inFlight} icon={MessageCircleQuestion} primary>
+          Odpovedať
+        </ActionButton>
+      )}
+
+      {offered.has("ask") && (
+        <ActionButton onClick={() => setMode("ask")} disabled={inFlight} icon={MessageCircleQuestion}>
+          Spýtať sa
+        </ActionButton>
+      )}
+
+      {offered.has("pause") && (
+        <ActionButton onClick={() => onAction("pause")} disabled={inFlight} icon={Pause}>
+          Pozastaviť
+        </ActionButton>
       )}
     </div>
+  );
+}
+
+interface ButtonProps {
+  onClick: () => void;
+  disabled?: boolean;
+  primary?: boolean;
+  icon: typeof Play;
+  title?: string;
+  children: ReactNode;
+}
+
+function ActionButton({ onClick, disabled, primary, icon: Icon, title, children }: ButtonProps) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium disabled:opacity-50 ${
+        primary
+          ? "bg-primary-600 text-white hover:bg-primary-500"
+          : "border border-[var(--color-border-default)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
+      }`}
+    >
+      <Icon className="h-3 w-3" />
+      {children}
+    </button>
   );
 }
 

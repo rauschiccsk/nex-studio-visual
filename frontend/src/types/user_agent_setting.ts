@@ -1,13 +1,9 @@
 // Per-user per-role agent model/effort config (CR-NS-040, E3(b/c)).
 // Mirrors backend/schemas/user_agent_setting.py.
 
-// The PIPELINE agent role (NOT the user's ri/ha/shu access role).
-export type PipelineAgentRole =
-  | "coordinator"
-  | "designer"
-  | "customer"
-  | "implementer"
-  | "auditor";
+// The PIPELINE agent role (NOT the user's ri/ha/shu access role). v2 (CR-V2-001/007): the 5-role waterfall
+// collapsed to the two v2 agents — the AI Agent (doer) + the independent Auditor. DB values (underscore).
+export type PipelineAgentRole = "ai_agent" | "auditor";
 
 export type AgentModel =
   | "claude-opus-4-8"

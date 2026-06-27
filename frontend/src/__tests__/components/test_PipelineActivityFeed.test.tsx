@@ -10,7 +10,7 @@ import PipelineActivityFeed from "@/components/cockpit/PipelineActivityFeed";
 import type { ActivityLine } from "@/services/api/pipeline";
 
 function line(over: Partial<ActivityLine> = {}): ActivityLine {
-  return { stage: "kickoff", actor: "coordinator", kind: "tool", line: "číta x.md", ...over };
+  return { stage: "programovanie", actor: "ai_agent", kind: "tool", line: "číta x.md", ...over };
 }
 
 describe("PipelineActivityFeed", () => {

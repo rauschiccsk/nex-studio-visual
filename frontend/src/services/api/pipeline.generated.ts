@@ -15,8 +15,8 @@ export interface paths {
          * Available Roles
          * @description Return per-role charter availability for ``project_slug``.
          *
-         *     Since E3(a) (CR-NS-039) the spawn API is Coordinator-only, so this reports just
-         *     ``{"coordinator": <bool>}`` — true when ``.claude/agents/coordinator/CLAUDE.md``
+         *     Since CR-V2-007 the spawn API is AI-Agent-only, so this reports just
+         *     ``{"ai-agent": <bool>}`` — true when ``.claude/agents/ai-agent/CLAUDE.md``
          *     exists in the project (the set mirrors ``_VALID_ROLES``). An invalid slug or
          *     unknown project → 404.
          */
@@ -361,11 +361,10 @@ export interface paths {
          *     ``number`` is auto-assigned by the service layer as
          *     ``MAX(number) + 1`` for the supplied ``project_id`` (starts at ``1``
          *     for the first epic). ``status`` defaults to ``planned`` via the
-         *     Pydantic schema / DB ``server_default`` when omitted. ``module_id``
-         *     may be ``None`` to register a project-level epic (used by
-         *     single-module projects — DESIGN.md §1.9). Concurrent-create races
+         *     Pydantic schema / DB ``server_default`` when omitted.
+         *     Concurrent-create races
          *     on the same project surface as HTTP 409. Missing or invalid foreign
-         *     keys (``project_id``, ``module_id``) are rejected by the DB-level FK
+         *     keys (``project_id``, ``version_id``) are rejected by the DB-level FK
          *     and surface as HTTP 422.
          */
         post: operations["create_epic_api_v1_epics_post"];
@@ -405,7 +404,7 @@ export interface paths {
          * Update Epic
          * @description Partially update an epic's mutable fields.
          *
-         *     Only ``module_id``, ``title`` and ``status`` are mutable. ``id``,
+         *     Only ``title`` and ``status`` are mutable. ``id``,
          *     ``project_id``, ``number`` and ``created_at`` are immutable — the
          *     epic identity and its position within the project must not be
          *     rewritten after the fact; ``updated_at`` is refreshed by the ORM on
@@ -495,12 +494,11 @@ export interface paths {
          *     ``onupdate=func.now()``. Fields omitted from the payload are left
          *     unchanged.
          *
-         *     **Live documents side effect.** When a feat transitions to
-         *     ``status='done'`` (and was not already done), this endpoint
-         *     appends the phase-summary entry to ``HISTORY.md`` and regenerates
-         *     ``STATUS.md`` for the owning project. KB writes run before
-         *     ``db.commit`` so an I/O failure rolls the status change back —
-         *     the DB and the KB never diverge.
+         *     CR-V2-016: the old STATUS.md / HISTORY.md write side-effect on a
+         *     feat→done transition is RETIRED. Those DB-driven files were a second,
+         *     independent writer of project status / history; the single source of
+         *     truth is now the AI Agent's own ``MEMORY.md`` plus the Vývoj phase
+         *     tabs (R-DOUBLEWRITE). This endpoint is now a pure DB update.
          */
         patch: operations["update_feat_api_v1_feats__feat_id__patch"];
         trace?: never;
@@ -575,99 +573,6 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
-        trace?: never;
-    };
-    "/api/v1/module-dependencies": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Module Dependencies
-         * @description Return a paginated list of module dependency edges.
-         *
-         *     Results are ordered by ``created_at DESC`` (newest first) — owned
-         *     by the service layer, matching the typical Module Registry UI
-         *     "newest first" convention.
-         */
-        get: operations["list_module_dependencies_api_v1_module_dependencies_get"];
-        put?: never;
-        /**
-         * Create Module Dependency
-         * @description Create a new module dependency edge.
-         *
-         *     Two invariants are validated by the service pre-flush so the caller
-         *     receives a clean HTTP 409 (not a raw 500 / ``IntegrityError``):
-         *
-         *     * Self-loops (``module_id == depends_on_module_id``) are rejected
-         *       — a module cannot depend on itself (DESIGN.md §1.2).
-         *     * ``UNIQUE(module_id, depends_on_module_id)`` — a duplicate edge
-         *       is rejected pre-emptively.
-         *
-         *     Invalid foreign keys (``module_id`` or ``depends_on_module_id``
-         *     not matching an existing ``project_modules.id``) are rejected by
-         *     the DB-level FK on commit and propagate as a raw SQLAlchemy
-         *     constraint error — the caller is expected to supply valid
-         *     ``project_modules.id`` values (the schema-level UUID format check
-         *     is enforced by Pydantic; existence is the DB's job). Full
-         *     multi-hop cycle detection is the caller's responsibility
-         *     (Architect / ``ModuleService``) and is not performed here.
-         */
-        post: operations["create_module_dependency_api_v1_module_dependencies_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/module-dependencies/{dependency_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Module Dependency
-         * @description Return a single module dependency edge by primary key.
-         */
-        get: operations["get_module_dependency_api_v1_module_dependencies__dependency_id__get"];
-        put?: never;
-        post?: never;
-        /**
-         * Delete Module Dependency
-         * @description Hard-delete a module dependency edge by primary key.
-         *
-         *     ``module_dependencies`` has no inbound foreign keys, so no
-         *     RESTRICT dependency check is required. Outbound FKs (``module_id``,
-         *     ``depends_on_module_id``) both use ``ON DELETE CASCADE`` so
-         *     deleting either parent module cleans up the edge automatically;
-         *     this endpoint is the explicit inverse — the "break dependency"
-         *     flow in the module-registry / dependency-graph UI.
-         */
-        delete: operations["delete_module_dependency_api_v1_module_dependencies__dependency_id__delete"];
-        options?: never;
-        head?: never;
-        /**
-         * Update Module Dependency
-         * @description Partially update a module dependency edge.
-         *
-         *     :class:`ModuleDependency` has no mutable columns — ``id``,
-         *     ``module_id``, ``depends_on_module_id``, ``created_at`` and
-         *     ``updated_at`` are all immutable. ``module_id`` /
-         *     ``depends_on_module_id`` form the natural key and must not be
-         *     rewritten after the fact (a different pair is a different edge);
-         *     ``updated_at`` is auto-stamped by the ORM on flush.
-         *
-         *     :class:`ModuleDependencyUpdate` therefore exposes no fields; this
-         *     endpoint exists only for symmetry with the rest of the CRUD
-         *     surface. It confirms the row exists (returning HTTP 404 otherwise)
-         *     and returns the unmodified instance. Redirecting an edge is a
-         *     ``DELETE`` / ``POST`` operation, not an in-place edit.
-         */
-        patch: operations["update_module_dependency_api_v1_module_dependencies__dependency_id__patch"];
         trace?: never;
     };
     "/api/v1/pipeline/fast-fix": {
@@ -746,12 +651,15 @@ export interface paths {
         put?: never;
         /**
          * Open Debug Terminal
-         * @description Attach an interactive Director terminal to the headless agent session.
+         * @description Break-glass: attach an interactive Manažér terminal to the headless agent session (CR-V2-015).
          *
-         *     Resumes the existing ``orchestrator_session.claude_session_id`` for
-         *     ``(project, role)`` into a Director-owned ``agent_terminal_sessions`` row
-         *     so the standard AgentTerminal WS can stream it (F-007 §10 debug hatch).
-         *     The Director observes; the orchestrator still drives the pipeline.
+         *     Resumes the existing ``orchestrator_session.claude_session_id`` for ``(project, role)`` into a
+         *     Manažér-owned ``agent_terminal_sessions`` row so the standard AgentTerminal WS can stream it. This is an
+         *     OUT-OF-BAND human break-glass ONLY — the first-class Manažér↔AI-Agent channel is the read-only tab +
+         *     the engine relay (:func:`post_relay`). To preserve the single-writer invariant (SPIKE-IO Model B), the
+         *     debug-attach PTY is **gated so it cannot open while the engine is driving the session** (an open
+         *     write-capable PTY mid-turn would be a second concurrent writer). When the engine IS driving, this
+         *     returns 409; otherwise it attaches (and ``write_input`` is still per-keystroke-guarded as a backstop).
          */
         post: operations["open_debug_terminal_api_v1_pipeline__version_id__debug_terminal_post"];
         delete?: never;
@@ -774,6 +682,32 @@ export interface paths {
         get: operations["list_messages_api_v1_pipeline__version_id__messages_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pipeline/{version_id}/relay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Relay
+         * @description Relay a Manažér message to the AI Agent as the engine's next turn (CR-V2-015 / SPIKE-IO Model B).
+         *
+         *     This is the canonical Manažér→AI-Agent channel for the read-only AI Agent tab: the message is RELAYED
+         *     by the engine (the sole writer to the warm ``claude`` session) as the next ``--resume`` turn — it is
+         *     NEVER keystroked into the PTY (no concurrent second writer). When a turn is in flight the message is
+         *     enqueued behind it (``deferred=True``) and the in-flight dispatch drains it next; when the build is
+         *     settled it dispatches immediately as an ``ask``/``answer`` turn and we schedule the background run.
+         */
+        post: operations["post_relay_api_v1_pipeline__version_id__relay_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -818,91 +752,6 @@ export interface paths {
         head?: never;
         /** Update Project Member */
         patch: operations["update_project_member_api_v1_project_members__member_id__patch"];
-        trace?: never;
-    };
-    "/api/v1/project-modules": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Project Modules
-         * @description Return a paginated list of project modules.
-         */
-        get: operations["list_project_modules_api_v1_project_modules_get"];
-        put?: never;
-        /**
-         * Create Project Module
-         * @description Create a new project module.
-         *
-         *     ``UNIQUE(project_id, code)`` is validated pre-flush by the service;
-         *     a duplicate pair within the same project surfaces as HTTP 409. A
-         *     missing ``project_id`` is rejected by the DB-level foreign key and
-         *     surfaces as HTTP 422.
-         *
-         *     On success, appends a lifecycle entry to the owning project's
-         *     ``HISTORY.md`` and regenerates ``STATUS.md`` — the module list on
-         *     the status page and the chronological trail both stay in sync
-         *     with the DB.
-         */
-        post: operations["create_project_module_api_v1_project_modules_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/project-modules/{module_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Project Module
-         * @description Return a single project module by primary key.
-         */
-        get: operations["get_project_module_api_v1_project_modules__module_id__get"];
-        put?: never;
-        post?: never;
-        /**
-         * Delete Project Module
-         * @description Hard-delete a project module by primary key.
-         *
-         *     Inbound FKs to ``project_modules.id`` use either ``ON DELETE
-         *     CASCADE`` (``module_dependencies``) or ``ON DELETE SET NULL``
-         *     (``raw_specifications``, ``professional_specifications``,
-         *     ``kb_documents``, ``tasks``, ``architect_sessions``), so dependent
-         *     rows are either removed or have their module reference nulled out
-         *     automatically. No inbound FK uses ``RESTRICT``, so no dependency
-         *     guard is required.
-         *
-         *     Records the delete in the owning project's ``HISTORY.md`` and
-         *     regenerates ``STATUS.md`` so the modules section no longer lists
-         *     the removed row.
-         */
-        delete: operations["delete_project_module_api_v1_project_modules__module_id__delete"];
-        options?: never;
-        head?: never;
-        /**
-         * Update Project Module
-         * @description Partially update a project module's mutable fields.
-         *
-         *     ``id``, ``project_id``, ``created_at`` are immutable; ``updated_at``
-         *     is refreshed by the ORM on flush via ``onupdate=func.now()``. Fields
-         *     omitted from the payload are left unchanged. Changing ``code``
-         *     re-validates the ``UNIQUE(project_id, code)`` constraint and surfaces
-         *     a collision as HTTP 409.
-         *
-         *     On a status transition, appends a ``HISTORY.md`` entry and
-         *     regenerates ``STATUS.md``. Other field edits regenerate the
-         *     status markdown (so the modules section reflects the new name /
-         *     category) but do not spam the history log.
-         */
-        patch: operations["update_project_module_api_v1_project_modules__module_id__patch"];
         trace?: never;
     };
     "/api/v1/project-specs/content": {
@@ -994,16 +843,17 @@ export interface paths {
          *       changes. Failure → 500 and no further work is attempted. A repo
          *       that already exists is treated as success — reruns and
          *       deliberate reuse both work. Skipped when ``repo_url`` is NULL.
-         *     * **Seeds two live documents** (``STATUS.md`` / ``HISTORY.md``)
-         *       under ``{knowledge_base_path}/projects/{slug}/``. ARCHITECT.md
-         *       is no longer seeded — replaced by per-agent session logs in
-         *       ``docs/session-logs/<role>/`` (three-agent architecture).
+         *     * **Seeds the AI Agent's per-project ``MEMORY.md``** in the project
+         *       workspace (``/opt/projects/<slug>/``) once the Stage-3 init script
+         *       has created the checkout. This is the single source of truth for
+         *       project status / history (CR-V2-016, R-DOUBLEWRITE); the old
+         *       DB-driven STATUS.md / HISTORY.md seeding is retired. The agent owns
+         *       every later write (exactly one writer).
          *     * **Auto-creates initial version v0.1.0** in ``planned`` status —
          *       per main CLAUDE.md §2 (no spec change without a version binding).
-         *       Designer's Step 0 VERSION binding finds this version to start work.
-         *     * The DB insert, KB write, version creation and commit happen in a
-         *       single transaction — a failure at any step rolls the row back. If
-         *       KB write fails after GitHub repo was already created, the repo
+         *     * The DB insert, version creation and commit happen in a single
+         *       transaction — a failure at any step rolls the row back. If a later
+         *       stage fails after the GitHub repo was already created, the repo
          *       stays dangling (documented known-item; manual cleanup on the
          *       GitHub side).
          */
@@ -1106,9 +956,10 @@ export interface paths {
          *
          *     Side effects on success:
          *
-         *     * The KB folder ``{knowledge_base_path}/projects/{slug}/`` with
-         *       its live documents (STATUS.md / HISTORY.md) is removed — matches
-         *       the rest of the live-docs hooks.
+         *     * The KB folder ``{knowledge_base_path}/projects/{slug}/`` (any
+         *       project-scoped KB docs) is removed so a deleted project leaves no
+         *       orphaned KB tree. (The per-project ``MEMORY.md`` lives in the
+         *       project workspace, not the KB, and goes with the workspace.)
          *     * If ``delete_github=true`` is passed, the backing GitHub
          *       repository is deleted too. Off by default — the DB row and KB
          *       folder go, but the repo stays in case the caller wants to
@@ -1121,8 +972,8 @@ export interface paths {
          * Update Project
          * @description Partially update a project's mutable fields.
          *
-         *     ``id``, ``slug``, ``category``, ``created_by`` and ``created_at`` are
-         *     immutable; ``updated_at`` is refreshed by the ORM. Fields omitted from
+         *     ``id``, ``slug``, ``type``, ``auth_mode``, ``created_by`` and
+         *     ``created_at`` are immutable; ``updated_at`` is refreshed by the ORM. Fields omitted from
          *     the payload are left unchanged.
          */
         patch: operations["update_project_api_v1_projects__project_id__patch"];
@@ -1432,12 +1283,11 @@ export interface paths {
          *     by the ORM on flush via ``onupdate=func.now()``. Fields omitted
          *     from the payload are left unchanged.
          *
-         *     **Live documents side effect.** When a task transitions to
-         *     ``status='done'`` (and was not already done), this endpoint
-         *     appends a ``HISTORY.md`` entry and regenerates ``STATUS.md`` for
-         *     the owning project. The KB writes happen before ``db.commit()``
-         *     so an I/O failure rolls the status change back — the DB and the
-         *     KB never disagree.
+         *     CR-V2-016: the old STATUS.md / HISTORY.md write side-effect on a
+         *     task→done transition is RETIRED. Those DB-driven files were a second,
+         *     independent writer of project status / history; the single source of
+         *     truth is now the AI Agent's own ``MEMORY.md`` plus the Vývoj phase
+         *     tabs (R-DOUBLEWRITE). This endpoint is now a pure DB update.
          */
         patch: operations["update_task_api_v1_tasks__task_id__patch"];
         trace?: never;
@@ -1876,8 +1726,8 @@ export interface components {
     schemas: {
         /**
          * AgentSession
-         * @description R4 (D5): per-role agent liveness for the rail — ``idle`` / ``active`` / ``stale`` from R1's
-         *     ``OrchestratorSession.last_input_at`` heartbeat.
+         * @description Per-agent liveness for the who's-up status — ``idle`` / ``active`` / ``stale`` from R1's
+         *     ``OrchestratorSession.last_input_at`` heartbeat. v2: only the two agents (AI Agent / Auditor).
          */
         AgentSession: {
             /** Role */
@@ -1920,7 +1770,7 @@ export interface components {
              * Role
              * @enum {string}
              */
-            role: "coordinator" | "designer" | "implementer" | "auditor";
+            role: "ai-agent" | "auditor";
             /** Terminated By */
             terminated_by: ("idle" | "user" | "crash" | "server_restart") | null;
             /**
@@ -1940,7 +1790,7 @@ export interface components {
              * Role
              * @constant
              */
-            role: "coordinator";
+            role: "ai-agent";
         };
         /**
          * AuthUser
@@ -1977,40 +1827,6 @@ export interface components {
             updated_at: string;
             /** Username */
             username: string;
-        };
-        /**
-         * AutonomousDecision
-         * @description R4 (D4): one ``is_autonomous`` Coordinator decision in the board roll-up (task #, action, why).
-         *
-         *     PIPELINE-AUTONOMY §3.3: a gate-level routine auto-ratify carries ``stage`` (which gate auto-advanced,
-         *     e.g. ``gate_a``) and no ``task``; a task-scoped recovery/answer carries ``task`` and no ``stage`` — both
-         *     Optional, so the roll-up surfaces "which gates auto-ratified" without a contract break.
-         */
-        AutonomousDecision: {
-            /** Action */
-            action?: string | null;
-            /** Confidence */
-            confidence?: number | null;
-            /** Rationale */
-            rationale?: string | null;
-            /** Stage */
-            stage?: string | null;
-            /** Task */
-            task?: number | null;
-        };
-        /**
-         * AutonomousDecisionsSummary
-         * @description R4 (D4): board-level roll-up of the ``is_autonomous`` Coordinator notes (CR-055 recoveries +
-         *     CR-103 fast_fix answers) — the total ``count`` + the ``recent`` few (newest first).
-         */
-        AutonomousDecisionsSummary: {
-            /**
-             * Count
-             * @default 0
-             */
-            count: number;
-            /** Recent */
-            recent?: components["schemas"]["AutonomousDecision"][];
         };
         /**
          * BacklogItemCreate
@@ -2111,7 +1927,7 @@ export interface components {
         };
         /**
          * BoardTask
-         * @description The build task currently in focus, for the "kto je na rade" board (WS-C2, CR-NS-035).
+         * @description The Programovanie task currently in focus, for the who's-up status (WS-C2, CR-NS-035; v2 §4.4.2).
          */
         BoardTask: {
             /** Number */
@@ -2347,21 +2163,6 @@ export interface components {
              */
             new_password: string;
         };
-        /**
-         * CoordinatorTriage
-         * @description R4 (D3): the LATEST Coordinator relay/escalation triage in front of the Director NOW — its
-         *     ``triage_class`` + ``confidence`` + ``proposed_action``. Surfaced even for a NON-executable relay
-         *     (``director_decision`` / low-confidence), unlike the executable proposal WhosTurnBoard already shows.
-         *     All optional — a directive may omit any field.
-         */
-        CoordinatorTriage: {
-            /** Confidence */
-            confidence?: number | null;
-            /** Proposed Action */
-            proposed_action?: string | null;
-            /** Triage Class */
-            triage_class?: string | null;
-        };
         /** CreateDocumentRequest */
         CreateDocumentRequest: {
             /** Category */
@@ -2487,10 +2288,8 @@ export interface components {
          *     auto-assigned as ``max(number) + 1`` per project by the service
          *     layer (see DESIGN.md §2.6 ``POST /projects/{id}/epics``).
          *     ``status`` defaults to the value set by the DB-level
-         *     ``server_default`` (``planned``) so callers may omit it.  Nullable
-         *     columns default to ``None`` — ``module_id`` is optional because a
-         *     project-level epic (no specific module scope) is permitted for
-         *     single-module projects.  ``version_id`` is typed as ``Optional`` so
+         *     ``server_default`` (``planned``) so callers may omit it.
+         *     ``version_id`` is typed as ``Optional`` so
          *     the schema can also serve patch-style payload helpers, but the
          *     service layer (DESIGN.md §4.0 Rule 2) **requires** a non-null value
          *     on create and raises ``ValueError("version_id required for new
@@ -2499,11 +2298,6 @@ export interface components {
          *     RESTRICT`` remains expressible for legacy rows.
          */
         EpicCreate: {
-            /**
-             * Module Id
-             * @description Optional project module the epic is scoped to. ``None`` denotes a project-level epic (used by single-module projects).
-             */
-            module_id?: string | null;
             /**
              * Project Id
              * Format: uuid
@@ -2547,8 +2341,6 @@ export interface components {
              * Format: uuid
              */
             id: string;
-            /** Module Id */
-            module_id?: string | null;
             /** Number */
             number: number;
             /**
@@ -2579,17 +2371,9 @@ export interface components {
          *     the epic identity and its position within the project must not be
          *     rewritten after the fact.  ``updated_at`` is managed by the ORM via
          *     ``onupdate=func.now()`` and must not be set by clients.
-         *     ``module_id`` remains mutable because the DB-level
-         *     ``ON DELETE SET NULL`` semantics and project-level epics are
-         *     expressed through the same column.  All remaining fields are
-         *     optional to support PATCH-style semantics.
+         *     All remaining fields are optional to support PATCH-style semantics.
          */
         EpicUpdate: {
-            /**
-             * Module Id
-             * @description Updated module scope for the epic. ``None`` denotes a project-level epic.
-             */
-            module_id?: string | null;
             /**
              * Status
              * @description Updated lifecycle status: planned | in_progress | done.
@@ -2842,79 +2626,6 @@ export interface components {
             /** Output Tokens */
             output_tokens: number;
         };
-        /**
-         * ModuleDependencyCreate
-         * @description Payload for creating a new module dependency edge.
-         *
-         *     ``id``, ``created_at`` and ``updated_at`` are server-generated and
-         *     therefore excluded.  Both ``module_id`` and ``depends_on_module_id``
-         *     are required and together form the natural key of the row.
-         *
-         *     Application-level cycle detection (DESIGN.md §1.2 ``module_dependencies``)
-         *     runs before insert — the schema only enforces shape, not graph
-         *     semantics.
-         */
-        ModuleDependencyCreate: {
-            /**
-             * Depends On Module Id
-             * Format: uuid
-             * @description The prerequisite module — must have status='done' before the dependent module can enter 'in_development'.
-             */
-            depends_on_module_id: string;
-            /**
-             * Module Id
-             * Format: uuid
-             * @description The dependent module — the one that requires the other to be done first.
-             */
-            module_id: string;
-        };
-        /**
-         * ModuleDependencyRead
-         * @description Serialised representation of a module dependency row.
-         *
-         *     Mirrors every column on
-         *     :class:`backend.db.models.projects.ModuleDependency`.
-         *     ``from_attributes=True`` enables construction directly from an ORM
-         *     instance via ``ModuleDependencyRead.model_validate(obj)``.
-         */
-        ModuleDependencyRead: {
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /**
-             * Depends On Module Id
-             * Format: uuid
-             */
-            depends_on_module_id: string;
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /**
-             * Module Id
-             * Format: uuid
-             */
-            module_id: string;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-        };
-        /**
-         * ModuleDependencyUpdate
-         * @description Partial update for an existing module dependency edge.
-         *
-         *     ``id``, ``created_at`` and ``updated_at`` are immutable.  The natural
-         *     key ``(module_id, depends_on_module_id)`` is also immutable — a
-         *     dependency edge is either created or deleted, never rewritten in
-         *     place.  No mutable fields are therefore exposed; the schema exists
-         *     for symmetry with the rest of the codebase.
-         */
-        ModuleDependencyUpdate: Record<string, never>;
         /** PaginatedResponse[BacklogItemRead] */
         PaginatedResponse_BacklogItemRead_: {
             /** Items */
@@ -2959,32 +2670,10 @@ export interface components {
             /** Total */
             total: number;
         };
-        /** PaginatedResponse[ModuleDependencyRead] */
-        PaginatedResponse_ModuleDependencyRead_: {
-            /** Items */
-            items: components["schemas"]["ModuleDependencyRead"][];
-            /** Limit */
-            limit: number;
-            /** Skip */
-            skip: number;
-            /** Total */
-            total: number;
-        };
         /** PaginatedResponse[PipelineMessageRead] */
         PaginatedResponse_PipelineMessageRead_: {
             /** Items */
             items: components["schemas"]["PipelineMessageRead"][];
-            /** Limit */
-            limit: number;
-            /** Skip */
-            skip: number;
-            /** Total */
-            total: number;
-        };
-        /** PaginatedResponse[ProjectModuleRead] */
-        PaginatedResponse_ProjectModuleRead_: {
-            /** Items */
-            items: components["schemas"]["ProjectModuleRead"][];
             /** Limit */
             limit: number;
             /** Skip */
@@ -3053,9 +2742,16 @@ export interface components {
         };
         /**
          * PipelineBoardRead
-         * @description Board snapshot: current state + the most recent messages.
+         * @description Vývoj board snapshot: current 4-phase state + the most recent messages (CR-V2-021).
          *
-         *     ``state`` is ``None`` until the pipeline is ``start``ed (lazy creation).
+         *     The v2 Vývoj board (design §4.4.2) renders a horizontal 4-phase bar (Príprava → Návrh → Programovanie
+         *     → Verifikácia → Hotovo) whose chips ARE the tabs; each phase's durable artifact (Špecifikácia .md /
+         *     design doc / coding log / Auditor verdict) is read by the FE from ``recent_messages`` (the phase
+         *     gate_report / verdict carries it in ``payload['report']``). ``state`` is ``None`` until ``start``.
+         *
+         *     The v1 Gate-E / gate_g / Coordinator board fields (``gate_e_open_findings`` / ``release_acceptance_
+         *     satisfied`` / ``regate_proposal`` / ``coordinator_triage`` / ``autonomous_decisions_summary``) are
+         *     DROPPED — there is no Gate E, no gate_g release-gate, and no Coordinator hub in the 4-phase model.
          */
         PipelineBoardRead: {
             /** Agent Sessions */
@@ -3065,7 +2761,6 @@ export interface components {
              * @default true
              */
             all_tasks_done: boolean;
-            autonomous_decisions_summary?: components["schemas"]["AutonomousDecisionsSummary"] | null;
             /** Available Actions */
             available_actions?: string[];
             /**
@@ -3073,21 +2768,9 @@ export interface components {
              * @default 0
              */
             build_open_findings: number;
-            coordinator_triage?: components["schemas"]["CoordinatorTriage"] | null;
             current_task?: components["schemas"]["BoardTask"] | null;
-            /**
-             * Gate E Open Findings
-             * @default 0
-             */
-            gate_e_open_findings: number;
             /** Recent Messages */
             recent_messages?: components["schemas"]["PipelineMessageRead"][];
-            regate_proposal?: components["schemas"]["RegateProposal"] | null;
-            /**
-             * Release Acceptance Satisfied
-             * @default true
-             */
-            release_acceptance_satisfied: boolean;
             state?: components["schemas"]["PipelineStateRead"] | null;
         };
         /**
@@ -3133,6 +2816,32 @@ export interface components {
             version_id: string;
         };
         /**
+         * PipelineRelayRequest
+         * @description Body for ``POST /pipeline/{version_id}/relay`` (CR-V2-015) — a Manažér message typed in the
+         *     read-only AI Agent tab.
+         *
+         *     SPIKE-IO Model B: the message is RELAYED by the engine as the next ``--resume`` turn (the engine is the
+         *     sole writer to the warm ``claude`` session) — it is NEVER keystroked into the PTY. When a turn is in
+         *     flight the message is enqueued behind it; when settled it dispatches immediately as an ``ask``/``answer``.
+         */
+        PipelineRelayRequest: {
+            /**
+             * Text
+             * @description The Manažér's message to relay to the AI Agent.
+             */
+            text: string;
+        };
+        /**
+         * PipelineRelayResponse
+         * @description Result of a relay: whether the message was ENQUEUED behind an in-flight turn (``deferred``) or
+         *     dispatched immediately, plus the current board snapshot.
+         */
+        PipelineRelayResponse: {
+            board: components["schemas"]["PipelineBoardRead"];
+            /** Deferred */
+            deferred: boolean;
+        };
+        /**
          * PipelineStateRead
          * @description Serialised ``pipeline_state`` row — "who is on turn and what's next".
          */
@@ -3148,17 +2857,17 @@ export interface components {
              * Current Actor
              * @enum {string}
              */
-            current_actor: "coordinator" | "designer" | "customer" | "implementer" | "auditor" | "manazer";
+            current_actor: "ai_agent" | "auditor";
             /**
              * Current Stage
              * @enum {string}
              */
-            current_stage: "kickoff" | "gate_a" | "gate_b" | "gate_c" | "gate_d" | "gate_e" | "task_plan" | "build" | "gate_g" | "release" | "done";
+            current_stage: "priprava" | "navrh" | "programovanie" | "verifikacia" | "done";
             /**
              * Flow Type
              * @enum {string}
              */
-            flow_type: "new_version" | "cr" | "bug" | "fast_fix";
+            flow_type: "new_version" | "fast_fix";
             /**
              * Id
              * Format: uuid
@@ -3268,16 +2977,16 @@ export interface components {
          */
         ProjectCreate: {
             /**
+             * Auth Mode
+             * @description Login flavour wired onto every surface: password | token. Required.
+             * @enum {string}
+             */
+            auth_mode: "password" | "token";
+            /**
              * Backend Port
              * @description Backend service port from the ICC Port Registry.
              */
             backend_port?: number | null;
-            /**
-             * Category
-             * @description Project category: singlemodule | multimodule.
-             * @enum {string}
-             */
-            category: "singlemodule" | "multimodule";
             /**
              * Created By
              * @description User who created the project. If omitted, resolved from the active session.
@@ -3305,12 +3014,6 @@ export interface components {
              * @default false
              */
             enable_cicd: boolean;
-            /**
-             * Enable Coordinator
-             * @description F-004 K-003: bootstrap Koordinátor agent (charter + settings + dedo-inbox + state file). Default True per spec §4 form. Opt-out via False.
-             * @default true
-             */
-            enable_coordinator: boolean;
             /**
              * Frontend Port
              * @description Frontend service port from the ICC Port Registry.
@@ -3365,6 +3068,12 @@ export interface components {
              * @enum {string}
              */
             status: "active" | "archived" | "paused";
+            /**
+             * Type
+             * @description Project archetype (surface composition): standard | web.
+             * @enum {string}
+             */
+            type: "standard" | "web";
         };
         /** ProjectMemberCreate */
         ProjectMemberCreate: {
@@ -3438,136 +3147,6 @@ export interface components {
             usage: components["schemas"]["UsageTotalsRead"];
         };
         /**
-         * ProjectModuleCreate
-         * @description Payload for creating a new project module.
-         *
-         *     ``id``, ``created_at`` and ``updated_at`` are server-generated and
-         *     therefore excluded.  ``status`` defaults to the value set by the
-         *     DB-level ``server_default`` (``planned``) so callers may omit it.
-         *     Nullable columns default to ``None``.
-         */
-        ProjectModuleCreate: {
-            /**
-             * Category
-             * @description Module grouping — one of the localized ICC labels (Systém / Katalógy / Sklad / Predaj / Nákup / Účtovníctvo / Pokladňa).
-             * @enum {string}
-             */
-            category: "Systém" | "Katalógy" | "Sklad" | "Predaj" | "Nákup" | "Účtovníctvo" | "Pokladňa";
-            /**
-             * Code
-             * @description Kebab-case module code, unique within the project (e.g. 'partner-catalog', 'module-manager').
-             */
-            code: string;
-            /**
-             * Design Doc Path
-             * @description Absolute filesystem path to the module DESIGN.md in the KB.
-             */
-            design_doc_path?: string | null;
-            /**
-             * Name
-             * @description Full human-readable module name (e.g. 'Katalóg partnerov').
-             */
-            name: string;
-            /**
-             * Project Id
-             * Format: uuid
-             * @description Project that owns this module.
-             */
-            project_id: string;
-            /**
-             * Status
-             * @description Lifecycle status: planned | in_design | in_development | done.
-             * @default planned
-             * @enum {string}
-             */
-            status: "planned" | "in_design" | "in_development" | "done";
-        };
-        /**
-         * ProjectModuleRead
-         * @description Serialised representation of a project module row.
-         *
-         *     Mirrors every column on
-         *     :class:`backend.db.models.projects.ProjectModule`.
-         *     ``from_attributes=True`` enables construction directly from an ORM
-         *     instance via ``ProjectModuleRead.model_validate(obj)``.
-         */
-        ProjectModuleRead: {
-            /**
-             * Category
-             * @enum {string}
-             */
-            category: "Systém" | "Katalógy" | "Sklad" | "Predaj" | "Nákup" | "Účtovníctvo" | "Pokladňa";
-            /** Code */
-            code: string;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Design Doc Path */
-            design_doc_path?: string | null;
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /** Name */
-            name: string;
-            /**
-             * Project Id
-             * Format: uuid
-             */
-            project_id: string;
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "planned" | "in_design" | "in_development" | "done";
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-        };
-        /**
-         * ProjectModuleUpdate
-         * @description Partial update for an existing project module.
-         *
-         *     ``id`` and ``created_at`` are immutable.  ``updated_at`` is managed
-         *     by the ORM via ``onupdate=func.now()`` and must not be set by
-         *     clients.  ``project_id`` is an immutable foreign key — a module
-         *     belongs to exactly one project for its lifetime and is deleted
-         *     rather than reassigned.  All remaining fields are optional to
-         *     support PATCH-style semantics.
-         */
-        ProjectModuleUpdate: {
-            /**
-             * Category
-             * @description Updated module grouping (must be one of the allowed localized labels).
-             */
-            category?: ("Systém" | "Katalógy" | "Sklad" | "Predaj" | "Nákup" | "Účtovníctvo" | "Pokladňa") | null;
-            /**
-             * Code
-             * @description Updated kebab-case module code.
-             */
-            code?: string | null;
-            /**
-             * Design Doc Path
-             * @description Updated filesystem path to the module DESIGN.md.
-             */
-            design_doc_path?: string | null;
-            /**
-             * Name
-             * @description Updated module name.
-             */
-            name?: string | null;
-            /**
-             * Status
-             * @description Updated lifecycle status: planned | in_design | in_development | done.
-             */
-            status?: ("planned" | "in_design" | "in_development" | "done") | null;
-        };
-        /**
          * ProjectRead
          * @description Serialised representation of a project row.
          *
@@ -3576,13 +3155,13 @@ export interface components {
          *     instance via ``ProjectRead.model_validate(obj)``.
          */
         ProjectRead: {
-            /** Backend Port */
-            backend_port?: number | null;
             /**
-             * Category
+             * Auth Mode
              * @enum {string}
              */
-            category: "singlemodule" | "multimodule";
+            auth_mode: "password" | "token";
+            /** Backend Port */
+            backend_port?: number | null;
             /**
              * Created At
              * Format: date-time
@@ -3623,6 +3202,11 @@ export interface components {
              * @enum {string}
              */
             status: "active" | "archived" | "paused";
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "standard" | "web";
             /**
              * Updated At
              * Format: date-time
@@ -3713,10 +3297,10 @@ export interface components {
          *     ``id`` and ``created_at`` are immutable.  ``updated_at`` is managed
          *     by the ORM via ``onupdate=func.now()`` and must not be set by
          *     clients.  ``created_by`` is an audit column and must not be
-         *     rewritten after the fact.  ``slug`` is auto-generated from ``name``
-         *     and ``category`` cannot be changed once the project is created, so
-         *     both are excluded.  All remaining fields are optional to support
-         *     PATCH-style semantics.
+         *     rewritten after the fact.  ``slug`` is auto-generated from ``name``;
+         *     ``type`` and ``auth_mode`` are archetype/login presets fixed at
+         *     creation, so all three are excluded.  All remaining fields are optional
+         *     to support PATCH-style semantics.
          */
         ProjectUpdate: {
             /**
@@ -3769,18 +3353,6 @@ export interface components {
              * @description Updated lifecycle status: active | archived | paused.
              */
             status?: ("active" | "archived" | "paused") | null;
-        };
-        /**
-         * RegateProposal
-         * @description gate_g FAIL re-gate proposal (CR-NS-057 §F2.4): the Coordinator's inferred re-gate target for a FAIL
-         *     verdict + a short Slovak rationale, computed FRESH for the board. The Director one-click-confirms it or
-         *     overrides to any gate_a..build stage; the verdict stays the Director's.
-         */
-        RegateProposal: {
-            /** Entry Stage */
-            entry_stage: string;
-            /** Reason */
-            reason?: string | null;
         };
         /**
          * ReleaseNote
@@ -4164,7 +3736,7 @@ export interface components {
              * Agent Role
              * @enum {string}
              */
-            agent_role: "coordinator" | "designer" | "customer" | "implementer" | "auditor";
+            agent_role: "ai_agent" | "auditor";
             /** Effort */
             effort?: ("low" | "medium" | "high" | "xhigh" | "max") | null;
             /** Model */
@@ -5364,8 +4936,6 @@ export interface operations {
             query?: {
                 /** @description Filter by the project the epic belongs to. Hits the ``ix_epics_project_id`` index — the core Tasks-page query (DESIGN.md §3.1 ``TasksPage``). */
                 project_id?: string | null;
-                /** @description Filter by the project module the epic is scoped to. Passing a module UUID returns module-scoped epics only; project-level (``module_id IS NULL``) epics are filtered out when this argument is supplied. */
-                module_id?: string | null;
                 /** @description Filter by lifecycle status (``planned`` | ``in_progress`` | ``done``). */
                 status?: ("planned" | "in_progress" | "done") | null;
                 /** @description Number of rows to skip. */
@@ -5877,172 +5447,6 @@ export interface operations {
             };
         };
     };
-    list_module_dependencies_api_v1_module_dependencies_get: {
-        parameters: {
-            query?: {
-                /** @description Filter by the dependent module — the module that requires the prerequisite to be done first. Backs the ``ModuleService.start_module()`` prerequisite check (DESIGN.md §1.2) — 'what does this module depend on'. */
-                module_id?: string | null;
-                /** @description Filter by the prerequisite module — the module that other modules depend on. Backs the dependency-graph visualisation in ``ModuleGraph`` (DESIGN.md §3.2) — 'which modules depend on this one'. */
-                depends_on_module_id?: string | null;
-                /** @description Number of rows to skip. */
-                skip?: number;
-                /** @description Maximum rows to return. */
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaginatedResponse_ModuleDependencyRead_"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_module_dependency_api_v1_module_dependencies_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ModuleDependencyCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ModuleDependencyRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_module_dependency_api_v1_module_dependencies__dependency_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                dependency_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ModuleDependencyRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_module_dependency_api_v1_module_dependencies__dependency_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                dependency_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_module_dependency_api_v1_module_dependencies__dependency_id__patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                dependency_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ModuleDependencyUpdate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ModuleDependencyRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     start_fast_fix_api_v1_pipeline_fast_fix_post: {
         parameters: {
             query?: never;
@@ -6199,6 +5603,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PaginatedResponse_PipelineMessageRead_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_relay_api_v1_pipeline__version_id__relay_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelineRelayRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineRelayResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6374,174 +5813,6 @@ export interface operations {
             };
         };
     };
-    list_project_modules_api_v1_project_modules_get: {
-        parameters: {
-            query?: {
-                /** @description Filter by the project the module belongs to. */
-                project_id?: string | null;
-                /** @description Filter by lifecycle status (planned | in_design | in_development | done). */
-                status?: ("planned" | "in_design" | "in_development" | "done") | null;
-                /** @description Filter by module category (e.g. 'Katalógy', 'Sklad', 'Nákup'). */
-                category?: string | null;
-                /** @description Number of rows to skip. */
-                skip?: number;
-                /** @description Maximum rows to return. */
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaginatedResponse_ProjectModuleRead_"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_project_module_api_v1_project_modules_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ProjectModuleCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProjectModuleRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_project_module_api_v1_project_modules__module_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                module_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProjectModuleRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_project_module_api_v1_project_modules__module_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                module_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_project_module_api_v1_project_modules__module_id__patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                module_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ProjectModuleUpdate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProjectModuleRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_project_spec_content_api_v1_project_specs_content_get: {
         parameters: {
             query: {
@@ -6641,8 +5912,8 @@ export interface operations {
             query?: {
                 /** @description Filter by lifecycle status (active | archived | paused). */
                 status?: ("active" | "archived" | "paused") | null;
-                /** @description Filter by category (singlemodule | multimodule). */
-                category?: ("singlemodule" | "multimodule") | null;
+                /** @description Filter by archetype (standard | web). */
+                type?: ("standard" | "web") | null;
                 /** @description Filter by the creating user's id. */
                 created_by?: string | null;
                 /** @description Number of rows to skip. */
@@ -7491,7 +6762,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                agent_role: "coordinator" | "designer" | "customer" | "implementer" | "auditor";
+                agent_role: "ai_agent" | "auditor";
             };
             cookie?: never;
         };

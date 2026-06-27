@@ -47,7 +47,7 @@ function mkMsg(over: Partial<PipelineMessage>): PipelineMessage {
   return {
     id: `m${Math.random()}`,
     version_id: "v1",
-    stage: "build",
+    stage: "programovanie",
     author: "auditor",
     recipient: "manazer",
     kind: "gate_report",
@@ -77,7 +77,7 @@ describe("TaskPlanPanel (CR-NS-020 CR-5)", () => {
 
   it("shows the per-task audit verdict matched by payload.task_id on task click", async () => {
     const messages = [
-      mkMsg({ author: "auditor", stage: "build", payload: { task_id: "t1", task_pass: false, findings: ["chýba podvojnosť"] } }),
+      mkMsg({ author: "auditor", stage: "programovanie", payload: { task_id: "t1", task_pass: false, findings: ["chýba podvojnosť"] } }),
     ];
     render(<TaskPlanPanel versionId="v1" messages={messages} />);
     const task = await screen.findByText(/GL tables/);

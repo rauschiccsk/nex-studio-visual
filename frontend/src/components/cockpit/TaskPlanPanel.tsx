@@ -60,11 +60,14 @@ interface AuditView {
 }
 
 // Read the per-task audit verdict (latest Auditor turn) + auto-fix reasons for a task from the
-// live message stream — matched by payload.task_id, scoped to build/gate_g (spec §7.1).
+// live message stream — matched by payload.task_id, scoped to the Programovanie phase.
+// NOTE: v2 has NO per-task Auditor (design §2.2); this per-task audit view + readTaskAudit are RETIRED by
+// CR-V2-023. The stage filter is re-pointed to the v2 ``programovanie`` phase only to keep it compiling
+// against the 4-phase enum until CR-V2-023 removes it.
 function readTaskAudit(messages: PipelineMessage[], taskId: string): { audit?: AuditView; reasons: string[] } {
   const forTask = messages.filter((m) => {
     const p = m.payload as { task_id?: string } | null;
-    return p?.task_id === taskId && (m.stage === "build" || m.stage === "gate_g");
+    return p?.task_id === taskId && m.stage === "programovanie";
   });
   const auditorMsgs = forTask.filter((m) => m.author === "auditor");
   const latest = auditorMsgs[auditorMsgs.length - 1];

@@ -53,10 +53,7 @@ import type {
 // Labels come from the canonical ROLE_LABELS (labels.ts, CR-NS-018) — single
 // source of truth shared with the pipeline board, so role names never drift.
 const AGENT_ROLES: { id: PipelineAgentRole; label: string }[] = [
-  { id: "coordinator", label: ROLE_LABELS.coordinator },
-  { id: "designer", label: ROLE_LABELS.designer },
-  { id: "customer", label: ROLE_LABELS.customer },
-  { id: "implementer", label: ROLE_LABELS.implementer },
+  { id: "ai_agent", label: ROLE_LABELS.ai_agent },
   { id: "auditor", label: ROLE_LABELS.auditor },
 ];
 

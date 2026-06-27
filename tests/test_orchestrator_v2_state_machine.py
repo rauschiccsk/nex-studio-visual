@@ -455,16 +455,59 @@ def test_auto_chain_limit_is_provisional_four_phase_bound(db_session, fake_claud
     assert orchestrator.auto_chain_limit(db_session, version.id) == expected
 
 
-def test_coordinator_triage_retired_returns_none(db_session, fake_claude):
+def test_coordinator_triage_helper_removed(db_session, fake_claude):
+    """CR-V2-021: the v1 ``coordinator_triage`` board helper (a retired stub since CR-V2-009) is now
+    REMOVED entirely with the v1 board route — the 4-phase Vývoj board has no Coordinator triage slot
+    (design §2.2 — the Coordinator hub-and-spoke is gone). Assert the symbol no longer exists rather than
+    that it returns None (the slot it fed is dropped from PipelineBoardRead)."""
+    assert not hasattr(orchestrator, "coordinator_triage")
+    assert not hasattr(orchestrator, "autonomous_decisions_summary")
+
+
+# ── CR-V2-021: the re-authored Vývoj board route contract ─────────────────────
+
+
+def test_board_route_v2_contract(db_session, fake_claude):
+    """CR-V2-021: the re-authored ``_board`` assembler produces the 4-phase Vývoj contract — it carries the
+    state + dial-governed available_actions + Programovanie split-view facts + two-agent who's-up, and the
+    v1 Gate-E / gate_g / Coordinator board fields are GONE from ``PipelineBoardRead``."""
+    from backend.api.routes.pipeline import _board
+
     version, _ = _make_version(db_session)
     st = PipelineState(
         version_id=version.id,
         flow_type="new_version",
-        current_stage="navrh",
+        current_stage="programovanie",
         current_actor="ai_agent",
         status="awaiting_manazer",
         next_action="x",
     )
     db_session.add(st)
     db_session.flush()
-    assert orchestrator.coordinator_triage(db_session, version.id, st) is None
+    board = _board(db_session, version.id)
+    # v2 fields present.
+    assert board.state is not None and board.state.current_stage == "programovanie"
+    assert "schvalit" in board.available_actions  # dial-governed v2 verb at a settled Programovanie
+    assert {s.role for s in board.agent_sessions} == {orchestrator.AI_AGENT_ROLE, orchestrator.AUDITOR_ROLE}
+    # v1 board fields DROPPED from the schema (no longer serialised).
+    dumped = board.model_dump()
+    for dead in (
+        "gate_e_open_findings",
+        "release_acceptance_satisfied",
+        "regate_proposal",
+        "coordinator_triage",
+        "autonomous_decisions_summary",
+    ):
+        assert dead not in dumped, f"v1 board field {dead!r} survived CR-V2-021"
+
+
+def test_board_route_v2_before_start(db_session, fake_claude):
+    """A version whose pipeline never started → ``state`` None + empty offerable actions, no crash from the
+    dropped v1 helpers (the route no longer calls coordinator_triage / autonomous_decisions_summary)."""
+    from backend.api.routes.pipeline import _board
+
+    version, _ = _make_version(db_session)
+    board = _board(db_session, version.id)
+    assert board.state is None
+    assert board.available_actions == []
+    assert board.agent_sessions == []

@@ -78,103 +78,51 @@ class PipelineMessageRead(BaseModel):
 
 
 class BoardTask(BaseModel):
-    """The build task currently in focus, for the "kto je na rade" board (WS-C2, CR-NS-035)."""
+    """The Programovanie task currently in focus, for the who's-up status (WS-C2, CR-NS-035; v2 §4.4.2)."""
 
     number: int
     title: str
 
 
-class RegateProposal(BaseModel):
-    """gate_g FAIL re-gate proposal (CR-NS-057 §F2.4): the Coordinator's inferred re-gate target for a FAIL
-    verdict + a short Slovak rationale, computed FRESH for the board. The Director one-click-confirms it or
-    overrides to any gate_a..build stage; the verdict stays the Director's."""
-
-    entry_stage: str
-    reason: Optional[str] = None
-
-
-class CoordinatorTriage(BaseModel):
-    """R4 (D3): the LATEST Coordinator relay/escalation triage in front of the Director NOW — its
-    ``triage_class`` + ``confidence`` + ``proposed_action``. Surfaced even for a NON-executable relay
-    (``director_decision`` / low-confidence), unlike the executable proposal WhosTurnBoard already shows.
-    All optional — a directive may omit any field."""
-
-    triage_class: Optional[str] = None
-    confidence: Optional[float] = None
-    proposed_action: Optional[str] = None
-
-
-class AutonomousDecision(BaseModel):
-    """R4 (D4): one ``is_autonomous`` Coordinator decision in the board roll-up (task #, action, why).
-
-    PIPELINE-AUTONOMY §3.3: a gate-level routine auto-ratify carries ``stage`` (which gate auto-advanced,
-    e.g. ``gate_a``) and no ``task``; a task-scoped recovery/answer carries ``task`` and no ``stage`` — both
-    Optional, so the roll-up surfaces "which gates auto-ratified" without a contract break."""
-
-    task: Optional[int] = None
-    stage: Optional[str] = None
-    action: Optional[str] = None
-    rationale: Optional[str] = None
-    confidence: Optional[float] = None
-
-
-class AutonomousDecisionsSummary(BaseModel):
-    """R4 (D4): board-level roll-up of the ``is_autonomous`` Coordinator notes (CR-055 recoveries +
-    CR-103 fast_fix answers) — the total ``count`` + the ``recent`` few (newest first)."""
-
-    count: int = 0
-    recent: list[AutonomousDecision] = Field(default_factory=list)
-
-
 class AgentSession(BaseModel):
-    """R4 (D5): per-role agent liveness for the rail — ``idle`` / ``active`` / ``stale`` from R1's
-    ``OrchestratorSession.last_input_at`` heartbeat."""
+    """Per-agent liveness for the who's-up status — ``idle`` / ``active`` / ``stale`` from R1's
+    ``OrchestratorSession.last_input_at`` heartbeat. v2: only the two agents (AI Agent / Auditor)."""
 
     role: str
     status: Literal["idle", "active", "stale"]
 
 
 class PipelineBoardRead(BaseModel):
-    """Board snapshot: current state + the most recent messages.
+    """Vývoj board snapshot: current 4-phase state + the most recent messages (CR-V2-021).
 
-    ``state`` is ``None`` until the pipeline is ``start``ed (lazy creation).
+    The v2 Vývoj board (design §4.4.2) renders a horizontal 4-phase bar (Príprava → Návrh → Programovanie
+    → Verifikácia → Hotovo) whose chips ARE the tabs; each phase's durable artifact (Špecifikácia .md /
+    design doc / coding log / Auditor verdict) is read by the FE from ``recent_messages`` (the phase
+    gate_report / verdict carries it in ``payload['report']``). ``state`` is ``None`` until ``start``.
+
+    The v1 Gate-E / gate_g / Coordinator board fields (``gate_e_open_findings`` / ``release_acceptance_
+    satisfied`` / ``regate_proposal`` / ``coordinator_triage`` / ``autonomous_decisions_summary``) are
+    DROPPED — there is no Gate E, no gate_g release-gate, and no Coordinator hub in the 4-phase model.
     """
 
     state: Optional[PipelineStateRead] = None
     recent_messages: list[PipelineMessageRead] = Field(default_factory=list)
-    #: Deterministic count of unresolved Gate E gaps (CR-NS-018 §5) — the authoritative
-    #: open-finding value the FE close-gate reads, NOT the Customer's ``findings`` array.
-    gate_e_open_findings: int = 0
-    #: Backend-authoritative set of Director actions valid to OFFER right now (WS-C1, CR-NS-030).
-    #: The FE renders only these (intersected with its finer message-derived conditions); empty when
+    #: Backend-authoritative set of schvaľovacie-body actions valid to OFFER right now (WS-C1, CR-NS-030;
+    #: rebuilt to the dial-governed v2 verbs in CR-V2-009 — ``approve_spec`` / ``schvalit`` / ``uprav`` /
+    #: ``pokracovat`` / ``ask`` / ``answer`` / ``verdict`` / ``pause``). The FE renders only these; empty when
     #: the pipeline hasn't started.
     available_actions: list[str] = Field(default_factory=list)
-    #: Build-readiness facts (WS-C1, CR-NS-030) the FE uses to DISABLE the final-approve / end-build
-    #: buttons (mirrors ``gate_e_open_findings``): ``all_tasks_done`` False → a task is still ``todo``
-    #: (approve blocked); ``build_open_findings`` > 0 → a failed/unverified task (approve + end_build
-    #: blocked). Defaults are the permissive "ready" values so an absent field never disables.
+    #: Build-readiness facts (WS-C1, CR-NS-030) the FE uses to DISABLE the Programovanie sign-off button when
+    #: not satisfiable: ``all_tasks_done`` False → a task is still ``todo``; ``build_open_findings`` > 0 → a
+    #: failed/unverified task. Defaults are the permissive "ready" values so an absent field never disables.
+    #: Also feeds the Programovanie split-view task progress (design §4.5).
     all_tasks_done: bool = True
     build_open_findings: int = 0
-    #: gate-g-hardening GAP 1 (A4): the FE DISABLES the gate_g "Verdikt PASS" button while this is False —
-    #: the engine release acceptance (release_smoke_test.sh) has not reached exit-0 (or a legit non-web SKIP)
-    #: this iteration, so the verdict handler would 400 the PASS. Computed only at gate_g; True (permissive)
-    #: elsewhere / when absent, so it never disables a non-gate_g control. Mirrors ``build_open_findings``.
-    release_acceptance_satisfied: bool = True
-    #: The build task currently in focus (WS-C2, CR-NS-035) — in_progress while building, else the held
-    #: failed task at a HALT; the "kto je na rade" board shows "#N: title". ``None`` outside build.
+    #: The Programovanie task currently in focus (WS-C2, CR-NS-035) — in_progress while coding, else the held
+    #: failed task at a fix-loop HALT; the who's-up status shows "#N: title". ``None`` outside Programovanie.
     current_task: Optional[BoardTask] = None
-    #: gate_g FAIL re-gate proposal (CR-NS-057 §F2.4) — the inferred target + rationale, computed only at
-    #: gate_g / awaiting_director|blocked. ``None`` elsewhere; the FE renders the FAIL→target button + chips.
-    regate_proposal: Optional[RegateProposal] = None
-    #: R4 (D3): the latest Coordinator relay/escalation triage in front of the Director — present only at a
-    #: settled (awaiting_director / blocked) state with such a directive; ``None`` otherwise. The FE renders
-    #: "Koordinátor klasifikoval: X (istota Y %), navrhuje Z" even for a non-executable relay.
-    coordinator_triage: Optional[CoordinatorTriage] = None
-    #: R4 (D4): board roll-up of the autonomous Coordinator decisions for this version (count + recent few).
-    #: Always computed; the FE renders the line only when ``count > 0`` (absent / 0 → render nothing).
-    autonomous_decisions_summary: Optional[AutonomousDecisionsSummary] = None
-    #: R4 (D5): per-role agent liveness (idle / active / stale) for the rail's staleness chips. Always present
-    #: (one entry per agent role); an absent field on an older board → the FE renders no staleness indicator.
+    #: Per-agent liveness (idle / active / stale) for the who's-up status — one entry per v2 agent role
+    #: (AI Agent / Auditor). An absent field on an older board → the FE renders no staleness indicator.
     agent_sessions: list[AgentSession] = Field(default_factory=list)
 
 

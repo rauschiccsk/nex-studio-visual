@@ -30,9 +30,7 @@ from backend.schemas.agent_terminal import AgentTerminalSessionRead
 from backend.schemas.pagination import PaginatedResponse
 from backend.schemas.pipeline import (
     AgentSession,
-    AutonomousDecisionsSummary,
     BoardTask,
-    CoordinatorTriage,
     FastFixStartRequest,
     FastFixStartResponse,
     PipelineActionRequest,
@@ -41,7 +39,6 @@ from backend.schemas.pipeline import (
     PipelineRelayRequest,
     PipelineRelayResponse,
     PipelineStateRead,
-    RegateProposal,
 )
 from backend.services import agent_terminal as agent_terminal_service
 from backend.services import fast_fix as fast_fix_service
@@ -75,50 +72,38 @@ def _recent_messages(db: Session, version_id: uuid.UUID, limit: int) -> list[Pip
 
 
 def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> PipelineBoardRead:
+    """Assemble the Vývoj board snapshot (CR-V2-021) — the 4-phase model.
+
+    The horizontal phase bar + per-phase artifacts are derived FE-side from ``state.current_stage`` (the
+    build-position ``●``) + ``recent_messages`` (each phase's durable Špecifikácia / design doc / coding log
+    / Auditor verdict, carried in the gate_report / verdict ``payload['report']``). The route supplies only:
+    the offerable dial-governed actions, the Programovanie split-view task progress (build-readiness +
+    current task), and the two-agent who's-up liveness. The v1 Gate-E / gate_g / Coordinator board fields
+    are gone (no Gate E, no release-gate, no Coordinator hub in the 4-phase model)."""
     state = db.execute(select(PipelineState).where(PipelineState.version_id == version_id)).scalar_one_or_none()
-    # WS-C1 (CR-NS-030): build-readiness facts for the FE to disable the final-approve / end-build
-    # buttons when not satisfiable (the state-only available_actions can't see todos / open findings).
+    # WS-C1 (CR-NS-030): build-readiness facts for the FE to disable the Programovanie sign-off button when
+    # not satisfiable (the state-only available_actions can't see todos / open findings) + drive the
+    # Programovanie split-view task progress (design §4.5).
     all_tasks_done, build_open_findings = (
         orchestrator.build_readiness(db, version_id) if state is not None else (True, 0)
     )
-    # gate-g-hardening GAP 1 (A4): the gate_g PASS-button gate — True (permissive) everywhere except a
-    # gate_g where the engine release acceptance has not yet reached exit-0 / a legit SKIP this iteration.
-    release_acceptance_satisfied = (
-        orchestrator._release_acceptance_satisfied(db, version_id)
-        if (state is not None and state.current_stage == "gate_g")
-        else True
-    )
-    # WS-C2 (CR-NS-035): the build task in focus for the "kto je na rade" board (only at build).
+    # WS-C2 (CR-NS-035): the task in focus for the who's-up status (only during the Programovanie phase).
     ct = (
         orchestrator.current_build_task(db, version_id)
-        if (state is not None and state.current_stage == "build")
+        if (state is not None and state.current_stage == "programovanie")
         else None
     )
-    # gate_g FAIL Fix 2 (CR-NS-057 §F2.4): propose the re-gate target, computed FRESH (no synthesis payload
-    # marker), only at gate_g / awaiting_director|blocked. None elsewhere → the FE shows a plain FAIL verdict.
-    regate_proposal = None
-    if state is not None and state.current_stage == "gate_g" and state.status in ("awaiting_director", "blocked"):
-        entry = orchestrator._infer_regate_entry_stage(db, version_id)
-        reason = "návrh/rozsah → späť na dizajn (gate_a)" if entry == "gate_a" else "oprava implementácie → znova build"
-        regate_proposal = RegateProposal(entry_stage=entry, reason=reason)
-    # R4 operator legibility (v0.7.0, D3/D4/D5): the Coordinator's current triage, a board roll-up of
-    # autonomous decisions, and per-role agent liveness — each a bounded per-version scan / one query.
-    triage = orchestrator.coordinator_triage(db, version_id, state)
-    autonomous = orchestrator.autonomous_decisions_summary(db, version_id) if state is not None else None
+    # Per-agent liveness for the who's-up status — a bounded one-query scan over the two v2 agent sessions.
     sessions = orchestrator.agent_sessions(db, version_id, state) if state is not None else []
     return PipelineBoardRead(
         state=PipelineStateRead.model_validate(state) if state is not None else None,
         recent_messages=[PipelineMessageRead.model_validate(m) for m in _recent_messages(db, version_id, limit)],
-        gate_e_open_findings=orchestrator._gate_e_open_findings(db, version_id),
-        # WS-C1 (CR-NS-030): backend-authoritative offerable actions so the FE can't show no-op buttons.
+        # WS-C1 (CR-NS-030): backend-authoritative offerable actions (dial-governed v2 verbs) so the FE can't
+        # show no-op buttons.
         available_actions=sorted(orchestrator.determine_available_actions(state)) if state is not None else [],
         all_tasks_done=all_tasks_done,
         build_open_findings=build_open_findings,
-        release_acceptance_satisfied=release_acceptance_satisfied,
         current_task=BoardTask(number=ct.number, title=ct.title) if ct is not None else None,
-        regate_proposal=regate_proposal,
-        coordinator_triage=CoordinatorTriage(**triage) if triage is not None else None,
-        autonomous_decisions_summary=AutonomousDecisionsSummary(**autonomous) if autonomous is not None else None,
         agent_sessions=[AgentSession(**s) for s in sessions],
     )
 

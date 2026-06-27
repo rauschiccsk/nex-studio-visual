@@ -7,10 +7,10 @@ import api from "../api";
 import type { components } from "./pipeline.generated";
 import type { PaginatedResponse } from "../../types/common";
 
-// Debug-attach (CR-NS-018 §10) targets ANY pipeline agent's orchestrator session — a deliberately
-// separate type from the spawn `AgentRole` (E3(a)/CR-NS-039 narrowed that to "coordinator"). NOT
-// `PipelineActor` (that includes customer/director, which have no attachable orchestrator session).
-export type DebugAttachRole = "coordinator" | "designer" | "implementer" | "auditor";
+// Debug-attach (CR-V2-015) break-glass targets a v2 orchestrator session — the two agents only. These are
+// CHARTER-PATH SLUGS (hyphen, e.g. `ai-agent`), which the BE bridges to the DB role value (underscore,
+// `ai_agent`) via `db_role_for_charter_slug`; do not pass the underscore form to the debug-terminal route.
+export type DebugAttachRole = "ai-agent" | "auditor";
 
 // ── stage / actor / status enums (GENERATED — single source of truth, v0.7.0 R2) ─────────────
 //
@@ -25,9 +25,10 @@ export type PipelineStage = PipelineSchemas["PipelineStateRead"]["current_stage"
 
 export type PipelineActor = PipelineSchemas["PipelineStateRead"]["current_actor"];
 
-// `system` is message-only (a participant, never a state actor) — the BE keeps author/recipient as
-// plain str (out of R2 scope), so this composite stays hand-written over the generated actor union.
-export type PipelineParticipant = PipelineActor | "system";
+// `manazer` (the human operator) and `system` are message-only participants (never a state ACTOR — the
+// actor union is the two agents). The BE keeps author/recipient as plain str, so this composite stays
+// hand-written over the generated actor union + the two human/system authors.
+export type PipelineParticipant = PipelineActor | "manazer" | "system";
 
 export type PipelineStatus = PipelineSchemas["PipelineStateRead"]["status"];
 
@@ -56,31 +57,7 @@ export interface PipelineState {
   updated_at: string;
 }
 
-// R4 (D3): the latest Coordinator relay/escalation triage in front of the Director (mirrors BE CoordinatorTriage).
-export interface CoordinatorTriage {
-  triage_class?: string | null;
-  confidence?: number | null;
-  proposed_action?: string | null;
-}
-
-// R4 (D4): one `is_autonomous` Coordinator decision in the board roll-up.
-// PIPELINE-AUTONOMY §3.3: gate-level auto-ratify records carry `stage` (which gate), task-scoped
-// recovery/answer records carry `task` — both optional.
-export interface AutonomousDecision {
-  task?: number | null;
-  stage?: string | null;
-  action?: string | null;
-  rationale?: string | null;
-  confidence?: number | null;
-}
-
-// R4 (D4): board roll-up of autonomous Coordinator decisions (count + the recent few).
-export interface AutonomousDecisionsSummary {
-  count: number;
-  recent: AutonomousDecision[];
-}
-
-// R4 (D5): per-role agent liveness for the rail staleness chips.
+// Per-agent liveness for the who's-up staleness chips (CR-V2-021 — v2: the two agents only).
 export type AgentLiveness = "idle" | "active" | "stale";
 export interface AgentSession {
   role: PipelineActor;
@@ -106,76 +83,36 @@ export interface PipelineMessage {
 export interface PipelineBoard {
   state: PipelineState | null;
   recent_messages: PipelineMessage[];
-  // Deterministic unresolved Gate E gap count (CR-NS-018 §5) — the close-gate value,
-  // not the Customer's self-reported findings array.
-  gate_e_open_findings?: number;
-  // Backend-authoritative set of Director actions valid to offer right now (WS-C1, CR-NS-030).
-  // The action bar renders only these; absent → fall back to the FE's own hardcoded logic.
+  // Backend-authoritative set of schvaľovacie-body actions valid to offer right now (WS-C1, CR-NS-030;
+  // dial-governed v2 verbs). The action bar renders only these; absent → fall back to the FE's own logic.
   available_actions?: PipelineActionName[];
-  // Build-readiness facts (WS-C1, CR-NS-030): the FE disables the final-approve / end-build buttons
-  // when not satisfiable (all_tasks_done false → a todo remains; build_open_findings > 0 → a
-  // failed/unverified task). Absent → permissive (don't disable). Mirrors gate_e_open_findings.
+  // Build-readiness facts (WS-C1, CR-NS-030): the FE disables the Programovanie sign-off button when not
+  // satisfiable (all_tasks_done false → a todo remains; build_open_findings > 0 → a failed/unverified task)
+  // and drives the Programovanie split-view task progress. Absent → permissive (don't disable).
   all_tasks_done?: boolean;
   build_open_findings?: number;
-  // gate-g-hardening GAP 1 (A4): the gate_g "Verdikt PASS" button is DISABLED while this is false — the
-  // engine release acceptance (release_smoke_test.sh) has not reached exit-0 / a legit non-web SKIP this
-  // iteration, so the verdict would 400. Absent → permissive (don't disable). Mirrors build_open_findings.
-  release_acceptance_satisfied?: boolean;
-  // The build task currently in focus (WS-C2, CR-NS-035) — the "kto je na rade" board shows "#N: title".
+  // The Programovanie task currently in focus (WS-C2, CR-NS-035) — the who's-up status shows "#N: title".
   current_task?: { number: number; title: string } | null;
-  // gate_g FAIL re-gate proposal (CR-NS-057 §F2.4) — the inferred target + rationale, present only at
-  // gate_g / awaiting_manazer|blocked. Absent → the FE shows a plain "Verdikt FAIL".
-  regate_proposal?: { entry_stage: PipelineStage; reason?: string } | null;
-  // R4 (D3): the latest Coordinator relay/escalation triage in front of the Director — present only at a
-  // settled state with such a directive. Absent/null → render nothing.
-  coordinator_triage?: CoordinatorTriage | null;
-  // R4 (D4): board roll-up of autonomous Coordinator decisions; the FE renders the line only when count > 0.
-  autonomous_decisions_summary?: AutonomousDecisionsSummary | null;
-  // R4 (D5): per-role agent liveness for the rail staleness chips. Absent on an older board → no indicator.
+  // Per-agent liveness for the who's-up staleness chips (the two v2 agents). Absent → no indicator.
   agent_sessions?: AgentSession[];
 }
 
 // ── action requests ──────────────────────────────────────────────────────────
 
+// The dial-governed v2 schvaľovacie-body verbs (CR-V2-009; mirrors orchestrator._ACTIONS). The v1
+// Gate-E / gate_g / Coordinator / release action verbs (approve / return / fix / leave / verdict-PASS-gate
+// / apply_coordinator_recommendation / end_gate_e / end_build / continue_build / rerun_release_audit /
+// surgical_fix / uat_accept / retry_publish / accept_merged) are dropped with the 4-phase model.
 export type PipelineActionName =
-  | "start"
-  | "approve"
-  | "return"
-  | "ask"
-  | "answer"
-  | "apply_coordinator_recommendation"
-  | "fix"
-  | "leave"
-  | "verdict"
-  | "rerun_release_audit"
-  | "surgical_fix"
-  | "uat_accept"
-  | "retry_publish"
-  | "end_gate_e"
-  | "end_build"
-  | "continue_build"
-  | "accept_merged"
-  | "pause";
-
-// Structured Coordinator proposal (F-008 §2 A1, E7) carried on a coordinator gate_report's
-// payload.coordinator_directive. The Director approves it via apply_coordinator_recommendation and the
-// orchestrator executes the matching action (F-008 §9).
-export interface CoordinatorDirective {
-  // Mirrors the BE CoordinatorDirective.triage_class Literal (backend/services/pipeline_status.py).
-  // "programmer_routine_question" (CR-NS-103, F-009 §4.6): a routine fast_fix build question the
-  // Coordinator answers itself (proposed_action="coordinator_answer_question").
-  triage_class:
-    | "spec_problem"
-    | "programmer_guidance"
-    | "nex_studio_bug"
-    | "director_decision"
-    | "programmer_routine_question";
-  proposed_action: string;
-  target?: { task_id?: string; role?: string; commit?: string };
-  params?: Record<string, unknown>;
-  rationale: string;
-  confidence: number;
-}
+  | "start" // Spustiť tvorbu špecifikácie
+  | "approve_spec" // Schváliť špecifikáciu (end Príprava — ALWAYS mandatory, dial-independent)
+  | "schvalit" // Schváliť (dial-governed advance after Návrh / Programovanie / Verifikácia)
+  | "uprav" // Uprav (rework the current phase / "Skús znova" on an error block)
+  | "pokracovat" // Pokračovať (resume a paused Programovanie loop)
+  | "verdict" // the Auditor's Verifikácia verdict (PASS / FAIL)
+  | "ask" // open a direct AI-Agent consult
+  | "answer" // answer an agent QUESTION on a blocked state
+  | "pause"; // cooperative pause of the Programovanie loop
 
 export interface PipelineActionRequest {
   action: PipelineActionName;

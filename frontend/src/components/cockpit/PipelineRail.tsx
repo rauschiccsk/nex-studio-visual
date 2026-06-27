@@ -1,18 +1,15 @@
-// Left rail: stage progress + agent status chips (F-007 §7).
+// Vývoj horizontal 4-phase bar (CR-V2-021, design §4.4.2). The pipeline is a horizontal phase bar at the
+// TOP (Príprava ✓ › Návrh ● › Programovanie ○ › Verifikácia ○) whose chips ARE the tabs — there is no
+// separate tab row. Two coexisting states ride the bar: ● = where the BUILD currently is (auto-advances),
+// highlighted = which tab the Manažér is VIEWING (their click); these can differ.
 
-import type {
-  ActivityLine,
-  AgentSession,
-  PipelineActor,
-  PipelineBoard,
-  PipelineState,
-} from "../../services/api/pipeline";
-import type { StatusTone } from "./labels";
-import { FLOW_LABELS, ROLE_LABELS, STAGE_CODES, STAGE_LABELS, stageOrderForFlow, TONE_TEXT } from "./labels";
+import type { ActivityLine, AgentSession, PipelineActor, PipelineBoard, PipelineState } from "../../services/api/pipeline";
+import type { BuildPhase, StatusTone } from "./labels";
+import { PHASE_CODES, PHASE_LABELS, PHASE_ORDER, TONE_TEXT, V2_ROLE_LABELS } from "./labels";
 
-// The agent actually active (CR-NS-018): while working = the real streaming role
-// (latest activity frame, fallback the stage actor); at rest = who just acted
-// (latest non-director/system message author). NOT the nominal current_actor.
+// The agent actually active: while working = the real streaming role (latest activity frame, fallback the
+// stage actor); at rest = who just acted (latest non-manazer/system message author). Used for the who's-up
+// status; NOT the nominal current_actor. (Carried from CR-NS-018; re-keyed to the v2 participants.)
 export function deriveActiveAgent(board: PipelineBoard | null, activity: ActivityLine[]): PipelineActor | null {
   const state = board?.state ?? null;
   if (!state) return null;
@@ -28,144 +25,116 @@ export function deriveActiveAgent(board: PipelineBoard | null, activity: Activit
   return null;
 }
 
-// Agent chips (manazer is the human operator, not an agent chip). Labels from the shared
-// ROLE_LABELS map; emoji is decorative.
-const AGENTS: { actor: PipelineActor; emoji: string }[] = [
-  { actor: "coordinator", emoji: "🧭" },
-  { actor: "designer", emoji: "🎨" },
-  { actor: "customer", emoji: "🧑‍💼" },
-  { actor: "implementer", emoji: "🔨" },
-  { actor: "auditor", emoji: "🔍" },
-];
+// The four real phases (Hotovo is the terminal sentinel, not a clickable tab — design §4.4.2).
+const TAB_PHASES: BuildPhase[] = PHASE_ORDER.filter((p) => p !== "done");
 
-// R4 (D5): "stale" = a session untouched > 30 min (from agent_sessions), surfaced on an otherwise-idle chip.
-type ChipStatus = "idle" | "working" | "awaiting" | "blocked" | "stale";
+// A phase's position relative to the build's current phase → its chip marker + tone.
+//   done (✓, before the build position, or the terminal Hotovo) · current (●, the build position) ·
+//   pending (○, not yet reached).
+type PhaseMark = "done" | "current" | "pending";
 
-// Chip colour from the unified palette (CR-NS-028): working=blue, awaiting=amber, blocked=red,
-// idle=neutral — never emerald-for-working. stale=amber (an idle thread needing attention).
-const CHIP_TONE: Record<ChipStatus, StatusTone> = {
-  idle: "neutral",
-  working: "blue",
-  awaiting: "amber",
-  blocked: "red",
-  stale: "amber",
-};
-
-const CHIP_LABEL: Record<ChipStatus, string> = {
-  idle: "idle",
-  working: "working",
-  awaiting: "awaiting",
-  blocked: "blocked",
-  stale: "stale",
-};
-
-function chipStatusFor(
-  actor: PipelineActor,
-  state: PipelineState | null,
-  activeAgent: PipelineActor | null,
-): ChipStatus {
-  // The active agent is the one actually working / who just acted (CR-NS-018) — not
-  // the nominal stage actor (at gate_e that's always "customer"). Derived upstream.
-  if (!state || activeAgent !== actor) return "idle";
-  switch (state.status) {
-    case "agent_working":
-      return "working";
-    case "awaiting_manazer":
-      return "awaiting";
-    case "blocked":
-      return "blocked";
-    default:
-      return "idle";
-  }
+function phaseMarkFor(phase: BuildPhase, state: PipelineState | null): PhaseMark {
+  if (!state) return "pending";
+  const buildIdx = PHASE_ORDER.indexOf(state.current_stage as BuildPhase);
+  const phaseIdx = PHASE_ORDER.indexOf(phase);
+  const finished = state.status === "done"; // the whole build reached Hotovo
+  if (buildIdx < 0 || phaseIdx < 0) return "pending";
+  if (phaseIdx < buildIdx || (phaseIdx === buildIdx && finished)) return "done";
+  if (phaseIdx === buildIdx) return "current";
+  return "pending";
 }
+
+const MARK_GLYPH: Record<PhaseMark, string> = { done: "✓", current: "●", pending: "○" };
+const MARK_TONE: Record<PhaseMark, StatusTone> = { done: "green", current: "blue", pending: "neutral" };
 
 interface Props {
   state: PipelineState | null;
-  /** The agent actually active (working role, or latest message author at rest) —
-   *  derived in CockpitPage from activity + messages. Falls back to current_actor. */
-  activeAgent?: PipelineActor | null;
-  /** R4 (D5): per-role liveness from the board (idle/active/stale). An otherwise-idle chip whose session is
-   *  `stale` (untouched > 30 min) shows a "stale" indicator. Absent on an older board → no indicator. */
-  agentSessions?: AgentSession[];
+  /** Which phase tab the Manažér is currently VIEWING (the highlighted chip) — may differ from ●. */
+  viewedPhase: BuildPhase;
+  /** Select a phase tab (the chip click). */
+  onSelectPhase: (phase: BuildPhase) => void;
 }
 
-export function PipelineRail({ state, activeAgent = null, agentSessions }: Props) {
-  // R4 (D5): role → liveness lookup for the staleness chip.
+export function PipelineRail({ state, viewedPhase, onSelectPhase }: Props) {
+  return (
+    <div className="flex flex-shrink-0 items-center gap-1 overflow-x-auto border-b border-[var(--color-border-default)] px-4 py-2">
+      {TAB_PHASES.map((phase, idx) => {
+        const mark = phaseMarkFor(phase, state);
+        const viewed = phase === viewedPhase;
+        const tone = MARK_TONE[mark];
+        return (
+          <div key={phase} className="flex items-center">
+            {idx > 0 && <span className="px-1 text-[var(--color-text-muted)]">›</span>}
+            <button
+              onClick={() => onSelectPhase(phase)}
+              title={PHASE_CODES[phase]}
+              aria-current={viewed ? "true" : undefined}
+              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs transition-colors ${
+                viewed
+                  ? "bg-[var(--color-surface-hover)] font-semibold text-[var(--color-text-primary)] ring-1 ring-[var(--color-accent-primary)]"
+                  : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
+              }`}
+            >
+              <span className={`font-mono ${TONE_TEXT[tone]}`} aria-hidden="true">
+                {MARK_GLYPH[mark]}
+              </span>
+              <span>{PHASE_LABELS[phase]}</span>
+              {mark === "current" && state?.is_regate && (
+                <span className="rounded bg-[var(--color-state-warning-bg)] px-1 text-[9px] text-[var(--color-state-warning-fg)]">
+                  oprava #{state.iteration}
+                </span>
+              )}
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Who's-up status (design §4.4.2 "Below the tabs") ──────────────────────────
+// AI Agent / + helpers / Auditor / čaká na Manažéra — honest, derived from the live state.
+
+interface WhosUpProps {
+  state: PipelineState | null;
+  activeAgent?: PipelineActor | null;
+  agentSessions?: AgentSession[];
+  currentTask?: { number: number; title: string } | null;
+}
+
+export function WhosUp({ state, activeAgent = null, agentSessions, currentTask }: WhosUpProps) {
+  if (!state || state.status === "done") return null;
   const liveness: Partial<Record<PipelineActor, AgentSession["status"]>> = {};
   for (const s of agentSessions ?? []) liveness[s.role] = s.status;
-  // Flow-aware stage path (F-009): a fast_fix pipeline shows only the short lane
-  // (kickoff → build → release → done), never the full 11-stage waterfall rail.
-  const stageOrder = stageOrderForFlow(state?.flow_type);
-  const currentIdx = state ? stageOrder.indexOf(state.current_stage) : -1;
-  const flowBadge = state?.flow_type === "fast_fix" ? FLOW_LABELS.fast_fix : null;
+
+  let label: string;
+  let tone: StatusTone;
+  if (state.status === "awaiting_manazer" || state.status === "blocked") {
+    label = "čaká na Manažéra";
+    tone = "amber";
+  } else if (state.status === "paused") {
+    label = "pozastavené — pokračuj alebo uprav";
+    tone = "amber";
+  } else {
+    // agent_working — name the working agent (+ the Programovanie task in focus, if any).
+    const who = activeAgent ? V2_ROLE_LABELS[activeAgent === "auditor" ? "auditor" : "ai_agent"] : "AI Agent";
+    const task = currentTask ? ` — #${currentTask.number}: ${currentTask.title}` : "";
+    label = `${who} pracuje${task}`;
+    tone = "blue";
+  }
+  const stale = Object.values(liveness).includes("stale");
 
   return (
-    <div className="flex h-full flex-col gap-5 overflow-y-auto p-4">
-      <section>
-        <h3 className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-          Pipeline
-          {flowBadge && (
-            <span className="rounded-full border border-indigo-500/30 bg-indigo-500/20 px-1.5 py-0.5 text-[9px] font-medium normal-case text-[var(--color-accent-primary)]">
-              {flowBadge}
-            </span>
-          )}
-        </h3>
-        <ul className="space-y-1">
-          {stageOrder.map((stage, idx) => {
-            // A stage is completed (✓) when it's BEFORE the current stage, OR it IS the current stage
-            // and the pipeline has finished (status "done") — so the terminal "Hotovo" shows ✓, not the
-            // in-progress ">" marker, when the run is done (CR-NS-099).
-            const finished = state?.status === "done";
-            const completed = currentIdx >= 0 && (idx < currentIdx || (idx === currentIdx && finished));
-            const current = idx === currentIdx && !finished;
-            const marker = completed ? "✓" : current ? ">" : "·";
-            const color = completed
-              ? "text-[var(--color-status-success)]"
-              : current
-                ? "text-primary-400 font-semibold"
-                : "text-[var(--color-text-muted)]";
-            return (
-              <li key={stage} className={`flex items-center gap-2 text-xs ${color}`}>
-                <span className="w-3 text-center font-mono">{marker}</span>
-                <span title={STAGE_CODES[stage]}>{STAGE_LABELS[stage]}</span>
-                {current && state?.is_regate && (
-                  <span className="rounded bg-[var(--color-state-warning-bg)] px-1 text-[9px] text-[var(--color-state-warning-fg)]">
-                    re-gate #{state.iteration}
-                  </span>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-        {/* R4 (D6): a one-line legend for the stage markers — the ✓/>/· render but had no key. */}
-        <p className="mt-2 text-[9px] leading-tight text-[var(--color-text-muted)]">
-          <span className="font-mono text-[var(--color-status-success)]">✓</span> hotovo ·{" "}
-          <span className="font-mono text-primary-400">{">"}</span> práve ·{" "}
-          <span className="font-mono">·</span> ešte neprešlo
-        </p>
-      </section>
-
-      <section>
-        <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-          Agenti
-        </h3>
-        <ul className="space-y-1.5">
-          {AGENTS.map(({ actor, emoji }) => {
-            const base = chipStatusFor(actor, state, activeAgent);
-            // R4 (D5): an otherwise-idle agent whose session is stale (untouched > 30 min) shows "stale".
-            const s: ChipStatus = base === "idle" && liveness[actor] === "stale" ? "stale" : base;
-            return (
-              <li key={actor} className="flex items-center justify-between gap-2 text-xs">
-                <span className="flex items-center gap-1.5 text-[var(--color-text-secondary)]">
-                  <span aria-hidden="true">{emoji}</span>
-                  {ROLE_LABELS[actor]}
-                </span>
-                <span className={`font-mono text-[10px] ${TONE_TEXT[CHIP_TONE[s]]}`}>{CHIP_LABEL[s]}</span>
-              </li>
-            );
-          })}
-        </ul>
-      </section>
+    <div className="flex flex-shrink-0 items-center justify-between gap-2 border-b border-[var(--color-border-default)] px-4 py-1.5 text-xs">
+      <span className="flex items-center gap-1.5 text-[var(--color-text-muted)]">
+        Na rade:
+        <span className={`font-medium ${TONE_TEXT[tone]}`}>{label}</span>
+      </span>
+      {stale && (
+        <span className="text-[10px] text-[var(--color-state-warning-fg)]" title="Session bez aktivity > 30 min">
+          ⚠ session nečinná
+        </span>
+      )}
     </div>
   );
 }

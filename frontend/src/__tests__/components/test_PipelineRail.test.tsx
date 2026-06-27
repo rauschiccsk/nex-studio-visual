@@ -1,22 +1,24 @@
 /**
- * PipelineRail agent chips — unified status colours (CR-NS-028).
- * working = blue (sky), awaiting = amber, blocked = red, idle = neutral — never emerald-for-working.
+ * Vývoj horizontal 4-phase bar (CR-V2-021) — the chips ARE the tabs. The bar shows ✓ done / ● current /
+ * ○ pending markers, highlights the VIEWED tab (which may differ from the build position ●), and each chip
+ * is clickable. The WhosUp who's-up status names the working agent / čaká na Manažéra.
  */
 
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-import PipelineRail from "@/components/cockpit/PipelineRail";
+import PipelineRail, { WhosUp } from "@/components/cockpit/PipelineRail";
 import type { PipelineState, PipelineStatus } from "@/services/api/pipeline";
+import type { BuildPhase } from "@/components/cockpit/labels";
 
 function mkState(status: PipelineStatus, overrides: Partial<PipelineState> = {}): PipelineState {
   return {
     id: "11111111-1111-1111-1111-111111111111",
     version_id: "22222222-2222-2222-2222-222222222222",
     flow_type: "new_version",
-    current_stage: "build",
-    current_actor: "implementer",
+    current_stage: "programovanie",
+    current_actor: "ai_agent",
     status,
     next_action: "",
     is_regate: false,
@@ -27,105 +29,81 @@ function mkState(status: PipelineStatus, overrides: Partial<PipelineState> = {})
   };
 }
 
-describe("PipelineRail — unified chip colours (CR-NS-028)", () => {
-  it("the active agent's working chip = blue (not emerald)", () => {
-    render(<PipelineRail state={mkState("agent_working")} activeAgent="implementer" />);
-    const chip = screen.getByText("working");
-    // CR-NS-067c: TONE_TEXT is now theme-aware (text-X-600 dark:text-X-400) — assert the light base.
-    expect(chip).toHaveClass("text-sky-600");
-    expect(chip).not.toHaveClass("text-emerald-600"); // no emerald-for-working
+describe("PipelineRail — 4-phase bar (chips = tabs)", () => {
+  it("renders the four phase chips as tabs (Hotovo is not a tab)", () => {
+    render(<PipelineRail state={mkState("agent_working")} viewedPhase="programovanie" onSelectPhase={() => {}} />);
+    for (const label of ["Príprava", "Návrh", "Programovanie", "Verifikácia"]) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
+    expect(screen.queryByText("Hotovo")).not.toBeInTheDocument();
   });
 
-  it("awaiting chip = amber, blocked chip = red", () => {
-    const { rerender } = render(<PipelineRail state={mkState("awaiting_manazer")} activeAgent="implementer" />);
-    expect(screen.getByText("awaiting")).toHaveClass("text-amber-600");
-    rerender(<PipelineRail state={mkState("blocked")} activeAgent="implementer" />);
-    expect(screen.getByText("blocked")).toHaveClass("text-red-600");
+  it("marks phases ✓ done / ● current / ○ pending by the build position", () => {
+    // Build is at Programovanie → Príprava+Návrh done, Programovanie current, Verifikácia pending.
+    const { container } = render(
+      <PipelineRail state={mkState("agent_working")} viewedPhase="programovanie" onSelectPhase={() => {}} />,
+    );
+    const chips = (label: string) => screen.getByText(label).closest("button")!;
+    expect(chips("Príprava")).toHaveTextContent("✓");
+    expect(chips("Programovanie")).toHaveTextContent("●");
+    expect(chips("Verifikácia")).toHaveTextContent("○");
+    expect(container).toBeTruthy();
+  });
+
+  it("a done build ticks the terminal Verifikácia as ✓", () => {
+    render(<PipelineRail state={mkState("done", { current_stage: "done" })} viewedPhase="verifikacia" onSelectPhase={() => {}} />);
+    expect(screen.getByText("Verifikácia").closest("button")).toHaveTextContent("✓");
+  });
+
+  it("highlights the VIEWED tab even when it differs from the build position", () => {
+    // Build runs in Programovanie (●) but the Manažér is viewing Návrh.
+    render(<PipelineRail state={mkState("agent_working")} viewedPhase="navrh" onSelectPhase={() => {}} />);
+    expect(screen.getByText("Návrh").closest("button")).toHaveAttribute("aria-current", "true");
+    expect(screen.getByText("Programovanie").closest("button")).not.toHaveAttribute("aria-current");
+  });
+
+  it("a chip click selects that phase tab", () => {
+    const onSelect = vi.fn();
+    render(<PipelineRail state={mkState("agent_working")} viewedPhase="programovanie" onSelectPhase={onSelect} />);
+    fireEvent.click(screen.getByText("Návrh"));
+    expect(onSelect).toHaveBeenCalledWith<[BuildPhase]>("navrh");
   });
 });
 
-describe("PipelineRail — R4 staleness chips + legend (D5/D6)", () => {
-  it("an otherwise-idle agent with a stale session shows the amber 'stale' chip", () => {
+describe("WhosUp — who's-up status", () => {
+  it("names the working agent + the Programovanie task in focus", () => {
     render(
-      <PipelineRail
+      <WhosUp
         state={mkState("agent_working")}
-        activeAgent="implementer"
+        activeAgent="ai_agent"
+        currentTask={{ number: 3, title: "Faktúry API" }}
+      />,
+    );
+    expect(screen.getByText(/AI Agent pracuje/)).toBeInTheDocument();
+    expect(screen.getByText(/#3: Faktúry API/)).toBeInTheDocument();
+  });
+
+  it("shows 'čaká na Manažéra' at a settled stop", () => {
+    render(<WhosUp state={mkState("awaiting_manazer")} />);
+    expect(screen.getByText("čaká na Manažéra")).toBeInTheDocument();
+  });
+
+  it("renders nothing at done", () => {
+    const { container } = render(<WhosUp state={mkState("done", { current_stage: "done" })} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("surfaces a stale session indicator", () => {
+    render(
+      <WhosUp
+        state={mkState("agent_working")}
+        activeAgent="ai_agent"
         agentSessions={[
-          { role: "implementer", status: "active" },
-          { role: "designer", status: "stale" },
-          { role: "auditor", status: "idle" },
+          { role: "ai_agent", status: "active" },
+          { role: "auditor", status: "stale" },
         ]}
       />,
     );
-    expect(screen.getByText("stale")).toHaveClass("text-amber-600"); // designer's stale session
-    expect(screen.getByText("working")).toBeInTheDocument(); // implementer is the active agent
-  });
-
-  it("the active agent keeps its live 'working' status even if its session reads idle", () => {
-    render(
-      <PipelineRail
-        state={mkState("agent_working")}
-        activeAgent="implementer"
-        agentSessions={[{ role: "implementer", status: "idle" }]}
-      />,
-    );
-    expect(screen.getByText("working")).toBeInTheDocument();
-    expect(screen.queryByText("stale")).not.toBeInTheDocument();
-  });
-
-  it("renders the D6 stage-marker legend", () => {
-    render(<PipelineRail state={mkState("agent_working")} activeAgent="implementer" />);
-    const legend = screen.getByText(/ešte neprešlo/);
-    expect(legend).toHaveTextContent("hotovo");
-    expect(legend).toHaveTextContent("práve");
-  });
-
-  it("no agentSessions prop → no stale chips (graceful on an older board)", () => {
-    render(<PipelineRail state={mkState("blocked")} activeAgent="implementer" />);
-    expect(screen.queryByText("stale")).not.toBeInTheDocument();
-  });
-});
-
-describe("PipelineRail — fast_fix short stage path (CR-NS-095)", () => {
-  it("renders ONLY the short lane stages for a fast_fix flow, not the full waterfall", () => {
-    render(<PipelineRail state={mkState("agent_working", { flow_type: "fast_fix", current_stage: "build" })} />);
-
-    // Short lane present: kickoff → build → release → done.
-    expect(screen.getByText("Príprava")).toBeInTheDocument();
-    expect(screen.getByText("Programovanie")).toBeInTheDocument();
-    expect(screen.getByText("Vydanie")).toBeInTheDocument();
-    expect(screen.getByText("Hotovo")).toBeInTheDocument();
-
-    // Full-waterfall-only stages are skipped (absent from the rail).
-    expect(screen.queryByText("Rozsah")).not.toBeInTheDocument(); // gate_a
-    expect(screen.queryByText("Kontrola zákazníkom")).not.toBeInTheDocument(); // gate_e
-    expect(screen.queryByText("Plán úloh")).not.toBeInTheDocument(); // task_plan
-    expect(screen.queryByText("Audit")).not.toBeInTheDocument(); // gate_g
-
-    // Distinct lane badge.
-    expect(screen.getByText("Rýchla oprava")).toBeInTheDocument();
-  });
-
-  it("a new_version flow keeps the full rail and shows no fast-fix badge", () => {
-    render(<PipelineRail state={mkState("agent_working", { flow_type: "new_version", current_stage: "build" })} />);
-    expect(screen.getByText("Rozsah")).toBeInTheDocument(); // gate_a present
-    expect(screen.getByText("Audit")).toBeInTheDocument(); // gate_g present
-    expect(screen.queryByText("Rýchla oprava")).not.toBeInTheDocument();
-  });
-});
-
-describe("PipelineRail — finished pipeline ticks the terminal stage (CR-NS-099)", () => {
-  it("a done fast_fix run shows 'Hotovo' as completed (✓), not the in-progress '>'", () => {
-    render(<PipelineRail state={mkState("done", { flow_type: "fast_fix", current_stage: "done" })} />);
-    const hotovo = screen.getByText("Hotovo").closest("li");
-    expect(hotovo).toHaveTextContent("✓"); // completed marker
-    expect(hotovo).not.toHaveTextContent(">"); // NOT the current/in-progress marker
-  });
-
-  it("a done new_version run also ticks its terminal 'Hotovo'", () => {
-    render(<PipelineRail state={mkState("done", { current_stage: "done" })} />);
-    const hotovo = screen.getByText("Hotovo").closest("li");
-    expect(hotovo).toHaveTextContent("✓");
-    expect(hotovo).not.toHaveTextContent(">");
+    expect(screen.getByText(/session nečinná/)).toBeInTheDocument();
   });
 });

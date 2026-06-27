@@ -1,228 +1,125 @@
-// Right panel: next_action banner + message thread + action bar (F-007 §7).
+// Per-phase content panel for the Vývoj board (CR-V2-021, design §4.4.2). The phase chips ARE the tabs;
+// this renders the VIEWED phase's durable artifact + (when viewing the live phase) the status banner +
+// activity feed. Permanent content persists after the build completes — a finished phase stays viewable.
+//
+//   Príprava      → Špecifikácia .md (the manager's reading view)
+//   Návrh         → the design document incl. the task plan
+//   Programovanie → split view: coding activity LEFT + the task plan RIGHT (the task-plan slot is owned by
+//                   CR-V2-023; this panel hosts it)
+//   Verifikácia   → the Auditor's verdict + findings
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Bell } from "lucide-react";
 
-import type {
-  ActivityLine,
-  CoordinatorDirective,
-  PipelineActionName,
-  PipelineBoard,
-  PipelineState,
-} from "../../services/api/pipeline";
-import PipelineActionBar from "./PipelineActionBar";
+import type { ActivityLine, PipelineBoard, PipelineState } from "../../services/api/pipeline";
+import type { BuildPhase } from "./labels";
 import PipelineActivityFeed from "./PipelineActivityFeed";
-import PipelineMessageBubble from "./PipelineMessageBubble";
-import TaskSummaryCard from "./TaskSummaryCard";
-import WhosTurnBoard from "./WhosTurnBoard";
-import {
-  BLOCK_REASON_LABELS,
-  DECISION_BANNER,
-  PIPELINE_STATUS_TONE,
-  ROLE_LABELS,
-  STAGE_LABELS,
-  TONE_BANNER,
-} from "./labels";
+import { PhaseArtifact } from "./PhaseArtifact";
+import { DECISION_BANNER, PHASE_LABELS, PIPELINE_STATUS_TONE, TONE_BANNER } from "./labels";
 
-// The Coordinator actions the orchestrator can EXECUTE on approval (F-008 §9) — used to decide whether
-// the latest directive is an executable proposal (drives the build approve button) vs a plain relay.
-const EXECUTABLE_COORDINATOR_ACTIONS = new Set([
-  "coordinator_reset_task",
-  "coordinator_move_baseline",
-  "coordinator_clear_session",
-  "coordinator_escalate_dedo",
-  "coordinator_route_to_designer",
-  // v0.7.0 R2 (D5): the proof-case fix — `capture_backlog_item` is in the BE _EXECUTABLE_COORDINATOR_ACTIONS
-  // but had drifted out of this Set (flagged by 3/4 auditors). The R2-c parity contract-test now guards it.
-  "capture_backlog_item",
-  // CR-NS-103 (F-009 §4.6): the Coordinator's autonomous answer to a routine fast_fix build question —
-  // executable (mirrors the BE _EXECUTABLE_COORDINATOR_ACTIONS) so a Director-approved answer is recognized.
-  "coordinator_answer_question",
-]);
+// Slovak placeholder per phase tab when it has no artifact yet.
+const PHASE_PLACEHOLDER: Record<BuildPhase, string> = {
+  priprava: "Špecifikácia ešte nie je pripravená. Spusti tvorbu špecifikácie.",
+  navrh: "Návrhový dokument ešte nevznikol. Najprv schváľ špecifikáciu.",
+  programovanie: "Programovanie ešte nezačalo.",
+  verifikacia: "Auditor ešte nevydal verdikt.",
+  done: "Hotovo.",
+};
 
-// Compose the banner from machine values + Slovak display labels — never render
-// the raw backend ``next_action`` (it embeds machine tokens like 'coordinator').
-function bannerText(state: PipelineState, errorBlock: boolean): string {
-  const role = ROLE_LABELS[state.current_actor];
-  const stage = STAGE_LABELS[state.current_stage];
+// The Slovak banner for the live phase (only shown when the viewed tab IS the build position).
+function bannerText(state: PipelineState): string {
+  const phase = PHASE_LABELS[state.current_stage as BuildPhase] ?? state.current_stage;
   switch (state.status) {
     case "agent_working":
-      return `${role} pracuje na fáze ${stage}`;
+      return `Prebieha fáza ${phase}`;
     case "awaiting_manazer":
-      return `Na rade: Manažér — posúď fázu ${stage}`;
-    case "blocked": {
-      // R4 (D2): precise blocked banner from the AUTHORITATIVE block_reason — a question reads as a Manažér
-      // prompt; the three error reasons each read as a labelled "skús znova". NULL (legacy / unset) → the old
-      // `errorBlock` heuristic, byte-for-byte the prior behaviour.
-      const br = state.block_reason;
-      if (br === "agent_question") return `Na rade: Manažér — odpovedz ${role}-ovi`;
-      if (br) return `${BLOCK_REASON_LABELS[br]} vo fáze ${stage} — skús znova`;
-      return errorBlock
-        ? `Agent zlyhal vo fáze ${stage} — skús znova`
-        : `Na rade: Manažér — odpovedz ${role}-ovi`;
-    }
+      return `Na rade: Manažér — posúď fázu ${phase}`;
+    case "blocked":
+      return state.block_reason === "agent_question"
+        ? "Na rade: Manažér — odpovedz AI Agentovi"
+        : `Fáza ${phase} blokovaná — skús znova`;
     case "paused":
-      return "Build pozastavený — pokračuj alebo ukonči";
+      return "Programovanie pozastavené — pokračuj alebo uprav";
     case "done":
       return "Hotovo";
     default:
-      return stage;
+      return phase;
   }
 }
 
 interface Props {
   board: PipelineBoard;
-  inFlight: boolean;
+  /** Which phase tab the Manažér is viewing (the highlighted chip). */
+  viewedPhase: BuildPhase;
   activity: ActivityLine[];
-  onAction: (action: PipelineActionName, payload?: Record<string, unknown>) => void;
+  /** The task-plan slot for the Programovanie split view (CR-V2-023 supplies the panel). */
+  taskPlanSlot?: ReactNode;
 }
 
-export function ExchangePanel({ board, inFlight, activity, onAction }: Props) {
+export function ExchangePanel({ board, viewedPhase, activity, taskPlanSlot }: Props) {
   const { state, recent_messages } = board;
-  const threadRef = useRef<HTMLDivElement>(null);
+  const feedRef = useRef<HTMLDivElement>(null);
+
+  // The viewed tab is the build's CURRENT phase (the live one) when it matches current_stage.
+  const isLivePhase = state != null && (state.current_stage as BuildPhase) === viewedPhase;
 
   useEffect(() => {
-    threadRef.current?.scrollTo?.({ top: threadRef.current.scrollHeight });
+    feedRef.current?.scrollTo?.({ top: feedRef.current.scrollHeight });
   }, [recent_messages.length]);
 
-  // Banner tone from the unified palette (CR-NS-028): agent_working=blue, awaiting=amber, blocked=red,
-  // done=green — never emerald-for-working.
   const tone = state ? PIPELINE_STATUS_TONE[state.status] ?? "neutral" : "neutral";
-  const banner = state ? TONE_BANNER[tone] : "";
-  // CR-2 (v0.7.3): at awaiting_manazer / blocked the Manažér must act → render a HIGH-CONTRAST sticky CTA
-  // (instead of the low-key tonal banner) so a healthy "your turn" board never reads as "stuck".
-  // agent_working / done / paused keep the low-key banner (no false alarm). DECISION_BANNER is tone-aware
-  // (amber awaiting / red blocked) so the CTA stays inside the unified palette.
-  const decisionNeeded = state?.status === "awaiting_manazer" || state?.status === "blocked";
-  const decisionBanner = DECISION_BANNER[tone];
-  // R4 (D1): the FALLBACK heuristic for an error-block (agent crash/timeout escalates via a system
-  // notification — its last message is authored by "system"). Now superseded by the authoritative
-  // `state.block_reason` (the banner above + PipelineActionBar derive from it); this stays only for NULL /
-  // legacy blocked rows. Drives the "Skús znova" retry vs answer/approve choice when block_reason is absent.
-  const lastMessage = recent_messages[recent_messages.length - 1];
-  const isErrorBlock = state?.status === "blocked" && lastMessage?.author === "system";
-  // Drives the "Vrátiť Návrhárovi s odporúčaniami Koordinátora" button (v0.7.2 R-D): only offer it when
-  // there is a Coordinator gate_report to apply (else the action would 400). CR-NS-018.
-  const hasCoordinatorReport = recent_messages.some(
-    (m) => m.author === "coordinator" && m.kind === "gate_report",
-  );
-  // E7 (F-008 §9): the latest EXECUTABLE Coordinator proposal (the Director approves it via
-  // apply_coordinator_recommendation → the orchestrator executes the matching action). Only an
-  // executable directive (not a relay / director_decision / low-confidence) drives the build approve
-  // button + its effect label; a non-executable one stays a plain relay (the usual decision set).
-  const latestCoordinatorDirective = [...recent_messages]
-    .reverse()
-    .map((m) => (m.payload as { coordinator_directive?: CoordinatorDirective } | null)?.coordinator_directive)
-    .find((d): d is CoordinatorDirective => Boolean(d));
-  const coordinatorProposal =
-    latestCoordinatorDirective &&
-    latestCoordinatorDirective.triage_class !== "director_decision" &&
-    latestCoordinatorDirective.confidence >= 0.8 &&
-    EXECUTABLE_COORDINATOR_ACTIONS.has(latestCoordinatorDirective.proposed_action)
-      ? latestCoordinatorDirective
-      : null;
-  // Gate E boundary signals from the latest Customer gate_report (CR-NS-018 Phase 3):
-  // distinguishes a topic boundary (continue) from the final boundary (→ Build), and
-  // the open-finding gate that blocks closing.
-  const lastCustomerReport = [...recent_messages]
-    .reverse()
-    .find((m) => m.author === "customer" && m.stage === "gate_e" && m.kind === "gate_report");
-  const gateECoverageComplete = lastCustomerReport?.payload?.coverage_complete === true;
-  // Deterministic open-finding count from the board (CR-NS-018 §5) — NOT the Customer's
-  // self-reported findings array (which an imprecise summary could wrongly inflate).
-  const gateEOpenFindings = board.gate_e_open_findings ?? 0;
-  // Per-question stop vs topic boundary (revised §2): the latest gate_e milestone is
-  // either a Designer answer (per-question — Branch A/B) or a Customer gate_report
-  // (topic boundary). gap_found on that answer → Branch B (Opraviť/Ponechať).
-  const lastGateEMilestone = [...recent_messages]
-    .reverse()
-    .find(
-      (m) =>
-        m.stage === "gate_e" &&
-        ((m.author === "designer" && m.kind === "answer") ||
-          (m.author === "customer" && m.kind === "gate_report")),
-    );
-  const gateEMode = !lastGateEMilestone
-    ? null
-    : lastGateEMilestone.author === "customer"
-      ? "boundary"
-      : "question";
-  const gateEGap = lastGateEMilestone?.author === "designer" && lastGateEMilestone.payload?.gap_found === true;
+  const decisionNeeded = isLivePhase && (state?.status === "awaiting_manazer" || state?.status === "blocked");
+  const decisionBanner = state ? DECISION_BANNER[tone] : undefined;
+
+  // Programovanie split view (design §4.5): coding activity LEFT + task plan RIGHT.
+  const programovanieSplit = viewedPhase === "programovanie";
 
   return (
-    <div className="flex h-full flex-col">
-      {state &&
+    <div className="flex h-full min-h-0 flex-col">
+      {/* The live-phase status banner — only when the viewed tab IS the build position (else a finished
+          tab is a quiet durable record; the live banner belongs to the live phase). */}
+      {isLivePhase &&
+        state &&
         (decisionNeeded && decisionBanner ? (
           <div
-            className={`sticky top-0 z-10 flex flex-shrink-0 items-center gap-2 border-l-4 px-4 py-2.5 text-sm font-semibold ${decisionBanner}`}
+            className={`flex flex-shrink-0 items-center gap-2 border-l-4 px-4 py-2.5 text-sm font-semibold ${decisionBanner}`}
           >
             <Bell className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
-            <span>{bannerText(state, isErrorBlock)}</span>
+            <span>{bannerText(state)}</span>
           </div>
         ) : (
-          <div className={`flex-shrink-0 border-b px-4 py-2.5 text-xs ${banner}`}>
-            <span className="font-medium text-[var(--color-text-primary)]">{bannerText(state, isErrorBlock)}</span>
+          <div className={`flex-shrink-0 border-b px-4 py-2 text-xs ${TONE_BANNER[tone]}`}>
+            <span className="font-medium text-[var(--color-text-primary)]">{bannerText(state)}</span>
           </div>
         ))}
 
-      {/* "Kto je na rade" board (WS-C2, CR-NS-035): whose turn + decision-type + relay chain + current
-          task + the Coordinator's proposed action — honest, derived from the live state. Not at `done`
-          (the pipeline is finished — no one's turn; the banner's "Hotovo" suffices). */}
-      {state && state.status !== "done" && (
-        <WhosTurnBoard
-          state={state}
-          availableActions={board.available_actions}
-          currentTask={board.current_task}
-          coordinatorProposal={coordinatorProposal}
-          regateProposal={board.regate_proposal}
-          coordinatorTriage={board.coordinator_triage}
-          autonomousSummary={board.autonomous_decisions_summary}
-        />
-      )}
-
-      <div ref={threadRef} className="flex-1 space-y-2 overflow-y-auto p-4">
-        {recent_messages.length === 0 ? (
-          <div className="py-8 text-center text-xs text-[var(--color-text-muted)]">
-            Zatiaľ žiadne správy v pipeline.
+      {programovanieSplit ? (
+        // Coding log LEFT + the task plan RIGHT (split view).
+        <div className="flex min-h-0 flex-1">
+          <div className="flex min-w-0 flex-1 flex-col">
+            <PhaseArtifact phase="programovanie" messages={recent_messages} placeholder={PHASE_PLACEHOLDER.programovanie} />
+            {isLivePhase && state?.status === "agent_working" && (
+              <div className="flex-shrink-0">
+                <PipelineActivityFeed activity={activity} />
+              </div>
+            )}
           </div>
-        ) : (
-          recent_messages.map((m) =>
-            (m.payload as { is_task_summary?: boolean } | null)?.is_task_summary ? (
-              <TaskSummaryCard key={m.id} message={m} />
-            ) : (
-              <PipelineMessageBubble key={m.id} message={m} />
-            ),
-          )
-        )}
-      </div>
-
-      {/* Live activity feed BELOW the thread (CR-NS-026): flow reads top-to-bottom banner → thread →
-          live activity → action bar, so the streaming action sits right above the controls. */}
-      {state?.status === "agent_working" && (
-        <div className="flex-shrink-0">
-          <PipelineActivityFeed activity={activity} />
+          {taskPlanSlot && (
+            <div className="flex w-80 flex-shrink-0 flex-col border-l border-[var(--color-border-default)]">
+              {taskPlanSlot}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div ref={feedRef} className="min-h-0 flex-1 overflow-y-auto">
+          <PhaseArtifact phase={viewedPhase} messages={recent_messages} placeholder={PHASE_PLACEHOLDER[viewedPhase]} />
+          {isLivePhase && state?.status === "agent_working" && (
+            <div className="flex-shrink-0">
+              <PipelineActivityFeed activity={activity} />
+            </div>
+          )}
         </div>
       )}
-
-      <div className="flex-shrink-0 border-t border-[var(--color-border-default)] p-3">
-        <PipelineActionBar
-          state={state}
-          availableActions={board.available_actions}
-          allTasksDone={board.all_tasks_done}
-          buildOpenFindings={board.build_open_findings}
-          releaseAcceptanceSatisfied={board.release_acceptance_satisfied}
-          coordinatorProposal={coordinatorProposal}
-          regateProposal={board.regate_proposal}
-          inFlight={inFlight}
-          isErrorBlock={isErrorBlock}
-          hasCoordinatorReport={hasCoordinatorReport}
-          gateECoverageComplete={gateECoverageComplete}
-          gateEOpenFindings={gateEOpenFindings}
-          gateEMode={gateEMode}
-          gateEGap={gateEGap}
-          onAction={onAction}
-        />
-      </div>
     </div>
   );
 }

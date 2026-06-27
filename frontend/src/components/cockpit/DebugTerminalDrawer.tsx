@@ -9,12 +9,13 @@ import { useAuthStore } from "../../store/authStore";
 import { openDebugTerminalApi } from "../../services/api/pipeline";
 import type { DebugAttachRole, PipelineActor } from "../../services/api/pipeline";
 
-// Debug-attach targets any orchestrator-backed pipeline role (CR-NS-018 §10) — independent of the
-// E3(a) spawn-terminal narrowing (CR-NS-039); see DebugAttachRole in pipeline.ts.
-const TERMINAL_ROLES: DebugAttachRole[] = ["coordinator", "designer", "implementer", "auditor"];
+// Raw-terminal peek (CR-V2-021, design §4.4.2): the break-glass attach to a v2 orchestrator session — the
+// two agents only, as CHARTER-PATH SLUGS (hyphen). The board's current actor (a DB value, underscore) maps
+// to its slug; default to the AI Agent (the warm doer session the Manažér most often peeks at).
+const TERMINAL_ROLES: DebugAttachRole[] = ["ai-agent", "auditor"];
 
 function asTerminalRole(actor: PipelineActor): DebugAttachRole {
-  return (TERMINAL_ROLES as string[]).includes(actor) ? (actor as DebugAttachRole) : "coordinator";
+  return actor === "auditor" ? "auditor" : "ai-agent";
 }
 
 interface Props {

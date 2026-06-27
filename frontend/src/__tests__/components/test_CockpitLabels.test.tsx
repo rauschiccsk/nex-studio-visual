@@ -1,7 +1,7 @@
 /**
- * Slovak display labels across the cockpit (CR-NS-018) — rail stages + role
- * labels on agent chips and message bubbles. Machine values are unchanged; only
- * the rendered label is Slovak.
+ * Slovak display vocabulary across the Vývoj board (CR-V2-021). The 4-phase bar renders Slovak phase
+ * labels; deriveActiveAgent surfaces the real active agent (not the nominal current_actor). The v2
+ * vocabulary (CR-V2-019) is asserted exhaustively at the bottom.
  */
 
 import { describe, expect, it } from "vitest";
@@ -9,17 +9,13 @@ import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 import PipelineRail, { deriveActiveAgent } from "@/components/cockpit/PipelineRail";
-import PipelineMessageBubble from "@/components/cockpit/PipelineMessageBubble";
 import {
   BLOCK_REASON_LABELS,
   DECISION_BANNER,
-  DIRECTOR_BRIEF_LABEL,
   nextPhaseLabel,
-  nextStageLabel,
   PHASE_CODES,
   PHASE_LABELS,
   PHASE_ORDER,
-  TRIAGE_CLASS_LABELS,
   V2_ROLE_LABELS,
 } from "@/components/cockpit/labels";
 import type { BuildPhase, V2Participant } from "@/components/cockpit/labels";
@@ -31,97 +27,39 @@ function mkState(): PipelineState {
     id: "11111111-1111-1111-1111-111111111111",
     version_id: "22222222-2222-2222-2222-222222222222",
     flow_type: "new_version",
-    current_stage: "build",
-    current_actor: "implementer",
+    current_stage: "programovanie",
+    current_actor: "ai_agent",
     status: "agent_working",
     next_action: "x",
     is_regate: false,
     iteration: 0,
-    created_at: "2026-06-04T00:00:00Z",
-    updated_at: "2026-06-04T00:00:00Z",
+    created_at: "2026-06-27T00:00:00Z",
+    updated_at: "2026-06-27T00:00:00Z",
   };
 }
 
-describe("cockpit Slovak labels", () => {
-  it("rail renders Slovak stage labels (not raw codes)", () => {
-    render(<PipelineRail state={mkState()} />);
+describe("Vývoj board Slovak phase labels", () => {
+  it("the bar renders the four Slovak phase labels (not raw codes)", () => {
+    render(<PipelineRail state={mkState()} viewedPhase="programovanie" onSelectPhase={() => {}} />);
     expect(screen.getByText("Príprava")).toBeInTheDocument();
-    expect(screen.getByText("Rozsah")).toBeInTheDocument();
+    expect(screen.getByText("Návrh")).toBeInTheDocument();
     expect(screen.getByText("Programovanie")).toBeInTheDocument();
-    expect(screen.getByText("Audit")).toBeInTheDocument();
-    // raw codes are not shown as visible text (only as a tooltip)
-    expect(screen.queryByText("Gate A")).not.toBeInTheDocument();
-  });
-
-  it("rail renders Slovak role labels on agent chips", () => {
-    render(<PipelineRail state={mkState()} />);
-    expect(screen.getByText("Koordinátor")).toBeInTheDocument();
-    expect(screen.getByText("Návrhár")).toBeInTheDocument();
-    expect(screen.getByText("Zákazník")).toBeInTheDocument();
-    expect(screen.getByText("Programátor")).toBeInTheDocument();
-    expect(screen.getByText("Audítor")).toBeInTheDocument();
-    expect(screen.queryByText("Designer")).not.toBeInTheDocument();
-  });
-
-  it("message bubble renders Slovak author → recipient role labels", () => {
-    const msg: PipelineMessage = {
-      id: "33333333-3333-3333-3333-333333333333",
-      version_id: "22222222-2222-2222-2222-222222222222",
-      stage: "gate_a",
-      author: "designer",
-      recipient: "manazer",
-      kind: "gate_report",
-      content: "hotovo",
-      status: "delivered",
-      payload: null,
-      created_at: "2026-06-04T00:00:00Z",
-      seq: 1,
-    };
-    render(<PipelineMessageBubble message={msg} />);
-    expect(screen.getByText("Návrhár")).toBeInTheDocument();
-    expect(screen.getByText("Manažér")).toBeInTheDocument();
-    expect(screen.queryByText("Designer")).not.toBeInTheDocument();
-  });
-
-  it("nextStageLabel returns the following stage's Slovak label (clamped at done)", () => {
-    expect(nextStageLabel("kickoff")).toBe("Rozsah"); // gate_a
-    expect(nextStageLabel("gate_e")).toBe("Plán úloh"); // task_plan (CR-NS-020 CR-2)
-    expect(nextStageLabel("task_plan")).toBe("Programovanie"); // build
-    expect(nextStageLabel("release")).toBe("Hotovo"); // done
-    expect(nextStageLabel("done")).toBe("Hotovo"); // clamped
+    expect(screen.getByText("Verifikácia")).toBeInTheDocument();
+    // raw codes are only a tooltip, never visible text
+    expect(screen.queryByText("priprava")).not.toBeInTheDocument();
   });
 
   it("R4 (D1/D2): every block_reason maps to a distinct Slovak phrase", () => {
     const reasons: BlockReason[] = ["agent_question", "agent_error", "system_error", "parse_exhaustion"];
-    for (const r of reasons) {
-      expect(BLOCK_REASON_LABELS[r]).toBeTruthy();
-    }
+    for (const r of reasons) expect(BLOCK_REASON_LABELS[r]).toBeTruthy();
     expect(BLOCK_REASON_LABELS.agent_question).toBe("Agent sa pýta");
     expect(BLOCK_REASON_LABELS.agent_error).toBe("Agent zlyhal");
-    // distinct phrases (no collisions)
     expect(new Set(Object.values(BLOCK_REASON_LABELS)).size).toBe(reasons.length);
-  });
-
-  it("R4 (D3): triage_class labels read in Slovak", () => {
-    expect(TRIAGE_CLASS_LABELS.director_decision).toBe("rozhodnutie Directora");
-    expect(TRIAGE_CLASS_LABELS.spec_problem).toBe("problém v špecifikácii");
   });
 });
 
 describe("deriveActiveAgent (real active agent, not current_actor)", () => {
-  const gateEState = (status: PipelineState["status"]): PipelineState => ({
-    id: "1",
-    version_id: "2",
-    flow_type: "new_version",
-    current_stage: "gate_e",
-    current_actor: "customer", // nominal stage actor — must NOT win
-    status,
-    next_action: "x",
-    is_regate: false,
-    iteration: 0,
-    created_at: "2026-06-06T00:00:00Z",
-    updated_at: "2026-06-06T00:00:00Z",
-  });
+  const st = (status: PipelineState["status"]): PipelineState => ({ ...mkState(), status });
   const board = (state: PipelineState, messages: PipelineMessage[] = []): PipelineBoard => ({
     state,
     recent_messages: messages,
@@ -129,41 +67,42 @@ describe("deriveActiveAgent (real active agent, not current_actor)", () => {
   const msg = (author: PipelineMessage["author"]): PipelineMessage => ({
     id: author,
     version_id: "2",
-    stage: "gate_e",
+    stage: "programovanie",
     author,
     recipient: "manazer",
     kind: "answer",
     content: "x",
     status: "delivered",
     payload: null,
-    created_at: "2026-06-06T00:00:00Z",
+    created_at: "2026-06-27T00:00:00Z",
     seq: 1,
   });
 
-  it("while working = the latest activity frame's role (not the stage actor)", () => {
+  it("while working = the latest activity frame's role (not the nominal actor)", () => {
     const activity: ActivityLine[] = [
-      { stage: "gate_e", actor: "customer", kind: "status", line: "pracuje…" },
-      { stage: "gate_e", actor: "designer", kind: "status", line: "pracuje…" },
+      { stage: "programovanie", actor: "ai_agent", kind: "status", line: "pracuje…" },
+      { stage: "verifikacia", actor: "auditor", kind: "status", line: "pracuje…" },
     ];
-    expect(deriveActiveAgent(board(gateEState("agent_working")), activity)).toBe("designer");
+    expect(deriveActiveAgent(board(st("agent_working")), activity)).toBe("auditor");
   });
 
   it("while working with no activity falls back to current_actor", () => {
-    expect(deriveActiveAgent(board(gateEState("agent_working")), [])).toBe("customer");
+    expect(deriveActiveAgent(board(st("agent_working")), [])).toBe("ai_agent");
   });
 
   it("at awaiting_manazer = the latest message author (who just acted)", () => {
-    expect(deriveActiveAgent(board(gateEState("awaiting_manazer"), [msg("coordinator")]), [])).toBe("coordinator");
+    expect(deriveActiveAgent(board(st("awaiting_manazer"), [msg("auditor")]), [])).toBe("auditor");
   });
 
-  it("ignores a system/director latest message at rest", () => {
-    expect(deriveActiveAgent(board(gateEState("blocked"), [msg("system")]), [])).toBeNull();
+  it("ignores a system/manazer latest message at rest", () => {
+    expect(deriveActiveAgent(board(st("blocked"), [msg("system")]), [])).toBeNull();
+    expect(deriveActiveAgent(board(st("blocked"), [msg("manazer")]), [])).toBeNull();
   });
 });
 
-// CR-V2-019: the v2.0.0 vocabulary — the v1 11-stage STAGE map collapses to FOUR build
-// phases and the 7-role map collapses to THREE participants (AI Agent / Auditor / Manažér).
-describe("CR-V2-019 v2 vocabulary collapse", () => {
+// CR-V2-019/021: the v2.0.0 vocabulary — the v1 11-stage STAGE map collapses to FOUR build phases and the
+// 7-role map collapses to the v2 participants (AI Agent / Auditor / Manažér + system).
+describe("v2 vocabulary collapse", () => {
   it("PHASE_LABELS are exactly the four build phases + the terminal Hotovo", () => {
     const phases: BuildPhase[] = ["priprava", "navrh", "programovanie", "verifikacia", "done"];
     expect(Object.keys(PHASE_LABELS).sort()).toEqual([...phases].sort());
@@ -193,25 +132,16 @@ describe("CR-V2-019 v2 vocabulary collapse", () => {
     expect(V2_ROLE_LABELS.ai_agent).toBe("AI Agent");
     expect(V2_ROLE_LABELS.auditor).toBe("Audítor");
     expect(V2_ROLE_LABELS.manazer).toBe("Manažér");
-    // the collapsed-away v1 roles are gone from the v2 map
-    expect(Object.keys(V2_ROLE_LABELS)).not.toContain("coordinator");
-    expect(Object.keys(V2_ROLE_LABELS)).not.toContain("designer");
-    expect(Object.keys(V2_ROLE_LABELS)).not.toContain("customer");
-    expect(Object.keys(V2_ROLE_LABELS)).not.toContain("implementer");
+    for (const dead of ["coordinator", "designer", "customer", "implementer"]) {
+      expect(Object.keys(V2_ROLE_LABELS)).not.toContain(dead);
+    }
   });
 });
 
-// CR-2 (v0.7.3): the Director-facing brief badge + the decision-CTA banner palette.
-describe("CR-2 Director-facing legibility labels", () => {
-  it("DIRECTOR_BRIEF_LABEL is the Slovak 'Na rade' turn marker", () => {
-    expect(DIRECTOR_BRIEF_LABEL).toBe("Na rade");
-  });
-
-  it("DECISION_BANNER is tone-aware (amber awaiting / red blocked) + token-disciplined (no raw pastels)", () => {
+describe("decision-CTA banner palette", () => {
+  it("DECISION_BANNER is tone-aware (amber awaiting / red blocked), token-disciplined (no raw pastels)", () => {
     expect(DECISION_BANNER.amber).toContain("var(--color-state-warning-bg)");
-    expect(DECISION_BANNER.amber).toContain("var(--color-state-warning-fg)");
     expect(DECISION_BANNER.red).toContain("var(--color-state-error-bg)");
-    // only the decision tones are defined (blue/green/neutral keep the low-key TONE_BANNER)
     expect(DECISION_BANNER.blue).toBeUndefined();
     expect(DECISION_BANNER.green).toBeUndefined();
   });
