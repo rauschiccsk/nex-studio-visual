@@ -267,23 +267,16 @@ async def post_action(
 
     # Async dispatch (CR-NS-018 fix-round): the action left an agent working —
     # run it in the background; its result lands later via WS. POST returns now.
-    # The Director's return/ask/answer content (and the Coordinator's report for
-    # apply_coordinator_recommendation) is threaded into the re-dispatch prompt so
+    # The Manažér's uprav/ask/answer content is threaded into the re-dispatch prompt so
     # the agent acts on it (else it re-runs blind on the generic directive);
-    # fresh-stage dispatch (start/approve/verdict) → directive None.
+    # fresh-phase dispatch (start/approve/verdict) → directive None.
+    # (The v1 Gate-E sub-flow selector was removed in CR-V2-017 — the 4-phase model has no Gate E;
+    # the Auditor's upfront review after Návrh replaces it.)
     if state.status == "agent_working":
         directive = orchestrator.dispatch_directive(
             db, version_id, payload.action, payload.payload or {}, state.current_stage
         )
-        # Gate E sub-flow (F-007-gate-e §2/§5): fix → Designer edits (Coordinator-relayed)
-        # then continues; ask/return @ gate_e → the Coordinator revises its recommendation.
-        gate_e_dispatch = None
-        if state.current_stage == "gate_e":
-            if payload.action == "fix":
-                gate_e_dispatch = "designer_edit"
-            elif payload.action in ("ask", "return"):
-                gate_e_dispatch = "coordinator_consult"
-        pipeline_runner.schedule_dispatch(version_id, directive, gate_e_dispatch=gate_e_dispatch)
+        pipeline_runner.schedule_dispatch(version_id, directive)
 
     return _board(db, version_id)
 

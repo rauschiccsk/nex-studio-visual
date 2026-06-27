@@ -32,8 +32,16 @@ from backend.services.pipeline_ws import registry
 
 logger = logging.getLogger(__name__)
 
-# Settled states that warrant a Manažér nudge (F-007 §9; CR-V2-009 status rename). Never agent_working.
-_NOTIFY_STATUSES = ("awaiting_manazer", "blocked")
+# Settled states that warrant a system → Manažér notification (F-007 §9; CR-V2-009 status rename;
+# CR-V2-017 COMMS-5). Never agent_working. The 4-phase model has three notify-worthy settles, mapping to
+# the design §5.3 "away / escalation / done" notification events:
+#   * ``awaiting_manazer`` — a dial-governed schvaľovací bod or the Špecifikácia approval needs the Manažér
+#     (the "you're up" away nudge — the original F-007 §9 case).
+#   * ``blocked``          — an agent question / error / Auditor-loop ESCALATION needs the Manažér.
+#   * ``done``             — the build reached Hotovo (verified). Added in CR-V2-017 so an autonomously
+#     completed build (dial=plná, no human stops) still pings an away Manažér that it is DONE — otherwise a
+#     hands-off build would finish silently. (Deploy stays a separate per-customer action, D6.)
+_NOTIFY_STATUSES = ("awaiting_manazer", "blocked", "done")
 
 # Strong refs to in-flight tasks so the event loop doesn't GC them mid-run
 # (mirrors the idle/retention tasks in ``main.py``). Discarded on completion.
@@ -53,20 +61,17 @@ _MAX_RELAY_DRAIN = 20
 _ACTIVE_DISPATCH: dict[uuid.UUID, asyncio.Task] = {}
 
 
-def schedule_dispatch(
-    version_id: uuid.UUID, directive: str | None = None, *, gate_e_dispatch: str | None = None
-) -> None:
+def schedule_dispatch(version_id: uuid.UUID, directive: str | None = None) -> None:
     """Fire-and-forget the agent run for ``version_id`` as a tracked task.
 
-    ``directive`` (CR-NS-018) carries the Director's framed ``return``/``ask``/
+    ``directive`` (CR-NS-018) carries the Manažér's framed ``uprav``/``ask``/
     ``answer`` message through to :func:`orchestrator.run_dispatch` so the
-    re-dispatched agent acts on it instead of re-running the generic stage
+    re-dispatched agent acts on it instead of re-running the generic phase
     directive blind. The value is captured in-memory at schedule time (same
     process/event loop) — no DB round-trip needed.
 
-    ``gate_e_dispatch`` — DEFERRED no-op (CR-V2-009): the v1 Gate-E sub-flow selector. The 4-phase model
-    has no Gate E (the Auditor's upfront review replaces it, CR-V2-013), so the route always passes
-    ``None`` now. Kept for signature stability until the FE-contract CRs drop it.
+    (The v1 ``gate_e_dispatch`` sub-flow selector param was removed in CR-V2-017 — the 4-phase model has
+    no Gate E; the Auditor's upfront review after Návrh replaces it.)
 
     Single-flight per version (CR-NS-027): if a dispatch for ``version_id`` is already
     in-flight, skip this one (log + return) rather than starting a second concurrent loop.
@@ -77,7 +82,7 @@ def schedule_dispatch(
             "schedule_dispatch: a dispatch for version %s is already in-flight — skipping duplicate", version_id
         )
         return
-    task = asyncio.create_task(_run(version_id, directive, gate_e_dispatch))
+    task = asyncio.create_task(_run(version_id, directive))
     _ACTIVE_DISPATCH[version_id] = task
     _BG_TASKS.add(task)
     task.add_done_callback(_BG_TASKS.discard)
@@ -121,9 +126,9 @@ def _activity_callback(version_id: uuid.UUID, stage: str, fallback_actor: str):
     """Build the streaming callback that broadcasts ``agent_activity`` frames.
 
     The frame ``actor`` is the **real** invoked role (``evt["_role"]`` tagged by
-    :func:`orchestrator.invoke_agent`), so the rail steps through the agents in a
-    gate_e round; falls back to the nominal stage actor. A one-shot ``active_role``
-    event (no tool line) still emits a frame so a tool-less turn steps the rail."""
+    :func:`orchestrator.invoke_agent`), so the rail shows the live AI Agent / Auditor;
+    falls back to the nominal phase actor. A one-shot ``active_role`` event (no tool
+    line) still emits a frame so a tool-less turn steps the rail."""
 
     async def _cb(evt: dict) -> None:
         role = (evt.get("_role") if isinstance(evt, dict) else None) or fallback_actor
@@ -141,7 +146,7 @@ def _activity_callback(version_id: uuid.UUID, stage: str, fallback_actor: str):
     return _cb
 
 
-async def _run(version_id: uuid.UUID, directive: str | None = None, gate_e_dispatch: str | None = None) -> None:
+async def _run(version_id: uuid.UUID, directive: str | None = None) -> None:
     """Run one agent dispatch and broadcast the result. Owns its own session."""
     db = SessionLocal()
     try:
@@ -151,9 +156,7 @@ async def _run(version_id: uuid.UUID, directive: str | None = None, gate_e_dispa
         # via on_message the moment it's recorded — so the end batch is gone.
         on_message = _message_callback(db, version_id)
         try:
-            state = await orchestrator.run_dispatch(
-                db, version_id, on_event, directive, gate_e_dispatch=gate_e_dispatch, on_message=on_message
-            )
+            state = await orchestrator.run_dispatch(db, version_id, on_event, directive, on_message=on_message)
             db.commit()
             # Engine auto-chain (CR-NS-097; v2 4-phase CR-V2-009): run_dispatch returns status=agent_working
             # ONLY when it DELIBERATELY auto-advanced the phase and wants the next phase run in THIS same
@@ -179,11 +182,7 @@ async def _run(version_id: uuid.UUID, directive: str | None = None, gate_e_dispa
                 guard += 1
                 await _broadcast_state(version_id, state)
                 on_event = _activity_callback(version_id, state.current_stage, state.current_actor)
-                # gate_e_dispatch=None for every auto-chained turn (DEFERRED no-op in v2 — there is no Gate E;
-                # CR-V2-009). The parameter is kept until the FE-contract CRs drop it from the route/runner.
-                state = await orchestrator.run_dispatch(
-                    db, version_id, on_event, gate_e_dispatch=None, on_message=on_message
-                )
+                state = await orchestrator.run_dispatch(db, version_id, on_event, on_message=on_message)
                 db.commit()
             # Relay drain (CR-V2-015 / SPIKE-IO point (1)): a Manažér message typed into the read-only AI
             # Agent tab WHILE a turn was in flight was ENQUEUED (never a concurrent writer). Now that the
@@ -209,9 +208,7 @@ async def _run(version_id: uuid.UUID, directive: str | None = None, gate_e_dispa
                     inner_guard += 1
                     await _broadcast_state(version_id, state)
                     on_event = _activity_callback(version_id, state.current_stage, state.current_actor)
-                    state = await orchestrator.run_dispatch(
-                        db, version_id, on_event, gate_e_dispatch=None, on_message=on_message
-                    )
+                    state = await orchestrator.run_dispatch(db, version_id, on_event, on_message=on_message)
                     db.commit()
         except Exception as exc:  # noqa: BLE001 — unexpected; degrade to blocked, don't hang UI.
             logger.exception("run_dispatch failed for version %s", version_id)
@@ -314,8 +311,13 @@ async def _maybe_notify(db, version_id: uuid.UUID, state: PipelineState) -> None
         .where(Version.id == version_id)
     ).one_or_none()
     label = f"{proj_ver[0]} {proj_ver[1]}" if proj_ver else "NEX Studio"
-    link = f"\n{settings.app_public_url.rstrip('/')}/cockpit" if settings.app_public_url else ""
-    message = f"🔔 {label}: si na rade v NEX Studio cockpite{link}"
+    link = f"\n{settings.app_public_url.rstrip('/')}/vyvoj" if settings.app_public_url else ""
+    # CR-V2-017 COMMS-5: a Hotovo (``done``) settle is a "build finished" notification, not a "you're up"
+    # nudge — distinct copy so an away Manažér knows the autonomous build COMPLETED (vs needing an action).
+    if state.status == "done":
+        message = f"✅ {label}: build hotová (overené) — NEX Studio{link}"
+    else:
+        message = f"🔔 {label}: si na rade v NEX Studio{link}"
     for chat_id in chat_ids:
         await notify.send_telegram(message, chat_id)
 

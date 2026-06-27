@@ -7,9 +7,11 @@ tables:
   single ``SELECT`` answers "who is on turn and what's next" — the root
   problem F-007 solves. Created lazily by the orchestrator when a pipeline
   actually starts via the cockpit (never eager-seeded).
-* :class:`PipelineMessage` — append-only typed message log (the
-  ``.dedo-channel`` replacement). Director decisions land here as typed
-  messages, giving a queryable audit trail.
+* :class:`PipelineMessage` — append-only typed message log. The v1 5-role
+  file-bus is retired (v2.0.0 CR-V2-017): with only the AI Agent + Auditor
+  there are no roles to bus between, so the engine records every turn here as
+  a typed in-DB message — Manažér decisions, agent reports, and the Auditor's
+  verdict — giving a queryable audit trail (alongside the PTY log + phase tabs).
 
 Enums follow the codebase convention (``String`` + DB ``CHECK`` constraint,
 not native PG ENUM). Phase 1 of F-007 §12.
@@ -112,10 +114,10 @@ class PipelineState(Base, UUIDMixin, TimestampMixin):
     next_action = Column(Text, nullable=False, server_default="")
     is_regate = Column(Boolean, nullable=False, server_default="false")
     iteration = Column(Integer, nullable=False, server_default="0")
-    #: Transient return marker (E7 route_to_designer, CR-NS-034): "build" while a Designer spec-fix turn
-    #: is dispatched mid-build, so the dispatch-completion handler returns to _run_build_round (not a
-    #: gate); cleared on the Designer's DONE. Persisted (not in-memory like gate_e_dispatch) because the
-    #: route is an internal executor — the action route can't compute a transient marker for it.
+    #: Transient return marker. v1-ORPHANED COLUMN (CR-V2-017 FLAG): its only writer was the retired
+    #: Coordinator ``route_to_designer`` executor, excised with the v1 5-role engine. No v2 code reads or
+    #: writes it; kept as a nullable column (dropping it needs a migration, deferred — Milestone E ships no
+    #: migration). A later cleanup CR drops the column.
     returns_to = Column(String(20), nullable=True)
     #: WS-D (CR-NS-036): when the pipeline ENTERED its current Manažér-wait status
     #: (``awaiting_manazer`` / ``blocked``). Maintained by the ``status`` ``set`` event listener

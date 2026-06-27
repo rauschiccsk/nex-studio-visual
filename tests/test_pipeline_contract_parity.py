@@ -1,19 +1,22 @@
 """R2-c (v0.7.0) — BE↔FE parity for the executable-Coordinator-actions set.
 
-``_EXECUTABLE_COORDINATOR_ACTIONS`` (backend/services/orchestrator.py) is an internal orchestrator
-constant, NOT a response-model field, so the OpenAPI→TS codegen can't cover it (R2 §2, D4). This
-contract-test extracts the BE frozenset and parses the FE ``EXECUTABLE_COORDINATOR_ACTIONS`` Set
-literal from ``ExchangePanel.tsx`` and asserts equality — the durable guard that caught
-``capture_backlog_item`` drifting out of the FE (R2 §2, D5). It fails if EITHER side drifts.
+v1-SUPERSEDED (CR-V2-017): the BE constant ``_EXECUTABLE_COORDINATOR_ACTIONS`` was excised with the v1
+5-role Coordinator engine, and the FE ``ExchangePanel.tsx`` it parsed is re-authored in CR-V2-021 (the
+4-phase Vývoj board has no Coordinator executable-actions surface). The whole parity guard is therefore
+obsolete; module-skipped (mirrors the other v1 engine test modules) so the deleted-symbol import no longer
+breaks collection. There is no v2 successor — the v2 action surface is the schvaľovacie body verbs.
 """
 
 import re
 from pathlib import Path
 
-from backend.services.orchestrator import _EXECUTABLE_COORDINATOR_ACTIONS
+import pytest
+
+pytestmark = pytest.mark.skip(reason="v1 engine behaviour — Coordinator executable-actions set removed in CR-V2-017")
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _EXCHANGE_PANEL = _REPO_ROOT / "frontend" / "src" / "components" / "cockpit" / "ExchangePanel.tsx"
+_EXECUTABLE_COORDINATOR_ACTIONS: frozenset[str] = frozenset()  # v1 stub — module is skipped
 
 # The FE Set literal: `const EXECUTABLE_COORDINATOR_ACTIONS = new Set([ ... ])`.
 _SET_LITERAL = re.compile(
