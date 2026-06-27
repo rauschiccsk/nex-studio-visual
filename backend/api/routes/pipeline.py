@@ -124,11 +124,14 @@ async def start_fast_fix(
     _current_user: User = Depends(require_ri_role),
     db: Session = Depends(get_db),
 ) -> FastFixStartResponse:
-    """Fast-Fix Lane entry (F-009, CR-NS-094) — the "Rýchla oprava" one-prompt action.
+    """Fast-Fix Lane entry (F-009, CR-NS-094; v2 short path CR-V2-028) — the "Rýchla oprava" one-prompt action.
 
     Auto-creates the next PATCH version (``vX.Y.Z+1`` from the project's semver max) and starts a
-    ``fast_fix`` pipeline carrying the Director directive; the kickoff Coordinator triages it
-    (escalation guard) and the board then shows the short fast-lane path. Declared before the
+    ``fast_fix`` pipeline carrying the Manažér's directive (which IS the brief). The lane runs the v2 SHORT
+    path autonomously to the verified boundary — lightweight Príprava (no spec dialogue) → AI Agent
+    self-checking Programovanie → a LIGHT focused Auditor Verifikácia (fix works + no regression) → Hotovo
+    — with ZERO mid-flight approvals by default. It STOPS at verified; it does NOT auto-deploy (OQ-3/D6 —
+    deploy is the normal manual per-customer Nasadiť in the UAT/PROD tabs, CR-V2-027). Declared before the
     ``/{version_id}`` routes so ``fast-fix`` is never parsed as a version id.
     """
     if db.execute(select(Project.id).where(Project.id == payload.project_id)).scalar_one_or_none() is None:

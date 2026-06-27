@@ -582,27 +582,12 @@ def _record_message(
 
 
 def _directive_for(stage: str, flow_type: str = "new_version") -> str:
-    """Minimal orchestrator directive for a stage. The agent reads its charter."""
-    # Fast-Fix Lane kickoff (F-009 §3, CR-NS-094): the Coordinator's escalation guard. The Director's
-    # directive rides in the kickoff message payload; the Coordinator triages it FIRST — small & obvious
-    # (single concern, no multi-module / schema / new-dep, no requirement ambiguity) → confirm it's
-    # fast-lane-suitable and await the Director's go to build (NO Designer, NO task_plan). Non-trivial →
-    # STOP (kind=blocked) + a structured `coordinator_directive` proposing convert-to-full-version, never
-    # proceeding on its own (reuse the flag-the-gap-and-STOP pattern).
-    if stage == "kickoff" and flow_type == "fast_fix":
-        return (
-            "RÝCHLA OPRAVA (fast-fix lane, F-009): pokyn Directora (smernica) je VYŠŠIE v tomto brífe — je "
-            "to TVOJ celý zadanie. Najprv ho zatrieď (escalation guard §3): je malý a jednoznačný (jeden "
-            "koncept, žiadna multi-modul / schéma / nová závislosť zmena, žiadna nejasnosť požiadavky)?\n"
-            "- ÁNO → potvrď, že je vhodný pre rýchlu opravu (NEnastavuj kind=blocked). Engine ťa "
-            "AUTOMATICKY posunie do buildu — submission Directora JE autorizácia, NEčakaj na ďalšie "
-            "schválenie. NEDISPATCHUJ Návrhára ani task_plan.\n"
-            "- NIE (netriviálny: nejednoznačný, multi-modul, mení špecifikované správanie vyžadujúce návrh, "
-            "schéma/dependency zmena) → ZASTAV: nepokračuj, nastav kind=blocked a pripoj štruktúrovaný "
-            "`coordinator_directive` (triage_class=director_decision, proposed_action="
-            "convert_to_full_version, rationale=prečo) navrhujúci konverziu na plnú verziu/pipeline.\n"
-            "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
-        )
+    """Minimal orchestrator directive for a stage. The agent reads its charter.
+
+    (CR-V2-028: the v1 ``kickoff`` Coordinator-triage fast-fix branch is RETIRED with the rest of the v1
+    11-stage waterfall — ``kickoff`` is not a v2 phase, the Coordinator role is gone, and the fast-fix lane
+    begins at ``priprava`` with the lightweight directive-IS-the-brief variant of :func:`_priprava_directive`.
+    No phase routes through this generic directive for ``fast_fix`` any more.)"""
     # The task plan no longer flows through this generic directive — run_dispatch early-returns into the
     # Návrh round (CR-V2-011 _run_navrh_round), which folds the narrowed skeleton / per-feat passes
     # (_task_plan_skeleton_directive / _task_plan_feat_directive below) in after the design-doc turn.
@@ -641,7 +626,7 @@ def _navrh_design_doc_rel(version_number: str) -> str:
     return f"{_version_spec_rel(version_number)}/design.md"
 
 
-def _priprava_directive(db: Session, version_id: uuid.UUID) -> str:
+def _priprava_directive(db: Session, version_id: uuid.UUID, *, flow_type: str = "new_version") -> str:
     """The Príprava phase brief (CR-V2-010; PREP-1..PREP-4, RULES-3 read-first/ask-until-understood).
 
     DESIGN-BEARING (flagged for the Manažér): this prompt DEFINES the AI Agent's Príprava behaviour —
@@ -649,7 +634,14 @@ def _priprava_directive(db: Session, version_id: uuid.UUID) -> str:
     The agent's own ``Pravidlá agenta`` charter (templates/ai-agent-charter.md §2) carries the matching
     rules; this is the per-turn orchestrator injection that names the concrete Zadanie + Špecifikácia paths.
 
-    The init prompt ("Načítaj zadanie a začni prípravu špecifikácie" — design §2.1) tells the AI Agent to:
+    **Fast-fix short path (CR-V2-028; design §2.4/§2.5):** for ``flow_type='fast_fix'`` the heavy
+    interactive Zadanie→Špecifikácia dialogue is SKIPPED — the Manažér's directive IS the brief. Príprava
+    is a lightweight "acknowledge the directive + read just enough to fix it" turn that closes immediately
+    with ``kind=done`` (no Špecifikácia artifact, no clarification loop), so the lane advances straight to
+    Programovanie. The directive rode in as the kickoff content, so it is already in the warm session.
+
+    For ``flow_type='new_version'`` the init prompt ("Načítaj zadanie a začni prípravu špecifikácie" —
+    design §2.1) tells the AI Agent to:
       1. READ the Zadanie (``customer-requirements.md``) + existing code / specs / KB (read-before-you-think);
       2. systematize the requirements and ASK the Manažér clarifying questions on EVERY unclear /
          under-thought point — NO design until every detail is understood (set ``kind=question`` and STOP);
@@ -659,6 +651,20 @@ def _priprava_directive(db: Session, version_id: uuid.UUID) -> str:
          end-Príprava ``Schváliť špecifikáciu`` stop is ALWAYS mandatory (dial-independent) — Návrh cannot
          begin until the Manažér approves the Špecifikácia.
     """
+    if flow_type == "fast_fix":
+        # The lightweight fast-fix Príprava: the directive (in this warm session's kickoff) IS the whole
+        # brief — read only what's needed to fix it, do NOT run the heavy spec dialogue, do NOT write a
+        # Špecifikácia, do NOT block on clarification. Close immediately so the lane reaches Programovanie.
+        return (
+            "RÝCHLA OPRAVA (fast-fix lane) — Príprava je ĽAHKÁ: pokyn Manažéra (smernica) je VYŠŠIE v tomto "
+            "vlákne a JE celé tvoje zadanie. Neraď heavy dialóg špecifikácie a NEZAPISUJ Špecifikáciu.\n"
+            "1. Prečítaj IBA toľko kódu/kontextu, koľko treba na pochopenie opravy.\n"
+            "2. NEVytváraj Špecifikáciu ani návrhový dokument — smernica je brief; engine ťa AUTOMATICKY "
+            "posunie do Programovania (žiadne schválenie medzitým).\n"
+            "3. ZASTAV (`kind=question`) IBA ak je oprava naozaj nejednoznačná alebo technicky nemožná — NIE "
+            "preto, že by si chcel doplniť proces. Inak UZAVRI toto kolo `kind=done`.\n"
+            "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
+        )
     version_number = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
     zadanie_rel = f"{_version_spec_rel(version_number)}/customer-requirements.md"
     spec_rel = _priprava_spec_rel(version_number)
@@ -788,9 +794,18 @@ def _auditor_upfront_directive(db: Session, version_id: uuid.UUID) -> str:
     )
 
 
-def _verifikacia_directive(db: Session, version_id: uuid.UUID, *, smoke_block: str = "") -> str:
+def _verifikacia_directive(
+    db: Session, version_id: uuid.UUID, *, smoke_block: str = "", flow_type: str = "new_version"
+) -> str:
     """The Auditor's END verification brief (Verifikácia phase; CR-V2-014; VERIF-1..VERIF-3, AUD-1(b),
     AUD-2, AUD-3, AUD-6) — the v2 form of v1 ``gate_g``.
+
+    **Fast-fix LIGHT check (CR-V2-028; design §2.5 "light Auditor check — fix works + no regression,
+    focused, not the full release oracle"):** for ``flow_type='fast_fix'`` the Auditor runs a FOCUSED check
+    scoped to the directive — does the fix WORK and did it introduce NO regression — NOT the full
+    adversarial release oracle a ``new_version`` gets. It still emits a ``kind=verdict`` (PASS → verified;
+    FAIL → bounded fix loop) and still verifies §4 hard-security holds, but the depth is deliberately
+    lighter (the fast-fix value is the short path; a small obvious fix does not warrant the full audit).
 
     DESIGN-BEARING (flagged for the Manažér): this prompt DEFINES the independent Auditor's END-verification
     behaviour. Drafted from ``nex-studio-v2-design.md`` §2.5 (release verification) + §5.1(2) (Auditor rules
@@ -824,6 +839,29 @@ def _verifikacia_directive(db: Session, version_id: uuid.UUID, *, smoke_block: s
     end check (the Auditor is the safety net that compensates for fewer human stops); lower autonomy →
     lighter. The ``--effort`` flag is coupled to the dial in :func:`_resolve_dispatch_overrides`; the prose
     tells the Auditor to MATCH its scrutiny."""
+    if flow_type == "fast_fix":
+        # Fast-fix LIGHT verifikácia (CR-V2-028; design §2.5): a FOCUSED fix-works + no-regression check
+        # scoped to the directive — NOT the full adversarial release oracle. Still emits a verdict, still
+        # checks §4 hard-security + the smoke result, just lighter (the lane's value is the short path).
+        return (
+            "VERIFIKÁCIA — RÝCHLA OPRAVA (nezávislý Auditor, ĽAHKÁ koncová kontrola; NIE plný release oracle).\n"
+            "1. Si NEZÁVISLÝ overovateľ MIMO tímu AI Agenta, READ + RUN-ONLY — smieš ČÍTAŤ a SPUSTIŤ appku, "
+            "NIKDY neupravuj/necommituj. TY NÁJDEŠ — opravuje AI Agent.\n"
+            "2. ZAMERAJ sa na DVE veci (oprava je malá a jednoznačná, nerob plný adverzariálny audit):\n"
+            "   a) OPRAVA FUNGUJE — robí appka to, čo smernica (pokyn Manažéra) žiadala? Over to oproti "
+            "bežiacej appke / artefaktom, nie oproti slovu AI Agenta.\n"
+            "   b) ŽIADNA REGRESIA — nerozbila oprava nič susedné? Engine spustil release smoke (interné "
+            "fixtúry) — výsledok je nižšie; zohľadni ho.\n"
+            + smoke_block
+            + "3. §4 HARD-SECURITY (rýchla, ale POVINNÁ kontrola): žiadny credential pridaný do zdrojáku / "
+            "commitnutý / v logoch; secrets len v `.env`/runtime; `VITE_*` len public. Únik = FAIL.\n"
+            "4. Vráť `kind=verdict`:\n"
+            "   - oprava funguje + bez regresie + §4 čisté → `verdict=true` (PASS).\n"
+            "   - inak → `verdict=false` (FAIL); konkrétne zlyhania do `findings`, zameraný rozsah opravy do "
+            "`proposed_fix` (NEvykonávaj — opravuje AI Agent, ty re-verifikuješ). FAIL sa vráti do "
+            "ohraničenej slučky.\n"
+            "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
+        )
     level = resolve_miera_autonomie(db, version_id)
     depth = (
         "Miera autonómie je VYSOKÁ (Manažér je málokedy v slučke) — rob DÔKLADNÚ, adverzariálnu verifikáciu: "
@@ -937,16 +975,12 @@ def _task_plan_feat_directive(feat_title: str) -> str:
     )
 
 
-def _prepend_fast_fix_directive(db: Session, version_id: uuid.UUID, prompt: str) -> str:
-    """Prepend the Director's fast-fix directive onto the Coordinator's **kickoff** brief (F-009 §1,
-    CR-NS-097). The kickoff agent runs a FRESH session (start deletes the project's sessions, so there is
-    no thread to ``--resume``) — the brief is its ONLY context. Without the directive in the brief the
-    escalation-guard triage is blind (the live run asked "chýba samotný popis toho, čo mám opraviť"). A
-    no-op when no directive is recorded (the brief's generic triage instruction still stands)."""
-    directive = fast_fix.kickoff_directive(db, version_id)
-    if not directive:
-        return prompt
-    return f"## Pokyn Directora (smernica na rýchlu opravu)\n\n{directive}\n\n---\n\n{prompt}"
+# (CR-V2-028: the v1 ``_prepend_fast_fix_directive`` helper is RETIRED. It prepended the Director directive
+# onto the Coordinator's FRESH-session kickoff brief — but in v2 the fast-fix directive rides in as the
+# kickoff message CONTENT (``apply_action`` ``start`` sets ``kickoff_content = directive`` for ``fast_fix``),
+# so it is already in the AI Agent's warm Príprava session; there is no separate Coordinator kickoff turn to
+# prepend onto. The lightweight fast-fix Príprava brief — :func:`_priprava_directive` ``flow_type='fast_fix'``
+# — points the AI Agent at that in-session directive directly.)
 
 
 def _augment_brief_with_backlog(db: Session, version_id: uuid.UUID, stage: str, prompt: str) -> str:
@@ -1015,13 +1049,16 @@ def _latest_uat_deploy(db: Session, version_id: uuid.UUID) -> Optional[dict[str,
     """The most recent ``uat_deploy`` notification payload for a version, or ``None`` if no UAT deploy was
     ever attempted (v0.8.1 CR-2).
 
-    Both lanes record ``{"uat_deploy": {...}}`` ``system→director`` notifications — full flow:
-    :func:`_release_auto_uat_deploy`; fast-fix: :func:`_fast_fix_auto_deploy` — as a real success
-    (``{ok: True}``), a failure (``{ok: False}``), or a skip (``{skipped: True}``). ``uat_accept`` reads
-    this to report HONESTLY whether a UAT was ACTUALLY deployed, instead of the ``uat_slug`` proxy (which
-    lies when a configured slug's compose is gone — CR-1 honest-skips, yet the slug stays set). Ordered by
-    the monotonic ``seq`` so the latest deploy outcome wins; ``None`` when no deploy was ever recorded
-    (e.g. a ``cr``/``bug`` release, which never deploys to UAT)."""
+    A UAT deploy records a ``{"uat_deploy": {...}}`` ``system→manazer`` notification — a real success
+    (``{ok: True}``), a failure (``{ok: False}``), or a skip (``{skipped: True}``). This reports HONESTLY
+    whether a UAT was ACTUALLY deployed, instead of the ``uat_slug`` proxy (which lies when a configured
+    slug's compose is gone — CR-1 honest-skips, yet the slug stays set). Ordered by the monotonic ``seq``
+    so the latest deploy outcome wins; ``None`` when no deploy was ever recorded.
+
+    (CR-V2-028 NOTE: the in-pipeline auto-deploy that wrote these notes — v1 ``_release_auto_uat_deploy`` /
+    ``_fast_fix_auto_deploy`` — is RETIRED; deploy is OUT of the pipeline, manual + per-customer, OQ-3/D6.
+    This helper + its siblings are v1 release-stage leftovers pending removal with the deploy-subsystem
+    cleanup, NOT called from the v2 lane.)"""
     rows = (
         db.execute(
             select(PipelineMessage.payload)
@@ -1123,12 +1160,11 @@ def _existing_render_fails_h1(db: Session, version_id: uuid.UUID) -> bool:
     return bool(fail_msgs)
 
 
-# CR-R2-1 (#1b): the flows that actually deploy a UAT (record a ``uat_deploy`` note) — full flow
-# :func:`_release_auto_uat_deploy` (``new_version``) + fast-fix :func:`_fast_fix_auto_deploy` (``fast_fix``).
-# ``cr`` / ``bug`` releases NEVER deploy a UAT, so the no-silent-done-without-UAT guard must NOT fire for them
-# — it would be unremediable (``retry_publish`` is ``new_version``-only), leaving the version impossible to
-# finish. The guard is therefore gated on this set.
-_UAT_DEPLOYING_FLOWS: frozenset[str] = frozenset({"new_version", "fast_fix"})
+# (CR-V2-028: the v1 ``_UAT_DEPLOYING_FLOWS`` set is RETIRED — it gated the v1 no-silent-done-WITHOUT-UAT
+# guard, which is itself superseded by the v2 no-silent-done-WITHOUT-VERIFICATION invariant
+# (:func:`_verifikacia_passed`): deploy is OUT of the pipeline (OQ-3/D6), so Hotovo means *verified*, not
+# *deployed*, and there is no in-pipeline UAT deploy to gate. It also referenced the dropped ``cr``/``bug``
+# flows (CR-V2-031). The set had no live referrer after the v1 release stage moved to the deploy subsystem.)
 
 
 def _project_is_deployable(db: Session, version_id: uuid.UUID) -> bool:
@@ -2292,14 +2328,16 @@ def _begin_dispatch(db: Session, state: PipelineState) -> None:
     db.flush()
 
 
-# Fast-Fix UAT auto-deploy (F-009, CR-NS-098/-101). The lane REDEPLOYS an existing UAT — it does NOT
-# re-provision it. We run a plain ``docker compose up -d --build --force-recreate`` against the UAT's OWN
-# ``/opt/uat/<slug>/docker-compose.yml`` (hand-authored like NEX Ledger OR uat-deploy.py-provisioned like
-# NEX Inbox), so there is no template re-render, no port reallocation, no nginx rewrite — the working UAT
-# is preserved (uat-deploy.py is a PROVISIONER and would overwrite all three). ``/opt/uat`` +
-# /var/run/docker.sock are mounted into the backend image, so the compose is reachable. The FE build-arg
-# is stamped via ``VITE_APP_VERSION`` (post-commit version scheme). Module-level so tests can monkeypatch
-# the path/existence; the timeout backstops the docker build (~1–2 min).
+# UAT redeploy backend (F-009, CR-NS-098/-101; v2 owner = the per-customer deploy subsystem, deploy.py).
+# REDEPLOYS an existing UAT — it does NOT re-provision it: a plain ``docker compose up -d --build
+# --force-recreate`` against the UAT's OWN ``/opt/uat/<slug>/docker-compose.yml`` (hand-authored like NEX
+# Ledger OR uat-deploy.py-provisioned like NEX Inbox), so there is no template re-render, no port
+# reallocation, no nginx rewrite — the working UAT is preserved (uat-deploy.py is a PROVISIONER and would
+# overwrite all three). ``/opt/uat`` + /var/run/docker.sock are mounted into the backend image, so the
+# compose is reachable. The FE build-arg is stamped via ``VITE_APP_VERSION`` (post-commit version scheme).
+# Module-level so tests can monkeypatch the path/existence; the timeout backstops the docker build (~1–2 min).
+# (CR-V2-028: this is NO LONGER invoked from the fast-fix lane — deploy is OUT of the pipeline (OQ-3/D6),
+# manual + per-customer; ``_run_uat_deploy`` is now called only by the deploy subsystem, deploy.py.)
 UAT_ROOT: Path = Path("/opt/uat")
 UAT_DEPLOY_TIMEOUT = 900
 
@@ -2985,7 +3023,8 @@ async def run_dispatch(
     elif stage == "priprava":
         # Príprava round (CR-V2-010): the init prompt + the interactive spec-dialogue brief (read Zadanie →
         # systematize → ask until understood → propose → write the Špecifikácia .md). DESIGN-BEARING prompt.
-        prompt = _priprava_directive(db, state.version_id)
+        # Fast-fix (CR-V2-028) takes a lightweight directive-IS-the-brief variant (no spec dialogue).
+        prompt = _priprava_directive(db, state.version_id, flow_type=state.flow_type)
     else:
         prompt = _augment_brief_with_backlog(db, state.version_id, stage, _directive_for(stage, state.flow_type))
     result = await invoke_agent_with_parse_retry(
@@ -3032,7 +3071,9 @@ async def run_dispatch(
     # Príprava artifact persistence (CR-V2-010): on the Príprava gate_report that CLOSES the phase, persist
     # + verify the Špecifikácia .md artifact before settling. A missing artifact (checkout exists but the
     # spec file was not written) is a real failure → blocked, the phase does NOT advance to its approval.
-    if stage == "priprava" and result.kind == "gate_report":
+    # FAST-FIX EXCEPTION (CR-V2-028): the fast-fix Príprava is lightweight — the directive IS the brief and
+    # NO Špecifikácia is written, so the artifact gate must NOT fire (it would over-block the short path).
+    if stage == "priprava" and result.kind == "gate_report" and state.flow_type != "fast_fix":
         spec_err = _persist_priprava_spec(db, state, result)
         if spec_err is not None:
             state.status = "blocked"
@@ -3730,7 +3771,7 @@ async def _run_verifikacia_round(
         version_id=version_id,
         role=AUDITOR_ROLE,
         stage="verifikacia",
-        prompt=_verifikacia_directive(db, version_id, smoke_block=smoke_block),
+        prompt=_verifikacia_directive(db, version_id, smoke_block=smoke_block, flow_type=state.flow_type),
         on_event=on_event,
         recipient="manazer",
         on_message=on_message,
@@ -4167,9 +4208,12 @@ def _settle_phase_boundary(db: Session, state: PipelineState) -> bool:
     Verifikácia — :data:`DIAL_GOVERNED_BOUNDARIES`). Two boundaries are ALWAYS outside the dial and ALWAYS
     stop (:data:`ALWAYS_STOP_BOUNDARIES`, design §2.3 D3/D6):
       * **Príprava → Schváliť špecifikáciu** — the Špecifikácia approval is dial-INDEPENDENT and ALWAYS
-        mandatory: Príprava is NOT in ``DIAL_GOVERNED_BOUNDARIES``, so :func:`dial_stops_at` is never even
-        consulted for it here → it always returns ``False`` (STOP). Návrh cannot begin until the Manažér
-        clicks ``approve_spec``.
+        mandatory FOR A ``new_version``: Príprava is NOT in ``DIAL_GOVERNED_BOUNDARIES``, so
+        :func:`dial_stops_at` is never even consulted for it here → it always returns ``False`` (STOP).
+        Návrh cannot begin until the Manažér clicks ``approve_spec``. **A ``fast_fix`` is the exception
+        (CR-V2-028):** it produces NO Špecifikácia (the directive IS the brief; submitting it is the
+        authorization), so its Príprava AUTO-CONTINUES straight to Programovanie — zero mid-flight
+        approvals (design §2.4/§2.5).
       * **Verifikácia end sign-off** — at a non-stopping dial level a PASS verdict auto-signs-off to Hotovo,
         but ONLY through the recorded Auditor PASS verdict (no-silent-done invariant, safeguard #5): if no
         PASS is on record the boundary STOPS regardless of the dial (never a silent done without
@@ -4180,8 +4224,21 @@ def _settle_phase_boundary(db: Session, state: PipelineState) -> bool:
     ``agent_working`` at the next phase). The sole-mutator invariant is preserved: this runs inside the
     dispatch path, always as a consequence of an action already routed through :func:`apply_action`."""
     stage = state.current_stage
+    # Fast-fix Príprava (CR-V2-028; design §2.4/§2.5 "Autonomous — zero mid-flight approvals"): the
+    # ``approve_spec`` always-stop carve-out exists to gate the Manažér's reading + approval of a real
+    # Špecifikácia (a ``new_version`` deliverable). A fast-fix produces NO Špecifikácia — the directive IS
+    # the brief and SUBMITTING the fast-fix directive is itself the authorization — so there is nothing to
+    # approve. Auto-continue Príprava → Programovanie so the lane runs full-auto through to verified
+    # (consistent with the fast-fix dial=plna carve-out). Only fast-fix; a new_version Príprava still
+    # ALWAYS stops at ``approve_spec`` (D3, dial-independent).
+    if stage == "priprava":
+        if state.flow_type != "fast_fix":
+            return False  # new_version: the Špecifikácia approval is ALWAYS mandatory (approve_spec stop)
+        state.current_stage = _next_stage("priprava", state.flow_type)  # fast_fix → programovanie
+        _begin_dispatch(db, state)  # agent_working at Programovanie → the auto-chain loop runs it
+        return True
     if stage not in DIAL_GOVERNED_BOUNDARIES:
-        # Príprava (approve_spec — always-stop) + any non-boundary phase: never auto-continue here.
+        # Any other non-boundary phase: never auto-continue here.
         return False
     level = resolve_miera_autonomie(db, state.version_id)
     if dial_stops_at(level, stage):
@@ -4503,6 +4560,17 @@ async def _run_build_round(
     # superseded fix scope on a later (e.g. Manažér-steered) Programovanie re-dispatch.
     if state.is_regate:
         state.is_regate = False
+        db.flush()
+
+    # Fast-fix short path (CR-V2-028; design §2.4/§2.5): the fast-fix lane skips the heavy Návrh phase
+    # (FAST_FIX_STAGE_ORDER = priprava → programovanie → verifikacia → done), so NO task plan is
+    # materialized upstream. Re-target ``fast_fix.ensure_build_task`` ONTO this v2 short path: the Manažér's
+    # directive (carried in the kickoff payload) IS the brief, so materialize the ONE minimal Task here, at
+    # the START of Programovanie, before the build loop reads ``get_next_todo_task`` (which would otherwise
+    # see no task and falsely settle the phase as done with zero work). Idempotent — a Verifikácia FAIL
+    # re-entry / a resumed dispatch reuses the existing Task (the v2 self-checking loop then re-runs it).
+    if state.flow_type == "fast_fix":
+        fast_fix.ensure_build_task(db, version_id)
         db.flush()
 
     while True:

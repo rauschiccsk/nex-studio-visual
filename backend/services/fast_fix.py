@@ -1,15 +1,18 @@
-"""Service layer for the Fast-Fix Lane (F-009, CR-NS-094).
+"""Service layer for the Fast-Fix Lane ("Rýchla oprava"; F-009, CR-NS-094; v2 short path CR-V2-028).
 
-The Fast-Fix Lane is a lightweight cockpit flow for small, obvious fixes found during
-debugging — it skips the full waterfall (Designer / Customer / Auditor+Dual-Build) and runs
-``kickoff → build → release → done`` instead. This module owns the two pieces of plumbing the
-orchestrator does NOT:
+The Fast-Fix Lane is a lightweight flow for small, obvious fixes that do not warrant a full version
+build. In v2 it runs the SHORT path (``FAST_FIX_STAGE_ORDER`` = priprava → programovanie → verifikacia
+→ done): the Manažér's directive IS the brief (no heavy Návrh, no per-task Auditor), the AI Agent fixes
+it self-checking, a LIGHT focused Auditor check (fix works + no regression) verifies it, and the lane
+STOPS at the verified/Hotovo boundary — it does NOT auto-deploy (OQ-3 resolved; deploy is the normal
+manual per-customer Nasadiť in the UAT/PROD tabs, CR-V2-027). This module owns the two pieces of
+plumbing the orchestrator does NOT:
 
 * :func:`create_patch_version` — derive the next PATCH version (semver ``vX.Y.Z → vX.Y.Z+1`` from
   the project's latest version) and create it. The caller then starts a ``fast_fix`` pipeline on it.
-* :func:`ensure_build_task` — materialize the ONE minimal Task (Epic → Feat → Task) from the
-  Director directive carried in the kickoff message, so the existing per-task build loop runs
-  unchanged. Idempotent.
+* :func:`ensure_build_task` — materialize the ONE minimal Task (Epic → Feat → Task) from the Manažér's
+  directive carried in the kickoff message, so the v2 self-checking Programovanie loop has a task to run.
+  Re-targeted off the v1 per-task-audited loop onto the v2 short path (CR-V2-028). Idempotent.
 
 Design notes:
     * No dependency on :mod:`backend.services.orchestrator` — the orchestrator imports THIS module
@@ -114,19 +117,20 @@ def create_patch_version(db: Session, *, project_id: UUID, user_id: UUID) -> Ver
 
 
 def kickoff_directive(db: Session, version_id: UUID) -> Optional[str]:
-    """The Director directive carried in the version's kickoff message payload (set by the
-    orchestrator ``start`` for a ``fast_fix`` flow), or ``None``.
+    """The Manažér directive carried in the version's kickoff message payload (set by the orchestrator
+    ``start`` for a ``fast_fix`` flow), or ``None``.
 
-    Public (CR-NS-097): the orchestrator reads it to PREPEND the directive onto the Coordinator's
-    kickoff brief — the kickoff agent runs a fresh session (no thread to ``--resume``), so the brief is
-    its only context and the triage would otherwise be blind to what to fix."""
+    The fast-fix kickoff is recorded by ``apply_action('start')`` in the v2 first phase: ``stage='priprava'``,
+    ``author='manazer'``, ``kind='kickoff'``, ``payload.directive=<directive>`` (CR-V2-009 collapsed the v1
+    ``kickoff``/``director`` tokens — both are rejected by the v2 DB CHECK). :func:`ensure_build_task` reads
+    this so the Manažér's directive becomes the single fast-fix Task's brief on the v2 short path (CR-V2-028)."""
     msg = db.execute(
         select(PipelineMessage)
         .where(
             PipelineMessage.version_id == version_id,
-            PipelineMessage.stage == "kickoff",
+            PipelineMessage.stage == "priprava",
             PipelineMessage.kind == "kickoff",
-            PipelineMessage.author == "director",
+            PipelineMessage.author == "manazer",
         )
         .order_by(PipelineMessage.seq.desc())
         .limit(1)
@@ -149,11 +153,15 @@ def _title_from_directive(directive: Optional[str]) -> str:
 def ensure_build_task(db: Session, version_id: UUID) -> Task:
     """Materialize the ONE minimal Task for a Fast-Fix version (Epic → Feat → Task) — idempotent.
 
-    The Director directive (in the kickoff message) IS the task brief: it becomes the Task's
+    The Manažér's directive (in the kickoff message) IS the task brief: it becomes the Task's
     ``description`` (full text) and a trimmed first line is the title. ``task_type`` defaults to
-    ``backend`` (a neutral default — the directive guides the Implementer to the real layer; the
-    field only drives FE display + the optional checklist, left unset). If a Task already exists for
-    the version (a re-entry into build), the existing first todo/any task is returned untouched.
+    ``backend`` (a neutral default — the directive guides the AI Agent to the real layer; the field
+    only drives FE display + the optional checklist, left unset). If a Task already exists for the
+    version (a re-entry into build), the existing first todo/any task is returned untouched.
+
+    Called by the orchestrator at the START of the fast-fix Programovanie round (CR-V2-028): the v2 short
+    path skips Návrh, so this is where the single task is created for the AI Agent's self-checking loop —
+    the v2 replacement for the v1 per-task-audited build loop's plan materialization.
 
     Raises:
         ValueError: If the version does not exist.
