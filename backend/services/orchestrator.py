@@ -642,6 +642,25 @@ async def _record_parse_exhaustion(
         await on_message(msg)
 
 
+def _status_block_instruction(stage: str) -> str:
+    """The status-block contract appended to EVERY agent turn's prompt (CR-V2-031).
+
+    Names the EXACT enum literals the engine validates (``pipeline_status.STAGES`` / ``BLOCK_KINDS`` /
+    ``_AWAITING``) so the agent emits them verbatim instead of guessing/translating: Opus emitted
+    ``stage='preparation'`` (English) instead of the required ``stage='priprava'`` → an ``unknown stage``
+    ParseFailure that the re-emit (which never carried the exact value) could not fix. Injected at the
+    single :func:`invoke_agent` chokepoint, so the primary turn AND every parse-retry re-emit carry the
+    exact ``stage`` for the current phase. Keep the literals in sync with ``pipeline_status``."""
+    return (
+        "Ukonči odpoveď JEDNÝM štruktúrovaným stavovým blokom medzi značkami `<<<PIPELINE_STATUS>>>` a "
+        "`<<<END_PIPELINE_STATUS>>>` (F-007-orchestration-cockpit.md §5.3), ako POSLEDNÚ vec v odpovedi. "
+        "Polia sú PEVNÉ KÓDOVÉ HODNOTY — použi ich PRESNE, NIKDY ich neprekladaj do angličtiny: "
+        f"`stage` = `{stage}` (presne táto hodnota); "
+        "`kind` je jedna z {question, answer, gate_report, verdict, done, blocked}; "
+        "`awaiting` je `manazer` alebo `none`."
+    )
+
+
 def _directive_for(stage: str, flow_type: str = "new_version") -> str:
     """Minimal orchestrator directive for a stage. The agent reads its charter.
 
@@ -1741,6 +1760,12 @@ async def invoke_agent(
             await on_event({**evt, "_role": role} if isinstance(evt, dict) else evt)
 
         await tagged_on_event({"type": "active_role"})  # per-turn rail signal (steps Z→N→K)
+
+    # CR-V2-031: append the exact status-block enum values for THIS stage so the agent emits them verbatim
+    # instead of guessing/translating (Opus emitted stage='preparation' → 'unknown stage' ParseFailure).
+    # The single chokepoint every dispatch + every parse-retry re-emit passes through, so the re-emit also
+    # carries the exact `stage` and can actually recover.
+    prompt = f"{prompt}\n\n{_status_block_instruction(stage)}"
 
     # WS-D (CR-NS-036): time + meter this dispatch into the turn accumulator. A fresh local one for
     # single-shot direct callers; the shared one when threaded through the parse-retry loop.

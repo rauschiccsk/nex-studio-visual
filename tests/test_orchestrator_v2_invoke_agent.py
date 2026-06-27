@@ -619,3 +619,35 @@ async def test_parse_exhaustion_records_readable_notification(db_session):
     assert "nevrátil platný" in note.content
     assert note.payload["raw_excerpt"] == "…surový výstup agenta…"
     assert note.payload["parse_failure_reason"].startswith("status block schema invalid")
+
+
+# ── CR-V2-031: inject the exact status-block enum values ─────────────────────────
+
+
+def test_status_block_instruction_names_exact_stage_and_enums():
+    """The per-turn instruction names the EXACT slovak ``stage`` literal (never the English translation)
+    plus the valid kind/awaiting values — so the agent emits them verbatim."""
+    msg = orchestrator._status_block_instruction("priprava")
+    assert "priprava" in msg
+    assert "preparation" not in msg.lower()  # the exact enum, not Opus's English translation
+    assert "gate_report" in msg and "question" in msg  # kind enum listed
+    assert "manazer" in msg  # awaiting enum listed
+
+
+async def test_invoke_agent_appends_exact_stage_to_prompt(db_session, monkeypatch):
+    """CR-V2-031: every dispatch's prompt carries the exact ``stage`` value (here ``priprava``) so the agent
+    cannot guess/translate it — injected at the single chokepoint, so retries inherit it too."""
+    captured: dict = {}
+
+    async def _fake(*, prompt, **kwargs):
+        captured["prompt"] = prompt
+        return (_navrh_block(), claude_agent.UsageMetadata(1, 1, "m"))
+
+    monkeypatch.setattr(orchestrator, "invoke_claude", _fake)
+    version, _ = _make_version(db_session)
+    await orchestrator.invoke_agent(
+        db_session, version_id=version.id, role="ai_agent", stage="priprava", prompt="BRIEF-XYZ"
+    )
+    assert "BRIEF-XYZ" in captured["prompt"]  # the original directive is preserved
+    assert "priprava" in captured["prompt"]  # the exact stage value is appended
+    assert "PEVNÉ KÓDOVÉ" in captured["prompt"]  # the enum-contract instruction is present

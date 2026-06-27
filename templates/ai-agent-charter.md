@@ -100,3 +100,7 @@ CR-V2-006/OQ-10) — deterministický; pri malformed bloku engine nastaví `bloc
   polí (`report`, `question`) ako **správne escapnutý JSON reťazec** — pekné celé vety áno, ale JSON musí
   ostať platný (žiadne neescapnuté úvodzovky ani zalomenia, ktoré ho rozbijú).
 - Drž samotný blok **kompaktný a vecný**; dlhšie úvahy patria do prózy **nad** blok, nie do JSON-u.
+- **Polia sú PEVNÉ KÓDOVÉ HODNOTY — použi ich PRESNE, nikdy neprekladaj do angličtiny (CR-V2-031):**
+  `stage` ∈ `{priprava, navrh, programovanie, verifikacia}` (napr. `priprava`, **nie** „preparation");
+  `kind` ∈ `{question, answer, gate_report, verdict, done, blocked}`; `awaiting` ∈ `{manazer, none}`.
+  Engine ti pri každom kole pripomenie presnú hodnotu `stage` pre aktuálnu fázu — použi ju doslovne.
