@@ -19,6 +19,7 @@ import type { ActivityLine, PipelineBoard, PipelineState } from "../../services/
 import type { BuildPhase } from "./labels";
 import PipelineActivityFeed from "./PipelineActivityFeed";
 import { PhaseArtifact } from "./PhaseArtifact";
+import { AuditorUpfrontReview } from "./AuditorUpfrontReview";
 import { DECISION_BANNER, PHASE_LABELS, PIPELINE_STATUS_TONE, TONE_BANNER } from "./labels";
 
 // Slovak placeholder per phase tab when it has no artifact yet.
@@ -99,6 +100,11 @@ export function ExchangePanel({ board, viewedPhase, activity, taskPlanSlot }: Pr
             <span className="font-medium text-[var(--color-text-primary)]">{bannerText(state)}</span>
           </div>
         ))}
+
+      {/* CR-V2-039: the independent Auditor's UPFRONT verdict + findings, pinned above the design doc so
+          the Manažér can't approve a holed spec without seeing them. Renders only when an upfront verdict
+          exists (durable record); no-op otherwise. */}
+      {viewedPhase === "navrh" && <AuditorUpfrontReview messages={recent_messages} />}
 
       {programovanieSplit ? (
         // Coding log LEFT + the task plan RIGHT (split view).
