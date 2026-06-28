@@ -13,7 +13,7 @@ import uuid
 import pytest
 
 from backend.services import claude_agent
-from backend.services.claude_agent import ClaudeAgentError, invoke_claude
+from backend.services.claude_agent import ClaudeAgentError, ClaudeAgentTimeout, invoke_claude
 from backend.services.pipeline_status import PipelineStatusBlock, parse_status_block
 
 
@@ -192,6 +192,34 @@ async def test_json_mode_unparseable_envelope_raises(monkeypatch):
 
     with pytest.raises(ClaudeAgentError):
         await invoke_claude(project_slug="x", claude_session_id=uuid.uuid4(), prompt="go")
+
+
+async def test_json_mode_timeout_raises_claude_agent_timeout(monkeypatch):
+    """CR-V2-037: a json-path wall-clock timeout raises ``ClaudeAgentTimeout`` (a ``ClaudeAgentError``
+    subclass) — so callers can tell a real timeout (don't re-invoke) from a fast crash (worth a re-invoke).
+    A non-zero exit / decode failure stays a plain ``ClaudeAgentError`` (the crash case, tested above)."""
+
+    class _P:
+        returncode = None
+
+        async def communicate(self):
+            await asyncio.sleep(10)  # never completes within the timeout
+            return (b"", b"")
+
+        async def wait(self):
+            return 0
+
+    async def _fake_exec(*_a, **_k):
+        return _P()
+
+    async def _noop_kill(_proc):
+        return None
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
+    monkeypatch.setattr(claude_agent, "_kill_process_tree", _noop_kill)  # avoid os.killpg on the fake proc
+
+    with pytest.raises(ClaudeAgentTimeout):
+        await invoke_claude(project_slug="x", claude_session_id=uuid.uuid4(), prompt="go", timeout=0)
 
 
 async def test_streaming_parses_usage_from_result_event(monkeypatch):

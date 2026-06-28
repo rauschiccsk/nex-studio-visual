@@ -456,3 +456,120 @@ def test_task_plan_skeleton_directive_mandates_coarse_granularity():
     assert "HRUBOZRNNÁ" in d  # coarse granularity mandated in the skeleton pass
     assert "modul ≈ úloha" in d
     assert str(orchestrator.MAX_PLAN_FEATS) in d  # the cap is named so the agent stays well under it
+
+
+# ── CR-V2-037: per-feat pass resilience (a fast crash is retried, a timeout is not) ───────────────
+
+
+def _stub_plan_passes_faulty(monkeypatch, plan_spec, *, fault_feat, fault, fail_times=None, cross=_DEFAULT_CROSS):
+    """Like :func:`_stub_plan_passes`, but the per-feat pass for ``fault_feat`` RAISES ``fault`` (a
+    ``ClaudeAgentError`` / ``ClaudeAgentTimeout``). ``fail_times=None`` → always raise (persistent); an int
+    → raise that many times then succeed (transient — exercises the bounded re-invoke). Returns a ``calls``
+    dict counting the skeleton + fault-feat invocations so a test can assert retry vs no-retry."""
+    feat_by_title = {f_title: tasks for _e, feats in plan_spec for f_title, tasks in feats}
+    calls = {"skeleton": 0, fault_feat: 0}
+
+    async def _fake_invoke_claude(*, prompt, **_kw):
+        if "KOSTRU" in prompt:
+            calls["skeleton"] += 1
+            return ("", None, _skeleton_dict(plan_spec, cross))
+        for f_title, tasks in feat_by_title.items():
+            if f_title in prompt:
+                if f_title == fault_feat:
+                    calls[fault_feat] += 1
+                    if fail_times is None or calls[fault_feat] <= fail_times:
+                        raise fault
+                return ("", None, _feat_tasks_dict(tasks))
+        raise AssertionError(f"unexpected plan-pass prompt: {prompt[:80]}")
+
+    monkeypatch.setattr(orchestrator, "invoke_claude", _fake_invoke_claude)
+    monkeypatch.setattr(orchestrator, "_split_claude_result", lambda r: r)
+    monkeypatch.setattr(orchestrator, "_resolve_orch_session", lambda db, slug, role: (uuid.uuid4(), False))
+    monkeypatch.setattr(orchestrator, "_resolve_dispatch_overrides", lambda db, vid, role: (None, None))
+    return calls
+
+
+async def test_navrh_per_feat_crash_is_retried_then_succeeds(db_session, monkeypatch):
+    # A FAST crash (ClaudeAgentError, not a timeout) in a per-feat pass is re-invoked (bounded) rather than
+    # discarding the whole accumulated plan — crash once, then succeed → the FULL plan still materializes.
+    version, _ = _make_version(db_session, project_dial="po_kazdej_faze")
+    _seed_navrh(db_session, version.id)
+    _stub_design_turn(monkeypatch, _design_done())
+    plan = [
+        ("Foundation", [("Schema", [("t1", "migration", 60)])]),
+        ("Core", [("Engine", [("e1", "backend", 120)])]),
+    ]
+    calls = _stub_plan_passes_faulty(
+        monkeypatch,
+        plan,
+        fault_feat="Engine",
+        fault=orchestrator.ClaudeAgentError("claude exited with code 1: transient boom"),
+        fail_times=1,
+    )
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert state.current_stage == "navrh" and state.status == "awaiting_manazer"
+    assert calls["Engine"] == 2  # crashed once → re-invoked once → succeeded
+    assert {e.title for e in _epics(db_session, version.id)} == {"Foundation", "Core"}
+    assert len(db_session.execute(select(Task)).scalars().all()) == 2  # nothing lost
+
+
+async def test_navrh_per_feat_persistent_crash_blocks_agent_error_not_parse_exhaustion(db_session, monkeypatch):
+    # A crash that keeps failing past the bounded re-invokes is an envelope-loss; with NO dispatch baseline
+    # it HALTs blocked with block_reason=agent_error (never the parse_exhaustion mislabel) + writes nothing.
+    version, _ = _make_version(db_session, project_dial="po_kazdej_faze")
+    _seed_navrh(db_session, version.id)
+    _stub_design_turn(monkeypatch, _design_done())
+    calls = _stub_plan_passes_faulty(
+        monkeypatch,
+        [("Core", [("Engine", [("e1", "backend", 120)])])],
+        fault_feat="Engine",
+        fault=orchestrator.ClaudeAgentError("claude exited with code 1: persistent boom"),
+    )
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert state.status == "blocked" and state.block_reason == "agent_error"
+    assert calls["Engine"] == orchestrator._PARSE_RETRIES + 1  # initial attempt + the bounded re-invokes
+    assert not _epics(db_session, version.id)  # all-or-nothing: nothing written
+
+
+async def test_navrh_per_feat_persistent_crash_with_baseline_settles_review_continue(db_session, monkeypatch):
+    # With a dispatch baseline armed, a persistent crash settles awaiting_manazer ("review & continue") and
+    # the lost-work message tells the TRUTH — "Agent opakovane zlyhal", not the misleading "Vypršal čas".
+    version, _ = _make_version(db_session, project_dial="po_kazdej_faze")
+    _seed_navrh(db_session, version.id)
+    state0 = orchestrator._get_state(db_session, version.id)
+    state0.dispatch_baseline_sha = "deadbeefdeadbeef"
+    db_session.flush()
+    _stub_design_turn(monkeypatch, _design_done())
+    _stub_plan_passes_faulty(
+        monkeypatch,
+        [("Core", [("Engine", [("e1", "backend", 120)])])],
+        fault_feat="Engine",
+        fault=orchestrator.ClaudeAgentError("claude exited with code 1: persistent boom"),
+    )
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert state.status == "awaiting_manazer"
+    assert "Agent opakovane zlyhal" in state.next_action
+    assert "Vypršal čas" not in state.next_action
+    assert not _epics(db_session, version.id)
+
+
+async def test_navrh_per_feat_timeout_is_not_retried(db_session, monkeypatch):
+    # A genuine TIMEOUT (ClaudeAgentTimeout) is NOT re-invoked — re-running just risks another long wait. It
+    # settles the R1 lost-work path at once: the per-feat pass is called exactly ONCE; message "Vypršal čas".
+    version, _ = _make_version(db_session, project_dial="po_kazdej_faze")
+    _seed_navrh(db_session, version.id)
+    state0 = orchestrator._get_state(db_session, version.id)
+    state0.dispatch_baseline_sha = "deadbeefdeadbeef"
+    db_session.flush()
+    _stub_design_turn(monkeypatch, _design_done())
+    calls = _stub_plan_passes_faulty(
+        monkeypatch,
+        [("Core", [("Engine", [("e1", "backend", 120)])])],
+        fault_feat="Engine",
+        fault=orchestrator.ClaudeAgentTimeout("claude invocation timed out after 1200s"),
+    )
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert state.status == "awaiting_manazer"
+    assert calls["Engine"] == 1  # a timeout is NOT retried
+    assert "Vypršal čas agenta" in state.next_action
+    assert not _epics(db_session, version.id)

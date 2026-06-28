@@ -56,7 +56,7 @@ from backend.services import epic as epic_service
 from backend.services import feat as feat_service
 from backend.services import system_setting as system_setting_service
 from backend.services import task as task_service
-from backend.services.claude_agent import ClaudeAgentError, invoke_claude
+from backend.services.claude_agent import ClaudeAgentError, ClaudeAgentTimeout, invoke_claude
 from backend.services.pipeline_status import (
     PIPELINE_STATUS_JSON_SCHEMA,
     TASK_PLAN_FEAT_TASKS_JSON_SCHEMA,
@@ -496,6 +496,28 @@ def build_readiness(db: Session, version_id: uuid.UUID) -> tuple[bool, int]:
     button that 400s. Cheap counts; the board computes them each fetch like ``_gate_e_open_findings``."""
     all_tasks_done = task_service.get_next_todo_task(db, version_id) is None
     return all_tasks_done, _build_open_findings(db, version_id)
+
+
+def navrh_plan_materialized(db: Session, version_id: uuid.UUID) -> bool:
+    """True iff a task plan has actually landed for this version — at least one ``Task`` exists (CR-V2-037).
+
+    The Návrh task plan is written ALL-OR-NOTHING (CR-V2-011 ``_run_navrh_round``): the EPIC→FEAT→TASK rows
+    appear only after every per-feat pass succeeds. So 0 tasks means the plan never materialized — e.g. a
+    per-feat pass crashed past its bounded re-invokes and the round settled ``awaiting_manazer`` with an
+    empty plan. Approving ``schvalit`` out of Návrh then would advance to Programovanie with NOTHING to
+    build. This guards that gate (apply_action) and lets the board hide a dead "Schváliť" button. Note
+    ``build_readiness``'s ``all_tasks_done`` is True for an empty plan (no todo task), so it must NOT be
+    reused as the plan-present signal — this is a positive existence count."""
+    return (
+        db.execute(
+            select(Task.id)
+            .join(Feat, Task.feat_id == Feat.id)
+            .join(Epic, Feat.epic_id == Epic.id)
+            .where(Epic.version_id == version_id)
+            .limit(1)
+        ).first()
+        is not None
+    )
 
 
 class OrchestratorError(ValueError):
@@ -2111,14 +2133,17 @@ async def _plan_pass_once(
                     json_schema=json_schema,
                 )
             )
-    except ClaudeAgentError as exc:
-        # A failed invocation still burned wall-clock (no usage envelope) — count it (WS-D).
+    except ClaudeAgentTimeout as exc:
+        # A genuine TIMEOUT — the turn burned its whole budget. A failed invocation still burned wall-clock
+        # (no usage envelope) — count it (WS-D).
         metrics.record(None, perf_counter() - _started)
-        # R1 envelope-loss parity (CR-1, audit 2026-06-18): a timeout/crash may have left real commits
-        # behind even though the JSON envelope was lost — audit baseline..HEAD and ride the audit dict on
-        # ParseFailure.lost_work so the round settles to awaiting_director ("review & continue"), exactly
+        # R1 envelope-loss parity (CR-1, audit 2026-06-18): a timeout may have left real commits behind even
+        # though the JSON envelope was lost — audit baseline..HEAD and ride the audit dict on
+        # ParseFailure.lost_work so the round settles to awaiting_manazer ("review & continue"), exactly
         # like invoke_agent. A no-op (None) when no dispatch baseline was armed; the prefix below then lets
         # the round set block_reason=agent_error (a ClaudeAgentError), never the parse_exhaustion mislabel.
+        # ``lost_work`` set ⇒ the per-pass retry loop does NOT re-invoke (re-running just risks another long
+        # timeout — CR-V2-037 keeps this conservative for a real timeout).
         lost_work = await _audit_lost_work(
             db,
             version_id=version_id,
@@ -2132,6 +2157,21 @@ async def _plan_pass_once(
             usage=metrics.usage_payload(),
             timing=metrics.timing_payload(),
             lost_work=lost_work,
+        )
+    except ClaudeAgentError as exc:
+        # CR-V2-037: a FAST crash (non-zero exit / decode / stream-end — NOT a timeout). The agent produced
+        # nothing this turn, but it cost almost no wall-clock and is usually transient (a CLI hiccup, a
+        # too-large --resume, a rate blip), so DON'T audit/settle here — return a RETRYABLE envelope-loss
+        # (``lost_work`` stays None) so :func:`_invoke_plan_pass` re-invokes this single pass (bounded)
+        # rather than discard the whole accumulated plan. Same envelope-loss prefix as a timeout (it IS a
+        # claude invocation failure → block_reason=agent_error if the retries are exhausted), but no
+        # lost_work ⇒ the retry loop picks it up. Logged (the cause was previously swallowed → undiagnosable).
+        metrics.record(None, perf_counter() - _started)
+        logger.warning("task_plan pass crashed (retryable) for version=%s: %s", version_id, exc)
+        return ParseFailure(
+            f"{_PLAN_PASS_ENVELOPE_LOSS_PREFIX} {exc}",
+            usage=metrics.usage_payload(),
+            timing=metrics.timing_payload(),
         )
     metrics.record(usage, perf_counter() - _started)
     # TEXT/FENCE EXTRACTION (CR-1, live root-cause 2026-06-18): ``--json-schema`` does NOT return a
@@ -2184,19 +2224,28 @@ async def _invoke_plan_pass(
         metrics=metrics,
     )
     attempts = 0
+    # Retry a re-emittable failure within ``_PARSE_RETRIES``: a PARSE typo (re-ask for the SAME content) or
+    # — CR-V2-037 — a FAST CRASH (re-invoke the SAME pass; the agent crashed without producing output and a
+    # crash is usually transient). A genuine TIMEOUT sets ``lost_work`` → the loop condition excludes it
+    # (re-invoking just risks another long timeout), so a real timeout still settles the R1 path at once.
     while isinstance(result, ParseFailure) and result.lost_work is None and attempts < _PARSE_RETRIES:
-        # Retry only a genuine PARSE failure (re-emit the block). An envelope-loss (ClaudeAgentError →
-        # lost_work set) is NOT a re-emittable typo — stop and let the R1 path settle to awaiting_director
-        # (re-invoking would just risk another long timeout and could drop the lost_work signal).
         attempts += 1
-        result = await _plan_pass_once(
-            db,
-            state,
-            prompt=(
+        # A crash (envelope-loss prefix, no lost_work) → re-run the ORIGINAL prompt; a parse typo → ask the
+        # agent to resend the same content as one well-formed JSON block.
+        is_crash = result.reason.startswith(_PLAN_PASS_ENVELOPE_LOSS_PREFIX)
+        retry_prompt = (
+            prompt
+            if is_crash
+            else (
                 f"Tvoj výstup sa nepodarilo spracovať: {result.reason}. Pošli ho ZNOVA — rovnaký obsah, "
                 "ale VÝHRADNE ako jeden JSON objekt vnútri bloku <<<TASK_PLAN_JSON>>> … "
                 "<<<END_TASK_PLAN_JSON>>>, s presnými názvami polí a bez čohokoľvek navyše."
-            ),
+            )
+        )
+        result = await _plan_pass_once(
+            db,
+            state,
+            prompt=retry_prompt,
             json_schema=json_schema,
             parser=parser,
             on_event=None,  # cheap re-emit retries don't stream (mirror invoke_agent_with_parse_retry)
@@ -2204,6 +2253,22 @@ async def _invoke_plan_pass(
             metrics=metrics,
         )
     if isinstance(result, ParseFailure):
+        # CR-V2-037: a CRASH that STILL failed after the bounded re-invokes is a PERSISTENT envelope-loss —
+        # audit baseline..HEAD now (it was deferred so the retries could run) and ride the lost-work dict so
+        # the round settles awaiting_manazer ("review & continue"), exactly like a timeout, instead of a
+        # parse_exhaustion mislabel / blocked dead-end. (No-op → None when no dispatch baseline was armed;
+        # the envelope-loss prefix then still yields block_reason=agent_error in _settle_plan_pass_failure.)
+        if result.lost_work is None and result.reason.startswith(_PLAN_PASS_ENVELOPE_LOSS_PREFIX):
+            lost_work = await _audit_lost_work(
+                db,
+                version_id=state.version_id,
+                slug=_project_slug_for_version(db, state.version_id),
+                stage="navrh",
+                timeout_seconds=_timeout_for("navrh"),
+                on_message=on_message,
+                cause_label="Agent opakovane zlyhal",
+            )
+            result = replace(result, lost_work=lost_work)
         # Attach the accumulated turn metrics so the fail-closed Coordinator relay can carry the lost tokens.
         return replace(result, usage=metrics.usage_payload(), timing=metrics.timing_payload())
     msg = _record_message(
@@ -2358,6 +2423,7 @@ async def _audit_lost_work(
     stage: str,
     timeout_seconds: int,
     on_message: Optional[MessageCallback] = None,
+    cause_label: str = "Vypršal čas agenta",
 ) -> Optional[dict[str, Any]]:
     """R1-c (D1): on an agent envelope-loss (timeout/crash), audit ``baseline..HEAD`` and surface any
     committed-but-lost work to the Director — *review & continue*, never silently lost, never auto-merged.
@@ -2367,7 +2433,12 @@ async def _audit_lost_work(
     timeout_seconds, detected_commit_count}`` (idempotent per baseline). Returns the audit dict (with the
     Slovak ``next_action`` the caller settles on), or ``None`` when there is no dispatch baseline to audit
     against (e.g. an internal sub-turn before ``_begin_dispatch`` armed one, or an unreadable repo) — in which
-    case the caller keeps its existing escalation. Status is NOT mutated here (the caller owns it)."""
+    case the caller keeps its existing escalation. Status is NOT mutated here (the caller owns it).
+
+    ``cause_label`` (CR-V2-037) opens the ``next_action`` so it tells the truth about WHY the envelope was
+    lost: the default ``"Vypršal čas agenta"`` for a genuine timeout, but e.g. ``"Agent opakovane zlyhal"``
+    when a task-plan pass crashed past its bounded re-invokes (no time expired — calling it a timeout was
+    misleading)."""
     state = _get_state(db, version_id)
     if state is None or not state.dispatch_baseline_sha:
         return None
@@ -2376,9 +2447,9 @@ async def _audit_lost_work(
     head = _repo_head(project_root)
     count = _rev_list_count(project_root, baseline)
     if count >= 1:
-        next_action = f"Vypršal čas agenta — môžu byť zapísané zmeny ({count} commitov). Over 'git log' a pokračuj."
+        next_action = f"{cause_label} — môžu byť zapísané zmeny ({count} commitov). Over 'git log' a pokračuj."
     else:
-        next_action = "Vypršal čas agenta — žiadna zmena nezistená. Pokračuj."
+        next_action = f"{cause_label} — žiadna zmena nezistená. Pokračuj."
     if not _lost_work_audit_recorded(db, version_id, baseline):
         msg = _record_message(
             db,
@@ -5052,6 +5123,15 @@ async def apply_action(
         # whether the build STOPPED here for the Manažér at all; once it has, this signs it off.
         if state.current_stage not in ("navrh", "programovanie", "verifikacia"):
             raise OrchestratorError("Schváliť je platné len na schvaľovacom bode (Návrh / Programovanie / Verifikácia)")
+        # CR-V2-037: never advance out of Návrh with an EMPTY task plan (0 tasks) — that would enter
+        # Programovanie with nothing to build. An empty plan means the Návrh round did not materialize one
+        # (e.g. a per-feat pass crashed past its retries → settled awaiting_manazer). Recover via "Uprav"
+        # (re-run Návrh), not by signing off an absent plan. Authoritative belt to the board's hidden button.
+        if state.current_stage == "navrh" and not navrh_plan_materialized(db, version_id):
+            raise OrchestratorError(
+                "Schváliť nedovolené: plán úloh je prázdny (0 úloh) — Návrh sa nedokončil. "
+                "Použi „Uprav“ a nechaj agenta plán dokončiť."
+            )
         # no-silent-done-without-verification (R-BLAST safeguard #5, v2 form): the build may reach Hotovo
         # ONLY through a recorded Auditor PASS verdict at Verifikácia — never a silent sign-off. (v1's
         # "no-silent-done-without-UAT" gate is superseded: deploy is OUT of the pipeline — per-customer,

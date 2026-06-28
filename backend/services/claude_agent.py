@@ -50,6 +50,16 @@ class ClaudeAgentError(RuntimeError):
     """claude CLI invocation failed (non-zero exit, timeout, decode failure)."""
 
 
+class ClaudeAgentTimeout(ClaudeAgentError):
+    """The ``claude`` invocation exceeded its wall-clock timeout (CR-V2-037).
+
+    A SUBCLASS of :class:`ClaudeAgentError`, so every existing ``except ClaudeAgentError`` still catches a
+    timeout unchanged. It exists only to let callers distinguish a genuine TIMEOUT (the turn burned its
+    whole budget — re-invoking just risks another long wait) from a FAST crash (non-zero exit / decode /
+    stream-end — produced nothing but cost almost no wall-clock and is usually transient, so worth a
+    bounded re-invoke). The task-plan per-feat passes use this to retry a crash but not a timeout."""
+
+
 def _load_charter(charter_path: Path) -> str:
     """Read a role's ``Pravidlá agenta`` charter for ``--append-system-prompt``.
 
@@ -290,7 +300,7 @@ async def _invoke_once(
         )
     except asyncio.TimeoutError as exc:
         await _kill_process_tree(proc)
-        raise ClaudeAgentError(
+        raise ClaudeAgentTimeout(
             f"claude invocation timed out after {timeout}s",
         ) from exc
 
@@ -368,7 +378,7 @@ async def _invoke_streaming(
         result_text, result_usage, result_structured = await asyncio.wait_for(_consume(), timeout=timeout)
     except asyncio.TimeoutError as exc:
         await _kill_process_tree(proc)
-        raise ClaudeAgentError(f"claude invocation timed out after {timeout}s") from exc
+        raise ClaudeAgentTimeout(f"claude invocation timed out after {timeout}s") from exc
 
     await proc.wait()
     if proc.returncode != 0:

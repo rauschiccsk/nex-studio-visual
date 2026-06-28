@@ -329,3 +329,53 @@ def test_board_current_task_at_programovanie(client, db_session):
 
     body = client.get(f"/api/v1/pipeline/{version.id}").json()
     assert body["current_task"] == {"number": 2, "title": "AP tables"}
+
+
+# ── CR-V2-037: a settled Návrh hides "Schváliť" while the task plan is empty ─────
+
+
+def test_board_hides_schvalit_when_navrh_plan_empty(client, db_session):
+    # At a settled Návrh the dial-governed "Schváliť" is normally offered — but NOT while the task plan is
+    # still EMPTY (a per-feat pass crashed past its retries → 0 tasks). The board drops the dead button so
+    # the Manažér can't advance into Programovanie with nothing to build (apply_action enforces it too).
+    version = _make_version(db_session, client._ri)
+    db_session.add(
+        PipelineState(
+            version_id=version.id,
+            flow_type="new_version",
+            current_stage="navrh",
+            current_actor="ai_agent",
+            status="awaiting_manazer",
+            next_action="",
+        )
+    )
+    db_session.flush()
+    actions = client.get(f"/api/v1/pipeline/{version.id}").json()["available_actions"]
+    assert "schvalit" not in actions  # dead button hidden
+    assert "uprav" in actions  # the re-work recovery is still offered
+
+
+def test_board_offers_schvalit_when_navrh_plan_present(client, db_session):
+    # Complement: once a plan has materialized (≥1 task), the settled-Návrh "Schváliť" IS offered again.
+    version = _make_version(db_session, client._ri)
+    project_id = db_session.get(Version, version.id).project_id
+    db_session.add(
+        PipelineState(
+            version_id=version.id,
+            flow_type="new_version",
+            current_stage="navrh",
+            current_actor="ai_agent",
+            status="awaiting_manazer",
+            next_action="",
+        )
+    )
+    epic = Epic(project_id=project_id, version_id=version.id, number=1, title="E", status="planned")
+    db_session.add(epic)
+    db_session.flush()
+    feat = Feat(epic_id=epic.id, number=1, title="F", description="", status="todo")
+    db_session.add(feat)
+    db_session.flush()
+    db_session.add(Task(feat_id=feat.id, number=1, title="T", task_type="backend", status="todo"))
+    db_session.flush()
+    actions = client.get(f"/api/v1/pipeline/{version.id}").json()["available_actions"]
+    assert "schvalit" in actions

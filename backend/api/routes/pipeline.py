@@ -95,12 +95,23 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
     )
     # Per-agent liveness for the who's-up status — a bounded one-query scan over the two v2 agent sessions.
     sessions = orchestrator.agent_sessions(db, version_id, state) if state is not None else []
+    # WS-C1 (CR-NS-030): backend-authoritative offerable actions (dial-governed v2 verbs) so the FE can't
+    # show no-op buttons. CR-V2-037: drop the dial-governed "Schváliť" out of Návrh while the task plan is
+    # still EMPTY (a per-feat pass crashed past its retries → 0 tasks) — advancing then would build nothing.
+    # apply_action enforces the same rule authoritatively; this just hides the dead button (the state-only
+    # determine_available_actions can't see the DB-derived plan presence).
+    available_actions: list[str] = sorted(orchestrator.determine_available_actions(state)) if state is not None else []
+    if (
+        state is not None
+        and state.current_stage == "navrh"
+        and "schvalit" in available_actions
+        and not orchestrator.navrh_plan_materialized(db, version_id)
+    ):
+        available_actions = [a for a in available_actions if a != "schvalit"]
     return PipelineBoardRead(
         state=PipelineStateRead.model_validate(state) if state is not None else None,
         recent_messages=[PipelineMessageRead.model_validate(m) for m in _recent_messages(db, version_id, limit)],
-        # WS-C1 (CR-NS-030): backend-authoritative offerable actions (dial-governed v2 verbs) so the FE can't
-        # show no-op buttons.
-        available_actions=sorted(orchestrator.determine_available_actions(state)) if state is not None else [],
+        available_actions=available_actions,
         all_tasks_done=all_tasks_done,
         build_open_findings=build_open_findings,
         current_task=BoardTask(number=ct.number, title=ct.title) if ct is not None else None,

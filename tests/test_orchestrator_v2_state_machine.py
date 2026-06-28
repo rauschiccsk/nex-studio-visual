@@ -14,6 +14,7 @@ import pytest
 from backend.db.models.foundation import User
 from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
+from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.versions import Version
 from backend.services import orchestrator
 
@@ -208,16 +209,45 @@ async def test_fast_fix_approve_spec_skips_navrh(db_session, fake_claude):
 # ── schvalit — dial-governed schvaľovacie body ───────────────────────────────
 
 
+def _seed_min_plan(db_session, version, project):
+    """Seed a minimal MATERIALIZED task plan (1 Epic→Feat→Task) so a schvalit out of Návrh is legitimate
+    (CR-V2-037: advancing to Programovanie with 0 tasks is refused — you cannot build nothing)."""
+    epic = Epic(project_id=project.id, version_id=version.id, number=1, title="E", status="planned")
+    db_session.add(epic)
+    db_session.flush()
+    feat = Feat(epic_id=epic.id, number=1, title="F", status="todo")
+    db_session.add(feat)
+    db_session.flush()
+    db_session.add(Task(feat_id=feat.id, number=1, title="T", task_type="backend", status="todo"))
+    db_session.flush()
+
+
 async def test_schvalit_navrh_advances_to_programovanie(db_session, fake_claude):
+    version, project = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    st = _state(db_session, version.id)
+    st.current_stage = "navrh"
+    st.status = "awaiting_manazer"
+    db_session.flush()
+    _seed_min_plan(db_session, version, project)  # CR-V2-037: a materialized plan is the precondition
+    state = await orchestrator.apply_action(db_session, version_id=version.id, action="schvalit")
+    assert state.current_stage == "programovanie"
+    assert state.status == "agent_working"
+
+
+async def test_schvalit_navrh_empty_plan_rejected(db_session, fake_claude):
+    # CR-V2-037: schvalit out of Návrh with an EMPTY task plan (0 tasks — e.g. a per-feat pass crashed past
+    # its retries) is REFUSED, so the build never enters Programovanie with nothing to build. Recover via Uprav.
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
     st = _state(db_session, version.id)
     st.current_stage = "navrh"
     st.status = "awaiting_manazer"
     db_session.flush()
-    state = await orchestrator.apply_action(db_session, version_id=version.id, action="schvalit")
-    assert state.current_stage == "programovanie"
-    assert state.status == "agent_working"
+    with pytest.raises(orchestrator.OrchestratorError, match="plán úloh je prázdny"):
+        await orchestrator.apply_action(db_session, version_id=version.id, action="schvalit")
+    # the phase did NOT advance — still at Návrh awaiting the Manažér
+    assert _state(db_session, version.id).current_stage == "navrh"
 
 
 async def test_schvalit_rejected_at_priprava(db_session, fake_claude):
