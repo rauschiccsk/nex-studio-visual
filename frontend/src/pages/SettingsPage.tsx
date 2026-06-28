@@ -238,15 +238,33 @@ function AgentsTab({
     onLoad();
   }, [onLoad]);
   return (
-    <AgentsPanel
-      roles={AGENT_ROLES}
-      models={AGENT_MODELS}
-      efforts={AGENT_EFFORTS}
-      drafts={drafts}
-      onSave={onSave}
-      loadError={loadError}
-      saveErrors={saveErrors}
-    />
+    <div>
+      <AgentsPanel
+        roles={AGENT_ROLES}
+        models={AGENT_MODELS}
+        efforts={AGENT_EFFORTS}
+        helperModels={AGENT_MODELS}
+        helperModelRoleIds={["ai_agent"]}
+        drafts={drafts}
+        onSave={onSave}
+        loadError={loadError}
+        saveErrors={saveErrors}
+      />
+      {/* CR-V2-038: honest clarity — "Max" is the ceiling (ultracode is NOT a higher level), and the
+          AI Agent's dynamic-helper capability is built in, not a missing toggle. */}
+      <div className="px-6 pb-6 max-w-3xl space-y-1 text-[11px] text-[var(--color-text-muted)]">
+        <p>
+          <strong>„Max"</strong> je najvyššia úroveň uvažovania — niet vyššej. „Ultracode" nie je vyššia
+          úroveň; je to len schopnosť spúšťať dynamických pomocníkov — a tú má AI Agent zabudovanú.
+        </p>
+        <p>
+          AI Agent si <strong>dynamických pomocníkov spúšťa sám</strong> pre paralelnú/hromadnú prácu
+          (typicky Programovanie) — nie je to prepínač. „Model pomocníkov" určuje, na akom modeli bežia
+          (predvolene lacný/rýchly; Opus len pre prioritný build). Auditor je nezávislý overovateľ a
+          pomocníkov nespúšťa.
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -367,11 +385,12 @@ export default function SettingsPage() {
     listUserAgentSettingsApi()
       .then((rows) => {
         const initial: Record<string, AgentDraft> = {};
-        for (const r of AGENT_ROLES) initial[r.id] = { model: "", effort: "" };
+        for (const r of AGENT_ROLES) initial[r.id] = { model: "", effort: "", helperModel: "" };
         for (const row of rows) {
           initial[row.agent_role] = {
             model: row.model ?? "",
             effort: row.effort ?? "",
+            helperModel: row.helper_model ?? "",
           };
         }
         setAgentDrafts(initial);
@@ -389,6 +408,8 @@ export default function SettingsPage() {
         await upsertUserAgentSettingApi(roleId as PipelineAgentRole, {
           model: (draft.model || null) as AgentModel | null,
           effort: (draft.effort || null) as AgentEffort | null,
+          // CR-V2-038: only the AI Agent shows the helper-model selector; other roles send null.
+          helper_model: (draft.helperModel || null) as AgentModel | null,
         });
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "Neznáma chyba.";

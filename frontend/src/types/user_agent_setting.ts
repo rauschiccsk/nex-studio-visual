@@ -17,9 +17,13 @@ export interface UserAgentSettingRead {
   agent_role: PipelineAgentRole;
   model: AgentModel | null;
   effort: AgentEffort | null;
+  // CR-V2-038: the model the AI Agent spawns its dynamic helpers on (only meaningful for ai_agent).
+  // null = the dispatch default (a cheap/fast model for bulk work).
+  helper_model: AgentModel | null;
 }
 
 export interface UserAgentSettingUpsert {
   model: AgentModel | null;
   effort: AgentEffort | null;
+  helper_model: AgentModel | null;
 }
