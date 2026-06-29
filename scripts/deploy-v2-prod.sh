@@ -2,8 +2,10 @@
 #
 # Deploy NEX Studio v2 PARALLEL PROD with an auto-derived, VISIBLE version (CR-V2-040).
 #
-# Bakes VITE_APP_VERSION = 2.0.<commit-count>+<short-sha> into the frontend so the sidebar version VISIBLY
-# CHANGES on every deploy — the Manažér can tell which build is live and whether a fix actually landed.
+# Bakes VITE_APP_VERSION = 2.0.<v2-change-count> into the frontend so the sidebar version VISIBLY CHANGES
+# whenever the v2 code changes — the Manažér sees how many times the project was actually touched. No
+# commit-SHA suffix (visual clutter). <v2-change-count> = commits on the v2 line since it forked from the
+# frozen ``main`` (NOT the whole-repo count, which includes all of v1 — ~690).
 # NEVER hardcode the version in a manual ``docker build``; always run THIS so the version stays honest.
 #
 # Usage:  scripts/deploy-v2-prod.sh [backend|frontend|all]   (default: all)
@@ -14,7 +16,8 @@ cd "$(git rev-parse --show-toplevel)"
 COMPOSE="/opt/prod-v2/nex-studio/docker-compose.yml"
 PROJDIR="/opt/prod-v2/nex-studio"
 TARGET="${1:-all}"
-VER="2.0.$(git rev-list --count HEAD)+$(git rev-parse --short HEAD)"
+BASE="$(git merge-base main HEAD 2>/dev/null || true)"
+VER="2.0.$([ -n "$BASE" ] && git rev-list --count "${BASE}..HEAD" || git rev-list --count HEAD)"
 
 echo "==> Deploying NEX Studio v2 PROD — version ${VER} (target: ${TARGET})"
 

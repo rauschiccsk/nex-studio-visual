@@ -3,9 +3,10 @@
 # Post-commit hook — keep ``VITE_APP_VERSION`` in ``.env`` in sync with
 # the current HEAD so the sidebar footer visibly reflects each commit.
 #
-# Format (CR-V2-040): ``2.0.<commit_count>+<short_sha>`` (e.g. ``2.0.687+1f1837a``). Anchored to the
-# product (NEX Studio 2.0.x) so the sidebar version reads sensibly, monotonic + SHA-pinned so the Manažér
-# can tell which build is live and whether a fix landed. The N-th commit from root is ``2.0.N``.
+# Format: ``2.0.<v2_change_count>`` (e.g. ``2.0.62``) — NO commit-SHA suffix (the Manažér doesn't want it on
+# screen). ``<v2_change_count>`` = commits made on the v2 line since it forked from ``main`` (which is frozen /
+# v1 PROD-pinned) — the REAL number of times we touched v2, NOT the whole-repo count (~690, which includes all
+# of v1). It grows by 1 per v2 commit, so the sidebar shows how many times the project was actually changed.
 # Only the single VITE_APP_VERSION line is touched — any other values in
 # ``.env`` (backend secrets, local overrides) are preserved.
 #
@@ -20,8 +21,14 @@ set -euo pipefail
 REPO_ROOT=$(git rev-parse --show-toplevel)
 ENV_FILE="${REPO_ROOT}/.env"
 
-COMMIT_COUNT=$(git rev-list --count HEAD)
-VERSION="2.0.${COMMIT_COUNT}+$(git rev-parse --short HEAD)"
+# Count only the commits on the v2 line (since it forked from the frozen ``main``) — the real v2 change count.
+BASE=$(git merge-base main HEAD 2>/dev/null || true)
+if [[ -n "${BASE}" ]]; then
+    V2_CHANGES=$(git rev-list --count "${BASE}..HEAD")
+else
+    V2_CHANGES=$(git rev-list --count HEAD)  # fallback when ``main`` is unavailable
+fi
+VERSION="2.0.${V2_CHANGES}"
 NEW_LINE="VITE_APP_VERSION=${VERSION}"
 
 if [[ -f "${ENV_FILE}" ]] && grep -q '^VITE_APP_VERSION=' "${ENV_FILE}"; then
