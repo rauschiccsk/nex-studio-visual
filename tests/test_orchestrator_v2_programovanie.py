@@ -309,10 +309,26 @@ async def test_unreadable_baseline_fails_closed_to_manazer(db_session, monkeypat
 # ── dial governs the post-Programovanie stop ────────────────────────────────────
 
 
-async def test_plna_auto_continues_to_verifikacia(db_session, monkeypatch):
-    # Plná autonómia: a clean build auto-continues into Verifikácia (no Manažér stop).
+async def test_plna_programovanie_boundary_always_stops_new_version(db_session, monkeypatch):
+    # A (Director 2026-06-30): a new_version build STOPS at the Programovanie boundary for the Manažér's
+    # confirmation ('schvalit' → Verifikácia), INDEPENDENT of the dial — mandatory phase gate even at plná.
+    # The tasks still complete; the build just doesn't auto-cross into Verifikácia unattended.
     version, project = _make_version(db_session, project_dial="plna")
     _seed_programovanie(db_session, version.id)
+    _seed_tasks(db_session, version, project, ["T1", "T2"])
+    _no_baseline_git(monkeypatch)
+    _stub_turns(monkeypatch, [_done_block()])
+    _stub_mech(monkeypatch, [None])
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert state.current_stage == "programovanie"
+    assert state.status == "awaiting_manazer"  # mandatory gate — no auto-advance even at plná
+    assert all(t.status == "done" for t in _tasks(db_session, version.id))
+
+
+async def test_plna_programovanie_fast_fix_auto_continues_to_verifikacia(db_session, monkeypatch):
+    # fast_fix keeps its zero-approval lane: a clean build auto-continues into Verifikácia (no Manažér stop).
+    version, project = _make_version(db_session, project_dial="plna")
+    _seed_programovanie(db_session, version.id, flow_type="fast_fix")
     _seed_tasks(db_session, version, project, ["T1", "T2"])
     _no_baseline_git(monkeypatch)
     _stub_turns(monkeypatch, [_done_block()])

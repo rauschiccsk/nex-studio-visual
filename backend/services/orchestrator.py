@@ -4095,11 +4095,14 @@ async def _settle_verifikacia_verdict(
       * **FAIL** — the bounded Auditor fix↔re-verify loop (the Auditor FINDS, the AI Agent FIXES — §2.2
         "Division of labour"). ``iteration`` counts the rounds. On the (n+1)-th still-failing round
         (``iteration >= AUDITOR_LOOP_MAX``) STOP + escalate to the Manažér (``blocked``, a visible
-        ``system→manazer`` note). Otherwise loop the fix back to the AI Agent: reset the version's ``done``
-        tasks to ``todo`` (:func:`_reset_done_tasks_for_regate` — the WHOLE build re-runs against the
-        corrected understanding; the salvaged ``surgical_fix`` scope is threaded by :func:`_run_build_round`
-        via :func:`_latest_verifikacia_fix_scope`), mark ``is_regate``, bump the round counter, re-enter
-        Programovanie, and re-dispatch (warm sessions preserved — never reset mid-loop).
+        ``system→manazer`` note). Otherwise loop a **TARGETED** fix back to the AI Agent (A+B, Director
+        2026-06-30): materialize ONE fix task (:func:`_ensure_verifikacia_fix_task`) carrying the Auditor's
+        findings as its brief (threaded by :func:`_run_build_round` via :func:`_latest_verifikacia_fix_scope`)
+        — the already-done plan tasks **STAY done** (B: replaces the v1 gate_g whole-build reset
+        :func:`_reset_done_tasks_for_regate`, the overnight-token-burn cause). Mark ``is_regate``, bump the
+        round counter, re-enter Programovanie. A new_version then **STOPS** (``paused``) for the Manažér to
+        confirm the fix re-run (A: mandatory phase gate, dial-independent — 'Pokračovať' resumes); only a
+        ``fast_fix`` auto-re-dispatches its bounded one-task lane (warm sessions preserved — never reset mid-loop).
 
     The sole-mutator invariant holds whichever path called it: the autonomous path runs inside the dispatch
     path (a consequence of an action already routed through :func:`apply_action`), the manual path IS
@@ -4133,15 +4136,28 @@ async def _settle_verifikacia_verdict(
         if on_message is not None:
             await on_message(note)
         return state
-    # Loop the fix back to the AI Agent: reset done tasks so the build re-runs against the corrected
-    # understanding (the Auditor's findings/proposed_fix are threaded by _run_build_round), re-enter
-    # Programovanie, bump the round counter, preserve sessions (warm context — never reset mid-loop).
-    _reset_done_tasks_for_regate(db, version_id)
+    # Loop a TARGETED fix back to the AI Agent (A+B, Director 2026-06-30).
+    # B: materialize ONE fix task carrying the Auditor's findings as its brief — the already-done plan tasks
+    #    STAY done. NO whole-build re-run (the v1 gate_g `_reset_done_tasks_for_regate` reset-all was the
+    #    overnight-token-burn cause: a single behavioural-acceptance FAIL re-ran all N tasks from #1).
+    # A: GATE the re-run for a new_version — STOP for the Manažér to confirm the fix (status `paused` →
+    #    'Pokračovať' resumes Programovanie and runs the fix task), NEVER an unattended auto re-dispatch
+    #    across a phase boundary. fast_fix keeps its bounded auto fix-loop (zero-approval lane, design §2.4).
+    _ensure_verifikacia_fix_task(db, version_id)
     state.is_regate = True
     state.iteration += 1
     state.current_stage = "programovanie"
+    state.current_actor = "ai_agent"  # the Programovanie actor (the gated/paused path skips _begin_dispatch)
     db.flush()
-    _begin_dispatch(db, state)
+    if state.flow_type == "fast_fix":
+        _begin_dispatch(db, state)  # bounded auto fix-loop (one task; the lane is full-auto by design)
+    else:
+        state.status = "paused"  # A: mandatory phase gate — Manažér confirms via 'Pokračovať' (resume)
+        state.next_action = (
+            "Verifikácia našla chybu — cielená oprava je pripravená. 'Pokračovať' ju spustí "
+            "(prípadne 'Uprav' ju usmerni)."
+        )
+        db.flush()
     return state
 
 
@@ -4345,9 +4361,44 @@ def _reset_failed_tasks_to_todo(db: Session, version_id: uuid.UUID) -> None:
 def _reset_done_tasks_for_regate(db: Session, version_id: uuid.UUID) -> None:
     """gate_g FAIL Fix 2 (CR-NS-057 §F2.2): on a FAIL→build re-gate, flip the version's ``done`` tasks back to
     ``todo`` (existing ``todo`` untouched) so the WHOLE build re-runs against the corrected understanding.
-    Re-run tasks keep their ``baseline_sha`` (a fresh anchor is a separate Director ``move_baseline``)."""
+    Re-run tasks keep their ``baseline_sha`` (a fresh anchor is a separate Director ``move_baseline``).
+
+    SUPERSEDED (A+B, Director 2026-06-30) on the Verifikácia-FAIL path by :func:`_ensure_verifikacia_fix_task`
+    (a TARGETED one-task fix; done stays done). Kept for any other re-gate caller; do NOT re-introduce the
+    whole-build reset on a behavioural-acceptance FAIL — it re-ran all N tasks from #1 (the token-burn bug)."""
     feat_ids = select(Feat.id).join(Epic, Epic.id == Feat.epic_id).where(Epic.version_id == version_id)
     db.execute(update(Task).where(Task.feat_id.in_(feat_ids), Task.status == "done").values(status="todo"))
+    db.flush()
+
+
+#: Marker Epic title for the targeted Verifikácia-FAIL fix task — used to find+reuse it across the bounded
+#: fix↔re-verify rounds (so a multi-round loop never accumulates fix tasks). Visible in the task plan (honest).
+#: Title (a plain LABEL, never a lookup key) of the per-round targeted Verifikácia-FAIL fix Epic/Feat/Task.
+_VERIFIKACIA_FIX_TITLE = "Oprava po Verifikácii"
+
+
+def _ensure_verifikacia_fix_task(db: Session, version_id: uuid.UUID) -> None:
+    """B (Director 2026-06-30): materialize a fresh TARGETED fix Task for a Verifikácia FAIL so ONLY the fix
+    re-runs — the already-done plan tasks STAY done (replaces the whole-build :func:`_reset_done_tasks_for_regate`,
+    the overnight-token-burn cause). The Auditor's findings ARE the fix brief: set as the task description AND
+    threaded into attempt 1 by :func:`_run_build_round` (``is_regate`` → :func:`_latest_verifikacia_fix_scope`).
+
+    Creates a FRESH Epic→Feat→Task each FAIL round — it does NOT reuse-by-title: an Epic title has no unique
+    constraint, so a title-match query could hijack a user- OR agent-authored Epic of the same name and
+    corrupt the plan (review blocker, 2026-06-30). The loop is bounded by ``AUDITOR_LOOP_MAX``, so at most that
+    many small fix epics accrue — an acceptable, honest record of each fix attempt; the build loop's
+    ``get_next_todo_task`` picks the fresh todo fix task while the prior (done) plan tasks stay done."""
+    version = db.get(Version, version_id)
+    if version is None:
+        return
+    scope = _latest_verifikacia_fix_scope(db, version_id) or "Oprav blokujúce zlyhanie z koncovej Verifikácie."
+    epic = epic_service.create(
+        db, EpicCreate(project_id=version.project_id, version_id=version_id, title=_VERIFIKACIA_FIX_TITLE)
+    )
+    feat = feat_service.create(db, FeatCreate(epic_id=epic.id, title=_VERIFIKACIA_FIX_TITLE, description=scope))
+    task_service.create(
+        db, TaskCreate(feat_id=feat.id, title=_VERIFIKACIA_FIX_TITLE, description=scope, task_type="backend")
+    )
     db.flush()
 
 
@@ -4713,6 +4764,14 @@ def _settle_phase_boundary(db: Session, state: PipelineState) -> bool:
     if stage not in DIAL_GOVERNED_BOUNDARIES:
         # Any other non-boundary phase: never auto-continue here.
         return False
+    # A (Director 2026-06-30): a new_version build STOPS at EVERY phase boundary (Návrh→Programovanie,
+    # Programovanie→Verifikácia, Verifikácia→Hotovo) for the Manažér's confirmation ('schvalit'),
+    # INDEPENDENT of the Miera autonómie dial — a hard gate so an autonomous run can NEVER cross a phase
+    # unattended (the overnight-token-burn safeguard). The dial no longer skips phase gates; it now governs
+    # only the Auditor's depth (:func:`auditor_effort_for_level`). A ``fast_fix`` keeps its zero-approval
+    # lane (the directive IS the authorization; one bounded task — design §2.4/§2.5).
+    if state.flow_type != "fast_fix":
+        return False  # mandatory phase gate — STOP for the Manažér (dial-independent)
     level = resolve_miera_autonomie(db, state.version_id)
     if dial_stops_at(level, stage):
         return False  # the dial halts this schvaľovací bod for the Manažér

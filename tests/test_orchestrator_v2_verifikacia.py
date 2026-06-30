@@ -67,10 +67,12 @@ def _make_version(db_session, *, project_dial=None):
     return version, project
 
 
-def _seed_verifikacia(db_session, version_id, *, build_dial=None, iteration=0, is_regate=False):
+def _seed_verifikacia(
+    db_session, version_id, *, build_dial=None, iteration=0, is_regate=False, flow_type="new_version"
+):
     state = PipelineState(
         version_id=version_id,
-        flow_type="new_version",
+        flow_type=flow_type,
         current_stage="verifikacia",
         current_actor="auditor",
         status="agent_working",
@@ -241,22 +243,35 @@ async def test_verifikacia_brief_depth_scales_with_dial(db_session, monkeypatch)
 # ── PASS: the dial governs the end sign-off ───────────────────────────────────
 
 
-async def test_pass_under_plna_auto_signs_off_to_hotovo(db_session, monkeypatch):
-    # plná autonómia + PASS → the end stop auto-signs-off to Hotovo THROUGH the recorded PASS verdict
-    # (no-silent-done invariant). Deploy is OUT — Hotovo means verified, not deployed.
+async def test_pass_new_version_stops_for_signoff_even_at_plna(db_session, monkeypatch):
+    # A (Director 2026-06-30): a new_version PASS STOPS at the Verifikácia end for the Manažér's final
+    # sign-off ('schvalit' → Hotovo), even at plná — NEVER an auto-Hotovo. The PASS is on record
+    # (no-silent-done still holds); Hotovo now needs the Manažér's explicit confirmation (mandatory gate).
     version, _ = _make_version(db_session, project_dial="plna")
     _seed_verifikacia(db_session, version.id)
     _stub_auditor(monkeypatch, _verdict_pass(findings=["pozn.: zváž rate-limit"]))
     _stub_smoke(monkeypatch)
     _ban_deploy_calls(monkeypatch)
     state = await orchestrator.run_dispatch(db_session, version.id)
-    assert state.current_stage == "done" and state.status == "done"
-    assert "Nasadenie je samostatná akcia" in state.next_action
-    # Hotovo reached ONLY through a recorded PASS verdict (the gate)
+    assert state.current_stage == "verifikacia" and state.status == "awaiting_manazer"
     assert orchestrator._verifikacia_passed(db_session, version.id) is True
     verdicts = [m for m in _msgs(db_session, version.id) if m.kind == "verdict"]
     assert verdicts[-1].author == "auditor" and verdicts[-1].recipient == "manazer"
     assert verdicts[-1].stage == "verifikacia" and verdicts[-1].payload["verdict"] == "PASS"
+
+
+async def test_pass_fast_fix_auto_signs_off_to_hotovo(db_session, monkeypatch):
+    # fast_fix keeps its zero-approval lane: a PASS auto-signs-off to Hotovo (terminal) at plná THROUGH the
+    # recorded PASS verdict (no-silent-done invariant). Deploy is OUT — Hotovo means verified, not deployed.
+    version, _ = _make_version(db_session, project_dial="plna")
+    _seed_verifikacia(db_session, version.id, flow_type="fast_fix")
+    _stub_auditor(monkeypatch, _verdict_pass(findings=["pozn.: zváž rate-limit"]))
+    _stub_smoke(monkeypatch)
+    _ban_deploy_calls(monkeypatch)
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert state.current_stage == "done" and state.status == "done"
+    assert "Nasadenie je samostatná akcia" in state.next_action
+    assert orchestrator._verifikacia_passed(db_session, version.id) is True
 
 
 async def test_pass_under_stopping_dial_awaits_manazer_sign_off(db_session, monkeypatch):
@@ -276,39 +291,45 @@ async def test_pass_under_stopping_dial_awaits_manazer_sign_off(db_session, monk
 # ── FAIL: the bounded fix↔re-verify loop (THE GATE) ───────────────────────────
 
 
-async def test_fail_loops_fix_back_to_programovanie_with_scope(db_session, monkeypatch):
-    # THE GATE (first half): an injected behavioural FAIL → the build does NOT reach Hotovo; it loops the fix
-    # back to the AI Agent (re-enter Programovanie), resets done tasks to todo, threads the Auditor's
-    # proposed_fix, and bumps the round counter. Even at plná (where a PASS would auto-sign-off to Hotovo).
+async def test_fail_loops_targeted_fix_and_gates_new_version(db_session, monkeypatch):
+    # A+B (Director 2026-06-30): an injected behavioural FAIL → the build does NOT reach Hotovo; it loops a
+    # TARGETED fix back to the AI Agent (re-enter Programovanie). B: the already-done plan tasks STAY done and
+    # ONE fix task is materialized (NO whole-build reset). A: a new_version STOPS (paused) for the Manažér to
+    # confirm the fix re-run ('Pokračovať') — never an unattended auto re-dispatch. Even at plná.
     version, project = _make_version(db_session, project_dial="plna")
     _seed_verifikacia(db_session, version.id, iteration=0)
-    _seed_done_tasks(db_session, version, project, ["T1", "T2"])
+    _, _, done_tasks = _seed_done_tasks(db_session, version, project, ["T1", "T2"])
     fail = _verdict_fail(["DPH pri reverse-charge sa počíta zle (acceptance 2/12 FAIL)."])
     _stub_auditor(monkeypatch, fail)
     _stub_smoke(monkeypatch, acc=(False, "release_smoke_test.sh exit 1: 2 of 12 failed", False))
     _ban_deploy_calls(monkeypatch)
     state = await orchestrator.run_dispatch(db_session, version.id)
-    # looped back into Programovanie (NOT Hotovo), counter bumped, re-gate marked-then-consumed
+    # re-entered Programovanie (NOT Hotovo), counter bumped — but GATED for the Manažér (paused, not auto)
     assert state.current_stage == "programovanie"
     assert state.iteration == 1
-    # done tasks were reset to todo so the build re-runs against the corrected understanding
-    assert all(t.status == "todo" for t in _tasks(db_session, version.id))
+    assert state.status == "paused"  # A: mandatory gate — Manažér confirms via 'Pokračovať'
+    # B: the original plan tasks STAY done (no whole-build re-run); a single targeted fix task is added (todo)
+    all_tasks = _tasks(db_session, version.id)
+    assert all(t.status == "done" for t in all_tasks if t.id in {dt.id for dt in done_tasks})
+    fix_tasks = [t for t in all_tasks if t.id not in {dt.id for dt in done_tasks}]
+    assert len(fix_tasks) == 1 and fix_tasks[0].status == "todo"
     # the FAIL verdict landed with VALID v2 tokens (the live CHECK accepted it)
     verdicts = [m for m in _msgs(db_session, version.id) if m.kind == "verdict"]
     assert verdicts[-1].author == "auditor" and verdicts[-1].recipient == "manazer"
     assert verdicts[-1].payload["verdict"] == "FAIL" and verdicts[-1].payload["findings"]
-    # the salvaged surgical-fix scope is readable for the re-run brief
+    # the fix scope is readable for the re-run brief
     scope = orchestrator._latest_verifikacia_fix_scope(db_session, version.id)
     assert scope is not None and "DPH" in scope and "Verifikácia FAIL" in scope
     # NOT yet verified
     assert orchestrator._verifikacia_passed(db_session, version.id) is False
 
 
-async def test_fail_then_fix_reaches_hotovo(db_session, monkeypatch):
-    # THE GATE (full loop): FAIL → AI Agent fixes (Programovanie re-run, stubbed) → Auditor re-verifies PASS →
-    # reaches Hotovo. Drives the whole loop through run_dispatch in two steps (the auto-chain would do it live).
+async def test_fail_then_fix_reaches_hotovo_fast_fix(db_session, monkeypatch):
+    # THE FULL LOOP on the fast_fix zero-approval lane: FAIL → AI Agent fixes (Programovanie re-run, stubbed)
+    # → Auditor re-verifies PASS → reaches Hotovo, auto-chained (a new_version GATES each transition for the
+    # Manažér — A; fast_fix is the auto path that drives the loop end-to-end without stops).
     version, project = _make_version(db_session, project_dial="plna")
-    _seed_verifikacia(db_session, version.id, iteration=0)
+    _seed_verifikacia(db_session, version.id, iteration=0, flow_type="fast_fix")
     _seed_done_tasks(db_session, version, project, ["T1"])
     # round 1: FAIL → loop to Programovanie
     _stub_auditor(monkeypatch, _verdict_fail(["behaviorálne zlyhanie"]))
@@ -456,21 +477,25 @@ def test_no_uat_provisioner_or_deploy_in_verifikacia_source():
 # ── the manual verdict path (apply_action) matches the autonomous one ──────────
 
 
-async def test_manual_verdict_fail_resets_tasks_and_loops(db_session, monkeypatch):
+async def test_manual_verdict_fail_creates_targeted_fix_and_gates(db_session, monkeypatch):
     # The Manažér's manual verdict (apply_action) shares _settle_verifikacia_verdict with the autonomous round:
-    # a manual FAIL resets done tasks + re-enters Programovanie (the same downstream effect — no divergence).
+    # a manual FAIL on a new_version creates ONE targeted fix task (done stays done — B) and GATES the re-run
+    # (paused — A), the same downstream effect as the autonomous path (no divergence).
     version, project = _make_version(db_session, project_dial="po_kazdej_faze")
     state = _seed_verifikacia(db_session, version.id, iteration=0)
     state.status = "awaiting_manazer"  # settled at the Verifikácia stop, the Manažér acts
     db_session.flush()
-    _seed_done_tasks(db_session, version, project, ["T1"])
-    # _begin_dispatch is a no-op for the test (no real runner); the state mutation is what we assert
-    monkeypatch.setattr(orchestrator, "_begin_dispatch", lambda db, st: None)
+    _, _, done_tasks = _seed_done_tasks(db_session, version, project, ["T1"])
     new_state = await orchestrator.apply_action(
         db_session, version_id=version.id, action="verdict", payload={"verdict": "FAIL"}
     )
     assert new_state.current_stage == "programovanie" and new_state.iteration == 1
-    assert all(t.status == "todo" for t in _tasks(db_session, version.id))
+    assert new_state.status == "paused"  # A: gated for the Manažér (Pokračovať resumes the fix)
+    # B: the original plan task STAYS done; ONE targeted fix task is added (todo) — no whole-build reset.
+    all_tasks = _tasks(db_session, version.id)
+    assert all(t.status == "done" for t in all_tasks if t.id in {dt.id for dt in done_tasks})
+    fix_tasks = [t for t in all_tasks if t.id not in {dt.id for dt in done_tasks}]
+    assert len(fix_tasks) == 1 and fix_tasks[0].status == "todo"
     verdicts = [m for m in _msgs(db_session, version.id) if m.kind == "verdict"]
     assert verdicts[-1].author == "auditor" and verdicts[-1].payload["verdict"] == "FAIL"
 

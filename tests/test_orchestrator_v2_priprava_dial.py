@@ -55,10 +55,10 @@ def _make_version(db_session, *, source_path=None, project_dial=None):
     return version, project
 
 
-def _seed_state(db_session, version_id, *, stage, actor, build_dial=None, iteration=0):
+def _seed_state(db_session, version_id, *, stage, actor, build_dial=None, iteration=0, flow_type="new_version"):
     state = PipelineState(
         version_id=version_id,
-        flow_type="new_version",
+        flow_type=flow_type,
         current_stage=stage,
         current_actor=actor,
         status="agent_working",
@@ -183,23 +183,26 @@ async def test_priprava_no_checkout_records_db_only_artifact(db_session, monkeyp
 # ── Dial-settle wiring (SHARED Milestone-C deliverable) ──────────────────────
 
 
-async def test_plna_auto_continues_navrh_to_programovanie(db_session, monkeypatch):
-    # Plná autonómia: a settled Návrh boundary auto-advances to Programovanie (no Manažér stop).
+async def test_navrh_boundary_always_stops_even_at_plna(db_session, monkeypatch):
+    # A (Director 2026-06-30): a new_version build STOPS at the Návrh boundary for the Manažér's
+    # confirmation, INDEPENDENT of the dial — a mandatory phase gate even at plná autonómia (the Manažér
+    # advances via 'schvalit'). Prevents an autonomous run from crossing a phase unattended.
     version, _ = _make_version(db_session, project_dial="plna")
     _seed_state(db_session, version.id, stage="navrh", actor="ai_agent")
     _stub_invoke(monkeypatch, lambda s: _gate_report(s, plan=_one_epic_plan()))
     state = await orchestrator.run_dispatch(db_session, version.id)
-    assert state.current_stage == "programovanie"
-    assert state.status == "agent_working"  # auto-chain continues into the next phase
+    assert state.current_stage == "navrh"
+    assert state.status == "awaiting_manazer"  # mandatory gate — no auto-advance even at plná
 
 
-async def test_plna_auto_continues_programovanie_to_verifikacia(db_session, monkeypatch):
+async def test_programovanie_boundary_always_stops_even_at_plna(db_session, monkeypatch):
+    # A: a new_version build STOPS at the Programovanie boundary even at plná (mandatory phase gate).
     version, _ = _make_version(db_session, project_dial="plna")
     _seed_state(db_session, version.id, stage="programovanie", actor="ai_agent")
     _stub_invoke(monkeypatch, _gate_report("programovanie"))
     state = await orchestrator.run_dispatch(db_session, version.id)
-    assert state.current_stage == "verifikacia"
-    assert state.status == "agent_working"
+    assert state.current_stage == "programovanie"
+    assert state.status == "awaiting_manazer"
 
 
 async def test_po_kazdej_faze_stops_at_navrh(db_session, monkeypatch):
@@ -259,11 +262,27 @@ async def test_verifikacia_auto_signoff_requires_recorded_pass(db_session, monke
     assert orchestrator._verifikacia_passed(db_session, version.id) is False
 
 
-async def test_verifikacia_auto_signoff_to_done_with_recorded_pass(db_session, monkeypatch):
-    # With an Auditor PASS verdict, plná auto-signs-off the Verifikácia end stop to Hotovo (terminal). The
-    # PASS is recorded by the Verifikácia round (CR-V2-014); _settle_phase_boundary then auto-advances to done.
+async def test_verifikacia_pass_new_version_stops_for_signoff_even_at_plna(db_session, monkeypatch):
+    # A (Director 2026-06-30): a new_version PASS STOPS at the Verifikácia end for the Manažér's final
+    # sign-off ('schvalit' → Hotovo), even at plná — NEVER an auto-Hotovo. The PASS is on record
+    # (no-silent-done still holds), but Hotovo now needs the Manažér's explicit confirmation.
     version, _ = _make_version(db_session, project_dial="plna")
     _seed_state(db_session, version.id, stage="verifikacia", actor="auditor")
+    _stub_verifikacia_smoke(monkeypatch)
+    pass_block = PipelineStatusBlock(
+        stage="verifikacia", kind="verdict", summary="overené", awaiting="manazer", verdict=True
+    )
+    _stub_invoke(monkeypatch, pass_block)
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert state.current_stage == "verifikacia"
+    assert state.status == "awaiting_manazer"  # mandatory end gate — Manažér signs off to Hotovo
+    assert orchestrator._verifikacia_passed(db_session, version.id) is True
+
+
+async def test_verifikacia_pass_fast_fix_auto_signs_off_to_hotovo(db_session, monkeypatch):
+    # fast_fix keeps its zero-approval lane: a PASS auto-signs-off to Hotovo (terminal) at plná.
+    version, _ = _make_version(db_session, project_dial="plna")
+    _seed_state(db_session, version.id, stage="verifikacia", actor="auditor", flow_type="fast_fix")
     _stub_verifikacia_smoke(monkeypatch)
     pass_block = PipelineStatusBlock(
         stage="verifikacia", kind="verdict", summary="overené", awaiting="manazer", verdict=True
@@ -312,8 +331,17 @@ def test_settle_boundary_priprava_never_auto_continues(db_session):
     assert orchestrator._settle_phase_boundary(db_session, st) is False  # approve_spec always stops
 
 
-def test_settle_boundary_navrh_plna_advances(db_session):
+def test_settle_boundary_navrh_new_version_always_stops_even_at_plna(db_session):
+    # A: a new_version phase boundary returns False (STOP) regardless of the dial — mandatory gate.
     version, _ = _make_version(db_session, project_dial="plna")
     st = _seed_state(db_session, version.id, stage="navrh", actor="ai_agent")
+    assert orchestrator._settle_phase_boundary(db_session, st) is False
+    assert st.current_stage == "navrh"  # did NOT advance
+
+
+def test_settle_boundary_fast_fix_plna_advances(db_session):
+    # fast_fix keeps the dial (forced full-auto): the Programovanie boundary auto-advances to Verifikácia.
+    version, _ = _make_version(db_session, project_dial="plna")
+    st = _seed_state(db_session, version.id, stage="programovanie", actor="ai_agent", flow_type="fast_fix")
     assert orchestrator._settle_phase_boundary(db_session, st) is True
-    assert st.current_stage == "programovanie" and st.status == "agent_working"
+    assert st.current_stage == "verifikacia" and st.status == "agent_working"

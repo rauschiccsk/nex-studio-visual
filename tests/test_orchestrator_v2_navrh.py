@@ -399,16 +399,18 @@ async def test_navrh_inline_plan_materialized_without_extra_passes(db_session, m
 # ── Dial governs the post-Návrh stop ──────────────────────────────────────────
 
 
-async def test_navrh_plna_auto_continues_to_programovanie(db_session, monkeypatch):
-    # Plná autonómia: the Návrh schvaľovací bod does NOT stop — auto-continue into Programovanie.
+async def test_navrh_boundary_always_stops_new_version_even_at_plna(db_session, monkeypatch):
+    # A (Director 2026-06-30): a new_version build STOPS at the Návrh schvaľovací bod for the Manažér's
+    # confirmation ('schvalit' → Programovanie), INDEPENDENT of the dial — mandatory phase gate even at plná.
+    # The plan is still materialized; the build just doesn't auto-cross into Programovanie unattended.
     version, _ = _make_version(db_session, project_dial="plna")
     _seed_navrh(db_session, version.id)
     _stub_design_turn(monkeypatch, _design_done())
     _stub_plan_passes(monkeypatch, _small_plan())
     state = await orchestrator.run_dispatch(db_session, version.id)
-    assert state.current_stage == "programovanie"
-    assert state.status == "agent_working"  # auto-chain continues the build
-    assert len(_epics(db_session, version.id)) == 1  # plan materialized before the auto-continue
+    assert state.current_stage == "navrh"
+    assert state.status == "awaiting_manazer"  # mandatory gate — no auto-advance even at plná
+    assert len(_epics(db_session, version.id)) == 1  # plan materialized before the gate
 
 
 async def test_navrh_per_build_dial_beats_project(db_session, monkeypatch):

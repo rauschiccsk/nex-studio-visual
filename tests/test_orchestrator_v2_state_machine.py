@@ -307,8 +307,10 @@ async def test_pass_then_schvalit_reaches_hotovo(db_session, fake_claude):
     assert "Hotovo" in state.next_action or "dokončená" in state.next_action
 
 
-async def test_verdict_fail_loops_fix_back_to_ai_agent(db_session, fake_claude):
-    # FAIL loops the fix back to the AI Agent → re-enter Programovanie, bump the round counter.
+async def test_verdict_fail_loops_targeted_fix_back_to_ai_agent_gated(db_session, fake_claude):
+    # A+B (Director 2026-06-30): FAIL loops a TARGETED fix back to the AI Agent → re-enter Programovanie,
+    # bump the round counter — but GATED for the Manažér (a new_version STOPS `paused`; 'Pokračovať' resumes),
+    # never an unattended auto re-dispatch (the overnight-token-burn safeguard).
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
     _to_verifikacia(db_session, version.id, iteration=0)
@@ -319,7 +321,7 @@ async def test_verdict_fail_loops_fix_back_to_ai_agent(db_session, fake_claude):
     assert state.current_actor == "ai_agent"
     assert state.is_regate is True
     assert state.iteration == 1
-    assert state.status == "agent_working"
+    assert state.status == "paused"  # A: mandatory phase gate — Manažér confirms via 'Pokračovať'
 
 
 async def test_verdict_fail_escalates_after_auditor_loop_max(db_session, fake_claude):

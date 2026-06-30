@@ -47,8 +47,10 @@ const DIAL_PRESETS: DialPreset[] = [
   {
     id: "plna",
     label: "Plná autonómia",
-    stops: "Žiadne medzizastávky",
-    detail: "AI Agent prejde celý build (Návrh → Programovanie → Verifikácia) bez zastavenia.",
+    stops: "Najmenší dohľad (najhlbší Audítor)",
+    detail:
+      "Najmenej zásahov v rámci fázy → najhlbší, najprísnejší Audítor. Pri novom builde sa aj tak zastaví na " +
+      "každej fáze na tvoje potvrdenie (viď sekcia Vždy mimo dialu nižšie).",
   },
   {
     id: "len_na_konci",
@@ -221,6 +223,13 @@ export function AutonomyDialPanel({
               Vždy mimo dialu
             </h3>
             <ul className="space-y-1.5 text-[11px] text-[var(--color-text-muted)] leading-relaxed">
+              <li>
+                <span className="text-[var(--color-text-secondary)] font-medium">Prechody medzi fázami</span>{" "}
+                (Návrh → Programovanie → Verifikácia → Hotovo) sú pri <span className="font-medium">novom builde
+                vždy povinné zastávky</span> na tvoje potvrdenie — bez ohľadu na úroveň dialu (poistka proti
+                nekontrolovanému behu). Pri novom builde tak dial riadi najmä <span className="font-medium">hĺbku
+                Audítora</span>; rýchla oprava beží bez týchto zastávok.
+              </li>
               <li>
                 <span className="text-[var(--color-text-secondary)] font-medium">Schválenie špecifikácie</span>{" "}
                 (koniec Prípravy) je <span className="font-medium">vždy</span> povinná zastávka — bez ohľadu na

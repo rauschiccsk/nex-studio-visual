@@ -256,16 +256,17 @@ async def test_upfront_brief_depth_scales_with_dial(db_session, monkeypatch):
 # ── PASS review: the dial governs the post-Návrh stop ─────────────────────────
 
 
-async def test_upfront_pass_lets_dial_auto_continue(db_session, monkeypatch):
-    # Plná autonómia + a clean Auditor verdict → the post-Návrh stop does NOT halt; auto-continue to
-    # Programovanie (the Auditor found no hole, so it does not override the dial).
+async def test_upfront_pass_new_version_stops_at_navrh_gate_even_at_plna(db_session, monkeypatch):
+    # A (Director 2026-06-30): a clean Auditor verdict + plná → the post-Návrh boundary STILL STOPS for a
+    # new_version (mandatory phase gate, dial-independent — the Manažér confirms via 'schvalit'). The clean
+    # verdict no longer auto-continues; only a fast_fix (which has no Návrh phase) would skip this.
     version, _ = _make_version(db_session, project_dial="plna")
     _seed_navrh(db_session, version.id)
     _stub_turns(monkeypatch, design_block=_design_done(), audit_block=_audit_pass())
     _stub_plan_passes(monkeypatch)
     state = await orchestrator.run_dispatch(db_session, version.id)
-    assert state.current_stage == "programovanie"
-    assert state.status == "agent_working"
+    assert state.current_stage == "navrh"
+    assert state.status == "awaiting_manazer"  # mandatory gate — no auto-advance even at plná
     # the Auditor verdict landed with VALID v2 tokens
     verdicts = [m for m in _msgs(db_session, version.id) if m.kind == "verdict"]
     assert verdicts and verdicts[-1].author == "auditor" and verdicts[-1].recipient == "manazer"
@@ -350,8 +351,9 @@ async def test_upfront_absent_verdict_is_treated_as_hole_fail_closed(db_session,
 
 
 async def test_upfront_parse_failure_is_non_blocking(db_session, monkeypatch):
-    # A flaky Auditor turn must never wedge the build: it is recorded visibly + metered (system→manazer) and
-    # treated as "no hole" → the dial governs the stop (here plná → auto-continue to Programovanie).
+    # A flaky Auditor turn must never WEDGE the build: it is recorded visibly + metered (system→manazer) and
+    # treated as "no hole" → NON-blocking. It settles at the mandatory Návrh phase gate (awaiting_manazer, A),
+    # NOT a blocked/error state — the Manažér confirms via 'schvalit'. (A new_version always stops here now.)
     version, _ = _make_version(db_session, project_dial="plna")
     _seed_navrh(db_session, version.id)
     pf = ParseFailure(
@@ -360,7 +362,7 @@ async def test_upfront_parse_failure_is_non_blocking(db_session, monkeypatch):
     _stub_turns(monkeypatch, design_block=_design_done(), audit_block=pf)
     _stub_plan_passes(monkeypatch)
     state = await orchestrator.run_dispatch(db_session, version.id)
-    assert state.current_stage == "programovanie" and state.status == "agent_working"
+    assert state.current_stage == "navrh" and state.status == "awaiting_manazer"  # gated, NOT blocked/wedged
     # the failure is visible + the tokens are metered (NOT a director note — a v2 system→manazer note)
     notes = [
         m
