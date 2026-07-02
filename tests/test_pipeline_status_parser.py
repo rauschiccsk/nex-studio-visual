@@ -317,6 +317,29 @@ def test_parse_task_plan_skeleton_rejects_empty_and_non_object():
     assert isinstance(parse_task_plan_skeleton([]), ParseFailure)  # not an object
 
 
+def test_parse_task_plan_skeleton_carries_release_coverage_declaration():
+    # CR-V2-052: the skeleton carries flagship_features + safety_properties (the risk-floored oracle reads them).
+    obj = {
+        "epics": [{"title": "Foundation", "feats": [{"title": "Schema", "description": "t"}]}],
+        "cross_cutting_rules": "inv",
+        "flagship_features": ["Peppol export", "supplier match"],
+        "safety_properties": [{"name": "read_only blocks writes", "risky_op": "cat x > y"}],
+    }
+    res = parse_task_plan_skeleton(obj)
+    assert isinstance(res, TaskPlanSkeleton)
+    assert res.flagship_features == ["Peppol export", "supplier match"]
+    assert len(res.safety_properties) == 1
+    assert res.safety_properties[0].name == "read_only blocks writes"
+    assert res.safety_properties[0].risky_op == "cat x > y"
+    # a safety property missing risky_op → ParseFailure (both fields required)
+    bad = {**obj, "safety_properties": [{"name": "no op"}]}
+    assert isinstance(parse_task_plan_skeleton(bad), ParseFailure)
+    # the fields are OPTIONAL (default empty) — a skeleton without them still validates (non-breaking)
+    minimal = {"epics": [{"title": "E", "feats": [{"title": "F"}]}]}
+    ok = parse_task_plan_skeleton(minimal)
+    assert isinstance(ok, TaskPlanSkeleton) and ok.flagship_features == [] and ok.safety_properties == []
+
+
 def test_parse_task_plan_feat_tasks_accepts_tasks_only():
     obj = {"tasks": [{"title": "GL výpočet", "task_type": "backend", "estimated_minutes": 90}]}
     res = parse_task_plan_feat_tasks(obj)

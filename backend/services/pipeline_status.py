@@ -119,6 +119,23 @@ class TaskPlan(BaseModel):
     epics: list[TaskPlanEpic] = Field(min_length=1)
 
 
+# ── Release-coverage declaration (CR-V2-052) ─────────────────────────────────
+# The AI Agent declares, at Návrh close, WHAT the release must demonstrate (flagship features) and WHAT it
+# must refuse (safety properties). The risk-floored oracle (CR-V2-051) FAILs the acceptance when the smoke
+# ran fewer FEATURE assertions than declared flagship features, or fewer NEGATIVE assertions than declared
+# safety properties — so DONE means "the spec's promises hold AND its forbidden ops are refused", not "boots".
+
+
+class SafetyProperty(BaseModel):
+    """One safety invariant the app MUST enforce. ``name`` is the property (e.g. "the read_only preset must
+    block writes"); ``risky_op`` is the concrete forbidden operation the release oracle requires a NEGATIVE
+    assertion for (the op MUST be REJECTED — a green 'it works' test can never prove a safety invariant, only
+    a red-when-abused test can)."""
+
+    name: str = Field(min_length=1, max_length=300)
+    risky_op: str = Field(min_length=1, max_length=300)
+
+
 # ── (v0.7.3) incremental task_plan generation — narrowed per-pass schemas (CR-1) ──
 # A large design's full EPIC→FEAT→TASK tree overflows ONE structured-output turn (the
 # model drops the per-feat tasks → ``parse_exhaustion``). The AI Agent instead emits the
@@ -163,6 +180,12 @@ class TaskPlanSkeleton(BaseModel):
 
     epics: list[TaskPlanSkeletonEpic] = Field(min_length=1)
     cross_cutting_rules: Optional[str] = None
+    #: CR-V2-052: the behaviour-bearing features the release must DEMONSTRATE (≥1 FEATURE assertion each in
+    #: release_smoke_test.sh — the risk-floored oracle CR-V2-051). Declared once, with the skeleton.
+    flagship_features: list[str] = Field(default_factory=list)
+    #: CR-V2-052: the safety invariants the app must ENFORCE (≥1 NEGATIVE assertion each — the risky op MUST
+    #: be rejected). The oracle FAILs a build that declares a property but ships no negative test for it.
+    safety_properties: list[SafetyProperty] = Field(default_factory=list)
 
 
 class TaskPlanFeatTasks(BaseModel):
@@ -261,6 +284,12 @@ class PipelineStatusBlock(BaseModel):
     #: Cross-cutting invariants (markdown) codified once with the plan; re-read from the
     #: gate_report payload and injected into every per-task build brief.
     cross_cutting_rules: Optional[str] = None
+    #: CR-V2-052: release-coverage declaration carried on the Návrh gate_report — the flagship features the
+    #: release must demonstrate + the safety properties it must enforce. The risk-floored oracle (CR-V2-051)
+    #: reads these from the recorded payload and FAILs a build with fewer FEATURE / NEGATIVE assertions than
+    #: declared. Empty on non-Návrh blocks.
+    flagship_features: list[str] = Field(default_factory=list)
+    safety_properties: list[SafetyProperty] = Field(default_factory=list)
 
     # ── Auditor verdict (CR-V2-006 — repurposes the v1 Gate-E findings/proposed_fix shape) ──
     # The Auditor is v2's independent verifier with two touchpoints: an UPFRONT design/spec

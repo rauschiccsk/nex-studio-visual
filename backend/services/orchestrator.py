@@ -1213,7 +1213,10 @@ _SKELETON_EXAMPLE = (
     "Príklad tvaru:\n<<<TASK_PLAN_JSON>>>\n"
     '{"epics":[{"title":"Foundation","feats":['
     '{"title":"Schéma a migrácie","description":"DB schéma + audit log","estimated_minutes":120}]}],'
-    '"cross_cutting_rules":"Spoločná transakčná hranica; immutable audit; scoping na firmu."}\n'
+    '"cross_cutting_rules":"Spoločná transakčná hranica; immutable audit; scoping na firmu.",'
+    '"flagship_features":["Export faktúry do Peppol XML","Automatické párovanie dodávateľa"],'
+    '"safety_properties":[{"name":"Scoping na firmu (žiadny cross-tenant read)",'
+    '"risky_op":"GET /api/faktury inej firmy vráti dáta"}]}\n'
     "<<<END_TASK_PLAN_JSON>>>"
 )
 _FEAT_TASKS_EXAMPLE = (
@@ -1240,6 +1243,15 @@ def _task_plan_skeleton_directive(director_note: Optional[str] = None) -> str:
         "`feats` (zoznam, ≥1) — KAŽDÁ funkcia má `title`, `description` a `estimated_minutes` (Σ odhadov "
         "jej úloh). Navrch objektu pole `cross_cutting_rules` (markdown, regulované invarianty knihy, "
         "kodifikované RAZ). Úlohy NEemituj — doplnia sa v ďalších prechodoch po jednej funkcii.\n"
+        # CR-V2-052: the release-coverage declaration the risk-floored oracle (CR-V2-051) enforces — every
+        # flagship feature needs a FEATURE assertion, every safety property a NEGATIVE assertion at Verifikácia.
+        "Navrch objektu aj pole `flagship_features` (zoznam textov, ≥1): kľúčové funkcie, ktoré MUSÍ vydanie "
+        "PREUKÁZATEĽNE robiť — release oracle vyžaduje ≥1 pozitívnu (FEATURE) akceptačnú skúšku na každú. "
+        "A pole `safety_properties` (zoznam objektov {`name`,`risky_op`}): bezpečnostné invarianty, ktoré appka "
+        "MUSÍ VYNÚTIŤ — `risky_op` je konkrétna ZAKÁZANÁ operácia, ktorú oracle vyžaduje otestovať NEGATÍVNE "
+        '(musí byť ODMIETNUTÁ; zelený „funguje to" test bezpečnostný invariant nikdy nedokáže). Vymenuj ich '
+        "POCTIVO (autentifikácia, autorizácia/scoping, injection, nebezpečné príkazy, …); prázdny zoznam iba ak "
+        "appka naozaj nemá žiadny bezpečnostný invariant — Auditor prázdnu deklaráciu spochybní.\n"
         # CR-V2-036: the skeleton pass decides the FEAT COUNT, so the coarse-granularity rule MUST live here
         # (not only in the per-feat task pass — too late). Without it the agent over-decomposed (46 feats >
         # the hard cap) and the engine rejected the plan.
@@ -2196,6 +2208,10 @@ async def invoke_agent(
             # mode="json" so any UUID in the plan serializes to a str for JSONB.
             "plan": parsed.plan.model_dump(mode="json") if parsed.plan is not None else None,
             "cross_cutting_rules": parsed.cross_cutting_rules,
+            # CR-V2-052: the release-coverage declaration (flagship features + safety properties) carried on a
+            # Návrh gate_report — persisted so _declared_release_coverage reads it to risk-floor the oracle.
+            "flagship_features": parsed.flagship_features,
+            "safety_properties": [sp.model_dump(mode="json") for sp in parsed.safety_properties],
             # v1 per-task Auditor verdict (removed by CR-V2-006; defensive read — see note above).
             "task_pass": getattr(parsed, "task_pass", None),
             # v1 structured Coordinator proposal (removed by CR-V2-006; defensive read — see note above).
@@ -3840,6 +3856,10 @@ async def _fold_task_plan_into_navrh(
         awaiting="manazer",
         plan=full_plan,
         cross_cutting_rules=skeleton.cross_cutting_rules,
+        # CR-V2-052: carry the release-coverage declaration (flagship features + safety properties) the
+        # risk-floored oracle (CR-V2-051) reads from this gate_report's payload.
+        flagship_features=skeleton.flagship_features,
+        safety_properties=skeleton.safety_properties,
     )
     # Record the AI-Agent navrh gate_report carrying the assembled plan + cross_cutting_rules: the build
     # loop re-reads the rules from THIS message (_fetch_cross_cutting_rules), and it is the audit-trail
@@ -3857,6 +3877,10 @@ async def _fold_task_plan_into_navrh(
         payload={
             "plan": full_plan.model_dump(mode="json"),
             "cross_cutting_rules": skeleton.cross_cutting_rules,
+            # CR-V2-052: the declared release coverage — _declared_release_coverage(db, version_id) reads these
+            # to floor the acceptance (≥1 FEATURE assertion per flagship feature, ≥1 NEGATIVE per safety prop).
+            "flagship_features": skeleton.flagship_features,
+            "safety_properties": [sp.model_dump(mode="json") for sp in skeleton.safety_properties],
             "phase": "navrh",
         },
     )

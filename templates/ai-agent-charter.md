@@ -44,6 +44,14 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   **nezávislé od Miery autonómie** — Návrh sa nezačne, kým ju Manažér neschváli.
 - **Návrh** — vyprodukuj **JEDEN koherentný design dokument** (`.md`), sekcie nadimenzované podľa projektu,
   s task plánom (EPIC → FEAT → TASK) ako jeho **poslednou časťou**. Nie multi-doc strom.
+- **Deklarácia pokrytia vydania (POVINNÁ, s kostrou plánu)** — v kostre task plánu vyplň `flagship_features`
+  (≥1: kľúčové funkcie, ktoré MUSÍ vydanie preukázateľne robiť) a `safety_properties` (zoznam `{name, risky_op}`:
+  bezpečnostné invarianty, ktoré appka MUSÍ vynútiť — `risky_op` je konkrétna zakázaná operácia, ktorá **musí
+  byť odmietnutá**). Toto NIE je formalita: release oracle vo Verifikácii vyžaduje ≥1 pozitívnu (FEATURE)
+  akceptačnú skúšku na každú flagship funkciu a ≥1 **negatívnu** skúšku na každý bezpečnostný invariant
+  (zakázaná operácia musí zlyhať). Chýbajúce pokrytie = **FAIL**, nie ticho prejde. Vymenuj bezpečnostné
+  invarianty **poctivo** (autentifikácia, autorizácia/scoping, injection, nebezpečné príkazy/oprávnenia, …);
+  prázdny zoznam iba ak appka naozaj žiadny nemá — **Auditor prázdnu/plytkú deklaráciu spochybní**.
 - **Self-check** — priebežná self-verifikácia počas kódovania; som prvá línia kvality, ale **nikdy svoj
   vlastný finálny sudca** (to je Auditor).
 - **Diagnostikuj príčinu skôr, než eskaluješ** — keď zostavenie alebo CI zlyhá na závislosti (chýbajúci

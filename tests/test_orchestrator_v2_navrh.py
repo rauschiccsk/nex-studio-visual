@@ -134,7 +134,7 @@ def _task_plan_fence(obj: dict) -> str:
     )
 
 
-def _skeleton_dict(plan_spec, cross=_DEFAULT_CROSS) -> dict:
+def _skeleton_dict(plan_spec, cross=_DEFAULT_CROSS, *, flagship=None, safety=None) -> dict:
     epics = []
     for e_title, feats in plan_spec:
         fs = []
@@ -145,7 +145,12 @@ def _skeleton_dict(plan_spec, cross=_DEFAULT_CROSS) -> dict:
                 f["estimated_minutes"] = sum(ests)
             fs.append(f)
         epics.append({"title": e_title, "feats": fs})
-    return {"epics": epics, "cross_cutting_rules": cross}
+    obj = {"epics": epics, "cross_cutting_rules": cross}
+    if flagship is not None:  # CR-V2-052 release-coverage declaration
+        obj["flagship_features"] = flagship
+    if safety is not None:
+        obj["safety_properties"] = safety
+    return obj
 
 
 def _feat_tasks_dict(tasks) -> dict:
@@ -158,9 +163,10 @@ def _feat_tasks_dict(tasks) -> dict:
     return {"tasks": out}
 
 
-def _stub_plan_passes(monkeypatch, plan_spec, *, cross=_DEFAULT_CROSS, text=False):
+def _stub_plan_passes(monkeypatch, plan_spec, *, cross=_DEFAULT_CROSS, text=False, flagship=None, safety=None):
     """Drive the folded task-plan passes via a fake ``invoke_claude``: the skeleton pass (prompt contains
-    "KOSTRU") → EPIC+FEAT(no tasks)+cross; a per-feat pass (the feat title appears) → that feat's tasks.
+    "KOSTRU") → EPIC+FEAT(no tasks)+cross (+ CR-V2-052 flagship/safety declaration); a per-feat pass (the feat
+    title appears) → that feat's tasks.
 
     ``text=True`` returns the real-env shape (prose + ``<<<TASK_PLAN_JSON>>>`` fence as TEXT,
     structured_output=None); ``text=False`` returns the dict as structured_output."""
@@ -171,7 +177,7 @@ def _stub_plan_passes(monkeypatch, plan_spec, *, cross=_DEFAULT_CROSS, text=Fals
 
     async def _fake_invoke_claude(*, prompt, **_kw):
         if "KOSTRU" in prompt:
-            return _emit(_skeleton_dict(plan_spec, cross))
+            return _emit(_skeleton_dict(plan_spec, cross, flagship=flagship, safety=safety))
         for f_title, tasks in feat_by_title.items():
             if f_title in prompt:
                 return _emit(_feat_tasks_dict(tasks))
@@ -270,6 +276,41 @@ async def test_navrh_folds_task_plan_via_incremental_passes(db_session, monkeypa
     # the durable design-doc artifact note exists (the Vývoj → Návrh tab reads it)
     notes = [m for m in _msgs(db_session, version.id) if m.payload and m.payload.get("navrh_design_doc")]
     assert notes and notes[-1].payload["path"] == rel
+
+
+async def test_navrh_gate_report_carries_release_coverage_declaration(db_session, monkeypatch, tmp_path):
+    # CR-V2-052: the AI Agent declares flagship_features + safety_properties with the skeleton; the engine
+    # records them on the navrh gate_report so the risk-floored oracle (_declared_release_coverage) reads them.
+    version, _ = _make_version(db_session, source_path=str(tmp_path), project_dial="po_kazdej_faze")
+    _seed_navrh(db_session, version.id)
+    rel = orchestrator._navrh_design_doc_rel(version.version_number)
+    doc = Path(tmp_path) / rel
+    doc.parent.mkdir(parents=True, exist_ok=True)
+    doc.write_text("# Návrh\n", encoding="utf-8")
+    _stub_design_turn(
+        monkeypatch,
+        PipelineStatusBlock(stage="navrh", kind="done", summary="ok", awaiting="manazer", deliverables=[rel]),
+    )
+    _stub_plan_passes(
+        monkeypatch,
+        [("Foundation", [("Schema", [("t", "migration", 60)])])],
+        flagship=["PDF→Peppol export", "supplier auto-match"],
+        safety=[
+            {"name": "scoping na firmu", "risky_op": "cross-tenant GET /api/faktury"},
+            {"name": "read_only blocks writes", "risky_op": "cat x > y under read_only"},
+        ],
+    )
+    await orchestrator.run_dispatch(db_session, version.id)
+    gr = [
+        m
+        for m in _msgs(db_session, version.id)
+        if m.author == "ai_agent" and m.stage == "navrh" and m.kind == "gate_report"
+    ]
+    assert gr, "the navrh gate_report was recorded"
+    assert gr[-1].payload["flagship_features"] == ["PDF→Peppol export", "supplier auto-match"]
+    assert [sp["name"] for sp in gr[-1].payload["safety_properties"]] == ["scoping na firmu", "read_only blocks writes"]
+    # the oracle reads the declared coverage: 2 flagship features + 2 safety properties
+    assert orchestrator._declared_release_coverage(db_session, version.id) == (2, 2)
     # NO message was recorded under a (now-invalid) "task_plan" stage — the standalone stage is gone
     assert not [m for m in _msgs(db_session, version.id) if m.stage == "task_plan"]
 
