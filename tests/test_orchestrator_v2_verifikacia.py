@@ -907,3 +907,59 @@ async def test_escalation_decision_card_hold_stays_blocked(db_session, monkeypat
     )
     assert new_state.current_stage == "verifikacia" and new_state.status == "blocked"
     assert orchestrator._verifikacia_passed(db_session, version.id) is False
+
+
+# ── CR-V2-055: re-judge on escalation — a fix directive invalidates a prior PASS ──────────────────────
+
+
+def _rec_verdict(db_session, version_id, verdict):
+    orchestrator._record_message(
+        db_session,
+        version_id=version_id,
+        stage="verifikacia",
+        author="auditor",
+        recipient="manazer",
+        kind="verdict",
+        content=verdict,
+        payload={"verdict": verdict, "phase": "verifikacia"},
+    )
+    db_session.flush()
+
+
+async def test_pass_is_stale_after_a_fix_directive_until_re_judged(db_session):
+    # CR-V2-055: a prior Auditor PASS can NO LONGER sign off once a fix is directed after it — a fresh
+    # adversarial re-run must produce a new PASS. This makes "re-judge on escalation" a hard invariant.
+    version, _ = _make_version(db_session)
+    _seed_verifikacia(db_session, version.id)
+    _rec_verdict(db_session, version.id, "PASS")
+    assert orchestrator._verifikacia_passed(db_session, version.id) is True
+    # an operator fix directive (Uprav / escalation Decision Card → manazer→ai_agent return) lands AFTER it
+    orchestrator._record_message(
+        db_session,
+        version_id=version.id,
+        stage="verifikacia",
+        author="manazer",
+        recipient="ai_agent",
+        kind="return",
+        content="Doplň chýbajúci negatívny test.",
+        payload={"phase": "verifikacia", "manazer_fix_directive": True},
+    )
+    db_session.flush()
+    # the PASS is now STALE — Hotovo is blocked until a fresh Auditor PASS
+    assert orchestrator._verifikacia_passed(db_session, version.id) is False
+    # a fresh Auditor re-run PASS re-opens Hotovo
+    _rec_verdict(db_session, version.id, "PASS")
+    assert orchestrator._verifikacia_passed(db_session, version.id) is True
+
+
+async def test_uprav_at_verifikacia_makes_prior_pass_stale(db_session):
+    # End-to-end with CR-V2-054: an 'Uprav' at Verifikácia (routes to the AI-Agent fix loop) invalidates the
+    # prior PASS — Hotovo can't be signed off on the stale PASS.
+    version, _ = _make_version(db_session, project_dial="po_kazdej_faze")
+    state = _seed_verifikacia(db_session, version.id, iteration=0)
+    state.status = "awaiting_manazer"
+    db_session.flush()
+    _rec_verdict(db_session, version.id, "PASS")
+    assert orchestrator._verifikacia_passed(db_session, version.id) is True
+    await orchestrator.apply_action(db_session, version_id=version.id, action="uprav", payload={"comment": "Oprav X."})
+    assert orchestrator._verifikacia_passed(db_session, version.id) is False  # re-judge pending

@@ -1553,18 +1553,27 @@ def _verifikacia_passed(db: Session, version_id: uuid.UUID) -> bool:
     Verifikácia end-stop is gated on this, never a silent sign-off. Deterministic from the message log —
     the most recent ``stage=verifikacia`` ∧ ``kind=verdict`` message whose ``payload.verdict == 'PASS'``.
     (v2 form of the v1 ``no-silent-done-without-UAT`` safeguard: deploy is OUT of the pipeline — D6/OQ-3 —
-    so the gate becomes ``no-silent-done-without-VERIFICATION``.)"""
+    so the gate becomes ``no-silent-done-without-VERIFICATION``.)
+
+    CR-V2-055 — RE-JUDGE ON ESCALATION: a prior PASS is STALE once a fix is directed after it. The gate reads
+    the latest of ``{verdict, return}`` (a ``manazer→ai_agent`` verifikacia ``return`` is an operator fix
+    directive — an 'Uprav' or an escalation Decision Card, CR-V2-054). If that latest message is a ``return``
+    (a fix pending), a PASS can NO LONGER sign off — a FRESH adversarial Auditor re-run must produce a new
+    PASS first. This forces the fresh re-judge the deep analysis called for (a stale PASS can never cross an
+    escalation)."""
     latest = db.execute(
         select(PipelineMessage)
         .where(
             PipelineMessage.version_id == version_id,
             PipelineMessage.stage == "verifikacia",
-            PipelineMessage.kind == "verdict",
+            PipelineMessage.kind.in_(("verdict", "return")),
         )
         .order_by(PipelineMessage.seq.desc())
         .limit(1)
     ).scalar_one_or_none()
-    return bool(latest and latest.payload and latest.payload.get("verdict") == "PASS")
+    if latest is None or latest.kind != "verdict":
+        return False  # no verdict yet, or a fix directive is newer than the last verdict → re-judge pending
+    return bool(latest.payload and latest.payload.get("verdict") == "PASS")
 
 
 # (CR-V2-013: the Gate-E milestone / gap / coverage helpers — ``_gate_e_coverage_complete``,
