@@ -325,7 +325,8 @@ async def test_verdict_fail_loops_targeted_fix_back_to_ai_agent_gated(db_session
 
 
 async def test_verdict_fail_escalates_after_auditor_loop_max(db_session, fake_claude):
-    # After AUDITOR_LOOP_MAX still-failing rounds, STOP + escalate to the Manažér (bounded loop).
+    # After AUDITOR_LOOP_MAX still-failing rounds, STOP + surface an operator Decision Card (CR-V2-054,
+    # bounded loop). block_reason=decision_needed so the DecisionCardStack renders it.
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
     _to_verifikacia(db_session, version.id, iteration=orchestrator.AUDITOR_LOOP_MAX)
@@ -333,8 +334,8 @@ async def test_verdict_fail_escalates_after_auditor_loop_max(db_session, fake_cl
         db_session, version_id=version.id, action="verdict", payload={"verdict": "FAIL"}
     )
     assert state.status == "blocked"
-    assert state.block_reason == "agent_error"
-    assert "eskalované" in state.next_action.lower()
+    assert state.block_reason == "decision_needed"  # CR-V2-054: a Manažér Decision Card, not a bare error
+    assert "Decision Card" in state.next_action
     # phase did NOT advance — it escalated, not re-looped
     assert state.current_stage == "verifikacia"
 

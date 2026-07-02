@@ -61,6 +61,9 @@ from backend.services.pipeline_status import (
     PIPELINE_STATUS_JSON_SCHEMA,
     TASK_PLAN_FEAT_TASKS_JSON_SCHEMA,
     TASK_PLAN_SKELETON_JSON_SCHEMA,
+    ConsultationBlock,
+    ConsultDecision,
+    ConsultOption,
     ParseFailure,
     PipelineStatusBlock,
     TaskPlan,
@@ -4258,12 +4261,46 @@ async def _settle_verifikacia_verdict(
         return state
     # FAIL (or a PASS string floored to FAIL by the runtime floor) → bounded fix loop.
     if state.iteration >= AUDITOR_LOOP_MAX:
-        # Exhausted the bounded loop → STOP + escalate to the Manažér (§2.2 (i)).
+        # Exhausted the bounded AUTONOMOUS loop → STOP + surface an operator DECISION (CR-V2-054, safeguard #5):
+        # a kind=consultation (source=verifikacia_fail) the DecisionCardStack renders with an explanation +
+        # recommendation + one action, so a non-expert operator (Tibor/Nazar) can act without knowing the
+        # fixer/finder split. block_reason=decision_needed (not agent_error) so 'decide' is valid + the route
+        # never auto-dispatches. The scope (why it is stuck) is the card's explanation.
+        scope = _latest_verifikacia_fix_scope(db, version_id) or "Auditor nevie verziu dostať cez Verifikáciu."
+        consult = ConsultationBlock(
+            id=f"verifikacia-fail-{version_id}-{state.iteration}",
+            intro=f"Auditor po {AUDITOR_LOOP_MAX} kolách stále FAIL — potrebné je tvoje rozhodnutie.",
+            source="verifikacia_fail",
+            decisions=[
+                ConsultDecision(
+                    key="verifikacia_fail_next",
+                    question="Auditor nevie verziu dostať cez koncovú Verifikáciu. Ako chceš pokračovať?",
+                    explanation=scope,
+                    options=[
+                        ConsultOption(
+                            id="guide_fix",
+                            label="Usmerniť opravu pre AI Agenta",
+                            detail="Napíš konkrétny pokyn (pole nižšie) — pošle sa AI Agentovi ako cielená "
+                            "oprava a Auditor ju znova overí.",
+                            recommended=True,
+                        ),
+                        ConsultOption(
+                            id="hold",
+                            label="Zatiaľ podržať (rozhodnem neskôr)",
+                            detail="Build ostane blokovaný, kým nerozhodneš; neskôr môžeš usmerniť opravu "
+                            "aj cez 'Uprav'.",
+                        ),
+                    ],
+                    rationale="Odporúčam usmerniť opravu — Auditor zvyčajne uviazol na konkrétnej veci, ktorú "
+                    "vieš adresne opísať; pokyn dostane AI Agent (opravár), nie Auditor (nálezca).",
+                    allow_free_text=True,
+                )
+            ],
+        )
         state.status = "blocked"
-        state.block_reason = "agent_error"  # R4 (D1): the version still fails verification after the bound
+        state.block_reason = "decision_needed"  # CR-V2-054: a Manažér DECISION, surfaced as a Decision Card
         state.next_action = (
-            f"Auditor po {AUDITOR_LOOP_MAX} kolách stále FAIL — eskalované Manažérovi. "
-            "Usmerni opravu (Uprav) alebo rozhodni o ďalšom kroku."
+            f"Auditor po {AUDITOR_LOOP_MAX} kolách stále FAIL — rozhodni (Decision Card): usmerni opravu, alebo podrž."
         )
         db.flush()
         note = _record_message(
@@ -4272,9 +4309,13 @@ async def _settle_verifikacia_verdict(
             stage="verifikacia",
             author="system",
             recipient="manazer",
-            kind="notification",
-            content=f"Verifikácia zlyhala {AUDITOR_LOOP_MAX}× — bounded fix-loop vyčerpaný, eskalované Manažérovi.",
-            payload={"phase": "verifikacia", "auditor_loop_exhausted": True},
+            kind="consultation",
+            content=consult.intro,
+            payload={
+                "phase": "verifikacia",
+                "auditor_loop_exhausted": True,
+                "consultation": consult.model_dump(mode="json"),
+            },
         )
         if on_message is not None:
             await on_message(note)
@@ -4567,6 +4608,48 @@ def _ensure_verifikacia_fix_task(db: Session, version_id: uuid.UUID) -> None:
     db.flush()
 
 
+async def _route_manazer_fix_to_ai_agent(
+    db: Session, state: PipelineState, *, comment: str, on_message: Optional[MessageCallback] = None
+) -> PipelineState:
+    """CR-V2-054 — route a Manažér-directed fix at Verifikácia to the AI Agent (the FIXER), NOT the Auditor
+    (the finder). This is the operator-actionable half of safeguard #5: a release-gate blocker becomes a
+    concrete fix the operator can trigger, without having to know the fixer/finder split (the bug that made
+    the NEX Agents dogfood need Dedo — an 'Uprav' at Verifikácia hit the Auditor, which just re-confirmed).
+
+    The operator's comment (an 'Uprav' or an escalation Decision Card answer) IS the fix brief: record it as a
+    ``manazer→ai_agent`` return (:func:`_latest_verifikacia_fix_scope` reads it as the most-recent verifikacia
+    directive), materialize ONE targeted fix task (the done plan tasks STAY done), RESET the bounded loop
+    counter (a human now steers — ``AUDITOR_LOOP_MAX`` bounds the AUTONOMOUS re-verify loop, not human
+    interventions), and re-enter Programovanie (``paused`` for a ``new_version`` so the Manažér confirms the
+    re-run via 'Pokračovať'; auto-dispatched on the ``fast_fix`` lane)."""
+    version_id = state.version_id
+    ret = _record_message(
+        db,
+        version_id=version_id,
+        stage="verifikacia",
+        author="manazer",
+        recipient="ai_agent",
+        kind="return",
+        content=comment,
+        payload={"phase": "verifikacia", "manazer_fix_directive": True},
+    )
+    if on_message is not None:
+        await on_message(ret)
+    _ensure_verifikacia_fix_task(db, version_id)  # brief = the manazer directive just recorded (fix-scope reader)
+    state.is_regate = True
+    state.iteration = 0  # human-directed fresh attempt — reset the bounded AUTONOMOUS loop counter
+    state.current_stage = "programovanie"
+    state.current_actor = "ai_agent"
+    db.flush()
+    if state.flow_type == "fast_fix":
+        _begin_dispatch(db, state)  # zero-approval lane drives the fix through
+    else:
+        state.status = "paused"  # mandatory phase gate — Manažér confirms the re-run via 'Pokračovať'
+        state.next_action = "Oprava podľa tvojho pokynu je pripravená — 'Pokračovať' ju spustí."
+        db.flush()
+    return state
+
+
 def _resolve_surgical_targets(
     db: Session, version_id: uuid.UUID, identifiers: list[str]
 ) -> tuple[list[Task], list[str]]:
@@ -4671,18 +4754,33 @@ def _latest_verifikacia_fix_scope(db: Session, version_id: uuid.UUID) -> Optiona
     message (``author=auditor`` — a valid v2 token). Its ``findings`` (the concrete failures) + ``proposed_fix``
     (the targeted scope the Auditor proposes, never an edit by it — independence) become the fix brief the AI
     Agent re-runs against in the bounded fix↔re-verify loop. ``None`` when there is no FAIL verdict on record
-    (a fresh build, or the last verdict was a PASS) → the build loop falls back to its generated task briefs."""
+    (a fresh build, or the last verdict was a PASS) → the build loop falls back to its generated task briefs.
+
+    CR-V2-054: a Manažér 'Uprav' / escalation-decision at Verifikácia records a ``manazer→ai_agent``
+    ``kind=return`` — the OPERATOR's own fix instruction. When that return is the MOST RECENT verifikacia
+    message, it IS the fix brief (the operator is steering the fix directly), taking precedence over a prior
+    Auditor FAIL verdict."""
     latest = db.execute(
         select(PipelineMessage)
         .where(
             PipelineMessage.version_id == version_id,
             PipelineMessage.stage == "verifikacia",
-            PipelineMessage.kind == "verdict",
+            PipelineMessage.kind.in_(("verdict", "return")),
         )
         .order_by(PipelineMessage.seq.desc())
         .limit(1)
     ).scalar_one_or_none()
-    if latest is None or not latest.payload or latest.payload.get("verdict") != "FAIL":
+    if latest is None:
+        return None
+    if latest.kind == "return":
+        # CR-V2-054: the operator's directed fix instruction (most recent) IS the brief.
+        directive = (latest.content or "").strip()
+        if not directive:
+            return None
+        return (
+            "## Verifikácia — oprav podľa pokynu Manažéra (cielená oprava, potom Auditor re-verifikuje)\n" + directive
+        )
+    if not latest.payload or latest.payload.get("verdict") != "FAIL":
         return None
     findings = latest.payload.get("findings") or []
     proposed_fix = latest.payload.get("proposed_fix")
@@ -5690,6 +5788,12 @@ async def apply_action(
         comment = payload.get("comment")
         if not comment or not str(comment).strip():
             raise OrchestratorError("uprav requires a non-empty payload.comment")
+        # CR-V2-054: an 'Uprav' at Verifikácia is a FIX directive → route it to the AI Agent (the fixer),
+        # NOT state.current_actor (the Auditor/finder — which would just re-confirm). Re-enters the bounded
+        # fix loop with the operator's comment as the brief. (The was-the-bug: the NEX Agents dogfood 'Uprav'
+        # hit the Auditor and re-passed.)
+        if state.current_stage == "verifikacia":
+            return await _route_manazer_fix_to_ai_agent(db, state, comment=str(comment))
         # A paused Programovanie loop steered by ``uprav`` resumes from the pause (re-dispatch the loop).
         recipient = state.current_actor
         _record_message(
@@ -5793,6 +5897,18 @@ async def apply_action(
             state.next_action = f"Manažér: rozhodni {len(answered) + 1}/{len(keys)} (konzultácia)."
             db.flush()
             return state
+        # CR-V2-054: a verifikacia_fail escalation Decision Card routes to the AI-Agent FIX loop, NOT a
+        # re-dispatch of the current actor (the Auditor). The operator's answer (free text preferred, else the
+        # chosen option label) is the fix brief; a plain 'hold' keeps the build blocked (they can steer later
+        # via 'Uprav').
+        if c.get("source") == "verifikacia_fail":
+            ans = answered.get("verifikacia_fail_next") or {}
+            if ans.get("option_id") == "hold" and not ans.get("free_text"):
+                state.next_action = "Podržané — usmerni opravu neskôr (Decision Card alebo 'Uprav')."
+                db.flush()
+                return state
+            brief = (ans.get("free_text") or ans.get("label") or "Oprav blokujúce zlyhanie z Verifikácie.").strip()
+            return await _route_manazer_fix_to_ai_agent(db, state, comment=brief)
         # all decided → APPLY: re-dispatch the AI Agent (dispatch_directive frames every captured decision)
         _begin_dispatch(db, state)
         return state

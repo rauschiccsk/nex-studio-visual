@@ -382,19 +382,27 @@ async def test_fail_then_fix_reaches_hotovo_fast_fix(db_session, monkeypatch):
 
 
 async def test_fail_at_loop_max_escalates_to_manazer(db_session, monkeypatch):
-    # The bounded loop: a still-failing build at the AUDITOR_LOOP_MAX-th round STOPS + escalates to the Manažér
-    # (blocked, a visible system→manazer note) — never an infinite loop, never a silent done.
+    # The bounded loop: a still-failing build at the AUDITOR_LOOP_MAX-th round STOPS + surfaces an operator
+    # DECISION (CR-V2-054) — never an infinite loop, never a silent done. block_reason=decision_needed so the
+    # DecisionCardStack renders it as a card (explanation + recommendation + one action).
     version, project = _make_version(db_session, project_dial="plna")
     _seed_verifikacia(db_session, version.id, iteration=orchestrator.AUDITOR_LOOP_MAX)
     _seed_done_tasks(db_session, version, project, ["T1"])
     _stub_auditor(monkeypatch, _verdict_fail(["stále zlyháva"]))
     _stub_smoke(monkeypatch, acc=(False, "still failing", False))
     state = await orchestrator.run_dispatch(db_session, version.id)
-    assert state.status == "blocked" and state.block_reason == "agent_error"
+    assert state.status == "blocked" and state.block_reason == "decision_needed"  # CR-V2-054: a Decision Card
     assert state.current_stage == "verifikacia"  # did NOT loop back — escalated
-    assert f"{orchestrator.AUDITOR_LOOP_MAX}" in state.next_action and "Manažér" in state.next_action
-    notes = [m for m in _msgs(db_session, version.id) if m.payload and m.payload.get("auditor_loop_exhausted")]
-    assert notes and notes[-1].author == "system" and notes[-1].recipient == "manazer"
+    assert f"{orchestrator.AUDITOR_LOOP_MAX}" in state.next_action and "Decision Card" in state.next_action
+    # the escalation is a kind=consultation (source=verifikacia_fail) the DecisionCardStack renders
+    cards = [m for m in _msgs(db_session, version.id) if m.kind == "consultation"]
+    assert cards and cards[-1].author == "system" and cards[-1].recipient == "manazer"
+    consult = cards[-1].payload["consultation"]
+    assert consult["source"] == "verifikacia_fail"
+    assert cards[-1].payload.get("auditor_loop_exhausted") is True
+    # the recommended action is to guide the fix (routes to the AI Agent, not the Auditor)
+    opts = consult["decisions"][0]["options"]
+    assert [o for o in opts if o.get("recommended")][0]["id"] == "guide_fix"
     assert orchestrator._verifikacia_passed(db_session, version.id) is False
 
 
@@ -788,3 +796,114 @@ async def test_declared_coverage_flows_into_release_smoke(db_session, monkeypatc
     _ban_deploy_calls(monkeypatch)
     await orchestrator.run_dispatch(db_session, version.id)
     assert seen["coverage_req"] == (2, 1)  # declared coverage reached the oracle
+
+
+# ── CR-V2-054: operator gate actionable — uprav routes to the AI Agent (fixer), escalation = Decision Card ──
+
+
+async def test_uprav_at_verifikacia_routes_to_ai_agent_fix_loop(db_session, monkeypatch):
+    # THE dogfood bug fix: an 'Uprav' at Verifikácia is a FIX directive → it must reach the AI Agent (fixer)
+    # and re-enter the fix loop, NOT the Auditor (finder, current_actor) which would just re-confirm.
+    version, project = _make_version(db_session, project_dial="po_kazdej_faze")
+    state = _seed_verifikacia(db_session, version.id, iteration=0)
+    state.status = "awaiting_manazer"
+    db_session.flush()
+    _, _, done_tasks = _seed_done_tasks(db_session, version, project, ["T1"])
+    new_state = await orchestrator.apply_action(
+        db_session,
+        version_id=version.id,
+        action="uprav",
+        payload={"comment": "Oprav read_only preset — blokuj cat s presmerovaním a find -delete."},
+    )
+    # re-entered Programovanie targeting the AI Agent (the fixer), gated for the Manažér
+    assert new_state.current_stage == "programovanie" and new_state.current_actor == "ai_agent"
+    assert new_state.status == "paused"
+    # the operator's comment reached the AI Agent (manazer→ai_agent return) — NOT the Auditor
+    returns = [m for m in _msgs(db_session, version.id) if m.kind == "return" and m.stage == "verifikacia"]
+    assert returns and returns[-1].author == "manazer" and returns[-1].recipient == "ai_agent"
+    assert "read_only" in returns[-1].content
+    # a targeted fix task carries the operator's directive as its brief; the done plan task stays done
+    fix_tasks = [t for t in _tasks(db_session, version.id) if t.id not in {dt.id for dt in done_tasks}]
+    assert len(fix_tasks) == 1 and fix_tasks[0].status == "todo"
+    scope = orchestrator._latest_verifikacia_fix_scope(db_session, version.id)
+    assert scope is not None and "pokynu Manažéra" in scope and "read_only" in scope
+
+
+async def test_latest_fix_scope_prefers_operator_directive_over_auditor_fail(db_session):
+    # When a Manažér directive is the most recent verifikacia message, it wins over an older Auditor FAIL.
+    version, _ = _make_version(db_session)
+    _seed_verifikacia(db_session, version.id)
+    # older Auditor FAIL verdict
+    orchestrator._record_message(
+        db_session,
+        version_id=version.id,
+        stage="verifikacia",
+        author="auditor",
+        recipient="manazer",
+        kind="verdict",
+        content="FAIL",
+        payload={"verdict": "FAIL", "findings": ["staré nálezy"], "phase": "verifikacia"},
+    )
+    db_session.flush()
+    assert "staré nálezy" in orchestrator._latest_verifikacia_fix_scope(db_session, version.id)
+    # newer Manažér directive → takes precedence
+    orchestrator._record_message(
+        db_session,
+        version_id=version.id,
+        stage="verifikacia",
+        author="manazer",
+        recipient="ai_agent",
+        kind="return",
+        content="Zameraj sa na scoping na firmu.",
+        payload={"phase": "verifikacia", "manazer_fix_directive": True},
+    )
+    db_session.flush()
+    scope = orchestrator._latest_verifikacia_fix_scope(db_session, version.id)
+    assert "pokynu Manažéra" in scope and "scoping na firmu" in scope and "staré nálezy" not in scope
+
+
+async def test_escalation_decision_card_guide_fix_routes_to_ai_agent(db_session, monkeypatch):
+    # Deciding the verifikacia_fail escalation card with 'guide_fix' + a free-text instruction routes to the
+    # AI-Agent fix loop (not a re-dispatch of the Auditor).
+    version, project = _make_version(db_session, project_dial="plna")
+    _seed_verifikacia(db_session, version.id, iteration=orchestrator.AUDITOR_LOOP_MAX)
+    _, _, done_tasks = _seed_done_tasks(db_session, version, project, ["T1"])
+    _stub_auditor(monkeypatch, _verdict_fail(["stále zlyháva"]))
+    _stub_smoke(monkeypatch, acc=(False, "still failing", False))
+    monkeypatch.setattr(orchestrator, "_begin_dispatch", lambda db, st: None)  # plna auto-dispatch → no-op
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert state.status == "blocked" and state.block_reason == "decision_needed"
+    # the operator picks guide_fix + types the fix instruction
+    new_state = await orchestrator.apply_action(
+        db_session,
+        version_id=version.id,
+        action="decide",
+        payload={
+            "decision_key": "verifikacia_fail_next",
+            "option_id": "guide_fix",
+            "free_text": "Doplň negatívny test na write-under-read_only.",
+        },
+    )
+    assert new_state.current_stage == "programovanie" and new_state.current_actor == "ai_agent"
+    fix_tasks = [t for t in _tasks(db_session, version.id) if t.id not in {dt.id for dt in done_tasks}]
+    assert len(fix_tasks) == 1 and fix_tasks[0].status == "todo"
+    scope = orchestrator._latest_verifikacia_fix_scope(db_session, version.id)
+    assert scope is not None and "negatívny test" in scope
+
+
+async def test_escalation_decision_card_hold_stays_blocked(db_session, monkeypatch):
+    # Choosing 'hold' (no free text) leaves the build blocked — the operator can steer later.
+    version, project = _make_version(db_session, project_dial="plna")
+    _seed_verifikacia(db_session, version.id, iteration=orchestrator.AUDITOR_LOOP_MAX)
+    _seed_done_tasks(db_session, version, project, ["T1"])
+    _stub_auditor(monkeypatch, _verdict_fail(["stále zlyháva"]))
+    _stub_smoke(monkeypatch, acc=(False, "still failing", False))
+    await orchestrator.run_dispatch(db_session, version.id)
+    new_state = await orchestrator.apply_action(
+        db_session,
+        version_id=version.id,
+        action="decide",
+        payload={"decision_key": "verifikacia_fail_next", "option_id": "hold"},
+    )
+    assert new_state.current_stage == "verifikacia" and new_state.status == "blocked"
+    assert orchestrator._verifikacia_passed(db_session, version.id) is False
