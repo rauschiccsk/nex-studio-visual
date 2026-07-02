@@ -241,7 +241,7 @@ def _stub_verifikacia_smoke(monkeypatch):
     """The Verifikácia round (CR-V2-014) runs _run_release_smoke; stub it (no docker) so these dial tests
     exercise only the PASS/FAIL → dial-settle wiring."""
 
-    async def _fake(slug, version_label):
+    async def _fake(slug, version_label, coverage_req=(0, 0)):
         return (True, "app booted + responds"), (True, "5 assertions", False)
 
     monkeypatch.setattr(orchestrator, "_run_release_smoke", _fake)

@@ -221,7 +221,12 @@ async def test_driver_pass_runs_acceptance_no_pytest(monkeypatch, tmp_path) -> N
     (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("green", "v1.0.0")
 
     assert (boot_ok, boot_detail) == (True, "app booted + responds")
-    assert acceptance == (True, "release acceptance PASS — 3 assertions", False)
+    # CR-V2-051: no declaration → (0,0) floor; PASS detail now carries the feature/negative breakdown.
+    assert acceptance == (
+        True,
+        "release acceptance PASS — 3 assertions (0 feature / 0 negative; declared 0 feature / 0 safety)",
+        False,
+    )
     assert rec.ran("up") and rec.ran("python") and rec.ran("down")
     assert not rec.ran("pytest"), "the smoke must NOT run pytest in the prod container"
     up_cmd = next(cmd for cmd in rec.calls if "up" in cmd)
@@ -364,7 +369,9 @@ async def test_acceptance_script_pass_with_assertions(monkeypatch, tmp_path) -> 
     ok, detail, skipped = await orchestrator._run_release_acceptance(stack, "ok")
 
     assert (ok, skipped) == (True, False)
-    assert detail == "release acceptance PASS — 5 assertions"
+    # CR-V2-051: PASS detail now reports the feature/negative breakdown + the declared floor (0/0 here — no
+    # declaration → degrades to the anti-empty floor).
+    assert detail == "release acceptance PASS — 5 assertions (0 feature / 0 negative; declared 0 feature / 0 safety)"
     assert seen["script"].name == "release_smoke_test.sh"
     assert seen["env"]["SMOKE_PROJECT"] == "ok-smoke" and seen["env"]["SMOKE_BACKEND"] == "backend"
     assert seen["env"]["SMOKE_BACKEND_PORT"] == "10180"
@@ -416,6 +423,75 @@ def test_parse_assertions_run() -> None:
     assert orchestrator._parse_assertions_run("noise\nASSERTIONS_RUN=1\nmore\nASSERTIONS_RUN=4\n") == 4
     assert orchestrator._parse_assertions_run("ASSERTIONS_RUN=0") == 0
     assert orchestrator._parse_assertions_run("nothing here") is None
+
+
+def test_parse_assertions_run_ignores_named_sentinels() -> None:
+    """CR-V2-051: the ``\\b`` anchor makes ``_parse_assertions_run`` match ONLY the bare total — a line with
+    ONLY ``FEATURE_ASSERTIONS_RUN=`` / ``NEGATIVE_ASSERTIONS_RUN=`` must NOT be mis-read as the total
+    (the ``_`` before ``ASSERTIONS`` is a word char → no boundary)."""
+    out = "FEATURE_ASSERTIONS_RUN=2\nNEGATIVE_ASSERTIONS_RUN=1\n"
+    assert orchestrator._parse_assertions_run(out) is None  # no bare ASSERTIONS_RUN= present
+    # the three sentinels coexisting: each parser picks its own value
+    full = "ASSERTIONS_RUN=4\nFEATURE_ASSERTIONS_RUN=2\nNEGATIVE_ASSERTIONS_RUN=1\n"
+    assert orchestrator._parse_assertions_run(full) == 4
+    assert orchestrator._parse_last_sentinel(full, orchestrator._FEATURE_ASSERTIONS_RUN_RE) == 2
+    assert orchestrator._parse_last_sentinel(full, orchestrator._NEGATIVE_ASSERTIONS_RUN_RE) == 1
+    assert orchestrator._parse_last_sentinel(full, orchestrator._FEATURE_ASSERTIONS_RUN_RE) == 2
+
+
+def test_evaluate_release_coverage_risk_floor() -> None:
+    """CR-V2-051 pure floor: a green boot alone is not a pass — declared flagship features need FEATURE
+    assertions and declared safety properties need NEGATIVE assertions; missing coverage is a FAIL."""
+    ev = orchestrator._evaluate_release_coverage
+    # anti-empty floor (no declaration)
+    assert ev(total=None, feature=0, negative=0, coverage_req=(0, 0))[0] is False
+    assert ev(total=0, feature=0, negative=0, coverage_req=(0, 0))[0] is False
+    # no declaration + ≥1 assertion → PASS (backward compatible)
+    ok, detail = ev(total=1, feature=0, negative=0, coverage_req=(0, 0))
+    assert ok is True and "1 assertions" in detail
+    # declared 2 features, only 1 feature assertion → FAIL (missing behavioural coverage)
+    ok, detail = ev(total=3, feature=1, negative=1, coverage_req=(2, 1))
+    assert ok is False and "missing behavioural coverage" in detail and "2 flagship" in detail
+    # declared 1 safety property, 0 negative assertions → FAIL (missing safety coverage) — THE dogfood shape
+    ok, detail = ev(total=3, feature=2, negative=0, coverage_req=(2, 1))
+    assert ok is False and "missing safety coverage" in detail and "risky op MUST be rejected" in detail
+    # full declared coverage met → PASS
+    ok, detail = ev(total=4, feature=2, negative=1, coverage_req=(2, 1))
+    assert ok is True and "2 feature / 1 negative" in detail
+
+
+@pytest.mark.asyncio
+async def test_acceptance_missing_safety_coverage_is_fail(monkeypatch, tmp_path) -> None:
+    """End-to-end through ``_run_release_acceptance``: the script exits 0 with a green boot + feature assertion
+    but ZERO negative assertions while the design declared a safety property → FAIL (the NEX Agents shape:
+    a boot-green build with an unproven safety invariant must not pass)."""
+    monkeypatch.setattr(orchestrator.claude_agent, "PROJECTS_ROOT", tmp_path)
+    _make_project(tmp_path, "sec", script=True)
+    stack = _mk_stack(tmp_path, slug="sec")
+
+    async def _script(script, env):
+        return 0, "ASSERTIONS_RUN=2\nFEATURE_ASSERTIONS_RUN=1\nNEGATIVE_ASSERTIONS_RUN=0\n"
+
+    monkeypatch.setattr(orchestrator, "_run_acceptance_script", _script)
+    # declared 1 flagship feature + 1 safety property
+    ok, detail, skipped = await orchestrator._run_release_acceptance(stack, "sec", coverage_req=(1, 1))
+    assert ok is False and skipped is False and "missing safety coverage" in detail
+
+
+@pytest.mark.asyncio
+async def test_acceptance_full_declared_coverage_passes(monkeypatch, tmp_path) -> None:
+    """The same script but with the negative assertion present → the declared (1 feature, 1 safety) floor is
+    met → PASS."""
+    monkeypatch.setattr(orchestrator.claude_agent, "PROJECTS_ROOT", tmp_path)
+    _make_project(tmp_path, "sec2", script=True)
+    stack = _mk_stack(tmp_path, slug="sec2")
+
+    async def _script(script, env):
+        return 0, "ASSERTIONS_RUN=3\nFEATURE_ASSERTIONS_RUN=1\nNEGATIVE_ASSERTIONS_RUN=1\n"
+
+    monkeypatch.setattr(orchestrator, "_run_acceptance_script", _script)
+    ok, detail, skipped = await orchestrator._run_release_acceptance(stack, "sec2", coverage_req=(1, 1))
+    assert ok is True and skipped is False and "1 feature / 1 negative" in detail
 
 
 # ---------------------------------------------------------------------------

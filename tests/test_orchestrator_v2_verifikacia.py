@@ -174,9 +174,10 @@ def _stub_smoke(monkeypatch, *, boot_ok=True, acc=(True, "release acceptance PAS
     (acceptance is None when boot failed). Captures the (slug, version) it was called with."""
     seen = {}
 
-    async def _fake(project_slug, version_label):
+    async def _fake(project_slug, version_label, coverage_req=(0, 0)):
         seen["slug"] = project_slug
         seen["version"] = version_label
+        seen["coverage_req"] = coverage_req
         if not boot_ok:
             return (False, "up exit 1: boot failed"), None
         return (True, "app booted + responds"), acc
@@ -703,3 +704,58 @@ async def test_latest_runtime_floor_red_reads_recorded_evidence(db_session):
     assert orchestrator._latest_runtime_floor_red(db_session, version.id) is True  # ran-but-failed → red
     _rec({"smoke": {"pass": False, "detail": "boot exit 1"}})
     assert orchestrator._latest_runtime_floor_red(db_session, version.id) is True  # boot red → red
+
+
+# ── CR-V2-051: spec-derived risk-floored oracle — the declared coverage feeds the acceptance floor ─────
+
+
+def _rec_navrh_gate_report(db_session, version_id, *, flagship_features=None, safety_properties=None):
+    """Record the Návrh gate_report the AI Agent closes the design with, carrying the declared flagship
+    features + safety properties (CR-V2-052 populates these; here seeded directly to exercise the reader)."""
+    payload = {"phase": "navrh", "plan": {"epics": []}}
+    if flagship_features is not None:
+        payload["flagship_features"] = flagship_features
+    if safety_properties is not None:
+        payload["safety_properties"] = safety_properties
+    orchestrator._record_message(
+        db_session,
+        version_id=version_id,
+        stage="navrh",
+        author="ai_agent",
+        recipient="manazer",
+        kind="gate_report",
+        content="Návrh hotový",
+        payload=payload,
+    )
+    db_session.flush()
+
+
+async def test_declared_release_coverage_reads_navrh_declaration(db_session):
+    version, _ = _make_version(db_session)
+    # no design on record → (0, 0), the graceful degradation to the anti-empty floor
+    assert orchestrator._declared_release_coverage(db_session, version.id) == (0, 0)
+    _rec_navrh_gate_report(
+        db_session,
+        version.id,
+        flagship_features=["PDF→Peppol export", "supplier auto-match"],
+        safety_properties=[{"name": "read_only blocks writes", "risky_op": "cat x > y"}],
+    )
+    assert orchestrator._declared_release_coverage(db_session, version.id) == (2, 1)
+
+
+async def test_declared_coverage_flows_into_release_smoke(db_session, monkeypatch):
+    # The engine reads the Návrh declaration and threads the coverage requirement into the release smoke — so
+    # the oracle floors the acceptance against what the design promised (2 flagship features, 1 safety property).
+    version, _ = _make_version(db_session, project_dial="po_kazdej_faze")
+    _rec_navrh_gate_report(
+        db_session,
+        version.id,
+        flagship_features=["export", "match"],
+        safety_properties=[{"name": "authz", "risky_op": "cross-tenant read"}],
+    )
+    _seed_verifikacia(db_session, version.id)
+    _stub_auditor(monkeypatch, _verdict_pass())
+    seen = _stub_smoke(monkeypatch)
+    _ban_deploy_calls(monkeypatch)
+    await orchestrator.run_dispatch(db_session, version.id)
+    assert seen["coverage_req"] == (2, 1)  # declared coverage reached the oracle

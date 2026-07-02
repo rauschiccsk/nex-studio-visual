@@ -3293,18 +3293,59 @@ async def _run_app_starts_smoke(stack: _SmokeStack) -> tuple[bool, str]:
     return True, "app booted + responds"
 
 
-# gate-g-hardening GAP 1 (B): the anti-empty-floor sentinel ``release_smoke_test.sh`` MUST print —
-# ``ASSERTIONS_RUN=<n>``. An empty ``set -e`` script that exit-0's without running anything is a FALSE
-# green; the absence of the sentinel (or ``n==0``) is a FAIL, not a pass (parsed by the engine, below).
-_ASSERTIONS_RUN_RE = re.compile(r"ASSERTIONS_RUN=(\d+)")
+# gate-g-hardening GAP 1 (B) + CR-V2-051 risk floor: ``release_smoke_test.sh`` MUST print three sentinels —
+# ``ASSERTIONS_RUN=<n>`` (anti-empty floor: an empty ``set -e`` script that exit-0's without asserting is a
+# FALSE green), ``FEATURE_ASSERTIONS_RUN=<n>`` (≥1 per declared flagship feature) and
+# ``NEGATIVE_ASSERTIONS_RUN=<n>`` (≥1 per declared safety property — the risky op must be REJECTED). The
+# absence of a sentinel / an insufficient count is a FAIL, not a pass (parsed by the engine, below).
+_ASSERTIONS_RUN_RE = re.compile(r"\bASSERTIONS_RUN=(\d+)")
+_FEATURE_ASSERTIONS_RUN_RE = re.compile(r"\bFEATURE_ASSERTIONS_RUN=(\d+)")
+_NEGATIVE_ASSERTIONS_RUN_RE = re.compile(r"\bNEGATIVE_ASSERTIONS_RUN=(\d+)")
+
+
+def _parse_last_sentinel(output: str, pattern: re.Pattern[str]) -> Optional[int]:
+    """The LAST ``<NAME>=<n>`` count printed by ``release_smoke_test.sh`` for *pattern*, or ``None`` when the
+    script printed no such sentinel at all."""
+    matches = pattern.findall(output)
+    return int(matches[-1]) if matches else None
 
 
 def _parse_assertions_run(output: str) -> Optional[int]:
-    """The LAST ``ASSERTIONS_RUN=<n>`` count printed by ``release_smoke_test.sh`` (anti-empty floor), or
-    ``None`` when the script printed no sentinel at all. ``None`` / ``0`` ⇒ the script asserted nothing
-    (a false exit-0) → the caller FAILs it."""
-    matches = _ASSERTIONS_RUN_RE.findall(output)
-    return int(matches[-1]) if matches else None
+    """The LAST ``ASSERTIONS_RUN=<n>`` count (anti-empty floor). ``None`` / ``0`` ⇒ the script asserted
+    nothing (a false exit-0) → the caller FAILs it. ``FEATURE_ASSERTIONS_RUN`` / ``NEGATIVE_ASSERTIONS_RUN``
+    also end in ``ASSERTIONS_RUN=`` but the ``\\b`` word-boundary anchor makes this match ONLY the bare
+    total (the ``_`` before ``ASSERTIONS`` in the named sentinels is a word char, so ``\\b`` does not match
+    there)."""
+    return _parse_last_sentinel(output, _ASSERTIONS_RUN_RE)
+
+
+def _evaluate_release_coverage(
+    *, total: Optional[int], feature: int, negative: int, coverage_req: tuple[int, int]
+) -> tuple[bool, str]:
+    """CR-V2-051 — the spec-derived, risk-floored acceptance verdict from the parsed sentinel counts + the
+    DECLARED coverage requirement ``(n_flagship_features, n_safety_properties)`` from the Návrh design. Pure
+    (unit-tested). A green boot alone is NOT a pass: every declared flagship feature needs ≥1 FEATURE
+    assertion and every declared safety property needs ≥1 NEGATIVE assertion (the risky op MUST be rejected)
+    — missing coverage is a FAIL, never a silent pass. With no declaration ``(0, 0)`` it degrades to the
+    existing anti-empty floor (backward compatible)."""
+    n_features, n_safety = coverage_req
+    if not total:  # None (no sentinel) or 0 — the anti-empty floor.
+        return False, f"anti-empty floor: ASSERTIONS_RUN={total} — the acceptance script ran no assertions"
+    if feature < n_features:
+        return False, (
+            f"missing behavioural coverage: the design declared {n_features} flagship feature(s) but the "
+            f"acceptance ran {feature} FEATURE assertion(s) — every flagship feature needs one"
+        )
+    if negative < n_safety:
+        return False, (
+            f"missing safety coverage: the design declared {n_safety} safety property/ies but the acceptance "
+            f"ran {negative} NEGATIVE assertion(s) — every safety property needs a negative test (the risky "
+            f"op MUST be rejected)"
+        )
+    return True, (
+        f"release acceptance PASS — {total} assertions ({feature} feature / {negative} negative; "
+        f"declared {n_features} feature / {n_safety} safety)"
+    )
 
 
 async def _run_acceptance_script(script: Path, env: dict[str, str]) -> tuple[int, str]:
@@ -3328,11 +3369,19 @@ async def _run_acceptance_script(script: Path, env: dict[str, str]) -> tuple[int
     return proc.returncode, (stdout or b"").decode("utf-8", "replace")
 
 
-async def _run_release_acceptance(stack: _SmokeStack, project_slug: str) -> tuple[bool, str, bool]:
-    """Release-acceptance leg (gate-g-hardening GAP 1 A1): run the project's black-box host-executable
-    ``release_smoke_test.sh`` against the ALREADY-BOOTED isolated *stack* (NOT pytest in the prod image),
-    requiring exit-0 AND a non-zero ``ASSERTIONS_RUN`` (anti-empty floor). Returns ``(ok, detail,
-    skipped)``.
+async def _run_release_acceptance(
+    stack: _SmokeStack, project_slug: str, coverage_req: tuple[int, int] = (0, 0)
+) -> tuple[bool, str, bool]:
+    """Release-acceptance leg (gate-g-hardening GAP 1 A1; CR-V2-051 risk floor): run the project's black-box
+    host-executable ``release_smoke_test.sh`` against the ALREADY-BOOTED isolated *stack* (NOT pytest in the
+    prod image), requiring exit-0 AND the spec-derived coverage floor. Returns ``(ok, detail, skipped)``.
+
+    **The risk floor (CR-V2-051):** *coverage_req* is ``(n_flagship_features, n_safety_properties)`` declared
+    in the Návrh design (read by :func:`_declared_release_coverage`). Beyond the anti-empty floor
+    (``ASSERTIONS_RUN>0``), the script must have run ≥1 FEATURE assertion per declared flagship feature and
+    ≥1 NEGATIVE assertion per declared safety property (the risky op MUST be rejected). Missing coverage is a
+    FAIL, never a silent pass — proving the app BOOTS is not proving it does what the spec promises nor that
+    it refuses what the spec forbids. With no declaration ``(0, 0)`` it degrades to the anti-empty floor.
 
     **Archetype-conditional** (the key honesty fix): a web app (a ``backend`` service is present in the
     compose) with NO ``release_smoke_test.sh`` is a **FAIL** ("required but missing") — never a silent SKIP
@@ -3358,14 +3407,15 @@ async def _run_release_acceptance(stack: _SmokeStack, project_slug: str) -> tupl
     rc, out = await _run_acceptance_script(script, env)
     if rc != 0:
         return False, f"release_smoke_test.sh exit {rc}: {out.strip()[-400:]}", False
-    assertions = _parse_assertions_run(out)
-    if not assertions:  # None (no sentinel) or 0 — a false exit-0 that asserted nothing.
-        return False, f"anti-empty floor: ASSERTIONS_RUN={assertions} — the acceptance script ran no assertions", False
-    return True, f"release acceptance PASS — {assertions} assertions", False
+    total = _parse_assertions_run(out)
+    feature = _parse_last_sentinel(out, _FEATURE_ASSERTIONS_RUN_RE) or 0
+    negative = _parse_last_sentinel(out, _NEGATIVE_ASSERTIONS_RUN_RE) or 0
+    ok, detail = _evaluate_release_coverage(total=total, feature=feature, negative=negative, coverage_req=coverage_req)
+    return ok, detail, False
 
 
 async def _run_release_smoke(
-    project_slug: str, version_label: str
+    project_slug: str, version_label: str, coverage_req: tuple[int, int] = (0, 0)
 ) -> tuple[tuple[bool, str], Optional[tuple[bool, str, bool]]]:
     """gate-g-hardening GAP 1: the boot leg + the release-acceptance leg in ONE up/down cycle (A2). Returns
     ``((boot_ok, boot_detail), acceptance)`` where ``acceptance`` is ``(ok, detail, skipped)`` — or ``None``
@@ -3392,8 +3442,33 @@ async def _run_release_smoke(
         boot_ok, boot_detail = await _run_app_starts_smoke(stack)
         if not boot_ok:
             return (boot_ok, boot_detail), None
-        acceptance = await _run_release_acceptance(stack, project_slug)
+        acceptance = await _run_release_acceptance(stack, project_slug, coverage_req)
         return (boot_ok, boot_detail), acceptance
+
+
+def _declared_release_coverage(db: Session, version_id: uuid.UUID) -> tuple[int, int]:
+    """CR-V2-051 — the ``(n_flagship_features, n_safety_properties)`` the Návrh design DECLARED, read from the
+    latest ``navrh`` ``gate_report`` payload (:func:`_run_navrh_round` records ``flagship_features`` +
+    ``safety_properties`` there — CR-V2-052). This is the risk floor the release-acceptance oracle enforces:
+    ≥1 FEATURE assertion per flagship feature, ≥1 NEGATIVE assertion per safety property. Defensive: returns
+    ``(0, 0)`` when no design is on record or the payload predates the declaration (graceful degradation to
+    the anti-empty floor — never raises)."""
+    latest = db.execute(
+        select(PipelineMessage)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.stage == "navrh",
+            PipelineMessage.kind == "gate_report",
+        )
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    payload = (latest.payload if latest else None) or {}
+    features = payload.get("flagship_features")
+    safety = payload.get("safety_properties")
+    n_features = len(features) if isinstance(features, list) else 0
+    n_safety = len(safety) if isinstance(safety, list) else 0
+    return n_features, n_safety
 
 
 # NOTE (CR-V2-021): the v1 ``_release_acceptance_satisfied`` (the gate_g PASS-button gate the v1 ``_board()``
@@ -4215,7 +4290,10 @@ async def _run_verifikacia_round(
 
     # 1. Release-acceptance against INTERNAL FIXTURES (boot leg + acceptance leg in ONE up/down cycle). NEVER
     # touches a customer instance / uat_provisioner / deploy.py — an ephemeral -p <slug>-smoke stack only.
-    (smoke_ok, smoke_detail), acceptance = await _run_release_smoke(slug, version_label)
+    # CR-V2-051: the acceptance is risk-floored against the Návrh design's DECLARED flagship features + safety
+    # properties — ≥1 FEATURE assertion each, ≥1 NEGATIVE assertion each; missing coverage is a FAIL.
+    coverage_req = _declared_release_coverage(db, version_id)
+    (smoke_ok, smoke_detail), acceptance = await _run_release_smoke(slug, version_label, coverage_req)
     smoke_msg = _record_message(
         db,
         version_id=version_id,
