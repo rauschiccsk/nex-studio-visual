@@ -219,26 +219,55 @@ async def test_verifikacia_brief_is_release_acceptance_internal_fixtures_securit
     assert "INTERNÝM FIXTÚRAM" in p  # internal fixtures, not a customer instance
     assert "READ + RUN-ONLY" in p  # independence
     assert "§4 HARD-SECURITY" in p  # explicit §4 verification
-    assert "ADVERZARIÁLNE SPOT-CHECKY" in p  # adversarial spot-checks
+    assert "REFUTUJ, NEPOTVRDZUJ" in p  # CR-V2-053: refute-don't-confirm
+    assert "NEGATÍVNE / BEZPEČNOSTNÉ OVERENIE" in p  # CR-V2-053: unconditional negative/safety mandate
     assert "kind=verdict" in p
     # the engine smoke result was fed into the brief
     assert "Engine release smoke" in p and "interné fixtúry" in p
 
 
-async def test_verifikacia_brief_depth_scales_with_dial(db_session, monkeypatch):
+async def test_verifikacia_brief_depth_is_dial_independent(db_session, monkeypatch):
+    # CR-V2-053: the END verification depth is FIXED — the same deep, adversarial, refute-don't-confirm brief
+    # regardless of the Miera autonómie dial (the old down-scaling at low autonomy is removed). The dial
+    # governs WHERE the build stops for approval, NOT how hard the release gate is checked.
     hi, _ = _make_version(db_session, project_dial="plna")
     _seed_verifikacia(db_session, hi.id)
     cap_hi = _stub_auditor(monkeypatch, _verdict_pass())
     _stub_smoke(monkeypatch)
     await orchestrator.run_dispatch(db_session, hi.id)
-    assert "DÔKLADNÚ" in cap_hi["prompt"]
 
     lo, _ = _make_version(db_session, project_dial="po_kazdej_faze")
     _seed_verifikacia(db_session, lo.id)
     cap_lo = _stub_auditor(monkeypatch, _verdict_pass())
     _stub_smoke(monkeypatch)
     await orchestrator.run_dispatch(db_session, lo.id)
-    assert "ZAMERANÚ" in cap_lo["prompt"]
+
+    # identical brief at both dial ends (no dial-conditional depth text); both carry the refute + negative mandate
+    assert cap_hi["prompt"] == cap_lo["prompt"]
+    for needle in ("REFUTUJ, NEPOTVRDZUJ", "NEGATÍVNE / BEZPEČNOSTNÉ OVERENIE", "rovnaká PLNÁ hĺbka VŽDY"):
+        assert needle in cap_hi["prompt"]
+    # the removed dial-conditional wording is gone
+    assert "DÔKLADNÚ" not in cap_hi["prompt"] and "ZAMERANÚ" not in cap_lo["prompt"]
+
+
+async def test_verifikacia_brief_enumerates_declared_coverage(db_session, monkeypatch):
+    # CR-V2-053: the Auditor brief names the EXACT declared safety properties (risky ops) to run + reject, so
+    # the negative-test mandate is concrete, not abstract.
+    version, _ = _make_version(db_session, project_dial="plna")
+    _rec_navrh_gate_report(
+        db_session,
+        version.id,
+        flagship_features=["Peppol export"],
+        safety_properties=[{"name": "read_only blocks writes", "risky_op": "cat x > y under read_only"}],
+    )
+    _seed_verifikacia(db_session, version.id)
+    cap = _stub_auditor(monkeypatch, _verdict_pass())
+    _stub_smoke(monkeypatch)
+    await orchestrator.run_dispatch(db_session, version.id)
+    p = cap["prompt"]
+    assert "Deklarované pokrytie z Návrhu" in p
+    assert "read_only blocks writes" in p and "cat x > y under read_only" in p
+    assert "Peppol export" in p
 
 
 # ── PASS: the dial governs the end sign-off ───────────────────────────────────

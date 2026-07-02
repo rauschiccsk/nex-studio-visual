@@ -302,7 +302,8 @@ def test_verifikacia_directive_is_light_for_fast_fix(db_session) -> None:
     assert "kind=verdict" in light and "§4 HARD-SECURITY" in light
 
     full = orchestrator._verifikacia_directive(db_session, version.id, flow_type="new_version")
-    assert "ADVERZARIÁLNE SPOT-CHECKY" in full  # the full release oracle
+    # CR-V2-053: the full release oracle refutes-don't-confirms + runs an unconditional negative/safety test
+    assert "REFUTUJ, NEPOTVRDZUJ" in full and "NEGATÍVNE / BEZPEČNOSTNÉ OVERENIE" in full
 
 
 # ---------------------------------------------------------------------------

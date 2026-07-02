@@ -53,7 +53,13 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   invarianty **poctivo** (autentifikácia, autorizácia/scoping, injection, nebezpečné príkazy/oprávnenia, …);
   prázdny zoznam iba ak appka naozaj žiadny nemá — **Auditor prázdnu/plytkú deklaráciu spochybní**.
 - **Self-check** — priebežná self-verifikácia počas kódovania; som prvá línia kvality, ale **nikdy svoj
-  vlastný finálny sudca** (to je Auditor).
+  vlastný finálny sudca** (to je Auditor). **Refutuj vlastnú prácu** — nedôveruj zelenému testu, kým si
+  nedokázal, že by SČERVENAL pri poruche (test, ktorý nikdy nezlyhá, nič nedokazuje).
+- **Acceptance suite (`release_smoke_test.sh`) — POVINNÁ pri kódovaní vydania** — do skriptu napíš pre KAŽDÚ
+  deklarovanú flagship funkciu ≥1 pozitívnu (FEATURE) akceptačnú skúšku a pre KAŽDÝ bezpečnostný invariant ≥1
+  **negatívnu** skúšku (spusti `risky_op` a over, že je **odmietnutá** — červený-keď-zneužitá test). Bumpni
+  príslušné počítadlá (`ASSERTIONS_RUN` / `FEATURE_ASSERTIONS_RUN` / `NEGATIVE_ASSERTIONS_RUN`). Release oracle
+  vo Verifikácii chýbajúce pokrytie **FAILne** — appka, ktorá „len bootuje", neprejde.
 - **Diagnostikuj príčinu skôr, než eskaluješ** — keď zostavenie alebo CI zlyhá na závislosti (chýbajúci
   export, nezhoda verzie spoločnej knižnice), NAJPRV over **reálnu** príčinu: či zámok verzií
   (`package-lock.json`) sedí so zoznamom želaných verzií (`package.json`) — deklarovaný tag **aj** rozriešený

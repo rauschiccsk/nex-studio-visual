@@ -1131,10 +1131,14 @@ def _verifikacia_directive(
         (the Auditor FINDS, the AI Agent FIXES — independence), bounded by :data:`AUDITOR_LOOP_MAX` rounds,
         then STOP + escalate to the Manažér.
 
-    Depth scales INVERSELY with human oversight (OQ-9 / AUD-6): higher autonomy → deeper, more adversarial
-    end check (the Auditor is the safety net that compensates for fewer human stops); lower autonomy →
-    lighter. The ``--effort`` flag is coupled to the dial in :func:`_resolve_dispatch_overrides`; the prose
-    tells the Auditor to MATCH its scrutiny."""
+    Depth is FIXED — always deep + adversarial, INDEPENDENT of the Miera autonómie dial (CR-V2-053, revising
+    OQ-9 / AUD-6). The dial governs WHERE the build stops for the Manažér's approval, NOT how hard the release
+    gate is checked: the Auditor is the only reliable independent net before Hotovo and the operator
+    (Tibor/Nazar) is a non-expert who cannot backstop it — the old "depth scales with oversight" down-scaled
+    the gate exactly when it mattered. The brief mandates refute-don't-confirm + an UNCONDITIONAL negative test
+    per declared safety property (the risky op MUST be shown to be rejected). ``fast_fix`` keeps its own
+    deliberately-focused light lane (a separate flow_type, not a dial level; the mechanical CR-V2-050/051
+    floors still bite there)."""
     if flow_type == "fast_fix":
         # Fast-fix LIGHT verifikácia (CR-V2-028; design §2.5): a FOCUSED fix-works + no-regression check
         # scoped to the directive — NOT the full adversarial release oracle. Still emits a verdict, still
@@ -1158,14 +1162,12 @@ def _verifikacia_directive(
             "ohraničenej slučky.\n"
             "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
         )
-    level = resolve_miera_autonomie(db, version_id)
-    depth = (
-        "Miera autonómie je VYSOKÁ (Manažér je málokedy v slučke) — rob DÔKLADNÚ, adverzariálnu verifikáciu: "
-        "si jediné nezávislé oči pred Hotovo, kompenzuješ menej ľudských kontrol."
-        if level in ("plna", "len_na_konci")
-        else "Miera autonómie je nižšia (Manažér kontroluje často) — rob ZAMERANÚ verifikáciu na rizikové "
-        "miesta; ťažšiu kontrolu nesie Manažér."
-    )
+    # CR-V2-053: the END release verification depth is FIXED — always deep + adversarial, INDEPENDENT of the
+    # Miera autonómie dial. The dial governs WHERE the build stops for the Manažér's approval, NOT how hard the
+    # release gate is checked: the Auditor is the only reliable independent net before Hotovo, and the operator
+    # (Tibor/Nazar) is a non-expert who cannot backstop it. The old "depth scales inversely with human
+    # oversight" down-scaled the gate exactly when it mattered — removed.
+    coverage_brief = _release_coverage_brief(db, version_id)
     return (
         "VERIFIKÁCIA (nezávislý Auditor, koncová kontrola po Programovaní, pred Hotovo).\n"
         "1. Si NEZÁVISLÝ overovateľ MIMO tímu AI Agenta — over z VONKU (žiadny agent sa nevie auditovať sám). "
@@ -1175,16 +1177,22 @@ def _verifikacia_directive(
         "spustil appku proti INTERNÝM FIXTÚRAM (nie zákazníckej inštancii — deploy je mimo pipeline; "
         "„Hotovo“ = overené, nie nasadené) — výsledok je nižšie. Zohľadni ho v synthéze.\n"
         + smoke_block
-        + "3. ADVERZARIÁLNE SPOT-CHECKY (zamerané, NIE per-task): aktívne lov diery v RIZIKOVÝCH častiach — "
-        "bezpečnosť, peniaze/výpočty, hlavný kontrakt. Verify-don't-trust: over oproti artefaktom a bežiacej "
-        "appke, NIE oproti slovu AI Agenta.\n"
-        "4. §4 HARD-SECURITY (explicitne): over, že P0 pravidlá držia v KÓDE aj v LOGOCH — žiadny credential "
+        + "3. REFUTUJ, NEPOTVRDZUJ (rovnaká PLNÁ hĺbka VŽDY — nezávisle od Miery autonómie): predpokladaj, že "
+        "build je CHYBNÝ, kým sám nedokážeš opak. NEDÔVERUJ zeleným testom AI Agenta — over ich SÁM oproti "
+        "bežiacej appke. Aktívne LOV diery v RIZIKOVÝCH častiach (bezpečnosť, peniaze/výpočty, hlavný "
+        "kontrakt); verify-don't-trust oproti artefaktom a bežiacej appke, NIE oproti slovu AI Agenta.\n"
+        "4. NEGATÍVNE / BEZPEČNOSTNÉ OVERENIE (POVINNÉ, bez ohľadu na dial): pre KAŽDÝ deklarovaný bezpečnostný "
+        "invariant SÁM SPUSTI zakázanú operáciu a over, že je SKUTOČNE ODMIETNUTÁ (červený-keď-zneužitá test). "
+        "Zelený „funguje to“ test bezpečnostný invariant NEDOKÁŽE — len negatívny. Nepokrytý invariant = FAIL. "
+        "Ak deklarácia vyzerá NEÚPLNÁ (chýba zjavný invariant — autentifikácia, autorizácia/scoping, injection, "
+        "nebezpečné príkazy/oprávnenia), SPOCHYBNI ju a daj nález.\n"
+        + coverage_brief
+        + "5. §4 HARD-SECURITY (explicitne): over, že P0 pravidlá držia v KÓDE aj v LOGOCH — žiadny credential "
         "v zdrojáku / commitnutý / v logoch; secrets len v `.env`/runtime env; `VITE_*` len public hodnoty. "
         "Únik credentialu je FAIL.\n"
-        f"5. {depth}\n"
         "6. Vráť `kind=verdict`:\n"
-        "   - ak je verzia overená (acceptance + spot-checky + §4 čisté) → `verdict=true` (PASS); do "
-        "`findings` daj prípadné neblokujúce poznámky.\n"
+        "   - ak je verzia overená (acceptance + negatívne bezpečnostné testy + spot-checky + §4 čisté) → "
+        "`verdict=true` (PASS); do `findings` daj prípadné neblokujúce poznámky.\n"
         "   - ak nájdeš zlyhanie → `verdict=false` (FAIL); konkrétne zlyhania vymenuj v `findings` a do "
         "`proposed_fix` napíš ZAMERANÝ rozsah opravy pre AI Agenta (NEvykonávaj ho — opravuje AI Agent, ty "
         "re-verifikuješ). FAIL sa vráti AI Agentovi do ohraničenej slučky.\n"
@@ -3462,13 +3470,11 @@ async def _run_release_smoke(
         return (boot_ok, boot_detail), acceptance
 
 
-def _declared_release_coverage(db: Session, version_id: uuid.UUID) -> tuple[int, int]:
-    """CR-V2-051 — the ``(n_flagship_features, n_safety_properties)`` the Návrh design DECLARED, read from the
-    latest ``navrh`` ``gate_report`` payload (:func:`_run_navrh_round` records ``flagship_features`` +
-    ``safety_properties`` there — CR-V2-052). This is the risk floor the release-acceptance oracle enforces:
-    ≥1 FEATURE assertion per flagship feature, ≥1 NEGATIVE assertion per safety property. Defensive: returns
-    ``(0, 0)`` when no design is on record or the payload predates the declaration (graceful degradation to
-    the anti-empty floor — never raises)."""
+def _latest_navrh_gate_report_payload(db: Session, version_id: uuid.UUID) -> dict[str, Any]:
+    """The payload of the latest ``navrh`` ``gate_report`` (the AI Agent's design close carrying the plan +
+    cross_cutting_rules + the CR-V2-052 release-coverage declaration), or ``{}`` when none is on record.
+    Shared by :func:`_declared_release_coverage` (the oracle floor) and :func:`_release_coverage_brief` (the
+    Auditor's adversarial brief)."""
     latest = db.execute(
         select(PipelineMessage)
         .where(
@@ -3479,12 +3485,46 @@ def _declared_release_coverage(db: Session, version_id: uuid.UUID) -> tuple[int,
         .order_by(PipelineMessage.seq.desc())
         .limit(1)
     ).scalar_one_or_none()
-    payload = (latest.payload if latest else None) or {}
+    return (latest.payload if latest else None) or {}
+
+
+def _declared_release_coverage(db: Session, version_id: uuid.UUID) -> tuple[int, int]:
+    """CR-V2-051 — the ``(n_flagship_features, n_safety_properties)`` the Návrh design DECLARED
+    (:func:`_run_navrh_round` records ``flagship_features`` + ``safety_properties`` on the navrh gate_report —
+    CR-V2-052). This is the risk floor the release-acceptance oracle enforces: ≥1 FEATURE assertion per
+    flagship feature, ≥1 NEGATIVE assertion per safety property. Defensive: returns ``(0, 0)`` when no design
+    is on record or the payload predates the declaration (graceful degradation to the anti-empty floor)."""
+    payload = _latest_navrh_gate_report_payload(db, version_id)
     features = payload.get("flagship_features")
     safety = payload.get("safety_properties")
     n_features = len(features) if isinstance(features, list) else 0
     n_safety = len(safety) if isinstance(safety, list) else 0
     return n_features, n_safety
+
+
+def _release_coverage_brief(db: Session, version_id: uuid.UUID) -> str:
+    """CR-V2-053 — a Slovak block enumerating the Návrh-declared flagship features + safety properties for the
+    Auditor's END brief, so the adversarial negative-test mandate names the EXACT risky ops to run and
+    reject. Empty string when nothing was declared (the directive already tells the Auditor to challenge a
+    missing declaration)."""
+    payload = _latest_navrh_gate_report_payload(db, version_id)
+    features = payload.get("flagship_features") or []
+    safety = payload.get("safety_properties") or []
+    if not features and not safety:
+        return ""
+    lines = ["   Deklarované pokrytie z Návrhu (over KAŽDÉ položku):\n"]
+    if features:
+        lines.append("   Flagship funkcie (každá potrebuje POZITÍVNE overenie voči bežiacej appke):\n")
+        lines += [f"     - {f}\n" for f in features if isinstance(f, str)]
+    if safety:
+        lines.append(
+            "   Bezpečnostné invarianty (každý potrebuje NEGATÍVNY test — zakázanú operáciu SÁM spusti, MUSÍ "
+            "byť odmietnutá):\n"
+        )
+        for sp in safety:
+            if isinstance(sp, dict):
+                lines.append(f"     - {sp.get('name', '?')} → over odmietnutie: {sp.get('risky_op', '?')}\n")
+    return "".join(lines)
 
 
 # NOTE (CR-V2-021): the v1 ``_release_acceptance_satisfied`` (the gate_g PASS-button gate the v1 ``_board()``
