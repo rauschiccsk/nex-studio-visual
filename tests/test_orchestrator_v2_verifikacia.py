@@ -545,3 +545,161 @@ async def test_no_invalid_v2_tokens_written_anywhere_in_path(db_session, monkeyp
         assert m.author in PARTICIPANT_VALUES, m.author
         assert m.recipient in PARTICIPANT_VALUES, m.recipient
         assert m.stage in STAGE_VALUES, m.stage
+
+
+# ── CR-V2-050: fail-closed hard-gate — the runtime floor OVERRIDES the Auditor LLM verdict ─────────────
+# The NEX Agents dogfood defect: the Auditor emitted PASS while the release evidence was red. DONE must be
+# reality (a green smoke/acceptance), never a self-reported string. A red boot smoke, or an acceptance leg that
+# RAN but did not pass, floors the verdict to FAIL regardless of what the Auditor says — autonomous AND manual.
+
+
+async def test_red_acceptance_floors_auditor_pass_to_fail(db_session, monkeypatch):
+    # THE core dogfood: Auditor says PASS, but the acceptance leg RAN and FAILED → the engine floors it to FAIL.
+    # A red smoke can NEVER coexist with a green gate. Loops the targeted fix (does NOT reach Hotovo).
+    version, project = _make_version(db_session, project_dial="plna")
+    _seed_verifikacia(db_session, version.id, iteration=0)
+    _, _, done_tasks = _seed_done_tasks(db_session, version, project, ["T1"])
+    _stub_auditor(monkeypatch, _verdict_pass(findings=["vyzerá to dobre"]))  # LLM PASS — over-claim
+    _stub_smoke(monkeypatch, acc=(False, "release_smoke_test.sh exit 1: 2 of 12 failed", False))  # red floor
+    _ban_deploy_calls(monkeypatch)
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    # the recorded verdict is FAIL with the engine-override marker (audit trail), NOT the LLM's PASS
+    verdicts = [m for m in _msgs(db_session, version.id) if m.kind == "verdict"]
+    assert verdicts[-1].payload["verdict"] == "FAIL"
+    assert verdicts[-1].payload.get("engine_override") == "runtime_floor_red"
+    assert any("ENGINE OVERRIDE" in f for f in verdicts[-1].payload["findings"])
+    # did NOT reach Hotovo — looped the targeted fix back to Programovanie (paused for the Manažér on new_version)
+    assert state.current_stage == "programovanie" and state.iteration == 1
+    assert orchestrator._verifikacia_passed(db_session, version.id) is False
+    # the override is a readable fix scope for the re-run brief (fix loop is not left without a brief)
+    assert orchestrator._latest_verifikacia_fix_scope(db_session, version.id) is not None
+    fix_tasks = [t for t in _tasks(db_session, version.id) if t.id not in {dt.id for dt in done_tasks}]
+    assert len(fix_tasks) == 1 and fix_tasks[0].status == "todo"
+
+
+async def test_red_boot_floors_auditor_pass_to_fail(db_session, monkeypatch):
+    # Boot smoke FAILED (app did not even come up) but the Auditor said PASS → floored to FAIL. Acceptance is
+    # None when boot fails; the floor is red on the boot leg alone.
+    version, project = _make_version(db_session, project_dial="plna")
+    _seed_verifikacia(db_session, version.id, iteration=0)
+    _seed_done_tasks(db_session, version, project, ["T1"])
+    _stub_auditor(monkeypatch, _verdict_pass())
+    _stub_smoke(monkeypatch, boot_ok=False)  # boot red → acceptance None
+    _ban_deploy_calls(monkeypatch)
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    verdicts = [m for m in _msgs(db_session, version.id) if m.kind == "verdict"]
+    assert verdicts[-1].payload["verdict"] == "FAIL"
+    assert verdicts[-1].payload.get("engine_override") == "runtime_floor_red"
+    assert state.current_stage != "done"
+    assert orchestrator._verifikacia_passed(db_session, version.id) is False
+
+
+async def test_skip_acceptance_does_not_floor_pass(db_session, monkeypatch):
+    # A SKIP is NOT red: an acceptance leg that did not run (no coverage) does not floor a PASS under CR-050 —
+    # the floor is for RAN-but-FAILED only. (CR-051 will separately turn missing coverage into a FAIL.) This
+    # guards the floor against over-blocking a genuine boot-green PASS.
+    version, _ = _make_version(db_session, project_dial="po_kazdej_faze")
+    _seed_verifikacia(db_session, version.id)
+    _stub_auditor(monkeypatch, _verdict_pass())
+    _stub_smoke(monkeypatch, acc=(False, "acceptance skipped — no fixtures", True))  # skipped=True → not red
+    _ban_deploy_calls(monkeypatch)
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    verdicts = [m for m in _msgs(db_session, version.id) if m.kind == "verdict"]
+    assert verdicts[-1].payload["verdict"] == "PASS"
+    assert "engine_override" not in verdicts[-1].payload
+    assert state.status == "awaiting_manazer"  # settled for the end sign-off (no floor)
+    assert orchestrator._verifikacia_passed(db_session, version.id) is True
+
+
+async def test_green_smoke_preserves_auditor_pass(db_session, monkeypatch):
+    # Regression guard: a genuinely green smoke + acceptance leaves the Auditor's PASS intact (the floor only
+    # bites on red evidence — it does not turn every build into a FAIL).
+    version, _ = _make_version(db_session, project_dial="po_kazdej_faze")
+    _seed_verifikacia(db_session, version.id)
+    _stub_auditor(monkeypatch, _verdict_pass())
+    _stub_smoke(monkeypatch)  # default: boot ok, acc=(True, ..., False) — green
+    _ban_deploy_calls(monkeypatch)
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    verdicts = [m for m in _msgs(db_session, version.id) if m.kind == "verdict"]
+    assert verdicts[-1].payload["verdict"] == "PASS"
+    assert "engine_override" not in verdicts[-1].payload
+    assert state.status == "awaiting_manazer"
+
+
+async def test_manual_pass_override_cannot_cross_red_floor(db_session, monkeypatch):
+    # The manual path (apply_action verdict): a Manažér PASS-override cannot cross a red floor either. The floor
+    # is recomputed from the recorded release evidence; the EFFECTIVE verdict recorded is FAIL (so the fix loop's
+    # _latest_verifikacia_fix_scope can never read a PASS while the settle takes the FAIL branch).
+    version, project = _make_version(db_session, project_dial="po_kazdej_faze")
+    state = _seed_verifikacia(db_session, version.id, iteration=0)
+    state.status = "awaiting_manazer"
+    db_session.flush()
+    _, _, done_tasks = _seed_done_tasks(db_session, version, project, ["T1"])
+    # record the canonical release-evidence the autonomous round would have written: boot green, acceptance RED
+    orchestrator._record_message(
+        db_session,
+        version_id=version.id,
+        stage="verifikacia",
+        author="system",
+        recipient="manazer",
+        kind="notification",
+        content="Release smoke — boot PASS",
+        payload={"phase": "verifikacia", "smoke": {"pass": True, "detail": "booted"}},
+    )
+    orchestrator._record_message(
+        db_session,
+        version_id=version.id,
+        stage="verifikacia",
+        author="system",
+        recipient="manazer",
+        kind="notification",
+        content="Release acceptance — FAIL",
+        payload={
+            "phase": "verifikacia",
+            "release_acceptance": {"pass": False, "detail": "2 of 12 failed", "skipped": False},
+        },
+    )
+    db_session.flush()
+    new_state = await orchestrator.apply_action(
+        db_session, version_id=version.id, action="verdict", payload={"verdict": "PASS"}
+    )
+    # the manual PASS was floored to FAIL → the fix loop, not the sign-off
+    verdicts = [m for m in _msgs(db_session, version.id) if m.kind == "verdict"]
+    assert verdicts[-1].content == "FAIL" and verdicts[-1].payload["verdict"] == "FAIL"
+    assert verdicts[-1].payload.get("engine_override") == "runtime_floor_red"
+    assert new_state.current_stage == "programovanie" and new_state.status == "paused"
+    assert orchestrator._verifikacia_passed(db_session, version.id) is False
+    fix_tasks = [t for t in _tasks(db_session, version.id) if t.id not in {dt.id for dt in done_tasks}]
+    assert len(fix_tasks) == 1 and fix_tasks[0].status == "todo"
+
+
+async def test_latest_runtime_floor_red_reads_recorded_evidence(db_session):
+    # Unit-level guard on the helper the manual path uses: it reads the LATEST recorded smoke/acceptance and
+    # returns red iff boot failed OR acceptance ran-but-failed; a SKIP or no-evidence is not red.
+    version, _ = _make_version(db_session)
+    _seed_verifikacia(db_session, version.id)
+    # no evidence on record → floor clear
+    assert orchestrator._latest_runtime_floor_red(db_session, version.id) is False
+
+    def _rec(payload):
+        orchestrator._record_message(
+            db_session,
+            version_id=version.id,
+            stage="verifikacia",
+            author="system",
+            recipient="manazer",
+            kind="notification",
+            content="evidence",
+            payload={"phase": "verifikacia", **payload},
+        )
+        db_session.flush()
+
+    _rec({"smoke": {"pass": True, "detail": "ok"}})
+    _rec({"release_acceptance": {"pass": True, "detail": "12/12", "skipped": False}})
+    assert orchestrator._latest_runtime_floor_red(db_session, version.id) is False  # green
+    _rec({"release_acceptance": {"pass": False, "detail": "no fixtures", "skipped": True}})
+    assert orchestrator._latest_runtime_floor_red(db_session, version.id) is False  # SKIP is not red
+    _rec({"release_acceptance": {"pass": False, "detail": "2/12 failed", "skipped": False}})
+    assert orchestrator._latest_runtime_floor_red(db_session, version.id) is True  # ran-but-failed → red
+    _rec({"smoke": {"pass": False, "detail": "boot exit 1"}})
+    assert orchestrator._latest_runtime_floor_red(db_session, version.id) is True  # boot red → red

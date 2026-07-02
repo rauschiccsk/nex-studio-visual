@@ -4074,6 +4074,7 @@ async def _settle_verifikacia_verdict(
     state: PipelineState,
     *,
     verdict: str,
+    runtime_floor_red: bool = False,
     on_message: Optional[MessageCallback] = None,
 ) -> PipelineState:
     """Apply an Auditor Verifikácia ``verdict`` (PASS / FAIL) and settle the state (CR-V2-014; VERIF-1..3,
@@ -4108,12 +4109,15 @@ async def _settle_verifikacia_verdict(
     path (a consequence of an action already routed through :func:`apply_action`), the manual path IS
     :func:`apply_action`."""
     version_id = state.version_id
-    if verdict == "PASS":
+    # CR-V2-050: even on a PASS string, a red runtime floor (boot/acceptance) coerces to the FAIL path — the
+    # mechanically-computed evidence is authoritative; a self-reported PASS can never cross a red floor. Guards
+    # BOTH the autonomous caller and the manual apply_action verdict override.
+    if verdict == "PASS" and not runtime_floor_red:
         state.status = "awaiting_manazer"
         state.next_action = "Verifikácia PASS — schváľ na Hotovo (nasadenie je samostatná akcia per zákazník)."
         db.flush()
         return state
-    # FAIL → bounded fix loop.
+    # FAIL (or a PASS string floored to FAIL by the runtime floor) → bounded fix loop.
     if state.iteration >= AUDITOR_LOOP_MAX:
         # Exhausted the bounded loop → STOP + escalate to the Manažér (§2.2 (i)).
         state.status = "blocked"
@@ -4252,6 +4256,11 @@ async def _run_verifikacia_round(
             f"   Engine release smoke (interné fixtúry): boot FAIL — {smoke_detail} "
             "(acceptance sa nespustila). Zohľadni to vo verdikte.\n"
         )
+    # CR-V2-050 (fail-closed hard-gate): the mechanically-computed release evidence is AUTHORITATIVE, not
+    # advisory. A red boot smoke, or an acceptance leg that RAN but did not pass (a SKIP is not red), floors
+    # the verdict to FAIL below regardless of what the Auditor LLM says — the single change that stops a red
+    # smoke coexisting with a green gate (the NEX Agents self-confirming-test hole).
+    runtime_floor_red = (not smoke_ok) or (acceptance is not None and not acceptance[0] and not acceptance[2])
 
     # 2. The Auditor's verdict turn (independent, READ + RUN-ONLY). Recorded author=auditor / recipient=manazer
     # / stage=verifikacia / kind=verdict by invoke_agent — all valid v2 tokens. Effort scales with the dial.
@@ -4294,7 +4303,10 @@ async def _run_verifikacia_round(
     # _verifikacia_passed). The kind=verdict message was already recorded by invoke_agent (author=auditor) but
     # WITHOUT the canonical PASS/FAIL payload _verifikacia_passed / _latest_verifikacia_fix_scope read — record
     # the canonical verdict message now (the durable Verifikácia artifact) so both gates see it.
-    is_pass = review.kind == "verdict" and bool(review.verdict)
+    # CR-V2-050: the computed runtime floor OVERRIDES the Auditor LLM string — a red smoke/acceptance is a
+    # deterministic FAIL the LLM cannot upgrade to PASS.
+    llm_pass = review.kind == "verdict" and bool(review.verdict)
+    is_pass = llm_pass and not runtime_floor_red
     verdict_str = "PASS" if is_pass else "FAIL"
     verdict_msg = _record_message(
         db,
@@ -4306,15 +4318,26 @@ async def _run_verifikacia_round(
         content=review.summary or f"Verifikácia {verdict_str}.",
         payload={
             "verdict": verdict_str,
-            "findings": review.findings,
+            "findings": (
+                [
+                    *review.findings,
+                    "ENGINE OVERRIDE (CR-V2-050): a red release smoke/acceptance floored the verdict to FAIL "
+                    "regardless of the Auditor's PASS.",
+                ]
+                if (llm_pass and runtime_floor_red)
+                else review.findings
+            ),
             "proposed_fix": review.proposed_fix,
             "phase": "verifikacia",
+            **({"engine_override": "runtime_floor_red"} if (llm_pass and runtime_floor_red) else {}),
         },
     )
     if on_message is not None:
         await on_message(verdict_msg)
 
-    settled = await _settle_verifikacia_verdict(db, state, verdict=verdict_str, on_message=on_message)
+    settled = await _settle_verifikacia_verdict(
+        db, state, verdict=verdict_str, runtime_floor_red=runtime_floor_red, on_message=on_message
+    )
     if verdict_str == "FAIL":
         return settled  # the fix loop re-entered Programovanie (or escalated) — already settled
     # PASS → the dial governs the end sign-off. _settle_verifikacia_verdict put it awaiting_manazer; now apply
@@ -4532,6 +4555,47 @@ def _latest_verifikacia_fix_scope(db: Session, version_id: uuid.UUID) -> Optiona
         "## Verifikácia FAIL — oprav podľa nálezov Auditora (cielená oprava, potom Auditor re-verifikuje)\n"
         + "\n\n".join(parts)
     )
+
+
+def _latest_runtime_floor_red(db: Session, version_id: uuid.UUID) -> bool:
+    """CR-V2-050 — recompute the fail-closed runtime floor for the MANUAL verdict path from the canonical
+    release-evidence messages the autonomous Verifikácia round already recorded
+    (:func:`_run_verifikacia_round` writes ``payload.smoke`` for the boot leg and ``payload.release_acceptance``
+    for the acceptance leg). The floor is RED when the latest boot smoke FAILED, or the latest acceptance leg
+    RAN but did not pass (a SKIP is not red). This guarantees a Manažér PASS-override at a Verifikácia stop can
+    no more cross a red floor than the autonomous verdict can. Returns ``False`` (floor clear) when no evidence
+    is on record — a manual verdict with no recorded smoke is not the release oracle's to hold."""
+    rows = (
+        db.execute(
+            select(PipelineMessage)
+            .where(
+                PipelineMessage.version_id == version_id,
+                PipelineMessage.stage == "verifikacia",
+                PipelineMessage.author == "system",
+                PipelineMessage.kind == "notification",
+            )
+            .order_by(PipelineMessage.seq.desc())
+            .limit(40)
+        )
+        .scalars()
+        .all()
+    )
+    smoke_pass: Optional[bool] = None
+    acc: Optional[tuple[bool, bool]] = None  # (pass, skipped) of the latest acceptance leg
+    for m in rows:
+        p = m.payload or {}
+        if smoke_pass is None and isinstance(p.get("smoke"), dict):
+            smoke_pass = bool(p["smoke"].get("pass"))
+        if acc is None and isinstance(p.get("release_acceptance"), dict):
+            ra = p["release_acceptance"]
+            acc = (bool(ra.get("pass")), bool(ra.get("skipped")))
+        if smoke_pass is not None and acc is not None:
+            break
+    if smoke_pass is None:
+        return False  # no boot evidence on record → floor is not the oracle's to hold
+    if not smoke_pass:
+        return True
+    return acc is not None and not acc[0] and not acc[1]
 
 
 # ── v2 board aggregation (CR-V2-021) ───────────────────────────────────────────────────────────────
@@ -5602,6 +5666,18 @@ async def apply_action(
         verdict = payload.get("verdict")
         if verdict not in ("PASS", "FAIL"):
             raise OrchestratorError("verdict requires payload.verdict in {PASS, FAIL}")
+        # CR-V2-050: the fail-closed runtime floor overrides a manual PASS-override too — recompute it from the
+        # recorded release evidence and RECORD the EFFECTIVE verdict (a floored PASS becomes FAIL) so the canonical
+        # kind=verdict message the fix-loop reads (:func:`_latest_verifikacia_fix_scope`) can never say PASS while
+        # the settle takes the FAIL branch.
+        floor_red = _latest_runtime_floor_red(db, version_id)
+        effective_verdict = "FAIL" if (verdict == "PASS" and floor_red) else verdict
+        verdict_payload: dict[str, Any] = {"verdict": effective_verdict, "phase": "verifikacia"}
+        if effective_verdict != verdict:
+            verdict_payload["engine_override"] = "runtime_floor_red"
+            verdict_payload["findings"] = [
+                "ENGINE OVERRIDE (CR-V2-050): a red release smoke/acceptance floored the Manažér's PASS to FAIL."
+            ]
         _record_message(
             db,
             version_id=version_id,
@@ -5609,15 +5685,15 @@ async def apply_action(
             author="auditor",
             recipient="manazer",
             kind="verdict",
-            content=verdict,
-            payload={"verdict": verdict, "phase": "verifikacia"},
+            content=effective_verdict,
+            payload=verdict_payload,
         )
         # Apply the verdict via the SHARED settle (CR-V2-014) so the MANUAL path here and the AUTONOMOUS path
         # (:func:`_run_verifikacia_round`) can never diverge: PASS → settle for the dial-governed end sign-off
         # (no-silent-done invariant); FAIL → bounded fix↔re-verify loop (reset done tasks + re-enter
         # Programovanie with the Auditor's fix scope threaded, bounded by :data:`AUDITOR_LOOP_MAX`, then
         # escalate). The ``kind=verdict`` message above is the canonical record both gates read.
-        return await _settle_verifikacia_verdict(db, state, verdict=verdict)
+        return await _settle_verifikacia_verdict(db, state, verdict=effective_verdict, runtime_floor_red=floor_red)
 
     if action == "pokracovat":
         # Resume a Programovanie loop the Manažér paused (cooperative pause boundary) — no comment, no phase
