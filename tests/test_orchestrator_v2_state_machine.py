@@ -309,8 +309,9 @@ async def test_pass_then_schvalit_reaches_hotovo(db_session, fake_claude):
 
 async def test_verdict_fail_loops_targeted_fix_back_to_ai_agent_gated(db_session, fake_claude):
     # A+B (Director 2026-06-30): FAIL loops a TARGETED fix back to the AI Agent → re-enter Programovanie,
-    # bump the round counter — but GATED for the Manažér (a new_version STOPS `paused`; 'Pokračovať' resumes),
-    # never an unattended auto re-dispatch (the overnight-token-burn safeguard).
+    # bump the round counter — but GATED for the Manažér. CR-V2-058 Part A: the gate is a deliberated Decision
+    # Card (blocked/decision_needed, source=verifikacia_fix), not the old blind `paused`. The manual verdict
+    # path runs no critic → no fix_critique → the card recommends 'guide' (accept_fix hidden, §2 invariant).
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
     _to_verifikacia(db_session, version.id, iteration=0)
@@ -321,7 +322,9 @@ async def test_verdict_fail_loops_targeted_fix_back_to_ai_agent_gated(db_session
     assert state.current_actor == "ai_agent"
     assert state.is_regate is True
     assert state.iteration == 1
-    assert state.status == "paused"  # A: mandatory phase gate — Manažér confirms via 'Pokračovať'
+    assert state.status == "blocked" and state.block_reason == "decision_needed"
+    card = _msgs(db_session, version.id)[-1]
+    assert card.kind == "consultation" and card.payload["consultation"]["source"] == "verifikacia_fix"
 
 
 async def test_verdict_fail_escalates_after_auditor_loop_max(db_session, fake_claude):

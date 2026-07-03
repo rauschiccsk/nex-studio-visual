@@ -58,12 +58,14 @@ from backend.services import system_setting as system_setting_service
 from backend.services import task as task_service
 from backend.services.claude_agent import ClaudeAgentError, ClaudeAgentTimeout, invoke_claude
 from backend.services.pipeline_status import (
+    FIX_CRITIQUE_JSON_SCHEMA,
     PIPELINE_STATUS_JSON_SCHEMA,
     TASK_PLAN_FEAT_TASKS_JSON_SCHEMA,
     TASK_PLAN_SKELETON_JSON_SCHEMA,
     ConsultationBlock,
     ConsultDecision,
     ConsultOption,
+    FixCritique,
     ParseFailure,
     PipelineStatusBlock,
     TaskPlan,
@@ -71,6 +73,7 @@ from backend.services.pipeline_status import (
     TaskPlanFeat,
     extract_report_body,
     extract_task_plan_json,
+    parse_fix_critique,
     parse_status_block,
     parse_structured_output,
     parse_task_plan_feat_tasks,
@@ -1205,6 +1208,67 @@ def _verifikacia_directive(
         "`proposed_fix` napíš ZAMERANÝ rozsah opravy pre AI Agenta (NEvykonávaj ho — opravuje AI Agent, ty "
         "re-verifikuješ). FAIL sa vráti AI Agentovi do ohraničenej slučky.\n"
         "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
+    )
+
+
+# CR-V2-058 Part B: the fix-critic carries its narrowed JSON in the SAME ``<<<TASK_PLAN_JSON>>>`` sentinel
+# fence the task_plan passes use (``extract_task_plan_json`` is a generic fence extractor; ``structured_output``
+# is dead in this CLI). The fence must pin the EXACT field names of :class:`FixCritique` and forbid extras.
+_FIX_CRITIQUE_FENCE_RULE = (
+    "Výstup vráť VÝHRADNE ako jeden JSON objekt vnútri tohto sentinel bloku (nič iné okolo, žiaden "
+    "markdown, žiaden komentár):\n<<<TASK_PLAN_JSON>>>\n{…}\n<<<END_TASK_PLAN_JSON>>>\n"
+    "Použi PRESNE tieto tri polia a ŽIADNE iné: `verdict` (jedno z: accept, narrow, reject), "
+    "`corrected_scope` (text; pri `narrow` POVINNE zúžený/opravený rozsah opravy, inak prázdny reťazec) a "
+    "`why` (text — POVINNÉ zdôvodnenie verdiktu; bez neho sa kritika zahodí).\n"
+    'Príklad tvaru:\n<<<TASK_PLAN_JSON>>>\n{"verdict":"reject","corrected_scope":"",'
+    '"why":"pre-push hook nie je hranica — nedozorovaný full_auto fixer ho obíde cez git push --no-verify; '
+    'príčina je inde (default write_commit namiesto push)."}\n<<<END_TASK_PLAN_JSON>>>'
+)
+
+
+def _fix_critique_directive(db: Session, version_id: uuid.UUID, *, verdict_msg: PipelineMessage) -> str:
+    """CR-V2-058 Part B — the independent fix-critic's brief: adversarially REFUTE the Auditor's proposed FIX
+    (the CURE), NOT the build (CR-V2-053 "REFUTUJ, NEPOTVRDZUJ" pointed at the remedy). The critic is a
+    separate AUDITOR_ROLE turn; it must NOT re-judge whether the build passes — it judges whether the
+    PROPOSED FIX is a REAL, enforced-by-construction boundary or a fake one.
+
+    Self-audit fix: the brief MUST carry the FIXER's permission model, else it only catches a fake boundary by
+    luck. Fix rounds run UNATTENDED in ``bypassPermissions`` / ``full_auto`` — so a fix whose safety rests on a
+    tool the fixer itself can turn off (a git hook bypassed with ``--no-verify``; an advisory/client-side
+    guard) is NO boundary. The brief enumerates those anti-patterns and asks the decisive question."""
+    payload = verdict_msg.payload or {}
+    proposed_fix = str(payload.get("proposed_fix") or "").strip() or "(Auditor nedodal explicitný proposed_fix.)"
+    findings = payload.get("findings") or []
+    findings_block = "\n".join(f"   - {f}" for f in findings) if findings else "   (bez vymenovaných nálezov)"
+    return (
+        "PREVERENIE NAVRHNUTEJ OPRAVY (nezávislý kritik — REFUTUJ LIEK, nie build).\n"
+        "1. Auditor (nálezca) našiel vo Verifikácii zlyhanie a NAVRHOL opravu. TVOJA JEDINÁ úloha je "
+        "adversariálne PREVERIŤ TEN NÁVRH OPRAVY — nie znovu posudzovať, či build prešiel (to už padlo). "
+        "Nálezca navrhol rozsah; ty ako NEZÁVISLÝ kritik posúď, či ten liek naozaj lieči a či drží.\n"
+        f"2. NÁLEZY AUDITORA:\n{findings_block}\n"
+        f"   NAVRHNUTÁ OPRAVA (proposed_fix):\n   {proposed_fix}\n"
+        "3. KRITICKÝ KONTEXT — MODEL OPRÁVNENÍ OPRAVÁRA: opravné kolá bežia BEZ DOZORU v móde "
+        "`bypassPermissions` / `full_auto`. Opravár (AI Agent) má plné práva a NIKTO nad ním nestojí. Preto "
+        "oprava, ktorej bezpečnosť stojí na nástroji, ktorý si opravár SÁM vie vypnúť, NIE JE hranica.\n"
+        "4. ANTI-VZORY FALOŠNEJ HRANICE (ak návrh sedí na niektorý → `narrow` alebo `reject`):\n"
+        "   a) git pre-commit / pre-push hook ako hranica — nedozorovaný agent ho obíde cez `git push "
+        "--no-verify` / `git commit --no-verify`. Falošná hranica.\n"
+        "   b) client-side / advisory / „varovací“ guard namiesto enforced-by-construction defaultu — čo nie "
+        "je vynútené konštrukciou (default hodnota, typ, DB-constraint, capability), agent obíde.\n"
+        "   c) oprava SYMPTÓMU namiesto PRÍČINY — zamaskuje prejav, koreň ostáva.\n"
+        "   d) „self-confirming“ test, ktorý len ZAZELENÁ smoke namiesto reálneho preukázania invariantu "
+        "(negatívny test chýba).\n"
+        "5. ROZHODUJÚCA OTÁZKA: Je navrhnutá hranica VYNÚTENÁ KONŠTRUKCIOU (enforced-by-construction default, "
+        "ktorý nedozorovaný full_auto agent NEVIE obísť), alebo len hook/guard, ktorý obíde? Ak vieš lepší, "
+        "skutočne vynútený default, daj ho do `corrected_scope`.\n"
+        "6. Vráť verdikt:\n"
+        "   - `accept` — oprava je reálna, vynútená konštrukciou, lieči príčinu.\n"
+        "   - `narrow` — v jadre správna, ale rozsah treba zúžiť/opraviť; napíš opravený rozsah do "
+        "`corrected_scope`.\n"
+        "   - `reject` — falošná hranica / symptómová oprava / koreň je inde; `why` vysvetlí prečo je zlá a kam "
+        "koreň patrí.\n"
+        "Keď si NEISTÝ, prikloň sa k `reject`/`narrow` (bezpečnejšie — nepreverená oprava sa nesmie odporučiť).\n"
+        + _FIX_CRITIQUE_FENCE_RULE
     )
 
 
@@ -4289,6 +4353,144 @@ async def _materialize_inline_navrh_plan(
     return None
 
 
+def _latest_fix_critique(db: Session, version_id: uuid.UUID) -> Optional[dict[str, Any]]:
+    """CR-V2-058 Part B — the ``fix_critique`` record ({verdict, corrected_scope, why}) for the CURRENT FAIL
+    round, or ``None``.
+
+    The critic note (``author=auditor`` / ``kind=notification`` / ``payload.fix_critique``) is recorded at the
+    FAIL seam BEFORE the settle, so within a round it has a HIGHER ``seq`` than the round's ``kind=verdict`` and
+    a LOWER ``seq`` than the card the settle then builds. A critique belongs to THIS round iff it is NEWER than
+    the latest FAIL verdict — scanning the ``verdict``/``notification`` messages newest-first, the first hit
+    decides: a ``fix_critique`` note → return it; a ``verdict`` first → ``None``. This makes every un-vetted
+    path fail-safe BY CONSTRUCTION (§2): a round that recorded NO critique (fail-open / engine-red skip /
+    manual verdict path) leaves the verdict on top → ``None``; a PRIOR round's stale critique is older than
+    THIS round's verdict → also ``None`` (never stale-recommends an un-vetted fix)."""
+    rows = db.execute(
+        select(PipelineMessage.payload, PipelineMessage.kind)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.stage == "verifikacia",
+            PipelineMessage.kind.in_(("verdict", "notification")),
+        )
+        .order_by(PipelineMessage.seq.desc())
+    ).all()
+    for payload, kind in rows:
+        p = payload if isinstance(payload, dict) else {}
+        if kind == "notification" and isinstance(p.get("fix_critique"), dict):
+            return p["fix_critique"]
+        if kind == "verdict":
+            # the current round's verdict is newer than any critique → no critique for THIS round
+            return None
+    return None
+
+
+def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineState) -> ConsultationBlock:
+    """CR-V2-058 Part A — the deliberated Decision Card on a Verifikácia FAIL (the FIRST FAIL onward, not only
+    loop exhaustion). The SHARED, engine-side card builder that enforces the §2 nosný invariant BY
+    CONSTRUCTION: *"Spustiť pripravenú opravu" (``accept_fix``) is OFFERED + recommended ONLY when a POSITIVE
+    ``fix_critique`` (verdict ∈ {accept, narrow}) is on record for THIS round; otherwise it is omitted and
+    "Usmerniť opravu" (``guide``) is recommended.*
+
+    Because the recommendation reads the SAME :func:`_latest_fix_critique` every path writes (or does not),
+    each un-vetted path fail-safes to ``guide`` with NO special-casing — the manual verdict path (records no
+    critique), the fail-open critic (records no critique), and the engine-red skip (records no critique) ALL
+    default to ``guide``; a ``reject`` critique likewise. No path can one-click an un-vetted fix.
+
+    Engine-built cards do NOT pass ``_validate_block`` (they are assembled here, not parsed from an agent), so
+    the builder SELF-ASSERTS exactly one ``recommended`` option (§2)."""
+    critique = _latest_fix_critique(db, version_id)
+    positive = bool(critique) and critique.get("verdict") in ("accept", "narrow")
+    scope = _latest_verifikacia_fix_scope(db, version_id) or "Auditor našiel blokujúce zlyhanie vo Verifikácii."
+
+    explanation_parts = [
+        "Auditor (nezávislý overovateľ) našiel pri koncovej Verifikácii blokujúce zlyhanie a navrhol cielenú opravu:",
+        scope,
+    ]
+    if critique:
+        crit_verdict = critique.get("verdict")
+        crit_why = str(critique.get("why") or "").strip()
+        corrected = str(critique.get("corrected_scope") or "").strip()
+        if positive:
+            head = (
+                "Navrhnutú opravu nezávisle PREVERIL kritik (accept — je vynútená konštrukciou)"
+                if crit_verdict == "accept"
+                else "Navrhnutú opravu nezávisle PREVERIL kritik (narrow — v jadre správna, so zúženým rozsahom)"
+            )
+            explanation_parts.append(f"{head}. {crit_why}".strip())
+            if corrected:
+                explanation_parts.append(f"Preverený (opravený) rozsah: {corrected}")
+        else:  # reject
+            explanation_parts.append(
+                f"Nezávislý kritik navrhnutú opravu ZAMIETOL (reject) — nie je dôveryhodná. {crit_why}".strip()
+            )
+    else:
+        explanation_parts.append(
+            "Navrhnutá oprava NEbola nezávisle preverená (kritik nebol dostupný alebo išlo o mechanické "
+            "engine-červené zlyhanie), preto ju nemôžem odporučiť na jednoklik."
+        )
+    explanation = "\n\n".join(explanation_parts)
+
+    options: list[ConsultOption] = []
+    if positive:
+        # Only a positively-vetted fix is even OFFERED for one-click (§2/§5 "skrytá" otherwise) — recommended.
+        options.append(
+            ConsultOption(
+                id="accept_fix",
+                label="Spustiť pripravenú opravu",
+                detail="Spustí už pripravenú cielenú opravu (AI Agent ju vykoná v Programovaní a Auditor ju "
+                "znova overí). Navrhnutá oprava prešla nezávislým preverením kritika.",
+                recommended=True,
+            )
+        )
+    options.append(
+        ConsultOption(
+            id="guide",
+            label="Usmerniť opravu",
+            detail="Napíš konkrétny pokyn (pole nižšie) — pošle sa AI Agentovi (opravárovi) ako cielená oprava "
+            "a Auditor ju znova overí. Odporúčané, keď navrhnutá oprava nie je preverená alebo bola zamietnutá.",
+            recommended=not positive,
+        )
+    )
+    options.append(
+        ConsultOption(
+            id="hold",
+            label="Zatiaľ podržať (rozhodnem neskôr)",
+            detail="Build ostane blokovaný, kým nerozhodneš; kartu môžeš vyriešiť neskôr (spustiť opravu alebo "
+            "usmerniť).",
+        )
+    )
+    # §2 by construction: exactly one recommended (positive → accept_fix; else → guide). Self-assert because
+    # engine cards bypass _validate_block; a future refactor that broke it would fail loudly here, never ship a
+    # card that recommends an un-vetted fix (or none).
+    recommended_count = sum(1 for o in options if o.recommended)
+    if recommended_count != 1:  # pragma: no cover - defensive; construction guarantees exactly one
+        raise OrchestratorError(
+            f"fix-consultation invariant violated: expected exactly one recommended option, got {recommended_count}"
+        )
+
+    rationale = (
+        "Odporúčam spustiť pripravenú opravu — nezávislý kritik ju preveril (je vynútená konštrukciou)."
+        if positive
+        else "Odporúčam usmerniť opravu — navrhnutá oprava nebola nezávisle preverená (alebo bola zamietnutá), "
+        "tak ju nespúšťaj naslepo; napíš adresný pokyn a Auditor ho znova overí."
+    )
+    return ConsultationBlock(
+        id=f"verifikacia-fix-{version_id}-{state.iteration}",
+        intro="Verifikácia našla chybu — potrebné je tvoje rozhodnutie.",
+        source="verifikacia_fix",
+        decisions=[
+            ConsultDecision(
+                key="verifikacia_fix_next",
+                question="Verifikácia našla blokujúcu chybu. Ako chceš pokračovať?",
+                explanation=explanation,
+                options=options,
+                rationale=rationale,
+                allow_free_text=True,
+            )
+        ],
+    )
+
+
 async def _settle_verifikacia_verdict(
     db: Session,
     state: PipelineState,
@@ -4413,14 +4615,148 @@ async def _settle_verifikacia_verdict(
     db.flush()
     if state.flow_type == "fast_fix":
         _begin_dispatch(db, state)  # bounded auto fix-loop (one task; the lane is full-auto by design)
-    else:
-        state.status = "paused"  # A: mandatory phase gate — Manažér confirms via 'Pokračovať' (resume)
-        state.next_action = (
-            "Verifikácia našla chybu — cielená oprava je pripravená. 'Pokračovať' ju spustí "
-            "(prípadne 'Uprav' ju usmerni)."
-        )
-        db.flush()
+        return state
+    # CR-V2-058 Part A: replace the blind ``paused`` + {Pokračovať/Uprav} (which one-clicked an UN-VETTED fix)
+    # with a DELIBERATED Decision Card the Manažér resolves from the screen — human explanation + INDEPENDENTLY
+    # vetted options + recommendation. The fix task + the iteration bump already happened above (once per FAIL
+    # round), so ``accept_fix`` resumes the SAME task with NO second bump (D6). The §2 invariant (never
+    # recommend an un-vetted fix) is enforced BY CONSTRUCTION inside :func:`_build_fix_consultation`.
+    consult = _build_fix_consultation(db, version_id, state)
+    state.status = "blocked"
+    state.block_reason = "decision_needed"  # a Manažér DECISION, surfaced as a Decision Card (like exhaustion)
+    state.next_action = (
+        "Verifikácia našla chybu — rozhodni (Decision Card): spusti preverenú opravu, usmerni ju, alebo podrž."
+    )
+    db.flush()
+    note = _record_message(
+        db,
+        version_id=version_id,
+        stage="verifikacia",
+        author="system",
+        recipient="manazer",
+        kind="consultation",
+        content=consult.intro,
+        payload={"phase": "verifikacia", "consultation": consult.model_dump(mode="json")},
+    )
+    if on_message is not None:
+        await on_message(note)
     return state
+
+
+async def _invoke_fix_critique(
+    db: Session,
+    state: PipelineState,
+    *,
+    verdict_msg: PipelineMessage,
+    metrics: "_DispatchMetrics",
+    on_event: Optional[claude_agent.EventCallback] = None,
+) -> Optional[FixCritique]:
+    """CR-V2-058 Part B — ONE narrowed invocation of the independent fix-critic (``role=AUDITOR_ROLE``),
+    modelled on :func:`_plan_pass_once` but for the :class:`FixCritique` ``{accept,narrow,reject}`` shape (NOT
+    :data:`PIPELINE_STATUS_JSON_SCHEMA`, whose ``verdict`` is a bool → ParseFail there). Grammar-constrains to
+    :data:`FIX_CRITIQUE_JSON_SCHEMA`, meters the turn into ``metrics``, and parses the ``<<<TASK_PLAN_JSON>>>``
+    fence (``structured_output`` is dead in this CLI — the same TEXT/fence survival path the task_plan passes
+    use). Resumes the Auditor's warm session so the finding context is in scope; the CRITIQUE is adversarial
+    (refute the FIX), never a re-confirm.
+
+    FAIL-OPEN (§5): any crash / timeout / parse failure returns ``None`` (the caller records NO ``fix_critique``
+    → the Decision Card demotes ``accept_fix`` + recommends guide). We NEVER fall back to a ``paused`` state
+    with a one-click un-vetted fix."""
+    version_id = state.version_id
+    slug = _project_slug_for_version(db, version_id)
+    session_id, is_first = _resolve_orch_session(db, slug, AUDITOR_ROLE)
+    db.execute(
+        update(OrchestratorSession)
+        .where(OrchestratorSession.project_slug == slug, OrchestratorSession.role == AUDITOR_ROLE)
+        .values(last_input_at=datetime.now(timezone.utc))
+    )
+    model_override, effort_override = _resolve_dispatch_overrides(db, version_id, AUDITOR_ROLE)
+    charter_path: Optional[Path] = None
+    if is_first:  # the Auditor normally already ran the verdict turn (session exists → resume); defensive.
+        charter_path = (
+            claude_agent.PROJECTS_ROOT
+            / slug
+            / ".claude"
+            / "agents"
+            / _charter_slug_for_role(AUDITOR_ROLE)
+            / "CLAUDE.md"
+        )
+    prompt = _fix_critique_directive(db, version_id, verdict_msg=verdict_msg)
+    _started = perf_counter()
+    try:
+        with _engine_session_active(session_id):
+            text, usage, structured = _split_claude_result(
+                await invoke_claude(
+                    project_slug=slug,
+                    claude_session_id=session_id,
+                    prompt=prompt,
+                    charter_path=charter_path,
+                    timeout=_timeout_for("verifikacia"),
+                    on_event=on_event,
+                    model=model_override,
+                    effort=effort_override,
+                    json_schema=FIX_CRITIQUE_JSON_SCHEMA,
+                )
+            )
+    except (ClaudeAgentError, ClaudeAgentTimeout) as exc:
+        # Fail-OPEN: a critic crash/timeout leaves NO fix_critique record → the card demotes accept_fix (§5).
+        metrics.record(None, perf_counter() - _started)
+        logger.warning("fix-critique invoke failed (fail-open → guide) for version=%s: %s", version_id, exc)
+        return None
+    metrics.record(usage, perf_counter() - _started)
+    obj: Any = structured if structured is not None else extract_task_plan_json(text)
+    if isinstance(obj, ParseFailure):
+        logger.info("fix-critique fence parse failed (fail-open → guide) for version=%s: %s", version_id, obj.reason)
+        return None
+    parsed = parse_fix_critique(obj)
+    if isinstance(parsed, ParseFailure):
+        logger.info("fix-critique invalid (fail-open → guide) for version=%s: %s", version_id, parsed.reason)
+        return None
+    return parsed
+
+
+async def _run_fix_critique(
+    db: Session,
+    state: PipelineState,
+    *,
+    verdict_msg: PipelineMessage,
+    on_event: Optional[claude_agent.EventCallback] = None,
+    on_message: Optional[MessageCallback] = None,
+) -> None:
+    """CR-V2-058 Part B — adversarially critique the Auditor's ``proposed_fix`` BEFORE it becomes the fix task /
+    the Decision Card's recommendation, and record an APPEND-ONLY ``fix_critique`` note. Called at the FAIL seam
+    of :func:`_run_verifikacia_round` (after the verdict, before the settle), ONLY for a non-fast_fix,
+    NON-engine-red FAIL (the mechanical runtime floor IS the truth — D4 — no ``proposed_fix`` to vet).
+
+    On a well-formed critique the note carries ``{verdict, corrected_scope, why}`` (``author=auditor`` →
+    ``manazer``, ``kind=notification``): :func:`_latest_verifikacia_fix_scope` then prefers a ``corrected_scope``
+    and :func:`_build_fix_consultation` recommends ``accept_fix`` ONLY on accept/narrow. FAIL-OPEN records
+    NOTHING → the card demotes ``accept_fix`` + recommends guide (§2 invariant, by construction)."""
+    metrics = _DispatchMetrics()
+    critique = await _invoke_fix_critique(db, state, verdict_msg=verdict_msg, metrics=metrics, on_event=on_event)
+    if critique is None:
+        return  # fail-open: no fix_critique record → the card-builder demotes accept_fix, recommends guide
+    note = _record_message(
+        db,
+        version_id=state.version_id,
+        stage="verifikacia",
+        author="auditor",
+        recipient="manazer",
+        kind="notification",
+        content=f"Preverenie navrhnutej opravy — {critique.verdict.upper()}: {critique.why}".strip(),
+        payload={
+            "phase": "verifikacia",
+            "fix_critique": {
+                "verdict": critique.verdict,
+                "corrected_scope": critique.corrected_scope,
+                "why": critique.why,
+            },
+            "usage": metrics.usage_payload(),
+            "timing": metrics.timing_payload(),
+        },
+    )
+    if on_message is not None:
+        await on_message(note)
 
 
 async def _run_verifikacia_round(
@@ -4602,6 +4938,15 @@ async def _run_verifikacia_round(
     )
     if on_message is not None:
         await on_message(verdict_msg)
+
+    # CR-V2-058 Part B (the NOSNÁ half): before the settle builds the Decision Card, adversarially PRE-VET the
+    # Auditor's proposed_fix with an INDEPENDENT critic (finder/fixer/critic split — the finder no longer both
+    # proposes AND has its raw scope trusted). Always-on for ``new_version`` (Director-approved cost, §6). SKIP
+    # a ``runtime_floor_red`` FAIL (the mechanical floor IS the truth — no proposed_fix to vet, D4) and the
+    # ``fast_fix`` lane (its focused auto loop is unchanged, §6 D3). Fail-open inside → no record → the card
+    # demotes accept_fix (§2). The critic writes an append-only fix_critique note the settle then reads.
+    if verdict_str == "FAIL" and not runtime_floor_red and state.flow_type != "fast_fix":
+        await _run_fix_critique(db, state, verdict_msg=verdict_msg, on_event=on_event, on_message=on_message)
 
     settled = await _settle_verifikacia_verdict(
         db, state, verdict=verdict_str, runtime_floor_red=runtime_floor_red, on_message=on_message
@@ -4868,7 +5213,14 @@ def _latest_verifikacia_fix_scope(db: Session, version_id: uuid.UUID) -> Optiona
     if not latest.payload or latest.payload.get("verdict") != "FAIL":
         return None
     findings = latest.payload.get("findings") or []
-    proposed_fix = latest.payload.get("proposed_fix")
+    # CR-V2-058 Part B (read-precedence): when an independent fix-critic vetted THIS round's proposed_fix and
+    # returned a non-empty ``corrected_scope`` (a ``narrow`` — or an ``accept``/``reject`` that still supplied a
+    # better default), the fix task must materialize the VETTED scope, NOT the Auditor's raw proposed_fix. The
+    # manazer-``return`` precedence above still wins (a human steer has the highest seq); this only refines the
+    # Auditor-verdict branch. No critique / no corrected_scope → the raw proposed_fix, exactly as before.
+    critique = _latest_fix_critique(db, version_id)
+    corrected = str((critique or {}).get("corrected_scope") or "").strip()
+    proposed_fix = corrected or latest.payload.get("proposed_fix")
     parts: list[str] = []
     if proposed_fix:
         parts.append(str(proposed_fix).strip())
@@ -4876,10 +5228,12 @@ def _latest_verifikacia_fix_scope(db: Session, version_id: uuid.UUID) -> Optiona
         parts.append("\n".join(f"- {f}" for f in findings))
     if not parts:
         return None
-    return (
-        "## Verifikácia FAIL — oprav podľa nálezov Auditora (cielená oprava, potom Auditor re-verifikuje)\n"
-        + "\n\n".join(parts)
+    heading = (
+        "## Verifikácia FAIL — oprav podľa PREVERENÉHO rozsahu (kritik upravil rozsah; potom Auditor re-verifikuje)\n"
+        if corrected
+        else "## Verifikácia FAIL — oprav podľa nálezov Auditora (cielená oprava, potom Auditor re-verifikuje)\n"
     )
+    return heading + "\n\n".join(parts)
 
 
 def _latest_runtime_floor_red(db: Session, version_id: uuid.UUID) -> bool:
@@ -6019,6 +6373,32 @@ async def apply_action(
                 state.next_action = "Podržané — usmerni opravu neskôr (Decision Card alebo 'Uprav')."
                 db.flush()
                 return state
+            brief = (ans.get("free_text") or ans.get("label") or "Oprav blokujúce zlyhanie z Verifikácie.").strip()
+            return await _route_manazer_fix_to_ai_agent(db, state, comment=brief)
+        # CR-V2-058 Part A: the PER-FAIL Decision Card (distinct source key ``verifikacia_fix`` so it never
+        # collides with the exhaustion ``verifikacia_fail`` handler above — self-audit found the collision on
+        # the hardcoded next-key). Three vetted options resolved from the screen:
+        #   * ``accept_fix`` — D6: resume the ALREADY-materialized fix task (Programovanie picks it up via
+        #     ``get_next_todo_task``) — NO second task, NO second iteration bump (both happened in the settle).
+        #     Only offered when the fix was positively vetted (:func:`_build_fix_consultation` invariant).
+        #   * ``guide`` — route the operator's own fix brief to the AI Agent (the fixer), resetting the loop.
+        #   * ``hold`` — re-block WITHOUT consuming the card: the card stays the action surface (no dead-end).
+        if c.get("source") == "verifikacia_fix":
+            ans = answered.get("verifikacia_fix_next") or {}
+            opt = ans.get("option_id")
+            if opt == "hold" and not ans.get("free_text"):
+                state.next_action = (
+                    "Podržané — rozhodni neskôr (Decision Card): spusti opravu, usmerni ju, alebo podrž."
+                )
+                db.flush()
+                return state
+            if opt == "accept_fix" and not ans.get("free_text"):
+                # resume the already-materialized (and critic-vetted) fix task — the settle set stage=
+                # programovanie / actor=ai_agent and bumped the counter; _begin_dispatch just flips to working.
+                _begin_dispatch(db, state)
+                return state
+            # ``guide`` (or an ``accept_fix`` the Manažér amended with a free-text steer) → route the operator's
+            # brief to the AI Agent (fixer). _route_manazer_fix_to_ai_agent resets the bounded loop (human steers).
             brief = (ans.get("free_text") or ans.get("label") or "Oprav blokujúce zlyhanie z Verifikácie.").strip()
             return await _route_manazer_fix_to_ai_agent(db, state, comment=brief)
         # all decided → APPLY: re-dispatch the AI Agent (dispatch_directive frames every captured decision)

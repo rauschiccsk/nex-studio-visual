@@ -202,6 +202,26 @@ def _ban_deploy_calls(monkeypatch):
         monkeypatch.setattr(orchestrator, "_run_uat_deploy", _aboom)
 
 
+def _stub_critique(monkeypatch, *, verdict=None, corrected_scope="", why="preverené"):
+    """CR-V2-058 Part B: stub the independent fix-critic's NARROWED invoke (``_invoke_fix_critique``) so tests
+    never hit real ``claude``. ``verdict=None`` models FAIL-OPEN (the critic could not be parsed → no
+    fix_critique record → the card demotes accept_fix); a concrete verdict returns a :class:`FixCritique`.
+    Captures the proposed_fix it was handed so a test can assert the critic saw the Auditor's fix."""
+    from backend.services.pipeline_status import FixCritique
+
+    captured = {}
+
+    async def _fake(db, state, *, verdict_msg, metrics, on_event=None):
+        captured["called"] = True
+        captured["proposed_fix"] = (verdict_msg.payload or {}).get("proposed_fix")
+        if verdict is None:
+            return None
+        return FixCritique(verdict=verdict, corrected_scope=corrected_scope, why=why)
+
+    monkeypatch.setattr(orchestrator, "_invoke_fix_critique", _fake)
+    return captured
+
+
 # ── the verdict brief (DESIGN-BEARING) ────────────────────────────────────────
 
 
@@ -334,10 +354,11 @@ async def test_fail_loops_targeted_fix_and_gates_new_version(db_session, monkeyp
     _stub_smoke(monkeypatch, acc=(False, "release_smoke_test.sh exit 1: 2 of 12 failed", False))
     _ban_deploy_calls(monkeypatch)
     state = await orchestrator.run_dispatch(db_session, version.id)
-    # re-entered Programovanie (NOT Hotovo), counter bumped — but GATED for the Manažér (paused, not auto)
+    # re-entered Programovanie (NOT Hotovo), counter bumped — but GATED for the Manažér via a Decision Card
+    # (CR-V2-058 Part A: blocked/decision_needed + a deliberated card, NOT the old blind 'paused').
     assert state.current_stage == "programovanie"
     assert state.iteration == 1
-    assert state.status == "paused"  # A: mandatory gate — Manažér confirms via 'Pokračovať'
+    assert state.status == "blocked" and state.block_reason == "decision_needed"
     # B: the original plan tasks STAY done (no whole-build re-run); a single targeted fix task is added (todo)
     all_tasks = _tasks(db_session, version.id)
     assert all(t.status == "done" for t in all_tasks if t.id in {dt.id for dt in done_tasks})
@@ -347,6 +368,17 @@ async def test_fail_loops_targeted_fix_and_gates_new_version(db_session, monkeyp
     verdicts = [m for m in _msgs(db_session, version.id) if m.kind == "verdict"]
     assert verdicts[-1].author == "auditor" and verdicts[-1].recipient == "manazer"
     assert verdicts[-1].payload["verdict"] == "FAIL" and verdicts[-1].payload["findings"]
+    # CR-V2-058 Part A: the FAIL surfaced as a Decision Card (source=verifikacia_fix, key verifikacia_fix_next);
+    # runtime_floor_red here skipped the critic → no positive fix_critique → 'Usmerniť opravu' (guide) is the
+    # recommended option, and 'Spustiť pripravenú opravu' (accept_fix) is NOT offered (§2 invariant).
+    cards = [m for m in _msgs(db_session, version.id) if m.kind == "consultation"]
+    assert cards and cards[-1].author == "system" and cards[-1].recipient == "manazer"
+    consult = cards[-1].payload["consultation"]
+    assert consult["source"] == "verifikacia_fix"
+    opts = consult["decisions"][0]["options"]
+    assert consult["decisions"][0]["key"] == "verifikacia_fix_next"
+    assert [o for o in opts if o.get("recommended")][0]["id"] == "guide"
+    assert "accept_fix" not in {o["id"] for o in opts}
     # the fix scope is readable for the re-run brief
     scope = orchestrator._latest_verifikacia_fix_scope(db_session, version.id)
     assert scope is not None and "DPH" in scope and "Verifikácia FAIL" in scope
@@ -420,6 +452,7 @@ async def test_credential_leak_is_flagged_as_fail(db_session, monkeypatch):
     )
     _stub_auditor(monkeypatch, leak)
     _stub_smoke(monkeypatch)
+    _stub_critique(monkeypatch)  # green smoke + FAIL → the Part B critic fires; stub it (fail-open) — no live claude
     _ban_deploy_calls(monkeypatch)
     state = await orchestrator.run_dispatch(db_session, version.id)
     assert state.current_stage != "done", "a §4 credential leak must not reach Hotovo"
@@ -442,6 +475,7 @@ async def test_absent_verdict_is_fail_closed(db_session, monkeypatch):
     )  # verdict defaults to None → not True → FAIL
     _stub_auditor(monkeypatch, no_verdict)
     _stub_smoke(monkeypatch)
+    _stub_critique(monkeypatch)  # green smoke + FAIL → the Part B critic fires; stub it (fail-open)
     state = await orchestrator.run_dispatch(db_session, version.id)
     assert state.current_stage != "done"  # did NOT auto-sign-off
     verdicts = [m for m in _msgs(db_session, version.id) if m.kind == "verdict"]
@@ -518,7 +552,8 @@ def test_no_uat_provisioner_or_deploy_in_verifikacia_source():
 async def test_manual_verdict_fail_creates_targeted_fix_and_gates(db_session, monkeypatch):
     # The Manažér's manual verdict (apply_action) shares _settle_verifikacia_verdict with the autonomous round:
     # a manual FAIL on a new_version creates ONE targeted fix task (done stays done — B) and GATES the re-run
-    # (paused — A), the same downstream effect as the autonomous path (no divergence).
+    # via the Decision Card (CR-V2-058 Part A), the same downstream effect as the autonomous path.
+    # The MANUAL path runs NO critic (§6) → no fix_critique → the card recommends 'guide' (accept_fix hidden).
     version, project = _make_version(db_session, project_dial="po_kazdej_faze")
     state = _seed_verifikacia(db_session, version.id, iteration=0)
     state.status = "awaiting_manazer"  # settled at the Verifikácia stop, the Manažér acts
@@ -528,7 +563,7 @@ async def test_manual_verdict_fail_creates_targeted_fix_and_gates(db_session, mo
         db_session, version_id=version.id, action="verdict", payload={"verdict": "FAIL"}
     )
     assert new_state.current_stage == "programovanie" and new_state.iteration == 1
-    assert new_state.status == "paused"  # A: gated for the Manažér (Pokračovať resumes the fix)
+    assert new_state.status == "blocked" and new_state.block_reason == "decision_needed"
     # B: the original plan task STAYS done; ONE targeted fix task is added (todo) — no whole-build reset.
     all_tasks = _tasks(db_session, version.id)
     assert all(t.status == "done" for t in all_tasks if t.id in {dt.id for dt in done_tasks})
@@ -536,6 +571,13 @@ async def test_manual_verdict_fail_creates_targeted_fix_and_gates(db_session, mo
     assert len(fix_tasks) == 1 and fix_tasks[0].status == "todo"
     verdicts = [m for m in _msgs(db_session, version.id) if m.kind == "verdict"]
     assert verdicts[-1].author == "auditor" and verdicts[-1].payload["verdict"] == "FAIL"
+    # the manual path recorded NO fix_critique (§6) → the card recommends guide, not accept_fix
+    cards = [m for m in _msgs(db_session, version.id) if m.kind == "consultation"]
+    consult = cards[-1].payload["consultation"]
+    assert consult["source"] == "verifikacia_fix"
+    opts = consult["decisions"][0]["options"]
+    assert [o for o in opts if o.get("recommended")][0]["id"] == "guide"
+    assert "accept_fix" not in {o["id"] for o in opts}
 
 
 async def test_manual_verdict_pass_settles_for_sign_off(db_session, monkeypatch):
@@ -705,7 +747,9 @@ async def test_manual_pass_override_cannot_cross_red_floor(db_session, monkeypat
     verdicts = [m for m in _msgs(db_session, version.id) if m.kind == "verdict"]
     assert verdicts[-1].content == "FAIL" and verdicts[-1].payload["verdict"] == "FAIL"
     assert verdicts[-1].payload.get("engine_override") == "runtime_floor_red"
-    assert new_state.current_stage == "programovanie" and new_state.status == "paused"
+    # CR-V2-058 Part A: the floored FAIL re-enters Programovanie behind a Decision Card (blocked/decision_needed)
+    assert new_state.current_stage == "programovanie"
+    assert new_state.status == "blocked" and new_state.block_reason == "decision_needed"
     assert orchestrator._verifikacia_passed(db_session, version.id) is False
     fix_tasks = [t for t in _tasks(db_session, version.id) if t.id not in {dt.id for dt in done_tasks}]
     assert len(fix_tasks) == 1 and fix_tasks[0].status == "todo"
@@ -985,3 +1029,321 @@ async def test_pass_binds_verified_sha_and_recomputes(db_session, monkeypatch):
     # recompute against live HEAD: verified at the PASS commit, NOT verified once HEAD drifts past it
     assert orchestrator.version_verified(db_session, version.id, head="sha-at-pass") == (True, "sha_match")
     assert orchestrator.version_verified(db_session, version.id, head="moved-head") == (False, "sha_drift")
+
+
+# ── CR-V2-058: deliberated Verifikácia-FAIL card + adversarial fix-critique ───────────────────────────
+# Part A = a deliberated Decision Card on the FIRST FAIL (not only exhaustion). Part B = an independent
+# fix-critic that pre-vets the Auditor's proposed_fix; the §2 invariant ("Spustiť pripravenú opravu" is only
+# recommended when a POSITIVE critique exists) is enforced BY CONSTRUCTION inside _build_fix_consultation.
+
+
+def _rec_fail_verdict(db, version_id, *, proposed_fix="Oprav X.", findings=("zlyhanie",)):
+    """Record a canonical Verifikácia FAIL verdict (author=auditor→manazer) — the fix-scope + card source."""
+    orchestrator._record_message(
+        db,
+        version_id=version_id,
+        stage="verifikacia",
+        author="auditor",
+        recipient="manazer",
+        kind="verdict",
+        content="FAIL",
+        payload={"verdict": "FAIL", "phase": "verifikacia", "proposed_fix": proposed_fix, "findings": list(findings)},
+    )
+    db.flush()
+
+
+def _rec_fix_critique(db, version_id, *, verdict, corrected_scope="", why="prečo"):
+    """Record an append-only fix_critique note (author=auditor→manazer) exactly as _run_fix_critique would."""
+    orchestrator._record_message(
+        db,
+        version_id=version_id,
+        stage="verifikacia",
+        author="auditor",
+        recipient="manazer",
+        kind="notification",
+        content=f"Preverenie — {verdict}",
+        payload={
+            "phase": "verifikacia",
+            "fix_critique": {"verdict": verdict, "corrected_scope": corrected_scope, "why": why},
+        },
+    )
+    db.flush()
+
+
+def _one_recommended(consult):
+    opts = consult.decisions[0].options
+    return [o for o in opts if o.recommended]
+
+
+# ── §9 THE deterministic safe-default gate — no positive critique ⇒ accept_fix NOT recommended ────────
+
+
+def test_card_invariant_deterministic_safe_default(db_session):
+    # THE §2 invariant, deterministically (NOT "the LLM always catches it"): the card-builder recommends
+    # 'accept_fix' IFF a POSITIVE (accept/narrow) fix_critique is on record; a missing OR reject critique
+    # falls back to 'guide' — and 'accept_fix' is not even offered (skrytá). Exactly ONE recommended always.
+    for crit_verdict, expect_accept_recommended in [
+        (None, False),  # NO critique (fail-open / engine-red skip / manual path) → guide, accept_fix hidden
+        ("reject", False),  # a refuted fix → guide, accept_fix hidden
+        ("accept", True),  # vetted → accept_fix offered + recommended
+        ("narrow", True),  # vetted with tightened scope → accept_fix offered + recommended
+    ]:
+        version, _ = _make_version(db_session, project_dial="plna")
+        state = _seed_verifikacia(db_session, version.id, iteration=1)
+        _rec_fail_verdict(db_session, version.id, proposed_fix="pre-push hook", findings=["push gate neplatí"])
+        if crit_verdict is not None:
+            _rec_fix_critique(db_session, version.id, verdict=crit_verdict, corrected_scope="", why="dôvod")
+        consult = orchestrator._build_fix_consultation(db_session, version.id, state)
+        opt_ids = {o.id for o in consult.decisions[0].options}
+        recommended = _one_recommended(consult)
+        # exactly one recommended, ALWAYS (the builder self-asserts too)
+        assert len(recommended) == 1, (crit_verdict, [o.id for o in recommended])
+        if expect_accept_recommended:
+            assert "accept_fix" in opt_ids and recommended[0].id == "accept_fix", crit_verdict
+        else:
+            assert "accept_fix" not in opt_ids, crit_verdict  # never a one-click un-vetted fix
+            assert recommended[0].id == "guide", crit_verdict
+        # guide + hold are always present; source/key are the distinct verifikacia_fix pair
+        assert {"guide", "hold"} <= opt_ids
+        assert consult.source == "verifikacia_fix" and consult.decisions[0].key == "verifikacia_fix_next"
+
+
+def test_card_builder_reject_surfaces_why_and_hides_accept(db_session):
+    # A reject critique (the fake-boundary case): the card demotes accept_fix (hidden) and surfaces the
+    # critic's WHY in the explanation so the Manažér sees why the Auditor's fix is untrustworthy.
+    version, _ = _make_version(db_session, project_dial="plna")
+    state = _seed_verifikacia(db_session, version.id, iteration=1)
+    _rec_fail_verdict(db_session, version.id, proposed_fix="pridaj pre-push hook", findings=["push gate"])
+    _rec_fix_critique(
+        db_session,
+        version.id,
+        verdict="reject",
+        why="pre-push hook obíde full_auto agent cez --no-verify; koreň je default write_commit.",
+    )
+    consult = orchestrator._build_fix_consultation(db_session, version.id, state)
+    assert "accept_fix" not in {o.id for o in consult.decisions[0].options}
+    assert _one_recommended(consult)[0].id == "guide"
+    assert "--no-verify" in consult.decisions[0].explanation  # the critic's reason is on the card
+
+
+# ── §9 corrected_scope precedence in the fix brief ────────────────────────────────────────────────────
+
+
+def test_latest_fix_scope_prefers_corrected_scope(db_session):
+    # A narrow critique's corrected_scope REPLACES the Auditor's raw proposed_fix in the fix brief (so the
+    # materialized fix task carries the VETTED scope); a later manazer 'return' still wins (higher seq).
+    version, _ = _make_version(db_session, project_dial="plna")
+    _seed_verifikacia(db_session, version.id, iteration=1)
+    _rec_fail_verdict(db_session, version.id, proposed_fix="RAW_SCOPE", findings=["f"])
+    _rec_fix_critique(db_session, version.id, verdict="narrow", corrected_scope="NARROWED_SCOPE", why="zúž")
+    scope = orchestrator._latest_verifikacia_fix_scope(db_session, version.id)
+    assert scope is not None and "NARROWED_SCOPE" in scope and "RAW_SCOPE" not in scope
+    # a subsequent manazer directive (return) takes precedence over the critic-corrected scope
+    orchestrator._record_message(
+        db_session,
+        version_id=version.id,
+        stage="verifikacia",
+        author="manazer",
+        recipient="ai_agent",
+        kind="return",
+        content="Použi default write_commit, nie hook.",
+        payload={"phase": "verifikacia", "manazer_fix_directive": True},
+    )
+    db_session.flush()
+    scope2 = orchestrator._latest_verifikacia_fix_scope(db_session, version.id)
+    assert scope2 is not None and "write_commit" in scope2
+
+
+def test_latest_fix_critique_ignores_stale_prior_round(db_session):
+    # _latest_fix_critique returns the critique ONLY when it is NEWER than the latest FAIL verdict: a prior
+    # round's critique that predates THIS round's verdict is stale → None (so the card safe-defaults to guide).
+    version, _ = _make_version(db_session, project_dial="plna")
+    _seed_verifikacia(db_session, version.id, iteration=2)
+    # round 1: verdict + a positive critique
+    _rec_fail_verdict(db_session, version.id, proposed_fix="fix1", findings=["a"])
+    _rec_fix_critique(db_session, version.id, verdict="accept", why="ok")
+    assert (orchestrator._latest_fix_critique(db_session, version.id) or {}).get("verdict") == "accept"
+    # round 2: a FRESH FAIL verdict with NO critique (fail-open) → the prior accept is now stale → None
+    _rec_fail_verdict(db_session, version.id, proposed_fix="fix2", findings=["b"])
+    assert orchestrator._latest_fix_critique(db_session, version.id) is None
+
+
+# ── §9 the full autonomous FAIL flow with the critic (Part A + B end-to-end) ──────────────────────────
+
+
+async def test_fail_with_positive_critique_recommends_accept_and_uses_corrected_scope(db_session, monkeypatch):
+    # Autonomous new_version FAIL + green smoke → the critic fires (Part B). A 'narrow' critique → the card
+    # OFFERS + recommends accept_fix, records the fix_critique (append-only, author=auditor), and the fix task
+    # carries the CORRECTED scope (Part B read-precedence).
+    version, project = _make_version(db_session, project_dial="plna")
+    _seed_verifikacia(db_session, version.id, iteration=0)
+    _, _, done_tasks = _seed_done_tasks(db_session, version, project, ["T1"])
+    _stub_auditor(monkeypatch, _verdict_fail(["DPH zle"], proposed_fix="RAW_FIX"))
+    _stub_smoke(monkeypatch)  # green → NOT floored → critic runs
+    cap = _stub_critique(monkeypatch, verdict="narrow", corrected_scope="ZÚŽENÝ_FIX", why="zúž na modul X")
+    _ban_deploy_calls(monkeypatch)
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert cap.get("called") and cap.get("proposed_fix") == "RAW_FIX"  # the critic saw the Auditor's fix
+    assert state.status == "blocked" and state.block_reason == "decision_needed"
+    # the fix_critique is an append-only auditor→manazer note
+    crit_notes = [m for m in _msgs(db_session, version.id) if m.payload and m.payload.get("fix_critique")]
+    assert crit_notes and crit_notes[-1].author == "auditor" and crit_notes[-1].recipient == "manazer"
+    assert crit_notes[-1].payload["fix_critique"]["verdict"] == "narrow"
+    # the card recommends accept_fix (positive critique)
+    consult = [m for m in _msgs(db_session, version.id) if m.kind == "consultation"][-1].payload["consultation"]
+    rec = [o for o in consult["decisions"][0]["options"] if o.get("recommended")]
+    assert rec and rec[0]["id"] == "accept_fix"
+    # the materialized fix task carries the CORRECTED scope, not the raw proposed_fix
+    fix_task = [t for t in _tasks(db_session, version.id) if t.id not in {dt.id for dt in done_tasks}][0]
+    assert "ZÚŽENÝ_FIX" in (fix_task.description or "")
+
+
+async def test_fail_open_critic_parsefail_still_builds_card_with_guide(db_session, monkeypatch):
+    # Fail-open (§5): the critic could not be parsed → NO fix_critique record → the card is STILL built (never
+    # a return to a 'paused' one-click), with accept_fix hidden + guide recommended.
+    version, project = _make_version(db_session, project_dial="plna")
+    _seed_verifikacia(db_session, version.id, iteration=0)
+    _seed_done_tasks(db_session, version, project, ["T1"])
+    _stub_auditor(monkeypatch, _verdict_fail(["behaviorálne zlyhanie"]))
+    _stub_smoke(monkeypatch)  # green → critic runs
+    _stub_critique(monkeypatch, verdict=None)  # fail-open: no critique returned
+    _ban_deploy_calls(monkeypatch)
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert state.status == "blocked" and state.block_reason == "decision_needed"
+    assert not [m for m in _msgs(db_session, version.id) if m.payload and m.payload.get("fix_critique")]
+    consult = [m for m in _msgs(db_session, version.id) if m.kind == "consultation"][-1].payload["consultation"]
+    opts = consult["decisions"][0]["options"]
+    assert "accept_fix" not in {o["id"] for o in opts}
+    assert [o for o in opts if o.get("recommended")][0]["id"] == "guide"
+
+
+async def test_critic_skipped_when_runtime_floor_red(db_session, monkeypatch):
+    # D4: an engine-red FAIL (acceptance RAN + failed) is the mechanical truth — no proposed_fix to vet → the
+    # critic is SKIPPED (no fix_critique record). The card is still built (guide recommended).
+    version, project = _make_version(db_session, project_dial="plna")
+    _seed_verifikacia(db_session, version.id, iteration=0)
+    _seed_done_tasks(db_session, version, project, ["T1"])
+    _stub_auditor(monkeypatch, _verdict_fail(["x"]))
+    _stub_smoke(monkeypatch, acc=(False, "2 of 12 failed", False))  # red floor
+    cap = _stub_critique(monkeypatch, verdict="accept")  # would recommend accept IF called — must NOT be called
+    _ban_deploy_calls(monkeypatch)
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert not cap.get("called")  # critic skipped on the engine-red floor
+    assert state.status == "blocked" and state.block_reason == "decision_needed"
+    consult = [m for m in _msgs(db_session, version.id) if m.kind == "consultation"][-1].payload["consultation"]
+    assert [o for o in consult["decisions"][0]["options"] if o.get("recommended")][0]["id"] == "guide"
+
+
+async def test_fast_fix_fail_runs_no_critic_and_no_card(db_session, monkeypatch):
+    # §6 D3: the fast_fix lane is UNCHANGED — no critic, no card, its bounded auto fix-loop just re-dispatches.
+    version, project = _make_version(db_session, project_dial="plna")
+    _seed_verifikacia(db_session, version.id, iteration=0, flow_type="fast_fix")
+    _seed_done_tasks(db_session, version, project, ["T1"])
+    _stub_auditor(monkeypatch, _verdict_fail(["x"]))
+    _stub_smoke(monkeypatch)  # green — but fast_fix never runs the critic regardless
+    cap = _stub_critique(monkeypatch, verdict="accept")
+    _ban_deploy_calls(monkeypatch)
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert not cap.get("called")  # fast_fix: no critic
+    assert not [m for m in _msgs(db_session, version.id) if m.kind == "consultation"]  # no card
+    assert state.current_stage == "programovanie" and state.iteration == 1
+
+
+# ── §9 the decide loop on the verifikacia_fix card (accept_fix / guide / hold) ────────────────────────
+
+
+async def _blocked_on_fix_card(db_session, monkeypatch, *, critique="accept"):
+    """Drive an autonomous new_version FAIL to a verifikacia_fix Decision Card; return (version, project)."""
+    version, project = _make_version(db_session, project_dial="plna")
+    _seed_verifikacia(db_session, version.id, iteration=0)
+    _seed_done_tasks(db_session, version, project, ["T1"])
+    _stub_auditor(monkeypatch, _verdict_fail(["zlyhanie"], proposed_fix="FIX"))
+    _stub_smoke(monkeypatch)
+    _stub_critique(monkeypatch, verdict=critique, why="ok")
+    _ban_deploy_calls(monkeypatch)
+    await orchestrator.run_dispatch(db_session, version.id)
+    return version, project
+
+
+async def test_decide_accept_fix_resumes_same_task_no_second_bump(db_session, monkeypatch):
+    # D6: 'accept_fix' resumes the ALREADY-materialized fix task (no 2nd task, no 2nd iteration bump); the
+    # build goes agent_working in Programovanie.
+    version, project = await _blocked_on_fix_card(db_session, monkeypatch, critique="accept")
+    before = _tasks(db_session, version.id)
+    monkeypatch.setattr(orchestrator, "_begin_dispatch", lambda db, st: setattr(st, "status", "agent_working"))
+    state = await orchestrator.apply_action(
+        db_session,
+        version_id=version.id,
+        action="decide",
+        payload={"decision_key": "verifikacia_fix_next", "option_id": "accept_fix"},
+    )
+    assert state.status == "agent_working" and state.current_stage == "programovanie"
+    assert state.iteration == 1  # NO second bump
+    assert len(_tasks(db_session, version.id)) == len(before)  # NO second fix task
+
+
+async def test_decide_guide_routes_to_ai_agent(db_session, monkeypatch):
+    # 'guide' with free text routes the operator's fix brief to the AI Agent (fixer) + resets the loop.
+    version, project = await _blocked_on_fix_card(db_session, monkeypatch, critique="reject")
+    state = await orchestrator.apply_action(
+        db_session,
+        version_id=version.id,
+        action="decide",
+        payload={"decision_key": "verifikacia_fix_next", "option_id": "guide", "free_text": "Použi default X."},
+    )
+    assert state.current_stage == "programovanie" and state.current_actor == "ai_agent"
+    assert state.iteration == 0  # human steer resets the bounded loop
+    returns = [m for m in _msgs(db_session, version.id) if m.kind == "return" and m.stage == "verifikacia"]
+    assert returns and returns[-1].author == "manazer" and returns[-1].recipient == "ai_agent"
+    assert "default X" in returns[-1].content
+
+
+async def test_decide_hold_reblocks_without_dead_end(db_session, monkeypatch):
+    # 'hold' re-blocks WITHOUT consuming the card — the card stays the action surface (no dead-end); a later
+    # 'accept_fix' on the SAME card still works (the latest answer wins).
+    version, project = await _blocked_on_fix_card(db_session, monkeypatch, critique="accept")
+    state = await orchestrator.apply_action(
+        db_session,
+        version_id=version.id,
+        action="decide",
+        payload={"decision_key": "verifikacia_fix_next", "option_id": "hold"},
+    )
+    assert state.status == "blocked" and state.block_reason == "decision_needed"  # still the action surface
+    assert "decide" in orchestrator.determine_available_actions(state)  # the card is still resolvable
+    # later: accept_fix on the SAME card resumes the fix
+    monkeypatch.setattr(orchestrator, "_begin_dispatch", lambda db, st: setattr(st, "status", "agent_working"))
+    state = await orchestrator.apply_action(
+        db_session,
+        version_id=version.id,
+        action="decide",
+        payload={"decision_key": "verifikacia_fix_next", "option_id": "accept_fix"},
+    )
+    assert state.status == "agent_working"
+
+
+# ── §9 the critic directive covers the anti-patterns (permission model + hook/--no-verify) ────────────
+
+
+def test_fix_critique_directive_covers_fake_boundary_antipatterns(db_session):
+    version, _ = _make_version(db_session, project_dial="plna")
+    verdict_msg = orchestrator._record_message(
+        db_session,
+        version_id=version.id,
+        stage="verifikacia",
+        author="auditor",
+        recipient="manazer",
+        kind="verdict",
+        content="FAIL",
+        payload={"verdict": "FAIL", "phase": "verifikacia", "proposed_fix": "pre-push hook", "findings": ["push gate"]},
+    )
+    db_session.flush()
+    brief = orchestrator._fix_critique_directive(db_session, version.id, verdict_msg=verdict_msg)
+    # the fixer's permission model (else the critic catches a fake boundary only by luck)
+    assert "bypassPermissions" in brief and "full_auto" in brief
+    # the concrete anti-patterns
+    assert "--no-verify" in brief and "hook" in brief
+    assert "enforced-by-construction" in brief or "vynúten" in brief.lower()
+    # refute, don't confirm — aimed at the CURE, and the Auditor's proposed_fix is in the brief
+    assert "REFUTUJ" in brief and "pre-push hook" in brief
+    # constrained to the FixCritique fence + fields
+    assert "<<<TASK_PLAN_JSON>>>" in brief and "verdict" in brief and "corrected_scope" in brief

@@ -33,7 +33,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Optional, Union
+from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -202,6 +202,39 @@ class TaskPlanFeatTasks(BaseModel):
 #: (byte-identical — ``invoke_agent`` is untouched).
 TASK_PLAN_SKELETON_JSON_SCHEMA = TaskPlanSkeleton.model_json_schema()
 TASK_PLAN_FEAT_TASKS_JSON_SCHEMA = TaskPlanFeatTasks.model_json_schema()
+
+
+# ── Fix-critic (CR-V2-058 Part B) ────────────────────────────────────────────────────────────────
+# The independent adversarial critique of the Auditor's ``proposed_fix`` for a Verifikácia FAIL, BEFORE
+# that fix becomes the fix task / the Decision Card's recommendation (§5). A NARROWED schema — NOT a
+# :class:`PipelineStatusBlock` (whose ``verdict`` is a bool + findings + proposed_fix) — so the critic's
+# ``{accept,narrow,reject}`` shape can NEVER collide with :data:`PIPELINE_STATUS_JSON_SCHEMA` (it would
+# ParseFail there). Invoked via the dedicated narrowed path (``_invoke_fix_critique``), the sibling of the
+# task_plan passes; ``PIPELINE_STATUS_JSON_SCHEMA`` stays the default for every other agent invocation.
+
+
+class FixCritique(BaseModel):
+    """CR-V2-058 Part B — the fix-critic's verdict on the Auditor's proposed Verifikácia-FAIL fix (the CURE,
+    NOT the build). ``accept`` = the fix is a real, enforced-by-construction boundary; ``narrow`` = mostly
+    right but the scope must be tightened (``corrected_scope`` carries the corrected fix scope); ``reject`` =
+    the fix is a FAKE boundary (a git hook an unattended ``bypassPermissions`` fixer evades via
+    ``--no-verify``; an advisory/client-side guard) or fixes the symptom not the cause (``why`` = why it is
+    wrong / where the root actually is). Only ``accept``/``narrow`` let the Decision Card recommend the fix
+    (§2 invariant); ``reject`` (or NO critique) → the card demotes it and recommends guiding the fix."""
+
+    verdict: Literal["accept", "narrow", "reject"]
+    #: The tightened/corrected fix scope — REQUIRED-in-spirit for ``narrow`` (the whole point), optional
+    #: otherwise. When non-empty it takes precedence over the Auditor's raw ``proposed_fix`` in the fix brief
+    #: (:func:`orchestrator._latest_verifikacia_fix_scope`).
+    corrected_scope: str = ""
+    #: WHY this verdict — a stated reason is mandatory (a positive verdict with no reasoning is not a vet); a
+    #: critique that omits it ParseFails → fail-open → the card recommends guide (never a blind ``accept_fix``).
+    why: str
+
+
+#: Narrowed JSON Schema for the fix-critic pass (CR-V2-058). Derived from the model (single source); used
+#: ONLY by ``_invoke_fix_critique``. :data:`PIPELINE_STATUS_JSON_SCHEMA` stays the default elsewhere.
+FIX_CRITIQUE_JSON_SCHEMA = FixCritique.model_json_schema()
 
 
 # ── Interactive consultation (CR-V2-041) ─────────────────────────────────────────────────────────
@@ -506,6 +539,20 @@ def parse_task_plan_feat_tasks(obj: dict) -> Union[TaskPlanFeatTasks, ParseFailu
         return TaskPlanFeatTasks.model_validate(obj)
     except ValidationError as exc:
         return ParseFailure(f"task_plan feat-tasks invalid — {_format_validation_errors(exc)}")
+
+
+def parse_fix_critique(obj: dict) -> Union[FixCritique, ParseFailure]:
+    """Validate the fix-critic pass's narrowed output (CR-V2-058 Part B) — the ``{accept,narrow,reject}``
+    verdict + ``corrected_scope`` + ``why``. Never raises, never infers: an unparseable / incomplete critique
+    (e.g. a missing ``why``, or a ``verdict`` outside the Literal) → :class:`ParseFailure`, which the caller
+    treats as FAIL-OPEN (no ``fix_critique`` record → the Decision Card demotes ``accept_fix`` + recommends
+    guide; §5). A critique is trusted ONLY when it is well-formed."""
+    if not isinstance(obj, dict):
+        return ParseFailure("fix_critique structured_output is not an object")
+    try:
+        return FixCritique.model_validate(obj)
+    except ValidationError as exc:
+        return ParseFailure(f"fix_critique invalid — {_format_validation_errors(exc)}")
 
 
 def extract_task_plan_json(text: str) -> Union[dict, ParseFailure]:
