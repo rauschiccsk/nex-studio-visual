@@ -4656,31 +4656,28 @@ async def _invoke_fix_critique(
     :data:`PIPELINE_STATUS_JSON_SCHEMA`, whose ``verdict`` is a bool → ParseFail there). Grammar-constrains to
     :data:`FIX_CRITIQUE_JSON_SCHEMA`, meters the turn into ``metrics``, and parses the ``<<<TASK_PLAN_JSON>>>``
     fence (``structured_output`` is dead in this CLI — the same TEXT/fence survival path the task_plan passes
-    use). Resumes the Auditor's warm session so the finding context is in scope; the CRITIQUE is adversarial
-    (refute the FIX), never a re-confirm.
+    use). Runs in a FRESH, isolated session (a new ``--session-id`` under the Auditor charter — NOT the
+    Auditor's warm verdict session), so the critic is independent of the FINDER, not merely role-split from the
+    fixer (review fix). The self-contained directive supplies the findings + proposed_fix; the critic reads the
+    code fresh. The CRITIQUE is adversarial (refute the FIX), never a re-confirm.
 
     FAIL-OPEN (§5): any crash / timeout / parse failure returns ``None`` (the caller records NO ``fix_critique``
     → the Decision Card demotes ``accept_fix`` + recommends guide). We NEVER fall back to a ``paused`` state
     with a one-click un-vetted fix."""
     version_id = state.version_id
     slug = _project_slug_for_version(db, version_id)
-    session_id, is_first = _resolve_orch_session(db, slug, AUDITOR_ROLE)
-    db.execute(
-        update(OrchestratorSession)
-        .where(OrchestratorSession.project_slug == slug, OrchestratorSession.role == AUDITOR_ROLE)
-        .values(last_input_at=datetime.now(timezone.utc))
-    )
+    # CR-V2-058 independence (review fix): the critic runs in a FRESH, one-shot session — NOT the Auditor's warm
+    # session that authored this FAIL verdict + proposed_fix. Resuming the finder's session would let it re-judge
+    # its OWN cure in-context (the exact "same finder re-judges" shape §1 Diera B exists to break). The directive
+    # is fully self-contained (embeds findings + proposed_fix + the fixer's permission model + the fake-boundary
+    # anti-patterns) and the critic reads the code fresh under the read-only Auditor charter, so a cold session
+    # loses only the bias. A fresh uuid + charter → invoke_claude opens a NEW --session-id (claude_agent.py:255);
+    # ephemeral — never persisted as an OrchestratorSession (never resumed), so no warm-session bookkeeping.
+    session_id = uuid.uuid4()
     model_override, effort_override = _resolve_dispatch_overrides(db, version_id, AUDITOR_ROLE)
-    charter_path: Optional[Path] = None
-    if is_first:  # the Auditor normally already ran the verdict turn (session exists → resume); defensive.
-        charter_path = (
-            claude_agent.PROJECTS_ROOT
-            / slug
-            / ".claude"
-            / "agents"
-            / _charter_slug_for_role(AUDITOR_ROLE)
-            / "CLAUDE.md"
-        )
+    charter_path: Optional[Path] = (
+        claude_agent.PROJECTS_ROOT / slug / ".claude" / "agents" / _charter_slug_for_role(AUDITOR_ROLE) / "CLAUDE.md"
+    )
     prompt = _fix_critique_directive(db, version_id, verdict_msg=verdict_msg)
     _started = perf_counter()
     try:
