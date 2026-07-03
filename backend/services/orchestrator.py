@@ -6333,6 +6333,15 @@ async def apply_action(
         free_text = str(payload.get("free_text", "")).strip() or None
         if not option_id and not free_text:
             raise OrchestratorError("decide vyžaduje option_id alebo free_text")
+        # CR-V2-058 security: honour ONLY an option the card actually OFFERED. The card-builder omits unsafe
+        # options BY CONSTRUCTION (e.g. accept_fix without a positive fix_critique — §2). Without this check the
+        # handler would blindly execute a FORGED/replayed option_id (accept_fix on a guide-only card → a
+        # one-click UN-VETTED fix — the exact footgun the CR exists to prevent). Reject any option_id not among
+        # this decision's offered options; the allow_free_text escape (option_id absent, free_text present)
+        # stays valid. Hardens ALL consultation cards, not just verifikacia_fix.
+        offered_ids = {o.get("id") for o in decision.get("options", [])}
+        if option_id and option_id not in offered_ids:
+            raise OrchestratorError(f"Neponúknutá možnosť {option_id!r} pre rozhodnutie {decision_key!r}.")
         label = free_text or next(
             (o.get("label") for o in decision.get("options", []) if o.get("id") == option_id), option_id
         )

@@ -24,6 +24,7 @@ The Verifikácia round (``_run_verifikacia_round``) is the v2 form of v1 gate_g:
 
 import uuid
 
+import pytest
 from sqlalchemy import select
 
 from backend.db.models.foundation import User
@@ -1296,6 +1297,25 @@ async def test_decide_guide_routes_to_ai_agent(db_session, monkeypatch):
     returns = [m for m in _msgs(db_session, version.id) if m.kind == "return" and m.stage == "verifikacia"]
     assert returns and returns[-1].author == "manazer" and returns[-1].recipient == "ai_agent"
     assert "default X" in returns[-1].content
+
+
+async def test_decide_rejects_unoffered_accept_fix_on_guide_only_card(db_session, monkeypatch):
+    # CR-V2-058 SECURITY (review must-fix): on a GUIDE-ONLY card (reject critique → accept_fix hidden BY
+    # CONSTRUCTION), a FORGED/replayed decide POST with option_id=accept_fix must be REJECTED server-side —
+    # the enforcement can't live only in card-build (FE hiding), else an API client one-clicks the UN-VETTED
+    # fix (the exact footgun the CR exists to prevent).
+    version, project = await _blocked_on_fix_card(db_session, monkeypatch, critique="reject")
+    # if the guard is missing, _begin_dispatch would flip agent_working — prove it is NEVER reached.
+    monkeypatch.setattr(orchestrator, "_begin_dispatch", lambda db, st: setattr(st, "status", "agent_working"))
+    with pytest.raises(orchestrator.OrchestratorError, match="Neponúknutá možnosť"):
+        await orchestrator.apply_action(
+            db_session,
+            version_id=version.id,
+            action="decide",
+            payload={"decision_key": "verifikacia_fix_next", "option_id": "accept_fix"},
+        )
+    st = orchestrator._get_state(db_session, version.id)
+    assert st.status == "blocked" and st.block_reason == "decision_needed"  # un-vetted fix did NOT dispatch
 
 
 async def test_decide_hold_reblocks_without_dead_end(db_session, monkeypatch):

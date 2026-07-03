@@ -229,7 +229,8 @@ class FixCritique(BaseModel):
     corrected_scope: str = ""
     #: WHY this verdict — a stated reason is mandatory (a positive verdict with no reasoning is not a vet); a
     #: critique that omits it ParseFails → fail-open → the card recommends guide (never a blind ``accept_fix``).
-    why: str
+    #: ``min_length=1`` (review fix): an EMPTY ``why`` is not a vet either → it ParseFails → fail-open to guide.
+    why: str = Field(min_length=1)
 
 
 #: Narrowed JSON Schema for the fix-critic pass (CR-V2-058). Derived from the model (single source); used
