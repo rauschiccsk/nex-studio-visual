@@ -186,25 +186,29 @@ def project_had_prod_deploy(db: Session, project_id: UUID) -> bool:
 def list_verified_versions(db: Session, project_id: UUID) -> list[str]:
     """The project's VERIFIED version_numbers — deployable via Nasadiť (design §3.4).
 
-    A version is deployable only once the pipeline has carried it to **Hotovo**
-    (``pipeline_state.current_stage == 'done'``) — "verified", per CR-V2-014's
-    "Hotovo ≠ deployed" boundary. The Nasadiť dropdown in the UAT/PROD tabs lists
-    exactly these; a non-verified (still in-flight) version is never offered.
+    CR-V2-056 (layer-1 reality-anchoring): "verified" is COMPUTED from the live repo, not read as a stored
+    ``done`` snapshot. Candidates = versions whose pipeline reached the ``done`` phase (the cache); each is
+    then kept only if :func:`orchestrator.version_verified` still holds — i.e. its latest PASS verdict is
+    bound to a commit SHA that STILL equals the repo HEAD. So a version whose HEAD drifted past its verified
+    commit silently drops out of the deployable list (no frozen PASS). The repo HEAD is read ONCE per project
+    (batch), then each candidate's stored SHA is compared in-DB — never a git subprocess per version.
 
-    Ordered ``version_number`` descending so the newest verified version is the
-    natural default. A version with no pipeline_state row is NOT verified (it has
-    never run), so the INNER join is intentional.
+    Ordered ``version_number`` descending so the newest verified version is the natural default.
     """
-    stmt = (
-        select(Version.version_number)
+    from backend.services import claude_agent
+    from backend.services.orchestrator import _repo_head, version_verified
+
+    rows = db.execute(
+        select(Version.id, Version.version_number)
         .join(PipelineState, PipelineState.version_id == Version.id)
-        .where(
-            Version.project_id == project_id,
-            PipelineState.current_stage == VERIFIED_STAGE,
-        )
+        .where(Version.project_id == project_id, PipelineState.current_stage == VERIFIED_STAGE)
         .order_by(Version.version_number.desc())
-    )
-    return list(db.execute(stmt).scalars().all())
+    ).all()
+    if not rows:
+        return []
+    slug = db.execute(select(Project.slug).where(Project.id == project_id)).scalar_one_or_none()
+    head = _repo_head(claude_agent.PROJECTS_ROOT / slug) if slug else None  # read HEAD ONCE per project
+    return [num for (vid, num) in rows if version_verified(db, vid, head=head)[0]]
 
 
 def accepted_versions(db: Session, customer_id: UUID) -> list[str]:
@@ -429,7 +433,18 @@ async def deploy(
     customer = _get_customer(db, customer_id)
     project = _get_project(db, customer.project_id)
     # Validate the requested version exists for the project (verified boundary).
-    _resolve_version(db, project.id, version_number)
+    version = _resolve_version(db, project.id, version_number)
+    # CR-V2-056 (layer-1): fail-closed verified guard on the ACTION itself (not just the dropdown) —
+    # version_verified recomputes against the live HEAD, so a stale-done version whose HEAD drifted (or that
+    # never actually passed) is refused here, closing the direct-POST bypass of the deployable-list filter.
+    from backend.services.orchestrator import version_verified
+
+    _ok, _prov = version_verified(db, version.id)
+    if not _ok:
+        raise ValueError(
+            f"Deploy blocked: version {version_number!r} is not verified against the current code ({_prov}) — "
+            "re-run Verifikácia on the current HEAD before deploying."
+        )
 
     # PROD gate (§3.5) — never bypassed.
     if environment == "prod" and not is_accepted(db, customer_id, version_number):

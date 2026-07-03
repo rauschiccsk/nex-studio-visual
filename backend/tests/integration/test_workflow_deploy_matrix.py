@@ -35,6 +35,7 @@ from backend.db.models.pipeline import PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.services import deploy as deploy_service
+from backend.services import orchestrator
 
 # ---------------------------------------------------------------------------
 # Fixtures — a project with two customers and two verified versions
@@ -95,6 +96,19 @@ def _seed_verified_version(db, project: Project, version_number: str) -> Version
             status="done",
             next_action="",
         )
+    )
+    db.flush()
+    # CR-V2-056: verified is COMPUTED from the Verifikácia PASS verdict (version_verified), not the stored
+    # 'done' stage alone — record the PASS. No verified_sha in the test repo → 'unbound' → verified.
+    orchestrator._record_message(
+        db,
+        version_id=version.id,
+        stage="verifikacia",
+        author="auditor",
+        recipient="manazer",
+        kind="verdict",
+        content="PASS",
+        payload={"verdict": "PASS", "phase": "verifikacia"},
     )
     db.flush()
     return version

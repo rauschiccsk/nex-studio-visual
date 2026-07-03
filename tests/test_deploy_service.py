@@ -35,7 +35,7 @@ from backend.db.models.versions import Version
 from backend.schemas.customer import CustomerCreate
 from backend.services import customer as customer_service
 from backend.services import deploy as deploy_service
-from backend.services import uat_provisioner
+from backend.services import orchestrator, uat_provisioner
 
 # ---------------------------------------------------------------------------
 # Isolation — secrets written during a deploy/accept flow go to a throwaway
@@ -89,6 +89,19 @@ def _make_project(db_session, *, user: User | None = None, **overrides) -> Proje
 def _make_version(db_session, project, version_number="v0.1.0") -> Version:
     version = Version(project_id=project.id, version_number=version_number, name="dev")
     db_session.add(version)
+    db_session.flush()
+    # CR-V2-056: a deployable version must be VERIFIED — record the Verifikácia PASS verdict that
+    # version_verified reads. No verified_sha in the test repo → 'unbound' → verified (grandfathered).
+    orchestrator._record_message(
+        db_session,
+        version_id=version.id,
+        stage="verifikacia",
+        author="auditor",
+        recipient="manazer",
+        kind="verdict",
+        content="PASS",
+        payload={"verdict": "PASS", "phase": "verifikacia"},
+    )
     db_session.flush()
     return version
 

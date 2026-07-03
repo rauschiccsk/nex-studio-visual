@@ -1576,6 +1576,50 @@ def _verifikacia_passed(db: Session, version_id: uuid.UUID) -> bool:
     return bool(latest.payload and latest.payload.get("verdict") == "PASS")
 
 
+def version_verified(db: Session, version_id: uuid.UUID, *, head: Optional[str] = None) -> tuple[bool, str]:
+    """CR-V2-056 (layer-1 reality-anchoring): is a version VERIFIED *right now*, COMPUTED from real git state
+    — not a stored ``done`` snapshot. A version is verified iff its latest Verifikácia PASS verdict is bound
+    to a commit SHA that STILL equals the repo HEAD, so a HEAD change past the verified commit AUTO-UN-VERIFIES
+    (kills the frozen-PASS bug: the board shows a stale PASS + HEAD X while git moved to Y).
+
+    Returns ``(is_verified, provenance)``. TOTAL function (never raises, always a definite answer — a flaky
+    git read never silently un-verifies):
+      * no PASS on record, or a fix directive is newer (CR-V2-055) → ``(False, 'no_pass')``.
+      * PASS with ``verified_sha == 'legacy'`` (pre-anchoring backfill) → ``(True, 'legacy')`` — grandfathered.
+      * PASS with no ``verified_sha`` (repo unreadable at PASS time, so never anchored) → ``(True, 'unbound')``.
+      * repo unreadable NOW (``head is None``) → ``(True, 'repo_unreadable')`` — our own read failure never
+        un-verifies a version.
+      * ``verified_sha == head`` → ``(True, 'sha_match')``; else → ``(False, 'sha_drift')``.
+
+    ``head`` may be supplied by the caller (batch: read HEAD ONCE per project, compare each version's stored
+    SHA in DB) to avoid a git subprocess per version on list endpoints.
+
+    NOTE: the CI-green AND-leg (verified also requires green CI on the tagged commit for remote projects) is a
+    clean follow-on increment on top of this SHA anchor; it is NOT applied here."""
+    if not _verifikacia_passed(db, version_id):
+        return False, "no_pass"
+    latest = db.execute(
+        select(PipelineMessage)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.stage == "verifikacia",
+            PipelineMessage.kind == "verdict",
+        )
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    pass_sha = (latest.payload or {}).get("verified_sha") if latest else None
+    if pass_sha == "legacy":
+        return True, "legacy"  # backfilled pre-Layer-1 version — trusted as-was, not recomputed
+    if not pass_sha:
+        return True, "unbound"  # PASS never got a SHA anchor (repo unreadable at PASS) → do not un-verify
+    if head is None:
+        head = _repo_head(claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id))
+    if head is None:
+        return True, "repo_unreadable"  # our own read failure — never un-verifies
+    return (pass_sha == head), ("sha_match" if pass_sha == head else "sha_drift")
+
+
 # (CR-V2-013: the Gate-E milestone / gap / coverage helpers — ``_gate_e_coverage_complete``,
 # ``_latest_designer_answer``, ``_latest_gate_e_milestone``, ``_latest_coordinator_message_content``,
 # ``_gate_e_gap_open`` — and the Gate-E audit-markdown writers — ``_GATE_E_ROLE_SK``,
@@ -2657,6 +2701,26 @@ def _repo_head(project_root: Path) -> Optional[str]:
         return r.stdout.strip() if r.returncode == 0 else None
     except (OSError, subprocess.SubprocessError):
         return None
+
+
+def _git_tag_version(project_root: Path, version_number: str, sha: str) -> None:
+    """CR-V2-056 (layer-1): create/refresh an annotated git tag ``v{version_number}`` at the verified commit.
+    BEST-EFFORT, NEVER raises — the payload ``verified_sha`` (:func:`version_verified`) is the authoritative
+    anchor; the tag is the reproducible human artifact. ``-f`` re-anchors on a FAIL→fix→re-PASS (the verified
+    commit legitimately moved to the new PASS commit)."""
+    import subprocess
+
+    tag = f"v{version_number}"
+    try:
+        subprocess.run(
+            ["git", "-C", str(project_root), "tag", "-f", "-a", tag, sha, "-m", f"NEX Studio: {tag} verified"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
 
 
 def _rev_list_count(project_root: Path, baseline: Optional[str]) -> int:
@@ -4500,6 +4564,12 @@ async def _run_verifikacia_round(
     llm_pass = review.kind == "verdict" and bool(review.verdict)
     is_pass = llm_pass and not runtime_floor_red
     verdict_str = "PASS" if is_pass else "FAIL"
+    # CR-V2-056 (layer-1): bind the PASS to the commit it verified + tag it, so version_verified() recomputes
+    # against the live HEAD (a moved HEAD auto-un-verifies — kills the frozen-PASS bug). slug + version_label
+    # are already in scope in _run_verifikacia_round.
+    verified_sha = _repo_head(claude_agent.PROJECTS_ROOT / slug) if is_pass else None
+    if verified_sha:
+        _git_tag_version(claude_agent.PROJECTS_ROOT / slug, version_label, verified_sha)
     verdict_msg = _record_message(
         db,
         version_id=version_id,
@@ -4522,6 +4592,7 @@ async def _run_verifikacia_round(
             "proposed_fix": review.proposed_fix,
             "phase": "verifikacia",
             **({"engine_override": "runtime_floor_red"} if (llm_pass and runtime_floor_red) else {}),
+            **({"verified_sha": verified_sha} if verified_sha else {}),
         },
     )
     if on_message is not None:
@@ -5939,7 +6010,17 @@ async def apply_action(
         # the settle takes the FAIL branch.
         floor_red = _latest_runtime_floor_red(db, version_id)
         effective_verdict = "FAIL" if (verdict == "PASS" and floor_red) else verdict
+        # CR-V2-056 (layer-1): bind a manual PASS to the verified commit + tag it (same as the autonomous path).
+        verified_sha: Optional[str] = None
+        if effective_verdict == "PASS":
+            _proj_root = claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id)
+            verified_sha = _repo_head(_proj_root)
+            if verified_sha:
+                _vnum = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
+                _git_tag_version(_proj_root, _vnum, verified_sha)
         verdict_payload: dict[str, Any] = {"verdict": effective_verdict, "phase": "verifikacia"}
+        if verified_sha:
+            verdict_payload["verified_sha"] = verified_sha
         if effective_verdict != verdict:
             verdict_payload["engine_override"] = "runtime_floor_red"
             verdict_payload["findings"] = [

@@ -963,3 +963,25 @@ async def test_uprav_at_verifikacia_makes_prior_pass_stale(db_session):
     assert orchestrator._verifikacia_passed(db_session, version.id) is True
     await orchestrator.apply_action(db_session, version_id=version.id, action="uprav", payload={"comment": "Oprav X."})
     assert orchestrator._verifikacia_passed(db_session, version.id) is False  # re-judge pending
+
+
+# ── CR-V2-056: reality-anchored verified — a PASS binds the commit SHA + recomputes ───────────────────
+
+
+async def test_pass_binds_verified_sha_and_recomputes(db_session, monkeypatch):
+    # CR-V2-056: an autonomous PASS stamps verified_sha (HEAD at PASS time) into the verdict payload; then
+    # version_verified RECOMPUTES — verified at that HEAD, un-verified once HEAD moves (the frozen-PASS fix).
+    version, _ = _make_version(db_session, project_dial="po_kazdej_faze")
+    _seed_verifikacia(db_session, version.id)
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda _root: "sha-at-pass")
+    monkeypatch.setattr(orchestrator, "_git_tag_version", lambda *a, **k: None)  # no real git in tests
+    _stub_auditor(monkeypatch, _verdict_pass())
+    _stub_smoke(monkeypatch)
+    _ban_deploy_calls(monkeypatch)
+    await orchestrator.run_dispatch(db_session, version.id)
+    verdicts = [m for m in _msgs(db_session, version.id) if m.kind == "verdict"]
+    assert verdicts[-1].payload["verdict"] == "PASS"
+    assert verdicts[-1].payload["verified_sha"] == "sha-at-pass"  # bound to the commit it verified
+    # recompute against live HEAD: verified at the PASS commit, NOT verified once HEAD drifts past it
+    assert orchestrator.version_verified(db_session, version.id, head="sha-at-pass") == (True, "sha_match")
+    assert orchestrator.version_verified(db_session, version.id, head="moved-head") == (False, "sha_drift")
