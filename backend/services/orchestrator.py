@@ -418,6 +418,11 @@ _ACTIONS = frozenset(
         # CR-V2-041: the Manažér picks an option for ONE consultation decision (Decision Card). Like
         # ``answer`` it threads input + does not advance the phase; the LAST decide re-dispatches the apply.
         "decide",
+        # CR-V2-057: "Over znova" — re-verify a DRIFTED version against the CURRENT code. Valid ONLY when the
+        # recorded Verifikácia PASS is stale (:func:`version_verified` == ``sha_drift`` — HEAD moved past the
+        # verified commit). Re-enters Verifikácia and re-runs the independent Auditor against HEAD; the fresh
+        # verdict re-anchors (PASS bound to the new commit → drift gone) or re-gates (FAIL → targeted fix).
+        "overit_znovu",
     }
 )
 # Actions that act on / advance past an agent's output — only valid once the agent has SETTLED
@@ -5886,6 +5891,33 @@ async def apply_action(
             content=str(comment),
             payload={"phase": state.current_stage},
         )
+        _begin_dispatch(db, state)
+        return state
+
+    if action == "overit_znovu":
+        # CR-V2-057: "Over znova" — re-verify a DRIFTED version against the CURRENT code. The board surfaces
+        # this only when the recorded Verifikácia PASS is stale (:func:`version_verified` == ``sha_drift``:
+        # HEAD moved past the verified commit); the BE re-checks fail-closed here so a stale board / forged
+        # call can't force a re-run when there's nothing to re-verify. Valid from a SETTLED state only
+        # (``done`` or ``awaiting_manazer`` — never mid-turn). Re-enters Verifikácia and re-runs the
+        # independent Auditor against HEAD via the SHARED round machinery (:func:`_run_verifikacia_round`):
+        # the fresh verdict RE-ANCHORS (PASS bound to the current commit → drift gone, honestly verified) or
+        # RE-GATES (FAIL → one targeted fix task + paused, the normal :func:`_settle_verifikacia_verdict`
+        # path). No "just re-stamp the green" — an honest re-verify MUST re-run the Auditor.
+        if state.status not in ("done", "awaiting_manazer"):
+            raise OrchestratorError("Over znova je platné len na ustálenej verzii (Hotovo alebo čaká na Manažéra).")
+        _, provenance = version_verified(db, version_id)
+        if provenance != "sha_drift":
+            raise OrchestratorError(
+                "Over znova je platné len keď je overenie zastarané (kód sa pohol za overený commit)."
+            )
+        state.current_stage = "verifikacia"
+        state.is_regate = True
+        state.iteration += 1
+        db.flush()
+        # _begin_dispatch re-points the actor to the Auditor (STAGE_ACTOR['verifikacia']), flips to
+        # agent_working, and re-captures the dispatch baseline from the current HEAD → the background turn
+        # routes to _run_verifikacia_round (a fresh, independent Auditor + smoke against HEAD).
         _begin_dispatch(db, state)
         return state
 

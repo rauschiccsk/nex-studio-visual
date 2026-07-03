@@ -148,6 +148,8 @@ export default function CockpitPage() {
             agentSessions={board.agent_sessions}
             currentTask={board.current_task}
             verifiedProvenance={board.verified_provenance}
+            onReverify={() => handleAction("overit_znovu")}
+            reverifyInFlight={inFlight}
           />
 
           {/* CR-V2-041: the interactive consultation — pinned ABOVE the phase content when the build is

@@ -473,7 +473,20 @@ def test_apply_action_is_sole_mutator_grep_guard():
     state-machine surface (the action verbs) matches the design vocabulary so a drift is caught early."""
     assert orchestrator._ACTIONS == frozenset(
         # CR-V2-041: + "decide" (the Manažér picks a consultation Decision Card option).
-        {"start", "approve_spec", "schvalit", "uprav", "pokracovat", "verdict", "ask", "answer", "pause", "decide"}
+        # CR-V2-057: + "overit_znovu" ("Over znova" — re-verify a drifted version against the current HEAD).
+        {
+            "start",
+            "approve_spec",
+            "schvalit",
+            "uprav",
+            "pokracovat",
+            "verdict",
+            "ask",
+            "answer",
+            "pause",
+            "decide",
+            "overit_znovu",
+        }
     )
     # apply_coordinator_recommendation is REMOVED.
     assert "apply_coordinator_recommendation" not in orchestrator._ACTIONS

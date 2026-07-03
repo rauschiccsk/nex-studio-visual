@@ -104,9 +104,21 @@ interface WhosUpProps {
   // stale (the code moved past the verified commit) — we surface a warning so the screen reflects reality, not
   // a frozen green PASS.
   verifiedProvenance?: string;
+  // CR-V2-057: the remedy for a drifted PASS — "Over znova" re-runs Verifikácia (the Auditor) against the
+  // current code. Bound RIGHT NEXT to the drift warning (act where you see the problem); absent → no button.
+  onReverify?: () => void;
+  reverifyInFlight?: boolean;
 }
 
-export function WhosUp({ state, activeAgent = null, agentSessions, currentTask, verifiedProvenance }: WhosUpProps) {
+export function WhosUp({
+  state,
+  activeAgent = null,
+  agentSessions,
+  currentTask,
+  verifiedProvenance,
+  onReverify,
+  reverifyInFlight = false,
+}: WhosUpProps) {
   const drifted = verifiedProvenance === "sha_drift";
   // A done build normally hides this line — but a DRIFTED done build still surfaces the stale-PASS warning.
   if (!state || (state.status === "done" && !drifted)) return null;
@@ -138,11 +150,23 @@ export function WhosUp({ state, activeAgent = null, agentSessions, currentTask, 
       </span>
       <span className="flex items-center gap-2">
         {drifted && (
-          <span
-            className="text-[10px] font-medium text-[var(--color-state-warning-fg)]"
-            title="Overenie je zastarané: kód sa pohol za overený commit (HEAD sa zmenil). Táto verzia NIE je overená voči aktuálnemu kódu — over ju znova."
-          >
-            ⚠ overenie zastarané (kód sa pohol)
+          <span className="flex items-center gap-1.5">
+            <span
+              className="text-[10px] font-medium text-[var(--color-state-warning-fg)]"
+              title="Overenie je zastarané: kód sa pohol za overený commit (HEAD sa zmenil). Táto verzia NIE je overená voči aktuálnemu kódu — over ju znova."
+            >
+              ⚠ overenie zastarané (kód sa pohol)
+            </span>
+            {onReverify && (
+              <button
+                onClick={onReverify}
+                disabled={reverifyInFlight}
+                title="Znova over túto verziu voči aktuálnemu kódu — spustí Verifikáciu (Auditor prebehne nad HEAD)."
+                className="rounded border border-[var(--color-state-warning-fg)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-state-warning-fg)] transition-colors hover:bg-[var(--color-state-warning-bg)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {reverifyInFlight ? "Overujem…" : "Over znova"}
+              </button>
+            )}
           </span>
         )}
         {stale && (

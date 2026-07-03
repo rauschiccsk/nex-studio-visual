@@ -123,4 +123,33 @@ describe("WhosUp — who's-up status", () => {
     render(<WhosUp state={mkState("awaiting_manazer")} verifiedProvenance="sha_match" />);
     expect(screen.queryByText(/overenie zastarané/i)).not.toBeInTheDocument();
   });
+
+  // CR-V2-057: "Over znova" is the remedy for a drifted PASS — re-run Verifikácia against the current code.
+  // It sits next to the warning and fires the overit_znovu action.
+  it("offers an 'Over znova' button next to the drift warning and fires onReverify", () => {
+    const onReverify = vi.fn();
+    render(
+      <WhosUp state={mkState("awaiting_manazer")} verifiedProvenance="sha_drift" onReverify={onReverify} />,
+    );
+    const btn = screen.getByRole("button", { name: /over znova/i });
+    fireEvent.click(btn);
+    expect(onReverify).toHaveBeenCalledOnce();
+  });
+
+  it("shows no 'Over znova' button when there is no drift", () => {
+    render(<WhosUp state={mkState("awaiting_manazer")} verifiedProvenance="sha_match" onReverify={() => {}} />);
+    expect(screen.queryByRole("button", { name: /over znova/i })).not.toBeInTheDocument();
+  });
+
+  it("disables the 'Over znova' button while a re-verify is in flight", () => {
+    render(
+      <WhosUp
+        state={mkState("done", { current_stage: "done" })}
+        verifiedProvenance="sha_drift"
+        onReverify={() => {}}
+        reverifyInFlight
+      />,
+    );
+    expect(screen.getByRole("button", { name: /overujem/i })).toBeDisabled();
+  });
 });
