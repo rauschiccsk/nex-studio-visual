@@ -1367,3 +1367,15 @@ def test_fix_critique_directive_covers_fake_boundary_antipatterns(db_session):
     assert "REFUTUJ" in brief and "pre-push hook" in brief
     # constrained to the FixCritique fence + fields
     assert "<<<TASK_PLAN_JSON>>>" in brief and "verdict" in brief and "corrected_scope" in brief
+
+
+def test_verifikacia_directive_covers_fake_boundary_antipatterns(db_session):
+    # CR-V2-059 (defense-in-depth): the Auditor's END verdict now carries the SAME fake-boundary rigor as the
+    # fix-critic — so a fake IMPLEMENTED boundary (a pre-push hook the unattended full_auto agent skips via
+    # --no-verify) is caught at the Auditor's PASS gate, not only by the critic at proposal time.
+    version, _ = _make_version(db_session)
+    brief = orchestrator._verifikacia_directive(db_session, version.id, flow_type="new_version")
+    assert "bypassPermissions" in brief and "full_auto" in brief
+    assert "--no-verify" in brief and "hook" in brief
+    assert "ADVERSARIÁLNY BYPASS" in brief  # must test the bypass, not only the compliant negative path
+    assert "FALOŠN" in brief  # a bypassable boundary is FALSE → FAIL

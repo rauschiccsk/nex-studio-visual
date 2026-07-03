@@ -1101,6 +1101,28 @@ async def _settle_for_consultation(
     return state
 
 
+# CR-V2-059: fake-boundary rigor shared by the fix-critic (vets a PROPOSED fix, CR-V2-058) AND the Auditor's
+# Verifikácia verdict (vets an IMPLEMENTED boundary). A security fix/boundary is REAL only if the UNATTENDED
+# full_auto agent cannot BYPASS it — ONE source so the critic and the verdict never drift. The pre-push-hook
+# miss (2026-07-03): the Auditor ran the COMPLIANT `git push` (rejected → "works" → PASS) but not the
+# adversarial `git push --no-verify` (succeeds), so it passed a fake boundary. The verdict now carries this.
+_FAKE_BOUNDARY_ANTIPATTERNS = (
+    "MODEL OPRÁVNENÍ AGENTA: opravné/fixové kolá bežia BEZ DOZORU v móde `bypassPermissions` / `full_auto` — "
+    "agent má plné práva a NIKTO nad ním nestojí. Preto hranica, ktorej vynútenie stojí na nástroji, ktorý si "
+    "nedozorovaný agent SÁM vie vypnúť/obísť, NIE JE hranica.\n"
+    "ANTI-VZORY FALOŠNEJ HRANICE:\n"
+    "   a) git pre-commit / pre-push hook ako hranica — nedozorovaný agent ho obíde cez `git push --no-verify` "
+    "/ `git commit --no-verify` / `git config --unset core.hooksPath` / úpravou samotného hooku. Falošná hranica.\n"
+    "   b) client-side / advisory / „varovací“ guard namiesto enforced-by-construction defaultu (default "
+    "hodnota, typ, DB-constraint, capability, odobratý credential) — čo NIE je vynútené konštrukciou, agent obíde.\n"
+    "   c) oprava SYMPTÓMU namiesto PRÍČINY — zamaskuje prejav, koreň ostáva.\n"
+    "   d) „self-confirming“ test, ktorý len ZAZELENÁ smoke namiesto reálneho preukázania invariantu (negatívny "
+    "test chýba, alebo testuje len POSLUŠNÚ cestu, nie adversariálny bypass).\n"
+    "ROZHODUJÚCA OTÁZKA: je hranica VYNÚTENÁ KONŠTRUKCIOU (nedozorovaný full_auto agent ju NEVIE obísť), alebo "
+    "len hook/guard, ktorý obíde?"
+)
+
+
 def _verifikacia_directive(
     db: Session, version_id: uuid.UUID, *, smoke_block: str = "", flow_type: str = "new_version"
 ) -> str:
@@ -1198,6 +1220,12 @@ def _verifikacia_directive(
         "Ak deklarácia vyzerá NEÚPLNÁ (chýba zjavný invariant — autentifikácia, autorizácia/scoping, injection, "
         "nebezpečné príkazy/oprávnenia), SPOCHYBNI ju a daj nález.\n"
         + coverage_brief
+        + "4b. FALOŠNÉ HRANICE (CR-V2-059 — POVINNÉ pri bezpečnostných opravách/hraniciach): keď je invariant "
+        "HRANICA (git-push gate, oprávnenia, capability), NESTAČÍ overiť POSLUŠNÚ cestu — otestuj aj "
+        "ADVERSARIÁLNY BYPASS ako nedozorovaný full_auto agent. Hranica, ktorú takto obíde, je FALOŠNÁ → FAIL, "
+        "aj keď poslušný negatívny test prejde.\n"
+        + _FAKE_BOUNDARY_ANTIPATTERNS
+        + "\n"
         + "5. §4 HARD-SECURITY (explicitne): over, že P0 pravidlá držia v KÓDE aj v LOGOCH — žiadny credential "
         "v zdrojáku / commitnutý / v logoch; secrets len v `.env`/runtime env; `VITE_*` len public hodnoty. "
         "Únik credentialu je FAIL.\n"
@@ -1247,21 +1275,11 @@ def _fix_critique_directive(db: Session, version_id: uuid.UUID, *, verdict_msg: 
         "Nálezca navrhol rozsah; ty ako NEZÁVISLÝ kritik posúď, či ten liek naozaj lieči a či drží.\n"
         f"2. NÁLEZY AUDITORA:\n{findings_block}\n"
         f"   NAVRHNUTÁ OPRAVA (proposed_fix):\n   {proposed_fix}\n"
-        "3. KRITICKÝ KONTEXT — MODEL OPRÁVNENÍ OPRAVÁRA: opravné kolá bežia BEZ DOZORU v móde "
-        "`bypassPermissions` / `full_auto`. Opravár (AI Agent) má plné práva a NIKTO nad ním nestojí. Preto "
-        "oprava, ktorej bezpečnosť stojí na nástroji, ktorý si opravár SÁM vie vypnúť, NIE JE hranica.\n"
-        "4. ANTI-VZORY FALOŠNEJ HRANICE (ak návrh sedí na niektorý → `narrow` alebo `reject`):\n"
-        "   a) git pre-commit / pre-push hook ako hranica — nedozorovaný agent ho obíde cez `git push "
-        "--no-verify` / `git commit --no-verify`. Falošná hranica.\n"
-        "   b) client-side / advisory / „varovací“ guard namiesto enforced-by-construction defaultu — čo nie "
-        "je vynútené konštrukciou (default hodnota, typ, DB-constraint, capability), agent obíde.\n"
-        "   c) oprava SYMPTÓMU namiesto PRÍČINY — zamaskuje prejav, koreň ostáva.\n"
-        "   d) „self-confirming“ test, ktorý len ZAZELENÁ smoke namiesto reálneho preukázania invariantu "
-        "(negatívny test chýba).\n"
-        "5. ROZHODUJÚCA OTÁZKA: Je navrhnutá hranica VYNÚTENÁ KONŠTRUKCIOU (enforced-by-construction default, "
-        "ktorý nedozorovaný full_auto agent NEVIE obísť), alebo len hook/guard, ktorý obíde? Ak vieš lepší, "
-        "skutočne vynútený default, daj ho do `corrected_scope`.\n"
-        "6. Vráť verdikt:\n"
+        "3. "
+        + _FAKE_BOUNDARY_ANTIPATTERNS
+        + "\n4. Ak návrh sedí na niektorý anti-vzor → `narrow` alebo `reject`. Ak vieš lepší, skutočne vynútený "
+        "enforced-by-construction default, daj ho do `corrected_scope`.\n"
+        "5. Vráť verdikt:\n"
         "   - `accept` — oprava je reálna, vynútená konštrukciou, lieči príčinu.\n"
         "   - `narrow` — v jadre správna, ale rozsah treba zúžiť/opraviť; napíš opravený rozsah do "
         "`corrected_scope`.\n"
