@@ -100,10 +100,16 @@ interface WhosUpProps {
   activeAgent?: PipelineActor | null;
   agentSessions?: AgentSession[];
   currentTask?: { number: number; title: string } | null;
+  // CR-V2-056: the board's LIVE-computed verified provenance. 'sha_drift' = the recorded Verifikácia PASS is
+  // stale (the code moved past the verified commit) — we surface a warning so the screen reflects reality, not
+  // a frozen green PASS.
+  verifiedProvenance?: string;
 }
 
-export function WhosUp({ state, activeAgent = null, agentSessions, currentTask }: WhosUpProps) {
-  if (!state || state.status === "done") return null;
+export function WhosUp({ state, activeAgent = null, agentSessions, currentTask, verifiedProvenance }: WhosUpProps) {
+  const drifted = verifiedProvenance === "sha_drift";
+  // A done build normally hides this line — but a DRIFTED done build still surfaces the stale-PASS warning.
+  if (!state || (state.status === "done" && !drifted)) return null;
   const liveness: Partial<Record<PipelineActor, AgentSession["status"]>> = {};
   for (const s of agentSessions ?? []) liveness[s.role] = s.status;
 
@@ -130,11 +136,21 @@ export function WhosUp({ state, activeAgent = null, agentSessions, currentTask }
         Na rade:
         <span className={`font-medium ${TONE_TEXT[tone]}`}>{label}</span>
       </span>
-      {stale && (
-        <span className="text-[10px] text-[var(--color-state-warning-fg)]" title="Session bez aktivity > 30 min">
-          ⚠ session nečinná
-        </span>
-      )}
+      <span className="flex items-center gap-2">
+        {drifted && (
+          <span
+            className="text-[10px] font-medium text-[var(--color-state-warning-fg)]"
+            title="Overenie je zastarané: kód sa pohol za overený commit (HEAD sa zmenil). Táto verzia NIE je overená voči aktuálnemu kódu — over ju znova."
+          >
+            ⚠ overenie zastarané (kód sa pohol)
+          </span>
+        )}
+        {stale && (
+          <span className="text-[10px] text-[var(--color-state-warning-fg)]" title="Session bez aktivity > 30 min">
+            ⚠ session nečinná
+          </span>
+        )}
+      </span>
     </div>
   );
 }

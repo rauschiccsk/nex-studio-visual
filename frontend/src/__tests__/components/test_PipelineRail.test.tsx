@@ -106,4 +106,21 @@ describe("WhosUp — who's-up status", () => {
     );
     expect(screen.getByText(/session nečinná/)).toBeInTheDocument();
   });
+
+  // CR-V2-056: the board computes verified LIVE; 'sha_drift' means the recorded PASS is stale (HEAD moved
+  // past the verified commit) — the screen must reflect reality, not a frozen green.
+  it("surfaces a stale-PASS warning when the verified state drifted (HEAD moved)", () => {
+    render(<WhosUp state={mkState("awaiting_manazer")} verifiedProvenance="sha_drift" />);
+    expect(screen.getByText(/overenie zastarané/i)).toBeInTheDocument();
+  });
+
+  it("surfaces the drift warning even on a done build (which otherwise renders nothing)", () => {
+    render(<WhosUp state={mkState("done", { current_stage: "done" })} verifiedProvenance="sha_drift" />);
+    expect(screen.getByText(/overenie zastarané/i)).toBeInTheDocument();
+  });
+
+  it("shows no drift warning when verified matches the current HEAD", () => {
+    render(<WhosUp state={mkState("awaiting_manazer")} verifiedProvenance="sha_match" />);
+    expect(screen.queryByText(/overenie zastarané/i)).not.toBeInTheDocument();
+  });
 });

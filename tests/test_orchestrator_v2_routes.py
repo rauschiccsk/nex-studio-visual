@@ -379,3 +379,53 @@ def test_board_offers_schvalit_when_navrh_plan_present(client, db_session):
     db_session.flush()
     actions = client.get(f"/api/v1/pipeline/{version.id}").json()["available_actions"]
     assert "schvalit" in actions
+
+
+def test_board_reflects_live_verified_drift(db_session, monkeypatch):
+    # CR-V2-056: the board computes 'verified' LIVE — a PASS bound to commit X reads 'sha_drift' once HEAD
+    # moves to Y (the board reflects reality, not a frozen PASS the FE shows as green).
+    from backend.api.routes.pipeline import _board
+
+    user = _seed_user(db_session)
+    project = Project(
+        name="P",
+        slug=f"p-{uuid.uuid4().hex[:8]}",
+        type="standard",
+        auth_mode="password",
+        description="d",
+        created_by=user.id,
+    )
+    db_session.add(project)
+    db_session.flush()
+    version = Version(project_id=project.id, version_number="v0.1.0", name="dev")
+    db_session.add(version)
+    db_session.flush()
+    db_session.add(
+        PipelineState(
+            version_id=version.id,
+            flow_type="new_version",
+            current_stage="verifikacia",
+            current_actor="auditor",
+            status="awaiting_manazer",
+            next_action="",
+        )
+    )
+    orchestrator._record_message(
+        db_session,
+        version_id=version.id,
+        stage="verifikacia",
+        author="auditor",
+        recipient="manazer",
+        kind="verdict",
+        content="PASS",
+        payload={"verdict": "PASS", "phase": "verifikacia", "verified_sha": "commit-X"},
+    )
+    db_session.flush()
+
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda _root: "commit-Y")  # HEAD moved past the verified commit
+    drifted = _board(db_session, version.id)
+    assert drifted.verified is False and drifted.verified_provenance == "sha_drift"
+
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda _root: "commit-X")  # HEAD == the verified commit
+    matched = _board(db_session, version.id)
+    assert matched.verified is True and matched.verified_provenance == "sha_match"

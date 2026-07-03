@@ -108,6 +108,12 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         and not orchestrator.navrh_plan_materialized(db, version_id)
     ):
         available_actions = [a for a in available_actions if a != "schvalit"]
+    # CR-V2-056 (reality-anchoring): compute "verified" LIVE from the repo (PASS-bound SHA vs current HEAD) so
+    # the board never shows a frozen PASS — a version whose HEAD drifted past its verified commit reads
+    # 'sha_drift' and the FE flags it. One HEAD read for this single-version view.
+    verified, verified_provenance = (
+        orchestrator.version_verified(db, version_id) if state is not None else (False, "no_pass")
+    )
     return PipelineBoardRead(
         state=PipelineStateRead.model_validate(state) if state is not None else None,
         recent_messages=[PipelineMessageRead.model_validate(m) for m in _recent_messages(db, version_id, limit)],
@@ -116,6 +122,8 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         build_open_findings=build_open_findings,
         current_task=BoardTask(number=ct.number, title=ct.title) if ct is not None else None,
         agent_sessions=[AgentSession(**s) for s in sessions],
+        verified=verified,
+        verified_provenance=verified_provenance,
     )
 
 

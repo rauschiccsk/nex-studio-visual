@@ -95,6 +95,12 @@ export interface PipelineBoard {
   current_task?: { number: number; title: string } | null;
   // Per-agent liveness for the who's-up staleness chips (the two v2 agents). Absent → no indicator.
   agent_sessions?: AgentSession[];
+  // CR-V2-056 (reality-anchoring): is this version VERIFIED right now, COMPUTED live from the repo (the PASS
+  // verdict's bound commit SHA vs the current HEAD), not a stored 'done'. `verified_provenance === 'sha_drift'`
+  // means it WAS verified but the code moved past the verified commit — the board flags a stale-PASS warning
+  // instead of a frozen green. Absent (older board) → no drift indicator.
+  verified?: boolean;
+  verified_provenance?: string;
 }
 
 // ── action requests ──────────────────────────────────────────────────────────

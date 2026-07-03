@@ -124,6 +124,14 @@ class PipelineBoardRead(BaseModel):
     #: Per-agent liveness (idle / active / stale) for the who's-up status — one entry per v2 agent role
     #: (AI Agent / Auditor). An absent field on an older board → the FE renders no staleness indicator.
     agent_sessions: list[AgentSession] = Field(default_factory=list)
+    #: CR-V2-056 (reality-anchoring): is this version VERIFIED *right now*, COMPUTED from the live repo (the
+    #: Verifikácia PASS verdict's bound commit SHA vs the current HEAD) — NOT a stored 'done' snapshot. Lets
+    #: the board reflect reality: a version whose HEAD drifted past its verified commit shows a stale-PASS
+    #: warning instead of a frozen green. ``verified_provenance`` is the reason: ``sha_match`` (verified) /
+    #: ``sha_drift`` (was verified, HEAD moved past it — the frozen PASS the FE flags) / ``unbound`` /
+    #: ``legacy`` / ``repo_unreadable`` / ``no_pass`` (never passed / re-judge pending).
+    verified: bool = False
+    verified_provenance: str = "no_pass"
 
 
 class PipelineActionRequest(BaseModel):

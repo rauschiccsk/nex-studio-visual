@@ -147,6 +147,7 @@ export default function CockpitPage() {
             activeAgent={deriveActiveAgent(board, activity)}
             agentSessions={board.agent_sessions}
             currentTask={board.current_task}
+            verifiedProvenance={board.verified_provenance}
           />
 
           {/* CR-V2-041: the interactive consultation — pinned ABOVE the phase content when the build is
