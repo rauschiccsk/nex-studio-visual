@@ -479,6 +479,9 @@ def test_apply_action_is_sole_mutator_grep_guard():
         # CR-V2-057: + "overit_znovu" ("Over znova" — re-verify a drifted version against the current HEAD).
         # STEP 3 (step3-plan-design.md): + "zostav_plan" ("Zostaviť plán" — compose the task plan from the
         # approved Špecifikácia in the conversation register).
+        # STEP 4 (step4-programovanie-design.md): + "spustit_stavbu" ("Spustiť stavbu" — move a conversation
+        # build priprava→programovanie and run the EXISTING _run_build_round loop; the completion returns to
+        # the rozhovor). NOT advancing (like zostav_plan) — it stays in the conversation register.
         {
             "start",
             "approve_spec",
@@ -492,6 +495,7 @@ def test_apply_action_is_sole_mutator_grep_guard():
             "decide",
             "overit_znovu",
             "zostav_plan",
+            "spustit_stavbu",
         }
     )
     # apply_coordinator_recommendation is REMOVED.

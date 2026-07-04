@@ -432,6 +432,12 @@ _ACTIONS = frozenset(
         # Honest-by-construction like ``approve_spec`` (NOT advancing — it stays in the conversation register,
         # no phase walk); the board post-filters it to conversation + spec-approved + plan-not-materialized.
         "zostav_plan",
+        # STEP 4 (step4-programovanie-design.md MD-A=A): "Spustiť stavbu" — in a conversation build, AFTER the
+        # task plan is materialized, MOVE ``current_stage`` priprava→programovanie (mode stays 'conversation')
+        # and dispatch the EXISTING ``_run_build_round`` self-checking loop VERBATIM (routed by stage). NOT
+        # advancing (it stays in the conversation register — the completion tail returns to priprava, no phase
+        # walk); the board post-filters it to conversation + spec-approved + plan-materialized + NOT build-started.
+        "spustit_stavbu",
     }
 )
 # Actions that act on / advance past an agent's output — only valid once the agent has SETTLED
@@ -510,6 +516,10 @@ def determine_available_actions(state: PipelineState) -> set[str]:
         # ``schvalit`` at Návrh). The finer DB preconditions (conversation build + spec approved + plan not
         # yet materialized) are the board route's POST-FILTER; ``apply_action`` enforces them authoritatively.
         actions.add("zostav_plan")
+        # STEP 4 (step4-programovanie-design.md MD-A): "Spustiť stavbu" — offered UNCONDITIONALLY here too
+        # (state-only). The finer DB preconditions (conversation + spec approved + plan materialized + NOT
+        # build-started) are the board route's POST-FILTER; ``apply_action`` enforces them authoritatively.
+        actions.add("spustit_stavbu")
     elif stage in ("navrh", "programovanie"):
         # The dial-governed schvaľovacie body after Návrh / Programovanie — ``schvalit`` advances to the
         # next phase. (Whether the build HALTED here at all is the dial's call; once settled, it's offered.)
@@ -551,6 +561,27 @@ def navrh_plan_materialized(db: Session, version_id: uuid.UUID) -> bool:
             .join(Feat, Task.feat_id == Feat.id)
             .join(Epic, Feat.epic_id == Epic.id)
             .where(Epic.version_id == version_id)
+            .limit(1)
+        ).first()
+        is not None
+    )
+
+
+def _build_started(db: Session, version_id: uuid.UUID) -> bool:
+    """True iff the Programovanie build has BEGUN for this version — at least one ``Task`` has advanced past
+    ``todo`` (``in_progress`` / ``done`` / ``failed``) (STEP 4, step4-programovanie-design.md MD-A).
+
+    Distinguishes a freshly materialized plan (every Task ``todo`` → "Spustiť stavbu" is still offerable)
+    from a build already in flight or complete (some Task moved → the trigger is spent; the Manažér resumes
+    a paused/interrupted build via "Pokračovať", never a second "Spustiť stavbu"). Positive existence count,
+    the mirror of :func:`navrh_plan_materialized`; gates the ``spustit_stavbu`` board post-filter AND the
+    authoritative ``apply_action`` guard so a stale board / forged call can never re-kick a running build."""
+    return (
+        db.execute(
+            select(Task.id)
+            .join(Feat, Task.feat_id == Feat.id)
+            .join(Epic, Feat.epic_id == Epic.id)
+            .where(Epic.version_id == version_id, Task.status != "todo")
             .limit(1)
         ).first()
         is not None
@@ -2223,8 +2254,11 @@ async def drain_relay_turn(
     # through the PHASE AUTOMATON (``run_dispatch`` → ``_persist_priprava_spec`` / ``_settle_phase_boundary``),
     # leaking spec-persistence + phase-advance semantics into the conversation — the exact automaton the
     # spine REPLACES. A conversation build drains through the non-phase conversation loop; everything else
-    # keeps the phase automaton.
-    if state.mode == "conversation":
+    # keeps the phase automaton. STEP 4 (step4-programovanie-design.md MD-A): a conversation build that is
+    # MID-BUILD (``current_stage == 'programovanie'``) drains through ``run_dispatch`` → ``_run_build_round``
+    # (the EXISTING build loop, routed by stage) so a Manažér message during the build seeds the resumed task
+    # exactly like a legacy build — the conversation loop only owns the priprava register (stage != programovanie).
+    if state.mode == "conversation" and state.current_stage != "programovanie":
         return await run_conversation_turn(db, version_id, on_event, directive, on_message=on_message)
     return await run_dispatch(db, version_id, on_event, directive, on_message=on_message)
 
@@ -6251,6 +6285,34 @@ async def _run_build_round(
 
         task = task_service.get_next_todo_task(db, version_id)
         if task is None:
+            # STEP 4 (step4-programovanie-design.md MD-B): a CONVERSATION build's Programovanie has NO phase to
+            # advance into — the build ran INSIDE the 1:1 rozhovor. SKIP the dial-settle entirely (no
+            # ``_settle_phase_boundary``, no ``_next_stage``, no Auditor verdict — kontrola is STEP 5), RETURN
+            # ``current_stage`` to the conversation register (``priprava``, so the next turn routes back to
+            # ``run_conversation_turn``), settle ``awaiting_manazer`` and record ONE plain system→manazer
+            # completion notification. The notification rides ``stage='programovanie'`` (its author is the
+            # build loop — it brackets the build log with the ``▶ Úloha`` starts + task summaries, all
+            # ``programovanie``); the ``current_stage`` column governs ROUTING, independent of where the event
+            # is LOGGED. The LEGACY phase automaton (``mode`` NULL) keeps its dial-governed settle
+            # BYTE-IDENTICAL below.
+            if state.mode == "conversation":
+                state.current_stage = "priprava"
+                state.status = "awaiting_manazer"
+                state.next_action = "Programovanie dokončené — pokračujeme v rozhovore."
+                done_msg = _record_message(
+                    db,
+                    version_id=version_id,
+                    stage="programovanie",
+                    author="system",
+                    recipient="manazer",
+                    kind="notification",
+                    content="Programovanie dokončené — pokračujeme v rozhovore.",
+                    payload={"phase": "programovanie", "programming_complete": True},
+                )
+                if on_message is not None:
+                    await on_message(done_msg)
+                db.flush()
+                return state
             # No todo task remains → the phase produced its output. Apply the Miera autonómie dial at the
             # Programovanie schvaľovací bod (SHARED dial-settle, CR-V2-010, inherited here): auto-continue to
             # Verifikácia (``plna`` / fast_fix) or STOP ``awaiting_manazer`` for the Manažér to review. NO
@@ -6637,7 +6699,53 @@ async def apply_action(
         _begin_dispatch(db, state)
         return state
 
+    if action == "spustit_stavbu":
+        # STEP 4 (step4-programovanie-design.md MD-A=A): "Spustiť stavbu" — the conversation build starts
+        # programming the materialized plan. AUTHORITATIVE gate (the board post-filter merely hides the
+        # button): valid ONLY in a conversation build whose spec is approved, whose plan is materialized, and
+        # whose build has NOT yet started (a re-click after the build began is the Pokračovať/Uprav path).
+        if state.mode != "conversation":
+            raise OrchestratorError("Spustiť stavbu je platné len v rozhovorovom režime.")
+        if not spec_approved(db, version_id):
+            raise OrchestratorError("Spustiť stavbu je platné až po schválení Špecifikácie.")
+        if not navrh_plan_materialized(db, version_id):
+            raise OrchestratorError("Spustiť stavbu je platné až po zostavení plánu úloh.")
+        if _build_started(db, version_id):
+            raise OrchestratorError("Stavba už beží alebo je dokončená — pokračuj cez „Pokračovať v stavbe“.")
+        # Durable audit breadcrumb (MINOR — NOT the trigger): a manazer→ai_agent kind='directive' start_build
+        # marker for the audit trail. The ACTUAL trigger + restart-safety is the durable current_stage=
+        # 'programovanie' + _begin_dispatch (the runner routes on STAGE via run_dispatch→_run_build_round);
+        # NOTHING reads this marker (_run_build_round starts from get_next_todo_task). Rides the programovanie
+        # stage it kicks off — the same "record the kickoff at the phase being entered" shape as ``start``.
+        _record_message(
+            db,
+            version_id=version_id,
+            stage="programovanie",
+            author="manazer",
+            recipient="ai_agent",
+            kind="directive",
+            content="Spustiť stavbu — naprogramuj plán úloh úlohu po úlohe.",
+            payload={"phase": "programovanie", "start_build": True},
+        )
+        # MOVE the phase (mode STAYS 'conversation'): the runner then routes this build through run_dispatch →
+        # _run_build_round (the EXISTING self-checking loop, UNCHANGED) because current_stage == 'programovanie'.
+        state.current_stage = "programovanie"
+        db.flush()
+        _begin_dispatch(db, state)
+        return state
+
     if action == "schvalit":
+        # STEP 4 (step4-programovanie-design.md MAJOR): a CONVERSATION build NEVER walks the phase automaton —
+        # after Programovanie it returns to the rozhovor (MD-B completion tail), and kontrola is the separate
+        # STEP 5. So ``schvalit`` (the legacy phase-gate sign-off) is INVALID for a conversation build; raise
+        # here BEFORE the legacy stage-guard below. Without this belt, a settled conversation Programovanie
+        # (``current_stage='programovanie'``) would accept ``schvalit`` and _next_stage it into the Auditor's
+        # Verifikácia — corrupting the conversation build into the phase automaton. The board post-filter drops
+        # ``schvalit`` for conversation too (two-layer belt, mirroring ``zostav_plan``).
+        if state.mode == "conversation":
+            raise OrchestratorError(
+                "Schváliť fázu nie je v rozhovorovom režime — po programovaní pokračujeme v rozhovore."
+            )
         # "Schváliť" — the Manažér ratifies the current phase's output at a dial-governed schvaľovací bod
         # (after Návrh / Programovanie / Verifikácia) → advance to the next phase / Hotovo. The dial decides
         # whether the build STOPPED here for the Manažér at all; once it has, this signs it off.

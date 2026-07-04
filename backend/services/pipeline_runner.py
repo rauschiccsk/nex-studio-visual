@@ -188,8 +188,13 @@ async def _run(version_id: uuid.UUID, directive: str | None = None) -> None:
             # conversation loop ALWAYS settles (awaiting_manazer / blocked), so there is no auto-chain to
             # run (``chain_limit`` below stays 0 by the ``agent_working`` guard); the relay-drain loop is
             # KEPT for both — it is the "message-lands-after-the-turn" rhythm, and ``drain_relay_turn`` is
-            # itself mode-aware. NULL mode = the phase automaton, UNCHANGED.
-            if pre is not None and pre.mode == "conversation":
+            # itself mode-aware. NULL mode = the phase automaton, UNCHANGED. STEP 4
+            # (step4-programovanie-design.md MD-A): a conversation build that is MID-BUILD
+            # (``current_stage == 'programovanie'``, set by ``spustit_stavbu``) routes through
+            # ``run_dispatch`` → ``_run_build_round`` (the EXISTING self-checking loop, reused VERBATIM —
+            # routed by STAGE) instead of the conversation loop; the completion tail (MD-B) returns the stage
+            # to ``priprava``, so subsequent turns route back to ``run_conversation_turn``.
+            if pre is not None and pre.mode == "conversation" and pre.current_stage != "programovanie":
                 state = await orchestrator.run_conversation_turn(
                     db, version_id, on_event, directive, on_message=on_message
                 )

@@ -124,6 +124,35 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         )
     ):
         available_actions = [a for a in available_actions if a != "zostav_plan"]
+    # STEP 4 (step4-programovanie-design.md MD-A): POST-FILTER ``spustit_stavbu`` (mirror of the zostav_plan
+    # filter above) — the state-only ``determine_available_actions`` offers it unconditionally at ``priprava``;
+    # drop it here unless this is a conversation build whose Špecifikácia is approved, whose task plan is
+    # MATERIALIZED, and whose build has NOT yet started. ``apply_action`` enforces the same rule
+    # authoritatively; this hides the dead button.
+    if (
+        state is not None
+        and "spustit_stavbu" in available_actions
+        and not (
+            state.mode == "conversation"
+            and spec_approved
+            and orchestrator.navrh_plan_materialized(db, version_id)
+            and not orchestrator._build_started(db, version_id)
+        )
+    ):
+        available_actions = [a for a in available_actions if a != "spustit_stavbu"]
+    # STEP 4 (step4-programovanie-design.md MAJOR): a conversation build NEVER walks the phase automaton (its
+    # Programovanie returns to the rozhovor; kontrola is STEP 5), so the legacy phase-gate verb ``schvalit``
+    # (and, defensively, the Auditor ``verdict``) must never be OFFERED on it — DROP them when
+    # mode=='conversation' (two-layer belt with the ``apply_action('schvalit')`` raise, mirroring zostav_plan).
+    # A legacy (mode NULL) build is UNTOUCHED.
+    if state is not None and state.mode == "conversation":
+        available_actions = [a for a in available_actions if a not in ("schvalit", "verdict")]
+    # STEP 4 (step4-programovanie-design.md MINOR): once a conversation build's Špecifikácia is approved it is
+    # FROZEN (STEP 2), so ``approve_spec`` is spent — DROP it so the settled-priprava board never re-offers a
+    # phantom "Schváliť špecifikáciu". Still offered PRE-approval (the real end-Príprava stop). Mirrors the
+    # zostav_plan post-filter and cleans a pre-existing latent re-offer on the conversation register.
+    if state is not None and "approve_spec" in available_actions and state.mode == "conversation" and spec_approved:
+        available_actions = [a for a in available_actions if a != "approve_spec"]
     # CR-V2-056 (reality-anchoring): compute "verified" LIVE from the repo (PASS-bound SHA vs current HEAD) so
     # the board never shows a frozen PASS — a version whose HEAD drifted past its verified commit reads
     # 'sha_drift' and the FE flags it. One HEAD read for this single-version view.
