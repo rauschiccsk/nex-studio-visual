@@ -132,6 +132,12 @@ class PipelineBoardRead(BaseModel):
     #: ``legacy`` / ``repo_unreadable`` / ``no_pass`` (never passed / re-judge pending).
     verified: bool = False
     verified_provenance: str = "no_pass"
+    #: Durable "the Špecifikácia was frozen" flag (STEP 2 follow-up): TRUE iff at least one
+    #: ``kind='approval'`` message exists for this version. The FE Špecifikácia badge reads THIS
+    #: (not the truncated ``recent_messages`` tail, and not ``available_actions`` — ``approve_spec``
+    #: stays offerable after approval). Correct for BOTH conversation and legacy builds; additive,
+    #: no migration. Defaults False so an absent field on an older board never reads as approved.
+    spec_approved: bool = False
 
 
 class PipelineActionRequest(BaseModel):

@@ -325,3 +325,79 @@ def test_conversation_directive_names_spec_and_zadanie_paths(db_session) -> None
     # Phase-free: no gate / stage-advance automaton language leaks into the conversation brief.
     assert "gate_report" not in directive
     assert "Schváliť špecifikáciu" not in directive
+
+
+# ---------------------------------------------------------------------------
+# (viii) Durable board signal — board.spec_approved (STEP 2 follow-up)
+# ---------------------------------------------------------------------------
+#
+# The Špecifikácia badge ("Schválená" / "Rozpracované") needs a DURABLE flag, not the truncated
+# recent_messages tail (and approve_spec STAYS in available_actions after approval, so that can't
+# drive it either). ``PipelineBoardRead.spec_approved`` is TRUE iff ≥1 ``kind='approval'`` message
+# exists for the version — correct for BOTH conversation and legacy builds, additive, no migration.
+
+
+def _add_approval(db, version: Version) -> None:
+    """Append a bare ``kind='approval'`` message — the durable "spec frozen" signal the board counts."""
+    db.add(
+        PipelineMessage(
+            version_id=version.id,
+            stage="priprava",
+            author="manazer",
+            recipient="ai_agent",
+            kind="approval",
+            content="Špecifikácia schválená.",
+        )
+    )
+    db.flush()
+
+
+def test_board_spec_approved_false_when_no_approval(db_session, tmp_path) -> None:
+    from backend.api.routes.pipeline import _board
+
+    creator = _seed_user(db_session)
+    project = _seed_project(db_session, creator=creator, source_path=str(tmp_path))
+    version = _seed_version(db_session, project)
+    _seed_state(db_session, version, mode="conversation")
+
+    board = _board(db_session, version.id)
+    assert board.spec_approved is False
+
+
+def test_board_spec_approved_true_after_approval(db_session, tmp_path) -> None:
+    from backend.api.routes.pipeline import _board
+
+    creator = _seed_user(db_session)
+    project = _seed_project(db_session, creator=creator, source_path=str(tmp_path))
+    version = _seed_version(db_session, project)
+    _seed_state(db_session, version, mode="conversation")
+    _add_approval(db_session, version)
+
+    board = _board(db_session, version.id)
+    assert board.spec_approved is True
+
+
+def test_board_spec_approved_true_for_legacy_build(db_session, tmp_path) -> None:
+    """Correct for a legacy (``mode`` NULL) build too — the signal keys on the approval message, not mode."""
+    from backend.api.routes.pipeline import _board
+
+    creator = _seed_user(db_session)
+    project = _seed_project(db_session, creator=creator, source_path=str(tmp_path))
+    version = _seed_version(db_session, project)
+    _seed_state(db_session, version, mode=None)
+    _add_approval(db_session, version)
+
+    board = _board(db_session, version.id)
+    assert board.spec_approved is True
+
+
+def test_board_spec_approved_defaults_false_without_state(db_session, tmp_path) -> None:
+    """A version whose pipeline never started (no state, no messages) → honest False, no crash."""
+    from backend.api.routes.pipeline import _board
+
+    creator = _seed_user(db_session)
+    project = _seed_project(db_session, creator=creator, source_path=str(tmp_path))
+    version = _seed_version(db_session, project)
+
+    board = _board(db_session, version.id)
+    assert board.spec_approved is False

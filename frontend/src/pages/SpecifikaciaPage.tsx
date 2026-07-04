@@ -18,6 +18,7 @@ import { FileText, FolderOpen } from "lucide-react";
 
 import { useActiveContextStore } from "@/store/activeContextStore";
 import { getProjectSpecContent } from "@/services/api/projectSpecs";
+import { getPipelineBoardApi } from "@/services/api/pipeline";
 import { SpecMarkdown } from "@/components/markdown/SpecMarkdown";
 
 export default function SpecifikaciaPage() {
@@ -27,11 +28,15 @@ export default function SpecifikaciaPage() {
 
   const slug = selectedProject?.slug;
   const versionNumber = selectedVersion?.versionNumber;
+  const versionId = selectedVersion?.versionId;
 
   // Read the ONE on-disk Špecifikácia (docs/specs/versions/v<N>/specification.md) — the same file the
   // Príprava artifact reads (PhaseArtifact.tsx). Re-fetched when the pinned project / version changes.
   const [body, setBody] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Durable "Schválená" signal from the board (spine STEP 2 follow-up) — TRUE once the Špecifikácia was
+  // frozen (≥1 kind='approval' message). Read from the board, NOT the truncated recent_messages tail.
+  const [specApproved, setSpecApproved] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -53,6 +58,32 @@ export default function SpecifikaciaPage() {
       cancelled = true;
     };
   }, [slug, versionNumber]);
+
+  // Durable approval flag — fetched from the pipeline board (spec_approved). Absent board / no pipeline yet
+  // → stays false (honest "not approved"). Keyed on the pinned version so it refreshes on re-pin.
+  useEffect(() => {
+    let cancelled = false;
+    setSpecApproved(false);
+    if (!versionId) return;
+    getPipelineBoardApi(versionId)
+      .then((board) => {
+        if (!cancelled) setSpecApproved(board.spec_approved === true);
+      })
+      .catch(() => {
+        /* no pipeline / unreachable → leave false (never falsely claim "Schválená") */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [versionId]);
+
+  // Three honest badge states: approved → "Schválená"; a spec exists but isn't frozen → "Rozpracované";
+  // no spec on disk yet → no badge. spec_approved implies a frozen spec, so it takes precedence.
+  const specBadge: "schvalena" | "rozpracovane" | null = specApproved
+    ? "schvalena"
+    : body
+      ? "rozpracovane"
+      : null;
 
   if (!selectedProject) {
     return (
@@ -85,6 +116,16 @@ export default function SpecifikaciaPage() {
             <span className="text-[var(--color-text-muted)]"> · {selectedVersion.versionNumber}</span>
           )}
         </span>
+        {specBadge === "schvalena" && (
+          <span className="ml-auto flex-shrink-0 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+            Schválená
+          </span>
+        )}
+        {specBadge === "rozpracovane" && (
+          <span className="ml-auto flex-shrink-0 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+            Rozpracované
+          </span>
+        )}
       </div>
 
       {body ? (

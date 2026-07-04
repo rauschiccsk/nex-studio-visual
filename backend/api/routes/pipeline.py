@@ -114,6 +114,18 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
     verified, verified_provenance = (
         orchestrator.version_verified(db, version_id) if state is not None else (False, "no_pass")
     )
+    # Durable spec-approval signal (STEP 2 follow-up): the FE Špecifikácia badge needs a persistent
+    # "frozen" flag, not the truncated recent_messages tail (nor available_actions — approve_spec stays
+    # offerable after approval). TRUE iff ≥1 kind='approval' message exists — one indexed exists probe on
+    # the (version_id, kind) columns (version_id is indexed), correct for both conversation + legacy builds.
+    spec_approved = (
+        db.execute(
+            select(PipelineMessage.id)
+            .where(PipelineMessage.version_id == version_id, PipelineMessage.kind == "approval")
+            .limit(1)
+        ).scalar_one_or_none()
+        is not None
+    )
     return PipelineBoardRead(
         state=PipelineStateRead.model_validate(state) if state is not None else None,
         recent_messages=[PipelineMessageRead.model_validate(m) for m in _recent_messages(db, version_id, limit)],
@@ -124,6 +136,7 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         agent_sessions=[AgentSession(**s) for s in sessions],
         verified=verified,
         verified_provenance=verified_provenance,
+        spec_approved=spec_approved,
     )
 
 

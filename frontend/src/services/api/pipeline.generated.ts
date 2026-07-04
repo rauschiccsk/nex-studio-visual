@@ -1883,7 +1883,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Read Zadanie
+         * @description Return a version's saved Zadanie — the ``customer-requirements.md`` content (``""`` if not yet created).
+         *
+         *     The version-page editor loads FROM HERE: the saved file is the source of truth, NOT ``Version.description``
+         *     (2026-06-30 fix — loading from ``description`` showed an empty editor on re-open even though the Zadanie was
+         *     saved, and never reflected a Zadanie edited directly on disk). **404** — the version/project does not exist.
+         */
+        get: operations["read_zadanie_api_v1_versions__version_id__zadanie_get"];
         /**
          * Write Zadanie
          * @description Save a version's free-text Zadanie to ``customer-requirements.md`` (CR-V2-024, design §4.3).
@@ -3320,7 +3328,22 @@ export interface components {
             current_task?: components["schemas"]["BoardTask"] | null;
             /** Recent Messages */
             recent_messages?: components["schemas"]["PipelineMessageRead"][];
+            /**
+             * Spec Approved
+             * @default false
+             */
+            spec_approved: boolean;
             state?: components["schemas"]["PipelineStateRead"] | null;
+            /**
+             * Verified
+             * @default false
+             */
+            verified: boolean;
+            /**
+             * Verified Provenance
+             * @default no_pass
+             */
+            verified_provenance: string;
         };
         /**
          * PipelineMessageRead
@@ -4703,6 +4726,14 @@ export interface components {
             }[];
             /** Task Count */
             task_count: number;
+        };
+        /**
+         * _ZadanieReadResponse
+         * @description Response for ``GET /versions/{version_id}/zadanie``.
+         */
+        _ZadanieReadResponse: {
+            /** Content */
+            content: string;
         };
         /**
          * _ZadanieWrite
@@ -8228,6 +8259,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["_TaskPlanResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_zadanie_api_v1_versions__version_id__zadanie_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["_ZadanieReadResponse"];
                 };
             };
             /** @description Validation Error */

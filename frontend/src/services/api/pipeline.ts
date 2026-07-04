@@ -101,6 +101,11 @@ export interface PipelineBoard {
   // instead of a frozen green. Absent (older board) → no drift indicator.
   verified?: boolean;
   verified_provenance?: string;
+  // Durable "the Špecifikácia was frozen" flag (STEP 2 follow-up): TRUE iff ≥1 kind='approval' message
+  // exists for this version. The Špecifikácia badge reads THIS (durable) — not the truncated
+  // recent_messages tail, and not available_actions (approve_spec stays offerable after approval). Absent
+  // on an older board → treated as not approved.
+  spec_approved?: boolean;
 }
 
 // ── action requests ──────────────────────────────────────────────────────────
