@@ -34,10 +34,11 @@ const IconVersions = () => <NavIcon glyph="🌿" />;
 const IconBacklog = () => <NavIcon glyph="📋" />;
 const IconMetrics = () => <NavIcon glyph="📊" />;
 
-// v2 build surfaces: AI Agent = the doer's live terminal (was AG Koordinátor);
-// Vývoj = the 4-phase build board (was Orchestrácia).
-const IconAiAgent = () => <NavIcon glyph="👨‍💻" />;
-const IconVyvoj = () => <NavIcon glyph="🔄" />;
+// v2 spine STEP 1 (Chrbtica): the Riadiace centrum = the ONE conversation-centred
+// build surface (replaces the AI Agent terminal + the 4-phase Vývoj board);
+// Špecifikácia = the read-only spec shell.
+const IconRiadiace = () => <NavIcon glyph="🎛️" />;
+const IconSpec = () => <NavIcon glyph="📄" />;
 
 // v2 per-customer deploy surfaces (pages land in Milestone G — CR-V2-025/027).
 const IconCustomers = () => <NavIcon glyph="👥" />;
@@ -199,31 +200,29 @@ export default function Sidebar() {
         disabled={!hasProject}
         disabledTitle="Vyber projekt pre prístup k zásobníku"
       />
-      {/* v2 (CR-V2-019): the AI Agent — the doer's live Claude Code session (was AG Koordinátor).
-          Project-scoped per design §4.1 — disabled when no project is pinned. Route /ai-agent
-          (renamed from /coordinator, CR-V2-019 OQ-7); the event-rendered AI Agent chrome (transcript +
-          4-phase strip + relay + Helpers panel) landed in CR-V2-022. */}
+      {/* v2 spine STEP 1 (Chrbtica): the Riadiace centrum — the ONE conversation-centred build
+          surface that replaces the AI Agent terminal + the 4-phase Vývoj board. Project- +
+          version-scoped per design §4.1 — disabled when no project is pinned. The "čaká na Manažéra"
+          attention dot moves here (it fired on Vývoj before). */}
       <NavItem
-        icon={<IconAiAgent />}
-        label="AI Agent"
-        active={hasProject ? isActive("/ai-agent") : false}
-        onClick={() => navigate(hasProject ? "/ai-agent" : projectsFallback)}
+        icon={<IconRiadiace />}
+        label="Riadiace centrum"
+        active={hasProject ? isActive("/riadiace-centrum") : false}
+        onClick={() => navigate(hasProject ? "/riadiace-centrum" : projectsFallback)}
         disabled={!hasProject}
-        disabledTitle="Vyber projekt pre prístup k AI Agentovi"
-      />
-      {/* v2 (CR-V2-019): Vývoj — the 4-phase build board (was Orchestrácia). Version-scoped; the
-          board reads the active-project/version pin. Route /vyvoj (renamed from /cockpit). The
-          "čaká na Manažéra" attention dot stays here. The horizontal 4-phase board lands in
-          CR-V2-021. */}
-      <NavItem
-        icon={<IconVyvoj />}
-        label="Vývoj"
-        active={hasProject ? isActive("/vyvoj") : false}
-        onClick={() => navigate(hasProject ? "/vyvoj" : projectsFallback)}
-        disabled={!hasProject}
-        disabledTitle="Vyber projekt pre prístup k Vývoju"
+        disabledTitle="Vyber projekt pre prístup k Riadiacemu centru"
         badge={hasProject && cockpitAwaiting}
         badgeLabel="čaká na Manažéra"
+      />
+      {/* v2 spine STEP 1: Špecifikácia — the read-only spec shell (the agreed .md is wired in a
+          later step). Project-scoped — disabled (not hidden) when no project is pinned. */}
+      <NavItem
+        icon={<IconSpec />}
+        label="Špecifikácia"
+        active={hasProject ? isActive("/specifikacia") : false}
+        onClick={() => navigate(hasProject ? "/specifikacia" : projectsFallback)}
+        disabled={!hasProject}
+        disabledTitle="Vyber projekt pre prístup k Špecifikácii"
       />
       {/* v2 (CR-V2-019): per-customer deploy surfaces (design §3 / §4.1). Nav items are added now;
           their PAGES land in Milestone G (Zákazníci = CR-V2-025, UAT/PROD = CR-V2-027). Until then

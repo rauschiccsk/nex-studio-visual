@@ -16,8 +16,8 @@ import BacklogPage from "./pages/BacklogPage";
 import MetricsPage from "./pages/MetricsPage";
 import KnowledgeBasePage from "./pages/KnowledgeBasePage";
 import UpdatesPage from "./pages/UpdatesPage";
-import AgentTerminalPage from "./pages/AgentTerminalPage";
-import CockpitPage from "./pages/CockpitPage";
+import RiadiaceCentrumPage from "./pages/RiadiaceCentrumPage";
+import SpecifikaciaPage from "./pages/SpecifikaciaPage";
 import CredentialsPage from "./pages/CredentialsPage";
 import CustomersPage from "./pages/CustomersPage";
 import UatPage from "./pages/UatPage";
@@ -54,21 +54,17 @@ function App() {
                 Návrh (CR-V2-021); /kb remains for ICC-wide knowledge. The
                 wildcard route below redirects any stale /project-specs link
                 to the dashboard. */}
-            {/* v2 (CR-V2-019, OQ-7): the AI Agent live terminal route renamed
-                /coordinator → /ai-agent (matches the new vocabulary). CR-V2-022
-                landed the event-rendered AI Agent chrome (transcript + 4-phase
-                strip + relay + Helpers panel) and re-keyed the AgentRole store
-                slot "coordinator" → "ai-agent" (the backend wire/charter slug,
-                so sessions are not broken). The old /coordinator path redirects
-                so live links/bookmarks survive. CR-NS-065: the standalone
-                /dialogue page was retired. */}
-            <Route path="ai-agent" element={<AgentTerminalPage role="ai-agent" />} />
+            {/* v2 spine STEP 1 (Chrbtica): the Riadiace centrum is ONE conversation-centred
+                screen that replaces the CockpitPage (Vývoj board) + AgentTerminalPage (AI Agent
+                tab). The retired /vyvoj + /ai-agent routes redirect here so stale bookmarks
+                survive; /cockpit + /coordinator keep their existing hop (→ /vyvoj / → /ai-agent,
+                which redirect onward to /riadiace-centrum). Špecifikácia is the read-only spec
+                shell (real .md wired in a later step). */}
+            <Route path="riadiace-centrum" element={<RiadiaceCentrumPage />} />
+            <Route path="specifikacia" element={<SpecifikaciaPage />} />
+            <Route path="ai-agent" element={<Navigate to="/riadiace-centrum" replace />} />
             <Route path="coordinator" element={<Navigate to="/ai-agent" replace />} />
-            {/* v2 (CR-V2-019, OQ-7): the build board route renamed
-                /cockpit → /vyvoj (Orchestrácia → Vývoj). The horizontal
-                4-phase Vývoj board lands in CR-V2-021; CockpitPage is the
-                interim shell. Old /cockpit path redirects. */}
-            <Route path="vyvoj" element={<CockpitPage />} />
+            <Route path="vyvoj" element={<Navigate to="/riadiace-centrum" replace />} />
             <Route path="cockpit" element={<Navigate to="/vyvoj" replace />} />
             {/* v2: per-customer deploy nav surfaces (design §3 / §4.1).
                 Zákazníci = CR-V2-025 (project-scoped registry).

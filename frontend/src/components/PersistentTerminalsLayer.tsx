@@ -44,12 +44,11 @@ import {
 } from "@/store/agentTerminalStore";
 import { useAuthStore } from "@/store/authStore";
 
-function matchActiveRole(pathname: string): AgentRole | null {
-  // E3(a) (CR-NS-039): the AI Agent is the only interactive (break-glass) terminal route.
-  // CR-V2-019 (OQ-7): the route was renamed /coordinator → /ai-agent; the old path now redirects there
-  // (App.tsx). CR-V2-022 re-keyed the store AgentRole to "ai-agent" (the backend wire/charter slug). Match
-  // the live /ai-agent path so the persistent break-glass terminal (WS + xterm scrollback) survives.
-  if (pathname === "/ai-agent") return "ai-agent";
+function matchActiveRole(): AgentRole | null {
+  // v2 spine STEP 1 (Chrbtica): the /ai-agent route retired to a redirect onto /riadiace-centrum (App.tsx),
+  // so the break-glass PTY no longer has a live route to reveal it. matchActiveRole now matches NOTHING — the
+  // terminal layer + store stay mounted (proven debug plumbing intact) but dormant. A future break-glass
+  // entry point can re-key this without resurrecting the retired AI Agent tab.
   return null;
 }
 
@@ -78,7 +77,7 @@ export function PersistentTerminalsLayer() {
   // the BE for an unvisited role stays detached.
   const [visited, setVisited] = useState<Set<AgentRole>>(new Set());
   useEffect(() => {
-    const role = matchActiveRole(location.pathname);
+    const role = matchActiveRole();
     if (role && !visited.has(role)) {
       setVisited(new Set([...visited, role]));
     }
@@ -91,7 +90,7 @@ export function PersistentTerminalsLayer() {
 
   if (!isDirector || !token) return null;
 
-  const activeRole = matchActiveRole(location.pathname);
+  const activeRole = matchActiveRole();
   const entries: Array<[AgentRole, SlotState]> = [["ai-agent", aiAgent]];
 
   return (

@@ -372,7 +372,10 @@ async def _maybe_notify(db, version_id: uuid.UUID, state: PipelineState) -> None
         .where(Version.id == version_id)
     ).one_or_none()
     label = f"{proj_ver[0]} {proj_ver[1]}" if proj_ver else "NEX Studio"
-    link = f"\n{settings.app_public_url.rstrip('/')}/vyvoj" if settings.app_public_url else ""
+    # Spine STEP 1 (adversarial fix): deep-link straight to /riadiace-centrum (the spine page) instead of the
+    # retired /vyvoj route (which now only redirects onward), so the out-of-band nudge lands the away Manažér
+    # on the live conversation, not a bounce.
+    link = f"\n{settings.app_public_url.rstrip('/')}/riadiace-centrum" if settings.app_public_url else ""
     # CR-V2-017 COMMS-5: a Hotovo (``done``) settle is a "build finished" notification, not a "you're up"
     # nudge — distinct copy so an away Manažér knows the autonomous build COMPLETED (vs needing an action).
     # Spine STEP 1: a ``paused`` settle is the token-stop poistka — distinct copy so an away Manažér knows
