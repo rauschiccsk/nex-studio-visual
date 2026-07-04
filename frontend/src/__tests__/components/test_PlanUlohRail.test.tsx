@@ -19,7 +19,7 @@ import "@testing-library/jest-dom/vitest";
 import PlanUlohRail from "@/components/riadiace/PlanUlohRail";
 import { getTaskPlan } from "@/services/api/versions";
 import { postPipelineActionApi } from "@/services/api/pipeline";
-import type { PipelineBoard, PipelineMessage } from "@/services/api/pipeline";
+import type { PipelineBoard, PipelineMessage, PipelineState } from "@/services/api/pipeline";
 import type { TaskPlanResponse } from "@/types/task-plan";
 
 vi.mock("@/services/api/versions", () => ({ getTaskPlan: vi.fn() }));
@@ -80,6 +80,24 @@ const EMPTY_PLAN: TaskPlanResponse = { plan: [], epic_count: 0, feat_count: 0, t
 
 function mkBoard(over: Partial<PipelineBoard> = {}): PipelineBoard {
   return { state: null, recent_messages: [], ...over };
+}
+
+function mkState(over: Partial<PipelineState> = {}): PipelineState {
+  return {
+    id: "s1",
+    version_id: "v1",
+    flow_type: "new_version",
+    current_stage: "programovanie",
+    current_actor: "ai_agent",
+    status: "agent_working",
+    next_action: "",
+    is_regate: false,
+    iteration: 0,
+    block_reason: null,
+    created_at: "2026-07-04T00:00:00Z",
+    updated_at: "2026-07-04T00:00:00Z",
+    ...over,
+  };
 }
 
 function mkMsg(seq: number): PipelineMessage {
@@ -195,5 +213,131 @@ describe("PlanUlohRail — three-layer manager map (STEP 3)", () => {
 
     rerender(<PlanUlohRail versionId="v1" messages={[mkMsg(1)]} board={mkBoard()} onBoard={() => {}} />);
     await waitFor(() => expect(getTaskPlan).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("PlanUlohRail — Programovanie build controls (STEP 4)", () => {
+  beforeEach(() => {
+    vi.mocked(getTaskPlan).mockReset();
+    vi.mocked(postPipelineActionApi).mockReset();
+    vi.mocked(getTaskPlan).mockResolvedValue(PLAN);
+  });
+
+  it("shows the 'Práve robím' banner when board.current_task is present, hides it when null", async () => {
+    const { rerender } = render(
+      <PlanUlohRail
+        versionId="v1"
+        messages={[]}
+        board={mkBoard({
+          current_task: { number: 7, title: "Nastav GL tabuľky" },
+          state: mkState({ status: "agent_working" }),
+        })}
+        onBoard={() => {}}
+      />,
+    );
+    // Banner visible: label + "#N title".
+    expect(await screen.findByText("Práve robím:")).toBeInTheDocument();
+    expect(screen.getByText(/#7 Nastav GL tabuľky/)).toBeInTheDocument();
+
+    // current_task cleared (build finished / left Programovanie) → banner gone.
+    rerender(
+      <PlanUlohRail versionId="v1" messages={[]} board={mkBoard({ current_task: null })} onBoard={() => {}} />,
+    );
+    await waitFor(() => expect(screen.queryByText("Práve robím:")).not.toBeInTheDocument());
+  });
+
+  it("shows 'Spustiť stavbu' ONLY when offered, and fires postPipelineActionApi(spustit_stavbu) → onBoard", async () => {
+    const onBoard = vi.fn();
+    const fresh = mkBoard({ available_actions: [] });
+    vi.mocked(postPipelineActionApi).mockResolvedValue(fresh);
+
+    render(
+      <PlanUlohRail
+        versionId="v1"
+        messages={[]}
+        board={mkBoard({ available_actions: ["spustit_stavbu"] })}
+        onBoard={onBoard}
+      />,
+    );
+
+    const btn = await screen.findByRole("button", { name: /Spustiť stavbu/ });
+    fireEvent.click(btn);
+
+    await waitFor(() => expect(postPipelineActionApi).toHaveBeenCalledWith("v1", { action: "spustit_stavbu" }));
+    await waitFor(() => expect(onBoard).toHaveBeenCalledWith(fresh));
+  });
+
+  it("hides 'Spustiť stavbu' when the backend does not offer it (honest-by-construction)", async () => {
+    render(
+      <PlanUlohRail
+        versionId="v1"
+        messages={[]}
+        board={mkBoard({ available_actions: ["approve_spec"] })}
+        onBoard={() => {}}
+      />,
+    );
+    await screen.findByText(/Základ systému/);
+    expect(screen.queryByRole("button", { name: /Spustiť stavbu/ })).not.toBeInTheDocument();
+  });
+
+  it("shows 'Pokračovať v stavbe' ONLY when offered, and fires postPipelineActionApi(pokracovat) → onBoard", async () => {
+    const onBoard = vi.fn();
+    const fresh = mkBoard({ available_actions: [] });
+    vi.mocked(postPipelineActionApi).mockResolvedValue(fresh);
+
+    render(
+      <PlanUlohRail
+        versionId="v1"
+        messages={[]}
+        board={mkBoard({ available_actions: ["pokracovat"], state: mkState({ status: "paused" }) })}
+        onBoard={onBoard}
+      />,
+    );
+
+    const btn = await screen.findByRole("button", { name: /Pokračovať v stavbe/ });
+    fireEvent.click(btn);
+
+    await waitFor(() => expect(postPipelineActionApi).toHaveBeenCalledWith("v1", { action: "pokracovat" }));
+    await waitFor(() => expect(onBoard).toHaveBeenCalledWith(fresh));
+  });
+
+  it("shows the amber paused note above 'Pokračovať v stavbe' when status is paused, and NOT otherwise", async () => {
+    const { rerender } = render(
+      <PlanUlohRail
+        versionId="v1"
+        messages={[]}
+        board={mkBoard({ available_actions: ["pokracovat"], state: mkState({ status: "paused" }) })}
+        onBoard={() => {}}
+      />,
+    );
+    expect(await screen.findByText(/Stavba pozastavená \(token-limit\)/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Pokračovať v stavbe/ })).toBeInTheDocument();
+
+    // pokracovat still offered but not paused (mid-loop resume affordance) → no amber note.
+    rerender(
+      <PlanUlohRail
+        versionId="v1"
+        messages={[]}
+        board={mkBoard({ available_actions: ["pokracovat"], state: mkState({ status: "agent_working" }) })}
+        onBoard={() => {}}
+      />,
+    );
+    await waitFor(() => expect(screen.queryByText(/Stavba pozastavená/)).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /Pokračovať v stavbe/ })).toBeInTheDocument();
+  });
+
+  it("renders at most one trigger button — the ladder is mutually exclusive even if the BE offers several", async () => {
+    render(
+      <PlanUlohRail
+        versionId="v1"
+        messages={[]}
+        board={mkBoard({ available_actions: ["zostav_plan", "spustit_stavbu", "pokracovat"] })}
+        onBoard={() => {}}
+      />,
+    );
+    // First rung wins: zostav_plan renders, the other two do not.
+    expect(await screen.findByRole("button", { name: /Zostaviť plán/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Spustiť stavbu/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Pokračovať v stavbe/ })).not.toBeInTheDocument();
   });
 });

@@ -17,13 +17,20 @@
 // The "Zostaviť plán" TRIGGER (MD-1 rec A) renders ONLY when board.available_actions offers `zostav_plan`
 // (honest-by-construction, like "Schváliť Špecifikáciu") — the backend gates it (conversation + spec approved
 // + plan not yet built). On click it fires the EXISTING postPipelineActionApi and swaps in the fresh board.
+//
+// STEP 4 (Programovanie, docs/architecture/step4-programovanie-design.md) extends the SAME action slot into a
+// mutually-exclusive trigger ladder — `spustit_stavbu` ("Spustiť stavbu", start the build loop) and
+// `pokracovat` ("Pokračovať v stavbe", resume a paused/token-stopped loop) sit beside `zostav_plan`, each
+// gated the same honest-by-construction way (available_actions) and firing the same postPipelineActionApi.
+// A "Práve robím: #N title" banner (board.current_task, live during the build) and an amber paused note
+// (status === 'paused') round out the STEP-4 surface — all additive, no new endpoint/WS/backend change.
 
 import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 
 import { getTaskPlan } from "../../services/api/versions";
 import { postPipelineActionApi } from "../../services/api/pipeline";
-import type { PipelineBoard, PipelineMessage } from "../../services/api/pipeline";
+import type { PipelineActionName, PipelineBoard, PipelineMessage } from "../../services/api/pipeline";
 import type {
   TaskPlanResponse,
   TaskPlanEpicNode,
@@ -112,6 +119,22 @@ function TechnicalDetail({ text }: { text: string }) {
         Technický detail
       </div>
       <SpecMarkdown body={text} className="text-[11px] leading-snug text-[var(--color-text-muted)]" />
+    </div>
+  );
+}
+
+// CurrentBuildBanner (STEP 4) — a compact "Práve robím: #N title" banner pinned at the top of the rail body.
+// Fed by board.current_task (populated by the BE ONLY during Programovanie); the caller hides this entirely
+// when current_task is null. The blue dot pulses while the agent is actively working (status agent_working) —
+// derived from the live status, never guessed. This is SEPARATE from the per-node live in_progress dot: this
+// is the single "what am I on right now" line for the whole build, not a tree node.
+function CurrentBuildBanner({ number, title, working }: { number: number; title: string; working: boolean }) {
+  return (
+    <div className="flex flex-shrink-0 items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-surface-hover)] px-4 py-2">
+      <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full bg-blue-500 ${working ? "animate-pulse" : ""}`} />
+      <span className="min-w-0 truncate text-[11px] text-[var(--color-text-secondary)]">
+        <span className="font-medium text-[var(--color-text-primary)]">Práve robím:</span> #{number} {title}
+      </span>
     </div>
   );
 }
@@ -228,18 +251,29 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
     [versionId],
   );
 
-  // Honest-by-construction trigger: the button exists ONLY when the backend offers `zostav_plan` right now.
+  // Honest-by-construction triggers: each button exists ONLY when the backend offers that action right now.
+  // The three are MUTUALLY EXCLUSIVE by construction (the BE gate offers at most one), and the ladder below
+  // renders them as an if/else chain so at most one is ever on screen regardless.
+  //   zostav_plan   → "Zostaviť plán"      (STEP 3: build the task plan from the approved Špecifikácia)
+  //   spustit_stavbu→ "Spustiť stavbu"     (STEP 4: start the conversation build loop from the approved plan)
+  //   pokracovat    → "Pokračovať v stavbe" (STEP 4: resume a paused / token-stopped build loop)
   const canBuildPlan = !!board?.available_actions?.includes("zostav_plan");
+  const canProgram = !!board?.available_actions?.includes("spustit_stavbu");
+  const canResume = !!board?.available_actions?.includes("pokracovat");
+  // Honest, derived from the live status: a token-stopped build reads `paused` — the amber note reflects it.
+  const isPaused = board?.state?.status === "paused";
 
-  async function handleBuildPlan() {
+  // One handler for all three trigger buttons — reuses the shared triggering/triggerError state + the EXISTING
+  // postPipelineActionApi client, then swaps in the fresh board the action returns (onBoard from usePipelineWs).
+  async function runTrigger(action: PipelineActionName, failMsg: string) {
     if (!versionId) return;
     setTriggerError(null);
     setTriggering(true);
     try {
-      const nextBoard = await postPipelineActionApi(versionId, { action: "zostav_plan" });
+      const nextBoard = await postPipelineActionApi(versionId, { action });
       onBoard(nextBoard);
     } catch (err: unknown) {
-      setTriggerError(err instanceof Error ? err.message : "Zostavenie plánu zlyhalo.");
+      setTriggerError(err instanceof Error ? err.message : failMsg);
     } finally {
       setTriggering(false);
     }
@@ -259,14 +293,15 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
         )}
       </div>
 
-      {canBuildPlan && (
+      {/* Trigger ladder — mutually exclusive by construction (one action slot, if/else chain). */}
+      {canBuildPlan ? (
         <div className="flex-shrink-0 border-b border-[var(--color-border-default)] px-4 py-3">
           <p className="mb-2 text-xs text-[var(--color-text-muted)]">
             Špecifikácia je schválená — partner z nej zostaví Plán úloh.
           </p>
           <button
             type="button"
-            onClick={handleBuildPlan}
+            onClick={() => runTrigger("zostav_plan", "Zostavenie plánu zlyhalo.")}
             disabled={triggering}
             className="w-full rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -274,6 +309,45 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
           </button>
           {triggerError && <p className="mt-1 text-xs text-[var(--color-status-error)]">{triggerError}</p>}
         </div>
+      ) : canProgram ? (
+        <div className="flex-shrink-0 border-b border-[var(--color-border-default)] px-4 py-3">
+          <p className="mb-2 text-xs text-[var(--color-text-muted)]">Plán úloh je zostavený — spustíme stavbu.</p>
+          <button
+            type="button"
+            onClick={() => runTrigger("spustit_stavbu", "Spustenie stavby zlyhalo.")}
+            disabled={triggering}
+            className="w-full rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {triggering ? "Spúšťam stavbu…" : "Spustiť stavbu"}
+          </button>
+          {triggerError && <p className="mt-1 text-xs text-[var(--color-status-error)]">{triggerError}</p>}
+        </div>
+      ) : canResume ? (
+        <div className="flex-shrink-0 border-b border-[var(--color-border-default)] px-4 py-3">
+          {isPaused && (
+            <p className="mb-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-700 dark:text-amber-300">
+              Stavba pozastavená (token-limit) — pokračuj tlačidlom nižšie.
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={() => runTrigger("pokracovat", "Pokračovanie v stavbe zlyhalo.")}
+            disabled={triggering}
+            className="w-full rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {triggering ? "Pokračujem…" : "Pokračovať v stavbe"}
+          </button>
+          {triggerError && <p className="mt-1 text-xs text-[var(--color-status-error)]">{triggerError}</p>}
+        </div>
+      ) : null}
+
+      {/* "Práve robím" banner — top of the rail body, populated by the BE only during Programovanie. */}
+      {board?.current_task && (
+        <CurrentBuildBanner
+          number={board.current_task.number}
+          title={board.current_task.title}
+          working={board.state?.status === "agent_working"}
+        />
       )}
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2 text-xs">

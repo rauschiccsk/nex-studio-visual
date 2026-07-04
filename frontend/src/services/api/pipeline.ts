@@ -118,6 +118,7 @@ export type PipelineActionName =
   | "start" // Spustiť tvorbu špecifikácie
   | "approve_spec" // Schváliť špecifikáciu (end Príprava — ALWAYS mandatory, dial-independent)
   | "zostav_plan" // Zostaviť plán (STEP 3): build the task plan from the approved Špecifikácia (honest-by-construction)
+  | "spustit_stavbu" // Spustiť stavbu (STEP 4): start the conversation build loop from the approved Plán úloh
   | "schvalit" // Schváliť (dial-governed advance after Návrh / Programovanie / Verifikácia)
   | "uprav" // Uprav (rework the current phase / "Skús znova" on an error block)
   | "pokracovat" // Pokračovať (resume a paused Programovanie loop)
