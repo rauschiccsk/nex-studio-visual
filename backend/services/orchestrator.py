@@ -1788,6 +1788,35 @@ def _write_task_plan_doc(db: Session, version: Version) -> Optional[str]:
     return None
 
 
+def _priprava_spec_disk_status(db: Session, state: PipelineState) -> tuple[Optional[str], str]:
+    """Pure disk-check core of the Príprava Špecifikácia verify — NO notification / DB write side effect.
+
+    Returns ``(rel, status)`` where ``rel`` is the repo-relative ``specification.md`` path
+    (:func:`_priprava_spec_rel`, ``None`` only when the version row itself is gone) and ``status`` is:
+
+      * ``'ok'``          — a checkout exists and ``specification.md`` is present on disk;
+      * ``'no_checkout'`` — the project has no ``source_path`` (tests / library projects) — the spec lives
+                            only in the DB audit trail; the gate path treats this as a pass;
+      * ``'missing'``     — a checkout EXISTS but ``specification.md`` is absent (a real failure);
+      * ``'no_version'``  — the version row does not exist (``rel`` is ``None``).
+
+    Extracted so the single on-disk source-of-truth check lives in EXACTLY one place: the Príprava gate
+    path (:func:`_persist_priprava_spec`) and the conversation ``approve_spec`` path both call it. This
+    helper is intentionally free of ``_record_message`` — the caller decides what (if anything) to record.
+    """
+    version = db.get(Version, state.version_id)
+    if version is None:
+        return None, "no_version"
+    rel = _priprava_spec_rel(version.version_number)
+    project = db.get(Project, version.project_id)
+    if project is None or not project.source_path:
+        return rel, "no_checkout"
+    spec_path = Path(project.source_path) / rel
+    if not spec_path.exists():
+        return rel, "missing"
+    return rel, "ok"
+
+
 def _persist_priprava_spec(db: Session, state: PipelineState, block: PipelineStatusBlock) -> Optional[str]:
     """Persist + verify the Príprava Špecifikácia artifact at the end of the Príprava dialogue (CR-V2-010,
     PREP-3). Returns a failure reason (→ caller settles ``blocked``, the phase does NOT close) or ``None``.
@@ -1795,19 +1824,18 @@ def _persist_priprava_spec(db: Session, state: PipelineState, block: PipelineSta
     The AI Agent writes the Špecifikácia Markdown to disk itself (it has Write tools in its warm session)
     and lists it in ``deliverables[]``; this is the deterministic mechanical gate that the artifact is real
     + readable (the Vývoj → Príprava tab reads this record), the Príprava analogue of ``_write_task_plan``
-    for Návrh. The on-disk verify reuses the spec-tree convention (:func:`_priprava_spec_rel`).
+    for Návrh. The on-disk verify reuses the spec-tree convention (:func:`_priprava_spec_rel`), delegated
+    to the notif-free :func:`_priprava_spec_disk_status` core (shared with the conversation approval path).
 
     No-op pass (``None``) when the project has no checkout to write into (tests / library projects) — the
     spec then lives only as the recorded ``report`` payload of the gate_report message (DB audit trail),
     which is still readable. A checkout that EXISTS but is missing the spec file is a real failure: the
     Špecifikácia phase is not "done" without its reviewable artifact.
     """
-    version = db.get(Version, state.version_id)
-    if version is None:
+    rel, status = _priprava_spec_disk_status(db, state)
+    if status == "no_version":
         return "version not found for Špecifikácia write"
-    rel = _priprava_spec_rel(version.version_number)
-    project = db.get(Project, version.project_id)
-    if project is None or not project.source_path:
+    if status == "no_checkout":
         # No checkout — the spec is captured in the gate_report ``report`` payload (DB audit trail); record
         # the (DB-only) artifact note so the Príprava tab + audit trail still surface it.
         _record_message(
@@ -1821,8 +1849,7 @@ def _persist_priprava_spec(db: Session, state: PipelineState, block: PipelineSta
             payload={"phase": "priprava", "priprava_spec": True, "path": rel},
         )
         return None
-    spec_path = Path(project.source_path) / rel
-    if not spec_path.exists():
+    if status == "missing":
         return f"Špecifikácia artifact missing on disk: {rel}"
     _record_message(
         db,
@@ -3876,13 +3903,28 @@ def _conversation_directive(db: Session, version_id: uuid.UUID) -> str:
     what it needs (one thing at a time, with a recommendation), and be honest (surface the risk / wobbly
     part itself). The status-block contract is appended downstream at the :func:`invoke_agent` chokepoint
     (``_status_block_instruction``), so the turn still ends with the machine status block the engine parses.
+
+    STEP 2 (Špecifikácia) names the concrete artifact paths WITHOUT adding phase semantics: the partner keeps
+    ONE ``specification.md`` on disk as the single source of truth (MD-1 = A — no second copy anywhere) and
+    may read the optional ``customer-requirements.md`` Zadanie if it exists. There is NO gate, NO stage
+    advance — approval is a separate Manažér action (``approve_spec``) that only freezes the file.
     """
+    version_number = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
+    zadanie_rel = f"{_version_spec_rel(version_number)}/customer-requirements.md"
+    spec_rel = _priprava_spec_rel(version_number)
     return (
         "Pokračuj v živom rozhovore 1:1 s Manažérom projektu — presne ako Dedo so Zoltánom. "
         "Prečítaj si doterajší denník správ (to je kontext celej konverzácie) a reaguj po ľudsky, "
         "celými vetami bez žargónu a bez vysypaných kódov: odpovedz na jeho poslednú správu, alebo sa "
         "opýtaj, čo potrebuješ vedieť — JEDNO NARAZ, s odporúčaním. Buď proaktívny a čestný: ak je niečo "
-        "riziko alebo vratké, povedz to sám. Nič nerozhoduj za neho — vysvetli a nechaj ho rozhodnúť."
+        "riziko alebo vratké, povedz to sám. Nič nerozhoduj za neho — vysvetli a nechaj ho rozhodnúť.\n"
+        f"Zadanie od zákazníka je v `{zadanie_rel}` — prečítaj ho AK EXISTUJE; je NEPOVINNÉ, ak ho niet, "
+        "staviame Špecifikáciu od nuly z rozhovoru.\n"
+        f"Ako sa priebežne dohodneme, udržiavaj Špecifikáciu ako JEDEN dokument v `{spec_rel}` (adresár "
+        "vytvor ak treba) — je to jediný zdroj pravdy; keď Manažér povie, že schvaľuje, musí byť kompletný. "
+        "NEVKLADAJ celý text `specification.md` do svojej odpovede v rozhovore — súbor na disku je úplná "
+        "kópia; v odpovedi len povedz, čo si do neho zapísal alebo zmenil (napr. „aktualizoval som "
+        "specification.md“), aby denník ostal zhrnutím a súbor jedinou plnou kópiou."
     )
 
 
@@ -6341,6 +6383,38 @@ async def apply_action(
         # Príprava; the Manažér has read the Špecifikácia in the Príprava tab and signs it off.
         if state.current_stage != "priprava":
             raise OrchestratorError("Schváliť špecifikáciu je platné len vo fáze Príprava")
+        # Spine STEP 2 (ADDITIVE): a conversation build (``mode='conversation'``) has NO Návrh phase to
+        # advance into — approval FREEZES the on-disk Špecifikácia as the binding source of truth and settles
+        # back to the Manažér; the rozhovor then continues (STEP 3 wires the task plan in). The legacy phase
+        # automaton (``mode`` NULL) stays BYTE-IDENTICAL below.
+        if state.mode == "conversation":
+            rel, disk_status = _priprava_spec_disk_status(db, state)
+            # A checkout that EXISTS but is missing specification.md is a real failure — there is nothing to
+            # freeze. ``no_checkout`` (tests / library projects with no source_path) and ``ok`` both approve:
+            # the spec is captured (on disk when a checkout exists, in the append-only log otherwise).
+            if disk_status == "missing":
+                raise OrchestratorError("Špecifikácia ešte nie je napísaná — nedá sa schváliť")
+            _record_message(
+                db,
+                version_id=version_id,
+                stage="priprava",
+                author="manazer",
+                recipient="ai_agent",
+                kind="approval",
+                content=payload.get("comment", "Špecifikácia schválená."),
+                payload={
+                    "phase": "priprava",
+                    "approve_spec": True,
+                    "mode": "conversation",
+                    "spec_path": rel,
+                },
+            )
+            # NO _next_stage / NO _begin_dispatch — the conversation does not walk the phase automaton; it
+            # settles to the Manažér (awaiting_manazer) and continues as an ordinary 1:1 turn afterwards.
+            state.status = "awaiting_manazer"
+            state.next_action = "Špecifikácia schválená a zmrazená — pokračujeme v rozhovore."
+            db.flush()
+            return state
         _record_message(
             db,
             version_id=version_id,
