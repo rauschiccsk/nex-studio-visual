@@ -427,6 +427,11 @@ _ACTIONS = frozenset(
         # verified commit). Re-enters Verifikácia and re-runs the independent Auditor against HEAD; the fresh
         # verdict re-anchors (PASS bound to the new commit → drift gone) or re-gates (FAIL → targeted fix).
         "overit_znovu",
+        # STEP 3 (step3-plan-design.md MD-1=A): "Zostaviť plán" — in a conversation build, AFTER the
+        # Špecifikácia is approved, compose the task plan (EPIC→FEAT→TASK) from the frozen Špecifikácia.
+        # Honest-by-construction like ``approve_spec`` (NOT advancing — it stays in the conversation register,
+        # no phase walk); the board post-filters it to conversation + spec-approved + plan-not-materialized.
+        "zostav_plan",
     }
 )
 # Actions that act on / advance past an agent's output — only valid once the agent has SETTLED
@@ -501,6 +506,10 @@ def determine_available_actions(state: PipelineState) -> set[str]:
     if stage == "priprava":
         # End-Príprava: the ALWAYS-mandatory Špecifikácia approval (dial-independent, design §2.3/D3).
         actions.add("approve_spec")
+        # STEP 3 (step3-plan-design.md FIX2): "Zostaviť plán" — offered UNCONDITIONALLY here (state-only, like
+        # ``schvalit`` at Návrh). The finer DB preconditions (conversation build + spec approved + plan not
+        # yet materialized) are the board route's POST-FILTER; ``apply_action`` enforces them authoritatively.
+        actions.add("zostav_plan")
     elif stage in ("navrh", "programovanie"):
         # The dial-governed schvaľovacie body after Návrh / Programovanie — ``schvalit`` advances to the
         # next phase. (Whether the build HALTED here at all is the dial's call; once settled, it's offered.)
@@ -544,6 +553,24 @@ def navrh_plan_materialized(db: Session, version_id: uuid.UUID) -> bool:
             .where(Epic.version_id == version_id)
             .limit(1)
         ).first()
+        is not None
+    )
+
+
+def spec_approved(db: Session, version_id: uuid.UUID) -> bool:
+    """True iff the Manažér has approved the Špecifikácia for this version — ≥1 ``kind='approval'``
+    :class:`PipelineMessage` exists (STEP 2 durable freeze signal; STEP 3 gating).
+
+    DRY (step3-plan-design.md FIX2): the SINGLE spec-approval probe — one indexed exists query on the
+    ``(version_id, kind)`` columns (``version_id`` is indexed), correct for both conversation + legacy
+    builds. Shared by the board route (the Špecifikácia badge + the ``zostav_plan`` post-filter) AND the
+    STEP-3 conversation plan gating (:func:`apply_action`) so there is no second inline ``exists`` query."""
+    return (
+        db.execute(
+            select(PipelineMessage.id)
+            .where(PipelineMessage.version_id == version_id, PipelineMessage.kind == "approval")
+            .limit(1)
+        ).scalar_one_or_none()
         is not None
     )
 
@@ -1310,8 +1337,9 @@ _TASK_PLAN_FENCE_RULE = (
 # Concrete minimal examples (exact field names) — the model copies the SHAPE, not the content.
 _SKELETON_EXAMPLE = (
     "Príklad tvaru:\n<<<TASK_PLAN_JSON>>>\n"
-    '{"epics":[{"title":"Foundation","feats":['
-    '{"title":"Schéma a migrácie","description":"DB schéma + audit log","estimated_minutes":120}]}],'
+    '{"epics":[{"title":"Foundation","plain_description":"Základ appky — databáza a spoločné pravidlá.",'
+    '"feats":[{"title":"Schéma a migrácie","description":"DB schéma + audit log",'
+    '"plain_description":"Založíme databázu a záznam o zmenách.","estimated_minutes":120}]}],'
     '"cross_cutting_rules":"Spoločná transakčná hranica; immutable audit; scoping na firmu.",'
     '"flagship_features":["Export faktúry do Peppol XML","Automatické párovanie dodávateľa"],'
     '"safety_properties":[{"name":"Scoping na firmu (žiadny cross-tenant read)",'
@@ -1321,6 +1349,7 @@ _SKELETON_EXAMPLE = (
 _FEAT_TASKS_EXAMPLE = (
     "Príklad tvaru:\n<<<TASK_PLAN_JSON>>>\n"
     '{"tasks":[{"title":"GL tabuľky","task_type":"migration","description":"hlavná kniha + saldokonto",'
+    '"plain_description":"Pripravíme tabuľky hlavnej knihy.",'
     '"checklist_type":null,"priority":"normal","estimated_minutes":90}]}\n'
     "<<<END_TASK_PLAN_JSON>>>"
 )
@@ -1338,10 +1367,13 @@ def _task_plan_skeleton_directive(director_note: Optional[str] = None) -> str:
     base = (
         "Doplň POSLEDNÚ časť návrhu — plán úloh. Najprv vytvor jeho KOSTRU: emituj IBA epiky a funkcie "
         "(EPIC + FEAT), BEZ úloh. "
-        "Objekt má pole `epics` (zoznam): KAŽDÝ epik má `title` a pole "
-        "`feats` (zoznam, ≥1) — KAŽDÁ funkcia má `title`, `description` a `estimated_minutes` (Σ odhadov "
-        "jej úloh). Navrch objektu pole `cross_cutting_rules` (markdown, regulované invarianty knihy, "
-        "kodifikované RAZ). Úlohy NEemituj — doplnia sa v ďalších prechodoch po jednej funkcii.\n"
+        "Objekt má pole `epics` (zoznam): KAŽDÝ epik má `title`, `plain_description` a pole "
+        "`feats` (zoznam, ≥1) — KAŽDÁ funkcia má `title`, `description`, `plain_description` a "
+        "`estimated_minutes` (Σ odhadov jej úloh). `plain_description` je JEDNORIADKOVÉ ľudské vysvetlenie "
+        "BEZ žargónu (čo daný epik/funkcia znamená pre Manažéra — nie technický popis); epik `description` "
+        "NEMÁ, takže `plain_description` je jeho jediný ľudský text. Navrch objektu pole `cross_cutting_rules` "
+        "(markdown, regulované invarianty knihy, kodifikované RAZ). Úlohy NEemituj — doplnia sa v ďalších "
+        "prechodoch po jednej funkcii.\n"
         # CR-V2-052: the release-coverage declaration the risk-floored oracle (CR-V2-051) enforces — every
         # flagship feature needs a FEATURE assertion, every safety property a NEGATIVE assertion at Verifikácia.
         "Navrch objektu aj pole `flagship_features` (zoznam textov, ≥1): kľúčové funkcie, ktoré MUSÍ vydanie "
@@ -1378,8 +1410,10 @@ def _task_plan_feat_directive(feat_title: str) -> str:
     return (
         f"Pre funkciu „{feat_title}“ z kostry plánu emituj IBA jej úlohy. Objekt má jedno pole `tasks` "
         "(zoznam, ≥1): KAŽDÁ úloha má `title`, `task_type` (jedno z: backend, frontend, migration, test, "
-        "docs), `description`, `checklist_type` (text alebo null), `priority` (normal | high | urgent) a "
-        "`estimated_minutes`. Granularita HRUBOZRNNÁ — modul ≈ úloha (F-007 §4); nedeľ koherentný modul. "
+        "docs), `description`, `plain_description`, `checklist_type` (text alebo null), `priority` "
+        "(normal | high | urgent) a `estimated_minutes`. `plain_description` je JEDNORIADKOVÉ ľudské "
+        "vysvetlenie úlohy BEZ žargónu (čo robí pre Manažéra — nie technický `description`). Granularita "
+        "HRUBOZRNNÁ — modul ≈ úloha (F-007 §4); nedeľ koherentný modul. "
         + _TASK_PLAN_ESTIMATE_NOTE
         + "\n\n"
         + _TASK_PLAN_FENCE_RULE
@@ -1718,12 +1752,16 @@ def version_verified(db: Session, version_id: uuid.UUID, *, head: Optional[str] 
 # separate customer-dialogue.md.)
 
 
-def _render_task_plan_md(db: Session, version: Version, project: Project) -> str:
-    """Render the version's materialized Epic/Feat/Task rows to a reviewable markdown plan — the LAST
-    part of the Návrh design doc (CR-V2-011). The plan otherwise lives ONLY as cockpit DB rows; the
-    Manažér (+ the independent Auditor) need this doc to review the plan against the design at the
-    post-Návrh schvaľovací bod. Re-queried from the DB rows so the displayed hierarchical numbers match
-    the cockpit."""
+def _render_task_plan_md(db: Session, version: Version, project: Project, stage: str = "navrh") -> str:
+    """Render the version's materialized Epic/Feat/Task rows to a reviewable markdown plan.
+
+    In the Návrh phase (``stage='navrh'``, the default — legacy byte-identical) this is the LAST part of
+    the Návrh design doc (CR-V2-011): the Manažér (+ the independent Auditor) review it against the design
+    at the post-Návrh schvaľovací bod. In the STEP-3 conversation register (any other ``stage`` — the plan
+    is composed straight from the approved Špecifikácia, no Návrh phase, no independent Auditor gate before
+    a build) the header DROPS the "fáza Návrh / nezávislému Auditorovi / pred stavbou" clause so the doc's
+    provenance line is honest (step3-plan-design.md, Task 2). Re-queried from the DB rows so the displayed
+    hierarchical numbers match the cockpit."""
     epics = db.execute(select(Epic).where(Epic.version_id == version.id).order_by(Epic.number)).scalars().all()
     n_epics = n_feats = n_tasks = 0
     total_min = 0
@@ -1747,12 +1785,23 @@ def _render_task_plan_md(db: Session, version: Version, project: Project) -> str
                 body.append(f"- **{epic.number}.{feat.number}.{task.number}** `[{task.task_type}]` {task.title}{test}")
             body.append("")
     hours = round(total_min / 60, 1)
+    if stage == "navrh":
+        provenance = (
+            "> Generované automaticky z plánu úloh fázy Návrh (zdroj pravdy = cockpit DB rows). Slúži Manažérovi "
+            "(a nezávislému Auditorovi) na overenie plánu proti návrhu pred stavbou. Needituj ručne — pri ďalšom "
+            "behu Návrhu sa prepíše."
+        )
+    else:
+        # STEP-3 conversation register — the plan is composed from the approved Špecifikácia in the live 1:1,
+        # not the Návrh phase; drop the phase/independent-Auditor/pre-build clause (step3-plan-design.md).
+        provenance = (
+            "> Generované automaticky z plánu úloh (zdroj pravdy = cockpit DB rows). Needituj ručne — pri ďalšej "
+            "úprave plánu sa prepíše."
+        )
     header = [
         f"# {project.slug} — Plán úloh v{version.version_number}",
         "",
-        "> Generované automaticky z plánu úloh fázy Návrh (zdroj pravdy = cockpit DB rows). Slúži Manažérovi "
-        "(a nezávislému Auditorovi) na overenie plánu proti návrhu pred stavbou. Needituj ručne — pri ďalšom "
-        "behu Návrhu sa prepíše.",
+        provenance,
         "",
         f"**Súhrn:** {n_epics} epicov · {n_feats} featov · {n_tasks} úloh · odhad ~{total_min} min (~{hours} h).",
         "",
@@ -1760,13 +1809,15 @@ def _render_task_plan_md(db: Session, version: Version, project: Project) -> str
     return "\n".join(header + body).rstrip() + "\n"
 
 
-def _write_task_plan_doc(db: Session, version: Version) -> Optional[str]:
+def _write_task_plan_doc(db: Session, version: Version, stage: str = "navrh") -> Optional[str]:
     """Write the materialized task plan to ``spec/task-plan.md`` in the project repo
     so it is a reviewable artefact (not DB-only). Skips cleanly (``None``) when the
     project has no ``source_path`` (no checkout to write into — tests / library
     projects). Returns a failure reason (→ caller records ``blocked``) only when a
     checkout exists but the write fails — a checked-out project's plan is not "done"
-    without its reviewable doc (2026-06-22 process-gap fix)."""
+    without its reviewable doc (2026-06-22 process-gap fix). ``stage`` selects the
+    doc's provenance register (:func:`_render_task_plan_md`); default ``navrh`` is
+    legacy byte-identical."""
     project = db.get(Project, version.project_id)
     if project is None or not project.source_path:
         return None
@@ -1780,7 +1831,7 @@ def _write_task_plan_doc(db: Session, version: Version) -> Optional[str]:
         / "task-plan.md"
     )
     try:
-        md = _render_task_plan_md(db, version, project)
+        md = _render_task_plan_md(db, version, project, stage)
         doc_path.parent.mkdir(parents=True, exist_ok=True)
         doc_path.write_text(md, encoding="utf-8")
     except OSError as exc:
@@ -1910,20 +1961,25 @@ def _persist_navrh_design_doc(db: Session, state: PipelineState, block: Pipeline
     return None
 
 
-def _write_task_plan(db: Session, state: PipelineState, block: PipelineStatusBlock) -> Optional[str]:
-    """Materialize the AI Agent's Návrh task-plan decomposition into Epic/Feat/Task rows.
+def _write_task_plan(
+    db: Session, state: PipelineState, block: PipelineStatusBlock, stage: str = "navrh"
+) -> Optional[str]:
+    """Materialize the AI Agent's task-plan decomposition into Epic/Feat/Task rows.
 
-    F-007 §5 / CR-NS-020 CR-2; v2 CR-V2-011 (the plan folds into the Návrh design doc). The deterministic
-    mechanical gate for the task plan (replaces the disk-deliverable ``verify_mechanical`` — the plan's
-    deliverable is DB rows, not files). Returns a failure reason (→ ``status=blocked``, nothing written)
-    or ``None`` on success.
+    F-007 §5 / CR-NS-020 CR-2; v2 CR-V2-011 (the plan folds into the Návrh design doc); STEP 3 re-homes it
+    to the ``priprava`` conversation register too (step3-plan-design.md). The deterministic mechanical gate
+    for the task plan (replaces the disk-deliverable ``verify_mechanical`` — the plan's deliverable is DB
+    rows, not files). Returns a failure reason (→ ``status=blocked``, nothing written) or ``None`` on success.
 
-    **Idempotent replace + atomic:** a Manažér ``uprav`` re-dispatches the AI Agent, which re-runs this;
-    we drop the version's existing epics first (FK cascade → feats/tasks) so a re-plan never duplicates.
-    The whole replace runs in a SAVEPOINT — any failure rolls back the rows while the caller still records
-    ``blocked`` (never a half-written plan). Numbers are service-assigned (MAX+1); status is forced
-    (planned/todo — the AI Agent never pre-marks done); ``baseline_sha`` / ``task_count`` /
-    ``auto_fix_count`` stay untouched (CR-3 owns them).
+    **Idempotent replace + atomic:** a Manažér ``uprav`` (Návrh) or a repeat ``zostav_plan`` (conversation,
+    MD-2) re-dispatches the AI Agent, which re-runs this; we drop the version's existing epics first (FK
+    cascade → feats/tasks) so a re-plan never duplicates — the plan is rebuilt in place. The whole replace
+    runs in a SAVEPOINT — any failure rolls back the rows while the caller still records ``blocked`` (never
+    a half-written plan). Numbers are service-assigned (MAX+1); status is forced (planned/todo — the AI Agent
+    never pre-marks done); ``plain_description`` (STEP 3) is carried through; ``baseline_sha`` / ``task_count``
+    / ``auto_fix_count`` stay untouched (CR-3 owns them). ``stage`` threads the honest phase into the
+    notification's stage column + payload ``phase`` + the reviewable doc's provenance; default ``navrh`` is
+    legacy byte-identical.
     """
     plan = block.plan
     if plan is None or not plan.epics:  # defensive — parse_status_block already guards this
@@ -1944,6 +2000,7 @@ def _write_task_plan(db: Session, state: PipelineState, block: PipelineStatusBlo
                         project_id=version.project_id,
                         version_id=state.version_id,
                         title=epic_in.title,
+                        plain_description=epic_in.plain_description,
                     ),
                 )
                 n_epics += 1
@@ -1954,6 +2011,7 @@ def _write_task_plan(db: Session, state: PipelineState, block: PipelineStatusBlo
                             epic_id=epic_row.id,
                             title=feat_in.title,
                             description=feat_in.description,
+                            plain_description=feat_in.plain_description,
                             estimated_minutes=feat_in.estimated_minutes,
                         ),
                     )
@@ -1966,6 +2024,7 @@ def _write_task_plan(db: Session, state: PipelineState, block: PipelineStatusBlo
                                 title=task_in.title,
                                 task_type=task_in.task_type,
                                 description=task_in.description,
+                                plain_description=task_in.plain_description,
                                 checklist_type=task_in.checklist_type,
                                 priority=task_in.priority,
                                 estimated_minutes=task_in.estimated_minutes,
@@ -1976,20 +2035,20 @@ def _write_task_plan(db: Session, state: PipelineState, block: PipelineStatusBlo
         return f"plan write failed: {exc}"
 
     # Materialize the plan as a reviewable doc (spec/task-plan.md) — not DB-only —
-    # so the Coordinator (separate session) can verify it before the build.
-    doc_err = _write_task_plan_doc(db, version)
+    # so the Manažér (+ the independent Auditor, in the Návrh register) can verify it before the build.
+    doc_err = _write_task_plan_doc(db, version, stage)
     if doc_err is not None:
         return doc_err
 
     _record_message(
         db,
         version_id=state.version_id,
-        stage="navrh",  # CR-V2-011: the task plan is the last part of the Návrh design doc
+        stage=stage,  # CR-V2-011: navrh (task plan = last part of the design doc); STEP 3: priprava (conversation)
         author="system",
         recipient="manazer",
         kind="notification",
         content=f"Plán úloh zapísaný: {n_epics} epicov, {n_feats} featov, {n_tasks} taskov. Doc: spec/task-plan.md.",
-        payload={"task_plan_summary": {"epics": n_epics, "feats": n_feats, "tasks": n_tasks}, "phase": "navrh"},
+        payload={"task_plan_summary": {"epics": n_epics, "feats": n_feats, "tasks": n_tasks}, "phase": stage},
     )
     return None
 
@@ -2526,6 +2585,7 @@ async def _plan_pass_once(
     on_event: Optional[claude_agent.EventCallback],
     on_message: Optional[MessageCallback],
     metrics: "_DispatchMetrics",
+    stage: str = "navrh",
 ) -> Any:
     """One ``claude`` invocation for a task_plan generation pass (v0.7.3, CR-1).
 
@@ -2603,7 +2663,7 @@ async def _plan_pass_once(
             db,
             version_id=version_id,
             slug=slug,
-            stage="navrh",  # CR-V2-011: the plan passes fold into Návrh — the lost-work note is a navrh-phase turn
+            stage=stage,  # CR-V2-011 navrh (folds into Návrh); STEP 3 priprava (conversation) — honest phase
             timeout_seconds=_timeout_for("navrh"),
             on_message=on_message,
         )
@@ -2653,6 +2713,7 @@ async def _invoke_plan_pass(
     label_fn: Callable[[Any], str],
     on_event: Optional[claude_agent.EventCallback] = None,
     on_message: Optional[MessageCallback] = None,
+    stage: str = "navrh",
 ) -> Any:
     """One bounded task_plan generation pass with per-pass parse-retry (v0.7.3, CR-1; v2 CR-V2-011).
 
@@ -2677,6 +2738,7 @@ async def _invoke_plan_pass(
         on_event=on_event,
         on_message=on_message,
         metrics=metrics,
+        stage=stage,
     )
     attempts = 0
     # Retry a re-emittable failure within ``_PARSE_RETRIES``: a PARSE typo (re-ask for the SAME content) or
@@ -2706,6 +2768,7 @@ async def _invoke_plan_pass(
             on_event=None,  # cheap re-emit retries don't stream (mirror invoke_agent_with_parse_retry)
             on_message=on_message,
             metrics=metrics,
+            stage=stage,
         )
     if isinstance(result, ParseFailure):
         # CR-V2-037: a CRASH that STILL failed after the bounded re-invokes is a PERSISTENT envelope-loss —
@@ -2718,23 +2781,24 @@ async def _invoke_plan_pass(
                 db,
                 version_id=state.version_id,
                 slug=_project_slug_for_version(db, state.version_id),
-                stage="navrh",
+                stage=stage,
                 timeout_seconds=_timeout_for("navrh"),
                 on_message=on_message,
                 cause_label="Agent opakovane zlyhal",
             )
             result = replace(result, lost_work=lost_work)
-        # Attach the accumulated turn metrics so the fail-closed Coordinator relay can carry the lost tokens.
+        # Attach the accumulated turn metrics so the fail-closed relay can carry the lost tokens.
         return replace(result, usage=metrics.usage_payload(), timing=metrics.timing_payload())
     msg = _record_message(
         db,
         version_id=state.version_id,
-        stage="navrh",  # CR-V2-011: the plan passes are Návrh-phase turns (the plan folds into Návrh)
+        # CR-V2-011: navrh (the plan passes fold into Návrh); STEP 3: priprava (conversation) — honest phase.
+        stage=stage,
         author="ai_agent",
         recipient="manazer",
         kind="notification",
         content=label_fn(result),
-        payload={"usage": metrics.usage_payload(), "timing": metrics.timing_payload(), "phase": "navrh"},
+        payload={"usage": metrics.usage_payload(), "timing": metrics.timing_payload(), "phase": stage},
     )
     if on_message is not None:
         await on_message(msg)
@@ -3962,6 +4026,11 @@ async def run_conversation_turn(
         # Mirror run_dispatch's guard — a settled/paused build has nothing to run (a stale re-entry, or a
         # Manažér intervention that already moved the state). Return it untouched.
         return state
+    # STEP 3 (step3-plan-design.md FIX3): a durable compose_plan directive marker (recorded by
+    # ``apply_action(zostav_plan)``) delegates this turn to the incremental plan round — a RESTART-SAFE DB
+    # read, NOT the in-memory ``directive`` arg (None for zostav_plan, lost on restart). SOLELY the marker.
+    if _pending_compose_plan_marker(db, version_id):
+        return await _run_conversation_plan_round(db, state, on_event=on_event, on_message=on_message)
     stage = state.current_stage
     actor = state.current_actor
     prompt = directive if directive is not None else _conversation_directive(db, version_id)
@@ -4007,6 +4076,70 @@ async def run_conversation_turn(
     return state
 
 
+def _pending_compose_plan_marker(db: Session, version_id: uuid.UUID) -> bool:
+    """True iff the LATEST pipeline message is an unprocessed compose_plan directive (STEP 3 restart-safe
+    trigger; step3-plan-design.md FIX3).
+
+    ``apply_action(zostav_plan)`` records a ``manazer→ai_agent`` ``kind='directive'`` marker
+    (``payload.compose_plan``) and arms ``agent_working``; the plan round is driven SOLELY by this durable DB
+    marker (the in-memory dispatch directive is None for ``zostav_plan`` and is lost on a restart, so it can
+    never be the trigger). The marker IS the latest message the instant the round fires — ``apply_action``
+    records nothing after it — and once the round records its passes / gate_report (higher ``seq``) it is no
+    longer latest → not pending, so a stale re-entry or a follow-up Manažér message never re-runs the plan."""
+    latest = db.execute(
+        select(PipelineMessage)
+        .where(PipelineMessage.version_id == version_id)
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    return (
+        latest is not None
+        and latest.kind == "directive"
+        and latest.author == "manazer"
+        and isinstance(latest.payload, dict)
+        and bool(latest.payload.get("compose_plan"))
+    )
+
+
+async def _run_conversation_plan_round(
+    db: Session,
+    state: PipelineState,
+    *,
+    on_event: Optional[claude_agent.EventCallback] = None,
+    on_message: Optional[MessageCallback] = None,
+) -> PipelineState:
+    """STEP 3 (step3-plan-design.md): compose the task plan in the conversation register — the plan round the
+    durable compose_plan marker delegates to.
+
+    REUSES the proven incremental machinery (:func:`_generate_incremental_plan`, ``stage='priprava'``) —
+    skeleton pass + per-feat passes + :data:`MAX_PLAN_FEATS` + fail-closed HALT — NEVER a whole-tree parse
+    off one turn. MD-2: it re-reads the CURRENT ``specification.md`` and rebuilds the plan IN PLACE
+    (:func:`_write_task_plan`'s SAVEPOINT drop-and-recreate), so a repeat "Zostaviť plán" can never diverge
+    from the frozen spec. It NEVER advances a phase (the spine invariant — no ``_settle_phase_boundary`` /
+    ``_next_stage`` / independent-Auditor gate): on success it settles ``awaiting_manazer`` with
+    ``current_stage`` UNCHANGED (``priprava``), handing the turn back to the Manažér. A plan-pass failure
+    already settled (blocked / awaiting_manazer) inside the shared machinery — returned directly."""
+    version_number = db.execute(select(Version.version_number).where(Version.id == state.version_id)).scalar_one()
+    spec_rel = _priprava_spec_rel(version_number)
+    # MD-2: re-read the CURRENT (approved, frozen) Špecifikácia — the single source of truth — and build the
+    # plan from its present state. Prepended as the skeleton pass's framed brief (like _navrh_directive names
+    # the Špecifikácia path). The skeleton directive itself carries the field/granularity/fence contract.
+    directive = (
+        f"Zostav plán úloh (EPIC → FEAT → TASK) zo schválenej Špecifikácie. NAJPRV si ZNOVA prečítaj "
+        f"`{spec_rel}` (jediný zdroj pravdy) a plán postav podľa jej AKTUÁLNEHO stavu."
+    )
+    settled = await _generate_incremental_plan(
+        db, state, stage="priprava", on_event=on_event, directive=directive, on_message=on_message
+    )
+    if settled is not None:
+        return settled  # a plan-pass failure already settled (blocked / awaiting_manazer)
+    # No phase advance — the spine hands the turn back to the Manažér (current_stage stays 'priprava').
+    state.status = "awaiting_manazer"
+    state.next_action = "Plán úloh je zostavený — pozri ho a pokračuj v rozhovore."
+    db.flush()
+    return state
+
+
 # (CR-V2-013: ``_GATE_E_NO_EDIT`` + ``_block_failed`` + ``_coordinator_review_gap`` +
 # ``_gate_e_scope_directive`` + ``_gate_e_continue_prompt`` + the ``_run_gate_e_round`` per-question
 # sub-state-machine are REMOVED with the rest of the Gate-E machinery. The v2 Auditor's UPFRONT review
@@ -4021,6 +4154,7 @@ async def _settle_plan_pass_failure(
     *,
     note: str,
     on_message: Optional[MessageCallback],
+    stage: str = "navrh",
 ) -> PipelineState:
     """Settle a failed folded task-plan pass (skeleton or per-feat) — R1 envelope-loss parity (v0.7.3,
     CR-1; v2 CR-V2-011 — the plan folds into Návrh, the Coordinator relay is retired, design §2.2).
@@ -4046,12 +4180,12 @@ async def _settle_plan_pass_failure(
     msg = _record_message(
         db,
         version_id=state.version_id,
-        stage="navrh",
+        stage=stage,
         author="system",
         recipient="manazer",
         kind="notification",
-        content=f"Plán úloh sa nepodarilo vygenerovať: {note}. Usmerni agenta (Uprav) a zopakuj Návrh.",
-        payload={"phase": "navrh", **(_failure_metrics_payload(failed) or {})},
+        content=f"Plán úloh sa nepodarilo vygenerovať: {note}. Usmerni agenta (Uprav) a zopakuj.",
+        payload={"phase": stage, **(_failure_metrics_payload(failed) or {})},
     )
     if on_message is not None:
         await on_message(msg)
@@ -4064,33 +4198,40 @@ async def _settle_plan_pass_failure(
     return state
 
 
-async def _fold_task_plan_into_navrh(
+async def _generate_incremental_plan(
     db: Session,
     state: PipelineState,
     *,
+    stage: str,
     on_event: Optional[claude_agent.EventCallback],
     directive: Optional[str],
     on_message: Optional[MessageCallback],
 ) -> Optional[PipelineState]:
-    """Generate the EPIC→FEAT→TASK task plan INCREMENTALLY and fold it into the Návrh phase (CR-V2-011).
+    """Generate the EPIC→FEAT→TASK task plan INCREMENTALLY and materialize it (CR-V2-011; STEP 3 re-home).
 
-    The standalone ``task_plan`` stage/round is removed; the plan is the LAST part of the Návrh design doc
-    (design §2.1(2)). This runs AFTER the design-doc turn, on the SAME warm AI-Agent session (so the full
-    design doc + the just-emitted skeleton stay in context), then materializes the plan via the
-    re-homed :func:`_write_task_plan`:
+    The PROVEN incremental machinery, extracted so BOTH registers reuse it byte-for-byte (step3-plan-design.md
+    — do NOT parse a whole plan tree off one turn): the Návrh phase (``stage='navrh'`` —
+    :func:`_fold_task_plan_into_navrh`) and the STEP-3 conversation plan round (``stage='priprava'`` —
+    :func:`_run_conversation_plan_round`). Runs on the SAME warm AI-Agent session (so the design doc /
+    Špecifikácia + the just-emitted skeleton stay in context), then materializes via :func:`_write_task_plan`:
 
-    * **Pass 1 — skeleton:** EPIC + FEAT (no tasks) + ``cross_cutting_rules``.
+    * **Pass 1 — skeleton:** EPIC + FEAT (no tasks) + ``cross_cutting_rules`` (+ the release-coverage
+      declaration). ``directive`` prepends the register's framed brief (MD-2: re-read the current spec).
     * **Passes 2..N — per feat (skeleton order):** that feat's ``tasks[]``, accumulated in memory.
     * **Assemble** the full :class:`TaskPlan` in skeleton order (so ``_write_task_plan``'s MAX+1 numbering
-      matches what the Manažér reviews), record the AI-Agent ``navrh`` ``gate_report`` (carries the plan +
-      ``cross_cutting_rules`` the build loop re-reads via :func:`_fetch_cross_cutting_rules`), then call
-      :func:`_write_task_plan` (re-homed to the ``navrh`` stage).
+      matches what the Manažér reviews) carrying every node's ``plain_description``, record the AI-Agent
+      ``gate_report`` (carries the plan + ``cross_cutting_rules`` the build loop re-reads via
+      :func:`_fetch_cross_cutting_rules`), then call :func:`_write_task_plan`.
+
+    ``stage`` threads the HONEST phase into every ``_record_message`` stage column + payload ``phase`` + the
+    assembled block + both plan-pass helpers + both settles + the reviewable doc — nothing hardcodes
+    ``navrh`` (step3-plan-design.md FIX1); default-free (the caller always passes it explicitly).
 
     Fail-closed (NO parse exhaustion on a large plan — that is the whole point of the incremental passes):
     a skeleton/per-feat exhaustion → ``blocked`` via :func:`_settle_plan_pass_failure` **naming the feat**,
     writing **nothing**; :data:`MAX_PLAN_FEATS` caps total feats; a defensive assemble/write failure →
     ``blocked``. Returns the SETTLED state on any failure (the caller returns it directly), or ``None`` on
-    success (the caller then runs the SHARED dial-settle). The passes use the dedicated
+    success (the caller then settles for its register). The passes use the dedicated
     :func:`_invoke_plan_pass` — ``invoke_agent`` stays byte-identical."""
     version_id = state.version_id
 
@@ -4107,12 +4248,18 @@ async def _fold_task_plan_into_navrh(
         ),
         on_event=on_event,
         on_message=on_message,
+        stage=stage,
     )
     if isinstance(skeleton, ParseFailure):
         # Skeleton failure: a genuine parse exhaustion → blocked; an envelope-loss (timeout) → R1
         # awaiting_manazer (never a blocked dead-end). See the helper.
         return await _settle_plan_pass_failure(
-            db, state, skeleton, note="agent nevrátil platnú kostru plánu ani po opravách", on_message=on_message
+            db,
+            state,
+            skeleton,
+            note="agent nevrátil platnú kostru plánu ani po opravách",
+            on_message=on_message,
+            stage=stage,
         )
 
     # MAX_PLAN_FEATS cap (fail-closed) — a coarse-grained plan (module ≈ task) never needs this many.
@@ -4121,7 +4268,7 @@ async def _fold_task_plan_into_navrh(
         msg = _record_message(
             db,
             version_id=version_id,
-            stage="navrh",
+            stage=stage,
             author="system",
             recipient="manazer",
             kind="notification",
@@ -4129,13 +4276,13 @@ async def _fold_task_plan_into_navrh(
                 f"Plán má priveľa funkcií ({len(feat_refs)} > strop {MAX_PLAN_FEATS}) — rozklad je príliš "
                 "jemnozrnný; treba hrubšiu granularitu (modul ≈ úloha, F-007 §4)."
             ),
-            payload={"phase": "navrh"},
+            payload={"phase": stage},
         )
         if on_message is not None:
             await on_message(msg)
         state.status = "blocked"
         state.block_reason = "system_error"
-        state.next_action = "Plán úloh zamietnutý — rozklad je príliš jemnozrnný. Usmerni Návrh (Uprav)."
+        state.next_action = "Plán úloh zamietnutý — rozklad je príliš jemnozrnný. Usmerni plán (Uprav)."
         db.flush()
         return state
 
@@ -4151,6 +4298,7 @@ async def _fold_task_plan_into_navrh(
             label_fn=lambda r, _t=feat.title: f"Plán — funkcia „{_t}“: {len(r.tasks)} úloh.",
             on_event=on_event,
             on_message=on_message,
+            stage=stage,
         )
         if isinstance(pass_result, ParseFailure):
             # Fail-closed: one per-feat pass exhausting → HALT naming the feat, write NOTHING (no half-plan
@@ -4162,21 +4310,25 @@ async def _fold_task_plan_into_navrh(
                 pass_result,
                 note=f"úlohy pre funkciu „{feat.title}“ sa nepodarilo vygenerovať ani po opravách",
                 on_message=on_message,
+                stage=stage,
             )
         feat_tasks[(ei, fi)] = pass_result.tasks
 
-    # Assemble the FULL TaskPlan in skeleton order. TaskPlanFeat.tasks min_length=1 + the per-feat
-    # passes' own ≥1 guarantee make this non-empty; a defensive ValidationError → fail-closed HALT
-    # (nothing written).
+    # Assemble the FULL TaskPlan in skeleton order, carrying every node's plain_description (STEP 3 FIX4 —
+    # the epic's plain_description is its ONLY prose; the tasks are already TaskPlanTask objects that carry
+    # theirs). TaskPlanFeat.tasks min_length=1 + the per-feat passes' own ≥1 guarantee make this non-empty;
+    # a defensive ValidationError → fail-closed HALT (nothing written).
     try:
         full_plan = TaskPlan(
             epics=[
                 TaskPlanEpic(
                     title=epic.title,
+                    plain_description=epic.plain_description,
                     feats=[
                         TaskPlanFeat(
                             title=feat.title,
                             description=feat.description,
+                            plain_description=feat.plain_description,
                             estimated_minutes=feat.estimated_minutes,
                             tasks=feat_tasks[(ei, fi)],
                         )
@@ -4190,25 +4342,32 @@ async def _fold_task_plan_into_navrh(
         msg = _record_message(
             db,
             version_id=version_id,
-            stage="navrh",
+            stage=stage,
             author="system",
             recipient="manazer",
             kind="notification",
             content=f"Zostavený plán úloh je neúplný: {exc}.",
-            payload={"phase": "navrh"},
+            payload={"phase": stage},
         )
         if on_message is not None:
             await on_message(msg)
         state.status = "blocked"
         state.block_reason = "system_error"
-        state.next_action = "Plán úloh zamietnutý — zostavený plán je neúplný. Usmerni Návrh (Uprav)."
+        state.next_action = "Plán úloh zamietnutý — zostavený plán je neúplný. Usmerni plán (Uprav)."
         db.flush()
         return state
 
+    # Register-aware summary — the Návrh phase closes the whole design (doc + plan) BYTE-IDENTICALLY to
+    # pre-STEP-3; the conversation register composed only the plan from the approved Špecifikácia.
+    summary = (
+        "Návrh hotový — návrhový dokument + plán úloh (kostra + úlohy po funkciách)."
+        if stage == "navrh"
+        else "Plán úloh zostavený zo schválenej Špecifikácie (kostra + úlohy po funkciách)."
+    )
     assembled = PipelineStatusBlock(
-        stage="navrh",
+        stage=stage,
         kind="gate_report",
-        summary="Návrh hotový — návrhový dokument + plán úloh (kostra + úlohy po funkciách).",
+        summary=summary,
         awaiting="manazer",
         plan=full_plan,
         cross_cutting_rules=skeleton.cross_cutting_rules,
@@ -4217,15 +4376,14 @@ async def _fold_task_plan_into_navrh(
         flagship_features=skeleton.flagship_features,
         safety_properties=skeleton.safety_properties,
     )
-    # Record the AI-Agent navrh gate_report carrying the assembled plan + cross_cutting_rules: the build
-    # loop re-reads the rules from THIS message (_fetch_cross_cutting_rules), and it is the audit-trail
-    # record of the plan the Manažér reviews at the post-Návrh schvaľovací bod. No usage of its own
-    # (orchestrator-synthesized — the per-pass notes already accounted the agent tokens); mode="json" so
-    # any UUID in the plan serializes for JSONB.
+    # Record the AI-Agent gate_report carrying the assembled plan + cross_cutting_rules: the build loop
+    # re-reads the rules from THIS message (_fetch_cross_cutting_rules), and it is the audit-trail record of
+    # the plan the Manažér reviews. No usage of its own (orchestrator-synthesized — the per-pass notes
+    # already accounted the agent tokens); mode="json" so any UUID in the plan serializes for JSONB.
     plan_msg = _record_message(
         db,
         version_id=version_id,
-        stage="navrh",
+        stage=stage,
         author="ai_agent",
         recipient="manazer",
         kind="gate_report",
@@ -4237,33 +4395,54 @@ async def _fold_task_plan_into_navrh(
             # to floor the acceptance (≥1 FEATURE assertion per flagship feature, ≥1 NEGATIVE per safety prop).
             "flagship_features": skeleton.flagship_features,
             "safety_properties": [sp.model_dump(mode="json") for sp in skeleton.safety_properties],
-            "phase": "navrh",
+            "phase": stage,
         },
     )
     if on_message is not None:
         await on_message(plan_msg)
 
-    reason = _write_task_plan(db, state, assembled)
+    reason = _write_task_plan(db, state, assembled, stage=stage)
     if reason is not None:
         # Plan write failed → blocked: a direct system→manazer note (no Coordinator relay, design §2.2).
         msg = _record_message(
             db,
             version_id=version_id,
-            stage="navrh",
+            stage=stage,
             author="system",
             recipient="manazer",
             kind="notification",
             content=f"Plán úloh sa nepodarilo zapísať: {reason}.",
-            payload={"phase": "navrh"},
+            payload={"phase": stage},
         )
         if on_message is not None:
             await on_message(msg)
         state.status = "blocked"
         state.block_reason = "system_error"  # R4 (D1): task-plan write failed (engine-side)
-        state.next_action = "Plán úloh sa nepodarilo zapísať — usmerni Návrh (Uprav)."
+        state.next_action = "Plán úloh sa nepodarilo zapísať — usmerni plán (Uprav)."
         db.flush()
         return state
-    return None  # success — the caller runs the SHARED dial-settle
+    return None  # success — the caller settles for its register
+
+
+async def _fold_task_plan_into_navrh(
+    db: Session,
+    state: PipelineState,
+    *,
+    on_event: Optional[claude_agent.EventCallback],
+    directive: Optional[str],
+    on_message: Optional[MessageCallback],
+) -> Optional[PipelineState]:
+    """Fold the incremental task plan into the Návrh phase (CR-V2-011) — the ``stage='navrh'`` wrapper over
+    the shared :func:`_generate_incremental_plan`.
+
+    The standalone ``task_plan`` stage/round is removed; the plan is the LAST part of the Návrh design doc
+    (design §2.1(2)), generated pass-by-pass so a large plan never overflows one turn. Byte-identical to the
+    pre-STEP-3 behaviour (every record stays on the ``navrh`` stage). Returns the SETTLED state on any
+    failure (the caller returns it directly), or ``None`` on success (the caller then runs the SHARED
+    dial-settle)."""
+    return await _generate_incremental_plan(
+        db, state, stage="navrh", on_event=on_event, directive=directive, on_message=on_message
+    )
 
 
 async def _run_auditor_upfront_review(
@@ -6427,6 +6606,34 @@ async def apply_action(
         )
         state.current_stage = _next_stage("priprava", state.flow_type)  # new_version → navrh; fast_fix → programovanie
         db.flush()
+        _begin_dispatch(db, state)
+        return state
+
+    if action == "zostav_plan":
+        # STEP 3 (step3-plan-design.md MD-1=A): "Zostaviť plán" — the conversation build composes the task
+        # plan FROM the approved Špecifikácia. AUTHORITATIVE gate (the board post-filter merely hides the
+        # button): valid ONLY in a conversation build whose spec is approved and whose plan is not yet
+        # materialized — a repeat is the Uprav/rebuild path, not a second first-build.
+        if state.mode != "conversation":
+            raise OrchestratorError("Zostaviť plán je platné len v rozhovorovom režime.")
+        if not spec_approved(db, version_id):
+            raise OrchestratorError("Zostaviť plán je platné až po schválení Špecifikácie.")
+        if navrh_plan_materialized(db, version_id):
+            raise OrchestratorError("Plán úloh už existuje — jeho úpravu rieš v rozhovore (Uprav).")
+        # Durable, restart-safe trigger (FIX3): record a manazer→ai_agent kind='directive' marker carrying
+        # payload.compose_plan. ``run_conversation_turn`` delegates to the plan round SOLELY on this DB marker
+        # — the in-memory dispatch directive is None for ``zostav_plan`` (directive_for_action) and is lost on
+        # a restart, so it must never be the trigger. The marker rides the ``priprava`` conversation stage.
+        _record_message(
+            db,
+            version_id=version_id,
+            stage="priprava",
+            author="manazer",
+            recipient="ai_agent",
+            kind="directive",
+            content="Zostav plán úloh zo schválenej Špecifikácie.",
+            payload={"phase": "priprava", "compose_plan": True},
+        )
         _begin_dispatch(db, state)
         return state
 

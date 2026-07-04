@@ -64,6 +64,14 @@ class EpicCreate(BaseModel):
         max_length=500,
         description="Short epic title.",
     )
+    plain_description: Optional[str] = Field(
+        default=None,
+        description=(
+            "Plain-language, jargon-free one-liner for the STEP 3 Plán úloh rail (step3-plan-design.md). "
+            "The Epic has no technical ``description`` — this is its ONLY prose. Nullable; ``None`` when "
+            "the AI partner emitted no one-liner."
+        ),
+    )
     status: EpicStatus = Field(
         default="planned",
         description="Lifecycle status: planned | in_progress | done.",
@@ -107,6 +115,7 @@ class EpicRead(BaseModel):
     version_id: Optional[UUID] = None
     number: int
     title: str = Field(..., min_length=1, max_length=500)
+    plain_description: Optional[str] = None
     status: EpicStatus
     created_at: datetime
     updated_at: datetime

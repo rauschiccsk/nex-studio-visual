@@ -259,6 +259,7 @@ def create(db: Session, data: TaskCreate) -> Task:
         number=number,
         title=data.title,
         description=data.description,
+        plain_description=data.plain_description,
         task_type=data.task_type,
         status=data.status,
         priority=data.priority,

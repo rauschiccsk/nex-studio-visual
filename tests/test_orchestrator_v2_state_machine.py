@@ -477,6 +477,8 @@ def test_apply_action_is_sole_mutator_grep_guard():
     assert orchestrator._ACTIONS == frozenset(
         # CR-V2-041: + "decide" (the Manažér picks a consultation Decision Card option).
         # CR-V2-057: + "overit_znovu" ("Over znova" — re-verify a drifted version against the current HEAD).
+        # STEP 3 (step3-plan-design.md): + "zostav_plan" ("Zostaviť plán" — compose the task plan from the
+        # approved Špecifikácia in the conversation register).
         {
             "start",
             "approve_spec",
@@ -489,6 +491,7 @@ def test_apply_action_is_sole_mutator_grep_guard():
             "pause",
             "decide",
             "overit_znovu",
+            "zostav_plan",
         }
     )
     # apply_coordinator_recommendation is REMOVED.

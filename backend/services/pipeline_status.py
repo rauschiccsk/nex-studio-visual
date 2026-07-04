@@ -92,6 +92,9 @@ class TaskPlanTask(BaseModel):
     title: str = Field(min_length=1, max_length=500)
     task_type: TaskType
     description: str = ""
+    #: STEP 3 (step3-plan-design.md FIX4): the plain-language, jargon-free one-liner for the Plán úloh rail
+    #: (distinct from the technical ``description``). Default empty so an omission parses.
+    plain_description: str = ""
     checklist_type: Optional[str] = Field(default=None, max_length=30)
     priority: TaskPriority = "normal"
     estimated_minutes: Optional[int] = None
@@ -102,6 +105,8 @@ class TaskPlanFeat(BaseModel):
 
     title: str = Field(min_length=1, max_length=500)
     description: str = ""
+    #: STEP 3 (step3-plan-design.md FIX4): plain-language one-liner for the Plán úloh rail. Default empty.
+    plain_description: str = ""
     estimated_minutes: Optional[int] = None
     tasks: list[TaskPlanTask] = Field(min_length=1)
 
@@ -110,6 +115,9 @@ class TaskPlanEpic(BaseModel):
     """An epic groups ≥1 feat (always project-level — multi-module removed in v2)."""
 
     title: str = Field(min_length=1, max_length=500)
+    #: STEP 3 (step3-plan-design.md FIX4): plain-language one-liner — the Epic's ONLY prose (no technical
+    #: ``description`` on an Epic). Default empty so an omission parses.
+    plain_description: str = ""
     feats: list[TaskPlanFeat] = Field(min_length=1)
 
 
@@ -149,11 +157,13 @@ class SafetyProperty(BaseModel):
 
 
 class TaskPlanSkeletonFeat(BaseModel):
-    """A feat in the skeleton pass — title/description/estimated_minutes, **NO** tasks
+    """A feat in the skeleton pass — title/description/plain_description/estimated_minutes, **NO** tasks
     (tasks arrive in the per-feat passes)."""
 
     title: str = Field(min_length=1, max_length=500)
     description: str = ""
+    #: STEP 3 (step3-plan-design.md FIX4): plain-language one-liner for the Plán úloh rail. Default empty.
+    plain_description: str = ""
     estimated_minutes: Optional[int] = None
 
 
@@ -161,6 +171,8 @@ class TaskPlanSkeletonEpic(BaseModel):
     """An epic in the skeleton pass — title + ≥1 (task-less) feat."""
 
     title: str = Field(min_length=1, max_length=500)
+    #: STEP 3 (step3-plan-design.md FIX4): plain-language one-liner — the Epic's ONLY prose. Default empty.
+    plain_description: str = ""
     feats: list[TaskPlanSkeletonFeat] = Field(min_length=1)
 
     @model_validator(mode="before")

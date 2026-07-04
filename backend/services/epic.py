@@ -245,6 +245,7 @@ def create(db: Session, data: EpicCreate) -> Epic:
         version_id=data.version_id,
         number=number,
         title=data.title,
+        plain_description=data.plain_description,
         status=data.status,
     )
     db.add(epic)

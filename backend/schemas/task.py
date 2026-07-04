@@ -72,6 +72,13 @@ class TaskCreate(BaseModel):
         default="",
         description="Detailed task description. Defaults to an empty string.",
     )
+    plain_description: Optional[str] = Field(
+        default=None,
+        description=(
+            "Plain-language, jargon-free one-liner for the STEP 3 Plán úloh rail (step3-plan-design.md) — "
+            "distinct from the technical ``description``. Nullable; ``None`` when the AI partner emitted none."
+        ),
+    )
     task_type: TaskType = Field(
         ...,
         description="Task type: backend | frontend | migration | test | docs.",
@@ -168,6 +175,7 @@ class TaskRead(BaseModel):
     number: int
     title: str = Field(..., min_length=1, max_length=500)
     description: str
+    plain_description: Optional[str] = None
     task_type: TaskType
     status: TaskStatus
     estimated_minutes: Optional[int] = None

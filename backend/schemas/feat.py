@@ -56,6 +56,13 @@ class FeatCreate(BaseModel):
         default="",
         description="Detailed feat description. Defaults to an empty string.",
     )
+    plain_description: Optional[str] = Field(
+        default=None,
+        description=(
+            "Plain-language, jargon-free one-liner for the STEP 3 Plán úloh rail (step3-plan-design.md) — "
+            "distinct from the technical ``description``. Nullable; ``None`` when the AI partner emitted none."
+        ),
+    )
     status: FeatStatus = Field(
         default="todo",
         description="Lifecycle status: todo | in_progress | done | failed.",
@@ -121,6 +128,7 @@ class FeatRead(BaseModel):
     number: int
     title: str = Field(..., min_length=1, max_length=500)
     description: str
+    plain_description: Optional[str] = None
     status: FeatStatus
     estimated_minutes: Optional[int] = None
     actual_minutes: Optional[int] = None

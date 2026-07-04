@@ -101,6 +101,10 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
     # apply_action enforces the same rule authoritatively; this just hides the dead button (the state-only
     # determine_available_actions can't see the DB-derived plan presence).
     available_actions: list[str] = sorted(orchestrator.determine_available_actions(state)) if state is not None else []
+    # Durable spec-approval signal (STEP 2 follow-up) — the SINGLE shared probe (orchestrator.spec_approved,
+    # step3-plan-design.md FIX2): drives both the FE Špecifikácia badge below AND the STEP-3 zostav_plan
+    # post-filter here. One indexed exists query; correct for conversation + legacy builds alike.
+    spec_approved = orchestrator.spec_approved(db, version_id)
     if (
         state is not None
         and state.current_stage == "navrh"
@@ -108,23 +112,23 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         and not orchestrator.navrh_plan_materialized(db, version_id)
     ):
         available_actions = [a for a in available_actions if a != "schvalit"]
+    # STEP 3 (step3-plan-design.md FIX2): the state-only ``determine_available_actions`` offers ``zostav_plan``
+    # unconditionally at ``priprava``; POST-FILTER it here (mirror of the schvalit filter above) — drop it
+    # unless this is a conversation build whose Špecifikácia is approved and whose plan is not yet
+    # materialized. ``apply_action`` enforces the same rule authoritatively; this hides the dead button.
+    if (
+        state is not None
+        and "zostav_plan" in available_actions
+        and not (
+            state.mode == "conversation" and spec_approved and not orchestrator.navrh_plan_materialized(db, version_id)
+        )
+    ):
+        available_actions = [a for a in available_actions if a != "zostav_plan"]
     # CR-V2-056 (reality-anchoring): compute "verified" LIVE from the repo (PASS-bound SHA vs current HEAD) so
     # the board never shows a frozen PASS — a version whose HEAD drifted past its verified commit reads
     # 'sha_drift' and the FE flags it. One HEAD read for this single-version view.
     verified, verified_provenance = (
         orchestrator.version_verified(db, version_id) if state is not None else (False, "no_pass")
-    )
-    # Durable spec-approval signal (STEP 2 follow-up): the FE Špecifikácia badge needs a persistent
-    # "frozen" flag, not the truncated recent_messages tail (nor available_actions — approve_spec stays
-    # offerable after approval). TRUE iff ≥1 kind='approval' message exists — one indexed exists probe on
-    # the (version_id, kind) columns (version_id is indexed), correct for both conversation + legacy builds.
-    spec_approved = (
-        db.execute(
-            select(PipelineMessage.id)
-            .where(PipelineMessage.version_id == version_id, PipelineMessage.kind == "approval")
-            .limit(1)
-        ).scalar_one_or_none()
-        is not None
     )
     return PipelineBoardRead(
         state=PipelineStateRead.model_validate(state) if state is not None else None,

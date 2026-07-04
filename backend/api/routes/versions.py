@@ -305,6 +305,8 @@ def get_task_plan(
                 "priority": t.priority,
                 "checklist_type": t.checklist_type,
                 "description": t.description,
+                # STEP 3 (step3-plan-design.md): the plain-language L2 one-liner for the three-layer rail.
+                "plain_description": t.plain_description,
             }
         )
 
@@ -316,6 +318,9 @@ def get_task_plan(
                 "number": f.number,
                 "title": f.title,
                 "status": f.status,
+                # STEP 3: expose the technical description (L3 detail) + the plain-language L2 one-liner.
+                "description": f.description,
+                "plain_description": f.plain_description,
                 "tasks": tasks_by_feat.get(str(f.id), []),
             }
         )
@@ -326,6 +331,8 @@ def get_task_plan(
             "number": e.number,
             "title": e.title,
             "status": e.status,
+            # STEP 3: the Epic's ONLY prose (no technical description column) — the L2 one-liner.
+            "plain_description": e.plain_description,
             "feats": feats_by_epic.get(str(e.id), []),
         }
         for e in epics

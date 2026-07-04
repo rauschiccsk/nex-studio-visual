@@ -35,6 +35,11 @@ class Epic(Base, UUIDMixin, TimestampMixin):
     )
     number = Column(Integer, nullable=False)
     title = Column(String(500), nullable=False)
+    # STEP 3 (Plán úloh): the plain-language, jargon-free one-liner shown to the Manažér in the
+    # three-layer rail (F-007 §5.x; step3-plan-design.md FIX4). The Epic has no ``description`` column —
+    # ``plain_description`` is its ONLY prose. Nullable Text (migration 080); an omission parses (default
+    # empty on the generating schema), and the FE shows a muted placeholder rather than technical text.
+    plain_description = Column(Text, nullable=True)
     status = Column(String(20), nullable=False, server_default="planned")
 
     __table_args__ = (
@@ -64,6 +69,10 @@ class Feat(Base, UUIDMixin, TimestampMixin):
     number = Column(Integer, nullable=False)
     title = Column(String(500), nullable=False)
     description = Column(Text, nullable=False, server_default="")
+    # STEP 3 (Plán úloh): plain-language one-liner for the three-layer rail (step3-plan-design.md FIX4) —
+    # distinct from the technical ``description``. Nullable Text (migration 080); default empty on the
+    # generating schema so an omission parses; the FE never falls back to ``description`` when empty.
+    plain_description = Column(Text, nullable=True)
     status = Column(String(20), nullable=False, server_default="todo")
     estimated_minutes = Column(Integer, nullable=True)
     actual_minutes = Column(Integer, nullable=True)
@@ -94,6 +103,10 @@ class Task(Base, UUIDMixin, TimestampMixin):
     number = Column(Integer, nullable=False)
     title = Column(String(500), nullable=False)
     description = Column(Text, nullable=False, server_default="")
+    # STEP 3 (Plán úloh): plain-language one-liner for the three-layer rail (step3-plan-design.md FIX4) —
+    # distinct from the technical ``description``. Nullable Text (migration 080); default empty on the
+    # generating schema so an omission parses; the FE never falls back to ``description`` when empty.
+    plain_description = Column(Text, nullable=True)
     task_type = Column(String(20), nullable=False)
     status = Column(String(20), nullable=False, server_default="todo", index=True)
     priority = Column(String(10), nullable=False, server_default="normal")
