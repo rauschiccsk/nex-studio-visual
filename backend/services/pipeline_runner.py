@@ -41,7 +41,11 @@ logger = logging.getLogger(__name__)
 #   * ``done``             — the build reached Hotovo (verified). Added in CR-V2-017 so an autonomously
 #     completed build (dial=plná, no human stops) still pings an away Manažér that it is DONE — otherwise a
 #     hands-off build would finish silently. (Deploy stays a separate per-customer action, D6.)
-_NOTIFY_STATUSES = ("awaiting_manazer", "blocked", "done")
+#   * ``paused``           — the spine's token-stop poistka paused the build past the token cap (STEP 1,
+#     REDESIGN §9). Only the AUTOMATIC token-stop pause nudges — a Manažér's OWN ``pause`` click must not
+#     ping them about their own action, so ``_maybe_notify`` further gates ``paused`` on
+#     :func:`_is_token_stop_pause` (the last message being the ``token_stop`` notification).
+_NOTIFY_STATUSES = ("awaiting_manazer", "blocked", "done", "paused")
 
 # Strong refs to in-flight tasks so the event loop doesn't GC them mid-run
 # (mirrors the idle/retention tasks in ``main.py``). Discarded on completion.
@@ -179,7 +183,18 @@ async def _run(version_id: uuid.UUID, directive: str | None = None) -> None:
         # via on_message the moment it's recorded — so the end batch is gone.
         on_message = _message_callback(db, version_id)
         try:
-            state = await orchestrator.run_dispatch(db, version_id, on_event, directive, on_message=on_message)
+            # Spine STEP 1: a ``mode='conversation'`` build runs the non-phase conversation loop
+            # (``run_conversation_turn``) instead of the 4-phase automaton (``run_dispatch``). The
+            # conversation loop ALWAYS settles (awaiting_manazer / blocked), so there is no auto-chain to
+            # run (``chain_limit`` below stays 0 by the ``agent_working`` guard); the relay-drain loop is
+            # KEPT for both — it is the "message-lands-after-the-turn" rhythm, and ``drain_relay_turn`` is
+            # itself mode-aware. NULL mode = the phase automaton, UNCHANGED.
+            if pre is not None and pre.mode == "conversation":
+                state = await orchestrator.run_conversation_turn(
+                    db, version_id, on_event, directive, on_message=on_message
+                )
+            else:
+                state = await orchestrator.run_dispatch(db, version_id, on_event, directive, on_message=on_message)
             db.commit()
             # Engine auto-chain (CR-NS-097; v2 4-phase CR-V2-009): run_dispatch returns status=agent_working
             # ONLY when it DELIBERATELY auto-advanced the phase and wants the next phase run in THIS same
@@ -308,6 +323,25 @@ def _notify_chat_ids(db, version_id: uuid.UUID) -> list[str]:
     return [owner] if owner else []
 
 
+def _is_token_stop_pause(db, version_id: uuid.UUID) -> bool:
+    """True iff the version's MOST RECENT message is the automatic token-stop notification (spine STEP 1).
+
+    Distinguishes the token-stop poistka pause (``_run_build_round`` wrote a ``system→manazer``
+    notification with ``payload.token_stop=True`` immediately before settling ``paused``) from a Manažér's
+    OWN ``pause`` click (which records NO message — ``apply_action`` just sets ``status='paused'``). Keying
+    on the LATEST message means a token-stop → resume → later manual pause correctly reads as NOT a
+    token-stop (the latest message is then the resumed work, not the stale token_stop note), so only the
+    genuine automatic pause nudges an away Manažér. The append-only log IS the source of truth — no state
+    flag to keep in sync."""
+    msg = db.execute(
+        select(PipelineMessage)
+        .where(PipelineMessage.version_id == version_id)
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    return bool(msg is not None and msg.author == "system" and (msg.payload or {}).get("token_stop") is True)
+
+
 async def _maybe_notify(db, version_id: uuid.UUID, state: PipelineState) -> None:
     """Presence-aware Telegram nudge (F-007 §9). Never blocks dispatch.
 
@@ -317,6 +351,10 @@ async def _maybe_notify(db, version_id: uuid.UUID, state: PipelineState) -> None
     (see :func:`_notify_chat_ids`).
     """
     if state.status not in _NOTIFY_STATUSES:
+        return
+    # Spine STEP 1: a ``paused`` settle nudges ONLY for the automatic token-stop pause — a Manažér who
+    # paused the build themselves just acted, so pinging them about their own pause would be spurious noise.
+    if state.status == "paused" and not _is_token_stop_pause(db, version_id):
         return
     if registry.active_director_ids(version_id):
         # a Director is on the board AND not "away" (E6, CR-NS-038) — no out-of-band nudge. An away
@@ -337,8 +375,12 @@ async def _maybe_notify(db, version_id: uuid.UUID, state: PipelineState) -> None
     link = f"\n{settings.app_public_url.rstrip('/')}/vyvoj" if settings.app_public_url else ""
     # CR-V2-017 COMMS-5: a Hotovo (``done``) settle is a "build finished" notification, not a "you're up"
     # nudge — distinct copy so an away Manažér knows the autonomous build COMPLETED (vs needing an action).
+    # Spine STEP 1: a ``paused`` settle is the token-stop poistka — distinct copy so an away Manažér knows
+    # the build hit the token cap (and should check the token-limit state), not that it needs a review.
     if state.status == "done":
         message = f"✅ {label}: build hotová (overené) — NEX Studio{link}"
+    elif state.status == "paused":
+        message = f"⏸️ {label}: build pozastavený — prekročený token-limit — NEX Studio{link}"
     else:
         message = f"🔔 {label}: si na rade v NEX Studio{link}"
     for chat_id in chat_ids:

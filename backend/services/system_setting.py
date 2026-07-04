@@ -79,6 +79,26 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
             "and deploy are always outside the dial. Also scales the Auditor's depth (OQ-9)."
         ),
     ),
+    # ── Token-stop poistka — the spine's runtime-mutable build stop (STEP 1, REDESIGN §9) ──
+    # GLOBAL cap on how many MILLIONS of tokens a Programovanie build may spend before the engine
+    # cooperatively PAUSES at the next task boundary and (for an away Manažér) nudges via Telegram — the
+    # Manažér then reads the token-limit state and decides whether to continue (``pokracovat``). 0 = no
+    # stop (the partner runs in one go, the pre-spine behaviour). Dynamic by design: when Anthropic
+    # changes its token policy the Manažér edits this ONE value in Nastavenia → Systém, no code change.
+    # GLOBAL-only for the spine (per-project/per-build override columns are left UNBUILT — the proven
+    # 074 dial pattern is documented for later); default '0' keeps every existing v2 PROD project
+    # byte-identical (non-stop). The append-only PipelineMessage log IS the token ledger
+    # (``pipeline_metrics.aggregate_pipeline_usage``) — no new counter, no migration (a row appears only
+    # on the first Settings edit; until then get_int returns this default 0).
+    "programovanie_token_stop_millions": _Default(
+        value="0",
+        value_type="int",
+        description=(
+            "Stop the Programovanie build once total token spend exceeds X million tokens (input+output), "
+            "pausing cooperatively at the next task boundary and nudging an away Manažér via Telegram. "
+            "0 = non-stop (the partner runs in one go). GLOBAL, runtime-mutable, no migration."
+        ),
+    ),
     # ── Pipeline / AI ───────────────────────────────────────────────
     "claude_stream_timeout_seconds": _Default(
         value="1800",

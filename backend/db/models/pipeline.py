@@ -165,6 +165,15 @@ class PipelineState(Base, UUIDMixin, TimestampMixin):
     #: by the orchestrator resolver, not a DB CHECK (the dial value set lives in one place in code;
     #: an unrecognised stored value degrades to the next layer). Written on ``start`` by CR-V2-009.
     miera_autonomie = Column(String(32), nullable=True)
+    #: Spine STEP 1 (the redesign's Riadiace centrum): selects the NON-PHASE conversation loop
+    #: (``orchestrator.run_conversation_turn``, driven by ``pipeline_runner._run``) over the legacy 4-phase
+    #: automaton (``run_dispatch``). ``'conversation'`` = the spine's live 1:1 with the Manažér; NULL (the
+    #: default) = the phase automaton, so EVERY existing v2 PROD row + every new_version/fast_fix build is
+    #: unaffected (ADDITIVE — migration 079, nullable, no backfill). A free column with NO CHECK constraint
+    #: (the value set lives in code, mirroring ``miera_autonomie``); it does NOT touch STAGE_VALUES/
+    #: ACTOR_VALUES — a conversation turn still carries the valid ``current_stage='priprava'`` +
+    #: ``current_actor='ai_agent'``; the mode column, not the stage, distinguishes the loop.
+    mode = Column(String(16), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("version_id", name="uq_pipeline_state_version_id"),

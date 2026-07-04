@@ -57,6 +57,7 @@ from backend.services import feat as feat_service
 from backend.services import system_setting as system_setting_service
 from backend.services import task as task_service
 from backend.services.claude_agent import ClaudeAgentError, ClaudeAgentTimeout, invoke_claude
+from backend.services.pipeline_metrics import aggregate_pipeline_usage
 from backend.services.pipeline_status import (
     FIX_CRITIQUE_JSON_SCHEMA,
     PIPELINE_STATUS_JSON_SCHEMA,
@@ -2131,6 +2132,14 @@ async def drain_relay_turn(
     _begin_dispatch(db, state)
     db.flush()
     directive = f"Manažér ti počas behu napísal: {text}"
+    # Spine STEP 1 (adversarial MAJOR fix): route the drained IN-FLIGHT relay by mode, mirroring the runner's
+    # ``_run`` selection. Without this, an in-flight Manažér message on a CONVERSATION build would drain
+    # through the PHASE AUTOMATON (``run_dispatch`` → ``_persist_priprava_spec`` / ``_settle_phase_boundary``),
+    # leaking spec-persistence + phase-advance semantics into the conversation — the exact automaton the
+    # spine REPLACES. A conversation build drains through the non-phase conversation loop; everything else
+    # keeps the phase automaton.
+    if state.mode == "conversation":
+        return await run_conversation_turn(db, version_id, on_event, directive, on_message=on_message)
     return await run_dispatch(db, version_id, on_event, directive, on_message=on_message)
 
 
@@ -3851,6 +3860,108 @@ async def run_dispatch(
         state.status = "awaiting_manazer"
         state.next_action = f"Manažér: posúdiť výstup fázy '{stage}'."
         db.flush()
+    return state
+
+
+# ── Spine STEP 1: the conversation loop (REPLACES run_dispatch for a 'conversation' build) ──────────
+
+
+def _conversation_directive(db: Session, version_id: uuid.UUID) -> str:
+    """The spine's minimal, PHASE-FREE brief for a conversation turn (STEP 1; REDESIGN §5/§6).
+
+    REPLACES the phase-specific ``_priprava_directive`` chain — it carries NO phase semantics
+    (no Zadanie→Špecifikácia state machine, no artifact gate, no stage advance). It just tells the AI
+    partner to continue the live 1:1 with the Manažér — read the append-only log for the whole
+    conversation context, react like a human (celé vety, žiaden žargón), answer his last message OR ask
+    what it needs (one thing at a time, with a recommendation), and be honest (surface the risk / wobbly
+    part itself). The status-block contract is appended downstream at the :func:`invoke_agent` chokepoint
+    (``_status_block_instruction``), so the turn still ends with the machine status block the engine parses.
+    """
+    return (
+        "Pokračuj v živom rozhovore 1:1 s Manažérom projektu — presne ako Dedo so Zoltánom. "
+        "Prečítaj si doterajší denník správ (to je kontext celej konverzácie) a reaguj po ľudsky, "
+        "celými vetami bez žargónu a bez vysypaných kódov: odpovedz na jeho poslednú správu, alebo sa "
+        "opýtaj, čo potrebuješ vedieť — JEDNO NARAZ, s odporúčaním. Buď proaktívny a čestný: ak je niečo "
+        "riziko alebo vratké, povedz to sám. Nič nerozhoduj za neho — vysvetli a nechaj ho rozhodnúť."
+    )
+
+
+async def run_conversation_turn(
+    db: Session,
+    version_id: uuid.UUID,
+    on_event: Optional[claude_agent.EventCallback] = None,
+    directive: Optional[str] = None,
+    *,
+    on_message: Optional[MessageCallback] = None,
+) -> Optional[PipelineState]:
+    """Run ONE spine conversation turn and SETTLE — the non-phase loop that REPLACES :func:`run_dispatch`
+    for a ``mode='conversation'`` build (STEP 1; REDESIGN §5/§6).
+
+    A deliberately SIMPLE turn: no ``STAGE_ACTOR`` walk, no ``_settle_phase_boundary``, no ``_next_stage``,
+    no artifact gate. It mirrors ``run_dispatch``'s guards (reload the ``agent_working`` state; nothing to
+    run otherwise), invokes the partner through the SHARED :func:`invoke_agent_with_parse_retry` (ALWAYS —
+    never ``invoke_claude`` raw, never a parse without retry; INVARIANT), threads ``on_event`` / ``on_message``
+    exactly as ``run_dispatch`` does (so the live WS feed + incremental broadcast are unchanged), and then
+    SETTLES to the Manažér — it NEVER silently advances a phase (the whole point of cutting the automaton):
+
+      * :class:`ParseFailure` → ``blocked`` / ``block_reason='parse_exhaustion'`` via
+        :func:`_record_parse_exhaustion` (readable notification + raw excerpt, never an empty screen).
+      * ``kind in {question, blocked}`` → ``blocked`` / ``block_reason='agent_question'`` (the partner asked
+        the Manažér something — the board offers ``answer``, relayed back as the next turn).
+      * a normal reply → ``awaiting_manazer`` (the partner answered — the Manažér reads it and writes back).
+
+    Returns the settled state (``None`` if the version/state vanished). The turn carries the valid
+    ``stage='priprava'`` + ``actor='ai_agent'`` (both already in the CHECK sets) — the ``mode`` column, not
+    the stage, is what routed us here."""
+    state = _get_state(db, version_id)
+    if state is None:
+        return None
+    if state.status != "agent_working":
+        # Mirror run_dispatch's guard — a settled/paused build has nothing to run (a stale re-entry, or a
+        # Manažér intervention that already moved the state). Return it untouched.
+        return state
+    stage = state.current_stage
+    actor = state.current_actor
+    prompt = directive if directive is not None else _conversation_directive(db, version_id)
+    result = await invoke_agent_with_parse_retry(
+        db,
+        version_id=version_id,
+        role=actor,
+        stage=stage,
+        prompt=prompt,
+        on_event=on_event,
+        on_message=on_message,
+    )
+
+    if isinstance(result, ParseFailure):
+        # The partner produced no parseable status block after the bounded retries → settle blocked with a
+        # readable notification (+ raw excerpt) so the conversation is never left on an empty screen.
+        state.status = "blocked"
+        state.block_reason = "parse_exhaustion"
+        state.next_action = "Blokované — AI partner nevrátil platný výstup. Napíš mu znova alebo upresni."
+        await _record_parse_exhaustion(
+            db,
+            state,
+            stage=stage,
+            result=result,
+            human_hint="Napíš mu znova alebo upresni, čo potrebuješ.",
+            on_message=on_message,
+        )
+        db.flush()
+        return state
+
+    if result.kind in ("question", "blocked"):
+        # The partner asked the Manažér something → blocked on an agent_question so the board offers answer.
+        state.status = "blocked"
+        state.block_reason = "agent_question"
+        state.next_action = f"AI partner sa pýta: {result.question}"
+        db.flush()
+        return state
+
+    # A normal reply → SETTLE for the Manažér (never a phase advance — the spine always hands the turn back).
+    state.status = "awaiting_manazer"
+    state.next_action = "AI partner odpovedal — pokračuj v rozhovore."
+    db.flush()
     return state
 
 
@@ -5874,6 +5985,49 @@ async def _run_build_round(
         if state is None or state.status != "agent_working":
             return state  # Manažér intervened (pause / steer) — land cleanly at a task boundary
 
+        # Token-stop poistka (spine STEP 1, REDESIGN §9 — "must ACTUALLY pause"): between tasks, honour the
+        # GLOBAL ``programovanie_token_stop_millions`` cap. When set (>0) and this version's total spend has
+        # crossed the cap — the append-only log IS the ledger (``aggregate_pipeline_usage``; NO new counter)
+        # — PAUSE cooperatively HERE, exactly like a Manažér ``pause`` (apply_action :6506), resumed via the
+        # existing ``pokracovat`` verb (the paused-state guard keeps ask/answer/schvalit out). Write ONE
+        # system→manazer notification flagged ``token_stop=True`` so the board shows why AND the away-Manažér
+        # Telegram nudge (``pipeline_runner._maybe_notify``) fires ONLY for this automatic pause, never a
+        # manual one. 0 = non-stop → this whole block is a no-op (byte-identical pre-spine behaviour). The
+        # notification payload carries no ``usage``/``timing``, so it never inflates the token ledger itself.
+        limit_millions = system_setting_service.get_int(db, "programovanie_token_stop_millions")
+        if limit_millions > 0:
+            spent = aggregate_pipeline_usage(db, version_id).version
+            tokens_spent = spent.input_tokens + spent.output_tokens
+            if tokens_spent >= limit_millions * 1_000_000:
+                state.status = "paused"
+                state.next_action = (
+                    f"Pozastavené — build prekročil token-limit ({limit_millions} mil.). "
+                    "Skontroluj stav a pokračuj cez „Pokračovať“."
+                )
+                stop_msg = _record_message(
+                    db,
+                    version_id=version_id,
+                    stage="programovanie",
+                    author="system",
+                    recipient="manazer",
+                    kind="notification",
+                    content=(
+                        f"⏸️ Build pozastavený — prekročený token-limit "
+                        f"({tokens_spent:,} tokenov ≥ {limit_millions} mil.). "
+                        "Skontroluj stav token-limitu a rozhodni, či pokračovať."
+                    ),
+                    payload={
+                        "phase": "programovanie",
+                        "token_stop": True,
+                        "tokens_spent": tokens_spent,
+                        "limit_millions": limit_millions,
+                    },
+                )
+                if on_message is not None:
+                    await on_message(stop_msg)
+                db.flush()
+                return state
+
         task = task_service.get_next_todo_task(db, version_id)
         if task is None:
             # No todo task remains → the phase produced its output. Apply the Miera autonómie dial at the
@@ -6097,14 +6251,26 @@ async def apply_action(
         # global). Validated against the preset set; an unrecognised value degrades to inherit (NULL), it
         # never crashes the start. NULL (the default) inherits the per-project / global dial.
         per_build_dial = _normalize_miera_autonomie(payload.get("miera_autonomie"))
+        # Spine STEP 1 (ADDITIVE mode toggle): an explicit ``mode='conversation'`` selects the non-phase
+        # conversation loop (``run_conversation_turn``, routed by ``pipeline_runner._run``); anything else
+        # (incl. absent) is NULL = the phase automaton (``run_dispatch``), so every existing new_version/
+        # fast_fix start + every existing v2 PROD row is UNCHANGED. Same build shape either way
+        # (current_stage='priprava' / actor='ai_agent' / status='agent_working') — only ``mode`` + a
+        # conversation-appropriate next_action differ.
+        mode = "conversation" if payload.get("mode") == "conversation" else None
         state = PipelineState(
             version_id=version_id,
             flow_type=flow_type,
             current_stage="priprava",
             current_actor="ai_agent",
             status="agent_working",
-            next_action="AI Agent pripravuje špecifikáciu.",
+            next_action=(
+                "AI partner načítava kontext a začína rozhovor."
+                if mode == "conversation"
+                else "AI Agent pripravuje špecifikáciu."
+            ),
             miera_autonomie=per_build_dial,
+            mode=mode,
         )
         db.add(state)
         db.flush()
