@@ -13,29 +13,11 @@
 // (reads, writes, tool calls) streams below the last bubble.
 
 import { useEffect, useRef } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
-import remarkGfm from "remark-gfm";
 
-import { CodeBlock } from "../markdown/CodeBlock";
+import { SpecMarkdown } from "../markdown/SpecMarkdown";
 import type { ActivityLine, PipelineMessage, PipelineParticipant } from "../../services/api/pipeline";
 import PipelineActivityFeed from "../cockpit/PipelineActivityFeed";
 import { ROLE_LABELS } from "../cockpit/labels";
-
-// Fenced code → the shared CodeBlock (language label + copy); everything else default GFM. Mirrors
-// PhaseArtifact's renderer so transcript bubbles and durable phase artifacts read identically.
-const MARKDOWN_COMPONENTS: Components = {
-  code({ className, children, ...props }) {
-    const match = /language-(\w+)/.exec(className || "");
-    const inline = !className;
-    if (!inline && match) return <CodeBlock language={match[1]}>{String(children)}</CodeBlock>;
-    if (!inline) return <CodeBlock>{String(children)}</CodeBlock>;
-    return (
-      <code className="rounded bg-[var(--color-surface-hover)] px-1 py-0.5 text-[0.85em]" {...props}>
-        {children}
-      </code>
-    );
-  },
-};
 
 // The Manažér's own messages align right (like an outgoing chat); everyone else aligns left.
 function isOperator(author: PipelineParticipant): boolean {
@@ -100,21 +82,19 @@ export function ConversationThread({ messages, activity, working }: Props) {
                   <div className="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
                     <span className="font-semibold text-[var(--color-text-secondary)]">{authorLabel(m.author)}</span>
                   </div>
-                  <div className="prose prose-sm dark:prose-invert max-w-none text-sm text-[var(--color-text-primary)]">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
-                      {body}
-                    </ReactMarkdown>
-                  </div>
+                  <SpecMarkdown
+                    body={body}
+                    className="prose prose-sm dark:prose-invert max-w-none text-sm text-[var(--color-text-primary)]"
+                  />
                   {question.trim() && (
                     <div className="mt-2 rounded-md border-l-2 border-[var(--color-accent-primary)] bg-[var(--color-accent-primary)]/5 px-3 py-2">
                       <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-accent-primary)]">
                         Otázka — na rade si ty
                       </div>
-                      <div className="prose prose-sm dark:prose-invert max-w-none text-sm text-[var(--color-text-primary)]">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
-                          {question}
-                        </ReactMarkdown>
-                      </div>
+                      <SpecMarkdown
+                        body={question}
+                        className="prose prose-sm dark:prose-invert max-w-none text-sm text-[var(--color-text-primary)]"
+                      />
                     </div>
                   )}
                 </div>

@@ -7,10 +7,8 @@
 // is no artifact yet (the phase hasn't produced its report), the panel shows a phase-appropriate placeholder.
 
 import { useEffect, useState } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
-import remarkGfm from "remark-gfm";
 
-import { CodeBlock } from "../markdown/CodeBlock";
+import { SpecMarkdown } from "../markdown/SpecMarkdown";
 import type { PipelineMessage } from "../../services/api/pipeline";
 import { getProjectSpecContent } from "../../services/api/projectSpecs";
 import { useActiveContextStore } from "../../store/activeContextStore";
@@ -22,21 +20,6 @@ import type { BuildPhase } from "./labels";
 const PHASE_ARTIFACT_FILE: Partial<Record<BuildPhase, string>> = {
   priprava: "specification.md",
   navrh: "design.md",
-};
-
-// Fenced code → the shared CodeBlock (language label + copy); everything else default GFM.
-const MARKDOWN_COMPONENTS: Components = {
-  code({ className, children, ...props }) {
-    const match = /language-(\w+)/.exec(className || "");
-    const inline = !className;
-    if (!inline && match) return <CodeBlock language={match[1]}>{String(children)}</CodeBlock>;
-    if (!inline) return <CodeBlock>{String(children)}</CodeBlock>;
-    return (
-      <code className="rounded bg-[var(--color-surface-hover)] px-1 py-0.5 text-[0.85em]" {...props}>
-        {children}
-      </code>
-    );
-  },
 };
 
 // The latest message for ``phase`` carrying a renderable artifact body (``payload.report`` — the durable
@@ -104,11 +87,10 @@ export function PhaseArtifact({ phase, messages, placeholder }: Props) {
     );
   }
   return (
-    <div className="prose prose-sm dark:prose-invert max-w-none px-4 py-3 text-sm text-[var(--color-text-primary)]">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
-        {body}
-      </ReactMarkdown>
-    </div>
+    <SpecMarkdown
+      body={body}
+      className="prose prose-sm dark:prose-invert max-w-none px-4 py-3 text-sm text-[var(--color-text-primary)]"
+    />
   );
 }
 

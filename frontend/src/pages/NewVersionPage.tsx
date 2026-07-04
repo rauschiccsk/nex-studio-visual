@@ -94,7 +94,8 @@ export default function NewVersionPage() {
   function validate(): boolean {
     const next: Record<string, string> = {};
     if (!versionNumber.trim()) next.versionNumber = "Číslo verzie je povinné.";
-    if (!zadanie.trim()) next.zadanie = "Zadanie je povinné — je to hlavný vstup pre prípravu špecifikácie.";
+    // STEP 2: Zadanie is OPTIONAL — a blank brief is valid; the Špecifikácia is then built from the
+    // Riadiace-centrum conversation from scratch (no not-empty gate here).
     setErrors(next);
     return Object.keys(next).length === 0;
   }
@@ -114,8 +115,10 @@ export default function NewVersionPage() {
         description: zadanie.trim() || undefined,
         target_date: targetDate || undefined,
       });
-      // Persist the brief to the spec tree the Príprava phase reads.
-      await writeZadanie(v.id, zadanie.trim());
+      // Persist the brief to the spec tree the Príprava phase reads — ONLY when non-empty. A blank Zadanie
+      // writes NO customer-requirements.md (STEP 2): the directive's "read it IF EXISTS" stays a clean
+      // present/absent test, never present-but-empty.
+      if (zadanie.trim()) await writeZadanie(v.id, zadanie.trim());
       setSavedVersion(v);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Nepodarilo sa uložiť Zadanie.";
@@ -252,8 +255,8 @@ export default function NewVersionPage() {
                 docs/specs/versions/v<N>/customer-requirements.md; the Príprava phase reads it. */}
             <div>
               <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                Zadanie *{" "}
-                <span className="ml-1 text-[var(--color-text-muted)] font-normal text-xs">(brief — hlavný vstup; voľný text)</span>
+                Zadanie{" "}
+                <span className="ml-1 text-[var(--color-text-muted)] font-normal text-xs">(nepovinné — brief; voľný text)</span>
               </label>
               <textarea
                 rows={8}
@@ -270,8 +273,8 @@ export default function NewVersionPage() {
                 <p className="mt-1 text-xs text-[var(--color-status-error)]">{errors.zadanie}</p>
               ) : (
                 <p className="text-[11px] text-[var(--color-text-muted)] mt-1.5">
-                  Po uložení sa Zadanie zapíše do <span className="font-mono">customer-requirements.md</span>; špecifikáciu z neho
-                  vytvorí AI Agent vo fáze Príprava.
+                  Nepovinné. Ak Zadanie vyplníš, uloží sa do <span className="font-mono">customer-requirements.md</span> ako
+                  vstup; ak ho necháš prázdne, Špecifikáciu postavíte od nuly v rozhovore v Riadiacom centre.
                 </p>
               )}
             </div>

@@ -1,20 +1,58 @@
 /**
- * SpecifikaciaPage — the read-only "Špecifikácia" surface (spine STEP 1, route /specifikacia).
+ * SpecifikaciaPage — the read-only "Špecifikácia" surface (spine STEP 2, route /specifikacia).
  *
- * Step-1 placeholder: a light read-only shell for the sidebar's project-scoped Špecifikácia item. The real
- * rendered spec (the agreed .md, the output of the Riadiace-centrum conversation) is wired in step 2; for now
- * this is an honest "nothing agreed yet" shell so the nav item + route resolve without a 404.
+ * Renders the ONE agreed specification document (``docs/specs/versions/v<N>/specification.md``) read-only.
+ * The AI partner writes + maintains it during the Riadiace-centrum conversation and it is frozen on
+ * "Schváliť Špecifikáciu"; there is exactly ONE physical file (no second copy → no drift), read in-app via
+ * the EXISTING getProjectSpecContent endpoint — the same file PhaseArtifact already reads (source_path ==
+ * /opt/projects/<slug>).
+ *
+ * Three honest states: no project pinned → guard; no spec on disk yet (404 / empty) → "nothing agreed yet"
+ * + a link back to the Riadiace centrum where it is written; present → the rendered Markdown. The page is a
+ * plain preview both DURING drafting and AFTER approval — it always shows the current single source of truth.
  */
 
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FileText, FolderOpen } from "lucide-react";
 
 import { useActiveContextStore } from "@/store/activeContextStore";
+import { getProjectSpecContent } from "@/services/api/projectSpecs";
+import { SpecMarkdown } from "@/components/markdown/SpecMarkdown";
 
 export default function SpecifikaciaPage() {
   const navigate = useNavigate();
   const selectedProject = useActiveContextStore((s) => s.selectedProject);
   const selectedVersion = useActiveContextStore((s) => s.selectedVersion);
+
+  const slug = selectedProject?.slug;
+  const versionNumber = selectedVersion?.versionNumber;
+
+  // Read the ONE on-disk Špecifikácia (docs/specs/versions/v<N>/specification.md) — the same file the
+  // Príprava artifact reads (PhaseArtifact.tsx). Re-fetched when the pinned project / version changes.
+  const [body, setBody] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setBody(null);
+    if (!slug || !versionNumber) return;
+    const path = `docs/specs/versions/v${versionNumber}/specification.md`;
+    setLoading(true);
+    getProjectSpecContent(slug, path)
+      .then((res) => {
+        if (!cancelled && res.is_text && res.content.trim()) setBody(res.content);
+      })
+      .catch(() => {
+        /* not written yet / unreadable → fall through to the honest "nothing agreed yet" empty state */
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slug, versionNumber]);
 
   if (!selectedProject) {
     return (
@@ -49,11 +87,30 @@ export default function SpecifikaciaPage() {
         </span>
       </div>
 
-      <div className="flex flex-1 items-center justify-center p-6 text-center">
-        <p className="max-w-md text-xs text-[var(--color-text-muted)]">
-          Špecifikácia sa objaví, keď sa v Riadiacom centre dohodneme na zadaní. Zatiaľ tu nič nie je.
-        </p>
-      </div>
+      {body ? (
+        <div className="flex-1 overflow-y-auto">
+          <SpecMarkdown
+            body={body}
+            className="prose prose-sm dark:prose-invert max-w-none px-6 py-5 text-sm text-[var(--color-text-primary)]"
+          />
+        </div>
+      ) : (
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
+          <p className="max-w-md text-xs text-[var(--color-text-muted)]">
+            {loading
+              ? "Načítavam Špecifikáciu…"
+              : "Špecifikácia zatiaľ nie je napísaná. Vzniká v Riadiacom centre — v rozhovore s AI Agentom sa dohodnete na zadaní a AI ju priebežne zapisuje ako jeden dokument."}
+          </p>
+          {!loading && (
+            <button
+              onClick={() => navigate("/riadiace-centrum")}
+              className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500"
+            >
+              → Otvor Riadiace centrum
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -26,6 +26,7 @@ import { usePipelineWs } from "@/hooks/usePipelineWs";
 import { relayPipelineMessageApi } from "@/services/api/pipeline";
 import ConversationThread from "@/components/riadiace/ConversationThread";
 import ConversationComposer from "@/components/riadiace/ConversationComposer";
+import SpecApprovalBar from "@/components/riadiace/SpecApprovalBar";
 import PhaseBar from "@/components/riadiace/PhaseBar";
 import HonestStatusStrip from "@/components/riadiace/HonestStatusStrip";
 import PlanUlohRail from "@/components/riadiace/PlanUlohRail";
@@ -43,7 +44,7 @@ export default function RiadiaceCentrumPage() {
 
   // The event-rendered transcript + live activity, streamed over the EXISTING pipeline WS (INVARIANT: no new
   // WS client — live streaming already reaches the FE over this hook).
-  const { board, activity, reconnecting, error } = usePipelineWs(versionId);
+  const { board, activity, reconnecting, error, setBoard } = usePipelineWs(versionId);
 
   async function handleRelay(text: string): Promise<{ deferred: boolean }> {
     if (!versionId) throw new Error("Najprv vyber verziu (pin v Projektoch).");
@@ -107,7 +108,7 @@ export default function RiadiaceCentrumPage() {
   const working = board?.state?.status === "agent_working";
 
   return (
-    <div className="grid h-full grid-cols-[minmax(0,1fr)_320px] grid-rows-[auto_minmax(0,1fr)_auto] bg-[var(--color-canvas)]">
+    <div className="grid h-full grid-cols-[minmax(0,1fr)_320px] grid-rows-[auto_minmax(0,1fr)_auto_auto] bg-[var(--color-canvas)]">
       {/* Top — read-only phase bar (conversation column). */}
       <div className="col-start-1 row-start-1 min-w-0">
         <PhaseBar state={board?.state ?? null} />
@@ -125,13 +126,19 @@ export default function RiadiaceCentrumPage() {
         <ConversationThread messages={board?.recent_messages ?? []} activity={activity} working={!!working} />
       </div>
 
-      {/* Bottom — the relay send box. */}
+      {/* Approval moment — the "Schváliť Špecifikáciu" bar (STEP 2). Renders null unless the backend
+          currently offers ``approve_spec``; sits between the thread and the relay send box. */}
       <div className="col-start-1 row-start-3 min-w-0">
+        <SpecApprovalBar board={board} versionId={versionId} onBoard={setBoard} />
+      </div>
+
+      {/* Bottom — the relay send box. */}
+      <div className="col-start-1 row-start-4 min-w-0">
         <ConversationComposer onRelay={handleRelay} disabled={!versionId} />
       </div>
 
       {/* Right rail — Plán úloh placeholder, spanning the full height. */}
-      <div className="col-start-2 row-start-1 row-span-3 min-h-0">
+      <div className="col-start-2 row-start-1 row-span-4 min-h-0">
         <PlanUlohRail versionId={versionId} />
       </div>
     </div>
