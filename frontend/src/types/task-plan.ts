@@ -21,7 +21,10 @@ export interface TaskPlanTaskNode {
   status: TaskNodeStatus;
   priority: string;
   checklist_type: string | null;
+  /** Technical (L2) detail — the programmer's files/functions, shown only on expand. */
   description: string;
+  /** Plain-language (L1) one-liner for the Manažér — jargon-free; "" ⇒ FE muted placeholder (STEP 3). */
+  plain_description: string;
 }
 
 export interface TaskPlanFeatNode {
@@ -29,6 +32,10 @@ export interface TaskPlanFeatNode {
   number: number;
   title: string;
   status: TaskNodeStatus;
+  /** Technical (L2) detail — shown only on expand (STEP 3). */
+  description: string;
+  /** Plain-language (L1) one-liner for the Manažér (STEP 3). */
+  plain_description: string;
   tasks: TaskPlanTaskNode[];
 }
 
@@ -37,6 +44,8 @@ export interface TaskPlanEpicNode {
   number: number;
   title: string;
   status: EpicNodeStatus;
+  /** Plain-language (L1) one-liner — the Epic's ONLY prose (no technical description column) (STEP 3). */
+  plain_description: string;
   feats: TaskPlanFeatNode[];
 }
 

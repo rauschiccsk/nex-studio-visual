@@ -137,9 +137,15 @@ export default function RiadiaceCentrumPage() {
         <ConversationComposer onRelay={handleRelay} disabled={!versionId} />
       </div>
 
-      {/* Right rail — Plán úloh placeholder, spanning the full height. */}
+      {/* Right rail — the Plán úloh three-layer manager map (STEP 3), spanning the full height. Reads the live
+          board (available_actions gates the "Zostaviť plán" trigger; recent_messages drives tree-freshness). */}
       <div className="col-start-2 row-start-1 row-span-4 min-h-0">
-        <PlanUlohRail versionId={versionId} />
+        <PlanUlohRail
+          versionId={versionId}
+          messages={board?.recent_messages ?? []}
+          board={board}
+          onBoard={setBoard}
+        />
       </div>
     </div>
   );
