@@ -1,11 +1,10 @@
 /**
- * E3(a) (CR-NS-039) → CR-V2-019 — Sidebar AG terminal is a single AI Agent item.
+ * CR-V2-019 → spine STEP 1 (Chrbtica) — the Sidebar build surface collapsed to ONE item.
  *
- * Supersedes the CR-NS-014 per-charter gating test: the Designer / Customer /
- * Implementer / Auditor sidebar terminals were removed, so only the single AI
- * Agent NavItem remains (was "AG Koordinátor", renamed in CR-V2-019, design
- * §4.1). The pipeline still runs all work internally — this asserts the trimmed
- * sidebar surface plus the AUD-7 invariant (no Auditor nav item ever renders).
+ * The per-charter Designer / Customer / Implementer / Auditor sidebar terminals were removed (CR-NS-039),
+ * then the AI Agent terminal + the 4-phase Vývoj board collapsed into ONE "Riadiace centrum" item (spine
+ * STEP 1), with a project-scoped "Špecifikácia" item alongside it. This asserts the trimmed sidebar surface
+ * plus the AUD-7 invariant (no Auditor nav item ever renders).
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -36,13 +35,24 @@ function renderSidebar() {
   );
 }
 
-describe("Sidebar AG terminal (E3(a) / CR-NS-039 → CR-V2-019)", () => {
-  it("shows the single AI Agent terminal, enabled when a project is pinned", () => {
+describe("Sidebar build surface (CR-V2-019 → spine STEP 1)", () => {
+  it("shows the single Riadiace centrum item, enabled when a project is pinned", () => {
     renderSidebar();
 
-    // A project is pinned (mocked) → the project-scoped AI Agent item is active.
-    const aiAgent = screen.getByRole("button", { name: /AI Agent/i });
-    expect(aiAgent).not.toBeDisabled();
+    // A project is pinned (mocked) → the project-scoped Riadiace centrum item is active.
+    const riadiace = screen.getByRole("button", { name: /Riadiace centrum/i });
+    expect(riadiace).not.toBeDisabled();
+
+    // It replaces the retired AI Agent tab + Vývoj board — neither renders any more.
+    expect(screen.queryByRole("button", { name: /AI Agent/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Vývoj/i })).toBeNull();
+  });
+
+  it("shows the project-scoped Špecifikácia item, enabled when a project is pinned", () => {
+    renderSidebar();
+
+    const spec = screen.getByRole("button", { name: /Špecifikácia/i });
+    expect(spec).not.toBeDisabled();
   });
 
   it("no longer renders the Designer / Customer / Implementer / Auditor terminals", () => {
@@ -57,18 +67,12 @@ describe("Sidebar AG terminal (E3(a) / CR-NS-039 → CR-V2-019)", () => {
     expect(screen.queryByRole("button", { name: /Orchestrácia/i })).toBeNull();
   });
 
-  it("AUD-7: renders NO Auditor / Audítor nav item (verdict lives in Vývoj → Verifikácia)", () => {
+  it("AUD-7: renders NO Auditor / Audítor nav item (verdict lives inside the build surface)", () => {
     renderSidebar();
 
-    // The independent Auditor is intentionally absent from the nav — its verdict
-    // surfaces only inside the Vývoj board. A future edit must not re-add it.
+    // The independent Auditor is intentionally absent from the nav — its verdict surfaces only inside the
+    // build surface, never as a standalone destination. A future edit must not re-add it.
     expect(screen.queryByRole("button", { name: /Audítor/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /Auditor/i })).toBeNull();
-  });
-
-  it("removes the Špecifikácie nav item (spec now lives in Vývoj → Príprava)", () => {
-    renderSidebar();
-
-    expect(screen.queryByRole("button", { name: /Špecifikácie/i })).toBeNull();
   });
 });

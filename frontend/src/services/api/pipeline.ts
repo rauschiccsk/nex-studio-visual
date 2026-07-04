@@ -17,7 +17,7 @@ export type DebugAttachRole = "ai-agent" | "auditor";
 // These unions are no longer hand-mirrored from the backend CHECK constraints; they are derived
 // from `pipeline.generated.ts` (produced by `npm run codegen` ← OpenAPI ← the Pydantic `Literal`
 // schemas in backend/schemas/pipeline.py). `pipeline.ts` stays the stable import surface, so
-// consumers (ExchangePanel.tsx et al.) import these names unchanged while the VALUES track the
+// consumers (the cockpit panels et al.) import these names unchanged while the VALUES track the
 // backend automatically — a BE change that isn't regenerated fails the CI drift-gate (R2-c).
 type PipelineSchemas = components["schemas"];
 

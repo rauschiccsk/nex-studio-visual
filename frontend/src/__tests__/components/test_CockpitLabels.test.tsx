@@ -1,14 +1,14 @@
 /**
- * Slovak display vocabulary across the Vývoj board (CR-V2-021). The 4-phase bar renders Slovak phase
- * labels; deriveActiveAgent surfaces the real active agent (not the nominal current_actor). The v2
- * vocabulary (CR-V2-019) is asserted exhaustively at the bottom.
+ * Slovak display vocabulary from components/cockpit/labels.ts (CR-V2-021). Pins the 4-phase / 3-participant
+ * v2 vocabulary + the block-reason phrases + the decision-CTA banner palette.
+ *
+ * Spine STEP 1: decoupled from the CUT phase-rail component — the render-based "bar renders the phase labels" case
+ * and the deriveActiveAgent cases moved out with the deleted component. labels.ts is KEPT, so its vocabulary
+ * assertions stay here (the single source of truth for the display dictionary).
  */
 
 import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
-import "@testing-library/jest-dom/vitest";
 
-import PipelineRail, { deriveActiveAgent } from "@/components/cockpit/PipelineRail";
 import {
   BLOCK_REASON_LABELS,
   DECISION_BANNER,
@@ -20,35 +20,8 @@ import {
 } from "@/components/cockpit/labels";
 import type { BuildPhase, V2Participant } from "@/components/cockpit/labels";
 import type { BlockReason } from "@/services/api/pipeline";
-import type { ActivityLine, PipelineBoard, PipelineMessage, PipelineState } from "@/services/api/pipeline";
 
-function mkState(): PipelineState {
-  return {
-    id: "11111111-1111-1111-1111-111111111111",
-    version_id: "22222222-2222-2222-2222-222222222222",
-    flow_type: "new_version",
-    current_stage: "programovanie",
-    current_actor: "ai_agent",
-    status: "agent_working",
-    next_action: "x",
-    is_regate: false,
-    iteration: 0,
-    created_at: "2026-06-27T00:00:00Z",
-    updated_at: "2026-06-27T00:00:00Z",
-  };
-}
-
-describe("Vývoj board Slovak phase labels", () => {
-  it("the bar renders the four Slovak phase labels (not raw codes)", () => {
-    render(<PipelineRail state={mkState()} viewedPhase="programovanie" onSelectPhase={() => {}} />);
-    expect(screen.getByText("Príprava")).toBeInTheDocument();
-    expect(screen.getByText("Návrh")).toBeInTheDocument();
-    expect(screen.getByText("Programovanie")).toBeInTheDocument();
-    expect(screen.getByText("Verifikácia")).toBeInTheDocument();
-    // raw codes are only a tooltip, never visible text
-    expect(screen.queryByText("priprava")).not.toBeInTheDocument();
-  });
-
+describe("cockpit block_reason phrases", () => {
   it("R4 (D1/D2): every block_reason maps to a distinct Slovak phrase", () => {
     // CR-V2-041: + "decision_needed" (an interactive consultation).
     const reasons: BlockReason[] = [
@@ -62,48 +35,6 @@ describe("Vývoj board Slovak phase labels", () => {
     expect(BLOCK_REASON_LABELS.agent_question).toBe("Agent sa pýta");
     expect(BLOCK_REASON_LABELS.agent_error).toBe("Agent zlyhal");
     expect(new Set(Object.values(BLOCK_REASON_LABELS)).size).toBe(reasons.length);
-  });
-});
-
-describe("deriveActiveAgent (real active agent, not current_actor)", () => {
-  const st = (status: PipelineState["status"]): PipelineState => ({ ...mkState(), status });
-  const board = (state: PipelineState, messages: PipelineMessage[] = []): PipelineBoard => ({
-    state,
-    recent_messages: messages,
-  });
-  const msg = (author: PipelineMessage["author"]): PipelineMessage => ({
-    id: author,
-    version_id: "2",
-    stage: "programovanie",
-    author,
-    recipient: "manazer",
-    kind: "answer",
-    content: "x",
-    status: "delivered",
-    payload: null,
-    created_at: "2026-06-27T00:00:00Z",
-    seq: 1,
-  });
-
-  it("while working = the latest activity frame's role (not the nominal actor)", () => {
-    const activity: ActivityLine[] = [
-      { stage: "programovanie", actor: "ai_agent", kind: "status", line: "pracuje…" },
-      { stage: "verifikacia", actor: "auditor", kind: "status", line: "pracuje…" },
-    ];
-    expect(deriveActiveAgent(board(st("agent_working")), activity)).toBe("auditor");
-  });
-
-  it("while working with no activity falls back to current_actor", () => {
-    expect(deriveActiveAgent(board(st("agent_working")), [])).toBe("ai_agent");
-  });
-
-  it("at awaiting_manazer = the latest message author (who just acted)", () => {
-    expect(deriveActiveAgent(board(st("awaiting_manazer"), [msg("auditor")]), [])).toBe("auditor");
-  });
-
-  it("ignores a system/manazer latest message at rest", () => {
-    expect(deriveActiveAgent(board(st("blocked"), [msg("system")]), [])).toBeNull();
-    expect(deriveActiveAgent(board(st("blocked"), [msg("manazer")]), [])).toBeNull();
   });
 });
 

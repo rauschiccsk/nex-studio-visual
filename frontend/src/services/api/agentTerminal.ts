@@ -5,8 +5,8 @@
  * embedded PTY-backed claude CLI sessions — REST for lifecycle, WebSocket
  * for IO streaming. In v2.0.0 this raw PTY is the **break-glass debug**
  * path only (CR-V2-015): the first-class Manažér↔AI-Agent channel is the
- * event-rendered transcript + engine relay on the AI Agent tab
- * (:file:`pages/AgentTerminalPage.tsx`), NOT this raw byte stream.
+ * event-rendered transcript + engine relay on the Riadiace centrum (spine
+ * STEP 1), NOT this raw byte stream.
  *
  * All endpoints require the ``ri`` role; the auth wrapper in ``api.ts``
  * surfaces 403 as a thrown ``ApiError`` the page can render as a Lock

@@ -1,7 +1,7 @@
 /**
  * RiadiaceCentrumPage — the Riadiace centrum, the SPINE of NEX Studio v2 (spine STEP 1).
  *
- * Replaces the old CockpitPage (Vývoj phase-automaton board) + AgentTerminalPage (AI Agent tab) with ONE
+ * Replaces the old Vývoj phase-automaton board + the AI Agent tab with ONE
  * screen: a live 1:1 conversation between the Manažér and the AI partner — exactly how the Director talks to
  * Dedo. A thin, HONEST FE over the backend spine: the conversation IS `board.recent_messages` streamed live
  * over the EXISTING pipeline WS; sends go through the EXISTING single-writer relay. No new WS client, no new
@@ -52,7 +52,7 @@ export default function RiadiaceCentrumPage() {
     return { deferred: res.deferred };
   }
 
-  // --- Render guards (salvaged from AgentTerminalPage) ---
+  // --- Render guards (salvaged from the retired AI Agent tab) ---
 
   if (!isDirector) {
     return (

@@ -1,5 +1,5 @@
 // ConversationComposer — the relay send box at the bottom of the Riadiace centrum (spine STEP 1). Salvaged
-// from the proven components/agent/AgentInputBox.tsx (CUT) per the SALVAGE_VS_FRESH design choice, minus the
+// from the proven (now-CUT) agent input box per the SALVAGE_VS_FRESH design choice, minus the
 // break-glass `write_rejected` wiring — the spine page has no raw-PTY keystroke path (the break-glass PTY is
 // dormant), so the sole channel is the engine relay.
 //

@@ -23,7 +23,7 @@ const _MAX_ACTIVITY = 50;
 const _EMPTY_HELPERS: HelpersFeed = { stage: "priprava", count: 0, line: "", helpers: [] };
 
 // Live-activity survives a route change (2026-06-30 fix). The agent_activity stream is ephemeral — the WS
-// never replays it on (re)connect — so when the Manažér leaves Vývoj (e.g. → Metriky) the CockpitPage
+// never replays it on (re)connect — so when the Manažér leaves the build page (e.g. → Metriky) the page
 // unmounts, the hook's `activity` state is destroyed, and on return it remounts empty → the feed flashed
 // "Agent štartuje…" and the streamed lines were lost. This module-level, per-version cache lets a remount
 // restore the buffer; it is kept in lock-step with `activity` and cleared (→ []) whenever a state change

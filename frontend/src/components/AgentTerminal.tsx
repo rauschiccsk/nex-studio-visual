@@ -10,7 +10,7 @@
  * * a ``ResizeObserver`` keeping the PTY cols/rows in sync with the
  *   parent container
  *
- * The parent page (``AgentTerminalPage``) is responsible for:
+ * The parent page is responsible for:
  *
  * * spawning the session via ``POST /agent-terminal/spawn``
  * * passing the resulting ``sessionId`` + the auth ``token`` down here

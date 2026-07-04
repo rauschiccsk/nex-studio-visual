@@ -1,5 +1,5 @@
 // ConversationThread — the SPINE: the event-rendered 1:1 transcript at the centre of the Riadiace centrum
-// (spine STEP 1). Salvaged near-verbatim from the proven components/agent/AgentTranscript.tsx (CUT) per the
+// (spine STEP 1). Salvaged near-verbatim from the proven (now-CUT) agent transcript component per the
 // SALVAGE_VS_FRESH design choice — the bubble/question/report rendering was tuned over several CRs and the
 // spine reuses it unchanged rather than rewriting a conversation UI from scratch.
 //

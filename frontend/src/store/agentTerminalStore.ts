@@ -5,8 +5,8 @@
  * Implementer/Auditor spawn-terminals were removed in CR-NS-039).
  *
  * In v2.0.0 this raw PTY session is the **break-glass debug** path
- * (CR-V2-015): the first-class Manažér↔AI-Agent surface is the AI Agent tab's
- * event-rendered transcript + engine relay (:file:`pages/AgentTerminalPage.tsx`).
+ * (CR-V2-015): the first-class Manažér↔AI-Agent surface is the Riadiace centrum's
+ * event-rendered transcript + engine relay (spine STEP 1).
  * This store still owns the PTY lifecycle so the break-glass console (hosted by
  * :file:`components/PersistentTerminalsLayer.tsx`) survives React Router
  * navigation to/from ``/ai-agent`` (CR-NS-004, CR-NS-009, OQ-7 rename).

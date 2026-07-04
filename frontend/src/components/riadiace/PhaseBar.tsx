@@ -1,5 +1,5 @@
 // PhaseBar — the read-only phase bar across the top of the Riadiace centrum (spine STEP 1). Salvaged from the
-// proven components/agent/AgentPhaseStrip.tsx (CUT), MINUS the navigate-to-/vyvoj behaviour — this bar IS on
+// proven (now-CUT) agent phase strip, MINUS the navigate-to-/vyvoj behaviour — this bar IS on
 // the spine page, so it is a read-only marker, not a link.
 //
 // It marks the build position (●) across the four phases, derived live from the pipeline state. The backend

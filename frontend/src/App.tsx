@@ -55,8 +55,8 @@ function App() {
                 wildcard route below redirects any stale /project-specs link
                 to the dashboard. */}
             {/* v2 spine STEP 1 (Chrbtica): the Riadiace centrum is ONE conversation-centred
-                screen that replaces the CockpitPage (Vývoj board) + AgentTerminalPage (AI Agent
-                tab). The retired /vyvoj + /ai-agent routes redirect here so stale bookmarks
+                screen that replaces the old Vývoj build board + the AI Agent tab. The retired
+                /vyvoj + /ai-agent routes redirect here so stale bookmarks
                 survive; /cockpit + /coordinator keep their existing hop (→ /vyvoj / → /ai-agent,
                 which redirect onward to /riadiace-centrum). Špecifikácia is the read-only spec
                 shell (real .md wired in a later step). */}

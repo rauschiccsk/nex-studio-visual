@@ -1,5 +1,5 @@
 // HonestStatusStrip — the honest run-status strip pinned above the ConversationThread (spine STEP 1). Reuses
-// the proven headerStatus() derivation from components/agent → pages/AgentTerminalPage.tsx (CUT) + the
+// the proven headerStatus() derivation from the retired AI Agent tab (CUT) + the
 // reconnecting/error signals from usePipelineWs. The tone comes from the unified cockpit palette (labels.ts,
 // CR-NS-028) — a single source of truth, so "Pozastavené" reads amber and never blue.
 //
@@ -12,7 +12,7 @@ import type { PipelineState } from "../../services/api/pipeline";
 import { PHASE_LABELS, PIPELINE_STATUS_TONE, TONE_BANNER, TONE_DOT } from "../cockpit/labels";
 import type { BuildPhase, StatusTone } from "../cockpit/labels";
 
-// Honest status text (salvaged verbatim from AgentTerminalPage.headerStatus, design §4.4.1):
+// Honest status text (salvaged verbatim from the retired AI Agent tab's headerStatus, design §4.4.1):
 // Voľný / Pracuje na <projekt> v<ver> — fáza X / Čaká na súhlas / Pozastavené.
 function statusText(state: PipelineState | null, projectName: string, versionNumber: string): string {
   if (!state || state.status === "done") return "Voľný";

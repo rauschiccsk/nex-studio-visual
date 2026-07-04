@@ -1,6 +1,6 @@
 /**
  * usePipelineWs — live-activity survives a route change (2026-06-30 fix). The agent_activity stream is
- * ephemeral (the WS never replays it on connect), so navigating away from Vývoj (CockpitPage unmounts) and
+ * ephemeral (the WS never replays it on connect), so navigating away from the build page (it unmounts) and
  * back used to lose every streamed line and flash "Agent štartuje…". A per-version module cache now restores
  * the buffer on remount; a state change (run ended) clears it so a settled run never restores stale activity.
  */
@@ -73,7 +73,7 @@ describe("usePipelineWs — live-activity persists across a route change (2026-0
     act(() => FakeWS.instances[0]!._frame(activityFrame("číta súbory…")));
     expect(first.result.current.activity.map((a) => a.line)).toContain("číta súbory…");
 
-    first.unmount(); // navigate away → CockpitPage unmounts, hook state destroyed
+    first.unmount(); // navigate away → the build page unmounts, hook state destroyed
 
     // navigate back → remount (same version) → activity RESTORED from the cache, not empty
     const second = renderHook(() => usePipelineWs("ver-restore"));

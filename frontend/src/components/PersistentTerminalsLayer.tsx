@@ -1,6 +1,6 @@
 /**
  * PersistentTerminalsLayer — mounts the persistent **break-glass** claude CLI
- * ``<AgentTerminal/>`` (raw xterm PTY) ABOVE :file:`pages/AgentTerminalPage.tsx`
+ * ``<AgentTerminal/>`` (raw xterm PTY) ABOVE the app content
  * so its WebSocket + xterm.js stay alive when React Router navigates to/from
  * ``/ai-agent`` (CR-NS-004; narrowed to the single terminal in CR-NS-039;
  * route + slot re-keyed ``/coordinator``→``/ai-agent`` / ``coordinator``→
@@ -26,9 +26,9 @@
  *
  * Layout — the layer is mounted as a sibling of ``<Outlet/>`` inside
  * :file:`components/layout/AppLayout.tsx`'s ``<main>`` which is set to
- * ``relative``. Each slot is ``absolute inset-0 z-0`` and is overlaid by
- * :file:`pages/AgentTerminalPage.tsx`'s opaque header chrome
- * (``relative z-10`` + ``bg-[var(--color-surface)]``) so the page header stays visible
+ * ``relative``. Each slot is ``absolute inset-0 z-0`` and was overlaid by
+ * the retired AI Agent tab's opaque header chrome
+ * (``relative z-10`` + ``bg-[var(--color-surface)]``) so the page header stayed visible
  * on top of the terminal viewport without any offset math or portals.
  */
 
