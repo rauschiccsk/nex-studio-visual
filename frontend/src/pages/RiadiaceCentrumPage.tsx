@@ -23,7 +23,7 @@ import { Lock, FolderOpen } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import { usePipelineWs } from "@/hooks/usePipelineWs";
-import { relayPipelineMessageApi } from "@/services/api/pipeline";
+import { relayPipelineMessageApi, postPipelineActionApi } from "@/services/api/pipeline";
 import ConversationThread from "@/components/riadiace/ConversationThread";
 import ConversationComposer from "@/components/riadiace/ConversationComposer";
 import SpecApprovalBar from "@/components/riadiace/SpecApprovalBar";
@@ -46,9 +46,23 @@ export default function RiadiaceCentrumPage() {
   // WS client — live streaming already reaches the FE over this hook).
   const { board, activity, reconnecting, error, setBoard } = usePipelineWs(versionId);
 
-  async function handleRelay(text: string): Promise<{ deferred: boolean }> {
+  async function handleSend(text: string): Promise<{ deferred: boolean }> {
     if (!versionId) throw new Error("Najprv vyber verziu (pin v Projektoch).");
-    // The SOLE mutating call — the single-writer relay (Model B): the engine, not this page, writes the turn.
+    // COLD-START (spine STEP 1 HOT-FIX): a freshly-created version has NO pipeline yet (``board.state`` is
+    // null), so nothing has ever called ``start`` — a plain relay would raise "Pipeline not started". The
+    // Manažér's FIRST message STARTS the conversation: route it through the ``start`` action (mode=conversation,
+    // the message itself as the kickoff directive) and adopt the returned board. The start dispatches the first
+    // turn immediately (no in-flight turn to queue behind), so it is never ``deferred``.
+    if (!board?.state) {
+      const nextBoard = await postPipelineActionApi(versionId, {
+        action: "start",
+        payload: { mode: "conversation", directive: text },
+      });
+      setBoard(nextBoard);
+      return { deferred: false };
+    }
+    // Pipeline already exists → the SOLE mutating call is the single-writer relay (Model B): the engine, not
+    // this page, writes the turn (enqueued behind an in-flight turn when ``deferred``).
     const res = await relayPipelineMessageApi(versionId, text);
     return { deferred: res.deferred };
   }
@@ -134,7 +148,7 @@ export default function RiadiaceCentrumPage() {
 
       {/* Bottom — the relay send box. */}
       <div className="col-start-1 row-start-4 min-w-0">
-        <ConversationComposer onRelay={handleRelay} disabled={!versionId} />
+        <ConversationComposer onRelay={handleSend} disabled={!versionId} />
       </div>
 
       {/* Right rail — the Plán úloh three-layer manager map (STEP 3), spanning the full height. Reads the live

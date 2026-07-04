@@ -6521,19 +6521,6 @@ async def apply_action(
         flow_type = payload.get("flow_type", "new_version")
         if flow_type not in ("new_version", "fast_fix"):
             raise OrchestratorError(f"Invalid flow_type: {flow_type!r}")
-        # Fast-fix lane (design §2.4): the Manažér's directive IS the whole brief — carry it in BOTH the
-        # human-readable kickoff content (so it shows on the board) and the payload (so the Príprava round
-        # can seed from it). ``None`` for new_version → the Príprava dialogue starts from the saved Zadanie.
-        directive = payload.get("directive") if flow_type == "fast_fix" else None
-        # "Spustiť tvorbu špecifikácie" (design §2.1): the kickoff message is recorded in the Príprava
-        # phase — Príprava is the first phase the AI Agent enters. For new_version the content is generic;
-        # for fast_fix it carries the directive so the kickoff brief is honoured.
-        kickoff_content = directive if (flow_type == "fast_fix" and directive) else "Spustiť tvorbu špecifikácie."
-        # Per-build Miera autonómie override (AUTON-6, CR-V2-008): an explicit ``miera_autonomie`` in the
-        # start payload is persisted on the build as the TOP resolution layer (per-build → per-project →
-        # global). Validated against the preset set; an unrecognised value degrades to inherit (NULL), it
-        # never crashes the start. NULL (the default) inherits the per-project / global dial.
-        per_build_dial = _normalize_miera_autonomie(payload.get("miera_autonomie"))
         # Spine STEP 1 (ADDITIVE mode toggle): an explicit ``mode='conversation'`` selects the non-phase
         # conversation loop (``run_conversation_turn``, routed by ``pipeline_runner._run``); anything else
         # (incl. absent) is NULL = the phase automaton (``run_dispatch``), so every existing new_version/
@@ -6541,6 +6528,30 @@ async def apply_action(
         # (current_stage='priprava' / actor='ai_agent' / status='agent_working') — only ``mode`` + a
         # conversation-appropriate next_action differ.
         mode = "conversation" if payload.get("mode") == "conversation" else None
+        # The Manažér's directive rides in as the kickoff for BOTH the fast-fix lane AND the conversation
+        # COLD-START (spine STEP 1 HOT-FIX — the FIRST message STARTS the rozhovor). Fast-fix (design §2.4):
+        # the directive IS the whole brief — carried in BOTH the human-readable kickoff content (so it shows
+        # on the board) and the payload (so the Programovanie round can seed the one Task from it). Conversation
+        # cold-start: a freshly-created version has NO ``pipeline_state``, so nothing ever calls ``start`` — the
+        # Manažér's FIRST Riadiace-centrum message does, carrying itself as the ``directive``; it becomes the
+        # kickoff the partner reads first from the append-only log. ``None`` for a generic new_version → the
+        # Príprava dialogue starts from the saved Zadanie.
+        directive = payload.get("directive") if (flow_type == "fast_fix" or mode == "conversation") else None
+        # Conversation cold-start normalization: an empty / whitespace-only first message is no directive at
+        # all — the rozhovor still cold-starts, just with the generic kickoff. Fast-fix keeps its RAW directive
+        # (byte-identical legacy behaviour — this normalization is the conversation branch ONLY).
+        if mode == "conversation" and not (isinstance(directive, str) and directive.strip()):
+            directive = None
+        # "Spustiť tvorbu špecifikácie" (design §2.1): the kickoff message is recorded in the Príprava phase —
+        # the first phase the AI Agent / partner enters. new_version → generic; fast_fix → the directive brief;
+        # conversation → the Manažér's first message (when non-empty), else the generic kickoff. (For fast_fix
+        # this is byte-identical to the old ``flow_type == "fast_fix" and directive`` gate.)
+        kickoff_content = directive if directive else "Spustiť tvorbu špecifikácie."
+        # Per-build Miera autonómie override (AUTON-6, CR-V2-008): an explicit ``miera_autonomie`` in the
+        # start payload is persisted on the build as the TOP resolution layer (per-build → per-project →
+        # global). Validated against the preset set; an unrecognised value degrades to inherit (NULL), it
+        # never crashes the start. NULL (the default) inherits the per-project / global dial.
+        per_build_dial = _normalize_miera_autonomie(payload.get("miera_autonomie"))
         state = PipelineState(
             version_id=version_id,
             flow_type=flow_type,
