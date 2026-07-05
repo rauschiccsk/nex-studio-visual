@@ -19,11 +19,17 @@
 // + plan not yet built). On click it fires the EXISTING postPipelineActionApi and swaps in the fresh board.
 //
 // STEP 4 (Programovanie, docs/architecture/step4-programovanie-design.md) extends the SAME action slot into a
-// mutually-exclusive trigger ladder — `spustit_stavbu` ("Spustiť stavbu", start the build loop) and
-// `pokracovat` ("Pokračovať v stavbe", resume a paused/token-stopped loop) sit beside `zostav_plan`, each
-// gated the same honest-by-construction way (available_actions) and firing the same postPipelineActionApi.
-// A "Práve robím: #N title" banner (board.current_task, live during the build) and an amber paused note
-// (status === 'paused') round out the STEP-4 surface — all additive, no new endpoint/WS/backend change.
+// mutually-exclusive trigger ladder — `spustit_stavbu` ("Spustiť stavbu", start the build loop),
+// `pokracovat` ("Pokračovať v stavbe", resume a paused/token-stopped loop) and `pause` ("Pozastaviť",
+// cooperatively hold a running loop) sit beside `zostav_plan`, each gated the same honest-by-construction way
+// (available_actions) and firing the same postPipelineActionApi. A running build offers `pause`; a paused one
+// offers `pokracovat` — the ladder shows exactly one. A "Práve robím: #N title" banner (board.current_task,
+// live during the build) and an amber paused note (status === 'paused') round out the STEP-4 surface.
+//
+// A build-progress indicator (salvaged from cockpit/TaskPlanPanel, CR-NS-025 Part 2) sits directly above the
+// tree: "<done>/<total> úloh hotových" + a slim green bar + "N %", computed live off the SAME fetched plan
+// (the message-growth refetch advances it as tasks finish). Shown only when the plan has tasks. All additive,
+// no new endpoint/WS/backend change.
 
 import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
@@ -260,6 +266,9 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
   const canBuildPlan = !!board?.available_actions?.includes("zostav_plan");
   const canProgram = !!board?.available_actions?.includes("spustit_stavbu");
   const canResume = !!board?.available_actions?.includes("pokracovat");
+  // A running Programovanie loop offers `pause` (BE determine_available_actions → {"pause"}); the rung below
+  // fires the same postPipelineActionApi(action:'pause'). Mutually exclusive with `pokracovat` by construction.
+  const canPause = !!board?.available_actions?.includes("pause");
   // Honest, derived from the live status: a token-stopped build reads `paused` — the amber note reflects it.
   const isPaused = board?.state?.status === "paused";
 
@@ -278,6 +287,18 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
       setTriggering(false);
     }
   }
+
+  // Build-progress indicator (salvaged from cockpit/TaskPlanPanel, CR-NS-025 Part 2): % of tasks done, live
+  // for free off the SAME fetched plan as the tree (the message-growth refetch advances it as tasks finish —
+  // no new data/endpoint). done/total are counted over the flattened leaf TASK rows.
+  const allTasks: TaskPlanTaskNode[] = (plan?.plan ?? []).flatMap((e) => e.feats.flatMap((f) => f.tasks));
+  const doneCount = allTasks.filter((t) => t.status === "done").length;
+  const failedCount = allTasks.filter((t) => t.status === "failed").length;
+  const totalCount = allTasks.length;
+  const donePct = totalCount ? Math.round((doneCount / totalCount) * 100) : 0;
+  // Show only when the plan HAS tasks (and no fetch error): hides the no-plan / loading / error states AND the
+  // degenerate "epics but zero tasks" case — no confusing "0/0 úloh". totalCount>0 ⇒ a populated tree.
+  const showProgress = !error && totalCount > 0;
 
   return (
     <aside
@@ -339,6 +360,19 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
           </button>
           {triggerError && <p className="mt-1 text-xs text-[var(--color-status-error)]">{triggerError}</p>}
         </div>
+      ) : canPause ? (
+        <div className="flex-shrink-0 border-b border-[var(--color-border-default)] px-4 py-3">
+          <p className="mb-2 text-xs text-[var(--color-text-muted)]">Stavba prebieha — v prípade potreby ju pozastav.</p>
+          <button
+            type="button"
+            onClick={() => runTrigger("pause", "Pozastavenie stavby zlyhalo.")}
+            disabled={triggering}
+            className="w-full rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-50 dark:text-amber-300"
+          >
+            {triggering ? "Pozastavujem…" : "Pozastaviť"}
+          </button>
+          {triggerError && <p className="mt-1 text-xs text-[var(--color-status-error)]">{triggerError}</p>}
+        </div>
       ) : null}
 
       {/* "Práve robím" banner — top of the rail body, populated by the BE only during Programovanie. */}
@@ -348,6 +382,29 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
           title={board.current_task.title}
           working={board.state?.status === "agent_working"}
         />
+      )}
+
+      {/* Build-progress indicator (CR-NS-025 Part 2, salvaged) — overall done/total + % directly above the tree. */}
+      {showProgress && (
+        <div className="flex-shrink-0 border-b border-[var(--color-border-default)] px-4 py-2.5">
+          <div className="mb-1.5 flex items-baseline justify-between gap-2 text-[11px]">
+            <span className="text-[var(--color-text-secondary)]">
+              {doneCount}/{totalCount} úloh hotových
+              {failedCount > 0 && (
+                <span className="font-medium text-[var(--color-status-error)]"> · {failedCount} zlyhané</span>
+              )}
+            </span>
+            <span className="font-semibold tabular-nums text-[var(--color-text-primary)]">{donePct} %</span>
+          </div>
+          <div className="h-2 w-full overflow-hidden rounded-full bg-[var(--color-surface-hover)]">
+            <div
+              data-testid="planrail-progress-fill"
+              // Always green (CR-NS-028): the fill shows completed progress, and green = done.
+              className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-[width] duration-500 ease-out"
+              style={{ width: `${donePct}%` }}
+            />
+          </div>
+        </div>
       )}
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2 text-xs">
