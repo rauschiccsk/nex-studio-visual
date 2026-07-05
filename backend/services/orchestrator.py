@@ -438,6 +438,13 @@ _ACTIONS = frozenset(
         # advancing (it stays in the conversation register — the completion tail returns to priprava, no phase
         # walk); the board post-filters it to conversation + spec-approved + plan-materialized + NOT build-started.
         "spustit_stavbu",
+        # STEP 5 (step5-kontrola-design.md K-1=A): "Skontrolovať" — in a conversation build, AFTER Programovanie
+        # completes, run the partner's HONEST self-check (real boot + acceptance + spec reconciliation) that
+        # STAYS at ``current_stage='priprava'`` and emits ONE ``kind='gate_report'`` (NEVER a verdict). NOT
+        # advancing (it never walks the phase automaton — kontrola signs nothing, deploys nothing; it must stay
+        # INVISIBLE to the release/deploy path); the board post-filters it to conversation + spec-approved +
+        # programming-complete + NOT already-checked.
+        "skontrolovat",
     }
 )
 # Actions that act on / advance past an agent's output — only valid once the agent has SETTLED
@@ -520,6 +527,10 @@ def determine_available_actions(state: PipelineState) -> set[str]:
         # (state-only). The finer DB preconditions (conversation + spec approved + plan materialized + NOT
         # build-started) are the board route's POST-FILTER; ``apply_action`` enforces them authoritatively.
         actions.add("spustit_stavbu")
+        # STEP 5 (step5-kontrola-design.md K-1): "Skontrolovať" — offered UNCONDITIONALLY here too (state-only).
+        # The finer DB preconditions (conversation + spec approved + programming complete + NOT already-checked)
+        # are the board route's POST-FILTER; ``apply_action`` enforces them authoritatively.
+        actions.add("skontrolovat")
     elif stage in ("navrh", "programovanie"):
         # The dial-governed schvaľovacie body after Návrh / Programovanie — ``schvalit`` advances to the
         # next phase. (Whether the build HALTED here at all is the dial's call; once settled, it's offered.)
@@ -586,6 +597,57 @@ def _build_started(db: Session, version_id: uuid.UUID) -> bool:
         ).first()
         is not None
     )
+
+
+def _latest_programming_complete_seq(db: Session, version_id: uuid.UUID) -> Optional[int]:
+    """The ``seq`` of the LATEST Programovanie-complete notification for this version, or ``None`` when the
+    build has never completed (STEP 5, step5-kontrola-design.md).
+
+    The MD-B completion tail (:func:`_run_build_round`) records exactly ONE ``stage='programovanie'`` ∧
+    ``kind='notification'`` ∧ ``payload.programming_complete`` message per finished conversation build; a new
+    build / fix records a FRESHER one (higher ``seq``). Returning the seq (not just a bool) lets
+    :func:`kontrola_done` decide whether a kontrola gate_report is NEWER than the build it checked, so a
+    re-built version re-opens the check. Matches the ``.astext == 'true'`` JSONB style used elsewhere."""
+    return db.execute(
+        select(func.max(PipelineMessage.seq)).where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.stage == "programovanie",
+            PipelineMessage.kind == "notification",
+            PipelineMessage.payload["programming_complete"].astext == "true",
+        )
+    ).scalar()
+
+
+def programming_complete(db: Session, version_id: uuid.UUID) -> bool:
+    """True iff the conversation build's Programovanie has COMPLETED for this version — a
+    ``stage='programovanie'`` ∧ ``kind='notification'`` ∧ ``payload.programming_complete`` message is on
+    record (STEP 5, step5-kontrola-design.md). Gates the ``skontrolovat`` offer (board post-filter) AND the
+    authoritative ``apply_action`` guard: the honest self-check is only offerable once there is a finished
+    build to check. The mirror of :func:`navrh_plan_materialized` / :func:`_build_started` for STEP 5."""
+    return _latest_programming_complete_seq(db, version_id) is not None
+
+
+def kontrola_done(db: Session, version_id: uuid.UUID) -> bool:
+    """True iff a kontrola self-check has ALREADY run for the LATEST completed build (STEP 5, K-4 =
+    honest-by-construction "one kontrola per completed build").
+
+    A kontrola is "done" iff the latest ``stage='priprava'`` ∧ ``kind='gate_report'`` ∧ ``payload.kontrola``
+    message has a HIGHER ``seq`` than the latest Programovanie-complete notification — i.e. the self-check was
+    recorded AFTER the build it checked. A fresh build / fix records a NEWER ``programming_complete`` (higher
+    seq than the old kontrola report) → ``kontrola_done`` flips back to ``False``, re-opening "Skontrolovať".
+    Returns ``False`` when the build never completed (nothing to have checked yet)."""
+    prog_seq = _latest_programming_complete_seq(db, version_id)
+    if prog_seq is None:
+        return False
+    kontrola_seq = db.execute(
+        select(func.max(PipelineMessage.seq)).where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.stage == "priprava",
+            PipelineMessage.kind == "gate_report",
+            PipelineMessage.payload["kontrola"].astext == "true",
+        )
+    ).scalar()
+    return kontrola_seq is not None and kontrola_seq > prog_seq
 
 
 def spec_approved(db: Session, version_id: uuid.UUID) -> bool:
@@ -4026,6 +4088,42 @@ def _conversation_directive(db: Session, version_id: uuid.UUID) -> str:
     )
 
 
+def _kontrola_directive(db: Session, version_id: uuid.UUID, *, smoke_block: str) -> str:
+    """STEP 5 (step5-kontrola-design.md K-1/K-2/K-5): the partner's HONEST self-check brief — the SAME AI
+    Agent that wrote the code checks its OWN work after Programovanie and reports PEVNÉ / VRATKÉ as an
+    ordinary conversation message (``kind=gate_report`` — NEVER a ``verdict``; a verdict at Verifikácia is a
+    release PASS the deploy path reads, and kontrola must NEVER touch that path).
+
+    Honesty anchor (K-1=A): the engine ALREADY ran the app in an ephemeral isolated stack (boot + acceptance)
+    and its result is fed below (``smoke_block``) + is already on the append-only log — the partner must
+    RECONCILE with it, not around it (it cannot claim PEVNÉ over a machine that says broken). The release
+    oracle is the approved ``specification.md``. K-5: the depth is the BASELINE self-check (real boot +
+    acceptance + honest spec reconciliation); per-feature / negative coverage is NOT enforced in the
+    conversation flow — if something is unproven, the partner names it HONESTLY under VRATKÉ instead of
+    claiming it. Distinct from :func:`_verifikacia_directive` (the INDEPENDENT Auditor's release verdict):
+    kontrola is the partner's own read of its work in the rozhovor, signs nothing, deploys nothing."""
+    version_number = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
+    spec_rel = _priprava_spec_rel(version_number)
+    return (
+        "KONTROLA — čestná sebakontrola po Programovaní. Toto robíš TY (ten istý AI partner, čo písal kód), "
+        "NIE nezávislý Auditor, a NIE je to release verdikt: nič nepodpisuješ ani nenasadzuješ — len po ľudsky "
+        "povieš, čo je hotové a čo ešte nie, a vrátiš kormidlo Manažérovi.\n"
+        f"1. Prečítaj si SCHVÁLENÚ Špecifikáciu `{spec_rel}` (jediný zdroj pravdy) a porovnaj ju s reálnym "
+        "stavom kódu — robí appka to, čo Špecifikácia sľúbila?\n"
+        "2. ČESTNE sa vyrovnaj s behom appky: engine ju UŽ NAOZAJ spustil v izolovanom kontajneri (boot + "
+        "akceptačný beh) — výsledok je nižšie a je aj v denníku. Zohľadni ho. Ak je červený, NEMÔŽEŠ tvrdiť, "
+        "že je všetko PEVNÉ — priznaj to.\n"
+        + smoke_block
+        + "3. Napíš PO ĽUDSKY (celé vety, žiaden žargón, žiadne vysypané kódy) DVE časti:\n"
+        "   - PEVNÉ: čo je overené a drží (oproti Špecifikácii aj behu appky).\n"
+        "   - VRATKÉ: čo je rizikové, nedotiahnuté alebo NEOVERENÉ. Čo si nestihol reálne overiť, patrí SEM — "
+        "radšej čestne priznaj neistotu, než sľúbiť PEVNÉ.\n"
+        "4. Nič nerozhoduj za Manažéra a nič neschvaľuj — kontrola len ukáže stav a nechá ho rozhodnúť.\n"
+        "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3) ako "
+        "`gate_report` (NIE verdict)."
+    )
+
+
 async def run_conversation_turn(
     db: Session,
     version_id: uuid.UUID,
@@ -4065,6 +4163,13 @@ async def run_conversation_turn(
     # read, NOT the in-memory ``directive`` arg (None for zostav_plan, lost on restart). SOLELY the marker.
     if _pending_compose_plan_marker(db, version_id):
         return await _run_conversation_plan_round(db, state, on_event=on_event, on_message=on_message)
+    # STEP 5 (step5-kontrola-design.md K-1): a durable check directive marker (recorded by
+    # ``apply_action(skontrolovat)``) delegates this turn to the honest self-check round — the SAME restart-safe
+    # DB read as the compose_plan marker (NOT the in-memory ``directive`` arg, None for skontrolovat + lost on
+    # restart). The two markers carry distinct payload flags (compose_plan vs check), so checking one after the
+    # other is unambiguous. Both keep ``current_stage='priprava'`` so subsequent turns route back here.
+    if _pending_check_marker(db, version_id):
+        return await _run_conversation_kontrola_round(db, state, on_event=on_event, on_message=on_message)
     stage = state.current_stage
     actor = state.current_actor
     prompt = directive if directive is not None else _conversation_directive(db, version_id)
@@ -4135,6 +4240,31 @@ def _pending_compose_plan_marker(db: Session, version_id: uuid.UUID) -> bool:
     )
 
 
+def _pending_check_marker(db: Session, version_id: uuid.UUID) -> bool:
+    """True iff the LATEST pipeline message is an unprocessed kontrola directive (STEP 5 restart-safe trigger;
+    step5-kontrola-design.md K-1) — the exact mirror of :func:`_pending_compose_plan_marker`.
+
+    ``apply_action(skontrolovat)`` records a ``manazer→ai_agent`` ``kind='directive'`` marker
+    (``payload.check``) and arms ``agent_working``; the kontrola round is driven SOLELY by this durable DB
+    marker (the in-memory dispatch directive is None for ``skontrolovat`` and is lost on a restart, so it can
+    never be the trigger). The marker IS the latest message the instant the round fires — ``apply_action``
+    records nothing after it — and once the round records its smoke legs / gate_report (higher ``seq``) it is
+    no longer latest → not pending, so a stale re-entry or a follow-up Manažér message never re-runs kontrola."""
+    latest = db.execute(
+        select(PipelineMessage)
+        .where(PipelineMessage.version_id == version_id)
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    return (
+        latest is not None
+        and latest.kind == "directive"
+        and latest.author == "manazer"
+        and isinstance(latest.payload, dict)
+        and bool(latest.payload.get("check"))
+    )
+
+
 async def _run_conversation_plan_round(
     db: Session,
     state: PipelineState,
@@ -4170,6 +4300,170 @@ async def _run_conversation_plan_round(
     # No phase advance — the spine hands the turn back to the Manažér (current_stage stays 'priprava').
     state.status = "awaiting_manazer"
     state.next_action = "Plán úloh je zostavený — pozri ho a pokračuj v rozhovore."
+    db.flush()
+    return state
+
+
+async def _run_conversation_kontrola_round(
+    db: Session,
+    state: PipelineState,
+    *,
+    on_event: Optional[claude_agent.EventCallback] = None,
+    on_message: Optional[MessageCallback] = None,
+) -> PipelineState:
+    """STEP 5 (step5-kontrola-design.md): the honest self-check round the durable check marker delegates to.
+
+    After Programovanie completes, the partner (the SAME AI Agent that wrote the code — NOT the independent
+    Auditor) honestly checks its own work and reports PEVNÉ / VRATKÉ as an ordinary conversation message
+    (``kind='gate_report'`` — NEVER a ``verdict``), STAYING at ``current_stage='priprava'`` so it is
+    INVISIBLE to the release/deploy path (a verdict at ``verifikacia`` reads as a release PASS to
+    :func:`_verifikacia_passed` / :func:`version_verified` / ``deploy.list_verified_versions``).
+
+    **Honesty-by-construction (K-1=A):** the engine runs the PROOF FIRST — :func:`_run_release_smoke` boots
+    the built app in an ephemeral, deploy-free ``-p <slug>-smoke`` stack + runs the acceptance leg — and
+    records BOTH legs ``system→manazer`` at ``stage='priprava'`` BEFORE the partner turn. So a red boot / red
+    acceptance is on the log before the partner speaks; it cannot claim "PEVNÉ" over a machine that says
+    broken. REUSES the Verifikácia SMOKE machinery (:func:`_run_release_smoke` + :func:`_declared_release_coverage`
+    → ``(0,0)`` for a conversation build, which never produced a ``navrh`` gate_report → the acceptance
+    degrades to the anti-empty floor) WITHOUT its verdict/gate tail (no Auditor, no ``verdict``, no
+    :func:`_settle_verifikacia_verdict`, no git tag, no fix loop).
+
+    **K-3=A — NO auto-fix loop.** The round ALWAYS runs the partner turn (it reconciles honestly with the
+    machine result). On a red runtime floor it then settles ``awaiting_manazer`` + records ONE
+    ``kontrola_floor_red`` notification — the Manažér steers the fix; kontrola never signs off. The round
+    NEVER advances a phase (no :func:`_settle_phase_boundary` / :func:`_next_stage`); ``current_stage`` stays
+    ``priprava``. The settle mirrors :func:`run_conversation_turn`: ParseFailure → blocked/parse_exhaustion;
+    question/blocked → blocked/agent_question; a normal gate_report → awaiting_manazer."""
+    version_id = state.version_id
+    slug = _project_slug_for_version(db, version_id)
+    version_label = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
+
+    # 1. HONESTY PROOF FIRST (K-1=A): boot the app + run acceptance in ONE ephemeral -p <slug>-smoke cycle
+    # (deploy-free — NEVER a customer instance / uat_provisioner / deploy.py). Recorded system→manazer at
+    # stage='priprava' (kontrola LIVES in the conversation register — never 'verifikacia', which the
+    # release/deploy path reads as a PASS) BEFORE the partner turn, so the machine's result is on the log
+    # before the partner can speak. The coverage floor is the conversation build's (0,0) — it produced no
+    # navrh gate_report — so the acceptance degrades to the anti-empty floor (ASSERTIONS_RUN>0); per-feature/
+    # negative coverage is NOT enforced in the conversation flow (K-5, honestly stated, tightened later).
+    coverage_req = _declared_release_coverage(db, version_id)
+    (smoke_ok, smoke_detail), acceptance = await _run_release_smoke(slug, version_label, coverage_req)
+    smoke_msg = _record_message(
+        db,
+        version_id=version_id,
+        stage="priprava",
+        author="system",
+        recipient="manazer",
+        kind="notification",
+        content=(f"Kontrola — beh appky (interné fixtúry): boot {'PASS' if smoke_ok else 'FAIL'}: {smoke_detail}"),
+        payload={"phase": "priprava", "kontrola": True, "smoke": {"pass": smoke_ok, "detail": smoke_detail}},
+    )
+    if on_message is not None:
+        await on_message(smoke_msg)
+    # The acceptance leg only ran if boot passed (else None). Record it + build the Slovak block for the brief.
+    if acceptance is not None:
+        acc_ok, acc_detail, acc_skipped = acceptance
+        acc_msg = _record_message(
+            db,
+            version_id=version_id,
+            stage="priprava",
+            author="system",
+            recipient="manazer",
+            kind="notification",
+            content=(
+                f"Kontrola — akceptačný beh — {'PASS' if acc_ok else ('SKIP' if acc_skipped else 'FAIL')}: {acc_detail}"
+            ),
+            payload={
+                "phase": "priprava",
+                "kontrola": True,
+                "release_acceptance": {"pass": acc_ok, "detail": acc_detail, "skipped": acc_skipped},
+            },
+        )
+        if on_message is not None:
+            await on_message(acc_msg)
+        acc_line = "PASS" if acc_ok else ("SKIP" if acc_skipped else "FAIL")
+        smoke_block = (
+            f"   Beh appky (interné fixtúry): boot {'PASS' if smoke_ok else 'FAIL'} — {smoke_detail}; "
+            f"akceptácia {acc_line} — {acc_detail}.\n"
+        )
+    else:
+        smoke_block = (
+            f"   Beh appky (interné fixtúry): boot FAIL — {smoke_detail} "
+            "(akceptácia sa nespustila). Priznaj to čestne v kontrole.\n"
+        )
+    # Deterministic runtime floor — the SAME mechanical truth the Verifikácia oracle computes (CR-V2-050): a
+    # red boot, or an acceptance leg that RAN but did not pass (a SKIP is not red). The partner cannot talk it
+    # away. Unlike Verifikácia this floors NO verdict (there is none) — it drives the kontrola_floor_red note.
+    runtime_floor_red = (not smoke_ok) or (acceptance is not None and not acceptance[0] and not acceptance[2])
+
+    # 2. The partner's honest self-check turn — role=state.current_actor (the AI Agent, NOT the Auditor:
+    # kontrola is the partner checking its OWN work in the rozhovor, not the independent release gate),
+    # stage='priprava', recipient='manazer', payload.kontrola marker. → ONE kind='gate_report' (never a
+    # verdict). ALWAYS invoked through the SHARED invoke_agent_with_parse_retry (INVARIANT).
+    result = await invoke_agent_with_parse_retry(
+        db,
+        version_id=version_id,
+        role=state.current_actor,
+        stage="priprava",
+        prompt=_kontrola_directive(db, version_id, smoke_block=smoke_block),
+        on_event=on_event,
+        recipient="manazer",
+        on_message=on_message,
+        extra_payload={"kontrola": True},
+    )
+
+    if isinstance(result, ParseFailure):
+        # The partner produced no parseable status block after the bounded retries → settle blocked with a
+        # readable notification (+ raw excerpt) so the conversation is never left on an empty screen (mirror
+        # run_conversation_turn). No phase advance — the spine always hands the turn back.
+        state.status = "blocked"
+        state.block_reason = "parse_exhaustion"
+        state.next_action = "Blokované — AI partner nevrátil platný výstup kontroly. Napíš mu znova alebo upresni."
+        await _record_parse_exhaustion(
+            db,
+            state,
+            stage="priprava",
+            result=result,
+            human_hint="Napíš mu znova alebo upresni, čo má prekontrolovať.",
+            on_message=on_message,
+        )
+        db.flush()
+        return state
+
+    if result.kind in ("question", "blocked"):
+        # The partner asked the Manažér something → blocked on an agent_question so the board offers answer.
+        state.status = "blocked"
+        state.block_reason = "agent_question"
+        state.next_action = f"AI partner sa pýta: {result.question}"
+        db.flush()
+        return state
+
+    # A normal self-check report (gate_report) → SETTLE for the Manažér. current_stage STAYS 'priprava' — NO
+    # _settle_phase_boundary / _next_stage (the spine invariant; kontrola signs nothing, deploys nothing).
+    if runtime_floor_red:
+        # K-3=A: a red runtime floor STOPS and hands the wheel back — NO auto-fix loop. Record ONE honest
+        # floor-red notification (the machine floored it, not the partner's say-so) so the board flags it; the
+        # Manažér steers the fix and re-runs kontrola. Kontrola never signs off on a red build.
+        floor_msg = _record_message(
+            db,
+            version_id=version_id,
+            stage="priprava",
+            author="system",
+            recipient="manazer",
+            kind="notification",
+            content=(
+                "Kontrola — beh appky je ČERVENÝ (appka nenaštartovala alebo akceptačný beh neprešiel). "
+                "Kontrola nič nepodpisuje — oprav to a spusti kontrolu znova."
+            ),
+            payload={"phase": "priprava", "kontrola": True, "kontrola_floor_red": True},
+        )
+        if on_message is not None:
+            await on_message(floor_msg)
+    state.status = "awaiting_manazer"
+    state.next_action = (
+        "Kontrola: beh appky je červený — pozri nález a oprav, potom spusti kontrolu znova."
+        if runtime_floor_red
+        else "Kontrola hotová — pozri, čo je PEVNÉ a čo VRATKÉ, a pokračuj v rozhovore."
+    )
     db.flush()
     return state
 
@@ -6742,6 +7036,44 @@ async def apply_action(
         # _run_build_round (the EXISTING self-checking loop, UNCHANGED) because current_stage == 'programovanie'.
         state.current_stage = "programovanie"
         db.flush()
+        _begin_dispatch(db, state)
+        return state
+
+    if action == "skontrolovat":
+        # STEP 5 (step5-kontrola-design.md K-1=A): "Skontrolovať" — the conversation build runs the partner's
+        # HONEST self-check of its OWN Programovanie output. MIRRORS ``zostav_plan`` (it STAYS at
+        # ``current_stage='priprava'`` — NOT ``spustit_stavbu`` which MOVES the stage): the round is INVISIBLE
+        # to the release/deploy path (a verdict at ``verifikacia`` reads as a release PASS to _verifikacia_passed
+        # / version_verified / deploy.list_verified_versions — kontrola must NEVER touch that path). AUTHORITATIVE
+        # gate (the board post-filter merely hides the button): valid ONLY in a conversation build whose spec is
+        # approved, whose Programovanie has COMPLETED, and whose latest completed build has NOT yet been checked
+        # (a repeat is refused — one kontrola per completed build, K-4; a new build/fix re-opens it).
+        if state.mode != "conversation":
+            raise OrchestratorError("Skontrolovať je platné len v rozhovorovom režime.")
+        if not spec_approved(db, version_id):
+            raise OrchestratorError("Skontrolovať je platné až po schválení Špecifikácie.")
+        if not programming_complete(db, version_id):
+            raise OrchestratorError("Skontrolovať je platné až po dokončení Programovania.")
+        if kontrola_done(db, version_id):
+            raise OrchestratorError("Kontrola pre túto stavbu už prebehla — nová stavba/oprava ju znovu otvorí.")
+        # Durable, restart-safe trigger (mirror of the compose_plan marker, FIX3): record a manazer→ai_agent
+        # kind='directive' marker carrying payload.check. ``run_conversation_turn`` delegates to the kontrola
+        # round SOLELY on this DB marker — the in-memory dispatch directive is None for ``skontrolovat`` and is
+        # lost on a restart, so it must never be the trigger. The marker rides the ``priprava`` conversation
+        # stage (kontrola LIVES in the conversation register — current_stage STAYS 'priprava' throughout).
+        _record_message(
+            db,
+            version_id=version_id,
+            stage="priprava",
+            author="manazer",
+            recipient="ai_agent",
+            kind="directive",
+            content="Skontroluj vlastnú robotu po Programovaní — čestne, čo je PEVNÉ a čo VRATKÉ.",
+            payload={"phase": "priprava", "check": True},
+        )
+        # NO _next_stage / NO stage move — kontrola never walks the phase automaton. _begin_dispatch arms the
+        # priprava actor (ai_agent) as agent_working; the runner routes it through run_conversation_turn (stage
+        # stays 'priprava'), which delegates to _run_conversation_kontrola_round on the check marker.
         _begin_dispatch(db, state)
         return state
 

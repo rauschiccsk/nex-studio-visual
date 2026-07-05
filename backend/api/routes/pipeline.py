@@ -140,6 +140,22 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         )
     ):
         available_actions = [a for a in available_actions if a != "spustit_stavbu"]
+    # STEP 5 (step5-kontrola-design.md K-1): POST-FILTER ``skontrolovat`` (mirror of the spustit_stavbu filter
+    # above) — the state-only ``determine_available_actions`` offers it unconditionally at ``priprava``; drop it
+    # here unless this is a conversation build whose Špecifikácia is approved, whose Programovanie has COMPLETED,
+    # and whose latest completed build has NOT yet been checked (K-4). ``apply_action`` enforces the same rule
+    # authoritatively; this hides the dead button. Reuses the ``spec_approved`` local computed above.
+    if (
+        state is not None
+        and "skontrolovat" in available_actions
+        and not (
+            state.mode == "conversation"
+            and spec_approved
+            and orchestrator.programming_complete(db, version_id)
+            and not orchestrator.kontrola_done(db, version_id)
+        )
+    ):
+        available_actions = [a for a in available_actions if a != "skontrolovat"]
     # STEP 4 (step4-programovanie-design.md MAJOR): a conversation build NEVER walks the phase automaton (its
     # Programovanie returns to the rozhovor; kontrola is STEP 5), so the legacy phase-gate verb ``schvalit``
     # (and, defensively, the Auditor ``verdict``) must never be OFFERED on it — DROP them when
