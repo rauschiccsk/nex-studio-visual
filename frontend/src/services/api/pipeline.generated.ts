@@ -2802,6 +2802,11 @@ export interface components {
          */
         EpicCreate: {
             /**
+             * Plain Description
+             * @description Plain-language, jargon-free one-liner for the STEP 3 Plán úloh rail (step3-plan-design.md). The Epic has no technical ``description`` — this is its ONLY prose. Nullable; ``None`` when the AI partner emitted no one-liner.
+             */
+            plain_description?: string | null;
+            /**
              * Project Id
              * Format: uuid
              * @description Project the epic belongs to.
@@ -2846,6 +2851,8 @@ export interface components {
             id: string;
             /** Number */
             number: number;
+            /** Plain Description */
+            plain_description?: string | null;
             /**
              * Project Id
              * Format: uuid
@@ -2953,6 +2960,11 @@ export interface components {
              */
             estimated_minutes?: number | null;
             /**
+             * Plain Description
+             * @description Plain-language, jargon-free one-liner for the STEP 3 Plán úloh rail (step3-plan-design.md) — distinct from the technical ``description``. Nullable; ``None`` when the AI partner emitted none.
+             */
+            plain_description?: string | null;
+            /**
              * Status
              * @description Lifecycle status: todo | in_progress | done | failed.
              * @default todo
@@ -2999,6 +3011,8 @@ export interface components {
             id: string;
             /** Number */
             number: number;
+            /** Plain Description */
+            plain_description?: string | null;
             /**
              * Status
              * @enum {string}
@@ -3449,6 +3463,8 @@ export interface components {
             is_regate: boolean;
             /** Iteration */
             iteration: number;
+            /** Mode */
+            mode?: string | null;
             /** Next Action */
             next_action: string;
             /**
@@ -4100,6 +4116,11 @@ export interface components {
              */
             feat_id: string;
             /**
+             * Plain Description
+             * @description Plain-language, jargon-free one-liner for the STEP 3 Plán úloh rail (step3-plan-design.md) — distinct from the technical ``description``. Nullable; ``None`` when the AI partner emitted none.
+             */
+            plain_description?: string | null;
+            /**
              * Priority
              * @description Task priority: normal | high | urgent.
              * @default normal
@@ -4159,6 +4180,8 @@ export interface components {
             id: string;
             /** Number */
             number: number;
+            /** Plain Description */
+            plain_description?: string | null;
             /**
              * Priority
              * @default normal
