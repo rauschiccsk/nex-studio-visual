@@ -273,6 +273,10 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
   // own robotu against the approved Špecifikácia (boot + acceptance run, stays priprava, never a verdict/deploy).
   // Last rung of the mutually-exclusive ladder (the BE offers it only once the build is complete).
   const canCheck = !!board?.available_actions?.includes("skontrolovat");
+  // STEP 6 (Hotovo): once the Kontrola has run, the BE offers `hotovo` — the Manažér's TERMINAL sign-off that
+  // makes the version deployable (SHA-bound signature, stays priprava, never a verdict). LAST rung of the
+  // mutually-exclusive ladder (appended AFTER canCheck), so it only shows once the check has completed.
+  const canFinish = !!board?.available_actions?.includes("hotovo");
   // Honest, derived from the live status: a token-stopped build reads `paused` — the amber note reflects it.
   const isPaused = board?.state?.status === "paused";
 
@@ -391,6 +395,29 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
             {triggering ? "Kontrolujem…" : "Skontrolovať"}
           </button>
           {triggerError && <p className="mt-1 text-xs text-[var(--color-status-error)]">{triggerError}</p>}
+        </div>
+      ) : canFinish ? (
+        <div className="flex-shrink-0 border-b border-[var(--color-border-default)] px-4 py-3">
+          <p className="mb-2 text-xs text-[var(--color-text-muted)]">
+            Kontrola prebehla — keď si spokojný, označ verziu ako hotovú.
+          </p>
+          <button
+            type="button"
+            onClick={() => runTrigger("hotovo", "Označenie ako hotové zlyhalo.")}
+            disabled={triggering}
+            className="w-full rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {triggering ? "Označujem…" : "Označiť ako hotové"}
+          </button>
+          {triggerError && <p className="mt-1 text-xs text-[var(--color-status-error)]">{triggerError}</p>}
+        </div>
+      ) : board?.state?.status === "done" && board?.state?.mode === "conversation" ? (
+        // STEP 6: the version is signed off (terminal 'done'). Honest static note — deployment (UAT/PROD) is a
+        // SEPARATE domain reached from the left menu, never a cross-domain button here.
+        <div className="flex-shrink-0 border-b border-[var(--color-border-default)] px-4 py-3">
+          <p className="text-xs text-[var(--color-text-muted)]">
+            Verzia je hotová. Nasadenie (UAT/PROD) je samostatný krok — nájdeš ho v ľavom menu.
+          </p>
         </div>
       ) : null}
 

@@ -61,6 +61,9 @@ export interface ProjectCreate {
   full_smoke?: boolean;
   /** F-004 O-3: GitHub branch protection (require PR, no force push). Default false. */
   enable_branch_protection?: boolean;
+  /** STEP 6 (R9): "Vývoj na zákazku" — the only switch that later permits deviating from the unified
+   *  company design. Set at creation only (like ``type``/``auth_mode``), never in ProjectUpdate. Default false. */
+  custom_development_enabled?: boolean;
 }
 
 /**
@@ -99,6 +102,8 @@ export interface ProjectRead {
   source_path: string | null;
   kb_path: string | null;
   guardian_enabled: boolean;
+  /** STEP 6 (R9): "Vývoj na zákazku" — permits deviating from the unified company design. Fixed at creation. */
+  custom_development_enabled: boolean;
   created_by: string;
   /** Notification owner (CR-NS-012), nullable. */
   owner_id: string | null;

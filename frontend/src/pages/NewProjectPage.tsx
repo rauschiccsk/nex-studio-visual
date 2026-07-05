@@ -77,6 +77,9 @@ export default function NewProjectPage() {
   const [enableCicd, setEnableCicd] = useState(false);
   const [fullSmoke, setFullSmoke] = useState(false);
   const [enableBranchProtection, setEnableBranchProtection] = useState(false);
+  // STEP 6 (R9): "Vývoj na zákazku" — create-only flag, the only switch that later permits deviating from
+  // the unified company design. Inert data in STEP 6 (no behaviour binds to it yet). Default unchecked.
+  const [customDevelopment, setCustomDevelopment] = useState(false);
 
   // CR-NS-012: notification owner picker. Empty = none (no notifications).
   const [users, setUsers] = useState<UserRead[]>([]);
@@ -192,6 +195,8 @@ export default function NewProjectPage() {
         enable_cicd: enableCicd,
         full_smoke: fullSmoke,
         enable_branch_protection: enableBranchProtection,
+        // STEP 6 (R9): create-only "Vývoj na zákazku" flag.
+        custom_development_enabled: customDevelopment,
       });
       navigate(`/projects/${project.slug}`, {
         state: {
@@ -467,6 +472,15 @@ export default function NewProjectPage() {
                   className="w-4 h-4 rounded border-[var(--color-border-default)] bg-[var(--color-canvas)] text-primary-500 focus:ring-primary-500"
                 />
                 <span>Povoliť ochranu vetvy (vyžadovať PR, bez force push)</span>
+              </label>
+              <label className="flex items-center gap-3 text-sm text-[var(--color-text-primary)] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={customDevelopment}
+                  onChange={(e) => setCustomDevelopment(e.target.checked)}
+                  className="w-4 h-4 rounded border-[var(--color-border-default)] bg-[var(--color-canvas)] text-primary-500 focus:ring-primary-500"
+                />
+                <span>Vývoj na zákazku (povoľuje odchýliť sa od jednotného firemného dizajnu)</span>
               </label>
             </div>
 

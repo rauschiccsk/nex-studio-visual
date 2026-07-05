@@ -110,6 +110,14 @@ describe("PhaseBar — legacy phase-automaton strip (byte-identical)", () => {
     expect(screen.getByText("Verifikácia")).toBeInTheDocument();
     expect(screen.queryByText("Kontrola")).not.toBeInTheDocument();
   });
+
+  it("renders exactly the 4 legacy phases — the terminal 'Hotovo' phase never leaks into the legacy strip (STEP 6)", () => {
+    // A legacy board that has settled to done: the legacy strip filters the 'done' phase, so 'Hotovo' (the
+    // PHASE_LABELS['done'] label) is not shown; only the four real phases render.
+    render(<PhaseBar board={mkBoard({ state: mkState({ current_stage: "verifikacia", status: "done" }) })} />);
+    for (const label of LEGACY_LABELS) expect(screen.getByText(label)).toBeInTheDocument();
+    expect(screen.queryByText("Hotovo")).not.toBeInTheDocument();
+  });
 });
 
 describe("PhaseBar — conversation (spine) strip derived from board signals (STEP 5)", () => {
@@ -194,5 +202,22 @@ describe("PhaseBar — conversation (spine) strip derived from board signals (ST
     expect(isCurrent("Kontrola")).toBe(true);
     expect(isCurrent("Programovanie")).toBe(false);
     expect(isCurrent("Plán")).toBe(false);
+  });
+
+  // STEP 6 (Hotovo): the terminal manager sign-off settles the version to status='done'. The conversation strip
+  // gains a 5th, rightmost phase 'Hotovo' — current when done, back-marking Kontrola ✓.
+  it("renders Hotovo as the 5th terminal phase in the conversation strip", () => {
+    render(<PhaseBar board={convBoard({})} />);
+    expect(screen.getByText("Hotovo")).toBeInTheDocument();
+  });
+
+  it("marks Hotovo current and back-marks Kontrola done (✓) when the conversation version is done", () => {
+    render(<PhaseBar board={convBoard({ status: "done" })} />);
+    // Hotovo is the current (rightmost) terminal phase; Kontrola is no longer current.
+    expect(isCurrent("Hotovo")).toBe(true);
+    expect(isCurrent("Kontrola")).toBe(false);
+    // The four earlier phases are all done (✓); Hotovo alone is the ● current marker.
+    expect(screen.getAllByText("✓")).toHaveLength(4);
+    expect(screen.getByText("●")).toBeInTheDocument();
   });
 });

@@ -134,7 +134,8 @@ export type PipelineActionName =
   | "pause" // cooperative pause of the Programovanie loop
   | "decide" // CR-V2-041: pick one consultation Decision Card option (decision_needed)
   | "overit_znovu" // CR-V2-057: "Over znova" — re-verify a drifted version (re-run Verifikácia vs current HEAD)
-  | "skontrolovat"; // STEP 5 (Kontrola): the partner honestly re-checks its own FINISHED build against the approved Špecifikácia (stays priprava, never a verdict/deploy)
+  | "skontrolovat" // STEP 5 (Kontrola): the partner honestly re-checks its own FINISHED build against the approved Špecifikácia (stays priprava, never a verdict/deploy)
+  | "hotovo"; // STEP 6 (Hotovo): the Manažér's TERMINAL sign-off — makes the conversation version deployable (SHA-bound signature, stays priprava; never a verdict/deploy). Hand-written union — no codegen regen for the verb.
 
 export interface PipelineActionRequest {
   action: PipelineActionName;

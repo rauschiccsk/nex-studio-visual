@@ -83,6 +83,7 @@ const project: ProjectRead = {
   source_path: null,
   kb_path: null,
   guardian_enabled: false,
+  custom_development_enabled: false,
   created_by: "u1",
   owner_id: null,
   created_at: "2026-06-01T00:00:00Z",

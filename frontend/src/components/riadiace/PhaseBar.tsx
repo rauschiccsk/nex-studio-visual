@@ -39,13 +39,14 @@ function phaseMarkFor(phase: BuildPhase, state: PipelineState | null): PhaseMark
 // ── Conversation (spine) strip — STEP 5 ───────────────────────────────────────
 // The spine build never leaves current_stage='priprava', so its position is derived from BOARD SIGNALS, not the
 // stage index. Distinct from PHASE_LABELS (those stay the legacy phase-automaton labels, unchanged).
-type ConvPhase = "specifikacia" | "plan" | "programovanie" | "kontrola";
-const CONV_PHASES: ConvPhase[] = ["specifikacia", "plan", "programovanie", "kontrola"];
+type ConvPhase = "specifikacia" | "plan" | "programovanie" | "kontrola" | "hotovo";
+const CONV_PHASES: ConvPhase[] = ["specifikacia", "plan", "programovanie", "kontrola", "hotovo"];
 const CONV_LABELS: Record<ConvPhase, string> = {
   specifikacia: "Špecifikácia",
   plan: "Plán",
   programovanie: "Programovanie",
   kontrola: "Kontrola",
+  hotovo: "Hotovo",
 };
 
 // Which conversation phase is CURRENT, derived from the live board — grounded on the same signals the Plán úloh
@@ -59,6 +60,9 @@ function conversationPhase(board: PipelineBoard | null): ConvPhase {
   const working = board?.state?.status === "agent_working";
   const stage = board?.state?.current_stage;
 
+  // Hotovo (STEP 6) — the Manažér's terminal sign-off has settled the version to 'done'. Furthest-right
+  // terminal phase, evaluated FIRST so it wins over every earlier signal and back-marks Kontrola ✓.
+  if (board?.state?.status === "done") return "hotovo";
   // Kontrola — the check is offered, has already been reported, or is running right after the build completed.
   if (has("skontrolovat") || msgHasFlag("kontrola") || (working && msgHasFlag("programming_complete"))) {
     return "kontrola";

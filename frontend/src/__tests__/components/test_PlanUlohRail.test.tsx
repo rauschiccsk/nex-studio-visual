@@ -538,3 +538,77 @@ describe("PlanUlohRail — Kontrola trigger (STEP 5)", () => {
     expect(screen.queryByRole("button", { name: /Skontrolovať/ })).not.toBeInTheDocument();
   });
 });
+
+// STEP 6 (Hotovo, docs/architecture/step6-hotovo-design.md): once the Kontrola has run, the BE offers `hotovo`
+// — the Manažér's TERMINAL sign-off rung, appended AFTER `skontrolovat` so it is the LAST rung of the ladder.
+describe("PlanUlohRail — Hotovo trigger (STEP 6)", () => {
+  beforeEach(() => {
+    vi.mocked(getTaskPlan).mockReset();
+    vi.mocked(postPipelineActionApi).mockReset();
+    vi.mocked(getTaskPlan).mockResolvedValue(PLAN);
+  });
+
+  it("shows 'Označiť ako hotové' ONLY when offered, and fires postPipelineActionApi(hotovo) → onBoard on click", async () => {
+    const onBoard = vi.fn();
+    const fresh = mkBoard({ available_actions: [] });
+    vi.mocked(postPipelineActionApi).mockResolvedValue(fresh);
+
+    render(
+      <PlanUlohRail
+        versionId="v1"
+        messages={[]}
+        board={mkBoard({ available_actions: ["hotovo"] })}
+        onBoard={onBoard}
+      />,
+    );
+
+    // The muted intro + the primary button.
+    expect(await screen.findByText(/keď si spokojný, označ verziu ako hotovú/)).toBeInTheDocument();
+    const btn = await screen.findByRole("button", { name: /Označiť ako hotové/ });
+    fireEvent.click(btn);
+
+    await waitFor(() => expect(postPipelineActionApi).toHaveBeenCalledWith("v1", { action: "hotovo" }));
+    await waitFor(() => expect(onBoard).toHaveBeenCalledWith(fresh));
+  });
+
+  it("hides 'Označiť ako hotové' when the backend does not offer it (honest-by-construction)", async () => {
+    render(
+      <PlanUlohRail
+        versionId="v1"
+        messages={[]}
+        board={mkBoard({ available_actions: ["approve_spec"] })}
+        onBoard={() => {}}
+      />,
+    );
+    await screen.findByText(/Základ systému/);
+    expect(screen.queryByRole("button", { name: /Označiť ako hotové/ })).not.toBeInTheDocument();
+  });
+
+  it("is the LAST rung — Skontrolovať (canCheck) still wins over hotovo if the BE offers both", async () => {
+    render(
+      <PlanUlohRail
+        versionId="v1"
+        messages={[]}
+        board={mkBoard({ available_actions: ["skontrolovat", "hotovo"] })}
+        onBoard={() => {}}
+      />,
+    );
+    // canCheck precedes canFinish in the ladder → Skontrolovať renders, Označiť ako hotové does not.
+    expect(await screen.findByRole("button", { name: /Skontrolovať/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Označiť ako hotové/ })).not.toBeInTheDocument();
+  });
+
+  it("renders the honest terminal note (no cross-domain button) once the version is done in conversation mode", async () => {
+    render(
+      <PlanUlohRail
+        versionId="v1"
+        messages={[]}
+        board={mkBoard({ available_actions: [], state: mkState({ status: "done", mode: "conversation" }) })}
+        onBoard={() => {}}
+      />,
+    );
+    // Static plain note pointing at the SEPARATE deploy domain — never a rung/button.
+    expect(await screen.findByText(/Nasadenie \(UAT\/PROD\) je samostatný krok/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Označiť ako hotové/ })).not.toBeInTheDocument();
+  });
+});

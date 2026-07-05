@@ -15,6 +15,11 @@ import type { BuildPhase, StatusTone } from "../cockpit/labels";
 // Honest status text (salvaged verbatim from the retired AI Agent tab's headerStatus, design §4.4.1):
 // Voľný / Pracuje na <projekt> v<ver> — fáza X / Čaká na súhlas / Pozastavené.
 function statusText(state: PipelineState | null, projectName: string, versionNumber: string): string {
+  // STEP 6 (Hotovo): a signed-off conversation build reads "Hotovo — pripravené na nasadenie" (green via the
+  // existing done→green tone). MUST precede the bare-"Voľný" done branch below, else it is shadowed.
+  if (state && state.status === "done" && state.mode === "conversation") {
+    return "Hotovo — pripravené na nasadenie";
+  }
   if (!state || state.status === "done") return "Voľný";
   if (state.status === "awaiting_manazer" || state.status === "blocked") return "Čaká na súhlas";
   if (state.status === "paused") return "Pozastavené";
