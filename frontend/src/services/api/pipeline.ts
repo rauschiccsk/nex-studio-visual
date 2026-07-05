@@ -53,6 +53,12 @@ export interface PipelineState {
   // R4 (D1): why the pipeline is `blocked` — authoritative; the banner + action bar derive question-vs-error
   // from this. `null`/absent (legacy rows, or not blocked) → the FE falls back to the `isErrorBlock` heuristic.
   block_reason?: BlockReason | null;
+  // STEP 5 (Kontrola, step5-kontrola-design.md MAJOR): the build register — `'conversation'` for a spine
+  // build, `null`/absent for the legacy phase automaton. Mirrors backend PipelineStateRead.mode (added in the
+  // same STEP). The PhaseBar branches its phase strip on this — a spine build stays on current_stage='priprava'
+  // end-to-end, so its four phases (Špecifikácia → Plán → Programovanie → Kontrola) are DERIVED from board
+  // signals, not the stage index. Absent (older board / legacy) → the legacy stage-index strip renders.
+  mode?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -127,7 +133,8 @@ export type PipelineActionName =
   | "answer" // answer an agent QUESTION on a blocked state
   | "pause" // cooperative pause of the Programovanie loop
   | "decide" // CR-V2-041: pick one consultation Decision Card option (decision_needed)
-  | "overit_znovu"; // CR-V2-057: "Over znova" — re-verify a drifted version (re-run Verifikácia vs current HEAD)
+  | "overit_znovu" // CR-V2-057: "Over znova" — re-verify a drifted version (re-run Verifikácia vs current HEAD)
+  | "skontrolovat"; // STEP 5 (Kontrola): the partner honestly re-checks its own FINISHED build against the approved Špecifikácia (stays priprava, never a verdict/deploy)
 
 export interface PipelineActionRequest {
   action: PipelineActionName;

@@ -125,7 +125,7 @@ export default function RiadiaceCentrumPage() {
     <div className="grid h-full grid-cols-[minmax(0,1fr)_320px] grid-rows-[auto_minmax(0,1fr)_auto_auto] bg-[var(--color-canvas)]">
       {/* Top — read-only phase bar (conversation column). */}
       <div className="col-start-1 row-start-1 min-w-0">
-        <PhaseBar state={board?.state ?? null} />
+        <PhaseBar board={board ?? null} />
       </div>
 
       {/* Centre — the SPINE: honest status pinned above the live conversation thread (the overflow region). */}

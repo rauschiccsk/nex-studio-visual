@@ -269,6 +269,10 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
   // A running Programovanie loop offers `pause` (BE determine_available_actions → {"pause"}); the rung below
   // fires the same postPipelineActionApi(action:'pause'). Mutually exclusive with `pokracovat` by construction.
   const canPause = !!board?.available_actions?.includes("pause");
+  // STEP 5 (Kontrola): a FINISHED Programovanie build offers `skontrolovat` — the partner honestly re-checks its
+  // own robotu against the approved Špecifikácia (boot + acceptance run, stays priprava, never a verdict/deploy).
+  // Last rung of the mutually-exclusive ladder (the BE offers it only once the build is complete).
+  const canCheck = !!board?.available_actions?.includes("skontrolovat");
   // Honest, derived from the live status: a token-stopped build reads `paused` — the amber note reflects it.
   const isPaused = board?.state?.status === "paused";
 
@@ -370,6 +374,21 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
             className="w-full rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-50 dark:text-amber-300"
           >
             {triggering ? "Pozastavujem…" : "Pozastaviť"}
+          </button>
+          {triggerError && <p className="mt-1 text-xs text-[var(--color-status-error)]">{triggerError}</p>}
+        </div>
+      ) : canCheck ? (
+        <div className="flex-shrink-0 border-b border-[var(--color-border-default)] px-4 py-3">
+          <p className="mb-2 text-xs text-[var(--color-text-muted)]">
+            Programovanie dokončené — partner sám prekontroluje robotu oproti Špecifikácii.
+          </p>
+          <button
+            type="button"
+            onClick={() => runTrigger("skontrolovat", "Kontrola zlyhala.")}
+            disabled={triggering}
+            className="w-full rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {triggering ? "Kontrolujem…" : "Skontrolovať"}
           </button>
           {triggerError && <p className="mt-1 text-xs text-[var(--color-status-error)]">{triggerError}</p>}
         </div>

@@ -478,3 +478,63 @@ describe("PlanUlohRail — salvaged regressions: build-progress indicator + Poza
     expect(screen.queryByRole("button", { name: /Pozastaviť/ })).not.toBeInTheDocument();
   });
 });
+
+// STEP 5 (Kontrola, docs/architecture/step5-kontrola-design.md): once the Programovanie build is FINISHED, the
+// BE offers `skontrolovat` — the last rung of the mutually-exclusive ladder, AFTER `pause`.
+describe("PlanUlohRail — Kontrola trigger (STEP 5)", () => {
+  beforeEach(() => {
+    vi.mocked(getTaskPlan).mockReset();
+    vi.mocked(postPipelineActionApi).mockReset();
+    vi.mocked(getTaskPlan).mockResolvedValue(PLAN);
+  });
+
+  it("shows 'Skontrolovať' ONLY when offered, and fires postPipelineActionApi(skontrolovat) → onBoard on click", async () => {
+    const onBoard = vi.fn();
+    const fresh = mkBoard({ available_actions: [] });
+    vi.mocked(postPipelineActionApi).mockResolvedValue(fresh);
+
+    render(
+      <PlanUlohRail
+        versionId="v1"
+        messages={[]}
+        board={mkBoard({ available_actions: ["skontrolovat"] })}
+        onBoard={onBoard}
+      />,
+    );
+
+    // The muted intro + the primary button.
+    expect(await screen.findByText(/partner sám prekontroluje robotu oproti Špecifikácii/)).toBeInTheDocument();
+    const btn = await screen.findByRole("button", { name: /Skontrolovať/ });
+    fireEvent.click(btn);
+
+    await waitFor(() => expect(postPipelineActionApi).toHaveBeenCalledWith("v1", { action: "skontrolovat" }));
+    await waitFor(() => expect(onBoard).toHaveBeenCalledWith(fresh));
+  });
+
+  it("hides 'Skontrolovať' when the backend does not offer it (honest-by-construction)", async () => {
+    render(
+      <PlanUlohRail
+        versionId="v1"
+        messages={[]}
+        board={mkBoard({ available_actions: ["approve_spec"] })}
+        onBoard={() => {}}
+      />,
+    );
+    await screen.findByText(/Základ systému/);
+    expect(screen.queryByRole("button", { name: /Skontrolovať/ })).not.toBeInTheDocument();
+  });
+
+  it("is the LAST rung — a running build (pause) still wins over skontrolovat if the BE offers both", async () => {
+    render(
+      <PlanUlohRail
+        versionId="v1"
+        messages={[]}
+        board={mkBoard({ available_actions: ["pause", "skontrolovat"], state: mkState({ status: "agent_working" }) })}
+        onBoard={() => {}}
+      />,
+    );
+    // canPause precedes canCheck in the ladder → Pozastaviť renders, Skontrolovať does not.
+    expect(await screen.findByRole("button", { name: /Pozastaviť/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Skontrolovať/ })).not.toBeInTheDocument();
+  });
+});

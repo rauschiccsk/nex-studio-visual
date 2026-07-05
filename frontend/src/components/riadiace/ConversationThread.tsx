@@ -76,12 +76,34 @@ export function ConversationThread({ messages, activity, working }: Props) {
             const report = typeof m.payload?.report === "string" ? (m.payload.report as string) : "";
             const question = typeof m.payload?.question === "string" ? (m.payload.question as string) : "";
             const body = report.trim() || m.content;
+            // STEP 5 (Kontrola, K-2): a kontrola report carries `payload.kontrola === true` + Pevné/Vratké
+            // counts. Render a slim two-chip header ABOVE the full plain report (which renders unchanged below).
+            // Degrade gracefully: no flag / no counts → no chips (a normal message is untouched).
+            const isKontrola = m.payload?.kontrola === true;
+            const solidCount = typeof m.payload?.solid_count === "number" ? (m.payload.solid_count as number) : null;
+            const shakyCount = typeof m.payload?.shaky_count === "number" ? (m.payload.shaky_count as number) : null;
             return (
               <li key={m.id} className={`flex ${right ? "justify-end" : "justify-start"}`}>
                 <div className={`max-w-[85%] rounded-lg border px-3 py-2 ${bubbleClass(m.author)}`}>
                   <div className="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
                     <span className="font-semibold text-[var(--color-text-secondary)]">{authorLabel(m.author)}</span>
                   </div>
+                  {isKontrola && (solidCount !== null || shakyCount !== null) && (
+                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                      {solidCount !== null && (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                          Pevné · {solidCount}
+                        </span>
+                      )}
+                      {shakyCount !== null && (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
+                          <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+                          Vratké · {shakyCount}
+                        </span>
+                      )}
+                    </div>
+                  )}
                   <SpecMarkdown
                     body={body}
                     className="prose prose-sm dark:prose-invert max-w-none text-sm text-[var(--color-text-primary)]"
