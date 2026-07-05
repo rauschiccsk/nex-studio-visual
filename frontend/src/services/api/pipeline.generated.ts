@@ -3581,6 +3581,12 @@ export interface components {
              */
             created_by?: string | null;
             /**
+             * Custom Development Enabled
+             * @description Vývoj na zákazku — the only switch permitting deviation from the unified default design (firemné zásady §4). Set once at creation (like type / auth_mode). Default False.
+             * @default false
+             */
+            custom_development_enabled: boolean;
+            /**
              * Db Port
              * @description Database port from the ICC Port Registry.
              */
@@ -3760,6 +3766,8 @@ export interface components {
              * Format: uuid
              */
             created_by: string;
+            /** Custom Development Enabled */
+            custom_development_enabled: boolean;
             /** Db Port */
             db_port?: number | null;
             /** Description */

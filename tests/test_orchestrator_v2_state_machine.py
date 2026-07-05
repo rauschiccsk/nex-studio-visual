@@ -485,6 +485,9 @@ def test_apply_action_is_sole_mutator_grep_guard():
         # STEP 5 (step5-kontrola-design.md): + "skontrolovat" ("Skontrolovať" — the partner's honest self-check
         # after Programovanie; STAYS at priprava, emits a gate_report, invisible to the release/deploy path).
         # NOT advancing (like zostav_plan) — it never walks the phase automaton.
+        # STEP 6 (step6-hotovo-design.md): + "hotovo" ("Označiť ako hotové" — the Manažér's TERMINAL sign-off
+        # after Kontrola; settles the conversation build to 'done' + records a SHA-anchored manager signature
+        # version_verified honours → deployable). NOT advancing (a terminal signature, not a phase-walk).
         {
             "start",
             "approve_spec",
@@ -500,6 +503,7 @@ def test_apply_action_is_sole_mutator_grep_guard():
             "zostav_plan",
             "spustit_stavbu",
             "skontrolovat",
+            "hotovo",
         }
     )
     # apply_coordinator_recommendation is REMOVED.

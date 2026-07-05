@@ -88,6 +88,7 @@ class TestProjectCreate:
         assert payload.source_path is None
         assert payload.kb_path is None
         assert payload.guardian_enabled is False
+        assert payload.custom_development_enabled is False  # STEP 6: create-only flag defaults False
 
     def test_full_payload(self) -> None:
         payload = ProjectCreate(
@@ -100,11 +101,13 @@ class TestProjectCreate:
                 source_path="/opt/repo-src/",
                 kb_path="/home/icc/knowledge/projects/repo/",
                 guardian_enabled=True,
+                custom_development_enabled=True,
             )
         )
         assert payload.status == "paused"
         assert payload.backend_port == 10100
         assert payload.guardian_enabled is True
+        assert payload.custom_development_enabled is True  # STEP 6: honoured when set at creation
 
     def test_required_fields(self) -> None:
         """name, slug, type, auth_mode, description are required. created_by is optional (resolved server-side)."""
@@ -231,6 +234,7 @@ def _make_project_namespace(**overrides: object) -> SimpleNamespace:
         "source_path": None,
         "kb_path": None,
         "guardian_enabled": False,
+        "custom_development_enabled": False,
         "created_by": uuid.uuid4(),
         "created_at": now,
         "updated_at": now,

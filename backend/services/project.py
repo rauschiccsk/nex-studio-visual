@@ -216,6 +216,7 @@ def create(db: Session, data: ProjectCreate) -> Project:
         source_path=source_path,
         kb_path=kb_path,
         guardian_enabled=data.guardian_enabled,
+        custom_development_enabled=data.custom_development_enabled,
         created_by=data.created_by,
         owner_id=owner_id,
     )

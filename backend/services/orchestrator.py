@@ -445,6 +445,14 @@ _ACTIONS = frozenset(
         # INVISIBLE to the release/deploy path); the board post-filters it to conversation + spec-approved +
         # programming-complete + NOT already-checked.
         "skontrolovat",
+        # STEP 6 (step6-hotovo-design.md MD-1=A): "Označiť ako hotové" — the Manažér's TERMINAL sign-off on a
+        # conversation build AFTER Kontrola: it settles the build to the terminal ``done`` (verified) stage and
+        # records a SHA-anchored manager signature that ``version_verified`` honours → the version becomes
+        # DEPLOYABLE. This signature REPLACES an Auditor verdict for conversation builds (no verdict is
+        # resurrected). NOT advancing (it is a terminal signature, not a phase-walk — kept out of
+        # ``_ADVANCING_ACTIONS`` below); the board post-filters it to conversation + spec-approved +
+        # kontrola-done + NOT already-done.
+        "hotovo",
     }
 )
 # Actions that act on / advance past an agent's output — only valid once the agent has SETTLED
@@ -531,6 +539,10 @@ def determine_available_actions(state: PipelineState) -> set[str]:
         # The finer DB preconditions (conversation + spec approved + programming complete + NOT already-checked)
         # are the board route's POST-FILTER; ``apply_action`` enforces them authoritatively.
         actions.add("skontrolovat")
+        # STEP 6 (step6-hotovo-design.md MD-1): "Označiť ako hotové" — offered UNCONDITIONALLY here too
+        # (state-only). The finer DB preconditions (conversation + spec approved + kontrola done + NOT already
+        # done) are the board route's POST-FILTER; ``apply_action`` enforces them authoritatively.
+        actions.add("hotovo")
     elif stage in ("navrh", "programovanie"):
         # The dial-governed schvaľovacie body after Návrh / Programovanie — ``schvalit`` advances to the
         # next phase. (Whether the build HALTED here at all is the dial's call; once settled, it's offered.)
@@ -648,6 +660,29 @@ def kontrola_done(db: Session, version_id: uuid.UUID) -> bool:
         )
     ).scalar()
     return kontrola_seq is not None and kontrola_seq > prog_seq
+
+
+def hotovo_done(db: Session, version_id: uuid.UUID) -> bool:
+    """True iff the Manažér has already signed the LATEST completed build as Hotovo (STEP 6, mirror of
+    :func:`kontrola_done`).
+
+    The signature is the latest ``stage='priprava'`` ∧ ``kind='notification'`` ∧ ``payload.hotovo`` message; it
+    counts as "done" only if its ``seq`` is HIGHER than the latest Programovanie-complete notification — a fresh
+    build/fix records a NEWER ``programming_complete`` (higher seq than the old signature) → ``hotovo_done`` flips
+    back to ``False``, honestly re-opening the Hotovo sign-off (kept consistent with :func:`_manazer_signoff`'s
+    stale-awareness). Returns ``False`` when the build never completed (nothing to have signed yet)."""
+    prog_seq = _latest_programming_complete_seq(db, version_id)
+    if prog_seq is None:
+        return False
+    hotovo_seq = db.execute(
+        select(func.max(PipelineMessage.seq)).where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.stage == "priprava",
+            PipelineMessage.kind == "notification",
+            PipelineMessage.payload["hotovo"].astext == "true",
+        )
+    ).scalar()
+    return hotovo_seq is not None and hotovo_seq > prog_seq
 
 
 def spec_approved(db: Session, version_id: uuid.UUID) -> bool:
@@ -1791,6 +1826,37 @@ def _verifikacia_passed(db: Session, version_id: uuid.UUID) -> bool:
     return bool(latest.payload and latest.payload.get("verdict") == "PASS")
 
 
+def _manazer_signoff(db: Session, version_id: uuid.UUID) -> Optional[dict[str, Any]]:
+    """The Manažér's TERMINAL Hotovo signature payload for this version, or ``None`` when there is none / it is
+    STALE (STEP 6, step6-hotovo-design.md MD-1=A).
+
+    A conversation build reaches deployability through a manager signature (:func:`apply_action` ``hotovo``), NOT
+    an Auditor verdict: the signature is ONE ``stage='priprava'`` ∧ ``kind='notification'`` ∧ ``payload.hotovo``
+    message carrying the anchored ``hotovo_sha``. Returns that payload so :func:`version_verified` can apply the
+    SAME SHA-anchor ladder the verdict path uses. STALE-AWARE (mirror CR-V2-055 / :func:`kontrola_done`): if a
+    FRESHER Programovanie-complete notification outranks the signature (a re-build landed AFTER the signoff), the
+    old signature no longer counts → ``None`` (the version must be re-checked + re-signed). Legacy (mode NULL /
+    Auditor) builds never record this marker → ``None`` → :func:`version_verified` falls through to the unchanged
+    verdict path byte-identically."""
+    row = db.execute(
+        select(PipelineMessage.seq, PipelineMessage.payload)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.stage == "priprava",
+            PipelineMessage.kind == "notification",
+            PipelineMessage.payload["hotovo"].astext == "true",
+        )
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).first()
+    if row is None:
+        return None
+    prog_seq = _latest_programming_complete_seq(db, version_id)
+    if prog_seq is not None and prog_seq > row.seq:
+        return None  # a fresh build landed AFTER the signoff → stale, must re-check + re-sign
+    return row.payload or {}
+
+
 def version_verified(db: Session, version_id: uuid.UUID, *, head: Optional[str] = None) -> tuple[bool, str]:
     """CR-V2-056 (layer-1 reality-anchoring): is a version VERIFIED *right now*, COMPUTED from real git state
     — not a stored ``done`` snapshot. A version is verified iff its latest Verifikácia PASS verdict is bound
@@ -1810,7 +1876,23 @@ def version_verified(db: Session, version_id: uuid.UUID, *, head: Optional[str] 
     SHA in DB) to avoid a git subprocess per version on list endpoints.
 
     NOTE: the CI-green AND-leg (verified also requires green CI on the tagged commit for remote projects) is a
-    clean follow-on increment on top of this SHA anchor; it is NOT applied here."""
+    clean follow-on increment on top of this SHA anchor; it is NOT applied here.
+
+    STEP 6 (step6-hotovo-design.md MD-1=A): a CONVERSATION build reaches deployability through a Manažér Hotovo
+    SIGNATURE (:func:`_manazer_signoff`), NOT an Auditor verdict — the signature REPLACES the verdict. When one is
+    present (and fresh), apply the SAME SHA-anchor ladder to its ``hotovo_sha`` and short-circuit; provenance
+    strings are the ``hotovo_*`` variants so the FE can tell a manager signoff from an Auditor PASS. Legacy
+    builds have no signature → fall through to the UNCHANGED verdict path byte-identically."""
+    signoff = _manazer_signoff(db, version_id)
+    if signoff is not None:
+        pass_sha = signoff.get("hotovo_sha")
+        if not pass_sha:
+            return True, "hotovo_unbound"  # signed while repo unreadable → never anchored; do not un-verify
+        if head is None:
+            head = _repo_head(claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id))
+        if head is None:
+            return True, "repo_unreadable"  # our own read failure — never un-verifies
+        return (pass_sha == head), ("hotovo_match" if pass_sha == head else "hotovo_drift")
     if not _verifikacia_passed(db, version_id):
         return False, "no_pass"
     latest = db.execute(
@@ -7075,6 +7157,63 @@ async def apply_action(
         # priprava actor (ai_agent) as agent_working; the runner routes it through run_conversation_turn (stage
         # stays 'priprava'), which delegates to _run_conversation_kontrola_round on the check marker.
         _begin_dispatch(db, state)
+        return state
+
+    if action == "hotovo":
+        # STEP 6 (step6-hotovo-design.md MD-1=A): "Označiť ako hotové" — the Manažér's TERMINAL sign-off on a
+        # conversation build. Unlike the legacy Auditor path (a ``verdict`` PASS at Verifikácia signed off via
+        # ``schvalit``), a conversation build reaches DEPLOYABILITY through THIS manager signature: it settles
+        # the build to the terminal ``done`` (verified) stage and records a SHA-anchored marker that
+        # ``version_verified`` honours (the signature REPLACES a verdict — no verdict is resurrected). AUTHORITATIVE
+        # gate (the board post-filter merely hides the button): valid ONLY in a conversation build whose spec is
+        # approved, whose Kontrola has run for the latest build, and which is NOT already ``done`` (a re-sign is
+        # refused — the terminal state itself blocks it, MD-2; a new build/fix re-opens Kontrola → Hotovo).
+        if state.mode != "conversation":
+            raise OrchestratorError("Označiť ako hotové je platné len v rozhovorovom režime.")
+        if not spec_approved(db, version_id):
+            raise OrchestratorError("Označiť ako hotové je platné až po schválení Špecifikácie.")
+        if not kontrola_done(db, version_id):
+            raise OrchestratorError("Označiť ako hotové je platné až po Kontrole.")
+        if state.current_stage == "done":
+            raise OrchestratorError("Verzia je už hotová.")
+        # SHA-anchor the manager signature to the exact code state — the SAME ladder as the verdict path
+        # (:7347-7357): read the repo HEAD and best-effort tag ``v{version_number}`` at it, so a later HEAD change
+        # past the signed commit AUTO-UN-VERIFIES the version (``version_verified`` → ``hotovo_drift``), exactly
+        # like the Auditor PASS. ``hotovo_sha`` stays None when the repo is unreadable (→ ``hotovo_unbound``).
+        proj_root = claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id)
+        hotovo_sha = _repo_head(proj_root)
+        if hotovo_sha:
+            _vnum = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
+            _git_tag_version(proj_root, _vnum, hotovo_sha)
+        # Record EXACTLY ONE marker via the sole writer: a manazer→ai_agent conversation ``notification`` at
+        # ``stage='priprava'`` carrying ``payload.hotovo`` (+ the anchored ``hotovo_sha`` when set). CRITICAL:
+        # kind='notification' (NOT 'verdict', NOT 'done') and stage='priprava' (NOT 'verifikacia') — 'notification'
+        # is a valid MESSAGE_KIND, already used by the completion tail, and is INVISIBLE to ``_verifikacia_passed``
+        # (which reads ONLY stage='verifikacia' ∧ kind∈{verdict,return}). ``_manazer_signoff`` / ``version_verified``
+        # read THIS marker for deploy-eligibility.
+        signoff_payload: dict[str, Any] = {"phase": "priprava", "hotovo": True}
+        if hotovo_sha:
+            signoff_payload["hotovo_sha"] = hotovo_sha
+        _record_message(
+            db,
+            version_id=version_id,
+            stage="priprava",
+            author="manazer",
+            recipient="ai_agent",
+            kind="notification",
+            content="Označené ako hotové — verzia je pripravená na nasadenie.",
+            payload=signoff_payload,
+        )
+        # TERMINAL settle (mirror the ``schvalit`` done-branch :7126-7130): the conversation build reaches the
+        # ``done`` verified stage, so ``deploy.list_verified_versions``' candidate axis (current_stage=='done') is
+        # satisfied, exactly like the Auditor path. No agent is on turn (terminal); ``current_actor`` stays a valid
+        # ACTOR value. NO ``_begin_dispatch`` — this is a pure terminal signature, not a dispatched agent turn
+        # (the partner never self-signs), so ``run_conversation_turn`` needs no hotovo delegation branch.
+        state.current_stage = "done"
+        state.current_actor = "ai_agent"
+        state.status = "done"
+        state.next_action = "Verzia je hotová — nasadenie (UAT/PROD) je samostatný krok."
+        db.flush()
         return state
 
     if action == "schvalit":

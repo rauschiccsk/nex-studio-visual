@@ -156,6 +156,22 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         )
     ):
         available_actions = [a for a in available_actions if a != "skontrolovat"]
+    # STEP 6 (step6-hotovo-design.md MD-1): POST-FILTER ``hotovo`` (mirror of the skontrolovat filter above) —
+    # the state-only ``determine_available_actions`` offers it unconditionally at ``priprava``; drop it here
+    # unless this is a conversation build whose Špecifikácia is approved, whose Kontrola has run for the latest
+    # build, and which is NOT already ``done`` (the terminal Hotovo state itself blocks a re-sign — MD-2).
+    # ``apply_action`` enforces the same rule authoritatively; this hides the dead button. Reuses ``spec_approved``.
+    if (
+        state is not None
+        and "hotovo" in available_actions
+        and not (
+            state.mode == "conversation"
+            and spec_approved
+            and orchestrator.kontrola_done(db, version_id)
+            and state.current_stage != "done"
+        )
+    ):
+        available_actions = [a for a in available_actions if a != "hotovo"]
     # STEP 4 (step4-programovanie-design.md MAJOR): a conversation build NEVER walks the phase automaton (its
     # Programovanie returns to the rozhovor; kontrola is STEP 5), so the legacy phase-gate verb ``schvalit``
     # (and, defensively, the Auditor ``verdict``) must never be OFFERED on it — DROP them when

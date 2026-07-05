@@ -149,6 +149,13 @@ class ProjectCreate(BaseModel):
         default=False,
         description="Whether Guardian review is enabled for this project.",
     )
+    custom_development_enabled: bool = Field(
+        default=False,
+        description=(
+            "Vývoj na zákazku — the only switch permitting deviation from the unified default design "
+            "(firemné zásady §4). Set once at creation (like type / auth_mode). Default False."
+        ),
+    )
     created_by: Optional[UUID] = Field(
         default=None,
         description="User who created the project. If omitted, resolved from the active session.",
@@ -265,6 +272,7 @@ class ProjectRead(BaseModel):
     source_path: Optional[str] = None
     kb_path: Optional[str] = None
     guardian_enabled: bool
+    custom_development_enabled: bool
     created_by: UUID
     owner_id: Optional[UUID] = None
     created_at: datetime

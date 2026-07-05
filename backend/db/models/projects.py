@@ -60,6 +60,11 @@ class Project(Base, UUIDMixin, TimestampMixin):
     # one place in code; an unrecognised stored value degrades to the global default).
     miera_autonomie = Column(String(32), nullable=True)
     guardian_enabled = Column(Boolean, nullable=False, server_default="false")
+    # STEP 6 (step6-hotovo-design.md, R9): "Vývoj na zákazku" — the ONLY switch that later permits a
+    # project to deviate from the unified default design (firemné zásady §4). Set ONCE at creation (like
+    # ``type`` / ``auth_mode`` — excluded from ProjectUpdate); an INERT stored datum in STEP 6 (no behaviour
+    # binds to it yet — the deviation gate is a future scope). Clones the ``guardian_enabled`` Column shape.
+    custom_development_enabled = Column(Boolean, nullable=False, server_default="false")
     created_by = Column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="RESTRICT"),
