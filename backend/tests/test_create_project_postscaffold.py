@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ import pytest
 from backend.services.claude_agent import ClaudeAgentError, _load_charter
 from backend.services.create_project_postscaffold import (
     ProvisioningError,
+    _commit_and_push_scaffold_finalisation,
     _mark_project_trusted,
     provision_v2_agent_charters,
 )
@@ -181,3 +183,61 @@ def test_mark_project_trusted_missing_config_does_not_raise() -> None:
     # No .claude.json in CLAUDE_CONFIG_DIR → best-effort no-op (headless build works regardless).
     assert not _claude_config_path().exists()
     _mark_project_trusted(Path("/opt/projects/demo"))  # must not raise
+
+
+# ─── v2 normalisation — stale v1 state files + git finalisation ─────────────────
+
+
+def test_provision_removes_stale_v1_state_files(tmp_path: Path) -> None:
+    _make_v1_scaffold(tmp_path)
+    # the icc-claude-template also drops 5-role session-state files at the project root
+    for role in ("designer", "implementer", "customer", "auditor"):
+        (tmp_path / f".nex-{role}-state.md").write_text("stale\n", encoding="utf-8")
+
+    provision_v2_agent_charters(tmp_path, "demo", "Demo Project")
+
+    # v1-only role state files removed; auditor (a v2 role) kept.
+    for v1_role in ("designer", "implementer", "customer"):
+        assert not (tmp_path / f".nex-{v1_role}-state.md").exists()
+    assert (tmp_path / ".nex-auditor-state.md").exists()
+
+
+def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=True)
+
+
+def _init_repo(root: Path) -> None:
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@t.t")
+    _git(root, "config", "user.name", "t")
+
+
+def test_scaffold_finalisation_commits_residual_changes(tmp_path: Path) -> None:
+    # Repo with a bootstrap commit, then an uncommitted change (mimics the v2 normalisation).
+    _init_repo(tmp_path)
+    (tmp_path / "CLAUDE.md").write_text("bootstrap\n", encoding="utf-8")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-q", "-m", "bootstrap")
+    head_before = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
+
+    (tmp_path / "CLAUDE.md").write_text("v2 shape\n", encoding="utf-8")  # normalisation edit
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "x").write_text("new\n", encoding="utf-8")
+
+    # push is best-effort (no remote configured → swallowed); the commit is the asserted behaviour.
+    _commit_and_push_scaffold_finalisation(tmp_path, "demo")
+
+    assert _git(tmp_path, "rev-parse", "HEAD").stdout.strip() != head_before  # residual commit made
+    assert _git(tmp_path, "status", "--porcelain").stdout.strip() == ""  # working tree now clean
+
+
+def test_scaffold_finalisation_noop_on_clean_tree(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    (tmp_path / "f").write_text("x\n", encoding="utf-8")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-q", "-m", "init")
+    head_before = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
+
+    _commit_and_push_scaffold_finalisation(tmp_path, "demo")  # clean tree → no commit
+
+    assert _git(tmp_path, "rev-parse", "HEAD").stdout.strip() == head_before

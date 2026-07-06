@@ -160,6 +160,11 @@ def provision_v2_agent_charters(project_root: Path, slug: str, project_name: str
     # hard step: a leftover dir does not block the build, so cleanup failure is swallowed, not raised.
     for v1_dir in _V1_AGENT_DIRS:
         shutil.rmtree(claude_dir / "agents" / v1_dir, ignore_errors=True)
+    # Also drop the stale v1-role session-state files at the project root (.nex-{designer,implementer,
+    # customer}-state.md) — a v2 project only has the ai-agent + auditor roles. Gitignored, disk-only
+    # clutter; best-effort (a leftover file does not block the build).
+    for v1_role in _V1_AGENT_DIRS:
+        (project_root / f".nex-{v1_role}-state.md").unlink(missing_ok=True)
 
     # CR-V2-030: mark the project trusted so claude — the interactive "Surový terminál" OR the headless
     # dispatch — never hits its first-run "Do you trust this folder?" dialog. A NEX-Studio-created project
@@ -236,6 +241,10 @@ def run_post_scaffold_steps(
         _compose_archetype_surfaces(target_path, slug, project_type=project_type, auth_mode=auth_mode)
         _run_smoke_test(target_path, slug, full=full_smoke)
         _seed_release_smoke_test(target_path, slug)
+        # Commit + push the v2-shape normalisation (and archetype/smoke seeds) BEFORE the CI commit so the
+        # fresh project has a clean working tree and the remote reflects the real v2 shape (not the v1
+        # template it was bootstrapped from). Commit order: bootstrap → normalise → CI.
+        _commit_and_push_scaffold_finalisation(target_path, slug)
     else:
         logger.warning("Skipping K-004 smoke test — target %r not a directory", target)
 
@@ -562,6 +571,67 @@ def _wire_cicd_workflow(target: Path, slug: str) -> None:
         return
 
     logger.info("K-005 CI/CD workflow committed + pushed (slug=%s)", slug)
+
+
+def _commit_and_push_scaffold_finalisation(target: Path, slug: str) -> None:
+    """Commit + push any residual scaffold changes the earlier steps wrote but never committed — chiefly the
+    v2-shape normalisation from :func:`provision_v2_agent_charters` (rewritten root ``CLAUDE.md`` + ai-agent/
+    auditor charters + removed v1 agent dirs) and the archetype-surface metadata. Without this the freshly
+    created project keeps a DIRTY working tree and the remote repo still shows the v1 template shape.
+
+    Best-effort (never raises; a git failure is logged and the project stays usable). ``git add -A`` respects
+    the project ``.gitignore`` so gitignored artifacts (``.env``, ``.nex-*-state.md``, ``MEMORY.md``) are never
+    staged. No-op when nothing is staged (tree already clean)."""
+    add_result = subprocess.run(
+        ["git", "-C", str(target), "add", "-A"],
+        capture_output=True,
+        text=True,
+        timeout=CICD_TIMEOUT,
+        check=False,
+    )
+    if add_result.returncode != 0:
+        logger.warning("scaffold finalise git add failed (slug=%s): %s", slug, add_result.stderr.strip())
+        return
+
+    # Nothing staged → the working tree is already clean, no residual commit needed.
+    diff_result = subprocess.run(
+        ["git", "-C", str(target), "diff", "--cached", "--quiet"],
+        capture_output=True,
+        text=True,
+        timeout=CICD_TIMEOUT,
+        check=False,
+    )
+    if diff_result.returncode == 0:
+        logger.info("scaffold finalise — working tree already clean, nothing to commit (slug=%s)", slug)
+        return
+
+    commit_result = subprocess.run(
+        ["git", "-C", str(target), "commit", "-m", "chore(scaffold): normalise project to v2 agent shape"],
+        capture_output=True,
+        text=True,
+        timeout=CICD_TIMEOUT,
+        check=False,
+    )
+    if commit_result.returncode != 0:
+        logger.warning("scaffold finalise git commit failed (slug=%s): %s", slug, commit_result.stderr.strip())
+        return
+
+    push_result = subprocess.run(
+        ["git", "-C", str(target), "push", "origin", "main"],
+        capture_output=True,
+        text=True,
+        timeout=CICD_TIMEOUT,
+        check=False,
+    )
+    if push_result.returncode != 0:
+        logger.warning(
+            "scaffold finalise git push failed (slug=%s): %s — committed locally, push deferred",
+            slug,
+            push_result.stderr.strip(),
+        )
+        return
+
+    logger.info("scaffold finalise — v2-shape normalisation committed + pushed (slug=%s)", slug)
 
 
 def _enable_branch_protection(repo_url: str, slug: str) -> None:
