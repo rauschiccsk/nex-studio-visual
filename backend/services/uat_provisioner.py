@@ -55,6 +55,9 @@ NEX_STUDIO_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATES_DIR = NEX_STUDIO_ROOT / "templates"
 
 UAT_ROOT = Path("/opt/uat")
+# PROD instances live under the per-customer control-plane root (design §2): a PROD deploy renders
+# ``/opt/customers/<customer-slug>/<full-project-slug>/`` instead of ``/opt/uat/<instance-slug>/``.
+PROD_ROOT = Path("/opt/customers")
 PROJECTS_ROOT = Path("/opt/projects")
 
 # Port-allocation state file (shared with scripts/_uat_lib.allocate_port — same repo-root path) so a
@@ -621,29 +624,54 @@ def parse_compose_extra_hosts(uat_dir: Path, be_service: str = "backend") -> lis
 # ---------------------------------------------------------------------------
 
 
-def frontend_traefik_labels(slug: str, fe_internal_port: int) -> list[str]:
-    """The FE service's Traefik labels — the catch-all ``Host(uat-<slug>.isnex.eu)`` route."""
-    host = f"uat-{slug}.{UAT_DOMAIN_SUFFIX}"
+def _instance_naming(
+    environment: str, uat_slug: str, customer_slug: Optional[str], app: Optional[str]
+) -> tuple[str, str]:
+    """The ``(name_base, host)`` for an instance's compose/container/image/router ids + public vhost.
+
+    UAT → ``uat-<uat_slug>`` @ ``uat-<uat_slug>.isnex.eu`` (unchanged). PROD →
+    ``<customer_slug>-<app>`` @ ``<customer_slug>-<app>.isnex.eu`` (design §2). The host is always
+    ``<name_base>.<UAT_DOMAIN_SUFFIX>``, so BOTH environments route via Traefik on the clean host.
+    """
+    if environment == "prod":
+        if not customer_slug or not app:
+            raise ValueError("prod instance naming requires customer_slug + app")
+        name_base = f"{customer_slug}-{app}"
+    else:
+        name_base = f"uat-{uat_slug}"
+    return name_base, f"{name_base}.{UAT_DOMAIN_SUFFIX}"
+
+
+def frontend_traefik_labels(name_base: str, fe_internal_port: int, host: str) -> list[str]:
+    """The FE service's Traefik labels — the catch-all ``Host(<host>)`` route.
+
+    ``name_base`` is the router/service id base (``uat-<slug>`` for UAT, ``<customer>-<app>`` for
+    PROD); ``host`` the matching public vhost. Traefik stays ENABLED for both environments — PROD
+    keeps its labels, just with the clean host + prefix-free router ids.
+    """
     return [
         "traefik.enable=true",
         f"traefik.docker.network={PROXY_NETWORK}",
-        f"traefik.http.routers.uat-{slug}.rule=Host(`{host}`)",
-        f"traefik.http.routers.uat-{slug}.entrypoints=web",
-        f"traefik.http.routers.uat-{slug}.priority={FE_ROUTER_PRIORITY}",
-        f"traefik.http.services.uat-{slug}.loadbalancer.server.port={fe_internal_port}",
+        f"traefik.http.routers.{name_base}.rule=Host(`{host}`)",
+        f"traefik.http.routers.{name_base}.entrypoints=web",
+        f"traefik.http.routers.{name_base}.priority={FE_ROUTER_PRIORITY}",
+        f"traefik.http.services.{name_base}.loadbalancer.server.port={fe_internal_port}",
     ]
 
 
-def backend_traefik_labels(slug: str, be_internal_port: int) -> list[str]:
-    """The BE service's Traefik labels — the higher-priority ``/api`` PathPrefix split."""
-    host = f"uat-{slug}.{UAT_DOMAIN_SUFFIX}"
+def backend_traefik_labels(name_base: str, be_internal_port: int, host: str) -> list[str]:
+    """The BE service's Traefik labels — the higher-priority ``/api`` PathPrefix split.
+
+    ``name_base``/``host`` are per-env (see :func:`frontend_traefik_labels`); the router/service id
+    is ``<name_base>-api``.
+    """
     return [
         "traefik.enable=true",
         f"traefik.docker.network={PROXY_NETWORK}",
-        f"traefik.http.routers.uat-{slug}-api.rule=Host(`{host}`) && PathPrefix(`/api`)",
-        f"traefik.http.routers.uat-{slug}-api.entrypoints=web",
-        f"traefik.http.routers.uat-{slug}-api.priority={BE_ROUTER_PRIORITY}",
-        f"traefik.http.services.uat-{slug}-api.loadbalancer.server.port={be_internal_port}",
+        f"traefik.http.routers.{name_base}-api.rule=Host(`{host}`) && PathPrefix(`/api`)",
+        f"traefik.http.routers.{name_base}-api.entrypoints=web",
+        f"traefik.http.routers.{name_base}-api.priority={BE_ROUTER_PRIORITY}",
+        f"traefik.http.services.{name_base}-api.loadbalancer.server.port={be_internal_port}",
     ]
 
 
@@ -672,7 +700,15 @@ def _merge_labels(existing: Any, traefik: list[str]) -> list[str]:
 
 
 def _add_proxy_network(svc: dict[str, Any]) -> None:
-    """Attach the external ``nex-proxy-net`` to a service (list or mapping ``networks`` form)."""
+    """Attach the external ``nex-proxy-net`` to a service (list or mapping ``networks`` form).
+
+    Networking fix (spec §3): a service with NO explicit ``networks`` is implicitly on the compose
+    ``default`` network (where ``db``/``migrate`` live). Giving it an explicit list of ONLY
+    ``nex-proxy-net`` would silently drop it OFF ``default`` — so the backend could no longer reach
+    ``db`` (the manual-deploy bug). When there is no explicit list we therefore attach BOTH
+    ``default`` and ``nex-proxy-net``. A service that already declares a shared internal network keeps
+    it (it can already reach ``db``) and only gains ``nex-proxy-net``. Applies to both prod and uat.
+    """
     nets = svc.get("networks")
     if isinstance(nets, dict):
         nets.setdefault(PROXY_NETWORK, None)
@@ -680,7 +716,7 @@ def _add_proxy_network(svc: dict[str, Any]) -> None:
         if PROXY_NETWORK not in nets:
             nets.append(PROXY_NETWORK)
     else:
-        svc["networks"] = [PROXY_NETWORK]
+        svc["networks"] = ["default", PROXY_NETWORK]
 
 
 def build_uat_compose(
@@ -694,33 +730,46 @@ def build_uat_compose(
     db_name: str,
     loopback_base_port: Optional[int] = None,
     extra_backend_hosts: Optional[list[str]] = None,
+    environment: str = "uat",
+    customer_slug: Optional[str] = None,
+    app: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Build the final UAT compose **dict** from the parsed source compose (CR-1).
+    """Build the final compose **dict** from the parsed source compose (CR-1), environment-aware.
 
-    Per-service transform: rename ``container_name`` + built-image tag to ``uat-<slug>-<svc>``,
-    absolutize build contexts, ``restart: "no"``, preserve environment/volumes/healthcheck/
-    depends_on/extra_hosts/networks, and force the DB password to the synthetic
-    ``${POSTGRES_PASSWORD}``. The FE + BE services additionally join ``nex-proxy-net`` and get the
-    exact Traefik labels. Top-level ``name: uat-<slug>`` namespaces all unnamed networks/volumes;
-    ``nex-proxy-net`` is added as the (only) external network. A source external network other than
-    ``nex-proxy-net`` raises ``ValueError`` (§5.3). Host ports are dropped for routing — only if
-    ``loopback_base_port`` is given are FE/BE/DB bound to loopback debug ports (FE base, BE base+100,
-    DB base+200).
+    Per-service transform: rename ``container_name`` + built-image tag to ``<name_base>-<svc>``
+    (``name_base`` = ``uat-<slug>`` for UAT / ``<customer>-<app>`` for PROD, design §2), absolutize
+    build contexts, set ``restart`` (uat ``"no"`` / prod ``"unless-stopped"``), preserve
+    environment/volumes/healthcheck/depends_on/extra_hosts/networks, and force the DB password to the
+    synthetic ``${POSTGRES_PASSWORD}``. The FE + BE services additionally join ``nex-proxy-net`` and
+    get the exact Traefik labels on the per-env host. Top-level ``name: <name_base>`` namespaces all
+    unnamed networks/volumes; ``nex-proxy-net`` is added as the (only) external network. A source
+    external network other than ``nex-proxy-net`` raises ``ValueError`` (§5.3). Host ports are dropped
+    for routing — only if ``loopback_base_port`` is given are FE/BE/DB bound to loopback debug ports
+    (FE base, BE base+100, DB base+200).
     """
     fe_name, be_name, db_name_svc = roles["frontend"], roles["backend"], roles["db"]
     src_services: dict[str, Any] = source["services"]
+
+    name_base, host = _instance_naming(environment, slug, customer_slug, app)
+    restart_policy = "unless-stopped" if environment == "prod" else "no"
 
     services: dict[str, Any] = {}
     for name, src_svc in src_services.items():
         svc = copy.deepcopy(src_svc) if isinstance(src_svc, dict) else {}
 
-        svc["container_name"] = f"uat-{slug}-{name}"
-        svc["restart"] = "no"
+        svc["container_name"] = f"{name_base}-{name}"
+        # One-shot services (e.g. migrate ``alembic upgrade head``) are marked ``restart: "no"``
+        # in the source and are depended on via ``service_completed_successfully``. Forcing PROD's
+        # ``unless-stopped`` on them makes docker restart them after exit 0 → the dependency never
+        # satisfies → deploy hangs ("timeout waiting for dependencies"). Preserve the one-shot
+        # marker; apply the env restart policy only to long-running services.
+        _src_restart = svc.get("restart")
+        svc["restart"] = "no" if (_src_restart == "no" or _src_restart is False) else restart_policy
 
         # Built services → tag + absolutize context; image-only services pass through.
         build = svc.get("build")
         if build is not None:
-            svc["image"] = f"uat-{slug}-{name}:latest"
+            svc["image"] = f"{name_base}-{name}:latest"
             if isinstance(build, str):
                 svc["build"] = {"context": _abs_build_context(build, project_path)}
             elif isinstance(build, dict):
@@ -758,13 +807,13 @@ def build_uat_compose(
         fe_port = detect_internal_port(src_services[fe_name], 80)
         _add_proxy_network(services[fe_name])
         services[fe_name]["labels"] = _merge_labels(
-            services[fe_name].get("labels"), frontend_traefik_labels(slug, fe_port)
+            services[fe_name].get("labels"), frontend_traefik_labels(name_base, fe_port, host)
         )
     if be_name and be_name in services:
         be_port = detect_internal_port(src_services[be_name], 8000)
         _add_proxy_network(services[be_name])
         services[be_name]["labels"] = _merge_labels(
-            services[be_name].get("labels"), backend_traefik_labels(slug, be_port)
+            services[be_name].get("labels"), backend_traefik_labels(name_base, be_port, host)
         )
 
     # Optional loopback debug ports (FE base / BE base+100 / DB base+200).
@@ -808,7 +857,7 @@ def build_uat_compose(
         vol.pop("name", None)
         volumes[vol_name] = vol or None
 
-    compose: dict[str, Any] = {"name": f"uat-{slug}", "services": services, "networks": networks}
+    compose: dict[str, Any] = {"name": name_base, "services": services, "networks": networks}
     if volumes:
         compose["volumes"] = volumes
     return compose
@@ -876,19 +925,39 @@ def provision_uat(
     uat_root: Path = UAT_ROOT,
     loopback_base_port: Optional[int] = None,
     rotate_secrets: bool = False,
+    environment: str = "uat",
+    customer_slug: Optional[str] = None,
+    app: Optional[str] = None,
+    full_project_slug: Optional[str] = None,
+    prod_root: Path = PROD_ROOT,
 ) -> ProvisionResult:
-    """Render ``/opt/uat/<uat_slug>/{docker-compose.yml,.env}`` + create dirs for ``project_slug``.
+    """Render an instance's ``{docker-compose.yml,.env}`` + create dirs for ``project_slug``.
 
-    Pure provisioning — it does **NOT** build or start anything (Phase-3 ``_run_uat_deploy`` does).
-    Synchronous; an async caller should wrap it via ``asyncio.to_thread``.
+    Environment-aware (design §2): UAT renders under ``/opt/uat/<uat_slug>/`` with ``uat-<slug>-*``
+    names; PROD renders under ``/opt/customers/<customer_slug>/<full_project_slug>/`` with
+    ``<customer_slug>-<app>-*`` names, the clean ``<customer_slug>-<app>.isnex.eu`` Traefik host, and
+    ``restart: unless-stopped``. ``environment`` defaults to ``'uat'`` (back-compat); PROD requires
+    ``customer_slug`` + ``app`` + ``full_project_slug``. BOTH route via Traefik on ``nex-proxy-net``.
+
+    Pure provisioning — it does **NOT** build or start anything (Phase-3 ``_run_uat_deploy`` /
+    ``_run_prod_deploy`` does). Synchronous; an async caller should wrap it via ``asyncio.to_thread``.
 
     Redeploy safety: when a ``.env`` already exists and ``rotate_secrets`` is False, existing
     secrets + the BE ``extra_hosts`` are PRESERVED (never silently rotate a data-bearing instance);
     ``rotate_secrets=True`` forces a fresh re-provision. The ``.env`` is ``chmod 600`` and its
     contents are never logged/returned.
     """
+    if environment not in ("uat", "prod"):
+        raise ValueError(f"unknown environment {environment!r} (expected 'uat' or 'prod')")
     validate_uat_slug(uat_slug)
     validate_uat_slug(project_slug)
+    if environment == "prod":
+        if not (customer_slug and app and full_project_slug):
+            raise ValueError("prod provisioning requires customer_slug, app, and full_project_slug")
+        # Guard the directory + name components against traversal (same rules as the uat slug).
+        validate_uat_slug(customer_slug)
+        validate_uat_slug(app)
+        validate_uat_slug(full_project_slug)
 
     project_path = projects_root / project_slug
     if not project_path.is_dir():
@@ -898,7 +967,7 @@ def provision_uat(
     src_services: dict[str, Any] = source["services"]
     roles = identify_service_roles(src_services)
 
-    uat_dir = uat_root / uat_slug
+    uat_dir = (prod_root / customer_slug / full_project_slug) if environment == "prod" else (uat_root / uat_slug)
 
     # Redeploy preservation (per the live-instance contract).
     is_redeploy = (uat_dir / ".env").is_file() and not rotate_secrets
@@ -922,6 +991,9 @@ def provision_uat(
         db_name=db_name,
         loopback_base_port=loopback_base_port,
         extra_backend_hosts=extra_backend_hosts,
+        environment=environment,
+        customer_slug=customer_slug,
+        app=app,
     )
 
     env_example = _parse_env_file(project_path / ".env.example")
@@ -962,10 +1034,11 @@ def provision_uat(
     env_path.write_text(env_content, encoding="utf-8")
     env_path.chmod(0o600)
 
+    _name_base, host = _instance_naming(environment, uat_slug, customer_slug, app)
     if roles["frontend"] is None:
         warnings.append(
             f"no frontend service detected in {project_slug}'s compose — Traefik has no default "
-            f"route for uat-{uat_slug}.{UAT_DOMAIN_SUFFIX} (only /api would resolve)"
+            f"route for {host} (only /api would resolve)"
         )
     if roles["backend"] is None:
         warnings.append(f"no backend service detected in {project_slug}'s compose — no /api Traefik route")

@@ -292,20 +292,33 @@ async def _default_deploy_runner(
     version_number: str,
     force_fresh: bool,
 ) -> tuple[bool, str, Optional[str]]:
-    """Provision (preserve-by-default) then bring up a customer instance.
+    """Provision (preserve-by-default) then bring up a customer instance — environment-aware.
 
-    Renders ``/opt/uat/<uat_slug>/`` via :func:`uat_provisioner.provision_uat`
-    (``rotate_secrets=force_fresh`` — default False PRESERVES secrets + data +
-    extra_hosts and runs migrations on ``up``), then delegates the build/up +
-    serve-verify to the orchestrator's ``_run_uat_deploy``. Returns
-    ``(ok, detail, url)``; never raises (the orchestrator leg already returns a
-    tuple). The ``.env`` content is never read/returned here — only the
-    non-secret deploy outcome.
+    The environment + PROD layout are derived from the instance slug (``<base>-<env>``, see
+    :func:`_instance_slug`): a ``-prod`` suffix selects PROD — provisioning the clean
+    ``/opt/customers/<customer>/<full-project-slug>/`` layout with ``<customer>-<app>-*`` names + the
+    ``<customer>-<app>.isnex.eu`` Traefik host — else UAT (``/opt/uat/<slug>/``, unchanged). The
+    runner's public seam stays ``(project_slug, uat_slug, version_number, force_fresh)`` so an
+    injected/faked runner is untouched; the env is threaded to the provisioner + deployer HERE.
+
+    Renders via :func:`uat_provisioner.provision_uat` (``rotate_secrets=force_fresh`` — default False
+    PRESERVES secrets + data + extra_hosts and runs migrations on ``up``), then delegates the build/up
+    + serve-verify to the orchestrator (``_run_uat_deploy`` / ``_run_prod_deploy``). Returns
+    ``(ok, detail, url)``; never raises (the orchestrator leg already returns a tuple). The ``.env``
+    content is never read/returned here — only the non-secret deploy outcome.
 
     Imported lazily (the orchestrator imports the deploy chain transitively;
     keeping the import inside the function avoids an import cycle at module load).
     """
     from backend.services import orchestrator
+
+    # ``-prod``/``-uat`` suffix is guaranteed by _instance_slug; PROD threads the clean layout through.
+    is_prod = uat_slug.endswith("-prod")
+    prod_kwargs: dict = {}
+    if is_prod:
+        customer_slug = uat_slug.removesuffix("-prod")
+        app = uat_provisioner.derive_uat_slug(project_slug)
+        prod_kwargs = dict(environment="prod", customer_slug=customer_slug, app=app, full_project_slug=project_slug)
 
     def _provision() -> uat_provisioner.ProvisionResult:
         return uat_provisioner.provision_uat(
@@ -313,6 +326,7 @@ async def _default_deploy_runner(
             uat_slug,
             version=version_number,
             rotate_secrets=force_fresh,
+            **prod_kwargs,
         )
 
     try:
@@ -320,8 +334,12 @@ async def _default_deploy_runner(
     except (FileNotFoundError, ValueError) as exc:
         return False, f"provision failed: {exc}", None
 
-    ok, detail = await orchestrator._run_uat_deploy(project_slug, uat_slug)
-    url = _url_for_instance_slug(uat_slug) if result.fe_service else None
+    if is_prod:
+        ok, detail = await orchestrator._run_prod_deploy(project_slug, customer_slug, app, project_slug)
+        url = _prod_url(customer_slug, app) if result.fe_service else None
+    else:
+        ok, detail = await orchestrator._run_uat_deploy(project_slug, uat_slug)
+        url = _url_for_instance_slug(uat_slug) if result.fe_service else None
     # Surface any provision warnings in the recorded (non-secret) detail.
     if result.warnings:
         detail = f"{detail} | warnings: {'; '.join(result.warnings)}"
@@ -520,6 +538,18 @@ def _url_for_instance_slug(instance_slug: str) -> str:
 def _instance_url(customer: Customer, environment: str) -> str:
     """The public URL of a customer's per-environment instance (design §3.5 link)."""
     return _url_for_instance_slug(_instance_slug(customer, environment))
+
+
+def _prod_url(customer_slug: str, app: str) -> str:
+    """The public URL for a PROD instance — the clean ``https://<customer>-<app>.isnex.eu`` host (§2).
+
+    ``customer_slug`` = ``(subdomain or slug).lower()`` (the base :func:`_instance_slug` uses); ``app``
+    = the project slug with a leading ``nex-`` stripped (``uat_provisioner.derive_uat_slug``). The
+    PROD ``(customer_slug, app, full_project_slug)`` triple is derived at the deploy-runner seam (from
+    ``uat_slug``/``project_slug``) rather than passed as objects — the runner's public interface stays
+    ``(project_slug, uat_slug, version_number, force_fresh)`` so an injected/faked runner is untouched.
+    """
+    return f"https://{customer_slug}-{app}.{uat_provisioner.UAT_DOMAIN_SUFFIX}"
 
 
 def _ensure_version(db: Session, project_id: UUID, version_number: str, *, source: str) -> Version:

@@ -3257,11 +3257,26 @@ def _begin_dispatch(db: Session, state: PipelineState) -> None:
 # (CR-V2-028: this is NO LONGER invoked from the fast-fix lane — deploy is OUT of the pipeline (OQ-3/D6),
 # manual + per-customer; ``_run_uat_deploy`` is now called only by the deploy subsystem, deploy.py.)
 UAT_ROOT: Path = Path("/opt/uat")
+# PROD instances live under the per-customer control-plane root: a PROD deploy redeploys the compose
+# at ``/opt/customers/<customer-slug>/<full-project-slug>/`` (mirrors uat_provisioner.PROD_ROOT, §2).
+PROD_ROOT: Path = Path("/opt/customers")
 UAT_DEPLOY_TIMEOUT = 900
 
 
-def _uat_compose_path(uat_slug: str) -> Path:
-    """The UAT's existing compose file — ``/opt/uat/<uat_slug>/docker-compose.yml``."""
+def _uat_compose_path(
+    uat_slug: str,
+    *,
+    environment: str = "uat",
+    customer_slug: Optional[str] = None,
+    full_project_slug: Optional[str] = None,
+) -> Path:
+    """The instance's existing compose file — env-aware.
+
+    UAT → ``/opt/uat/<uat_slug>/docker-compose.yml`` (unchanged). PROD →
+    ``/opt/customers/<customer_slug>/<full_project_slug>/docker-compose.yml`` (§2).
+    """
+    if environment == "prod":
+        return PROD_ROOT / customer_slug / full_project_slug / "docker-compose.yml"
     return UAT_ROOT / uat_slug / "docker-compose.yml"
 
 
@@ -3291,12 +3306,22 @@ def _fe_app_version(project_slug: str) -> str:
     return f"0.1.{count}" if result.returncode == 0 and count.isdigit() else "0.1.0"
 
 
-async def _run_uat_deploy(project_slug: str, uat_slug: str) -> tuple[bool, str]:
-    """Plain redeploy of the UAT's EXISTING compose (``docker compose -f … up -d --build --force-recreate``).
+async def _run_uat_deploy(
+    project_slug: str,
+    uat_slug: str,
+    *,
+    environment: str = "uat",
+    customer_slug: Optional[str] = None,
+    app: Optional[str] = None,
+    full_project_slug: Optional[str] = None,
+) -> tuple[bool, str]:
+    """Plain redeploy of an instance's EXISTING compose (``docker compose -f … up -d --build --force-recreate``).
 
-    Respects ``/opt/uat/<uat_slug>/docker-compose.yml`` as-is — no re-render, no port reallocation, no
-    nginx rewrite (unlike the uat-deploy.py provisioner) — and stamps the FE build-arg via
-    ``VITE_APP_VERSION`` (post-commit version scheme).
+    Respects the instance compose as-is — no re-render, no port reallocation, no nginx rewrite (unlike
+    the uat-deploy.py provisioner) — and stamps the FE build-arg via ``VITE_APP_VERSION`` (post-commit
+    version scheme). Environment-aware: UAT reads ``/opt/uat/<uat_slug>/docker-compose.yml``
+    (unchanged), PROD reads ``/opt/customers/<customer_slug>/<full_project_slug>/docker-compose.yml``
+    (§2). ``environment`` defaults to ``'uat'``; the PROD entry point is :func:`_run_prod_deploy`.
 
     Returns ``(ok, detail)``: ``ok`` is True only when ``up`` exits 0 AND the deployed app actually
     SERVES (icc-deploy §5.6 #2 — "exit 0" is not "serves"); ``detail`` is ``"OK"`` on success, else a
@@ -3305,7 +3330,9 @@ async def _run_uat_deploy(project_slug: str, uat_slug: str) -> tuple[bool, str]:
     false success. Async (``create_subprocess_exec`` + ``await``) so the ~1–2 min docker build never
     blocks the event loop.
     """
-    compose = _uat_compose_path(uat_slug)
+    compose = _uat_compose_path(
+        uat_slug, environment=environment, customer_slug=customer_slug, full_project_slug=full_project_slug
+    )
     cmd = ["docker", "compose", "-f", str(compose), "up", "-d", "--build", "--force-recreate"]
     env = {**os.environ, "VITE_APP_VERSION": _fe_app_version(project_slug)}
     try:
@@ -3323,26 +3350,65 @@ async def _run_uat_deploy(project_slug: str, uat_slug: str) -> tuple[bool, str]:
         tail = (stdout or b"").decode("utf-8", "replace").strip()[-300:]
         return False, (f"exit {proc.returncode}: {tail}" if tail else f"exit {proc.returncode}")
     # ``up`` exit 0 only means the containers were created — NOT that the app serves (the nex-asistent
-    # false-success bug). Verify the app actually responds before reporting success.
+    # false-success bug). Verify the app actually responds before reporting success. UAT keeps the exact
+    # 2-arg call (byte-identical — a monkeypatched serve-verify fake gets only project_slug + uat_slug);
+    # PROD threads the layout kwargs so the FE cross-probe targets the ``<customer>-<app>-<svc>`` name.
+    if environment == "prod":
+        return await _verify_uat_serves(
+            project_slug,
+            uat_slug,
+            environment="prod",
+            customer_slug=customer_slug,
+            app=app,
+            full_project_slug=full_project_slug,
+        )
     return await _verify_uat_serves(project_slug, uat_slug)
 
 
-async def _verify_uat_serves(project_slug: str, uat_slug: str) -> tuple[bool, str]:
-    """Post-``up`` readiness gate for a UAT deploy (icc-deploy §5.6 #2): confirm the deployed app actually
+async def _run_prod_deploy(project_slug: str, customer_slug: str, app: str, full_project_slug: str) -> tuple[bool, str]:
+    """PROD sibling of :func:`_run_uat_deploy` — redeploy the customer's PROD compose (§2).
+
+    Redeploys ``/opt/customers/<customer_slug>/<full_project_slug>/docker-compose.yml`` and
+    serve-verifies via the ``<customer_slug>-<app>-<svc>`` container names. Thin wrapper over the
+    env-aware :func:`_run_uat_deploy` so the subprocess dance + serve-verify gate are shared.
+    """
+    return await _run_uat_deploy(
+        project_slug,
+        f"{customer_slug}-{app}",
+        environment="prod",
+        customer_slug=customer_slug,
+        app=app,
+        full_project_slug=full_project_slug,
+    )
+
+
+async def _verify_uat_serves(
+    project_slug: str,
+    uat_slug: str,
+    *,
+    environment: str = "uat",
+    customer_slug: Optional[str] = None,
+    app: Optional[str] = None,
+    full_project_slug: Optional[str] = None,
+) -> tuple[bool, str]:
+    """Post-``up`` readiness gate for a deploy (icc-deploy §5.6 #2): confirm the deployed app actually
     SERVES before :func:`_run_uat_deploy` reports success — every backend ``/api`` responds AND every
     frontend serves (HTTP ``< 500``). Returns ``(True, "OK")`` once verified, else ``(False, reason)`` so
     the caller settles to ``blocked`` rather than a false success.
 
-    The UAT compose strips host ports (Traefik routes by network), so this probes IN-network via
+    The compose strips host ports (Traefik routes by network), so this probes IN-network via
     ``docker compose exec``: the backend probes itself at ``localhost`` and probes the frontend (nginx, no
-    Python) over the network by its unique UAT container name. Service keys + container ports are read from
-    the SOURCE compose (the UAT compose's stripped ports can't reveal the container port); ``up --build``
-    rebuilds the UAT from that same source, so the ports match the live containers.
+    Python) over the network by its unique container name (``uat-<slug>-<svc>`` for UAT,
+    ``<customer>-<app>-<svc>`` for PROD, §2). Service keys + container ports are read from the SOURCE
+    compose (the instance compose's stripped ports can't reveal the container port); ``up --build``
+    rebuilds from that same source, so the ports match the live containers.
 
     Defensive skips return ``(True, "OK")`` (the app deployed; we just can't probe it) — NEVER a new false
-    FAIL: no UAT compose (the caller already guards existence), an unreadable source compose, or no backend
-    service (no Python container to probe from). The real serve check runs whenever a backend exists."""
-    uat_compose = _uat_compose_path(uat_slug)
+    FAIL: no instance compose (the caller already guards existence), an unreadable source compose, or no
+    backend service (no Python container to probe from). The real serve check runs whenever a backend exists."""
+    uat_compose = _uat_compose_path(
+        uat_slug, environment=environment, customer_slug=customer_slug, full_project_slug=full_project_slug
+    )
     if not uat_compose.is_file():
         logger.warning("UAT serve-verify skipped (uat=%s) — no UAT compose to probe", uat_slug)
         return True, "OK"
@@ -3370,7 +3436,8 @@ async def _verify_uat_serves(project_slug: str, uat_slug: str) -> tuple[bool, st
     fe_role = roles["frontend"]
     if fe_role is not None:
         fe_port = uat_provisioner.detect_internal_port(services[fe_role], 80)
-        fe_host = f"uat-{uat_slug}-{fe_role}"
+        name_base = f"{customer_slug}-{app}" if environment == "prod" else f"uat-{uat_slug}"
+        fe_host = f"{name_base}-{fe_role}"
         fe_ready, fe_last = await _await_http_ready(base, be_role, fe_port, host=fe_host, path="/")
         if not fe_ready:
             return False, f"frontend '{fe_role}' not serving within {ACCEPTANCE_SMOKE_READY_TIMEOUT}s: {fe_last}"
