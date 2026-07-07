@@ -176,6 +176,12 @@ COPY --chown=andros:andros migrations/ ./migrations/
 # so UAT auto-provisioning + smoke-seed failed in the container. (gate-g-hardening followup)
 COPY --chown=andros:andros templates/ ./templates/
 
+# Bake the notify script so send_telegram works in ANY instance — esp. v3, where /opt/projects is an
+# isolated per-instance workspace WITHOUT nex-studio, so the old hardcoded
+# /opt/projects/nex-studio/scripts/notify_telegram.sh path resolved to nothing → Telegram nudges
+# silently skipped (same "forgotten-in-image" class as the templates COPY above).
+COPY --chown=andros:andros scripts/notify_telegram.sh ./scripts/notify_telegram.sh
+
 # Bake ONLY the per-version RELEASE_NOTES.md files (the "Aktualizácie"
 # changelog) from the pruned stage above — NEVER the full docs/specs tree.
 # Read by backend.services.release_notes via GET /api/v1/release-notes.

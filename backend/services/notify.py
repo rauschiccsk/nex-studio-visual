@@ -15,9 +15,19 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# The script lives on the mounted source tree (``/opt/projects`` is bind-mounted
-# rw into the backend container), so no image COPY is needed.
-NOTIFY_SCRIPT = Path("/opt/projects/nex-studio/scripts/notify_telegram.sh")
+
+def _resolve_notify_script() -> Path:
+    """Locate ``notify_telegram.sh``. Prefer the copy BAKED into the image (``/app/scripts/``) so it
+    works in ANY instance — including v3, where ``/opt/projects`` is an isolated per-instance workspace
+    that does NOT contain nex-studio (the old hardcoded source path resolved to nothing there, so every
+    Telegram nudge silently skipped). Falls back to the legacy bind-mounted source path for old images."""
+    baked = Path(__file__).resolve().parents[2] / "scripts" / "notify_telegram.sh"
+    if baked.exists():
+        return baked
+    return Path("/opt/projects/nex-studio/scripts/notify_telegram.sh")
+
+
+NOTIFY_SCRIPT = _resolve_notify_script()
 
 
 async def send_telegram(message: str, chat_id: str) -> None:
@@ -25,6 +35,10 @@ async def send_telegram(message: str, chat_id: str) -> None:
 
     No-op when ``chat_id`` is empty or the script is absent.
     """
+    # Defensive: a chat_id pasted with surrounding whitespace (e.g. " 7204918893") is silently
+    # rejected by the Telegram API → the nudge vanishes. Strip it so no send path can be broken by
+    # stray whitespace, regardless of how the value was stored.
+    chat_id = chat_id.strip() if chat_id else chat_id
     if not chat_id or not message:
         return
     if not NOTIFY_SCRIPT.exists():
