@@ -49,4 +49,26 @@ describe("ConversationThread — full body + question (CR-V2-032)", () => {
     render(<ConversationThread messages={[agentMsg(null, "Len zhrnutie ABC.")]} activity={[]} working={false} />);
     expect(screen.getByText(/Len zhrnutie ABC/)).toBeInTheDocument();
   });
+
+  // Director observation #6: the system framework_issue message (agent → Dedo escalation) is accented +
+  // surfaces the escalation message that went to Dedo.
+  it("renders the framework_issue system message with the Dedo badge + the escalation message", () => {
+    const systemMsg: PipelineMessage = {
+      id: "fi1",
+      version_id: "v1",
+      stage: "priprava",
+      author: "system",
+      recipient: "manazer",
+      kind: "notification",
+      content: "NEX Studio potrebuje opravu (Dedo). Dedo dostal správu, počkaj.",
+      status: "delivered",
+      payload: { framework_issue: true, dedo_message: "Chýba docker socket mount — treba upraviť NEX Studio." },
+      created_at: "2026-07-07T00:00:00Z",
+      seq: 2,
+    };
+    render(<ConversationThread messages={[systemMsg]} activity={[]} working={false} />);
+    expect(screen.getByText(/NEX Studio · Dedo/)).toBeInTheDocument(); // the escalation badge
+    expect(screen.getByText(/Správa pre Deda/i)).toBeInTheDocument(); // the escalation-message block label
+    expect(screen.getByText(/Chýba docker socket mount/)).toBeInTheDocument(); // the actual Dedo message
+  });
 });

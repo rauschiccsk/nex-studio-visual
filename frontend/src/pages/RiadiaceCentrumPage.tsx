@@ -120,6 +120,10 @@ export default function RiadiaceCentrumPage() {
   }
 
   const working = board?.state?.status === "agent_working";
+  // Director observation #6: an agent → Dedo escalation locks the composer — the Manažér cannot fix a
+  // NEX Studio bug, only Dedo can (the banner tells them to wait).
+  const frameworkBlocked =
+    board?.state?.status === "blocked" && board?.state?.block_reason === "framework_issue";
 
   return (
     <div className="grid h-full grid-cols-[minmax(0,1fr)_320px] grid-rows-[auto_minmax(0,1fr)_auto_auto] bg-[var(--color-canvas)]">
@@ -148,7 +152,7 @@ export default function RiadiaceCentrumPage() {
 
       {/* Bottom — the relay send box. */}
       <div className="col-start-1 row-start-4 min-w-0">
-        <ConversationComposer onRelay={handleSend} disabled={!versionId} />
+        <ConversationComposer onRelay={handleSend} disabled={!versionId} frameworkBlocked={frameworkBlocked} />
       </div>
 
       {/* Right rail — the Plán úloh three-layer manager map (STEP 3), spanning the full height. Reads the live

@@ -72,7 +72,19 @@ STATUS_VALUES = ("agent_working", "awaiting_manazer", "blocked", "paused", "done
 # CR-V2-041: ``decision_needed`` — the build is blocked on a multi-decision CONSULTATION (the AI Agent
 # translated a problem/Auditor-findings into a queue of plain-language decisions the Manažér answers by
 # click). Distinct from ``agent_question`` (a single free-text Q) so the FE renders Decision Cards.
-BLOCK_REASON_VALUES = ("agent_question", "decision_needed", "agent_error", "system_error", "parse_exhaustion")
+# Director observation #6: ``framework_issue`` — AGENT-INITIATED escalation to Dedo. The AI Agent hit an
+# error it CANNOT fix because the fix requires a change to NEX Studio ITSELF (the framework/tooling, §15) —
+# something the Manažér objectively cannot do. The build settles ``blocked``/``framework_issue`` with a
+# message for Dedo (delivered via the Dedo escalation channel inbox + a Telegram ping) and offers the
+# Manažér NO recovery actions (``determine_available_actions`` returns EMPTY): only Dedo clears it.
+BLOCK_REASON_VALUES = (
+    "agent_question",
+    "decision_needed",
+    "agent_error",
+    "system_error",
+    "parse_exhaustion",
+    "framework_issue",
+)
 MESSAGE_KIND_VALUES = (
     "kickoff",
     "question",

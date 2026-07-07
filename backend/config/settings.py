@@ -47,6 +47,15 @@ class Settings(BaseSettings):
     # (CR-NS-018 Phase 5a). Empty → the notification omits the link.
     app_public_url: str = ""
 
+    # Filesystem location of the .dedo-channel Dedo↔agent message bus (Director
+    # observation #6). The agent → Dedo ``framework_issue`` escalation writes an
+    # audit-trail file into ``<dir>/inbox/``. Env-configurable (DEDO_CHANNEL_DIR)
+    # because in v3 ``/opt/projects`` is an isolated per-instance workspace that
+    # does NOT contain nex-studio, so the legacy hardcoded path resolves to
+    # nothing there (SAME reachability class as the #5-fixed notify script) —
+    # Dedo mounts the real ``.dedo-channel`` in and points this at the mount.
+    dedo_channel_dir: str = "/opt/projects/nex-studio/.dedo-channel"
+
     # NOTE: operational timeouts (Claude stream / design doc / task plan,
     # GitHub API), conversation history limit, design-doc max chars,
     # token expiry, port registry bounds and path templates are all

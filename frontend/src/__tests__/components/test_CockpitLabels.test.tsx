@@ -24,16 +24,19 @@ import type { BlockReason } from "@/services/api/pipeline";
 describe("cockpit block_reason phrases", () => {
   it("R4 (D1/D2): every block_reason maps to a distinct Slovak phrase", () => {
     // CR-V2-041: + "decision_needed" (an interactive consultation).
+    // Director observation #6: + "framework_issue" (agent → Dedo escalation).
     const reasons: BlockReason[] = [
       "agent_question",
       "decision_needed",
       "agent_error",
       "system_error",
       "parse_exhaustion",
+      "framework_issue",
     ];
     for (const r of reasons) expect(BLOCK_REASON_LABELS[r]).toBeTruthy();
     expect(BLOCK_REASON_LABELS.agent_question).toBe("Agent sa pýta");
     expect(BLOCK_REASON_LABELS.agent_error).toBe("Agent zlyhal");
+    expect(BLOCK_REASON_LABELS.framework_issue).toBe("NEX Studio potrebuje opravu (Dedo)");
     expect(new Set(Object.values(BLOCK_REASON_LABELS)).size).toBe(reasons.length);
   });
 });

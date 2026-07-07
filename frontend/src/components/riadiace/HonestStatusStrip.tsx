@@ -21,6 +21,12 @@ function statusText(state: PipelineState | null, projectName: string, versionNum
     return "Hotovo — pripravené na nasadenie";
   }
   if (!state || state.status === "done") return "Voľný";
+  // Director observation #6: a framework_issue block is an agent → Dedo escalation — there is NOTHING the
+  // Manažér can do, so the honest status is "wait for Dedo", NOT the generic "Čaká na súhlas" (which implies
+  // the Manažér should act). MUST precede the generic blocked branch below.
+  if (state.status === "blocked" && state.block_reason === "framework_issue") {
+    return "NEX Studio potrebuje opravu (Dedo) — počkaj";
+  }
   if (state.status === "awaiting_manazer" || state.status === "blocked") return "Čaká na súhlas";
   if (state.status === "paused") return "Pozastavené";
   // agent_working — name the project, version, and live phase. version_number is stored without a leading

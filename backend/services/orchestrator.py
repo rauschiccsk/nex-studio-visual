@@ -42,7 +42,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.db.models.backlog import BacklogItem
-from backend.db.models.foundation import UserAgentSettings
+from backend.db.models.foundation import User, UserAgentSettings
 from backend.db.models.orchestrator import OrchestratorSession
 from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
@@ -51,7 +51,7 @@ from backend.db.models.versions import Version
 from backend.schemas.epic import EpicCreate
 from backend.schemas.feat import FeatCreate
 from backend.schemas.task import TaskCreate
-from backend.services import claude_agent, fast_fix, uat_provisioner
+from backend.services import claude_agent, dedo_escalation, fast_fix, uat_provisioner
 from backend.services import epic as epic_service
 from backend.services import feat as feat_service
 from backend.services import system_setting as system_setting_service
@@ -510,6 +510,13 @@ def determine_available_actions(state: PipelineState) -> set[str]:
         # paused build resumes via ``pokracovat`` or the Manažér steers it with ``uprav``).
         return {"pokracovat", "uprav"}
 
+    # Director observation #6: a ``framework_issue`` block is an escalation to Dedo — the fix needs a change
+    # to NEX Studio ITSELF, which the Manažér objectively CANNOT do. Offer NO actions (no Uprav / answer /
+    # decide — nothing the Manažér can act on); Dedo fixes the framework and clears the block. MUST precede
+    # the universal ask+uprav defaults below (those would wrongly offer the Manažér a dead recovery path).
+    if status == "blocked" and state.block_reason == "framework_issue":
+        return set()
+
     # CR-V2-041: a multi-decision CONSULTATION blocks with block_reason="decision_needed" — the Manažér
     # resolves it via Decision Cards (``decide``), one decision at a time, NEVER the raw free-text
     # answer/uprav box (a non-expert must not face a blank box). ``ask`` stays so the Manažér can probe a
@@ -905,8 +912,16 @@ def _status_block_instruction(stage: str) -> str:
         "Polia stavového bloku sú PEVNÉ KÓDOVÉ HODNOTY — použi ich PRESNE, NIKDY ich neprekladaj do "
         "angličtiny: "
         f"`stage` = `{stage}` (presne táto hodnota); "
-        "`kind` je jedna z {question, answer, gate_report, verdict, done, blocked}; "
-        "`awaiting` je `manazer` alebo `none`."
+        "`kind` je jedna z {question, answer, gate_report, verdict, done, blocked, framework_issue}; "
+        "`awaiting` je `manazer` alebo `none`.\n"
+        # §15 escalation to Dedo (Director observation #6) — injected on EVERY turn (incl. --resume), so the
+        # agent always knows the escape hatch even mid-build without a charter reset.
+        "ESKALÁCIA NA DEDA (§15): ak naďabíš na problém, ktorý NEVIEŠ opraviť, lebo si vyžaduje zmenu "
+        "SAMOTNÉHO NEX Studia (nástroja/frameworku — NIE zákazníckeho projektu), NEOPAKUJ pokusy donekonečna "
+        "a NEPÝTAJ Manažéra, nech to opraví — on to nevie. Eskaluj Dedovi (meta-vývojárovi NEX Studia): "
+        "vráť stavový blok s `kind` = `framework_issue` a do poľa `question` napíš JASNÚ správu pre Deda — "
+        "čo zlyhalo (chyba), v akom kontexte, a akú zmenu NEX Studia to podľa teba potrebuje. `awaiting` daj "
+        "`manazer`. Build sa zablokuje a Dedo dostane tvoju správu."
     )
 
 
@@ -1253,6 +1268,82 @@ async def _settle_for_consultation(
     state.block_reason = "decision_needed"
     word = "rozhodnutie" if n == 1 else ("rozhodnutia" if 2 <= n <= 4 else "rozhodnutí")
     state.next_action = f"Manažér: rozhodni 1/{n} ({n} {word}, konzultácia)."
+    db.flush()
+    return state
+
+
+def _owner_chat_id_for_version(db: Session, version_id: uuid.UUID) -> Optional[str]:
+    """Telegram chat_id of the version's project owner, or ``None`` (mirrors
+    ``pipeline_runner._owner_chat_id`` — the recipient of the agent → Dedo escalation ping, Director obs #6)."""
+    return db.execute(
+        select(User.telegram_chat_id)
+        .join(Project, Project.owner_id == User.id)
+        .join(Version, Version.project_id == Project.id)
+        .where(Version.id == version_id)
+    ).scalar_one_or_none()
+
+
+async def _settle_framework_issue(
+    db: Session,
+    state: PipelineState,
+    result: PipelineStatusBlock,
+    *,
+    stage: str,
+    on_message: Optional[MessageCallback] = None,
+) -> PipelineState:
+    """Director observation #6: settle an AGENT-INITIATED ``framework_issue`` escalation to Dedo.
+
+    Called from the agent-output settle path (:func:`run_conversation_turn`, :func:`run_dispatch`) when the
+    parsed block carries ``kind='framework_issue'`` — the AI Agent hit a problem it CANNOT fix because the
+    fix needs a change to NEX Studio ITSELF (§15). The build settles ``blocked``/``block_reason=
+    'framework_issue'`` (``determine_available_actions`` then offers the Manažér NO recovery actions — only
+    Dedo clears it), records a readable ``system→manazer`` notification carrying the Dedo-message +
+    ``payload.framework_issue=True`` (the FE renders it with an amber/red accent), and DELIVERS the message
+    to Dedo two ways (A: the ``.dedo-channel/inbox`` audit file; B: a Telegram ping to the project owner).
+
+    Delivery is best-effort (:func:`dedo_escalation.escalate_to_dedo` never raises): the block is already
+    durable in the DB + the append-only message log, so the escalation is never lost even if the channel
+    mount is absent or Telegram hiccups."""
+    dedo_message = (result.question or result.summary or "").strip()
+    state.status = "blocked"
+    state.block_reason = "framework_issue"
+    state.next_action = "NEX Studio potrebuje opravu (Dedo) — Dedo dostal správu, počkaj."
+
+    slug = _project_slug_for_version(db, state.version_id)
+    version_number = db.execute(select(Version.version_number).where(Version.id == state.version_id)).scalar_one()
+
+    msg = _record_message(
+        db,
+        version_id=state.version_id,
+        stage=stage,
+        author="system",
+        recipient="manazer",
+        kind="notification",
+        content=(
+            "NEX Studio potrebuje opravu (Dedo). AI Agent narazil na problém, ktorý si vyžaduje zmenu "
+            "NEX Studia (framework) — Manažér to nevie opraviť. Dedo dostal správu, počkaj."
+        ),
+        payload={
+            "phase": stage,
+            "framework_issue": True,
+            "dedo_message": dedo_message,
+        },
+    )
+    if on_message is not None:
+        await on_message(msg)
+
+    # Deliver to Dedo (A + B). Context = the build state that produced the escalation (the message itself is
+    # in the frontmatter's "Správa od agenta" section — the block + notification already carry it).
+    context = (
+        f"Projekt: {slug} · Verzia: v{version_number} · Fáza: {stage} · Stav: blocked / block_reason=framework_issue."
+    )
+    await dedo_escalation.escalate_to_dedo(
+        project_slug=slug,
+        version_number=version_number,
+        dedo_message=dedo_message,
+        context=context,
+        owner_chat_id=_owner_chat_id_for_version(db, state.version_id),
+    )
     db.flush()
     return state
 
@@ -4158,6 +4249,12 @@ async def run_dispatch(
         db.flush()
         return state
 
+    if result.kind == "framework_issue":
+        # §15 escalation to Dedo (Director obs #6): the agent hit a problem it CANNOT fix because the fix
+        # needs a change to NEX Studio ITSELF — settle blocked/framework_issue + deliver the message to Dedo
+        # (NO recovery actions for the Manažér — only Dedo clears it). Same helper as the conversation spine.
+        return await _settle_framework_issue(db, state, result, stage=stage, on_message=on_message)
+
     if result.kind in ("question", "blocked"):
         # The agent asked the Manažér something (direct comms — no Coordinator relay, design §2.2). Settle
         # blocked with an agent_question reason so the board offers ``answer``.
@@ -4348,6 +4445,12 @@ async def run_conversation_turn(
         )
         db.flush()
         return state
+
+    if result.kind == "framework_issue":
+        # §15 escalation to Dedo (Director obs #6): the partner hit a problem it CANNOT fix because the fix
+        # needs a change to NEX Studio ITSELF — settle blocked/framework_issue + deliver the message to Dedo
+        # (NO recovery actions for the Manažér — only Dedo clears it).
+        return await _settle_framework_issue(db, state, result, stage=stage, on_message=on_message)
 
     if result.kind in ("question", "blocked"):
         # The partner asked the Manažér something → blocked on an agent_question so the board offers answer.

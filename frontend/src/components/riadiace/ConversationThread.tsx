@@ -30,7 +30,11 @@ function authorLabel(author: PipelineParticipant): string {
 
 // Per-author bubble accent — keeps the AI Agent visually distinct from the Auditor / system notices, reusing
 // the unified token palette (no raw pastels).
-function bubbleClass(author: PipelineParticipant): string {
+function bubbleClass(author: PipelineParticipant, frameworkIssue = false): string {
+  // Director observation #6: an agent → Dedo escalation (framework_issue) is a system message that must
+  // STAND OUT — the build is hard-blocked on a NEX Studio fix. Red accent, regardless of author.
+  if (frameworkIssue)
+    return "bg-[var(--color-state-error-bg)] border-[var(--color-state-error-fg)]/40";
   if (author === "manazer")
     return "bg-[var(--color-accent-primary)]/10 border-[var(--color-accent-primary)]/30";
   if (author === "auditor")
@@ -82,11 +86,21 @@ export function ConversationThread({ messages, activity, working }: Props) {
             const isKontrola = m.payload?.kontrola === true;
             const solidCount = typeof m.payload?.solid_count === "number" ? (m.payload.solid_count as number) : null;
             const shakyCount = typeof m.payload?.shaky_count === "number" ? (m.payload.shaky_count as number) : null;
+            // Director observation #6: the agent → Dedo escalation system message — accent it red and surface
+            // the message that went to Dedo (payload.dedo_message) so the Manažér sees exactly what escalated.
+            const isFrameworkIssue = m.payload?.framework_issue === true;
+            const dedoMessage =
+              typeof m.payload?.dedo_message === "string" ? (m.payload.dedo_message as string) : "";
             return (
               <li key={m.id} className={`flex ${right ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[85%] rounded-lg border px-3 py-2 ${bubbleClass(m.author)}`}>
+                <div className={`max-w-[85%] rounded-lg border px-3 py-2 ${bubbleClass(m.author, isFrameworkIssue)}`}>
                   <div className="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
                     <span className="font-semibold text-[var(--color-text-secondary)]">{authorLabel(m.author)}</span>
+                    {isFrameworkIssue && (
+                      <span className="rounded-full bg-[var(--color-state-error-fg)]/15 px-1.5 py-0.5 font-semibold text-[var(--color-state-error-fg)]">
+                        NEX Studio · Dedo
+                      </span>
+                    )}
                   </div>
                   {isKontrola && (solidCount !== null || shakyCount !== null) && (
                     <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -115,6 +129,17 @@ export function ConversationThread({ messages, activity, working }: Props) {
                       </div>
                       <SpecMarkdown
                         body={question}
+                        className="prose prose-sm dark:prose-invert max-w-none text-sm text-[var(--color-text-primary)]"
+                      />
+                    </div>
+                  )}
+                  {isFrameworkIssue && dedoMessage.trim() && (
+                    <div className="mt-2 rounded-md border-l-2 border-[var(--color-state-error-fg)] bg-[var(--color-state-error-fg)]/5 px-3 py-2">
+                      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-state-error-fg)]">
+                        Správa pre Deda
+                      </div>
+                      <SpecMarkdown
+                        body={dedoMessage}
                         className="prose prose-sm dark:prose-invert max-w-none text-sm text-[var(--color-text-primary)]"
                       />
                     </div>

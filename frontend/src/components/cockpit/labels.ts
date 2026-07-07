@@ -105,6 +105,9 @@ export const BLOCK_REASON_LABELS: Record<BlockReason, string> = {
   agent_error: "Agent zlyhal",
   system_error: "Systémová chyba",
   parse_exhaustion: "Chyba spracovania výstupu",
+  // Director observation #6: an agent → Dedo escalation — the fix needs a change to NEX Studio itself, so
+  // the Manažér has NO recovery action (only Dedo clears it). Reads as a system/blocked red state.
+  framework_issue: "NEX Studio potrebuje opravu (Dedo)",
 };
 
 // Slovak labels for EPIC/FEAT/TASK node statuses in the TaskPlanPanel tree (CR-NS-020 CR-5).

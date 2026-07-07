@@ -3,9 +3,11 @@
 Verifies the v2.0.0 communications model (design §5.3) and the orphan-v1 dead-code excision that lands
 in this CR:
 
-* the ``.dedo-channel`` file-bus + the hub-and-spoke Coordinator relay are GONE from the engine — no
-  ``.dedo-channel`` writer in ``backend/``, and a RAW ``recipient="director"`` / ``author="coordinator"``
-  grep on ``orchestrator.py`` is HONESTLY zero;
+* the v1 5-role ``.dedo-channel`` file-bus + the hub-and-spoke Coordinator relay are GONE from the engine —
+  the channel is RESURRECTED in v2 for ONE Director-approved purpose only (the agent → Dedo
+  ``framework_issue`` escalation, Director observation #6, ``docs/specs/agent-dedo-escalation.md``), so the
+  ONLY backend references are that sanctioned surface; a RAW ``recipient="director"`` /
+  ``author="coordinator"`` grep on ``orchestrator.py`` is HONESTLY zero;
 * the provably-dead v1 Coordinator / autonomy / release-auto functions are excised (no live import breaks);
 * the vestigial ``gate_e_dispatch`` param thread is dropped from the dispatch path;
 * system → Manažér notifications cover the three design §5.3 events (away / escalation / done): an away
@@ -46,16 +48,38 @@ def test_raw_director_coordinator_grep_on_orchestrator_is_zero():
     assert hits == [], f"orchestrator.py still emits v1 hub-and-spoke tokens: {len(hits)} occurrence(s)"
 
 
-def test_dedo_channel_file_bus_is_fully_removed_from_backend():
-    """The ``.dedo-channel`` file-bus is retired (design §5.3): no source file under ``backend/`` references
-    it — no writer, no path literal, no docstring mention that would trip the gate."""
+#: The Director-observation-#6 agent → Dedo escalation is the SANCTIONED v2 owner of ``.dedo-channel``
+#: (``docs/specs/agent-dedo-escalation.md``, Director-approved delivery A): the ``dedo_escalation`` delivery
+#: module writes the audit file into ``<DEDO_CHANNEL_DIR>/inbox/``, ``config/settings`` carries the
+#: env-configurable ``DEDO_CHANNEL_DIR`` path, and ``orchestrator`` wires the call on a ``framework_issue``
+#: settle. NOTHING ELSE in the engine may reference the channel.
+_SANCTIONED_DEDO_CHANNEL_REFS = frozenset(
+    {
+        "services/dedo_escalation.py",
+        "config/settings.py",
+        "services/orchestrator.py",
+    }
+)
+
+
+def test_dedo_channel_only_the_sanctioned_escalation_writer():
+    """The v1 5-role ``.dedo-channel`` FILE-BUS is retired (design §5.3). It is RESURRECTED in v2 for ONE
+    Director-approved purpose — the agent → Dedo ``framework_issue`` escalation (Director observation #6).
+    This guard ensures the ONLY backend references are that sanctioned surface
+    (:data:`_SANCTIONED_DEDO_CHANNEL_REFS`); a NEW hub-and-spoke file-bus writer creeping back in anywhere
+    else still trips it. (The retired v1 relay symbols are pinned absent by ``test_dead_v1_symbol_is_excised``;
+    test files are excluded — they legitimately exercise the escalation.)"""
     offenders = []
     for path in _BACKEND.rglob("*.py"):
-        if "__pycache__" in path.parts:
+        if "__pycache__" in path.parts or "tests" in path.parts:
             continue
-        if "dedo-channel" in path.read_text(encoding="utf-8") or "dedo_channel" in path.read_text(encoding="utf-8"):
-            offenders.append(str(path.relative_to(_BACKEND)))
-    assert offenders == [], f".dedo-channel still referenced in backend: {offenders}"
+        rel = str(path.relative_to(_BACKEND))
+        if rel in _SANCTIONED_DEDO_CHANNEL_REFS:
+            continue
+        text = path.read_text(encoding="utf-8")
+        if "dedo-channel" in text or "dedo_channel" in text:
+            offenders.append(rel)
+    assert offenders == [], f".dedo-channel referenced outside the sanctioned escalation surface: {offenders}"
 
 
 @pytest.mark.parametrize(

@@ -71,7 +71,12 @@ STAGES = frozenset(
 #: Kinds an *agent* may emit in a status block (subset of pipeline_message.kind;
 #: directive/approval/return/notification are orchestrator/Manažér-authored). ``verdict`` is
 #: the Auditor's Verifikácia/upfront-review verdict (CR-V2-006 repurposes the findings shape).
-BLOCK_KINDS = frozenset({"question", "answer", "gate_report", "verdict", "done", "blocked", "consultation"})
+#: ``framework_issue`` (Director observation #6) is the AI Agent's AGENT-INITIATED escalation to Dedo when a
+#: fix requires a change to NEX Studio ITSELF (§15) — the Dedo message rides in ``question`` (like ``blocked``/
+#: ``question``); the settle path routes it to ``blocked``/``block_reason='framework_issue'`` + delivery.
+BLOCK_KINDS = frozenset(
+    {"question", "answer", "gate_report", "verdict", "done", "blocked", "consultation", "framework_issue"}
+)
 #: ``awaiting`` targets (CR-V2-004: Director → Manažér). The agent either hands back to the
 #: operator (``manazer``) or signals it keeps the turn (``none``).
 _AWAITING = frozenset({"manazer", "none"})
@@ -438,6 +443,12 @@ def _validate_block(data: dict) -> ParseResult:
         return ParseFailure(f"unknown awaiting {block.awaiting!r}")
     if block.kind in _QUESTION_KINDS and not (block.question and block.question.strip()):
         return ParseFailure(f"kind={block.kind!r} requires a non-empty 'question'")
+    # Director observation #6: a ``framework_issue`` escalation MUST carry the message for Dedo (the error,
+    # the context, the NEX Studio change needed) in ``question`` — the settle path captures it for delivery
+    # (the Dedo escalation channel inbox file + the Telegram ping). Kept OUT of ``_QUESTION_KINDS`` so the
+    # orchestrator msg_kind mapping never downgrades a framework_issue to a plain "question" message.
+    if block.kind == "framework_issue" and not (block.question and block.question.strip()):
+        return ParseFailure("kind='framework_issue' requires a non-empty 'question' (the message for Dedo)")
     # Návrh close (CR-V2-011 — the task plan folds into the Návrh phase): the AI Agent's Návrh
     # gate_report must carry the EPIC→FEAT→TASK decomposition. A question/blocked turn is still
     # allowed (re-plan dialogue); only the gate_report — the turn that closes the phase — requires

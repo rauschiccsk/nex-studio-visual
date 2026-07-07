@@ -12,22 +12,32 @@ import { useState, type FormEvent, type KeyboardEvent } from "react";
 import { Loader2, Send } from "lucide-react";
 
 const ENGINE_BUSY_HINT = "Engine práve pracuje — správa sa pošle po dokončení ťahu.";
+// Director observation #6: a framework_issue block is an agent → Dedo escalation. The Manažér cannot fix a
+// NEX Studio bug via Uprav — the composer is locked with this banner until Dedo clears the block.
+const FRAMEWORK_ISSUE_BANNER =
+  "Toto musí opraviť Dedo — už dostal správu. Manažér to nevie cez Uprav. Počkaj na Deda.";
 
 interface Props {
   /** Relay the text through the engine; resolves to whether it was ENQUEUED behind an in-flight turn. */
   onRelay: (text: string) => Promise<{ deferred: boolean }>;
   disabled?: boolean;
+  /** Director obs #6: the build is blocked on a framework_issue (escalated to Dedo) — lock the composer +
+   *  show the "wait for Dedo" banner; the Manažér has no move here (only Dedo clears it). */
+  frameworkBlocked?: boolean;
 }
 
-export function ConversationComposer({ onRelay, disabled }: Props) {
+export function ConversationComposer({ onRelay, disabled, frameworkBlocked }: Props) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // A framework_issue escalation hard-disables the whole composer (Manažér has no recovery move).
+  const locked = disabled || frameworkBlocked;
+
   async function submit() {
     const trimmed = text.trim();
-    if (!trimmed || sending || disabled) return;
+    if (!trimmed || sending || locked) return;
     setSending(true);
     setError(null);
     setHint(null);
@@ -61,6 +71,14 @@ export function ConversationComposer({ onRelay, disabled }: Props) {
       onSubmit={onFormSubmit}
       className="flex-shrink-0 border-t border-[var(--color-border-default)] bg-[var(--color-surface)] p-3"
     >
+      {frameworkBlocked && (
+        <div
+          role="alert"
+          className="mb-2 rounded border border-[var(--color-state-error-fg)]/30 bg-[var(--color-state-error-bg)] px-2 py-1.5 text-[11px] font-medium text-[var(--color-state-error-fg)]"
+        >
+          {FRAMEWORK_ISSUE_BANNER}
+        </div>
+      )}
       {(hint || error) && (
         <div
           className={`mb-2 rounded px-2 py-1 text-[11px] ${
@@ -78,14 +96,18 @@ export function ConversationComposer({ onRelay, disabled }: Props) {
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
-          disabled={disabled || sending}
+          disabled={locked || sending}
           rows={2}
-          placeholder="Napíš AI Agentovi… (Enter odošle, Shift+Enter nový riadok)"
+          placeholder={
+            frameworkBlocked
+              ? "Zablokované — čaká sa na opravu NEX Studia (Dedo)."
+              : "Napíš AI Agentovi… (Enter odošle, Shift+Enter nový riadok)"
+          }
           className="min-h-[2.5rem] flex-1 resize-none rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent-primary)] focus:outline-none disabled:opacity-50"
         />
         <button
           type="submit"
-          disabled={disabled || sending || !text.trim()}
+          disabled={locked || sending || !text.trim()}
           className="flex h-9 items-center gap-1.5 rounded-lg bg-primary-600 px-3 text-xs font-medium text-white hover:bg-primary-500 disabled:opacity-40"
         >
           {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
