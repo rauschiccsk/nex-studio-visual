@@ -612,3 +612,229 @@ describe("PlanUlohRail — Hotovo trigger (STEP 6)", () => {
     expect(screen.queryByRole("button", { name: /Označiť ako hotové/ })).not.toBeInTheDocument();
   });
 });
+
+// Director observation #3 — REAL subtree collapse (the chevron hides the whole subtree, not just L2 detail) plus
+// smart auto-collapse: done work folds away by default, the live active task force-shows, a manual toggle wins.
+describe("PlanUlohRail — subtree collapse + smart auto-collapse (Director #3)", () => {
+  beforeEach(() => {
+    vi.mocked(getTaskPlan).mockReset();
+    vi.mocked(postPipelineActionApi).mockReset();
+    window.localStorage.clear();
+  });
+
+  // A plan with NO in-progress task and NO done EPIC/FEAT → nothing auto-collapses / force-expands, so the manual
+  // chevron is the ONLY thing that moves the subtree (isolates the collapse mechanic from the auto behaviours).
+  const STABLE_PLAN: TaskPlanResponse = {
+    plan: [
+      {
+        id: "e1",
+        number: 1,
+        title: "Epik A",
+        status: "in_progress",
+        plain_description: "Epik po ľudsky.",
+        feats: [
+          {
+            id: "f1",
+            number: 1,
+            title: "Feat A",
+            status: "in_progress",
+            plain_description: "Feat po ľudsky.",
+            description: "Feat technický.",
+            tasks: [mkTask("t1", 1, "todo"), mkTask("t2", 2, "todo")],
+          },
+        ],
+      },
+    ],
+    epic_count: 1,
+    feat_count: 1,
+    task_count: 2,
+  };
+
+  // A one-feat plan whose FEAT status is parameterised — lets a test flip it in_progress → done across a refetch.
+  // Its leaf tasks are `done` throughout: task-done never collapses (only EPIC/FEAT done does), so they stay a
+  // clean visibility probe for the feat's collapse.
+  function doneFeatPlan(featStatus: "in_progress" | "done"): TaskPlanResponse {
+    return {
+      plan: [
+        {
+          id: "e1",
+          number: 1,
+          title: "Epik A",
+          status: "in_progress",
+          plain_description: "Epik po ľudsky.",
+          feats: [
+            {
+              id: "f1",
+              number: 1,
+              title: "Feat A",
+              status: featStatus,
+              plain_description: "Feat po ľudsky.",
+              description: "Feat technický.",
+              tasks: [mkTask("t1", 1, "done"), mkTask("t2", 2, "done")],
+            },
+          ],
+        },
+      ],
+      epic_count: 1,
+      feat_count: 1,
+      task_count: 2,
+    };
+  }
+
+  it("collapsing a FEAT hides its tasks + their descriptions — only the FEAT's own header line remains", async () => {
+    vi.mocked(getTaskPlan).mockResolvedValue(STABLE_PLAN);
+    render(<PlanUlohRail versionId="v1" messages={[]} board={mkBoard()} onBoard={() => {}} />);
+
+    // Subtree visible before collapse.
+    expect(await screen.findByText(/Úloha 1/)).toBeInTheDocument();
+    expect(screen.getByText(/Úloha 2/)).toBeInTheDocument();
+    expect(screen.getByText(/Úloha t1 po ľudsky/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("planrail-chevron-f1"));
+
+    // The FEAT header row stays; every task + description below it is gone, incl. the feat's OWN L1 plain line.
+    expect(screen.getByText(/Feat A/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(/Úloha 1/)).not.toBeInTheDocument());
+    expect(screen.queryByText(/Úloha 2/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Úloha t1 po ľudsky/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Feat po ľudsky/)).not.toBeInTheDocument();
+  });
+
+  it("collapsing an EPIC hides all its feats + tasks — only the EPIC's own header line remains", async () => {
+    vi.mocked(getTaskPlan).mockResolvedValue(STABLE_PLAN);
+    render(<PlanUlohRail versionId="v1" messages={[]} board={mkBoard()} onBoard={() => {}} />);
+
+    expect(await screen.findByText(/Feat A/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("planrail-chevron-e1"));
+
+    expect(screen.getByText(/Epik A/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(/Feat A/)).not.toBeInTheDocument());
+    expect(screen.queryByText(/Úloha 1/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Epik po ľudsky/)).not.toBeInTheDocument();
+  });
+
+  it("persists the collapsed set to nex_planrail_collapsed_<v> and rehydrates on remount", async () => {
+    vi.mocked(getTaskPlan).mockResolvedValue(STABLE_PLAN);
+    const { unmount } = render(<PlanUlohRail versionId="v1" messages={[]} board={mkBoard()} onBoard={() => {}} />);
+    await screen.findByText(/Feat A/);
+
+    fireEvent.click(screen.getByTestId("planrail-chevron-f1"));
+
+    // Persisted under the DISTINCT collapsed key (not the expanded one).
+    await waitFor(() =>
+      expect(window.localStorage.getItem("nex_planrail_collapsed_v1")).toContain("f1"),
+    );
+    expect(window.localStorage.getItem("nex_planrail_expanded_v1") ?? "").not.toContain("f1");
+
+    unmount();
+
+    // Fresh mount reads the collapsed set back → f1 starts collapsed (its tasks stay hidden).
+    render(<PlanUlohRail versionId="v1" messages={[]} board={mkBoard()} onBoard={() => {}} />);
+    await screen.findByText(/Feat A/);
+    await waitFor(() => expect(screen.queryByText(/Úloha 1/)).not.toBeInTheDocument());
+  });
+
+  it("a FEAT already 'done' on first load starts collapsed (done work out of the way by default)", async () => {
+    vi.mocked(getTaskPlan).mockResolvedValue(doneFeatPlan("done"));
+    render(<PlanUlohRail versionId="v1" messages={[]} board={mkBoard()} onBoard={() => {}} />);
+
+    // Header renders, subtree does not — and the collapse is persisted.
+    expect(await screen.findByText(/Feat A/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(/Úloha 1/)).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(window.localStorage.getItem("nex_planrail_collapsed_v1")).toContain("f1"),
+    );
+  });
+
+  it("auto-collapses a FEAT the MOMENT its status transitions to 'done' (fire-once on the transition)", async () => {
+    vi.mocked(getTaskPlan).mockResolvedValue(doneFeatPlan("in_progress"));
+    const { rerender } = render(
+      <PlanUlohRail versionId="v1" messages={[]} board={mkBoard()} onBoard={() => {}} />,
+    );
+    // Not done yet → subtree visible.
+    expect(await screen.findByText(/Úloha 1/)).toBeInTheDocument();
+
+    // Feat flips to done; the message-growth refetch delivers the new status.
+    vi.mocked(getTaskPlan).mockResolvedValue(doneFeatPlan("done"));
+    rerender(<PlanUlohRail versionId="v1" messages={[mkMsg(1)]} board={mkBoard()} onBoard={() => {}} />);
+
+    // The `* → done` transition auto-collapses it → tasks gone, header remains.
+    await waitFor(() => expect(screen.queryByText(/Úloha 1/)).not.toBeInTheDocument());
+    expect(screen.getByText(/Feat A/)).toBeInTheDocument();
+  });
+
+  it("force-expands the ancestors of an in-progress task even when collapsed — without mutating the saved set", async () => {
+    // Saved state: e1 + f1 collapsed.
+    window.localStorage.setItem("nex_planrail_collapsed_v1", JSON.stringify(["e1", "f1"]));
+    const activePlan: TaskPlanResponse = {
+      plan: [
+        {
+          id: "e1",
+          number: 1,
+          title: "Epik A",
+          status: "in_progress",
+          plain_description: "Epik po ľudsky.",
+          feats: [
+            {
+              id: "f1",
+              number: 1,
+              title: "Feat A",
+              status: "in_progress",
+              plain_description: "Feat po ľudsky.",
+              description: "Feat technický.",
+              tasks: [mkTask("t1", 1, "in_progress"), mkTask("t2", 2, "todo")],
+            },
+          ],
+        },
+      ],
+      epic_count: 1,
+      feat_count: 1,
+      task_count: 2,
+    };
+    vi.mocked(getTaskPlan).mockResolvedValue(activePlan);
+    render(<PlanUlohRail versionId="v1" messages={[]} board={mkBoard()} onBoard={() => {}} />);
+
+    // The active (in_progress) task is visible despite e1 + f1 being in the saved collapsed set.
+    expect(await screen.findByText(/Úloha 1/)).toBeInTheDocument();
+    // The override is render-time only — the saved set is byte-for-byte unchanged.
+    expect(window.localStorage.getItem("nex_planrail_collapsed_v1")).toBe(JSON.stringify(["e1", "f1"]));
+  });
+
+  it("keeps a done node the user manually re-expanded open — a manual toggle wins over auto-collapse", async () => {
+    vi.mocked(getTaskPlan).mockResolvedValue(doneFeatPlan("done"));
+    const { rerender } = render(
+      <PlanUlohRail versionId="v1" messages={[]} board={mkBoard()} onBoard={() => {}} />,
+    );
+    // Done feat starts collapsed.
+    await screen.findByText(/Feat A/);
+    await waitFor(() => expect(screen.queryByText(/Úloha 1/)).not.toBeInTheDocument());
+
+    // Manually expand it via the chevron.
+    fireEvent.click(screen.getByTestId("planrail-chevron-f1"));
+    expect(await screen.findByText(/Úloha 1/)).toBeInTheDocument();
+
+    // A refetch that STILL reports the feat as done must not re-collapse it (transition already fired once).
+    rerender(<PlanUlohRail versionId="v1" messages={[mkMsg(1)]} board={mkBoard()} onBoard={() => {}} />);
+    await waitFor(() => expect(getTaskPlan).toHaveBeenCalledTimes(2));
+    expect(screen.getByText(/Úloha 1/)).toBeInTheDocument();
+  });
+
+  it("keeps the chevron and the title as SEPARATE interactions — the chevron collapses, the title reveals L2", async () => {
+    vi.mocked(getTaskPlan).mockResolvedValue(STABLE_PLAN);
+    render(<PlanUlohRail versionId="v1" messages={[]} board={mkBoard()} onBoard={() => {}} />);
+    await screen.findByText(/Feat A/);
+
+    // Clicking the FEAT title reveals its L2 technical detail — and does NOT collapse the subtree.
+    fireEvent.click(screen.getByRole("button", { name: /Feat A/ }));
+    expect(await screen.findByText(/Feat technický/)).toBeInTheDocument();
+    expect(screen.getByText(/Úloha 1/)).toBeInTheDocument(); // subtree still shown
+    expect(window.localStorage.getItem("nex_planrail_expanded_v1")).toContain("f1");
+    expect(window.localStorage.getItem("nex_planrail_collapsed_v1") ?? "").not.toContain("f1");
+
+    // Clicking the chevron collapses the subtree — the technical reveal is irrelevant once the node is folded.
+    fireEvent.click(screen.getByTestId("planrail-chevron-f1"));
+    await waitFor(() => expect(screen.queryByText(/Úloha 1/)).not.toBeInTheDocument());
+    expect(screen.queryByText(/Feat technický/)).not.toBeInTheDocument();
+  });
+});

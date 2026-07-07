@@ -31,7 +31,7 @@
 // (the message-growth refetch advances it as tasks finish). Shown only when the plan has tasks. All additive,
 // no new endpoint/WS/backend change.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 
 import { getTaskPlan } from "../../services/api/versions";
@@ -84,6 +84,34 @@ function writeExpanded(versionId: string, expanded: Set<string>): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(expandedStorageKey(versionId), JSON.stringify([...expanded]));
+  } catch {
+    // Quota / disabled storage — the rail still works in-session, just doesn't persist.
+  }
+}
+
+// localStorage key for the COLLAPSED-node set (EPIC/FEAT ids whose CHILDREN are hidden — a real subtree
+// collapse), scoped per version. Intentionally DISTINCT from `nex_planrail_expanded_*` above: the two sets
+// carry different semantics (this hides the subtree; that reveals L2 technical detail) and must never collide.
+function collapsedStorageKey(versionId: string): string {
+  return `nex_planrail_collapsed_${versionId}`;
+}
+
+function readCollapsed(versionId: string): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = window.localStorage.getItem(collapsedStorageKey(versionId));
+    if (!raw) return new Set();
+    const ids = JSON.parse(raw) as unknown;
+    return Array.isArray(ids) ? new Set(ids.filter((id): id is string => typeof id === "string")) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function writeCollapsed(versionId: string, collapsed: Set<string>): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(collapsedStorageKey(versionId), JSON.stringify([...collapsed]));
   } catch {
     // Quota / disabled storage — the rail still works in-session, just doesn't persist.
   }
@@ -145,9 +173,15 @@ function CurrentBuildBanner({ number, title, working }: { number: number; title:
   );
 }
 
-// One node: L0 header (a button ONLY when it has technical detail to reveal) + L1 plain + L2 technical
-// (on expand) + nested children. `bold` renders the epic title heavier; `taskType` is the task's tiny tag.
+// One node with TWO independent interactions (Director-approved separation, Director observation #3):
+//   • the left CHEVRON (only on nodes that HAVE children) toggles a REAL subtree collapse — a collapsed node
+//     renders ONLY its L0 header row (number, title, status dot, chevron): no L1 plain line, no L2 technical
+//     detail, no children. ChevronDown = expanded, ChevronRight = collapsed.
+//   • the node TITLE (a button only when there IS L2 technical detail) toggles that L2 reveal — moved OFF the
+//     chevron so the two never conflict. Leaf tasks (no children) carry only this title/technical reveal.
+// `bold` renders the epic title heavier; `taskType` is the task's tiny tag.
 function PlanNode(props: {
+  nodeId: string;
   number: number;
   title: string;
   status: string;
@@ -156,53 +190,75 @@ function PlanNode(props: {
   taskType?: string;
   levelColor: string;
   bold?: boolean;
+  hasChildren: boolean;
+  isCollapsed: boolean;
+  onToggleCollapse: () => void;
   isExpanded: boolean;
-  onToggle: () => void;
+  onToggleTechnical: () => void;
   className?: string;
   children?: React.ReactNode;
 }) {
-  const { number, title, status, plain, technical, taskType, levelColor, bold, isExpanded, onToggle, className, children } =
-    props;
+  const {
+    nodeId,
+    number,
+    title,
+    status,
+    plain,
+    technical,
+    taskType,
+    levelColor,
+    bold,
+    hasChildren,
+    isCollapsed,
+    onToggleCollapse,
+    isExpanded,
+    onToggleTechnical,
+    className,
+    children,
+  } = props;
   const hasTechnical = !!(technical ?? "").trim();
-  const header = (
-    <>
-      <span className={`flex min-w-0 items-center gap-1.5 ${levelColor}`}>
-        {hasTechnical ? (
-          isExpanded ? (
-            <ChevronDown className="h-3 w-3 flex-shrink-0" />
-          ) : (
-            <ChevronRight className="h-3 w-3 flex-shrink-0" />
-          )
-        ) : (
-          <span className="inline-block h-3 w-3 flex-shrink-0" />
-        )}
-        <span className={`truncate ${bold ? "font-medium" : ""}`}>
-          {number}. {title}
-        </span>
-        {taskType && (
-          <span className="flex-shrink-0 text-[9px] uppercase text-[var(--color-text-muted)]">{taskType}</span>
-        )}
-      </span>
-      <StatusDot status={status} />
-    </>
-  );
   return (
     <div className={className}>
-      {hasTechnical ? (
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-expanded={isExpanded}
-          className="flex w-full items-center justify-between gap-2 rounded px-1 py-0.5 text-left hover:bg-[var(--color-surface-hover)]"
-        >
-          {header}
-        </button>
-      ) : (
-        <div className="flex items-center justify-between gap-2 px-1 py-0.5">{header}</div>
-      )}
-      <PlainLine text={plain} />
-      {hasTechnical && isExpanded && <TechnicalDetail text={technical ?? ""} />}
-      {children}
+      <div className="flex items-center justify-between gap-2 rounded px-1 py-0.5 hover:bg-[var(--color-surface-hover)]">
+        <span className={`flex min-w-0 items-center gap-1.5 ${levelColor}`}>
+          {hasChildren ? (
+            <button
+              type="button"
+              onClick={onToggleCollapse}
+              aria-expanded={!isCollapsed}
+              aria-label={isCollapsed ? "Rozbaliť podúlohy" : "Zbaliť podúlohy"}
+              data-testid={`planrail-chevron-${nodeId}`}
+              className="flex-shrink-0 rounded p-0.5 hover:bg-[var(--color-surface-active)]"
+            >
+              {isCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            </button>
+          ) : (
+            <span className="inline-block h-3 w-3 flex-shrink-0" />
+          )}
+          {hasTechnical ? (
+            <button
+              type="button"
+              onClick={onToggleTechnical}
+              aria-expanded={isExpanded}
+              className={`min-w-0 truncate text-left hover:underline ${bold ? "font-medium" : ""}`}
+            >
+              {number}. {title}
+            </button>
+          ) : (
+            <span className={`truncate ${bold ? "font-medium" : ""}`}>
+              {number}. {title}
+            </span>
+          )}
+          {taskType && (
+            <span className="flex-shrink-0 text-[9px] uppercase text-[var(--color-text-muted)]">{taskType}</span>
+          )}
+        </span>
+        <StatusDot status={status} />
+      </div>
+      {/* A collapsed node is reduced to its single header line — its own L1/L2 and its whole subtree vanish. */}
+      {!isCollapsed && <PlainLine text={plain} />}
+      {!isCollapsed && hasTechnical && isExpanded && <TechnicalDetail text={technical ?? ""} />}
+      {!isCollapsed && children}
     </div>
   );
 }
@@ -213,11 +269,29 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
   // The set of nodes whose L2 technical detail is expanded, hydrated from localStorage (per version, per
   // browser) so the choice survives navigation + reload. Default empty ⇒ technical hidden (not the default view).
   const [expanded, setExpanded] = useState<Set<string>>(() => (versionId ? readExpanded(versionId) : new Set()));
+  // The set of EPIC/FEAT ids whose CHILDREN are collapsed (a real subtree hide), hydrated per version. Default
+  // empty ⇒ the whole plan is visible. Separate from `expanded` above (different semantics + localStorage key).
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => (versionId ? readCollapsed(versionId) : new Set()));
   const [triggering, setTriggering] = useState(false);
   const [triggerError, setTriggerError] = useState<string | null>(null);
 
+  // Last-seen status per node id, to detect `* → done` transitions for auto-collapse (req 4) WITHOUT re-collapsing
+  // on every render (else the Manažér could never keep a done node open). Reset per version. versionIdRef lets the
+  // transition effect persist under the right key while keying only on `plan` (so a version switch — which nulls no
+  // plan — never processes a stale tree under the new version's key before its own refetch lands).
+  const seenStatusRef = useRef<Map<string, string>>(new Map());
+  const versionIdRef = useRef<string | null>(versionId);
+
   useEffect(() => {
-    if (versionId) setExpanded(readExpanded(versionId));
+    if (versionId) {
+      setExpanded(readExpanded(versionId));
+      setCollapsed(readCollapsed(versionId));
+    } else {
+      setExpanded(new Set());
+      setCollapsed(new Set());
+    }
+    seenStatusRef.current = new Map();
+    versionIdRef.current = versionId;
   }, [versionId]);
 
   // Tree-freshness: refetch on mount, on version change, and whenever the live message stream grows, so node
@@ -243,7 +317,42 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
     };
   }, [versionId, messages.length]);
 
-  const toggle = useCallback(
+  // Auto-collapse on done (req 4): keyed on the fetched plan, diff each EPIC/FEAT status against its last-seen
+  // value; on any `* → done` transition add that node id to `collapsed` (+ persist). A node ALREADY done on first
+  // load counts too (prev is undefined ≠ 'done') → done work starts out of the way by default (Director). Because
+  // the ref records the done status, a subsequent manual EXPAND is never re-collapsed (manual wins, req 5). Uses
+  // versionIdRef so it keys only on `plan` — a stale tree from the previous version can't be processed here.
+  useEffect(() => {
+    const vId = versionIdRef.current;
+    if (!plan || !vId) return;
+    const seen = seenStatusRef.current;
+    const toCollapse: string[] = [];
+    for (const epic of plan.plan) {
+      if (epic.status === "done" && seen.get(epic.id) !== "done") toCollapse.push(epic.id);
+      seen.set(epic.id, epic.status);
+      for (const feat of epic.feats) {
+        if (feat.status === "done" && seen.get(feat.id) !== "done") toCollapse.push(feat.id);
+        seen.set(feat.id, feat.status);
+      }
+    }
+    if (toCollapse.length === 0) return;
+    setCollapsed((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const id of toCollapse) {
+        if (!next.has(id)) {
+          next.add(id);
+          changed = true;
+        }
+      }
+      if (!changed) return prev;
+      writeCollapsed(vId, next);
+      return next;
+    });
+  }, [plan]);
+
+  // Reveal / hide a node's L2 technical detail (title click). Persisted under the `expanded` key.
+  const toggleTechnical = useCallback(
     (id: string) => {
       if (!versionId) return;
       setExpanded((prev) => {
@@ -251,6 +360,22 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
         if (next.has(id)) next.delete(id);
         else next.add(id);
         writeExpanded(versionId, next);
+        return next;
+      });
+    },
+    [versionId],
+  );
+
+  // Collapse / expand a node's CHILDREN (chevron click). A manual toggle always wins and is remembered (req 5),
+  // persisted under the `collapsed` key.
+  const toggleCollapse = useCallback(
+    (id: string) => {
+      if (!versionId) return;
+      setCollapsed((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        writeCollapsed(versionId, next);
         return next;
       });
     },
@@ -307,6 +432,22 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
   // Show only when the plan HAS tasks (and no fetch error): hides the no-plan / loading / error states AND the
   // degenerate "epics but zero tasks" case — no confusing "0/0 úloh". totalCount>0 ⇒ a populated tree.
   const showProgress = !error && totalCount > 0;
+
+  // Auto-expand active during build (req 3): the ancestor EPIC/FEAT ids of any IN-PROGRESS task. The active-task
+  // signal is the plan's own per-node status (`in_progress`), not board.current_task — current_task carries only
+  // {number,title} (no id, number not unique across levels), so the tree's status is the robust, id-bearing source.
+  const activeAncestors = new Set<string>();
+  for (const epic of plan?.plan ?? []) {
+    for (const feat of epic.feats) {
+      if (feat.tasks.some((t) => t.status === "in_progress")) {
+        activeAncestors.add(epic.id);
+        activeAncestors.add(feat.id);
+      }
+    }
+  }
+  // Render-time view of the collapse set: an active-task ancestor is force-EXPANDED so the live task stays visible,
+  // WITHOUT mutating the saved `collapsed` (the Manažér's choice is remembered; the override lifts when work moves on).
+  const effectiveCollapsed = new Set([...collapsed].filter((id) => !activeAncestors.has(id)));
 
   return (
     <aside
@@ -466,9 +607,11 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
           </p>
         ) : (
           plan.plan.map((epic: TaskPlanEpicNode) => (
-            // Epic has no technical description column — plain_description is its ONLY prose (no L2 toggle).
+            // Epic has no technical description column — plain_description is its ONLY prose (no L2 toggle). Its
+            // chevron collapses/expands the feats beneath it.
             <PlanNode
               key={epic.id}
+              nodeId={epic.id}
               className="mb-2"
               number={epic.number}
               title={epic.title}
@@ -476,12 +619,16 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
               plain={epic.plain_description}
               levelColor={EPIC_LEVEL_COLOR}
               bold
+              hasChildren={epic.feats.length > 0}
+              isCollapsed={effectiveCollapsed.has(epic.id)}
+              onToggleCollapse={() => toggleCollapse(epic.id)}
               isExpanded={expanded.has(epic.id)}
-              onToggle={() => toggle(epic.id)}
+              onToggleTechnical={() => toggleTechnical(epic.id)}
             >
               {epic.feats.map((feat: TaskPlanFeatNode) => (
                 <PlanNode
                   key={feat.id}
+                  nodeId={feat.id}
                   className="ml-3 mt-1.5"
                   number={feat.number}
                   title={feat.title}
@@ -489,12 +636,17 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
                   plain={feat.plain_description}
                   technical={feat.description}
                   levelColor={FEAT_LEVEL_COLOR}
+                  hasChildren={feat.tasks.length > 0}
+                  isCollapsed={effectiveCollapsed.has(feat.id)}
+                  onToggleCollapse={() => toggleCollapse(feat.id)}
                   isExpanded={expanded.has(feat.id)}
-                  onToggle={() => toggle(feat.id)}
+                  onToggleTechnical={() => toggleTechnical(feat.id)}
                 >
                   {feat.tasks.map((task: TaskPlanTaskNode) => (
+                    // Leaf task — no children (no chevron); keeps only the L2 technical-detail reveal on its title.
                     <PlanNode
                       key={task.id}
+                      nodeId={task.id}
                       className="ml-4 mt-1"
                       number={task.number}
                       title={task.title}
@@ -503,8 +655,11 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
                       technical={task.description}
                       taskType={task.task_type}
                       levelColor={TASK_LEVEL_COLOR}
+                      hasChildren={false}
+                      isCollapsed={false}
+                      onToggleCollapse={() => {}}
                       isExpanded={expanded.has(task.id)}
-                      onToggle={() => toggle(task.id)}
+                      onToggleTechnical={() => toggleTechnical(task.id)}
                     />
                   ))}
                 </PlanNode>
