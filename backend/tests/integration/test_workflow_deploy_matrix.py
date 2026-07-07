@@ -28,6 +28,7 @@ import uuid as _uuid
 
 import bcrypt
 import pytest
+from sqlalchemy import select
 
 from backend.db.models.customers import Customer
 from backend.db.models.foundation import User
@@ -61,6 +62,33 @@ def fake_deploy_runner(monkeypatch):
                 "force_fresh": force_fresh,
             }
         )
+        return True, "OK (faked)", f"https://uat-{uat_slug}.isnex.eu"
+
+    monkeypatch.setattr(deploy_service, "_default_deploy_runner", _runner)
+    return calls
+
+
+@pytest.fixture()
+def prod_failing_deploy_runner(monkeypatch):
+    """A runner that SUCCEEDS for UAT but FAILS for PROD (the ``-prod`` instance slug).
+
+    Lets a test drive the UAT deploy + acceptance normally, then exercise a FAILED first-PROD
+    deploy — so the §3.6 graduation (gated on ``first_prod and ok``) is forced to leave the version
+    un-promoted. ``git``/``docker`` are never spawned. The ``calls`` list records each invocation.
+    """
+    calls: list[dict] = []
+
+    async def _runner(*, project_slug, uat_slug, version_number, force_fresh):
+        calls.append(
+            {
+                "project_slug": project_slug,
+                "uat_slug": uat_slug,
+                "version_number": version_number,
+                "force_fresh": force_fresh,
+            }
+        )
+        if uat_slug.endswith("-prod"):
+            return False, "provision failed (faked)", None
         return True, "OK (faked)", f"https://uat-{uat_slug}.isnex.eu"
 
     monkeypatch.setattr(deploy_service, "_default_deploy_runner", _runner)
@@ -197,7 +225,8 @@ class TestProdAcceptanceGate:
         """⚠ SAFETY INVARIANT: no PROD deploy without a recorded UAT acceptance."""
         user = _current_user(db_session)
         project = _seed_project(db_session, creator=user)
-        _seed_verified_version(db_session, project, "v0.1.0")
+        version = _seed_verified_version(db_session, project, "v0.1.0")
+        version_id = version.id  # the row that will be graduated IN PLACE (§3.6)
         customer = _seed_customer(db_session, project, "andros")
 
         # 1) Deploy to UAT — allowed (no gate on UAT).
@@ -244,6 +273,27 @@ class TestProdAcceptanceGate:
         assert result["ok"] is True
         assert result["bumped_to"] == "v1.0.0"  # first PROD deploy bump (§3.6)
 
+        # 5b) §3.6 graduation is IN PLACE: the BUILT version (v0.1.0) is promoted to v1.0.0 on the
+        # SAME row (its history preserved) + marked released — NOT a new empty v1.0.0 shell beside it.
+        db_session.expire_all()  # drop identity-map snapshots so we read the committed state
+        rows = db_session.execute(select(Version).where(Version.project_id == project.id)).scalars().all()
+        assert len(rows) == 1, "graduation must promote in place, not create a second version row"
+        graduated = rows[0]
+        assert graduated.id == version_id  # SAME row — not a new shell
+        assert graduated.version_number == "v1.0.0"
+        assert graduated.status == "released"  # a first-prod graduation IS the release
+        assert graduated.release_date is not None
+        # History preserved: the pipeline_message seeded on the pre-graduation version is still
+        # reachable under the SAME version.id after the in-place rename.
+        from backend.db.models.pipeline import PipelineMessage
+
+        child = (
+            db_session.execute(select(PipelineMessage).where(PipelineMessage.version_id == version_id))
+            .scalars()
+            .first()
+        )
+        assert child is not None
+
     def test_accept_logs_who_when_version_customer(self, client, db_session, fake_deploy_runner):
         """Akceptovať records who/when/version/customer (§3.5 audit log)."""
         user = _current_user(db_session)
@@ -280,6 +330,165 @@ class TestProdAcceptanceGate:
             json={"version_number": "v0.1.0"},
         )
         assert accept.status_code == 409, accept.text
+
+    def test_second_prod_deploy_of_different_version_does_not_regraduate(self, client, db_session, fake_deploy_runner):
+        """Only the FIRST prod deploy graduates (§3.6 ``project_had_prod_deploy`` guard).
+
+        After v0.1.0 graduates IN PLACE to v1.0.0, a later prod deploy of a *different*
+        version must NOT re-graduate: it deploys under its own number, does not bump, and
+        leaves its own row untouched (so the graduated v1.0.0 and the second version coexist).
+        """
+        user = _current_user(db_session)
+        project = _seed_project(db_session, creator=user)
+        first = _seed_verified_version(db_session, project, "v0.1.0")
+        first_id = first.id
+        second = _seed_verified_version(db_session, project, "v0.2.0")
+        second_id = second.id
+        customer = _seed_customer(db_session, project, "andros")
+
+        # First version → UAT, accept, PROD → graduates in place to v1.0.0.
+        for env in ("uat",):
+            client.post(
+                f"/api/v1/customers/{customer.id}/deploy",
+                json={"version_number": "v0.1.0", "environment": env},
+            )
+        client.post(f"/api/v1/customers/{customer.id}/accept", json={"version_number": "v0.1.0"})
+        first_prod = client.post(
+            f"/api/v1/customers/{customer.id}/deploy",
+            json={"version_number": "v0.1.0", "environment": "prod"},
+        )
+        assert first_prod.json()["bumped_to"] == "v1.0.0"
+
+        # Second, DIFFERENT version → UAT, accept, PROD. The project already had a prod deploy,
+        # so this one does NOT graduate: no bump, deploys as v0.2.0, its row is untouched.
+        client.post(
+            f"/api/v1/customers/{customer.id}/deploy",
+            json={"version_number": "v0.2.0", "environment": "uat"},
+        )
+        client.post(f"/api/v1/customers/{customer.id}/accept", json={"version_number": "v0.2.0"})
+        second_prod = client.post(
+            f"/api/v1/customers/{customer.id}/deploy",
+            json={"version_number": "v0.2.0", "environment": "prod"},
+        )
+        assert second_prod.status_code == 200, second_prod.text
+        assert second_prod.json()["ok"] is True
+        assert second_prod.json()["bumped_to"] is None  # no re-graduation on the 2nd prod deploy
+
+        db_session.expire_all()
+        by_id = {
+            v.id: v for v in db_session.execute(select(Version).where(Version.project_id == project.id)).scalars().all()
+        }
+        # The graduated first version and the ungraduated second version coexist as distinct rows.
+        assert by_id[first_id].version_number == "v1.0.0"
+        assert by_id[first_id].status == "released"
+        assert by_id[second_id].version_number == "v0.2.0"  # untouched — no rename, no second v1.0.0
+
+
+# ---------------------------------------------------------------------------
+# §3.6 graduation is gated on deploy SUCCESS — the KEY mutation (promote-in-place
+# only on ``first_prod and ok``) exercised on the FAILURE + idempotent paths.
+# ---------------------------------------------------------------------------
+
+
+class TestGraduationGatedOnDeploySuccess:
+    def test_failed_first_prod_deploy_does_not_graduate(self, client, db_session, prod_failing_deploy_runner):
+        """⚠ A FAILED first-PROD deploy leaves the version un-graduated + resolvable for a retry (§3.6).
+
+        The promote-in-place graduation is gated on ``first_prod and ok`` — a runner returning ``ok=False``
+        records a ``failed`` event, drops the bump signal, and leaves the built version under its ORIGINAL
+        number/status with NO v1.0.0 shell, so the Manažér can simply re-deploy it.
+        """
+        user = _current_user(db_session)
+        project = _seed_project(db_session, creator=user)
+        version = _seed_verified_version(db_session, project, "v0.1.0")
+        version_id = version.id
+        customer = _seed_customer(db_session, project, "andros")
+
+        # UAT deploy succeeds, then accept → the PROD gate (§3.5) is satisfied.
+        uat = client.post(
+            f"/api/v1/customers/{customer.id}/deploy",
+            json={"version_number": "v0.1.0", "environment": "uat"},
+        )
+        assert uat.status_code == 200, uat.text
+        assert uat.json()["ok"] is True
+        accept = client.post(f"/api/v1/customers/{customer.id}/accept", json={"version_number": "v0.1.0"})
+        assert accept.status_code == 200, accept.text
+
+        # PROD deploy — the runner FAILS (ok=False). The action itself returns 200; the DEPLOY failed.
+        prod = client.post(
+            f"/api/v1/customers/{customer.id}/deploy",
+            json={"version_number": "v0.1.0", "environment": "prod"},
+        )
+        assert prod.status_code == 200, prod.text
+        result = prod.json()
+        assert result["ok"] is False
+        assert result["bumped_to"] is None  # a failed deploy drops the bump signal
+        assert result["url"] is None
+
+        # No graduation: the built version stays under v0.1.0 with its seed status, and NO v1.0.0 row was created.
+        db_session.expire_all()
+        rows = db_session.execute(select(Version).where(Version.project_id == project.id)).scalars().all()
+        assert len(rows) == 1, "a failed deploy must not create a v1.0.0 shell"
+        stayed = rows[0]
+        assert stayed.id == version_id
+        assert stayed.version_number == "v0.1.0"  # NOT graduated
+        assert stayed.status == "planned"  # seed default, untouched — a failed deploy never marks released
+        # Still resolvable under its original number for a retry (the deploy is repeatable).
+        assert deploy_service._resolve_version(db_session, project.id, "v0.1.0").id == version_id
+        # The failure is in the audit log as a 'failed' prod deploy event.
+        prod_events = [
+            e
+            for e in deploy_service.list_events(db_session, customer.id)
+            if e.environment == "prod" and e.event_type == "deploy"
+        ]
+        assert prod_events and prod_events[0].status == "failed"
+
+    def test_deploying_already_v1_0_0_version_is_idempotent(self, client, db_session, fake_deploy_runner):
+        """Deploying a version ALREADY numbered v1.0.0 neither errors nor double-graduates (§3.6 idempotent).
+
+        A free-form ``v1.0.0`` (manually numbered) reaching its first PROD deploy hits the graduation's
+        idempotent branch (``version_number == target`` → no rename, just mark released). A SECOND PROD deploy —
+        now with prod history — does not re-graduate. Exactly ONE v1.0.0 row survives each pass; no raise.
+        """
+        user = _current_user(db_session)
+        project = _seed_project(db_session, creator=user)
+        version = _seed_verified_version(db_session, project, "v1.0.0")  # already carries the graduation target
+        version_id = version.id
+        customer = _seed_customer(db_session, project, "andros")
+
+        client.post(f"/api/v1/customers/{customer.id}/deploy", json={"version_number": "v1.0.0", "environment": "uat"})
+        client.post(f"/api/v1/customers/{customer.id}/accept", json={"version_number": "v1.0.0"})
+
+        first_prod = client.post(
+            f"/api/v1/customers/{customer.id}/deploy",
+            json={"version_number": "v1.0.0", "environment": "prod"},
+        )
+        assert first_prod.status_code == 200, first_prod.text
+        assert first_prod.json()["ok"] is True
+        # First PROD (no prior prod history) → the idempotent branch marks it released + still reports the bump.
+        assert first_prod.json()["bumped_to"] == "v1.0.0"
+
+        db_session.expire_all()
+        rows = db_session.execute(select(Version).where(Version.project_id == project.id)).scalars().all()
+        assert len(rows) == 1  # no duplicate v1.0.0 shell
+        assert rows[0].id == version_id
+        assert rows[0].version_number == "v1.0.0"
+        assert rows[0].status == "released"
+
+        # SECOND PROD deploy of the same v1.0.0 — prod history now exists → not first_prod → no re-graduation, no error.
+        second_prod = client.post(
+            f"/api/v1/customers/{customer.id}/deploy",
+            json={"version_number": "v1.0.0", "environment": "prod"},
+        )
+        assert second_prod.status_code == 200, second_prod.text
+        assert second_prod.json()["ok"] is True
+        assert second_prod.json()["bumped_to"] is None  # already graduated — no bump on the 2nd prod deploy
+
+        db_session.expire_all()
+        rows2 = db_session.execute(select(Version).where(Version.project_id == project.id)).scalars().all()
+        assert len(rows2) == 1  # STILL exactly one row — no double-graduate
+        assert rows2[0].version_number == "v1.0.0"
+        assert rows2[0].status == "released"
 
 
 # ---------------------------------------------------------------------------

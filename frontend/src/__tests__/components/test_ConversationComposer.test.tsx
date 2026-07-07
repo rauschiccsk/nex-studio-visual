@@ -34,4 +34,12 @@ describe("ConversationComposer — framework_issue lock (Director obs #6)", () =
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.getByRole("textbox")).not.toBeDisabled();
   });
+
+  // obs #4 (batch-2): the composer disables native spellcheck so Slovak (and English) words are not underlined
+  // in this Slovak-primary internal tool — `lang="sk"` alone doesn't suppress underlines without a browser SK
+  // dictionary, so spellCheck={false} is the guarantee (matching SlovakTextarea's choice).
+  it("renders the textarea with spellcheck disabled (obs #4)", () => {
+    render(<ConversationComposer onRelay={noopRelay} />);
+    expect(screen.getByRole("textbox")).toHaveAttribute("spellcheck", "false");
+  });
 });

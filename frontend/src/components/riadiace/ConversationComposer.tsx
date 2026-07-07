@@ -93,6 +93,7 @@ export function ConversationComposer({ onRelay, disabled, frameworkBlocked }: Pr
       <div className="flex items-end gap-2">
         <textarea
           lang="sk"
+          spellCheck={false}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}

@@ -906,3 +906,145 @@ describe("findCurrentTaskPath — pure ancestry lookup (Director #4)", () => {
     expect(findCurrentTaskPath(PLAN, null)).toBeNull();
   });
 });
+
+// obs #3 follow-up (ux-batch2-followup Correction 1) — the REAL fix. `seenStatusRef` resets on every mount, so the
+// auto-collapse-on-done effect used to treat every already-`done` EPIC/FEAT as a fresh `* → done` transition on the
+// first plan-fetch after a REMOUNT, re-collapsing done nodes the Manažér had manually expanded (clobbering the
+// persisted expand across a tab switch). The fix seeds `seen` from the plan on the first pass and applies the
+// done-on-load default ONLY the first time a version is ever seen (collapsed localStorage key ABSENT); once the key
+// exists the persisted set is respected verbatim. The null-first hydration (batch-2) + hydratedRef gating are kept.
+describe("PlanUlohRail — done nodes survive a remount, not re-collapsed (obs #3 real fix)", () => {
+  beforeEach(() => {
+    vi.mocked(getTaskPlan).mockReset();
+    vi.mocked(postPipelineActionApi).mockReset();
+    window.localStorage.clear();
+  });
+
+  // One epic, two feats: f1 in_progress (the Manažér manually collapsed it — persisted), f2 done (an
+  // auto-collapse-on-done target). Their leaf tasks carry distinct titles so each subtree is a clean probe.
+  const TWO_FEAT_PLAN: TaskPlanResponse = {
+    plan: [
+      {
+        id: "e1",
+        number: 1,
+        title: "Epik A",
+        status: "in_progress",
+        plain_description: "Epik po ľudsky.",
+        feats: [
+          {
+            id: "f1",
+            number: 1,
+            title: "Feat Jedna",
+            status: "in_progress",
+            plain_description: "Feat jedna po ľudsky.",
+            description: "Feat jedna technický.",
+            tasks: [mkTask("t1", 1, "todo")],
+          },
+          {
+            id: "f2",
+            number: 2,
+            title: "Feat Dva",
+            status: "done",
+            plain_description: "Feat dva po ľudsky.",
+            description: "Feat dva technický.",
+            tasks: [mkTask("t2", 2, "done")],
+          },
+        ],
+      },
+    ],
+    epic_count: 1,
+    feat_count: 2,
+    task_count: 2,
+  };
+
+  // A fully-done subtree the Manažér reviewed (nex-payables shape): one in_progress EPIC (a stable container that
+  // never collapses) carrying two DONE feats, each with a done leaf task under a distinct title — a clean probe.
+  const DONE_FEATS_PLAN: TaskPlanResponse = {
+    plan: [
+      {
+        id: "e1",
+        number: 1,
+        title: "Epik A",
+        status: "in_progress",
+        plain_description: "Epik po ľudsky.",
+        feats: [
+          {
+            id: "f1",
+            number: 1,
+            title: "Feat Jedna",
+            status: "done",
+            plain_description: "Feat jedna po ľudsky.",
+            description: "Feat jedna technický.",
+            tasks: [mkTask("t1", 1, "done")],
+          },
+          {
+            id: "f2",
+            number: 2,
+            title: "Feat Dva",
+            status: "done",
+            plain_description: "Feat dva po ľudsky.",
+            description: "Feat dva technický.",
+            tasks: [mkTask("t2", 2, "done")],
+          },
+        ],
+      },
+    ],
+    epic_count: 1,
+    feat_count: 2,
+    task_count: 2,
+  };
+
+  it("restores the persisted collapsed set when versionId is null on first render and resolves late", async () => {
+    // The Manažér had manually collapsed f1 (an in_progress feat) in a prior session.
+    window.localStorage.setItem("nex_planrail_collapsed_v1", JSON.stringify(["f1"]));
+    vi.mocked(getTaskPlan).mockResolvedValue(TWO_FEAT_PLAN);
+
+    // Remount with versionId still null (the prop arrives async) → nothing hydrated yet.
+    const { rerender } = render(
+      <PlanUlohRail versionId={null} messages={[]} board={mkBoard()} onBoard={() => {}} />,
+    );
+    // versionId resolves a tick later (the store/query lands).
+    rerender(<PlanUlohRail versionId="v1" messages={[]} board={mkBoard()} onBoard={() => {}} />);
+
+    // The tree loads; f1's subtree stays hidden — its saved collapse was restored despite the null-first mount.
+    expect(await screen.findByText(/Feat Jedna/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(/Úloha 1/)).not.toBeInTheDocument());
+    // The saved collapse was not clobbered — f1 is still persisted.
+    expect(window.localStorage.getItem("nex_planrail_collapsed_v1")).toContain("f1");
+  });
+
+  it("does NOT re-collapse a manually-expanded done FEAT on remount when the collapsed key already exists (discriminating)", async () => {
+    // The Manažér was here before (key PRESENT) and had expanded the done feats (neither f1 nor f2 in the set).
+    // A remount (fresh instance → seenStatusRef reset) must respect that persisted expand, NOT re-collapse. This
+    // is the REAL obs #3 scenario — it FAILS against the pre-fix component (which re-collapses done-on-remount).
+    window.localStorage.setItem("nex_planrail_collapsed_v1", JSON.stringify([]));
+    vi.mocked(getTaskPlan).mockResolvedValue(DONE_FEATS_PLAN);
+
+    render(<PlanUlohRail versionId="v1" messages={[]} board={mkBoard()} onBoard={() => {}} />);
+
+    // Both done feats stay EXPANDED — their leaf tasks render (the persisted expand survived the remount).
+    expect(await screen.findByText(/Úloha 1/)).toBeInTheDocument();
+    expect(screen.getByText(/Úloha 2/)).toBeInTheDocument();
+    // localStorage was NOT re-written to collapse the done feats — the persisted set is respected verbatim.
+    const saved = window.localStorage.getItem("nex_planrail_collapsed_v1") ?? "";
+    expect(saved).not.toContain("f1");
+    expect(saved).not.toContain("f2");
+  });
+
+  it("still applies the done-on-load default the FIRST time a version is ever seen (collapsed key absent)", async () => {
+    // Key ABSENT (cleared in beforeEach) → first-ever visit → the done-on-load default folds the done work away.
+    // Proves the fix DIDN'T just disable auto-collapse-on-load — it gated it to the first-ever visit per version.
+    vi.mocked(getTaskPlan).mockResolvedValue(DONE_FEATS_PLAN);
+
+    render(<PlanUlohRail versionId="v1" messages={[]} board={mkBoard()} onBoard={() => {}} />);
+
+    expect(await screen.findByText(/Epik A/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(/Úloha 1/)).not.toBeInTheDocument());
+    expect(screen.queryByText(/Úloha 2/)).not.toBeInTheDocument();
+    await waitFor(() => {
+      const saved = window.localStorage.getItem("nex_planrail_collapsed_v1") ?? "";
+      expect(saved).toContain("f1");
+      expect(saved).toContain("f2");
+    });
+  });
+});

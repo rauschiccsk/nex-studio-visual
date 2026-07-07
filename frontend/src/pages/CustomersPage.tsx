@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FolderOpen, Loader2, Plus, Trash2, KeyRound } from "lucide-react";
+import { FolderOpen, Loader2, Plus, Trash2, KeyRound, Pencil } from "lucide-react";
 
-import { listCustomers, createCustomer, deleteCustomer } from "@/services/api/customers";
+import { listCustomers, createCustomer, updateCustomer, deleteCustomer } from "@/services/api/customers";
 import { ApiError } from "@/services/api";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import type { CustomerRead } from "@/types/customer";
@@ -37,6 +37,9 @@ export default function CustomersPage() {
   const [secret, setSecret] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  // obs #6: when non-null the form is in EDIT mode for this customer (submits via updateCustomer/PATCH
+  // instead of createCustomer/POST); null = add mode.
+  const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
 
   const load = useCallback(() => {
     if (!slug) return;
@@ -66,6 +69,22 @@ export default function CustomersPage() {
     setNotes("");
     setSecret("");
     setFormError(null);
+    setEditingCustomerId(null);
+  }
+
+  // obs #6: load an existing customer's fields into the form and switch it to edit mode. The secret is
+  // write-only (never echoed back by the API) so it is intentionally left BLANK — leaving it blank on submit
+  // keeps the stored secret unchanged; typing a value rotates it.
+  function startEdit(c: CustomerRead) {
+    setEditingCustomerId(c.id);
+    setName(c.name);
+    setCustomerSlug(c.slug);
+    setSubdomain(c.subdomain ?? "");
+    setIntegrations(c.integrations ? JSON.stringify(c.integrations, null, 2) : "");
+    setNotes(c.notes ?? "");
+    setSecret("");
+    setFormError(null);
+    setShowForm(true);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -84,15 +103,22 @@ export default function CustomersPage() {
     }
 
     setSubmitting(true);
+    const payload = {
+      name: name.trim(),
+      slug: customerSlug.trim(),
+      subdomain: subdomain.trim() || null,
+      integrations: integrationsParsed,
+      notes: notes.trim() || null,
+      // Write-only: a blank secret sends null, which the PATCH treats as "leave the stored secret unchanged"
+      // (the backend skips null fields) — so editing never wipes an existing secret; a typed value rotates it.
+      secret: secret ? secret : null,
+    };
     try {
-      await createCustomer(slug, {
-        name: name.trim(),
-        slug: customerSlug.trim(),
-        subdomain: subdomain.trim() || null,
-        integrations: integrationsParsed,
-        notes: notes.trim() || null,
-        secret: secret ? secret : null,
-      });
+      if (editingCustomerId) {
+        await updateCustomer(editingCustomerId, payload);
+      } else {
+        await createCustomer(slug, payload);
+      }
       resetForm();
       setShowForm(false);
       load();
@@ -169,6 +195,9 @@ export default function CustomersPage() {
           onSubmit={handleSubmit}
           className="mb-5 space-y-3 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] p-4"
         >
+          <div className="text-xs font-semibold text-[var(--color-text-secondary)]">
+            {editingCustomerId ? "Upraviť zákazníka" : "Nový zákazník"}
+          </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <label className="block text-xs">
               <span className="text-[var(--color-text-secondary)]">Názov *</span>
@@ -206,7 +235,11 @@ export default function CustomersPage() {
                 value={secret}
                 onChange={(e) => setSecret(e.target.value)}
                 autoComplete="new-password"
-                placeholder="uloží sa do credentials store; nezobrazí sa späť"
+                placeholder={
+                  editingCustomerId
+                    ? "ponechaj prázdne = bez zmeny; vyplň = rotuj secret"
+                    : "uloží sa do credentials store; nezobrazí sa späť"
+                }
                 className="mt-1 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
               />
             </label>
@@ -225,6 +258,7 @@ export default function CustomersPage() {
             <span className="text-[var(--color-text-secondary)]">Poznámka</span>
             <textarea
               lang="sk"
+              spellCheck={false}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={2}
@@ -291,13 +325,22 @@ export default function CustomersPage() {
                   <div className="mt-0.5 font-mono text-[11px] text-[var(--color-text-muted)]">{c.subdomain}</div>
                 )}
               </div>
-              <button
-                onClick={() => handleDelete(c)}
-                title="Odstrániť zákazníka"
-                className="rounded p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-state-error-bg)] hover:text-[var(--color-state-error-fg)]"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
+              <div className="flex flex-shrink-0 items-center gap-1">
+                <button
+                  onClick={() => startEdit(c)}
+                  title="Upraviť zákazníka"
+                  className="rounded p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text-primary)]"
+                >
+                  <Pencil className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => handleDelete(c)}
+                  title="Odstrániť zákazníka"
+                  className="rounded p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-state-error-bg)] hover:text-[var(--color-state-error-fg)]"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
             </div>
           ))}
         </div>

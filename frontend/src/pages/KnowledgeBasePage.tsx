@@ -562,6 +562,8 @@ export default function KnowledgeBasePage() {
                       Názov dokumentu
                     </label>
                     <input
+                      lang="sk"
+                      spellCheck={false}
                       type="text"
                       value={newTitle}
                       onChange={(e) => setNewTitle(e.target.value)}
@@ -605,6 +607,7 @@ export default function KnowledgeBasePage() {
                 </label>
                 <textarea
                   lang="sk"
+                  spellCheck={false}
                   value={newContent}
                   onChange={(e) => setNewContent(e.target.value)}
                   placeholder="# Názov dokumentu&#10;&#10;Obsah v Markdown..."
@@ -638,6 +641,7 @@ export default function KnowledgeBasePage() {
                   </div>
                   <textarea
                     lang="sk"
+                    spellCheck={false}
                     value={editContent}
                     onChange={(e) => setEditContent(e.target.value)}
                     className="flex-1 px-3 py-2 bg-[var(--color-canvas)] border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)] font-mono resize-none focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-focus)]"

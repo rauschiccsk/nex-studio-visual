@@ -118,6 +118,19 @@ function writeCollapsed(versionId: string, collapsed: Set<string>): void {
   }
 }
 
+// Whether a collapsed set has EVER been persisted for this version (obs #3 real fix). Distinct from
+// `readCollapsed`, which returns an EMPTY Set for BOTH an absent key and an empty `[]` — indistinguishable, yet the
+// difference is load-bearing: an absent key = the version has never been visited (apply the done-on-load default
+// once), an empty `[]` = the Manažér has been here and expanded everything (respect it verbatim, never re-collapse).
+function collapsedKeyExists(versionId: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(collapsedStorageKey(versionId)) !== null;
+  } catch {
+    return false;
+  }
+}
+
 // L0 trailing status chip — dot colour from the unified palette (CR-NS-028) + Slovak label.
 function StatusDot({ status }: { status: string }) {
   return (
@@ -295,17 +308,28 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
   // plan — never processes a stale tree under the new version's key before its own refetch lands).
   const seenStatusRef = useRef<Map<string, string>>(new Map());
   const versionIdRef = useRef<string | null>(versionId);
+  // Whether the persisted collapsed/expanded sets have been loaded for the CURRENT versionId (obs #3). The
+  // useState initializers above run once at mount — if `versionId` is still null then (the prop arrives async on a
+  // tab remount) they seed EMPTY. Without this guard the auto-collapse effect could then run against the un-hydrated
+  // (empty) set and PERSIST done-collapses computed off it, clobbering the Manažér's saved choice. Hydration flips
+  // this true; auto-collapse waits on it so it only ever AUGMENTS the restored set, never replaces it.
+  const hydratedRef = useRef(false);
 
+  // Hydrate the persisted sets from localStorage on mount AND the moment `versionId` becomes a valid non-null value
+  // (obs #3 — not only on a change between two non-null ids). Effects always run on mount, so a tab remount whose
+  // initializer saw a null prop first still re-reads the saved collapsed/expanded sets once `versionId` resolves.
   useEffect(() => {
+    seenStatusRef.current = new Map();
+    versionIdRef.current = versionId;
     if (versionId) {
       setExpanded(readExpanded(versionId));
       setCollapsed(readCollapsed(versionId));
+      hydratedRef.current = true;
     } else {
       setExpanded(new Set());
       setCollapsed(new Set());
+      hydratedRef.current = false;
     }
-    seenStatusRef.current = new Map();
-    versionIdRef.current = versionId;
   }, [versionId]);
 
   // Tree-freshness: refetch on mount, on version change, and whenever the live message stream grows, so node
@@ -331,15 +355,50 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
     };
   }, [versionId, messages.length]);
 
-  // Auto-collapse on done (req 4): keyed on the fetched plan, diff each EPIC/FEAT status against its last-seen
-  // value; on any `* → done` transition add that node id to `collapsed` (+ persist). A node ALREADY done on first
-  // load counts too (prev is undefined ≠ 'done') → done work starts out of the way by default (Director). Because
-  // the ref records the done status, a subsequent manual EXPAND is never re-collapsed (manual wins, req 5). Uses
-  // versionIdRef so it keys only on `plan` — a stale tree from the previous version can't be processed here.
+  // Auto-collapse on done (req 4): keyed on the fetched plan. The effect separates the two behaviours it used to
+  // conflate via the empty-`seen` trick (obs #3 real fix) — `seenStatusRef` resets on every mount, so the old
+  // "prev is undefined ≠ 'done'" test wrongly treated EVERY already-done node as a fresh transition on the first
+  // plan-fetch after a REMOUNT, re-collapsing done nodes the Manažér had manually expanded and clobbering that
+  // persisted choice. Now:
+  //   • FIRST pass this mount (`seen` empty) — SEED `seen` with all current statuses (so already-done nodes are
+  //     never mistaken for transitions on later passes) and apply the done-on-load default ONLY the first time the
+  //     version is ever seen (collapsed key ABSENT). If the key already exists, respect the persisted set verbatim
+  //     — this is what preserves a manual expand across a tab switch + return.
+  //   • SUBSEQUENT passes (`seen` non-empty) — the genuine `* → done` runtime transition (collapse + persist).
+  // Uses versionIdRef so it keys only on `plan` — a stale tree from the previous version can't be processed here.
   useEffect(() => {
     const vId = versionIdRef.current;
-    if (!plan || !vId) return;
+    // Obs #3: never run auto-collapse before hydration has restored the persisted set — otherwise it would compute
+    // done-collapses against an empty set and persist them, clobbering the Manažér's saved manual choice.
+    if (!plan || !vId || !hydratedRef.current) return;
     const seen = seenStatusRef.current;
+
+    if (seen.size === 0) {
+      // First pass after this mount: record every node's status up front so no already-done node is later read as
+      // a fresh transition, and collect the done EPIC/FEAT for the (first-ever-only) done-on-load default.
+      const doneOnLoad: string[] = [];
+      for (const epic of plan.plan) {
+        seen.set(epic.id, epic.status);
+        if (epic.status === "done") doneOnLoad.push(epic.id);
+        for (const feat of epic.feats) {
+          seen.set(feat.id, feat.status);
+          if (feat.status === "done") doneOnLoad.push(feat.id);
+        }
+      }
+      // Done-on-load default applies only the FIRST time this version is ever seen (key absent). Once the key
+      // exists the persisted set is authoritative — a re-collapse here would clobber a manual expand on remount.
+      if (doneOnLoad.length === 0 || collapsedKeyExists(vId)) return;
+      setCollapsed((prev) => {
+        const next = new Set(prev);
+        for (const id of doneOnLoad) next.add(id);
+        writeCollapsed(vId, next);
+        return next;
+      });
+      return;
+    }
+
+    // Subsequent passes: a node observed transitioning to done DURING this session folds away (manual wins, req 5 —
+    // once `seen` records 'done' a later manual EXPAND is never re-collapsed).
     const toCollapse: string[] = [];
     for (const epic of plan.plan) {
       if (epic.status === "done" && seen.get(epic.id) !== "done") toCollapse.push(epic.id);

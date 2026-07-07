@@ -46,6 +46,7 @@ provision+up leg is async (a ~1–2 min docker build) and is injected via
 from __future__ import annotations
 
 import asyncio
+from datetime import date
 from typing import Awaitable, Callable, Optional
 from uuid import UUID
 
@@ -475,13 +476,10 @@ async def deploy(
     # version is what is provisioned + recorded so the audit row reflects PROD reality.
     deployed_version = version_number
     bumped_to: Optional[str] = None
-    if environment == "prod" and not project_had_prod_deploy(db, project.id):
+    first_prod = environment == "prod" and not project_had_prod_deploy(db, project.id)
+    if first_prod:
         deployed_version = FIRST_PROD_VERSION
         bumped_to = FIRST_PROD_VERSION
-        # Reflect the graduation on the project's own version record set: ensure a
-        # v1.0.0 version row exists for the project (idempotent) so the PROD tab and
-        # version list show the graduated version. Never overwrites an existing row.
-        _ensure_version(db, project.id, FIRST_PROD_VERSION, source=version_number)
 
     # Per-customer UAT/PROD instance slug: customer subdomain (preferred) or slug,
     # namespaced by environment so a customer's UAT and PROD never collide.
@@ -493,6 +491,14 @@ async def deploy(
         version_number=deployed_version,
         force_fresh=force_fresh,
     )
+
+    # Graduation (§3.6): on a SUCCESSFUL first PROD deploy, promote the BUILT version to v1.0.0 IN
+    # PLACE + mark it released — never spin up a new empty v1.0.0 shell beside it (which would strand
+    # its epics/backlog/tokens/pipeline history + break the metrics page). ``version`` is the row
+    # resolved above; renaming it keeps all its children under the same id. Gated on ``ok`` so a failed
+    # deploy never graduates and the version stays resolvable under its old number for a retry.
+    if first_prod and ok:
+        _graduate_version_in_place(db, version, FIRST_PROD_VERSION)
 
     event = DeployEvent(
         customer_id=customer_id,
@@ -552,25 +558,44 @@ def _prod_url(customer_slug: str, app: str) -> str:
     return f"https://{customer_slug}-{app}.{uat_provisioner.UAT_DOMAIN_SUFFIX}"
 
 
-def _ensure_version(db: Session, project_id: UUID, version_number: str, *, source: str) -> Version:
-    """Idempotently ensure a ``version_number`` row exists for the project (§3.6 graduation).
+def _graduate_version_in_place(db: Session, version: Version, target: str) -> Version:
+    """Promote the BUILT ``version`` to ``target`` (v1.0.0) IN PLACE + mark it released (§3.6).
 
-    Used when a first-PROD deploy graduates a project to v1.0.0 — the graduated
-    version must appear in the project's version set. Never overwrites an existing
-    row. Created directly (not via ``version_service.create``) so the graduation
-    carries a descriptive name without re-running the create-flow side effects.
+    A first-PROD graduation renames the version the pipeline actually built — the row
+    carrying all its epics, backlog, tokens and pipeline history — to ``target``, rather
+    than creating a NEW empty ``v1.0.0`` shell beside it. The old behaviour stranded every
+    child row under the pre-graduation number and left an empty "released" v1.0.0 that broke
+    the metrics page (all tokens sat on the old version) and confused the version list.
+
+    Behaviour:
+      * ``version.version_number == target`` already ⇒ no rename (idempotent) — e.g. a free-form
+        ``v1.0.0`` reaching its first prod deploy, or a repeat call.
+      * a DIFFERENT row already carries ``(project_id, target)`` ⇒ ``ValueError``. This is a
+        DEFENSIVE guard, not a strictly unreachable branch: the ``project_had_prod_deploy`` guard
+        only means no *prior prod deploy* graduated a row — it does NOT preclude a manually-created
+        free-form ``v1.0.0`` row already existing while this project does its first prod deploy. The
+        raise then prevents a silent collision on the ``uq_versions_project_id_version_number`` UNIQUE
+        (a clean 409/422 for the router) instead of letting the flush blow up.
+      * otherwise ⇒ rename ``version.version_number = target``.
+
+    In all cases the version is marked released (``status='released'`` + ``release_date`` today):
+    a first-prod graduation IS the release. The two fields are set directly rather than routed
+    through ``version_service.release`` — graduation already cleared the deploy gates
+    (``version_verified`` + ``is_accepted``), so coupling to ``release``'s ``done``-state
+    precondition would be wrong. ``version.name`` / ``version.description`` are left untouched
+    (keep the built version's own identity — §8 anti-destructive).
     """
-    existing = db.execute(
-        select(Version).where(Version.project_id == project_id, Version.version_number == version_number)
-    ).scalar_one_or_none()
-    if existing is not None:
-        return existing
-    version = Version(
-        project_id=project_id,
-        version_number=version_number,
-        name=f"PROD release (graduated from {source})",
-        description=f"First production deploy — graduated from {source} (design §3.6).",
-    )
-    db.add(version)
+    if version.version_number != target:
+        clash = db.execute(
+            select(Version).where(Version.project_id == version.project_id, Version.version_number == target)
+        ).scalar_one_or_none()
+        if clash is not None and clash.id != version.id:
+            raise ValueError(
+                f"Cannot graduate to {target!r}: a different version row already carries it for this "
+                f"project (uq_versions_project_id_version_number) — a first-prod graduation must not collide"
+            )
+        version.version_number = target
+    version.status = "released"
+    version.release_date = date.today()
     db.flush()
     return version

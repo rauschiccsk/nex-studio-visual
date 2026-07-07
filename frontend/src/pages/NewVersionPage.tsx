@@ -260,6 +260,7 @@ export default function NewVersionPage() {
               </label>
               <textarea
                 lang="sk"
+                spellCheck={false}
                 rows={8}
                 placeholder="Opíš, čo má verzia priniesť. Napr.: Pridať platobný modul cez Tatra banku. Zákazník potrebuje automatické párovanie platieb s faktúrami a emailové notifikácie. Cieľ: funkčné platby pre pilotného zákazníka do konca mája. (AI Agent zadanie systematizuje a v Príprave sa doptá na nejasnosti.)"
                 value={zadanie}

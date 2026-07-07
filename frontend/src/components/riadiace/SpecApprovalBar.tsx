@@ -65,6 +65,7 @@ export default function SpecApprovalBar({ board, versionId, onBoard }: Props) {
       <div className="flex items-center gap-2">
         <input
           lang="sk"
+          spellCheck={false}
           type="text"
           value={comment}
           onChange={(e) => setComment(e.target.value)}

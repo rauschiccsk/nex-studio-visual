@@ -269,6 +269,7 @@ export default function CredentialsPage() {
                 </div>
                 <textarea
                   lang="sk"
+                  spellCheck={false}
                   value={editContent}
                   onChange={(e) => setEditContent(e.target.value)}
                   className="w-full min-h-[400px] px-3 py-2 bg-[var(--color-canvas)] border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)] font-mono resize-y focus:outline-none focus:border-primary-500"
@@ -301,6 +302,7 @@ export default function CredentialsPage() {
                   <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">Názov</label>
                   <input
                     lang="sk"
+                    spellCheck={false}
                     type="text"
                     value={createTitle}
                     onChange={(e) => setCreateTitle(e.target.value)}
@@ -322,6 +324,7 @@ export default function CredentialsPage() {
                   <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">Obsah (Markdown)</label>
                   <textarea
                     lang="sk"
+                    spellCheck={false}
                     value={createContent}
                     onChange={(e) => setCreateContent(e.target.value)}
                     className="w-full min-h-[300px] px-3 py-2 bg-[var(--color-canvas)] border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)] font-mono resize-y focus:outline-none focus:border-primary-500"
