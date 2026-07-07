@@ -566,6 +566,7 @@ export default function ProjectDetailPage() {
               Popis opravy
             </label>
             <textarea
+              lang="sk"
               id="fastfix-directive"
               autoFocus
               value={fastFixDirective}

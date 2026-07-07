@@ -264,12 +264,14 @@ export default function BacklogPage() {
       {showNew && (
         <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] p-4 mb-4 space-y-3">
           <input
+            lang="sk"
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
             placeholder="Názov požiadavky"
             className="w-full bg-[var(--color-surface)] border border-[var(--color-border-default)] rounded px-3 py-1.5 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-primary-500"
           />
           <textarea
+            lang="sk"
             value={newDesc}
             onChange={(e) => setNewDesc(e.target.value)}
             placeholder="Popis (voliteľný)"
@@ -330,11 +332,13 @@ export default function BacklogPage() {
                 {editingId === it.id ? (
                   <div className="space-y-2">
                     <input
+                      lang="sk"
                       value={editTitle}
                       onChange={(e) => setEditTitle(e.target.value)}
                       className="w-full bg-[var(--color-surface)] border border-[var(--color-border-default)] rounded px-3 py-1.5 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-primary-500"
                     />
                     <textarea
+                      lang="sk"
                       value={editDesc}
                       onChange={(e) => setEditDesc(e.target.value)}
                       rows={2}

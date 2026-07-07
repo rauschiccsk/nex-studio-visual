@@ -268,6 +268,7 @@ export default function CredentialsPage() {
                   </button>
                 </div>
                 <textarea
+                  lang="sk"
                   value={editContent}
                   onChange={(e) => setEditContent(e.target.value)}
                   className="w-full min-h-[400px] px-3 py-2 bg-[var(--color-canvas)] border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)] font-mono resize-y focus:outline-none focus:border-primary-500"
@@ -299,6 +300,7 @@ export default function CredentialsPage() {
                 <div>
                   <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">Názov</label>
                   <input
+                    lang="sk"
                     type="text"
                     value={createTitle}
                     onChange={(e) => setCreateTitle(e.target.value)}
@@ -319,6 +321,7 @@ export default function CredentialsPage() {
                 <div>
                   <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">Obsah (Markdown)</label>
                   <textarea
+                    lang="sk"
                     value={createContent}
                     onChange={(e) => setCreateContent(e.target.value)}
                     className="w-full min-h-[300px] px-3 py-2 bg-[var(--color-canvas)] border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)] font-mono resize-y focus:outline-none focus:border-primary-500"

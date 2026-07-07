@@ -74,6 +74,7 @@ export function ConversationComposer({ onRelay, disabled }: Props) {
       )}
       <div className="flex items-end gap-2">
         <textarea
+          lang="sk"
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}

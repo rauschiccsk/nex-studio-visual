@@ -17,6 +17,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 import PlanUlohRail from "@/components/riadiace/PlanUlohRail";
+import { findCurrentTaskPath } from "@/components/riadiace/currentTaskPath";
 import { getTaskPlan } from "@/services/api/versions";
 import { postPipelineActionApi } from "@/services/api/pipeline";
 import type { PipelineBoard, PipelineMessage, PipelineState } from "@/services/api/pipeline";
@@ -836,5 +837,72 @@ describe("PlanUlohRail — subtree collapse + smart auto-collapse (Director #3)"
     fireEvent.click(screen.getByTestId("planrail-chevron-f1"));
     await waitFor(() => expect(screen.queryByText(/Úloha 1/)).not.toBeInTheDocument());
     expect(screen.queryByText(/Feat technický/)).not.toBeInTheDocument();
+  });
+});
+
+// Director observation #4 — the "Práve robím" banner shows the FULL EPIC › FEAT › TASK hierarchy (not a bare
+// "#N title") when the current task is located in the fetched plan tree, and falls back to "#N title" when not.
+describe("PlanUlohRail — full task-reference hierarchy in the banner (Director #4)", () => {
+  beforeEach(() => {
+    vi.mocked(getTaskPlan).mockReset();
+    vi.mocked(postPipelineActionApi).mockReset();
+    vi.mocked(getTaskPlan).mockResolvedValue(PLAN);
+  });
+
+  it("renders the 'E# epic › F# feat › T# task' path when the current task is in the plan", async () => {
+    render(
+      <PlanUlohRail
+        versionId="v1"
+        messages={[]}
+        board={mkBoard({
+          current_task: { number: 2, title: "AP tabuľky" },
+          state: mkState({ status: "agent_working" }),
+        })}
+        onBoard={() => {}}
+      />,
+    );
+    // t2 (number 2) lives under feat f1 "Schéma databázy" under epic e1 "Základ systému".
+    expect(
+      await screen.findByText("E1 Základ systému › F1 Schéma databázy › T2: AP tabuľky"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Práve robím:")).toBeInTheDocument();
+  });
+
+  it("falls back to '#N title' when the current task number is not in the plan tree", async () => {
+    render(
+      <PlanUlohRail
+        versionId="v1"
+        messages={[]}
+        board={mkBoard({
+          current_task: { number: 99, title: "Neznáma úloha" },
+          state: mkState({ status: "agent_working" }),
+        })}
+        onBoard={() => {}}
+      />,
+    );
+    await screen.findByText(/Základ systému/); // the plan has loaded (99 is absent from it)
+    expect(screen.getByText(/#99 Neznáma úloha/)).toBeInTheDocument();
+    // The fallback carries no hierarchy separator.
+    expect(screen.queryByText(/›/)).not.toBeInTheDocument();
+  });
+});
+
+// The pure ancestry lookup behind Director #4 — matched by number across the whole version (honest-by-construction).
+describe("findCurrentTaskPath — pure ancestry lookup (Director #4)", () => {
+  it("returns the epic/feat/task ancestry (number + title) for a task in the plan", () => {
+    expect(findCurrentTaskPath(PLAN, { number: 2, title: "AP tabuľky" })).toEqual({
+      epic: { number: 1, title: "Základ systému" },
+      feat: { number: 1, title: "Schéma databázy" },
+      task: { number: 2, title: "AP tabuľky" },
+    });
+  });
+
+  it("returns null when the task number is absent (⇒ banner fallback)", () => {
+    expect(findCurrentTaskPath(PLAN, { number: 99, title: "x" })).toBeNull();
+  });
+
+  it("returns null for a null plan or a null current task", () => {
+    expect(findCurrentTaskPath(null, { number: 1, title: "x" })).toBeNull();
+    expect(findCurrentTaskPath(PLAN, null)).toBeNull();
   });
 });

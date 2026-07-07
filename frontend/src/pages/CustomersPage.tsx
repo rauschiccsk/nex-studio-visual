@@ -224,6 +224,7 @@ export default function CustomersPage() {
           <label className="block text-xs">
             <span className="text-[var(--color-text-secondary)]">Poznámka</span>
             <textarea
+              lang="sk"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={2}

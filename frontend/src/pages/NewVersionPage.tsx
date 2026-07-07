@@ -259,6 +259,7 @@ export default function NewVersionPage() {
                 <span className="ml-1 text-[var(--color-text-muted)] font-normal text-xs">(nepovinné — brief; voľný text)</span>
               </label>
               <textarea
+                lang="sk"
                 rows={8}
                 placeholder="Opíš, čo má verzia priniesť. Napr.: Pridať platobný modul cez Tatra banku. Zákazník potrebuje automatické párovanie platieb s faktúrami a emailové notifikácie. Cieľ: funkčné platby pre pilotného zákazníka do konca mája. (AI Agent zadanie systematizuje a v Príprave sa doptá na nejasnosti.)"
                 value={zadanie}

@@ -375,6 +375,7 @@ export default function NewProjectPage() {
             {/* Description */}
             <Field label="Popis">
               <textarea
+                lang="sk"
                 rows={2}
                 placeholder="Krátky popis projektu…"
                 value={description}

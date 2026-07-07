@@ -35,6 +35,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 
 import { getTaskPlan } from "../../services/api/versions";
+import { findCurrentTaskPath, type CurrentTaskPath } from "./currentTaskPath";
 import { postPipelineActionApi } from "../../services/api/pipeline";
 import type { PipelineActionName, PipelineBoard, PipelineMessage } from "../../services/api/pipeline";
 import type {
@@ -157,17 +158,30 @@ function TechnicalDetail({ text }: { text: string }) {
   );
 }
 
-// CurrentBuildBanner (STEP 4) — a compact "Práve robím: #N title" banner pinned at the top of the rail body.
-// Fed by board.current_task (populated by the BE ONLY during Programovanie); the caller hides this entirely
-// when current_task is null. The blue dot pulses while the agent is actively working (status agent_working) —
+// CurrentBuildBanner (STEP 4) — a compact "Práve robím: …" banner pinned at the top of the rail body. Fed by
+// board.current_task (populated by the BE ONLY during Programovanie); the caller hides this entirely when
+// current_task is null. The blue dot pulses while the agent is actively working (status agent_working) —
 // derived from the live status, never guessed. This is SEPARATE from the per-node live in_progress dot: this
 // is the single "what am I on right now" line for the whole build, not a tree node.
-function CurrentBuildBanner({ number, title, working }: { number: number; title: string; working: boolean }) {
+// Director observation #4: when the task is located in the plan tree (`path`) the banner shows the full
+// "E1 <epic> › F2 <feat> › T5: <task>" hierarchy for context; otherwise it falls back to the bare "#N title".
+function CurrentBuildBanner({
+  path,
+  fallback,
+  working,
+}: {
+  path: CurrentTaskPath | null;
+  fallback: { number: number; title: string };
+  working: boolean;
+}) {
   return (
     <div className="flex flex-shrink-0 items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-surface-hover)] px-4 py-2">
       <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full bg-blue-500 ${working ? "animate-pulse" : ""}`} />
       <span className="min-w-0 truncate text-[11px] text-[var(--color-text-secondary)]">
-        <span className="font-medium text-[var(--color-text-primary)]">Práve robím:</span> #{number} {title}
+        <span className="font-medium text-[var(--color-text-primary)]">Práve robím:</span>{" "}
+        {path
+          ? `E${path.epic.number} ${path.epic.title} › F${path.feat.number} ${path.feat.title} › T${path.task.number}: ${path.task.title}`
+          : `#${fallback.number} ${fallback.title}`}
       </span>
     </div>
   );
@@ -565,8 +579,8 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
       {/* "Práve robím" banner — top of the rail body, populated by the BE only during Programovanie. */}
       {board?.current_task && (
         <CurrentBuildBanner
-          number={board.current_task.number}
-          title={board.current_task.title}
+          path={findCurrentTaskPath(plan, board.current_task)}
+          fallback={board.current_task}
           working={board.state?.status === "agent_working"}
         />
       )}

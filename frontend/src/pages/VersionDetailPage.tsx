@@ -183,6 +183,7 @@ export default function VersionDetailPage() {
                 objasňujúce otázky a vytvorí Špecifikáciu.
               </div>
               <textarea
+                lang="sk"
                 value={zadanie}
                 onChange={(e) => { setZadanie(e.target.value); setZadanieSaved(false); }}
                 rows={14}
