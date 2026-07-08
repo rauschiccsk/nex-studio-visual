@@ -1970,6 +1970,15 @@ def version_verified(db: Session, version_id: uuid.UUID, *, head: Optional[str] 
 
     Returns ``(is_verified, provenance)``. TOTAL function (never raises, always a definite answer — a flaky
     git read never silently un-verifies):
+      * ``status == 'released'`` → ``(True, 'released')`` — a shipped release is an immutable, already-shipped
+        record; its verification happened at release and NO post-release commit may un-verify it (checked
+        FIRST, before any SHA/HEAD comparison). This is the general fix for the §3.6 graduation note-move
+        (deploy._move_release_note_dir) — and any future maintenance commit — advancing HEAD past the anchored
+        ``verified_sha``/``hotovo_sha``: without it the just-graduated ``v1.0.0`` would read ``sha_drift`` and
+        drop out of ``list_verified_versions``, hard-blocking every later deploy (2nd customer / redeploy) of
+        a version that can no longer be re-verified. Guardrail: ONLY ``released`` short-circuits — every
+        non-released status keeps the byte-identical drift detection below (the real safeguard that catches
+        code changing after a Verifikácia PASS).
       * no PASS on record, or a fix directive is newer (CR-V2-055) → ``(False, 'no_pass')``.
       * PASS with ``verified_sha == 'legacy'`` (pre-anchoring backfill) → ``(True, 'legacy')`` — grandfathered.
       * PASS with no ``verified_sha`` (repo unreadable at PASS time, so never anchored) → ``(True, 'unbound')``.
@@ -1988,6 +1997,13 @@ def version_verified(db: Session, version_id: uuid.UUID, *, head: Optional[str] 
     present (and fresh), apply the SAME SHA-anchor ladder to its ``hotovo_sha`` and short-circuit; provenance
     strings are the ``hotovo_*`` variants so the FE can tell a manager signoff from an Auditor PASS. Legacy
     builds have no signature → fall through to the UNCHANGED verdict path byte-identically."""
+    # A RELEASED version is verified BY DEFINITION — checked FIRST, before any SHA/HEAD drift comparison. The
+    # §3.6 graduation note-move commit (or any later maintenance commit) advances HEAD past the anchored SHA;
+    # a shipped, immutable release must never un-verify from that. ONLY 'released' short-circuits — the drift
+    # detection below is unchanged for every non-released status (the real guardrail).
+    version = db.get(Version, version_id)
+    if version is not None and version.status == "released":
+        return True, "released"
     signoff = _manazer_signoff(db, version_id)
     if signoff is not None:
         pass_sha = signoff.get("hotovo_sha")
@@ -3267,6 +3283,39 @@ def _git_tag_version(project_root: Path, version_number: str, sha: str) -> None:
         )
     except (OSError, subprocess.SubprocessError):
         pass
+
+
+def _commit_release_note(db: Session, version_id: uuid.UUID, project_root: Path, version_number: str) -> None:
+    """Part 1 (per-app-changelog-standard.md §1): NEX Studio OWNS the user-facing ``RELEASE_NOTES.md`` —
+    (re)generate it from the completing version's Epics + commit it INTO the app repo. BEST-EFFORT, NEVER
+    raises: the note is a served artifact, not a release gate, so a git/FS hiccup must never sink a sign-off.
+
+    Placed at each completion seam BEFORE the sign-off/verified SHA is read, so the note rides the SAME
+    signed/tagged commit (and is baked into the backend image, whose Dockerfile COPYs only ``RELEASE_NOTES.md``)
+    AND :func:`version_verified` stays green — it recomputes against the note commit, not its parent.
+
+    A version already ``released`` is immutable (:func:`release_note_writer.write_release_note` returns None)
+    → no write, no commit. The commit is pathspec-scoped so only the note is committed, never stray changes."""
+    from backend.services import release_note_writer
+
+    try:
+        path = release_note_writer.write_release_note(db, version_id, project_root)
+    except Exception:  # noqa: BLE001 — best-effort artifact; a generator failure must not sink the sign-off
+        return
+    if path is None:
+        return
+    try:
+        rel = str(path.relative_to(project_root))
+    except ValueError:
+        return
+    if not _git_ok(project_root, ["add", "-A", "--", rel]):
+        return
+    # Pathspec-scoped commit → only the note lands, even if the worktree carries other changes. A no-op
+    # (note unchanged since the last commit) exits non-zero — harmless, the artifact is already in place.
+    _git_ok(
+        project_root,
+        ["commit", "-m", f"docs(release-notes): v{version_number} — user-facing changelog", "--", rel],
+    )
 
 
 def _rev_list_count(project_root: Path, baseline: Optional[str]) -> int:
@@ -6118,6 +6167,11 @@ async def _run_verifikacia_round(
     # CR-V2-056 (layer-1): bind the PASS to the commit it verified + tag it, so version_verified() recomputes
     # against the live HEAD (a moved HEAD auto-un-verifies — kills the frozen-PASS bug). slug + version_label
     # are already in scope in _run_verifikacia_round.
+    # Part 1 (per-app-changelog-standard.md §1): on a PASS, (re)generate + commit the user-facing
+    # RELEASE_NOTES.md into the app repo BEFORE anchoring the verified SHA, so the note rides the
+    # verified/tagged commit (version_verified recomputes against the note commit, not its parent).
+    if is_pass:
+        _commit_release_note(db, version_id, claude_agent.PROJECTS_ROOT / slug, version_label)
     verified_sha = _repo_head(claude_agent.PROJECTS_ROOT / slug) if is_pass else None
     if verified_sha:
         _git_tag_version(claude_agent.PROJECTS_ROOT / slug, version_label, verified_sha)
@@ -7638,9 +7692,13 @@ async def apply_action(
         # past the signed commit AUTO-UN-VERIFIES the version (``version_verified`` → ``hotovo_drift``), exactly
         # like the Auditor PASS. ``hotovo_sha`` stays None when the repo is unreadable (→ ``hotovo_unbound``).
         proj_root = claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id)
+        # Part 1 (per-app-changelog-standard.md §1): NEX Studio (re)generates + commits the user-facing
+        # RELEASE_NOTES.md from the version's Epics BEFORE anchoring the sign-off SHA, so the note rides the
+        # signed/tagged commit (baked into the image) and does not later move HEAD past the signed commit.
+        _vnum = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
+        _commit_release_note(db, version_id, proj_root, _vnum)
         hotovo_sha = _repo_head(proj_root)
         if hotovo_sha:
-            _vnum = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
             _git_tag_version(proj_root, _vnum, hotovo_sha)
         # Record EXACTLY ONE marker via the sole writer: a manazer→ai_agent conversation ``notification`` at
         # ``stage='priprava'`` carrying ``payload.hotovo`` (+ the anchored ``hotovo_sha`` when set). CRITICAL:
@@ -7944,9 +8002,12 @@ async def apply_action(
         verified_sha: Optional[str] = None
         if effective_verdict == "PASS":
             _proj_root = claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id)
+            # Part 1 (per-app-changelog-standard.md §1): (re)generate + commit the user-facing RELEASE_NOTES.md
+            # into the app repo BEFORE anchoring the verified SHA, so the note rides the verified/tagged commit.
+            _vnum = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
+            _commit_release_note(db, version_id, _proj_root, _vnum)
             verified_sha = _repo_head(_proj_root)
             if verified_sha:
-                _vnum = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
                 _git_tag_version(_proj_root, _vnum, verified_sha)
         verdict_payload: dict[str, Any] = {"verdict": effective_verdict, "phase": "verifikacia"}
         if verified_sha:

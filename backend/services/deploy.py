@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date
+from pathlib import Path
 from typing import Awaitable, Callable, Optional
 from uuid import UUID
 
@@ -498,7 +499,9 @@ async def deploy(
     # resolved above; renaming it keeps all its children under the same id. Gated on ``ok`` so a failed
     # deploy never graduates and the version stays resolvable under its old number for a retry.
     if first_prod and ok:
-        _graduate_version_in_place(db, version, FIRST_PROD_VERSION)
+        from backend.services import claude_agent
+
+        _graduate_version_in_place(db, version, FIRST_PROD_VERSION, claude_agent.PROJECTS_ROOT / project.slug)
 
     event = DeployEvent(
         customer_id=customer_id,
@@ -558,7 +561,35 @@ def _prod_url(customer_slug: str, app: str) -> str:
     return f"https://{customer_slug}-{app}.{uat_provisioner.UAT_DOMAIN_SUFFIX}"
 
 
-def _graduate_version_in_place(db: Session, version: Version, target: str) -> Version:
+def _move_release_note_dir(proj_root: Path, old_number: str, target: str) -> None:
+    """Part 1 (per-app-changelog-standard.md §4): when graduation renames the built version, MOVE its
+    committed ``RELEASE_NOTES.md`` into the target version dir + commit, so the served version number matches
+    the note dir (the endpoint globs ``v*/RELEASE_NOTES.md`` and matches by ``version_number``). Without this
+    the graduated version would show no note. BEST-EFFORT, NEVER raises (a moved note is not a release gate)."""
+    from backend.services import release_note_writer
+    from backend.services.orchestrator import _git_ok
+
+    old_file = release_note_writer.version_notes_dir(proj_root, old_number) / "RELEASE_NOTES.md"
+    new_dir = release_note_writer.version_notes_dir(proj_root, target)
+    new_file = new_dir / "RELEASE_NOTES.md"
+    if new_file == old_file or not old_file.is_file():
+        return
+    try:
+        new_dir.mkdir(parents=True, exist_ok=True)
+        old_file.replace(new_file)
+    except OSError:
+        return
+    old_rel = str(old_file.relative_to(proj_root))
+    new_rel = str(new_file.relative_to(proj_root))
+    if not _git_ok(proj_root, ["add", "-A", "--", old_rel, new_rel]):
+        return
+    _git_ok(
+        proj_root,
+        ["commit", "-m", f"docs(release-notes): graduate notes to v{target.lstrip('v')}", "--", old_rel, new_rel],
+    )
+
+
+def _graduate_version_in_place(db: Session, version: Version, target: str, proj_root: Path) -> Version:
     """Promote the BUILT ``version`` to ``target`` (v1.0.0) IN PLACE + mark it released (§3.6).
 
     A first-PROD graduation renames the version the pipeline actually built — the row
@@ -585,6 +616,7 @@ def _graduate_version_in_place(db: Session, version: Version, target: str) -> Ve
     precondition would be wrong. ``version.name`` / ``version.description`` are left untouched
     (keep the built version's own identity — §8 anti-destructive).
     """
+    old_number = version.version_number  # capture BEFORE the rename — drives the §4 note dir-move
     if version.version_number != target:
         clash = db.execute(
             select(Version).where(Version.project_id == version.project_id, Version.version_number == target)
@@ -598,4 +630,7 @@ def _graduate_version_in_place(db: Session, version: Version, target: str) -> Ve
     version.status = "released"
     version.release_date = date.today()
     db.flush()
+    # §4: keep the served note dir in sync with the renamed version (no-op when the number is unchanged).
+    if old_number != target:
+        _move_release_note_dir(proj_root, old_number, target)
     return version
