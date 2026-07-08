@@ -229,13 +229,16 @@ def test_metrics_aggregation_and_breakdown(db_session):
     assert m.usage.duration_seconds == 30.0
     assert m.usage.messages == 2
     v = m.by_version[0]
-    # always all 4 comparison-phase rows, in canonical order; non-running phases are present at 0
-    assert [r.phase for r in v.by_phase] == list(COMPARISON_PHASES)
+    # metrics-v3-three-phases.md Part 2: only phases that DID work are emitted, in canonical order — the
+    # zero-token phases (priprava / verifikacia here) are DROPPED (no phantom empty rows).
+    assert [r.phase for r in v.by_phase] == ["navrh", "programovanie"]
     rows = {r.phase: r for r in v.by_phase}
     assert rows["programovanie"].input_tokens == 1000
     assert rows["navrh"].input_tokens == 2000
-    assert rows["priprava"].input_tokens == 0
-    assert rows["verifikacia"].input_tokens == 0
+    assert "priprava" not in rows  # zero-token phase → no row
+    assert "verifikacia" not in rows
+    # footing preserved: the emitted phase rows still sum to the version grand total
+    assert sum(r.input_tokens for r in v.by_phase) == v.usage.input_tokens
     # no un-phased system-authored messages → the engine-overhead row foots at 0
     assert v.system_overhead.input_tokens == 0
 
@@ -426,7 +429,9 @@ def test_endpoint_returns_shape_and_404(db_session):
     assert body["slug"] == project.slug
     assert body["usage"]["input_tokens"] == 100
     assert len(body["by_version"]) == 1
-    assert len(body["by_phase"]) == len(COMPARISON_PHASES)
+    # metrics-v3-three-phases.md Part 2: only phases that did work are emitted — this project ran a single
+    # priprava turn, so exactly ONE phase row (no phantom empty rows for the other three).
+    assert [p["phase"] for p in body["by_phase"]] == ["priprava"]
     assert "system_overhead" in body and "manager" in body and "roi" in body
     assert body["roi"]["total_versions"] == 1
 

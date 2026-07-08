@@ -840,6 +840,7 @@ async def _record_parse_exhaustion(
     result: ParseFailure,
     human_hint: str,
     on_message: Optional[MessageCallback],
+    metrics_phase: Optional[str] = None,
 ) -> None:
     """CR-V2-029: record a human-readable ``system→manazer`` notification when an agent turn produced no
     parseable status block after the bounded retries.
@@ -848,7 +849,14 @@ async def _record_parse_exhaustion(
     an EMPTY 'awaiting' screen indistinguishable from a legitimate question (the agent's live output had
     streamed then vanished). The notification names the parser reason and carries a raw-output excerpt in
     its payload, so the failure is visible in both the AI Agent tab and the Vývoj board, and is debuggable
-    instead of silent. The caller still sets ``status='blocked'`` + ``block_reason='parse_exhaustion'``."""
+    instead of silent. The caller still sets ``status='blocked'`` + ``block_reason='parse_exhaustion'``.
+
+    ``metrics_phase`` (metrics-v3-followup.md C1): decouples the metrics PHASE stamp (``payload['phase']``,
+    which ``aggregate_usage_by_phase`` reads for the failed turn's usage/timing) from the ``stage`` column —
+    a v3 conversation failure attributes to Návrh/Verifikácia while ``stage`` stays ``'priprava'``. ``None``
+    (every legacy caller) keeps ``phase == stage`` — byte-for-byte the pre-v3 behaviour. ``msg.stage`` is
+    NEVER touched (deploy gate + ``_latest_navrh_gate_report_payload`` key on it) — a metrics-only stamp."""
+    phase = metrics_phase if metrics_phase is not None else stage
     msg = _record_message(
         db,
         version_id=state.version_id,
@@ -861,7 +869,7 @@ async def _record_parse_exhaustion(
             f"(dôvod: {result.reason}). {human_hint}"
         ),
         payload={
-            "phase": stage,
+            "phase": phase,
             "parse_failure_reason": result.reason,
             "raw_excerpt": result.raw,
             **(_failure_metrics_payload(result) or {}),
@@ -2228,7 +2236,11 @@ def _persist_navrh_design_doc(db: Session, state: PipelineState, block: Pipeline
 
 
 def _write_task_plan(
-    db: Session, state: PipelineState, block: PipelineStatusBlock, stage: str = "navrh"
+    db: Session,
+    state: PipelineState,
+    block: PipelineStatusBlock,
+    stage: str = "navrh",
+    metrics_phase: Optional[str] = None,
 ) -> Optional[str]:
     """Materialize the AI Agent's task-plan decomposition into Epic/Feat/Task rows.
 
@@ -2245,8 +2257,11 @@ def _write_task_plan(
     never pre-marks done); ``plain_description`` (STEP 3) is carried through; ``baseline_sha`` / ``task_count``
     / ``auto_fix_count`` stay untouched (CR-3 owns them). ``stage`` threads the honest phase into the
     notification's stage column + payload ``phase`` + the reviewable doc's provenance; default ``navrh`` is
-    legacy byte-identical.
+    legacy byte-identical. ``metrics_phase`` (metrics-v3-three-phases.md Part 1) overrides ONLY the metrics
+    ``payload['phase']`` stamp (the conversation plan round passes ``navrh`` while ``stage`` stays
+    ``priprava``); ``None`` keeps ``phase == stage`` — byte-for-byte the pre-STEP-3 behaviour.
     """
+    phase = metrics_phase if metrics_phase is not None else stage
     plan = block.plan
     if plan is None or not plan.epics:  # defensive — parse_status_block already guards this
         return "task_plan gate_report carried no plan"
@@ -2314,7 +2329,7 @@ def _write_task_plan(
         recipient="manazer",
         kind="notification",
         content=f"Plán úloh zapísaný: {n_epics} epicov, {n_feats} featov, {n_tasks} taskov. Doc: spec/task-plan.md.",
-        payload={"task_plan_summary": {"epics": n_epics, "feats": n_feats, "tasks": n_tasks}, "phase": stage},
+        payload={"task_plan_summary": {"epics": n_epics, "feats": n_feats, "tasks": n_tasks}, "phase": phase},
     )
     return None
 
@@ -2516,6 +2531,7 @@ async def invoke_agent(
     on_message: Optional[MessageCallback] = None,
     extra_payload: Optional[dict[str, Any]] = None,
     metrics: Optional["_DispatchMetrics"] = None,
+    metrics_phase: Optional[str] = None,
 ) -> PipelineStatusBlock | ParseFailure:
     """Drive one agent turn headless and record its message.
 
@@ -2543,6 +2559,14 @@ async def invoke_agent(
     across parse-retries, and the recorded message's ``payload.usage`` / ``payload.timing`` reflect
     the accumulated total. When ``None`` a fresh per-call accumulator is used (single-shot direct
     callers still get accurate per-message metrics).
+
+    ``metrics_phase`` (metrics-v3-three-phases.md Part 1): a METRICS-ONLY phase stamp written into the
+    recorded message's ``payload['phase']`` (one of ``STAGE_VALUES`` — ``navrh`` / ``programovanie`` /
+    ``verifikacia``). The v3 conversation flow passes the phase for the round that produced the turn so
+    :func:`pipeline_metrics.aggregate_usage_by_phase` attributes it there instead of falling back to
+    ``msg.stage``. It does **NOT** touch ``stage`` / ``current_stage`` / any predicate — the deploy/release
+    gate still reads the STAGE. ``None`` (every legacy caller) omits the key → byte-for-byte the historical
+    payload, so attribution falls back to ``msg.stage`` exactly as before.
     """
     slug = _project_slug_for_version(db, version_id)
     session_id, is_first = _resolve_orch_session(db, slug, role)
@@ -2739,6 +2763,10 @@ async def invoke_agent(
             # Caller-supplied structural markers (e.g. is_fix_edit) for the deterministic
             # open-finding count — orchestrator record, not agent self-report (§5).
             **(extra_payload or {}),
+            # metrics-v3-three-phases.md Part 1: the metrics-only phase stamp (v3 conversation flow). Spread
+            # AFTER extra_payload so this orchestrator-owned stamp is never clobbered; omitted entirely when
+            # None → aggregate_usage_by_phase falls back to msg.stage (legacy payload byte-for-byte unchanged).
+            **({"phase": metrics_phase} if metrics_phase is not None else {}),
             # WS-D (CR-NS-036) token usage + dispatch timing for this turn — placed AFTER the
             # extra_payload spread so these orchestrator-owned metrics are never clobbered. usage is
             # None when no envelope carried it (never fabricated); timing accumulates parse-retries.
@@ -2764,6 +2792,7 @@ async def invoke_agent_with_parse_retry(
     on_message: Optional[MessageCallback] = None,
     extra_payload: Optional[dict[str, Any]] = None,
     metrics: Optional["_DispatchMetrics"] = None,
+    metrics_phase: Optional[str] = None,
 ) -> PipelineStatusBlock | ParseFailure:
     """Invoke the actor; on a status-block ``ParseFailure``, re-invoke (bounded).
 
@@ -2802,6 +2831,7 @@ async def invoke_agent_with_parse_retry(
         on_message=on_message,
         extra_payload=extra_payload,
         metrics=turn_metrics,
+        metrics_phase=metrics_phase,
     )
     attempts = 0
     while isinstance(result, ParseFailure) and attempts < _PARSE_RETRIES:
@@ -2834,6 +2864,7 @@ async def invoke_agent_with_parse_retry(
             on_message=on_message,
             extra_payload=extra_payload,
             metrics=turn_metrics,
+            metrics_phase=metrics_phase,
         )
     return result
 
@@ -2983,6 +3014,7 @@ async def _invoke_plan_pass(
     on_event: Optional[claude_agent.EventCallback] = None,
     on_message: Optional[MessageCallback] = None,
     stage: str = "navrh",
+    metrics_phase: Optional[str] = None,
 ) -> Any:
     """One bounded task_plan generation pass with per-pass parse-retry (v0.7.3, CR-1; v2 CR-V2-011).
 
@@ -2996,7 +3028,13 @@ async def _invoke_plan_pass(
     audit ``pipeline_message`` (author=``ai_agent``, stage=``navrh``, kind=``notification`` — these are
     not status blocks, so ``note``-style) with the turn's accumulated usage/timing, so the ``on_message``
     broadcast + WS-D metrics are preserved. Returns the parsed narrowed model, or a :class:`ParseFailure`
-    on retry-exhaustion (carrying the accumulated metrics → the round's fail-closed HALT)."""
+    on retry-exhaustion (carrying the accumulated metrics → the round's fail-closed HALT).
+
+    ``metrics_phase`` (metrics-v3-three-phases.md Part 1): overrides the synthetic note's ``payload['phase']``
+    (the metrics stamp) WITHOUT moving ``msg.stage`` — the STEP-3 conversation plan round passes ``navrh``
+    while its ``stage`` stays ``priprava``. ``None`` (the legacy Návrh caller) keeps ``phase == stage``,
+    byte-for-byte the pre-STEP-3 behaviour."""
+    phase = metrics_phase if metrics_phase is not None else stage
     metrics = _DispatchMetrics()
     result = await _plan_pass_once(
         db,
@@ -3067,7 +3105,7 @@ async def _invoke_plan_pass(
         recipient="manazer",
         kind="notification",
         content=label_fn(result),
-        payload={"usage": metrics.usage_payload(), "timing": metrics.timing_payload(), "phase": stage},
+        payload={"usage": metrics.usage_payload(), "timing": metrics.timing_payload(), "phase": phase},
     )
     if on_message is not None:
         await on_message(msg)
@@ -4427,6 +4465,9 @@ async def run_conversation_turn(
         prompt=prompt,
         on_event=on_event,
         on_message=on_message,
+        # metrics-v3-three-phases.md Part 1: a pre-build conversation turn is Návrh work (alignment +
+        # specification) — stamp 'navrh' for metrics while stage stays 'priprava' (the routing/gate register).
+        metrics_phase="navrh",
     )
 
     if isinstance(result, ParseFailure):
@@ -4442,6 +4483,9 @@ async def run_conversation_turn(
             result=result,
             human_hint="Napíš mu znova alebo upresni, čo potrebuješ.",
             on_message=on_message,
+            # metrics-v3-followup.md C1: a pre-build conversation failure is Návrh work — stamp 'navrh' for
+            # metrics while stage stays 'priprava' (mirrors the SUCCESS turn's metrics_phase='navrh').
+            metrics_phase="navrh",
         )
         db.flush()
         return state
@@ -4545,7 +4589,15 @@ async def _run_conversation_plan_round(
         f"`{spec_rel}` (jediný zdroj pravdy) a plán postav podľa jej AKTUÁLNEHO stavu."
     )
     settled = await _generate_incremental_plan(
-        db, state, stage="priprava", on_event=on_event, directive=directive, on_message=on_message
+        db,
+        state,
+        stage="priprava",
+        on_event=on_event,
+        directive=directive,
+        on_message=on_message,
+        # metrics-v3-three-phases.md Part 1: the task plan is Návrh work — attribute its tokens to 'navrh'
+        # for metrics while stage stays the conversation register's 'priprava' (routing unchanged).
+        metrics_phase="navrh",
     )
     if settled is not None:
         return settled  # a plan-pass failure already settled (blocked / awaiting_manazer)
@@ -4661,6 +4713,10 @@ async def _run_conversation_kontrola_round(
         recipient="manazer",
         on_message=on_message,
         extra_payload={"kontrola": True},
+        # metrics-v3-three-phases.md Part 1: the honest self-check is Verifikácia work — stamp 'verifikacia'
+        # for metrics while stage STAYS 'priprava' so it remains invisible to the release/deploy path (a
+        # verifikacia STAGE reads as a release PASS; only the metrics PHASE moves).
+        metrics_phase="verifikacia",
     )
 
     if isinstance(result, ParseFailure):
@@ -4677,6 +4733,9 @@ async def _run_conversation_kontrola_round(
             result=result,
             human_hint="Napíš mu znova alebo upresni, čo má prekontrolovať.",
             on_message=on_message,
+            # metrics-v3-followup.md C1: the honest self-check is Verifikácia work — stamp 'verifikacia' for
+            # metrics while stage STAYS 'priprava' (mirrors the SUCCESS kontrola turn's metrics_phase).
+            metrics_phase="verifikacia",
         )
         db.flush()
         return state
@@ -4735,6 +4794,7 @@ async def _settle_plan_pass_failure(
     note: str,
     on_message: Optional[MessageCallback],
     stage: str = "navrh",
+    metrics_phase: Optional[str] = None,
 ) -> PipelineState:
     """Settle a failed folded task-plan pass (skeleton or per-feat) — R1 envelope-loss parity (v0.7.3,
     CR-1; v2 CR-V2-011 — the plan folds into Návrh, the Coordinator relay is retired, design §2.2).
@@ -4751,12 +4811,19 @@ async def _settle_plan_pass_failure(
       and HALT ``blocked`` with an ACCURATE ``block_reason`` — ``agent_error`` when it was still a
       ``ClaudeAgentError`` (timeout/crash with no audit baseline), ``parse_exhaustion`` only for a
       genuinely unparseable structured output. Never mislabel a timeout as ``parse_exhaustion``.
+
+    ``metrics_phase`` (metrics-v3-followup.md C1): decouples the metrics PHASE stamp (``payload['phase']``)
+    from the ``stage`` column, exactly like :func:`_record_parse_exhaustion` and
+    :func:`_generate_incremental_plan`. The STEP-3 conversation plan round passes ``navrh`` so a failed
+    plan pass attributes to Návrh for metrics while its ``stage`` stays the conversation register's
+    ``priprava``; ``None`` (the legacy Návrh caller) keeps ``phase == stage`` — byte-for-byte unchanged.
     """
     if failed.lost_work is not None:
         state.status = "awaiting_manazer"
         state.next_action = failed.lost_work["next_action"]
         db.flush()
         return state
+    phase = metrics_phase if metrics_phase is not None else stage
     msg = _record_message(
         db,
         version_id=state.version_id,
@@ -4765,7 +4832,7 @@ async def _settle_plan_pass_failure(
         recipient="manazer",
         kind="notification",
         content=f"Plán úloh sa nepodarilo vygenerovať: {note}. Usmerni agenta (Uprav) a zopakuj.",
-        payload={"phase": stage, **(_failure_metrics_payload(failed) or {})},
+        payload={"phase": phase, **(_failure_metrics_payload(failed) or {})},
     )
     if on_message is not None:
         await on_message(msg)
@@ -4786,6 +4853,7 @@ async def _generate_incremental_plan(
     on_event: Optional[claude_agent.EventCallback],
     directive: Optional[str],
     on_message: Optional[MessageCallback],
+    metrics_phase: Optional[str] = None,
 ) -> Optional[PipelineState]:
     """Generate the EPIC→FEAT→TASK task plan INCREMENTALLY and materialize it (CR-V2-011; STEP 3 re-home).
 
@@ -4807,6 +4875,11 @@ async def _generate_incremental_plan(
     assembled block + both plan-pass helpers + both settles + the reviewable doc — nothing hardcodes
     ``navrh`` (step3-plan-design.md FIX1); default-free (the caller always passes it explicitly).
 
+    ``metrics_phase`` (metrics-v3-three-phases.md Part 1): decouples the metrics PHASE stamp (``payload
+    ['phase']``) from the ``stage`` column. The STEP-3 conversation plan round passes ``navrh`` so the task
+    plan attributes to Návrh for metrics while its ``stage`` stays the conversation register's ``priprava``.
+    ``None`` (the legacy Návrh caller) keeps ``phase == stage`` — byte-for-byte the pre-STEP-3 behaviour.
+
     Fail-closed (NO parse exhaustion on a large plan — that is the whole point of the incremental passes):
     a skeleton/per-feat exhaustion → ``blocked`` via :func:`_settle_plan_pass_failure` **naming the feat**,
     writing **nothing**; :data:`MAX_PLAN_FEATS` caps total feats; a defensive assemble/write failure →
@@ -4814,6 +4887,9 @@ async def _generate_incremental_plan(
     success (the caller then settles for its register). The passes use the dedicated
     :func:`_invoke_plan_pass` — ``invoke_agent`` stays byte-identical."""
     version_id = state.version_id
+    # metrics-v3-three-phases.md Part 1: the metrics phase stamp for every message this round records — the
+    # conversation plan round overrides it to 'navrh' while stage stays 'priprava'; None → phase == stage.
+    phase = metrics_phase if metrics_phase is not None else stage
 
     # Pass 1 — skeleton (EPIC + FEAT, no tasks) + cross_cutting_rules.
     skeleton = await _invoke_plan_pass(
@@ -4829,6 +4905,7 @@ async def _generate_incremental_plan(
         on_event=on_event,
         on_message=on_message,
         stage=stage,
+        metrics_phase=metrics_phase,
     )
     if isinstance(skeleton, ParseFailure):
         # Skeleton failure: a genuine parse exhaustion → blocked; an envelope-loss (timeout) → R1
@@ -4840,6 +4917,7 @@ async def _generate_incremental_plan(
             note="agent nevrátil platnú kostru plánu ani po opravách",
             on_message=on_message,
             stage=stage,
+            metrics_phase=metrics_phase,  # C1: in-scope metrics phase (navrh for the STEP-3 conversation round)
         )
 
     # MAX_PLAN_FEATS cap (fail-closed) — a coarse-grained plan (module ≈ task) never needs this many.
@@ -4856,7 +4934,7 @@ async def _generate_incremental_plan(
                 f"Plán má priveľa funkcií ({len(feat_refs)} > strop {MAX_PLAN_FEATS}) — rozklad je príliš "
                 "jemnozrnný; treba hrubšiu granularitu (modul ≈ úloha, F-007 §4)."
             ),
-            payload={"phase": stage},
+            payload={"phase": phase},
         )
         if on_message is not None:
             await on_message(msg)
@@ -4879,6 +4957,7 @@ async def _generate_incremental_plan(
             on_event=on_event,
             on_message=on_message,
             stage=stage,
+            metrics_phase=metrics_phase,
         )
         if isinstance(pass_result, ParseFailure):
             # Fail-closed: one per-feat pass exhausting → HALT naming the feat, write NOTHING (no half-plan
@@ -4891,6 +4970,7 @@ async def _generate_incremental_plan(
                 note=f"úlohy pre funkciu „{feat.title}“ sa nepodarilo vygenerovať ani po opravách",
                 on_message=on_message,
                 stage=stage,
+                metrics_phase=metrics_phase,  # C1: in-scope metrics phase (navrh for the STEP-3 conversation round)
             )
         feat_tasks[(ei, fi)] = pass_result.tasks
 
@@ -4927,7 +5007,7 @@ async def _generate_incremental_plan(
             recipient="manazer",
             kind="notification",
             content=f"Zostavený plán úloh je neúplný: {exc}.",
-            payload={"phase": stage},
+            payload={"phase": phase},
         )
         if on_message is not None:
             await on_message(msg)
@@ -4975,13 +5055,13 @@ async def _generate_incremental_plan(
             # to floor the acceptance (≥1 FEATURE assertion per flagship feature, ≥1 NEGATIVE per safety prop).
             "flagship_features": skeleton.flagship_features,
             "safety_properties": [sp.model_dump(mode="json") for sp in skeleton.safety_properties],
-            "phase": stage,
+            "phase": phase,
         },
     )
     if on_message is not None:
         await on_message(plan_msg)
 
-    reason = _write_task_plan(db, state, assembled, stage=stage)
+    reason = _write_task_plan(db, state, assembled, stage=stage, metrics_phase=metrics_phase)
     if reason is not None:
         # Plan write failed → blocked: a direct system→manazer note (no Coordinator relay, design §2.2).
         msg = _record_message(
@@ -4992,7 +5072,7 @@ async def _generate_incremental_plan(
             recipient="manazer",
             kind="notification",
             content=f"Plán úloh sa nepodarilo zapísať: {reason}.",
-            payload={"phase": stage},
+            payload={"phase": phase},
         )
         if on_message is not None:
             await on_message(msg)
@@ -6923,6 +7003,10 @@ async def _run_build_round(
                 on_event=on_event,
                 on_message=on_message,
                 extra_payload={"task_id": str(task.id), "task_number": task.number, "attempt": attempt},
+                # metrics-v3-three-phases.md Part 1: stamp the build turn's metrics phase explicitly (already
+                # 'programovanie' via the stage fallback — this is robustness). Only for the conversation flow;
+                # the legacy automaton (mode NULL) passes None so its payload stays byte-for-byte unchanged.
+                metrics_phase="programovanie" if state.mode == "conversation" else None,
             )
             if isinstance(result, ParseFailure):
                 if result.lost_work is not None:

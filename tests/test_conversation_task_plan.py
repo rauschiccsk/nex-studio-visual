@@ -5,9 +5,11 @@ the frozen Špecifikácia — reusing the PROVEN incremental machinery (skeleton
 MAX_PLAN_FEATS + fail-closed HALT), NOT a whole-tree parse off one turn. Exercised against the real v2
 branch DB (4-phase CHECKs). Proves the four design fixes end-to-end:
 
-* **FIX1 (honest stage)** — every record of the conversation plan round carries ``stage='priprava'`` AND
-  ``payload['phase']=='priprava'`` (nothing hardcodes ``navrh`` on the conversation path); the Návrh path
-  stays ``navrh`` byte-identical.
+* **FIX1 (honest stage)** — every record of the conversation plan round carries ``stage='priprava'`` (the
+  routing / deploy-gate register, unchanged); its metrics ``payload['phase']`` is ``'navrh'`` per
+  metrics-v3-three-phases.md Part 1 (the task plan IS Návrh work → it attributes to Návrh for the per-phase
+  cost metric, while the STAGE the control flow reads stays ``priprava``). The Návrh path stays ``navrh``
+  byte-identical.
 * **FIX2 (button split like schvalit)** — ``determine_available_actions`` offers ``zostav_plan``
   unconditionally at ``priprava`` (state-only); the board route POST-FILTERS it to conversation +
   spec-approved + plan-not-materialized; ``apply_action`` enforces the same rule authoritatively (raises on
@@ -367,7 +369,10 @@ class TestConversationPlanRound:
         tasks = db_session.execute(select(Task).where(Task.feat_id == feats[0].id)).scalars().all()
         assert len(tasks) == 1
 
-        # FIX1: EVERY plan-round record carries the honest priprava stage AND payload phase — never navrh.
+        # FIX1 (honest STAGE) + metrics-v3-three-phases.md Part 1: EVERY plan-round record carries the honest
+        # priprava STAGE (routing / deploy gate — unchanged), while its metrics PHASE stamp is now 'navrh' —
+        # the task plan IS Návrh work, so it attributes to Návrh for the per-phase cost metric. The STAGE
+        # (not the phase stamp) is what the control flow / release gate reads, so this stays invisible there.
         plan_records = [
             m
             for m in _msgs(db_session, version.id)
@@ -377,10 +382,11 @@ class TestConversationPlanRound:
         for m in plan_records:
             assert m.stage == "priprava", f"{m.kind} recorded on stage {m.stage!r} — must be priprava"
             if isinstance(m.payload, dict) and "phase" in m.payload:
-                assert m.payload["phase"] == "priprava", f"{m.kind} payload phase {m.payload['phase']!r}"
-        # The gate_report explicitly carries phase=priprava (not navrh).
+                assert m.payload["phase"] == "navrh", f"{m.kind} payload phase {m.payload['phase']!r}"
+        # The gate_report explicitly carries the metrics phase 'navrh' (stage stays priprava).
         gate = [m for m in plan_records if m.kind == "gate_report"][-1]
-        assert gate.payload["phase"] == "priprava"
+        assert gate.payload["phase"] == "navrh"
+        assert gate.stage == "priprava"
 
     async def test_round_carries_plain_description_populated(self, db_session, monkeypatch):
         version, project = _make_version(db_session)

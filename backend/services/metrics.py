@@ -247,11 +247,30 @@ def _phase_metric(db: Session, phase: str, t: UsageTotals, flat_in: float, flat_
 def _build_phases(
     db: Session, by_phase: dict[str, UsageTotals], flat_in: float, flat_out: float
 ) -> list[PhaseMetricRead]:
-    """The 4 comparison-phase rows (always all 4, in canonical order — a non-running phase costs a
-    real 0, so the table is stable across versions)."""
-    return [
-        _phase_metric(db, phase, by_phase.get(phase, UsageTotals()), flat_in, flat_out) for phase in COMPARISON_PHASES
-    ]
+    """The comparison-phase rows for the phases that ACTUALLY did work — emit only a phase with SOME metered
+    activity (tokens OR wall-clock OR parse-attempts), in canonical ``COMPARISON_PHASES`` order
+    (metrics-v3-three-phases.md Part 2; drop predicate widened in metrics-v3-followup.md C2). A phase with NO
+    metered activity is DROPPED rather than rendered as a phantom empty row: a v3 conversation project shows
+    Návrh / Programovanie / Verifikácia (the three phases the collapsed one-partner flow stamps), a legacy
+    v1/v2 project shows whatever phases it truly used — never a permanent empty row.
+
+    The predicate is metered ACTIVITY, not tokens alone: a failed turn whose envelope carried ``timing`` but
+    no ``usage`` lands with 0 tokens + real ``duration_seconds`` (metrics-v3-followup.md C1). Dropping it on a
+    tokens-only test would (a) inflate the headline ``x_faster`` (its ``active_seconds`` vanish from the
+    denominator — a one-sided bias flattering the agent) and (b) hide its time entirely (``_overhead_totals``
+    excludes ``COMPARISON_PHASES``, so the wall-clock would foot nowhere). ``parse_attempts`` (rework with no
+    surviving usage) is likewise real activity.
+
+    Footing is preserved: a dropped phase contributed no tokens AND no time, and ``_overhead_totals`` still
+    folds every non-comparison bucket, so the per-phase table + the system-overhead row still foot to the
+    grand total. Applied to BOTH the per-version and the cumulative ``by_phase`` (both callers route here)."""
+    rows: list[PhaseMetricRead] = []
+    for phase in COMPARISON_PHASES:
+        t = by_phase.get(phase)
+        if t is None or not (t.input_tokens or t.output_tokens or t.duration_seconds or t.parse_attempts):
+            continue
+        rows.append(_phase_metric(db, phase, t, flat_in, flat_out))
+    return rows
 
 
 def _overhead_totals(by_phase: dict[str, UsageTotals]) -> UsageTotals:
