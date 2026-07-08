@@ -7,9 +7,12 @@ ephemeral ``docker run --rm`` sibling of THIS backend image (launched via the mo
 ``/var/run/docker.sock``, same as any sibling launch) where:
 
   * the project is bind-mounted ``:ro`` → a raw-shell write is kernel-refused ("Read-only file system");
-  * ONLY the project (``:ro``) + the ``~/.claude`` auth dir (``:ro``, + a tmpfs scratch) are mounted —
-    NO docker.sock, NO ``/opt/customers``, NO ``/opt/uat``, NO credentials store, NO ``/opt/infra``, NO
-    knowledge mount → the sidecar can see and reach nothing but the one project it is consulting;
+    THIS is the guarantee — the AI can read the one project but cannot mutate it (no write tools either);
+  * ONLY the project (``:ro``) + the ``~/.claude`` auth/config dir (WRITABLE — so ``claude`` persists and
+    ``--resume``s its OWN session state, exactly as the in-container build turns do; a writable config dir
+    does NOT let the AI touch the project) are mounted — NO docker.sock, NO ``/opt/customers``, NO
+    ``/opt/uat``, NO credentials store, NO ``/opt/infra``, NO knowledge mount → the sidecar can see and
+    reach nothing but the one project it is consulting;
   * the per-turn ``claude`` flags are byte-identical to the in-process turn (reused from
     :func:`claude_agent.build_claude_argv`) so the sidecar and in-process turns differ only in transport.
 
@@ -54,15 +57,14 @@ from backend.services.project_specs import _SLUG_RE as _PROJECT_SLUG_RE
 
 logger = logging.getLogger(__name__)
 
-#: In-container auth dir (mounted ``:ro``) + a PRE-POSITIONED writable tmpfs scratch + the env that points
-#: ``claude`` at the auth dir. ``CLAUDE_CONFIG_DIR`` currently points at the ``:ro`` auth mount — claude READS
-#: its OAuth token there. Whether ``claude`` ALSO needs a WRITABLE state dir under ``CLAUDE_CONFIG_DIR`` is
-#: pending Dedo's live smoke (konzultacia-sidecar-followup.md Fix 2): IF it does, wire the writable state at
-#: :data:`_CLAUDE_SCRATCH_DIR` (OAuth still read from the ``:ro`` mount) so a consult never depends on writing
-#: the real ``~/.claude``; IF claude tolerates the ``:ro`` config dir, the now-unused tmpfs can be dropped.
-#: NOT guessed here — the tmpfs is pre-positioned but not yet referenced by any env/HOME, awaiting that result.
+#: In-container auth/config dir (mounted WRITABLE) + the env that points ``claude`` at it. ``CLAUDE_CONFIG_DIR``
+#: points at this mount — claude READS its MAX-subscription OAuth token there AND WRITES/``--resume``s its own
+#: session state there. A live consult runs ``claude --resume <build-session-uuid>`` (it resumes the done
+#: version's existing session), which writes session state under ``CLAUDE_CONFIG_DIR``; a ``:ro`` mount made
+#: the kernel refuse that write (EROFS) → the turn failed (live bug, v3 2026-07-08). The mount is therefore
+#: writable, exactly as the in-container build turns already write ``~/.claude`` today. This does NOT weaken
+#: the project read-only guarantee: the PROJECT stays ``:ro`` (kernel-enforced) and the AI has no write tools.
 _CLAUDE_AUTH_DIR = "/home/andros/.claude"
-_CLAUDE_SCRATCH_DIR = "/home/andros/.claude-scratch"
 
 #: The sidecar runs as this unprivileged host user (the same user the backend runs as) — never root.
 _SIDECAR_USER = "andros"
@@ -175,8 +177,9 @@ def build_sidecar_argv(
       * project bind ``:ro`` (the KERNEL read-only guarantee) at the SAME in-container path the backend uses
         (``/opt/projects/<slug>``), sourced from the translated HOST path — the slug is validated and the
         resolved source is containment-asserted FIRST so a ``..`` can never broaden the mount (Fix 1);
-      * ``~/.claude`` bind ``:ro`` (MAX-subscription OAuth) + ``CLAUDE_CONFIG_DIR`` at that ``:ro`` mount,
-        plus a pre-positioned ``--tmpfs`` scratch NOT yet wired to claude's state (pending live smoke — Fix 2);
+      * ``~/.claude`` bind WRITABLE (MAX-subscription OAuth) + ``CLAUDE_CONFIG_DIR`` at that mount, so claude
+        reads its token AND persists/``--resume``s its own session state there (as the build turns do) — the
+        writable config dir does NOT let the AI touch the project (no write tools + the kernel ``:ro`` project);
       * ``-w`` the project dir (cwd = project, as in-process);
       * ``--entrypoint claude`` + the reused per-turn claude flags.
 
@@ -205,13 +208,12 @@ def build_sidecar_argv(
         # with, so --resume/cwd/relative reads all resolve identically to the in-process turn.
         "-v",
         f"{host_project_dir}:{container_project_dir}:ro",
-        # MAX-subscription auth mounted READ-ONLY (OAuth token). The --tmpfs is a PRE-POSITIONED writable
-        # scratch; it is NOT yet wired to claude's state (CLAUDE_CONFIG_DIR → the :ro mount) — the wiring
-        # decision is deferred to Dedo's live smoke (Fix 2), not guessed here.
+        # MAX-subscription auth/config dir mounted WRITABLE (OAuth token in). A live consult runs
+        # `claude --resume`, which WRITES session state under CLAUDE_CONFIG_DIR → a :ro mount kernel-refused
+        # it (EROFS, live bug v3 2026-07-08). Writable so claude persists/resumes its own session, exactly as
+        # the in-container build turns do — the project stays :ro (the guarantee) and the AI has no write tools.
         "-v",
-        f"{_CLAUDE_AUTH_DIR}:{_CLAUDE_AUTH_DIR}:ro",
-        "--tmpfs",
-        _CLAUDE_SCRATCH_DIR,
+        f"{_CLAUDE_AUTH_DIR}:{_CLAUDE_AUTH_DIR}",
         "-e",
         f"CLAUDE_CONFIG_DIR={_CLAUDE_AUTH_DIR}",
         "-w",

@@ -75,13 +75,27 @@ async def test_sidecar_mounts_project_read_only_at_host_path(monkeypatch) -> Non
     assert _value_after(argv, "-w") == "/opt/projects/acme"  # cwd = project, as in-process
 
 
-async def test_sidecar_mounts_auth_read_only_with_tmpfs_scratch(monkeypatch) -> None:
+async def test_sidecar_mounts_auth_writable_no_tmpfs(monkeypatch) -> None:
     argv = await _sidecar_argv(monkeypatch)
     binds = [argv[i + 1] for i, a in enumerate(argv) if a == "-v"]
-    # MAX-subscription OAuth auth dir mounted READ-ONLY (never writable), plus a tmpfs scratch + CONFIG_DIR.
-    assert "/home/andros/.claude:/home/andros/.claude:ro" in binds
-    assert _value_after(argv, "--tmpfs") == "/home/andros/.claude-scratch"
+    # MAX-subscription OAuth auth/config dir mounted READ-WRITE so claude can persist + --resume its own
+    # session state (exactly as the in-container build turns already do). CLAUDE_CONFIG_DIR points at it.
+    assert "/home/andros/.claude:/home/andros/.claude" in binds
+    assert "/home/andros/.claude:/home/andros/.claude:ro" not in binds  # NOT read-only anymore
+    # The dead --tmpfs scratch (only existed for the :ro scenario) is gone — claude writes ~/.claude directly.
+    assert "--tmpfs" not in argv
+    assert "/home/andros/.claude-scratch" not in " ".join(argv)
     assert _value_after(argv, "-e") == "CLAUDE_CONFIG_DIR=/home/andros/.claude"
+
+
+async def test_auth_dir_writable_so_resume_can_persist(monkeypatch) -> None:
+    # Regression guard for the LIVE bug (v3 2026-07-08): the real consult runs `claude --resume`, which
+    # WRITES session state into CLAUDE_CONFIG_DIR = the mounted ~/.claude. A :ro auth mount kernel-refused
+    # that write (EROFS) → the turn failed. The auth bind MUST be writable (no :ro suffix).
+    argv = await _sidecar_argv(monkeypatch)
+    binds = [argv[i + 1] for i, a in enumerate(argv) if a == "-v"]
+    auth_bind = next(b for b in binds if b.startswith("/home/andros/.claude:"))
+    assert not auth_bind.endswith(":ro"), f"auth bind must be writable for --resume, got {auth_bind!r}"
 
 
 async def test_sidecar_reuses_readonly_tool_flags(monkeypatch) -> None:
