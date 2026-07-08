@@ -45,6 +45,31 @@ CLAUDE_INVOKE_TIMEOUT = settings.claude_invoke_timeout
 #: small (CR-NS-018). 64 MB is generous and bounded.
 _STREAM_LINE_LIMIT = 64 * 1024 * 1024
 
+#: The known WRITE / EXECUTE / spawn tools a read-only turn must NOT reach (konzultacia-mode.md Part 1).
+#: When ``invoke_claude`` is given an explicit ``allowed_tools`` set, every one of these NOT in that set is
+#: passed to ``--disallowedTools`` — a CLI DENY, which ALWAYS wins over the project ``settings.json`` allow
+#: list (the ai-agent profile allows Edit/Write/Bash). So the hard guarantee is the ABSENCE of any write
+#: tool from the turn (per the Bash-permission lesson), not a "read-only Bash". Sub-agent spawn is denied
+#: under BOTH names: ``Agent`` (Claude Code 2.x) AND ``Task`` (historical/SDK) — the CLI spawns helpers via
+#: ``Task`` (see ``_kill_process_tree``) and the sibling ``pipeline_activity._HELPER_SPAWN_TOOLS`` keys on
+#: both, so a rename can't silently reopen the hole; a helper would run with its OWN write-capable profile
+#: and could mutate the project (konzultacia-followup.md Fix 2a). Also denied: the orchestration / skill /
+#: tool-loading meta-tools ``Workflow`` / ``Skill`` / ``ToolSearch`` — a live read-only smoke showed these
+#: remain in a headless session and could indirectly spawn a write-capable sub-agent or load a mutating
+#: deferred/MCP tool; a read-only consult needs none of them (Read/Grep/Glob suffice to read the project).
+_MUTATING_TOOLS: tuple[str, ...] = (
+    "Bash",
+    "Write",
+    "Edit",
+    "MultiEdit",
+    "NotebookEdit",
+    "Agent",
+    "Task",
+    "Workflow",
+    "Skill",
+    "ToolSearch",
+)
+
 
 class ClaudeAgentError(RuntimeError):
     """claude CLI invocation failed (non-zero exit, timeout, decode failure)."""
@@ -135,6 +160,65 @@ def _structured_from(envelope: dict) -> Optional[dict]:
     return obj if isinstance(obj, dict) else None
 
 
+def build_claude_argv(
+    *,
+    streaming: bool,
+    claude_session_id: UUID,
+    prompt: str,
+    charter_text: Optional[str],
+    model: Optional[str] = None,
+    effort: Optional[str] = None,
+    json_schema: Optional[dict] = None,
+    allowed_tools: Optional[list[str]] = None,
+) -> list[str]:
+    """Compose the ``claude -p`` argv shared by the in-process turn AND the OS-isolated consult sidecar.
+
+    The SINGLE source of the per-turn ``claude`` flags (konzultacia-sidecar-sandbox.md Part 1): both
+    :func:`_invoke_once` (in-process subprocess) and :func:`consult_sandbox.run_consult_in_sandbox` (the
+    ``docker run --entrypoint claude`` sidecar) call this so the two transports stay byte-identical except
+    for the container wrapper. Returns the full argv beginning with the literal ``"claude"``; the sidecar
+    drops that leading element (the entrypoint provides it) and appends the rest after the image.
+
+    Flags, in order:
+      * ``--output-format`` — ``stream-json`` (+ ``--verbose``) when ``streaming`` else ``json`` (WS-D,
+        CR-NS-036: json carries the usage/cost envelope; the sidecar is always non-streaming → json).
+      * ``charter_text`` given (first turn for this session — already read by the caller via
+        :func:`_load_charter`, whose descriptive error is preserved) → ``--session-id`` +
+        ``--append-system-prompt``; else ``--resume`` the existing session.
+      * ``--model`` / ``--effort`` (CR-NS-040) when set; unset → no flag (CLI default).
+      * ``--json-schema`` (R3, v0.7.0) when set → grammar-constrain the status block at the source.
+      * ``allowed_tools`` given (konzultacia-mode.md Part 1 + konzultacia-followup.md Fix 2) → the
+        EXCLUSIVE, deny-by-default read-only profile: ``--allowedTools`` auto-approves exactly those,
+        ``--disallowedTools`` hard-denies every :data:`_MUTATING_TOOLS` member NOT in the set (a CLI deny
+        wins over the project ``settings.json`` allow), and ``--permission-mode default`` makes the allow
+        list exclusive (every other/MCP/future tool denied in headless). Unset → no tool flags (build
+        turns, byte-identical).
+    The positional ``prompt`` is always last.
+    """
+    if streaming:
+        args = ["claude", "-p", "--output-format", "stream-json", "--verbose"]
+    else:
+        args = ["claude", "-p", "--output-format", "json"]
+    if charter_text is not None:
+        args += ["--session-id", str(claude_session_id), "--append-system-prompt", charter_text]
+    else:
+        args += ["--resume", str(claude_session_id)]
+    if model:
+        args += ["--model", model]
+    if effort:
+        args += ["--effort", effort]
+    if json_schema is not None:
+        args += ["--json-schema", json.dumps(json_schema)]
+    if allowed_tools is not None:
+        args += ["--allowedTools", ",".join(allowed_tools)]
+        deny = [t for t in _MUTATING_TOOLS if t not in allowed_tools]
+        if deny:
+            args += ["--disallowedTools", ",".join(deny)]
+        args += ["--permission-mode", "default"]
+    args.append(prompt)
+    return args
+
+
 async def invoke_claude(
     *,
     project_slug: str,
@@ -146,6 +230,8 @@ async def invoke_claude(
     model: Optional[str] = None,
     effort: Optional[str] = None,
     json_schema: Optional[dict] = None,
+    allowed_tools: Optional[list[str]] = None,
+    sandbox: bool = False,
 ) -> tuple[str, Optional["UsageMetadata"], Optional[dict]]:
     """Invoke ``claude -p`` with bounded transient-error retry (CR-NS-018 robustness).
 
@@ -158,6 +244,19 @@ async def invoke_claude(
     grammar-constrains its output to the schema and returns the validated object in the envelope's
     ``structured_output`` field — making a malformed status block impossible at the source. Unset →
     today's behavior (no flag, ``structured_output`` ``None``).
+
+    ``allowed_tools`` (konzultacia-mode.md Part 1): an explicit read-only tool profile. When given, the
+    turn is auto-approved for exactly those tools (``--allowedTools``) AND every mutating/exec/spawn tool
+    NOT in the set is HARD-denied (``--disallowedTools`` — a CLI deny wins over the project settings.json
+    allow list), so a read-only Konzultácia turn provably cannot touch the project. Unset (default) →
+    today's full-auto build profile, byte-identical (no tool flags — the project settings.json governs).
+
+    ``sandbox`` (konzultacia-sidecar-sandbox.md Part 2): when ``True`` AND ``allowed_tools`` is set (a
+    CONSULT turn), the turn runs inside an OS-isolated sidecar container where the project is
+    KERNEL-enforced ``:ro`` and the host is unreachable — not the in-process subprocess. Build turns
+    (``allowed_tools is None``) never take the sidecar path regardless of this flag. If the sidecar is
+    unavailable it degrades to the in-process read-only turn with an honest WARNING (see
+    :func:`_invoke_once`). Default ``False`` → today's in-process behavior, byte-identical.
 
     Delegates to :func:`_invoke_once`; on a **transient** ``ClaudeAgentError``
     (529 / overloaded / 429 / rate limit in stderr) retries with bounded backoff
@@ -179,6 +278,8 @@ async def invoke_claude(
                 model=model,
                 effort=effort,
                 json_schema=json_schema,
+                allowed_tools=allowed_tools,
+                sandbox=sandbox,
             )
         except ClaudeAgentError as exc:
             if attempt < len(_TRANSIENT_BACKOFF) and _TRANSIENT_RE.search(str(exc)):
@@ -207,6 +308,8 @@ async def _invoke_once(
     model: Optional[str] = None,
     effort: Optional[str] = None,
     json_schema: Optional[dict] = None,
+    allowed_tools: Optional[list[str]] = None,
+    sandbox: bool = False,
 ) -> tuple[str, Optional["UsageMetadata"], Optional[dict]]:
     """One ``claude -p`` subprocess invocation (no retry — see :func:`invoke_claude`).
 
@@ -233,6 +336,15 @@ async def _invoke_once(
             grammar-constrains the agent's output to this JSON Schema and returns the validated
             object in the envelope's ``structured_output`` field; ``None`` → no flag (no structured
             output, fence fallback applies).
+        allowed_tools: optional read-only tool profile (konzultacia-mode.md Part 1). When given,
+            ``--allowedTools`` auto-approves exactly these tools AND ``--disallowedTools`` hard-denies
+            every :data:`_MUTATING_TOOLS` member NOT in the set (a CLI deny wins over settings.json
+            allow), so the turn cannot mutate the project. ``None`` → no tool flags (build profile).
+        sandbox: konzultacia-sidecar-sandbox.md Part 2. When ``True`` and ``allowed_tools`` is set (a
+            CONSULT turn), run inside an OS-isolated sidecar container (project KERNEL-``:ro``, host
+            unreachable) instead of this in-process subprocess; the sidecar produces the same
+            ``--output-format json`` envelope so the return contract is unchanged. Build turns
+            (``allowed_tools is None``) never take the sidecar path. ``None``/``False`` → in-process.
 
     Returns:
         ``(text, usage, structured_output)`` — the result text (stripped) + token usage + the
@@ -246,38 +358,54 @@ async def _invoke_once(
     """
     project_root = PROJECTS_ROOT / project_slug
 
-    if on_event is not None:
-        args = ["claude", "-p", "--output-format", "stream-json", "--verbose"]
-    else:
-        # WS-D (CR-NS-036): json (not text) so the envelope carries usage/cost; we return the same
-        # `result` text the text path returned, so downstream parsing is unaffected.
-        args = ["claude", "-p", "--output-format", "json"]
-    if charter_path is not None:
-        # First invocation for this claude session — create it. A missing charter raises a descriptive
-        # ClaudeAgentError (not a raw FileNotFoundError) → clear "re-create through NEX Studio v2" hint.
-        charter_text = _load_charter(charter_path)
-        args += [
-            "--session-id",
-            str(claude_session_id),
-            "--append-system-prompt",
-            charter_text,
-        ]
-    else:
-        # Subsequent invocation — resume existing session.
-        args += ["--resume", str(claude_session_id)]
-    # CR-NS-040 (E3(b/c)): per-dispatch model/effort from the project owner's user_agent_settings.
-    # Stateless per-invoke directives — they do NOT conflict with --resume/--session-id/--output-format
-    # and may vary per turn on a shared session (the session UUID is flag-agnostic). Unset → no flag
-    # (the CLI uses .claude/agents/<role>/settings.json — today's exact behavior).
-    if model:
-        args += ["--model", model]
-    if effort:
-        args += ["--effort", effort]
-    # R3 (v0.7.0): grammar-constrain the output to the status-block schema. Stateless per-invoke flag
-    # (like --model/--effort) — added BEFORE the positional prompt; unset → no flag (today's behavior).
-    if json_schema is not None:
-        args += ["--json-schema", json.dumps(json_schema)]
-    args.append(prompt)
+    # konzultacia-sidecar-sandbox.md Part 2: a CONSULT turn (read-only tool profile active) requested to run
+    # OS-isolated executes inside an ephemeral sidecar container where the project is KERNEL-enforced ``:ro``
+    # and the host is unreachable — NOT this in-process subprocess. Build turns (``allowed_tools is None``)
+    # never take this path. If the sidecar is UNAVAILABLE (no docker CLI / daemon), degrade to the in-process
+    # read-only turn below (still tool-profile read-only, just not kernel-isolated) and LOG the weaker
+    # guarantee HONESTLY — never a silent downgrade (Part 2).
+    if sandbox and allowed_tools is not None:
+        from backend.services import consult_sandbox  # local import — avoids a claude_agent↔consult_sandbox cycle
+
+        if consult_sandbox.sandbox_enabled():
+            try:
+                return await consult_sandbox.run_consult_in_sandbox(
+                    project_slug=project_slug,
+                    claude_session_id=claude_session_id,
+                    prompt=prompt,
+                    charter_path=charter_path,
+                    timeout=timeout,
+                    model=model,
+                    effort=effort,
+                    json_schema=json_schema,
+                    allowed_tools=allowed_tools,
+                )
+            except consult_sandbox.SidecarUnavailable as exc:
+                logger.warning(
+                    "consult sidecar unavailable (%s) — DEGRADED to in-process read-only turn: the project is "
+                    "tool-profile read-only but NOT kernel-isolated this turn (konzultacia-sidecar-sandbox.md)",
+                    exc,
+                )
+        else:
+            logger.info(
+                "CONSULT_SANDBOX disabled — running the consult turn in-process (tool-profile read-only, "
+                "not kernel-isolated)",
+            )
+
+    # First invocation for this claude session loads the charter (a missing one raises a descriptive
+    # ClaudeAgentError — the "re-create through NEX Studio v2" hint — not a raw FileNotFoundError); a
+    # subsequent turn passes None and the argv builder emits ``--resume`` instead.
+    charter_text = _load_charter(charter_path) if charter_path is not None else None
+    args = build_claude_argv(
+        streaming=on_event is not None,
+        claude_session_id=claude_session_id,
+        prompt=prompt,
+        charter_text=charter_text,
+        model=model,
+        effort=effort,
+        json_schema=json_schema,
+        allowed_tools=allowed_tools,
+    )
 
     logger.info(
         "Invoking claude agent: project=%s session=%s charter=%s prompt_len=%d",

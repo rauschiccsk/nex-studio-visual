@@ -31,6 +31,8 @@ from backend.schemas.pagination import PaginatedResponse
 from backend.schemas.pipeline import (
     AgentSession,
     BoardTask,
+    ChangeRequestCaptureRequest,
+    ChangeRequestCaptureResponse,
     FastFixStartRequest,
     FastFixStartResponse,
     PipelineActionRequest,
@@ -41,6 +43,7 @@ from backend.schemas.pipeline import (
     PipelineStateRead,
 )
 from backend.services import agent_terminal as agent_terminal_service
+from backend.services import change_request as change_request_service
 from backend.services import fast_fix as fast_fix_service
 from backend.services import orchestrator, pipeline_runner
 from backend.services.agent_terminal import AgentTerminalError, SessionConflictError
@@ -414,6 +417,49 @@ async def post_relay(
         pipeline_runner.schedule_dispatch(version_id, directive)
 
     return PipelineRelayResponse(deferred=result.deferred, board=_board(db, version_id))
+
+
+@router.post("/{version_id}/change-request", response_model=ChangeRequestCaptureResponse)
+def post_change_request(
+    version_id: uuid.UUID,
+    payload: ChangeRequestCaptureRequest,
+    current_user: User = Depends(require_ri_role),
+    db: Session = Depends(get_db),
+) -> ChangeRequestCaptureResponse:
+    """Capture a read-only consult's change request → a NEW draft version (konzultacia-mode.md Part 2; Fix 3/4).
+
+    ``version_id`` (path) is the FINISHED version the Konzultácia ran on; ``payload.message_id`` is the SOURCE
+    consult message that carried the ``change_request`` marker. Its project owns the new backlog ``REQ-N`` and
+    the minted next version (DRAFT / ``planned``, NO ``PipelineState``, NO build running). NEVER starts a build
+    — the Manažér opens the new version and engages deliberately. Idempotent per source message: a repeat call
+    returns the EXISTING minted version. Returns ``project_slug`` + version id/number so the FE navigates using
+    the RETURNED slug (Fix 4)."""
+    if not _version_exists(db, version_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+    # Defense: the source message must belong to the consulted version in the path (a mismatched id is a 404).
+    msg_version_id = db.execute(
+        select(PipelineMessage.version_id).where(PipelineMessage.id == payload.message_id)
+    ).scalar_one_or_none()
+    if msg_version_id is None or msg_version_id != version_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Consult message not found for this version")
+    try:
+        result = change_request_service.capture(
+            db,
+            source_message_id=payload.message_id,
+            user_id=current_user.id,
+        )
+    except ValueError as exc:
+        db.rollback()
+        detail = str(exc)
+        code = status.HTTP_404_NOT_FOUND if "not found" in detail.lower() else status.HTTP_422_UNPROCESSABLE_ENTITY
+        raise HTTPException(status_code=code, detail=detail) from exc
+    db.commit()
+    return ChangeRequestCaptureResponse(
+        version_id=result.version_id,
+        version_number=result.version_number,
+        project_slug=result.project_slug,
+        backlog_number=result.backlog_number,
+    )
 
 
 @router.post("/{version_id}/debug-terminal", response_model=AgentTerminalSessionRead)

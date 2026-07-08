@@ -307,6 +307,20 @@ class ConsultationBlock(BaseModel):
         return self
 
 
+class ChangeRequestMarker(BaseModel):
+    """A change-request the read-only Konzultácia turn raises (konzultacia-mode.md Part 2).
+
+    Set ONLY when the Manažér's ask in a read-only consult would require MODIFYING the finished app —
+    which the consult turn cannot do. The AI's plain-language reply still says "this needs a new version";
+    this structured marker lets the cockpit render the "Založiť novú verziu z tejto požiadavky" bar, whose
+    click captures ``summary`` as a backlog REQ and the new DRAFT version's Zadanie. ``None`` on every build
+    turn and on a purely advisory consult answer (nothing to change)."""
+
+    summary: str
+    #: Optional short title for the backlog REQ; falls back to a truncated ``summary`` when absent.
+    title: Optional[str] = None
+
+
 class PipelineStatusBlock(BaseModel):
     """Validated agent status block. ``extra='ignore'`` drops derived fields.
 
@@ -362,6 +376,11 @@ class PipelineStatusBlock(BaseModel):
     #: CR-V2-041: a ``kind=consultation`` turn carries the AI Agent's decision queue here (plain-language
     #: decisions + options + recommendation the Manažér answers one-at-a-time). ``None`` on every other block.
     consultation: Optional[ConsultationBlock] = None
+
+    #: konzultacia-mode.md Part 2: a read-only Konzultácia turn sets this when the Manažér's ask requires
+    #: modifying the finished app — the cockpit turns it into "Založiť novú verziu z tejto požiadavky".
+    #: ``None`` on every build turn and on a purely advisory consult answer.
+    change_request: Optional[ChangeRequestMarker] = None
 
 
 @dataclass(frozen=True)

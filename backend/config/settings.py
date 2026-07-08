@@ -26,6 +26,14 @@ class Settings(BaseSettings):
     claude_config_dir: str = "/root/.claude"
     claude_cli_path: str = "claude"
 
+    # Konzultácia OS-level read-only sidecar (konzultacia-sidecar-sandbox.md). The consult turn runs
+    # inside an ephemeral ``docker run --rm`` sibling of THIS backend image so the project is
+    # KERNEL-enforced ``:ro``. ``consult_sandbox_image`` is that image tag — a dedicated knob
+    # (env ``CONSULT_SANDBOX_IMAGE``) rather than overloading ``app_version`` (a semver, not an image
+    # tag). Default = the current v3 backend image. The on/off kill-switch is the ``CONSULT_SANDBOX``
+    # env (default on), read at turn time in :func:`backend.services.consult_sandbox.sandbox_enabled`.
+    consult_sandbox_image: str = "nex-studio-backend:v3.0.0"
+
     # Backstop timeout (seconds) for a single headless ``claude -p`` invocation
     # driven by the F-007 orchestrator (CR-NS-018 fix-round). Since agent
     # dispatch is asynchronous, this only guards a *hung* agent, so it is

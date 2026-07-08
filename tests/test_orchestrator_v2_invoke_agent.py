@@ -139,8 +139,23 @@ class FakeClaude:
         model=None,
         effort=None,
         json_schema=None,
+        allowed_tools=None,
+        sandbox=False,
     ):
-        self.calls.append({"prompt": prompt, "model": model, "effort": effort, "json_schema": json_schema})
+        # konzultacia-followup.md Fix 1: ``invoke_agent`` now forwards ``allowed_tools=`` on EVERY turn (the
+        # read-only consult profile, or ``None`` for a build). konzultacia-sidecar-sandbox.md Part 2 adds
+        # ``sandbox=`` (``True`` only for a consult turn). Accept + record both so this fake mirrors the real
+        # ``invoke_claude`` signature (else a TypeError — the regression this fixes).
+        self.calls.append(
+            {
+                "prompt": prompt,
+                "model": model,
+                "effort": effort,
+                "json_schema": json_schema,
+                "allowed_tools": allowed_tools,
+                "sandbox": sandbox,
+            }
+        )
         return self.response(prompt) if callable(self.response) else self.response
 
 

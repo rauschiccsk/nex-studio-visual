@@ -6,15 +6,25 @@
 // INVARIANT (honest, derived, never guessed): the text is derived purely from the live pipeline status. A
 // paused / token-stopped run reads "Pozastavené", NOT "working".
 
-import { Loader2 } from "lucide-react";
+import { Eye, Loader2 } from "lucide-react";
 
 import type { PipelineState } from "../../services/api/pipeline";
 import { PHASE_LABELS, PIPELINE_STATUS_TONE, TONE_BANNER, TONE_DOT } from "../cockpit/labels";
 import type { BuildPhase, StatusTone } from "../cockpit/labels";
 
+// konzultacia-mode.md Part 3: a TERMINAL version (current_stage === 'done' — a finished / released build) is
+// answerable in READ-ONLY advisory mode. The strip shows this so the Manažér knows typing now = advice, not
+// a build. No mode toggle — the version's terminal state IS the mode.
+const CONSULT_INDICATOR = "Konzultácia — poradím, nič nezmením";
+
 // Honest status text (salvaged verbatim from the retired AI Agent tab's headerStatus, design §4.4.1):
 // Voľný / Pracuje na <projekt> v<ver> — fáza X / Čaká na súhlas / Pozastavené.
 function statusText(state: PipelineState | null, projectName: string, versionNumber: string): string {
+  // Konzultácia (Part 3): a running consult turn on a terminal version reads "premýšľam…" — NOT the generic
+  // agent_working "fáza done" (the phase is meaningless in read-only advisory mode). Precedes every branch.
+  if (state && state.current_stage === "done" && state.status === "agent_working") {
+    return "Konzultácia — premýšľam…";
+  }
   // STEP 6 (Hotovo): a signed-off conversation build reads "Hotovo — pripravené na nasadenie" (green via the
   // existing done→green tone). MUST precede the bare-"Voľný" done branch below, else it is shadowed.
   if (state && state.status === "done" && state.mode === "conversation") {
@@ -54,6 +64,8 @@ export function HonestStatusStrip({ state, projectName, versionNumber, reconnect
   const text = statusText(state, projectName, versionNumber);
   const tone = statusTone(state);
   const working = state?.status === "agent_working";
+  // Konzultácia (Part 3): a terminal version (current_stage === 'done') is in read-only advisory mode.
+  const consultMode = !!state && state.current_stage === "done";
 
   return (
     <div className="flex flex-shrink-0 flex-col border-b border-[var(--color-border-default)] bg-[var(--color-surface)]">
@@ -65,6 +77,13 @@ export function HonestStatusStrip({ state, projectName, versionNumber, reconnect
           <span className="truncate">{text}</span>
         </span>
       </div>
+
+      {consultMode && (
+        <div className="flex items-center gap-1.5 border-t border-[var(--color-border-default)] px-4 py-1.5 text-[11px] text-[var(--color-text-muted)]">
+          <Eye className="h-3 w-3 flex-shrink-0" />
+          <span className="truncate">{CONSULT_INDICATOR}</span>
+        </div>
+      )}
 
       {(reconnecting || (error && !reconnecting)) && (
         <div

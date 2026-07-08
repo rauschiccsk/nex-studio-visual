@@ -192,3 +192,27 @@ class FastFixStartResponse(BaseModel):
 
     version_id: UUID
     board: PipelineBoardRead
+
+
+class ChangeRequestCaptureRequest(BaseModel):
+    """Body for ``POST /pipeline/{version_id}/change-request`` (konzultacia-mode.md Part 2; -followup Fix 3) —
+    capture a read-only consult's change request into a NEW draft version.
+
+    ``version_id`` (path) is the FINISHED version the consult ran on; ``message_id`` identifies the SOURCE
+    consult answer that carried the ``change_request`` marker. The summary/title are read from that marker
+    (authoritative) — the capture is idempotent per source message, so a double-click / revisit can never mint
+    duplicate draft versions. NO build is started — the new version is minted in DRAFT; the Manažér opens it
+    and engages deliberately."""
+
+    message_id: UUID = Field(..., description="The source consult message carrying the change_request marker.")
+
+
+class ChangeRequestCaptureResponse(BaseModel):
+    """Result of capturing a change request (konzultacia-followup.md Fix 4): the new DRAFT version's
+    ``project_slug`` + ``version_number`` + ``version_id`` (the FE navigates using the RETURNED slug so it is
+    correct even if the pin diverged from the consulted version's project) + the backlog ``REQ-N`` number."""
+
+    version_id: UUID
+    version_number: str
+    project_slug: str
+    backlog_number: int

@@ -62,6 +62,7 @@ Management and §4.0 Version Lifecycle Rules, and
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from pathlib import Path
 from typing import Optional
@@ -174,6 +175,45 @@ def _get_by_project_and_version_number(
         Version.version_number == version_number,
     )
     return db.execute(stmt).scalar_one_or_none()
+
+
+#: Bare-semver (optional leading ``v`` + optional patch) — the same shape the FE ``nextVersionNumber``
+#: helper accepts (NewVersionPage.tsx). Versions are stored WITHOUT the leading ``v``.
+_SEMVER_RE = re.compile(r"^v?(\d+)\.(\d+)(?:\.(\d+))?$")
+
+
+def suggest_next_version_number(db: Session, project_id: UUID) -> str:
+    """Suggest the next bare-semver version number for ``project_id`` (mirrors the FE ``nextVersionNumber``).
+
+    Bumps the MINOR of the most recently CREATED version (``0.1.0`` when the project has none), rolling to
+    the next MAJOR at ``.10`` (``1.9.0`` → ``2.0.0``), then bumps the PATCH to skip any already-taken number
+    so a mint never collides on the ``UNIQUE(project_id, version_number)`` pair. Falls back to a patch bump of
+    the latest when its number is not parseable semver."""
+    latest = db.execute(
+        select(Version).where(Version.project_id == project_id).order_by(Version.created_at.desc()).limit(1)
+    ).scalar_one_or_none()
+    if latest is None:
+        candidate = "0.1.0"
+    else:
+        m = _SEMVER_RE.match(latest.version_number)
+        if m is None:
+            # Not semver — append a patch so the mint still produces a fresh, unique number.
+            candidate = f"{latest.version_number}.1"
+        else:
+            maj, minor = int(m.group(1)), int(m.group(2))
+            candidate = f"{maj + 1}.0.0" if minor + 1 >= 10 else f"{maj}.{minor + 1}.0"
+
+    # Skip any already-taken number (a manually-created draft may already sit on the computed next).
+    guard = 0
+    while _get_by_project_and_version_number(db, project_id, candidate) is not None and guard < 1000:
+        guard += 1
+        m = _SEMVER_RE.match(candidate)
+        if m is None:
+            candidate = f"{candidate}.1"
+            continue
+        maj, minor, patch = int(m.group(1)), int(m.group(2)), int(m.group(3) or 0)
+        candidate = f"{maj}.{minor}.{patch + 1}"
+    return candidate
 
 
 def create(

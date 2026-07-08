@@ -27,6 +27,7 @@ import { relayPipelineMessageApi, postPipelineActionApi } from "@/services/api/p
 import ConversationThread from "@/components/riadiace/ConversationThread";
 import ConversationComposer from "@/components/riadiace/ConversationComposer";
 import SpecApprovalBar from "@/components/riadiace/SpecApprovalBar";
+import ChangeRequestBar from "@/components/riadiace/ChangeRequestBar";
 import PhaseBar from "@/components/riadiace/PhaseBar";
 import HonestStatusStrip from "@/components/riadiace/HonestStatusStrip";
 import PlanUlohRail from "@/components/riadiace/PlanUlohRail";
@@ -144,10 +145,13 @@ export default function RiadiaceCentrumPage() {
         <ConversationThread messages={board?.recent_messages ?? []} activity={activity} working={!!working} />
       </div>
 
-      {/* Approval moment — the "Schváliť Špecifikáciu" bar (STEP 2). Renders null unless the backend
-          currently offers ``approve_spec``; sits between the thread and the relay send box. */}
+      {/* Approval / change-request moment — sits between the thread and the relay send box. Both bars are
+          honest-by-construction (render null unless applicable) and mutually exclusive in practice:
+          SpecApprovalBar on a mid-build settled Príprava (STEP 2); ChangeRequestBar on a read-only consult
+          answer that raised a change_request (konzultacia-mode.md Part 3). */}
       <div className="col-start-1 row-start-3 min-w-0">
         <SpecApprovalBar board={board} versionId={versionId} onBoard={setBoard} />
+        <ChangeRequestBar board={board} versionId={versionId} />
       </div>
 
       {/* Bottom — the relay send box. */}

@@ -103,6 +103,12 @@ logger = logging.getLogger(__name__)
 AI_AGENT_ROLE = "ai_agent"
 AUDITOR_ROLE = "auditor"
 
+#: Read-only tool profile for a Konzultácia turn (konzultacia-mode.md Part 1). Passed to
+#: :func:`invoke_agent` → :func:`claude_agent.invoke_claude` so a consult on a finished version can ONLY
+#: read the project (Read/Grep/Glob) — every mutating/exec/spawn tool is hard-denied there. The
+#: non-mutating guarantee is by TOOL PROFILE (the absence of any write tool), not by prompt promise.
+CONSULT_READ_ONLY_TOOLS: list[str] = ["Read", "Grep", "Glob"]
+
 #: Default model for BOTH v2 agents when the project owner has no explicit per-role pick in Nastavenia
 #: (CR-V2-028). Both the AI Agent (the doer) and the Auditor (the verifier) are strong roles that own /
 #: verify the whole build, so the unconfigured default must be the strongest model — NOT the CLI's own
@@ -2469,6 +2475,16 @@ async def relay_manazer_message(db: Session, *, version_id: uuid.UUID, text: str
         db.flush()
         return RelayResult(state=state, deferred=True, action=None)
 
+    # Konzultácia (konzultacia-mode.md Part 1): a SETTLED TERMINAL version (``current_stage == 'done'`` —
+    # covers a done conversation build signed off via ``hotovo``, a legacy schvalit-done build, AND a
+    # PROD-released version) is answerable in READ-ONLY advisory mode. Route to the consult path — record the
+    # message + arm a read-only turn — instead of ``apply_action('ask')`` whose ``_begin_dispatch`` no-ops on
+    # ``done`` (STAGE_ACTOR has no ``done`` actor) and leaves the message a dead-end (the bug this fixes). The
+    # ``state is None`` guard above is UNCHANGED, so a NEVER-BUILT version still cold-starts a build.
+    if state.current_stage == "done":
+        new_state = _begin_consult(db, state, text)
+        return RelayResult(state=new_state, deferred=False, action="consult")
+
     # Settled → dispatch now. ``answer`` when the agent is blocked on its own question; else ``ask``.
     action = "answer" if (state.status == "blocked" and state.block_reason == "agent_question") else "ask"
     new_state = await apply_action(db, version_id=version_id, action=action, payload={"text": text})
@@ -2494,6 +2510,14 @@ async def drain_relay_turn(
     state = _get_state(db, version_id)
     if state is None:
         return None
+    # Konzultácia (konzultacia-mode.md Part 1): a drained message on a TERMINAL version (``current_stage ==
+    # 'done'``) is a read-only consult, NOT a build turn — ``_begin_dispatch`` would no-op on ``done`` (no
+    # STAGE_ACTOR) and leave it a dead-end. Arm the read-only turn instead (the enqueued Manažér message is
+    # already on the log — it is the latest ``manazer`` message the consult directive reads). Serialized
+    # behind the just-settled turn exactly like every drain.
+    if state.current_stage == "done":
+        _arm_consult_dispatch(db, state)
+        return await run_consult_turn(db, version_id, on_event, on_message=on_message)
     # Re-arm the dispatch (sole-mutator: this mutates state as a CONSEQUENCE of the queued Manažér action,
     # exactly like ``apply_action``'s ask/answer handlers do via ``_begin_dispatch``).
     _begin_dispatch(db, state)
@@ -2532,6 +2556,8 @@ async def invoke_agent(
     extra_payload: Optional[dict[str, Any]] = None,
     metrics: Optional["_DispatchMetrics"] = None,
     metrics_phase: Optional[str] = None,
+    allowed_tools: Optional[list[str]] = None,
+    sandbox: bool = False,
 ) -> PipelineStatusBlock | ParseFailure:
     """Drive one agent turn headless and record its message.
 
@@ -2567,6 +2593,16 @@ async def invoke_agent(
     ``msg.stage``. It does **NOT** touch ``stage`` / ``current_stage`` / any predicate — the deploy/release
     gate still reads the STAGE. ``None`` (every legacy caller) omits the key → byte-for-byte the historical
     payload, so attribution falls back to ``msg.stage`` exactly as before.
+
+    ``allowed_tools`` (konzultacia-mode.md Part 1): the read-only tool profile forwarded to
+    :func:`claude_agent.invoke_claude`. When given (the consult turn passes ``CONSULT_READ_ONLY_TOOLS``),
+    the turn can ONLY read the project — no ``Bash``/``Write``/``Edit``. ``None`` (every build caller) →
+    today's full-auto profile, byte-identical.
+
+    ``sandbox`` (konzultacia-sidecar-sandbox.md Part 2): forwarded to :func:`claude_agent.invoke_claude`.
+    ``True`` (only the consult turn) runs the read-only turn inside the OS-isolated sidecar (KERNEL-``:ro``
+    project, host unreachable); build turns pass ``False`` and are byte-identical. The sidecar path requires
+    ``allowed_tools`` to be set too, so a build turn can never take it regardless of this flag.
     """
     slug = _project_slug_for_version(db, version_id)
     session_id, is_first = _resolve_orch_session(db, slug, role)
@@ -2631,6 +2667,11 @@ async def invoke_agent(
                     # R3 (v0.7.0): grammar-constrain the agent's status block to the schema so a malformed
                     # block is impossible at the source; the validated object lands in structured_output.
                     json_schema=PIPELINE_STATUS_JSON_SCHEMA,
+                    # konzultacia-mode.md Part 1: the read-only tool profile (consult turn) or None (build).
+                    allowed_tools=allowed_tools,
+                    # konzultacia-sidecar-sandbox.md Part 2: route the consult turn through the OS-isolated
+                    # sidecar (True only from run_consult_turn); build turns pass False → in-process.
+                    sandbox=sandbox,
                 )
             )
     except ClaudeAgentError as exc:
@@ -2741,6 +2782,11 @@ async def invoke_agent(
             # CR-V2-041: the consultation decision queue (kind=consultation) — the FE DecisionCardStack reads
             # decisions[] from here; mode="json" for JSONB. None on every other block.
             "consultation": parsed.consultation.model_dump(mode="json") if parsed.consultation is not None else None,
+            # konzultacia-mode.md Part 2: the change-request marker a read-only consult turn raises when the
+            # Manažér's ask needs a NEW version — the FE ChangeRequestBar reads it. None on every build turn.
+            "change_request": (
+                parsed.change_request.model_dump(mode="json") if parsed.change_request is not None else None
+            ),
             # task_plan decomposition (F-007 §4/§5, CR-NS-020 CR-2; v2: folds into Návrh — CR-V2-011).
             # Persisted so the audit trail / TaskPlanPanel can show the plan and CR-3 can re-read the
             # cross-cutting rules from this gate_report payload.
@@ -2793,6 +2839,8 @@ async def invoke_agent_with_parse_retry(
     extra_payload: Optional[dict[str, Any]] = None,
     metrics: Optional["_DispatchMetrics"] = None,
     metrics_phase: Optional[str] = None,
+    allowed_tools: Optional[list[str]] = None,
+    sandbox: bool = False,
 ) -> PipelineStatusBlock | ParseFailure:
     """Invoke the actor; on a status-block ``ParseFailure``, re-invoke (bounded).
 
@@ -2832,6 +2880,8 @@ async def invoke_agent_with_parse_retry(
         extra_payload=extra_payload,
         metrics=turn_metrics,
         metrics_phase=metrics_phase,
+        allowed_tools=allowed_tools,
+        sandbox=sandbox,
     )
     attempts = 0
     while isinstance(result, ParseFailure) and attempts < _PARSE_RETRIES:
@@ -2865,6 +2915,8 @@ async def invoke_agent_with_parse_retry(
             extra_payload=extra_payload,
             metrics=turn_metrics,
             metrics_phase=metrics_phase,
+            allowed_tools=allowed_tools,
+            sandbox=sandbox,
         )
     return result
 
@@ -4507,6 +4559,157 @@ async def run_conversation_turn(
     # A normal reply → SETTLE for the Manažér (never a phase advance — the spine always hands the turn back).
     state.status = "awaiting_manazer"
     state.next_action = "AI partner odpovedal — pokračuj v rozhovore."
+    db.flush()
+    return state
+
+
+# ── Konzultácia: the read-only advisory turn on a FINISHED version (konzultacia-mode.md Part 1) ──────
+
+#: The version's terminal resting next_action after a consult answer settles — still done/released.
+_CONSULT_REST_NEXT_ACTION = "Konzultácia — verzia je hotová. Napíš ďalšiu otázku, alebo založ novú verziu z požiadavky."
+
+
+def _latest_manazer_message_text(db: Session, version_id: uuid.UUID) -> Optional[str]:
+    """The content of the LATEST ``manazer``-authored message for a version (the consult question), or None.
+
+    Restart-safe source for the consult directive: the Manažér's message is recorded (:func:`_begin_consult`
+    on the settled path, or the in-flight enqueue on the drain path) BEFORE the turn runs, so it is the latest
+    ``manazer`` message when :func:`run_consult_turn` reads it — no in-memory directive threading needed."""
+    return db.execute(
+        select(PipelineMessage.content)
+        .where(PipelineMessage.version_id == version_id, PipelineMessage.author == "manazer")
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def _consult_directive(db: Session, version_id: uuid.UUID) -> str:
+    """The read-only Konzultácia brief (konzultacia-mode.md Part 1.3) — a sibling of :func:`_conversation_directive`
+    WITHOUT the ``specification.md`` write instruction.
+
+    Contract: the partner is in read-only advisory mode over a FINISHED version — it answers/analyses/explains
+    grounded in the project's specs, code, plan, metrics and history (Read/Grep/Glob only) and must change
+    NOTHING. If the Manažér asks for a change to the app, it does NOT attempt it — it states plainly that it
+    needs a new version and emits the ``change_request`` marker (Part 2) the cockpit turns into "Založiť novú
+    verziu z tejto požiadavky". The status-block contract is appended downstream at the :func:`invoke_agent`
+    chokepoint, so the turn still ends with the machine block the engine parses (stage=``done``)."""
+    question = _latest_manazer_message_text(db, version_id)
+    ask = f"Manažér sa ťa v režime Konzultácia pýta:\n{question}\n\n" if question else ""
+    return (
+        ask + "Si v režime KONZULTÁCIA nad HOTOVOU verziou (dokončená / nasadená). Toto je LEN poradný "
+        "rozhovor: odpovedz, analyzuj a vysvetli — po ľudsky, celými vetami. Opri sa o Špecifikáciu, kód, "
+        "plán úloh, metriky a históriu projektu; máš práva LEN na ČÍTANIE (Read/Grep/Glob). NIČ NEMENÍŠ — "
+        "nepíšeš do súborov, nespúšťaš príkazy, nekomituješ; ani specification.md neupravuj.\n"
+        "Ak Manažér žiada ZMENU aplikácie (novú funkciu, opravu správania, úpravu), NEROB ju — jasne po "
+        "ľudsky povedz, že si to vyžaduje NOVÚ VERZIU, a v stavovom bloku vráť pole `change_request` s krátkym "
+        "`summary` (čo treba spraviť, jazykom Manažéra) a voliteľným `title`. Ak ide len o otázku alebo "
+        "vysvetlenie, `change_request` nevypĺňaj."
+    )
+
+
+def _arm_consult_dispatch(db: Session, state: PipelineState) -> None:
+    """Arm a read-only Konzultácia turn WITHOUT the build mutations of :func:`_begin_dispatch` (Part 1.4).
+
+    Deliberately NOT ``_begin_dispatch``: no baseline-SHA capture (the turn cannot commit — nothing to audit)
+    and NO phase move — ``current_stage`` stays ``done`` so the runner routes to :func:`run_consult_turn` and
+    the version returns to its terminal resting state (still done/released) after the answer. It only flips to
+    ``agent_working`` for the duration of the turn (a transient working state, not a sticking status) and arms
+    the durable single-flight flag so a second consult message queues behind this one instead of running
+    concurrently. The status set-listener clears ``dispatch_in_flight`` when the turn settles back off
+    ``agent_working``."""
+    state.current_actor = AI_AGENT_ROLE
+    state.dispatch_in_flight = True
+    state.status = "agent_working"
+    state.next_action = "AI partner odpovedá v režime Konzultácia (len číta, nič nemení)."
+    db.flush()
+
+
+def _begin_consult(db: Session, state: PipelineState, text: str) -> PipelineState:
+    """Record the Manažér's consult message + arm the read-only turn on a terminal version (Part 1.1).
+
+    The message is recorded at ``stage='done'`` with a ``consult`` marker (NO ``payload.phase`` in a
+    comparison bucket — it folds into system-overhead, Part 1.5). Then :func:`_arm_consult_dispatch` arms the
+    read-only turn (no ``_begin_dispatch`` mutation). Returns the armed state."""
+    _record_message(
+        db,
+        version_id=state.version_id,
+        stage="done",
+        author="manazer",
+        recipient=AI_AGENT_ROLE,
+        kind="question",
+        content=text,
+        payload={"consult": True, "phase": "done"},
+    )
+    _arm_consult_dispatch(db, state)
+    return state
+
+
+async def run_consult_turn(
+    db: Session,
+    version_id: uuid.UUID,
+    on_event: Optional[claude_agent.EventCallback] = None,
+    *,
+    on_message: Optional[MessageCallback] = None,
+) -> Optional[PipelineState]:
+    """Run ONE read-only Konzultácia turn on a FINISHED version and SETTLE back to terminal rest (Part 1).
+
+    The consult counterpart of :func:`run_conversation_turn`: it drives the SAME shared
+    :func:`invoke_agent_with_parse_retry` chokepoint but with three hard differences that make it read-only
+    and metrics-safe:
+
+      * **Read-only tool profile + OS-isolated sidecar** — ``allowed_tools=CONSULT_READ_ONLY_TOOLS``
+        (Read/Grep/Glob only) AND ``sandbox=True`` so the turn runs in an ephemeral container where the
+        project is KERNEL-enforced ``:ro`` and the host is unreachable (konzultacia-sidecar-sandbox.md); the
+        turn provably cannot write/exec/commit (Part 1.2 tool profile + the kernel guarantee).
+      * **The read-only directive** (:func:`_consult_directive`) — no ``specification.md`` write instruction
+        (Part 1.3); a change request is routed to a NEW version, never attempted here.
+      * **Metrics safety** — ``stage='done'`` + NO ``metrics_phase`` → the usage folds into the ``done``
+        bucket (system-overhead), never a navrh/programovanie/verifikacia build phase (Part 1.5).
+
+    It NEVER calls ``_begin_dispatch`` and NEVER advances a phase: on any outcome the version returns to its
+    terminal resting state (``status='done'``, ``current_stage='done'`` — still done/released). Guards on
+    ``agent_working`` like ``run_dispatch`` (a stale re-entry / already-settled turn returns untouched).
+    Returns the settled state (``None`` if the version/state vanished)."""
+    state = _get_state(db, version_id)
+    if state is None:
+        return None
+    if state.status != "agent_working":
+        # Not armed (stale re-entry, or the turn already settled) — nothing to run; leave it terminal.
+        return state
+    result = await invoke_agent_with_parse_retry(
+        db,
+        version_id=version_id,
+        role=AI_AGENT_ROLE,
+        stage="done",
+        prompt=_consult_directive(db, version_id),
+        on_event=on_event,
+        on_message=on_message,
+        allowed_tools=CONSULT_READ_ONLY_TOOLS,
+        # konzultacia-sidecar-sandbox.md Part 2: run the read-only consult in the OS-isolated sidecar
+        # (KERNEL-``:ro`` project, host unreachable). Honest in-process fallback if the sidecar is
+        # unavailable (logged by claude_agent._invoke_once). Build turns never set this.
+        sandbox=True,
+        # Part 1.5 metrics safety: NO metrics_phase → the recorded message carries no payload.phase, so
+        # aggregate_usage_by_phase folds the consult usage/timing into the 'done' bucket (system-overhead),
+        # NEVER a COMPARISON_PHASES bucket. The navrh/programovanie/verifikacia totals are untouched.
+    )
+    if isinstance(result, ParseFailure):
+        # A read-only consult that produced no parseable block: record the failure notification (with the
+        # turn's metrics, still stage='done') and return to terminal rest — a finished version never shows a
+        # 'blocked' recovery board; the Manažér just asks again.
+        await _record_parse_exhaustion(
+            db,
+            state,
+            stage="done",
+            result=result,
+            human_hint="Skús mu napísať znova alebo upresni otázku.",
+            on_message=on_message,
+        )
+    # Part 1.4: NO phase advance, NO sticking agent_working — settle back to the terminal resting state so the
+    # build state (status/current_stage/baseline SHA) is exactly what it was before the consult. The status
+    # set-listener clears the single-flight flag + baseline on this transition off 'agent_working'.
+    state.status = "done"
+    state.next_action = _CONSULT_REST_NEXT_ACTION
     db.flush()
     return state
 

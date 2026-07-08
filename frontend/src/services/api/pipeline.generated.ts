@@ -739,6 +739,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pipeline/{version_id}/change-request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Change Request
+         * @description Capture a read-only consult's change request → a NEW draft version (konzultacia-mode.md Part 2; Fix 3/4).
+         *
+         *     ``version_id`` (path) is the FINISHED version the Konzultácia ran on; ``payload.message_id`` is the SOURCE
+         *     consult message that carried the ``change_request`` marker. Its project owns the new backlog ``REQ-N`` and
+         *     the minted next version (DRAFT / ``planned``, NO ``PipelineState``, NO build running). NEVER starts a build
+         *     — the Manažér opens the new version and engages deliberately. Idempotent per source message: a repeat call
+         *     returns the EXISTING minted version. Returns ``project_slug`` + version id/number so the FE navigates using
+         *     the RETURNED slug (Fix 4).
+         */
+        post: operations["post_change_request_api_v1_pipeline__version_id__change_request_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pipeline/{version_id}/debug-terminal": {
         parameters: {
             query?: never;
@@ -2387,6 +2414,44 @@ export interface components {
              * @description New plaintext password (min 5, max 128 characters). Min 5 — Director directive 2026-05-13, NEX Studio is internal.
              */
             new_password: string;
+        };
+        /**
+         * ChangeRequestCaptureRequest
+         * @description Body for ``POST /pipeline/{version_id}/change-request`` (konzultacia-mode.md Part 2; -followup Fix 3) —
+         *     capture a read-only consult's change request into a NEW draft version.
+         *
+         *     ``version_id`` (path) is the FINISHED version the consult ran on; ``message_id`` identifies the SOURCE
+         *     consult answer that carried the ``change_request`` marker. The summary/title are read from that marker
+         *     (authoritative) — the capture is idempotent per source message, so a double-click / revisit can never mint
+         *     duplicate draft versions. NO build is started — the new version is minted in DRAFT; the Manažér opens it
+         *     and engages deliberately.
+         */
+        ChangeRequestCaptureRequest: {
+            /**
+             * Message Id
+             * Format: uuid
+             * @description The source consult message carrying the change_request marker.
+             */
+            message_id: string;
+        };
+        /**
+         * ChangeRequestCaptureResponse
+         * @description Result of capturing a change request (konzultacia-followup.md Fix 4): the new DRAFT version's
+         *     ``project_slug`` + ``version_number`` + ``version_id`` (the FE navigates using the RETURNED slug so it is
+         *     correct even if the pin diverged from the consulted version's project) + the backlog ``REQ-N`` number.
+         */
+        ChangeRequestCaptureResponse: {
+            /** Backlog Number */
+            backlog_number: number;
+            /** Project Slug */
+            project_slug: string;
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+            /** Version Number */
+            version_number: string;
         };
         /** CreateDocumentRequest */
         CreateDocumentRequest: {
@@ -6330,6 +6395,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PipelineBoardRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_change_request_api_v1_pipeline__version_id__change_request_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangeRequestCaptureRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeRequestCaptureResponse"];
                 };
             };
             /** @description Validation Error */

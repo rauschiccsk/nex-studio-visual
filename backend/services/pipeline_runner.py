@@ -194,7 +194,15 @@ async def _run(version_id: uuid.UUID, directive: str | None = None) -> None:
             # ``run_dispatch`` → ``_run_build_round`` (the EXISTING self-checking loop, reused VERBATIM —
             # routed by STAGE) instead of the conversation loop; the completion tail (MD-B) returns the stage
             # to ``priprava``, so subsequent turns route back to ``run_conversation_turn``.
-            if pre is not None and pre.mode == "conversation" and pre.current_stage != "programovanie":
+            # Konzultácia (konzultacia-mode.md Part 1): a TERMINAL version (``current_stage == 'done'`` — a
+            # hotovo-signed conversation build, a legacy schvalit-done build, or a PROD-released version)
+            # answers in READ-ONLY advisory mode. Routed by the STAGE (mode-agnostic — both a conversation and
+            # a legacy done build reach here), BEFORE the conversation/dispatch split. ``run_consult_turn``
+            # guards ``agent_working`` (a spurious _run on a settled done version is a no-op), so it fires
+            # only when a consult relay/drain armed it; it never advances a phase (returns to terminal rest).
+            if pre is not None and pre.current_stage == "done":
+                state = await orchestrator.run_consult_turn(db, version_id, on_event, on_message=on_message)
+            elif pre is not None and pre.mode == "conversation" and pre.current_stage != "programovanie":
                 state = await orchestrator.run_conversation_turn(
                     db, version_id, on_event, directive, on_message=on_message
                 )
