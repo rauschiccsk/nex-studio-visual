@@ -3318,6 +3318,30 @@ def _commit_release_note(db: Session, version_id: uuid.UUID, project_root: Path,
     )
 
 
+def _write_release_note_to_disk(db: Session, version_id: uuid.UUID, project_root: Path) -> None:
+    """obs-2 Part B Part 2 (per-app-changelog-part2-gate.md): (re)generate the completing version's
+    ``RELEASE_NOTES.md`` ONTO DISK (NO commit) immediately BEFORE a release smoke, so the ephemeral image
+    bakes the REAL note and the 2a behavioural gate asserts a SERVED note.
+
+    Why the pre-smoke write (the second-version deadlock): the note is otherwise committed only at the PASS
+    seam (:func:`_commit_release_note`) — AFTER the smoke. The 2a gate requires the endpoint to SERVE the
+    completing version, which needs the note baked into the image BEFORE the build. For a 2nd+ version the
+    served list would carry the PRIOR releases but never the completing one (its note is written only at a
+    PASS the failing 2a prevents) → the gate could never pass → deadlock. Writing the note to disk here breaks
+    it: the completing version's note rides the smoke build.
+
+    Idempotent + best-effort: a ``released`` version is immutable (:func:`release_note_writer.write_release_note`
+    returns None) and any generator/FS hiccup is swallowed so it never sinks the smoke. The PASS-time
+    :func:`_commit_release_note` seam is UNCHANGED — its idempotent re-write + commit still anchors the note to
+    the verified SHA."""
+    from backend.services import release_note_writer
+
+    try:
+        release_note_writer.write_release_note(db, version_id, project_root)
+    except Exception:  # noqa: BLE001 — a served artifact, never a release gate; a hiccup must not sink the smoke
+        logger.warning("pre-smoke release-note write failed (version_id=%s)", version_id, exc_info=True)
+
+
 def _rev_list_count(project_root: Path, baseline: Optional[str]) -> int:
     """Number of commits in ``baseline..HEAD`` — work that landed since the dispatch baseline (R1-c).
 
@@ -4176,6 +4200,217 @@ async def _run_release_acceptance(
     return ok, detail, False
 
 
+# ── obs-2 Part B Part 2: the per-app "Aktualizácie" changelog release gate (per-app-changelog-part2-gate.md) ─
+# Two NEX-Studio-OWNED release blockers, both surfaced through the SAME boot leg → smoke_block path (2c): 2b —
+# a STATIC check that the generated app's source still wires the scaffolded Aktualizácie FE tab; 2a — a
+# BEHAVIOURAL probe that the booted backend actually SERVES ``GET /api/v1/release-notes`` with the completing
+# version. A build must NOT reach done/deploy while either fails.
+
+_RELEASE_NOTES_STATUS_RE = re.compile(r"RELEASE_NOTES_STATUS (\d+)")
+# 2a probe retry budget (Fix 1, per-app-changelog-part2-followup.md): the release-notes handler reads many
+# files, so its FIRST cold request can exceed the in-probe 10s timeout → no status line. Retry the probe for a
+# bounded budget before declaring "neodpovedalo"; a REAL HTTP status (200/404/500) is evaluated on the FIRST
+# response (no wasteful retry — a genuine drop won't self-heal). Mirrors ``_await_http_ready``'s loop/budget.
+RELEASE_NOTES_PROBE_TIMEOUT = 60  # bounded retry budget for a cold/slow release-notes endpoint.
+RELEASE_NOTES_PROBE_INTERVAL = 3  # seconds between probe retries.
+#: 2b route detection — a wired ``/updates`` route in EITHER react-router form: JSX ``path="updates"`` /
+#: ``path={"/updates"}`` OR the data-router object ``path: "updates"`` (a ``path:`` property, ``createBrowser
+#: Router``). ``\bpath`` is word-anchored so a stray ``const filepath = "updates"`` does NOT match (it is not a
+#: route). react-router nests without a leading slash → ``/?`` accepts both ``updates`` and ``/updates``.
+#: Matched against comment-stripped source (a commented-out route is not a wired route).
+_UPDATES_ROUTE_RE = re.compile(r"""\bpath\s*[=:]\s*\{?\s*["']/?updates\b""")
+#: 2b page detection (broadened) — a source that IMPORTS an updates page module, so a page validly renamed away
+#: from ``Updates*.tsx`` still counts. Keyed on an ``import … from "…updates…"`` module path (case-insensitive).
+_UPDATES_PAGE_IMPORT_RE = re.compile(r"""\bfrom\s+["'][^"'\n]*updates[^"'\n]*["']""", re.IGNORECASE)
+#: 2b nav detection (route-anchored, language-agnostic) — a nav entry whose TARGET is the ``/updates`` route:
+#: ``navigate("/updates")`` / ``to="/updates"`` / ``href="/updates"`` / ``to={"/updates"}``. Keyed on the
+#: ``/updates`` navigation target (a leading-slash link path), NOT the accent-stem — so an unrelated "Naposledy
+#: aktualizované" label can't false-PASS (which would DEFEAT the gate) and an English "Updates"/"Changelog"
+#: label can't false-FAIL. The bare route ``path="updates"`` (no leading slash, no to/href/navigate) is NOT a
+#: nav target, so a route definition never satisfies the nav check.
+_UPDATES_NAV_RE = re.compile(r"""(?:navigate\(|\b(?:to|href)\s*=\s*\{?)\s*["']/updates\b""")
+
+
+def _strip_ts_comments(text: str) -> str:
+    """Strip ``/* … */`` block comments (covers JSX ``{/* … */}``) and ``// …`` line comments so a route/nav
+    detection matches only LIVE source, never a commented-out mention (a false PRESENT). Deliberately naive (a
+    ``//`` inside a string literal is dropped too) — acceptable here, the gate's patterns never live in URLs."""
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
+    return re.sub(r"(?m)//.*$", "", text)
+
+
+def _fe_src_matches(fe_src: Path, pattern: re.Pattern[str], *, exclude: "frozenset[Path]" = frozenset()) -> bool:
+    """True iff any ``frontend/src`` TypeScript/TSX source (comments stripped) matches *pattern*. Best-effort
+    per file — an unreadable file is skipped, never fatal. The router + sidebar are somewhere under this tree;
+    grepping the whole tree keeps the check robust to the generated app's exact file names. *exclude* skips the
+    Updates PAGE file(s), whose own "Aktualizácie" heading / self-route must not satisfy the WIRING checks."""
+    for pat in ("*.tsx", "*.ts"):
+        for f in fe_src.rglob(pat):
+            if f in exclude:
+                continue
+            try:
+                body = _strip_ts_comments(f.read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                continue
+            if pattern.search(body):
+                return True
+    return False
+
+
+def _check_aktualizacie_frontend(proj_root: Path) -> Optional[str]:
+    """2b (STATIC, pure) — the generated app's ``frontend/src`` still wires the scaffolded *Aktualizácie* UI:
+    ALL of an Updates page, a ``/updates`` route, and a ``/updates`` nav entry. Returns the specific
+    missing-piece message (Slovak) or ``None`` when all three are present. No boot → unit-testable.
+
+    Detectors are broadened/tightened for robustness (per-app-changelog-part2-followup.md Fix 2) so a valid
+    app is never false-blocked and a dropped piece is never false-passed:
+
+    * **Page** — any ``frontend/src/**/Updates*.tsx`` (a validly renamed page, not only ``pages/UpdatesPage.tsx``)
+      OR a source importing an updates page module — so a rename isn't blocked.
+    * **Route** — JSX ``path="updates"`` OR the data-router object ``path: "updates"``; word-anchored so a stray
+      ``const filepath = "updates"`` is not mistaken for a route.
+    * **Nav** — keyed on the ``/updates`` navigation TARGET (``navigate("/updates")`` / ``to`` / ``href``), NOT
+      the accent-stem, so an unrelated "Naposledy aktualizované" label can't false-PASS (defeating the gate) and
+      an English label can't false-FAIL.
+
+    The route + nav are WIRING that lives OUTSIDE the page (the router / sidebar), so the page file(s) are
+    excluded from those greps — a page's own self-route / heading must not paper over a dropped sidebar entry.
+    Mirrors the flagship-app drop (nex-payables: page + route + nav all missing → the first, page, message). A
+    missing ``frontend/src`` surfaces as the page message — the caller only runs this for a full web app."""
+    fe_src = Path(proj_root) / "frontend" / "src"
+    page_files = frozenset(fe_src.rglob("Updates*.tsx"))
+    if not page_files and not _fe_src_matches(fe_src, _UPDATES_PAGE_IMPORT_RE):
+        return "chýba stránka Aktualizácie (napr. frontend/src/pages/UpdatesPage.tsx)"
+    if not _fe_src_matches(fe_src, _UPDATES_ROUTE_RE, exclude=page_files):
+        return "chýba /updates route v routeri"
+    if not _fe_src_matches(fe_src, _UPDATES_NAV_RE, exclude=page_files):
+        return "chýba navigácia na /updates v menu (sidebar)"
+    return None
+
+
+def _bare_version(version_number: str) -> str:
+    """Version number without a leading ``v`` — the normalisation the served list + the completing version are
+    both compared under (``"v1.0.0"`` and ``"1.0.0"`` → ``"1.0.0"``)."""
+    return version_number[1:] if version_number.startswith("v") else version_number
+
+
+def _evaluate_release_notes(status: int, body: str, version_label: str) -> Optional[str]:
+    """2a (BEHAVIOURAL verdict, pure) — from the probed ``GET /api/v1/release-notes`` response. Returns the
+    blocker message (Slovak) or ``None`` when the endpoint served HTTP 200 AND a JSON list INCLUDING the
+    completing version (matched ``v``-normalised on the ``version`` field). Unit-testable without booting."""
+    if status != 200:
+        return f"Aktualizácie chýba: /api/v1/release-notes vrátil HTTP {status} (očakávané 200)"
+    try:
+        data = json.loads(body)
+    except (ValueError, TypeError):
+        return f"Aktualizácie chýba: /api/v1/release-notes nevrátil platný JSON (telo: {body[:120]!r})"
+    if not isinstance(data, list):
+        return "Aktualizácie chýba: /api/v1/release-notes nevrátil JSON zoznam"
+    target = _bare_version(version_label)
+    served = {_bare_version(str(item.get("version", ""))) for item in data if isinstance(item, dict)}
+    if target not in served:
+        return (
+            f"Aktualizácie chýba: /api/v1/release-notes neobsahuje verziu v{target} "
+            f"(vrátené: {sorted(served) or 'žiadne'})"
+        )
+    return None
+
+
+def _release_notes_probe_src(port: int, *, path: str = "/api/v1/release-notes") -> str:
+    """In-container stdlib probe (no curl — slim images ship none) that GETs the release-notes endpoint on the
+    backend's own ``localhost:<port>`` and prints ``RELEASE_NOTES_STATUS <code>`` + ``RELEASE_NOTES_BODY
+    <json>`` (compact single-line JSON) for :func:`_parse_release_notes_probe`. A transport error prints only
+    ``RELEASE_NOTES_ERR`` (no status line) → the caller reports "neodpovedalo". Always exits 0 — the verdict is
+    in the printed status, not the exit code."""
+    url = f"http://localhost:{port}{path}"
+    return (
+        "import sys, urllib.request, urllib.error\n"
+        "try:\n"
+        f"    r = urllib.request.urlopen('{url}', timeout=10)\n"
+        "    b = r.read().decode('utf-8', 'replace')\n"
+        "    print('RELEASE_NOTES_STATUS', getattr(r, 'status', 200))\n"
+        "    print('RELEASE_NOTES_BODY', b)\n"
+        "except urllib.error.HTTPError as e:\n"
+        "    b = e.read().decode('utf-8', 'replace')\n"
+        "    print('RELEASE_NOTES_STATUS', e.code)\n"
+        "    print('RELEASE_NOTES_BODY', b)\n"
+        "except Exception as e:\n"
+        "    print('RELEASE_NOTES_ERR', e)\n"
+        "sys.exit(0)\n"
+    )
+
+
+def _parse_release_notes_probe(out: str) -> tuple[Optional[int], str]:
+    """Parse the in-container probe stdout → ``(status, body)``. ``status`` is ``None`` when the probe printed
+    no status line (a transport error / no response); ``body`` is the raw text after the ``RELEASE_NOTES_BODY``
+    marker (empty when absent). Robust to interleaved ``docker compose`` warnings."""
+    m = _RELEASE_NOTES_STATUS_RE.search(out)
+    if m is None:
+        return None, ""
+    status = int(m.group(1))
+    marker = "RELEASE_NOTES_BODY "
+    body = ""
+    for line in out.splitlines():
+        idx = line.find(marker)
+        if idx != -1:
+            body = line[idx + len(marker) :]
+            break
+    return status, body
+
+
+async def _probe_release_notes(
+    base: list[str],
+    exec_service: str,
+    port: int,
+    version_label: str,
+    *,
+    timeout: int = RELEASE_NOTES_PROBE_TIMEOUT,
+    interval: int = RELEASE_NOTES_PROBE_INTERVAL,
+) -> tuple[bool, str]:
+    """2a (behavioural) — run the release-notes probe INSIDE *exec_service* (``docker compose exec``; host
+    ports were stripped, so probe in-network) and evaluate the response via :func:`_evaluate_release_notes`.
+    Returns ``(True, detail)`` when the endpoint serves 200 + a list including the completing version, else
+    ``(False, "Aktualizácie chýba: …")``. Never raises.
+
+    Fix 1 (per-app-changelog-part2-followup.md): the release-notes handler reads many files, so its FIRST cold
+    request can exceed the in-probe 10s timeout → no status line → a good build would be false-blocked. So RETRY
+    the probe for a bounded budget (mirrors :func:`_await_http_ready`) but ONLY when the probe COULDN'T RUN (no
+    status line — a transport error / cold-start read still in flight). A REAL HTTP status (200/404/500) is
+    evaluated on the FIRST response — no wasteful retry (a genuine 404/500 won't self-heal; a 200's verdict is
+    already final). Only "the probe never got a response" yields the transient-fail "neodpovedalo" message."""
+    cmd = base + ["exec", "-T", exec_service, "python", "-c", _release_notes_probe_src(port)]
+    attempts = max(1, timeout // interval)
+    last = "no response"
+    for i in range(attempts):
+        rc, out = await _compose_smoke_step(cmd, 30)
+        status, body = _parse_release_notes_probe(out)
+        if status is not None:  # a real HTTP status → final verdict now, never retry
+            err = _evaluate_release_notes(status, body, version_label)
+            if err:
+                return False, err
+            return True, "Aktualizácie OK — /api/v1/release-notes serves the completing version"
+        last = out.strip()[-200:] or f"exit {rc}"  # probe couldn't run (cold start / transport error) → retry
+        if i < attempts - 1:
+            await asyncio.sleep(interval)
+    return False, f"Aktualizácie chýba: /api/v1/release-notes neodpovedalo ({last})"
+
+
+async def _run_aktualizacie_gate(stack: "_SmokeStack", proj_root: Path, version_label: str) -> tuple[bool, str]:
+    """obs-2 Part B Part 2: the per-app *Aktualizácie* changelog release gate — 2b (static FE) THEN 2a
+    (behavioural BE), both release blockers. Applies ONLY to a full web app (a backend serves the endpoint + a
+    frontend hosts the tab); a pure API / worker / FE-less stack has no Aktualizácie tab requirement → SKIP (a
+    pass). 2b (cheap, no container) runs before 2a (needs the booted backend). Never raises."""
+    if stack.roles["backend"] is None or stack.roles["frontend"] is None:
+        return True, "Aktualizácie gate SKIP — nie je plná web app (backend + frontend)"
+    missing = _check_aktualizacie_frontend(proj_root)
+    if missing:
+        return False, f"Aktualizácie chýba vo frontende: {missing}"
+    port = _compose_backend_port(stack.compose)
+    if port is None:
+        return True, "Aktualizácie gate SKIP — backend port neurčiteľný (2a sa nedá odmerať)"
+    return await _probe_release_notes(stack.base, stack.roles["backend"], port, version_label)
+
+
 async def _run_release_smoke(
     project_slug: str, version_label: str, coverage_req: tuple[int, int] = (0, 0)
 ) -> tuple[tuple[bool, str], Optional[tuple[bool, str, bool]]]:
@@ -4204,6 +4439,13 @@ async def _run_release_smoke(
         boot_ok, boot_detail = await _run_app_starts_smoke(stack)
         if not boot_ok:
             return (boot_ok, boot_detail), None
+        # obs-2 Part B Part 2 (per-app-changelog-part2-gate.md): the per-app Aktualizácie changelog is a
+        # release blocker — 2b (static FE tab wired) THEN 2a (BE actually serves the completing version). A
+        # failure is surfaced as a boot-leg FAIL → smoke_block → the runtime floor bites the verdict (2c);
+        # acceptance never runs (mirrors a boot FAIL).
+        akt_ok, akt_detail = await _run_aktualizacie_gate(stack, root, version_label)
+        if not akt_ok:
+            return (False, akt_detail), None
         acceptance = await _run_release_acceptance(stack, project_slug, coverage_req)
         return (boot_ok, boot_detail), acceptance
 
@@ -4902,6 +5144,10 @@ async def _run_conversation_kontrola_round(
     # navrh gate_report — so the acceptance degrades to the anti-empty floor (ASSERTIONS_RUN>0); per-feature/
     # negative coverage is NOT enforced in the conversation flow (K-5, honestly stated, tightened later).
     coverage_req = _declared_release_coverage(db, version_id)
+    # obs-2 Part B Part 2: bake the completing version's REAL note onto disk BEFORE the smoke so the 2a gate
+    # asserts a served note (not a placeholder / a 2nd-version list missing its own note). PASS-time commit
+    # (:func:`_commit_release_note`) is unchanged — this is an idempotent pre-write.
+    _write_release_note_to_disk(db, version_id, claude_agent.PROJECTS_ROOT / slug)
     (smoke_ok, smoke_detail), acceptance = await _run_release_smoke(slug, version_label, coverage_req)
     smoke_msg = _record_message(
         db,
@@ -6071,6 +6317,10 @@ async def _run_verifikacia_round(
     # CR-V2-051: the acceptance is risk-floored against the Návrh design's DECLARED flagship features + safety
     # properties — ≥1 FEATURE assertion each, ≥1 NEGATIVE assertion each; missing coverage is a FAIL.
     coverage_req = _declared_release_coverage(db, version_id)
+    # obs-2 Part B Part 2: bake the completing version's REAL note onto disk BEFORE the smoke so the 2a gate
+    # asserts a served note (not a placeholder / a 2nd-version list missing its own note). PASS-time commit
+    # (:func:`_commit_release_note`) is unchanged — this is an idempotent pre-write.
+    _write_release_note_to_disk(db, version_id, claude_agent.PROJECTS_ROOT / slug)
     (smoke_ok, smoke_detail), acceptance = await _run_release_smoke(slug, version_label, coverage_req)
     smoke_msg = _record_message(
         db,

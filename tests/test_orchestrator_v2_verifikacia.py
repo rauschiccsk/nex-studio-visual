@@ -32,7 +32,7 @@ from backend.db.models.pipeline import PARTICIPANT_VALUES, STAGE_VALUES, Pipelin
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.versions import Version
-from backend.services import orchestrator
+from backend.services import orchestrator, release_note_writer
 from backend.services.pipeline_status import ParseFailure, PipelineStatusBlock
 
 # (pytest ``asyncio_mode = auto`` — async tests run without an explicit mark.)
@@ -841,6 +841,53 @@ async def test_declared_coverage_flows_into_release_smoke(db_session, monkeypatc
     _ban_deploy_calls(monkeypatch)
     await orchestrator.run_dispatch(db_session, version.id)
     assert seen["coverage_req"] == (2, 1)  # declared coverage reached the oracle
+
+
+# ── obs-2 Part B Part 2: the pre-smoke release-note write breaks the SECOND-version deadlock ────────────────
+
+
+async def test_verifikacia_writes_release_note_to_disk_before_smoke(db_session, monkeypatch, tmp_path):
+    # THE regression (per-app-changelog-part2-gate.md): the 2a gate requires the booted app to SERVE the
+    # completing version's note, which must be BAKED into the smoke image (built from disk) BEFORE the smoke.
+    # The note is otherwise committed only at PASS — AFTER the smoke — so for a 2nd version the served list
+    # would carry the prior releases but never the completing one → 2a can never pass → the PASS-time commit
+    # never runs → DEADLOCK. The round now writes the note to DISK before the smoke; assert (a) the write ran
+    # BEFORE the smoke and (b) the completing version's note is on disk next to the prior release.
+    monkeypatch.setattr(orchestrator.claude_agent, "PROJECTS_ROOT", tmp_path)
+    version, project = _make_version(db_session, project_dial="po_kazdej_faze")
+    # the "second version" premise — a prior release already baked on disk
+    prior = tmp_path / project.slug / "docs" / "specs" / "versions" / "v0.9.0"
+    prior.mkdir(parents=True)
+    (prior / "RELEASE_NOTES.md").write_text("## v0.9.0\n\n- Prvé vydanie.\n", encoding="utf-8")
+
+    order: list[str] = []
+    real_write = release_note_writer.write_release_note
+
+    def _spy_write(db, version_id, proj_root):
+        result = real_write(db, version_id, proj_root)
+        order.append("write")
+        return result
+
+    monkeypatch.setattr(release_note_writer, "write_release_note", _spy_write)
+
+    async def _fake_smoke(slug, version_label, coverage_req=(0, 0)):
+        order.append("smoke")
+        return (True, "app booted + responds"), (True, "acc ok", False)
+
+    monkeypatch.setattr(orchestrator, "_run_release_smoke", _fake_smoke)
+    _seed_verifikacia(db_session, version.id)
+    _stub_auditor(monkeypatch, _verdict_pass())
+    _ban_deploy_calls(monkeypatch)
+
+    await orchestrator.run_dispatch(db_session, version.id)
+
+    # (a) the note was written to disk BEFORE the smoke (the pre-smoke bake — not just the PASS-time commit)
+    assert order[0] == "write" and "smoke" in order and order.index("write") < order.index("smoke")
+    # (b) the completing version's note is on disk next to the prior release → the baked image would serve it
+    bare = orchestrator._bare_version(version.version_number)
+    note = tmp_path / project.slug / "docs" / "specs" / "versions" / f"v{bare}" / "RELEASE_NOTES.md"
+    assert note.is_file()
+    assert orchestrator._verifikacia_passed(db_session, version.id) is True
 
 
 # ── CR-V2-054: operator gate actionable — uprav routes to the AI Agent (fixer), escalation = Decision Card ──

@@ -89,16 +89,41 @@ services:
 """
 
 
+def _seed_aktualizacie_frontend(proj: Path) -> None:
+    """Seed the scaffolded *Aktualizácie* FE tab (obs-2 Part B Part 2 gate 2b): an Updates page, a ``/updates``
+    route in the router, and an "Aktualizácie" sidebar entry — so ``_check_aktualizacie_frontend`` passes."""
+    (proj / "frontend" / "src" / "pages").mkdir(parents=True, exist_ok=True)
+    (proj / "frontend" / "src" / "components" / "layout").mkdir(parents=True, exist_ok=True)
+    (proj / "frontend" / "src" / "pages" / "UpdatesPage.tsx").write_text(
+        "export default function UpdatesPage() { return <div>Aktualizácie</div>; }\n"
+    )
+    (proj / "frontend" / "src" / "App.tsx").write_text(
+        'import UpdatesPage from "./pages/UpdatesPage";\n<Route path="updates" element={<UpdatesPage />} />\n'
+    )
+    (proj / "frontend" / "src" / "components" / "layout" / "Sidebar.tsx").write_text(
+        '<NavItem label="Aktualizácie" onClick={() => navigate("/updates")} />\n'
+    )
+
+
 def _make_project(
-    root, slug: str, *, compose: bool = True, compose_yml: str = COMPOSE_YML, script: bool = False
+    root,
+    slug: str,
+    *,
+    compose: bool = True,
+    compose_yml: str = COMPOSE_YML,
+    script: bool = False,
+    frontend_tab: bool = False,
 ) -> Path:
-    """Materialise a fake project tree under *root*/<slug>; optionally seed ``release_smoke_test.sh``."""
+    """Materialise a fake project tree under *root*/<slug>; optionally seed ``release_smoke_test.sh`` and the
+    scaffolded Aktualizácie FE tab (``frontend_tab``)."""
     proj = root / slug
     proj.mkdir(parents=True, exist_ok=True)
     if compose:
         (proj / "docker-compose.yml").write_text(compose_yml)
     if script:
         (proj / "release_smoke_test.sh").write_text("#!/usr/bin/env bash\necho ASSERTIONS_RUN=1\n")
+    if frontend_tab:
+        _seed_aktualizacie_frontend(proj)
     return proj
 
 
@@ -209,7 +234,7 @@ async def test_driver_pass_runs_acceptance_no_pytest(monkeypatch, tmp_path) -> N
     """``up`` ok + app ready + the host acceptance script exit-0 with assertions → boot PASS + acceptance
     PASS, teardown runs, and NO in-container pytest is ever invoked."""
     monkeypatch.setattr(orchestrator.claude_agent, "PROJECTS_ROOT", tmp_path)
-    _make_project(tmp_path, "green", script=True)
+    _make_project(tmp_path, "green", script=True, frontend_tab=True)
     rec = _StepRecorder({"up": (0, "Started"), "ready": (0, "status 200"), "down": (0, "")})
     monkeypatch.setattr(orchestrator, "_compose_smoke_step", rec)
 
@@ -217,6 +242,13 @@ async def test_driver_pass_runs_acceptance_no_pytest(monkeypatch, tmp_path) -> N
         return 0, "ASSERTIONS_RUN=3"
 
     monkeypatch.setattr(orchestrator, "_run_acceptance_script", _script)
+
+    # obs-2 Part B Part 2: the Aktualizácie 2a behavioural probe is exercised by its own tests; here stub it
+    # green so the driver's boot→acceptance happy path (FE tab seeded → 2b passes) stays focused.
+    async def _akt_probe(*_a, **_k):
+        return True, "Aktualizácie OK"
+
+    monkeypatch.setattr(orchestrator, "_probe_release_notes", _akt_probe)
 
     (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("green", "v1.0.0")
 
