@@ -27,6 +27,7 @@ import { relayPipelineMessageApi, postPipelineActionApi } from "@/services/api/p
 import ConversationThread from "@/components/riadiace/ConversationThread";
 import ConversationComposer from "@/components/riadiace/ConversationComposer";
 import SpecApprovalBar from "@/components/riadiace/SpecApprovalBar";
+import SchvalitBar from "@/components/riadiace/SchvalitBar";
 import ChangeRequestBar from "@/components/riadiace/ChangeRequestBar";
 import PhaseBar from "@/components/riadiace/PhaseBar";
 import HonestStatusStrip from "@/components/riadiace/HonestStatusStrip";
@@ -145,12 +146,14 @@ export default function RiadiaceCentrumPage() {
         <ConversationThread messages={board?.recent_messages ?? []} activity={activity} working={!!working} />
       </div>
 
-      {/* Approval / change-request moment — sits between the thread and the relay send box. Both bars are
+      {/* Approval / change-request moment — sits between the thread and the relay send box. All bars are
           honest-by-construction (render null unless applicable) and mutually exclusive in practice:
-          SpecApprovalBar on a mid-build settled Príprava (STEP 2); ChangeRequestBar on a read-only consult
-          answer that raised a change_request (konzultacia-mode.md Part 3). */}
+          SpecApprovalBar on a settled Príprava (approve_spec, STEP 2); SchvalitBar on a Návrh gate awaiting
+          the Manažér (schvalit — advances to Programovanie); ChangeRequestBar on a read-only consult answer
+          that raised a change_request (konzultacia-mode.md Part 3). */}
       <div className="col-start-1 row-start-3 min-w-0">
         <SpecApprovalBar board={board} versionId={versionId} onBoard={setBoard} />
+        <SchvalitBar board={board} versionId={versionId} onBoard={setBoard} />
         <ChangeRequestBar board={board} versionId={versionId} />
       </div>
 
