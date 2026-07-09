@@ -155,3 +155,29 @@ def integration_client(db_session, _seed_admin):
         yield c
 
     main_app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# Create-Project KB isolation — autouse for the WHOLE integration suite
+# (docs/specs/kb-ghost-followup.md Fix A)
+# ---------------------------------------------------------------------------
+#
+# The canonical ``_isolate_create_project_kb`` fixture lives in the ROOT
+# tests/conftest.py so create-touching modules outside tests/integration/ can
+# reach it too. Here we make it autouse so EVERY integration test inherits the
+# tmp-KB redirection + real-KB sentinel — closing the Fix-A coverage gap:
+# ``test_auth_flow.py::test_login_then_create_project`` creates the slug
+# ``test-auth-project`` (one of the hand-cleaned ghost names) on the create
+# SUCCESS path and previously had NO isolation, so the ghost recurred whenever
+# ``template_init_script_path`` was configured.
+#
+# Safe for the KB/RAG read tests in this directory (e.g. test_knowledge_rag.py):
+# those monkeypatch ``settings.knowledge_base_path`` to their own tmp anyway,
+# use a private app (so the shared-app writer override is inert for them), and
+# never write to the real KB (so the sentinel is a no-op pass for them).
+
+
+@pytest.fixture(autouse=True)
+def _auto_isolate_create_project_kb(_isolate_create_project_kb):
+    """Pull the root-conftest KB isolation fixture into every integration test."""
+    yield _isolate_create_project_kb

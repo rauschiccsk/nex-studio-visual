@@ -28,6 +28,7 @@ from qdrant_client.models import (
     Filter,
     FilterSelector,
     MatchValue,
+    PointIdsList,
     PointStruct,
 )
 
@@ -230,6 +231,67 @@ class RAGIndexer:
 
         logger.info(f"Qdrant delete: removed {count} chunks of '{source_file}' from '{tenant}'")
         return count
+
+    def delete_project_documents(self, project_slug: str, tenant: str = "icc") -> int:
+        """Delete every Qdrant point belonging to a project's KB docs.
+
+        Removes all points in ``tenant`` whose ``source_file`` payload is under
+        ``projects/{project_slug}/`` — the project's KB document tree. Used by
+        the ``DELETE /projects/{id}`` flow so a deleted project leaves no ghost
+        in RAG search either (the disk folder is already ``rmtree``-d by the KB
+        cleanup; this clears the vector store alongside it).
+
+        Keyed on the slug PREFIX, deliberately NOT on a disk enumeration: by the
+        time delete runs the folder is gone, so the only reliable key is the
+        ``projects/{slug}/`` path prefix. The trailing slash makes the match
+        collision-safe — ``projects/port-owner/`` does not match
+        ``projects/cross-port-owner/...``.
+
+        Qdrant keyword filters are exact-match only (no native prefix match), so
+        we narrow the scan with an exact ``category == "projects"`` filter
+        (``category`` = the first path component, set at index time) and
+        prefix-match ``source_file`` client-side, then delete the collected
+        point ids. Synchronous — the caller (``delete_project`` route) is sync
+        and only Qdrant client calls (themselves sync) are used.
+
+        Returns the number of points removed.
+        """
+        prefix = f"projects/{project_slug}/"
+        client = self._get_client()
+
+        # Narrow the scroll to project docs (category == first path component).
+        project_filter = Filter(must=[FieldCondition(key="category", match=MatchValue(value="projects"))])
+
+        ids_to_delete: list = []
+        offset = None
+        while True:
+            points, offset = client.scroll(
+                collection_name=tenant,
+                scroll_filter=project_filter,
+                limit=256,
+                offset=offset,
+                # Only ``source_file`` is needed to prefix-match; loading the
+                # full ``content`` chunk of EVERY projects-category point across
+                # all projects would be wasteful (mirror ``reader.py`` stats
+                # scroll). Behaviour is unchanged — the delete still targets the
+                # slug-prefixed points.
+                with_payload=["source_file"],
+                with_vectors=False,
+            )
+            for point in points:
+                source_file = str((point.payload or {}).get("source_file", "")).replace("\\", "/")
+                if source_file.startswith(prefix):
+                    ids_to_delete.append(point.id)
+            if offset is None:
+                break
+
+        if not ids_to_delete:
+            logger.info("Qdrant delete: no points under '%s' in '%s'", prefix, tenant)
+            return 0
+
+        client.delete(collection_name=tenant, points_selector=PointIdsList(points=ids_to_delete))
+        logger.info("Qdrant delete: removed %d points under '%s' from '%s'", len(ids_to_delete), prefix, tenant)
+        return len(ids_to_delete)
 
     async def reindex_document(
         self,

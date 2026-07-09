@@ -16,6 +16,14 @@ from unittest.mock import patch
 
 import pytest
 
+from backend.main import app as main_app
+
+# KB isolation (docs/specs/kb-ghost-root-cause.md Fix 1 + kb-ghost-followup.md
+# Fix A): every integration test now runs against a tmp KB via the autouse
+# ``_auto_isolate_create_project_kb`` fixture in tests/integration/conftest.py,
+# so a create never touches the shared /home/icc/knowledge and the sentinel
+# asserts no ghost dir is left behind. No per-module pytestmark needed.
+
 
 @pytest.mark.integration
 class TestProjectCreationFlow:
@@ -206,6 +214,23 @@ class TestProjectCreationFlow:
             data = check_resp.json()
             assert data["available"] is False
             assert data["conflict_project"] == "Port Check Project"
+
+    def test_kb_writes_are_isolated_to_tmp(self, integration_client, _isolate_create_project_kb):
+        """Fix 1: the KB writer the create/delete flow resolves is rooted at the
+        isolated tmp KB — NOT the shared /home/icc/knowledge — so no create test
+        can pollute the real KB (the ghost-dir regression). Complements the
+        autouse real-KB sentinel baked into ``_isolate_create_project_kb``.
+        """
+        from backend.api.dependencies import get_knowledge_base_writer
+        from backend.config.settings import settings
+
+        writer = main_app.dependency_overrides[get_knowledge_base_writer]()
+        base = str(writer._base_path)
+
+        assert str(_isolate_create_project_kb) in base
+        assert "/home/icc/knowledge" not in base
+        # Settings-rooted KB access is redirected away from the shared KB too.
+        assert "/home/icc/knowledge" not in settings.knowledge_base_path
 
     def test_project_without_ports_or_repo(self, integration_client, _seed_admin):
         """Projects can be created without ports or repo_url (all optional)."""

@@ -23,6 +23,7 @@ Covers:
 from __future__ import annotations
 
 import uuid
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI
@@ -33,6 +34,14 @@ from backend.api.routes.projects import router as projects_router
 from backend.db.models.foundation import User
 from backend.db.session import get_db
 from backend.services.knowledge_base_writer import KnowledgeBaseWriter
+
+# KB-ghost follow-up (docs/specs/kb-ghost-followup.md Fix A): this module lives
+# OUTSIDE tests/integration/, so it can't see that dir's autouse isolation.
+# Opt in to the shared root-conftest fixture so every create here also runs
+# against a tmp KB (settings + init.sh dry-run) with the real-KB sentinel — the
+# module's own ``router_client`` already redirects the writer DI on its private
+# app; this neutralises the remaining settings + init.sh vectors.
+pytestmark = pytest.mark.usefixtures("_isolate_create_project_kb")
 
 
 @pytest.fixture()
@@ -431,6 +440,41 @@ class TestProjectRouter:
         resp = router_client.delete(f"/api/v1/projects/{created['id']}")
         assert resp.status_code == 204
         assert calls == []
+
+    # ----------------------------------------------- RAG cleanup (KB ghost Fix 2)
+
+    def test_delete_clears_project_rag_points(self, router_client, creator):
+        """Fix 2: deleting a project clears its Qdrant points (tenant icc,
+        ``source_file`` under ``projects/<slug>/``) — keyed on the slug — so a
+        deleted project leaves no ghost in RAG search, not just on disk."""
+        created = router_client.post(
+            "/api/v1/projects",
+            json=_payload(creator.id, slug="rag-del-proj"),
+        ).json()
+
+        spy = MagicMock()
+        spy.delete_project_documents.return_value = 3
+        router_client.app.dependency_overrides[get_rag_indexer] = lambda: spy
+
+        resp = router_client.delete(f"/api/v1/projects/{created['id']}")
+        assert resp.status_code == 204
+        spy.delete_project_documents.assert_called_once_with("rag-del-proj")
+
+    def test_delete_best_effort_when_rag_delete_raises(self, router_client, creator):
+        """Fix 2: a Qdrant failure during RAG cleanup must NOT undo the already
+        committed DB delete — best-effort, never-raise (mirrors the KB / GitHub
+        / UAT cleanups)."""
+        created = router_client.post("/api/v1/projects", json=_payload(creator.id)).json()
+
+        boom = MagicMock()
+        boom.delete_project_documents.side_effect = RuntimeError("qdrant unreachable")
+        router_client.app.dependency_overrides[get_rag_indexer] = lambda: boom
+
+        resp = router_client.delete(f"/api/v1/projects/{created['id']}")
+        assert resp.status_code == 204  # delete stands despite the RAG failure
+        boom.delete_project_documents.assert_called_once()
+        # DB row is gone — the committed delete was not undone.
+        assert router_client.get(f"/api/v1/projects/{created['id']}").status_code == 404
 
     # ----------------------------------------------- AI-Agent memory (CR-V2-016)
 

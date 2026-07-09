@@ -22,6 +22,14 @@ from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.session import get_db
 
+# KB-ghost follow-up (docs/specs/kb-ghost-followup.md Fix A): this module shares
+# the projects router but only exercises the GET port endpoints today — no create,
+# so no KB write. The mark is belt-and-suspenders: it inherits the shared tmp-KB
+# isolation + real-KB sentinel so any future create-path test added here is
+# covered by construction, and it keeps this module consistent with its
+# create-touching siblings named in the follow-up spec.
+pytestmark = pytest.mark.usefixtures("_isolate_create_project_kb")
+
 
 @pytest.fixture()
 def router_client(db_session):

@@ -18,7 +18,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
-from backend.api.dependencies import get_rag_indexer
+from backend.api.dependencies import get_knowledge_base_writer, get_rag_indexer
+from backend.config.settings import settings
 
 # ``backend.db.base`` imports every ORM model — importing it here populates
 # ``Base.metadata`` with every table at collection time, so a model missing from
@@ -38,6 +39,8 @@ from backend.db.models.tasks import Epic  # noqa: F401
 from backend.db.models.versions import Version  # noqa: F401
 from backend.db.session import _ensure_pg8000_driver, get_db
 from backend.main import app
+from backend.services import template_bootstrap
+from backend.services.knowledge_base_writer import KnowledgeBaseWriter
 from tests._db_guard import assert_test_db_distinct
 
 
@@ -264,3 +267,86 @@ def client(db_session):
         yield test_client
 
     app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# Create-Project KB isolation (docs/specs/kb-ghost-root-cause.md Fix 1 +
+# kb-ghost-followup.md Fix A)
+# ---------------------------------------------------------------------------
+#
+# Lives in the ROOT conftest (not tests/integration/) so EVERY create-touching
+# module can reach it, regardless of directory:
+#   * tests/integration/  — pulled in for the whole suite via an autouse wrapper
+#     in tests/integration/conftest.py (the Fix-A coverage gap: test_auth_flow's
+#     create SUCCESS path had NO isolation, so the ghost slug ``test-auth-project``
+#     recurred whenever ``template_init_script_path`` was configured).
+#   * tests/test_project_router.py, tests/api/test_project_create_validation.py,
+#     tests/api/test_project_ports.py — opt in via
+#     ``pytestmark = pytest.mark.usefixtures("_isolate_create_project_kb")``.
+#
+# Deliberately NOT autouse for the ENTIRE suite: KB/RAG read tests (e.g.
+# tests/integration/test_knowledge_rag.py) legitimately point settings at their
+# own tmp KB, and a blanket autouse would fight them. Scope stays on the
+# create-touching paths.
+
+
+@pytest.fixture()
+def _isolate_create_project_kb(tmp_path, monkeypatch):
+    """Redirect the Create-Project flow's KB writes to an ISOLATED tmp KB.
+
+    ``POST /api/v1/projects`` has bootstrap side-effects (the ``init.sh``
+    subprocess, the :class:`KnowledgeBaseWriter`) that otherwise land dirs
+    under the SHARED ``/home/icc/knowledge/projects/<slug>/`` — the ghost
+    scaffold dirs cleaned by hand 2026-06-13 + 2026-07-09. Isolation, not
+    clean-up: point the KB root at ``tmp_path`` so nothing touches the real KB
+    even on a mid-test crash, and force ``init.sh`` into ``dry_run`` so its
+    subprocess performs no ``/opt/projects`` or KB filesystem writes regardless
+    of whether ``template_init_script_path`` is configured in this environment.
+
+    Neutralises all three ghost vectors:
+      1. ``settings.knowledge_base_path`` → tmp (``get_knowledge_base_writer``
+         reads it at call time).
+      2. ``get_knowledge_base_writer`` DI on the shared app → a tmp-rooted
+         writer (belt-and-suspenders; modules that mount the router on their
+         OWN app also override this on that app).
+      3. ``invoke_init_script`` → dry-run (the historical ghost vector).
+
+    Doubles as a live regression sentinel: snapshots the real KB ``projects``
+    dir before the test and asserts NO new dir appeared there afterwards (the
+    exact ghost-dir check the fix targets).
+    """
+    # Capture the REAL KB projects dir BEFORE we monkeypatch settings.
+    real_kb_projects = Path(settings.knowledge_base_path) / "projects"
+    before = {p.name for p in real_kb_projects.iterdir()} if real_kb_projects.is_dir() else set()
+
+    kb_root = tmp_path / "knowledge"
+    (kb_root / "projects").mkdir(parents=True)
+
+    # (1) Settings-rooted KB access (``get_knowledge_base_writer`` reads this at
+    #     call time) + (2) belt-and-suspenders DI override of the writer itself.
+    monkeypatch.setattr(settings, "knowledge_base_path", str(kb_root))
+    app.dependency_overrides[get_knowledge_base_writer] = lambda: KnowledgeBaseWriter(kb_root)
+
+    # (3) init.sh — the historical ghost vector. Force dry-run so the subprocess
+    #     never writes to /opt/projects or the KB even if the init script path is
+    #     configured. Patched on the route module because it imports
+    #     ``invoke_init_script`` by value (binding-by-value), so patching the
+    #     source module would not rebind the route's reference.
+    real_invoke = template_bootstrap.invoke_init_script
+
+    def _dry_run_invoke(db, project, **kwargs):
+        kwargs.setdefault("dry_run", True)
+        return real_invoke(db, project, **kwargs)
+
+    monkeypatch.setattr("backend.api.routes.projects.invoke_init_script", _dry_run_invoke)
+
+    yield kb_root
+
+    app.dependency_overrides.pop(get_knowledge_base_writer, None)
+
+    after = {p.name for p in real_kb_projects.iterdir()} if real_kb_projects.is_dir() else set()
+    new_dirs = after - before
+    assert not new_dirs, (
+        f"Create-Project test polluted the real KB {real_kb_projects}: {sorted(new_dirs)} — "
+        "KB isolation broke (docs/specs/kb-ghost-root-cause.md Fix 1 / kb-ghost-followup.md Fix A)."
+    )

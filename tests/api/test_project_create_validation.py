@@ -24,6 +24,12 @@ from backend.db.models.projects import Project
 from backend.db.session import get_db
 from backend.services.knowledge_base_writer import KnowledgeBaseWriter
 
+# KB-ghost follow-up (docs/specs/kb-ghost-followup.md Fix A): this module lives
+# OUTSIDE tests/integration/, so it can't see that dir's autouse isolation. Opt
+# in to the shared root-conftest fixture so every create here also runs against
+# a tmp KB (settings + init.sh dry-run) with the real-KB sentinel.
+pytestmark = pytest.mark.usefixtures("_isolate_create_project_kb")
+
 
 @pytest.fixture()
 def router_client(db_session, tmp_path, monkeypatch):

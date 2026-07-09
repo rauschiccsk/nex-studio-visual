@@ -32,10 +32,11 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
-from backend.api.dependencies import get_knowledge_base_writer
+from backend.api.dependencies import get_knowledge_base_writer, get_rag_indexer
 from backend.core.security import require_ha_or_above, require_ri_role
 from backend.db.models.foundation import User
 from backend.db.session import get_db
+from backend.rag.indexer import RAGIndexer
 from backend.schemas.pagination import PaginatedResponse
 from backend.schemas.project import (
     GitHubRepoNotFoundError,
@@ -666,6 +667,7 @@ def delete_project(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_ri_role),
     kb_writer: KnowledgeBaseWriter = Depends(get_knowledge_base_writer),
+    rag_indexer: RAGIndexer = Depends(get_rag_indexer),
     delete_github: bool = Query(
         default=False,
         description=(
@@ -695,6 +697,10 @@ def delete_project(
     * The KB folder ``{knowledge_base_path}/projects/{slug}/`` (any
       project-scoped KB docs) is removed so a deleted project leaves no
       orphaned KB tree.
+    * The project's RAG entries (Qdrant points in tenant ``icc`` whose
+      ``source_file`` is under ``projects/{slug}/``) are removed too, so a
+      deleted project also leaves no ghost in RAG search — best-effort,
+      keyed on the slug prefix (the disk docs are already gone).
     * If ``delete_github=true`` is passed, the backing GitHub
       repository is deleted too. Off by default — the DB row and KB
       folder go, but the repo stays in case the caller wants to
@@ -747,6 +753,21 @@ def delete_project(
         kb_writer.delete_project(slug)
     except OSError as exc:
         logger.warning("KB cleanup failed for deleted project %r: %s", slug, exc)
+
+    # RAG cleanup — best-effort. The KB rmtree above clears the project's docs
+    # on disk but NOT their Qdrant vectors; without this a deleted project would
+    # still surface in RAG search. Delete the project's points (tenant 'icc',
+    # source_file under projects/<slug>/) keyed on the slug PREFIX — the disk
+    # files are already gone, so the path prefix is the only reliable key. Never
+    # raises: a Qdrant failure must NOT undo the already-committed DB delete
+    # (mirrors the KB / GitHub / UAT cleanups). rag_indexer is None when indexing
+    # is disabled (e.g. tests) — skip cleanly in that case.
+    if rag_indexer is not None:
+        try:
+            removed = rag_indexer.delete_project_documents(slug)
+            logger.info("RAG cleanup removed %d points for deleted project %r", removed, slug)
+        except Exception as exc:  # noqa: BLE001 — best-effort, must never undo the committed delete
+            logger.warning("RAG cleanup failed for deleted project %r: %s", slug, exc)
 
     # Workspace cleanup — best-effort (CR-V2-027). Remove the on-disk project workspace so a deleted
     # project leaves no orphaned tree and the slug can be cleanly re-created (the per-project MEMORY.md
