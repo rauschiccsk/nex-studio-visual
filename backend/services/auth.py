@@ -92,12 +92,18 @@ def create_access_token(user: User, token_version: int, expire_minutes: int) -> 
         Tuple of (encoded_jwt, expires_in_seconds).
     """
     expires_in = expire_minutes * 60
-    expire = datetime.now(timezone.utc) + timedelta(minutes=expire_minutes)
+    now = datetime.now(timezone.utc)
+    expire = now + timedelta(minutes=expire_minutes)
 
     payload = {
         "sub": str(user.id),
         "role": user.role,
         "tv": token_version,
+        # ``iat`` (issued-at) lets the frontend compute the renewal window as a
+        # fraction of the *actual* token lifetime (exp - iat) instead of
+        # hard-coding it — the sliding keep-alive renews at ~75% of lifetime.
+        # Purely informational for the backend (never validated on decode).
+        "iat": now,
         "exp": expire,
     }
 
@@ -119,6 +125,32 @@ def login(db: Session, username: str, password: str) -> tuple[User, str, int]:
     expire_minutes = system_setting_service.get_int(db, "access_token_expire_minutes")
     access_token, expires_in = create_access_token(user, token_version, expire_minutes)
     return user, access_token, expires_in
+
+
+def refresh_session(db: Session, user: User) -> tuple[str, int]:
+    """Issue a fresh access token for an already-authenticated session.
+
+    Sliding expiration: unlike :func:`login`, this does NOT bump
+    ``token_version`` — it re-issues a token for the SAME still-valid session
+    (same user, same version) with a fresh ``access_token_expire_minutes``
+    expiry. The caller must have already passed the ``get_current_user``
+    dependency (token valid, non-expired, current ``token_version``), so an
+    expired / bumped / invalid token is rejected upstream with 401 and never
+    reaches here — a dead session can never be renewed.
+
+    Returns:
+        Tuple of (access_token, expires_in_seconds), same shape as
+        :func:`login` minus the user (the router already holds it).
+
+    Raises:
+        ValueError: If no session row exists for the user (a token that
+            outlived its session — treated as a dead session → 401 upstream).
+    """
+    token_version = get_token_version(db, user.id)
+    if token_version is None:
+        raise ValueError("Session not found for user")
+    expire_minutes = system_setting_service.get_int(db, "access_token_expire_minutes")
+    return create_access_token(user, token_version, expire_minutes)
 
 
 def logout(db: Session, user_id: object) -> None:

@@ -61,6 +61,42 @@ def login(
 
 
 @router.post(
+    "/refresh",
+    response_model=LoginResponse,
+    status_code=status.HTTP_200_OK,
+)
+def refresh(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> LoginResponse:
+    """Renew (slide) the current session's access token.
+
+    The ``get_current_user`` dependency validates the incoming bearer token
+    exactly like every protected route — an expired / invalid / superseded
+    (bumped ``token_version``) JWT is rejected with 401 *before* this body
+    runs, so a dead session can never be renewed. On success a NEW token for
+    the same user + same ``token_version`` with a fresh expiry is returned,
+    mirroring ``/login``'s response shape. No refresh-token needed — this is a
+    sliding renewal of a still-valid session.
+    """
+    try:
+        access_token, expires_in = auth_service.refresh_session(db, current_user)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+
+    return LoginResponse(
+        access_token=access_token,
+        token_type="bearer",
+        expires_in=expires_in,
+        user=AuthUser.model_validate(current_user),
+    )
+
+
+@router.post(
     "/logout",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,

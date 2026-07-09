@@ -4,6 +4,7 @@ import AppLayout from "./components/layout/AppLayout";
 import ProtectedRoute from "./components/auth/ProtectedRoute";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { useAuthStore } from "./store/authStore";
+import { useSessionKeepAlive } from "./hooks/useSessionKeepAlive";
 
 import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
@@ -26,6 +27,11 @@ import SettingsPage from "./pages/SettingsPage";
 
 function App() {
   const username = useAuthStore((s) => s.user?.username);
+
+  // Silently renew the session while the user is actively working so a
+  // short-lived JWT never bounces them to /login mid-work (idle sessions still
+  // expire — see the hook's security posture).
+  useSessionKeepAlive();
 
   return (
     <ThemeProvider username={username}>

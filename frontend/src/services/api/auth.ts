@@ -3,9 +3,10 @@
  *
  * Maps to backend routes defined in ``backend.api.routes.auth``:
  *
- *   - ``POST  /auth/login``  → loginApi
- *   - ``POST  /auth/logout`` → logoutApi
- *   - ``GET   /auth/me``     → getMeApi
+ *   - ``POST  /auth/login``   → loginApi
+ *   - ``POST  /auth/refresh`` → refreshApi
+ *   - ``POST  /auth/logout``  → logoutApi
+ *   - ``GET   /auth/me``      → getMeApi
  */
 
 import api from "../api";
@@ -48,6 +49,24 @@ export function loginApi(
     { username, password },
     { skipAuth: true },
   );
+}
+
+/**
+ * Silently renew the current (still-valid) session — sliding expiration.
+ *
+ * Mirrors ``POST /auth/refresh``. Unlike login it needs no body: the current
+ * bearer token (attached by the api-client) authenticates the request, and the
+ * backend re-issues a token for the same user + same ``token_version`` with a
+ * fresh expiry — same ``LoginResponse`` shape.
+ *
+ * A FAILED refresh (already-expired / bumped token → 401) intentionally does
+ * NOT set ``skipAuthRedirect``: it falls through to the existing 401 →
+ * ``/login?next=…`` behavior, exactly as the spec requires. The keep-alive
+ * hook only ever calls this for a still-valid, recently-active session, so the
+ * happy path is silent (no redirect).
+ */
+export function refreshApi(): Promise<LoginResponse> {
+  return api.post<LoginResponse>("/auth/refresh", undefined);
 }
 
 /**
