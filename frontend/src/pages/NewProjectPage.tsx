@@ -59,10 +59,10 @@ export default function NewProjectPage() {
   // Archetype (CR-V2-005, design §4.2): the preset surface composition that replaces the retired
   // single/multi-module category. Štandardný = BE + app-FE; Web = BE + admin-FE + public-site.
   const [type, setType] = useState<ProjectType>("standard");
-  // Auth mode (CR-V2-005, design §4.2): MANDATORY — shapes the project's auth structure (BE login +
-  // FE login flow). No default is pre-selected so the Manažér makes a deliberate choice; submit is
-  // blocked until one is picked.
-  const [authMode, setAuthMode] = useState<ProjectAuthMode | "">("");
+  // Auth mode (CR-V2-005, design §4.2): shapes the project's auth structure (BE login + FE login flow).
+  // Audit Theme 5: defaults to the common "password" instead of forcing a non-expert to make an uninformed
+  // choice up front (they can still switch to token). Submit is never blocked on this now.
+  const [authMode, setAuthMode] = useState<ProjectAuthMode>("password");
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [slugManual, setSlugManual] = useState(false);
@@ -277,7 +277,7 @@ export default function NewProjectPage() {
             {/* Auth mode (CR-V2-005, design §4.2): MANDATORY — shapes the project's auth structure. */}
             <div>
               <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-2">
-                Spôsob prihlásenia *
+                Spôsob prihlásenia <span className="font-normal text-[var(--color-text-muted)]">(predvolené: meno a heslo)</span>
               </label>
               <div className="grid grid-cols-2 gap-2">
                 <button
@@ -298,7 +298,7 @@ export default function NewProjectPage() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 11c0-1.105.895-2 2-2s2 .895 2 2m-9 0h10a2 2 0 012 2v6a2 2 0 01-2 2H7a2 2 0 01-2-2v-6a2 2 0 012-2zm5-7a4 4 0 014 4v3H8V8a4 4 0 014-4z" />
                   </svg>
                   <div className="text-sm font-medium">Meno a heslo</div>
-                  <div className="text-[10px] opacity-70 mt-0.5">Prihlásenie ako NEX Studio</div>
+                  <div className="text-[10px] opacity-70 mt-0.5">Používateľ sa prihlási menom a heslom. Bežná voľba.</div>
                 </button>
                 <button
                   type="button"
@@ -318,7 +318,7 @@ export default function NewProjectPage() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
                   </svg>
                   <div className="text-sm font-medium">Token</div>
-                  <div className="text-[10px] opacity-70 mt-0.5">Spustenie tokenom ako NEX Inbox</div>
+                  <div className="text-[10px] opacity-70 mt-0.5">Aplikácia sa otvára odkazom s tokenom, bez hesla.</div>
                 </button>
               </div>
               {errors.authMode && <p className="mt-1 text-xs text-[var(--color-status-error)]">{errors.authMode}</p>}

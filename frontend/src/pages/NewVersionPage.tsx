@@ -93,7 +93,14 @@ export default function NewVersionPage() {
 
   function validate(): boolean {
     const next: Record<string, string> = {};
-    if (!versionNumber.trim()) next.versionNumber = "Číslo verzie je povinné.";
+    const v = versionNumber.trim();
+    if (!v) {
+      next.versionNumber = "Číslo verzie je povinné.";
+    } else if (!/^\d+\.\d+\.\d+$/.test(v)) {
+      // Audit Theme 5: without a format guard, "v1"/"verzia 1" passed and later silently broke the on-disk
+      // spec path (docs/specs/versions/v<N>/…). Require bare semver so the version folder is always valid.
+      next.versionNumber = 'Číslo verzie musí byť v tvare 1.2.3 (len čísla a bodky — bez písmena „v" a bez medzier).';
+    }
     // STEP 2: Zadanie is OPTIONAL — a blank brief is valid; the Špecifikácia is then built from the
     // Riadiace-centrum conversation from scratch (no not-empty gate here).
     setErrors(next);

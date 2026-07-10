@@ -180,7 +180,8 @@ export default function VersionDetailPage() {
               <div className="text-xs text-[var(--color-text-muted)] mb-3">
                 Voľný text — hlavný vstup pre Prípravu. Opíš, čo má aplikácia robiť (ciele, funkcie,
                 hraničné prípady). Po „Spustiť tvorbu špecifikácie" AI Agent prečíta Zadanie, doplní
-                objasňujúce otázky a vytvorí Špecifikáciu.
+                objasňujúce otázky a vytvorí Špecifikáciu. Zadanie je nepovinné — ak ho necháš prázdne,
+                dohodnete sa priamo v rozhovore.
               </div>
               <textarea
                 lang="sk"
@@ -206,8 +207,12 @@ export default function VersionDetailPage() {
                 <button
                   type="button"
                   onClick={handleStart}
-                  disabled={starting || !zadanieSaved}
-                  title={!zadanieSaved ? "Najprv ulož Zadanie" : undefined}
+                  disabled={starting || (!!zadanie.trim() && !zadanieSaved)}
+                  title={
+                    !!zadanie.trim() && !zadanieSaved
+                      ? "Najprv ulož Zadanie (alebo ho vymaž a spusti od nuly)"
+                      : undefined
+                  }
                   className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500 disabled:opacity-50 transition-colors"
                 >
                   {starting ? "Spúšťam…" : "Spustiť tvorbu špecifikácie"}
@@ -222,17 +227,17 @@ export default function VersionDetailPage() {
               <div className="text-xs text-[var(--color-text-muted)]">
                 {epicCount} epic · {epicsDone} hotových · {version.bug_count} chýb.
                 Špecifikáciu, návrh a kód tejto verzie pripravuje AI Agent; výsledok overuje Auditor.
-                Fázy (Príprava → Návrh → Programovanie → Verifikácia) sleduješ vo Vývoji.
+                Fázy (Príprava → Návrh → Programovanie → Verifikácia) sleduješ v Riadiacom centre.
               </div>
               <button
                 type="button"
-                onClick={() => navigate("/vyvoj")}
+                onClick={() => navigate("/riadiace-centrum")}
                 className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500 transition-colors"
               >
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
-                Otvoriť vo Vývoji
+                Otvoriť v Riadiacom centre
               </button>
             </div>
           )}

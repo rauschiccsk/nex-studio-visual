@@ -91,7 +91,8 @@ function VersionCard({ version, onOpen }: { version: Version; onOpen: () => void
         <PipelineBar version={version} />
         <div className="flex items-center justify-between text-xs text-[var(--color-text-muted)]">
           <span>{version.bug_count} bugov · {version.epics_done}/{version.epic_count} epikov hotových</span>
-          <span className="text-primary-400 font-medium">Pokračovať →</span>
+          {/* Audit Theme 5: a never-started (planned) version says "Začať", not "Pokračovať" (nothing to continue). */}
+          <span className="text-primary-400 font-medium">{version.status === "planned" ? "Začať →" : "Pokračovať →"}</span>
         </div>
       </div>
     </div>
@@ -295,7 +296,8 @@ export default function ProjectDetailPage() {
               ? "bg-[var(--color-state-warning-bg)] border border-[var(--color-state-warning-bg)] text-[var(--color-state-warning-fg)]"
               : "bg-[var(--color-surface-active)] text-[var(--color-text-muted)]"
           }`}>
-            {project.status}
+            {/* Audit Theme 5/6: Slovak status, not the raw English enum. */}
+            {({ active: "Aktívny", paused: "Pozastavený", archived: "Archivovaný", released: "Vydaný" } as Record<string, string>)[project.status] ?? project.status}
           </span>
         </div>
       </div>
