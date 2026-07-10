@@ -28,6 +28,7 @@ import ConversationThread from "@/components/riadiace/ConversationThread";
 import ConversationComposer from "@/components/riadiace/ConversationComposer";
 import SpecApprovalBar from "@/components/riadiace/SpecApprovalBar";
 import SchvalitBar from "@/components/riadiace/SchvalitBar";
+import DecisionCardsBar from "@/components/riadiace/DecisionCardsBar";
 import ChangeRequestBar from "@/components/riadiace/ChangeRequestBar";
 import PhaseBar from "@/components/riadiace/PhaseBar";
 import HonestStatusStrip from "@/components/riadiace/HonestStatusStrip";
@@ -149,9 +150,11 @@ export default function RiadiaceCentrumPage() {
       {/* Approval / change-request moment — sits between the thread and the relay send box. All bars are
           honest-by-construction (render null unless applicable) and mutually exclusive in practice:
           SpecApprovalBar on a settled Príprava (approve_spec, STEP 2); SchvalitBar on a Návrh gate awaiting
-          the Manažér (schvalit — advances to Programovanie); ChangeRequestBar on a read-only consult answer
+          the Manažér (schvalit — advances to Programovanie); DecisionCardsBar on a consultation blocker
+          (decide — one Decision Card at a time, CR-V2-041); ChangeRequestBar on a read-only consult answer
           that raised a change_request (konzultacia-mode.md Part 3). */}
       <div className="col-start-1 row-start-3 min-w-0">
+        <DecisionCardsBar board={board} versionId={versionId} onBoard={setBoard} />
         <SpecApprovalBar board={board} versionId={versionId} onBoard={setBoard} />
         <SchvalitBar board={board} versionId={versionId} onBoard={setBoard} />
         <ChangeRequestBar board={board} versionId={versionId} />
