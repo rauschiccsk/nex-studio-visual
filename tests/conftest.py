@@ -157,6 +157,29 @@ def test_engine():
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _isolate_projects_root(tmp_path_factory):
+    """Redirect ``PROJECTS_ROOT`` to a throwaway temp dir for the WHOLE session, so create-project /
+    charter-provisioning / metrics tests NEVER scaffold into the REAL ``/opt/projects`` — the source of the
+    1690 ``p-<hex>`` / ``metrics-phase-<hex>`` junk dirs that polluted the dev workspace (Director 2026-07-10).
+
+    ``PROJECTS_ROOT`` is a hardcoded module global in ``claude_agent`` (no env/settings knob). ``project_memory``
+    copied it at import time, so BOTH bindings are rebound — a leftover copy at ``project_memory.PROJECTS_ROOT``
+    would otherwise still point at the real dir. ``api.routes.projects`` re-imports it INSIDE its functions, so
+    it picks up this rebind at call time. Per-test ``monkeypatch.setattr(<mod>, "PROJECTS_ROOT", ...)`` still
+    overrides for a specific test — this only moves the DEFAULT off the real workspace.
+    """
+    from backend.services import claude_agent, project_memory
+
+    tmp = tmp_path_factory.mktemp("projects_root")
+    orig_ca, orig_pm = claude_agent.PROJECTS_ROOT, project_memory.PROJECTS_ROOT
+    claude_agent.PROJECTS_ROOT = tmp
+    project_memory.PROJECTS_ROOT = tmp
+    yield tmp
+    claude_agent.PROJECTS_ROOT = orig_ca
+    project_memory.PROJECTS_ROOT = orig_pm
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _guard_prod_db_isolation(test_engine):
     """Guarantee no test can EVER write to the cockpit/PROD database (CR-NS-076).
 

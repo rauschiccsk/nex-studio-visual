@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -22,6 +23,16 @@ import pytest
 from backend.services import claude_agent, consult_sandbox
 
 _READ_ONLY = ["Read", "Grep", "Glob"]
+
+
+@pytest.fixture(autouse=True)
+def _pin_projects_root(monkeypatch):
+    """These tests assert the FIXED in-container ``/opt/projects`` → host ``/opt/projects-v3`` sidecar path
+    translation, so ``PROJECTS_ROOT`` must be the real ``/opt/projects`` here. The suite-wide
+    ``_isolate_projects_root`` default (a temp dir, so scaffold WRITES never pollute the real workspace) would
+    otherwise break the translation — but the consult sidecar tests do NO scaffolding (docker is mocked), so
+    pinning the real prefix is correct and leak-free."""
+    monkeypatch.setattr(claude_agent, "PROJECTS_ROOT", Path("/opt/projects"))
 
 
 def _ok_proc(envelope: dict | None = None) -> MagicMock:
