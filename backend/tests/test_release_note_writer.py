@@ -126,6 +126,32 @@ def test_write_release_note_from_epics(db_session, tmp_path):
         assert token not in body
 
 
+def test_fix_loop_epics_excluded_from_notes(db_session, tmp_path):
+    """Drift fix: the internal re-verify fix-loop Epics ("Oprava po Verifikácii", one per Verifikácia-FAIL
+    round) must NEVER reach the changelog — they are churn, and including them drifted RELEASE_NOTES by one
+    duplicate bullet per round, blocking every Verifikácia. The version's REAL features stay; the fix Epics
+    are dropped no matter how many rounds ran."""
+    _creator, project, version = _seed(db_session, version_number="1.1.0", name="Platby SLSP")
+    _add_epic(db_session, project, version, 8, "Bankový adaptér SLSP", "Napojenie na banku SLSP.")
+    _fix = release_note_writer.VERIFIKACIA_FIX_EPIC_TITLE
+    _add_epic(db_session, project, version, 14, _fix, _fix)
+    _add_epic(db_session, project, version, 15, _fix, _fix)
+
+    body = release_note_writer.write_release_note(db_session, version.id, tmp_path).read_text(encoding="utf-8")
+
+    assert "- Napojenie na banku SLSP." in body  # the real feature stays
+    assert "Oprava po Verifikácii" not in body  # ZERO fix-loop bullets → no drift, no matter how many rounds
+
+
+def test_fix_epic_marker_in_sync_with_orchestrator():
+    """The exclusion is keyed on the exact fix-Epic title, defined in BOTH orchestrator (where the Epics are
+    created) and release_note_writer (where they are filtered). Pin the two equal so a rename can never
+    silently re-open the drift."""
+    from backend.services import orchestrator
+
+    assert release_note_writer.VERIFIKACIA_FIX_EPIC_TITLE == orchestrator._VERIFIKACIA_FIX_TITLE
+
+
 def test_epic_title_fallback_when_plain_description_null(db_session, tmp_path):
     _creator, project, version = _seed(db_session, version_number="0.1.0")
     _add_epic(db_session, project, version, 1, "Prihlásenie používateľa", None)

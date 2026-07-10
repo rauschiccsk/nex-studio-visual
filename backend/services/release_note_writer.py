@@ -42,6 +42,14 @@ from backend.db.models.versions import Version
 #: as defence on the title-fallback path — ``plain_description`` is jargon-free.
 _CODE_RE = re.compile(r"\b(?:CR|EPIC|FEAT|TASK|BUG)-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*\b")
 
+#: The internal fix-loop Epic marker (== ``orchestrator._VERIFIKACIA_FIX_TITLE``): each Verifikácia-FAIL round
+#: spawns a fresh Epic with THIS title. It is INTERNAL churn (a re-verify fix cycle), NOT a user-facing feature
+#: — it must NEVER appear in the changelog. Including it caused a recurring RELEASE_NOTES drift: one duplicate
+#: "- Oprava po Verifikácii" bullet per round → the bundled-notes test fails → another round → another Epic →
+#: worse (a structural loop that blocked EVERY Verifikácia). A test pins this equal to the orchestrator marker
+#: so the two can never silently diverge.
+VERIFIKACIA_FIX_EPIC_TITLE = "Oprava po Verifikácii"
+
 
 def _strip_codes(text: str) -> str:
     """Remove internal work-item codes + tidy the residual whitespace/punctuation."""
@@ -75,6 +83,11 @@ def _epic_bullets(db: Session, version: Version) -> list[str]:
     epics = db.execute(select(Epic).where(Epic.version_id == version.id).order_by(Epic.number)).scalars().all()
     bullets: list[str] = []
     for epic in epics:
+        # Skip the internal re-verify fix-loop Epics — they are churn, not user-facing changelog entries, and
+        # including them caused a recurring RELEASE_NOTES drift that blocked every Verifikácia (one duplicate
+        # bullet per fix round). The version's REAL features stay; the fix cycles never touch the changelog.
+        if (epic.title or "").strip() == VERIFIKACIA_FIX_EPIC_TITLE:
+            continue
         text = (epic.plain_description or "").strip()
         if not text:
             text = _strip_codes((epic.title or "").strip())
