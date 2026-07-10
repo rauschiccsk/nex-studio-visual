@@ -34,16 +34,22 @@ export default function SchvalitBar({ board, versionId, onBoard }: Props) {
   // Honest-by-construction gate: the bar exists ONLY when the backend offers `schvalit` right now.
   if (!board?.available_actions?.includes("schvalit")) return null;
 
-  // Context-aware copy (release-smoke-boot-and-batch-fixes.md C): the SAME `schvalit` verb is offered at TWO
-  // gates. At `programovanie` (build done → advances Programovanie → Verifikácia) the Návrh "Schváliť plán"
-  // copy was nonsense; branch off the board's current stage. Any non-programovanie stage (Návrh, or a null/
-  // legacy state) keeps today's plan-approval copy.
-  const buildDone = board.state?.current_stage === "programovanie";
-  const approveLabel = buildDone ? "Prejsť na overenie" : "Schváliť plán";
-  const approveBusyLabel = buildDone ? "Posúvam…" : "Schvaľujem…";
-  const consequence = buildDone
-    ? "Potvrdíš dokončenú stavbu; projekt sa posunie na Verifikáciu (overenie Auditorom)."
-    : "Schválením potvrdíš návrh a plán; projekt sa posunie do stavby (Programovanie).";
+  // Context-aware copy: the SAME `schvalit` verb is the manager's approve/advance at THREE gates, and the
+  // consequence differs at each. Branch off the board's current stage so the button always names what it does:
+  //   • navrh          → "Schváliť plán"       → posunie do stavby (Programovanie)
+  //   • programovanie  → "Prejsť na overenie"  → posunie na Verifikáciu (overenie Auditorom)
+  //   • verifikacia    → "Schváliť na Hotovo"  → overená verzia sa označí ako Hotovo (terminálny podpis)
+  // Any null/legacy state falls back to the plan-approval copy (the earliest gate).
+  const stage = board.state?.current_stage;
+  const approveLabel =
+    stage === "verifikacia" ? "Schváliť na Hotovo" : stage === "programovanie" ? "Prejsť na overenie" : "Schváliť plán";
+  const approveBusyLabel = stage === "programovanie" ? "Posúvam…" : "Schvaľujem…";
+  const consequence =
+    stage === "verifikacia"
+      ? "Potvrdíš overenú verziu (Auditor dal PASS); verzia sa označí ako Hotovo a uzavrie."
+      : stage === "programovanie"
+        ? "Potvrdíš dokončenú stavbu; projekt sa posunie na Verifikáciu (overenie Auditorom)."
+        : "Schválením potvrdíš návrh a plán; projekt sa posunie do stavby (Programovanie).";
 
   async function submit(action: PipelineActionName, failMsg: string) {
     setError("");
