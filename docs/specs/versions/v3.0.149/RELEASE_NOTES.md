@@ -1,0 +1,3 @@
+## v3.0.149 — Zrozumiteľné vysvetlenie zlyhania
+
+Keď stavba alebo overenie zlyhá, doteraz manažér často videl **surový technický text** — anglické riadky z vnútornej kontroly agenta alebo výstup skúšobného skriptu. Odteraz vidí **po slovensky ČO zlyhalo a PREČO**: napríklad *„Skúška spustenia — aplikácia sa nespustila do 15 min, štart aplikácie alebo databázy zlyhal"* namiesto surového výstupu. Podrobný technický text ostáva dostupný pod **rozklikávacím „Technický detail"** — na dosah, ale nie manažérovi v tvári. A **vnútorné bľabotanie agenta** (opakované „self-check" riadky, ktoré nikdy neboli určené manažérovi) sa už v konverzácii nezobrazuje — namiesto neho je čistý súhrn *„Úloha zlyhala po N pokusoch"*.
