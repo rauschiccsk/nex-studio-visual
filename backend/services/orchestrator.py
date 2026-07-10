@@ -3908,9 +3908,11 @@ async def _compose_smoke_step(cmd: list[str], timeout: int) -> tuple[int, str]:
     return proc.returncode, (stdout or b"").decode("utf-8", "replace")
 
 
-def _acceptance_smoke_override(compose_path: Path) -> str:
+def _acceptance_smoke_override(compose_path: Path, smoke_env: Optional[Path] = None) -> str:
     """Build an ephemeral compose override that strips ``container_name`` + host ``ports`` from
-    every service of *compose_path*.
+    every service of *compose_path* — and, when *smoke_env* is given, injects it as an ``env_file``
+    so services that read ``env_file: .env`` (migrate/backend) get the COMPLETE rendered env INSIDE
+    the container (``--env-file`` alone only feeds compose interpolation, never the containers).
 
     Under the isolated compose project ``-p <slug>-smoke`` the only remaining collision sources with
     a concurrently-running live UAT of the same project are the project's FIXED ``container_name``
@@ -3929,6 +3931,14 @@ def _acceptance_smoke_override(compose_path: Path) -> str:
         lines.append(f"  {name}:")
         lines.append("    container_name: !reset null")
         lines.append("    ports: !reset []")
+        # A (fix): inject the rendered env as an env_file so a service reading ``env_file: .env`` (migrate,
+        # backend) gets the COMPLETE env INSIDE the container. Compose CONCATENATES env_file lists and the
+        # LATER file wins → the rendered values override the incomplete live .env (e.g. the missing
+        # DATABASE_URL). Harmless for interpolation-only services (extra vars ignored; an explicit
+        # ``environment:`` key still wins over env_file).
+        if smoke_env is not None:
+            lines.append("    env_file:")
+            lines.append(f"      - {smoke_env}")
     return "\n".join(lines) + "\n"
 
 
@@ -4143,9 +4153,11 @@ async def _boot_smoke_stack(project_slug: str, compose: Path, roles: dict[str, O
     # --env-file feeds compose interpolation WITHOUT touching the app's live .env (which may hold real secrets).
     # No readable .env.example → no --env-file (unchanged legacy boot).
     smoke_env = tmpdir / "smoke.env"
-    env_file_args = (
-        ["--env-file", str(smoke_env)] if _render_smoke_env(compose.parent / ".env.example", smoke_env) else []
-    )
+    # ``--env-file`` feeds compose INTERPOLATION; the SAME rendered file is ALSO injected as a per-service
+    # ``env_file`` in the override below, so services reading ``env_file: .env`` (migrate/backend) get the
+    # complete env inside the container (--env-file alone does not reach them → DATABASE_URL was missing).
+    smoke_env_rendered = _render_smoke_env(compose.parent / ".env.example", smoke_env)
+    env_file_args = ["--env-file", str(smoke_env)] if smoke_env_rendered else []
     base = ["docker", "compose", "-p", project, *env_file_args, "-f", str(compose), "-f", str(override)]
     stack = _SmokeStack(
         base=base, compose=compose, override=override, project=project, roles=roles, up_rc=-1, up_detail=""
@@ -4153,7 +4165,7 @@ async def _boot_smoke_stack(project_slug: str, compose: Path, roles: dict[str, O
     try:
         # Isolate — ephemeral override stripping container_name + host ports — then up (build + boot;
         # ``--wait`` blocks until healthchecks pass; Ollama reached via the app's own extra_hosts).
-        override.write_text(_acceptance_smoke_override(compose))
+        override.write_text(_acceptance_smoke_override(compose, smoke_env if smoke_env_rendered else None))
         stack.up_rc, stack.up_detail = await _compose_smoke_step(
             base + ["up", "-d", "--build", "--wait"], ACCEPTANCE_SMOKE_TIMEOUT
         )

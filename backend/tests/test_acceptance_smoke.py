@@ -332,6 +332,30 @@ def test_render_smoke_env_completes_incomplete_example(tmp_path) -> None:
     assert orchestrator._render_smoke_env(tmp_path / "missing.example", dst) is False
 
 
+def test_acceptance_smoke_override_injects_env_file_per_service(tmp_path) -> None:
+    """A (fix): the override injects the rendered *smoke_env* as an ``env_file`` for EVERY service, so a
+    service reading ``env_file: .env`` (migrate/backend) gets the COMPLETE env INSIDE the container —
+    ``--env-file`` feeds only compose interpolation, never the containers (that was the missing DATABASE_URL).
+    Without *smoke_env* the override is the legacy strip-only (no env_file)."""
+    compose = tmp_path / "docker-compose.yml"
+    compose.write_text(
+        "services:\n"
+        "  db:\n    image: postgres:16\n    environment:\n      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}\n"
+        "  migrate:\n    image: app\n    env_file: .env\n"
+        "  backend:\n    image: app\n    env_file: .env\n"
+    )
+    smoke_env = tmp_path / "smoke.env"
+    smoke_env.write_text("POSTGRES_PASSWORD=ci\nDATABASE_URL=postgresql+pg8000://u:ci@db:5432/app\n")
+
+    with_env = orchestrator._acceptance_smoke_override(compose, smoke_env)
+    # Injected under EVERY service; compose concatenates env_file lists so the later rendered file wins.
+    assert with_env.count(f"      - {smoke_env}") == 3, "rendered env_file injected per service"
+    assert with_env.count("    env_file:") == 3
+
+    without = orchestrator._acceptance_smoke_override(compose)
+    assert "env_file:" not in without, "no smoke_env → legacy strip-only override (unchanged)"
+
+
 class _EnvFileCapturingRecorder(_StepRecorder):
     """A ``_StepRecorder`` that also captures the ``--env-file`` path + its CONTENT at ``up`` time (before the
     ``finally`` teardown rmtree's the smoke tmpdir), so the test can assert the rendered env COMPLETED the
