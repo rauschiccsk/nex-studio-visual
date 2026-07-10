@@ -34,6 +34,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 import yaml
 from pydantic import ValidationError
@@ -1557,6 +1558,13 @@ _TASK_PLAN_ESTIMATE_NOTE = (
     "`estimated_minutes` = realistický odhad práce pre schopného ĽUDSKÉHO vývojára v minútach "
     "(NIE čas AI výpočtu); ADVISORY pole — chýbajúci odhad je povolený a NIKDY neblokuje build."
 )
+# D1 (release-smoke-boot-and-batch-fixes.md): the AI drifted to writing per-version "EPIC 1 — …" / "EPIC 2 — …"
+# prefixes INTO epic/feat titles, so the cockpit showed a confusing double number ("8. EPIC 1 — …") on top of
+# the DB's own continuous numbering. FORBID it: the title is the NAME only — the system numbers epics/feats.
+_TASK_PLAN_TITLE_RULE = (
+    "`title` je IBA NÁZOV (napr. „Základ appky“) — NEPREfixuj ho číslom, poradím ani „EPIC N“/„FUNKCIA N“; "
+    "epiky aj funkcie čísluje systém sám."
+)
 # TEXT/FENCE EXTRACTION (CR-1, live root-cause 2026-06-18): ``--json-schema`` does NOT yield a
 # ``structured_output`` field in this CLI — the model emits TEXT. So the narrowed passes carry their JSON
 # in a DEDICATED ``<<<TASK_PLAN_JSON>>>`` sentinel fence (extracted by ``extract_task_plan_json``). The
@@ -1604,7 +1612,9 @@ def _task_plan_skeleton_directive(director_note: Optional[str] = None) -> str:
         "`feats` (zoznam, ≥1) — KAŽDÁ funkcia má `title`, `description`, `plain_description` a "
         "`estimated_minutes` (Σ odhadov jej úloh). `plain_description` je JEDNORIADKOVÉ ľudské vysvetlenie "
         "BEZ žargónu (čo daný epik/funkcia znamená pre Manažéra — nie technický popis); epik `description` "
-        "NEMÁ, takže `plain_description` je jeho jediný ľudský text. Navrch objektu pole `cross_cutting_rules` "
+        "NEMÁ, takže `plain_description` je jeho jediný ľudský text. "
+        + _TASK_PLAN_TITLE_RULE
+        + " Navrch objektu pole `cross_cutting_rules` "
         "(markdown, regulované invarianty knihy, kodifikované RAZ). Úlohy NEemituj — doplnia sa v ďalších "
         "prechodoch po jednej funkcii.\n"
         # CR-V2-052: the release-coverage declaration the risk-floored oracle (CR-V2-051) enforces — every
@@ -3922,6 +3932,66 @@ def _acceptance_smoke_override(compose_path: Path) -> str:
     return "\n".join(lines) + "\n"
 
 
+# ── A (release-smoke-boot-and-batch-fixes.md): render a COMPLETE, ``.env.example``-derived env for the smoke
+# boot ─────────────────────────────────────────────────────────────────────────────────────────────────────
+# The generated app's ``docker-compose.yml`` fail-fast-guards required vars (``POSTGRES_PASSWORD:
+# ${POSTGRES_PASSWORD:?set …}``). The app's LIVE ``.env`` can be INCOMPLETE (it may lack ``POSTGRES_PASSWORD``)
+# → compose interpolation FAILS before any container starts → the app never boots → Verifikácia can never pass
+# (the nex-payables 1.1.0 blocker). The app's ``.env.example`` HAS a consistent dev default. This renders a
+# THROWAWAY env from ``.env.example`` (handed to ``docker compose --env-file``) so every ``${…:?}`` guard
+# resolves, WITHOUT clobbering the live ``.env`` (which may hold real secrets). Mirrors the seeded
+# ``scripts/ci_render_dotenv.py`` the CI ``migrate`` job uses (same host/password rewrite + guaranteed
+# ``POSTGRES_PASSWORD``), so the smoke boots against the SAME shape CI migrates against.
+_SMOKE_ENV_PASSWORD = "ci"  # same value as scripts/ci_render_dotenv.py CI_PASSWORD (smoke render == CI render).
+_SMOKE_ENV_HOST = "db"  # the compose ``db`` service name (ci_render_dotenv CI_HOST) — the in-network DB target.
+
+
+def _rewrite_smoke_database_url(value: str) -> str:
+    """Rewrite the ``DATABASE_URL`` host + password to the compose ``db`` service, PRESERVING the scheme (incl.
+    any ``+driver``), user, port, and dbname — the exact contract of ``ci_render_dotenv._rewrite_database_url``
+    so the smoke DB URL matches what the online migrate path exercises."""
+    parts = urlsplit(value)
+    username = parts.username or ""
+    port = f":{parts.port}" if parts.port is not None else ""
+    userinfo = f"{username}:{_SMOKE_ENV_PASSWORD}" if username else _SMOKE_ENV_PASSWORD
+    netloc = f"{userinfo}@{_SMOKE_ENV_HOST}{port}"
+    # urlunsplit keeps ``scheme`` (incl. the ``+pg8000`` driver) byte-for-byte.
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+
+def _render_smoke_env(env_example: Path, dst: Path) -> bool:
+    """Render a COMPLETE throwaway env from *env_example* into *dst* for the smoke ``docker compose --env-file``
+    (A). Returns ``True`` when it rendered, ``False`` when there is no readable ``.env.example`` to render from
+    (the caller then boots WITHOUT an ``--env-file``, byte-identical to the pre-fix behaviour). Never raises.
+
+    Mirrors ``scripts/ci_render_dotenv.py`` exactly: ``DATABASE_URL`` host/password rewritten to the compose
+    ``db`` service (scheme preserved), ``DB_PASSWORD``/``POSTGRES_PASSWORD`` forced to the known dev value, and
+    ``POSTGRES_PASSWORD`` GUARANTEED present (APPENDED when the example omitted it) so the compose
+    ``${POSTGRES_PASSWORD:?…}`` fail-fast guard always resolves. Every other line is copied verbatim."""
+    try:
+        raw_lines = env_example.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    out: list[str] = []
+    seen_postgres_password = False
+    for raw in raw_lines:
+        stripped = raw.strip()
+        if stripped.startswith("DATABASE_URL="):
+            key, _, val = raw.partition("=")
+            out.append(f"{key}={_rewrite_smoke_database_url(val)}")
+        elif stripped.startswith("DB_PASSWORD="):
+            out.append(f"DB_PASSWORD={_SMOKE_ENV_PASSWORD}")
+        elif stripped.startswith("POSTGRES_PASSWORD="):
+            out.append(f"POSTGRES_PASSWORD={_SMOKE_ENV_PASSWORD}")
+            seen_postgres_password = True
+        else:
+            out.append(raw)
+    if not seen_postgres_password:
+        out.append(f"POSTGRES_PASSWORD={_SMOKE_ENV_PASSWORD}")
+    dst.write_text("\n".join(out) + "\n", encoding="utf-8")
+    return True
+
+
 def _compose_backend_port(compose_path: Path) -> Optional[int]:
     """The CONTAINER port the ``backend`` service listens on, from its first ``ports`` entry — the
     target for the in-container ``/health`` readiness poll. Handles the short forms (``"port"`` /
@@ -4068,7 +4138,15 @@ async def _boot_smoke_stack(project_slug: str, compose: Path, roles: dict[str, O
     project = f"{project_slug}-smoke"
     tmpdir = Path(tempfile.mkdtemp(prefix=f"{project_slug}-smoke-"))
     override = tmpdir / "smoke.override.yml"
-    base = ["docker", "compose", "-p", project, "-f", str(compose), "-f", str(override)]
+    # A: boot against a COMPLETE, .env.example-derived env (throwaway) so ${POSTGRES_PASSWORD:?…} & co. always
+    # resolve — the live .env may be incomplete → compose interpolation would fail before any container starts.
+    # --env-file feeds compose interpolation WITHOUT touching the app's live .env (which may hold real secrets).
+    # No readable .env.example → no --env-file (unchanged legacy boot).
+    smoke_env = tmpdir / "smoke.env"
+    env_file_args = (
+        ["--env-file", str(smoke_env)] if _render_smoke_env(compose.parent / ".env.example", smoke_env) else []
+    )
+    base = ["docker", "compose", "-p", project, *env_file_args, "-f", str(compose), "-f", str(override)]
     stack = _SmokeStack(
         base=base, compose=compose, override=override, project=project, roles=roles, up_rc=-1, up_detail=""
     )
@@ -6406,6 +6484,38 @@ async def _run_verifikacia_round(
     # the verdict to FAIL below regardless of what the Auditor LLM says — the single change that stops a red
     # smoke coexisting with a green gate (the NEX Agents self-confirming-test hole).
     runtime_floor_red = (not smoke_ok) or (acceptance is not None and not acceptance[0] and not acceptance[2])
+
+    # B (release-smoke-boot-and-batch-fixes.md): a boot-FAIL is a DECISIVE product FAIL — the app never
+    # started, so there is NOTHING for the Auditor to verify. Settle a clean Verifikácia FAIL carrying the boot
+    # reason DETERMINISTICALLY, AHEAD of (and independent of) the Auditor turn + its verdict-parse block. Without
+    # this, a stack that never booted still burned an Auditor turn whose verdict could time out / not parse →
+    # the manager saw the CONFUSING "verdikt sa nepodarilo spracovať / blocked" instead of the TRUTH: the app
+    # didn't boot. The recorded FAIL verdict's findings carry the boot reason, so the fix↔re-verify loop
+    # (_latest_verifikacia_fix_scope) threads it to the AI Agent as the fix brief. Settled via the SHARED
+    # _settle_verifikacia_verdict (runtime_floor_red=True → the bounded fix loop / escalation, never a PASS).
+    if not smoke_ok:
+        boot_fail_content = f"Appka sa nespustila: {smoke_detail}"
+        boot_verdict_msg = _record_message(
+            db,
+            version_id=version_id,
+            stage="verifikacia",
+            author="auditor",  # the release verdict channel (valid v2 token) — consistent with the CR-V2-050 floor
+            recipient="manazer",
+            kind="verdict",
+            content=boot_fail_content,
+            payload={
+                "verdict": "FAIL",
+                "findings": [boot_fail_content],
+                "proposed_fix": ("Zisti a oprav dôvod, prečo sa appka nespustí (`docker compose up`), a over znova."),
+                "phase": "verifikacia",
+                "engine_override": "boot_fail",
+            },
+        )
+        if on_message is not None:
+            await on_message(boot_verdict_msg)
+        return await _settle_verifikacia_verdict(
+            db, state, verdict="FAIL", runtime_floor_red=True, on_message=on_message
+        )
 
     # 2. The Auditor's verdict turn (independent, READ + RUN-ONLY). Recorded author=auditor / recipient=manazer
     # / stage=verifikacia / kind=verdict by invoke_agent — all valid v2 tokens. Effort scales with the dial.

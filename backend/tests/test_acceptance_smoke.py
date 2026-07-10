@@ -113,9 +113,12 @@ def _make_project(
     compose_yml: str = COMPOSE_YML,
     script: bool = False,
     frontend_tab: bool = False,
+    env: str | None = None,
+    env_example: str | None = None,
 ) -> Path:
-    """Materialise a fake project tree under *root*/<slug>; optionally seed ``release_smoke_test.sh`` and the
-    scaffolded Aktualizácie FE tab (``frontend_tab``)."""
+    """Materialise a fake project tree under *root*/<slug>; optionally seed ``release_smoke_test.sh``, the
+    scaffolded Aktualizácie FE tab (``frontend_tab``), and the ``.env`` / ``.env.example`` pair (release-smoke
+    boot fix A: the live ``.env`` may be INCOMPLETE while ``.env.example`` carries the complete dev default)."""
     proj = root / slug
     proj.mkdir(parents=True, exist_ok=True)
     if compose:
@@ -124,6 +127,10 @@ def _make_project(
         (proj / "release_smoke_test.sh").write_text("#!/usr/bin/env bash\necho ASSERTIONS_RUN=1\n")
     if frontend_tab:
         _seed_aktualizacie_frontend(proj)
+    if env is not None:
+        (proj / ".env").write_text(env)
+    if env_example is not None:
+        (proj / ".env.example").write_text(env_example)
     return proj
 
 
@@ -292,6 +299,91 @@ async def test_driver_boot_fail_skips_acceptance(monkeypatch, tmp_path) -> None:
     assert acceptance is None
     assert called["script"] is False, "acceptance must NOT run when the boot leg failed"
     assert rec.ran("down")
+
+
+# ---------------------------------------------------------------------------
+# A (release-smoke-boot-and-batch-fixes.md): the smoke boots with a COMPLETE, .env.example-derived env-file
+# ---------------------------------------------------------------------------
+
+
+def test_render_smoke_env_completes_incomplete_example(tmp_path) -> None:
+    """``_render_smoke_env`` mirrors ``scripts/ci_render_dotenv.py``: ``DATABASE_URL`` host/password rewritten
+    to the compose ``db`` service (scheme PRESERVED), ``POSTGRES_PASSWORD`` GUARANTEED present (appended when
+    the example omits it, forced to the known value when present), other lines verbatim. No example → False."""
+    src = tmp_path / ".env.example"
+    dst = tmp_path / "smoke.env"
+
+    # An example WITH a driver URL but WITHOUT POSTGRES_PASSWORD → it must be APPENDED (the fail-fast guard).
+    src.write_text("DATABASE_URL=postgresql+pg8000://appuser:CHANGE_ME@localhost:5432/appdb\nJWT=abc\n")
+    assert orchestrator._render_smoke_env(src, dst) is True
+    out = dst.read_text()
+    assert "POSTGRES_PASSWORD=ci" in out, "the missing POSTGRES_PASSWORD must be appended"
+    assert "postgresql+pg8000://appuser:ci@db:5432/appdb" in out, "host+password → db/ci, scheme preserved"
+    assert "JWT=abc" in out, "unrelated lines pass through verbatim"
+
+    # An example WITH POSTGRES_PASSWORD → forced to the known value, exactly once (no duplicate append).
+    src.write_text("POSTGRES_PASSWORD=nexpay_dev\nDB_PASSWORD=nexpay_dev\n")
+    assert orchestrator._render_smoke_env(src, dst) is True
+    out = dst.read_text()
+    assert out.count("POSTGRES_PASSWORD=ci") == 1 and "nexpay_dev" not in out
+    assert "DB_PASSWORD=ci" in out
+
+    # No .env.example → False → the caller boots WITHOUT an --env-file (unchanged legacy behaviour).
+    assert orchestrator._render_smoke_env(tmp_path / "missing.example", dst) is False
+
+
+class _EnvFileCapturingRecorder(_StepRecorder):
+    """A ``_StepRecorder`` that also captures the ``--env-file`` path + its CONTENT at ``up`` time (before the
+    ``finally`` teardown rmtree's the smoke tmpdir), so the test can assert the rendered env COMPLETED the
+    missing ``POSTGRES_PASSWORD``."""
+
+    def __init__(self, results: dict[str, tuple[int, str]]) -> None:
+        super().__init__(results)
+        self.env_file_path: str | None = None
+        self.env_file_content: str | None = None
+
+    async def __call__(self, cmd: list[str], timeout: int) -> tuple[int, str]:
+        if "up" in cmd and "--env-file" in cmd:
+            path = Path(cmd[cmd.index("--env-file") + 1])
+            self.env_file_path = str(path)
+            self.env_file_content = path.read_text()
+        return await super().__call__(cmd, timeout)
+
+
+@pytest.mark.asyncio
+async def test_driver_renders_env_file_when_live_env_incomplete(monkeypatch, tmp_path) -> None:
+    """A: the live ``.env`` LACKS ``POSTGRES_PASSWORD`` (the compose's ``${POSTGRES_PASSWORD:?…}`` guard would
+    fail interpolation → the app never boots — the nex-payables 1.1.0 blocker) but ``.env.example`` HAS it → the
+    boot renders a COMPLETE throwaway env and hands it to ``docker compose --env-file``, so the stack boots. The
+    live ``.env`` is NEVER clobbered, and the rendered env is a throwaway (not the project's ``.env``)."""
+    monkeypatch.setattr(orchestrator.claude_agent, "PROJECTS_ROOT", tmp_path)
+    live_env = "DATABASE_URL=postgresql+pg8000://app:x@db:5432/appdb\n"  # deliberately NO POSTGRES_PASSWORD
+    example = "DATABASE_URL=postgresql+pg8000://app:CHANGE_ME@db:5432/appdb\nPOSTGRES_PASSWORD=nexpay_dev\n"
+    proj = _make_project(tmp_path, "envr", script=True, frontend_tab=True, env=live_env, env_example=example)
+
+    rec = _EnvFileCapturingRecorder({"up": (0, "Started"), "ready": (0, "status 200"), "down": (0, "")})
+    monkeypatch.setattr(orchestrator, "_compose_smoke_step", rec)
+
+    async def _script(script, env):
+        return 0, "ASSERTIONS_RUN=1"
+
+    monkeypatch.setattr(orchestrator, "_run_acceptance_script", _script)
+
+    async def _akt_probe(*_a, **_k):
+        return True, "Aktualizácie OK"
+
+    monkeypatch.setattr(orchestrator, "_probe_release_notes", _akt_probe)
+
+    (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("envr", "v1.1.0")
+
+    assert boot_ok is True, boot_detail
+    up_cmd = next(cmd for cmd in rec.calls if "up" in cmd)
+    assert "--env-file" in up_cmd, "the up command must carry the rendered --env-file"
+    assert rec.env_file_content is not None, "the smoke rendered no env-file despite a .env.example"
+    assert "POSTGRES_PASSWORD=ci" in rec.env_file_content, "the rendered env completes the missing guard var"
+    # The live .env is untouched (still lacks POSTGRES_PASSWORD) and the rendered env is a THROWAWAY (not .env).
+    assert "POSTGRES_PASSWORD" not in (proj / ".env").read_text()
+    assert rec.env_file_path is not None and not rec.env_file_path.endswith("/.env")
 
 
 # ---------------------------------------------------------------------------

@@ -27,9 +27,12 @@ vi.mock("@/services/api/pipeline", () => ({
   postPipelineActionApi: vi.fn(),
 }));
 
-// A board offering `actions` (honest-by-construction: the bar keys off available_actions only).
-function boardWith(actions: string[]): PipelineBoard {
-  return { state: null, recent_messages: [], available_actions: actions } as unknown as PipelineBoard;
+// A board offering `actions` (honest-by-construction: the bar keys off available_actions only). `stage`
+// drives the CONTEXT-AWARE copy (release-smoke-boot-and-batch-fixes.md C); omitting it (state:null) is the
+// legacy/Návrh default that keeps today's plan copy.
+function boardWith(actions: string[], stage?: string): PipelineBoard {
+  const state = stage ? { current_stage: stage } : null;
+  return { state, recent_messages: [], available_actions: actions } as unknown as PipelineBoard;
 }
 
 // The fresh board the action returns — onBoard must adopt exactly this.
@@ -104,6 +107,35 @@ describe("SchvalitBar — the Návrh/plan-approval gate button", () => {
       }),
     );
     await waitFor(() => expect(onBoard).toHaveBeenCalledWith(NEXT_BOARD));
+  });
+
+  // ── Context-aware copy (release-smoke-boot-and-batch-fixes.md C): the SAME `schvalit` verb, two gates ──
+
+  it("at the Návrh gate (current_stage 'navrh') shows the PLAN copy", () => {
+    render(<SchvalitBar board={boardWith(["schvalit", "uprav"], "navrh")} versionId="v-1" onBoard={vi.fn()} />);
+    expect(screen.getByRole("button", { name: /Schváliť plán/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Prejsť na overenie/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/posunie do stavby \(Programovanie\)/)).toBeInTheDocument();
+  });
+
+  it("at a COMPLETED build (current_stage 'programovanie') shows the VERIFICATION copy", () => {
+    render(
+      <SchvalitBar board={boardWith(["schvalit", "uprav"], "programovanie")} versionId="v-1" onBoard={vi.fn()} />,
+    );
+    expect(screen.getByRole("button", { name: /Prejsť na overenie/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Schváliť plán/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/posunie na Verifikáciu \(overenie Auditorom\)/)).toBeInTheDocument();
+    // The action stays `schvalit` regardless of the copy.
+    fireEvent.click(screen.getByRole("button", { name: /Prejsť na overenie/ }));
+    return waitFor(() =>
+      expect(postPipelineActionApi).toHaveBeenCalledWith("v-1", { action: "schvalit", payload: undefined }),
+    );
+  });
+
+  it("defaults to the PLAN copy when state is null (legacy board)", () => {
+    render(<SchvalitBar board={boardWith(["schvalit", "uprav"])} versionId="v-1" onBoard={vi.fn()} />);
+    expect(screen.getByRole("button", { name: /Schváliť plán/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Prejsť na overenie/ })).not.toBeInTheDocument();
   });
 
   it("the review affordance navigates to /specifikacia", () => {

@@ -1,15 +1,16 @@
-// SchvalitBar — the "Schváliť plán" moment at the Návrh/plan-approval gate (regression fix
-// schvalit-approval-bar.md). A near-mirror of SpecApprovalBar for the OTHER schvaľovacie-body verb the
-// backend offers.
+// SchvalitBar — the ``schvalit`` schvaľovacie-body gate (regression fix schvalit-approval-bar.md). A
+// near-mirror of SpecApprovalBar for the OTHER verb the backend offers. The SAME ``schvalit`` is offered at
+// TWO gates, so the copy is CONTEXT-AWARE off the board's current stage (release-smoke-boot-and-batch-fixes.md
+// C): at ``navrh`` it's "Schváliť plán" (Návrh → Programovanie); at ``programovanie`` (build done) it's
+// "Prejsť na overenie" (Programovanie → Verifikácia).
 //
 // Honest-by-construction: renders NOTHING unless the backend currently OFFERS ``schvalit`` in
-// ``board.available_actions`` (a Návrh gate awaiting the Manažér after the Auditor review —
-// ``available_actions={uprav, ask, schvalit}``). So SpecApprovalBar (``approve_spec``) and this bar
-// (``schvalit``) are mutually exclusive by construction — at most one shows.
+// ``board.available_actions``. So SpecApprovalBar (``approve_spec``) and this bar (``schvalit``) are mutually
+// exclusive by construction — at most one shows.
 //
-// Primary "Schváliť plán" → ``schvalit`` ADVANCES Návrh → Programovanie (the build). Secondary "Upraviť" →
-// ``uprav`` (same available_actions set) sends the comment back as the REWORK instruction for the phase.
-// The optional comment threads into ``payload.comment`` for either action.
+// Primary → ``schvalit`` ADVANCES the current phase. Secondary "Upraviť" → ``uprav`` (same available_actions
+// set) sends the comment back as the REWORK instruction for the phase. The optional comment threads into
+// ``payload.comment`` for either action.
 
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -30,8 +31,19 @@ export default function SchvalitBar({ board, versionId, onBoard }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  // Honest-by-construction gate: the bar exists ONLY when the backend offers the Návrh approval right now.
+  // Honest-by-construction gate: the bar exists ONLY when the backend offers `schvalit` right now.
   if (!board?.available_actions?.includes("schvalit")) return null;
+
+  // Context-aware copy (release-smoke-boot-and-batch-fixes.md C): the SAME `schvalit` verb is offered at TWO
+  // gates. At `programovanie` (build done → advances Programovanie → Verifikácia) the Návrh "Schváliť plán"
+  // copy was nonsense; branch off the board's current stage. Any non-programovanie stage (Návrh, or a null/
+  // legacy state) keeps today's plan-approval copy.
+  const buildDone = board.state?.current_stage === "programovanie";
+  const approveLabel = buildDone ? "Prejsť na overenie" : "Schváliť plán";
+  const approveBusyLabel = buildDone ? "Posúvam…" : "Schvaľujem…";
+  const consequence = buildDone
+    ? "Potvrdíš dokončenú stavbu; projekt sa posunie na Verifikáciu (overenie Auditorom)."
+    : "Schválením potvrdíš návrh a plán; projekt sa posunie do stavby (Programovanie).";
 
   async function submit(action: PipelineActionName, failMsg: string) {
     setError("");
@@ -54,9 +66,7 @@ export default function SchvalitBar({ board, versionId, onBoard }: Props) {
   return (
     <div className="flex flex-col gap-2 border-t border-[var(--color-border-default)] bg-[var(--color-surface)] px-4 py-3">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-xs text-[var(--color-text-muted)]">
-          Schválením potvrdíš návrh a plán; projekt sa posunie do stavby (Programovanie).
-        </p>
+        <p className="text-xs text-[var(--color-text-muted)]">{consequence}</p>
         <button
           type="button"
           onClick={() => navigate("/specifikacia")}
@@ -92,7 +102,7 @@ export default function SchvalitBar({ board, versionId, onBoard }: Props) {
           disabled={submitting}
           className="shrink-0 rounded-lg bg-primary-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {submitting ? "Schvaľujem…" : "Schváliť plán"}
+          {submitting ? approveBusyLabel : approveLabel}
         </button>
       </div>
 
