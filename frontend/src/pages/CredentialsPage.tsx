@@ -9,6 +9,7 @@ import {
   deleteCredential,
 } from "@/services/api/credentials";
 import { ApiError } from "@/services/api";
+import { humanizeApiError } from "@/services/apiError";
 import type { CredentialRead } from "@/types/credential";
 
 type Mode = "view" | "edit" | "create";
@@ -34,6 +35,8 @@ export default function CredentialsPage() {
   const [createError, setCreateError] = useState<string | null>(null);
 
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+  // Audit Theme 2: save/delete used to fail SILENTLY (no catch → data-loss illusion). This surfaces the reason.
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const loadList = useCallback(() => {
     setLoading(true);
@@ -47,7 +50,7 @@ export default function CredentialsPage() {
           } else if (err.status === 403) {
             setAccessError("Credentials vyžadujú rolu Director (ri).");
           } else {
-            setAccessError(`Načítanie zlyhalo (HTTP ${err.status}).`);
+            setAccessError(humanizeApiError(err, "Načítanie zlyhalo").message);
           }
         } else {
           setAccessError("Sieťová chyba pri načítavaní credentials.");
@@ -91,21 +94,26 @@ export default function CredentialsPage() {
     setSelected(c);
     setMode("view");
     setDeleteConfirm(false);
+    setActionError(null);
   }
 
   function handleStartEdit() {
     if (!selected) return;
     setEditContent(content);
     setMode("edit");
+    setActionError(null);
   }
 
   async function handleSaveEdit() {
     if (!selected) return;
     setSaving(true);
+    setActionError(null);
     try {
       await putCredentialContent(selected.id, { content: editContent });
       setContent(editContent);
       setMode("view");
+    } catch (err) {
+      setActionError(humanizeApiError(err, "Uloženie zlyhalo").message);
     } finally {
       setSaving(false);
     }
@@ -138,7 +146,7 @@ export default function CredentialsPage() {
       setMode("view");
     } catch (err) {
       if (err instanceof ApiError) {
-        setCreateError(err.status === 409 ? "Súbor s týmto názvom už existuje." : `Vytvorenie zlyhalo (HTTP ${err.status}).`);
+        setCreateError(err.status === 409 ? "Súbor s týmto názvom už existuje." : humanizeApiError(err, "Vytvorenie zlyhalo").message);
       } else {
         setCreateError("Vytvorenie zlyhalo.");
       }
@@ -149,11 +157,16 @@ export default function CredentialsPage() {
 
   async function handleDelete() {
     if (!selected) return;
-    await deleteCredential(selected.id);
-    setItems((prev) => prev.filter((c) => c.id !== selected.id));
-    setSelected(null);
-    setMode("view");
-    setDeleteConfirm(false);
+    setActionError(null);
+    try {
+      await deleteCredential(selected.id);
+      setItems((prev) => prev.filter((c) => c.id !== selected.id));
+      setSelected(null);
+      setMode("view");
+      setDeleteConfirm(false);
+    } catch (err) {
+      setActionError(humanizeApiError(err, "Zmazanie zlyhalo").message);
+    }
   }
 
   return (
@@ -236,6 +249,9 @@ export default function CredentialsPage() {
                     </>
                   )}
                 </div>
+                {actionError && (
+                  <div className="rounded border border-[var(--color-state-error-bg)] bg-[var(--color-state-error-bg)] p-3 text-sm text-[var(--color-state-error-fg)]">{actionError}</div>
+                )}
                 <div className="text-xs font-mono text-[var(--color-text-muted)]">{selected.file_path}</div>
                 <div className="rounded-xl border border-[var(--color-border-default)] bg-[var(--color-canvas)] p-5">
                   {contentLoading && <div className="text-sm text-[var(--color-text-muted)]">Načítavam obsah…</div>}
@@ -267,6 +283,9 @@ export default function CredentialsPage() {
                     Zrušiť
                   </button>
                 </div>
+                {actionError && (
+                  <div className="rounded border border-[var(--color-state-error-bg)] bg-[var(--color-state-error-bg)] p-3 text-sm text-[var(--color-state-error-fg)]">{actionError}</div>
+                )}
                 <textarea
                   lang="sk"
                   spellCheck={false}

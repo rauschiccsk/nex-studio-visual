@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createProjectApi, suggestPortBlockApi } from "@/services/api/projects";
+import { humanizeApiError } from "@/services/apiError";
 import { getSystemSettingApi } from "@/services/api/systemSettings";
 import { listUsersApi } from "@/services/api/users";
 import { useAuthStore } from "@/store/authStore";
@@ -208,8 +209,9 @@ export default function NewProjectPage() {
         },
       });
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Nepodarilo sa vytvoriť projekt.";
-      setFormError(msg);
+      // Audit Theme 2: the raw backend detail (English "…D-020…", or an object-shaped detail rendering as
+      // "[object Object]") used to surface verbatim. Frame it in plain Slovak; the raw text stays as the detail.
+      setFormError(humanizeApiError(err, "Projekt sa nepodarilo vytvoriť").message);
     } finally {
       setLoading(false);
     }

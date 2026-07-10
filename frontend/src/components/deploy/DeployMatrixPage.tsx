@@ -12,6 +12,7 @@ import {
 
 import { acceptCustomerUat, deployCustomer, getDeployMatrix } from "@/services/api/deploy";
 import { ApiError } from "@/services/api";
+import { humanizeApiError } from "@/services/apiError";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import type { DeployEnvironment, DeployMatrix, DeployMatrixRow } from "@/types/deploy";
 
@@ -79,7 +80,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
       .then(setMatrix)
       .catch((err) => {
         if (err instanceof ApiError) {
-          setLoadError(`Načítanie zlyhalo (HTTP ${err.status}).`);
+          setLoadError(humanizeApiError(err, "Načítanie zlyhalo").message);
         } else {
           setLoadError("Sieťová chyba pri načítavaní matice nasadení.");
         }
@@ -135,7 +136,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
         } else if (err.status === 403) {
           setRowMsg(row.customer_id, "Nasadenie vyžaduje rolu Manažér (ri).");
         } else {
-          setRowMsg(row.customer_id, `Nasadenie zlyhalo (HTTP ${err.status}).`);
+          setRowMsg(row.customer_id, humanizeApiError(err, "Nasadenie zlyhalo").message);
         }
       } else {
         setRowMsg(row.customer_id, "Sieťová chyba pri nasadení.");
@@ -164,7 +165,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
         if (err.status === 403) {
           setRowMsg(row.customer_id, "Akceptácia vyžaduje rolu Manažér (ri).");
         } else {
-          setRowMsg(row.customer_id, `Akceptácia zlyhala (HTTP ${err.status}).`);
+          setRowMsg(row.customer_id, humanizeApiError(err, "Akceptácia zlyhala").message);
         }
       } else {
         setRowMsg(row.customer_id, "Sieťová chyba pri akceptácii.");

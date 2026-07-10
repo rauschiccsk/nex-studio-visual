@@ -4,6 +4,7 @@ import { FolderOpen, Loader2, Plus, Trash2, KeyRound, Pencil } from "lucide-reac
 
 import { listCustomers, createCustomer, updateCustomer, deleteCustomer } from "@/services/api/customers";
 import { ApiError } from "@/services/api";
+import { humanizeApiError } from "@/services/apiError";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import type { CustomerRead } from "@/types/customer";
 
@@ -49,7 +50,7 @@ export default function CustomersPage() {
       .then(setItems)
       .catch((err) => {
         if (err instanceof ApiError) {
-          setLoadError(`Načítanie zlyhalo (HTTP ${err.status}).`);
+          setLoadError(humanizeApiError(err, "Načítanie zlyhalo").message);
         } else {
           setLoadError("Sieťová chyba pri načítavaní zákazníkov.");
         }
@@ -129,7 +130,7 @@ export default function CustomersPage() {
         } else if (err.status === 403) {
           setFormError("Pridanie zákazníka vyžaduje rolu Manažér (ri).");
         } else {
-          setFormError(`Uloženie zlyhalo (HTTP ${err.status}).`);
+          setFormError(humanizeApiError(err, "Uloženie zlyhalo").message);
         }
       } else {
         setFormError("Sieťová chyba pri ukladaní.");
@@ -141,12 +142,14 @@ export default function CustomersPage() {
 
   async function handleDelete(c: CustomerRead) {
     if (!window.confirm(`Odstrániť zákazníka ${c.name}? Odstráni sa aj jeho uložený secret.`)) return;
+    setLoadError(null);
     try {
       await deleteCustomer(c.id);
       load();
-    } catch {
-      // Reload reflects the real state regardless.
-      load();
+    } catch (err) {
+      // Audit Theme 2: the delete used to swallow the error and reload → the customer reappeared with NO
+      // feedback (the manager couldn't tell it failed or why). Surface the reason instead of silently reloading.
+      setLoadError(humanizeApiError(err, `Zákazníka „${c.name}" sa nepodarilo odstrániť`).message);
     }
   }
 
