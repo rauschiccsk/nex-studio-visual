@@ -128,7 +128,7 @@ export default function CustomersPage() {
         if (err.status === 409) {
           setFormError("Zákazník s týmto slug už v projekte existuje.");
         } else if (err.status === 403) {
-          setFormError("Pridanie zákazníka vyžaduje rolu Manažér (ri).");
+          setFormError("Pridanie zákazníka je dostupné len pre rolu Manažér.");
         } else {
           setFormError(humanizeApiError(err, "Uloženie zlyhalo").message);
         }

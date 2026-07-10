@@ -143,7 +143,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
           // The backend gate (never bypassed) rejected, e.g. PROD without acceptance.
           setRowMsg(row.customer_id, err.message || "Nasadenie zablokované (akceptačná brána).");
         } else if (err.status === 403) {
-          setRowMsg(row.customer_id, "Nasadenie vyžaduje rolu Manažér (ri).");
+          setRowMsg(row.customer_id, "Nasadenie je dostupné len pre rolu Manažér.");
         } else {
           setRowMsg(row.customer_id, humanizeApiError(err, "Nasadenie zlyhalo").message);
         }
@@ -172,7 +172,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 403) {
-          setRowMsg(row.customer_id, "Akceptácia vyžaduje rolu Manažér (ri).");
+          setRowMsg(row.customer_id, "Akceptácia je dostupná len pre rolu Manažér.");
         } else {
           setRowMsg(row.customer_id, humanizeApiError(err, "Akceptácia zlyhala").message);
         }

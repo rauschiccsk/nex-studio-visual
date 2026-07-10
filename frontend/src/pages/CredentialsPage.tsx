@@ -48,7 +48,7 @@ export default function CredentialsPage() {
           if (err.status === 401) {
             setAccessError("Pre prístup k credentials sa musíš prihlásiť.");
           } else if (err.status === 403) {
-            setAccessError("Credentials vyžadujú rolu Director (ri).");
+            setAccessError("Prístupy sú dostupné len pre rolu Manažér.");
           } else {
             setAccessError(humanizeApiError(err, "Načítanie zlyhalo").message);
           }
@@ -174,14 +174,14 @@ export default function CredentialsPage() {
       <div className="flex items-center gap-3 px-4 h-12 border-b border-[var(--color-border-default)] flex-shrink-0">
         <span className="text-sm font-medium text-[var(--color-text-primary)]">Prístupy</span>
         <span className="text-[11px] text-[var(--color-text-muted)]">
-          {items.length} záznamov · /opt/data/nex-studio/credentials
+          {items.length} záznamov
         </span>
         <div className="ml-auto">
           <button
             onClick={handleStartCreate}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary-600 hover:bg-primary-500 text-white rounded-lg transition-colors"
           >
-            + Nový credential
+            + Nový prístup
           </button>
         </div>
       </div>
@@ -299,7 +299,7 @@ export default function CredentialsPage() {
             {mode === "create" && (
               <div className="max-w-3xl space-y-3">
                 <div className="flex items-center gap-2">
-                  <h2 className="text-lg font-semibold text-[var(--color-text-primary)] flex-1">Nový credential</h2>
+                  <h2 className="text-lg font-semibold text-[var(--color-text-primary)] flex-1">Nový prístup</h2>
                   <button
                     onClick={handleSaveCreate}
                     disabled={saving}

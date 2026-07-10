@@ -47,19 +47,9 @@ function ProjectCard({ project, index, onOpen }: ProjectCardProps) {
         </div>
       </div>
 
-      {/* Progress bar placeholder */}
-      <div className="mb-3">
-        <div className="flex justify-between items-center mb-1">
-          <span className="text-[10px] text-[var(--color-text-muted)]">— · —</span>
-          <span className="text-[10px] text-[var(--color-text-muted)]">—%</span>
-        </div>
-        <div className="h-1.5 bg-[var(--color-surface)] rounded-full" />
-      </div>
-
-      <div className="flex items-center justify-between">
-        <div className="flex gap-2 text-[10px] text-[var(--color-text-muted)]">
-          <span>— verzií</span>
-        </div>
+      {/* Audit Theme 6 (honesty): the fake "— · —" / "—%" progress bar + "— verzií" placeholders (never wired)
+          read as broken data. Removed — an honest card shows the real name/repo + Otvoriť, nothing fabricated. */}
+      <div className="flex items-center justify-end">
         <button
           onClick={onOpen}
           className="text-[10px] text-primary-700 dark:text-primary-400 hover:text-primary-300 transition-colors"
@@ -150,18 +140,8 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
-
-      {/* Continue work — placeholder until Phase 3 */}
-      {projects.length > 0 && (
-        <div>
-          <h2 className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-widest mb-3">
-            Pokračuj v práci
-          </h2>
-          <div className="rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-hover)] p-5 text-center text-sm text-[var(--color-text-secondary)]">
-            Dostupné po pridaní verzie a spustení pipeline.
-          </div>
-        </div>
-      )}
+      {/* Audit Theme 6: the permanent "Pokračuj v práci — Dostupné po pridaní verzie a spustení pipeline"
+          placeholder (never wired, jargon "pipeline") is removed rather than shown as a dead coming-soon panel. */}
     </div>
   );
 }

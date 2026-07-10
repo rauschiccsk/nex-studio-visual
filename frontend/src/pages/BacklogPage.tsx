@@ -43,6 +43,14 @@ const STATUS_LABEL: Record<BacklogStatus, string> = {
   rejected: "Zamietnuté",
 };
 
+// Audit Theme 6: priority rendered raw English ("low"/"high"); localise it like STATUS_LABEL.
+const PRIORITY_LABEL: Record<BacklogPriority, string> = {
+  low: "Nízka",
+  medium: "Stredná",
+  high: "Vysoká",
+  critical: "Kritická",
+};
+
 export default function BacklogPage() {
   const { slug } = useParams<{ slug: string }>();
 
@@ -288,7 +296,7 @@ export default function BacklogPage() {
             >
               {PRIORITIES.map((p) => (
                 <option key={p} value={p}>
-                  {p}
+                  {PRIORITY_LABEL[p]}
                 </option>
               ))}
             </select>
@@ -356,7 +364,7 @@ export default function BacklogPage() {
                       >
                         {PRIORITIES.map((p) => (
                           <option key={p} value={p}>
-                            {p}
+                            {PRIORITY_LABEL[p]}
                           </option>
                         ))}
                       </select>
@@ -382,7 +390,7 @@ export default function BacklogPage() {
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-mono text-[var(--color-text-muted)]">REQ-{it.number}</span>
                           <span className={`text-[10px] px-1.5 py-0.5 rounded ${PRIORITY_CLS[it.priority]}`}>
-                            {it.priority}
+                            {PRIORITY_LABEL[it.priority]}
                           </span>
                           <span className={`text-[10px] px-1.5 py-0.5 rounded ${STATUS_CLS[it.status]}`}>
                             {STATUS_LABEL[it.status]}
