@@ -14,6 +14,7 @@ import logging
 import os
 import re
 import signal
+from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -72,7 +73,15 @@ _MUTATING_TOOLS: tuple[str, ...] = (
 
 
 class ClaudeAgentError(RuntimeError):
-    """claude CLI invocation failed (non-zero exit, timeout, decode failure)."""
+    """claude CLI invocation failed (non-zero exit, timeout, decode failure).
+
+    ``log_path`` (build-robustness-crash-handling.md Fix 1): the per-turn diagnostic log written for this
+    failing turn (redacted stderr / stdout tail / stream-event tail), or ``None`` when no ``log_dir`` was
+    passed to :func:`invoke_claude`. The honest crash/timeout notification (Fix 3) references it so the
+    operator/Dedo can read the cause of the next crash instead of an empty terminal-logs volume."""
+
+    #: Class-level default so ``exc.log_path`` is always safe to read (raisers set the instance attr).
+    log_path: Optional[str] = None
 
 
 class ClaudeAgentTimeout(ClaudeAgentError):
@@ -83,6 +92,87 @@ class ClaudeAgentTimeout(ClaudeAgentError):
     whole budget — re-invoking just risks another long wait) from a FAST crash (non-zero exit / decode /
     stream-end — produced nothing but cost almost no wall-clock and is usually transient, so worth a
     bounded re-invoke). The task-plan per-feat passes use this to retry a crash but not a timeout."""
+
+
+# --------------------------------------------------------------------------------------------------------
+# Per-turn diagnostic logging (build-robustness-crash-handling.md Fix 1)
+# --------------------------------------------------------------------------------------------------------
+
+#: Per-turn diagnostic log root. Same DURABLE volume as the PTY logs (docker-compose ``terminal_logs`` →
+#: ``/var/lib/nex-studio/terminal-logs``), so a crash/timeout leaves a trace on disk (the volume was empty
+#: → a crash was undiagnosable). Env-overridable (``NEX_TURN_LOG_DIR``) for a non-container run / tests.
+TURN_LOG_DIR = Path(os.environ.get("NEX_TURN_LOG_DIR", "/var/lib/nex-studio/terminal-logs"))
+
+#: Bounded tail (bytes) of stdout / stream-events kept in a turn log — a single ``result`` line can be a
+#: whole spec file, so only the TAIL is durable. The stderr (where a crash cause lives) is kept up to the
+#: same bound but is normally tiny.
+_LOG_TAIL_BYTES = 64 * 1024
+#: How many trailing stream-json event lines to retain for a streaming turn's log.
+_LOG_EVENT_TAIL = 50
+
+#: §4 SECURITY (Fix 1): credential / OAuth-token patterns scrubbed from a turn log BEFORE it hits disk. The
+#: ``claude`` CLI should never emit a token, but a durable log is a leak surface, so redact defensively:
+#: an ``Authorization: …`` / ``…=…`` header (whole value to line-end), a bare ``Bearer <tok>``, ``token=`` /
+#: ``api_key=`` / ``access_token=`` k=v pairs, and any bare ``sk-…`` secret (Anthropic OAuth ``sk-ant-oat…``
+#: / API ``sk-ant-api…`` keys). Ordered so the header rule runs first, then the standalone-token rules mop
+#: up anything it left (defense in depth — a leaked token must not survive under ANY of these shapes).
+_REDACTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"(?im)^(.*\bauthorization)\b\s*[:=].*$"), r"\1: [REDACTED]"),
+    (re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._\-]+"), "Bearer [REDACTED]"),
+    (
+        re.compile(r"(?i)\b(access[_-]?token|refresh[_-]?token|api[_-]?key|token|secret|password)\s*[:=]\s*\S+"),
+        r"\1=[REDACTED]",
+    ),
+    (re.compile(r"\bsk-[A-Za-z0-9._\-]{6,}"), "[REDACTED]"),
+)
+
+
+def _redact_secrets(text: str) -> str:
+    """Scrub credential / OAuth-token patterns from ``text`` (Fix 1, §4). Idempotent; never raises."""
+    if not text:
+        return text
+    for pattern, replacement in _REDACTIONS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+def _write_turn_log(
+    log_dir: Optional[Path],
+    log_label: Optional[str],
+    *,
+    outcome: str,
+    detail: str = "",
+    stdout_tail: str = "",
+    stderr: str = "",
+    events_tail: str = "",
+) -> Optional[str]:
+    """Persist ONE agent turn's output to ``<log_dir>/<log_label>.log`` (Fix 1) — REDACTED (§4) + bounded.
+
+    ``outcome`` is ``ok`` / ``crash`` / ``timeout``. A no-op returning ``None`` when ``log_dir`` /
+    ``log_label`` is unset (today's byte-identical behaviour) OR on any ``OSError`` — a diagnostic log must
+    NEVER break a run. Returns the written path (str) so the caller can reference it in the honest
+    crash/timeout message (Fix 3)."""
+    if not log_dir or not log_label:
+        return None
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        safe = re.sub(r"[^A-Za-z0-9._-]", "_", log_label)
+        path = log_dir / f"{safe}.log"
+        sections = [f"=== agent turn — {outcome} ==="]
+        if detail:
+            sections.append(detail)
+        if stderr:
+            sections.append("--- stderr ---\n" + stderr[-_LOG_TAIL_BYTES:])
+        if events_tail:
+            sections.append("--- last stream events ---\n" + events_tail[-_LOG_TAIL_BYTES:])
+        if stdout_tail:
+            sections.append("--- stdout (tail) ---\n" + stdout_tail[-_LOG_TAIL_BYTES:])
+        body = _redact_secrets("\n\n".join(sections))
+        path.write_text(body + "\n", encoding="utf-8")
+        return str(path)
+    except OSError as exc:  # never let a diagnostic write break a run (Fix 1)
+        logger.warning("failed to persist agent turn log %s: %s", log_label, exc)
+        return None
 
 
 def _load_charter(charter_path: Path) -> str:
@@ -232,6 +322,8 @@ async def invoke_claude(
     json_schema: Optional[dict] = None,
     allowed_tools: Optional[list[str]] = None,
     sandbox: bool = False,
+    log_dir: Optional[Path] = None,
+    log_label: Optional[str] = None,
 ) -> tuple[str, Optional["UsageMetadata"], Optional[dict]]:
     """Invoke ``claude -p`` with bounded transient-error retry (CR-NS-018 robustness).
 
@@ -280,6 +372,8 @@ async def invoke_claude(
                 json_schema=json_schema,
                 allowed_tools=allowed_tools,
                 sandbox=sandbox,
+                log_dir=log_dir,
+                log_label=log_label,
             )
         except ClaudeAgentError as exc:
             if attempt < len(_TRANSIENT_BACKOFF) and _TRANSIENT_RE.search(str(exc)):
@@ -310,6 +404,8 @@ async def _invoke_once(
     json_schema: Optional[dict] = None,
     allowed_tools: Optional[list[str]] = None,
     sandbox: bool = False,
+    log_dir: Optional[Path] = None,
+    log_label: Optional[str] = None,
 ) -> tuple[str, Optional["UsageMetadata"], Optional[dict]]:
     """One ``claude -p`` subprocess invocation (no retry — see :func:`invoke_claude`).
 
@@ -431,7 +527,7 @@ async def _invoke_once(
     )
 
     if on_event is not None:
-        return await _invoke_streaming(proc, timeout=timeout, on_event=on_event)
+        return await _invoke_streaming(proc, timeout=timeout, on_event=on_event, log_dir=log_dir, log_label=log_label)
 
     try:
         stdout, stderr = await asyncio.wait_for(
@@ -440,24 +536,63 @@ async def _invoke_once(
         )
     except asyncio.TimeoutError as exc:
         await _kill_process_tree(proc)
-        raise ClaudeAgentTimeout(
-            f"claude invocation timed out after {timeout}s",
-        ) from exc
-
-    if proc.returncode != 0:
-        stderr_text = stderr.decode("utf-8", errors="replace").strip()
-        raise ClaudeAgentError(
-            f"claude exited with code {proc.returncode}: {stderr_text[:500]}",
+        # Fix 1: a real TIMEOUT returns no envelope — persist a marker log so the wall-clock exhaustion is
+        # diagnosable (and so Fix 3 can reference the path), then raise the DISTINCT timeout type.
+        log_path = _write_turn_log(
+            log_dir,
+            log_label,
+            outcome="timeout",
+            detail=f"claude invocation timed out after {timeout}s (no envelope returned)",
         )
+        err = ClaudeAgentTimeout(f"claude invocation timed out after {timeout}s")
+        err.log_path = log_path
+        raise err from exc
 
+    stderr_text = stderr.decode("utf-8", errors="replace").strip()
     # WS-D (CR-NS-036): --output-format json → parse the envelope for the result text + usage.
     raw = stdout.decode("utf-8", errors="replace").strip()
+
+    if proc.returncode != 0:
+        log_path = _write_turn_log(
+            log_dir,
+            log_label,
+            outcome="crash",
+            detail=f"claude exited with code {proc.returncode}",
+            stdout_tail=raw,
+            stderr=stderr_text,
+        )
+        err = ClaudeAgentError(f"claude exited with code {proc.returncode}: {stderr_text[:500]}")
+        err.log_path = log_path
+        raise err
+
     try:
         envelope = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise ClaudeAgentError(f"claude json output not parseable: {exc}") from exc
+        log_path = _write_turn_log(
+            log_dir,
+            log_label,
+            outcome="crash",
+            detail=f"claude json output not parseable: {exc}",
+            stdout_tail=raw,
+            stderr=stderr_text,
+        )
+        err = ClaudeAgentError(f"claude json output not parseable: {exc}")
+        err.log_path = log_path
+        raise err from exc
     if not isinstance(envelope, dict) or "result" not in envelope:
-        raise ClaudeAgentError("claude json output has no 'result' field")
+        log_path = _write_turn_log(
+            log_dir,
+            log_label,
+            outcome="crash",
+            detail="claude json output has no 'result' field",
+            stdout_tail=raw,
+            stderr=stderr_text,
+        )
+        err = ClaudeAgentError("claude json output has no 'result' field")
+        err.log_path = log_path
+        raise err
+    # Fix 1: persist a normal completion too, so the NEXT crash has a healthy prior-turn baseline to diff.
+    _write_turn_log(log_dir, log_label, outcome="ok", stdout_tail=raw, stderr=stderr_text)
     return str(envelope["result"]).strip(), _usage_from(envelope), _structured_from(envelope)
 
 
@@ -480,7 +615,7 @@ async def _kill_process_tree(proc) -> None:
 
 
 async def _invoke_streaming(
-    proc, *, timeout: int, on_event: EventCallback
+    proc, *, timeout: int, on_event: EventCallback, log_dir: Optional[Path] = None, log_label: Optional[str] = None
 ) -> tuple[str, Optional["UsageMetadata"], Optional[dict]]:
     """Read ``--output-format stream-json`` NDJSON, emit events, return ``(text, usage, structured_output)``.
 
@@ -489,7 +624,11 @@ async def _invoke_streaming(
     (WS-D, CR-NS-036) and, when ``--json-schema`` was passed, the grammar-constrained
     ``structured_output`` object (R3). A callback that raises is logged and swallowed (a broken UI
     feed must never kill an agent run).
+
+    Fix 1: the last :data:`_LOG_EVENT_TAIL` raw event lines are retained in an outer-scope ring buffer, so
+    on a timeout (``_consume`` cancelled) OR a crash the tail is still persisted to the per-turn log.
     """
+    event_tail: deque[str] = deque(maxlen=_LOG_EVENT_TAIL)
 
     async def _consume() -> tuple[Optional[str], Optional[UsageMetadata], Optional[dict]]:
         result_text: Optional[str] = None
@@ -500,6 +639,7 @@ async def _invoke_streaming(
             line = raw.decode("utf-8", errors="replace").strip()
             if not line:
                 continue
+            event_tail.append(line)
             try:
                 evt = json.loads(line)
             except json.JSONDecodeError:
@@ -518,14 +658,43 @@ async def _invoke_streaming(
         result_text, result_usage, result_structured = await asyncio.wait_for(_consume(), timeout=timeout)
     except asyncio.TimeoutError as exc:
         await _kill_process_tree(proc)
-        raise ClaudeAgentTimeout(f"claude invocation timed out after {timeout}s") from exc
+        log_path = _write_turn_log(
+            log_dir,
+            log_label,
+            outcome="timeout",
+            detail=f"claude invocation timed out after {timeout}s (stream did not complete)",
+            events_tail="\n".join(event_tail),
+        )
+        err = ClaudeAgentTimeout(f"claude invocation timed out after {timeout}s")
+        err.log_path = log_path
+        raise err from exc
 
     await proc.wait()
     if proc.returncode != 0:
         stderr_text = ""
         if proc.stderr is not None:
             stderr_text = (await proc.stderr.read()).decode("utf-8", errors="replace").strip()
-        raise ClaudeAgentError(f"claude exited with code {proc.returncode}: {stderr_text[:500]}")
+        log_path = _write_turn_log(
+            log_dir,
+            log_label,
+            outcome="crash",
+            detail=f"claude exited with code {proc.returncode}",
+            stderr=stderr_text,
+            events_tail="\n".join(event_tail),
+        )
+        err = ClaudeAgentError(f"claude exited with code {proc.returncode}: {stderr_text[:500]}")
+        err.log_path = log_path
+        raise err
     if result_text is None:
-        raise ClaudeAgentError("claude stream ended without a result event")
+        log_path = _write_turn_log(
+            log_dir,
+            log_label,
+            outcome="crash",
+            detail="claude stream ended without a result event",
+            events_tail="\n".join(event_tail),
+        )
+        err = ClaudeAgentError("claude stream ended without a result event")
+        err.log_path = log_path
+        raise err
+    _write_turn_log(log_dir, log_label, outcome="ok", events_tail="\n".join(event_tail))
     return result_text.strip(), result_usage, result_structured

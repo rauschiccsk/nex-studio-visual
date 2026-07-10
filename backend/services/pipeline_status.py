@@ -409,6 +409,18 @@ class ParseFailure:
     #: "work may have landed — review & continue" next_action instead of a bare ``blocked`` relay. ``None``
     #: for an ordinary parse failure (no dispatch baseline to audit against).
     lost_work: Optional[dict[str, Any]] = None
+    #: build-robustness-crash-handling.md Fix 2/3: the KIND of envelope loss — ``"timeout"`` (the turn
+    #: burned its whole wall-clock budget → a real :class:`ClaudeAgentTimeout`) or ``"crash"`` (a
+    #: :class:`ClaudeAgentError` — connection/decode/non-zero-exit, NOT the budget). Set only by
+    #: :func:`orchestrator.invoke_agent` on an envelope-loss so the build round can auto-retry a crash ONCE
+    #: (but never a real timeout) and route the honest, type-specific settle message. ``None`` for an
+    #: ordinary parse failure.
+    envelope_loss_kind: Optional[str] = None
+    #: build-robustness-crash-handling.md Fix 1: the per-turn diagnostic log written for this failing turn
+    #: (redacted stderr / stdout tail / stream-event tail), carried up from the raising
+    #: :class:`ClaudeAgentError`. The honest crash/timeout notification (Fix 3) references it so the
+    #: operator/Dedo can read the cause. ``None`` when no log dir was configured for the turn.
+    log_path: Optional[str] = None
 
 
 ParseResult = Union[PipelineStatusBlock, ParseFailure]

@@ -141,10 +141,13 @@ class FakeClaude:
         json_schema=None,
         allowed_tools=None,
         sandbox=False,
+        log_dir=None,
+        log_label=None,
     ):
         # konzultacia-followup.md Fix 1: ``invoke_agent`` now forwards ``allowed_tools=`` on EVERY turn (the
         # read-only consult profile, or ``None`` for a build). konzultacia-sidecar-sandbox.md Part 2 adds
-        # ``sandbox=`` (``True`` only for a consult turn). Accept + record both so this fake mirrors the real
+        # ``sandbox=`` (``True`` only for a consult turn). build-robustness-crash-handling.md Fix 1 adds
+        # ``log_dir=``/``log_label=`` (the per-turn diagnostic log). Accept all so this fake mirrors the real
         # ``invoke_claude`` signature (else a TypeError — the regression this fixes).
         self.calls.append(
             {

@@ -2664,6 +2664,12 @@ async def invoke_agent(
     # WS-D (CR-NS-036): time + meter this dispatch into the turn accumulator. A fresh local one for
     # single-shot direct callers; the shared one when threaded through the parse-retry loop.
     turn_metrics = metrics if metrics is not None else _DispatchMetrics()
+    # build-robustness-crash-handling.md Fix 1: persist this turn's subprocess output to a durable per-turn
+    # log so the next crash/timeout is diagnosable (the terminal-logs volume was empty). Keyed on the stage
+    # + the (project, role) session id (no Date.now — resume-safe), under a per-version subdir. On a crash /
+    # timeout the raising ``ClaudeAgentError`` carries the written path (Fix 3 references it).
+    log_dir = claude_agent.TURN_LOG_DIR / str(version_id)
+    log_label = f"{stage}-{session_id}"
     _started = perf_counter()
     try:
         # CR-V2-015 single-writer guard: mark this ``claude_session_id`` engine-busy for the live CLI
@@ -2688,8 +2694,35 @@ async def invoke_agent(
                     # konzultacia-sidecar-sandbox.md Part 2: route the consult turn through the OS-isolated
                     # sidecar (True only from run_consult_turn); build turns pass False → in-process.
                     sandbox=sandbox,
+                    # Fix 1: persist this turn's output to a durable per-turn log (redacted, §4).
+                    log_dir=log_dir,
+                    log_label=log_label,
                 )
             )
+    except ClaudeAgentTimeout as exc:
+        # build-robustness-crash-handling.md Fix 2: a REAL timeout — the turn burned its whole wall-clock
+        # budget. Re-running just risks another 40-min wall, so this stays conservative (NO auto-retry; the
+        # build round settles to awaiting_manazer). Distinguished from a crash via ``envelope_loss_kind`` so
+        # the round routes the honest, type-specific message (Fix 3). MUST precede ``except ClaudeAgentError``
+        # (ClaudeAgentTimeout is a subclass).
+        turn_metrics.record(None, perf_counter() - _started)
+        lost_work = await _audit_lost_work(
+            db,
+            version_id=version_id,
+            slug=slug,
+            stage=stage,
+            timeout_seconds=timeout if timeout is not None else _timeout_for(stage),
+            on_message=on_message,
+            cause_label="Agent vyčerpal časový limit",
+        )
+        return ParseFailure(
+            f"claude invocation failed: {exc}",
+            usage=turn_metrics.usage_payload(),
+            timing=turn_metrics.timing_payload(),
+            lost_work=lost_work,
+            envelope_loss_kind="timeout",
+            log_path=getattr(exc, "log_path", None),
+        )
     except ClaudeAgentError as exc:
         # A failed invocation still burned wall-clock (and counts as an attempt) — record it so the
         # turn's timing/parse_attempts reflect retries; no usage (no envelope was returned) (WS-D).
@@ -2699,6 +2732,9 @@ async def invoke_agent(
         # the Director can review & continue — never silently re-do or lose the work. The audit dict rides
         # on the returned ParseFailure so ``run_dispatch`` settles to ``awaiting_director`` (not a bare
         # ``blocked``). A no-op (returns None) when no dispatch baseline was armed (Seam #1/#3).
+        # build-robustness-crash-handling.md Fix 2: this is a CRASH (connection/decode/non-zero exit — NOT
+        # the wall-clock budget), usually transient → the build round auto-retries the turn ONCE before
+        # settling. ``envelope_loss_kind='crash'`` routes both the retry decision and the honest message.
         lost_work = await _audit_lost_work(
             db,
             version_id=version_id,
@@ -2706,6 +2742,7 @@ async def invoke_agent(
             stage=stage,
             timeout_seconds=timeout if timeout is not None else _timeout_for(stage),
             on_message=on_message,
+            cause_label="Agent stratil spojenie / spadol",
         )
         # Return the failure SILENTLY otherwise (CR-NS-022 §2 — no raw system→director dump here). The
         # caller decides if/how it reaches the Director: invoke_agent_with_parse_retry relays the
@@ -2717,6 +2754,8 @@ async def invoke_agent(
             usage=turn_metrics.usage_payload(),
             timing=turn_metrics.timing_payload(),
             lost_work=lost_work,
+            envelope_loss_kind="crash",
+            log_path=getattr(exc, "log_path", None),
         )
     turn_metrics.record(usage, perf_counter() - _started)
     stdout = text
@@ -7282,6 +7321,58 @@ async def _record_task_summary(
 _SELF_CHECK_RETRIES = 5
 
 
+def _envelope_loss_next_action(kind: str, timeout_seconds: int, log_path: Optional[str]) -> str:
+    """Plain-language build-round settle message routed by the envelope-loss TYPE
+    (build-robustness-crash-handling.md Fix 3). A REAL timeout and a CRASH must NOT share the misleading
+    "Vypršal čas agenta" string:
+
+      * ``timeout`` — the turn burned its whole wall-clock budget; the work committed so far is safe and the
+        manager resumes the build.
+      * ``crash`` — the agent lost its connection / crashed (NOT a timeout); ONE auto-retry (Fix 2) already
+        ran and failed again; the diagnostic log path (Fix 1) is cited so the operator/Dedo can read the
+        cause.
+    """
+    if kind == "timeout":
+        minutes = max(1, round(timeout_seconds / 60))
+        return f"Agent vyčerpal časový limit ({minutes} min) — hotové zmeny sú zapísané, môžeš pokračovať v stavbe."
+    log_note = f" (log: {log_path})" if log_path else ""
+    return (
+        "Agent stratil spojenie / spadol (nie časový limit) — skúsil som to raz znova, opäť zlyhalo. "
+        f"Hotové zmeny sú zapísané, môžeš pokračovať.{log_note}"
+    )
+
+
+async def _dispatch_build_turn(
+    db: Session,
+    *,
+    version_id: uuid.UUID,
+    task: Task,
+    attempt: int,
+    prompt: str,
+    mode: Optional[str],
+    on_event: Optional[claude_agent.EventCallback],
+    on_message: Optional[MessageCallback],
+) -> PipelineStatusBlock | ParseFailure:
+    """One Programovanie build turn (build-robustness-crash-handling.md Fix 2 seam). A thin wrapper over
+    :func:`invoke_agent_with_parse_retry` so :func:`_run_build_round` can run the SAME turn twice — the
+    initial dispatch AND the single crash auto-retry — from one call site (no duplication, no in-loop
+    closure that would capture the loop task)."""
+    return await invoke_agent_with_parse_retry(
+        db,
+        version_id=version_id,
+        role=AI_AGENT_ROLE,
+        stage="programovanie",
+        prompt=prompt,
+        on_event=on_event,
+        on_message=on_message,
+        extra_payload={"task_id": str(task.id), "task_number": task.number, "attempt": attempt},
+        # metrics-v3-three-phases.md Part 1: stamp the build turn's metrics phase explicitly (already
+        # 'programovanie' via the stage fallback — this is robustness). Only for the conversation flow;
+        # the legacy automaton (mode NULL) passes None so its payload stays byte-for-byte unchanged.
+        metrics_phase="programovanie" if mode == "conversation" else None,
+    )
+
+
 async def _run_build_round(
     db: Session,
     state: PipelineState,
@@ -7337,6 +7428,11 @@ async def _run_build_round(
     # The Manažér's framed return/answer (an ``uprav`` / ``answer`` re-dispatch) seeds attempt 1 of whichever
     # task runs first in THIS dispatch (the resumed task), then is consumed so later turns use generated briefs.
     pending_directive = directive
+    # build-robustness-crash-handling.md Fix 2: auto-retry a CRASH (ClaudeAgentError — connection/decode,
+    # usually transient) ONCE per dispatch before settling; a REAL timeout is never retried (re-running just
+    # risks another 40-min wall). Bounded to ONE across the whole build round (all tasks/attempts) so a
+    # persistent crash still surfaces, never an infinite retry loop.
+    crash_retried = False
     # Verifikácia FAIL fix-loop (CR-V2-014; AUD-3): a re-gate re-entry (``is_regate`` set by the verdict FAIL
     # settle) re-runs the build against the Auditor's findings → the SALVAGED ``surgical_fix`` scope (the
     # Auditor FINDS, the AI Agent FIXES — independence). Thread the Auditor's latest Verifikácia FAIL
@@ -7501,20 +7597,45 @@ async def _run_build_round(
                 pending_directive = None  # consume once — later attempts/tasks use generated briefs
             else:
                 prompt = _directive_for_build_task(task, cross_cutting, prior_failures, state.flow_type)
-            result = await invoke_agent_with_parse_retry(
+            result = await _dispatch_build_turn(
                 db,
                 version_id=version_id,
-                role=AI_AGENT_ROLE,
-                stage="programovanie",
+                task=task,
+                attempt=attempt,
                 prompt=prompt,
+                mode=state.mode,
                 on_event=on_event,
                 on_message=on_message,
-                extra_payload={"task_id": str(task.id), "task_number": task.number, "attempt": attempt},
-                # metrics-v3-three-phases.md Part 1: stamp the build turn's metrics phase explicitly (already
-                # 'programovanie' via the stage fallback — this is robustness). Only for the conversation flow;
-                # the legacy automaton (mode NULL) passes None so its payload stays byte-for-byte unchanged.
-                metrics_phase="programovanie" if state.mode == "conversation" else None,
             )
+            # build-robustness-crash-handling.md Fix 2: a CRASH (envelope-loss, kind='crash' — connection /
+            # decode, NOT the wall-clock budget) is usually transient → re-invoke the SAME turn ONCE before
+            # settling. Bounded to ONE crash retry per dispatch (``crash_retried``) so a persistent problem
+            # still surfaces, never an infinite loop. A REAL timeout (kind='timeout') is NEVER retried — a
+            # re-run just risks another 40-min wall (kept conservative). The build round is resume-safe, so a
+            # retry re-runs the same task cleanly.
+            if (
+                isinstance(result, ParseFailure)
+                and result.lost_work is not None
+                and result.envelope_loss_kind == "crash"
+                and not crash_retried
+            ):
+                crash_retried = True
+                logger.warning(
+                    "build turn crashed (envelope loss) for version=%s task=#%s — auto-retrying ONCE: %s",
+                    version_id,
+                    task.number,
+                    result.reason,
+                )
+                result = await _dispatch_build_turn(
+                    db,
+                    version_id=version_id,
+                    task=task,
+                    attempt=attempt,
+                    prompt=prompt,
+                    mode=state.mode,
+                    on_event=on_event,
+                    on_message=on_message,
+                )
             if isinstance(result, ParseFailure):
                 if result.lost_work is not None:
                     # Lost-work audit (R-BLAST safeguard #3): the AI Agent's envelope was lost (timeout/crash)
@@ -7523,7 +7644,16 @@ async def _run_build_round(
                     # stays in_progress (reclaimed to todo on the next resume) — committed-but-lost work is
                     # surfaced, NEVER silently dropped or blindly redone.
                     state.status = "awaiting_manazer"
-                    state.next_action = result.lost_work["next_action"]
+                    # Fix 3: route the honest, type-specific settle message from the exception TYPE — a real
+                    # timeout and a (retried) crash must not share the misleading "Vypršal čas agenta". Fall
+                    # back to the audit's own next_action for a legacy envelope-loss with no kind stamped.
+                    kind = result.envelope_loss_kind
+                    if kind in ("timeout", "crash"):
+                        state.next_action = _envelope_loss_next_action(
+                            kind, _timeout_for("programovanie"), result.log_path
+                        )
+                    else:
+                        state.next_action = result.lost_work["next_action"]
                     db.flush()
                     return state
                 prior_failures.append(f"neplatný status blok: {result.reason}")
