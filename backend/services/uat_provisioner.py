@@ -795,9 +795,14 @@ def build_uat_compose(
                 if isinstance(existing, list)
                 else ([f"{k}:{v}" for k, v in existing.items()] if isinstance(existing, dict) else [])
             )
-            for host in extra_backend_hosts:
-                if host not in merged:
-                    merged.append(host)
+            # NB: the loop var must NOT be named ``host`` — that would clobber the outer ``host`` (the public
+            # vhost from _instance_naming) with the last extra_hosts entry (e.g. "host.docker.internal:host-
+            # gateway"), which then poisons the Traefik Host() rules below → the instance becomes publicly
+            # unreachable. Only bites on REDEPLOY (extra_backend_hosts non-empty). Regression: andros-payables
+            # PROD outage 2026-07-10.
+            for extra_host in extra_backend_hosts:
+                if extra_host not in merged:
+                    merged.append(extra_host)
             svc["extra_hosts"] = merged
 
         services[name] = svc
