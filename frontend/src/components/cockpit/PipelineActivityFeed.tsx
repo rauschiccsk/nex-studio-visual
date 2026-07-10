@@ -6,6 +6,7 @@ import { useEffect, useRef } from "react";
 import { FileText, Loader2, Terminal, Wrench } from "lucide-react";
 
 import type { ActivityLine } from "../../services/api/pipeline";
+import { humanizeActivityLine } from "./humanizeActivityLine";
 
 function KindIcon({ kind, line }: { kind: ActivityLine["kind"]; line: string }) {
   if (kind === "text") return <FileText className="h-3 w-3 shrink-0 text-[var(--color-text-muted)]" />;
@@ -39,12 +40,21 @@ export function PipelineActivityFeed({ activity }: Props) {
         <div className="text-[11px] text-[var(--color-text-muted)]">Agent štartuje…</div>
       ) : (
         <ul className="space-y-0.5">
-          {activity.map((a, i) => (
-            <li key={i} className="flex items-center gap-1.5 font-mono text-[11px] text-[var(--color-text-secondary)]">
-              <KindIcon kind={a.kind} line={a.line} />
-              <span className="truncate">{a.line}</span>
-            </li>
-          ))}
+          {activity.map((a, i) => {
+            // Sanitize once (strip leaked internal markers / raw JSON) and use it for both the icon heuristic
+            // and the rendered text so they can never disagree.
+            const text = humanizeActivityLine(a.line);
+            return (
+              // items-start (not items-center): with a wrapping multi-row line, the leading icon tops the
+              // first row instead of floating to the vertical middle of the block.
+              <li key={i} className="flex items-start gap-1.5 font-mono text-[11px] text-[var(--color-text-secondary)]">
+                <KindIcon kind={a.kind} line={text} />
+                {/* whitespace-pre-wrap + break-words: the full line wraps across rows and is readable — the
+                    panel keeps its fixed cap + vertical scroll (line-28 comment). No more one-row clip. */}
+                <span className="whitespace-pre-wrap break-words">{text}</span>
+              </li>
+            );
+          })}
         </ul>
       )}
       <div ref={endRef} />

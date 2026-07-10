@@ -50,3 +50,6 @@ migrations/versions/__pycache__/
 
 # Runtime uploads (file-browser / upload dir — not versioned)
 /uploads/
+
+# Claude MAX OAuth session credentials (P0 — never commit)
+.claude/.credentials.json

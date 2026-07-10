@@ -175,6 +175,27 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         )
     ):
         available_actions = [a for a in available_actions if a != "hotovo"]
+    # Bug 1 (cockpit-timeout-and-activity-fix.md): the state-only ``determine_available_actions`` ALWAYS
+    # offers ``schvalit`` at a SETTLED Programovanie — but ``schvalit`` ADVANCES programovanie → verifikacia
+    # (FINISH). After a build TIMEOUT settles the round ``awaiting_manazer`` ("review & continue") with tasks
+    # still REMAINING, that is a footgun: it would FINISH a half-built version, and there is no clean
+    # "Pokračovať v stavbe". Gate ``schvalit`` vs ``pokracovat`` on the DB-derived tasks-remaining signal
+    # (``all_tasks_done`` from ``build_readiness`` above — the SAME probe, no extra query): tasks REMAIN →
+    # DROP ``schvalit`` and OFFER ``pokracovat`` (resume the build loop, ``apply_action`` re-dispatches
+    # ``_run_build_round`` from awaiting_manazer); ``all_tasks_done`` → keep ``schvalit`` (advance to
+    # Verifikácia), as today. Placed BEFORE the conversation-mode ``schvalit`` drop so a conversation build's
+    # timeout ALSO gets a clean "Pokračovať" (its ``schvalit`` is dropped below either way). ``uprav`` / ``ask``
+    # (and ``answer`` on a blocked settle) stay in both cases.
+    if (
+        state is not None
+        and state.current_stage == "programovanie"
+        and "schvalit" in available_actions
+        and not all_tasks_done
+    ):
+        remaining = [a for a in available_actions if a != "schvalit"]
+        if "pokracovat" not in remaining:
+            remaining.append("pokracovat")
+        available_actions = sorted(remaining)  # keep the sorted invariant of the initial computation
     # STEP 4 (step4-programovanie-design.md MAJOR): a conversation build NEVER walks the phase automaton (its
     # Programovanie returns to the rozhovor; kontrola is STEP 5), so the legacy phase-gate verb ``schvalit``
     # (and, defensively, the Auditor ``verdict``) must never be OFFERED on it — DROP them when
