@@ -1,25 +1,79 @@
 /**
- * SpecifikaciaPage — the read-only "Špecifikácia" surface (spine STEP 2, route /specifikacia).
+ * SpecifikaciaPage — the read-only project-DOCUMENTS surface (spine STEP 2, route /specifikacia).
  *
- * Renders the ONE agreed specification document (``docs/specs/versions/v<N>/specification.md``) read-only.
- * The AI partner writes + maintains it during the Riadiace-centrum conversation and it is frozen on
- * "Schváliť Špecifikáciu"; there is exactly ONE physical file (no second copy → no drift), read in-app via
- * the EXISTING getProjectSpecContent endpoint — the same file PhaseArtifact already reads (source_path ==
- * /opt/projects/<slug>).
+ * Audit Theme 3 (2026-07-10): previously this rendered exactly ONE hardcoded file
+ * (``docs/specs/versions/v<N>/specification.md``) — the manager could not open design.md, the DB-schema doc,
+ * their own customer-requirements (Zadanie), etc., so most of what the AI produced was invisible from the
+ * cockpit ("DONE = reality the manager can SEE"). Now it lists the pinned version's ``docs/specs/`` documents
+ * (via the EXISTING but previously-unwired ``/project-specs/list``), lets the Manažér pick one, and renders it
+ * with the SAME ``/project-specs/content`` + SpecMarkdown path. Defaults to the specification (unchanged
+ * behaviour when it is the only doc). Read-only; the AI writes + maintains these during the conversation.
  *
- * Three honest states: no project pinned → guard; no spec on disk yet (404 / empty) → "nothing agreed yet"
- * + a link back to the Riadiace centrum where it is written; present → the rendered Markdown. The page is a
- * plain preview both DURING drafting and AFTER approval — it always shows the current single source of truth.
+ * Honest states: no project pinned → guard; no docs on disk yet → "nothing agreed yet" + a link to the
+ * Riadiace centrum; present → the doc picker + the rendered Markdown.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FileText, FolderOpen } from "lucide-react";
 
 import { useActiveContextStore } from "@/store/activeContextStore";
-import { getProjectSpecContent } from "@/services/api/projectSpecs";
+import { getProjectSpecContent, listProjectSpecs, type ProjectSpecDoc } from "@/services/api/projectSpecs";
 import { getPipelineBoardApi } from "@/services/api/pipeline";
 import { SpecMarkdown } from "@/components/markdown/SpecMarkdown";
+
+// Friendly Slovak names for the known spec documents (fallback = the filename without .md).
+const DOC_LABELS: Record<string, string> = {
+  "specification.md": "Špecifikácia",
+  "design.md": "Návrh",
+  "development-spec.md": "Vývojová špecifikácia",
+  "customer-requirements.md": "Zadanie zákazníka",
+  "DATABASE_SCHEMAS.md": "Databázová schéma",
+  "database_schemas.md": "Databázová schéma",
+  "RELEASE_NOTES.md": "Poznámky k vydaniu",
+};
+// The order the pills appear in (most manager-relevant first); anything else sorts alphabetically after.
+const DOC_ORDER = [
+  "specification.md",
+  "design.md",
+  "development-spec.md",
+  "customer-requirements.md",
+  "DATABASE_SCHEMAS.md",
+  "database_schemas.md",
+  "RELEASE_NOTES.md",
+];
+
+function labelFor(filename: string): string {
+  return DOC_LABELS[filename] ?? filename.replace(/\.md$/i, "");
+}
+
+// The content endpoint's ``path`` is repo-relative (``docs/...``); the list's ``relative_path`` is prefixed
+// with ``<slug>/`` — strip it.
+function repoPath(doc: ProjectSpecDoc, slug: string): string {
+  const prefix = `${slug}/`;
+  return doc.relative_path.startsWith(prefix) ? doc.relative_path.slice(prefix.length) : doc.relative_path;
+}
+
+// Keep only the pinned version's spec docs: this version's ``docs/specs/versions/v<N>/`` files PLUS the
+// project-level ``docs/specs/`` files (e.g. customer-requirements) — but NOT other versions' folders.
+function filterVersionDocs(all: ProjectSpecDoc[], slug: string, versionNumber: string): ProjectSpecDoc[] {
+  const specsPrefix = `${slug}/docs/specs/`;
+  const versionPrefix = `${slug}/docs/specs/versions/v${versionNumber}/`;
+  const picked = all.filter(
+    (d) =>
+      !d.is_directory &&
+      /\.md$/i.test(d.filename) &&
+      d.relative_path.startsWith(specsPrefix) &&
+      (d.relative_path.startsWith(versionPrefix) || !d.category.includes("/versions/")),
+  );
+  return picked.sort((a, b) => {
+    const ia = DOC_ORDER.indexOf(a.filename);
+    const ib = DOC_ORDER.indexOf(b.filename);
+    const oa = ia === -1 ? 999 : ia;
+    const ob = ib === -1 ? 999 : ib;
+    return oa - ob || a.filename.localeCompare(b.filename);
+  });
+}
 
 export default function SpecifikaciaPage() {
   const navigate = useNavigate();
@@ -30,37 +84,66 @@ export default function SpecifikaciaPage() {
   const versionNumber = selectedVersion?.versionNumber;
   const versionId = selectedVersion?.versionId;
 
-  // Read the ONE on-disk Špecifikácia (docs/specs/versions/v<N>/specification.md) — the same file the
-  // Príprava artifact reads (PhaseArtifact.tsx). Re-fetched when the pinned project / version changes.
+  const [docs, setDocs] = useState<ProjectSpecDoc[]>([]);
+  const [docsLoading, setDocsLoading] = useState(false);
+  const [activePath, setActivePath] = useState<string | null>(null);
+
   const [body, setBody] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  // Durable "Schválená" signal from the board (spine STEP 2 follow-up) — TRUE once the Špecifikácia was
-  // frozen (≥1 kind='approval' message). Read from the board, NOT the truncated recent_messages tail.
+  const [contentLoading, setContentLoading] = useState(false);
+
+  // Durable "Schválená" signal from the board (spine STEP 2) — TRUE once the Špecifikácia was frozen.
   const [specApproved, setSpecApproved] = useState(false);
 
+  // Load the pinned version's document list, filter it, and pick a sensible default (the specification, else
+  // the first doc). Re-fetched when the pinned project / version changes.
   useEffect(() => {
     let cancelled = false;
+    setDocs([]);
+    setActivePath(null);
     setBody(null);
     if (!slug || !versionNumber) return;
-    const path = `docs/specs/versions/v${versionNumber}/specification.md`;
-    setLoading(true);
-    getProjectSpecContent(slug, path)
+    setDocsLoading(true);
+    listProjectSpecs()
       .then((res) => {
-        if (!cancelled && res.is_text && res.content.trim()) setBody(res.content);
+        if (cancelled) return;
+        const filtered = filterVersionDocs(res.documents, slug, versionNumber);
+        setDocs(filtered);
+        const def = filtered.find((d) => d.filename === "specification.md") ?? filtered[0];
+        setActivePath(def ? repoPath(def, slug) : null);
       })
       .catch(() => {
-        /* not written yet / unreadable → fall through to the honest "nothing agreed yet" empty state */
+        /* unreachable / none → honest "nothing agreed yet" empty state */
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setDocsLoading(false);
       });
     return () => {
       cancelled = true;
     };
   }, [slug, versionNumber]);
 
-  // Durable approval flag — fetched from the pipeline board (spec_approved). Absent board / no pipeline yet
-  // → stays false (honest "not approved"). Keyed on the pinned version so it refreshes on re-pin.
+  // Load the selected document's content (same endpoint as before), whenever the active pick changes.
+  useEffect(() => {
+    let cancelled = false;
+    setBody(null);
+    if (!slug || !activePath) return;
+    setContentLoading(true);
+    getProjectSpecContent(slug, activePath)
+      .then((res) => {
+        if (!cancelled && res.is_text) setBody(res.content);
+      })
+      .catch(() => {
+        /* unreadable → fall through to the empty note */
+      })
+      .finally(() => {
+        if (!cancelled) setContentLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slug, activePath]);
+
+  // Durable approval flag from the pipeline board (spec_approved). Keyed on the pinned version.
   useEffect(() => {
     let cancelled = false;
     setSpecApproved(false);
@@ -77,13 +160,9 @@ export default function SpecifikaciaPage() {
     };
   }, [versionId]);
 
-  // Three honest badge states: approved → "Schválená"; a spec exists but isn't frozen → "Rozpracované";
-  // no spec on disk yet → no badge. spec_approved implies a frozen spec, so it takes precedence.
-  const specBadge: "schvalena" | "rozpracovane" | null = specApproved
-    ? "schvalena"
-    : body
-      ? "rozpracovane"
-      : null;
+  const hasSpec = useMemo(() => docs.some((d) => d.filename === "specification.md"), [docs]);
+  // Badge: approved → "Schválená"; a spec exists but isn't frozen → "Rozpracované"; no spec yet → none.
+  const specBadge: "schvalena" | "rozpracovane" | null = specApproved ? "schvalena" : hasSpec ? "rozpracovane" : null;
 
   if (!selectedProject) {
     return (
@@ -91,7 +170,7 @@ export default function SpecifikaciaPage() {
         <FolderOpen className="h-10 w-10 text-[var(--color-text-muted)]" />
         <h2 className="text-sm font-semibold text-[var(--color-text-secondary)]">Nemáš vybraný projekt</h2>
         <p className="max-w-md text-xs text-[var(--color-text-muted)]">
-          Špecifikácia je viazaná na konkrétny projekt. Otvor <span className="font-mono">Projekty</span> a
+          Dokumenty projektu sú viazané na konkrétny projekt. Otvor <span className="font-mono">Projekty</span> a
           pripni projekt.
         </p>
         <button
@@ -108,7 +187,7 @@ export default function SpecifikaciaPage() {
     <div className="flex h-full flex-col bg-[var(--color-canvas)]">
       <div className="flex flex-shrink-0 items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-surface)] px-4 py-2.5">
         <FileText className="h-4 w-4 text-[var(--color-text-muted)]" />
-        <h1 className="text-sm font-semibold text-[var(--color-text-primary)]">Špecifikácia</h1>
+        <h1 className="text-sm font-semibold text-[var(--color-text-primary)]">Dokumenty</h1>
         <span className="text-[var(--color-text-muted)]">·</span>
         <span className="truncate text-xs text-[var(--color-text-secondary)]">
           {selectedProject.name}
@@ -128,28 +207,60 @@ export default function SpecifikaciaPage() {
         )}
       </div>
 
-      {body ? (
-        <div className="flex-1 overflow-y-auto">
-          <SpecMarkdown
-            body={body}
-            className="prose prose-sm dark:prose-invert max-w-none px-6 py-5 text-sm text-[var(--color-text-primary)]"
-          />
+      {/* Document picker — one pill per document the AI produced for this version. Hidden when there is ≤1. */}
+      {docs.length > 1 && (
+        <div className="flex flex-shrink-0 flex-wrap items-center gap-1.5 border-b border-[var(--color-border-default)] bg-[var(--color-surface)] px-4 py-2">
+          {docs.map((d) => {
+            const p = repoPath(d, slug!);
+            const active = p === activePath;
+            return (
+              <button
+                key={d.relative_path}
+                type="button"
+                onClick={() => setActivePath(p)}
+                title={d.filename}
+                className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                  active
+                    ? "border-primary-500 bg-primary-600 text-white"
+                    : "border-[var(--color-border-default)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
+                }`}
+              >
+                {labelFor(d.filename)}
+              </button>
+            );
+          })}
         </div>
+      )}
+
+      {docsLoading || contentLoading ? (
+        <div className="flex flex-1 items-center justify-center p-6 text-center">
+          <p className="text-xs text-[var(--color-text-muted)]">Načítavam…</p>
+        </div>
+      ) : body !== null ? (
+        body.trim() ? (
+          <div className="flex-1 overflow-y-auto">
+            <SpecMarkdown
+              body={body}
+              className="prose prose-sm dark:prose-invert max-w-none px-6 py-5 text-sm text-[var(--color-text-primary)]"
+            />
+          </div>
+        ) : (
+          <div className="flex flex-1 items-center justify-center p-6 text-center">
+            <p className="text-xs text-[var(--color-text-muted)]">Tento dokument je zatiaľ prázdny.</p>
+          </div>
+        )
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
           <p className="max-w-md text-xs text-[var(--color-text-muted)]">
-            {loading
-              ? "Načítavam Špecifikáciu…"
-              : "Špecifikácia zatiaľ nie je napísaná. Vzniká v Riadiacom centre — v rozhovore s AI Agentom sa dohodnete na zadaní a AI ju priebežne zapisuje ako jeden dokument."}
+            Zatiaľ tu nie sú žiadne dokumenty. Vznikajú v Riadiacom centre — v rozhovore s AI Agentom sa dohodnete
+            na zadaní a AI ich priebežne zapisuje.
           </p>
-          {!loading && (
-            <button
-              onClick={() => navigate("/riadiace-centrum")}
-              className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500"
-            >
-              → Otvor Riadiace centrum
-            </button>
-          )}
+          <button
+            onClick={() => navigate("/riadiace-centrum")}
+            className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500"
+          >
+            → Otvor Riadiace centrum
+          </button>
         </div>
       )}
     </div>

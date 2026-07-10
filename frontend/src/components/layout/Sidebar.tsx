@@ -218,11 +218,11 @@ export default function Sidebar() {
           later step). Project-scoped — disabled (not hidden) when no project is pinned. */}
       <NavItem
         icon={<IconSpec />}
-        label="Špecifikácia"
+        label="Dokumenty"
         active={hasProject ? isActive("/specifikacia") : false}
         onClick={() => navigate(hasProject ? "/specifikacia" : projectsFallback)}
         disabled={!hasProject}
-        disabledTitle="Vyber projekt pre prístup k Špecifikácii"
+        disabledTitle="Vyber projekt pre prístup k dokumentom"
       />
       {/* v2 (CR-V2-019): per-customer deploy surfaces (design §3 / §4.1). Nav items are added now;
           their PAGES land in Milestone G (Zákazníci = CR-V2-025, UAT/PROD = CR-V2-027). Until then
