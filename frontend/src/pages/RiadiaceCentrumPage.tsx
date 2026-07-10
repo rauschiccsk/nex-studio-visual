@@ -29,6 +29,7 @@ import ConversationComposer from "@/components/riadiace/ConversationComposer";
 import SpecApprovalBar from "@/components/riadiace/SpecApprovalBar";
 import SchvalitBar from "@/components/riadiace/SchvalitBar";
 import DecisionCardsBar from "@/components/riadiace/DecisionCardsBar";
+import ReverifyBar from "@/components/riadiace/ReverifyBar";
 import ChangeRequestBar from "@/components/riadiace/ChangeRequestBar";
 import PhaseBar from "@/components/riadiace/PhaseBar";
 import HonestStatusStrip from "@/components/riadiace/HonestStatusStrip";
@@ -151,12 +152,14 @@ export default function RiadiaceCentrumPage() {
           honest-by-construction (render null unless applicable) and mutually exclusive in practice:
           SpecApprovalBar on a settled Príprava (approve_spec, STEP 2); SchvalitBar on a Návrh gate awaiting
           the Manažér (schvalit — advances to Programovanie); DecisionCardsBar on a consultation blocker
-          (decide — one Decision Card at a time, CR-V2-041); ChangeRequestBar on a read-only consult answer
+          (decide — one Decision Card at a time, CR-V2-041); ReverifyBar on a settled version whose verified
+          green drifted past HEAD (overit_znovu — CR-V2-057); ChangeRequestBar on a read-only consult answer
           that raised a change_request (konzultacia-mode.md Part 3). */}
       <div className="col-start-1 row-start-3 min-w-0">
         <DecisionCardsBar board={board} versionId={versionId} onBoard={setBoard} />
         <SpecApprovalBar board={board} versionId={versionId} onBoard={setBoard} />
         <SchvalitBar board={board} versionId={versionId} onBoard={setBoard} />
+        <ReverifyBar board={board} versionId={versionId} onBoard={setBoard} />
         <ChangeRequestBar board={board} versionId={versionId} />
       </div>
 

@@ -215,6 +215,21 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
     verified, verified_provenance = (
         orchestrator.version_verified(db, version_id) if state is not None else (False, "no_pass")
     )
+    # CR-V2-057 (drift re-verify): OFFER ``overit_znovu`` when the live provenance is 'sha_drift' — the version
+    # WAS verified (PASS/Hotovo) but HEAD moved past the verified commit, so the green "overená" is stale. The
+    # handler (apply_action) guards on EXACTLY this (settled state + sha_drift); surface the button here so the
+    # Manažér can re-run the Auditor against current HEAD in ONE click, instead of the heavier Upraviť fix-loop.
+    # Without this the fully-built handler was unreachable — never offered by determine_available_actions (which
+    # is state-only and can't do the repo HEAD read) nor anywhere else. Honest-by-construction: appended ONLY
+    # when actually drifted AND settled (done/awaiting_manazer), so the FE bar is gated by available_actions like
+    # every other verb. Note a done/drifted version otherwise has an EMPTY action set — this is its only action.
+    if (
+        state is not None
+        and verified_provenance == "sha_drift"
+        and state.status in ("done", "awaiting_manazer")
+        and "overit_znovu" not in available_actions
+    ):
+        available_actions = sorted([*available_actions, "overit_znovu"])
     return PipelineBoardRead(
         state=PipelineStateRead.model_validate(state) if state is not None else None,
         recent_messages=[PipelineMessageRead.model_validate(m) for m in _recent_messages(db, version_id, limit)],
