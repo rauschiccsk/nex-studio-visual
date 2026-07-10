@@ -260,6 +260,7 @@ def build_matrix(db: Session, project: Project) -> dict:
     rows = []
     for customer in customers:
         uat_version = current_version(db, customer.id, "uat")
+        prod_version = current_version(db, customer.id, "prod")
         rows.append(
             {
                 "customer_id": customer.id,
@@ -267,11 +268,12 @@ def build_matrix(db: Session, project: Project) -> dict:
                 "customer_slug": customer.slug,
                 "subdomain": customer.subdomain,
                 "uat_version": uat_version,
-                "prod_version": current_version(db, customer.id, "prod"),
+                "prod_version": prod_version,
                 "accepted_versions": accepted_versions(db, customer.id),
-                # The UAT tab links to the live instance only once it has a UAT
-                # deploy (§3.5 "link to the UAT URL"); None hides the link.
+                # Each tab links to its live instance only once it has a deploy there (§3.5 "link to the URL");
+                # None hides the link. Audit Theme 4: PROD now carries its own link, mirroring UAT.
                 "uat_url": _instance_url(customer, "uat") if uat_version else None,
+                "prod_url": _instance_url(customer, "prod") if prod_version else None,
             }
         )
 

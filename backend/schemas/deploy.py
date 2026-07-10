@@ -128,6 +128,10 @@ class DeployMatrixRow(BaseModel):
         default=None,
         description="Link to the customer's live UAT instance (the UAT tab link, §3.5); None until a UAT deploy.",
     )
+    prod_url: Optional[str] = Field(
+        default=None,
+        description="Link to the customer's live PROD instance (the PROD tab link); None until a PROD deploy.",
+    )
 
 
 class DeployMatrix(BaseModel):

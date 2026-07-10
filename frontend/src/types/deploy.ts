@@ -64,6 +64,8 @@ export interface DeployMatrixRow {
   accepted_versions: string[];
   /** Link to the customer's live UAT instance (the UAT tab link, §3.5); null until a UAT deploy. */
   uat_url: string | null;
+  /** Link to the customer's live PROD instance (the PROD tab link); null until a PROD deploy. */
+  prod_url: string | null;
 }
 
 /** The full version × customer matrix payload for a project's UAT/PROD tabs. */

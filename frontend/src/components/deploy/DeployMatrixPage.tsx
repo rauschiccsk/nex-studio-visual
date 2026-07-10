@@ -14,7 +14,7 @@ import { acceptCustomerUat, deployCustomer, getDeployMatrix } from "@/services/a
 import { ApiError } from "@/services/api";
 import { humanizeApiError } from "@/services/apiError";
 import { useActiveContextStore } from "@/store/activeContextStore";
-import type { DeployEnvironment, DeployMatrix, DeployMatrixRow } from "@/types/deploy";
+import type { DeployEnvironment, DeployMatrix, DeployMatrixRow, DeployResult } from "@/types/deploy";
 
 /**
  * Shared version × customer matrix page for the UAT and PROD tabs (CR-V2-027,
@@ -71,6 +71,9 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
   // The customer_id currently mid-action (deploy/accept) → disables its row.
   const [busy, setBusy] = useState<string | null>(null);
   const [rowError, setRowError] = useState<Record<string, string>>({});
+  // Audit Theme 4: the successful DeployResult per customer (url / bumped_to / warnings) — previously thrown
+  // away, so the manager got no confirmation, no live link, no version-bump notice.
+  const [rowResult, setRowResult] = useState<Record<string, DeployResult>>({});
 
   const load = useCallback(() => {
     if (!slug) return;
@@ -124,9 +127,15 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
     const version = pickedVersion(row);
     if (!version) return;
     setRowMsg(row.customer_id, null);
+    setRowResult((prev) => {
+      const next = { ...prev };
+      delete next[row.customer_id];
+      return next;
+    });
     setBusy(row.customer_id);
     try {
-      await deployCustomer(row.customer_id, { version_number: version, environment });
+      const result = await deployCustomer(row.customer_id, { version_number: version, environment });
+      setRowResult((prev) => ({ ...prev, [row.customer_id]: result }));
       load();
     } catch (err) {
       if (err instanceof ApiError) {
@@ -244,6 +253,11 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                 const blocked = deployBlockedReason(row);
                 const current = currentCol(row);
                 const chosen = pickedVersion(row);
+                // Env-generic live link (UAT or PROD), the last successful deploy result, and the UAT-accepted flag.
+                const liveUrl = environment === "uat" ? row.uat_url : row.prod_url;
+                const result = rowResult[row.customer_id];
+                const accepted =
+                  environment === "uat" && !!row.uat_version && row.accepted_versions.includes(row.uat_version);
                 return (
                   <tr key={row.customer_id} className="align-top">
                     {/* Customer */}
@@ -254,21 +268,28 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
 
                     {/* Currently deployed version in this environment */}
                     <td className="px-3 py-3">
-                      {current ? (
-                        <span className="rounded bg-[var(--color-surface)] px-1.5 py-0.5 font-mono text-xs text-[var(--color-text-primary)]">
-                          {current}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-[var(--color-text-muted)]">—</span>
-                      )}
-                      {environment === "uat" && row.uat_url && (
+                      <div className="flex items-center gap-1.5">
+                        {current ? (
+                          <span className="rounded bg-[var(--color-surface)] px-1.5 py-0.5 font-mono text-xs text-[var(--color-text-primary)]">
+                            {current}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-[var(--color-text-muted)]">—</span>
+                        )}
+                        {accepted && (
+                          <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                            Akceptované ✓
+                          </span>
+                        )}
+                      </div>
+                      {liveUrl && (
                         <a
-                          href={row.uat_url}
+                          href={liveUrl}
                           target="_blank"
                           rel="noreferrer"
                           className="mt-1 flex items-center gap-1 text-[11px] text-primary-500 hover:underline"
                         >
-                          <ExternalLink className="h-3 w-3" /> UAT URL
+                          <ExternalLink className="h-3 w-3" /> Otvoriť aplikáciu
                         </a>
                       )}
                     </td>
@@ -293,9 +314,34 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                           ))}
                         </select>
                       )}
+                      {isBusy && (
+                        <div className="mt-1 flex items-center gap-1 text-[11px] text-[var(--color-text-muted)]">
+                          <Loader2 className="h-3 w-3 animate-spin" /> Nasadzujem… (~2 min, počkaj)
+                        </div>
+                      )}
                       {rowError[row.customer_id] && (
                         <div className="mt-1 text-[11px] text-[var(--color-state-error-fg)]">
                           {rowError[row.customer_id]}
+                        </div>
+                      )}
+                      {result && !isBusy && (
+                        <div className="mt-1 space-y-0.5 text-[11px] text-emerald-600 dark:text-emerald-400">
+                          <div>✓ Nasadené{result.bumped_to ? ` — projekt povýšený na ${result.bumped_to}` : ""}</div>
+                          {result.url && (
+                            <a
+                              href={result.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="flex items-center gap-1 hover:underline"
+                            >
+                              <ExternalLink className="h-3 w-3" /> Otvoriť aplikáciu
+                            </a>
+                          )}
+                          {result.warnings.map((w, i) => (
+                            <div key={i} className="text-amber-600 dark:text-amber-400">
+                              ⚠ {w}
+                            </div>
+                          ))}
                         </div>
                       )}
                     </td>
