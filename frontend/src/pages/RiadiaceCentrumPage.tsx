@@ -29,6 +29,7 @@ import ConversationComposer from "@/components/riadiace/ConversationComposer";
 import SpecApprovalBar from "@/components/riadiace/SpecApprovalBar";
 import SchvalitBar from "@/components/riadiace/SchvalitBar";
 import DecisionCardsBar from "@/components/riadiace/DecisionCardsBar";
+import BlockRecoveryBar from "@/components/riadiace/BlockRecoveryBar";
 import ReverifyBar from "@/components/riadiace/ReverifyBar";
 import ChangeRequestBar from "@/components/riadiace/ChangeRequestBar";
 import PhaseBar from "@/components/riadiace/PhaseBar";
@@ -157,6 +158,7 @@ export default function RiadiaceCentrumPage() {
           that raised a change_request (konzultacia-mode.md Part 3). */}
       <div className="col-start-1 row-start-3 min-w-0">
         <DecisionCardsBar board={board} versionId={versionId} onBoard={setBoard} />
+        <BlockRecoveryBar board={board} versionId={versionId} onBoard={setBoard} />
         <SpecApprovalBar board={board} versionId={versionId} onBoard={setBoard} />
         <SchvalitBar board={board} versionId={versionId} onBoard={setBoard} />
         <ReverifyBar board={board} versionId={versionId} onBoard={setBoard} />

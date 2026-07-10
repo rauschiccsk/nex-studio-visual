@@ -9,7 +9,7 @@
 import { Eye, Loader2 } from "lucide-react";
 
 import type { PipelineState } from "../../services/api/pipeline";
-import { PHASE_LABELS, PIPELINE_STATUS_TONE, TONE_BANNER, TONE_DOT } from "../cockpit/labels";
+import { BLOCK_REASON_LABELS, PHASE_LABELS, PIPELINE_STATUS_TONE, TONE_BANNER, TONE_DOT } from "../cockpit/labels";
 import type { BuildPhase, StatusTone } from "../cockpit/labels";
 
 // konzultacia-mode.md Part 3: a TERMINAL version (current_stage === 'done' — a finished / released build) is
@@ -37,7 +37,13 @@ function statusText(state: PipelineState | null, projectName: string, versionNum
   if (state.status === "blocked" && state.block_reason === "framework_issue") {
     return "NEX Studio potrebuje opravu (Dedo) — počkaj";
   }
-  if (state.status === "awaiting_manazer" || state.status === "blocked") return "Čaká na súhlas";
+  // A blocked state names its PRECISE reason (audit Theme 1) — "Systémová chyba" / "Agent sa pýta" / "Treba
+  // tvoje rozhodnutie" — never the generic "Čaká na súhlas" that collapsed five distinct situations into one.
+  // (framework_issue is handled above; decision_needed keeps its own accurate label.)
+  if (state.status === "blocked") {
+    return (state.block_reason && BLOCK_REASON_LABELS[state.block_reason]) || "Čaká na súhlas";
+  }
+  if (state.status === "awaiting_manazer") return "Čaká na súhlas";
   if (state.status === "paused") return "Pozastavené";
   // agent_working — name the project, version, and live phase. version_number is stored without a leading
   // "v" (e.g. "1.0.0"), so prefix it here.
@@ -66,6 +72,10 @@ export function HonestStatusStrip({ state, projectName, versionNumber, reconnect
   const working = state?.status === "agent_working";
   // Konzultácia (Part 3): a terminal version (current_stage === 'done') is in read-only advisory mode.
   const consultMode = !!state && state.current_stage === "done";
+  // Audit Theme 1: surface the engine's ready-made "čo ďalej" guidance (state.next_action) — previously
+  // rendered NOWHERE. Shown for the settled awaiting_manazer wait (blocked states carry it in their own bar:
+  // BlockRecoveryBar / Decision Cards / the Dedo banner), so it never double-renders.
+  const guidance = state?.status === "awaiting_manazer" ? (state.next_action || "").trim() : "";
 
   return (
     <div className="flex flex-shrink-0 flex-col border-b border-[var(--color-border-default)] bg-[var(--color-surface)]">
@@ -77,6 +87,12 @@ export function HonestStatusStrip({ state, projectName, versionNumber, reconnect
           <span className="truncate">{text}</span>
         </span>
       </div>
+
+      {guidance && (
+        <div className="flex items-start gap-1.5 border-t border-[var(--color-border-default)] px-4 py-1.5 text-[11px] text-[var(--color-text-muted)]">
+          <span className="truncate">{guidance}</span>
+        </div>
+      )}
 
       {consultMode && (
         <div className="flex items-center gap-1.5 border-t border-[var(--color-border-default)] px-4 py-1.5 text-[11px] text-[var(--color-text-muted)]">

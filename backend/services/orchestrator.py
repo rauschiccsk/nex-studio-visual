@@ -536,8 +536,15 @@ def determine_available_actions(state: PipelineState) -> set[str]:
     # consult. A blocked state is an agent QUESTION → the Manažér can ``answer`` it.
     actions: set[str] = {"ask", "uprav"}
     if status == "blocked":
+        # A blocked state (agent_question / agent_error / system_error / parse_exhaustion — framework_issue and
+        # decision_needed already returned above) is a QUESTION or an ERROR the Manažér must answer / recover
+        # from (``answer`` / ``uprav`` = "Skús znova"). The phase-ADVANCE verbs below are NOT offered: advancing
+        # past an unresolved error/question is a footgun (e.g. "Schváliť špecifikáciu" appearing right after a
+        # parse failure — the audit's Theme 1). Only the settled ``awaiting_manazer`` path offers the advance body.
         actions.add("answer")
+        return actions
 
+    # Settled (awaiting_manazer): the phase-advance schvaľovacie body.
     if stage == "priprava":
         # End-Príprava: the ALWAYS-mandatory Špecifikácia approval (dial-independent, design §2.3/D3).
         actions.add("approve_spec")
