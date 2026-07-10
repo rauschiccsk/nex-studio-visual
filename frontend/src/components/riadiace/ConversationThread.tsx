@@ -55,12 +55,19 @@ interface Props {
 export function ConversationThread({ messages, activity, working }: Props) {
   const endRef = useRef<HTMLDivElement>(null);
 
+  // Self-sufficiency kernel: hide internal build-loop chatter the Manažér never needs. The per-attempt
+  // self-check `return` messages (author=system, recipient=ai_agent, kind="return") are the AI Agent's own
+  // self-talk — raw, technical (often English: "deliverable 'x' missing on disk"), and up to 5 per failed task.
+  // The manager gets the plain per-task summary instead ("Úloha #N zlyhala po 5 pokusoch"). Filtered from the
+  // manager thread ONLY — the rows stay in the board/DB for the agent loop + break-glass debug.
+  const visibleMessages = messages.filter((m) => !(m.kind === "return" && m.recipient === "ai_agent"));
+
   // Auto-scroll to the newest bubble / activity line (a live console follows the bottom).
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ block: "end" });
-  }, [messages.length, activity.length, working]);
+  }, [visibleMessages.length, activity.length, working]);
 
-  const empty = messages.length === 0 && !working;
+  const empty = visibleMessages.length === 0 && !working;
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-y-auto bg-[var(--color-canvas)] px-4 py-3">
@@ -71,7 +78,7 @@ export function ConversationThread({ messages, activity, working }: Props) {
         </div>
       ) : (
         <ul className="space-y-3">
-          {messages.map((m) => {
+          {visibleMessages.map((m) => {
             const right = isOperator(m.author);
             // CR-V2-032: render the agent's FULL human-readable body (``payload.report``) — ``content`` is
             // only the one-line summary (deriveBrief / previews / lists). When the turn is a question, the
@@ -91,6 +98,11 @@ export function ConversationThread({ messages, activity, working }: Props) {
             const isFrameworkIssue = m.payload?.framework_issue === true;
             const dedoMessage =
               typeof m.payload?.dedo_message === "string" ? (m.payload.dedo_message as string) : "";
+            // Plain-language failure framing: when the manager-facing body is the humanised WHY, the raw
+            // technical reason (a boot probe error, the smoke script's tail) rides in payload.technical_detail —
+            // render it under a collapsible so it's available on demand, never in the manager's face.
+            const technicalDetail =
+              typeof m.payload?.technical_detail === "string" ? (m.payload.technical_detail as string) : "";
             return (
               <li key={m.id} className={`flex ${right ? "justify-end" : "justify-start"}`}>
                 <div className={`max-w-[85%] rounded-lg border px-3 py-2 ${bubbleClass(m.author, isFrameworkIssue)}`}>
@@ -143,6 +155,16 @@ export function ConversationThread({ messages, activity, working }: Props) {
                         className="prose prose-sm dark:prose-invert max-w-none text-sm text-[var(--color-text-primary)]"
                       />
                     </div>
+                  )}
+                  {technicalDetail.trim() && (
+                    <details className="mt-2 text-[11px] text-[var(--color-text-muted)]">
+                      <summary className="cursor-pointer select-none hover:text-[var(--color-text-secondary)]">
+                        Technický detail
+                      </summary>
+                      <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded border border-[var(--color-border-default)] bg-[var(--color-canvas)] px-2 py-1.5 font-mono text-[10px] leading-relaxed text-[var(--color-text-secondary)]">
+                        {technicalDetail}
+                      </pre>
+                    </details>
                   )}
                 </div>
               </li>

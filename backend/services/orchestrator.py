@@ -52,7 +52,7 @@ from backend.db.models.versions import Version
 from backend.schemas.epic import EpicCreate
 from backend.schemas.feat import FeatCreate
 from backend.schemas.task import TaskCreate
-from backend.services import claude_agent, dedo_escalation, fast_fix, uat_provisioner
+from backend.services import claude_agent, dedo_escalation, failure_framing, fast_fix, uat_provisioner
 from backend.services import epic as epic_service
 from backend.services import feat as feat_service
 from backend.services import system_setting as system_setting_service
@@ -6454,6 +6454,13 @@ async def _run_verifikacia_round(
     # (:func:`_commit_release_note`) is unchanged — this is an idempotent pre-write.
     _write_release_note_to_disk(db, version_id, claude_agent.PROJECTS_ROOT / slug)
     (smoke_ok, smoke_detail), acceptance = await _run_release_smoke(slug, version_label, coverage_req)
+    # Plain-language framing (self-sufficiency kernel): the manager-facing content is the HUMANISED WHY, never
+    # the raw probe detail; the raw rides in payload.technical_detail for the FE's collapsible "Technický detail".
+    smoke_content = (
+        "Skúška spustenia (interné fixtúry) — aplikácia sa spustila ✓"
+        if smoke_ok
+        else f"Skúška spustenia (interné fixtúry) — {failure_framing.humanize_release_failure(smoke_detail)}"
+    )
     smoke_msg = _record_message(
         db,
         version_id=version_id,
@@ -6461,14 +6468,24 @@ async def _run_verifikacia_round(
         author="system",
         recipient="manazer",
         kind="notification",
-        content=(f"Release smoke (interné fixtúry) — boot {'PASS' if smoke_ok else 'FAIL'}: {smoke_detail}"),
-        payload={"phase": "verifikacia", "smoke": {"pass": smoke_ok, "detail": smoke_detail}},
+        content=smoke_content,
+        payload={
+            "phase": "verifikacia",
+            "smoke": {"pass": smoke_ok, "detail": smoke_detail},
+            **({} if smoke_ok else {"technical_detail": smoke_detail}),
+        },
     )
     if on_message is not None:
         await on_message(smoke_msg)
     # The acceptance leg only ran if boot passed (else None). Record it + build the Slovak block for the brief.
     if acceptance is not None:
         acc_ok, acc_detail, acc_skipped = acceptance
+        if acc_ok:
+            acc_content = "Automatická skúška po spustení — prešla ✓"
+        elif acc_skipped:
+            acc_content = "Automatická skúška po spustení — preskočená (nie sú definované kontroly)"
+        else:
+            acc_content = f"Automatická skúška po spustení — {failure_framing.humanize_release_failure(acc_detail)}"
         acc_msg = _record_message(
             db,
             version_id=version_id,
@@ -6476,10 +6493,11 @@ async def _run_verifikacia_round(
             author="system",
             recipient="manazer",
             kind="notification",
-            content=(f"Release acceptance — {'PASS' if acc_ok else ('SKIP' if acc_skipped else 'FAIL')}: {acc_detail}"),
+            content=acc_content,
             payload={
                 "phase": "verifikacia",
                 "release_acceptance": {"pass": acc_ok, "detail": acc_detail, "skipped": acc_skipped},
+                **({"technical_detail": acc_detail} if (not acc_ok and not acc_skipped) else {}),
             },
         )
         if on_message is not None:
@@ -6509,7 +6527,11 @@ async def _run_verifikacia_round(
     # (_latest_verifikacia_fix_scope) threads it to the AI Agent as the fix brief. Settled via the SHARED
     # _settle_verifikacia_verdict (runtime_floor_red=True → the bounded fix loop / escalation, never a PASS).
     if not smoke_ok:
-        boot_fail_content = f"Appka sa nespustila: {smoke_detail}"
+        # Plain-language framing: the manager-facing finding is the humanised WHY (it flows into the Decision
+        # Card explanation via _latest_verifikacia_fix_scope), never the raw probe detail. The AI Agent fixer
+        # reproduces the boot failure itself (`docker compose up`, per proposed_fix); the raw probe string is
+        # kept in payload.technical_detail as a breadcrumb + the FE's collapsible "Technický detail".
+        boot_fail_content = f"Appka sa nespustila — {failure_framing.humanize_release_failure(smoke_detail)}"
         boot_verdict_msg = _record_message(
             db,
             version_id=version_id,
@@ -6524,6 +6546,7 @@ async def _run_verifikacia_round(
                 "proposed_fix": ("Zisti a oprav dôvod, prečo sa appka nespustí (`docker compose up`), a over znova."),
                 "phase": "verifikacia",
                 "engine_override": "boot_fail",
+                "technical_detail": smoke_detail,
             },
         )
         if on_message is not None:
