@@ -359,6 +359,32 @@ def _seed_page_and_scaffold(proj: Path) -> Path:
     return src
 
 
+def test_2b_nav_data_router_prefixed_path_passes(tmp_path) -> None:
+    """Regression (nex-payables 2026-07-10): a data-router nav — an object entry
+    ``{ to: "/admin/updates", label: "Aktualizácie" }`` driven by ``navigate(item.to)`` under a PREFIXED
+    ``/admin`` path — is a valid wired nav. The old regex matched only ``to="/updates"`` (attribute ``=``,
+    exact path) and false-FAILED it. The check must now PASS."""
+    proj = tmp_path / "app"
+    src = _seed_page_and_scaffold(proj)
+    (src / "App.tsx").write_text('<Route path="updates" element={<UpdatesPage />} />\n')
+    (src / "components" / "layout" / "Sidebar.tsx").write_text(
+        'const items = [{ to: "/admin/updates", label: "Aktualizácie", icon: "✨" }];\n'
+        "items.map((item) => <NavItem onClick={() => navigate(item.to)} />);\n"
+    )
+    assert orchestrator._check_aktualizacie_frontend(proj) is None
+
+
+def test_2b_nav_unrelated_updates_log_does_not_satisfy(tmp_path) -> None:
+    """A distinct ``/settings/updates-log`` nav must NOT satisfy the ``…/updates`` nav check (the trailing
+    lookahead keeps ``updates-log`` from matching) — else the tab could false-PASS on an unrelated route."""
+    proj = tmp_path / "app"
+    src = _seed_page_and_scaffold(proj)
+    (src / "App.tsx").write_text('<Route path="updates" element={<UpdatesPage />} />\n')
+    (src / "components" / "layout" / "Sidebar.tsx").write_text('<NavItem to="/settings/updates-log" />\n')
+    msg = orchestrator._check_aktualizacie_frontend(proj)
+    assert msg is not None and "menu" in msg
+
+
 def test_2b_object_router_path_detected(tmp_path) -> None:
     """Route (false-FAIL fix): the data-router object form ``{ path: "updates" }`` counts as a wired route (not
     only JSX ``path="updates"``); an English "Updates" nav label still passes (language-agnostic)."""

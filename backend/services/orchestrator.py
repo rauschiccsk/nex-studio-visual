@@ -4351,13 +4351,16 @@ _UPDATES_ROUTE_RE = re.compile(r"""\bpath\s*[=:]\s*\{?\s*["']/?updates\b""")
 #: 2b page detection (broadened) — a source that IMPORTS an updates page module, so a page validly renamed away
 #: from ``Updates*.tsx`` still counts. Keyed on an ``import … from "…updates…"`` module path (case-insensitive).
 _UPDATES_PAGE_IMPORT_RE = re.compile(r"""\bfrom\s+["'][^"'\n]*updates[^"'\n]*["']""", re.IGNORECASE)
-#: 2b nav detection (route-anchored, language-agnostic) — a nav entry whose TARGET is the ``/updates`` route:
-#: ``navigate("/updates")`` / ``to="/updates"`` / ``href="/updates"`` / ``to={"/updates"}``. Keyed on the
-#: ``/updates`` navigation target (a leading-slash link path), NOT the accent-stem — so an unrelated "Naposledy
-#: aktualizované" label can't false-PASS (which would DEFEAT the gate) and an English "Updates"/"Changelog"
-#: label can't false-FAIL. The bare route ``path="updates"`` (no leading slash, no to/href/navigate) is NOT a
-#: nav target, so a route definition never satisfies the nav check.
-_UPDATES_NAV_RE = re.compile(r"""(?:navigate\(|\b(?:to|href)\s*=\s*\{?)\s*["']/updates\b""")
+#: 2b nav detection (route-anchored, language-agnostic) — a nav entry whose TARGET path ends in ``…/updates``:
+#: ``navigate("/updates")`` / ``to="/updates"`` / ``href="/updates"`` / ``to={"/updates"}`` AND the data-router
+#: object form ``{ to: "/admin/updates", … }`` driven by ``navigate(item.to)`` — i.e. ``to:``/``href:`` with a
+#: COLON as well as ``=``, and a PREFIXED path (a nav can legitimately live under ``/admin/updates``). Matching
+#: only the ``=``/exact-``/updates`` form false-FAILED a compliant app (nex-payables 2026-07-10). Keyed on the
+#: ``…/updates`` navigation TARGET, NOT the accent-stem — so an unrelated "Naposledy aktualizované" label can't
+#: false-PASS and an English "Updates"/"Changelog" label can't false-FAIL. The trailing lookahead ``["'/]`` keeps
+#: a distinct route like ``/updates-log`` from matching, and a bare route ``path="updates"`` (no to/href/navigate)
+#: is still not a nav target.
+_UPDATES_NAV_RE = re.compile(r"""(?:navigate\(|\b(?:to|href)\s*[=:]\s*)\{?\s*["'](?:[^"'\n]*/)?updates(?=["'/])""")
 
 
 def _strip_ts_comments(text: str) -> str:
