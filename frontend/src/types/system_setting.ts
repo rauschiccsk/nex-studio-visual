@@ -13,6 +13,10 @@ export interface SystemSettingRead {
   value: string;
   value_type: SystemSettingValueType;
   description: string | null;
+  /** Human display name (card title); the raw ``key`` drops to small info. ``null``/absent → key is title. */
+  label?: string | null;
+  /** Unit shown after the editor (e.g. "sekúnd"). ``null``/absent → no suffix. */
+  unit?: string | null;
   /** ISO-8601 timestamp of last edit; ``null`` when the value is a default. */
   updated_at: string | null;
   /** UUID of the user who last edited; ``null`` for defaults. */

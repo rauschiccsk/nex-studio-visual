@@ -29,6 +29,17 @@ class SystemSettingRead(BaseModel):
 
     key: str = Field(..., max_length=100)
     value: str
+    label: str = Field(
+        default="",
+        description=("Human Slovak name shown as the setting's title — registry metadata, never stored per-row."),
+    )
+    unit: str = Field(
+        default="",
+        description=(
+            "Optional unit suffix hint rendered after the editor (e.g. sekúnd, € / hod) — "
+            "registry metadata, may be empty."
+        ),
+    )
     value_type: SystemSettingValueType = Field(
         default="string",
         description=(

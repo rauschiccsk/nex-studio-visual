@@ -36,11 +36,19 @@ from backend.schemas.system_setting import SystemSettingRead, SystemSettingValue
 
 @dataclass(frozen=True)
 class _Default:
-    """Service-layer default for a known setting key."""
+    """Service-layer default for a known setting key.
+
+    ``label`` (human Slovak name) and ``unit`` (optional suffix hint) are
+    registry-only presentation metadata — they are NEVER stored per-row;
+    the read path always sources them from here so a stored override still
+    shows the current Slovak label/description/unit.
+    """
 
     value: str
     description: str
+    label: str
     value_type: SystemSettingValueType = "string"
+    unit: str = ""
 
 
 #: Known settings + their defaults. A row in ``system_settings`` overrides
@@ -51,8 +59,11 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
     # ── ICC ─────────────────────────────────────────────────────────
     "github_org": _Default(
         value="rauschiccsk",
+        label="GitHub organizácia",
+        unit="",
         description=(
-            "GitHub organisation used to auto-fill repository URLs on the new-project form as '{github_org}/{slug}'."
+            "Organizácia na GitHube, ktorou sa predvyplnia adresy repozitárov na formulári "
+            'nového projektu (v tvare „organizácia/názov-projektu").'
         ),
     ),
     # ── Miera autonómie — the autonomy dial (v2.0.0, CR-V2-008 / AUTON-1, AUTON-6) ──
@@ -71,12 +82,12 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
     # evaluator. The dial also scales the Auditor's depth (OQ-9) and sets fast-fix = full-auto.
     "miera_autonomie": _Default(
         value="plna",
+        label="Miera autonómie",
+        unit="",
         description=(
-            "Global default of the Miera autonómie dial — how often the AI Agent stops at a "
-            "schvaľovací bod for the Manažér. One of: plna | len_na_konci | pri_klucovych_bodoch "
-            "| po_kazdej_faze. Overridable per project (projects.miera_autonomie) and per build "
-            "(pipeline_state.miera_autonomie); NULL there inherits this. The Špecifikácia approval "
-            "and deploy are always outside the dial. Also scales the Auditor's depth (OQ-9)."
+            "Ako často sa AI agent zastaví a počká na tvoje schválenie: plná / len na konci / "
+            "pri kľúčových bodoch / po každej fáze. Dá sa prepísať pre jednotlivý projekt aj "
+            "konkrétnu stavbu."
         ),
     ),
     # ── Token-stop poistka — the spine's runtime-mutable build stop (STEP 1, REDESIGN §9) ──
@@ -93,153 +104,176 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
     "programovanie_token_stop_millions": _Default(
         value="0",
         value_type="int",
+        label="Limit tokenov na stavbu",
+        unit="mil. tokenov",
         description=(
-            "Stop the Programovanie build once total token spend exceeds X million tokens (input+output), "
-            "pausing cooperatively at the next task boundary and nudging an away Manažér via Telegram. "
-            "0 = non-stop (the partner runs in one go). GLOBAL, runtime-mutable, no migration."
+            "Keď spotreba tokenov počas programovania prekročí túto hranicu, systém sa slušne "
+            "zastaví na najbližšej hranici úlohy a upozorní ťa. 0 = bez limitu (beží naraz)."
         ),
     ),
     # ── Pipeline / AI ───────────────────────────────────────────────
     "claude_stream_timeout_seconds": _Default(
         value="1800",
         value_type="int",
+        label="Časový limit toku AI",
+        unit="sekúnd",
         description=(
-            "Max wall-clock seconds a Claude CLI stream may run before "
-            "the subprocess is killed. Raise if long re-emissions of "
-            "the whole spec occasionally hit the cap."
+            "Najdlhší čas, počas ktorého môže bežať jeden tok AI, kým sa proces ukončí. "
+            "Zvýš, ak dlhé výpisy celej špecifikácie občas narazia na limit."
         ),
     ),
     "claude_design_doc_timeout_seconds": _Default(
         value="1800",
         value_type="int",
-        description=("Timeout for generating BEHAVIOR.md / DESIGN.md from an approved Vývojová dokumentácia."),
+        label="Časový limit generovania návrhovej dokumentácie",
+        unit="sekúnd",
+        description=(
+            "Časový limit na vygenerovanie návrhových dokumentov (BEHAVIOR.md / DESIGN.md) "
+            "zo schválenej vývojovej dokumentácie."
+        ),
     ),
     "claude_task_plan_timeout_seconds": _Default(
         value="1800",
         value_type="int",
-        description="Timeout for the Epic → Feat → Task plan generation.",
+        label="Časový limit generovania plánu úloh",
+        unit="sekúnd",
+        description="Časový limit na vygenerovanie plánu úloh (Epika → Funkcia → Úloha).",
     ),
     "github_api_timeout_seconds": _Default(
         value="10",
         value_type="int",
-        description="HTTP timeout for GitHub REST calls (repo probe, create, delete).",
+        label="Časový limit GitHub API",
+        unit="sekúnd",
+        description="Časový limit HTTP volaní na GitHub (overenie, vytvorenie a zmazanie repozitára).",
     ),
     "conversation_history_limit": _Default(
         value="100",
         value_type="int",
+        label="Limit histórie konverzácie",
+        unit="správ",
         description=(
-            "Max Architect conversation messages loaded as context — "
-            "older messages are still persisted but not sent to the AI."
+            "Koľko posledných správ konverzácie s Architektom sa načíta ako kontext pre AI. "
+            "Staršie správy sa uchovávajú, ale AI sa už neposielajú."
         ),
     ),
     "design_doc_max_chars": _Default(
         value="12000",
         value_type="int",
+        label="Maximálna dĺžka návrhovej dokumentácie",
+        unit="znakov",
         description=(
-            "Max characters of DESIGN.md handed to the feat-executor AI prompt so the context window is not blown."
+            "Najviac znakov z DESIGN.md, ktoré sa vložia do AI promptu pri programovaní úlohy, "
+            "aby sa nezahltil kontext."
         ),
     ),
     # ── Auth ────────────────────────────────────────────────────────
     "access_token_expire_minutes": _Default(
         value="480",
         value_type="int",
-        description="JWT access-token lifetime in minutes (480 = 8h).",
+        label="Platnosť prihlásenia",
+        unit="minút",
+        description="Ako dlho platí prihlásenie, kým sa musíš znova prihlásiť (480 = 8 hodín).",
     ),
     # ── Ports (ICC Port Registry v2 / D-020) ───────────────────────
     "port_range_min": _Default(
         value="10100",
         value_type="int",
+        label="Najnižší port pre projekty",
+        unit="",
         description=(
-            "Lowest port number NEX Studio hands out to projects. "
-            "Changing mid-flight is risky for existing deployments."
+            "Najnižšie číslo portu, ktoré NEX Studio prideľuje projektom. "
+            "Zmena za behu je riziková pre existujúce nasadenia."
         ),
     ),
     "port_range_max": _Default(
         value="14999",
         value_type="int",
-        description="Highest port number in the commercial-projects range.",
+        label="Najvyšší port pre projekty",
+        unit="",
+        description="Najvyššie číslo portu v rozsahu pre komerčné projekty.",
     ),
     "port_block_size": _Default(
         value="10",
         value_type="int",
-        description=("Port block size per project. D-020 reserved 10-port blocks (backend/frontend/db + 7 spare)."),
+        label="Veľkosť bloku portov",
+        unit="portov",
+        description=(
+            "Koľko portov dostane jeden projekt. Štandard: bloky po 10 (backend / frontend / databáza + 7 rezervných)."
+        ),
     ),
     # ── Path templates ─────────────────────────────────────────────
     "default_source_path_template": _Default(
         value="/opt/projects/{slug}",
+        label="Predvolené umiestnenie zdrojového kódu",
+        unit="",
         description=(
-            "Default filesystem location where the project source is "
-            "checked out. ``{slug}`` is substituted with the project slug. "
-            "Convention per icc/STRUCTURE.md (2026-05-03): all new projects "
-            "live under /opt/projects/<slug>/. Legacy projects in "
-            "/opt/<slug>-src/ are migrated case-by-case."
+            'Kam sa štandardne uloží zdrojový kód projektu. „{slug}" sa nahradí názvom projektu. '
+            "Podľa konvencie žijú nové projekty v /opt/projects/<názov>/."
         ),
     ),
     "default_kb_path_template": _Default(
         value="/home/icc/knowledge/projects/{slug}",
-        description="Default KB directory for per-project live documents.",
+        label="Predvolené umiestnenie znalostnej bázy",
+        unit="",
+        description="Predvolený priečinok pre živé dokumenty jednotlivého projektu.",
     ),
     "template_init_script_path": _Default(
         value="",
+        label="Cesta k inicializačnému skriptu šablóny",
+        unit="",
         description=(
-            "Absolute path to the icc-claude-template init.sh bootstrap "
-            "script. Invoked as subprocess on POST /api/v1/projects to "
-            "auto-create the project directory + CLAUDE.md + skills + "
-            "hooks + scripts. Empty string (default) disables auto-"
-            "bootstrap so a fresh install + test runs don't depend on "
-            "host filesystem template availability. Production deploy: "
-            "set via Settings UI to "
-            "'/home/icc/knowledge/templates/claude-project/init.sh' "
-            "(or fork path)."
+            "Úplná cesta k skriptu init.sh, ktorý pri vytvorení projektu založí jeho priečinok "
+            "a základné súbory. Prázdne = automatické zakladanie je vypnuté."
         ),
     ),
     "template_init_timeout_seconds": _Default(
         value="60",
-        description=(
-            "Maximum wall-clock seconds for template init.sh subprocess "
-            "to complete. Typical greenfield bootstrap is < 5 s; the "
-            "60 s default tolerates first-time mkdir + git init + "
-            "Docker volume warmup."
-        ),
         value_type="int",
+        label="Časový limit inicializácie šablóny",
+        unit="sekúnd",
+        description=(
+            "Najdlhší čas na dobehnutie skriptu init.sh. Bežné založenie trvá do 5 sekúnd; "
+            "60 pokrýva prvé vytváranie priečinkov a Docker."
+        ),
     ),
     "reserved_port_ranges": _Default(
         value="",
+        label="Rezervované rozsahy portov",
+        unit="",
         description=(
-            "Comma-separated list of port ranges reserved for projects "
-            "managed externally (not via NEX Studio web UI). Format: "
-            "'<start>-<end>,<start>-<end>,...'. _validate_ports rejects "
-            "any port inside these ranges with HTTP 422 and "
-            "suggest_next_port_block skips them. Empty default keeps "
-            "test fixtures + greenfield deployments unaffected. Production "
-            "deploy: set via Settings UI to '10110-10159' (NEX Automat "
-            "per D-022) plus any other commercial reservations."
+            "Rozsahy portov vyhradené pre projekty spravované mimo NEX Studia (oddelené čiarkou, "
+            'napr. „10110-10159"). Z týchto rozsahov systém port nepridelí. Prázdne = žiadne rezervácie.'
         ),
     ),
     # ── Metrics / ROI pricing (E5, CR-NS-043) ───────────────────────
     "developer_hourly_rate": _Default(
         value="0.0",
         value_type="float",
+        label="Hodinová sadzba vývojára",
+        unit="€ / hod",
         description=(
-            "Average human developer hourly rate (currency-agnostic) for the metrics-page "
-            "human-baseline (Σ estimated_minutes / 60 × rate). 0 = unset → ROI shows 'not configured', "
-            "never a fabricated number. Falls back to the DEVELOPER_HOURLY_RATE env value."
+            "Priemerná hodinová sadzba ľudského vývojára pre porovnanie na stránke Metriky. "
+            "0 = nenastavené → návratnosť sa nezobrazí (nikdy sa nevymyslí číslo)."
         ),
     ),
     "api_price_input_per_mtok": _Default(
         value="0.0",
         value_type="float",
+        label="Cena za vstupné tokeny",
+        unit="$ / mil. tokenov",
         description=(
-            "Claude API price per 1,000,000 INPUT tokens, for the metrics-page API-cost figure. "
-            "0 = unset → cost null. Falls back to the API_PRICE_INPUT_PER_MTOK env value."
+            "Cena Claude API za 1 milión vstupných tokenov — pre výpočet nákladov na stránke "
+            "Metriky. 0 = nenastavené → náklad sa nezobrazí."
         ),
     ),
     "api_price_output_per_mtok": _Default(
         value="0.0",
         value_type="float",
+        label="Cena za výstupné tokeny",
+        unit="$ / mil. tokenov",
         description=(
-            "Claude API price per 1,000,000 OUTPUT tokens, for the metrics-page API-cost figure. "
-            "0 = unset → cost null. Falls back to the API_PRICE_OUTPUT_PER_MTOK env value."
+            "Cena Claude API za 1 milión výstupných tokenov — pre výpočet nákladov na stránke "
+            "Metriky. 0 = nenastavené → náklad sa nezobrazí."
         ),
     ),
     # ── Metrics / ROI — per-PHASE agent-vs-human model (v2 metrics per-phase basis, CR-V2-029) ─────
@@ -257,80 +291,124 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
     "metrics_minutes_per_mtok_priprava": _Default(
         value="0.0",
         value_type="float",
+        label="Ľudský čas — fáza Príprava",
+        unit="min / mil. tokenov",
         description=(
-            "Human-equivalent minutes per 1,000,000 total tokens for the Príprava phase. "
-            "0 = unset → that phase's human-time/cost null (never fabricated)."
+            "Koľko minút ľudskej práce zodpovedá 1 miliónu tokenov vo fáze Príprava. "
+            "0 = nenastavené → čas a náklad tejto fázy sa nezobrazia."
         ),
     ),
     "metrics_minutes_per_mtok_navrh": _Default(
         value="0.0",
         value_type="float",
-        description="Human-equivalent minutes per 1,000,000 total tokens for the Návrh phase. 0 = unset → null.",
+        label="Ľudský čas — fáza Návrh",
+        unit="min / mil. tokenov",
+        description=(
+            "Koľko minút ľudskej práce zodpovedá 1 miliónu tokenov vo fáze Návrh. 0 = nenastavené → nezobrazí sa."
+        ),
     ),
     "metrics_minutes_per_mtok_programovanie": _Default(
         value="0.0",
         value_type="float",
+        label="Ľudský čas — fáza Programovanie",
+        unit="min / mil. tokenov",
         description=(
-            "Human-equivalent minutes per 1,000,000 total tokens for the Programovanie phase. 0 = unset → null."
+            "Koľko minút ľudskej práce zodpovedá 1 miliónu tokenov vo fáze Programovanie. "
+            "0 = nenastavené → nezobrazí sa."
         ),
     ),
     "metrics_minutes_per_mtok_verifikacia": _Default(
         value="0.0",
         value_type="float",
-        description="Human-equivalent minutes per 1,000,000 total tokens for the Verifikácia phase. 0 = unset → null.",
+        label="Ľudský čas — fáza Verifikácia",
+        unit="min / mil. tokenov",
+        description=(
+            "Koľko minút ľudskej práce zodpovedá 1 miliónu tokenov vo fáze Verifikácia. 0 = nenastavené → nezobrazí sa."
+        ),
     ),
     # Per-phase hourly wage (currency-agnostic) for the human-cost side (human-time × wage). 0 = unset → null.
     "metrics_hourly_wage_priprava": _Default(
         value="0.0",
         value_type="float",
-        description="Hourly wage, Príprava-phase human-equivalent. 0 = unset → null.",
+        label="Hodinová mzda — fáza Príprava",
+        unit="€ / hod",
+        description=(
+            "Hodinová mzda ľudskej práce pre fázu Príprava (na výpočet ľudského nákladu). "
+            "0 = nenastavené → nezobrazí sa."
+        ),
     ),
     "metrics_hourly_wage_navrh": _Default(
         value="0.0",
         value_type="float",
-        description="Hourly wage, Návrh-phase human-equivalent. 0 = unset → null.",
+        label="Hodinová mzda — fáza Návrh",
+        unit="€ / hod",
+        description="Hodinová mzda ľudskej práce pre fázu Návrh. 0 = nenastavené → nezobrazí sa.",
     ),
     "metrics_hourly_wage_programovanie": _Default(
         value="0.0",
         value_type="float",
-        description="Hourly wage, Programovanie-phase human-equivalent. 0 = unset → null.",
+        label="Hodinová mzda — fáza Programovanie",
+        unit="€ / hod",
+        description="Hodinová mzda ľudskej práce pre fázu Programovanie. 0 = nenastavené → nezobrazí sa.",
     ),
     "metrics_hourly_wage_verifikacia": _Default(
         value="0.0",
         value_type="float",
-        description="Hourly wage, Verifikácia-phase human-equivalent. 0 = unset → null.",
+        label="Hodinová mzda — fáza Verifikácia",
+        unit="€ / hod",
+        description="Hodinová mzda ľudskej práce pre fázu Verifikácia. 0 = nenastavené → nezobrazí sa.",
     ),
     # Per-family API price (IN/OUT per 1,000,000 tokens). Falls back to the flat api_price_*_per_mtok
     # pair (which itself falls back to env) for the _unknown family + any family left at 0.
     "api_price_input_per_mtok_opus": _Default(
         value="0.0",
         value_type="float",
-        description="IN price per 1M tokens, Opus family. Falls back to the flat api_price_input_per_mtok.",
+        label="Cena vstupu — Opus",
+        unit="$ / mil. tokenov",
+        description=("Cena za 1 milión vstupných tokenov pre modely Opus. Ak je 0, použije sa všeobecná cena vstupu."),
     ),
     "api_price_output_per_mtok_opus": _Default(
         value="0.0",
         value_type="float",
-        description="OUT price per 1M tokens, Opus family. Falls back to the flat api_price_output_per_mtok.",
+        label="Cena výstupu — Opus",
+        unit="$ / mil. tokenov",
+        description=(
+            "Cena za 1 milión výstupných tokenov pre modely Opus. Ak je 0, použije sa všeobecná cena výstupu."
+        ),
     ),
     "api_price_input_per_mtok_sonnet": _Default(
         value="0.0",
         value_type="float",
-        description="IN price per 1M tokens, Sonnet family. Falls back to the flat api_price_input_per_mtok.",
+        label="Cena vstupu — Sonnet",
+        unit="$ / mil. tokenov",
+        description=(
+            "Cena za 1 milión vstupných tokenov pre modely Sonnet. Ak je 0, použije sa všeobecná cena vstupu."
+        ),
     ),
     "api_price_output_per_mtok_sonnet": _Default(
         value="0.0",
         value_type="float",
-        description="OUT price per 1M tokens, Sonnet family. Falls back to the flat api_price_output_per_mtok.",
+        label="Cena výstupu — Sonnet",
+        unit="$ / mil. tokenov",
+        description=(
+            "Cena za 1 milión výstupných tokenov pre modely Sonnet. Ak je 0, použije sa všeobecná cena výstupu."
+        ),
     ),
     "api_price_input_per_mtok_haiku": _Default(
         value="0.0",
         value_type="float",
-        description="IN price per 1M tokens, Haiku family. Falls back to the flat api_price_input_per_mtok.",
+        label="Cena vstupu — Haiku",
+        unit="$ / mil. tokenov",
+        description=("Cena za 1 milión vstupných tokenov pre modely Haiku. Ak je 0, použije sa všeobecná cena vstupu."),
     ),
     "api_price_output_per_mtok_haiku": _Default(
         value="0.0",
         value_type="float",
-        description="OUT price per 1M tokens, Haiku family. Falls back to the flat api_price_output_per_mtok.",
+        label="Cena výstupu — Haiku",
+        unit="$ / mil. tokenov",
+        description=(
+            "Cena za 1 milión výstupných tokenov pre modely Haiku. Ak je 0, použije sa všeobecná cena výstupu."
+        ),
     ),
 }
 
@@ -434,6 +512,8 @@ def _to_read_from_default(key: str, default: _Default) -> SystemSettingRead:
     return SystemSettingRead(
         key=key,
         value=default.value,
+        label=default.label,
+        unit=default.unit,
         value_type=default.value_type,
         description=default.description,
         updated_at=None,
@@ -444,11 +524,20 @@ def _to_read_from_default(key: str, default: _Default) -> SystemSettingRead:
 
 
 def _to_read_from_row(row: SystemSetting, username: Optional[str] = None) -> SystemSettingRead:
+    # label / unit / description are REGISTRY metadata — sourced from
+    # DEFAULT_SETTINGS, never from the stored row, so a runtime override
+    # still shows the current Slovak label/description/unit rather than a
+    # stale row.description. The row supplies only value + updated_* +
+    # is_default=False. Unknown keys (admin-inserted, no default) fall
+    # back to the raw key as label and the row's own description.
+    meta = DEFAULT_SETTINGS.get(row.key)
     return SystemSettingRead(
         key=row.key,
         value=row.value,
+        label=meta.label if meta else row.key,
+        unit=meta.unit if meta else "",
         value_type=row.value_type,
-        description=row.description,
+        description=meta.description if meta else row.description,
         updated_at=row.updated_at,
         updated_by=row.updated_by,
         updated_by_username=username,
