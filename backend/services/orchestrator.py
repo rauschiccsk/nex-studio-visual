@@ -3751,6 +3751,21 @@ async def _verify_uat_serves(
         fe_ready, fe_last = await _await_http_ready(base, be_role, fe_port, host=fe_host, path="/")
         if not fe_ready:
             return False, f"frontend '{fe_role}' not serving within {ACCEPTANCE_SMOKE_READY_TIMEOUT}s: {fe_last}"
+        # The checks above prove the app serves IN-network; they do NOT prove the PUBLIC Traefik route works.
+        # The andros-payables outage (2026-07-10): healthy containers, but a poisoned Host() label left no route
+        # for the real domain → 404 at the public URL, while the cockpit reported "✓ Nasadené". Probe the route
+        # the internet actually uses — from the app's own container (on nex-proxy-net), hit Traefik with the
+        # public Host header — so a broken public route is a real deploy FAILURE, not a false success.
+        public_host = f"{name_base}.{uat_provisioner.UAT_DOMAIN_SUFFIX}"
+        route_state, route_last = await _verify_public_route(base, be_role, public_host)
+        if route_state == "down":
+            return False, (
+                f"appka beží, ale verejná adresa {public_host} nie je dostupná — smerovanie zlyhalo: {route_last}"
+            )
+        if route_state == "skip":
+            logger.warning(
+                "public-route verify skipped (host=%s) — Traefik unreachable from probe: %s", public_host, route_last
+            )
     return True, "OK"
 
 
@@ -4100,6 +4115,55 @@ async def _await_acceptance_app_ready(base: list[str], port: int) -> tuple[bool,
     ``/health`` gets 404 — which now correctly means "up"). Thin wrapper over :func:`_await_http_ready`
     (the ``backend``-probes-itself case): probe ``http://localhost:<port>/health`` from the backend."""
     return await _await_http_ready(base, "backend", port, host="localhost", path="/health")
+
+
+# The shared ICC Traefik that fronts every customer instance on ``nex-proxy-net`` (its web entrypoint). The
+# public-route probe below hits THIS with a ``Host`` header — the same routing the internet exercises, minus the
+# edge WAF (which 403s a container's direct public request, so probing the public URL from a container is
+# useless). If the name ever changes the probe degrades to a SKIP (never a false FAIL — see _verify_public_route).
+_PUBLIC_ROUTE_TRAEFIK_HOST = "nex-uat-traefik"
+_PUBLIC_ROUTE_TRAEFIK_PORT = 80
+
+
+def _traefik_public_route_probe_src(public_host: str) -> str:
+    """In-container probe of the PUBLIC Traefik route. From a container ON ``nex-proxy-net`` it GETs the
+    Traefik web entrypoint with ``Host: <public_host>`` — exactly what the internet hits. A working route →
+    the app answers (2xx/3xx, or any non-404 app status). A MISSING route → Traefik's own ``404`` (the
+    andros-payables outage shape: a poisoned ``Host()`` label left no route for the real domain). Exit codes:
+    ``0`` = route OK; ``1`` = reached Traefik but the route is DOWN (``404`` no-route / ``>=500``); ``2`` =
+    could NOT reach Traefik at all (inconclusive → the caller SKIPS, never a false FAIL)."""
+    url = f"http://{_PUBLIC_ROUTE_TRAEFIK_HOST}:{_PUBLIC_ROUTE_TRAEFIK_PORT}/"
+    return (
+        "import sys, urllib.request, urllib.error\n"
+        f"req = urllib.request.Request('{url}', headers={{'Host': '{public_host}'}})\n"
+        "try:\n"
+        "    r = urllib.request.urlopen(req, timeout=8)\n"
+        "    print('status', getattr(r, 'status', 200)); sys.exit(0)\n"
+        "except urllib.error.HTTPError as e:\n"
+        "    print('status', e.code); sys.exit(0 if (e.code < 500 and e.code != 404) else 1)\n"
+        "except Exception as e:\n"
+        "    print('err', e); sys.exit(2)\n"
+    )
+
+
+async def _verify_public_route(base: list[str], exec_service: str, public_host: str) -> tuple[str, str]:
+    """Probe the PUBLIC Traefik route for ``public_host`` from ``exec_service`` (a container on
+    ``nex-proxy-net``). Returns ``(state, last)`` where state is ``"ok"`` (route serves), ``"down"`` (reached
+    Traefik but the route is missing/erroring → the deploy must NOT report success), or ``"skip"`` (could not
+    reach Traefik at all → defensive skip, NEVER a false FAIL). Retries over the readiness budget (Traefik
+    needs a moment to register a freshly-``up``'d instance's labels)."""
+    cmd = base + ["exec", "-T", exec_service, "python", "-c", _traefik_public_route_probe_src(public_host)]
+    attempts = max(1, ACCEPTANCE_SMOKE_READY_TIMEOUT // ACCEPTANCE_SMOKE_READY_INTERVAL)
+    last, last_rc = "no response", 2
+    for i in range(attempts):
+        rc, out = await _compose_smoke_step(cmd, 30)
+        last = out.strip()[-200:] or f"exit {rc}"
+        if rc == 0:
+            return "ok", last
+        last_rc = rc
+        if i < attempts - 1:
+            await asyncio.sleep(ACCEPTANCE_SMOKE_READY_INTERVAL)
+    return ("down" if last_rc == 1 else "skip"), last
 
 
 def _compose_frontend_port(compose_path: Path) -> Optional[int]:
