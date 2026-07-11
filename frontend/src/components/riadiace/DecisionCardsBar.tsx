@@ -19,6 +19,8 @@ import { useMemo, useState } from "react";
 import { CircleAlert, Lightbulb } from "lucide-react";
 
 import { postPipelineActionApi, type PipelineBoard, type PipelineMessage } from "@/services/api/pipeline";
+import { humanizeApiError, type HumanError } from "@/services/apiError";
+import ErrorNote from "@/components/common/ErrorNote";
 
 interface ConsultOption {
   id: string;
@@ -87,7 +89,7 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
   const [note, setNote] = useState("");
   const [showFree, setShowFree] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<HumanError | null>(null);
 
   // Honest-by-construction gate: the bar exists ONLY when the backend offers `decide` right now (blocked +
   // decision_needed). Placed AFTER the hooks so the hook order is stable across renders.
@@ -104,7 +106,7 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
 
   async function submit() {
     if (!current || !canSubmit) return;
-    setError("");
+    setError(null);
     setSubmitting(true);
     try {
       const payload = showFree
@@ -117,7 +119,7 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
       setNote("");
       setShowFree(false);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Rozhodnutie zlyhalo.");
+      setError(humanizeApiError(err, "Rozhodnutie zlyhalo"));
     } finally {
       setSubmitting(false);
     }
@@ -239,7 +241,7 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
             </button>
           </div>
 
-          {error && <p className="mt-2 text-xs text-[var(--color-status-error)]">{error}</p>}
+          <ErrorNote error={error} className="mt-2" />
         </div>
       </div>
     </div>

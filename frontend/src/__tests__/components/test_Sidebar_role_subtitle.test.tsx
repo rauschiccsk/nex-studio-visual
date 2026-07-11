@@ -30,22 +30,22 @@ function renderSidebar() {
 }
 
 describe("Sidebar — UserCard subtitle from role (CR-NS-093)", () => {
-  it("ri → 'Manažér · Ri'", () => {
+  it("ri → 'Manažér'", () => {
     mockState.user = { username: "ri-user", role: "ri" };
     renderSidebar();
-    expect(screen.getByText("Manažér · Ri")).toBeInTheDocument();
+    expect(screen.getByText("Manažér")).toBeInTheDocument();
   });
 
-  it("ha → 'Medior · Ha'", () => {
+  it("ha → 'Medior'", () => {
     mockState.user = { username: "ha-user", role: "ha" };
     renderSidebar();
-    expect(screen.getByText("Medior · Ha")).toBeInTheDocument();
+    expect(screen.getByText("Medior")).toBeInTheDocument();
   });
 
-  it("shu → 'Junior · Shu'", () => {
+  it("shu → 'Junior'", () => {
     mockState.user = { username: "shu-user", role: "shu" };
     renderSidebar();
-    expect(screen.getByText("Junior · Shu")).toBeInTheDocument();
+    expect(screen.getByText("Junior")).toBeInTheDocument();
   });
 
   it("no user → '—' fallback (name + subtitle both em-dash, no 'undefined')", () => {

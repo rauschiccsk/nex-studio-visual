@@ -126,7 +126,7 @@ export default function CustomersPage() {
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 409) {
-          setFormError("Zákazník s týmto slug už v projekte existuje.");
+          setFormError("Zákazník s touto skratkou už v projekte existuje.");
         } else if (err.status === 403) {
           setFormError("Pridanie zákazníka je dostupné len pre rolu Manažér.");
         } else {
@@ -141,7 +141,7 @@ export default function CustomersPage() {
   }
 
   async function handleDelete(c: CustomerRead) {
-    if (!window.confirm(`Odstrániť zákazníka ${c.name}? Odstráni sa aj jeho uložený secret.`)) return;
+    if (!window.confirm(`Odstrániť zákazníka ${c.name}? Odstráni sa aj jeho uložený tajný kľúč.`)) return;
     setLoadError(null);
     try {
       await deleteCustomer(c.id);
@@ -213,7 +213,7 @@ export default function CustomersPage() {
               />
             </label>
             <label className="block text-xs">
-              <span className="text-[var(--color-text-secondary)]">Slug *</span>
+              <span className="text-[var(--color-text-secondary)]">Skratka *</span>
               <input
                 value={customerSlug}
                 onChange={(e) => setCustomerSlug(e.target.value)}
@@ -232,7 +232,7 @@ export default function CustomersPage() {
               />
             </label>
             <label className="block text-xs">
-              <span className="text-[var(--color-text-secondary)]">Secret (per-zákazník)</span>
+              <span className="text-[var(--color-text-secondary)]">Tajný kľúč (pre zákazníka)</span>
               <input
                 type="password"
                 value={secret}
@@ -240,8 +240,8 @@ export default function CustomersPage() {
                 autoComplete="new-password"
                 placeholder={
                   editingCustomerId
-                    ? "ponechaj prázdne = bez zmeny; vyplň = rotuj secret"
-                    : "uloží sa do credentials store; nezobrazí sa späť"
+                    ? "ponechaj prázdne = bez zmeny; vyplň = zmeň tajný kľúč"
+                    : "uloží sa bezpečne; späť sa už nezobrazí"
                 }
                 className="mt-1 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
               />
@@ -320,7 +320,7 @@ export default function CustomersPage() {
                   <span className="font-mono text-xs text-[var(--color-text-muted)]">{c.slug}</span>
                   {c.has_secret && (
                     <span className="flex items-center gap-1 rounded bg-[var(--color-surface)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]">
-                      <KeyRound className="h-3 w-3" /> secret uložený
+                      <KeyRound className="h-3 w-3" /> tajný kľúč uložený
                     </span>
                   )}
                 </div>

@@ -104,7 +104,7 @@ describe("usePipelineWs — auto-reconnect (CR 2026-06-12)", () => {
     getPipelineBoardApi.mockRejectedValueOnce(new Error("boom"));
     const { result, unmount } = renderHook(() => usePipelineWs("v1"));
     await act(async () => {}); // flush the rejected initial snapshot → error set
-    expect(result.current.error).toBe("boom");
+    expect(result.current.error).toBe("Načítanie prehľadu zlyhalo — skús to prosím znova.");
 
     act(() => FakeWS.instances[0]!._drop());
     expect(result.current.error).toBeNull(); // suppressed so it can't stack with the amber banner

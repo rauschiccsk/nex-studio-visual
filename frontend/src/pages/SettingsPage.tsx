@@ -38,6 +38,7 @@ import {
 } from "@/components/settings/AutonomyDialPanel";
 import { useAuthStore } from "@/store/authStore";
 import { ROLE_LABELS } from "@/components/cockpit/labels";
+import { humanizeApiError } from "@/services/apiError";
 import type { UserRole, UserRead } from "@/types/user";
 import type { SystemSettingRead } from "@/types/system_setting";
 import type {
@@ -76,7 +77,7 @@ const AGENT_EFFORTS: AgentEffort[] = ["low", "medium", "high", "xhigh", "max"];
 const SETTINGS_CATEGORIES: SettingsCategory[] = [
   {
     id: "pipeline",
-    label: "Pipeline / AI",
+    label: "Priebeh / AI",
     description:
       "Timeouty pre Claude CLI (chat, generovanie dokumentácie, task plan) a limity kontextu pre AI prompty.",
     prefixes: ["claude_", "conversation_", "design_doc_"],
@@ -96,7 +97,7 @@ const SETTINGS_CATEGORIES: SettingsCategory[] = [
   },
   {
     id: "ports",
-    label: "Port Registry (ICC D-020)",
+    label: "Rozsah portov",
     description:
       "Rozsah portov prideľovaných projektom a veľkosť per-project bloku. Zmena má dosah len na nové projekty.",
     prefixes: ["port_"],
@@ -122,10 +123,17 @@ const SETTINGS_CATEGORIES: SettingsCategory[] = [
 // Role options drive BOTH the Users filter and the create/edit form. Order
 // matters: the kit UserForm defaults to the first option → "shu", matching the
 // old form's hardcoded default.
+// Slovak label per USER account role (ri/ha/shu) — never the raw slug or the English "Director".
+const USER_ROLE_LABELS: Record<string, string> = {
+  ri: "Manažér",
+  ha: "Medior",
+  shu: "Junior",
+};
+
 const ROLE_OPTIONS: { value: string; label: string }[] = [
-  { value: "shu", label: "shu — Junior" },
-  { value: "ha", label: "ha — Medior" },
-  { value: "ri", label: "ri — Director" },
+  { value: "shu", label: "Junior" },
+  { value: "ha", label: "Medior" },
+  { value: "ri", label: "Manažér" },
 ];
 
 // Studio renders the full user field set; password min 5 mirrors the backend
@@ -412,7 +420,7 @@ export default function SettingsPage() {
           helper_model: (draft.helperModel || null) as AgentModel | null,
         });
       } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : "Neznáma chyba.";
+        const msg = humanizeApiError(e, "Uloženie zlyhalo").message;
         setAgentSaveErrors((prev) => ({ ...prev, [roleId]: msg }));
         throw e; // rethrow so the panel does not flash a false success
       }
@@ -538,7 +546,7 @@ export default function SettingsPage() {
         {user.username}
       </span>
       {" · "}
-      <span className={`font-mono text-[11px] ${roleCls(role)}`}>{role}</span>
+      <span className={`text-[11px] font-medium ${roleCls(role)}`}>{USER_ROLE_LABELS[role] ?? role}</span>
     </span>
   ) : undefined;
 

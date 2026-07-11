@@ -9,7 +9,14 @@
 import { Eye, Loader2 } from "lucide-react";
 
 import type { PipelineState } from "../../services/api/pipeline";
-import { BLOCK_REASON_LABELS, PHASE_LABELS, PIPELINE_STATUS_TONE, TONE_BANNER, TONE_DOT } from "../cockpit/labels";
+import {
+  BLOCK_REASON_LABELS,
+  PHASE_LABELS,
+  PIPELINE_STATUS_TONE,
+  TONE_BANNER,
+  TONE_DOT,
+  verificationUnconfirmed,
+} from "../cockpit/labels";
 import type { BuildPhase, StatusTone } from "../cockpit/labels";
 
 // konzultacia-mode.md Part 3: a TERMINAL version (current_stage === 'done' — a finished / released build) is
@@ -25,17 +32,19 @@ function statusText(state: PipelineState | null, projectName: string, versionNum
   if (state && state.current_stage === "done" && state.status === "agent_working") {
     return "Konzultácia — premýšľam…";
   }
-  // STEP 6 (Hotovo): a signed-off conversation build reads "Hotovo — pripravené na nasadenie" (green via the
-  // existing done→green tone). MUST precede the bare-"Voľný" done branch below, else it is shadowed.
-  if (state && state.status === "done" && state.mode === "conversation") {
+  // Hotovo: ANY signed-off build reads "Hotovo — pripravené na nasadenie" (green via the existing done→green
+  // tone). Mode-agnostic — a completed GUIDED (phase-automaton) build must show "Hotovo" too, not fall through
+  // to "Voľný" as it did when this was gated on mode==="conversation". MUST precede the bare-"Voľný" branch
+  // below, else it is shadowed.
+  if (state && state.status === "done") {
     return "Hotovo — pripravené na nasadenie";
   }
-  if (!state || state.status === "done") return "Voľný";
-  // Director observation #6: a framework_issue block is an agent → Dedo escalation — there is NOTHING the
-  // Manažér can do, so the honest status is "wait for Dedo", NOT the generic "Čaká na súhlas" (which implies
-  // the Manažér should act). MUST precede the generic blocked branch below.
+  if (!state) return "Voľný";
+  // A framework_issue block means the bug is in NEX Studio itself — our technical team resolves it. Plain
+  // Slovak, no internal "Dedo"/"framework" jargon. The Manažér's one concrete move is "Nahlásiť znova"
+  // (NahlasitZnovaBar). MUST precede the generic blocked branch below.
   if (state.status === "blocked" && state.block_reason === "framework_issue") {
-    return "NEX Studio potrebuje opravu (Dedo) — počkaj";
+    return "NEX Studio má chybu — rieši ju náš technický tím";
   }
   // A blocked state names its PRECISE reason (audit Theme 1) — "Systémová chyba" / "Agent sa pýta" / "Treba
   // tvoje rozhodnutie" — never the generic "Čaká na súhlas" that collapsed five distinct situations into one.
@@ -64,11 +73,26 @@ interface Props {
   versionNumber: string;
   reconnecting: boolean;
   error: string | null;
+  /** Live verification provenance from the board (audit honest #6). When a `done` version's provenance is
+   *  unconfirmable (unbound / repo_unreadable / hotovo_unbound) the "Hotovo" badge reads AMBER, not green. */
+  verifiedProvenance?: string | null;
 }
 
-export function HonestStatusStrip({ state, projectName, versionNumber, reconnecting, error }: Props) {
-  const text = statusText(state, projectName, versionNumber);
-  const tone = statusTone(state);
+export function HonestStatusStrip({
+  state,
+  projectName,
+  versionNumber,
+  reconnecting,
+  error,
+  verifiedProvenance,
+}: Props) {
+  // Honest #6: a settled `done` version whose verification could NOT be confirmed must read amber, never a
+  // green "overená/Hotovo". Override the derived text + tone for exactly that case.
+  const unconfirmed = state?.status === "done" && verificationUnconfirmed(verifiedProvenance);
+  const text = unconfirmed
+    ? "Hotovo — overenie sa nedá potvrdiť"
+    : statusText(state, projectName, versionNumber);
+  const tone: StatusTone = unconfirmed ? "amber" : statusTone(state);
   const working = state?.status === "agent_working";
   // Konzultácia (Part 3): a terminal version (current_stage === 'done') is in read-only advisory mode.
   const consultMode = !!state && state.current_stage === "done";

@@ -32,7 +32,8 @@
 // no new endpoint/WS/backend change.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { ChevronDown, ChevronRight, Loader2, Rocket } from "lucide-react";
 
 import { getTaskPlan } from "../../services/api/versions";
 import { findCurrentTaskPath, type CurrentTaskPath } from "./currentTaskPath";
@@ -44,8 +45,10 @@ import type {
   TaskPlanFeatNode,
   TaskPlanTaskNode,
 } from "../../types/task-plan";
-import { TASK_STATUS_LABELS, TASK_STATUS_TONE, TONE_DOT } from "../cockpit/labels";
+import { TASK_STATUS_LABELS, TASK_TYPE_LABELS, TASK_STATUS_TONE, TONE_DOT, verificationUnconfirmed } from "../cockpit/labels";
 import { SpecMarkdown } from "../markdown/SpecMarkdown";
+import { humanizeApiError, type HumanError } from "../../services/apiError";
+import ErrorNote from "../common/ErrorNote";
 
 interface Props {
   versionId: string | null;
@@ -136,7 +139,7 @@ function StatusDot({ status }: { status: string }) {
   return (
     <span className="inline-flex flex-shrink-0 items-center gap-1 text-[10px] text-[var(--color-text-secondary)]">
       <span className={`h-1.5 w-1.5 rounded-full ${TONE_DOT[TASK_STATUS_TONE[status] ?? "neutral"]}`} />
-      {TASK_STATUS_LABELS[status] ?? status}
+      {TASK_STATUS_LABELS[status] ?? "Neznámy stav"}
     </span>
   );
 }
@@ -277,7 +280,9 @@ function PlanNode(props: {
             </span>
           )}
           {taskType && (
-            <span className="flex-shrink-0 text-[9px] uppercase text-[var(--color-text-muted)]">{taskType}</span>
+            <span className="flex-shrink-0 text-[9px] uppercase text-[var(--color-text-muted)]">
+              {TASK_TYPE_LABELS[taskType] ?? taskType}
+            </span>
           )}
         </span>
         <StatusDot status={status} />
@@ -291,8 +296,9 @@ function PlanNode(props: {
 }
 
 export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
+  const navigate = useNavigate();
   const [plan, setPlan] = useState<TaskPlanResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<HumanError | null>(null);
   // The set of nodes whose L2 technical detail is expanded, hydrated from localStorage (per version, per
   // browser) so the choice survives navigation + reload. Default empty ⇒ technical hidden (not the default view).
   const [expanded, setExpanded] = useState<Set<string>>(() => (versionId ? readExpanded(versionId) : new Set()));
@@ -300,7 +306,7 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
   // empty ⇒ the whole plan is visible. Separate from `expanded` above (different semantics + localStorage key).
   const [collapsed, setCollapsed] = useState<Set<string>>(() => (versionId ? readCollapsed(versionId) : new Set()));
   const [triggering, setTriggering] = useState(false);
-  const [triggerError, setTriggerError] = useState<string | null>(null);
+  const [triggerError, setTriggerError] = useState<HumanError | null>(null);
 
   // Last-seen status per node id, to detect `* → done` transitions for auto-collapse (req 4) WITHOUT re-collapsing
   // on every render (else the Manažér could never keep a done node open). Reset per version. versionIdRef lets the
@@ -348,7 +354,7 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
         }
       })
       .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Načítanie plánu zlyhalo");
+        if (!cancelled) setError(humanizeApiError(e, "Načítanie plánu zlyhalo"));
       });
     return () => {
       cancelled = true;
@@ -488,7 +494,7 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
       const nextBoard = await postPipelineActionApi(versionId, { action });
       onBoard(nextBoard);
     } catch (err: unknown) {
-      setTriggerError(err instanceof Error ? err.message : failMsg);
+      setTriggerError(humanizeApiError(err, failMsg));
     } finally {
       setTriggering(false);
     }
@@ -531,7 +537,7 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
         <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">Plán úloh</h2>
         {plan && plan.epic_count > 0 && (
           <span className="text-[10px] text-[var(--color-text-muted)]">
-            {plan.epic_count} epic · {plan.feat_count} feat · {plan.task_count} úloh
+            {plan.epic_count} celkov · {plan.feat_count} funkcií · {plan.task_count} úloh
           </span>
         )}
       </div>
@@ -544,26 +550,26 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
           </p>
           <button
             type="button"
-            onClick={() => runTrigger("zostav_plan", "Zostavenie plánu zlyhalo.")}
+            onClick={() => runTrigger("zostav_plan", "Zostavenie plánu zlyhalo")}
             disabled={triggering}
             className="w-full rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {triggering ? "Zostavujem plán…" : "Zostaviť plán"}
           </button>
-          {triggerError && <p className="mt-1 text-xs text-[var(--color-status-error)]">{triggerError}</p>}
+          <ErrorNote error={triggerError} className="mt-1" />
         </div>
       ) : canProgram ? (
         <div className="flex-shrink-0 border-b border-[var(--color-border-default)] px-4 py-3">
           <p className="mb-2 text-xs text-[var(--color-text-muted)]">Plán úloh je zostavený — spustíme stavbu.</p>
           <button
             type="button"
-            onClick={() => runTrigger("spustit_stavbu", "Spustenie stavby zlyhalo.")}
+            onClick={() => runTrigger("spustit_stavbu", "Spustenie stavby zlyhalo")}
             disabled={triggering}
             className="w-full rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {triggering ? "Spúšťam stavbu…" : "Spustiť stavbu"}
           </button>
-          {triggerError && <p className="mt-1 text-xs text-[var(--color-status-error)]">{triggerError}</p>}
+          <ErrorNote error={triggerError} className="mt-1" />
         </div>
       ) : canResume ? (
         <div className="flex-shrink-0 border-b border-[var(--color-border-default)] px-4 py-3">
@@ -574,26 +580,26 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
           )}
           <button
             type="button"
-            onClick={() => runTrigger("pokracovat", "Pokračovanie v stavbe zlyhalo.")}
+            onClick={() => runTrigger("pokracovat", "Pokračovanie v stavbe zlyhalo")}
             disabled={triggering}
             className="w-full rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {triggering ? "Pokračujem…" : "Pokračovať v stavbe"}
           </button>
-          {triggerError && <p className="mt-1 text-xs text-[var(--color-status-error)]">{triggerError}</p>}
+          <ErrorNote error={triggerError} className="mt-1" />
         </div>
       ) : canPause ? (
         <div className="flex-shrink-0 border-b border-[var(--color-border-default)] px-4 py-3">
           <p className="mb-2 text-xs text-[var(--color-text-muted)]">Stavba prebieha — v prípade potreby ju pozastav.</p>
           <button
             type="button"
-            onClick={() => runTrigger("pause", "Pozastavenie stavby zlyhalo.")}
+            onClick={() => runTrigger("pause", "Pozastavenie stavby zlyhalo")}
             disabled={triggering}
             className="w-full rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-50 dark:text-amber-300"
           >
             {triggering ? "Pozastavujem…" : "Pozastaviť"}
           </button>
-          {triggerError && <p className="mt-1 text-xs text-[var(--color-status-error)]">{triggerError}</p>}
+          <ErrorNote error={triggerError} className="mt-1" />
         </div>
       ) : canCheck ? (
         <div className="flex-shrink-0 border-b border-[var(--color-border-default)] px-4 py-3">
@@ -602,13 +608,13 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
           </p>
           <button
             type="button"
-            onClick={() => runTrigger("skontrolovat", "Kontrola zlyhala.")}
+            onClick={() => runTrigger("skontrolovat", "Kontrola zlyhala")}
             disabled={triggering}
             className="w-full rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {triggering ? "Kontrolujem…" : "Skontrolovať"}
           </button>
-          {triggerError && <p className="mt-1 text-xs text-[var(--color-status-error)]">{triggerError}</p>}
+          <ErrorNote error={triggerError} className="mt-1" />
         </div>
       ) : canFinish ? (
         <div className="flex-shrink-0 border-b border-[var(--color-border-default)] px-4 py-3">
@@ -617,21 +623,37 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
           </p>
           <button
             type="button"
-            onClick={() => runTrigger("hotovo", "Označenie ako hotové zlyhalo.")}
+            onClick={() => runTrigger("hotovo", "Označenie ako hotové zlyhalo")}
             disabled={triggering}
             className="w-full rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {triggering ? "Označujem…" : "Označiť ako hotové"}
           </button>
-          {triggerError && <p className="mt-1 text-xs text-[var(--color-status-error)]">{triggerError}</p>}
+          <ErrorNote error={triggerError} className="mt-1" />
         </div>
-      ) : board?.state?.status === "done" && board?.state?.mode === "conversation" ? (
-        // STEP 6: the version is signed off (terminal 'done'). Honest static note — deployment (UAT/PROD) is a
-        // SEPARATE domain reached from the left menu, never a cross-domain button here.
+      ) : board?.state?.status === "done" ? (
+        // STEP 6: the version is signed off (terminal 'done') — mode-agnostic (a GUIDED phase-automaton build
+        // reaches 'done' too, not only a conversation build). A real "Prejsť na nasadenie" button beats the old
+        // greyed sentence with no action: it navigates to Nasadenie (UAT). The left-menu path stays too.
         <div className="flex-shrink-0 border-b border-[var(--color-border-default)] px-4 py-3">
-          <p className="text-xs text-[var(--color-text-muted)]">
-            Verzia je hotová. Nasadenie (UAT/PROD) je samostatný krok — nájdeš ho v ľavom menu.
+          {/* Honest #6: a `done` version whose verification could NOT be confirmed (repo unreadable / never
+              anchored) warns AMBER before the manager deploys — never a silent green "pripravená". */}
+          {verificationUnconfirmed(board?.verified_provenance) && (
+            <p className="mb-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-700 dark:text-amber-300">
+              Overenie sa nedá potvrdiť — pred nasadením ho over.
+            </p>
+          )}
+          <p className="mb-2 text-xs text-[var(--color-text-muted)]">
+            Verzia je hotová a pripravená na nasadenie k zákazníkovi.
           </p>
+          <button
+            type="button"
+            onClick={() => navigate("/uat")}
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500"
+          >
+            <Rocket className="h-3.5 w-3.5" />
+            Prejsť na nasadenie
+          </button>
         </div>
       ) : null}
 
@@ -669,7 +691,7 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2 text-xs">
         {error ? (
-          <p className="px-1 text-[11px] text-[var(--color-status-error)]">{error}</p>
+          <ErrorNote error={error} className="px-1" />
         ) : !plan ? (
           <p className="flex items-center gap-1.5 px-1 text-[var(--color-text-muted)]">
             <Loader2 className="h-3 w-3 animate-spin" /> Načítavam plán…

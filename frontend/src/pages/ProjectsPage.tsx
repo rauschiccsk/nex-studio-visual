@@ -83,18 +83,6 @@ function ProjectRow({ project, index, selected, onOpen, onTogglePin }: ProjectRo
         </div>
       </div>
 
-      {/* Versions — placeholder until Phase 3 */}
-      <div className="text-center shrink-0 w-12">
-        <div className="text-sm font-semibold text-[var(--color-text-primary)]">—</div>
-        <div className="text-[10px] text-[var(--color-text-muted)]">verzií</div>
-      </div>
-
-      {/* Active version — placeholder until Phase 3 */}
-      <div className="text-center shrink-0 w-14">
-        <div className="text-sm font-semibold text-primary-700 dark:text-primary-400">—</div>
-        <div className="text-[10px] text-[var(--color-text-muted)]">verzia</div>
-      </div>
-
       {/* Actions */}
       <div className="flex items-center gap-3 shrink-0">
         <button
@@ -206,7 +194,7 @@ export default function ProjectsPage() {
             </svg>
           </div>
           <p className="text-sm text-[var(--color-text-muted)] mb-1">Žiadne projekty</p>
-          <p className="text-xs text-[var(--color-text-muted)]">Vytvor prvý projekt a začni s NEX Studio pipeline.</p>
+          <p className="text-xs text-[var(--color-text-muted)]">Vytvor prvý projekt a začni pracovať v NEX Studio.</p>
           <button
             onClick={() => navigate("/projects/new")}
             className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-primary-600 hover:bg-primary-500 rounded-lg transition-colors"

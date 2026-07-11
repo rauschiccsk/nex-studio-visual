@@ -36,7 +36,7 @@ describe("cockpit block_reason phrases", () => {
     for (const r of reasons) expect(BLOCK_REASON_LABELS[r]).toBeTruthy();
     expect(BLOCK_REASON_LABELS.agent_question).toBe("Agent sa pýta");
     expect(BLOCK_REASON_LABELS.agent_error).toBe("Agent zlyhal");
-    expect(BLOCK_REASON_LABELS.framework_issue).toBe("NEX Studio potrebuje opravu (Dedo)");
+    expect(BLOCK_REASON_LABELS.framework_issue).toBe("NEX Studio má chybu — rieši ju náš technický tím");
     expect(new Set(Object.values(BLOCK_REASON_LABELS)).size).toBe(reasons.length);
   });
 });

@@ -25,7 +25,7 @@ function isOperator(author: PipelineParticipant): boolean {
 }
 
 function authorLabel(author: PipelineParticipant): string {
-  return ROLE_LABELS[author] ?? author;
+  return ROLE_LABELS[author] ?? "Neznáma rola";
 }
 
 // Per-author bubble accent — keeps the AI Agent visually distinct from the Auditor / system notices, reusing
@@ -110,7 +110,7 @@ export function ConversationThread({ messages, activity, working }: Props) {
                     <span className="font-semibold text-[var(--color-text-secondary)]">{authorLabel(m.author)}</span>
                     {isFrameworkIssue && (
                       <span className="rounded-full bg-[var(--color-state-error-fg)]/15 px-1.5 py-0.5 font-semibold text-[var(--color-state-error-fg)]">
-                        NEX Studio · Dedo
+                        Chyba NEX Studia
                       </span>
                     )}
                   </div>
@@ -148,7 +148,7 @@ export function ConversationThread({ messages, activity, working }: Props) {
                   {isFrameworkIssue && dedoMessage.trim() && (
                     <div className="mt-2 rounded-md border-l-2 border-[var(--color-state-error-fg)] bg-[var(--color-state-error-fg)]/5 px-3 py-2">
                       <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-state-error-fg)]">
-                        Správa pre Deda
+                        Nahlásené technickému tímu
                       </div>
                       <SpecMarkdown
                         body={dedoMessage}

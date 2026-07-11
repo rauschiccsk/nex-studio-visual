@@ -129,8 +129,8 @@ export function AgentTerminal({ sessionId, token, onEnded }: AgentTerminalProps)
         if (msg.type === "output" && typeof msg.data === "string") {
           term.write(msg.data);
         } else if (msg.type === "end") {
-          const reason: string = msg.terminated_by ?? "exited";
-          term.write(`\r\n\x1b[33m[session ended: ${reason}]\x1b[0m\r\n`);
+          const reason: string = msg.terminated_by ?? "ukončené";
+          term.write(`\r\n\x1b[33m[relácia ukončená: ${reason}]\x1b[0m\r\n`);
           onEnded?.(reason);
         } else if (msg.type === "write_rejected") {
           // CR-V2-015 single-writer guard: the engine is driving this session, so the raw keystroke was
@@ -149,7 +149,7 @@ export function AgentTerminal({ sessionId, token, onEnded }: AgentTerminalProps)
     };
 
     ws.onerror = () => {
-      term.write("\r\n\x1b[31m[connection error]\x1b[0m\r\n");
+      term.write("\r\n\x1b[31m[chyba spojenia]\x1b[0m\r\n");
     };
 
     // Pipe user keystrokes → server.
@@ -203,7 +203,7 @@ export function AgentTerminal({ sessionId, token, onEnded }: AgentTerminalProps)
       <div ref={containerRef} className="absolute inset-0" />
       {status === "connecting" && (
         <div className="pointer-events-none absolute right-3 top-3 rounded bg-[var(--color-surface-hover)] px-2 py-1 text-[10px] text-[var(--color-text-secondary)]">
-          Connecting…
+          Pripájam…
         </div>
       )}
     </div>

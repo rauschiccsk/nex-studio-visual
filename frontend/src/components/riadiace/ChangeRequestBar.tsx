@@ -20,6 +20,8 @@ import {
   type ChangeRequestMarker,
   type PipelineBoard,
 } from "@/services/api/pipeline";
+import { humanizeApiError, type HumanError } from "@/services/apiError";
+import ErrorNote from "@/components/common/ErrorNote";
 
 interface Props {
   board: PipelineBoard | null;
@@ -30,7 +32,7 @@ export default function ChangeRequestBar({ board, versionId }: Props) {
   const navigate = useNavigate();
   const setSelectedVersion = useActiveContextStore((s) => s.setSelectedVersion);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<HumanError | null>(null);
   // Synchronous double-submit guard (Fix 3): flips BEFORE the first await, so a second click that fires before
   // React re-renders the disabled button is still short-circuited — no duplicate mint from a double-click race.
   const inFlight = useRef(false);
@@ -54,7 +56,7 @@ export default function ChangeRequestBar({ board, versionId }: Props) {
   async function handleCreate() {
     if (inFlight.current) return; // synchronous guard — a concurrent second click is a no-op
     inFlight.current = true;
-    setError("");
+    setError(null);
     setSubmitting(true);
     try {
       const res = await captureChangeRequestApi(versionId, source!.messageId);
@@ -63,7 +65,7 @@ export default function ChangeRequestBar({ board, versionId }: Props) {
       setSelectedVersion({ versionId: res.version_id, versionNumber: res.version_number });
       navigate(`/projects/${res.project_slug}/versions/${res.version_id}`);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Založenie novej verzie zlyhalo.");
+      setError(humanizeApiError(err, "Založenie novej verzie zlyhalo"));
       inFlight.current = false;
       setSubmitting(false);
     }
@@ -89,7 +91,7 @@ export default function ChangeRequestBar({ board, versionId }: Props) {
         </button>
       </div>
 
-      {error && <p className="text-xs text-[var(--color-status-error)]">{error}</p>}
+      <ErrorNote error={error} />
     </div>
   );
 }

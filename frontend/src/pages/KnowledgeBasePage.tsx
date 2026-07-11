@@ -41,7 +41,8 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { api, ApiError } from "@/services/api";
+import { api } from "@/services/api";
+import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { useAuthStore } from "@/store/authStore";
 import { useSessionStore } from "@/store/sessionStore";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
@@ -141,8 +142,8 @@ export default function KnowledgeBasePage() {
   // Copy
   const [copyDoc, isDocCopied] = useCopyToClipboard();
 
-  // Error
-  const [error, setError] = useState("");
+  // Error — plain-Slovak HumanError (never a raw English backend detail).
+  const [error, setError] = useState<HumanError | null>(null);
 
   // --- API calls ---
 
@@ -157,7 +158,7 @@ export default function KnowledgeBasePage() {
 
   const loadDocuments = useCallback(async (category?: string | null) => {
     setLoading(true);
-    setError("");
+    setError(null);
     try {
       const params = category ? { category } : {};
       const data = await api.get<{ documents: KnowledgeDoc[]; count: number }>(
@@ -166,14 +167,14 @@ export default function KnowledgeBasePage() {
       );
       setDocuments(data.documents);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Chyba pri načítaní dokumentov");
+      setError(humanizeApiError(e, "Načítanie dokumentov zlyhalo"));
     }
     setLoading(false);
   }, []);
 
   const loadDocContent = async (doc: KnowledgeDoc) => {
     setLoadingContent(true);
-    setError("");
+    setError(null);
     try {
       const data = await api.get<{ relative_path: string; content: string }>(
         "/knowledge/documents/content",
@@ -186,7 +187,7 @@ export default function KnowledgeBasePage() {
       setSearchResults(null);
       useSessionStore.getState().setKnowledgeDocPath(doc.relative_path);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Chyba pri načítaní dokumentu");
+      setError(humanizeApiError(e, "Načítanie dokumentu zlyhalo"));
     }
     setLoadingContent(false);
   };
@@ -196,7 +197,7 @@ export default function KnowledgeBasePage() {
   // vectors from a previous index that points at a renamed file).
   const loadDocContentByPath = async (filePath: string) => {
     setLoadingContent(true);
-    setError("");
+    setError(null);
     const filename = filePath.replace(/\\/g, "/").split("/").pop() || filePath;
     try {
       const data = await api.get<{ relative_path: string; content: string }>(
@@ -219,8 +220,8 @@ export default function KnowledgeBasePage() {
         setMode("browse");
         setSearchResults(null);
         useSessionStore.getState().setKnowledgeDocPath(filePath);
-      } catch {
-        setError("Dokument sa nepodarilo načítať");
+      } catch (e) {
+        setError(humanizeApiError(e, "Načítanie dokumentu zlyhalo"));
       }
     }
     setLoadingContent(false);
@@ -233,7 +234,7 @@ export default function KnowledgeBasePage() {
       return;
     }
     setLoading(true);
-    setError("");
+    setError(null);
     setSearchInfo(null);
     try {
       const data = await api.get<{ results: SearchResult[]; count: number }>(
@@ -245,7 +246,7 @@ export default function KnowledgeBasePage() {
       setDocContent("");
       setMode("browse");
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Chyba pri vyhľadávaní");
+      setError(humanizeApiError(e, "Vyhľadávanie zlyhalo"));
     }
     setLoading(false);
   };
@@ -257,7 +258,7 @@ export default function KnowledgeBasePage() {
   const handleCreate = async () => {
     if (!newTitle.trim() || !newCategory || !newContent.trim()) return;
     setSaving(true);
-    setError("");
+    setError(null);
     const filename = newFilename.trim() || titleToFilename(newTitle);
     try {
       await api.post("/knowledge/documents", {
@@ -273,7 +274,7 @@ export default function KnowledgeBasePage() {
       setNewContent("");
       await refresh();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Chyba pri vytváraní dokumentu");
+      setError(humanizeApiError(e, "Vytvorenie dokumentu zlyhalo"));
     }
     setSaving(false);
   };
@@ -281,7 +282,7 @@ export default function KnowledgeBasePage() {
   const handleUpdate = async () => {
     if (!selectedDoc || !editContent.trim()) return;
     setSaving(true);
-    setError("");
+    setError(null);
     try {
       await api.put("/knowledge/documents", {
         relative_path: selectedDoc.relative_path,
@@ -292,7 +293,7 @@ export default function KnowledgeBasePage() {
       setMode("browse");
       await refresh();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Chyba pri ukladaní");
+      setError(humanizeApiError(e, "Uloženie zlyhalo"));
     }
     setSaving(false);
   };
@@ -300,7 +301,7 @@ export default function KnowledgeBasePage() {
   const handleDelete = async () => {
     if (!selectedDoc) return;
     setDeleting(true);
-    setError("");
+    setError(null);
     try {
       await api.delete("/knowledge/documents", {
         params: { relative_path: selectedDoc.relative_path, tenant: "icc" },
@@ -312,7 +313,7 @@ export default function KnowledgeBasePage() {
       useSessionStore.getState().setKnowledgeDocPath(null);
       await refresh();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Chyba pri mazaní");
+      setError(humanizeApiError(e, "Zmazanie zlyhalo"));
     }
     setDeleting(false);
   };
@@ -434,7 +435,7 @@ export default function KnowledgeBasePage() {
                   setNewCategory("icc");
                   setNewFilename("");
                   setNewContent("");
-                  setError("");
+                  setError(null);
                 }}
                 className="flex items-center gap-1 px-2 py-1.5 bg-[var(--color-accent-primary)] text-white rounded hover:bg-[var(--color-accent-primary-hover)] text-xs font-medium transition-colors"
               >
@@ -458,8 +459,8 @@ export default function KnowledgeBasePage() {
 
         {error && (
           <div className="px-3 py-2 bg-[var(--color-state-error-bg)] border-b border-[var(--color-border-default)] text-[var(--color-state-error-fg)] text-xs flex items-center justify-between">
-            <span className="truncate">{error}</span>
-            <button onClick={() => setError("")} className="text-[var(--color-state-error-fg)] hover:opacity-80 ml-2">
+            <span className="truncate">{error.message}</span>
+            <button onClick={() => setError(null)} className="text-[var(--color-state-error-fg)] hover:opacity-80 ml-2">
               <X size={12} />
             </button>
           </div>
@@ -500,7 +501,7 @@ export default function KnowledgeBasePage() {
                     <span className="font-medium truncate text-xs text-[var(--color-text-primary)]">{r.title}</span>
                   </div>
                   <div className="text-[10px] text-[var(--color-text-muted)] mt-1">
-                    {r.category} · score: {r.score.toFixed(2)}
+                    {r.category} · zhoda {Math.round(r.score * 100)} %
                   </div>
                   {r.snippet && (
                     <div className="text-[10px] text-[var(--color-text-muted)] mt-1 line-clamp-2">{r.snippet}</div>
@@ -603,14 +604,14 @@ export default function KnowledgeBasePage() {
                   </div>
                 </div>
                 <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
-                  Obsah (Markdown)
+                  Obsah (text)
                 </label>
                 <textarea
                   lang="sk"
                   spellCheck={false}
                   value={newContent}
                   onChange={(e) => setNewContent(e.target.value)}
-                  placeholder="# Názov dokumentu&#10;&#10;Obsah v Markdown..."
+                  placeholder="# Názov dokumentu&#10;&#10;Text dokumentu..."
                   className="flex-1 min-h-[200px] px-3 py-2 bg-[var(--color-canvas)] border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)] font-mono resize-none focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-focus)]"
                 />
                 <div className="flex gap-2 mt-4">

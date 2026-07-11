@@ -20,6 +20,8 @@ import { CircleAlert, MessageCircle, RotateCw } from "lucide-react";
 
 import { postPipelineActionApi, type PipelineBoard, type BlockReason } from "@/services/api/pipeline";
 import { BLOCK_REASON_LABELS } from "@/components/cockpit/labels";
+import { humanizeApiError, type HumanError } from "@/services/apiError";
+import ErrorNote from "@/components/common/ErrorNote";
 
 const ERROR_REASONS: BlockReason[] = ["agent_error", "system_error", "parse_exhaustion"];
 const DEFAULT_RETRY = "Skús to prosím znova.";
@@ -34,7 +36,7 @@ interface Props {
 export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
   const [text, setText] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<HumanError | null>(null);
 
   const state = board?.state ?? null;
   const reason = state?.block_reason ?? null;
@@ -51,7 +53,7 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
 
   async function submit() {
     if (!canSubmit) return;
-    setError("");
+    setError(null);
     setSubmitting(true);
     try {
       const trimmed = text.trim();
@@ -62,7 +64,7 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
       onBoard(nextBoard);
       setText("");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Akcia zlyhala.");
+      setError(humanizeApiError(err, "Akcia zlyhala"));
     } finally {
       setSubmitting(false);
     }
@@ -114,7 +116,7 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
           </button>
         </div>
 
-        {error && <p className="text-xs text-[var(--color-status-error)]">{error}</p>}
+        <ErrorNote error={error} />
       </div>
     </div>
   );

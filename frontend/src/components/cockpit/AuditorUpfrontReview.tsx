@@ -17,6 +17,8 @@ import type { PipelineMessage } from "../../services/api/pipeline";
 interface UpfrontVerdict {
   findings: string[];
   proposed_fix?: string;
+  /** Insertion order of the verdict message — so a later fail-open note can supersede a stale verdict. */
+  seq: number;
 }
 
 // The latest upfront-review Auditor verdict (newest first). ``upfront_review`` marks the Návrh-phase
@@ -30,9 +32,31 @@ function latestUpfrontVerdict(messages: PipelineMessage[]): UpfrontVerdict | nul
     return {
       findings: Array.isArray(p.findings) ? (p.findings as string[]) : [],
       proposed_fix: typeof p.proposed_fix === "string" ? p.proposed_fix : undefined,
+      seq: m.seq,
     };
   }
   return null;
+}
+
+// Honest #13: the seq of the LATEST signal that the upfront review did NOT complete (fail-open). The review is
+// a safety net that is treated as "no hole found" when it crashes / parse-fails — which would otherwise render
+// NOTHING (a clean-looking Návrh). Detected via a payload flag (mirrors ``upfront_review_hole``) or, on the
+// current backend, the ``system → manazer`` "Upfront previerka … sa nepodarila" notification. -1 = none.
+function latestUpfrontFailureSeq(messages: PipelineMessage[]): number {
+  let seq = -1;
+  for (const m of messages) {
+    if (!m || m.stage !== "navrh") continue;
+    const p = m.payload as Record<string, unknown> | null;
+    const flagged = !!p && (p.upfront_review_failed === true || p.upfront_review_incomplete === true);
+    const noteMatch =
+      m.kind === "notification" &&
+      m.author === "system" &&
+      typeof m.content === "string" &&
+      /upfront previerka/i.test(m.content) &&
+      /nepodaril/i.test(m.content);
+    if ((flagged || noteMatch) && m.seq > seq) seq = m.seq;
+  }
+  return seq;
 }
 
 // Slovak count word: 1 nález / 2–4 nálezy / 5+ nálezov.
@@ -44,7 +68,28 @@ function findingsWord(n: number): string {
 
 export function AuditorUpfrontReview({ messages }: { messages: PipelineMessage[] }) {
   const verdict = latestUpfrontVerdict(messages);
+  const failureSeq = latestUpfrontFailureSeq(messages);
   const [showFix, setShowFix] = useState(false);
+
+  // Honest #13: the review FAILED / didn't complete and no LATER successful verdict superseded it → the safety
+  // net didn't run. Warn ON the card so the Manažér judges the návrh themselves, instead of rendering nothing
+  // (an absence that reads as a clean "bez nálezov" pass).
+  const reviewDidNotRun = failureSeq >= 0 && (!verdict || failureSeq > verdict.seq);
+  if (reviewDidNotRun) {
+    return (
+      <div className="flex-shrink-0 border-b border-l-4 border-l-[var(--color-state-warning-fg)] bg-[var(--color-state-warning-bg)] px-4 py-3">
+        <div className="flex items-center gap-2 text-sm font-semibold text-[var(--color-state-warning-fg)]">
+          <Bell className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+          <span>Predbežná previerka neprebehla — posúď návrh sám</span>
+        </div>
+        <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
+          Nezávislá predbežná previerka Audítora sa nedokončila, takže táto bezpečnostná poistka teraz nebežala.
+          Pred schválením si návrh a špecifikáciu prejdi pozorne sám.
+        </p>
+      </div>
+    );
+  }
+
   if (!verdict) return null;
 
   const n = verdict.findings.length;
@@ -65,10 +110,10 @@ export function AuditorUpfrontReview({ messages }: { messages: PipelineMessage[]
           <CheckCircle2 className="h-4 w-4 flex-shrink-0 text-[var(--color-status-success)]" aria-hidden="true" />
         )}
         <span>
-          Auditor — nezávislá upfront previerka:{" "}
+          Audítor — nezávislá predbežná previerka:{" "}
           {hasFindings
             ? `${n} ${findingsWord(n)} — vyrieš (Uprav) pred schválením`
-            : "bez nálezov (PASS)"}
+            : "bez nálezov (v poriadku)"}
         </span>
       </div>
 
@@ -88,7 +133,7 @@ export function AuditorUpfrontReview({ messages }: { messages: PipelineMessage[]
             className="flex items-center gap-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
           >
             {showFix ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-            Navrhovaná oprava (Auditor)
+            Navrhovaná oprava (Audítor)
           </button>
           {showFix && (
             <div className="prose prose-sm dark:prose-invert mt-1 max-h-48 max-w-none overflow-y-auto">

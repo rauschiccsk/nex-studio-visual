@@ -19,9 +19,8 @@ describe("ConversationComposer — framework_issue lock (Director obs #6)", () =
   it("shows the 'wait for Dedo' banner and disables the composer when frameworkBlocked", () => {
     render(<ConversationComposer onRelay={noopRelay} frameworkBlocked />);
 
-    // The banner names Dedo + tells the Manažér they cannot fix it via Uprav.
-    expect(screen.getByRole("alert")).toHaveTextContent(/musí opraviť Dedo/i);
-    expect(screen.getByRole("alert")).toHaveTextContent(/Počkaj na Deda/i);
+    // The banner explains, in plain Slovak (no "Dedo"/"framework" jargon), that the technical team resolves it.
+    expect(screen.getByRole("alert")).toHaveTextContent(/technický tím/i);
 
     // Both the input and the send button are disabled — no move for the Manažér here.
     expect(screen.getByRole("textbox")).toBeDisabled();

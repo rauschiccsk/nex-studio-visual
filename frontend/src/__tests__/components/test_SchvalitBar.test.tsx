@@ -124,7 +124,7 @@ describe("SchvalitBar — the Návrh/plan-approval gate button", () => {
     );
     expect(screen.getByRole("button", { name: /Prejsť na overenie/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Schváliť plán/ })).not.toBeInTheDocument();
-    expect(screen.getByText(/posunie na Verifikáciu \(overenie Auditorom\)/)).toBeInTheDocument();
+    expect(screen.getByText(/posunie na Verifikáciu \(overenie Audítorom\)/)).toBeInTheDocument();
     // The action stays `schvalit` regardless of the copy.
     fireEvent.click(screen.getByRole("button", { name: /Prejsť na overenie/ }));
     return waitFor(() =>

@@ -105,9 +105,10 @@ export const BLOCK_REASON_LABELS: Record<BlockReason, string> = {
   agent_error: "Agent zlyhal",
   system_error: "Systémová chyba",
   parse_exhaustion: "Chyba spracovania výstupu",
-  // Director observation #6: an agent → Dedo escalation — the fix needs a change to NEX Studio itself, so
-  // the Manažér has NO recovery action (only Dedo clears it). Reads as a system/blocked red state.
-  framework_issue: "NEX Studio potrebuje opravu (Dedo)",
+  // A framework_issue means the bug is in NEX Studio itself (not the project) — our technical team resolves it.
+  // Plain Slovak, no internal "Dedo"/"framework" jargon (a non-expert Manažér doesn't know who "Dedo" is). The
+  // Manažér's one concrete move is "Nahlásiť znova" (NahlasitZnovaBar); it reads as a system/blocked red state.
+  framework_issue: "NEX Studio má chybu — rieši ju náš technický tím",
 };
 
 // Slovak labels for EPIC/FEAT/TASK node statuses in the TaskPlanPanel tree (CR-NS-020 CR-5).
@@ -118,6 +119,16 @@ export const TASK_STATUS_LABELS: Record<string, string> = {
   in_progress: "Prebieha",
   done: "Hotovo",
   failed: "Zlyhalo",
+};
+
+// Slovak display label per task_type — the tiny tag on a Plán úloh / task-plan leaf. Keeps the badge readable
+// for a non-expert Manažér: no raw English "backend"/"frontend"/"migration" tokens. Unknown → the raw value.
+export const TASK_TYPE_LABELS: Record<string, string> = {
+  backend: "Backend",
+  frontend: "Frontend",
+  migration: "Databáza",
+  test: "Test",
+  docs: "Dokumentácia",
 };
 
 // ── Unified cockpit status palette (CR-NS-028) ────────────────────────────────
@@ -199,6 +210,18 @@ export const FLOW_LABELS: Record<string, string> = {
   new_version: "Nová verzia",
   fast_fix: "Rýchla oprava",
 };
+
+// Honest verification (audit honest #6): a version can be `verified === true` yet its verification could NOT
+// actually be CONFIRMED — the PASS was never anchored to a commit (`unbound` / `hotovo_unbound`, signed while
+// the repo was unreadable) or the repo can't be read right now (`repo_unreadable`). For those three the honest
+// surface is an AMBER "overenie sa nedá potvrdiť", never a green "overená". The confirmed-green provenances
+// (`sha_match` / `hotovo_match` / `released`) stay green; the drift ones (`sha_drift` / `hotovo_drift`) already
+// read as a stale-PASS warning via ReverifyBar.
+export const VERIFICATION_UNCONFIRMED_PROVENANCES = ["unbound", "repo_unreadable", "hotovo_unbound"] as const;
+
+export function verificationUnconfirmed(provenance: string | null | undefined): boolean {
+  return provenance != null && (VERIFICATION_UNCONFIRMED_PROVENANCES as readonly string[]).includes(provenance);
+}
 
 // NOTE (CR-V2-021): the v1 ``STAGE_ORDER`` / ``FAST_FIX_STAGE_ORDER`` / ``stageOrderForFlow`` /
 // ``REGATE_TARGETS`` / ``nextStageLabel`` (the 11-stage waterfall order + gate_g re-gate targets) are

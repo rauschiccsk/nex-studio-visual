@@ -13,9 +13,9 @@ import type { UserRole } from "@/types/user";
 // CR-V2-004: operator label Director → Manažér (the ``ri`` ACCESS-ROLE token is
 // unchanged — auth gate stays per design §8; this is a display relabel only).
 const ROLE_LABEL: Record<UserRole, string> = {
-  ri: "Manažér · Ri",
-  ha: "Medior · Ha",
-  shu: "Junior · Shu",
+  ri: "Manažér",
+  ha: "Medior",
+  shu: "Junior",
 };
 
 // ─── Icon helpers ───────────────────────────────────────────────────────────
@@ -29,6 +29,7 @@ const ROLE_LABEL: Record<UserRole, string> = {
 // Colored nav glyphs via the shared <NavIcon> (E1 chrome unification, CR-NS-067).
 // FINAL v2.0.0 sidebar glyphs (CR-V2-019, design §4.1).
 const IconHome = () => <NavIcon glyph="🏠" />;
+const IconGuide = () => <NavIcon glyph="🧭" />;
 const IconFolder = () => <NavIcon glyph="📁" />;
 const IconVersions = () => <NavIcon glyph="🌿" />;
 const IconBacklog = () => <NavIcon glyph="📋" />;
@@ -112,8 +113,8 @@ export default function Sidebar() {
           onClick={() => setIsAway(!isAway)}
           title={
             isAway
-              ? "Preč — upozornenia na Telegram zapnuté aj s otvoreným cockpitom. Klikni pre „Pri počítači“."
-              : "Pri počítači — bez Telegram upozornení (vidíš cockpit). Klikni pred odchodom od počítača."
+              ? "Preč — upozornenia na Telegram zapnuté aj s otvoreným Riadiacim centrom. Klikni pre „Pri počítači“."
+              : "Pri počítači — bez Telegram upozornení (vidíš Riadiace centrum). Klikni pred odchodom od počítača."
           }
           className={`flex items-center gap-2 w-full rounded-lg px-2 py-1.5 mb-1 text-xs transition-colors ${
             isAway
@@ -152,6 +153,8 @@ export default function Sidebar() {
       footer={footer}
     >
       <NavItem icon={<IconHome />} label="Prehľad" active={isActive("/")} onClick={() => navigate("/")} />
+      {/* Getting-started guide for a non-expert operator (handover). Always accessible (not project-scoped). */}
+      <NavItem icon={<IconGuide />} label="Ako začať" active={isActive("/getting-started")} onClick={() => navigate("/getting-started")} />
       <NavItem icon={<IconFolder />} label="Projekty" active={isActive("/projects")} onClick={() => navigate("/projects")} />
 
       {/* Selected project indicator — placed directly under Projects

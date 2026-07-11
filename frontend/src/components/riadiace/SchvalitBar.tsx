@@ -17,6 +17,8 @@ import { useNavigate } from "react-router-dom";
 import { FileText } from "lucide-react";
 
 import { postPipelineActionApi, type PipelineBoard, type PipelineActionName } from "@/services/api/pipeline";
+import { humanizeApiError, type HumanError } from "@/services/apiError";
+import ErrorNote from "@/components/common/ErrorNote";
 
 interface Props {
   board: PipelineBoard | null;
@@ -29,7 +31,7 @@ export default function SchvalitBar({ board, versionId, onBoard }: Props) {
   const navigate = useNavigate();
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<HumanError | null>(null);
 
   // Honest-by-construction gate: the bar exists ONLY when the backend offers `schvalit` right now.
   if (!board?.available_actions?.includes("schvalit")) return null;
@@ -46,13 +48,13 @@ export default function SchvalitBar({ board, versionId, onBoard }: Props) {
   const approveBusyLabel = stage === "programovanie" ? "Posúvam…" : "Schvaľujem…";
   const consequence =
     stage === "verifikacia"
-      ? "Potvrdíš overenú verziu (Auditor dal PASS); verzia sa označí ako Hotovo a uzavrie."
+      ? "Potvrdíš overenú verziu (Audítor ju overil); verzia sa označí ako Hotovo a uzavrie."
       : stage === "programovanie"
-        ? "Potvrdíš dokončenú stavbu; projekt sa posunie na Verifikáciu (overenie Auditorom)."
+        ? "Potvrdíš dokončenú stavbu; projekt sa posunie na Verifikáciu (overenie Audítorom)."
         : "Schválením potvrdíš návrh a plán; projekt sa posunie do stavby (Programovanie).";
 
   async function submit(action: PipelineActionName, failMsg: string) {
-    setError("");
+    setError(null);
     setSubmitting(true);
     try {
       const trimmed = comment.trim();
@@ -63,7 +65,7 @@ export default function SchvalitBar({ board, versionId, onBoard }: Props) {
       onBoard(nextBoard);
       setComment("");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : failMsg);
+      setError(humanizeApiError(err, failMsg));
     } finally {
       setSubmitting(false);
     }
@@ -96,7 +98,7 @@ export default function SchvalitBar({ board, versionId, onBoard }: Props) {
         />
         <button
           type="button"
-          onClick={() => submit("uprav", "Úprava zlyhala.")}
+          onClick={() => submit("uprav", "Úprava zlyhala")}
           disabled={submitting}
           className="shrink-0 rounded-lg border border-[var(--color-border-strong)] px-4 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -104,7 +106,7 @@ export default function SchvalitBar({ board, versionId, onBoard }: Props) {
         </button>
         <button
           type="button"
-          onClick={() => submit("schvalit", "Schválenie zlyhalo.")}
+          onClick={() => submit("schvalit", "Schválenie zlyhalo")}
           disabled={submitting}
           className="shrink-0 rounded-lg bg-primary-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -112,7 +114,7 @@ export default function SchvalitBar({ board, versionId, onBoard }: Props) {
         </button>
       </div>
 
-      {error && <p className="text-xs text-[var(--color-status-error)]">{error}</p>}
+      <ErrorNote error={error} />
     </div>
   );
 }

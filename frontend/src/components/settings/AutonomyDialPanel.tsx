@@ -24,6 +24,8 @@
 
 import { useState } from "react";
 
+import { humanizeApiError } from "../../services/apiError";
+
 /** The dial preset machine value — mirrors the backend `MIERA_AUTONOMIE_VALUES`. */
 export type MieraAutonomieLevel =
   | "plna"
@@ -49,14 +51,14 @@ const DIAL_PRESETS: DialPreset[] = [
     label: "Plná autonómia",
     stops: "Najmenší dohľad (najhlbší Audítor)",
     detail:
-      "Najmenej zásahov v rámci fázy → najhlbší, najprísnejší Audítor. Pri novom builde sa aj tak zastaví na " +
-      "každej fáze na tvoje potvrdenie (viď sekcia Vždy mimo dialu nižšie).",
+      "Najmenej zásahov v rámci fázy → najhlbší, najprísnejší Audítor. Pri novom zostavení sa aj tak zastaví na " +
+      "každej fáze na tvoje potvrdenie (viď sekcia Vždy mimo tohto nastavenia nižšie).",
   },
   {
     id: "len_na_konci",
     label: "Len na konci",
     stops: "Po Verifikácii",
-    detail: "Zastaví sa až keď je build overený/hotový — jedno schválenie na konci.",
+    detail: "Zastaví sa až keď je zostavenie overené/hotové — jedno schválenie na konci.",
   },
   {
     id: "pri_klucovych_bodoch",
@@ -125,7 +127,7 @@ export function AutonomyDialPanel({
       setFlash(true);
       setTimeout(() => setFlash(false), 2000);
     } catch (e: unknown) {
-      setSaveError(e instanceof Error ? e.message : "Neznáma chyba.");
+      setSaveError(humanizeApiError(e, "Uloženie zlyhalo").message);
     } finally {
       setSaving(false);
     }
@@ -139,8 +141,8 @@ export function AutonomyDialPanel({
       <p className="text-xs text-[var(--color-text-muted)] mb-4 leading-relaxed">
         Ako často sa AI Agent zastaví na <span className="font-medium">schvaľovacom bode</span> pre
         Manažéra. Toto je <span className="font-medium">globálna predvolená</span> úroveň —
-        prepísateľná per projekt aj per build (pri spustení); pri builde sa použije prvá nastavená
-        vrstva (build → projekt → globál). Dial zároveň škáluje hĺbku Audítora.
+        prepísateľná per projekt aj per zostavenie (pri spustení); pri zostavení sa použije prvá nastavená
+        vrstva (zostavenie → projekt → globál). Toto nastavenie zároveň škáluje hĺbku Audítora.
       </p>
 
       {loadError && (
@@ -202,7 +204,7 @@ export function AutonomyDialPanel({
                 "Predvolená hodnota."
               ) : (
                 <>
-                  Uložený override
+                  Uložená vlastná hodnota
                   {updatedByUsername && (
                     <>
                       {" "}
@@ -220,20 +222,20 @@ export function AutonomyDialPanel({
           {/* The two stops ALWAYS outside the dial (design §2.3, D3/D6). */}
           <div className="mt-5 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-hover)] p-3">
             <h3 className="text-[11px] font-semibold text-[var(--color-text-secondary)] uppercase tracking-widest mb-2">
-              Vždy mimo dialu
+              Vždy mimo tohto nastavenia
             </h3>
             <ul className="space-y-1.5 text-[11px] text-[var(--color-text-muted)] leading-relaxed">
               <li>
                 <span className="text-[var(--color-text-secondary)] font-medium">Prechody medzi fázami</span>{" "}
-                (Návrh → Programovanie → Verifikácia → Hotovo) sú pri <span className="font-medium">novom builde
-                vždy povinné zastávky</span> na tvoje potvrdenie — bez ohľadu na úroveň dialu (poistka proti
-                nekontrolovanému behu). Pri novom builde tak dial riadi najmä <span className="font-medium">hĺbku
+                (Návrh → Programovanie → Verifikácia → Hotovo) sú pri <span className="font-medium">novom zostavení
+                vždy povinné zastávky</span> na tvoje potvrdenie — bez ohľadu na zvolenú úroveň (poistka proti
+                nekontrolovanému behu). Pri novom zostavení tak toto nastavenie riadi najmä <span className="font-medium">hĺbku
                 Audítora</span>; rýchla oprava beží bez týchto zastávok.
               </li>
               <li>
                 <span className="text-[var(--color-text-secondary)] font-medium">Schválenie špecifikácie</span>{" "}
                 (koniec Prípravy) je <span className="font-medium">vždy</span> povinná zastávka — bez ohľadu na
-                úroveň dialu.
+                zvolenú úroveň.
               </li>
               <li>
                 <span className="text-[var(--color-text-secondary)] font-medium">Nasadenie (UAT / PROD)</span> je{" "}
@@ -244,7 +246,7 @@ export function AutonomyDialPanel({
 
           {!canEdit && (
             <p className="mt-4 text-[11px] text-[var(--color-text-muted)] italic">
-              Read-only — na úpravu chýba oprávnenie.
+              Iba na čítanie — na úpravu chýba oprávnenie.
             </p>
           )}
         </>

@@ -4,6 +4,8 @@ import { listProjectsApi } from "@/services/api/projects";
 import { listVersions, createVersion, writeZadanie } from "@/services/api/versions";
 import { postPipelineActionApi } from "@/services/api/pipeline";
 import { useActiveContextStore } from "@/store/activeContextStore";
+import { humanizeApiError, type HumanError } from "@/services/apiError";
+import ErrorNote from "@/components/common/ErrorNote";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
 
@@ -59,7 +61,7 @@ export default function NewVersionPage() {
   const [savedVersion, setSavedVersion] = useState<Version | null>(null);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [formError, setFormError] = useState("");
+  const [formError, setFormError] = useState<HumanError | null>(null);
   const [saving, setSaving] = useState(false);
   const [starting, setStarting] = useState(false);
 
@@ -112,7 +114,7 @@ export default function NewVersionPage() {
   async function handleSaveZadanie(e: React.FormEvent) {
     e.preventDefault();
     if (!project || !validate()) return;
-    setFormError("");
+    setFormError(null);
     setSaving(true);
     try {
       const v = await createVersion(project.id, {
@@ -128,8 +130,7 @@ export default function NewVersionPage() {
       if (zadanie.trim()) await writeZadanie(v.id, zadanie.trim());
       setSavedVersion(v);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Nepodarilo sa uložiť Zadanie.";
-      setFormError(msg);
+      setFormError(humanizeApiError(err, "Uloženie Zadania zlyhalo"));
     } finally {
       setSaving(false);
     }
@@ -141,7 +142,7 @@ export default function NewVersionPage() {
   // tab so the Manažér watches the interactive spec dialogue live.
   async function handleStart() {
     if (!project || !savedVersion) return;
-    setFormError("");
+    setFormError(null);
     setStarting(true);
     try {
       await postPipelineActionApi(savedVersion.id, { action: "start" });
@@ -149,8 +150,7 @@ export default function NewVersionPage() {
       setSelectedVersion({ versionId: savedVersion.id, versionNumber: savedVersion.version_number });
       navigate("/ai-agent");
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Nepodarilo sa spustiť tvorbu špecifikácie.";
-      setFormError(msg);
+      setFormError(humanizeApiError(err, "Spustenie tvorby špecifikácie zlyhalo"));
       setStarting(false);
     }
   }
@@ -282,18 +282,17 @@ export default function NewVersionPage() {
                 <p className="mt-1 text-xs text-[var(--color-status-error)]">{errors.zadanie}</p>
               ) : (
                 <p className="text-[11px] text-[var(--color-text-muted)] mt-1.5">
-                  Nepovinné. Ak Zadanie vyplníš, uloží sa do <span className="font-mono">customer-requirements.md</span> ako
-                  vstup; ak ho necháš prázdne, Špecifikáciu postavíte od nuly v rozhovore v Riadiacom centre.
+                  Nepovinné. Ak Zadanie vyplníš, uloží sa ako vstup pre Prípravu; ak ho necháš prázdne,
+                  Špecifikáciu postavíte od nuly v rozhovore v Riadiacom centre.
                 </p>
               )}
             </div>
 
             {/* Error banner */}
-            {formError && (
-              <div className="rounded-lg bg-[var(--color-state-error-bg)] border border-[var(--color-state-error-bg)] p-3 text-sm text-[var(--color-state-error-fg)]">
-                {formError}
-              </div>
-            )}
+            <ErrorNote
+              error={formError}
+              className="rounded-lg bg-[var(--color-state-error-bg)] border border-[var(--color-state-error-bg)] p-3"
+            />
 
             {/* Saved confirmation — shown after step 1 succeeds. */}
             {savedVersion && (

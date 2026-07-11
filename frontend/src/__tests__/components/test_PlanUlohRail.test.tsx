@@ -13,8 +13,9 @@
  */
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
+import { MemoryRouter } from "react-router-dom";
 
 import PlanUlohRail from "@/components/riadiace/PlanUlohRail";
 import { findCurrentTaskPath } from "@/components/riadiace/currentTaskPath";
@@ -22,6 +23,11 @@ import { getTaskPlan } from "@/services/api/versions";
 import { postPipelineActionApi } from "@/services/api/pipeline";
 import type { PipelineBoard, PipelineMessage, PipelineState } from "@/services/api/pipeline";
 import type { TaskPlanResponse, TaskPlanTaskNode, TaskNodeStatus } from "@/types/task-plan";
+
+// PlanUlohRail now uses useNavigate (the "Prejsť na nasadenie" done-state button), so it must render inside a
+// Router. Wrap every render in a MemoryRouter via the RTL `wrapper` option (the wrapper persists across
+// rerender), so all existing `render(<PlanUlohRail .../>)` call sites work unchanged.
+const render = (ui: Parameters<typeof rtlRender>[0]) => rtlRender(ui, { wrapper: MemoryRouter });
 
 vi.mock("@/services/api/versions", () => ({ getTaskPlan: vi.fn() }));
 // The component's only runtime dependency on the pipeline module is postPipelineActionApi; the board/message
@@ -599,7 +605,7 @@ describe("PlanUlohRail — Hotovo trigger (STEP 6)", () => {
     expect(screen.queryByRole("button", { name: /Označiť ako hotové/ })).not.toBeInTheDocument();
   });
 
-  it("renders the honest terminal note (no cross-domain button) once the version is done in conversation mode", async () => {
+  it("renders the done note + a real 'Prejsť na nasadenie' button once the version is done (mode-agnostic)", async () => {
     render(
       <PlanUlohRail
         versionId="v1"
@@ -608,8 +614,11 @@ describe("PlanUlohRail — Hotovo trigger (STEP 6)", () => {
         onBoard={() => {}}
       />,
     );
-    // Static plain note pointing at the SEPARATE deploy domain — never a rung/button.
-    expect(await screen.findByText(/Nasadenie \(UAT\/PROD\) je samostatný krok/)).toBeInTheDocument();
+    // A completed version points at deployment with a REAL button (self-sufficiency: an action beats a greyed
+    // sentence). Shown for ANY done build (mode-agnostic), not only conversation mode.
+    expect(await screen.findByText(/Verzia je hotová a pripravená na nasadenie/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Prejsť na nasadenie/ })).toBeInTheDocument();
+    // The build-loop rungs are gone (no available_actions).
     expect(screen.queryByRole("button", { name: /Označiť ako hotové/ })).not.toBeInTheDocument();
   });
 });

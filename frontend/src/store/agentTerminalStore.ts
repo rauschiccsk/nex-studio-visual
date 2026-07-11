@@ -26,7 +26,7 @@ import {
   type AgentRole,
   type AgentTerminalSession,
 } from "@/services/api/agentTerminal";
-import { ApiError } from "@/services/api";
+import { humanizeApiError } from "@/services/apiError";
 
 export type SlotStatus = "idle" | "loading" | "spawning" | "ending";
 
@@ -100,8 +100,7 @@ export const useAgentTerminalStore = create<AgentTerminalState>()((set, get) => 
         return next;
       });
     } catch (e) {
-      const msg =
-        e instanceof ApiError ? e.message : "Nepodarilo sa načítať sessions.";
+      const msg = humanizeApiError(e, "Načítanie relácií zlyhalo").message;
       set((s) => ({
         "ai-agent": { ...s["ai-agent"], status: "idle", error: msg },
         initialized: true,
@@ -118,10 +117,7 @@ export const useAgentTerminalStore = create<AgentTerminalState>()((set, get) => 
       });
       set((s) => setSlot(s, role, { session: row, status: "idle", error: "" }));
     } catch (e) {
-      const msg =
-        e instanceof ApiError && e.message
-          ? `Nepodarilo sa spustiť session: ${e.message}`
-          : "Nepodarilo sa spustiť session.";
+      const msg = humanizeApiError(e, "Spustenie relácie zlyhalo").message;
       set((s) => setSlot(s, role, { status: "idle", error: msg }));
     }
   },
@@ -134,8 +130,7 @@ export const useAgentTerminalStore = create<AgentTerminalState>()((set, get) => 
       await endAgentTerminalSessionApi(slot.session.id);
       set((s) => setSlot(s, role, { session: null, status: "idle", error: "" }));
     } catch (e) {
-      const msg =
-        e instanceof ApiError ? e.message : "Nepodarilo sa ukončiť session.";
+      const msg = humanizeApiError(e, "Ukončenie relácie zlyhalo").message;
       set((s) => setSlot(s, role, { status: "idle", error: msg }));
     }
   },

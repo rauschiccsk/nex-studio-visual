@@ -11,29 +11,39 @@
 import { useState, type FormEvent, type KeyboardEvent } from "react";
 import { Loader2, Send } from "lucide-react";
 
-const ENGINE_BUSY_HINT = "Engine práve pracuje — správa sa pošle po dokončení ťahu.";
-// Director observation #6: a framework_issue block is an agent → Dedo escalation. The Manažér cannot fix a
-// NEX Studio bug via Uprav — the composer is locked with this banner until Dedo clears the block.
-const FRAMEWORK_ISSUE_BANNER =
-  "Toto musí opraviť Dedo — už dostal správu. Manažér to nevie cez Uprav. Počkaj na Deda.";
+import { humanizeApiError, type HumanError } from "@/services/apiError";
+
+const ENGINE_BUSY_HINT = "AI Agent práve pracuje — správa sa pošle, keď dokončí.";
+// A framework_issue block means the bug is in NEX Studio itself — the Manažér cannot chat their way out of a
+// NEX-Studio bug (correct to keep the composer locked). Plain Slovak, no "Dedo"/"framework" jargon: our
+// technical team resolves it.
+const FRAMEWORK_ISSUE_BANNER = "Túto chybu rieši náš technický tím.";
+// Category I: when a recovery bar above owns the input (a blocked question / error), the always-open composer
+// is de-emphasised and this hint points the Manažér at the one obvious input above.
+const BLOCKED_ABOVE_HINT = "Najprv odpovedz na otázku vyššie.";
 
 interface Props {
   /** Relay the text through the engine; resolves to whether it was ENQUEUED behind an in-flight turn. */
   onRelay: (text: string) => Promise<{ deferred: boolean }>;
   disabled?: boolean;
-  /** Director obs #6: the build is blocked on a framework_issue (escalated to Dedo) — lock the composer +
-   *  show the "wait for Dedo" banner; the Manažér has no move here (only Dedo clears it). */
+  /** The build is blocked on a framework_issue (a NEX-Studio bug) — lock the composer + show the "technical
+   *  team is on it" banner; the Manažér cannot chat their way out of it (NahlasitZnovaBar owns the one move). */
   frameworkBlocked?: boolean;
+  /** Category I: a recovery bar above (a blocked question / error) owns the input right now. The always-open
+   *  composer stays usable but is de-emphasised, with a hint pointing at the one obvious input above. */
+  blockedAbove?: boolean;
 }
 
-export function ConversationComposer({ onRelay, disabled, frameworkBlocked }: Props) {
+export function ConversationComposer({ onRelay, disabled, frameworkBlocked, blockedAbove }: Props) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<HumanError | null>(null);
 
-  // A framework_issue escalation hard-disables the whole composer (Manažér has no recovery move).
+  // A framework_issue escalation hard-disables the whole composer (Manažér has no recovery move here).
   const locked = disabled || frameworkBlocked;
+  // Category I: a recovery bar above owns the input — de-emphasise (don't lock; the Manažér may still type).
+  const deemphasized = !!blockedAbove && !frameworkBlocked;
 
   async function submit() {
     const trimmed = text.trim();
@@ -47,7 +57,7 @@ export function ConversationComposer({ onRelay, disabled, frameworkBlocked }: Pr
       // `deferred` ⇒ a turn was in flight; the message is queued and lands at the next boundary.
       setHint(deferred ? ENGINE_BUSY_HINT : null);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Správu sa nepodarilo odoslať.");
+      setError(humanizeApiError(e, "Odoslanie správy zlyhalo"));
     } finally {
       setSending(false);
     }
@@ -79,6 +89,11 @@ export function ConversationComposer({ onRelay, disabled, frameworkBlocked }: Pr
           {FRAMEWORK_ISSUE_BANNER}
         </div>
       )}
+      {deemphasized && (
+        <div className="mb-2 rounded border border-[var(--color-state-warning-fg)]/30 bg-[var(--color-state-warning-bg)] px-2 py-1.5 text-[11px] font-medium text-[var(--color-state-warning-fg)]">
+          {BLOCKED_ABOVE_HINT}
+        </div>
+      )}
       {(hint || error) && (
         <div
           className={`mb-2 rounded px-2 py-1 text-[11px] ${
@@ -87,10 +102,10 @@ export function ConversationComposer({ onRelay, disabled, frameworkBlocked }: Pr
               : "bg-[var(--color-state-warning-bg)] text-[var(--color-state-warning-fg)]"
           }`}
         >
-          {error ?? hint}
+          {error ? error.message : hint}
         </div>
       )}
-      <div className="flex items-end gap-2">
+      <div className={`flex items-end gap-2 ${deemphasized ? "opacity-60" : ""}`}>
         <textarea
           lang="sk"
           spellCheck={false}
@@ -101,7 +116,7 @@ export function ConversationComposer({ onRelay, disabled, frameworkBlocked }: Pr
           rows={2}
           placeholder={
             frameworkBlocked
-              ? "Zablokované — čaká sa na opravu NEX Studia (Dedo)."
+              ? "Zablokované — túto chybu rieši náš technický tím."
               : "Napíš AI Agentovi… (Enter odošle, Shift+Enter nový riadok)"
           }
           className="min-h-[2.5rem] flex-1 resize-none rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent-primary)] focus:outline-none disabled:opacity-50"
