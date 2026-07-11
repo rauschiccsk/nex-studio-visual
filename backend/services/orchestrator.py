@@ -7153,8 +7153,16 @@ def agent_sessions(db: Session, version_id: uuid.UUID, state: Optional[PipelineS
     sessions: list[dict[str, Any]] = []
     for role in _AGENT_SESSION_ROLES:
         ts = last_input.get(role)
+        if ts is not None and ts.tzinfo is None:  # DB stores tz-aware; guard a naive timestamp
+            ts = ts.replace(tzinfo=timezone.utc)
         if role == working_role:
-            session_status = "active"
+            # Audit P2 (2026-07-12): don't hard-code "active" for the working role — a WEDGED dispatch
+            # (``agent_working`` but its ``last_input_at`` heartbeat is old) would otherwise show a healthy
+            # green "working" chip for the whole wall-clock budget. A stale heartbeat → "stale" so the manager
+            # sees the turn is hung, not progressing. (No heartbeat yet = just started → "active".)
+            session_status = (
+                "stale" if (ts is not None and (now - ts).total_seconds() > _AGENT_STALE_SECONDS) else "active"
+            )
         elif ts is None:
             session_status = "idle"
         else:
