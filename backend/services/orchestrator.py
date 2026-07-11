@@ -586,8 +586,21 @@ def build_readiness(db: Session, version_id: uuid.UUID) -> tuple[bool, int]:
     exposes these two facts so the FE can DISABLE "Schváliť build → Audit" / "Ukončiť build" when not
     satisfiable — mirroring the existing Gate E ``gate_e_open_findings`` gate — instead of offering a
     button that 400s. Cheap counts; the board computes them each fetch like ``_gate_e_open_findings``."""
-    all_tasks_done = task_service.get_next_todo_task(db, version_id) is None
-    return all_tasks_done, _build_open_findings(db, version_id)
+    # Audit P2 (2026-07-12): "no todo task remains" is NOT "the build is complete" when NO tasks exist at all
+    # (an empty / not-started plan) — that would read as "complete / 0 findings" before any work landed. Only
+    # call it done when a task EXISTS and none is still todo.
+    no_todo = task_service.get_next_todo_task(db, version_id) is None
+    has_any_task = (
+        db.execute(
+            select(func.count())
+            .select_from(Task)
+            .join(Feat, Feat.id == Task.feat_id)
+            .join(Epic, Epic.id == Feat.epic_id)
+            .where(Epic.version_id == version_id)
+        ).scalar_one()
+        > 0
+    )
+    return (no_todo and has_any_task), _build_open_findings(db, version_id)
 
 
 def navrh_plan_materialized(db: Session, version_id: uuid.UUID) -> bool:
@@ -3302,6 +3315,11 @@ def verify_mechanical(slug: str, block: PipelineStatusBlock, baseline_sha: Optio
         if not (project_root / rel).exists():
             return f"deliverable {rel!r} missing on disk"
     if baseline_sha is not None:
+        # Audit P2 (2026-07-12): a per-task build MUST land at least one commit — an EMPTY ``commits[]`` with a
+        # baseline set makes the loops below no-ops and passes trivially, marking the task ``done`` with zero
+        # committed work. Require the agent to have reported a commit.
+        if not block.commits:
+            return "task reported no commits — no work landed on the task baseline"
         if not _commit_exists(project_root, baseline_sha):
             return f"task baseline {baseline_sha!r} not found in {slug}"
         if not _git_ok(project_root, ["merge-base", "--is-ancestor", baseline_sha, "HEAD"]):
@@ -7970,7 +7988,14 @@ async def _run_build_round(
                         state.next_action = result.lost_work["next_action"]
                     db.flush()
                     return state
-                prior_failures.append(f"neplatný status blok: {result.reason}")
+                # Audit P2 (2026-07-12): distinguish a system/tooling CRASH (an envelope loss with no dispatch
+                # baseline → ``lost_work`` None but ``envelope_loss_kind`` still stamped) from a genuine
+                # unparseable agent output. Labeling a crash "neplatný status blok" frames OUR tooling fault
+                # as the agent's output problem.
+                if result.envelope_loss_kind in ("timeout", "crash"):
+                    prior_failures.append(f"systémová chyba ({result.envelope_loss_kind}): {result.reason}")
+                else:
+                    prior_failures.append(f"neplatný status blok: {result.reason}")
             elif result.kind in ("question", "blocked"):
                 # The AI Agent cannot proceed → it asks the Manažér DIRECTLY (no Coordinator relay — design
                 # §2.2). Settle blocked with an agent_question reason so the board offers ``answer``; the
