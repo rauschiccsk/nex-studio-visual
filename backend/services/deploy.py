@@ -517,6 +517,25 @@ async def deploy(
     # namespaced by environment so a customer's UAT and PROD never collide.
     instance_slug = _instance_slug(customer, environment)
 
+    # Self-sufficiency gate (audit P0, 2026-07-12): if the app seeds its admin login from ADMIN_INITIAL_PASSWORD
+    # and the customer has NO secret set, the provisioner would render a RANDOM synthetic admin password nobody
+    # can discover (§4 forbids surfacing it) → the manager is locked out of the instance they just deployed.
+    # Block the deploy UP-FRONT (before any teardown) with a clear, actionable message, rather than shipping a
+    # lockout. Reads the SAME ``<project>/.env.example`` the provisioner renders from.
+    if customer.credential_id is None:
+        from backend.services import claude_agent
+
+        _env_example = claude_agent.PROJECTS_ROOT / project.slug / ".env.example"
+        try:
+            _declares_admin = uat_provisioner.ADMIN_LOGIN_ENV_KEY in uat_provisioner._parse_env_file(_env_example)
+        except OSError:
+            _declares_admin = False
+        if _declares_admin:
+            raise ValueError(
+                "Nasadenie sa nedá spustiť: táto aplikácia potrebuje prihlasovacie heslo administrátora, ale "
+                "zákazník ho nemá nastavené. Najprv nastav heslo zákazníka v sekcii Zákazníci a skús to znova."
+            )
+
     # The deployed app's initial admin login (username ``admin``) = the customer's OWN secret (set in Zákazníci),
     # so the manager KNOWS it — otherwise the app seeds ``admin`` with a random synthetic nobody can discover and
     # the manager is locked out of their own instance (self-sufficiency kernel, 2026-07-11). Read via the

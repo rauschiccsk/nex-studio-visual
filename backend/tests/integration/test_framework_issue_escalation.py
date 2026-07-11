@@ -123,11 +123,13 @@ async def test_conversation_turn_framework_issue_settles_and_delivers(db_session
 
     state = await orchestrator.run_conversation_turn(db_session, version.id)
 
-    # Settled blocked/framework_issue with a "wait for Dedo" next_action.
+    # Settled blocked/framework_issue with a PLAIN-Slovak next_action — the manager sees "náš technický tím",
+    # never the internal "Dedo" jargon (audit P0, 2026-07-12).
     assert state is not None
     assert state.status == "blocked"
     assert state.block_reason == "framework_issue"
-    assert "Dedo" in state.next_action
+    assert "technický tím" in state.next_action
+    assert "Dedo" not in state.next_action
 
     # A system→manazer notification carries the flag + the Dedo message (the FE renders it red).
     notif = db_session.execute(
@@ -164,8 +166,9 @@ def test_determine_available_actions_empty_for_framework_issue(db_session) -> No
     state.block_reason = "framework_issue"
     db_session.flush()
 
-    # NOTHING is offered — not even the universal ask/uprav (the Manažér cannot fix a NEX Studio bug).
-    assert orchestrator.determine_available_actions(state) == set()
+    # The Manažér cannot fix a NEX Studio bug (no Uprav / answer / decide) — but instead of a jargon-free
+    # DEAD-END (empty set), they get the ONE action they DO have: re-send the report (audit P0, 2026-07-12).
+    assert orchestrator.determine_available_actions(state) == {"nahlasit_znova"}
 
     # Sanity contrast: a plain agent_question block at the SAME (blocked, priprava) state DOES offer the
     # universal recovery actions (ask/uprav/answer). framework_issue is the ONLY blocked reason with none.

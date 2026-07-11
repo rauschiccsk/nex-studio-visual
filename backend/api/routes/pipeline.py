@@ -170,7 +170,9 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         and not (
             state.mode == "conversation"
             and spec_approved
-            and orchestrator.kontrola_done(db, version_id)
+            # K-3: gate on kontrola_PASSED (ran AND runtime floor not red), not the pass-blind kontrola_done —
+            # a red-floor Kontrola must not leave "Označiť ako hotové" enabled next to the red note.
+            and orchestrator.kontrola_passed(db, version_id)
             and state.current_stage != "done"
         )
     ):

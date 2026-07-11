@@ -517,12 +517,13 @@ def determine_available_actions(state: PipelineState) -> set[str]:
         # paused build resumes via ``pokracovat`` or the Manažér steers it with ``uprav``).
         return {"pokracovat", "uprav"}
 
-    # Director observation #6: a ``framework_issue`` block is an escalation to Dedo — the fix needs a change
-    # to NEX Studio ITSELF, which the Manažér objectively CANNOT do. Offer NO actions (no Uprav / answer /
-    # decide — nothing the Manažér can act on); Dedo fixes the framework and clears the block. MUST precede
-    # the universal ask+uprav defaults below (those would wrongly offer the Manažér a dead recovery path).
+    # Director observation #6: a ``framework_issue`` block is an escalation to our technical team — the fix
+    # needs a change to NEX Studio ITSELF, which the Manažér objectively CANNOT do (no Uprav / answer / decide
+    # — nothing the Manažér can act on). But a pure empty set is a jargon-free dead-end for a non-expert (audit
+    # P0): offer the ONE action they DO have — ``nahlasit_znova`` (re-send the report) — so they have agency and
+    # a concrete button instead of a locked screen. MUST precede the universal ask+uprav defaults below.
     if status == "blocked" and state.block_reason == "framework_issue":
-        return set()
+        return {"nahlasit_znova"}
 
     # CR-V2-041: a multi-decision CONSULTATION blocks with block_reason="decision_needed" — the Manažér
     # resolves it via Decision Cards (``decide``), one decision at a time, NEVER the raw free-text
@@ -681,6 +682,42 @@ def kontrola_done(db: Session, version_id: uuid.UUID) -> bool:
         )
     ).scalar()
     return kontrola_seq is not None and kontrola_seq > prog_seq
+
+
+def kontrola_floor_red(db: Session, version_id: uuid.UUID) -> bool:
+    """True iff the LATEST kontrola self-check floored the runtime RED (the app did not boot / the acceptance
+    run did not pass). A red-floor kontrola turn records a ``stage='priprava'`` ∧ ``kind='notification'`` ∧
+    ``payload.kontrola_floor_red`` note whose ``seq`` is HIGHER than that turn's ``kontrola`` gate_report; a
+    later GREEN kontrola turn writes a NEWER gate_report (and no floor note), so the floor note falls behind.
+    Hence the latest kontrola is red iff a floor-red note exists with ``seq`` PAST the latest ``kontrola``
+    gate_report. Keeps the Hotovo sign-off off a red build (K-3)."""
+    kontrola_seq = db.execute(
+        select(func.max(PipelineMessage.seq)).where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.stage == "priprava",
+            PipelineMessage.kind == "gate_report",
+            PipelineMessage.payload["kontrola"].astext == "true",
+        )
+    ).scalar()
+    if kontrola_seq is None:
+        return False
+    floor_seq = db.execute(
+        select(func.max(PipelineMessage.seq)).where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.stage == "priprava",
+            PipelineMessage.kind == "notification",
+            PipelineMessage.payload["kontrola_floor_red"].astext == "true",
+        )
+    ).scalar()
+    return floor_seq is not None and floor_seq > kontrola_seq
+
+
+def kontrola_passed(db: Session, version_id: uuid.UUID) -> bool:
+    """True iff Kontrola has run for the latest completed build (:func:`kontrola_done`) AND its runtime floor
+    was NOT red (:func:`kontrola_floor_red`). This — not the pass-blind ``kontrola_done`` — gates the ``hotovo``
+    sign-off (board post-filter + the authoritative ``apply_action`` guard): K-3 = Kontrola never signs off on
+    a red build, so a non-booting build can never reach the deployable ``done`` state via one manager click."""
+    return kontrola_done(db, version_id) and not kontrola_floor_red(db, version_id)
 
 
 def hotovo_done(db: Session, version_id: uuid.UUID) -> bool:
@@ -1329,7 +1366,10 @@ async def _settle_framework_issue(
     dedo_message = (result.question or result.summary or "").strip()
     state.status = "blocked"
     state.block_reason = "framework_issue"
-    state.next_action = "NEX Studio potrebuje opravu (Dedo) — Dedo dostal správu, počkaj."
+    state.next_action = (
+        "Túto chybu musí opraviť náš technický tím — nedá sa vyriešiť odtiaľto. Automaticky sme ho na ňu "
+        "upozornili. Skús to o chvíľu znova (Nahlásiť znova), alebo zatiaľ pokračuj na inom projekte."
+    )
 
     slug = _project_slug_for_version(db, state.version_id)
     version_number = db.execute(select(Version.version_number).where(Version.id == state.version_id)).scalar_one()
@@ -1342,8 +1382,8 @@ async def _settle_framework_issue(
         recipient="manazer",
         kind="notification",
         content=(
-            "NEX Studio potrebuje opravu (Dedo). AI Agent narazil na problém, ktorý si vyžaduje zmenu "
-            "NEX Studia (framework) — Manažér to nevie opraviť. Dedo dostal správu, počkaj."
+            "Narazili sme na chybu, ktorú musí opraviť náš technický tím — nedá sa vyriešiť odtiaľto. "
+            "Automaticky sme ho na ňu upozornili. Skús to o chvíľu znova, alebo zatiaľ pokračuj na inom projekte."
         ),
         payload={
             "phase": stage,
@@ -3780,8 +3820,21 @@ async def _verify_uat_serves(
                 f"appka beží, ale verejná adresa {public_host} nie je dostupná — smerovanie zlyhalo: {route_last}"
             )
         if route_state == "skip":
+            # Audit P1 (2026-07-12): "couldn't verify the public route" is NOT clean success — it is the SAME
+            # condition as a real ingress outage (Traefik renamed / not on nex-proxy-net / transient DNS), the
+            # exact blindspot the probe closes. On PROD (customer-facing) FAIL-CLOSED — a public route we cannot
+            # confirm blocks the deploy (a retried deploy beats a silent outage). On UAT surface an amber
+            # warning in the detail so the manager checks the address, without failing the test run.
+            if environment == "prod":
+                return False, (
+                    f"appka beží, ale verejnú adresu {public_host} sa nepodarilo overiť (smerovanie/Traefik "
+                    f"nedostupné): {route_last}. Nasadenie na PROD je zastavené, kým sa dostupnosť nepotvrdí."
+                )
             logger.warning(
                 "public-route verify skipped (host=%s) — Traefik unreachable from probe: %s", public_host, route_last
+            )
+            return True, (
+                f"OK — ⚠ verejnú adresu {public_host} sa nepodarilo overiť; skontroluj, či je appka dostupná."
             )
     return True, "OK"
 
@@ -7750,6 +7803,23 @@ async def _run_build_round(
 
         task = task_service.get_next_todo_task(db, version_id)
         if task is None:
+            # P0 (audit 2026-07-12): a build task that exhausted its auto-fix budget is left ``failed`` and is
+            # SKIPPED by ``get_next_todo_task`` — so "no todo remains" does NOT mean the build succeeded. Gate
+            # the completion on the deterministic open-findings count (``failed`` / stuck ``in_progress``): if
+            # any remain, the build did NOT finish → settle blocked (agent_error) with an honest count and do
+            # NOT record ``programming_complete`` / advance the phase, so nothing downstream reads a green
+            # completion over dropped work. The manager's fix (Uprav / Pokračovať) resets ``failed``→``todo``
+            # so the build re-runs them.
+            open_findings = _build_open_findings(db, version_id)
+            if open_findings > 0:
+                state.status = "blocked"
+                state.block_reason = "agent_error"
+                state.next_action = (
+                    f"{open_findings} úloh sa nepodarilo dokončiť — stavba ešte nie je hotová. "
+                    "Napíš, čo treba opraviť (Uprav), a spustím stavbu znova."
+                )
+                db.flush()
+                return state
             # STEP 4 (step4-programovanie-design.md MD-B): a CONVERSATION build's Programovanie has NO phase to
             # advance into — the build ran INSIDE the 1:1 rozhovor. SKIP the dial-settle entirely (no
             # ``_settle_phase_boundary``, no ``_next_stage``, no Auditor verdict — kontrola is STEP 5), RETURN
@@ -8301,6 +8371,14 @@ async def apply_action(
             raise OrchestratorError("Označiť ako hotové je platné až po schválení Špecifikácie.")
         if not kontrola_done(db, version_id):
             raise OrchestratorError("Označiť ako hotové je platné až po Kontrole.")
+        if kontrola_floor_red(db, version_id):
+            # K-3: Kontrola never signs off on a red build. The pass-blind ``kontrola_done`` is True even on a
+            # red floor (the partner always emits its honest gate_report); the runtime-floor gate is what keeps
+            # a non-booting build off the deployable ``done`` state.
+            raise OrchestratorError(
+                "Označiť ako hotové sa nedá — beh appky je červený (appka nenaštartovala alebo akceptačný "
+                "beh neprešiel). Oprav to a spusti Kontrolu znova."
+            )
         if state.current_stage == "done":
             raise OrchestratorError("Verzia je už hotová.")
         # SHA-anchor the manager signature to the exact code state — the SAME ladder as the verdict path
@@ -8416,6 +8494,11 @@ async def apply_action(
         # hit the Auditor and re-passed.)
         if state.current_stage == "verifikacia":
             return await _route_manazer_fix_to_ai_agent(db, state, comment=str(comment))
+        # P0 (audit 2026-07-12): a Programovanie build re-dispatched by the manager's fix must RE-RUN its
+        # ``failed`` tasks — otherwise ``get_next_todo_task`` skips them and the fix silently drops the work
+        # (the same open-findings gate that now blocks completion). Reset failed→todo before the loop resumes.
+        if state.current_stage == "programovanie":
+            _reset_failed_tasks_to_todo(db, version_id)
         # A paused Programovanie loop steered by ``uprav`` resumes from the pause (re-dispatch the loop).
         recipient = state.current_actor
         _record_message(
@@ -8456,6 +8539,45 @@ async def apply_action(
         # agent_working, and re-captures the dispatch baseline from the current HEAD → the background turn
         # routes to _run_verifikacia_round (a fresh, independent Auditor + smoke against HEAD).
         _begin_dispatch(db, state)
+        return state
+
+    if action == "nahlasit_znova":
+        # Audit P0: the manager's ONE action on a ``framework_issue`` block (a NEX-Studio-side bug only our
+        # technical team can clear) — RE-SEND the escalation. Re-reads the recorded escalation message and
+        # re-delivers it best-effort, then records a fresh "re-reported" notification so the manager sees it
+        # went out again (a concrete button + a live timestamp instead of a locked, jargon-named dead-end).
+        if not (state.status == "blocked" and state.block_reason == "framework_issue"):
+            raise OrchestratorError("Nahlásiť znova je platné len keď je projekt zablokovaný na chybe NEX Studia.")
+        fw = db.execute(
+            select(PipelineMessage)
+            .where(
+                PipelineMessage.version_id == version_id,
+                PipelineMessage.payload["framework_issue"].astext == "true",
+            )
+            .order_by(PipelineMessage.seq.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        dedo_message = ((fw.payload or {}).get("dedo_message") if fw else "") or ""
+        slug = _project_slug_for_version(db, version_id)
+        version_number = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
+        await dedo_escalation.escalate_to_dedo(
+            project_slug=slug,
+            version_number=version_number,
+            dedo_message=dedo_message,
+            context=f"Projekt: {slug} · Verzia: v{version_number} · Opätovné nahlásenie (Manažér).",
+            owner_chat_id=_owner_chat_id_for_version(db, version_id),
+        )
+        _record_message(
+            db,
+            version_id=version_id,
+            stage=state.current_stage,
+            author="system",
+            recipient="manazer",
+            kind="notification",
+            content="Chybu sme znova nahlásili nášmu technickému tímu.",
+            payload={"phase": state.current_stage, "framework_issue": True, "dedo_message": dedo_message},
+        )
+        db.flush()
         return state
 
     if action == "ask":
@@ -8656,6 +8778,9 @@ async def apply_action(
         # (direct comms). Only valid in Programovanie (the only phase with a pause boundary).
         if state.current_stage != "programovanie":
             raise OrchestratorError("Pokračovať je platné len vo fáze Programovanie")
+        # P0 (audit 2026-07-12): resuming the build also re-runs any ``failed`` tasks (else they stay skipped
+        # and the build silently completes over dropped work — mirrors the ``uprav`` reset).
+        _reset_failed_tasks_to_todo(db, version_id)
         _record_message(
             db,
             version_id=version_id,
@@ -8663,7 +8788,7 @@ async def apply_action(
             author="manazer",
             recipient="ai_agent",
             kind="approval",
-            content="Build pokračuje.",
+            content="Stavba pokračuje.",
             payload={"phase": "programovanie"},
         )
         _begin_dispatch(db, state)  # phase stays programovanie; status → agent_working
