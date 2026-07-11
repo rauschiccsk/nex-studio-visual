@@ -420,6 +420,10 @@ def _mark_blocked(
         return None, None
     detail = f": {reason[:300]}" if reason else ""
     state.status = "blocked"
+    # Audit P2 (2026-07-12): a crash-path settle MUST stamp its own block_reason — otherwise it INHERITS a
+    # stale one (e.g. a prior 'agent_question'), and the board then renders a crashed dispatch as an
+    # answerable question (offers 'answer'). A dispatch crash is a system error → recover via 'Skús znova'.
+    state.block_reason = "system_error"
     state.next_action = f"Dispatch zlyhal{detail}. Skús znova alebo usmerni (Uprav)."
     msg = PipelineMessage(
         version_id=version_id,
