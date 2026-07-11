@@ -358,7 +358,9 @@ async def _default_deploy_runner(
         return False, f"provision failed: {exc}", None
 
     if is_prod:
-        ok, detail = await orchestrator._run_prod_deploy(project_slug, customer_slug, app, project_slug)
+        ok, detail = await orchestrator._run_prod_deploy(
+            project_slug, customer_slug, app, project_slug, version_number=version_number
+        )
         url = _prod_url(customer_slug, app) if result.fe_service else None
     else:
         ok, detail = await orchestrator._run_uat_deploy(
@@ -368,6 +370,7 @@ async def _default_deploy_runner(
             customer_slug=customer_slug,
             app=app,
             full_project_slug=project_slug,
+            version_number=version_number,
         )
         url = _url_for_instance_slug(f"{customer_slug}-{app}") if result.fe_service else None
     # Surface any provision warnings in the recorded (non-secret) detail.

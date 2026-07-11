@@ -3626,6 +3626,7 @@ async def _run_uat_deploy(
     customer_slug: Optional[str] = None,
     app: Optional[str] = None,
     full_project_slug: Optional[str] = None,
+    version_number: Optional[str] = None,
 ) -> tuple[bool, str]:
     """Plain redeploy of an instance's EXISTING compose (``docker compose -f … up -d --build --force-recreate``).
 
@@ -3646,7 +3647,14 @@ async def _run_uat_deploy(
         uat_slug, environment=environment, customer_slug=customer_slug, full_project_slug=full_project_slug
     )
     cmd = ["docker", "compose", "-f", str(compose), "up", "-d", "--build", "--force-recreate"]
-    env = {**os.environ, "VITE_APP_VERSION": _fe_app_version(project_slug)}
+    # A GENERATED app shows its OWN semantic version (each change = a new version), NOT a build counter (Director
+    # 2026-07-11: NEX Studio itself is regularly patched → a counter; the apps we build get their real version).
+    # Stamp the DEPLOYED version_number (bare, no leading 'v' — matches the deploy-matrix display) into BOTH the
+    # FE + BE build-args, so the app's sidebar reads the same 1.1.0 as its Aktualizácie. Falls back to the
+    # git-count scheme only when the version is unknown (defensive).
+    stamp = (version_number[1:] if version_number[:1].lower() == "v" else version_number) if version_number else None
+    build_ver = stamp or _fe_app_version(project_slug)
+    env = {**os.environ, "APP_VERSION": build_ver, "VITE_APP_VERSION": build_ver}
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=env
@@ -3677,7 +3685,9 @@ async def _run_uat_deploy(
     return await _verify_uat_serves(project_slug, uat_slug)
 
 
-async def _run_prod_deploy(project_slug: str, customer_slug: str, app: str, full_project_slug: str) -> tuple[bool, str]:
+async def _run_prod_deploy(
+    project_slug: str, customer_slug: str, app: str, full_project_slug: str, version_number: Optional[str] = None
+) -> tuple[bool, str]:
     """PROD sibling of :func:`_run_uat_deploy` — redeploy the customer's PROD compose (§2).
 
     Redeploys ``/opt/customers/<customer_slug>/<full_project_slug>/docker-compose.yml`` and
@@ -3691,6 +3701,7 @@ async def _run_prod_deploy(project_slug: str, customer_slug: str, app: str, full
         customer_slug=customer_slug,
         app=app,
         full_project_slug=full_project_slug,
+        version_number=version_number,
     )
 
 
