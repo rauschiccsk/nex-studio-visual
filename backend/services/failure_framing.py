@@ -32,6 +32,19 @@ def humanize_release_failure(raw: str) -> str:
     r = (raw or "").strip()
     low = r.lower()
 
+    # INFRA / DEPLOYMENT-CONFIG cause (checked FIRST): docker/compose could not even bring the stack UP — a
+    # missing env value, a port clash — so the app never started and NO check ever ran. Distinguished from a
+    # genuine app boot/acceptance failure so the manager isn't told "some checks failed" (→ go fix the app)
+    # when the real cause is the scaffold / deployment settings (→ complete the settings). The raw ``exit N``
+    # shape would otherwise fall into the generic acceptance branch below and misattribute it to the app's code.
+    if "interpolat" in low or "required variable" in low or "is not set" in low or "variable is not set" in low:
+        return (
+            "v nastavení nasadenia chýba potrebná hodnota (napríklad heslo k databáze) — "
+            "nie je to chyba v kóde aplikácie"
+        )
+    if "port is already allocated" in low or "address already in use" in low or "bind for" in low:
+        return "potrebný sieťový port už používa iný program — nie je to chyba v kóde aplikácie"
+
     # Boot never came up — the app (or its DB) failed to start within the boot window.
     if "did not boot" in low or "not responding within" in low:
         m = _BOOT_TIMEOUT_RE.search(low)

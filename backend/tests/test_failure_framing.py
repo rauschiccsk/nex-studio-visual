@@ -46,6 +46,24 @@ def test_acceptance_script_exit_is_humanised() -> None:
     _assert_plain(phrase)
 
 
+def test_compose_interpolation_error_is_a_config_cause_not_the_app() -> None:
+    # The nex-payables 1.1.0 shape: docker compose could not interpolate a missing env value, so the app
+    # never started + no check ever ran. Must NOT be framed as "some checks failed" (reads as an app bug) —
+    # it is a DEPLOYMENT-SETTINGS cause, explicitly "not the app's code".
+    phrase = humanize_release_failure("up exit 1: error while interpolating services.db.environment.POSTGRES_PASSWORD")
+    assert "nastavení nasadenia" in phrase
+    assert "nie je to chyba v kóde" in phrase
+    assert "automatická skúška" not in phrase  # not misattributed to a failed post-launch check
+    _assert_plain(phrase)
+
+
+def test_port_conflict_is_a_config_cause_not_the_app() -> None:
+    phrase = humanize_release_failure("Error response from daemon: driver failed: port is already allocated")
+    assert "port" in phrase
+    assert "nie je to chyba v kóde" in phrase
+    _assert_plain(phrase)
+
+
 def test_unknown_detail_falls_back_to_plain_never_raw() -> None:
     phrase = humanize_release_failure("Traceback (most recent call last): KeyError 'foo'")
     assert phrase == "skúška po spustení zlyhala"
