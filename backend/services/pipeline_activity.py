@@ -22,10 +22,13 @@ import os
 from dataclasses import dataclass, field
 from typing import Optional
 
-_MAX_TEXT = 140
-_MAX_CMD = 60
+# Live-activity caps. The FE feed WRAPS + scrolls (no one-row clip), so these only guard against a
+# pathologically huge single line flooding the feed — they used to cut a normal agent line mid-sentence
+# (Director 2026-07-11: "stále orezáva riadok"). Generous enough that a real line is shown whole, still bounded.
+_MAX_TEXT = 400
+_MAX_CMD = 200
 #: One-line helper description cap — the panel shows a terse "what each is doing".
-_MAX_HELPER_DESC = 80
+_MAX_HELPER_DESC = 140
 #: stream-json tool names that spawn an ephemeral sub-agent (helper). The CLI emits
 #: ``Agent`` (Claude Code 2.x); ``Task`` is the historical/SDK name. We key on both so a
 #: CLI rename can't silently stop helper capture.
