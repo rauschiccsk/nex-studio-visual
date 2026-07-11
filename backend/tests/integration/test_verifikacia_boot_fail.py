@@ -99,10 +99,14 @@ async def test_boot_fail_settles_honest_fail_verdict_ahead_of_auditor(db_session
     ).scalar_one()
     assert verdict.payload["verdict"] == "FAIL"
     assert verdict.payload["engine_override"] == "boot_fail"
+    # Honest-by-construction: the manager-facing content + findings are the HUMANISED why (never the raw probe
+    # jargon / leaked env-var names); the raw probe string is preserved as a breadcrumb in technical_detail
+    # (the FE's collapsible "Technický detail"), and the AI Agent fixer reproduces the boot failure itself.
     assert verdict.content.startswith("Appka sa nespustila")
-    assert _BOOT_FAIL_DETAIL in verdict.content
-    # The boot reason is in the findings, so _latest_verifikacia_fix_scope threads it to the AI Agent fix brief.
-    assert any(_BOOT_FAIL_DETAIL in f for f in verdict.payload["findings"])
+    assert _BOOT_FAIL_DETAIL not in verdict.content
+    assert _BOOT_FAIL_DETAIL in verdict.payload["technical_detail"]
+    assert verdict.payload["findings"] == [verdict.content]
+    # The humanised WHY threads to the AI Agent fix brief / Decision Card explanation.
     assert orchestrator._latest_verifikacia_fix_scope(db_session, version_id), "the fix brief carries the reason"
 
     # 2. The state SETTLED FAIL (the standard bounded fix-loop), NOT blocked-on-parse.
