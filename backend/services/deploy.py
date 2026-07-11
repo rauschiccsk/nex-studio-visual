@@ -295,6 +295,7 @@ async def _default_deploy_runner(
     uat_slug: str,
     version_number: str,
     force_fresh: bool,
+    admin_password: Optional[str] = None,
 ) -> tuple[bool, str, Optional[str]]:
     """Provision (preserve-by-default) then bring up a customer instance — environment-aware.
 
@@ -337,6 +338,7 @@ async def _default_deploy_runner(
             customer_slug=customer_slug,
             app=app,
             full_project_slug=project_slug,
+            admin_password=admin_password,
         )
 
     try:
@@ -501,11 +503,26 @@ async def deploy(
     # namespaced by environment so a customer's UAT and PROD never collide.
     instance_slug = _instance_slug(customer, environment)
 
+    # The deployed app's initial admin login (username ``admin``) = the customer's OWN secret (set in Zákazníci),
+    # so the manager KNOWS it — otherwise the app seeds ``admin`` with a random synthetic nobody can discover and
+    # the manager is locked out of their own instance (self-sufficiency kernel, 2026-07-11). Read via the
+    # ri-gated credentials store by the customer's ``credential_id`` (None when no secret was set → the app's own
+    # default applies). Held in-process, passed to the provisioner, NEVER logged/returned (§4).
+    admin_password: Optional[str] = None
+    if customer.credential_id is not None:
+        from backend.services import credentials as credentials_service
+
+        try:
+            admin_password = credentials_service.read_content(db, customer.credential_id).content
+        except (ValueError, OSError):
+            admin_password = None
+
     ok, detail, url = await runner(
         project_slug=project.slug,
         uat_slug=instance_slug,
         version_number=deployed_version,
         force_fresh=force_fresh,
+        admin_password=admin_password,
     )
 
     # Graduation (§3.6): on a SUCCESSFUL first PROD deploy, promote the BUILT version to v1.0.0 IN

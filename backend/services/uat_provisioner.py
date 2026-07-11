@@ -78,6 +78,12 @@ UAT_DB_PORT = "5432"
 
 # Synthetic secret detection (case-insensitive suffix match) + the ${VAR} placeholder.
 SECRET_SUFFIXES = ("_password", "_secret", "_key", "_token")
+
+# The ONE env var that is a HUMAN's login (the initial admin password), not a machine secret. The manager must
+# KNOW it to use the deployed app, so a per-customer deploy sets it to the customer secret (which the manager
+# themselves set), never a random synthetic they could never discover (self-sufficiency kernel, 2026-07-11).
+# Convention for NEX-Studio-generated apps (the bootstrap reads this key). All OTHER *_password/etc. stay random.
+ADMIN_LOGIN_ENV_KEY = "ADMIN_INITIAL_PASSWORD"
 USER_SECRET_PLACEHOLDER = "__UAT_SYNTHETIC__"
 
 # DB connection vars — explicit whitelist (pattern matching would catch false positives like
@@ -460,6 +466,7 @@ def generate_uat_env(
     db_name: str,
     shared_db_password: str,
     preserved_secrets: Optional[dict[str, str]] = None,
+    admin_password: Optional[str] = None,
 ) -> str:
     """Render the UAT ``.env`` content (detected DB creds + synthetic backend secrets).
 
@@ -504,6 +511,11 @@ def generate_uat_env(
             rendered[key_str] = _rewrite_db_connection_var(
                 key_str, value, user=db_user, db_name=db_name, password=shared_db_password, db_host=db_host
             )
+        elif key_str == ADMIN_LOGIN_ENV_KEY and admin_password:
+            # The manager's initial admin login — set it to the customer secret they KNOW (not a random
+            # synthetic they could never discover). Wins over both the synthetic path and preserved_secrets so a
+            # redeploy re-aligns it. Never logged (§4).
+            rendered[key_str] = admin_password
         elif key_str.lower().endswith(SECRET_SUFFIXES):
             rendered[key_str] = preserved_secrets.get(key_str) or _synthetic_secret(key_str)
         else:
@@ -937,6 +949,7 @@ def provision_uat(
     app: Optional[str] = None,
     full_project_slug: Optional[str] = None,
     prod_root: Path = PROD_ROOT,
+    admin_password: Optional[str] = None,
 ) -> ProvisionResult:
     """Render an instance's ``{docker-compose.yml,.env}`` + create dirs for ``project_slug``.
 
@@ -1025,6 +1038,7 @@ def provision_uat(
         db_name=db_name,
         shared_db_password=shared_db_password,
         preserved_secrets=preserved_secrets,
+        admin_password=admin_password,
     )
 
     # H1 (CR-1): driver↔URL self-validation BEFORE any file is written — fail LOUD at provision time for

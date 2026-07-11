@@ -53,7 +53,7 @@ def fake_deploy_runner(monkeypatch):
     """
     calls: list[dict] = []
 
-    async def _runner(*, project_slug, uat_slug, version_number, force_fresh):
+    async def _runner(*, project_slug, uat_slug, version_number, force_fresh, admin_password=None):
         calls.append(
             {
                 "project_slug": project_slug,
@@ -78,7 +78,7 @@ def prod_failing_deploy_runner(monkeypatch):
     """
     calls: list[dict] = []
 
-    async def _runner(*, project_slug, uat_slug, version_number, force_fresh):
+    async def _runner(*, project_slug, uat_slug, version_number, force_fresh, admin_password=None):
         calls.append(
             {
                 "project_slug": project_slug,
