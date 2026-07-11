@@ -99,7 +99,7 @@ async def test_boot_fail_settles_honest_fail_verdict_ahead_of_auditor(db_session
     ).scalar_one()
     assert verdict.payload["verdict"] == "FAIL"
     assert verdict.payload["engine_override"] == "boot_fail"
-    assert verdict.content.startswith("Appka sa nespustila:")
+    assert verdict.content.startswith("Appka sa nespustila")
     assert _BOOT_FAIL_DETAIL in verdict.content
     # The boot reason is in the findings, so _latest_verifikacia_fix_scope threads it to the AI Agent fix brief.
     assert any(_BOOT_FAIL_DETAIL in f for f in verdict.payload["findings"])
@@ -144,6 +144,6 @@ async def test_boot_fail_at_loop_max_escalates_not_blocked_on_parse(db_session, 
     verdict = db_session.execute(
         select(PipelineMessage).where(PipelineMessage.version_id == version_id, PipelineMessage.kind == "verdict")
     ).scalar_one()
-    assert verdict.payload["verdict"] == "FAIL" and verdict.content.startswith("Appka sa nespustila:")
+    assert verdict.payload["verdict"] == "FAIL" and verdict.content.startswith("Appka sa nespustila")
     assert settled.status == "blocked" and settled.block_reason == "decision_needed"
     assert settled.block_reason != "agent_error"
