@@ -48,10 +48,12 @@ describe("Sidebar build surface (CR-V2-019 → spine STEP 1)", () => {
     expect(screen.queryByRole("button", { name: /Vývoj/i })).toBeNull();
   });
 
-  it("shows the project-scoped Špecifikácia item, enabled when a project is pinned", () => {
+  it("shows the project-scoped Dokumenty item, enabled when a project is pinned", () => {
     renderSidebar();
 
-    const spec = screen.getByRole("button", { name: /Špecifikácia/i });
+    // The read-only spec shell was renamed "Špecifikácia" → "Dokumenty" (Audit Theme 3: it now lists
+    // EVERY doc the AI produced, not just the spec).
+    const spec = screen.getByRole("button", { name: /Dokumenty/i });
     expect(spec).not.toBeDisabled();
   });
 

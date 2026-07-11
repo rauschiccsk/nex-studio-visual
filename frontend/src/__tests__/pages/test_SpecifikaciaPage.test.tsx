@@ -1,8 +1,9 @@
 /**
  * SpecifikaciaPage — the durable "Schválená / Rozpracované" badge (spine STEP 2 follow-up).
  *
- * The badge is derived from the board's DURABLE ``spec_approved`` flag (≥1 kind='approval' message),
- * NOT the truncated recent_messages tail:
+ * The badge is derived from the board's DURABLE ``spec_approved`` flag (≥1 kind='approval' message) plus
+ * whether a ``specification.md`` is actually on disk for the pinned version (via ``listProjectSpecs`` →
+ * ``filterVersionDocs``), NOT the truncated recent_messages tail:
  *   * spec_approved true                → "Schválená"      (takes precedence — approval implies a frozen spec)
  *   * a specification.md exists, not yet → "Rozpracované"
  *   * no spec on disk                    → no badge at all
@@ -16,16 +17,28 @@ import SpecifikaciaPage from "@/pages/SpecifikaciaPage";
 
 // ── Hoisted mocks ─────────────────────────────────────────────────────────────
 
-const { getProjectSpecContentMock, getPipelineBoardApiMock, contextMock } = vi.hoisted(() => ({
-  getProjectSpecContentMock: vi.fn(),
-  getPipelineBoardApiMock: vi.fn(),
-  contextMock: {
-    selectedProject: { slug: "demo", name: "Demo" } as { slug: string; name: string } | null,
-    selectedVersion: { versionId: "v-1", versionNumber: "2.0.0" } as
-      | { versionId: string; versionNumber: string }
-      | null,
-  },
-}));
+const { getProjectSpecContentMock, listProjectSpecsMock, getPipelineBoardApiMock, contextMock } = vi.hoisted(
+  () => ({
+    getProjectSpecContentMock: vi.fn(),
+    listProjectSpecsMock: vi.fn(),
+    getPipelineBoardApiMock: vi.fn(),
+    contextMock: {
+      selectedProject: { slug: "demo", name: "Demo" } as { slug: string; name: string } | null,
+      selectedVersion: { versionId: "v-1", versionNumber: "2.0.0" } as
+        | { versionId: string; versionNumber: string }
+        | null,
+    },
+  }),
+);
+
+// A specification.md that survives ``filterVersionDocs`` for slug "demo" / version "2.0.0" → hasSpec = true.
+const SPEC_DOC = {
+  relative_path: "demo/docs/specs/versions/v2.0.0/specification.md",
+  filename: "specification.md",
+  category: "docs/specs/versions/v2.0.0",
+  size_bytes: 42,
+  is_directory: false,
+};
 
 vi.mock("react-router-dom", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react-router-dom")>();
@@ -34,7 +47,10 @@ vi.mock("react-router-dom", async (importOriginal) => {
 vi.mock("@/store/activeContextStore", () => ({
   useActiveContextStore: (selector: (s: typeof contextMock) => unknown) => selector(contextMock),
 }));
-vi.mock("@/services/api/projectSpecs", () => ({ getProjectSpecContent: getProjectSpecContentMock }));
+vi.mock("@/services/api/projectSpecs", () => ({
+  getProjectSpecContent: getProjectSpecContentMock,
+  listProjectSpecs: listProjectSpecsMock,
+}));
 vi.mock("@/services/api/pipeline", () => ({ getPipelineBoardApi: getPipelineBoardApiMock }));
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -42,11 +58,14 @@ vi.mock("@/services/api/pipeline", () => ({ getPipelineBoardApi: getPipelineBoar
 describe("SpecifikaciaPage badge", () => {
   beforeEach(() => {
     getProjectSpecContentMock.mockReset();
+    listProjectSpecsMock.mockReset();
     getPipelineBoardApiMock.mockReset();
+    // Default: the spec exists on disk and reads back as text (individual tests override the board flag).
+    listProjectSpecsMock.mockResolvedValue({ documents: [SPEC_DOC], count: 1 });
+    getProjectSpecContentMock.mockResolvedValue({ is_text: true, content: "# Špecifikácia\n\nObsah." });
   });
 
   it("shows 'Schválená' (and not 'Rozpracované') when spec_approved is true", async () => {
-    getProjectSpecContentMock.mockResolvedValue({ is_text: true, content: "# Špecifikácia\n\nObsah." });
     getPipelineBoardApiMock.mockResolvedValue({ spec_approved: true });
 
     render(<SpecifikaciaPage />);
@@ -56,7 +75,6 @@ describe("SpecifikaciaPage badge", () => {
   });
 
   it("shows 'Rozpracované' when a spec exists but spec_approved is false", async () => {
-    getProjectSpecContentMock.mockResolvedValue({ is_text: true, content: "# Špecifikácia\n\nObsah." });
     getPipelineBoardApiMock.mockResolvedValue({ spec_approved: false });
 
     render(<SpecifikaciaPage />);
@@ -66,19 +84,18 @@ describe("SpecifikaciaPage badge", () => {
   });
 
   it("shows NO badge when no spec exists on disk", async () => {
-    getProjectSpecContentMock.mockRejectedValue(new Error("404"));
+    listProjectSpecsMock.mockResolvedValue({ documents: [], count: 0 });
     getPipelineBoardApiMock.mockResolvedValue({ spec_approved: false });
 
     render(<SpecifikaciaPage />);
 
-    // The empty-state prompt is the reliable "settled with no spec" anchor.
-    await screen.findByText(/Špecifikácia zatiaľ nie je napísaná/);
+    // The empty-state prompt is the reliable "settled with no docs" anchor.
+    await screen.findByText(/Zatiaľ tu nie sú žiadne dokumenty/);
     expect(screen.queryByText("Schválená")).not.toBeInTheDocument();
     expect(screen.queryByText("Rozpracované")).not.toBeInTheDocument();
   });
 
   it("stays un-approved when the board fetch fails (never falsely claims 'Schválená')", async () => {
-    getProjectSpecContentMock.mockResolvedValue({ is_text: true, content: "# Špecifikácia\n\nObsah." });
     getPipelineBoardApiMock.mockRejectedValue(new Error("no pipeline"));
 
     render(<SpecifikaciaPage />);
