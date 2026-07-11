@@ -56,6 +56,11 @@ const LABELS: Record<DeployEnvironment, { title: string; intro: string; column: 
   },
 };
 
+// Normalise a version_number for DISPLAY (audit obs #3): some are stored "v1.0.0" (the graduated first-PROD)
+// and some "1.1.0" — strip a leading "v" so UAT + PROD always read the same bare-semver form. The STORED value
+// (the deploy identifier used in requests / accepted_versions) is never touched — this is display-only.
+const fmtVer = (v: string | null | undefined): string => (v ?? "").replace(/^v/i, "");
+
 export default function DeployMatrixPage({ environment }: DeployMatrixPageProps) {
   const navigate = useNavigate();
   const selectedProject = useActiveContextStore((s) => s.selectedProject);
@@ -118,7 +123,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
     const version = pickedVersion(row);
     if (!version) return "Žiadna overená verzia na nasadenie.";
     if (environment === "prod" && !row.accepted_versions.includes(version)) {
-      return `PROD je zablokované: verzia ${version} nemá akceptované UAT pre tohto zákazníka.`;
+      return `PROD je zablokované: verzia ${fmtVer(version)} nemá akceptované UAT pre tohto zákazníka.`;
     }
     return null;
   }
@@ -159,7 +164,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
     if (!row.uat_version) return;
     if (
       !window.confirm(
-        `Akceptovať UAT verziu ${row.uat_version} pre zákazníka ${row.customer_name}? ` +
+        `Akceptovať UAT verziu ${fmtVer(row.uat_version)} pre zákazníka ${row.customer_name}? ` +
           "Otvorí sa tým PROD nasadenie pre túto verziu.",
       )
     )
@@ -271,7 +276,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                       <div className="flex items-center gap-1.5">
                         {current ? (
                           <span className="rounded bg-[var(--color-surface)] px-1.5 py-0.5 font-mono text-xs text-[var(--color-text-primary)]">
-                            {current}
+                            {fmtVer(current)}
                           </span>
                         ) : (
                           <span className="text-xs text-[var(--color-text-muted)]">—</span>
@@ -309,7 +314,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                         >
                           {verified.map((v) => (
                             <option key={v} value={v}>
-                              {v}
+                              {fmtVer(v)}
                             </option>
                           ))}
                         </select>
@@ -326,7 +331,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                       )}
                       {result && !isBusy && (
                         <div className="mt-1 space-y-0.5 text-[11px] text-emerald-600 dark:text-emerald-400">
-                          <div>✓ Nasadené{result.bumped_to ? ` — projekt povýšený na ${result.bumped_to}` : ""}</div>
+                          <div>✓ Nasadené{result.bumped_to ? ` — projekt povýšený na ${fmtVer(result.bumped_to)}` : ""}</div>
                           {result.url && (
                             <a
                               href={result.url}
@@ -355,7 +360,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                             disabled={isBusy || !row.uat_version}
                             title={
                               row.uat_version
-                                ? `Akceptovať UAT verziu ${row.uat_version}`
+                                ? `Akceptovať UAT verziu ${fmtVer(row.uat_version)}`
                                 : "Najprv nasaď verziu na UAT"
                             }
                             className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] disabled:opacity-40"
@@ -366,7 +371,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                         <button
                           onClick={() => handleDeploy(row)}
                           disabled={isBusy || verified.length === 0 || blocked !== null}
-                          title={blocked ?? `Nasadiť verziu ${chosen} do ${labels.title}`}
+                          title={blocked ?? `Nasadiť verziu ${fmtVer(chosen)} do ${labels.title}`}
                           className="flex items-center gap-1.5 rounded-lg bg-primary-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-primary-500 disabled:opacity-40"
                         >
                           {isBusy ? (
