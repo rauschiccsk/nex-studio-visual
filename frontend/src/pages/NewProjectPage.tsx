@@ -165,8 +165,9 @@ export default function NewProjectPage() {
   function validate(): boolean {
     const next: Record<string, string> = {};
     if (!name.trim()) next.name = "Názov projektu je povinný.";
-    if (!slug.trim()) next.slug = "Slug je povinný.";
-    else if (!/^[a-z0-9-]+$/.test(slug)) next.slug = "Slug: iba malé písmená, čísla a pomlčky.";
+    if (!slug.trim()) next.slug = "Identifikátor je povinný.";
+    else if (!/^[a-z0-9-]+$/.test(slug))
+      next.slug = "Identifikátor: iba malé písmená, čísla a pomlčky (napr. nex-ledger).";
     // Auth mode is MANDATORY (design §4.2) — it shapes the project's auth structure.
     if (!authMode) next.authMode = "Spôsob prihlásenia je povinný.";
     setErrors(next);
@@ -339,7 +340,7 @@ export default function NewProjectPage() {
 
             {/* Slug */}
             <Field
-              label="Slug *"
+              label="Identifikátor (slug) *"
               error={errors.slug}
               hint={
                 !slugManual && slug ? (
@@ -356,6 +357,9 @@ export default function NewProjectPage() {
                 onChange={(e) => handleSlugChange(e.target.value)}
                 className={`${inputCls} font-mono ${errors.slug ? "border-[var(--color-status-error)]" : ""}`}
               />
+              <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+                Krátky názov v adresách, napr. nex-ledger.
+              </p>
             </Field>
 
             {/* GitHub repo — auto-filled as {github_org}/{slug} from ICC settings. */}
@@ -457,7 +461,7 @@ export default function NewProjectPage() {
                   onChange={(e) => setEnableCicd(e.target.checked)}
                   className="w-4 h-4 rounded border-[var(--color-border-default)] bg-[var(--color-canvas)] text-primary-500 focus:ring-primary-500"
                 />
-                <span>Povoliť CI/CD (GitHub Actions)</span>
+                <span>Automaticky zostaviť a nasadiť po každej zmene</span>
               </label>
               <label className="flex items-center gap-3 text-sm text-[var(--color-text-primary)] cursor-pointer">
                 <input
@@ -466,7 +470,7 @@ export default function NewProjectPage() {
                   onChange={(e) => setFullSmoke(e.target.checked)}
                   className="w-4 h-4 rounded border-[var(--color-border-default)] bg-[var(--color-canvas)] text-primary-500 focus:ring-primary-500"
                 />
-                <span>Úplný smoke test (build + up + /health, ~5-7 min)</span>
+                <span>Úplná kontrola po zostavení (spustí aplikáciu a overí, že beží — ~5–7 min)</span>
               </label>
               <label className="flex items-center gap-3 text-sm text-[var(--color-text-primary)] cursor-pointer">
                 <input
@@ -475,7 +479,7 @@ export default function NewProjectPage() {
                   onChange={(e) => setEnableBranchProtection(e.target.checked)}
                   className="w-4 h-4 rounded border-[var(--color-border-default)] bg-[var(--color-canvas)] text-primary-500 focus:ring-primary-500"
                 />
-                <span>Povoliť ochranu vetvy (vyžadovať PR, bez force push)</span>
+                <span>Chrániť hlavnú vetvu (zmeny len cez schválenú žiadosť, bez prepisovania histórie)</span>
               </label>
               <label className="flex items-center gap-3 text-sm text-[var(--color-text-primary)] cursor-pointer">
                 <input

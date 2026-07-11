@@ -67,8 +67,8 @@ describe("ConversationThread — full body + question (CR-V2-032)", () => {
       seq: 2,
     };
     render(<ConversationThread messages={[systemMsg]} activity={[]} working={false} />);
-    expect(screen.getByText(/NEX Studio · Dedo/)).toBeInTheDocument(); // the escalation badge
-    expect(screen.getByText(/Správa pre Deda/i)).toBeInTheDocument(); // the escalation-message block label
+    expect(screen.getByText(/Chyba NEX Studia/)).toBeInTheDocument(); // the escalation badge (plain Slovak, no "Dedo")
+    expect(screen.getByText(/Nahlásené technickému tímu/i)).toBeInTheDocument(); // the escalation-message block label
     expect(screen.getByText(/Chýba docker socket mount/)).toBeInTheDocument(); // the actual Dedo message
   });
 });

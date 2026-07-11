@@ -18,7 +18,7 @@ export function CodeBlock({ children, language }: CodeBlockProps) {
   return (
     <div className="relative my-3">
       <div className="flex items-center justify-between bg-[var(--color-surface)] px-3 py-1.5 rounded-t border border-[var(--color-border-default)] border-b-0">
-        <span className="text-xs text-[var(--color-text-secondary)]">{language || "code"}</span>
+        <span className="text-xs text-[var(--color-text-secondary)]">{language || "kód"}</span>
         <button
           onClick={() => copy(code)}
           className="flex items-center gap-1 text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"

@@ -21,7 +21,9 @@ import type {
   TaskPlanFeatNode,
 } from "../../types/task-plan";
 import type { PipelineMessage } from "../../services/api/pipeline";
-import { TASK_STATUS_LABELS, TASK_STATUS_TONE, TONE_DOT } from "./labels";
+import { TASK_STATUS_LABELS, TASK_TYPE_LABELS, TASK_STATUS_TONE, TONE_DOT } from "./labels";
+import { humanizeApiError, type HumanError } from "../../services/apiError";
+import ErrorNote from "../common/ErrorNote";
 
 interface Props {
   versionId: string;
@@ -72,7 +74,7 @@ function StatusBadge({ status }: { status: string }) {
   return (
     <span className="inline-flex flex-shrink-0 items-center gap-1 text-[10px] text-[var(--color-text-secondary)]">
       <span className={`h-1.5 w-1.5 rounded-full ${TONE_DOT[TASK_STATUS_TONE[status] ?? "neutral"]}`} />
-      {TASK_STATUS_LABELS[status] ?? status}
+      {TASK_STATUS_LABELS[status] ?? "Neznámy stav"}
     </span>
   );
 }
@@ -100,7 +102,7 @@ function rollupStatus(tasks: TaskPlanTaskNode[], dbStatus: string, resting: stri
 
 export default function TaskPlanPanel({ versionId, messages }: Props) {
   const [plan, setPlan] = useState<TaskPlanResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<HumanError | null>(null);
   // Expand/collapse state is hydrated from localStorage (per version, per browser — OQ-8) so it
   // survives navigation away+back AND a page reload. Re-init on version change so each version's tree
   // restores its own remembered state.
@@ -122,7 +124,7 @@ export default function TaskPlanPanel({ versionId, messages }: Props) {
         }
       })
       .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Načítanie plánu zlyhalo");
+        if (!cancelled) setError(humanizeApiError(e, "Načítanie plánu zlyhalo"));
       });
     return () => {
       cancelled = true;
@@ -162,7 +164,7 @@ export default function TaskPlanPanel({ versionId, messages }: Props) {
         <span className="text-xs font-semibold text-[var(--color-text-secondary)]">Plán úloh</span>
         {plan && (
           <span className="text-[10px] text-[var(--color-text-muted)]">
-            {plan.epic_count} epic · {plan.feat_count} feat · {plan.task_count} úloh
+            {plan.epic_count} celkov · {plan.feat_count} funkcií · {plan.task_count} úloh
           </span>
         )}
       </div>
@@ -189,7 +191,7 @@ export default function TaskPlanPanel({ versionId, messages }: Props) {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2 text-xs">
         {error ? (
-          <p className="px-1 text-[11px] text-[var(--color-status-error)]">{error}</p>
+          <ErrorNote error={error} className="px-1" />
         ) : !plan ? (
           <p className="flex items-center gap-1.5 px-1 text-[var(--color-text-muted)]">
             <Loader2 className="h-3 w-3 animate-spin" /> Načítavam plán…
@@ -254,7 +256,9 @@ export default function TaskPlanPanel({ versionId, messages }: Props) {
                                   <span className="truncate">
                                     {task.number}. {task.title}
                                   </span>
-                                  <span className="flex-shrink-0 text-[9px] uppercase text-[var(--color-text-muted)]">{task.task_type}</span>
+                                  <span className="flex-shrink-0 text-[9px] uppercase text-[var(--color-text-muted)]">
+                                    {TASK_TYPE_LABELS[task.task_type] ?? task.task_type}
+                                  </span>
                                 </span>
                                 <StatusBadge status={task.status} />
                               </div>

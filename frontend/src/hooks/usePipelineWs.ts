@@ -16,6 +16,7 @@ import {
   type PipelineBoard,
   type PipelineWsFrame,
 } from "../services/api/pipeline";
+import { humanizeApiError } from "../services/apiError";
 
 const _MAX_ACTIVITY = 50;
 
@@ -93,7 +94,10 @@ export function usePipelineWs(versionId: string | null): UsePipelineWs {
           if (!cancelled) setBoard(b);
         })
         .catch((e: unknown) => {
-          if (!cancelled) setError(e instanceof Error ? e.message : "Načítanie boardu zlyhalo");
+          // Plain-Slovak framing — HonestStatusStrip renders this string raw, so it must never be a raw
+          // English backend detail (audit Theme 2). We keep the hook's `error: string` shape and surface
+          // only the manager-facing sentence.
+          if (!cancelled) setError(humanizeApiError(e, "Načítanie prehľadu zlyhalo").message);
         });
     };
 

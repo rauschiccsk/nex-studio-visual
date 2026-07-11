@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ReleaseNotes } from "nex-shared";
 
-import { ApiError } from "@/services/api";
+import { humanizeApiError } from "@/services/apiError";
 import { listReleaseNotes, type ReleaseNote } from "@/services/api/releaseNotes";
 
 export default function UpdatesPage() {
@@ -25,9 +25,7 @@ export default function UpdatesPage() {
     try {
       setNotes(await listReleaseNotes());
     } catch (e) {
-      setError(
-        e instanceof ApiError ? e.message : "Chyba pri načítaní aktualizácií",
-      );
+      setError(humanizeApiError(e, "Načítanie aktualizácií zlyhalo").message);
     } finally {
       setLoading(false);
     }

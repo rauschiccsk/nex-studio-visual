@@ -19,6 +19,8 @@ import { useState } from "react";
 import { CircleAlert, RotateCw } from "lucide-react";
 
 import { postPipelineActionApi, type PipelineBoard } from "@/services/api/pipeline";
+import { humanizeApiError, type HumanError } from "@/services/apiError";
+import ErrorNote from "@/components/common/ErrorNote";
 
 interface Props {
   board: PipelineBoard | null;
@@ -29,20 +31,20 @@ interface Props {
 
 export default function ReverifyBar({ board, versionId, onBoard }: Props) {
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<HumanError | null>(null);
 
   // Honest-by-construction gate: the bar exists ONLY when the backend offers `overit_znovu` right now (a
   // settled version whose verified green has drifted past current HEAD).
   if (!board?.available_actions?.includes("overit_znovu")) return null;
 
   async function submit() {
-    setError("");
+    setError(null);
     setSubmitting(true);
     try {
       const nextBoard = await postPipelineActionApi(versionId, { action: "overit_znovu" });
       onBoard(nextBoard);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Overenie sa nepodarilo spustiť.");
+      setError(humanizeApiError(err, "Opätovné overenie zlyhalo"));
     } finally {
       setSubmitting(false);
     }
@@ -60,7 +62,7 @@ export default function ReverifyBar({ board, versionId, onBoard }: Props) {
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-[var(--color-text-muted)]">
             Táto verzia už bola overená, ale kód sa odvtedy posunul za overený bod — zelené „overená" už nemusí
-            platiť. „Over znova" nechá Auditora zopakovať overenie proti aktuálnemu kódu (bez opravy, bez novej
+            platiť. „Over znova" nechá Audítora zopakovať overenie proti aktuálnemu kódu (bez opravy, bez novej
             stavby).
           </p>
           <button
@@ -73,7 +75,7 @@ export default function ReverifyBar({ board, versionId, onBoard }: Props) {
             {submitting ? "Overujem…" : "Over znova"}
           </button>
         </div>
-        {error && <p className="text-xs text-[var(--color-status-error)]">{error}</p>}
+        <ErrorNote error={error} />
       </div>
     </div>
   );

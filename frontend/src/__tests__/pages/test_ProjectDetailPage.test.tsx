@@ -188,7 +188,7 @@ describe("ProjectDetailPage — guarded delete (CR-V2-027)", () => {
     const confirm = screen.getByRole("button", { name: /zmazať natrvalo/i });
     expect(confirm).toBeDisabled();
 
-    await userEvent.type(screen.getByLabelText(/na potvrdenie napíš/i), "DELETE");
+    await userEvent.type(screen.getByLabelText(/na potvrdenie napíš/i), "ZMAZAŤ");
     expect(confirm).toBeEnabled();
     await userEvent.click(confirm);
 
@@ -201,7 +201,7 @@ describe("ProjectDetailPage — guarded delete (CR-V2-027)", () => {
     render(<ProjectDetailPage />);
 
     await userEvent.click(await screen.findByRole("button", { name: /^zmazať projekt$/i }));
-    await userEvent.type(screen.getByLabelText(/na potvrdenie napíš/i), "delete"); // wrong case
+    await userEvent.type(screen.getByLabelText(/na potvrdenie napíš/i), "zmazať"); // wrong case
 
     expect(screen.getByRole("button", { name: /zmazať natrvalo/i })).toBeDisabled();
     expect(deleteProjectApiMock).not.toHaveBeenCalled();

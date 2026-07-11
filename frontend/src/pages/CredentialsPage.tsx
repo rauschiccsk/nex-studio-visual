@@ -46,14 +46,14 @@ export default function CredentialsPage() {
       .catch((err) => {
         if (err instanceof ApiError) {
           if (err.status === 401) {
-            setAccessError("Pre prístup k credentials sa musíš prihlásiť.");
+            setAccessError("Pre zobrazenie prístupov sa musíš prihlásiť.");
           } else if (err.status === 403) {
             setAccessError("Prístupy sú dostupné len pre rolu Manažér.");
           } else {
             setAccessError(humanizeApiError(err, "Načítanie zlyhalo").message);
           }
         } else {
-          setAccessError("Sieťová chyba pri načítavaní credentials.");
+          setAccessError("Sieťová chyba pri načítavaní prístupov.");
         }
       })
       .finally(() => setLoading(false));
@@ -81,7 +81,7 @@ export default function CredentialsPage() {
           } else if (err.status === 422) {
             setContentError("Obsah nemožno zobraziť (binárny súbor alebo prekročený limit 5 MB).");
           } else {
-            setContentError(`Načítanie zlyhalo (HTTP ${err.status}).`);
+            setContentError(humanizeApiError(err, "Načítanie zlyhalo").message);
           }
         } else {
           setContentError("Načítanie zlyhalo.");
@@ -130,7 +130,7 @@ export default function CredentialsPage() {
 
   async function handleSaveCreate() {
     if (!createTitle.trim() || !createFilename.trim()) {
-      setCreateError("Názov a filename sú povinné.");
+      setCreateError("Názov a názov súboru sú povinné.");
       return;
     }
     setSaving(true);
@@ -198,7 +198,7 @@ export default function CredentialsPage() {
           <div className="w-72 flex-shrink-0 border-r border-[var(--color-border-default)] overflow-y-auto">
             {loading && <div className="p-4 text-sm text-[var(--color-text-muted)]">Načítavam…</div>}
             {!loading && items.length === 0 && (
-              <div className="p-4 text-sm text-[var(--color-text-muted)]">Žiadne credentials.</div>
+              <div className="p-4 text-sm text-[var(--color-text-muted)]">Žiadne prístupy.</div>
             )}
             {items.map((c) => (
               <button
@@ -221,7 +221,7 @@ export default function CredentialsPage() {
           {/* Right: detail / edit / create */}
           <div className="flex-1 overflow-y-auto p-5">
             {mode === "view" && !selected && (
-              <div className="text-sm text-[var(--color-text-muted)]">Vyber credential zo zoznamu alebo vytvor nový.</div>
+              <div className="text-sm text-[var(--color-text-muted)]">Vyber prístup zo zoznamu alebo vytvor nový.</div>
             )}
 
             {mode === "view" && selected && (
@@ -330,7 +330,7 @@ export default function CredentialsPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">Názov súboru (bez slash-u)</label>
+                  <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">Názov súboru (bez lomítka)</label>
                   <input
                     type="text"
                     value={createFilename}

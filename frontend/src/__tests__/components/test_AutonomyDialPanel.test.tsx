@@ -45,7 +45,7 @@ describe("AutonomyDialPanel", () => {
 
   it("documents the two always-outside-the-dial exceptions", () => {
     renderPanel();
-    expect(screen.getByText("Vždy mimo dialu")).toBeInTheDocument();
+    expect(screen.getByText("Vždy mimo tohto nastavenia")).toBeInTheDocument();
     expect(screen.getByText("Schválenie špecifikácie")).toBeInTheDocument();
     expect(screen.getByText("Nasadenie (UAT / PROD)")).toBeInTheDocument();
   });
@@ -71,7 +71,7 @@ describe("AutonomyDialPanel", () => {
       expect(r).toBeDisabled();
     }
     expect(screen.queryByRole("button", { name: /Uložiť/ })).not.toBeInTheDocument();
-    expect(screen.getByText(/Read-only/)).toBeInTheDocument();
+    expect(screen.getByText(/Iba na čítanie/)).toBeInTheDocument();
   });
 
   it("degrades an unrecognised stored value to plna", () => {

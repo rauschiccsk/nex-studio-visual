@@ -105,9 +105,10 @@ export const BLOCK_REASON_LABELS: Record<BlockReason, string> = {
   agent_error: "Agent zlyhal",
   system_error: "Systémová chyba",
   parse_exhaustion: "Chyba spracovania výstupu",
-  // Director observation #6: an agent → Dedo escalation — the fix needs a change to NEX Studio itself, so
-  // the Manažér has NO recovery action (only Dedo clears it). Reads as a system/blocked red state.
-  framework_issue: "NEX Studio potrebuje opravu (Dedo)",
+  // A framework_issue means the bug is in NEX Studio itself (not the project) — our technical team resolves it.
+  // Plain Slovak, no internal "Dedo"/"framework" jargon (a non-expert Manažér doesn't know who "Dedo" is). The
+  // Manažér's one concrete move is "Nahlásiť znova" (NahlasitZnovaBar); it reads as a system/blocked red state.
+  framework_issue: "NEX Studio má chybu — rieši ju náš technický tím",
 };
 
 // Slovak labels for EPIC/FEAT/TASK node statuses in the TaskPlanPanel tree (CR-NS-020 CR-5).
@@ -118,6 +119,16 @@ export const TASK_STATUS_LABELS: Record<string, string> = {
   in_progress: "Prebieha",
   done: "Hotovo",
   failed: "Zlyhalo",
+};
+
+// Slovak display label per task_type — the tiny tag on a Plán úloh / task-plan leaf. Keeps the badge readable
+// for a non-expert Manažér: no raw English "backend"/"frontend"/"migration" tokens. Unknown → the raw value.
+export const TASK_TYPE_LABELS: Record<string, string> = {
+  backend: "Backend",
+  frontend: "Frontend",
+  migration: "Databáza",
+  test: "Test",
+  docs: "Dokumentácia",
 };
 
 // ── Unified cockpit status palette (CR-NS-028) ────────────────────────────────

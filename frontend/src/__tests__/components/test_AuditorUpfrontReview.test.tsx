@@ -40,7 +40,7 @@ describe("AuditorUpfrontReview (CR-V2-039)", () => {
       }),
     ];
     render(<AuditorUpfrontReview messages={messages} />);
-    expect(screen.getByText(/nezávislá upfront previerka/)).toBeInTheDocument();
+    expect(screen.getByText(/nezávislá predbežná previerka/)).toBeInTheDocument();
     expect(screen.getByText(/3 nálezy — vyrieš \(Uprav\) pred schválením/)).toBeInTheDocument();
     expect(screen.getByText(/náklady nadhodnotené/)).toBeInTheDocument();
   });
@@ -63,6 +63,6 @@ describe("AuditorUpfrontReview (CR-V2-039)", () => {
 
   it("shows a PASS state when the upfront verdict has no findings", () => {
     render(<AuditorUpfrontReview messages={[msg({ payload: { upfront_review: true, findings: [] } })]} />);
-    expect(screen.getByText(/bez nálezov \(PASS\)/)).toBeInTheDocument();
+    expect(screen.getByText(/bez nálezov \(v poriadku\)/)).toBeInTheDocument();
   });
 });

@@ -3,6 +3,8 @@ import { useNavigate, useParams } from "react-router-dom";
 import { listProjectsApi } from "@/services/api/projects";
 import { getVersion, writeZadanie, readZadanie } from "@/services/api/versions";
 import { postPipelineActionApi } from "@/services/api/pipeline";
+import { humanizeApiError, type HumanError } from "@/services/apiError";
+import ErrorNote from "@/components/common/ErrorNote";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
 import { useActiveContextSync } from "@/hooks/useActiveContextSync";
@@ -38,7 +40,7 @@ export default function VersionDetailPage() {
   const [zadanieSaved, setZadanieSaved] = useState(false);
   const [savingZadanie, setSavingZadanie] = useState(false);
   const [starting, setStarting] = useState(false);
-  const [zadanieError, setZadanieError] = useState<string | null>(null);
+  const [zadanieError, setZadanieError] = useState<HumanError | null>(null);
 
   useActiveContextSync(project, version);
 
@@ -76,7 +78,7 @@ export default function VersionDetailPage() {
       await writeZadanie(versionId, zadanie.trim());
       setZadanieSaved(true);
     } catch (e: unknown) {
-      setZadanieError(e instanceof Error ? e.message : "Nepodarilo sa uložiť Zadanie.");
+      setZadanieError(humanizeApiError(e, "Uloženie Zadania zlyhalo"));
     } finally {
       setSavingZadanie(false);
     }
@@ -92,7 +94,7 @@ export default function VersionDetailPage() {
       await postPipelineActionApi(versionId, { action: "start" });
       navigate("/ai-agent");
     } catch (e: unknown) {
-      setZadanieError(e instanceof Error ? e.message : "Nepodarilo sa spustiť tvorbu špecifikácie.");
+      setZadanieError(humanizeApiError(e, "Spustenie tvorby špecifikácie zlyhalo"));
       setStarting(false);
     }
   };
@@ -153,11 +155,11 @@ export default function VersionDetailPage() {
           <div className="flex items-center gap-5 text-center">
             <div>
               <div className="text-sm font-bold text-[var(--color-text-primary)]">{epicsDone}/{epicCount}</div>
-              <div className="text-[10px] text-[var(--color-text-secondary)]">epic hotových</div>
+              <div className="text-[10px] text-[var(--color-text-secondary)]">celkov hotových</div>
             </div>
             <div>
               <div className="text-sm font-bold text-[var(--color-text-primary)]">{version.epic_count}</div>
-              <div className="text-[10px] text-[var(--color-text-secondary)]">epic</div>
+              <div className="text-[10px] text-[var(--color-text-secondary)]">celky</div>
             </div>
             <div>
               <div className={`text-sm font-bold ${version.bug_count > 0 ? "text-[var(--color-status-error)]" : "text-[var(--color-text-primary)]"}`}>
@@ -192,9 +194,7 @@ export default function VersionDetailPage() {
                 placeholder="Opíš, čo má aplikácia robiť…"
                 className="w-full resize-y rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] transition-colors focus:border-primary-500 focus:outline-none"
               />
-              {zadanieError && (
-                <p className="mt-2 text-xs text-[var(--color-state-error-fg)]">{zadanieError}</p>
-              )}
+              <ErrorNote error={zadanieError} className="mt-2" />
               <div className="mt-3 flex items-center justify-end gap-2">
                 <button
                   type="button"
@@ -225,8 +225,8 @@ export default function VersionDetailPage() {
                 {version.version_number}{version.name ? ` — ${version.name}` : ""}
               </div>
               <div className="text-xs text-[var(--color-text-muted)]">
-                {epicCount} epic · {epicsDone} hotových · {version.bug_count} chýb.
-                Špecifikáciu, návrh a kód tejto verzie pripravuje AI Agent; výsledok overuje Auditor.
+                {epicCount} celkov · {epicsDone} hotových · {version.bug_count} chýb.
+                Špecifikáciu, návrh a kód tejto verzie pripravuje AI Agent; výsledok overuje Audítor.
                 Fázy (Príprava → Návrh → Programovanie → Verifikácia) sleduješ v Riadiacom centre.
               </div>
               <button

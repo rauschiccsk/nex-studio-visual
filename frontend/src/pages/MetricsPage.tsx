@@ -13,6 +13,8 @@ import {
 } from "recharts";
 
 import { getProjectMetricsApi } from "@/services/api/metrics";
+import { humanizeApiError, type HumanError } from "@/services/apiError";
+import ErrorNote from "@/components/common/ErrorNote";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import { PHASE_LABELS, type BuildPhase } from "@/components/cockpit/labels";
@@ -58,7 +60,7 @@ function fmtMinutes(min: number | null): string {
 }
 
 function phaseLabel(phase: string): string {
-  return PHASE_LABELS[phase as BuildPhase] ?? phase;
+  return PHASE_LABELS[phase as BuildPhase] ?? "Neznáma fáza";
 }
 
 // ─── small presentational pieces ─────────────────────────────────────────────
@@ -107,7 +109,7 @@ function PhaseRow({ r }: { r: PhaseMetric }) {
         {valuePair}
         {r.agent_cost === null && r.unpriced_model_keys.length > 0 && (
           <div className="text-[10px] text-[var(--color-status-warning)] mt-0.5">
-            AI cena chýba: model {r.unpriced_model_keys.join(", ")}
+            AI cena zatiaľ nie je k dispozícii
           </div>
         )}
       </td>
@@ -146,7 +148,7 @@ export default function MetricsPage() {
 
   const [metrics, setMetrics] = useState<ProjectMetrics | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<HumanError | null>(null);
   const [view, setView] = useState<View>("version");
   const [selectedVersionId, setSelectedVersionId] = useState<string>("");
 
@@ -154,6 +156,7 @@ export default function MetricsPage() {
     if (!slug) return;
     let cancelled = false;
     setLoading(true);
+    setError(null);
     getProjectMetricsApi(slug)
       .then((m) => {
         if (cancelled) return;
@@ -161,8 +164,8 @@ export default function MetricsPage() {
         const last = m.by_version[m.by_version.length - 1];
         if (last) setSelectedVersionId(last.version_id);
       })
-      .catch(() => {
-        if (!cancelled) setError("Nepodarilo sa načítať metriky.");
+      .catch((err) => {
+        if (!cancelled) setError(humanizeApiError(err, "Načítanie metrík zlyhalo"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -232,7 +235,7 @@ export default function MetricsPage() {
     return (
       <div className="p-6 max-w-5xl mx-auto">
         <div className="rounded-lg bg-[var(--color-state-error-bg)] border border-[var(--color-state-error-bg)] p-4 text-sm text-[var(--color-state-error-fg)]">
-          {error || "Metriky nedostupné."}
+          {error ? <ErrorNote error={error} /> : "Metriky nedostupné."}
         </div>
       </div>
     );
@@ -269,8 +272,8 @@ export default function MetricsPage() {
       </div>
       <p className="text-xs text-[var(--color-text-muted)] mb-4">
         Nameraná práca agenta vs. ekvivalentný ľudský čas pre{" "}
-        <span className="text-[var(--color-text-secondary)]">{projectName}</span> — z tej istej bázy (všetky tokeny per
-        fáza). Čísla, ktoré chýbajú (ceny / kurzy / mzdy), sa nezobrazujú vymyslené.
+        <span className="text-[var(--color-text-secondary)]">{projectName}</span> — z tej istej bázy (všetky tokeny
+        podľa fázy). Čísla, ktoré chýbajú (ceny / kurzy / mzdy), sa nezobrazujú vymyslené.
       </p>
 
       {/* Headline ROI */}
@@ -284,11 +287,11 @@ export default function MetricsPage() {
         <Card
           label="Lacnejšie ako človek"
           value={fmtRatio(roi.m_cheaper)}
-          hint={roi.m_cheaper === null ? "Ceny / kurzy / mzdy nenastavené" : "ľudská cena vs. API cena (hodnota compute)"}
+          hint={roi.m_cheaper === null ? "Ceny / kurzy / mzdy nenastavené" : "ľudská cena vs. cena AI (hodnota výpočtového výkonu)"}
           tone={roi.m_cheaper !== null ? "good" : "muted"}
         />
         <Card
-          label="Ušetrené € (tento build)"
+          label="Ušetrené € (toto zostavenie)"
           value={fmtCost(perBuildSaved)}
           hint={selectedVersion ? selectedVersion.version_number : undefined}
           tone={perBuildSaved !== null ? "good" : "muted"}
@@ -304,12 +307,12 @@ export default function MetricsPage() {
       {/* ROI-angle + model-drift badges */}
       <div className="flex flex-wrap gap-2 mb-3 text-[11px]">
         <span className="rounded border border-[var(--color-border-default)] bg-[var(--color-canvas)] px-2 py-1 text-[var(--color-text-muted)]">
-          Platíme flat Claude MAX → marginálny náklad ~0; vyššie je trhová hodnota spotrebovaného compute.
+          Platíme paušál za Claude MAX → marginálny náklad ~0; vyššie je trhová hodnota spotrebovaného výpočtového výkonu.
         </span>
         {roi.unknown_model_token_pct > 0 && (
           <span className="rounded border border-[var(--color-state-warning-bg)] bg-[var(--color-state-warning-bg)] px-2 py-1 text-[var(--color-state-warning-fg)]">
             {roi.unknown_model_token_pct.toLocaleString("sk-SK", { maximumFractionDigits: 1 })} % tokenov bez
-            rozpoznaného modelu — cena flat.
+            rozpoznaného modelu — cena je paušálna.
           </span>
         )}
       </div>
@@ -351,9 +354,9 @@ export default function MetricsPage() {
               <tr className="bg-[var(--color-surface)]">
                 <th className={TH}>Fáza</th>
                 <th className={TH}>AI čas</th>
-                <th className={TH}>tokeny IN/OUT</th>
-                <th className={TH}>rework</th>
-                <th className={TH}>hodnota IN/OUT (€)</th>
+                <th className={TH}>tokeny vstup/výstup</th>
+                <th className={TH}>opravy</th>
+                <th className={TH}>hodnota vstup/výstup (€)</th>
                 <th className={TH}>človek čas</th>
                 <th className={TH}>človek (€)</th>
                 <th className={TH}>N×</th>
@@ -368,7 +371,7 @@ export default function MetricsPage() {
               {/* Manažér overhead row — measured only (info-only; the v1 priced Director cost is retired) */}
               <tr className="border-t border-[var(--color-border-default)] bg-[var(--color-surface)]">
                 <td className={`${TD} font-medium text-[var(--color-text-secondary)]`}>
-                  Manažér (overhead)
+                  Manažér (réžia)
                 </td>
                 <td className={`${TD} text-[var(--color-text-muted)]`} colSpan={9}>
                   čakanie {fmtDuration(scope.manager.wait_seconds)} · intervencie {scope.manager.interventions}
@@ -376,7 +379,7 @@ export default function MetricsPage() {
               </tr>
               {/* System / engine row — info-only, foots the table */}
               <tr className="border-t border-[var(--color-border-default)] italic text-[var(--color-text-muted)]">
-                <td className={TD}>Systém / engine (neporovnané)</td>
+                <td className={TD}>Systém (neporovnané)</td>
                 <td className={TD}>{fmtDuration(scope.system_overhead.active_seconds)}</td>
                 <td className={TD}>
                   {fmtInt(scope.system_overhead.input_tokens)} / {fmtInt(scope.system_overhead.output_tokens)}
@@ -400,19 +403,19 @@ export default function MetricsPage() {
           <Card
             label="Čakanie na Manažéra (prestoj A)"
             value={fmtDuration(scope.manager_wait_seconds)}
-            hint="human-in-the-loop overhead, cieľ → 0"
+            hint="réžia zapojenia človeka, cieľ → 0"
             tone="muted"
           />
           <Card
-            label="Interný idle (prestoj B)"
+            label="Interná nečinnosť (prestoj B)"
             value={scope.internal_idle_seconds === null ? "—" : fmtDuration(scope.internal_idle_seconds)}
-            hint={scope.internal_idle_seconds === null ? "rozpätie neznáme" : "reálny wall-clock medzi ťahmi"}
+            hint={scope.internal_idle_seconds === null ? "rozpätie neznáme" : "reálny čas medzi ťahmi"}
             tone="muted"
           />
           <Card
-            label="Čas start → koniec"
+            label="Čas začiatok → koniec"
             value={scope.total_time_seconds === null ? "—" : fmtDuration(scope.total_time_seconds)}
-            hint={view === "cumulative" ? "per verzia (vyber verziu)" : "wall-clock verzie"}
+            hint={view === "cumulative" ? "pre verziu (vyber verziu)" : "reálny čas verzie"}
             tone="muted"
           />
         </div>
@@ -423,7 +426,7 @@ export default function MetricsPage() {
       <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] divide-y divide-[var(--color-border-default)] mb-6">
         {metrics.by_version.length === 0 ? (
           <div className="p-4 text-sm text-[var(--color-text-muted)]">
-            Žiadne pipeline dáta — metriky sa naplnia po prvom builde.
+            Zatiaľ žiadne namerané dáta — metriky sa naplnia po prvom zostavení.
           </div>
         ) : (
           metrics.by_version.map((v) => (

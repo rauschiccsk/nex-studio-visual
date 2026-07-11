@@ -218,7 +218,7 @@ export default function SpecifikaciaPage() {
                 key={d.relative_path}
                 type="button"
                 onClick={() => setActivePath(p)}
-                title={d.filename}
+                title={labelFor(d.filename)}
                 className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${
                   active
                     ? "border-primary-500 bg-primary-600 text-white"

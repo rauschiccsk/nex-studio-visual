@@ -11,6 +11,8 @@ import { useNavigate } from "react-router-dom";
 import { FileText } from "lucide-react";
 
 import { postPipelineActionApi, type PipelineBoard } from "@/services/api/pipeline";
+import { humanizeApiError, type HumanError } from "@/services/apiError";
+import ErrorNote from "@/components/common/ErrorNote";
 
 interface Props {
   board: PipelineBoard | null;
@@ -23,13 +25,13 @@ export default function SpecApprovalBar({ board, versionId, onBoard }: Props) {
   const navigate = useNavigate();
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<HumanError | null>(null);
 
   // Honest-by-construction gate: the bar exists ONLY when the backend offers the approval right now.
   if (!board?.available_actions?.includes("approve_spec")) return null;
 
   async function handleApprove() {
-    setError("");
+    setError(null);
     setSubmitting(true);
     try {
       const trimmed = comment.trim();
@@ -40,7 +42,7 @@ export default function SpecApprovalBar({ board, versionId, onBoard }: Props) {
       onBoard(nextBoard);
       setComment("");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Schválenie zlyhalo.");
+      setError(humanizeApiError(err, "Schválenie zlyhalo"));
     } finally {
       setSubmitting(false);
     }
@@ -83,7 +85,7 @@ export default function SpecApprovalBar({ board, versionId, onBoard }: Props) {
         </button>
       </div>
 
-      {error && <p className="text-xs text-[var(--color-status-error)]">{error}</p>}
+      <ErrorNote error={error} />
     </div>
   );
 }

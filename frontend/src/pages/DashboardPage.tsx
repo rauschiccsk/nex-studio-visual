@@ -104,7 +104,7 @@ export default function DashboardPage() {
               </svg>
             </div>
             <p className="text-sm text-[var(--color-text-muted)] mb-1">Žiadne projekty</p>
-            <p className="text-xs text-[var(--color-text-muted)]">Vytvor prvý projekt a začni s NEX Studio pipeline.</p>
+            <p className="text-xs text-[var(--color-text-muted)]">Vytvor prvý projekt a začni pracovať v NEX Studio.</p>
             <button
               onClick={() => navigate("/projects/new")}
               className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-primary-600 hover:bg-primary-500 rounded-lg transition-colors"

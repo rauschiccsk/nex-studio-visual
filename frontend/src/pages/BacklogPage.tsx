@@ -38,9 +38,22 @@ const STATUS_CLS: Record<BacklogStatus, string> = {
 
 const STATUS_LABEL: Record<BacklogStatus, string> = {
   open: "Otvorené",
-  included: "V verzii",
+  included: "Vo verzii",
   realized: "Realizované",
   rejected: "Zamietnuté",
+};
+
+// Version status shown in the "Priradiť k verzii" dropdown — render a Slovak label, never the raw
+// English enum. The DB enforces planned|active|released; the extra keys defend against any richer
+// runtime status so a raw enum never leaks to the manager. Unknown → neutral "Neznámy stav".
+const VERSION_STATUS_LABEL: Record<string, string> = {
+  planned: "plánovaná",
+  active: "aktívna",
+  released: "vydaná",
+  building: "prebieha",
+  draft: "rozpracovaná",
+  verified: "overená",
+  failed: "zlyhala",
 };
 
 // Audit Theme 6: priority rendered raw English ("low"/"high"); localise it like STATUS_LABEL.
@@ -107,7 +120,7 @@ export default function BacklogPage() {
         });
       })
       .catch(() => {
-        if (!cancelled) setError("Nepodarilo sa načítať backlog.");
+        if (!cancelled) setError("Nepodarilo sa načítať zásobník.");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -452,7 +465,7 @@ export default function BacklogPage() {
                           <option value="">— vyber verziu —</option>
                           {assignableVersions.map((v) => (
                             <option key={v.id} value={v.id}>
-                              {v.version_number} ({v.status})
+                              {v.version_number} ({VERSION_STATUS_LABEL[v.status] ?? "Neznámy stav"})
                             </option>
                           ))}
                         </select>

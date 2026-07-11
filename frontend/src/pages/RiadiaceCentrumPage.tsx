@@ -30,6 +30,7 @@ import SpecApprovalBar from "@/components/riadiace/SpecApprovalBar";
 import SchvalitBar from "@/components/riadiace/SchvalitBar";
 import DecisionCardsBar from "@/components/riadiace/DecisionCardsBar";
 import BlockRecoveryBar from "@/components/riadiace/BlockRecoveryBar";
+import NahlasitZnovaBar from "@/components/riadiace/NahlasitZnovaBar";
 import ReverifyBar from "@/components/riadiace/ReverifyBar";
 import ChangeRequestBar from "@/components/riadiace/ChangeRequestBar";
 import PhaseBar from "@/components/riadiace/PhaseBar";
@@ -80,8 +81,7 @@ export default function RiadiaceCentrumPage() {
         <Lock className="h-10 w-10 text-[var(--color-text-muted)]" />
         <h2 className="text-sm font-semibold text-[var(--color-text-secondary)]">{PAGE_NAME}</h2>
         <p className="max-w-md text-xs text-[var(--color-text-muted)]">
-          Riadiace centrum je dostupné iba pre rolu{" "}
-          <code className="rounded bg-[var(--color-surface)] px-1 py-0.5">ri</code> (Manažér).
+          Riadiace centrum je dostupné iba pre Manažéra.
         </p>
       </div>
     );
@@ -125,10 +125,19 @@ export default function RiadiaceCentrumPage() {
   }
 
   const working = board?.state?.status === "agent_working";
-  // Director observation #6: an agent → Dedo escalation locks the composer — the Manažér cannot fix a
-  // NEX Studio bug, only Dedo can (the banner tells them to wait).
+  // A framework_issue block (a NEX-Studio bug) locks the composer — the Manažér cannot chat their way out of it;
+  // NahlasitZnovaBar carries the one concrete move + the "technical team is on it" explanation.
   const frameworkBlocked =
     board?.state?.status === "blocked" && board?.state?.block_reason === "framework_issue";
+  // Category I: when a BlockRecoveryBar (a blocked QUESTION / ERROR) owns the input above, de-emphasise the
+  // always-open composer so there is ONE obvious input. Mirrors BlockRecoveryBar's own render gate (question +
+  // the three error reasons); framework_issue / decision_needed have their own dedicated bars, excluded here.
+  const blockRecoveryActive =
+    board?.state?.status === "blocked" &&
+    (board?.state?.block_reason === "agent_question" ||
+      board?.state?.block_reason === "agent_error" ||
+      board?.state?.block_reason === "system_error" ||
+      board?.state?.block_reason === "parse_exhaustion");
 
   return (
     <div className="grid h-full grid-cols-[minmax(0,1fr)_320px] grid-rows-[auto_minmax(0,1fr)_auto_auto] bg-[var(--color-canvas)]">
@@ -159,6 +168,7 @@ export default function RiadiaceCentrumPage() {
       <div className="col-start-1 row-start-3 min-w-0">
         <DecisionCardsBar board={board} versionId={versionId} onBoard={setBoard} />
         <BlockRecoveryBar board={board} versionId={versionId} onBoard={setBoard} />
+        <NahlasitZnovaBar board={board} versionId={versionId} onBoard={setBoard} />
         <SpecApprovalBar board={board} versionId={versionId} onBoard={setBoard} />
         <SchvalitBar board={board} versionId={versionId} onBoard={setBoard} />
         <ReverifyBar board={board} versionId={versionId} onBoard={setBoard} />
@@ -167,7 +177,12 @@ export default function RiadiaceCentrumPage() {
 
       {/* Bottom — the relay send box. */}
       <div className="col-start-1 row-start-4 min-w-0">
-        <ConversationComposer onRelay={handleSend} disabled={!versionId} frameworkBlocked={frameworkBlocked} />
+        <ConversationComposer
+          onRelay={handleSend}
+          disabled={!versionId}
+          frameworkBlocked={frameworkBlocked}
+          blockedAbove={blockRecoveryActive}
+        />
       </div>
 
       {/* Right rail — the Plán úloh three-layer manager map (STEP 3), spanning the full height. Reads the live

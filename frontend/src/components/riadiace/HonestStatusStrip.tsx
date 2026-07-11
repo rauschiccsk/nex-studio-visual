@@ -25,17 +25,19 @@ function statusText(state: PipelineState | null, projectName: string, versionNum
   if (state && state.current_stage === "done" && state.status === "agent_working") {
     return "Konzultácia — premýšľam…";
   }
-  // STEP 6 (Hotovo): a signed-off conversation build reads "Hotovo — pripravené na nasadenie" (green via the
-  // existing done→green tone). MUST precede the bare-"Voľný" done branch below, else it is shadowed.
-  if (state && state.status === "done" && state.mode === "conversation") {
+  // Hotovo: ANY signed-off build reads "Hotovo — pripravené na nasadenie" (green via the existing done→green
+  // tone). Mode-agnostic — a completed GUIDED (phase-automaton) build must show "Hotovo" too, not fall through
+  // to "Voľný" as it did when this was gated on mode==="conversation". MUST precede the bare-"Voľný" branch
+  // below, else it is shadowed.
+  if (state && state.status === "done") {
     return "Hotovo — pripravené na nasadenie";
   }
-  if (!state || state.status === "done") return "Voľný";
-  // Director observation #6: a framework_issue block is an agent → Dedo escalation — there is NOTHING the
-  // Manažér can do, so the honest status is "wait for Dedo", NOT the generic "Čaká na súhlas" (which implies
-  // the Manažér should act). MUST precede the generic blocked branch below.
+  if (!state) return "Voľný";
+  // A framework_issue block means the bug is in NEX Studio itself — our technical team resolves it. Plain
+  // Slovak, no internal "Dedo"/"framework" jargon. The Manažér's one concrete move is "Nahlásiť znova"
+  // (NahlasitZnovaBar). MUST precede the generic blocked branch below.
   if (state.status === "blocked" && state.block_reason === "framework_issue") {
-    return "NEX Studio potrebuje opravu (Dedo) — počkaj";
+    return "NEX Studio má chybu — rieši ju náš technický tím";
   }
   // A blocked state names its PRECISE reason (audit Theme 1) — "Systémová chyba" / "Agent sa pýta" / "Treba
   // tvoje rozhodnutie" — never the generic "Čaká na súhlas" that collapsed five distinct situations into one.

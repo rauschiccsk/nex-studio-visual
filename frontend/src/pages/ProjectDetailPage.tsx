@@ -6,6 +6,8 @@ import { getVersion, listVersions } from "@/services/api/versions";
 import { startFastFixApi } from "@/services/api/pipeline";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import { useAuthStore } from "@/store/authStore";
+import { humanizeApiError, type HumanError } from "@/services/apiError";
+import ErrorNote from "@/components/common/ErrorNote";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
 
@@ -90,7 +92,7 @@ function VersionCard({ version, onOpen }: { version: Version; onOpen: () => void
       <div className="px-5 py-4">
         <PipelineBar version={version} />
         <div className="flex items-center justify-between text-xs text-[var(--color-text-muted)]">
-          <span>{version.bug_count} bugov · {version.epics_done}/{version.epic_count} epikov hotových</span>
+          <span>{version.bug_count} chýb · {version.epics_done}/{version.epic_count} celkov hotových</span>
           {/* Audit Theme 5: a never-started (planned) version says "Začať", not "Pokračovať" (nothing to continue). */}
           <span className="text-primary-400 font-medium">{version.status === "planned" ? "Začať →" : "Pokračovať →"}</span>
         </div>
@@ -117,7 +119,7 @@ export default function ProjectDetailPage() {
   const [fastFixOpen, setFastFixOpen] = useState(false);
   const [fastFixDirective, setFastFixDirective] = useState("");
   const [fastFixSubmitting, setFastFixSubmitting] = useState(false);
-  const [fastFixError, setFastFixError] = useState("");
+  const [fastFixError, setFastFixError] = useState<HumanError | null>(null);
 
   // Guarded project deletion (CR-V2-027): admin-only (role `ri`) + only before any PROD deploy. The
   // backend enforces both; the UI mirrors them (disabled-over-hidden) and adds a type-DELETE confirm.
@@ -127,17 +129,17 @@ export default function ProjectDetailPage() {
   const [deleteGithub, setDeleteGithub] = useState(true);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [deleting, setDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState("");
+  const [deleteError, setDeleteError] = useState<HumanError | null>(null);
 
   const handleDelete = async () => {
-    if (!project || deleteConfirmText !== "DELETE" || deleting) return;
+    if (!project || deleteConfirmText !== "ZMAZAŤ" || deleting) return;
     setDeleting(true);
-    setDeleteError("");
+    setDeleteError(null);
     try {
       await deleteProjectApi(project.id, deleteGithub);
       navigate("/projects");
     } catch (e: unknown) {
-      setDeleteError(e instanceof Error ? e.message : "Projekt sa nepodarilo zmazať.");
+      setDeleteError(humanizeApiError(e, "Zmazanie projektu zlyhalo"));
       setDeleting(false);
     }
   };
@@ -146,7 +148,7 @@ export default function ProjectDetailPage() {
     const directive = fastFixDirective.trim();
     if (!project || !directive || fastFixSubmitting) return;
     setFastFixSubmitting(true);
-    setFastFixError("");
+    setFastFixError(null);
     try {
       const res = await startFastFixApi(project.id, directive);
       // The response carries only the new version_id — fetch the version to learn its (auto-bumped)
@@ -159,7 +161,7 @@ export default function ProjectDetailPage() {
       // CR-V2-019 (OQ-7): the build board route is /vyvoj (renamed from /cockpit).
       navigate("/vyvoj");
     } catch (e: unknown) {
-      setFastFixError(e instanceof Error ? e.message : "Rýchlu opravu sa nepodarilo spustiť.");
+      setFastFixError(humanizeApiError(e, "Spustenie rýchlej opravy zlyhalo"));
       setFastFixSubmitting(false);
     }
   };
@@ -246,7 +248,7 @@ export default function ProjectDetailPage() {
             <div className="text-[12px] text-[var(--color-state-success-fg)] mt-0.5 flex flex-wrap gap-x-3">
               {justCreated.repoUrl && (
                 <span>
-                  GitHub repo:{" "}
+                  GitHub úložisko:{" "}
                   <a
                     href={`https://github.com/${justCreated.repoUrl}`}
                     target="_blank"
@@ -259,7 +261,7 @@ export default function ProjectDetailPage() {
               )}
               {(justCreated.backendPort || justCreated.frontendPort || justCreated.dbPort) && (
                 <span className="font-mono">
-                  ports {justCreated.backendPort ?? "—"}/{justCreated.frontendPort ?? "—"}/
+                  porty {justCreated.backendPort ?? "—"}/{justCreated.frontendPort ?? "—"}/
                   {justCreated.dbPort ?? "—"}
                 </span>
               )}
@@ -297,7 +299,7 @@ export default function ProjectDetailPage() {
               : "bg-[var(--color-surface-active)] text-[var(--color-text-muted)]"
           }`}>
             {/* Audit Theme 5/6: Slovak status, not the raw English enum. */}
-            {({ active: "Aktívny", paused: "Pozastavený", archived: "Archivovaný", released: "Vydaný" } as Record<string, string>)[project.status] ?? project.status}
+            {({ active: "Aktívny", paused: "Pozastavený", archived: "Archivovaný", released: "Vydaný" } as Record<string, string>)[project.status] ?? "Neznámy stav"}
           </span>
         </div>
       </div>
@@ -306,7 +308,7 @@ export default function ProjectDetailPage() {
       <div className="rounded-xl border border-[var(--color-border-default)] bg-[var(--color-canvas)] p-5 mb-6">
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
-            <span className="text-[var(--color-text-muted)] text-xs">Slug</span>
+            <span className="text-[var(--color-text-muted)] text-xs">Identifikátor</span>
             <div className="font-mono text-[var(--color-text-primary)] mt-0.5">{project.slug}</div>
           </div>
           {project.repo_url && (
@@ -327,17 +329,17 @@ export default function ProjectDetailPage() {
               <div className="flex gap-3 mt-1">
                 {project.backend_port && (
                   <span className="text-[11px] font-mono bg-[var(--color-surface)] border border-[var(--color-border-default)] text-[var(--color-text-secondary)] px-2 py-0.5 rounded">
-                    BE :{project.backend_port}
+                    Backend :{project.backend_port}
                   </span>
                 )}
                 {project.frontend_port && (
                   <span className="text-[11px] font-mono bg-[var(--color-surface)] border border-[var(--color-border-default)] text-[var(--color-text-secondary)] px-2 py-0.5 rounded">
-                    FE :{project.frontend_port}
+                    Frontend :{project.frontend_port}
                   </span>
                 )}
                 {project.db_port && (
                   <span className="text-[11px] font-mono bg-[var(--color-surface)] border border-[var(--color-border-default)] text-[var(--color-text-secondary)] px-2 py-0.5 rounded">
-                    DB :{project.db_port}
+                    Databáza :{project.db_port}
                   </span>
                 )}
               </div>
@@ -356,7 +358,7 @@ export default function ProjectDetailPage() {
             {versions.length > 0 && (
               <button
                 onClick={() => {
-                  setFastFixError("");
+                  setFastFixError(null);
                   setFastFixDirective("");
                   setFastFixOpen(true);
                 }}
@@ -382,7 +384,7 @@ export default function ProjectDetailPage() {
           <>
             <div className="rounded-xl border border-dashed border-[var(--color-border-default)] p-8 text-center mb-3">
               <p className="text-sm text-[var(--color-text-muted)]">Žiadne verzie</p>
-              <p className="text-xs text-[var(--color-text-muted)] mt-1">Vytvor prvú verziu a začni 7-krokový pipeline.</p>
+              <p className="text-xs text-[var(--color-text-muted)] mt-1">Vytvor prvú verziu a spusti 4-fázový postup.</p>
             </div>
             <button
               onClick={() => navigate(`/projects/${slug}/versions/new`)}
@@ -391,7 +393,7 @@ export default function ProjectDetailPage() {
               <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>
-              Pridať verziu v0.1
+              Pridať verziu 0.1.0
             </button>
           </>
         ) : (
@@ -406,9 +408,9 @@ export default function ProjectDetailPage() {
             {/* Hint for next version */}
             {(() => {
               const last = versions[0];
-              const match = last?.version_number.match(/^v?(\d+)\.(\d+)$/);
+              const match = last?.version_number.match(/^v?(\d+)\.(\d+)\.(\d+)$/);
               const nextLabel = (match && match[1] && match[2])
-                ? `v${match[1]}.${parseInt(match[2]) + 1}`
+                ? `${match[1]}.${parseInt(match[2]) + 1}.0`
                 : "ďalšiu verziu";
               return (
                 <button
@@ -437,7 +439,7 @@ export default function ProjectDetailPage() {
         </p>
         {(() => {
           const blockedReason = !isAdmin
-            ? "Mazať projekt smie len admin (rola Ri)."
+            ? "Projekt smie zmazať iba Manažér."
             : project.has_prod_deploy
               ? "Projekt už bol nasadený do PROD — namiesto mazania ho archivuj."
               : null;
@@ -445,7 +447,7 @@ export default function ProjectDetailPage() {
             <>
               <button
                 onClick={() => {
-                  setDeleteError("");
+                  setDeleteError(null);
                   setDeleteConfirmText("");
                   setDeleteGithub(true);
                   setDeleteOpen(true);
@@ -486,10 +488,8 @@ export default function ProjectDetailPage() {
             </p>
             <ul className="text-xs text-[var(--color-text-secondary)] list-disc pl-5 space-y-0.5 mb-3">
               <li>projekt a všetky jeho verzie, špecifikácie, návrhy, epiky, úlohy a chyby</li>
-              <li>jeho priečinok v znalostnej báze (KB)</li>
-              <li>
-                jeho pracovný adresár na disku (vrátane <span className="font-mono">MEMORY.md</span>)
-              </li>
+              <li>jeho priečinok v znalostnej báze</li>
+              <li>jeho pracovný adresár na disku (vrátane pamäte agenta)</li>
               <li>jeho UAT prostredie (kontajnery + port), ak existuje</li>
               {project.repo_url && (
                 <li>
@@ -509,21 +509,20 @@ export default function ProjectDetailPage() {
               </label>
             )}
             <label htmlFor="delete-confirm" className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
-              Na potvrdenie napíš <span className="font-mono font-bold">DELETE</span>
+              Na potvrdenie napíš <span className="font-mono font-bold">ZMAZAŤ</span>
             </label>
             <input
               id="delete-confirm"
               autoFocus
               value={deleteConfirmText}
               onChange={(e) => setDeleteConfirmText(e.target.value)}
-              placeholder="DELETE"
+              placeholder="ZMAZAŤ"
               className="w-full rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface)] px-3 py-2 text-sm font-mono text-[var(--color-text-primary)] focus:border-[var(--color-status-error)] focus:outline-none"
             />
-            {deleteError && (
-              <div className="mt-2 rounded-lg bg-[var(--color-state-error-bg)] border border-[var(--color-state-error-bg)] px-3 py-2 text-xs text-[var(--color-state-error-fg)]">
-                {deleteError}
-              </div>
-            )}
+            <ErrorNote
+              error={deleteError}
+              className="mt-2 rounded-lg bg-[var(--color-state-error-bg)] border border-[var(--color-state-error-bg)] px-3 py-2"
+            />
             <div className="mt-4 flex items-center justify-end gap-2">
               <button
                 onClick={() => setDeleteOpen(false)}
@@ -534,7 +533,7 @@ export default function ProjectDetailPage() {
               </button>
               <button
                 onClick={handleDelete}
-                disabled={deleteConfirmText !== "DELETE" || deleting}
+                disabled={deleteConfirmText !== "ZMAZAŤ" || deleting}
                 className="inline-flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
@@ -560,9 +559,8 @@ export default function ProjectDetailPage() {
               <h3 id="fastfix-title" className="text-sm font-bold text-[var(--color-text-primary)]">Rýchla oprava</h3>
             </div>
             <p className="text-xs text-[var(--color-text-muted)] mb-3">
-              Pre malú, jednoznačnú opravu. Vytvorí sa nová patch verzia a spustí sa odľahčená linka
-              (Príprava → Programovanie → Vydanie) — bez plného waterfall postupu. Koordinátor zadanie
-              najprv posúdi; ak nie je triviálne, navrhne prevod na plnú verziu.
+              Pre malú, jednoznačnú opravu. Vytvorí sa nová opravná verzia a spustí sa odľahčená linka
+              (Príprava → Programovanie → Vydanie) — bez plného postupu novej verzie.
             </p>
             <label htmlFor="fastfix-directive" className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
               Popis opravy
@@ -575,14 +573,13 @@ export default function ProjectDetailPage() {
               value={fastFixDirective}
               onChange={(e) => setFastFixDirective(e.target.value)}
               rows={5}
-              placeholder="Napríklad: V sidebare oprav preklep „Nastvenia“ na „Nastavenia“."
+              placeholder="Napríklad: V ľavom menu oprav preklep „Nastvenia“ na „Nastavenia“."
               className="w-full resize-none rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)] focus:border-primary-500 focus:outline-none"
             />
-            {fastFixError && (
-              <div className="mt-2 rounded-lg bg-[var(--color-state-error-bg)] border border-[var(--color-state-error-bg)] px-3 py-2 text-xs text-[var(--color-state-error-fg)]">
-                {fastFixError}
-              </div>
-            )}
+            <ErrorNote
+              error={fastFixError}
+              className="mt-2 rounded-lg bg-[var(--color-state-error-bg)] border border-[var(--color-state-error-bg)] px-3 py-2"
+            />
             <div className="mt-4 flex items-center justify-end gap-2">
               <button
                 onClick={() => setFastFixOpen(false)}

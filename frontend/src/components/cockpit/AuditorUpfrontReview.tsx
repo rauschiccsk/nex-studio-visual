@@ -65,10 +65,10 @@ export function AuditorUpfrontReview({ messages }: { messages: PipelineMessage[]
           <CheckCircle2 className="h-4 w-4 flex-shrink-0 text-[var(--color-status-success)]" aria-hidden="true" />
         )}
         <span>
-          Auditor — nezávislá upfront previerka:{" "}
+          Audítor — nezávislá predbežná previerka:{" "}
           {hasFindings
             ? `${n} ${findingsWord(n)} — vyrieš (Uprav) pred schválením`
-            : "bez nálezov (PASS)"}
+            : "bez nálezov (v poriadku)"}
         </span>
       </div>
 
@@ -88,7 +88,7 @@ export function AuditorUpfrontReview({ messages }: { messages: PipelineMessage[]
             className="flex items-center gap-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
           >
             {showFix ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-            Navrhovaná oprava (Auditor)
+            Navrhovaná oprava (Audítor)
           </button>
           {showFix && (
             <div className="prose prose-sm dark:prose-invert mt-1 max-h-48 max-w-none overflow-y-auto">
