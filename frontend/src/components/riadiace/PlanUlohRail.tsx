@@ -45,7 +45,7 @@ import type {
   TaskPlanFeatNode,
   TaskPlanTaskNode,
 } from "../../types/task-plan";
-import { TASK_STATUS_LABELS, TASK_TYPE_LABELS, TASK_STATUS_TONE, TONE_DOT } from "../cockpit/labels";
+import { TASK_STATUS_LABELS, TASK_TYPE_LABELS, TASK_STATUS_TONE, TONE_DOT, verificationUnconfirmed } from "../cockpit/labels";
 import { SpecMarkdown } from "../markdown/SpecMarkdown";
 import { humanizeApiError, type HumanError } from "../../services/apiError";
 import ErrorNote from "../common/ErrorNote";
@@ -636,6 +636,13 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
         // reaches 'done' too, not only a conversation build). A real "Prejsť na nasadenie" button beats the old
         // greyed sentence with no action: it navigates to Nasadenie (UAT). The left-menu path stays too.
         <div className="flex-shrink-0 border-b border-[var(--color-border-default)] px-4 py-3">
+          {/* Honest #6: a `done` version whose verification could NOT be confirmed (repo unreadable / never
+              anchored) warns AMBER before the manager deploys — never a silent green "pripravená". */}
+          {verificationUnconfirmed(board?.verified_provenance) && (
+            <p className="mb-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-700 dark:text-amber-300">
+              Overenie sa nedá potvrdiť — pred nasadením ho over.
+            </p>
+          )}
           <p className="mb-2 text-xs text-[var(--color-text-muted)]">
             Verzia je hotová a pripravená na nasadenie k zákazníkovi.
           </p>

@@ -211,6 +211,18 @@ export const FLOW_LABELS: Record<string, string> = {
   fast_fix: "Rýchla oprava",
 };
 
+// Honest verification (audit honest #6): a version can be `verified === true` yet its verification could NOT
+// actually be CONFIRMED — the PASS was never anchored to a commit (`unbound` / `hotovo_unbound`, signed while
+// the repo was unreadable) or the repo can't be read right now (`repo_unreadable`). For those three the honest
+// surface is an AMBER "overenie sa nedá potvrdiť", never a green "overená". The confirmed-green provenances
+// (`sha_match` / `hotovo_match` / `released`) stay green; the drift ones (`sha_drift` / `hotovo_drift`) already
+// read as a stale-PASS warning via ReverifyBar.
+export const VERIFICATION_UNCONFIRMED_PROVENANCES = ["unbound", "repo_unreadable", "hotovo_unbound"] as const;
+
+export function verificationUnconfirmed(provenance: string | null | undefined): boolean {
+  return provenance != null && (VERIFICATION_UNCONFIRMED_PROVENANCES as readonly string[]).includes(provenance);
+}
+
 // NOTE (CR-V2-021): the v1 ``STAGE_ORDER`` / ``FAST_FIX_STAGE_ORDER`` / ``stageOrderForFlow`` /
 // ``REGATE_TARGETS`` / ``nextStageLabel`` (the 11-stage waterfall order + gate_g re-gate targets) are
 // REMOVED — the v2 Vývoj board uses the 4-phase :data:`PHASE_ORDER` + :func:`nextPhaseLabel` instead.

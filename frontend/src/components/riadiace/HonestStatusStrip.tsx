@@ -9,7 +9,14 @@
 import { Eye, Loader2 } from "lucide-react";
 
 import type { PipelineState } from "../../services/api/pipeline";
-import { BLOCK_REASON_LABELS, PHASE_LABELS, PIPELINE_STATUS_TONE, TONE_BANNER, TONE_DOT } from "../cockpit/labels";
+import {
+  BLOCK_REASON_LABELS,
+  PHASE_LABELS,
+  PIPELINE_STATUS_TONE,
+  TONE_BANNER,
+  TONE_DOT,
+  verificationUnconfirmed,
+} from "../cockpit/labels";
 import type { BuildPhase, StatusTone } from "../cockpit/labels";
 
 // konzultacia-mode.md Part 3: a TERMINAL version (current_stage === 'done' — a finished / released build) is
@@ -66,11 +73,26 @@ interface Props {
   versionNumber: string;
   reconnecting: boolean;
   error: string | null;
+  /** Live verification provenance from the board (audit honest #6). When a `done` version's provenance is
+   *  unconfirmable (unbound / repo_unreadable / hotovo_unbound) the "Hotovo" badge reads AMBER, not green. */
+  verifiedProvenance?: string | null;
 }
 
-export function HonestStatusStrip({ state, projectName, versionNumber, reconnecting, error }: Props) {
-  const text = statusText(state, projectName, versionNumber);
-  const tone = statusTone(state);
+export function HonestStatusStrip({
+  state,
+  projectName,
+  versionNumber,
+  reconnecting,
+  error,
+  verifiedProvenance,
+}: Props) {
+  // Honest #6: a settled `done` version whose verification could NOT be confirmed must read amber, never a
+  // green "overená/Hotovo". Override the derived text + tone for exactly that case.
+  const unconfirmed = state?.status === "done" && verificationUnconfirmed(verifiedProvenance);
+  const text = unconfirmed
+    ? "Hotovo — overenie sa nedá potvrdiť"
+    : statusText(state, projectName, versionNumber);
+  const tone: StatusTone = unconfirmed ? "amber" : statusTone(state);
   const working = state?.status === "agent_working";
   // Konzultácia (Part 3): a terminal version (current_stage === 'done') is in read-only advisory mode.
   const consultMode = !!state && state.current_stage === "done";

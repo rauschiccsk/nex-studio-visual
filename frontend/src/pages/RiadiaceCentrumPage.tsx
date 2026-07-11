@@ -154,6 +154,7 @@ export default function RiadiaceCentrumPage() {
           versionNumber={selectedVersion?.versionNumber ?? ""}
           reconnecting={reconnecting}
           error={error}
+          verifiedProvenance={board?.verified_provenance}
         />
         <ConversationThread messages={board?.recent_messages ?? []} activity={activity} working={!!working} />
       </div>

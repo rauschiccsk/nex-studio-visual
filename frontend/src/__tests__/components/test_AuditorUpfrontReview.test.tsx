@@ -65,4 +65,47 @@ describe("AuditorUpfrontReview (CR-V2-039)", () => {
     render(<AuditorUpfrontReview messages={[msg({ payload: { upfront_review: true, findings: [] } })]} />);
     expect(screen.getByText(/bez nálezov \(v poriadku\)/)).toBeInTheDocument();
   });
+
+  // Honest #13: a fail-open review (crashed / parse-failed → treated as "no hole") must NOT read as a clean
+  // pass. The card warns the Manažér that the safety net didn't run.
+  it("warns 'neprebehla' when the review failed via the system notification (current backend)", () => {
+    render(
+      <AuditorUpfrontReview
+        messages={[
+          msg({
+            seq: 80,
+            author: "system",
+            kind: "notification",
+            content: "Upfront previerka Auditora sa nepodarila ani po opakovaných pokusoch — pokračuje sa bez nej.",
+            payload: null,
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText(/Predbežná previerka neprebehla — posúď návrh sám/)).toBeInTheDocument();
+  });
+
+  it("warns 'neprebehla' when the review is flagged failed in the payload", () => {
+    render(
+      <AuditorUpfrontReview
+        messages={[
+          msg({ seq: 81, author: "system", kind: "notification", content: "x", payload: { upfront_review_failed: true } }),
+        ]}
+      />,
+    );
+    expect(screen.getByText(/Predbežná previerka neprebehla/)).toBeInTheDocument();
+  });
+
+  it("a LATER successful verdict supersedes an earlier fail-open note (shows the verdict, not the warning)", () => {
+    render(
+      <AuditorUpfrontReview
+        messages={[
+          msg({ id: "f", seq: 10, author: "system", kind: "notification", content: "Upfront previerka sa nepodarila", payload: null }),
+          msg({ id: "v", seq: 20, payload: { upfront_review: true, findings: [] } }),
+        ]}
+      />,
+    );
+    expect(screen.getByText(/bez nálezov \(v poriadku\)/)).toBeInTheDocument();
+    expect(screen.queryByText(/Predbežná previerka neprebehla/)).not.toBeInTheDocument();
+  });
 });

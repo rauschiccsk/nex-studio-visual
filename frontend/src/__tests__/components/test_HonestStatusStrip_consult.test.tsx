@@ -46,3 +46,34 @@ describe("HonestStatusStrip — Konzultácia read-only indicator", () => {
     expect(screen.queryByText("Konzultácia — poradím, nič nezmením")).not.toBeInTheDocument();
   });
 });
+
+// Honest #6: a `done` version whose verification could NOT be confirmed (unbound / repo_unreadable /
+// hotovo_unbound) reads AMBER "overenie sa nedá potvrdiť", never a green "Hotovo — pripravené na nasadenie".
+function stripV(state: Partial<PipelineState>, verifiedProvenance?: string | null) {
+  return (
+    <HonestStatusStrip
+      state={state as PipelineState}
+      projectName="Demo"
+      versionNumber="1.0.0"
+      reconnecting={false}
+      error={null}
+      verifiedProvenance={verifiedProvenance}
+    />
+  );
+}
+
+describe("HonestStatusStrip — honest verification (#6)", () => {
+  it.each(["unbound", "repo_unreadable", "hotovo_unbound"])(
+    "reads amber 'overenie sa nedá potvrdiť' on a done version with unconfirmable provenance '%s'",
+    (prov) => {
+      render(stripV({ current_stage: "done", status: "done", mode: "conversation" }, prov));
+      expect(screen.getByText("Hotovo — overenie sa nedá potvrdiť")).toBeInTheDocument();
+    },
+  );
+
+  it("stays green 'Hotovo — pripravené na nasadenie' when the verification is confirmed (sha_match)", () => {
+    render(stripV({ current_stage: "done", status: "done", mode: "conversation" }, "sha_match"));
+    expect(screen.getByText("Hotovo — pripravené na nasadenie")).toBeInTheDocument();
+    expect(screen.queryByText("Hotovo — overenie sa nedá potvrdiť")).not.toBeInTheDocument();
+  });
+});
