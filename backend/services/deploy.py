@@ -185,6 +185,13 @@ def project_had_prod_deploy(db: Session, project_id: UUID) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _semver_sort_key(version_number: str) -> tuple[int, ...]:
+    """A v-prefix-agnostic numeric sort key: ``'v1.2.0'`` and ``'1.2.0'`` → ``(1, 2, 0)``. A non-numeric part
+    sorts as 0 (never crash on an odd label). Used so the deploy dropdown defaults to the genuinely newest
+    verified version regardless of a mixed ``v``/no-``v`` version_number (Director obs 2026-07-11)."""
+    return tuple(int(p) if p.isdigit() else 0 for p in version_number.lstrip("vV").split("."))
+
+
 def list_verified_versions(db: Session, project_id: UUID) -> list[str]:
     """The project's VERIFIED version_numbers — deployable via Nasadiť (design §3.4).
 
@@ -210,7 +217,11 @@ def list_verified_versions(db: Session, project_id: UUID) -> list[str]:
         return []
     slug = db.execute(select(Project.slug).where(Project.id == project_id)).scalar_one_or_none()
     head = _repo_head(claude_agent.PROJECTS_ROOT / slug) if slug else None  # read HEAD ONCE per project
-    return [num for (vid, num) in rows if version_verified(db, vid, head=head)[0]]
+    verified = [num for (vid, num) in rows if version_verified(db, vid, head=head)[0]]
+    # Sort SEMANTICALLY, not by the SQL string order: version_number mixes 'v1.0.0' (the graduated first-PROD)
+    # and '1.1.0', so a string desc put the OLDER 'v1.0.0' first ('v' > '1' in ASCII) and the Nasadiť dropdown
+    # (verified_versions[0]) defaulted to an OLD version → accidental old-version deploy risk on UAT + PROD.
+    return sorted(verified, key=_semver_sort_key, reverse=True)
 
 
 def accepted_versions(db: Session, customer_id: UUID) -> list[str]:
