@@ -51,7 +51,7 @@ from pathlib import Path
 from typing import Awaitable, Callable, Optional
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from backend.db.models.customers import Customer
@@ -699,6 +699,17 @@ def _graduate_version_in_place(db: Session, version: Version, target: str, proj_
         version.version_number = target
     version.status = "released"
     version.release_date = date.today()
+    # Audit P1 (2026-07-12): the graduation RENAMED the version old→target, but its DeployEvent audit rows (the
+    # customer's UAT ``accept`` + ``deploy`` events) still carry ``old_number`` — so ``is_accepted(customer,
+    # target)`` / ``current_version`` would read False/None for the version the manager DID accept + deploy,
+    # blocking every SUBSEQUENT PROD action (redeploy / infra change) on the graduated number. Re-point the
+    # project's events for the old number to the target so the acceptance gate + the version row agree.
+    if old_number != target:
+        db.execute(
+            update(DeployEvent)
+            .where(DeployEvent.project_id == version.project_id, DeployEvent.version_number == old_number)
+            .values(version_number=target)
+        )
     db.flush()
     # §4: keep the served note dir in sync with the renamed version (no-op when the number is unchanged).
     if old_number != target:
