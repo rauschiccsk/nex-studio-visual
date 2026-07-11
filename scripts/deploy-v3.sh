@@ -23,8 +23,11 @@
 set -euo pipefail
 
 REPO="/opt/projects/nex-studio"
-COMPOSE="/opt/prod-v3/nex-studio/docker-compose.yml"
-ENVFILE="/opt/prod-v3/nex-studio/.env"
+# The running v3 cockpit's deploy artifacts moved under /opt/customers/dev/ in the 2026-07 /opt
+# consolidation (was /opt/prod-v3/nex-studio, which no longer exists). The containers are unchanged
+# (nex-studio-v3-prod-*, ports 9206/9207); only the compose+env location moved.
+COMPOSE="/opt/customers/dev/nex-studio/docker-compose.yml"
+ENVFILE="/opt/customers/dev/nex-studio/.env"
 
 NOTES=""
 while [[ $# -gt 0 ]]; do
