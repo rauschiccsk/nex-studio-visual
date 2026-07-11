@@ -272,8 +272,8 @@ def build_matrix(db: Session, project: Project) -> dict:
                 "accepted_versions": accepted_versions(db, customer.id),
                 # Each tab links to its live instance only once it has a deploy there (§3.5 "link to the URL");
                 # None hides the link. Audit Theme 4: PROD now carries its own link, mirroring UAT.
-                "uat_url": _instance_url(customer, "uat") if uat_version else None,
-                "prod_url": _instance_url(customer, "prod") if prod_version else None,
+                "uat_url": _instance_url(customer, "uat", project) if uat_version else None,
+                "prod_url": _instance_url(customer, "prod", project) if prod_version else None,
             }
         )
 
@@ -486,7 +486,7 @@ async def deploy(
 
     # Per-customer UAT/PROD instance slug: customer subdomain (preferred) or slug,
     # namespaced by environment so a customer's UAT and PROD never collide.
-    instance_slug = _instance_slug(customer, environment)
+    instance_slug = _instance_slug(customer, environment, project)
 
     ok, detail, url = await runner(
         project_slug=project.slug,
@@ -525,15 +525,20 @@ async def deploy(
     return event, (url if ok else None), bumped_to
 
 
-def _instance_slug(customer: Customer, environment: str) -> str:
-    """Derive the per-customer instance slug for an environment.
+def _instance_slug(customer: Customer, environment: str, project: Project) -> str:
+    """Derive the per-customer-per-PROJECT instance slug for an environment.
 
-    ``<subdomain-or-slug>-<env>`` keeps a customer's UAT and PROD instances on
-    distinct ``/opt/uat/<slug>`` namespaces (instance-per-customer-per-env). The
-    result is validated by ``uat_provisioner.validate_uat_slug`` at provision time.
+    UAT → ``<customer>-<app>`` (e.g. ``andros-payables``), so a customer's DIFFERENT projects get DISTINCT UAT
+    instances (audit fix 2026-07-11: it used to be ``<customer>-<env>`` = ``andros-uat``, which dropped the
+    project → two projects of one customer collided on ONE UAT and the name never said which project). PROD
+    stays ``<customer>-prod`` — the ``-prod`` suffix is how the runner detects the env, and the PROD path
+    re-derives the app and builds the clean ``<customer>-<app>`` host itself. ``<app>`` = the project slug
+    minus a leading ``nex-`` (:func:`uat_provisioner.derive_uat_slug`). Validated at provision time.
     """
     base = (customer.subdomain or customer.slug).strip().lower()
-    return f"{base}-{environment}"
+    if environment == "prod":
+        return f"{base}-prod"
+    return f"{base}-{uat_provisioner.derive_uat_slug(project.slug)}"
 
 
 def _url_for_instance_slug(instance_slug: str) -> str:
@@ -546,9 +551,16 @@ def _url_for_instance_slug(instance_slug: str) -> str:
     return f"https://uat-{instance_slug}.{uat_provisioner.UAT_DOMAIN_SUFFIX}"
 
 
-def _instance_url(customer: Customer, environment: str) -> str:
-    """The public URL of a customer's per-environment instance (design §3.5 link)."""
-    return _url_for_instance_slug(_instance_slug(customer, environment))
+def _instance_url(customer: Customer, environment: str, project: Project) -> str:
+    """The public URL of a customer's per-environment instance (design §3.5 link).
+
+    UAT → ``uat-<customer>-<app>.isnex.eu``; PROD → the clean ``<customer>-<app>.isnex.eu`` (via
+    :func:`_prod_url`, NOT the ``uat-`` prefixed builder — a Theme-4 slip previously pointed the PROD matrix
+    link at a non-existent ``uat-<customer>-prod`` host)."""
+    if environment == "prod":
+        base = (customer.subdomain or customer.slug).strip().lower()
+        return _prod_url(base, uat_provisioner.derive_uat_slug(project.slug))
+    return _url_for_instance_slug(_instance_slug(customer, environment, project))
 
 
 def _prod_url(customer_slug: str, app: str) -> str:

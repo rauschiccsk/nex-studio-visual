@@ -578,5 +578,10 @@ class TestMatrixServiceHelpers:
         project = _seed_project(db_session, creator=creator)
         customer = _seed_customer(db_session, project, "andros")
         # The matrix UAT URL must equal the runner-built URL for the same slug.
-        instance_slug = deploy_service._instance_slug(customer, "uat")
-        assert deploy_service._instance_url(customer, "uat") == deploy_service._url_for_instance_slug(instance_slug)
+        instance_slug = deploy_service._instance_slug(customer, "uat", project)
+        assert deploy_service._instance_url(customer, "uat", project) == deploy_service._url_for_instance_slug(
+            instance_slug
+        )
+        # Audit fix 2026-07-11: UAT is per-project (<customer>-<app>), never the old <customer>-uat.
+        assert instance_slug != "andros-uat"
+        assert instance_slug == f"andros-{deploy_service.uat_provisioner.derive_uat_slug(project.slug)}"
