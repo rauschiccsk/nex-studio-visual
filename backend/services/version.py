@@ -385,6 +385,11 @@ def update(db: Session, version_id: UUID, data: VersionUpdate) -> Version:
     version = get_by_id(db, version_id)
 
     update_data = data.model_dump(exclude_unset=True)
+    # Audit P2 (2026-07-12): 'released' is a GATED transition (§4.0 Rule 5) — never let a raw PATCH set it. A
+    # released marker permanently short-circuits ``version_verified`` → ``(True, 'released')`` with no gate;
+    # callers MUST use the gated ``release()`` for that transition. ``update()`` is backfill/correction only.
+    if update_data.get("status") == "released":
+        raise ValueError("Stav 'released' sa nedá nastaviť cez update — použi gated release().")
     allowed_fields = {
         "version_number",
         "name",

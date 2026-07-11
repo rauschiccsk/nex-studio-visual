@@ -8492,6 +8492,14 @@ async def apply_action(
             raise OrchestratorError(
                 "Hotovo nedovolené: Auditor ešte nevydal PASS vo Verifikácii — najprv over verdiktom PASS."
             )
+        # Audit P2 (2026-07-12): a recorded PASS is not enough — it must still bind the CURRENT code. If HEAD
+        # moved past the verified commit before sign-off, schvalit would advance to ``done`` against code the
+        # PASS never covered. Gate on LIVE verification too; "Over znova" re-anchors a drifted PASS.
+        if state.current_stage == "verifikacia" and not version_verified(db, version_id)[0]:
+            raise OrchestratorError(
+                "Hotovo nedovolené: overenie je zastarané — kód sa pohol za overený commit. "
+                "Najprv spusti Over znova, potom schváľ."
+            )
         _record_message(
             db,
             version_id=version_id,
