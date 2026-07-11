@@ -4900,6 +4900,16 @@ async def run_dispatch(
             # ``awaiting_manazer`` with the audit next_action. Never auto-proceeds (the phase does NOT
             # advance); the Manažér reviews ``git log`` and continues. Committed-but-lost work is surfaced,
             # never silently dropped.
+            # Audit P2 (2026-07-12): but if NOTHING committed (detected_commit_count 0) the deliverable is
+            # definitively ABSENT — settle BLOCKED/agent_error, NOT awaiting_manazer, so the phase-ADVANCE verbs
+            # (approve_spec / schvalit) are hidden (a non-expert must not be able to approve an empty spec after
+            # a timeout). Keep awaiting_manazer only when work actually landed (count >= 1: review & continue).
+            if result.lost_work.get("detected_commit_count", 0) < 1:
+                state.status = "blocked"
+                state.block_reason = "agent_error"
+                state.next_action = result.lost_work["next_action"]
+                db.flush()
+                return state
             state.status = "awaiting_manazer"
             state.next_action = result.lost_work["next_action"]
             db.flush()
