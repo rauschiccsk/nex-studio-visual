@@ -36,16 +36,24 @@ done
 
 cd "$REPO"
 
-# ── Version = 3.0.N ────────────────────────────────────────────────────────
-# N = commits on the v3 line (since it forked from the frozen ``main``). When we
-# publish a note we make exactly ONE commit, so reserve +1 → HEAD count equals
-# the stamped patch after that commit (the sidebar number and the newest
-# Aktualizácie entry stay in lock-step).
-BASE_COUNT=$(git rev-list --count main..HEAD)
-if [[ -n "$NOTES" ]]; then
-    VERSION="3.0.$((BASE_COUNT + 1))"
+# ── Version = 3.0.N (custom monotonic counter, obs #2) ─────────────────────
+# Was ``git rev-list --count main..HEAD`` — but each deploy makes TWO commits (the
+# code change + this note), so published Aktualizácie numbers SKIPPED (only odd:
+# …161, 163, 165…), which reads as missing versions. Use a COMMITTED counter that
+# advances by EXACTLY 1 per published note → continuous numbering. Seeded on first
+# run from the highest existing ``v3.0.<N>`` note dir so it CONTINUES from there
+# (never resets to a lower number).
+COUNTER_FILE="docs/specs/versions/.version-counter"
+if [[ -f "$COUNTER_FILE" ]]; then
+    LAST=$(cat "$COUNTER_FILE")
 else
-    VERSION="3.0.${BASE_COUNT}"
+    LAST=$(ls -d docs/specs/versions/v3.0.* 2>/dev/null | sed 's#.*/v3\.0\.##' | sort -n | tail -1)
+    LAST=${LAST:-0}
+fi
+if [[ -n "$NOTES" ]]; then
+    VERSION="3.0.$((LAST + 1))"   # a published note advances the counter by exactly 1
+else
+    VERSION="3.0.${LAST}"          # no note → stamp the current version, don't advance
 fi
 echo "deploy-v3: stamping VERSION=${VERSION}"
 
@@ -59,11 +67,10 @@ if [[ -n "$NOTES" ]]; then
     fi
     mkdir -p "$(dirname "$DEST")"
     sed "s|{{VERSION}}|v${VERSION}|g" "$NOTES" > "$DEST"
-    git add "$DEST"
+    echo "$((LAST + 1))" > "$COUNTER_FILE"   # advance the monotonic counter; committed WITH the note
+    git add "$DEST" "$COUNTER_FILE"
     git commit -q -m "docs(aktualizacie): v${VERSION}"
-    NOW=$(git rev-list --count main..HEAD)
-    [[ "$NOW" == "$((BASE_COUNT + 1))" ]] || echo "deploy-v3: warn — HEAD count ${NOW} != ${VERSION#3.0.}" >&2
-    echo "deploy-v3: published ${DEST}"
+    echo "deploy-v3: published ${DEST} (counter → $((LAST + 1)))"
 fi
 
 # ── Build both images with the version baked in ────────────────────────────
