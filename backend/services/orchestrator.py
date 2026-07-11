@@ -3580,13 +3580,15 @@ def _uat_compose_path(
     customer_slug: Optional[str] = None,
     full_project_slug: Optional[str] = None,
 ) -> Path:
-    """The instance's existing compose file — env-aware.
+    """The instance's existing compose file.
 
-    UAT → ``/opt/uat/<uat_slug>/docker-compose.yml`` (unchanged). PROD →
-    ``/opt/customers/<customer_slug>/<full_project_slug>/docker-compose.yml`` (§2).
+    Per-customer (customer_slug + full_project_slug given): nested ``<root>/<customer>/<project>/`` — PROD
+    under ``/opt/customers``, UAT under ``/opt/uat`` (audit fix 2026-07-11). Project-level UAT (no
+    customer_slug, the uat-deploy.py path) → flat ``/opt/uat/<uat_slug>/`` (unchanged).
     """
-    if environment == "prod":
-        return PROD_ROOT / customer_slug / full_project_slug / "docker-compose.yml"
+    if customer_slug and full_project_slug:
+        root = PROD_ROOT if environment == "prod" else UAT_ROOT
+        return root / customer_slug / full_project_slug / "docker-compose.yml"
     return UAT_ROOT / uat_slug / "docker-compose.yml"
 
 
@@ -3663,11 +3665,11 @@ async def _run_uat_deploy(
     # false-success bug). Verify the app actually responds before reporting success. UAT keeps the exact
     # 2-arg call (byte-identical — a monkeypatched serve-verify fake gets only project_slug + uat_slug);
     # PROD threads the layout kwargs so the FE cross-probe targets the ``<customer>-<app>-<svc>`` name.
-    if environment == "prod":
+    if customer_slug:
         return await _verify_uat_serves(
             project_slug,
             uat_slug,
-            environment="prod",
+            environment=environment,
             customer_slug=customer_slug,
             app=app,
             full_project_slug=full_project_slug,
@@ -3746,7 +3748,11 @@ async def _verify_uat_serves(
     fe_role = roles["frontend"]
     if fe_role is not None:
         fe_port = uat_provisioner.detect_internal_port(services[fe_role], 80)
-        name_base = f"{customer_slug}-{app}" if environment == "prod" else f"uat-{uat_slug}"
+        name_base = (
+            (f"{customer_slug}-{app}" if environment == "prod" else f"uat-{customer_slug}-{app}")
+            if customer_slug
+            else f"uat-{uat_slug}"
+        )
         fe_host = f"{name_base}-{fe_role}"
         fe_ready, fe_last = await _await_http_ready(base, be_role, fe_port, host=fe_host, path="/")
         if not fe_ready:

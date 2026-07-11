@@ -629,14 +629,16 @@ def _instance_naming(
 ) -> tuple[str, str]:
     """The ``(name_base, host)`` for an instance's compose/container/image/router ids + public vhost.
 
-    UAT → ``uat-<uat_slug>`` @ ``uat-<uat_slug>.isnex.eu`` (unchanged). PROD →
-    ``<customer_slug>-<app>`` @ ``<customer_slug>-<app>.isnex.eu`` (design §2). The host is always
-    ``<name_base>.<UAT_DOMAIN_SUFFIX>``, so BOTH environments route via Traefik on the clean host.
+    Per-customer (customer_slug + app given): PROD → ``<customer>-<app>``, UAT → ``uat-<customer>-<app>``
+    (audit fix 2026-07-11 — the per-customer UAT is per-PROJECT, not the old flat ``uat-<customer>-uat``).
+    Project-level UAT (no customer_slug, the uat-deploy.py path) → ``uat-<uat_slug>`` (unchanged). The host is
+    always ``<name_base>.<UAT_DOMAIN_SUFFIX>``, so both route via Traefik on the clean host.
     """
-    if environment == "prod":
-        if not customer_slug or not app:
-            raise ValueError("prod instance naming requires customer_slug + app")
-        name_base = f"{customer_slug}-{app}"
+    if customer_slug and app:
+        base = f"{customer_slug}-{app}"
+        name_base = base if environment == "prod" else f"uat-{base}"
+    elif environment == "prod":
+        raise ValueError("prod instance naming requires customer_slug + app")
     else:
         name_base = f"uat-{uat_slug}"
     return name_base, f"{name_base}.{UAT_DOMAIN_SUFFIX}"
@@ -956,10 +958,14 @@ def provision_uat(
         raise ValueError(f"unknown environment {environment!r} (expected 'uat' or 'prod')")
     validate_uat_slug(uat_slug)
     validate_uat_slug(project_slug)
-    if environment == "prod":
+    # Per-customer instances (cockpit deploy, BOTH uat + prod) nest under ``<root>/<customer>/<project>`` and
+    # are named ``[uat-]<customer>-<app>``; the components must all be present + traversal-safe. PROD is always
+    # per-customer; a per-customer UAT is signalled by ANY of the three being set (audit fix 2026-07-11). The
+    # project-level uat-deploy.py path passes NONE → the flat ``<uat_root>/<uat_slug>`` layout below (unchanged).
+    per_customer = bool(customer_slug or app or full_project_slug) or environment == "prod"
+    if per_customer:
         if not (customer_slug and app and full_project_slug):
-            raise ValueError("prod provisioning requires customer_slug, app, and full_project_slug")
-        # Guard the directory + name components against traversal (same rules as the uat slug).
+            raise ValueError("per-customer provisioning requires customer_slug, app, and full_project_slug together")
         validate_uat_slug(customer_slug)
         validate_uat_slug(app)
         validate_uat_slug(full_project_slug)
@@ -972,7 +978,12 @@ def provision_uat(
     src_services: dict[str, Any] = source["services"]
     roles = identify_service_roles(src_services)
 
-    uat_dir = (prod_root / customer_slug / full_project_slug) if environment == "prod" else (uat_root / uat_slug)
+    # Per-customer → nested ``<root>/<customer>/<project>`` (PROD /opt/customers, UAT /opt/uat); project-level
+    # UAT → flat ``/opt/uat/<slug>`` (unchanged).
+    if per_customer:
+        uat_dir = (prod_root if environment == "prod" else uat_root) / customer_slug / full_project_slug
+    else:
+        uat_dir = uat_root / uat_slug
 
     # Redeploy preservation (per the live-instance contract).
     is_redeploy = (uat_dir / ".env").is_file() and not rotate_secrets

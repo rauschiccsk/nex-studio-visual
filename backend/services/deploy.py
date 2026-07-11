@@ -316,13 +316,16 @@ async def _default_deploy_runner(
     """
     from backend.services import orchestrator
 
-    # ``-prod``/``-uat`` suffix is guaranteed by _instance_slug; PROD threads the clean layout through.
+    # The cockpit per-customer deploy ALWAYS has a customer: derive the clean per-project layout components for
+    # BOTH environments (audit fix 2026-07-11 — UAT used to fall through to the flat ``/opt/uat/<slug>`` path,
+    # yielding ``uat-<customer>-uat`` instead of the per-project ``uat-<customer>-<app>`` + nested
+    # ``/opt/uat/<customer>/<project>``). The ``-prod``/``-uat`` suffix (from ``_instance_slug``) selects the
+    # env + strips back to the customer. PROD is unchanged; the project-level uat-deploy.py path (which passes
+    # NO customer_slug) stays flat + untouched.
     is_prod = uat_slug.endswith("-prod")
-    prod_kwargs: dict = {}
-    if is_prod:
-        customer_slug = uat_slug.removesuffix("-prod")
-        app = uat_provisioner.derive_uat_slug(project_slug)
-        prod_kwargs = dict(environment="prod", customer_slug=customer_slug, app=app, full_project_slug=project_slug)
+    environment = "prod" if is_prod else "uat"
+    customer_slug = uat_slug.removesuffix("-prod") if is_prod else uat_slug.removesuffix("-uat")
+    app = uat_provisioner.derive_uat_slug(project_slug)
 
     def _provision() -> uat_provisioner.ProvisionResult:
         return uat_provisioner.provision_uat(
@@ -330,7 +333,10 @@ async def _default_deploy_runner(
             uat_slug,
             version=version_number,
             rotate_secrets=force_fresh,
-            **prod_kwargs,
+            environment=environment,
+            customer_slug=customer_slug,
+            app=app,
+            full_project_slug=project_slug,
         )
 
     try:
@@ -342,8 +348,15 @@ async def _default_deploy_runner(
         ok, detail = await orchestrator._run_prod_deploy(project_slug, customer_slug, app, project_slug)
         url = _prod_url(customer_slug, app) if result.fe_service else None
     else:
-        ok, detail = await orchestrator._run_uat_deploy(project_slug, uat_slug)
-        url = _url_for_instance_slug(uat_slug) if result.fe_service else None
+        ok, detail = await orchestrator._run_uat_deploy(
+            project_slug,
+            uat_slug,
+            environment="uat",
+            customer_slug=customer_slug,
+            app=app,
+            full_project_slug=project_slug,
+        )
+        url = _url_for_instance_slug(f"{customer_slug}-{app}") if result.fe_service else None
     # Surface any provision warnings in the recorded (non-secret) detail.
     if result.warnings:
         detail = f"{detail} | warnings: {'; '.join(result.warnings)}"
@@ -486,7 +499,7 @@ async def deploy(
 
     # Per-customer UAT/PROD instance slug: customer subdomain (preferred) or slug,
     # namespaced by environment so a customer's UAT and PROD never collide.
-    instance_slug = _instance_slug(customer, environment, project)
+    instance_slug = _instance_slug(customer, environment)
 
     ok, detail, url = await runner(
         project_slug=project.slug,
@@ -525,20 +538,13 @@ async def deploy(
     return event, (url if ok else None), bumped_to
 
 
-def _instance_slug(customer: Customer, environment: str, project: Project) -> str:
-    """Derive the per-customer-per-PROJECT instance slug for an environment.
-
-    UAT → ``<customer>-<app>`` (e.g. ``andros-payables``), so a customer's DIFFERENT projects get DISTINCT UAT
-    instances (audit fix 2026-07-11: it used to be ``<customer>-<env>`` = ``andros-uat``, which dropped the
-    project → two projects of one customer collided on ONE UAT and the name never said which project). PROD
-    stays ``<customer>-prod`` — the ``-prod`` suffix is how the runner detects the env, and the PROD path
-    re-derives the app and builds the clean ``<customer>-<app>`` host itself. ``<app>`` = the project slug
-    minus a leading ``nex-`` (:func:`uat_provisioner.derive_uat_slug`). Validated at provision time.
-    """
+def _instance_slug(customer: Customer, environment: str) -> str:
+    """The per-customer instance slug carrying the ENV: ``<subdomain-or-slug>-<env>`` (``andros-uat`` /
+    ``andros-prod``). The runner detects PROD via the ``-prod`` suffix and strips it back to the customer; the
+    real instance DIR + name are the clean per-project ``[uat-]<customer>-<app>`` derived downstream (audit fix
+    2026-07-11 — UAT no longer lands on the flat ``<customer>-uat``). Validated at provision time."""
     base = (customer.subdomain or customer.slug).strip().lower()
-    if environment == "prod":
-        return f"{base}-prod"
-    return f"{base}-{uat_provisioner.derive_uat_slug(project.slug)}"
+    return f"{base}-{environment}"
 
 
 def _url_for_instance_slug(instance_slug: str) -> str:
@@ -552,15 +558,15 @@ def _url_for_instance_slug(instance_slug: str) -> str:
 
 
 def _instance_url(customer: Customer, environment: str, project: Project) -> str:
-    """The public URL of a customer's per-environment instance (design §3.5 link).
-
-    UAT → ``uat-<customer>-<app>.isnex.eu``; PROD → the clean ``<customer>-<app>.isnex.eu`` (via
-    :func:`_prod_url`, NOT the ``uat-`` prefixed builder — a Theme-4 slip previously pointed the PROD matrix
-    link at a non-existent ``uat-<customer>-prod`` host)."""
+    """The public URL of a customer's per-environment instance (design §3.5 link) — UAT
+    ``uat-<customer>-<app>.isnex.eu`` / PROD the clean ``<customer>-<app>.isnex.eu`` (via :func:`_prod_url`,
+    NOT the ``uat-`` prefixed builder — a Theme-4 slip previously pointed the PROD matrix link at a
+    non-existent ``uat-<customer>-prod`` host)."""
+    base = (customer.subdomain or customer.slug).strip().lower()
+    app = uat_provisioner.derive_uat_slug(project.slug)
     if environment == "prod":
-        base = (customer.subdomain or customer.slug).strip().lower()
-        return _prod_url(base, uat_provisioner.derive_uat_slug(project.slug))
-    return _url_for_instance_slug(_instance_slug(customer, environment, project))
+        return _prod_url(base, app)
+    return _url_for_instance_slug(f"{base}-{app}")
 
 
 def _prod_url(customer_slug: str, app: str) -> str:

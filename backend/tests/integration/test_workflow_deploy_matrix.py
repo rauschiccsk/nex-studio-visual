@@ -578,10 +578,13 @@ class TestMatrixServiceHelpers:
         project = _seed_project(db_session, creator=creator)
         customer = _seed_customer(db_session, project, "andros")
         # The matrix UAT URL must equal the runner-built URL for the same slug.
-        instance_slug = deploy_service._instance_slug(customer, "uat", project)
+        base = (customer.subdomain or customer.slug).strip().lower()
+        app = deploy_service.uat_provisioner.derive_uat_slug(project.slug)
+        # Audit fix 2026-07-11: the per-customer UAT is per-PROJECT (uat-<customer>-<app>), never the old flat
+        # uat-<customer>-uat. The matrix link matches the URL the runner builds from <customer>-<app>.
         assert deploy_service._instance_url(customer, "uat", project) == deploy_service._url_for_instance_slug(
-            instance_slug
+            f"{base}-{app}"
         )
-        # Audit fix 2026-07-11: UAT is per-project (<customer>-<app>), never the old <customer>-uat.
-        assert instance_slug != "andros-uat"
-        assert instance_slug == f"andros-{deploy_service.uat_provisioner.derive_uat_slug(project.slug)}"
+        assert deploy_service._instance_url(customer, "uat", project) == f"https://uat-{base}-{app}.isnex.eu"
+        # The env-carrying slug (used only to detect prod + recover the customer) stays <customer>-<env>.
+        assert deploy_service._instance_slug(customer, "uat") == f"{base}-uat"
