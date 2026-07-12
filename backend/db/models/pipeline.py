@@ -52,6 +52,10 @@ FLOW_TYPE_VALUES = ("new_version", "fast_fix")
 STAGE_VALUES = (
     "priprava",
     "navrh",
+    # CR-1 (nex-studio-visual): the live-preview "Vizuálna konzultácia" phase — the AI-built FE renders
+    # live in the cockpit for the Manažér to walk + approve BEFORE Programovanie (spec §3.A). Inserted
+    # after ``navrh`` so the phase order is Príprava → Návrh → Vizuál → Programovanie → Verifikácia → Hotovo.
+    "vizual",
     "programovanie",
     "verifikacia",
     "done",

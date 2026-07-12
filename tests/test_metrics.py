@@ -116,8 +116,8 @@ def test_pricing_settings_keys_present(db_session):
         assert key in system_setting.DEFAULT_SETTINGS, key
         assert system_setting.DEFAULT_SETTINGS[key].value_type == "float"
         assert system_setting.DEFAULT_SETTINGS[key].value == "0.0" or key.startswith("developer") or key in flat
-    # the 4 per-phase rate + 4 per-phase wage keys exist (8 total)
-    assert len(per_phase) == 8
+    # the 5 per-phase rate + 5 per-phase wage keys exist (10 total — CR-1 added the Vizuál phase)
+    assert len(per_phase) == 10
     system_setting._cache.clear()
     # every new per-phase metrics key resolves to 0.0 (unset) without a seed row
     assert system_setting.get_float(db_session, "metrics_minutes_per_mtok_navrh") == 0.0

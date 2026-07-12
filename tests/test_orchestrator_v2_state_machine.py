@@ -85,8 +85,9 @@ def _msgs(db_session, version_id):
 # ── STAGE_ORDER / helpers ──────────────────────────────────────────────────
 
 
-def test_stage_order_is_four_phases_plus_done():
-    assert orchestrator.STAGE_ORDER == ("priprava", "navrh", "programovanie", "verifikacia", "done")
+def test_stage_order_is_five_phases_plus_done():
+    # CR-1 (nex-studio-visual): the Vizuál live-preview phase sits between Návrh and Programovanie.
+    assert orchestrator.STAGE_ORDER == ("priprava", "navrh", "vizual", "programovanie", "verifikacia", "done")
     # The v1 11-stage waterfall is gone.
     for dead in ("kickoff", "gate_a", "gate_e", "task_plan", "build", "gate_g", "release"):
         assert dead not in orchestrator.STAGE_ORDER
@@ -96,9 +97,11 @@ def test_fast_fix_skips_navrh():
     assert orchestrator.FAST_FIX_STAGE_ORDER == ("priprava", "programovanie", "verifikacia", "done")
 
 
-def test_next_stage_new_version_walks_four_phases():
+def test_next_stage_new_version_walks_all_phases():
     assert orchestrator._next_stage("priprava", "new_version") == "navrh"
-    assert orchestrator._next_stage("navrh", "new_version") == "programovanie"
+    # CR-1 (nex-studio-visual): Vizuál sits between Návrh and Programovanie.
+    assert orchestrator._next_stage("navrh", "new_version") == "vizual"
+    assert orchestrator._next_stage("vizual", "new_version") == "programovanie"
     assert orchestrator._next_stage("programovanie", "new_version") == "verifikacia"
     assert orchestrator._next_stage("verifikacia", "new_version") == "done"
     assert orchestrator._next_stage("done", "new_version") == "done"  # clamps at terminal
@@ -222,7 +225,7 @@ def _seed_min_plan(db_session, version, project):
     db_session.flush()
 
 
-async def test_schvalit_navrh_advances_to_programovanie(db_session, fake_claude):
+async def test_schvalit_navrh_advances_to_vizual(db_session, fake_claude):
     version, project = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
     st = _state(db_session, version.id)
@@ -231,7 +234,8 @@ async def test_schvalit_navrh_advances_to_programovanie(db_session, fake_claude)
     db_session.flush()
     _seed_min_plan(db_session, version, project)  # CR-V2-037: a materialized plan is the precondition
     state = await orchestrator.apply_action(db_session, version_id=version.id, action="schvalit")
-    assert state.current_stage == "programovanie"
+    # CR-1 (nex-studio-visual): Návrh now advances to the Vizuál live-preview phase (not straight to Programovanie).
+    assert state.current_stage == "vizual"
     assert state.status == "agent_working"
 
 

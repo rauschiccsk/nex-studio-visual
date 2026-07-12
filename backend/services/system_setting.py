@@ -307,6 +307,17 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
             "Koľko minút ľudskej práce zodpovedá 1 miliónu tokenov vo fáze Návrh. 0 = nenastavené → nezobrazí sa."
         ),
     ),
+    # CR-1 (nex-studio-visual): the Vizuál phase is a comparison phase too (COMPARISON_PHASES derives from
+    # STAGE_VALUES), so it carries its own rate/wage keys. Default 0.0 = unconfigured → its human-time/cost is null.
+    "metrics_minutes_per_mtok_vizual": _Default(
+        value="0.0",
+        value_type="float",
+        label="Ľudský čas — fáza Vizuál",
+        unit="min / mil. tokenov",
+        description=(
+            "Koľko minút ľudskej práce zodpovedá 1 miliónu tokenov vo fáze Vizuál. 0 = nenastavené → nezobrazí sa."
+        ),
+    ),
     "metrics_minutes_per_mtok_programovanie": _Default(
         value="0.0",
         value_type="float",
@@ -343,6 +354,14 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
         label="Hodinová mzda — fáza Návrh",
         unit="€ / hod",
         description="Hodinová mzda ľudskej práce pre fázu Návrh. 0 = nenastavené → nezobrazí sa.",
+    ),
+    # CR-1 (nex-studio-visual): per-phase wage for the Vizuál phase (see the rate key above).
+    "metrics_hourly_wage_vizual": _Default(
+        value="0.0",
+        value_type="float",
+        label="Hodinová mzda — fáza Vizuál",
+        unit="€ / hod",
+        description="Hodinová mzda ľudskej práce pre fázu Vizuál. 0 = nenastavené → nezobrazí sa.",
     ),
     "metrics_hourly_wage_programovanie": _Default(
         value="0.0",

@@ -63,6 +63,7 @@ STAGES = frozenset(
     {
         "priprava",
         "navrh",
+        "vizual",  # CR-1 (nex-studio-visual): the live-preview phase between Návrh and Programovanie
         "programovanie",
         "verifikacia",
         "done",

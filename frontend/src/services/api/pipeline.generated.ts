@@ -3562,7 +3562,7 @@ export interface components {
              * Current Stage
              * @enum {string}
              */
-            current_stage: "priprava" | "navrh" | "programovanie" | "verifikacia" | "done";
+            current_stage: "priprava" | "navrh" | "vizual" | "programovanie" | "verifikacia" | "done";
             /**
              * Flow Type
              * @enum {string}

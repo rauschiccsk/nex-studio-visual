@@ -341,6 +341,9 @@ def _failure_metrics_payload(result: object) -> dict[str, Any]:
 STAGE_ORDER: tuple[str, ...] = (
     "priprava",
     "navrh",
+    # CR-1 (nex-studio-visual): live-preview "Vizuál" phase between Návrh and Programovanie (spec §3.A) —
+    # the AI-built FE renders live for the Manažér to walk + approve before the coding phase.
+    "vizual",
     "programovanie",
     "verifikacia",
     "done",
@@ -364,6 +367,8 @@ FAST_FIX_STAGE_ORDER: tuple[str, ...] = (
 STAGE_ACTOR: dict[str, str] = {
     "priprava": "ai_agent",
     "navrh": "ai_agent",
+    # CR-1: the Vizuál phase is AI-Agent-owned (the doer spins the live preview / applies FE changes).
+    "vizual": "ai_agent",
     "programovanie": "ai_agent",
     "verifikacia": "auditor",
 }
@@ -483,6 +488,8 @@ _ADVANCING_ACTIONS = frozenset(
 STAGE_TIMEOUT: dict[str, int] = {
     "priprava": 900,
     "navrh": 1200,
+    # CR-1: the Vizuál round mirrors Návrh's budget (read + produce a live FE preview / apply FE edits).
+    "vizual": 1200,
     "programovanie": 2400,
     "verifikacia": 1200,
 }
@@ -565,8 +572,8 @@ def determine_available_actions(state: PipelineState) -> set[str]:
         # (state-only). The finer DB preconditions (conversation + spec approved + kontrola done + NOT already
         # done) are the board route's POST-FILTER; ``apply_action`` enforces them authoritatively.
         actions.add("hotovo")
-    elif stage in ("navrh", "programovanie"):
-        # The dial-governed schvaľovacie body after Návrh / Programovanie — ``schvalit`` advances to the
+    elif stage in ("navrh", "vizual", "programovanie"):
+        # The schvaľovacie body after Návrh / Vizuál (CR-1) / Programovanie — ``schvalit`` advances to the
         # next phase. (Whether the build HALTED here at all is the dial's call; once settled, it's offered.)
         actions.add("schvalit")
     elif stage == "verifikacia":
@@ -4828,6 +4835,14 @@ async def run_dispatch(
     if stage == "navrh":
         return await _run_navrh_round(db, state, on_event=on_event, directive=directive, on_message=on_message)
 
+    # Vizuál round (CR-1, nex-studio-visual — spec §3.A/§3.C). MINIMAL entry round: spin up the isolated
+    # live-preview Vite sandbox so the Manažér can WALK the running app in the cockpit + approve it before
+    # Programovanie. NO AI-Agent turn here (the "AI applies the Manažér's requested change" loop is a LATER
+    # CR-1 sub-task). Owns its own settle (records the preview-URL notification + ``awaiting_manazer``), so it
+    # early-returns like the other rounds. ``directive`` is not threaded — this minimal round has no agent turn.
+    if stage == "vizual":
+        return await _run_vizual_round(db, state, on_event=on_event, on_message=on_message)
+
     # Programovanie round (CR-V2-012): the AI Agent's SELF-CHECKING coding loop executing the Návrh task plan
     # (implement + own tests/verification per task; NO per-task Auditor — the independent Auditor verifies once
     # at Verifikácia). Owns its own multi-task lifecycle + the SHARED dial-settle at the end, so it
@@ -7270,11 +7285,16 @@ _MIERA_AUTONOMIE_DEFAULT = "plna"
 # Dial-governed *schvaľovacie body* (approval stops) in the 4-phase model. A boundary fires AFTER its
 # named phase completes. These are the ONLY stops the dial governs (design §2.3):
 SCHVALOVACI_BOD_NAVRH = "navrh"  # after Návrh (design + task plan)
+SCHVALOVACI_BOD_VIZUAL = "vizual"  # CR-1: after Vizuál (the live-preview walk) → Programovanie
 SCHVALOVACI_BOD_PROGRAMOVANIE = "programovanie"  # after Programovanie (the coding phase)
 SCHVALOVACI_BOD_VERIFIKACIA = "verifikacia"  # after Verifikácia = build verified/done (the "end" stop)
-#: Every dial-governed boundary (the schvaľovacie body the dial can halt at).
+#: Every dial-governed boundary (the schvaľovacie body the dial can halt at). For a ``new_version`` EVERY
+#: phase boundary is a mandatory Manažér stop regardless of the dial (see :func:`_settle_phase_boundary`),
+#: so the Vizuál boundary (``vizual → programovanie``) belongs here too. (The minimal CR-1 Vizuál round
+#: settles ``awaiting_manazer`` itself rather than going through the dial, so membership here is the design
+#: signal + future-proofing for when the round auto-continues at a non-stopping level.)
 DIAL_GOVERNED_BOUNDARIES = frozenset(
-    {SCHVALOVACI_BOD_NAVRH, SCHVALOVACI_BOD_PROGRAMOVANIE, SCHVALOVACI_BOD_VERIFIKACIA}
+    {SCHVALOVACI_BOD_NAVRH, SCHVALOVACI_BOD_VIZUAL, SCHVALOVACI_BOD_PROGRAMOVANIE, SCHVALOVACI_BOD_VERIFIKACIA}
 )
 #: Two stops are ALWAYS outside the dial — they fire at EVERY level, including ``plna`` (design §2.3,
 #: D3/D6). Carved out here so :func:`dial_stops_at` never even consults the dial for them:
@@ -7746,6 +7766,81 @@ async def _dispatch_build_turn(
         # the legacy automaton (mode NULL) passes None so its payload stays byte-for-byte unchanged.
         metrics_phase="programovanie" if mode == "conversation" else None,
     )
+
+
+async def _run_vizual_round(
+    db: Session,
+    state: PipelineState,
+    *,
+    on_event: Optional[claude_agent.EventCallback] = None,
+    on_message: Optional[MessageCallback] = None,
+) -> PipelineState:
+    """The Vizuál phase — MINIMAL live-preview entry round (CR-1, nex-studio-visual; spec §3.A/§3.C).
+
+    Brings the project's frontend up LIVE in an isolated Vite dev-server sandbox so the Manažér can WALK the
+    running app in the cockpit and approve it before Programovanie. This is the MINIMAL round: it only
+    spins the preview up and hands the Manažér the URL to review. The "AI applies the Manažér's requested
+    change" HMR loop is a LATER CR-1 sub-task and is deliberately NOT dispatched here (no AI-Agent turn).
+
+    Flow:
+      1. Resolve the project slug.
+      2. :func:`vizual_sandbox.spin_up` (idempotent) → the public preview URL. Wrapped in try/except so a
+         sandbox failure NEVER crashes the pipeline: it settles ``blocked`` / ``system_error`` with a
+         plain-Slovak note instead.
+      3. Record ONE ``system → manazer`` notification carrying the preview URL (content + payload).
+      4. Settle ``awaiting_manazer`` — the Manažér reviews the vizual and advances with ``schvalit`` (the
+         ``vizual → programovanie`` phase gate; dial-independent for a ``new_version``).
+
+    The sole-mutator invariant holds: this runs inside the dispatch path, always a consequence of an action
+    already routed through :func:`apply_action`.
+    """
+    version_id = state.version_id
+    slug = _project_slug_for_version(db, version_id)
+
+    # Lazy, module-level-style reference (avoids an import cycle at orchestrator load; the ``docker``-heavy
+    # sandbox module stays out of the hot import path). Referenced as ``vizual_sandbox.spin_up`` — a module
+    # attribute, NOT ``from ... import spin_up`` — so tests can monkeypatch ``spin_up`` without real docker.
+    from backend.services import vizual_sandbox
+
+    try:
+        url = vizual_sandbox.spin_up(slug)
+    except Exception as exc:  # noqa: BLE001 — a sandbox failure must NEVER crash the pipeline; settle honestly.
+        logger.exception("vizual sandbox spin_up failed for %s", slug)
+        state.status = "blocked"
+        state.block_reason = "system_error"  # R4 (D1): an engine-side step (the live preview) failed
+        state.next_action = "Živý náhľad sa nepodarilo spustiť — skús to znova (Uprav) alebo počkaj na technický tím."
+        err_msg = _record_message(
+            db,
+            version_id=version_id,
+            stage="vizual",
+            author="system",
+            recipient="manazer",
+            kind="notification",
+            content="Živý náhľad projektu sa nepodarilo spustiť. Skús to znova alebo počkaj na technický tím.",
+            payload={"phase": "vizual", "vizual_error": str(exc)},
+        )
+        if on_message is not None:
+            await on_message(err_msg)
+        db.flush()
+        return state
+
+    ready_msg = _record_message(
+        db,
+        version_id=version_id,
+        stage="vizual",
+        author="system",
+        recipient="manazer",
+        kind="notification",
+        content=f"Vizuál je pripravený — otvor si ho: {url}",
+        payload={"phase": "vizual", "vizual_url": url},
+    )
+    if on_message is not None:
+        await on_message(ready_msg)
+
+    state.status = "awaiting_manazer"
+    state.next_action = "Prezri si vizuál a keď sedí, schváľ (Hotovo/Schváliť)."
+    db.flush()
+    return state
 
 
 async def _run_build_round(
@@ -8497,8 +8592,10 @@ async def apply_action(
         # "Schváliť" — the Manažér ratifies the current phase's output at a dial-governed schvaľovací bod
         # (after Návrh / Programovanie / Verifikácia) → advance to the next phase / Hotovo. The dial decides
         # whether the build STOPPED here for the Manažér at all; once it has, this signs it off.
-        if state.current_stage not in ("navrh", "programovanie", "verifikacia"):
-            raise OrchestratorError("Schváliť je platné len na schvaľovacom bode (Návrh / Programovanie / Verifikácia)")
+        if state.current_stage not in ("navrh", "vizual", "programovanie", "verifikacia"):
+            raise OrchestratorError(
+                "Schváliť je platné len na schvaľovacom bode (Návrh / Vizuál / Programovanie / Verifikácia)"
+            )
         # CR-V2-037: never advance out of Návrh with an EMPTY task plan (0 tasks) — that would enter
         # Programovanie with nothing to build. An empty plan means the Návrh round did not materialize one
         # (e.g. a per-feat pass crashed past its retries → settled awaiting_manazer). Recover via "Uprav"

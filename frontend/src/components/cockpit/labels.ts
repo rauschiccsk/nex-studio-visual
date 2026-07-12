@@ -22,27 +22,30 @@ import type { BlockReason, PipelineParticipant, PipelineStage } from "../../serv
 // triage/regate label maps + the 11-stage STAGE_ORDER family are removed (see the NOTEs
 // below). The tone palette (TONE_*/StatusTone/DECISION_BANNER) is intact (salvaged).
 
-// The v2 build phase machine value (mirrors design §2.1; `done` is the terminal phase).
-export type BuildPhase = "priprava" | "navrh" | "programovanie" | "verifikacia" | "done";
+// The v2 build phase machine value (mirrors design §2.1; `done` is the terminal phase). CR-1
+// (nex-studio-visual) inserts `vizual` (the live-preview phase) between `navrh` and `programovanie`.
+export type BuildPhase = "priprava" | "navrh" | "vizual" | "programovanie" | "verifikacia" | "done";
 
 // Slovak human-facing label per v2 build phase — the 4-phase Vývoj board chips + the
 // AI Agent tab strip. Collapses the v1 11-stage STAGE_LABELS to the four real phases.
 export const PHASE_LABELS: Record<BuildPhase, string> = {
   priprava: "Príprava",
   navrh: "Návrh",
+  vizual: "Vizuál",
   programovanie: "Programovanie",
   verifikacia: "Verifikácia",
   done: "Hotovo",
 };
 
-// Canonical v2 phase order — the horizontal phase bar (Príprava › Návrh › Programovanie
+// Canonical v2 phase order — the horizontal phase bar (Príprava › Návrh › Vizuál › Programovanie
 // › Verifikácia › Hotovo). Replaces the v1 STAGE_ORDER for v2 surfaces.
-export const PHASE_ORDER: BuildPhase[] = ["priprava", "navrh", "programovanie", "verifikacia", "done"];
+export const PHASE_ORDER: BuildPhase[] = ["priprava", "navrh", "vizual", "programovanie", "verifikacia", "done"];
 
 // Raw machine code per phase — usable as a hover tooltip alongside the label.
 export const PHASE_CODES: Record<BuildPhase, string> = {
   priprava: "priprava",
   navrh: "navrh",
+  vizual: "vizual",
   programovanie: "programovanie",
   verifikacia: "verifikacia",
   done: "done",

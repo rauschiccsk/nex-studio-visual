@@ -44,24 +44,28 @@ describe("cockpit block_reason phrases", () => {
 // CR-V2-019/021: the v2.0.0 vocabulary — the v1 11-stage STAGE map collapses to FOUR build phases and the
 // 7-role map collapses to the v2 participants (AI Agent / Auditor / Manažér + system).
 describe("v2 vocabulary collapse", () => {
-  it("PHASE_LABELS are exactly the four build phases + the terminal Hotovo", () => {
-    const phases: BuildPhase[] = ["priprava", "navrh", "programovanie", "verifikacia", "done"];
+  it("PHASE_LABELS are exactly the five build phases + the terminal Hotovo", () => {
+    // CR-1 (nex-studio-visual): the Vizuál live-preview phase sits between Návrh and Programovanie.
+    const phases: BuildPhase[] = ["priprava", "navrh", "vizual", "programovanie", "verifikacia", "done"];
     expect(Object.keys(PHASE_LABELS).sort()).toEqual([...phases].sort());
     expect(PHASE_LABELS.priprava).toBe("Príprava");
     expect(PHASE_LABELS.navrh).toBe("Návrh");
+    expect(PHASE_LABELS.vizual).toBe("Vizuál");
     expect(PHASE_LABELS.programovanie).toBe("Programovanie");
     expect(PHASE_LABELS.verifikacia).toBe("Verifikácia");
     expect(PHASE_LABELS.done).toBe("Hotovo");
   });
 
   it("PHASE_ORDER is the horizontal bar order and PHASE_CODES covers every phase", () => {
-    expect(PHASE_ORDER).toEqual(["priprava", "navrh", "programovanie", "verifikacia", "done"]);
+    expect(PHASE_ORDER).toEqual(["priprava", "navrh", "vizual", "programovanie", "verifikacia", "done"]);
     for (const p of PHASE_ORDER) expect(PHASE_CODES[p]).toBeTruthy();
   });
 
   it("nextPhaseLabel returns the following phase (clamped at Hotovo)", () => {
     expect(nextPhaseLabel("priprava")).toBe("Návrh");
-    expect(nextPhaseLabel("navrh")).toBe("Programovanie");
+    // CR-1: Návrh → Vizuál → Programovanie.
+    expect(nextPhaseLabel("navrh")).toBe("Vizuál");
+    expect(nextPhaseLabel("vizual")).toBe("Programovanie");
     expect(nextPhaseLabel("programovanie")).toBe("Verifikácia");
     expect(nextPhaseLabel("verifikacia")).toBe("Hotovo");
     expect(nextPhaseLabel("done")).toBe("Hotovo");
