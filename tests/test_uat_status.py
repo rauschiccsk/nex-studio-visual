@@ -121,7 +121,12 @@ def test_status_reads_version_from_env(monkeypatch, tmp_path, capsys):
     with patch.object(mod, "_get_container_statuses", return_value=[]):
         mod.status("dev")
     captured = capsys.readouterr()
-    assert "v0.9.42" in captured.out
+    # Rich styles the console output (ANSI colour codes + number highlighting split the version string), so
+    # strip the escape sequences before the substring match — the version read from PROJECT_VERSION IS shown.
+    import re
+
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", captured.out)
+    assert "0.9.42" in plain
 
 
 def test_read_env_value_parses_simple_kv(monkeypatch, tmp_path):

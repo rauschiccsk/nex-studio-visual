@@ -27,10 +27,13 @@ def test_write_and_edit_tools():
 
 
 def test_bash_truncates():
-    long = "x" * 200
+    # The command preview is clipped to _MAX_CMD (200) chars — loosened from the original 60 so the live feed
+    # shows the meaningful head of a command (live-activity-truncation fix). Use a >200-char command so the
+    # truncation actually bites.
+    long = "x" * 300
     line, kind = activity_line(_assistant(_tool("Bash", command=long)))
     assert line.startswith("spúšťa: ")
-    assert len(line) <= len("spúšťa: ") + 60
+    assert len(line) <= len("spúšťa: ") + 200
     assert kind == "tool"
 
 

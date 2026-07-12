@@ -128,7 +128,7 @@ class _FakeRunner:
         self._url = url
         self.calls: list[dict] = []
 
-    async def __call__(self, *, project_slug, uat_slug, version_number, force_fresh):
+    async def __call__(self, *, project_slug, uat_slug, version_number, force_fresh, admin_password=None):
         self.calls.append(
             {
                 "project_slug": project_slug,
@@ -263,12 +263,12 @@ def test_default_runner_passes_rotate_secrets_through(monkeypatch):
         warnings: list[str] = []
         fe_service = "frontend"
 
-    def _fake_provision(project_slug, uat_slug, *, version, rotate_secrets):
+    def _fake_provision(project_slug, uat_slug, *, version, rotate_secrets, **kw):
         captured["rotate_secrets"] = rotate_secrets
         captured["uat_slug"] = uat_slug
         return _Result()
 
-    async def _fake_run_uat_deploy(project_slug, uat_slug):
+    async def _fake_run_uat_deploy(project_slug, uat_slug, **kw):
         return True, "OK"
 
     monkeypatch.setattr(uat_provisioner, "provision_uat", _fake_provision)
@@ -565,7 +565,7 @@ def _fake_default_runner(monkeypatch):
     """Patch the module-level default runner so HTTP deploys never spawn docker."""
     calls: list[dict] = []
 
-    async def _runner(*, project_slug, uat_slug, version_number, force_fresh):
+    async def _runner(*, project_slug, uat_slug, version_number, force_fresh, admin_password=None):
         calls.append(
             {
                 "project_slug": project_slug,

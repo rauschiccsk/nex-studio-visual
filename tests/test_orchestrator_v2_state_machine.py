@@ -552,7 +552,10 @@ def test_board_route_v2_contract(db_session, fake_claude):
     board = _board(db_session, version.id)
     # v2 fields present.
     assert board.state is not None and board.state.current_stage == "programovanie"
-    assert "schvalit" in board.available_actions  # dial-governed v2 verb at a settled Programovanie
+    # Bug 1 (cockpit-timeout-and-activity-fix.md): a settled Programovanie whose plan is NOT complete (here: no
+    # materialized tasks → build_readiness.all_tasks_done False) offers "Pokračovať" (resume the build), NOT the
+    # advance verb "schvalit" — the board post-filter swaps them so a timed-out build gets a clean resume.
+    assert "pokracovat" in board.available_actions
     assert {s.role for s in board.agent_sessions} == {orchestrator.AI_AGENT_ROLE, orchestrator.AUDITOR_ROLE}
     # v1 board fields DROPPED from the schema (no longer serialised).
     dumped = board.model_dump()

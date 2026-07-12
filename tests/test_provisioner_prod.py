@@ -183,7 +183,7 @@ def test_prod_still_routes_by_traefik_not_host_ports(tmp_path):
 def test_prod_requires_customer_app_and_full_slug(tmp_path):
     """``environment='prod'`` without customer_slug/app/full_project_slug is a hard error (fail-before-write)."""
     _make_project(tmp_path, "nex-payables", PROD_COMPOSE)
-    with pytest.raises(ValueError, match="prod provisioning requires"):
+    with pytest.raises(ValueError, match="per-customer provisioning requires"):
         P.provision_uat(
             "nex-payables",
             "andros-prod",
@@ -257,7 +257,7 @@ def test_default_deploy_runner_prod_derives_layout(monkeypatch):
         captured["provision"] = {"project_slug": project_slug, "uat_slug": uat_slug, **kw}
         return _Result()
 
-    async def _fake_run_prod(project_slug, customer_slug, app, full_project_slug):
+    async def _fake_run_prod(project_slug, customer_slug, app, full_project_slug, version_number=None):
         captured["prod_deploy"] = (project_slug, customer_slug, app, full_project_slug)
         return True, "OK"
 
@@ -280,8 +280,10 @@ def test_default_deploy_runner_prod_derives_layout(monkeypatch):
 
 
 def test_default_deploy_runner_uat_passes_no_prod_kwargs(monkeypatch):
-    """A ``-uat`` slug takes the UAT branch: provision_uat is called WITHOUT any prod kwargs (byte-identical
-    to today) and the URL is the ``uat-<slug>`` host."""
+    """A ``-uat`` slug takes the UAT branch. Since the 2026-07-11 audit fix the UAT branch ALSO derives the
+    per-project layout (``environment='uat'`` + customer/app/full-slug threaded to the provisioner + the plain
+    ``_run_uat_deploy`` redeploy) — so the runner takes ``_run_uat_deploy`` (never ``_run_prod_deploy``) and the
+    URL is the per-project ``uat-<customer>-<app>`` host."""
     import asyncio
 
     from backend.services import deploy as deploy_service
@@ -293,12 +295,12 @@ def test_default_deploy_runner_uat_passes_no_prod_kwargs(monkeypatch):
         warnings: list[str] = []
         fe_service = "frontend"
 
-    def _fake_provision(project_slug, uat_slug, *, version, rotate_secrets):
-        # NB: NO **kw — a prod kwarg would raise TypeError here, proving the uat path threads none.
+    def _fake_provision(project_slug, uat_slug, *, version, rotate_secrets, **kw):
         captured["uat_slug"] = uat_slug
+        captured["provision"] = kw
         return _Result()
 
-    async def _fake_run_uat(project_slug, uat_slug):
+    async def _fake_run_uat(project_slug, uat_slug, **kw):
         captured["uat_deploy"] = (project_slug, uat_slug)
         return True, "OK"
 
@@ -312,8 +314,9 @@ def test_default_deploy_runner_uat_passes_no_prod_kwargs(monkeypatch):
     )
 
     assert ok is True
+    assert captured["provision"]["environment"] == "uat"  # the UAT branch, never prod
     assert captured["uat_deploy"] == ("nex-payables", "andros-uat")
-    assert url == "https://uat-andros-uat.isnex.eu"
+    assert url == "https://uat-andros-payables.isnex.eu"
 
 
 # ---------- orchestrator: PROD deploy compose path + serve-verify container names ----------
@@ -357,7 +360,6 @@ async def test_run_prod_deploy_uses_customer_root_compose(monkeypatch):
         return True, "OK"
 
     monkeypatch.setattr(orchestrator.asyncio, "create_subprocess_exec", _fake_exec)
-    monkeypatch.setattr(orchestrator, "_fe_app_version", lambda slug: "1.0.0")
     monkeypatch.setattr(orchestrator, "_verify_uat_serves", _serves_ok)
 
     ok, detail = await orchestrator._run_prod_deploy("nex-payables", "andros", "payables", "nex-payables")
@@ -413,4 +415,6 @@ async def test_verify_uat_serves_prod_probes_customer_app_container(monkeypatch,
 
     assert (ok, detail) == (True, "OK")
     assert any("andros-payables-frontend:80/" in " ".join(c) for c in probes), "FE probed by prod container name"
-    assert not any("uat-" in " ".join(c) for c in probes), "no uat- container name in prod probes"
+    # No ``uat-`` prefixed INSTANCE container name in prod probes. (The public-route probe legitimately hits the
+    # shared ``nex-uat-traefik`` ingress host — infra, not an instance container — so match the instance prefix.)
+    assert not any("uat-andros-payables" in " ".join(c) for c in probes), "no uat- prefixed container in prod probes"

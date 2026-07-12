@@ -660,7 +660,7 @@ async def test_red_acceptance_floors_auditor_pass_to_fail(db_session, monkeypatc
 
 async def test_red_boot_settles_honest_boot_fail_ahead_of_auditor(db_session, monkeypatch):
     # release-smoke-boot-and-batch-fixes.md B: a boot-FAIL (the app never even came up) is a DECISIVE product
-    # FAIL — it settles a clean Verifikácia FAIL carrying the boot reason ("Appka sa nespustila: …") AHEAD of the
+    # FAIL — it settles a clean Verifikácia FAIL carrying the boot reason ("Appka sa nespustila — …") AHEAD of the
     # Auditor turn, independent of whether the Auditor could emit a parseable verdict. (Before B the Auditor
     # still ran and its PASS was floored to FAIL with engine_override=runtime_floor_red; now the boot-FAIL
     # short-circuits the Auditor entirely.) The Auditor PASS stub stays as a REGRESSION GUARD: were the Auditor
@@ -675,7 +675,7 @@ async def test_red_boot_settles_honest_boot_fail_ahead_of_auditor(db_session, mo
     verdicts = [m for m in _msgs(db_session, version.id) if m.kind == "verdict"]
     assert verdicts[-1].payload["verdict"] == "FAIL"
     assert verdicts[-1].payload.get("engine_override") == "boot_fail"
-    assert verdicts[-1].content.startswith("Appka sa nespustila:")
+    assert verdicts[-1].content.startswith("Appka sa nespustila")
     assert state.current_stage != "done"
     assert orchestrator._verifikacia_passed(db_session, version.id) is False
 

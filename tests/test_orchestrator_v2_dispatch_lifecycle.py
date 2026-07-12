@@ -3,9 +3,9 @@
 The dispatch-lifecycle SEAMS (R-BLAST safeguards) are exercised at 11+ live v2 dispatch sites but every
 phase test STUBS them to a no-op, so their own contracts had no live test once v1 ``test_orchestrator.py``
 / ``test_pipeline_runner.py`` were deferred. The UAT deploy helpers (``_run_uat_deploy`` /
-``_verify_uat_serves`` / ``_fe_app_version``) are still live v2 source (called by ``deploy.py``) but
-``test_deploy_service.py`` FAKES the runner above them, so their subprocess / exit-code / serve-verify /
-git-count behaviours had no live test either. This file re-expresses those v1 assertions in v2 vocabulary,
+``_verify_uat_serves``) are still live v2 source (called by ``deploy.py``) but
+``test_deploy_service.py`` FAKES the runner above them, so their subprocess / exit-code / serve-verify
+behaviours had no live test either. This file re-expresses those v1 assertions in v2 vocabulary,
 run against the real v2 branch DB:
 
   * ``_begin_dispatch`` — captures the baseline + arms the durable flag; freezes the baseline on re-entry.
@@ -14,7 +14,7 @@ run against the real v2 branch DB:
   * ``run_dispatch`` timeout → awaiting_manazer with the commit count, idempotent across parse-retries.
   * ``recover_orphaned_builds_on_startup`` — crash recovery of an orphaned agent_working build.
   * ``cleanup_old_orchestrator_sessions`` — TTL prune of idle OrchestratorSession rows.
-  * ``_run_uat_deploy`` / ``_verify_uat_serves`` / ``_fe_app_version`` — the deploy-helper primitives.
+  * ``_run_uat_deploy`` / ``_verify_uat_serves`` — the deploy-helper primitives.
 """
 
 import uuid
@@ -213,7 +213,9 @@ async def test_run_dispatch_timeout_with_commits_surfaces_lost_work(db_session, 
 
 
 async def test_run_dispatch_timeout_no_commits_surfaces_no_change(db_session, monkeypatch):
-    # A timeout with no commits → "žiadna zmena", still awaiting_manazer.
+    # Audit P2 (2026-07-12): a timeout with NO commits → the deliverable is definitively ABSENT, so it settles
+    # BLOCKED/agent_error (NOT awaiting_manazer) — the phase-ADVANCE verbs stay hidden so a non-expert can't
+    # approve an empty spec after a timeout. The next_action still names "žiadna zmena".
     async def _boom(**kwargs):
         raise orchestrator.ClaudeAgentError("claude invocation timed out after 900s")
 
@@ -225,7 +227,8 @@ async def test_run_dispatch_timeout_no_commits_surfaces_no_change(db_session, mo
 
     state = await orchestrator.run_dispatch(db_session, version.id)
 
-    assert state.status == "awaiting_manazer"
+    assert state.status == "blocked"
+    assert state.block_reason == "agent_error"
     assert "žiadna zmena" in state.next_action
 
 
@@ -309,9 +312,8 @@ async def test_run_uat_deploy_redeploys_existing_compose_with_version(monkeypatc
         return True, "OK"
 
     monkeypatch.setattr(orchestrator.asyncio, "create_subprocess_exec", _fake_exec)
-    monkeypatch.setattr(orchestrator, "_fe_app_version", lambda slug: "0.1.42")
     monkeypatch.setattr(orchestrator, "_verify_uat_serves", _serves_ok)  # serve-verify is its own unit
-    ok, detail = await orchestrator._run_uat_deploy("nex-ledger", "ledger")
+    ok, detail = await orchestrator._run_uat_deploy("nex-ledger", "ledger", version_number="v0.1.42")
 
     assert ok is True and detail == "OK"
     assert list(captured["cmd"]) == [
@@ -358,7 +360,6 @@ async def test_run_uat_deploy_blocks_when_serve_verify_fails(monkeypatch):
         return False, "backend 'backend' /api not responding within 120s: connection refused"
 
     monkeypatch.setattr(orchestrator.asyncio, "create_subprocess_exec", _fake_exec)
-    monkeypatch.setattr(orchestrator, "_fe_app_version", lambda slug: "0.1.0")
     monkeypatch.setattr(orchestrator, "_verify_uat_serves", _serves_fail)
     ok, detail = await orchestrator._run_uat_deploy("nex-ledger", "ledger")
 
@@ -467,30 +468,7 @@ async def test_verify_uat_serves_skips_when_no_uat_compose(monkeypatch, tmp_path
     assert rec.calls == [], "a skip never spawns a probe"
 
 
-# ── _fe_app_version (VITE_APP_VERSION = 0.1.<git rev-list --count HEAD>) ─────────
-
-
-def test_fe_app_version_from_git_count(monkeypatch):
-    class _R:
-        returncode = 0
-        stdout = "123\n"
-
-    monkeypatch.setattr(orchestrator.subprocess, "run", lambda *a, **k: _R())
-    assert orchestrator._fe_app_version("nex-ledger") == "0.1.123"
-
-
-def test_fe_app_version_falls_back_when_git_unavailable(monkeypatch):
-    def _boom(*a, **k):
-        raise OSError("git not found")
-
-    monkeypatch.setattr(orchestrator.subprocess, "run", _boom)
-    assert orchestrator._fe_app_version("nex-ledger") == "0.1.0"
-
-
-def test_fe_app_version_falls_back_on_nonzero_git(monkeypatch):
-    class _R:
-        returncode = 128
-        stdout = ""
-
-    monkeypatch.setattr(orchestrator.subprocess, "run", lambda *a, **k: _R())
-    assert orchestrator._fe_app_version("missing-repo") == "0.1.0"
+# ── _fe_app_version tests REMOVED — the git-rev-count helper was intentionally deleted from the product
+#    (obs 2026-07-11: generated apps show their REAL semantic version, not a build counter). The deploy
+#    now stamps the deployed ``version_number`` into VITE_APP_VERSION with a literal "0.1.0" fallback;
+#    that stamping is covered by test_run_uat_deploy_redeploys_existing_compose_with_version above.
