@@ -156,6 +156,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh
+         * @description Renew (slide) the current session's access token.
+         *
+         *     The ``get_current_user`` dependency validates the incoming bearer token
+         *     exactly like every protected route — an expired / invalid / superseded
+         *     (bumped ``token_version``) JWT is rejected with 401 *before* this body
+         *     runs, so a dead session can never be renewed. On success a NEW token for
+         *     the same user + same ``token_version`` with a fresh expiry is returned,
+         *     mirroring ``/login``'s response shape. No refresh-token needed — this is a
+         *     sliding renewal of a still-valid session.
+         */
+        post: operations["refresh_api_v1_auth_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/backlog": {
         parameters: {
             query?: never;
@@ -1090,6 +1118,10 @@ export interface paths {
          *     * The KB folder ``{knowledge_base_path}/projects/{slug}/`` (any
          *       project-scoped KB docs) is removed so a deleted project leaves no
          *       orphaned KB tree.
+         *     * The project's RAG entries (Qdrant points in tenant ``icc`` whose
+         *       ``source_file`` is under ``projects/{slug}/``) are removed too, so a
+         *       deleted project also leaves no ghost in RAG search — best-effort,
+         *       keyed on the slug prefix (the disk docs are already gone).
          *     * If ``delete_github=true`` is passed, the backing GitHub
          *       repository is deleted too. Off by default — the DB row and KB
          *       folder go, but the repo stays in case the caller wants to
@@ -2777,12 +2809,29 @@ export interface components {
             /** Customer Slug */
             customer_slug: string;
             /**
+             * Prod Last Attempt Failed
+             * @description True when the customer's newest PROD deploy attempt FAILED — same honest flag as UAT (#5).
+             * @default false
+             */
+            prod_last_attempt_failed: boolean;
+            /**
+             * Prod Url
+             * @description Link to the customer's live PROD instance (the PROD tab link); None until a PROD deploy.
+             */
+            prod_url?: string | null;
+            /**
              * Prod Version
              * @description Currently deployed PROD version (None = never).
              */
             prod_version?: string | null;
             /** Subdomain */
             subdomain?: string | null;
+            /**
+             * Uat Last Attempt Failed
+             * @description True when the customer's newest UAT deploy attempt FAILED (the cell shows the last-good version but the upgrade didn't land) — surfaced so a failed deploy never reads as a green cell (#5).
+             * @default false
+             */
+            uat_last_attempt_failed: boolean;
             /**
              * Uat Url
              * @description Link to the customer's live UAT instance (the UAT tab link, §3.5); None until a UAT deploy.
@@ -4114,6 +4163,18 @@ export interface components {
             is_default: boolean;
             /** Key */
             key: string;
+            /**
+             * Label
+             * @description Human Slovak name shown as the setting's title — registry metadata, never stored per-row.
+             * @default
+             */
+            label: string;
+            /**
+             * Unit
+             * @description Optional unit suffix hint rendered after the editor (e.g. sekúnd, € / hod) — registry metadata, may be empty.
+             * @default
+             */
+            unit: string;
             /** Updated At */
             updated_at?: string | null;
             /** Updated By */
@@ -5041,6 +5102,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuthUser"];
+                };
+            };
+        };
+    };
+    refresh_api_v1_auth_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
                 };
             };
         };
