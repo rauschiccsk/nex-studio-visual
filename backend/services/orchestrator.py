@@ -3655,27 +3655,6 @@ def _uat_compose_exists(uat_slug: str) -> bool:
     return _uat_compose_path(uat_slug).is_file()
 
 
-def _fe_app_version(project_slug: str) -> str:
-    """``0.1.<commit-count>`` for the project repo — the post-commit version the FE build-arg stamps.
-
-    ``<commit-count>`` = ``git -C /opt/projects/<slug> rev-list --count HEAD``. Falls back to ``0.1.0`` if
-    git / the repo is unavailable — the redeploy still runs, only the FE version label is generic (never a
-    hard failure over a missing counter).
-    """
-    project_root = claude_agent.PROJECTS_ROOT / project_slug
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(project_root), "rev-list", "--count", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return "0.1.0"
-    count = result.stdout.strip()
-    return f"0.1.{count}" if result.returncode == 0 and count.isdigit() else "0.1.0"
-
-
 async def _run_uat_deploy(
     project_slug: str,
     uat_slug: str,
@@ -3709,9 +3688,10 @@ async def _run_uat_deploy(
     # 2026-07-11: NEX Studio itself is regularly patched → a counter; the apps we build get their real version).
     # Stamp the DEPLOYED version_number (bare, no leading 'v' — matches the deploy-matrix display) into BOTH the
     # FE + BE build-args, so the app's sidebar reads the same 1.1.0 as its Aktualizácie. Falls back to the
-    # git-count scheme only when the version is unknown (defensive).
+    # scaffold's initial real version "0.1.0" only when the version is unknown (defensive) — never a build
+    # counter (obs P2-1: a counter is the very thing Director 2026-07-11 rejected for generated apps).
     stamp = (version_number[1:] if version_number[:1].lower() == "v" else version_number) if version_number else None
-    build_ver = stamp or _fe_app_version(project_slug)
+    build_ver = stamp or "0.1.0"
     env = {**os.environ, "APP_VERSION": build_ver, "VITE_APP_VERSION": build_ver}
     try:
         proc = await asyncio.create_subprocess_exec(
