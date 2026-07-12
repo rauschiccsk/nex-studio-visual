@@ -41,13 +41,13 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: nexstudio
-          POSTGRES_PASSWORD: nexstudio
-          POSTGRES_DB: nexstudio
+          POSTGRES_USER: nexstudiovisual
+          POSTGRES_PASSWORD: nexstudiovisual
+          POSTGRES_DB: nexstudiovisual
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U nexstudio -d nexstudio"
+          --health-cmd "pg_isready -U nexstudiovisual -d nexstudiovisual"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 5
@@ -69,21 +69,21 @@ jobs:
         run: |
           poetry run python -c "
           import pg8000
-          conn = pg8000.connect(host='localhost', port=5432, user='nexstudio', password='nexstudio', database='nexstudio')
+          conn = pg8000.connect(host='localhost', port=5432, user='nexstudiovisual', password='nexstudiovisual', database='nexstudiovisual')
           conn.autocommit = True
-          conn.run('CREATE DATABASE nexstudio_test OWNER nexstudio')
+          conn.run('CREATE DATABASE nexstudiovisual_test OWNER nexstudiovisual')
           conn.close()
           "
 
       - name: Run Alembic migrations
         env:
-          DATABASE_URL: "postgresql+pg8000://nexstudio:nexstudio@localhost:5432/nexstudio"
+          DATABASE_URL: "postgresql+pg8000://nexstudiovisual:nexstudiovisual@localhost:5432/nexstudiovisual"
         run: poetry run alembic upgrade head
 
       - name: Run tests
         env:
-          DATABASE_URL: "postgresql+pg8000://nexstudio:nexstudio@localhost:5432/nexstudio"
-          TEST_DATABASE_URL: "postgresql+pg8000://nexstudio:nexstudio@localhost:5432/nexstudio_test"
+          DATABASE_URL: "postgresql+pg8000://nexstudiovisual:nexstudiovisual@localhost:5432/nexstudiovisual"
+          TEST_DATABASE_URL: "postgresql+pg8000://nexstudiovisual:nexstudiovisual@localhost:5432/nexstudiovisual_test"
           SECRET_KEY: "ci-test-secret-key"
           BACKEND_PORT: "9176"
           FRONTEND_PORT: "9177"
@@ -165,22 +165,22 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Build backend image
-        run: docker build -t nex-studio-backend:ci-${{ github.sha }} .
+        run: docker build -t nex-studio-visual-backend:ci-${{ github.sha }} .
 
       # nex-shared is PUBLIC → the frontend builds IN-CONTAINER (multi-stage Dockerfile).
       - name: Build frontend image
-        run: docker build -t nex-studio-frontend:ci-${{ github.sha }} frontend/
+        run: docker build -t nex-studio-visual-frontend:ci-${{ github.sha }} frontend/
 
       - name: Verify images
         run: |
-          docker image inspect nex-studio-backend:ci-${{ github.sha }} > /dev/null
-          docker image inspect nex-studio-frontend:ci-${{ github.sha }} > /dev/null
+          docker image inspect nex-studio-visual-backend:ci-${{ github.sha }} > /dev/null
+          docker image inspect nex-studio-visual-frontend:ci-${{ github.sha }} > /dev/null
 
       - name: Clean up CI images
         if: always()
         run: |
-          docker rmi nex-studio-backend:ci-${{ github.sha }} || true
-          docker rmi nex-studio-frontend:ci-${{ github.sha }} || true
+          docker rmi nex-studio-visual-backend:ci-${{ github.sha }} || true
+          docker rmi nex-studio-visual-frontend:ci-${{ github.sha }} || true
 
   deploy:
     name: Deploy
@@ -195,7 +195,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Deploy with Docker Compose
-        working-directory: /opt/projects/nex-studio
+        working-directory: /opt/projects/nex-studio-visual
         env:
           VITE_APP_VERSION: "0.1.${{ github.run_number }}"
         run: |
@@ -209,6 +209,6 @@ jobs:
           sleep 5
 
       - name: Health check
-        working-directory: /opt/projects/nex-studio
+        working-directory: /opt/projects/nex-studio-visual
         run: |
           python -m backend.scripts.healthcheck || echo "Health check pending — backend may still be starting"

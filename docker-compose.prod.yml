@@ -7,8 +7,8 @@
 # v2.0.0 (Builder+Gate) development uses the base (build:) compose; do NOT `up --build` this prod view.
 services:
   backend:
-    image: nex-studio-backend:v1.0.0
+    image: nex-studio-visual-backend:v1.0.0
     environment:
       APP_VERSION: "1.0.0"
   frontend:
-    image: nex-studio-frontend:v1.0.0
+    image: nex-studio-visual-frontend:v1.0.0

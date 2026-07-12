@@ -1,23 +1,23 @@
 # Explicit project name — survives symlinks and cwd-based derivation.
 # Was implicit `nex-studio-src` (from old /opt/nex-studio-src dir).
 # Migrated 2026-05-03 per STRUCTURE.md to /opt/projects/nex-studio.
-name: nex-studio
+name: nex-studio-visual
 
 services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: nexstudio
-      POSTGRES_PASSWORD: nexstudio
-      POSTGRES_DB: nexstudio
+      POSTGRES_USER: nexstudiovisual
+      POSTGRES_PASSWORD: nexstudiovisual
+      POSTGRES_DB: nexstudiovisual
     ports:
-      - "9178:5432"
+      - "9215:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./docker/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U nexstudio -d nexstudio"]
+      test: ["CMD-SHELL", "pg_isready -U nexstudiovisual -d nexstudiovisual"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -28,7 +28,7 @@ services:
       dockerfile: backend/Dockerfile
     restart: unless-stopped
     ports:
-      - "9176:9176"
+      - "9213:9176"
     volumes:
       - /home/andros/.claude:/home/andros/.claude
       # rw — backend writes per-project live documents
@@ -44,14 +44,14 @@ services:
       # CLAUDE.md §13 + 2026-05-04 design: credentials live OUTSIDE
       # /home/icc/knowledge/ so no RAG indexer / kb_sync can pick them
       # up. ri-gated REST API at /api/v1/credentials is the only way in.
-      - /opt/data/nex-studio/credentials:/opt/data/nex-studio/credentials:rw
+      - /opt/data/nex-studio-visual/credentials:/opt/data/nex-studio-visual/credentials:rw
       - uploads:/app/uploads
       # rw — durable PTY output logs per agent terminal session.
       # Survives BE container restart so the visual scrollback is
       # preserved + ``claude --resume <uuid>`` can continue AI memory.
       # Director directive 2026-05-19. Retention: 30 days, rotation
       # at 100 MB/file (in-place truncate of older half).
-      - terminal_logs:/var/lib/nex-studio/terminal-logs
+      - terminal_logs:/var/lib/nex-studio-visual/terminal-logs
       # ro — Docker socket bind mount so AG agents inside the BE
       # container can drive the host Docker daemon (testcontainers
       # integration tests per L-012, Stalwart Mail server for IMAP
@@ -72,12 +72,12 @@ services:
       # file is owned by andros (uid 1000 = container user) so notify can read it.
       - /opt/infra:/opt/infra:ro
     environment:
-      DATABASE_URL: "postgresql+pg8000://nexstudio:nexstudio@db:5432/nexstudio"
-      TEST_DATABASE_URL: "postgresql+pg8000://nexstudio:nexstudio@db:5432/nexstudio_test"
+      DATABASE_URL: "postgresql+pg8000://nexstudiovisual:nexstudiovisual@db:5432/nexstudiovisual"
+      TEST_DATABASE_URL: "postgresql+pg8000://nexstudiovisual:nexstudiovisual@db:5432/nexstudiovisual_test"
       SECRET_KEY: "change-me-in-production"
       BACKEND_PORT: "9176"
       FRONTEND_PORT: "9177"
-      VITE_API_BASE_URL: "http://localhost:9176"
+      VITE_API_BASE_URL: "http://localhost:9213"
       CLAUDE_CONFIG_DIR: "/home/andros/.claude"
       CLAUDE_CLI_PATH: "claude"
       CLAUDE_CODE_OAUTH_TOKEN: "${CLAUDE_CODE_OAUTH_TOKEN}"
@@ -94,7 +94,7 @@ services:
       # GitHub PAT used by create_github_repo to provision the project
       # repository under rauschiccsk on POST /api/v1/projects.
       # Scope required: admin:org (create repo under an organisation)
-      # + repo (manage repo metadata). Set in /opt/projects/nex-studio/.env.
+      # + repo (manage repo metadata). Set in /opt/projects/nex-studio-visual/.env.
       GITHUB_TOKEN: "${GITHUB_TOKEN}"
       # gh CLI authentication — used by Implementer (AgentTerminal subprocess)
       # for `gh run watch`, `gh api`, etc. per charter §15.3 CI monitor.
@@ -120,7 +120,7 @@ services:
         VITE_APP_VERSION: "${VITE_APP_VERSION:-0.0.0-dev}"
     restart: unless-stopped
     ports:
-      - "9177:9177"
+      - "9214:9177"
     depends_on:
       backend:
         condition: service_healthy

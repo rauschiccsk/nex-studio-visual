@@ -5,15 +5,15 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
-    database_url: str = "postgresql+pg8000://nexstudio:nexstudio@localhost:9178/nexstudio"
-    test_database_url: str = "postgresql+pg8000://nexstudio:nexstudio@localhost:9178/nexstudio_test"
+    database_url: str = "postgresql+pg8000://nexstudiovisual:nexstudiovisual@localhost:9215/nexstudiovisual"
+    test_database_url: str = "postgresql+pg8000://nexstudiovisual:nexstudiovisual@localhost:9215/nexstudiovisual_test"
     secret_key: str = "change-me-in-production"
     backend_port: int = 9176
     frontend_port: int = 9177
-    vite_api_base_url: str = "http://localhost:9176"
+    vite_api_base_url: str = "http://localhost:9213"
     cors_origins: list[str] = [
-        "http://localhost:9177",
-        "http://127.0.0.1:9177",
+        "http://localhost:9214",
+        "http://127.0.0.1:9214",
     ]
 
     # GitHub integration
@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     # (env ``CONSULT_SANDBOX_IMAGE``) rather than overloading ``app_version`` (a semver, not an image
     # tag). Default = the current v3 backend image. The on/off kill-switch is the ``CONSULT_SANDBOX``
     # env (default on), read at turn time in :func:`backend.services.consult_sandbox.sandbox_enabled`.
-    consult_sandbox_image: str = "nex-studio-backend:v3.0.0"
+    consult_sandbox_image: str = "nex-studio-visual-backend:v3.0.0"
 
     # Backstop timeout (seconds) for a single headless ``claude -p`` invocation
     # driven by the F-007 orchestrator (CR-NS-018 fix-round). Since agent
@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     # does NOT contain nex-studio, so the legacy hardcoded path resolves to
     # nothing there (SAME reachability class as the #5-fixed notify script) —
     # Dedo mounts the real ``.dedo-channel`` in and points this at the mount.
-    dedo_channel_dir: str = "/opt/projects/nex-studio/.dedo-channel"
+    dedo_channel_dir: str = "/opt/projects/nex-studio-visual/.dedo-channel"
 
     # NOTE: operational timeouts (Claude stream / design doc / task plan,
     # GitHub API), conversation history limit, design-doc max chars,
@@ -88,7 +88,7 @@ class Settings(BaseSettings):
     # volume in production. Owner = process user, mode 0700. Backup is
     # an infrastructure-layer concern (restic include path); not handled
     # here.
-    credentials_storage_path: str = "/opt/data/nex-studio/credentials"
+    credentials_storage_path: str = "/opt/data/nex-studio-visual/credentials"
 
     # Maximum size in bytes for any single credentials file (read or write).
     # Same rationale as ``kb_content_max_bytes``.

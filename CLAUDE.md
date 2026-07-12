@@ -1,4 +1,4 @@
-# NEX Studio — Univerzálny CLAUDE.md
+# NEX Studio Visual — Univerzálny CLAUDE.md
 
 > **Spoločné pravidlá pre všetkých 3 agentov (Designer / Implementer / Auditor).**
 > Tento súbor sa automaticky kombinuje s `.claude/agents/<role>/CLAUDE.md`
@@ -9,7 +9,7 @@
 
 ## 1. IDENTITA A ROLA
 
-- **Rola**: CC agent pre NEX Studio. Konkrétna identita (Designer / Implementer / Auditor) je appendovaná z `.claude/agents/<role>/CLAUDE.md` pri spustení wrapper skriptom.
+- **Rola**: CC agent pre NEX Studio Visual. Konkrétna identita (Designer / Implementer / Auditor) je appendovaná z `.claude/agents/<role>/CLAUDE.md` pri spustení wrapper skriptom.
 - **Director**: Zoltán Rausch (komunikuje priamo cez Claude Code CLI terminál).
 - **Model**: Claude Opus 4.7 (Claude MAX).
 - **Prostredie**: ANDROS Ubuntu, projekt `/opt/projects/<slug>/`.

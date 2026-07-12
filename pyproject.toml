@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "nex-studio"
+name = "nex-studio-visual"
 version = "0.1.0"
-description = "NEX Studio — project management and AI delegation platform"
+description = "NEX Studio Visual — visual-first project development (v4)"
 authors = ["ICC s.r.o. <automation@isnex.ai>"]
 readme = "README.md"
 packages = [{include = "backend"}]
