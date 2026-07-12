@@ -5383,6 +5383,49 @@ async def _run_conversation_plan_round(
     return state
 
 
+def _apply_hotovo_signoff(
+    db: Session,
+    version_id: uuid.UUID,
+    state: PipelineState,
+    *,
+    content: str = "Označené ako hotové — verzia je pripravená na nasadenie.",
+) -> None:
+    """Record the manager's SHA-anchored Hotovo signature + settle the conversation build to terminal ``done``.
+
+    Shared by the ``hotovo`` action (STEP 6, the manager's explicit sign-off) and the drifted-version
+    ``overit_znovu`` auto re-anchor (audit #8, Director 2026-07-12 chose one-click auto re-sign): a GREEN
+    re-verify re-signs to the CURRENT HEAD without a second click. The caller MUST have already gated
+    (conversation + spec approved + kontrola passed + NOT floor-red). Mirrors the verdict path's SHA-anchor
+    ladder: (re)generate + commit the user-facing RELEASE_NOTES BEFORE anchoring so the note rides the signed
+    commit; tag ``v{version}`` at HEAD so a later HEAD move past it AUTO-UN-VERIFIES (→ ``hotovo_drift``);
+    ``hotovo_sha`` stays None when the repo is unreadable (→ ``hotovo_unbound``).
+    """
+    proj_root = claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id)
+    _vnum = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
+    _commit_release_note(db, version_id, proj_root, _vnum)
+    hotovo_sha = _repo_head(proj_root)
+    if hotovo_sha:
+        _git_tag_version(proj_root, _vnum, hotovo_sha)
+    signoff_payload: dict[str, Any] = {"phase": "priprava", "hotovo": True}
+    if hotovo_sha:
+        signoff_payload["hotovo_sha"] = hotovo_sha
+    _record_message(
+        db,
+        version_id=version_id,
+        stage="priprava",
+        author="manazer",
+        recipient="ai_agent",
+        kind="notification",
+        content=content,
+        payload=signoff_payload,
+    )
+    state.current_stage = "done"
+    state.current_actor = "ai_agent"
+    state.status = "done"
+    state.next_action = "Verzia je hotová — nasadenie (UAT/PROD) je samostatný krok."
+    db.flush()
+
+
 async def _run_conversation_kontrola_round(
     db: Session,
     state: PipelineState,
@@ -5416,6 +5459,21 @@ async def _run_conversation_kontrola_round(
     version_id = state.version_id
     slug = _project_slug_for_version(db, version_id)
     version_label = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
+    # audit #8: a re-verify of a drifted Hotovo (overit_znovu → hotovo_drift) flags the TRIGGERING check marker
+    # with ``auto_hotovo`` — read it up front so a GREEN runtime floor auto re-anchors the Hotovo signature to
+    # HEAD in one click (Director 2026-07-12). A normal ``skontrolovat`` has no such flag → the settle is unchanged.
+    _latest_check = db.execute(
+        select(PipelineMessage)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.stage == "priprava",
+            PipelineMessage.kind == "directive",
+            PipelineMessage.payload["check"].astext == "true",
+        )
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    auto_hotovo = bool(_latest_check and (_latest_check.payload or {}).get("auto_hotovo"))
 
     # 1. HONESTY PROOF FIRST (K-1=A): boot the app + run acceptance in ONE ephemeral -p <slug>-smoke cycle
     # (deploy-free — NEVER a customer instance / uat_provisioner / deploy.py). Recorded system→manazer at
@@ -5548,6 +5606,18 @@ async def _run_conversation_kontrola_round(
         )
         if on_message is not None:
             await on_message(floor_msg)
+    if auto_hotovo and not runtime_floor_red:
+        # audit #8: a GREEN re-verify of a drifted Hotovo re-anchors the manager's signature to the CURRENT
+        # commit in ONE click (Director 2026-07-12: auto re-sign). Same runtime-floor gate as the manual Hotovo
+        # (K-3 — the objective boot+acceptance floor, not the partner's advisory PEVNÉ/VRATKÉ prose). A RED floor
+        # NEVER auto-signs — it recorded the floor-red note above and settles re-opened below so the manager fixes.
+        _apply_hotovo_signoff(
+            db,
+            version_id,
+            state,
+            content="Znovu overené po zmene kódu — beh appky je v poriadku, verzia je opäť označená ako hotová.",
+        )
+        return state
     state.status = "awaiting_manazer"
     state.next_action = (
         "Kontrola: beh appky je červený — pozri nález a oprav, potom spusti kontrolu znova."
@@ -8404,48 +8474,12 @@ async def apply_action(
             )
         if state.current_stage == "done":
             raise OrchestratorError("Verzia je už hotová.")
-        # SHA-anchor the manager signature to the exact code state — the SAME ladder as the verdict path
-        # (:7347-7357): read the repo HEAD and best-effort tag ``v{version_number}`` at it, so a later HEAD change
-        # past the signed commit AUTO-UN-VERIFIES the version (``version_verified`` → ``hotovo_drift``), exactly
-        # like the Auditor PASS. ``hotovo_sha`` stays None when the repo is unreadable (→ ``hotovo_unbound``).
-        proj_root = claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id)
-        # Part 1 (per-app-changelog-standard.md §1): NEX Studio (re)generates + commits the user-facing
-        # RELEASE_NOTES.md from the version's Epics BEFORE anchoring the sign-off SHA, so the note rides the
-        # signed/tagged commit (baked into the image) and does not later move HEAD past the signed commit.
-        _vnum = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
-        _commit_release_note(db, version_id, proj_root, _vnum)
-        hotovo_sha = _repo_head(proj_root)
-        if hotovo_sha:
-            _git_tag_version(proj_root, _vnum, hotovo_sha)
-        # Record EXACTLY ONE marker via the sole writer: a manazer→ai_agent conversation ``notification`` at
-        # ``stage='priprava'`` carrying ``payload.hotovo`` (+ the anchored ``hotovo_sha`` when set). CRITICAL:
-        # kind='notification' (NOT 'verdict', NOT 'done') and stage='priprava' (NOT 'verifikacia') — 'notification'
-        # is a valid MESSAGE_KIND, already used by the completion tail, and is INVISIBLE to ``_verifikacia_passed``
-        # (which reads ONLY stage='verifikacia' ∧ kind∈{verdict,return}). ``_manazer_signoff`` / ``version_verified``
-        # read THIS marker for deploy-eligibility.
-        signoff_payload: dict[str, Any] = {"phase": "priprava", "hotovo": True}
-        if hotovo_sha:
-            signoff_payload["hotovo_sha"] = hotovo_sha
-        _record_message(
-            db,
-            version_id=version_id,
-            stage="priprava",
-            author="manazer",
-            recipient="ai_agent",
-            kind="notification",
-            content="Označené ako hotové — verzia je pripravená na nasadenie.",
-            payload=signoff_payload,
-        )
-        # TERMINAL settle (mirror the ``schvalit`` done-branch :7126-7130): the conversation build reaches the
-        # ``done`` verified stage, so ``deploy.list_verified_versions``' candidate axis (current_stage=='done') is
-        # satisfied, exactly like the Auditor path. No agent is on turn (terminal); ``current_actor`` stays a valid
-        # ACTOR value. NO ``_begin_dispatch`` — this is a pure terminal signature, not a dispatched agent turn
-        # (the partner never self-signs), so ``run_conversation_turn`` needs no hotovo delegation branch.
-        state.current_stage = "done"
-        state.current_actor = "ai_agent"
-        state.status = "done"
-        state.next_action = "Verzia je hotová — nasadenie (UAT/PROD) je samostatný krok."
-        db.flush()
+        # SHA-anchor the manager signature to the exact code state + settle terminal ``done`` — the SAME ladder
+        # as the verdict path (a later HEAD move past the signed commit AUTO-UN-VERIFIES → ``hotovo_drift``).
+        # Shared with the drifted-version auto re-anchor (audit #8) via ``_apply_hotovo_signoff``: the recorded
+        # marker is kind='notification' at stage='priprava' (INVISIBLE to ``_verifikacia_passed``); no
+        # ``_begin_dispatch`` — a pure terminal signature, the partner never self-signs.
+        _apply_hotovo_signoff(db, version_id, state)
         return state
 
     if action == "schvalit":
@@ -8546,31 +8580,52 @@ async def apply_action(
         return state
 
     if action == "overit_znovu":
-        # CR-V2-057: "Over znova" — re-verify a DRIFTED version against the CURRENT code. The board surfaces
-        # this only when the recorded Verifikácia PASS is stale (:func:`version_verified` == ``sha_drift``:
-        # HEAD moved past the verified commit); the BE re-checks fail-closed here so a stale board / forged
-        # call can't force a re-run when there's nothing to re-verify. Valid from a SETTLED state only
-        # (``done`` or ``awaiting_manazer`` — never mid-turn). Re-enters Verifikácia and re-runs the
-        # independent Auditor against HEAD via the SHARED round machinery (:func:`_run_verifikacia_round`):
-        # the fresh verdict RE-ANCHORS (PASS bound to the current commit → drift gone, honestly verified) or
-        # RE-GATES (FAIL → one targeted fix task + paused, the normal :func:`_settle_verifikacia_verdict`
-        # path). No "just re-stamp the green" — an honest re-verify MUST re-run the Auditor.
+        # CR-V2-057 + audit #8: "Over znova" — re-verify a DRIFTED version against the CURRENT code. Two shapes,
+        # both fail-closed on a re-read HEAD (a stale / forged board can't force a re-run with nothing to verify)
+        # and both valid from a SETTLED state only (``done`` / ``awaiting_manazer`` — never mid-turn):
+        #   * ``sha_drift`` — a phase build's Auditor Verifikácia PASS whose HEAD moved on → re-enter Verifikácia
+        #     and re-run the INDEPENDENT Auditor against HEAD (:func:`_run_verifikacia_round`); the fresh verdict
+        #     re-anchors (PASS bound to the new commit) or re-gates (FAIL → one targeted fix). Never re-stamps.
+        #   * ``hotovo_drift`` — a CONVERSATION build's manager Hotovo signature whose HEAD moved on → re-run the
+        #     partner's honest self-check against HEAD; on a GREEN runtime floor it AUTO re-anchors the Hotovo
+        #     signature to the new commit in ONE click (Director 2026-07-12), on RED it stays re-opened for the
+        #     manager to fix. The Auditor is NEVER routed for a conversation build (it has no Verifikácia phase).
         if state.status not in ("done", "awaiting_manazer"):
             raise OrchestratorError("Over znova je platné len na ustálenej verzii (Hotovo alebo čaká na Manažéra).")
         _, provenance = version_verified(db, version_id)
-        if provenance != "sha_drift":
-            raise OrchestratorError(
-                "Over znova je platné len keď je overenie zastarané (kód sa pohol za overený commit)."
+        if provenance == "sha_drift":
+            state.current_stage = "verifikacia"
+            state.is_regate = True
+            state.iteration += 1
+            db.flush()
+            # _begin_dispatch re-points the actor to the Auditor (STAGE_ACTOR['verifikacia']), flips to
+            # agent_working, and re-captures the dispatch baseline from the current HEAD → the background turn
+            # routes to _run_verifikacia_round (a fresh, independent Auditor + smoke against HEAD).
+            _begin_dispatch(db, state)
+            return state
+        if provenance == "hotovo_drift":
+            # Re-open the conversation build's self-check against HEAD. current_stage returns to the conversation
+            # register ('priprava'); the durable check marker carries ``auto_hotovo`` so the kontrola completion
+            # tail re-signs Hotovo on a GREEN runtime floor (else it settles re-opened for the manager). Mirrors
+            # the ``skontrolovat`` trigger (durable manazer→ai_agent kind='directive' payload.check) — the round
+            # is driven SOLELY by this DB marker (restart-safe), never the in-memory dispatch directive.
+            state.current_stage = "priprava"
+            _record_message(
+                db,
+                version_id=version_id,
+                stage="priprava",
+                author="manazer",
+                recipient="ai_agent",
+                kind="directive",
+                content=(
+                    "Over znova po zmene kódu — čestne prekontroluj vlastnú robotu; ak je beh appky v poriadku, "
+                    "verzia sa znovu označí ako hotová."
+                ),
+                payload={"phase": "priprava", "check": True, "auto_hotovo": True},
             )
-        state.current_stage = "verifikacia"
-        state.is_regate = True
-        state.iteration += 1
-        db.flush()
-        # _begin_dispatch re-points the actor to the Auditor (STAGE_ACTOR['verifikacia']), flips to
-        # agent_working, and re-captures the dispatch baseline from the current HEAD → the background turn
-        # routes to _run_verifikacia_round (a fresh, independent Auditor + smoke against HEAD).
-        _begin_dispatch(db, state)
-        return state
+            _begin_dispatch(db, state)
+            return state
+        raise OrchestratorError("Over znova je platné len keď je overenie zastarané (kód sa pohol za overený commit).")
 
     if action == "nahlasit_znova":
         # Audit P0: the manager's ONE action on a ``framework_issue`` block (a NEX-Studio-side bug only our

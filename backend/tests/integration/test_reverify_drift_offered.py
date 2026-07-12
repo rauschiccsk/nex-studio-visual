@@ -85,6 +85,29 @@ def test_overit_znovu_offered_when_drifted_and_awaiting_manazer(db_session, monk
     assert "overit_znovu" in board.available_actions
 
 
+def test_overit_znovu_offered_when_hotovo_drifted(db_session, monkeypatch) -> None:
+    """audit #8: a CONVERSATION build's manager Hotovo signature that drifted past HEAD (``hotovo_drift``) also
+    offers ``overit_znovu`` — previously ONLY ``sha_drift`` did, leaving a drifted conversation build a DEAD END
+    (it could neither deploy — not verified — nor re-verify — no button)."""
+    version = _seed_settled_version(db_session, state_status="done")
+    monkeypatch.setattr(orchestrator, "version_verified", lambda *a, **k: (False, "hotovo_drift"))
+
+    board = _board(db_session, version.id)
+
+    assert "overit_znovu" in board.available_actions
+
+
+def test_overit_znovu_not_offered_when_hotovo_matches_head(db_session, monkeypatch) -> None:
+    """Guardrail — a conversation build whose Hotovo signature MATCHES HEAD (``hotovo_match``) has nothing to
+    re-verify, so the button must not appear."""
+    version = _seed_settled_version(db_session, state_status="done")
+    monkeypatch.setattr(orchestrator, "version_verified", lambda *a, **k: (True, "hotovo_match"))
+
+    board = _board(db_session, version.id)
+
+    assert "overit_znovu" not in board.available_actions
+
+
 def test_overit_znovu_not_offered_when_verified_matches_head(db_session, monkeypatch) -> None:
     """Guardrail — a freshly-verified version whose SHA MATCHES HEAD (no drift) must NOT offer a re-verify
     (there is nothing to re-check); only ``sha_drift`` surfaces the button."""

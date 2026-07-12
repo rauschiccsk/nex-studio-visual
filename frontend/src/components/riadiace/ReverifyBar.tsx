@@ -8,12 +8,13 @@
 // The backend `overit_znovu` handler existed + worked but was never offered anywhere.
 //
 // This bar closes both halves of the kernel gap: (1) LEGIBILITY — an honest plain-language stale-PASS warning;
-// (2) ACTIONABILITY — a one-click "Over znova" that re-runs the independent Auditor against current HEAD (a
-// clean re-verify, no fix, no rebuild), instead of the heavier Upraviť fix-loop.
+// (2) ACTIONABILITY — a one-click "Over znova". audit #8: it serves BOTH drift shapes — a phase build's
+// `sha_drift` re-runs the independent Auditor against HEAD; a CONVERSATION build's `hotovo_drift` re-runs its
+// own honest self-check and auto re-signs Hotovo on green (Director 2026-07-12). The copy names which happens.
 //
 // Honest-by-construction (mirrors SchvalitBar): renders NOTHING unless the backend OFFERS `overit_znovu` right
-// now — which the board route does ONLY when the live provenance is `sha_drift` AND the state is settled
-// (done / awaiting_manazer). So the warning shows exactly when re-verify is both meaningful and available.
+// now — which the board route does ONLY when the live provenance is a DRIFT (`sha_drift` / `hotovo_drift`) AND
+// the state is settled (done / awaiting_manazer). So the warning shows exactly when re-verify is meaningful.
 
 import { useState } from "react";
 import { CircleAlert, RotateCw } from "lucide-react";
@@ -36,6 +37,10 @@ export default function ReverifyBar({ board, versionId, onBoard }: Props) {
   // Honest-by-construction gate: the bar exists ONLY when the backend offers `overit_znovu` right now (a
   // settled version whose verified green has drifted past current HEAD).
   if (!board?.available_actions?.includes("overit_znovu")) return null;
+
+  // audit #8: two drift shapes get this button — a phase build re-runs the independent Auditor; a CONVERSATION
+  // build re-runs its own honest self-check and, on green, re-signs "Hotovo" automatically. Say which will happen.
+  const isHotovoDrift = board.verified_provenance === "hotovo_drift";
 
   async function submit() {
     setError(null);
@@ -62,8 +67,10 @@ export default function ReverifyBar({ board, versionId, onBoard }: Props) {
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-[var(--color-text-muted)]">
             Táto verzia už bola overená, ale kód sa odvtedy posunul za overený bod — zelené „overená" už nemusí
-            platiť. „Over znova" nechá Audítora zopakovať overenie proti aktuálnemu kódu (bez opravy, bez novej
-            stavby).
+            platiť.{" "}
+            {isHotovoDrift
+              ? "„Over znova“ znova čestne prekontroluje aplikáciu proti aktuálnemu kódu; ak je beh v poriadku, verzia sa automaticky znovu označí ako hotová (bez ďalšieho kliku)."
+              : "„Over znova“ nechá Audítora zopakovať overenie proti aktuálnemu kódu (bez opravy, bez novej stavby)."}
           </p>
           <button
             type="button"

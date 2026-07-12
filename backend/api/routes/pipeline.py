@@ -217,17 +217,17 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
     verified, verified_provenance = (
         orchestrator.version_verified(db, version_id) if state is not None else (False, "no_pass")
     )
-    # CR-V2-057 (drift re-verify): OFFER ``overit_znovu`` when the live provenance is 'sha_drift' — the version
-    # WAS verified (PASS/Hotovo) but HEAD moved past the verified commit, so the green "overená" is stale. The
-    # handler (apply_action) guards on EXACTLY this (settled state + sha_drift); surface the button here so the
-    # Manažér can re-run the Auditor against current HEAD in ONE click, instead of the heavier Upraviť fix-loop.
-    # Without this the fully-built handler was unreachable — never offered by determine_available_actions (which
-    # is state-only and can't do the repo HEAD read) nor anywhere else. Honest-by-construction: appended ONLY
-    # when actually drifted AND settled (done/awaiting_manazer), so the FE bar is gated by available_actions like
-    # every other verb. Note a done/drifted version otherwise has an EMPTY action set — this is its only action.
+    # CR-V2-057 + audit #8 (drift re-verify): OFFER ``overit_znovu`` when the live provenance is a DRIFT — the
+    # version WAS verified but HEAD moved past the verified commit, so the green "overená" is stale. Both drift
+    # shapes get the button (the handler routes each correctly): ``sha_drift`` (a phase build's Auditor PASS) →
+    # re-run the Auditor; ``hotovo_drift`` (a CONVERSATION build's manager Hotovo signature) → re-run the self-
+    # check + auto re-anchor on green. Without this the ``hotovo_drift`` case was a DEAD END — the version could
+    # neither deploy (not verified) nor re-verify (no button), leaving it permanently stuck. Honest-by-
+    # construction: appended ONLY when actually drifted AND settled (done/awaiting_manazer), so the FE bar is
+    # gated by available_actions like every other verb (a drifted version otherwise has an EMPTY action set).
     if (
         state is not None
-        and verified_provenance == "sha_drift"
+        and verified_provenance in ("sha_drift", "hotovo_drift")
         and state.status in ("done", "awaiting_manazer")
         and "overit_znovu" not in available_actions
     ):
