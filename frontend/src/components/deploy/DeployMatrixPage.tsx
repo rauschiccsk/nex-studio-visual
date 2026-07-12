@@ -261,6 +261,9 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                 const chosen = pickedVersion(row);
                 // Env-generic live link (UAT or PROD), the last successful deploy result, and the UAT-accepted flag.
                 const liveUrl = environment === "uat" ? row.uat_url : row.prod_url;
+                // Audit #5: the newest attempt failed → flag it so the last-good/empty cell isn't read as green.
+                const lastAttemptFailed =
+                  environment === "uat" ? row.uat_last_attempt_failed : row.prod_last_attempt_failed;
                 const result = rowResult[row.customer_id];
                 const accepted =
                   environment === "uat" && !!row.uat_version && row.accepted_versions.includes(row.uat_version);
@@ -285,6 +288,14 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                         {accepted && (
                           <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
                             Akceptované ✓
+                          </span>
+                        )}
+                        {lastAttemptFailed && (
+                          <span
+                            title="Najnovší pokus o nasadenie zlyhal — beží stále predošlá verzia (alebo žiadna). Skús nasadiť znova."
+                            className="rounded-full border border-red-500/40 bg-red-500/10 px-1.5 py-0.5 text-[10px] font-medium text-red-600 dark:text-red-400"
+                          >
+                            Posledný pokus zlyhal
                           </span>
                         )}
                       </div>

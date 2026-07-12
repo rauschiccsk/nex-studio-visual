@@ -120,6 +120,15 @@ class DeployMatrixRow(BaseModel):
     subdomain: Optional[str] = None
     uat_version: Optional[str] = Field(default=None, description="Currently deployed UAT version (None = never).")
     prod_version: Optional[str] = Field(default=None, description="Currently deployed PROD version (None = never).")
+    uat_last_attempt_failed: bool = Field(
+        default=False,
+        description="True when the customer's newest UAT deploy attempt FAILED (the cell shows the last-good "
+        "version but the upgrade didn't land) — surfaced so a failed deploy never reads as a green cell (#5).",
+    )
+    prod_last_attempt_failed: bool = Field(
+        default=False,
+        description="True when the customer's newest PROD deploy attempt FAILED — same honest flag as UAT (#5).",
+    )
     accepted_versions: list[str] = Field(
         default_factory=list,
         description="Versions accepted-for-PROD for this customer — the only versions whose PROD Nasadiť is open.",

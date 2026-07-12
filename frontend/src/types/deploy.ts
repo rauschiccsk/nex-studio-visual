@@ -57,6 +57,11 @@ export interface DeployMatrixRow {
   uat_version: string | null;
   /** Currently deployed PROD version (null = never deployed there). */
   prod_version: string | null;
+  /** True when the customer's NEWEST UAT deploy attempt failed — the cell shows the last-good version but the
+   *  upgrade didn't land; surfaced so a failed deploy never reads as a green cell (audit #5). */
+  uat_last_attempt_failed: boolean;
+  /** True when the customer's NEWEST PROD deploy attempt failed — same honest flag as UAT (audit #5). */
+  prod_last_attempt_failed: boolean;
   /**
    * Versions accepted-for-PROD for this customer — the ONLY versions whose PROD
    * Nasadiť is open (the never-bypassed acceptance gate, §3.5).

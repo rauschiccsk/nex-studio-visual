@@ -165,6 +165,27 @@ def current_version(db: Session, customer_id: UUID, environment: str) -> Optiona
     return db.execute(stmt).scalar_one_or_none()
 
 
+def last_deploy_attempt_failed(db: Session, customer_id: UUID, environment: str) -> bool:
+    """True when the customer's MOST RECENT deploy attempt to ``environment`` FAILED.
+
+    ``current_version`` returns the last SUCCESSFUL version; on its own that HIDES a failed upgrade — the
+    matrix cell would read green (the last-good version) while the newest attempt actually errored, so the
+    manager never sees the failure in the matrix (honest-by-construction gap). This surfaces it: the FE shows
+    the last-good version PLUS a "posledný pokus zlyhal" flag, instead of a silently-stale green cell.
+    """
+    latest_status = db.execute(
+        select(DeployEvent.status)
+        .where(
+            DeployEvent.customer_id == customer_id,
+            DeployEvent.environment == environment,
+            DeployEvent.event_type == "deploy",
+        )
+        .order_by(DeployEvent.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    return latest_status == "failed"
+
+
 def project_had_prod_deploy(db: Session, project_id: UUID) -> bool:
     """True iff ANY customer of the project has ever had a successful PROD deploy (§3.6).
 
@@ -280,6 +301,10 @@ def build_matrix(db: Session, project: Project) -> dict:
                 "subdomain": customer.subdomain,
                 "uat_version": uat_version,
                 "prod_version": prod_version,
+                # Honest-by-construction (audit #5): a failed newest attempt must not read as a green cell —
+                # surface it alongside the last-good version so the manager sees the upgrade didn't land.
+                "uat_last_attempt_failed": last_deploy_attempt_failed(db, customer.id, "uat"),
+                "prod_last_attempt_failed": last_deploy_attempt_failed(db, customer.id, "prod"),
                 "accepted_versions": accepted_versions(db, customer.id),
                 # Each tab links to its live instance only once it has a deploy there (§3.5 "link to the URL");
                 # None hides the link. Audit Theme 4: PROD now carries its own link, mirroring UAT.

@@ -210,6 +210,39 @@ class TestDeployMatrixRead:
         # No secret material in any field.
         assert "secret" not in body and all("secret" not in r for r in body["rows"])
 
+    def test_matrix_flags_a_failed_deploy_attempt(self, client, db_session, prod_failing_deploy_runner):
+        """Audit #5: a FAILED newest attempt is SURFACED in the matrix, never hidden behind the last-good cell.
+
+        ``current_version`` returns only the last SUCCESSFUL version, so without an explicit flag a failed
+        upgrade reads as a green (or empty) cell. The row must carry ``*_last_attempt_failed`` so the manager
+        sees the deploy didn't land.
+        """
+        user = _current_user(db_session)
+        project = _seed_project(db_session, creator=user)
+        _seed_verified_version(db_session, project, "v0.1.0")
+        customer = _seed_customer(db_session, project, "andros")
+
+        # UAT succeeds → last-good version, no failure flag.
+        client.post(
+            f"/api/v1/customers/{customer.id}/deploy",
+            json={"version_number": "v0.1.0", "environment": "uat"},
+        )
+        client.post(f"/api/v1/customers/{customer.id}/accept", json={"version_number": "v0.1.0"})
+        # PROD FAILS (the fixture fails the ``-prod`` instance).
+        prod = client.post(
+            f"/api/v1/customers/{customer.id}/deploy",
+            json={"version_number": "v0.1.0", "environment": "prod"},
+        )
+        assert prod.json()["ok"] is False
+
+        row = client.get(f"/api/v1/projects/{project.slug}/deploy-matrix").json()["rows"][0]
+        # UAT succeeded → shows the version, no failure flag.
+        assert row["uat_version"] == "v0.1.0"
+        assert row["uat_last_attempt_failed"] is False
+        # PROD never succeeded AND the newest attempt failed → honest failure flag, not a silent empty cell.
+        assert row["prod_version"] is None
+        assert row["prod_last_attempt_failed"] is True
+
     def test_matrix_404_for_unknown_project(self, client):
         resp = client.get("/api/v1/projects/does-not-exist/deploy-matrix")
         assert resp.status_code == 404
