@@ -22,7 +22,7 @@ from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.services import orchestrator, vizual_sandbox
-from backend.services.pipeline_status import PipelineStatusBlock
+from backend.services.pipeline_status import ParseFailure, PipelineStatusBlock
 
 # (pytest ``asyncio_mode = auto`` — async tests run without an explicit mark.)
 
@@ -72,6 +72,19 @@ def _stub_invoke(monkeypatch, block):
         return block(stage) if callable(block) else block
 
     monkeypatch.setattr(orchestrator, "invoke_agent_with_parse_retry", _fake)
+
+
+def _stub_invoke_capture(monkeypatch, block):
+    """Monkeypatch ``invoke_agent_with_parse_retry`` to RETURN ``block`` and RECORD each call (role/stage/
+    prompt) — lets a test assert whether (and how) the AI turn was dispatched. No live ``claude`` CLI."""
+    calls: list[dict] = []
+
+    async def _fake(db, *, version_id, role, stage, prompt, **kw):
+        calls.append({"role": role, "stage": stage, "prompt": prompt, **kw})
+        return block(stage) if callable(block) else block
+
+    monkeypatch.setattr(orchestrator, "invoke_agent_with_parse_retry", _fake)
+    return calls
 
 
 def _gate_report(stage, **extra):
@@ -161,6 +174,76 @@ async def test_vizual_round_sandbox_failure_blocks_without_crashing(db_session, 
     # An honest system → manazer note is recorded (no raw crash surfaced to the Manažér).
     errs = [m for m in _msgs(db_session, version.id) if m.payload and m.payload.get("vizual_error")]
     assert errs and errs[-1].author == "system" and errs[-1].stage == "vizual"
+
+
+# ── The change-request loop: a Manažér directive DISPATCHES the AI to edit the live FE ────────
+
+
+async def test_vizual_directive_dispatches_ai_and_awaits_manazer(db_session, monkeypatch):
+    # A Manažér change-request (directive set) DISPATCHES the AI turn and settles back to the Manažér — the
+    # stage never advances here (only ``schvalit`` moves vizual → programovanie).
+    version, _ = _make_version(db_session)
+    state = _seed_state(db_session, version.id, stage="vizual", actor="ai_agent")
+    _patch_spin_up(monkeypatch)
+    calls = _stub_invoke_capture(monkeypatch, lambda s: _gate_report(s))
+
+    settled = await orchestrator._run_vizual_round(db_session, state, directive="make the total bigger")
+
+    # The AI turn was dispatched exactly once, as the ai_agent on the vizual stage, carrying the request.
+    assert len(calls) == 1
+    assert calls[0]["role"] == "ai_agent" and calls[0]["stage"] == "vizual"
+    assert "make the total bigger" in calls[0]["prompt"]
+    # Hands the turn back to the Manažér; the stage is unchanged.
+    assert settled.current_stage == "vizual"
+    assert settled.status == "awaiting_manazer"
+
+
+async def test_vizual_no_directive_does_not_dispatch_ai(db_session, monkeypatch):
+    # A FRESH entry (directive None) must NOT run the AI turn — it only spins the preview up + settles.
+    version, _ = _make_version(db_session)
+    state = _seed_state(db_session, version.id, stage="vizual", actor="ai_agent")
+    _patch_spin_up(monkeypatch)
+    calls = _stub_invoke_capture(monkeypatch, lambda s: _gate_report(s))
+
+    settled = await orchestrator._run_vizual_round(db_session, state)
+
+    assert calls == []  # no AI turn dispatched
+    assert settled.status == "awaiting_manazer"
+    # The preview-URL notification was recorded (the sub-task-3 entry behaviour).
+    notes = [m for m in _msgs(db_session, version.id) if m.payload and m.payload.get("vizual_url")]
+    assert len(notes) == 1
+
+
+async def test_vizual_directive_parse_failure_blocks_without_crashing(db_session, monkeypatch):
+    # A ParseFailure from the AI turn settles blocked/parse_exhaustion (readable note) — never a crash.
+    version, _ = _make_version(db_session)
+    state = _seed_state(db_session, version.id, stage="vizual", actor="ai_agent")
+    _patch_spin_up(monkeypatch)
+    _stub_invoke_capture(monkeypatch, ParseFailure(reason="no status block"))
+
+    settled = await orchestrator._run_vizual_round(db_session, state, directive="make it red")
+
+    assert settled.status == "blocked"
+    assert settled.block_reason == "parse_exhaustion"
+    # An honest system → manazer note names the parse reason (never an empty screen).
+    fails = [m for m in _msgs(db_session, version.id) if m.payload and m.payload.get("parse_failure_reason")]
+    assert fails and fails[-1].author == "system" and fails[-1].stage == "vizual"
+
+
+async def test_vizual_url_notification_recorded_once_not_respammed(db_session, monkeypatch):
+    # The preview-URL notification is announced ONCE (first entry) — the change-request loop must not re-spam it.
+    version, _ = _make_version(db_session)
+    state = _seed_state(db_session, version.id, stage="vizual", actor="ai_agent")
+    _patch_spin_up(monkeypatch)
+    _stub_invoke_capture(monkeypatch, lambda s: _gate_report(s))
+
+    # Turn 1: fresh entry → records the URL note.
+    await orchestrator._run_vizual_round(db_session, state)
+    # Turn 2: a change-request re-enters the round (spin_up is idempotent) → must NOT re-record the URL.
+    await orchestrator._run_vizual_round(db_session, state, directive="tweak the header")
+
+    notes = [m for m in _msgs(db_session, version.id) if m.payload and m.payload.get("vizual_url")]
+    assert len(notes) == 1
 
 
 # ── Boundary walk: navrh → vizual → programovanie, schvalit at each hop ───────

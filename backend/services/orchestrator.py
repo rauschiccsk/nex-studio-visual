@@ -1154,6 +1154,39 @@ def _navrh_directive(db: Session, version_id: uuid.UUID) -> str:
     )
 
 
+def _vizual_directive(db: Session, version_id: uuid.UUID, manager_request: str) -> str:
+    """The Vizuál phase brief (CR-1, nex-studio-visual; spec §3.B) — the AI's VISUAL-CONSULTATION turn.
+
+    A sibling of :func:`_priprava_directive` / :func:`_kontrola_directive`: the per-turn orchestrator
+    injection for the "Manažér asks for a change → AI edits the LIVE app" HMR loop (spec §1). It instructs
+    the AI Agent to build/refine the project's FRONTEND SCREENS ONLY (under ``frontend/``), visual-first
+    (Delphi form-first) — real screens / layout / navigation with MOCK / representative data (NO real
+    backend yet; that is Programovanie) — assembled from the shared ``nex-shared`` kit for a consistent
+    look, and to apply EXACTLY the Manažér's request, then commit. The live dev-server sandbox then reflects
+    the change in the cockpit preview via HMR (< 1 s, no rebuild). The status-block contract is appended
+    downstream at the :func:`invoke_agent` chokepoint, so the turn still ends with the machine status block
+    the engine parses. Slovak where it faces the Manažér; the directive body is normal build language."""
+    version_number = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
+    spec_rel = _priprava_spec_rel(version_number)
+    design_rel = _navrh_design_doc_rel(version_number)
+    return (
+        "Fáza VIZUÁLNA KONZULTÁCIA — staviaš a dolaďuješ ŽIVÝ vizuál appky spolu s Manažérom. Pracuješ "
+        "VÝHRADNE vo FRONTENDE (adresár `frontend/`): reálne obrazovky, rozloženie a navigácia, vizuál-first "
+        "(ako Delphi — najprv formuláre/obrazovky). Používaj MOCK / reprezentatívne dáta priamo vo FE "
+        "(fixtures / MSW) — REÁLNY backend teraz NErobíš (to je fáza Programovanie).\n"
+        f"1. Pre kontext si prečítaj schválenú Špecifikáciu `{spec_rel}` a Návrh `{design_rel}` — nech "
+        "obrazovky sedia so zámerom projektu.\n"
+        "2. Obrazovky skladaj zo zdieľaného kitu `nex-shared` (rovnaké komponenty a štýl) — kvôli "
+        "konzistentnému vzhľadu naprieč appkami.\n"
+        f"3. Manažér žiada TÚTO zmenu: «{manager_request}». Aplikuj PRESNE ju — nič navyše, nič menej.\n"
+        "4. Zmenu zapíš do FE zdrojov a COMMITni (živý náhľad ju cez HMR premietne < 1 s).\n"
+        "NEROB backendovú logiku ani dátové modely — to je Programovanie. Ak je požiadavka naozaj "
+        "nejednoznačná, nastav `kind=question`, opýtaj sa PRÁVE JEDNU vec a ZASTAV; inak kolo UZAVRI "
+        "`kind=done`.\n"
+        "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
+    )
+
+
 def _auditor_upfront_directive(db: Session, version_id: uuid.UUID) -> str:
     """The Auditor's UPFRONT spec/design review brief (CR-V2-013; AUD-1(a), AUD-5, NAVRH-4, AUTON-5).
 
@@ -4835,13 +4868,14 @@ async def run_dispatch(
     if stage == "navrh":
         return await _run_navrh_round(db, state, on_event=on_event, directive=directive, on_message=on_message)
 
-    # Vizuál round (CR-1, nex-studio-visual — spec §3.A/§3.C). MINIMAL entry round: spin up the isolated
-    # live-preview Vite sandbox so the Manažér can WALK the running app in the cockpit + approve it before
-    # Programovanie. NO AI-Agent turn here (the "AI applies the Manažér's requested change" loop is a LATER
-    # CR-1 sub-task). Owns its own settle (records the preview-URL notification + ``awaiting_manazer``), so it
-    # early-returns like the other rounds. ``directive`` is not threaded — this minimal round has no agent turn.
+    # Vizuál round (CR-1, nex-studio-visual — spec §3.A/§3.B/§3.C). Brings the project's frontend up LIVE in
+    # the isolated Vite dev-server sandbox so the Manažér can WALK the running app in the cockpit + approve it
+    # before Programovanie. On a FRESH entry (``directive`` None) it just spins the preview up + hands the
+    # Manažér the URL to review; on a Manažér CHANGE-REQUEST (``directive`` set — the framed relay message) it
+    # DISPATCHES the AI to apply the change to the live FE (HMR reflects it). Owns its own settle, so it
+    # early-returns like the other rounds. ``directive`` is threaded (two-way comms, mirroring navrh/programovanie).
     if stage == "vizual":
-        return await _run_vizual_round(db, state, on_event=on_event, on_message=on_message)
+        return await _run_vizual_round(db, state, on_event=on_event, directive=directive, on_message=on_message)
 
     # Programovanie round (CR-V2-012): the AI Agent's SELF-CHECKING coding loop executing the Návrh task plan
     # (implement + own tests/verification per task; NO per-task Auditor — the independent Auditor verifies once
@@ -7768,28 +7802,57 @@ async def _dispatch_build_turn(
     )
 
 
+def _vizual_url_recorded(db: Session, version_id: uuid.UUID) -> bool:
+    """True iff a Vizuál preview-URL notification has ALREADY been recorded for this version (CR-1).
+
+    The live-preview URL is announced to the Manažér ONCE — on the FIRST entry into the ``vizual`` stage. The
+    round is re-entered on every Manažér change-request (the HMR loop) and ``vizual_sandbox.spin_up`` is
+    idempotent, so re-announcing the URL each turn would SPAM the board. Detect a first entry by the ABSENCE
+    of any prior ``vizual`` ∧ ``notification`` ∧ ``payload.vizual_url`` message (the same ``.astext`` JSONB
+    probe style used by :func:`_latest_programming_complete_seq` / the kontrola probes)."""
+    seq = db.execute(
+        select(func.max(PipelineMessage.seq)).where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.stage == "vizual",
+            PipelineMessage.kind == "notification",
+            PipelineMessage.payload["vizual_url"].astext.isnot(None),
+        )
+    ).scalar()
+    return seq is not None
+
+
 async def _run_vizual_round(
     db: Session,
     state: PipelineState,
     *,
     on_event: Optional[claude_agent.EventCallback] = None,
+    directive: Optional[str] = None,
     on_message: Optional[MessageCallback] = None,
 ) -> PipelineState:
-    """The Vizuál phase — MINIMAL live-preview entry round (CR-1, nex-studio-visual; spec §3.A/§3.C).
+    """The Vizuál phase — the LIVE-preview VISUAL-CONSULTATION round (CR-1, nex-studio-visual; spec §3.A/§3.B/§3.C).
 
     Brings the project's frontend up LIVE in an isolated Vite dev-server sandbox so the Manažér can WALK the
-    running app in the cockpit and approve it before Programovanie. This is the MINIMAL round: it only
-    spins the preview up and hands the Manažér the URL to review. The "AI applies the Manažér's requested
-    change" HMR loop is a LATER CR-1 sub-task and is deliberately NOT dispatched here (no AI-Agent turn).
+    running app in the cockpit and approve it before Programovanie, and — when the Manažér asks for a change —
+    DISPATCHES the AI Agent to apply it to the live FE (HMR reflects it in the preview, spec §1). The stage
+    NEVER advances here: the loop always hands the turn back to the Manažér; only a ``schvalit`` action moves
+    ``vizual → programovanie``.
 
     Flow:
       1. Resolve the project slug.
-      2. :func:`vizual_sandbox.spin_up` (idempotent) → the public preview URL. Wrapped in try/except so a
-         sandbox failure NEVER crashes the pipeline: it settles ``blocked`` / ``system_error`` with a
-         plain-Slovak note instead.
-      3. Record ONE ``system → manazer`` notification carrying the preview URL (content + payload).
-      4. Settle ``awaiting_manazer`` — the Manažér reviews the vizual and advances with ``schvalit`` (the
-         ``vizual → programovanie`` phase gate; dial-independent for a ``new_version``).
+      2. :func:`vizual_sandbox.spin_up` (idempotent — safe to call every turn) → the public preview URL.
+         Wrapped in try/except so a sandbox failure NEVER crashes the pipeline: it settles ``blocked`` /
+         ``system_error`` with a plain-Slovak note instead.
+      3. Record ONE ``system → manazer`` preview-URL notification — but only on FIRST entry
+         (:func:`_vizual_url_recorded` is False), so the change-request loop does not re-spam the URL.
+      4a. ``directive`` is None (a FRESH entry into the stage): settle ``awaiting_manazer`` — the Manažér
+          reviews the vizual and either asks for a change (relayed back as the next turn's ``directive``) or
+          advances with ``schvalit`` (the ``vizual → programovanie`` phase gate; dial-independent).
+      4b. ``directive`` is set (a Manažér CHANGE-REQUEST): DISPATCH the AI Agent full-auto
+          (:func:`invoke_agent_with_parse_retry`, :func:`_vizual_directive`) to apply the change to the FE +
+          commit. On the parsed result, settle the way :func:`run_conversation_turn` does — a ``ParseFailure``
+          → ``blocked`` / ``parse_exhaustion`` (readable note, never a crash); ``framework_issue`` → escalate
+          to Dedo; a ``question`` / ``blocked`` → ``blocked`` / ``agent_question``; a normal reply →
+          ``awaiting_manazer`` (the change is in the vizual — walk it, then ask for more or approve).
 
     The sole-mutator invariant holds: this runs inside the dispatch path, always a consequence of an action
     already routed through :func:`apply_action`.
@@ -7824,21 +7887,78 @@ async def _run_vizual_round(
         db.flush()
         return state
 
-    ready_msg = _record_message(
+    # Announce the preview URL ONCE — on the first entry into the stage (no prior vizual_url note on record).
+    # The change-request loop re-enters this round every turn (spin_up is idempotent), so re-recording the URL
+    # each time would spam the board; guard it on the durable-message probe instead.
+    if not _vizual_url_recorded(db, version_id):
+        ready_msg = _record_message(
+            db,
+            version_id=version_id,
+            stage="vizual",
+            author="system",
+            recipient="manazer",
+            kind="notification",
+            content=f"Vizuál je pripravený — otvor si ho: {url}",
+            payload={"phase": "vizual", "vizual_url": url},
+        )
+        if on_message is not None:
+            await on_message(ready_msg)
+
+    # FRESH entry (no change-request): hand the Manažér the live preview to WALK + approve (sub-task 3 behaviour).
+    if directive is None:
+        state.status = "awaiting_manazer"
+        state.next_action = "Prezri si vizuál a keď sedí, schváľ (Hotovo/Schváliť)."
+        db.flush()
+        return state
+
+    # A Manažér CHANGE-REQUEST → DISPATCH the AI full-auto to apply it to the live FE (allowed_tools=None → it
+    # edits /opt/projects/<slug>/frontend, HMR reflects it, commits). Mirrors _dispatch_build_turn's use of the
+    # SHARED invoke-with-parse-retry chokepoint (recipient=manazer, on_event/on_message threaded).
+    result = await invoke_agent_with_parse_retry(
         db,
         version_id=version_id,
+        role=AI_AGENT_ROLE,
         stage="vizual",
-        author="system",
+        prompt=_vizual_directive(db, version_id, directive),
+        on_event=on_event,
         recipient="manazer",
-        kind="notification",
-        content=f"Vizuál je pripravený — otvor si ho: {url}",
-        payload={"phase": "vizual", "vizual_url": url},
+        on_message=on_message,
     )
-    if on_message is not None:
-        await on_message(ready_msg)
 
+    if isinstance(result, ParseFailure):
+        # The AI produced no parseable status block after the bounded retries → settle blocked with a readable
+        # note (+ raw excerpt), exactly like run_conversation_turn — NEVER a crash, never an empty screen.
+        state.status = "blocked"
+        state.block_reason = "parse_exhaustion"
+        state.next_action = "Blokované — AI nevrátil platný výstup. Napíš mu znova alebo upresni zmenu vo vizuáli."
+        await _record_parse_exhaustion(
+            db,
+            state,
+            stage="vizual",
+            result=result,
+            human_hint="Napíš mu znova alebo upresni, akú zmenu chceš vo vizuáli.",
+            on_message=on_message,
+        )
+        db.flush()
+        return state
+
+    if result.kind == "framework_issue":
+        # §15 escalation to Dedo: a problem the AI CANNOT fix without changing NEX Studio itself — settle
+        # blocked/framework_issue + deliver the message to Dedo (no Manažér recovery actions).
+        return await _settle_framework_issue(db, state, result, stage="vizual", on_message=on_message)
+
+    if result.kind in ("question", "blocked"):
+        # The AI asked the Manažér something → blocked on an agent_question so the board offers ``answer``.
+        state.status = "blocked"
+        state.block_reason = "agent_question"
+        state.next_action = f"AI sa pýta: {result.question}"
+        db.flush()
+        return state
+
+    # The AI applied the change (edited the FE + committed; HMR reflected it) → hand the turn BACK to the
+    # Manažér. NEVER advance the stage here — only a ``schvalit`` action moves vizual → programovanie.
     state.status = "awaiting_manazer"
-    state.next_action = "Prezri si vizuál a keď sedí, schváľ (Hotovo/Schváliť)."
+    state.next_action = "Zmena je vo vizuáli — pozri sa; napíš ďalšiu úpravu, alebo schváľ."
     db.flush()
     return state
 
