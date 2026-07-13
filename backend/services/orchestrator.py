@@ -7821,6 +7821,27 @@ def _vizual_url_recorded(db: Session, version_id: uuid.UUID) -> bool:
     return seq is not None
 
 
+def latest_vizual_url(db: Session, version_id: uuid.UUID) -> Optional[str]:
+    """The live-preview URL to embed in the cockpit Vizuál iframe, or None (CR-1, cockpit Vizuál surface).
+
+    Returns the ``payload.vizual_url`` of the LATEST (max ``seq``) ``vizual`` ∧ ``notification`` message that
+    carries one — the URL announced by :func:`_run_vizual_round` on entry into the stage. ``None`` when the
+    version never entered ``vizual`` (or no URL was recorded). The board route surfaces this on
+    ``PipelineBoardRead.vizual_url``; the FE embeds the running dev-server so the Manažér can walk it live.
+    Same ``.astext`` JSONB probe as :func:`_vizual_url_recorded`, ordered newest-first."""
+    return db.execute(
+        select(PipelineMessage.payload["vizual_url"].astext)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.stage == "vizual",
+            PipelineMessage.kind == "notification",
+            PipelineMessage.payload["vizual_url"].astext.isnot(None),
+        )
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
 async def _run_vizual_round(
     db: Session,
     state: PipelineState,

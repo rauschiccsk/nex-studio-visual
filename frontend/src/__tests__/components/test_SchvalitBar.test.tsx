@@ -132,6 +132,18 @@ describe("SchvalitBar — the Návrh/plan-approval gate button", () => {
     );
   });
 
+  it("at the Vizuál gate (current_stage 'vizual') shows the VIZUÁL copy (CR-1)", () => {
+    render(<SchvalitBar board={boardWith(["schvalit", "uprav"], "vizual")} versionId="v-1" onBoard={vi.fn()} />);
+    expect(screen.getByRole("button", { name: /Schváliť vizuál/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Schváliť plán/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/posunie do stavby \(Programovanie\)/)).toBeInTheDocument();
+    // The action stays `schvalit` regardless of the copy.
+    fireEvent.click(screen.getByRole("button", { name: /Schváliť vizuál/ }));
+    return waitFor(() =>
+      expect(postPipelineActionApi).toHaveBeenCalledWith("v-1", { action: "schvalit", payload: undefined }),
+    );
+  });
+
   it("defaults to the PLAN copy when state is null (legacy board)", () => {
     render(<SchvalitBar board={boardWith(["schvalit", "uprav"])} versionId="v-1" onBoard={vi.fn()} />);
     expect(screen.getByRole("button", { name: /Schváliť plán/ })).toBeInTheDocument();

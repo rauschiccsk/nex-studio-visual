@@ -41,6 +41,9 @@ const IconMetrics = () => <NavIcon glyph="📊" />;
 const IconRiadiace = () => <NavIcon glyph="🎛️" />;
 const IconSpec = () => <NavIcon glyph="📄" />;
 
+// CR-1 (nex-studio-visual): the Vizuál surface — the live app preview (monitor 2) during the vizual phase.
+const IconVizual = () => <NavIcon glyph="🖥️" />;
+
 // v2 per-customer deploy surfaces (pages land in Milestone G — CR-V2-025/027).
 const IconCustomers = () => <NavIcon glyph="👥" />;
 const IconUat = () => <NavIcon glyph="🧪" />;
@@ -216,6 +219,17 @@ export default function Sidebar() {
         disabledTitle="Vyber projekt pre prístup k Riadiacemu centru"
         badge={hasProject && cockpitAwaiting}
         badgeLabel="čaká na Manažéra"
+      />
+      {/* CR-1 (nex-studio-visual): the Vizuál surface — the live app preview (monitor 2), shown while the AI
+          edits the FE during the vizual phase. Project-scoped like the other build items → disabled (not
+          hidden, per the disabled-over-hidden convention) when no project is pinned. */}
+      <NavItem
+        icon={<IconVizual />}
+        label="Vizuál"
+        active={hasProject ? isActive("/vizual") : false}
+        onClick={() => navigate(hasProject ? "/vizual" : projectsFallback)}
+        disabled={!hasProject}
+        disabledTitle="Vyber projekt pre prístup k Vizuálu"
       />
       {/* v2 spine STEP 1: Špecifikácia — the read-only spec shell (the agreed .md is wired in a
           later step). Project-scoped — disabled (not hidden) when no project is pinned. */}

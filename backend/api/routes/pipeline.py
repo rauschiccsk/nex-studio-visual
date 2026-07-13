@@ -217,6 +217,11 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
     verified, verified_provenance = (
         orchestrator.version_verified(db, version_id) if state is not None else (False, "no_pass")
     )
+    # CR-1 (nex-studio-visual, cockpit Vizuál surface): the live-preview URL of the running dev-server sandbox,
+    # read off the latest ``vizual`` ∧ ``notification`` message that carries one (None if the version never
+    # entered the ``vizual`` stage). The FE Vizuál page embeds this in an iframe. One indexed probe; mirrors the
+    # ``spec_approved`` / ``verified`` reads above.
+    vizual_url = orchestrator.latest_vizual_url(db, version_id)
     # CR-V2-057 + audit #8 (drift re-verify): OFFER ``overit_znovu`` when the live provenance is a DRIFT — the
     # version WAS verified but HEAD moved past the verified commit, so the green "overená" is stale. Both drift
     # shapes get the button (the handler routes each correctly): ``sha_drift`` (a phase build's Auditor PASS) →
@@ -243,6 +248,7 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         verified=verified,
         verified_provenance=verified_provenance,
         spec_approved=spec_approved,
+        vizual_url=vizual_url,
     )
 
 

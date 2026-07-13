@@ -36,22 +36,31 @@ export default function SchvalitBar({ board, versionId, onBoard }: Props) {
   // Honest-by-construction gate: the bar exists ONLY when the backend offers `schvalit` right now.
   if (!board?.available_actions?.includes("schvalit")) return null;
 
-  // Context-aware copy: the SAME `schvalit` verb is the manager's approve/advance at THREE gates, and the
+  // Context-aware copy: the SAME `schvalit` verb is the manager's approve/advance at FOUR gates, and the
   // consequence differs at each. Branch off the board's current stage so the button always names what it does:
   //   • navrh          → "Schváliť plán"       → posunie do stavby (Programovanie)
+  //   • vizual         → "Schváliť vizuál"     → posunie projekt do stavby (Programovanie)   (CR-1)
   //   • programovanie  → "Prejsť na overenie"  → posunie na Verifikáciu (overenie Auditorom)
   //   • verifikacia    → "Schváliť na Hotovo"  → overená verzia sa označí ako Hotovo (terminálny podpis)
   // Any null/legacy state falls back to the plan-approval copy (the earliest gate).
   const stage = board.state?.current_stage;
   const approveLabel =
-    stage === "verifikacia" ? "Schváliť na Hotovo" : stage === "programovanie" ? "Prejsť na overenie" : "Schváliť plán";
+    stage === "verifikacia"
+      ? "Schváliť na Hotovo"
+      : stage === "programovanie"
+        ? "Prejsť na overenie"
+        : stage === "vizual"
+          ? "Schváliť vizuál"
+          : "Schváliť plán";
   const approveBusyLabel = stage === "programovanie" ? "Posúvam…" : "Schvaľujem…";
   const consequence =
     stage === "verifikacia"
       ? "Potvrdíš overenú verziu (Audítor ju overil); verzia sa označí ako Hotovo a uzavrie."
       : stage === "programovanie"
         ? "Potvrdíš dokončenú stavbu; projekt sa posunie na Verifikáciu (overenie Audítorom)."
-        : "Schválením potvrdíš návrh a plán; projekt sa posunie do stavby (Programovanie).";
+        : stage === "vizual"
+          ? "Schválením potvrdíš vizuál; projekt sa posunie do stavby (Programovanie)."
+          : "Schválením potvrdíš návrh a plán; projekt sa posunie do stavby (Programovanie).";
 
   async function submit(action: PipelineActionName, failMsg: string) {
     setError(null);

@@ -85,7 +85,9 @@ describe("CustomersPage — edit-customer flow (obs #6)", () => {
     await screen.findByText("ICC s.r.o.");
     expect(listCustomersMock).toHaveBeenCalledTimes(1); // initial load
 
-    fireEvent.click(screen.getByTitle("Upraviť zákazníka"));
+    // findByTitle (not getByTitle): under full-suite parallelism the pencil button can render a tick after
+    // the row text — wait for it so the assertion is order/timing-independent (pre-existing flake).
+    fireEvent.click(await screen.findByTitle("Upraviť zákazníka"));
     fireEvent.change(screen.getByDisplayValue("ICC s.r.o."), { target: { value: "ICC upravené" } });
     fireEvent.click(screen.getByRole("button", { name: /Uložiť/ }));
 

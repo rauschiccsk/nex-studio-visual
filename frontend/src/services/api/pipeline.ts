@@ -125,6 +125,11 @@ export interface PipelineBoard {
   // recent_messages tail, and not available_actions (approve_spec stays offerable after approval). Absent
   // on an older board → treated as not approved.
   spec_approved?: boolean;
+  // CR-1 (nex-studio-visual): the live-preview URL of the running dev-server sandbox
+  // (`https://vizual-<slug>.isnex.eu`) — the payload.vizual_url of the latest vizual-stage notification that
+  // carries one, else null/absent. The Vizuál page embeds this in an iframe so the Manažér can walk the
+  // running app while the AI edits it. Absent whenever the version never entered the vizual stage.
+  vizual_url?: string | null;
 }
 
 // ── action requests ──────────────────────────────────────────────────────────

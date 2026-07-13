@@ -20,6 +20,7 @@ import KnowledgeBasePage from "./pages/KnowledgeBasePage";
 import UpdatesPage from "./pages/UpdatesPage";
 import RiadiaceCentrumPage from "./pages/RiadiaceCentrumPage";
 import SpecifikaciaPage from "./pages/SpecifikaciaPage";
+import VizualPage from "./pages/VizualPage";
 import CredentialsPage from "./pages/CredentialsPage";
 import CustomersPage from "./pages/CustomersPage";
 import UatPage from "./pages/UatPage";
@@ -69,6 +70,10 @@ function App() {
                 which redirect onward to /riadiace-centrum). Špecifikácia is the read-only spec
                 shell (real .md wired in a later step). */}
             <Route path="riadiace-centrum" element={<RiadiaceCentrumPage />} />
+            {/* CR-1 (nex-studio-visual): the Vizuál surface — the live app preview (monitor 2) shown during the
+                vizual phase while the AI edits it. Thin wrapper pattern (UatPage / ProdPage); project- +
+                version-scoped, gated in the Sidebar. */}
+            <Route path="vizual" element={<VizualPage />} />
             <Route path="specifikacia" element={<SpecifikaciaPage />} />
             <Route path="ai-agent" element={<Navigate to="/riadiace-centrum" replace />} />
             <Route path="coordinator" element={<Navigate to="/ai-agent" replace />} />

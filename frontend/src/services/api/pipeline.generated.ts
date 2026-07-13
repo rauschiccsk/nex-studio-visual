@@ -3472,6 +3472,8 @@ export interface components {
              * @default no_pass
              */
             verified_provenance: string;
+            /** Vizual Url */
+            vizual_url?: string | null;
         };
         /**
          * PipelineMessageRead

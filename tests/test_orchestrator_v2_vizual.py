@@ -17,6 +17,7 @@ import uuid
 
 from sqlalchemy import select
 
+from backend.api.routes.pipeline import _board
 from backend.db.models.foundation import User
 from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
@@ -289,3 +290,23 @@ def test_settle_boundary_vizual_new_version_always_stops(db_session):
 def test_next_stage_inserts_vizual_between_navrh_and_programovanie():
     assert orchestrator._next_stage("navrh", "new_version") == "vizual"
     assert orchestrator._next_stage("vizual", "new_version") == "programovanie"
+
+
+# ── The board surfaces vizual_url for the cockpit Vizuál iframe (CR-1) ─────────
+
+
+async def test_board_surfaces_vizual_url_after_round(db_session, monkeypatch):
+    # The cockpit Vizuál page reads board.vizual_url — the LATEST vizual notification's preview URL. Absent
+    # before the round runs, present (== the announced URL) after the fresh-entry round records it.
+    version, project = _make_version(db_session)
+    _seed_state(db_session, version.id, stage="vizual", actor="ai_agent")
+    _patch_spin_up(monkeypatch)
+
+    # No vizual preview recorded yet → the board carries no URL (None, honest-by-construction).
+    assert _board(db_session, version.id).vizual_url is None
+
+    # Fresh entry into the stage records the preview-URL notification.
+    await orchestrator.run_dispatch(db_session, version.id)
+
+    url = f"https://vizual-{project.slug}.isnex.eu"
+    assert _board(db_session, version.id).vizual_url == url

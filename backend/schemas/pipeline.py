@@ -143,6 +143,12 @@ class PipelineBoardRead(BaseModel):
     #: stays offerable after approval). Correct for BOTH conversation and legacy builds; additive,
     #: no migration. Defaults False so an absent field on an older board never reads as approved.
     spec_approved: bool = False
+    #: CR-1 (nex-studio-visual, cockpit Vizuál surface): the live-preview URL of the running dev-server sandbox
+    #: (``https://vizual-<slug>.isnex.eu``) — the ``payload.vizual_url`` of the LATEST ``vizual`` ∧
+    #: ``notification`` message that carries one, else ``None``. The cockpit Vizuál page embeds this in an
+    #: iframe so the Manažér can walk the running app while the AI edits it. Additive, no migration; ``None``
+    #: whenever the version never entered the ``vizual`` stage (or no URL was recorded yet).
+    vizual_url: Optional[str] = None
 
 
 class PipelineActionRequest(BaseModel):
