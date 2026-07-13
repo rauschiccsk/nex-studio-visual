@@ -1146,15 +1146,16 @@ def _navrh_directive(db: Session, version_id: uuid.UUID) -> str:
     matching rules; this is the per-turn orchestrator injection naming the concrete Špecifikácia + design-doc
     paths.
 
-    Drives the DESIGN-DOC turn only — the EPIC→FEAT→TASK task plan (the design doc's LAST part) is generated
-    SEPARATELY via the folded incremental skeleton/per-feat passes (:func:`_run_navrh_round`), so a large plan
-    never overflows one turn (no parse exhaustion). The brief therefore tells the AI Agent to:
+    Drives the DESIGN-DOC turn only — the EPIC→FEAT→TASK task plan is NO LONGER built in Návrh (Director
+    2026-07-13); it is generated at the START of Programovanie (:func:`_run_build_round`) from the final
+    design + the Manažér's Vizuál changes, so it reflects the final state. Návrh only SKETCHES the plan as
+    the design doc's last part. The brief therefore tells the AI Agent to:
       1. READ the approved Špecifikácia (``specification.md``) + the Zadanie + existing code / KB;
       2. WRITE ONE coherent design ``.md`` to the version spec path — sections SIZED to the project (overview/
          goal · data model · API/interfaces · BE+FE design — only as much as needed; depth is the agent's
          judgment), list it in ``deliverables[]``;
-      3. close the design-doc turn with ``kind=done`` — the engine then folds the task plan in (the agent does
-         NOT cram the whole EPIC→FEAT→TASK tree into this status block);
+      3. close the design-doc turn with ``kind=done`` — do NOT cram the EPIC→FEAT→TASK tree into this status
+         block (the detailed plan is built later, at Programovanie start);
       4. if any design detail is still ambiguous, ASK the Manažér (``kind=question``) and STOP — the post-Návrh
          schvaľovací bod surfaces these clarification questions (the Auditor's upfront review hooks here in
          CR-V2-013).
@@ -1170,9 +1171,10 @@ def _navrh_directive(db: Session, version_id: uuid.UUID) -> str:
         "v `deliverables[]`. Sekcie NADIMENZUJ podľa projektu (prehľad/cieľ · dátový model · API/rozhrania · "
         "BE+FE návrh — len toľko, koľko treba; hĺbka je tvoj profesionálny úsudok: malé → ľahké, zložité → "
         "dôkladné).\n"
-        "3. Plán úloh (EPIC → FEAT → TASK) je POSLEDNÁ časť návrhu, ale NEVkladaj ho do tohto stavového "
-        "bloku — engine ho doplní samostatnými prechodmi (kostra + úlohy po funkciách), aby sa veľký plán "
-        "nezlomil. Tento ťah UZAVRI `kind=done` (návrhový dokument je hotový).\n"
+        "3. Plán úloh (EPIC → FEAT → TASK) je POSLEDNÁ časť návrhu — načrtni ho v dokumente, ale NEVkladaj "
+        "ho do tohto stavového bloku. Detailný plán úloh sa zostaví neskôr, na začiatku programovania (z tohto "
+        "návrhu + vizuálnych zmien), aby odrážal finálny stav. Tento ťah UZAVRI `kind=done` (návrhový dokument "
+        "je hotový).\n"
         "4. Ak je akýkoľvek detail návrhu ešte nejednoznačný, nastav `kind=question`, polož otázku Manažérovi "
         "a ZASTAV — schvaľovací bod po Návrhu tvoje otázky vynesie.\n"
         "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
@@ -6144,7 +6146,8 @@ async def _run_navrh_round(
     directive: Optional[str] = None,
     on_message: Optional[MessageCallback] = None,
 ) -> PipelineState:
-    """The Návrh round (CR-V2-011; NAVRH-1..NAVRH-4, ARCH-2): ONE coherent design doc + the folded task plan.
+    """The Návrh round (CR-V2-011; NAVRH-1..NAVRH-4, ARCH-2): ONE coherent design doc (the task plan is built
+    LATER, at Programovanie start — Director 2026-07-13).
 
     Replaces the v1 standalone design + ``_run_task_plan_round`` passes with a single Návrh phase:
 
@@ -6156,11 +6159,12 @@ async def _run_navrh_round(
        IS the agent's prompt (two-way comms).
     2. **Persist + verify** the design-doc artifact (mirror of the Príprava spec gate). A checkout that
        exists but is missing the doc → ``blocked`` (the phase is not "done" without its artifact).
-    3. **Fold the task plan in** (:func:`_fold_task_plan_into_navrh`) UNLESS the design turn already carried
-       a non-empty inline plan (a small project — then it is materialized directly, no extra passes).
+    3. **Auditor upfront review** (:func:`_run_auditor_upfront_review`, CR-V2-013) — the task plan is NO
+       LONGER folded in here; it is generated at the START of Programovanie (:func:`_run_build_round`) from
+       the final design + Vizuál changes, so it reflects the final state (Director 2026-07-13).
     4. **Settle via the SHARED dial** (:func:`_settle_phase_boundary`): the Návrh schvaľovací bod is
-       dial-governed — auto-continue to Programovanie (``plna``) or stop ``awaiting_manazer`` (the Manažér
-       reviews the design + plan + the AI Agent's clarification questions).
+       dial-governed — auto-continue (``plna``) or stop ``awaiting_manazer`` (the Manažér reviews the design
+       doc + the AI Agent's clarification questions).
 
     The sole-mutator invariant holds: this runs inside the dispatch path, always a consequence of an action
     already routed through :func:`apply_action`.
