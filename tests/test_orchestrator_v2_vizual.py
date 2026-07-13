@@ -15,14 +15,17 @@ Exercised against the real v4-branch DB (the stage CHECKs include ``'vizual'``):
 
 import uuid
 
+import pytest
 from sqlalchemy import select
 
 from backend.api.routes.pipeline import _board
 from backend.db.models.foundation import User
 from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
+from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.versions import Version
-from backend.services import orchestrator, vizual_sandbox
+from backend.services import orchestrator, pipeline_runner, vizual_sandbox
+from backend.services.orchestrator import OrchestratorError
 from backend.services.pipeline_status import ParseFailure, PipelineStatusBlock
 
 # (pytest ``asyncio_mode = auto`` — async tests run without an explicit mark.)
@@ -310,3 +313,222 @@ async def test_board_surfaces_vizual_url_after_round(db_session, monkeypatch):
 
     url = f"https://vizual-{project.slug}.isnex.eu"
     assert _board(db_session, version.id).vizual_url == url
+
+
+# ── CR-1: the CONVERSATION-flow ENTRY into Vizuál — `spustit_vizual` (mirror of `spustit_stavbu`) ─────
+#
+# NEW projects run in the CONVERSATION flow (mode='conversation'), which stays at current_stage='priprava'
+# and never reaches the phase-automaton `vizual` boundary. `spustit_vizual` is the explicit STEP that MOVES a
+# conversation build priprava→vizual (mode unchanged) so `_run_vizual_round` runs — the conversation-flow twin
+# of `spustit_stavbu`. These tests exercise the ENTRY (offer + guards + phase move + routing), not the round
+# itself (covered above). ``vizual_sandbox.spin_up`` is monkeypatched — no real docker.
+
+
+def _seed_conv_priprava(db_session, version_id, *, status="awaiting_manazer", mode="conversation"):
+    """A settled CONVERSATION build in the priprava register (the spec/plan gating window for spustit_vizual)."""
+    state = PipelineState(
+        version_id=version_id,
+        flow_type="new_version",
+        current_stage="priprava",
+        current_actor="ai_agent",
+        status=status,
+        next_action="rozhovor",
+        mode=mode,
+        dispatch_in_flight=(status == "agent_working"),
+    )
+    db_session.add(state)
+    db_session.flush()
+    return state
+
+
+def _approve_spec(db_session, version_id):
+    """The durable kind='approval' Špecifikácia freeze signal (what orchestrator.spec_approved reads)."""
+    db_session.add(
+        PipelineMessage(
+            version_id=version_id,
+            stage="priprava",
+            author="manazer",
+            recipient="ai_agent",
+            kind="approval",
+            content="Špecifikácia schválená.",
+            payload={"phase": "priprava", "approve_spec": True},
+        )
+    )
+    db_session.flush()
+
+
+def _seed_tasks(db_session, version, project, titles=("T1",)):
+    """ONE epic + ONE feat + a Task per title (all ``todo``) → navrh_plan_materialized True, _build_started False."""
+    epic = Epic(project_id=project.id, version_id=version.id, number=1, title="Foundation", status="planned")
+    db_session.add(epic)
+    db_session.flush()
+    feat = Feat(epic_id=epic.id, number=1, title="Schema", status="todo")
+    db_session.add(feat)
+    db_session.flush()
+    for i, title in enumerate(titles, start=1):
+        db_session.add(Task(feat_id=feat.id, number=i, title=title, task_type="backend", status="todo"))
+    db_session.flush()
+
+
+def _board_actions(db_session, version_id):
+    return _board(db_session, version_id).available_actions
+
+
+def _seed_ready_conv_build(db_session):
+    """A conversation build parked at a settled priprava with an approved spec + materialized plan (not started)
+    — the exact point at which BOTH build-launch verbs (spustit_vizual, spustit_stavbu) become offerable."""
+    version, project = _make_version(db_session)
+    _seed_conv_priprava(db_session, version.id)
+    _approve_spec(db_session, version.id)
+    _seed_tasks(db_session, version, project)
+    return version, project
+
+
+class _FakeRegistry:
+    async def broadcast(self, *_a, **_kw):
+        return None
+
+    def active_director_ids(self, _vid):
+        return {"d"}  # a director is on-board → _maybe_notify returns early (no out-of-band ping)
+
+    def present_director_ids(self, _vid):
+        return {"d"}
+
+    def away_director_ids(self, _vid):
+        return set()
+
+
+def _wire_runner(db_session, monkeypatch):
+    """Point the background runner at the test session (mirror of test_conversation_programming._wire_runner)."""
+    monkeypatch.setattr(pipeline_runner, "registry", _FakeRegistry())
+    monkeypatch.setattr(pipeline_runner, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(db_session, "close", lambda: None)
+    monkeypatch.setattr(db_session, "commit", db_session.flush)
+    monkeypatch.setattr(db_session, "rollback", lambda: None)
+
+
+def _stub_routers(monkeypatch):
+    """Stub BOTH orchestrator routers to RECORD which one the runner selected, then settle awaiting_manazer."""
+    routed: list[str] = []
+
+    async def _fake_dispatch(db, vid, on_event=None, directive=None, *, on_message=None):
+        routed.append("dispatch")
+        st = db.execute(select(PipelineState).where(PipelineState.version_id == vid)).scalar_one()
+        st.status = "awaiting_manazer"
+        db.flush()
+        return st
+
+    async def _fake_conversation(db, vid, on_event=None, directive=None, *, on_message=None):
+        routed.append("conversation")
+        st = db.execute(select(PipelineState).where(PipelineState.version_id == vid)).scalar_one()
+        st.status = "awaiting_manazer"
+        db.flush()
+        return st
+
+    monkeypatch.setattr(orchestrator, "run_dispatch", _fake_dispatch)
+    monkeypatch.setattr(orchestrator, "run_conversation_turn", _fake_conversation)
+    return routed
+
+
+# (a) apply_action('spustit_vizual') moves a ready conversation build priprava→vizual + arms the working turn.
+async def test_spustit_vizual_enters_vizual_and_arms_working(db_session):
+    version, _ = _seed_ready_conv_build(db_session)
+
+    state = await orchestrator.apply_action(db_session, version_id=version.id, action="spustit_vizual")
+
+    assert state.current_stage == "vizual"  # phase MOVED (the durable trigger)
+    assert state.status == "agent_working"  # _begin_dispatch armed the turn
+    assert state.mode == "conversation"  # mode UNCHANGED — still a conversation build
+    assert state.current_actor == "ai_agent"
+    assert state.dispatch_in_flight is True
+    # A durable manazer→ai_agent breadcrumb rides the vizual stage (audit only — NOT the trigger).
+    marker = _msgs(db_session, version.id)[-1]
+    assert marker.kind == "directive" and marker.author == "manazer" and marker.recipient == "ai_agent"
+    assert marker.payload.get("start_vizual") is True and marker.stage == "vizual"
+    # The FRESH entry carries NO in-memory directive (the round just spins the preview up; change-requests
+    # arrive LATER as relayed messages) — so dispatch_directive is None, mirroring spustit_stavbu.
+    assert orchestrator.dispatch_directive(db_session, version.id, "spustit_vizual", {}, "vizual") is None
+
+
+# (a′) the authoritative apply_action guards (mirror of spustit_stavbu) — each raises its own Slovak message.
+async def test_spustit_vizual_guards(db_session):
+    # not conversation → raise
+    version, project = _make_version(db_session)
+    _seed_conv_priprava(db_session, version.id, mode=None)
+    _approve_spec(db_session, version.id)
+    _seed_tasks(db_session, version, project)
+    with pytest.raises(OrchestratorError, match="rozhovorovom"):
+        await orchestrator.apply_action(db_session, version_id=version.id, action="spustit_vizual")
+
+    # spec not approved → raise
+    version, project = _make_version(db_session)
+    _seed_conv_priprava(db_session, version.id)
+    _seed_tasks(db_session, version, project)
+    with pytest.raises(OrchestratorError, match="schválení Špecifikácie"):
+        await orchestrator.apply_action(db_session, version_id=version.id, action="spustit_vizual")
+
+    # plan not materialized → raise
+    version, _ = _make_version(db_session)
+    _seed_conv_priprava(db_session, version.id)
+    _approve_spec(db_session, version.id)
+    with pytest.raises(OrchestratorError, match="zostavení plánu"):
+        await orchestrator.apply_action(db_session, version_id=version.id, action="spustit_vizual")
+
+    # already IN vizual → raise (a re-click is a no-op; change-requests flow through the chat relay)
+    version, _ = _seed_ready_conv_build(db_session)
+    st = orchestrator._get_state(db_session, version.id)
+    st.current_stage = "vizual"
+    st.status = "awaiting_manazer"
+    db_session.flush()
+    with pytest.raises(OrchestratorError, match="Vizuál už beží"):
+        await orchestrator.apply_action(db_session, version_id=version.id, action="spustit_vizual")
+
+
+# (b) the board offers spustit_vizual (and still spustit_stavbu) after the plan, and NOT spustit_vizual at vizual.
+async def test_board_offers_vizual_alongside_stavbu_then_hides_at_vizual(db_session, monkeypatch):
+    version, _ = _seed_ready_conv_build(db_session)
+
+    # At the settled priprava (spec approved + plan materialized + not started): BOTH build-launch verbs.
+    actions = _board_actions(db_session, version.id)
+    assert "spustit_vizual" in actions
+    assert "spustit_stavbu" in actions
+
+    # Enter Vizuál and settle the round → spustit_vizual SELF-HIDES; spustit_stavbu STAYS (proceed-to-build path).
+    _patch_spin_up(monkeypatch)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="spustit_vizual")
+    settled = await orchestrator.run_dispatch(db_session, version.id)
+    assert settled.current_stage == "vizual" and settled.status == "awaiting_manazer"
+    at_vizual = _board_actions(db_session, version.id)
+    assert "spustit_vizual" not in at_vizual  # hidden once IN vizual (current_stage == 'vizual' post-filter)
+    assert "spustit_stavbu" in at_vizual  # still offered so the Manažér can proceed to the build
+
+
+# (c) the runner routes a conversation build at current_stage=='vizual' to run_dispatch, NOT run_conversation_turn.
+async def test_runner_routes_conversation_vizual_to_run_dispatch(db_session, monkeypatch):
+    version, _ = _make_version(db_session)
+    state = _seed_state(db_session, version.id, stage="vizual", actor="ai_agent")
+    state.mode = "conversation"  # a CONVERSATION build parked at vizual (proves the vizual exclusion, not mode=NULL)
+    db_session.flush()
+    _wire_runner(db_session, monkeypatch)
+    routed = _stub_routers(monkeypatch)
+
+    await pipeline_runner._run(version.id)
+
+    # A conversation build at vizual takes the phase-dispatch path (→ _run_vizual_round), never the conv loop.
+    assert routed == ["dispatch"]
+
+
+# (d) spustit_stavbu STILL works from current_stage=='vizual' → programovanie (its gates don't check the stage).
+async def test_spustit_stavbu_from_vizual_advances_to_programovanie(db_session, monkeypatch):
+    version, _ = _seed_ready_conv_build(db_session)
+    _patch_spin_up(monkeypatch)
+
+    st = await orchestrator.apply_action(db_session, version_id=version.id, action="spustit_vizual")
+    assert st.current_stage == "vizual"
+    st = await orchestrator.run_dispatch(db_session, version.id)  # settle the vizual round → awaiting_manazer
+    assert st.current_stage == "vizual" and st.status == "awaiting_manazer"
+
+    # From vizual, "Spustiť stavbu" proceeds to the build (build not started; gates unchanged).
+    st = await orchestrator.apply_action(db_session, version_id=version.id, action="spustit_stavbu")
+    assert st.current_stage == "programovanie"
+    assert st.status == "agent_working"

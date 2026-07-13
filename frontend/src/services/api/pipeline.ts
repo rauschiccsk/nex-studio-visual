@@ -143,6 +143,7 @@ export type PipelineActionName =
   | "approve_spec" // Schváliť špecifikáciu (end Príprava — ALWAYS mandatory, dial-independent)
   | "zostav_plan" // Zostaviť plán (STEP 3): build the task plan from the approved Špecifikácia (honest-by-construction)
   | "spustit_stavbu" // Spustiť stavbu (STEP 4): start the conversation build loop from the approved Plán úloh
+  | "spustit_vizual" // CR-1 (nex-studio-visual): Spustiť vizuál — enter the Vizuál stage (live FE preview walk) before the build; offered alongside spustit_stavbu after the plan
   | "schvalit" // Schváliť (dial-governed advance after Návrh / Programovanie / Verifikácia)
   | "uprav" // Uprav (rework the current phase / "Skús znova" on an error block)
   | "pokracovat" // Pokračovať (resume a paused Programovanie loop)

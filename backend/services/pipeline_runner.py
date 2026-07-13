@@ -193,7 +193,11 @@ async def _run(version_id: uuid.UUID, directive: str | None = None) -> None:
             # (``current_stage == 'programovanie'``, set by ``spustit_stavbu``) routes through
             # ``run_dispatch`` → ``_run_build_round`` (the EXISTING self-checking loop, reused VERBATIM —
             # routed by STAGE) instead of the conversation loop; the completion tail (MD-B) returns the stage
-            # to ``priprava``, so subsequent turns route back to ``run_conversation_turn``.
+            # to ``priprava``, so subsequent turns route back to ``run_conversation_turn``. CR-1
+            # (nex-studio-visual): a conversation build at ``current_stage == 'vizual'`` (set by
+            # ``spustit_vizual``) ALSO routes through ``run_dispatch`` → ``_run_vizual_round`` — the fresh entry
+            # (directive None) spins up the live preview; each relayed change-request threads a ``directive``
+            # into the SAME round (the iterative "type a request → AI edits the live FE" HMR loop, spec §1).
             # Konzultácia (konzultacia-mode.md Part 1): a TERMINAL version (``current_stage == 'done'`` — a
             # hotovo-signed conversation build, a legacy schvalit-done build, or a PROD-released version)
             # answers in READ-ONLY advisory mode. Routed by the STAGE (mode-agnostic — both a conversation and
@@ -202,7 +206,9 @@ async def _run(version_id: uuid.UUID, directive: str | None = None) -> None:
             # only when a consult relay/drain armed it; it never advances a phase (returns to terminal rest).
             if pre is not None and pre.current_stage == "done":
                 state = await orchestrator.run_consult_turn(db, version_id, on_event, on_message=on_message)
-            elif pre is not None and pre.mode == "conversation" and pre.current_stage != "programovanie":
+            elif (
+                pre is not None and pre.mode == "conversation" and pre.current_stage not in ("programovanie", "vizual")
+            ):
                 state = await orchestrator.run_conversation_turn(
                     db, version_id, on_event, directive, on_message=on_message
                 )

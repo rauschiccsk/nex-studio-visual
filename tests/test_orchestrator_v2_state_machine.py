@@ -486,6 +486,9 @@ def test_apply_action_is_sole_mutator_grep_guard():
         # STEP 4 (step4-programovanie-design.md): + "spustit_stavbu" ("Spustiť stavbu" — move a conversation
         # build priprava→programovanie and run the EXISTING _run_build_round loop; the completion returns to
         # the rozhovor). NOT advancing (like zostav_plan) — it stays in the conversation register.
+        # CR-1 (nex-studio-visual): + "spustit_vizual" ("Spustiť vizuál" — move a conversation build
+        # priprava→vizual and run the EXISTING _run_vizual_round live-preview loop; offered alongside
+        # spustit_stavbu after the plan). NOT advancing (like spustit_stavbu) — mode stays 'conversation'.
         # STEP 5 (step5-kontrola-design.md): + "skontrolovat" ("Skontrolovať" — the partner's honest self-check
         # after Programovanie; STAYS at priprava, emits a gate_report, invisible to the release/deploy path).
         # NOT advancing (like zostav_plan) — it never walks the phase automaton.
@@ -506,6 +509,7 @@ def test_apply_action_is_sole_mutator_grep_guard():
             "overit_znovu",
             "zostav_plan",
             "spustit_stavbu",
+            "spustit_vizual",
             "skontrolovat",
             "hotovo",
         }

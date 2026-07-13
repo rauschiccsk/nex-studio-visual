@@ -47,7 +47,7 @@ describe("Sidebar", () => {
 
   it("renders the brand + version footer", () => {
     renderSidebar();
-    expect(screen.getByText("NEX Studio")).toBeInTheDocument();
+    expect(screen.getByText("NEX Studio Visual")).toBeInTheDocument();
     // version is "v{X.Y.Z}" (CI/post-commit) or "vdev" when VITE_APP_VERSION is unset.
     expect(screen.getByText(/^v(\d+\.\d+\.\d+|dev)$/)).toBeInTheDocument();
   });

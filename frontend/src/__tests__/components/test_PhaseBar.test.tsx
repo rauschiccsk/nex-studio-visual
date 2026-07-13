@@ -82,7 +82,7 @@ function isCurrent(text: string): boolean {
 }
 
 const LEGACY_LABELS = ["Príprava", "Návrh", "Programovanie", "Verifikácia"];
-const CONV_LABELS = ["Špecifikácia", "Plán", "Programovanie", "Kontrola"];
+const CONV_LABELS = ["Špecifikácia", "Plán", "Vizuál", "Programovanie", "Kontrola"];
 
 describe("PhaseBar — legacy phase-automaton strip (byte-identical)", () => {
   it("renders the four legacy phases and marks current_stage as current (no redesign labels leak in)", () => {
@@ -216,8 +216,8 @@ describe("PhaseBar — conversation (spine) strip derived from board signals (ST
     // Hotovo is the current (rightmost) terminal phase; Kontrola is no longer current.
     expect(isCurrent("Hotovo")).toBe(true);
     expect(isCurrent("Kontrola")).toBe(false);
-    // The four earlier phases are all done (✓); Hotovo alone is the ● current marker.
-    expect(screen.getAllByText("✓")).toHaveLength(4);
+    // The five earlier phases are all done (✓); Hotovo alone is the ● current marker.
+    expect(screen.getAllByText("✓")).toHaveLength(5);
     expect(screen.getByText("●")).toBeInTheDocument();
   });
 });

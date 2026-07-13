@@ -450,6 +450,14 @@ _ACTIONS = frozenset(
         # advancing (it stays in the conversation register — the completion tail returns to priprava, no phase
         # walk); the board post-filters it to conversation + spec-approved + plan-materialized + NOT build-started.
         "spustit_stavbu",
+        # CR-1 (nex-studio-visual): "Spustiť vizuál" — in a conversation build, AFTER the task plan is
+        # materialized (same window as ``spustit_stavbu``), MOVE ``current_stage`` priprava→vizual (mode stays
+        # 'conversation') and dispatch the EXISTING ``_run_vizual_round`` live-preview loop VERBATIM (routed by
+        # stage). The FRESH entry spins up the isolated Vite dev-server sandbox and hands the Manažér the preview
+        # URL to WALK; later relayed chat messages carry the change-requests the AI applies (HMR). NOT advancing
+        # (it stays in the conversation register — no phase walk); the board post-filters it to conversation +
+        # spec-approved + plan-materialized + NOT build-started + NOT already-in-vizual.
+        "spustit_vizual",
         # STEP 5 (step5-kontrola-design.md K-1=A): "Skontrolovať" — in a conversation build, AFTER Programovanie
         # completes, run the partner's HONEST self-check (real boot + acceptance + spec reconciliation) that
         # STAYS at ``current_stage='priprava'`` and emits ONE ``kind='gate_report'`` (NEVER a verdict). NOT
@@ -564,6 +572,11 @@ def determine_available_actions(state: PipelineState) -> set[str]:
         # (state-only). The finer DB preconditions (conversation + spec approved + plan materialized + NOT
         # build-started) are the board route's POST-FILTER; ``apply_action`` enforces them authoritatively.
         actions.add("spustit_stavbu")
+        # CR-1 (nex-studio-visual): "Spustiť vizuál" — offered UNCONDITIONALLY here too (state-only), the same
+        # window as ``spustit_stavbu``. The finer DB preconditions (conversation + spec approved + plan
+        # materialized + NOT build-started + NOT already-in-vizual) are the board route's POST-FILTER;
+        # ``apply_action`` enforces them authoritatively.
+        actions.add("spustit_vizual")
         # STEP 5 (step5-kontrola-design.md K-1): "Skontrolovať" — offered UNCONDITIONALLY here too (state-only).
         # The finer DB preconditions (conversation + spec approved + programming complete + NOT already-checked)
         # are the board route's POST-FILTER; ``apply_action`` enforces them authoritatively.
@@ -580,6 +593,18 @@ def determine_available_actions(state: PipelineState) -> set[str]:
         # Verifikácia is the Auditor's phase: the Manažér ratifies the Auditor's verdict (``verdict``) and,
         # at the dial-governed end stop, signs off with ``schvalit`` → Hotovo.
         actions.update({"verdict", "schvalit"})
+
+    # CR-1 (nex-studio-visual): a CONVERSATION build sitting AT the ``vizual`` stage still needs the
+    # build-launch verb — a conversation build's ``schvalit`` is DROPPED by the board post-filter (it never
+    # walks the phase automaton), so ``spustit_stavbu`` is the ONLY path from Vizuál → Programovanie. Offer it
+    # here too (+ ``spustit_vizual``, which its OWN post-filter hides once ``current_stage == 'vizual'`` so a
+    # re-click can't re-enter the stage). Both are POST-FILTERED authoritatively by the board route (conversation
+    # + spec approved + plan materialized + NOT build-started); ``apply_action`` enforces the same gates. For a
+    # phase-automaton (mode NULL) build at ``vizual`` both are dropped by the conversation-only post-filter, so
+    # this leaves the guided-build board (which offers ``schvalit`` above) unchanged.
+    if stage == "vizual":
+        actions.add("spustit_stavbu")
+        actions.add("spustit_vizual")
 
     return actions
 
@@ -2658,7 +2683,11 @@ async def drain_relay_turn(
     # MID-BUILD (``current_stage == 'programovanie'``) drains through ``run_dispatch`` → ``_run_build_round``
     # (the EXISTING build loop, routed by stage) so a Manažér message during the build seeds the resumed task
     # exactly like a legacy build — the conversation loop only owns the priprava register (stage != programovanie).
-    if state.mode == "conversation" and state.current_stage != "programovanie":
+    # CR-1 (nex-studio-visual): a conversation build at ``current_stage == 'vizual'`` drains through
+    # ``run_dispatch`` → ``_run_vizual_round`` too, so an in-flight Manažér change-request threads its
+    # ``directive`` into the live-preview round (the AI applies it to the FE; HMR reflects it) — mirroring the
+    # runner's ``_run`` selection, which also excludes ``vizual`` from the conversation-loop branch.
+    if state.mode == "conversation" and state.current_stage not in ("programovanie", "vizual"):
         return await run_conversation_turn(db, version_id, on_event, directive, on_message=on_message)
     return await run_dispatch(db, version_id, on_event, directive, on_message=on_message)
 
@@ -8643,6 +8672,48 @@ async def apply_action(
         # MOVE the phase (mode STAYS 'conversation'): the runner then routes this build through run_dispatch →
         # _run_build_round (the EXISTING self-checking loop, UNCHANGED) because current_stage == 'programovanie'.
         state.current_stage = "programovanie"
+        db.flush()
+        _begin_dispatch(db, state)
+        return state
+
+    if action == "spustit_vizual":
+        # CR-1 (nex-studio-visual): "Spustiť vizuál" — the conversation build ENTERS the Vizuál stage: the AI
+        # spins up the live FE preview sandbox and the Manažér WALKS the running app, asking for changes the AI
+        # applies live (HMR) before committing to the build. AUTHORITATIVE gate (the board post-filter merely
+        # hides the button): valid ONLY in a conversation build whose spec is approved, whose plan is
+        # materialized, whose build has NOT yet started (mirrors ``spustit_stavbu`` — Vizuál precedes the build),
+        # and which is NOT already IN the Vizuál stage (a re-click there is a no-op — change-requests flow through
+        # the chat relay into ``_run_vizual_round``, not this action).
+        if state.mode != "conversation":
+            raise OrchestratorError("Spustiť vizuál je platné len v rozhovorovom režime.")
+        if not spec_approved(db, version_id):
+            raise OrchestratorError("Spustiť vizuál je platné až po schválení Špecifikácie.")
+        if not navrh_plan_materialized(db, version_id):
+            raise OrchestratorError("Spustiť vizuál je platné až po zostavení plánu úloh.")
+        if _build_started(db, version_id):
+            raise OrchestratorError("Stavba už beží alebo je dokončená — vizuál sa spúšťa pred stavbou.")
+        if state.current_stage == "vizual":
+            raise OrchestratorError("Vizuál už beží — zmeny píš do rozhovoru, alebo pokračuj cez „Spustiť stavbu“.")
+        # Durable audit breadcrumb (MINOR — NOT the trigger): a manazer→ai_agent kind='directive' marker for the
+        # audit trail. The ACTUAL trigger + restart-safety is the durable current_stage='vizual' + _begin_dispatch
+        # (the runner routes a conversation build at ``vizual`` through run_dispatch → _run_vizual_round). NO
+        # directive is set here on purpose: the FRESH-entry ``_run_vizual_round(directive=None)`` just spins up the
+        # live preview and hands the Manažér the URL — the manager's LATER relayed chat messages carry the
+        # change-requests (each drains as a ``directive`` into ``_run_vizual_round``). Rides the vizual stage it
+        # kicks off — the same "record the kickoff at the phase being entered" shape as ``spustit_stavbu``.
+        _record_message(
+            db,
+            version_id=version_id,
+            stage="vizual",
+            author="manazer",
+            recipient="ai_agent",
+            kind="directive",
+            content="Spustiť vizuál — priprav živý náhľad frontendu na prechádzku.",
+            payload={"phase": "vizual", "start_vizual": True},
+        )
+        # MOVE the phase (mode STAYS 'conversation'): the runner then routes this build through run_dispatch →
+        # _run_vizual_round (fresh-entry preview spin-up, directive None) because current_stage == 'vizual'.
+        state.current_stage = "vizual"
         db.flush()
         _begin_dispatch(db, state)
         return state

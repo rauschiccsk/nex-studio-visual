@@ -143,6 +143,25 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         )
     ):
         available_actions = [a for a in available_actions if a != "spustit_stavbu"]
+    # CR-1 (nex-studio-visual): POST-FILTER ``spustit_vizual`` (mirror of the ``spustit_stavbu`` filter above) —
+    # the state-only ``determine_available_actions`` offers it at ``priprava`` AND ``vizual``; drop it here
+    # unless this is a conversation build whose Špecifikácia is approved, whose task plan is MATERIALIZED, whose
+    # build has NOT yet started, AND which is NOT already IN the Vizuál stage (so it is offered ALONGSIDE
+    # ``spustit_stavbu`` right after the plan, and SELF-HIDES once you have entered Vizuál — while
+    # ``spustit_stavbu`` STAYS offered there so the Manažér can proceed to the build). ``apply_action`` enforces
+    # the same rule authoritatively; this hides the dead button. Reuses the ``spec_approved`` local above.
+    if (
+        state is not None
+        and "spustit_vizual" in available_actions
+        and not (
+            state.mode == "conversation"
+            and spec_approved
+            and orchestrator.navrh_plan_materialized(db, version_id)
+            and not orchestrator._build_started(db, version_id)
+            and state.current_stage != "vizual"
+        )
+    ):
+        available_actions = [a for a in available_actions if a != "spustit_vizual"]
     # STEP 5 (step5-kontrola-design.md K-1): POST-FILTER ``skontrolovat`` (mirror of the spustit_stavbu filter
     # above) — the state-only ``determine_available_actions`` offers it unconditionally at ``priprava``; drop it
     # here unless this is a conversation build whose Špecifikácia is approved, whose Programovanie has COMPLETED,

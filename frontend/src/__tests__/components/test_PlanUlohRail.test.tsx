@@ -334,6 +334,44 @@ describe("PlanUlohRail — Programovanie build controls (STEP 4)", () => {
     expect(screen.queryByRole("button", { name: /Spustiť stavbu/ })).not.toBeInTheDocument();
   });
 
+  it("shows 'Spustiť vizuál' alongside 'Spustiť stavbu' when offered, and fires postPipelineActionApi(spustit_vizual) → onBoard", async () => {
+    // CR-1 (nex-studio-visual): after the plan is built, the BE offers BOTH build-launch verbs — the two
+    // buttons co-exist in the same rung (NOT mutually exclusive), the vizual one posting `spustit_vizual`.
+    const onBoard = vi.fn();
+    const fresh = mkBoard({ available_actions: [] });
+    vi.mocked(postPipelineActionApi).mockResolvedValue(fresh);
+
+    render(
+      <PlanUlohRail
+        versionId="v1"
+        messages={[]}
+        board={mkBoard({ available_actions: ["spustit_vizual", "spustit_stavbu"] })}
+        onBoard={onBoard}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: /Spustiť stavbu/ })).toBeInTheDocument();
+    const vizualBtn = await screen.findByRole("button", { name: /Spustiť vizuál/ });
+    fireEvent.click(vizualBtn);
+
+    await waitFor(() => expect(postPipelineActionApi).toHaveBeenCalledWith("v1", { action: "spustit_vizual" }));
+    await waitFor(() => expect(onBoard).toHaveBeenCalledWith(fresh));
+  });
+
+  it("hides 'Spustiť vizuál' when only 'spustit_stavbu' is offered (e.g. already IN the vizual stage)", async () => {
+    // Once IN the vizual stage the BE self-hides `spustit_vizual` but keeps `spustit_stavbu` (proceed-to-build).
+    render(
+      <PlanUlohRail
+        versionId="v1"
+        messages={[]}
+        board={mkBoard({ available_actions: ["spustit_stavbu"] })}
+        onBoard={() => {}}
+      />,
+    );
+    expect(await screen.findByRole("button", { name: /Spustiť stavbu/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Spustiť vizuál/ })).not.toBeInTheDocument();
+  });
+
   it("shows 'Pokračovať v stavbe' ONLY when offered, and fires postPipelineActionApi(pokracovat) → onBoard", async () => {
     const onBoard = vi.fn();
     const fresh = mkBoard({ available_actions: [] });

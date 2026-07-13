@@ -469,6 +469,11 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
   //   pokracovat    → "Pokračovať v stavbe" (STEP 4: resume a paused / token-stopped build loop)
   const canBuildPlan = !!board?.available_actions?.includes("zostav_plan");
   const canProgram = !!board?.available_actions?.includes("spustit_stavbu");
+  // CR-1 (nex-studio-visual): `spustit_vizual` → "Spustiť vizuál" — enter the Vizuál stage (live FE preview
+  // walk) BEFORE the build. Offered by the BE ALONGSIDE `spustit_stavbu` right after the plan is built, and
+  // hidden once you are IN the Vizuál stage (so `spustit_stavbu` remains the proceed-to-build path there).
+  // Rendered as a secondary button next to "Spustiť stavbu" in the same rung (they co-exist, not exclusive).
+  const canVizual = !!board?.available_actions?.includes("spustit_vizual");
   const canResume = !!board?.available_actions?.includes("pokracovat");
   // A running Programovanie loop offers `pause` (BE determine_available_actions → {"pause"}); the rung below
   // fires the same postPipelineActionApi(action:'pause'). Mutually exclusive with `pokracovat` by construction.
@@ -560,15 +565,33 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
         </div>
       ) : canProgram ? (
         <div className="flex-shrink-0 border-b border-[var(--color-border-default)] px-4 py-3">
-          <p className="mb-2 text-xs text-[var(--color-text-muted)]">Plán úloh je zostavený — spustíme stavbu.</p>
-          <button
-            type="button"
-            onClick={() => runTrigger("spustit_stavbu", "Spustenie stavby zlyhalo")}
-            disabled={triggering}
-            className="w-full rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {triggering ? "Spúšťam stavbu…" : "Spustiť stavbu"}
-          </button>
+          <p className="mb-2 text-xs text-[var(--color-text-muted)]">
+            {canVizual
+              ? "Plán úloh je zostavený — pozri si najprv živý vizuál, alebo rovno spusti stavbu."
+              : "Plán úloh je zostavený — spustíme stavbu."}
+          </p>
+          <div className="flex gap-2">
+            {/* CR-1: "Spustiť vizuál" co-exists with "Spustiť stavbu" (secondary, outline) — enter the live FE
+                preview walk before committing to the build. Present ONLY when the BE offers `spustit_vizual`. */}
+            {canVizual && (
+              <button
+                type="button"
+                onClick={() => runTrigger("spustit_vizual", "Spustenie vizuálu zlyhalo")}
+                disabled={triggering}
+                className="flex-1 rounded-lg border border-[var(--color-border-default)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {triggering ? "Spúšťam vizuál…" : "Spustiť vizuál"}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => runTrigger("spustit_stavbu", "Spustenie stavby zlyhalo")}
+              disabled={triggering}
+              className="flex-1 rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {triggering ? "Spúšťam stavbu…" : "Spustiť stavbu"}
+            </button>
+          </div>
           <ErrorNote error={triggerError} className="mt-1" />
         </div>
       ) : canResume ? (

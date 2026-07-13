@@ -22,7 +22,7 @@ function breadcrumbFor(pathname: string): string {
   if (breadcrumbMap[pathname]) return breadcrumbMap[pathname];
   // Dynamic project-scoped paths (/projects/<slug>[/versions/<id>|/backlog|/metrics]).
   if (pathname.startsWith("/projects/")) return "Projekt";
-  return "NEX Studio";
+  return "NEX Studio Visual";
 }
 
 // Plain-Slovak explanation for the kept-abbreviation breadcrumbs (UAT/PROD), shown as a hover tooltip so a

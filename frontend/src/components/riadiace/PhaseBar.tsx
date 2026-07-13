@@ -39,11 +39,12 @@ function phaseMarkFor(phase: BuildPhase, state: PipelineState | null): PhaseMark
 // ── Conversation (spine) strip — STEP 5 ───────────────────────────────────────
 // The spine build never leaves current_stage='priprava', so its position is derived from BOARD SIGNALS, not the
 // stage index. Distinct from PHASE_LABELS (those stay the legacy phase-automaton labels, unchanged).
-type ConvPhase = "specifikacia" | "plan" | "programovanie" | "kontrola" | "hotovo";
-const CONV_PHASES: ConvPhase[] = ["specifikacia", "plan", "programovanie", "kontrola", "hotovo"];
+type ConvPhase = "specifikacia" | "plan" | "vizual" | "programovanie" | "kontrola" | "hotovo";
+const CONV_PHASES: ConvPhase[] = ["specifikacia", "plan", "vizual", "programovanie", "kontrola", "hotovo"];
 const CONV_LABELS: Record<ConvPhase, string> = {
   specifikacia: "Špecifikácia",
   plan: "Plán",
+  vizual: "Vizuál",
   programovanie: "Programovanie",
   kontrola: "Kontrola",
   hotovo: "Hotovo",
@@ -67,6 +68,9 @@ function conversationPhase(board: PipelineBoard | null): ConvPhase {
   if (has("skontrolovat") || msgHasFlag("kontrola") || (working && msgHasFlag("programming_complete"))) {
     return "kontrola";
   }
+  // Vizuál — the visual-consultation stage is active (live preview + AI-applies loop). Checked BEFORE
+  // Programovanie because `spustit_stavbu` (its "proceed to build" verb) is offered while at Vizuál.
+  if (stage === "vizual") return "vizual";
   // Programovanie — the build is running / paused, or is built-and-ready to start.
   if (has("pause") || has("pokracovat") || has("spustit_stavbu") || stage === "programovanie") {
     return "programovanie";

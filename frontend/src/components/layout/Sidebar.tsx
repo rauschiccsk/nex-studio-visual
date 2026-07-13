@@ -103,7 +103,7 @@ export default function Sidebar() {
 
   // ─── Logo slot (shared Brand — E1 chrome unification, CR-NS-067) ───────────
   const logo = (
-    <Brand initials="NS" name="NEX Studio" version={`v${import.meta.env.VITE_APP_VERSION || "dev"}`} />
+    <Brand initials="NSV" name="NEX Studio Visual" version={`v${import.meta.env.VITE_APP_VERSION || "dev"}`} />
   );
 
   // ─── Footer slot ─────────────────────────────────────────────────────────
