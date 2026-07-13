@@ -1,3 +1,0 @@
-## v3.0.145 — Rozhodnutia od AI ako klikacie karty
-
-Keď AI partner potreboval tvoje rozhodnutie (napr. po úvodnej previerke alebo po neúspešnom overení), vypísal ho ako **text v konverzácii** — a nebolo na čo kliknúť, rozhodnutie sa dalo ľahko prehliadnuť. Teraz sa každé rozhodnutie zobrazí ako **prehľadná karta** s nápadným pruhom **„⛔ Treba tvoje rozhodnutie"**: vidíš otázku v ľudskej reči, jednotlivé možnosti a **odporúčanie AI zvýraznené** — a klikneš. Rozhoduješ **po jednom bode** s počítadlom *„2 zo 6"*, takže vždy vieš, koľko ešte zostáva; keď rozhodneš všetky, AI partner sám zapracuje zmeny a pokračuje.
