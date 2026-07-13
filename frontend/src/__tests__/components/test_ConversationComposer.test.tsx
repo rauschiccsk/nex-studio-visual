@@ -50,4 +50,11 @@ describe("ConversationComposer — framework_issue lock (Director obs #6)", () =
     expect(screen.queryByRole("button", { name: /Poslať/ })).not.toBeInTheDocument();
     expect(screen.getByText(/lištu vyššie/i)).toBeInTheDocument();
   });
+
+  // #2 (Director 2026-07-13): at the Vizuál gate this composer IS the change-request channel, so the
+  // placeholder names it explicitly (and the approval bar drops its own text box → one input on screen).
+  it("names the change-request channel in the placeholder when atVizual", () => {
+    render(<ConversationComposer onRelay={noopRelay} atVizual />);
+    expect(screen.getByPlaceholderText(/požiadavku na zmenu vizuálu/i)).toBeInTheDocument();
+  });
 });

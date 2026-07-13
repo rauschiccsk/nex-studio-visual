@@ -34,9 +34,12 @@ interface Props {
   /** Category I: a recovery bar above (a blocked question / error) owns the input right now. The always-open
    *  composer stays usable but is de-emphasised, with a hint pointing at the one obvious input above. */
   blockedAbove?: boolean;
+  /** At the Vizuál gate this composer IS the change-request channel (typed → the AI applies live, HMR), so
+   *  the placeholder names that explicitly ("Napíš požiadavku na zmenu vizuálu…"). Director 2026-07-13. */
+  atVizual?: boolean;
 }
 
-export function ConversationComposer({ onRelay, disabled, frameworkBlocked, blockedAbove }: Props) {
+export function ConversationComposer({ onRelay, disabled, frameworkBlocked, blockedAbove, atVizual }: Props) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
@@ -125,7 +128,9 @@ export function ConversationComposer({ onRelay, disabled, frameworkBlocked, bloc
           placeholder={
             frameworkBlocked
               ? "Zablokované — túto chybu rieši náš technický tím."
-              : "Napíš AI Agentovi… (Enter odošle, Shift+Enter nový riadok)"
+              : atVizual
+                ? "Napíš požiadavku na zmenu vizuálu… (Enter odošle, Shift+Enter nový riadok)"
+                : "Napíš AI Agentovi… (Enter odošle, Shift+Enter nový riadok)"
           }
           className="min-h-[2.5rem] flex-1 resize-none rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent-primary)] focus:outline-none disabled:opacity-50"
         />

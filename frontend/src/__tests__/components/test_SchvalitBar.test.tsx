@@ -111,11 +111,14 @@ describe("SchvalitBar — the Návrh/plan-approval gate button", () => {
 
   // ── Context-aware copy (release-smoke-boot-and-batch-fixes.md C): the SAME `schvalit` verb, two gates ──
 
-  it("at the Návrh gate (current_stage 'navrh') shows the PLAN copy", () => {
+  it("at the Návrh gate (current_stage 'navrh') shows the PLAN copy + keeps the comment box + Upraviť (#2)", () => {
     render(<SchvalitBar board={boardWith(["schvalit", "uprav"], "navrh")} versionId="v-1" onBoard={vi.fn()} />);
     expect(screen.getByRole("button", { name: /Schváliť plán/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Prejsť na overenie/ })).not.toBeInTheDocument();
     expect(screen.getByText(/posunie do stavby \(Programovanie\)/)).toBeInTheDocument();
+    // #2: the comment/rework input + "Upraviť" stay at the non-Vizuál gates (no live composer-apply loop there).
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Upraviť/ })).toBeInTheDocument();
   });
 
   it("at a COMPLETED build (current_stage 'programovanie') shows the VERIFICATION copy", () => {
@@ -132,11 +135,15 @@ describe("SchvalitBar — the Návrh/plan-approval gate button", () => {
     );
   });
 
-  it("at the Vizuál gate (current_stage 'vizual') shows the VIZUÁL copy (CR-1)", () => {
+  it("at the Vizuál gate (current_stage 'vizual') shows the VIZUÁL copy + approve button ONLY (#2)", () => {
     render(<SchvalitBar board={boardWith(["schvalit", "uprav"], "vizual")} versionId="v-1" onBoard={vi.fn()} />);
     expect(screen.getByRole("button", { name: /Schváliť vizuál/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Schváliť plán/ })).not.toBeInTheDocument();
     expect(screen.getByText(/posunie do stavby \(Programovanie\)/)).toBeInTheDocument();
+    // #2 (Director 2026-07-13): at Vizuál the composer owns change-requests (live HMR), so this bar drops its
+    // own comment box + "Upraviť" — exactly ONE input on screen. Just the approve button here.
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Upraviť/ })).not.toBeInTheDocument();
     // The action stays `schvalit` regardless of the copy.
     fireEvent.click(screen.getByRole("button", { name: /Schváliť vizuál/ }));
     return waitFor(() =>

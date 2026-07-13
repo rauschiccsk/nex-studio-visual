@@ -183,6 +183,7 @@ export default function RiadiaceCentrumPage() {
           disabled={!versionId}
           frameworkBlocked={frameworkBlocked}
           blockedAbove={blockRecoveryActive}
+          atVizual={board?.state?.current_stage === "vizual"}
         />
       </div>
 

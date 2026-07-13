@@ -44,6 +44,11 @@ export default function SchvalitBar({ board, versionId, onBoard }: Props) {
   //   • verifikacia    → "Schváliť na Hotovo"  → overená verzia sa označí ako Hotovo (terminálny podpis)
   // Any null/legacy state falls back to the plan-approval copy (the earliest gate).
   const stage = board.state?.current_stage;
+  // At the Vizuál gate the change-requests flow through the always-open composer (typed → the AI applies them
+  // live, HMR), so this bar's own comment box + "Upraviť" are redundant + confusing there ("2 editory",
+  // Director 2026-07-13). Render Vizuál as a pure approve button; keep the comment/rework input at the other
+  // gates (Návrh / Programovanie / Verifikácia) where there is no live composer-apply loop.
+  const isVizual = stage === "vizual";
   const approveLabel =
     stage === "verifikacia"
       ? "Schváliť na Hotovo"
@@ -95,29 +100,36 @@ export default function SchvalitBar({ board, versionId, onBoard }: Props) {
       </div>
 
       <div className="flex items-center gap-2">
-        <input
-          lang="sk"
-          spellCheck={false}
-          type="text"
-          value={comment}
-          onChange={(e) => setComment(e.target.value)}
-          placeholder="Komentár k schváleniu / pokyn na úpravu (voliteľné)"
-          disabled={submitting}
-          className="flex-1 rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-3 py-1.5 text-xs text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:border-primary-500 focus:outline-none disabled:opacity-60"
-        />
-        <button
-          type="button"
-          onClick={() => submit("uprav", "Úprava zlyhala")}
-          disabled={submitting}
-          className="shrink-0 rounded-lg border border-[var(--color-border-strong)] px-4 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {submitting ? "Pracujem…" : "Upraviť"}
-        </button>
+        {/* Vizuál: no comment box + no "Upraviť" — the composer below owns change-requests (live HMR). */}
+        {!isVizual && (
+          <>
+            <input
+              lang="sk"
+              spellCheck={false}
+              type="text"
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder="Komentár k schváleniu / pokyn na úpravu (voliteľné)"
+              disabled={submitting}
+              className="flex-1 rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-3 py-1.5 text-xs text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:border-primary-500 focus:outline-none disabled:opacity-60"
+            />
+            <button
+              type="button"
+              onClick={() => submit("uprav", "Úprava zlyhala")}
+              disabled={submitting}
+              className="shrink-0 rounded-lg border border-[var(--color-border-strong)] px-4 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {submitting ? "Pracujem…" : "Upraviť"}
+            </button>
+          </>
+        )}
         <button
           type="button"
           onClick={() => submit("schvalit", "Schválenie zlyhalo")}
           disabled={submitting}
-          className="shrink-0 rounded-lg bg-primary-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
+          className={`shrink-0 rounded-lg bg-primary-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50 ${
+            isVizual ? "ml-auto" : ""
+          }`}
         >
           {submitting ? approveBusyLabel : approveLabel}
         </button>
