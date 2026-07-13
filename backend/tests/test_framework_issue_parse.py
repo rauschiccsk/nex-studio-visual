@@ -116,33 +116,21 @@ def test_prose_with_no_block_still_fails() -> None:
     assert "no PIPELINE_STATUS block found" in result.reason
 
 
-# ── Návrh plan-required guard + its re-work relaxation (nex-studio-visual crash-test 2026-07-13) ───────
-# A Návrh gate_report normally MUST carry the EPIC→FEAT→TASK plan (it closes the phase). But a RE-WORK turn
-# whose plan is ALREADY materialized (applying decision cards) correctly omits it — the exact case that
-# wedged nex-weblist. relaxed_navrh_plan() (entered by _run_navrh_round for that turn) accepts it.
+# ── Návrh gate_report no longer requires a plan (nex-studio-visual, Director 2026-07-13) ───────────────
+# The task plan moved OUT of Návrh — it is built at Programovanie start (from the final design + Vizuál
+# changes). So a Návrh gate_report is legitimately plan-less and MUST parse (the old plan-required guard is
+# gone). Fenced OR bare (the nex-weblist shape).
 _NAVRH_GATE_NO_PLAN = {
     "stage": "navrh",
     "kind": "gate_report",
-    "summary": "Prepracoval som Špecifikáciu aj Návrh podľa 6 rozhodnutí.",
+    "summary": "Návrhový dokument je hotový.",
     "awaiting": "manazer",
-    "deliverables": ["docs/specs/versions/v0.1.0/specification.md"],
+    "deliverables": ["docs/specs/versions/v0.1.0/design.md"],
 }
 
 
-def test_navrh_gate_report_without_plan_fails_by_default() -> None:
-    # First-run contract unchanged: a plan-less Návrh gate_report is rejected (must carry the plan).
-    result = parse_status_block(_fence(_NAVRH_GATE_NO_PLAN))
-    assert isinstance(result, ParseFailure)
-    assert "plan" in result.reason
-
-
-def test_navrh_gate_report_without_plan_ok_when_relaxed() -> None:
-    # Re-work turn (plan already materialized): relaxed_navrh_plan() accepts the plan-less gate_report,
-    # whether fenced OR bare (the nex-weblist shape). The relaxation is confined to the with-block.
-    with pipeline_status.relaxed_navrh_plan():
-        fenced = parse_status_block(_fence(_NAVRH_GATE_NO_PLAN))
-        bare = parse_status_block(json.dumps(_NAVRH_GATE_NO_PLAN))
+def test_navrh_gate_report_without_plan_parses() -> None:
+    fenced = parse_status_block(_fence(_NAVRH_GATE_NO_PLAN))
+    bare = parse_status_block(json.dumps(_NAVRH_GATE_NO_PLAN))
     assert isinstance(fenced, PipelineStatusBlock) and fenced.kind == "gate_report"
     assert isinstance(bare, PipelineStatusBlock) and bare.kind == "gate_report"
-    # Outside the block the guard is active again (contextvar reset).
-    assert isinstance(parse_status_block(_fence(_NAVRH_GATE_NO_PLAN)), ParseFailure)

@@ -80,7 +80,6 @@ from backend.services.pipeline_status import (
     parse_structured_output,
     parse_task_plan_feat_tasks,
     parse_task_plan_skeleton,
-    relaxed_navrh_plan,
 )
 
 # NOTE (CR-V2-006): the v1 ``CoordinatorDirective`` / ``CoordinatorTarget`` / ``task_pass`` status-block
@@ -4792,21 +4791,34 @@ async def _run_release_smoke(
 
 
 def _latest_navrh_gate_report_payload(db: Session, version_id: uuid.UUID) -> dict[str, Any]:
-    """The payload of the latest ``navrh`` ``gate_report`` (the AI Agent's design close carrying the plan +
-    cross_cutting_rules + the CR-V2-052 release-coverage declaration), or ``{}`` when none is on record.
-    Shared by :func:`_declared_release_coverage` (the oracle floor) and :func:`_release_coverage_brief` (the
-    Auditor's adversarial brief)."""
-    latest = db.execute(
-        select(PipelineMessage)
-        .where(
-            PipelineMessage.version_id == version_id,
-            PipelineMessage.stage == "navrh",
-            PipelineMessage.kind == "gate_report",
+    """The payload of the plan gate_report (the AI Agent's design close carrying the plan + cross_cutting_rules
+    + the CR-V2-052 release-coverage declaration), or ``{}`` when none is on record. Shared by
+    :func:`_declared_release_coverage` (the oracle floor) and :func:`_release_coverage_brief` (the Auditor's
+    adversarial brief).
+
+    The plan gate_report used to be recorded in the Návrh phase (``stage='navrh'``); since nex-studio-visual
+    (Director 2026-07-13) the task plan is built at Programovanie ENTRY, so its gate_report lands under
+    ``stage='programovanie'`` (with ``payload['phase']=='navrh'``). Match it by the ``plan`` payload it
+    uniquely carries — the per-task build gate_reports of the loop carry none — newest-first, regardless of
+    which stage the plan gate_report landed under."""
+    msgs = (
+        db.execute(
+            select(PipelineMessage)
+            .where(
+                PipelineMessage.version_id == version_id,
+                PipelineMessage.stage.in_(("navrh", "programovanie")),
+                PipelineMessage.author == "ai_agent",
+                PipelineMessage.kind == "gate_report",
+            )
+            .order_by(PipelineMessage.seq.desc())
         )
-        .order_by(PipelineMessage.seq.desc())
-        .limit(1)
-    ).scalar_one_or_none()
-    return (latest.payload if latest else None) or {}
+        .scalars()
+        .all()
+    )
+    for msg in msgs:
+        if msg.payload and msg.payload.get("plan"):
+            return msg.payload
+    return {}
 
 
 def _declared_release_coverage(db: Session, version_id: uuid.UUID) -> tuple[int, int]:
@@ -6156,22 +6168,15 @@ async def _run_navrh_round(
     actor = state.current_actor  # ai_agent
     # 1. The design-doc turn — directive (uprav/ask/answer) when the Manažér steered, else the Návrh brief.
     prompt = directive if directive is not None else _navrh_directive(db, state.version_id)
-    # A Návrh RE-WORK turn (directive set — e.g. applying the Auditor's decision cards) whose task plan is
-    # ALREADY materialized must NOT be forced to re-emit the whole EPIC→FEAT→TASK plan: the AI re-works the
-    # spec/design and the existing plan rows are reused (step 3 below). Relax the plan-required parse guard
-    # for exactly that turn (nex-studio-visual crash-test 2026-07-13 — the re-work's plan-less gate_report
-    # was rejected → parse_exhaustion on a turn that had done the work). First runs are unchanged.
-    plan_already_materialized = directive is not None and navrh_plan_materialized(db, state.version_id)
-    with relaxed_navrh_plan() if plan_already_materialized else contextlib.nullcontext():
-        result = await invoke_agent_with_parse_retry(
-            db,
-            version_id=state.version_id,
-            role=actor,
-            stage="navrh",
-            prompt=prompt,
-            on_event=on_event,
-            on_message=on_message,
-        )
+    result = await invoke_agent_with_parse_retry(
+        db,
+        version_id=state.version_id,
+        role=actor,
+        stage="navrh",
+        prompt=prompt,
+        on_event=on_event,
+        on_message=on_message,
+    )
     if isinstance(result, ParseFailure):
         if result.lost_work is not None:  # R1-c lost-work audit (safeguard #3) — never silently dropped
             state.status = "awaiting_manazer"
@@ -6208,21 +6213,12 @@ async def _run_navrh_round(
         db.flush()
         return state
 
-    # 3. Fold the task plan in. If the design turn already carried a non-empty inline plan (a small
-    # project), materialize it directly; otherwise generate it via the incremental skeleton/per-feat passes
-    # (no parse exhaustion on a large plan). Either path writes the navrh gate_report + Epic/Feat/Task rows.
-    if result.plan is not None and result.plan.epics:
-        settled = await _materialize_inline_navrh_plan(db, state, result, on_message=on_message)
-    elif navrh_plan_materialized(db, state.version_id):
-        # RE-WORK turn (e.g. applying decision cards): the plan already exists — reuse the materialized
-        # EPIC→FEAT→TASK rows, do NOT regenerate them (a re-fold would duplicate/overwrite the plan). The
-        # gate_report parsed WITHOUT an inline plan under ``relaxed_navrh_plan`` above; here we simply skip
-        # the fold and let the Auditor re-review + the dial-settle close the phase.
-        settled = None
-    else:
-        settled = await _fold_task_plan_into_navrh(db, state, on_event=on_event, directive=None, on_message=on_message)
-    if settled is not None:
-        return settled  # a fold/materialize failure already settled (blocked / awaiting_manazer)
+    # 3. The task plan is NO LONGER generated here (nex-studio-visual, Director 2026-07-13). The Vizuál step
+    # keeps refining the app AFTER Návrh, so a plan built now would be stale (it would miss the screens/fields
+    # the Manažér adds while walking the live preview). Návrh produces the design DOCUMENT ONLY; the
+    # EPIC→FEAT→TASK plan is generated at the START of Programovanie (:func:`_run_build_round`), from the FINAL
+    # design + the Manažér's Vizuál changes (the warm session carries them). Any inline plan the design turn
+    # happens to emit is ignored — the plan is always built fresh at build time.
 
     # 4. AUDITOR UPFRONT REVIEW (CR-V2-013; AUD-1(a)/AUD-5/NAVRH-4 — replaces the Gate-E Customer function).
     # The independent Auditor (READ + RUN-ONLY, no write/commit) scans the Špecifikácia + the design doc for
@@ -6237,17 +6233,17 @@ async def _run_navrh_round(
     # 5. CR-V2-041: a spec/design HOLE → turn the Auditor's verdict into an INTERACTIVE Manažér consultation
     # (the AI Agent translates the findings into plain-language decision cards the Manažér answers one-at-a-
     # time). This OVERRIDES the dial (AUD-4 — a hole always escalates). Otherwise the SHARED dial-settle
-    # governs: auto-continue to Programovanie vs stop at the post-Návrh schvaľovací bod (design + plan +
-    # the AI Agent's own clarification questions).
+    # governs: auto-continue to Vizuál/Programovanie vs stop at the post-Návrh schvaľovací bod (the design doc
+    # + the AI Agent's own clarification questions; the task plan is now built later, at Programovanie start).
     if review_verdict is not None:
         return await _settle_for_consultation(
             db, state, source="auditor_upfront", verdict=review_verdict, on_event=on_event, on_message=on_message
         )
     if _settle_phase_boundary(db, state):
-        return state  # agent_working at Programovanie — the auto-chain loop continues the build
+        return state  # agent_working at the next phase — the auto-chain loop continues
     if state.status != "done":
         state.status = "awaiting_manazer"
-        state.next_action = "Manažér: posúdiť návrh + plán úloh (Schváliť / Uprav)."
+        state.next_action = "Manažér: posúdiť návrhový dokument (Schváliť / Uprav)."
         db.flush()
     return state
 
@@ -7655,23 +7651,33 @@ def cleanup_old_orchestrator_sessions(db: Session) -> int:
 
 
 def _fetch_cross_cutting_rules(db: Session, version_id: uuid.UUID) -> Optional[str]:
-    """Re-read the cross-cutting regulated-ledger invariants the AI Agent codified once in the Návrh
-    gate_report payload (CR-NS-020 CR-2; v2 CR-V2-011 — the plan + its rules fold into the Návrh phase).
-    Injected into every per-task build brief (consumed by the Programovanie loop, CR-V2-012)."""
-    msg = db.execute(
-        select(PipelineMessage)
-        .where(
-            PipelineMessage.version_id == version_id,
-            PipelineMessage.stage == "navrh",
-            PipelineMessage.author == "ai_agent",
-            PipelineMessage.kind == "gate_report",
+    """Re-read the cross-cutting regulated-ledger invariants the AI Agent codified once in the plan
+    gate_report payload (CR-NS-020 CR-2; v2 CR-V2-011). Injected into every per-task build brief (consumed
+    by the Programovanie loop, CR-V2-012).
+
+    The plan gate_report used to be recorded in the Návrh phase (``stage='navrh'``); since nex-studio-visual
+    (Director 2026-07-13) the task plan is built at Programovanie ENTRY, so its gate_report is recorded under
+    ``stage='programovanie'`` (with ``payload['phase']=='navrh'``). Match it by the ``cross_cutting_rules``
+    payload it uniquely carries — the per-task build gate_reports of the loop carry none — newest-first, so
+    the rules are found regardless of which stage the plan gate_report landed under."""
+    msgs = (
+        db.execute(
+            select(PipelineMessage)
+            .where(
+                PipelineMessage.version_id == version_id,
+                PipelineMessage.stage.in_(("navrh", "programovanie")),
+                PipelineMessage.author == "ai_agent",
+                PipelineMessage.kind == "gate_report",
+            )
+            .order_by(PipelineMessage.seq.desc())
         )
-        .order_by(PipelineMessage.seq.desc())
-        .limit(1)
-    ).scalar_one_or_none()
-    if msg is None or not msg.payload:
-        return None
-    return msg.payload.get("cross_cutting_rules")
+        .scalars()
+        .all()
+    )
+    for msg in msgs:
+        if msg.payload and msg.payload.get("cross_cutting_rules"):
+            return msg.payload["cross_cutting_rules"]
+    return None
 
 
 def _directive_for_build_task(
@@ -8075,6 +8081,27 @@ async def _run_build_round(
         update(Task).where(Task.feat_id.in_(feat_ids_of_version), Task.status == "in_progress").values(status="todo")
     )
     db.flush()
+
+    # Build the task plan HERE, at the START of Programovanie (nex-studio-visual, Director 2026-07-13) — NOT in
+    # Návrh. The Vizuál step keeps refining the app after Návrh, so the plan is generated now, from the FINAL
+    # design + the Manažér's Vizuál changes (the warm session carries them), never stale. Návrh emits the
+    # design doc only; the FIRST build dispatch builds the EPIC→FEAT→TASK plan, then codes it. Idempotent: a
+    # resumed / re-dispatched build finds the plan already materialized and skips straight to the task loop.
+    # metrics_phase='navrh' keeps the planning effort accounted as design work even though it runs at build time.
+    # ONLY the new_version flow: the fast_fix short path skips Návrh entirely and materializes its ONE Task from
+    # the directive below (fast_fix.ensure_build_task) — it must never run the heavy EPIC→FEAT→TASK plan passes.
+    if state.flow_type != "fast_fix" and not navrh_plan_materialized(db, version_id):
+        plan_settled = await _generate_incremental_plan(
+            db,
+            state,
+            stage="programovanie",
+            on_event=on_event,
+            directive=None,
+            on_message=on_message,
+            metrics_phase="navrh",
+        )
+        if plan_settled is not None:
+            return plan_settled  # a plan-generation failure already settled (blocked / awaiting_manazer)
 
     # Cross-cutting invariants the AI Agent codified once in the Návrh gate_report (re-read each round, threaded
     # into every task brief).
@@ -8822,15 +8849,11 @@ async def apply_action(
             raise OrchestratorError(
                 "Schváliť je platné len na schvaľovacom bode (Návrh / Vizuál / Programovanie / Verifikácia)"
             )
-        # CR-V2-037: never advance out of Návrh with an EMPTY task plan (0 tasks) — that would enter
-        # Programovanie with nothing to build. An empty plan means the Návrh round did not materialize one
-        # (e.g. a per-feat pass crashed past its retries → settled awaiting_manazer). Recover via "Uprav"
-        # (re-run Návrh), not by signing off an absent plan. Authoritative belt to the board's hidden button.
-        if state.current_stage == "navrh" and not navrh_plan_materialized(db, version_id):
-            raise OrchestratorError(
-                "Schváliť nedovolené: plán úloh je prázdny (0 úloh) — Návrh sa nedokončil. "
-                "Použi „Uprav“ a nechaj agenta plán dokončiť."
-            )
+        # NOTE (nex-studio-visual, Director 2026-07-13): the old "never advance out of Návrh with an EMPTY plan"
+        # gate is GONE — the task plan is no longer built in Návrh (it is built at Programovanie start, from the
+        # final design + Vizuál changes; see :func:`_run_build_round`). So approving Návrh with no plan is now
+        # the normal path. The empty-plan safety moved WITH the plan: :func:`_run_build_round` blocks on a
+        # plan-generation failure, so Programovanie can never silently run with nothing to build.
         # no-silent-done-without-verification (R-BLAST safeguard #5, v2 form): the build may reach Hotovo
         # ONLY through a recorded Auditor PASS verdict at Verifikácia — never a silent sign-off. (v1's
         # "no-silent-done-without-UAT" gate is superseded: deploy is OUT of the pipeline — per-customer,

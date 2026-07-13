@@ -312,8 +312,9 @@ async def test_upfront_hole_escalates_and_overrides_plna_dial(db_session, monkey
     # the AI Agent's consultation (decision queue) was recorded for the Manažér's Decision Cards
     consults = [m for m in _msgs(db_session, version.id) if m.kind == "consultation"]
     assert consults and consults[-1].payload["consultation"]["decisions"]
-    # plan was still materialized (the review runs AFTER the plan folds in)
-    assert _epics(db_session, version.id)
+    # nex-studio-visual (Director 2026-07-13): NO plan is materialized in Návrh — the upfront review runs
+    # AFTER the design DOCUMENT (the EPIC→FEAT→TASK plan is now built at Programovanie start).
+    assert not _epics(db_session, version.id)
 
 
 async def test_upfront_hole_stops_under_stopping_dial_too(db_session, monkeypatch):

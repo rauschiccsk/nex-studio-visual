@@ -160,7 +160,9 @@ class TestTokenStopPauses:
         _seed_programovanie(db_session, version.id, build_dial="po_kazdej_faze")
         _seed_usage(db_session, version.id, input_tokens=2_000_000, output_tokens=0)  # >> 1M, but limit is 0
 
-        # No tasks → the loop reaches the dial-settle; stub both so the test isolates "seam skipped".
+        # nex-studio-visual: the plan builds at Programovanie entry — this test is a mid-build token check, so
+        # the plan is already materialized (skip plan-gen). No tasks → the loop reaches the dial-settle.
+        monkeypatch.setattr(orchestrator, "navrh_plan_materialized", lambda db, vid: True)
         monkeypatch.setattr(orchestrator.task_service, "get_next_todo_task", lambda db, vid: None)
         monkeypatch.setattr(orchestrator, "_settle_phase_boundary", lambda db, state: False)
 
@@ -179,6 +181,8 @@ class TestTokenStopPauses:
         def _must_not_reach(db, vid):  # pragma: no cover - asserts the seam returned first
             raise AssertionError("token-stop must pause BEFORE get_next_todo_task")
 
+        # nex-studio-visual: plan already materialized (mid-build) — skip the Programovanie-entry plan-gen.
+        monkeypatch.setattr(orchestrator, "navrh_plan_materialized", lambda db, vid: True)
         monkeypatch.setattr(orchestrator.task_service, "get_next_todo_task", _must_not_reach)
 
         state = await orchestrator.run_dispatch(db_session, version.id)
@@ -199,6 +203,7 @@ class TestTokenStopPauses:
         _seed_programovanie(db_session, version.id, build_dial="plna")
         _seed_usage(db_session, version.id, input_tokens=600_000, output_tokens=400_000)  # sum == 1M exactly
         _set_limit(db_session, "1")
+        monkeypatch.setattr(orchestrator, "navrh_plan_materialized", lambda db, vid: True)
         monkeypatch.setattr(orchestrator.task_service, "get_next_todo_task", lambda db, vid: None)
         monkeypatch.setattr(orchestrator, "_settle_phase_boundary", lambda db, state: False)
 
@@ -212,6 +217,7 @@ class TestTokenStopPauses:
         _seed_programovanie(db_session, version.id, build_dial="po_kazdej_faze")
         _seed_usage(db_session, version.id, input_tokens=900_000, output_tokens=0)  # 900k < 1M
         _set_limit(db_session, "1")
+        monkeypatch.setattr(orchestrator, "navrh_plan_materialized", lambda db, vid: True)
         monkeypatch.setattr(orchestrator.task_service, "get_next_todo_task", lambda db, vid: None)
         monkeypatch.setattr(orchestrator, "_settle_phase_boundary", lambda db, state: False)
 
@@ -224,6 +230,7 @@ class TestTokenStopPauses:
         version, _ = _make_version(db_session)
         _seed_programovanie(db_session, version.id, build_dial="po_kazdej_faze")
         _set_limit(db_session, "1")  # cap set, but there is zero spend on record
+        monkeypatch.setattr(orchestrator, "navrh_plan_materialized", lambda db, vid: True)
         monkeypatch.setattr(orchestrator.task_service, "get_next_todo_task", lambda db, vid: None)
         monkeypatch.setattr(orchestrator, "_settle_phase_boundary", lambda db, state: False)
 

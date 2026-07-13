@@ -18,6 +18,7 @@ re-homed to the ``programovanie`` phase) rebuilds the v1 per-task-audited build 
 monkeypatched per test to control the per-task mechanical gate without touching real git.
 """
 
+import json
 import uuid
 
 from sqlalchemy import select
@@ -389,6 +390,10 @@ async def test_empty_plan_settles_via_dial(db_session, monkeypatch):
     version, _ = _make_version(db_session, project_dial="po_kazdej_faze")
     _seed_programovanie(db_session, version.id, iteration=1)
 
+    # nex-studio-visual: the plan is built at Programovanie entry — a re-loop already HAS a materialized plan
+    # (done tasks), so plan-gen is skipped and the empty todo-loop reaches the dial-settle. No agent turn runs.
+    monkeypatch.setattr(orchestrator, "navrh_plan_materialized", lambda db, vid: True)
+
     # no tasks seeded; invoke must never be called
     async def _boom(*a, **k):
         raise AssertionError("no agent turn expected when there is no todo task")
@@ -396,3 +401,327 @@ async def test_empty_plan_settles_via_dial(db_session, monkeypatch):
     monkeypatch.setattr(orchestrator, "invoke_agent_with_parse_retry", _boom)
     state = await orchestrator.run_dispatch(db_session, version.id)
     assert state.current_stage == "programovanie" and state.status == "awaiting_manazer"
+
+
+# ── task plan built at Programovanie ENTRY (re-homed from Návrh; nex-studio-visual, Director 2026-07-13) ──
+# The EPIC→FEAT→TASK plan is generated at the START of Programovanie (``_run_build_round`` entry), from the
+# final design + the Manažér's Vizuál changes — NOT in Návrh (which now produces the design DOCUMENT only).
+# These tests (moved from test_orchestrator_v2_navrh.py — coverage preserved, not dropped) pin plan
+# generation + the fail-closed plan-pass failure behaviour at the build-round entry seam. There is no
+# design-doc turn (the build starts in Programovanie); the incremental skeleton/per-feat passes are stubbed
+# via a controllable fake ``invoke_claude`` (the real fence/structured path). The tests call
+# ``_run_build_round`` directly (like the fast-fix short-path integration test) so the plan-gen seam is
+# exercised without the ``_begin_dispatch`` baseline capture.
+
+_DEFAULT_CROSS = "## Invarianty\n- spoločná transakčná hranica\n- immutable audit"
+
+
+def _epics(db_session, version_id):
+    return db_session.execute(select(Epic).where(Epic.version_id == version_id)).scalars().all()
+
+
+def _task_plan_fence(obj):
+    return (
+        "Tu je kostra/úlohy:\n"
+        f"<<<TASK_PLAN_JSON>>>\n{json.dumps(obj, ensure_ascii=False)}\n<<<END_TASK_PLAN_JSON>>>\nHotovo."
+    )
+
+
+def _skeleton_dict(plan_spec, cross=_DEFAULT_CROSS, *, flagship=None, safety=None):
+    epics = []
+    for e_title, feats in plan_spec:
+        fs = []
+        for f_title, tasks in feats:
+            f = {"title": f_title}
+            ests = [t[2] for t in tasks if len(t) > 2 and t[2] is not None]
+            if ests:
+                f["estimated_minutes"] = sum(ests)
+            fs.append(f)
+        epics.append({"title": e_title, "feats": fs})
+    obj = {"epics": epics, "cross_cutting_rules": cross}
+    if flagship is not None:  # CR-V2-052 release-coverage declaration
+        obj["flagship_features"] = flagship
+    if safety is not None:
+        obj["safety_properties"] = safety
+    return obj
+
+
+def _feat_tasks_dict(tasks):
+    out = []
+    for t in tasks:
+        d = {"title": t[0], "task_type": t[1]}
+        if len(t) > 2 and t[2] is not None:
+            d["estimated_minutes"] = t[2]
+        out.append(d)
+    return {"tasks": out}
+
+
+def _stub_plan_passes(monkeypatch, plan_spec, *, cross=_DEFAULT_CROSS, text=False, flagship=None, safety=None):
+    """Drive the build-entry task-plan passes via a fake ``invoke_claude``: the skeleton pass (prompt contains
+    "KOSTRU") → EPIC+FEAT(no tasks)+cross (+ CR-V2-052 flagship/safety declaration); a per-feat pass (the feat
+    title appears) → that feat's tasks. ``text=True`` returns the real-env prose + ``<<<TASK_PLAN_JSON>>>``
+    fence shape (structured_output=None); ``text=False`` returns the dict as structured_output."""
+    feat_by_title = {f_title: tasks for _e, feats in plan_spec for f_title, tasks in feats}
+
+    def _emit(obj):
+        return (_task_plan_fence(obj), None, None) if text else ("", None, obj)
+
+    async def _fake_invoke_claude(*, prompt, **_kw):
+        if "KOSTRU" in prompt:
+            return _emit(_skeleton_dict(plan_spec, cross, flagship=flagship, safety=safety))
+        for f_title, tasks in feat_by_title.items():
+            if f_title in prompt:
+                return _emit(_feat_tasks_dict(tasks))
+        raise AssertionError(f"unexpected plan-pass prompt: {prompt[:80]}")
+
+    monkeypatch.setattr(orchestrator, "invoke_claude", _fake_invoke_claude)
+    monkeypatch.setattr(orchestrator, "_split_claude_result", lambda r: r)
+    monkeypatch.setattr(orchestrator, "_resolve_orch_session", lambda db, slug, role: (uuid.uuid4(), False))
+    monkeypatch.setattr(orchestrator, "_resolve_dispatch_overrides", lambda db, vid, role: (None, None))
+
+
+def _small_plan():
+    return [("Foundation", [("Schema", [("users table", "migration", 60), ("audit_log", "migration", 30)])])]
+
+
+def _stub_plan_passes_faulty(monkeypatch, plan_spec, *, fault_feat, fault, fail_times=None, cross=_DEFAULT_CROSS):
+    """Like :func:`_stub_plan_passes`, but the per-feat pass for ``fault_feat`` RAISES ``fault`` (a
+    ``ClaudeAgentError`` / ``ClaudeAgentTimeout``). ``fail_times=None`` → always raise (persistent); an int →
+    raise that many times then succeed (transient — exercises the bounded re-invoke). Returns a ``calls``
+    dict counting the skeleton + fault-feat invocations so a test can assert retry vs no-retry."""
+    feat_by_title = {f_title: tasks for _e, feats in plan_spec for f_title, tasks in feats}
+    calls = {"skeleton": 0, fault_feat: 0}
+
+    async def _fake_invoke_claude(*, prompt, **_kw):
+        if "KOSTRU" in prompt:
+            calls["skeleton"] += 1
+            return ("", None, _skeleton_dict(plan_spec, cross))
+        for f_title, tasks in feat_by_title.items():
+            if f_title in prompt:
+                if f_title == fault_feat:
+                    calls[fault_feat] += 1
+                    if fail_times is None or calls[fault_feat] <= fail_times:
+                        raise fault
+                return ("", None, _feat_tasks_dict(tasks))
+        raise AssertionError(f"unexpected plan-pass prompt: {prompt[:80]}")
+
+    monkeypatch.setattr(orchestrator, "invoke_claude", _fake_invoke_claude)
+    monkeypatch.setattr(orchestrator, "_split_claude_result", lambda r: r)
+    monkeypatch.setattr(orchestrator, "_resolve_orch_session", lambda db, slug, role: (uuid.uuid4(), False))
+    monkeypatch.setattr(orchestrator, "_resolve_dispatch_overrides", lambda db, vid, role: (None, None))
+    return calls
+
+
+def _plan_gate_reports(db_session, version_id):
+    """The plan gate_report(s) recorded by the build-entry plan generation — uniquely identified by the
+    ``plan`` payload the per-task build gate_reports never carry."""
+    return [
+        m
+        for m in _msgs(db_session, version_id)
+        if m.author == "ai_agent" and m.kind == "gate_report" and m.payload and m.payload.get("plan")
+    ]
+
+
+async def test_build_entry_generates_task_plan_via_incremental_passes(db_session, monkeypatch, tmp_path):
+    # nex-studio-visual: the plan is built at Programovanie ENTRY (skeleton + per-feat passes) from the final
+    # design, then coded — a single coherent materialization moved out of Návrh.
+    version, _ = _make_version(db_session, source_path=str(tmp_path), project_dial="po_kazdej_faze")
+    state = _seed_programovanie(db_session, version.id)
+    _no_baseline_git(monkeypatch)
+    _stub_plan_passes(
+        monkeypatch,
+        [
+            ("Foundation", [("Schema", [("GL tables", "migration", 90), ("audit_log", "migration", 30)])]),
+            ("Calc", [("Hlavná kniha", [("GL výpočet", "backend", 120)])]),
+        ],
+        cross="## Invarianty\n- spoločná transakčná hranica\n- immutable audit",
+    )
+    _stub_turns(monkeypatch, [_done_block()])  # code each generated task
+    _stub_mech(monkeypatch, [None])
+    settled = await orchestrator._run_build_round(db_session, state)
+    # new_version → the Programovanie schvaľovací bod stops for the Manažér (mandatory gate)
+    assert settled.current_stage == "programovanie" and settled.status == "awaiting_manazer"
+    # EPIC→FEAT→TASK materialized at build entry
+    epics = _epics(db_session, version.id)
+    assert {e.title for e in epics} == {"Foundation", "Calc"}
+    feats = db_session.execute(select(Feat)).scalars().all()
+    tasks = db_session.execute(select(Task)).scalars().all()
+    assert len(feats) == 2 and len(tasks) == 3
+    est = {t.title: t.estimated_minutes for t in tasks}
+    assert est["GL tables"] == 90 and est["GL výpočet"] == 120
+    # the plan-gen gate_report carries the plan + cross_cutting_rules the build loop re-reads (_fetch_cross...)
+    gr = _plan_gate_reports(db_session, version.id)
+    assert gr and "transakčná" in gr[-1].payload["cross_cutting_rules"]
+    assert orchestrator._fetch_cross_cutting_rules(db_session, version.id) == gr[-1].payload["cross_cutting_rules"]
+    # the planning effort is accounted to the Návrh phase even though it runs at build time (metrics_phase)
+    assert gr[-1].payload["phase"] == "navrh"
+
+
+async def test_build_entry_gate_report_carries_release_coverage_declaration(db_session, monkeypatch, tmp_path):
+    # CR-V2-052: the AI Agent declares flagship_features + safety_properties with the skeleton; the engine
+    # records them on the plan gate_report so the risk-floored oracle (_declared_release_coverage) reads them.
+    version, _ = _make_version(db_session, source_path=str(tmp_path), project_dial="po_kazdej_faze")
+    state = _seed_programovanie(db_session, version.id)
+    _no_baseline_git(monkeypatch)
+    _stub_plan_passes(
+        monkeypatch,
+        [("Foundation", [("Schema", [("t", "migration", 60)])])],
+        flagship=["PDF→Peppol export", "supplier auto-match"],
+        safety=[
+            {"name": "scoping na firmu", "risky_op": "cross-tenant GET /api/faktury"},
+            {"name": "read_only blocks writes", "risky_op": "cat x > y under read_only"},
+        ],
+    )
+    _stub_turns(monkeypatch, [_done_block()])
+    _stub_mech(monkeypatch, [None])
+    await orchestrator._run_build_round(db_session, state)
+    gr = _plan_gate_reports(db_session, version.id)
+    assert gr, "the plan gate_report was recorded"
+    assert gr[-1].payload["flagship_features"] == ["PDF→Peppol export", "supplier auto-match"]
+    assert [sp["name"] for sp in gr[-1].payload["safety_properties"]] == ["scoping na firmu", "read_only blocks writes"]
+    # the oracle reads the declared coverage: 2 flagship features + 2 safety properties
+    assert orchestrator._declared_release_coverage(db_session, version.id) == (2, 2)
+    # NO message was recorded under a (now-invalid) "task_plan" stage — the standalone stage is gone
+    assert not [m for m in _msgs(db_session, version.id) if m.stage == "task_plan"]
+
+
+async def test_build_entry_plan_passes_via_text_fence_no_parse_exhaustion(db_session, monkeypatch):
+    # Real-env path: the passes return the narrowed JSON as TEXT in a <<<TASK_PLAN_JSON>>> fence
+    # (structured_output is dead in the live CLI). A multi-feat plan still assembles pass-by-pass.
+    version, _ = _make_version(db_session, project_dial="po_kazdej_faze")
+    state = _seed_programovanie(db_session, version.id)
+    _no_baseline_git(monkeypatch)
+    _stub_plan_passes(
+        monkeypatch,
+        [
+            ("Foundation", [("Schema", [("t1", "migration", 60)])]),
+            ("Core", [("Engine", [("e1", "backend", 120)]), ("API", [("a1", "backend", 90)])]),
+        ],
+        text=True,
+    )
+    _stub_turns(monkeypatch, [_done_block()])
+    _stub_mech(monkeypatch, [None])
+    settled = await orchestrator._run_build_round(db_session, state)
+    assert settled.current_stage == "programovanie" and settled.status == "awaiting_manazer"
+    assert len(_epics(db_session, version.id)) == 2
+    assert len(db_session.execute(select(Task)).scalars().all()) == 3
+
+
+async def test_build_entry_reviewable_task_plan_doc_written(db_session, monkeypatch, tmp_path):
+    version, _ = _make_version(db_session, source_path=str(tmp_path), project_dial="po_kazdej_faze")
+    state = _seed_programovanie(db_session, version.id)
+    _no_baseline_git(monkeypatch)
+    _stub_plan_passes(monkeypatch, _small_plan(), cross="## Invarianty\n- x")
+    _stub_turns(monkeypatch, [_done_block()])
+    _stub_mech(monkeypatch, [None])
+    await orchestrator._run_build_round(db_session, state)
+    plan_doc = tmp_path / "docs" / "specs" / "versions" / f"v{version.version_number}" / "spec" / "task-plan.md"
+    assert plan_doc.is_file()
+    md = plan_doc.read_text(encoding="utf-8")
+    assert "## Epic 1: Foundation" in md and "### Feat 1.1: Schema" in md
+    assert "users table" in md and "`[migration]`" in md
+
+
+# ── Fail-closed at build entry: a plan-pass exhaustion blocks, writes nothing ──
+
+
+async def test_build_entry_skeleton_parse_failure_blocks_writes_nothing(db_session, monkeypatch):
+    version, _ = _make_version(db_session, project_dial="po_kazdej_faze")
+    state = _seed_programovanie(db_session, version.id)
+
+    # the skeleton pass returns garbage (no fence) every time → parse-retries exhaust → blocked
+    async def _bad_invoke(*, prompt, **_kw):
+        return ("no fence here, just prose", None, None)
+
+    monkeypatch.setattr(orchestrator, "invoke_claude", _bad_invoke)
+    monkeypatch.setattr(orchestrator, "_split_claude_result", lambda r: r)
+    monkeypatch.setattr(orchestrator, "_resolve_orch_session", lambda db, slug, role: (uuid.uuid4(), False))
+    monkeypatch.setattr(orchestrator, "_resolve_dispatch_overrides", lambda db, vid, role: (None, None))
+    settled = await orchestrator._run_build_round(db_session, state)
+    assert settled.status == "blocked"
+    assert settled.block_reason == "parse_exhaustion"
+    assert settled.current_stage == "programovanie"
+    assert not _epics(db_session, version.id)  # nothing written on a failed plan
+
+
+async def test_build_entry_per_feat_crash_is_retried_then_succeeds(db_session, monkeypatch):
+    # A FAST crash (ClaudeAgentError, not a timeout) in a per-feat pass is re-invoked (bounded) rather than
+    # discarding the whole accumulated plan — crash once, then succeed → the FULL plan still materializes.
+    version, _ = _make_version(db_session, project_dial="po_kazdej_faze")
+    state = _seed_programovanie(db_session, version.id)
+    _no_baseline_git(monkeypatch)
+    plan = [
+        ("Foundation", [("Schema", [("t1", "migration", 60)])]),
+        ("Core", [("Engine", [("e1", "backend", 120)])]),
+    ]
+    calls = _stub_plan_passes_faulty(
+        monkeypatch,
+        plan,
+        fault_feat="Engine",
+        fault=orchestrator.ClaudeAgentError("claude exited with code 1: transient boom"),
+        fail_times=1,
+    )
+    _stub_turns(monkeypatch, [_done_block()])
+    _stub_mech(monkeypatch, [None])
+    settled = await orchestrator._run_build_round(db_session, state)
+    assert settled.current_stage == "programovanie" and settled.status == "awaiting_manazer"
+    assert calls["Engine"] == 2  # crashed once → re-invoked once → succeeded
+    assert {e.title for e in _epics(db_session, version.id)} == {"Foundation", "Core"}
+    assert len(db_session.execute(select(Task)).scalars().all()) == 2  # nothing lost
+
+
+async def test_build_entry_per_feat_persistent_crash_blocks_agent_error_not_parse_exhaustion(db_session, monkeypatch):
+    # A crash that keeps failing past the bounded re-invokes is an envelope-loss; with NO dispatch baseline
+    # it HALTs blocked with block_reason=agent_error (never the parse_exhaustion mislabel) + writes nothing.
+    version, _ = _make_version(db_session, project_dial="po_kazdej_faze")
+    state = _seed_programovanie(db_session, version.id)
+    calls = _stub_plan_passes_faulty(
+        monkeypatch,
+        [("Core", [("Engine", [("e1", "backend", 120)])])],
+        fault_feat="Engine",
+        fault=orchestrator.ClaudeAgentError("claude exited with code 1: persistent boom"),
+    )
+    settled = await orchestrator._run_build_round(db_session, state)
+    assert settled.status == "blocked" and settled.block_reason == "agent_error"
+    assert calls["Engine"] == orchestrator._PARSE_RETRIES + 1  # initial attempt + the bounded re-invokes
+    assert not _epics(db_session, version.id)  # all-or-nothing: nothing written
+
+
+async def test_build_entry_per_feat_persistent_crash_with_baseline_settles_review_continue(db_session, monkeypatch):
+    # With a dispatch baseline armed, a persistent crash settles awaiting_manazer ("review & continue") and
+    # the lost-work message tells the TRUTH — "Agent opakovane zlyhal", not the misleading "Vypršal čas".
+    version, _ = _make_version(db_session, project_dial="po_kazdej_faze")
+    state = _seed_programovanie(db_session, version.id)
+    state.dispatch_baseline_sha = "deadbeefdeadbeef"
+    db_session.flush()
+    _stub_plan_passes_faulty(
+        monkeypatch,
+        [("Core", [("Engine", [("e1", "backend", 120)])])],
+        fault_feat="Engine",
+        fault=orchestrator.ClaudeAgentError("claude exited with code 1: persistent boom"),
+    )
+    settled = await orchestrator._run_build_round(db_session, state)
+    assert settled.status == "awaiting_manazer"
+    assert "Agent opakovane zlyhal" in settled.next_action
+    assert "Vypršal čas" not in settled.next_action
+    assert not _epics(db_session, version.id)
+
+
+async def test_build_entry_per_feat_timeout_is_not_retried(db_session, monkeypatch):
+    # A genuine TIMEOUT (ClaudeAgentTimeout) is NOT re-invoked — re-running just risks another long wait. It
+    # settles the R1 lost-work path at once: the per-feat pass is called exactly ONCE; message "Vypršal čas".
+    version, _ = _make_version(db_session, project_dial="po_kazdej_faze")
+    state = _seed_programovanie(db_session, version.id)
+    state.dispatch_baseline_sha = "deadbeefdeadbeef"
+    db_session.flush()
+    calls = _stub_plan_passes_faulty(
+        monkeypatch,
+        [("Core", [("Engine", [("e1", "backend", 120)])])],
+        fault_feat="Engine",
+        fault=orchestrator.ClaudeAgentTimeout("claude invocation timed out after 1200s"),
+    )
+    settled = await orchestrator._run_build_round(db_session, state)
+    assert settled.status == "awaiting_manazer"
+    assert calls["Engine"] == 1  # a timeout is NOT retried
+    assert "Vypršal čas agenta" in settled.next_action
+    assert not _epics(db_session, version.id)

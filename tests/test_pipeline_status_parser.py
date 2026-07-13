@@ -258,17 +258,21 @@ def _navrh_plan_block() -> str:
 
 
 def test_navrh_gate_report_parses_project_level_epic():
-    # v2: epics are always project-level (multi-module removed). The plan folds into the Návrh phase
-    # (CR-V2-011) — a navrh gate_report carries the EPIC→FEAT→TASK tree.
+    # v2: epics are always project-level (multi-module removed). A navrh gate_report MAY still carry an
+    # EPIC→FEAT→TASK tree (it is no longer required — see below), and when present it parses.
     res = parse_status_block(_navrh_plan_block())
     assert isinstance(res, PipelineStatusBlock)
     assert res.plan.epics[0].title == "E1"
 
 
-def test_navrh_gate_report_requires_a_plan():
-    # the Návrh-close guard (was stage==task_plan in v1): a navrh gate_report with no plan → ParseFailure
+def test_navrh_gate_report_no_longer_requires_a_plan():
+    # nex-studio-visual (Director 2026-07-13): the task plan moved OUT of Návrh — it is built at
+    # Programovanie start (from the final design + Vizuál changes). So a Návrh gate_report is legitimately
+    # plan-less and MUST parse; the old "navrh gate_report requires a non-empty plan" guard is gone.
     planless = _block(stage="navrh", kind="gate_report", summary="x", awaiting="manazer")
-    assert isinstance(parse_status_block(planless), ParseFailure)
+    res = parse_status_block(planless)
+    assert isinstance(res, PipelineStatusBlock)
+    assert res.plan is None
 
 
 def test_non_navrh_gate_report_does_not_require_a_plan():
@@ -353,11 +357,13 @@ def test_parse_task_plan_feat_tasks_rejects_empty_and_bad_task():
     assert isinstance(parse_task_plan_feat_tasks("nope"), ParseFailure)  # not an object
 
 
-def test_task_plan_plan_required_guard_unchanged_for_narrowed_passes():
-    # The narrowed passes never hit the navrh plan-required guard — only the final assembled
-    # navrh gate_report does, and it has a plan.
+def test_narrowed_passes_validate_against_their_own_types_not_the_status_block():
+    # The narrowed skeleton/per-feat passes validate against TaskPlanSkeleton / TaskPlanFeatTasks (above),
+    # NOT the PipelineStatusBlock — they never routed through the (now-removed) navrh plan-required guard.
+    # A plan-less navrh gate_report parses cleanly (nex-studio-visual 2026-07-13: the plan is built at
+    # Programovanie start, so Návrh no longer needs to carry it).
     planless = _block(stage="navrh", kind="gate_report", summary="x", awaiting="manazer")
-    assert isinstance(parse_status_block(planless), ParseFailure)
+    assert isinstance(parse_status_block(planless), PipelineStatusBlock)
 
 
 # ── (v0.7.3) TEXT/FENCE extraction — the real-CLI path (CR-1, point 8) — KEPT ──

@@ -232,26 +232,28 @@ async def test_schvalit_navrh_advances_to_vizual(db_session, fake_claude):
     st.current_stage = "navrh"
     st.status = "awaiting_manazer"
     db_session.flush()
-    _seed_min_plan(db_session, version, project)  # CR-V2-037: a materialized plan is the precondition
+    _seed_min_plan(db_session, version, project)  # a materialized plan is harmless (no longer a precondition)
     state = await orchestrator.apply_action(db_session, version_id=version.id, action="schvalit")
     # CR-1 (nex-studio-visual): Návrh now advances to the Vizuál live-preview phase (not straight to Programovanie).
     assert state.current_stage == "vizual"
     assert state.status == "agent_working"
 
 
-async def test_schvalit_navrh_empty_plan_rejected(db_session, fake_claude):
-    # CR-V2-037: schvalit out of Návrh with an EMPTY task plan (0 tasks — e.g. a per-feat pass crashed past
-    # its retries) is REFUSED, so the build never enters Programovanie with nothing to build. Recover via Uprav.
+async def test_schvalit_navrh_no_plan_advances_to_vizual(db_session, fake_claude):
+    # nex-studio-visual (Director 2026-07-13): the old CR-V2-037 "refuse schvalit out of Návrh with an EMPTY
+    # task plan" gate is GONE — Návrh now produces the design DOCUMENT ONLY (the EPIC→FEAT→TASK plan is built
+    # at Programovanie start, from the final design + Vizuál changes). So approving a plan-less Návrh is the
+    # normal path: it advances to Vizuál. The empty-plan safety moved WITH the plan to _run_build_round
+    # (which blocks on a plan-generation failure — Programovanie can never silently run with nothing to build).
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
     st = _state(db_session, version.id)
     st.current_stage = "navrh"
     st.status = "awaiting_manazer"
     db_session.flush()
-    with pytest.raises(orchestrator.OrchestratorError, match="plán úloh je prázdny"):
-        await orchestrator.apply_action(db_session, version_id=version.id, action="schvalit")
-    # the phase did NOT advance — still at Návrh awaiting the Manažér
-    assert _state(db_session, version.id).current_stage == "navrh"
+    state = await orchestrator.apply_action(db_session, version_id=version.id, action="schvalit")
+    assert state.current_stage == "vizual"  # no plan is required to advance out of Návrh
+    assert state.status == "agent_working"
 
 
 async def test_schvalit_rejected_at_priprava(db_session, fake_claude):

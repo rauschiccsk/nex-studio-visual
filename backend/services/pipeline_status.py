@@ -30,12 +30,10 @@ Charter §5.3 contract (per Dedo 2026-06-03):
 
 from __future__ import annotations
 
-import contextlib
-import contextvars
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Iterator, Literal, Optional, Union
+from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -456,27 +454,6 @@ def _format_validation_errors(exc: ValidationError) -> str:
 PIPELINE_STATUS_JSON_SCHEMA = PipelineStatusBlock.model_json_schema()
 
 
-#: When a Návrh RE-WORK turn runs with the task plan ALREADY materialized (e.g. the AI applying the Auditor's
-#: decision cards), the AI correctly re-emits a ``gate_report`` WITHOUT re-listing the whole EPIC→FEAT→TASK
-#: plan — the plan already exists in the DB. ``_run_navrh_round`` enters :func:`relaxed_navrh_plan` for that
-#: case so :func:`_validate_block` does not demand the plan again (nex-studio-visual crash-test 2026-07-13:
-#: the re-work's plan-less gate_report was rejected → parse_exhaustion on a turn that had done the work).
-#: Default ``True`` = the first-run contract (a Návrh gate_report MUST carry the plan to close the phase).
-_require_navrh_plan: contextvars.ContextVar[bool] = contextvars.ContextVar("require_navrh_plan", default=True)
-
-
-@contextlib.contextmanager
-def relaxed_navrh_plan() -> Iterator[None]:
-    """Within this block, a Návrh ``gate_report`` need NOT carry an inline plan (the plan is already
-    materialized). Wraps the single re-work invoke in :func:`_run_navrh_round`; contextvar-scoped so the
-    relaxation is confined to that turn (incl. its parse-retries) and never leaks to another dispatch."""
-    token = _require_navrh_plan.set(False)
-    try:
-        yield
-    finally:
-        _require_navrh_plan.reset(token)
-
-
 def _validate_block(data: dict) -> ParseResult:
     """Validate a status-block dict through :class:`PipelineStatusBlock` + the imperative
     enum/cross-field rules. The SINGLE validation path shared by the fence transport
@@ -504,18 +481,10 @@ def _validate_block(data: dict) -> ParseResult:
     # orchestrator msg_kind mapping never downgrades a framework_issue to a plain "question" message.
     if block.kind == "framework_issue" and not (block.question and block.question.strip()):
         return ParseFailure("kind='framework_issue' requires a non-empty 'question' (the message for Dedo)")
-    # Návrh close (CR-V2-011 — the task plan folds into the Návrh phase): the AI Agent's Návrh
-    # gate_report must carry the EPIC→FEAT→TASK decomposition. A question/blocked turn is still
-    # allowed (re-plan dialogue); only the gate_report — the turn that closes the phase — requires
-    # a non-empty 'plan'. (The narrowed skeleton/per-feat passes never hit this guard — they emit
-    # a TaskPlanSkeleton/TaskPlanFeatTasks object, not a PipelineStatusBlock.)
-    if (
-        block.stage == "navrh"
-        and block.kind == "gate_report"
-        and _require_navrh_plan.get()
-        and (block.plan is None or not block.plan.epics)
-    ):
-        return ParseFailure("navrh gate_report requires a non-empty 'plan' (EPIC→FEAT→TASK)")
+    # NOTE (nex-studio-visual, Director 2026-07-13): the Návrh gate_report NO LONGER needs to carry the
+    # EPIC→FEAT→TASK plan. The task plan is built later, at Programovanie start (from the final design +
+    # Vizuál changes — see orchestrator._run_build_round), so a Návrh gate_report is legitimately plan-less.
+    # The old "navrh gate_report requires a non-empty 'plan'" guard is gone.
     # CR-V2-041: a consultation turn must carry the decision queue, and each decision must have EXACTLY
     # one recommended option (so the card pre-highlights a default). decisions≥1 / options≥2 are enforced by
     # the models; this adds the presence + "exactly one recommended" cross-field check. (consultation is NOT

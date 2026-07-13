@@ -1,22 +1,22 @@
-"""CR-V2-011 — Návrh phase (ONE design doc + the task plan folds in).
+"""CR-V2-011 — Návrh phase (ONE design DOCUMENT; the task plan is NOT built here).
 
 Exercised against the real v2 branch DB (4-phase CHECKs). The Návrh round:
 
-* **Design-doc turn** — ``run_dispatch`` injects the Návrh brief (read the approved Špecifikácia, write
-  ONE coherent design ``.md``), persists + verifies the design-doc artifact, and surfaces the AI Agent's
+* **Design-doc turn** — ``run_dispatch`` injects the Návrh brief (read the approved Špecifikácia, write ONE
+  coherent design ``.md``), persists + verifies the design-doc artifact, and surfaces the AI Agent's
   clarification questions at the post-Návrh stop (the SEAM the Auditor's upfront review hooks into in
   CR-V2-013).
-* **Task plan folds in** — the EPIC→FEAT→TASK plan is the design doc's LAST part, generated via the folded
-  incremental skeleton/per-feat passes (NO standalone ``task_plan`` stage; a large plan still generates
-  pass-by-pass, no parse exhaustion). Materialized into Epic/Feat/Task rows + a reviewable spec/task-plan.md.
-* **Dial-governed stop** — the post-Návrh schvaľovací bod fires per the Miera autonómie dial (``plna``
-  auto-continues to Programovanie; ``po_kazdej_faze`` stops).
+* **NO task plan in Návrh** — nex-studio-visual (Director 2026-07-13): the EPIC→FEAT→TASK plan is no longer
+  generated in Návrh. The Vizuál step keeps refining the app AFTER Návrh, so a plan built now would be stale;
+  the plan is built at the START of Programovanie (``_run_build_round`` entry) from the FINAL design + the
+  Manažér's Vizuál changes. Any inline plan the design turn happens to emit is IGNORED. The plan-generation +
+  plan-pass-failure tests now live in ``test_orchestrator_v2_programovanie.py`` (build-round entry).
+* **Dial-governed stop** — the post-Návrh schvaľovací bod fires per the Miera autonómie dial; a new_version
+  build ALWAYS stops there (mandatory phase gate, even at plná) for the Manažér's 'schvalit' → Vizuál.
 
-The design-doc turn is stubbed via ``invoke_agent_with_parse_retry`` (no live ``claude``); the folded
-task-plan passes are stubbed via a controllable fake ``invoke_claude`` (the real fence/structured path).
+The design-doc turn is stubbed via ``invoke_agent_with_parse_retry`` (no live ``claude``).
 """
 
-import json
 import uuid
 from pathlib import Path
 
@@ -25,7 +25,7 @@ from sqlalchemy import select
 from backend.db.models.foundation import User
 from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
-from backend.db.models.tasks import Epic, Feat, Task
+from backend.db.models.tasks import Epic
 from backend.db.models.versions import Version
 from backend.services import orchestrator
 from backend.services.pipeline_status import PipelineStatusBlock
@@ -117,83 +117,8 @@ def _stub_design_turn(monkeypatch, block):
 
 
 def _design_done():
-    """A design-doc turn that finished the doc (kind=done) WITHOUT an inline plan → the engine folds the
-    task plan in via the incremental passes."""
+    """A design-doc turn that finished the doc (kind=done). Návrh no longer folds a task plan in."""
     return PipelineStatusBlock(stage="navrh", kind="done", summary="návrh hotový", awaiting="manazer")
-
-
-# ── Stub the folded task-plan passes (invoke_claude) ──────────────────────────
-
-_DEFAULT_CROSS = "## Invarianty\n- spoločná transakčná hranica\n- immutable audit"
-
-
-def _task_plan_fence(obj: dict) -> str:
-    return (
-        "Tu je kostra/úlohy:\n"
-        f"<<<TASK_PLAN_JSON>>>\n{json.dumps(obj, ensure_ascii=False)}\n<<<END_TASK_PLAN_JSON>>>\nHotovo."
-    )
-
-
-def _skeleton_dict(plan_spec, cross=_DEFAULT_CROSS, *, flagship=None, safety=None) -> dict:
-    epics = []
-    for e_title, feats in plan_spec:
-        fs = []
-        for f_title, tasks in feats:
-            f: dict = {"title": f_title}
-            ests = [t[2] for t in tasks if len(t) > 2 and t[2] is not None]
-            if ests:
-                f["estimated_minutes"] = sum(ests)
-            fs.append(f)
-        epics.append({"title": e_title, "feats": fs})
-    obj = {"epics": epics, "cross_cutting_rules": cross}
-    if flagship is not None:  # CR-V2-052 release-coverage declaration
-        obj["flagship_features"] = flagship
-    if safety is not None:
-        obj["safety_properties"] = safety
-    return obj
-
-
-def _feat_tasks_dict(tasks) -> dict:
-    out = []
-    for t in tasks:
-        d: dict = {"title": t[0], "task_type": t[1]}
-        if len(t) > 2 and t[2] is not None:
-            d["estimated_minutes"] = t[2]
-        out.append(d)
-    return {"tasks": out}
-
-
-def _stub_plan_passes(monkeypatch, plan_spec, *, cross=_DEFAULT_CROSS, text=False, flagship=None, safety=None):
-    """Drive the folded task-plan passes via a fake ``invoke_claude``: the skeleton pass (prompt contains
-    "KOSTRU") → EPIC+FEAT(no tasks)+cross (+ CR-V2-052 flagship/safety declaration); a per-feat pass (the feat
-    title appears) → that feat's tasks.
-
-    ``text=True`` returns the real-env shape (prose + ``<<<TASK_PLAN_JSON>>>`` fence as TEXT,
-    structured_output=None); ``text=False`` returns the dict as structured_output."""
-    feat_by_title = {f_title: tasks for _e, feats in plan_spec for f_title, tasks in feats}
-
-    def _emit(obj: dict):
-        return (_task_plan_fence(obj), None, None) if text else ("", None, obj)
-
-    async def _fake_invoke_claude(*, prompt, **_kw):
-        if "KOSTRU" in prompt:
-            return _emit(_skeleton_dict(plan_spec, cross, flagship=flagship, safety=safety))
-        for f_title, tasks in feat_by_title.items():
-            if f_title in prompt:
-                return _emit(_feat_tasks_dict(tasks))
-        raise AssertionError(f"unexpected plan-pass prompt: {prompt[:80]}")
-
-    # _plan_pass_once calls _split_claude_result(invoke_claude(...)); patch invoke_claude (the source) and
-    # _split_claude_result (which unpacks the tuple) to pass the (text, usage, structured) tuple straight.
-    monkeypatch.setattr(orchestrator, "invoke_claude", _fake_invoke_claude)
-    monkeypatch.setattr(orchestrator, "_split_claude_result", lambda r: r)
-    # Skip the orch-session resolve (no real DB session rows needed for the passes).
-    monkeypatch.setattr(orchestrator, "_resolve_orch_session", lambda db, slug, role: (uuid.uuid4(), False))
-    monkeypatch.setattr(orchestrator, "_resolve_dispatch_overrides", lambda db, vid, role: (None, None))
-
-
-def _small_plan():
-    return [("Foundation", [("Schema", [("users table", "migration", 60), ("audit_log", "migration", 30)])])]
 
 
 # ── Návrh round: design-doc turn + brief ─────────────────────────────────────
@@ -203,7 +128,6 @@ async def test_navrh_brief_instructs_one_design_doc_with_plan_last(db_session, m
     version, _ = _make_version(db_session)
     _seed_navrh(db_session, version.id)
     captured = _stub_design_turn(monkeypatch, _design_done())
-    _stub_plan_passes(monkeypatch, _small_plan())
     await orchestrator.run_dispatch(db_session, version.id)
     p = captured["prompt"]
     assert captured["stage"] == "navrh" and captured["role"] == "ai_agent"
@@ -214,7 +138,7 @@ async def test_navrh_brief_instructs_one_design_doc_with_plan_last(db_session, m
 
 
 async def test_navrh_question_settles_blocked_before_plan(db_session, monkeypatch):
-    # A design ambiguity → the AI Agent asks BEFORE the plan folds in; the phase does NOT advance.
+    # A design ambiguity → the AI Agent asks; the phase does NOT advance. No plan is materialized in Návrh.
     version, _ = _make_version(db_session)
     _seed_navrh(db_session, version.id)
     q = PipelineStatusBlock(
@@ -228,12 +152,12 @@ async def test_navrh_question_settles_blocked_before_plan(db_session, monkeypatc
     assert not _epics(db_session, version.id)  # no plan materialized
 
 
-# ── Task plan folds in (the standalone task_plan stage is gone) ───────────────
+# ── Návrh produces the design DOCUMENT ONLY — no task plan (moved to Programovanie) ──
 
 
-async def test_navrh_folds_task_plan_via_incremental_passes(db_session, monkeypatch, tmp_path):
-    # The whole point: the design doc + the EPIC→FEAT→TASK plan come from ONE Návrh round; the plan is built
-    # incrementally (skeleton + per-feat), then materialized — a single coherent artifact.
+async def test_navrh_design_doc_only_no_plan_materialized(db_session, monkeypatch, tmp_path):
+    # nex-studio-visual (Director 2026-07-13): Návrh produces the design DOCUMENT ONLY. NO EPIC→FEAT→TASK
+    # plan is materialized here — it is built at Programovanie start (from the final design + Vizuál changes).
     version, _ = _make_version(db_session, source_path=str(tmp_path), project_dial="po_kazdej_faze")
     _seed_navrh(db_session, version.id)
     # the design doc on disk (the agent claims it; the engine verifies it)
@@ -245,157 +169,19 @@ async def test_navrh_folds_task_plan_via_incremental_passes(db_session, monkeypa
         monkeypatch,
         PipelineStatusBlock(stage="navrh", kind="done", summary="ok", awaiting="manazer", deliverables=[rel]),
     )
-    _stub_plan_passes(
-        monkeypatch,
-        [
-            ("Foundation", [("Schema", [("GL tables", "migration", 90), ("audit_log", "migration", 30)])]),
-            ("Calc", [("Hlavná kniha", [("GL výpočet", "backend", 120)])]),
-        ],
-        cross="## Invarianty\n- spoločná transakčná hranica\n- immutable audit",
-    )
     state = await orchestrator.run_dispatch(db_session, version.id)
-    # po_kazdej_faze → the Návrh schvaľovací bod stops for the Manažér (does not advance to programovanie)
+    # po_kazdej_faze → the Návrh schvaľovací bod stops for the Manažér (does not advance)
     assert state.current_stage == "navrh" and state.status == "awaiting_manazer"
-    # EPIC→FEAT→TASK materialized
-    epics = _epics(db_session, version.id)
-    assert {e.title for e in epics} == {"Foundation", "Calc"}
-    feats = db_session.execute(select(Feat)).scalars().all()
-    tasks = db_session.execute(select(Task)).scalars().all()
-    assert len(feats) == 2 and len(tasks) == 3
-    assert all(t.status == "todo" for t in tasks)
-    est = {t.title: t.estimated_minutes for t in tasks}
-    assert est["GL tables"] == 90 and est["GL výpočet"] == 120
-    # the AI-Agent navrh gate_report carries the plan + cross_cutting_rules (the build loop re-reads these)
-    gr = [
-        m
-        for m in _msgs(db_session, version.id)
-        if m.author == "ai_agent" and m.stage == "navrh" and m.kind == "gate_report"
-    ]
-    assert gr and "transakčná" in gr[-1].payload["cross_cutting_rules"]
-    assert orchestrator._fetch_cross_cutting_rules(db_session, version.id) == gr[-1].payload["cross_cutting_rules"]
+    # NO plan materialized — the design doc is the only Návrh deliverable
+    assert not _epics(db_session, version.id)
     # the durable design-doc artifact note exists (the Vývoj → Návrh tab reads it)
     notes = [m for m in _msgs(db_session, version.id) if m.payload and m.payload.get("navrh_design_doc")]
     assert notes and notes[-1].payload["path"] == rel
 
 
-async def test_navrh_gate_report_carries_release_coverage_declaration(db_session, monkeypatch, tmp_path):
-    # CR-V2-052: the AI Agent declares flagship_features + safety_properties with the skeleton; the engine
-    # records them on the navrh gate_report so the risk-floored oracle (_declared_release_coverage) reads them.
-    version, _ = _make_version(db_session, source_path=str(tmp_path), project_dial="po_kazdej_faze")
-    _seed_navrh(db_session, version.id)
-    rel = orchestrator._navrh_design_doc_rel(version.version_number)
-    doc = Path(tmp_path) / rel
-    doc.parent.mkdir(parents=True, exist_ok=True)
-    doc.write_text("# Návrh\n", encoding="utf-8")
-    _stub_design_turn(
-        monkeypatch,
-        PipelineStatusBlock(stage="navrh", kind="done", summary="ok", awaiting="manazer", deliverables=[rel]),
-    )
-    _stub_plan_passes(
-        monkeypatch,
-        [("Foundation", [("Schema", [("t", "migration", 60)])])],
-        flagship=["PDF→Peppol export", "supplier auto-match"],
-        safety=[
-            {"name": "scoping na firmu", "risky_op": "cross-tenant GET /api/faktury"},
-            {"name": "read_only blocks writes", "risky_op": "cat x > y under read_only"},
-        ],
-    )
-    await orchestrator.run_dispatch(db_session, version.id)
-    gr = [
-        m
-        for m in _msgs(db_session, version.id)
-        if m.author == "ai_agent" and m.stage == "navrh" and m.kind == "gate_report"
-    ]
-    assert gr, "the navrh gate_report was recorded"
-    assert gr[-1].payload["flagship_features"] == ["PDF→Peppol export", "supplier auto-match"]
-    assert [sp["name"] for sp in gr[-1].payload["safety_properties"]] == ["scoping na firmu", "read_only blocks writes"]
-    # the oracle reads the declared coverage: 2 flagship features + 2 safety properties
-    assert orchestrator._declared_release_coverage(db_session, version.id) == (2, 2)
-    # NO message was recorded under a (now-invalid) "task_plan" stage — the standalone stage is gone
-    assert not [m for m in _msgs(db_session, version.id) if m.stage == "task_plan"]
-
-
-async def test_navrh_plan_passes_via_text_fence_no_parse_exhaustion(db_session, monkeypatch):
-    # Real-env path: the passes return the narrowed JSON as TEXT in a <<<TASK_PLAN_JSON>>> fence
-    # (structured_output is dead in the live CLI). A multi-feat plan still assembles pass-by-pass.
-    version, _ = _make_version(db_session, project_dial="po_kazdej_faze")
-    _seed_navrh(db_session, version.id)
-    _stub_design_turn(monkeypatch, _design_done())
-    _stub_plan_passes(
-        monkeypatch,
-        [
-            ("Foundation", [("Schema", [("t1", "migration", 60)])]),
-            ("Core", [("Engine", [("e1", "backend", 120)]), ("API", [("a1", "backend", 90)])]),
-        ],
-        text=True,
-    )
-    state = await orchestrator.run_dispatch(db_session, version.id)
-    assert state.current_stage == "navrh" and state.status == "awaiting_manazer"
-    assert len(_epics(db_session, version.id)) == 2
-    assert len(db_session.execute(select(Task)).scalars().all()) == 3
-
-
-async def test_navrh_reviewable_task_plan_doc_written(db_session, monkeypatch, tmp_path):
-    version, project = _make_version(db_session, source_path=str(tmp_path), project_dial="po_kazdej_faze")
-    _seed_navrh(db_session, version.id)
-    rel = orchestrator._navrh_design_doc_rel(version.version_number)
-    doc = Path(tmp_path) / rel
-    doc.parent.mkdir(parents=True, exist_ok=True)
-    doc.write_text("# Návrh\n", encoding="utf-8")
-    _stub_design_turn(
-        monkeypatch,
-        PipelineStatusBlock(stage="navrh", kind="done", summary="ok", awaiting="manazer", deliverables=[rel]),
-    )
-    _stub_plan_passes(monkeypatch, _small_plan(), cross="## Invarianty\n- x")
-    await orchestrator.run_dispatch(db_session, version.id)
-    plan_doc = tmp_path / "docs" / "specs" / "versions" / f"v{version.version_number}" / "spec" / "task-plan.md"
-    assert plan_doc.is_file()
-    md = plan_doc.read_text(encoding="utf-8")
-    assert "## Epic 1: Foundation" in md and "### Feat 1.1: Schema" in md
-    assert "users table" in md and "`[migration]`" in md
-
-
-# ── Design-doc artifact gate ──────────────────────────────────────────────────
-
-
-async def test_navrh_missing_design_doc_blocks(db_session, monkeypatch, tmp_path):
-    # Checkout exists but the agent never wrote design.md → blocked, the phase does NOT close, no plan passes.
-    version, _ = _make_version(db_session, source_path=str(tmp_path))
-    _seed_navrh(db_session, version.id)
-    rel = orchestrator._navrh_design_doc_rel(version.version_number)
-    _stub_design_turn(
-        monkeypatch,
-        PipelineStatusBlock(stage="navrh", kind="done", summary="ok", awaiting="manazer", deliverables=[rel]),
-    )
-    # plan-pass stub present but should never be reached (the artifact gate fails first)
-    _stub_plan_passes(monkeypatch, _small_plan())
-    state = await orchestrator.run_dispatch(db_session, version.id)
-    assert state.status == "blocked"
-    assert state.block_reason == "agent_error"
-    assert state.current_stage == "navrh"
-    assert not _epics(db_session, version.id)
-
-
-async def test_navrh_no_checkout_records_db_only_artifact(db_session, monkeypatch):
-    # A library/no-checkout project: the design lives in the gate_report payload (DB audit trail); the
-    # artifact note is still recorded and the plan still folds in.
-    version, _ = _make_version(db_session, source_path=None, project_dial="po_kazdej_faze")
-    _seed_navrh(db_session, version.id)
-    _stub_design_turn(monkeypatch, _design_done())
-    _stub_plan_passes(monkeypatch, _small_plan())
-    state = await orchestrator.run_dispatch(db_session, version.id)
-    assert state.current_stage == "navrh" and state.status == "awaiting_manazer"
-    notes = [m for m in _msgs(db_session, version.id) if m.payload and m.payload.get("navrh_design_doc")]
-    assert notes  # DB-only artifact note recorded
-    assert len(_epics(db_session, version.id)) == 1  # plan still materialized
-
-
-# ── Inline plan (small project, plan in one turn) ─────────────────────────────
-
-
-async def test_navrh_inline_plan_materialized_without_extra_passes(db_session, monkeypatch):
-    # If the design turn already carries a non-empty plan (a small project), it is materialized directly —
-    # the incremental passes are NOT invoked (invoke_claude would raise if hit).
+async def test_navrh_inline_plan_is_ignored(db_session, monkeypatch):
+    # If the design turn HAPPENS to carry an inline plan, it is IGNORED — Návrh materializes NO plan (the
+    # authoritative EPIC→FEAT→TASK plan is always built fresh at Programovanie start, never from a Návrh turn).
     version, _ = _make_version(db_session, project_dial="po_kazdej_faze")
     _seed_navrh(db_session, version.id)
     inline = PipelineStatusBlock(
@@ -421,20 +207,46 @@ async def test_navrh_inline_plan_materialized_without_extra_passes(db_session, m
     )
     _stub_design_turn(monkeypatch, inline)
 
-    # invoke_claude must NOT be called on the inline path — make it explode if it is.
+    # the incremental plan passes must NOT run in Návrh — make invoke_claude explode if reached.
     async def _boom(*a, **k):
-        raise AssertionError("incremental plan passes must not run on the inline-plan path")
+        raise AssertionError("Návrh must not run the task-plan passes — the plan is built at Programovanie")
 
     monkeypatch.setattr(orchestrator, "invoke_claude", _boom)
     state = await orchestrator.run_dispatch(db_session, version.id)
     assert state.current_stage == "navrh" and state.status == "awaiting_manazer"
-    assert len(_epics(db_session, version.id)) == 1
-    gr = [
-        m
-        for m in _msgs(db_session, version.id)
-        if m.author == "ai_agent" and m.stage == "navrh" and m.kind == "gate_report"
-    ]
-    assert gr and "jedna firma" in gr[-1].payload["cross_cutting_rules"]
+    assert not _epics(db_session, version.id)  # the inline plan was ignored
+
+
+# ── Design-doc artifact gate ──────────────────────────────────────────────────
+
+
+async def test_navrh_missing_design_doc_blocks(db_session, monkeypatch, tmp_path):
+    # Checkout exists but the agent never wrote design.md → blocked, the phase does NOT close.
+    version, _ = _make_version(db_session, source_path=str(tmp_path))
+    _seed_navrh(db_session, version.id)
+    rel = orchestrator._navrh_design_doc_rel(version.version_number)
+    _stub_design_turn(
+        monkeypatch,
+        PipelineStatusBlock(stage="navrh", kind="done", summary="ok", awaiting="manazer", deliverables=[rel]),
+    )
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert state.status == "blocked"
+    assert state.block_reason == "agent_error"
+    assert state.current_stage == "navrh"
+    assert not _epics(db_session, version.id)
+
+
+async def test_navrh_no_checkout_records_db_only_artifact(db_session, monkeypatch):
+    # A library/no-checkout project: the design lives in the gate_report payload (DB audit trail); the
+    # artifact note is still recorded. No plan is materialized in Návrh (built at Programovanie start).
+    version, _ = _make_version(db_session, source_path=None, project_dial="po_kazdej_faze")
+    _seed_navrh(db_session, version.id)
+    _stub_design_turn(monkeypatch, _design_done())
+    state = await orchestrator.run_dispatch(db_session, version.id)
+    assert state.current_stage == "navrh" and state.status == "awaiting_manazer"
+    notes = [m for m in _msgs(db_session, version.id) if m.payload and m.payload.get("navrh_design_doc")]
+    assert notes  # DB-only artifact note recorded
+    assert not _epics(db_session, version.id)  # no plan materialized in Návrh
 
 
 # ── Dial governs the post-Návrh stop ──────────────────────────────────────────
@@ -442,16 +254,15 @@ async def test_navrh_inline_plan_materialized_without_extra_passes(db_session, m
 
 async def test_navrh_boundary_always_stops_new_version_even_at_plna(db_session, monkeypatch):
     # A (Director 2026-06-30): a new_version build STOPS at the Návrh schvaľovací bod for the Manažér's
-    # confirmation ('schvalit' → Programovanie), INDEPENDENT of the dial — mandatory phase gate even at plná.
-    # The plan is still materialized; the build just doesn't auto-cross into Programovanie unattended.
+    # confirmation ('schvalit' → Vizuál), INDEPENDENT of the dial — mandatory phase gate even at plná. The
+    # design doc is the only Návrh deliverable; the plan is built later, at Programovanie start.
     version, _ = _make_version(db_session, project_dial="plna")
     _seed_navrh(db_session, version.id)
     _stub_design_turn(monkeypatch, _design_done())
-    _stub_plan_passes(monkeypatch, _small_plan())
     state = await orchestrator.run_dispatch(db_session, version.id)
     assert state.current_stage == "navrh"
     assert state.status == "awaiting_manazer"  # mandatory gate — no auto-advance even at plná
-    assert len(_epics(db_session, version.id)) == 1  # plan materialized before the gate
+    assert not _epics(db_session, version.id)  # design doc only — no plan in Návrh
 
 
 async def test_navrh_per_build_dial_beats_project(db_session, monkeypatch):
@@ -459,32 +270,11 @@ async def test_navrh_per_build_dial_beats_project(db_session, monkeypatch):
     version, _ = _make_version(db_session, project_dial="plna")
     _seed_navrh(db_session, version.id, build_dial="po_kazdej_faze")
     _stub_design_turn(monkeypatch, _design_done())
-    _stub_plan_passes(monkeypatch, _small_plan())
     state = await orchestrator.run_dispatch(db_session, version.id)
     assert state.current_stage == "navrh" and state.status == "awaiting_manazer"
 
 
-# ── Fail-closed: a plan-pass exhaustion blocks, writes nothing ────────────────
-
-
-async def test_navrh_skeleton_parse_failure_blocks_writes_nothing(db_session, monkeypatch):
-    version, _ = _make_version(db_session, project_dial="po_kazdej_faze")
-    _seed_navrh(db_session, version.id)
-    _stub_design_turn(monkeypatch, _design_done())
-
-    # the skeleton pass returns garbage (no fence) every time → parse-retries exhaust → blocked
-    async def _bad_invoke(*, prompt, **_kw):
-        return ("no fence here, just prose", None, None)
-
-    monkeypatch.setattr(orchestrator, "invoke_claude", _bad_invoke)
-    monkeypatch.setattr(orchestrator, "_split_claude_result", lambda r: r)
-    monkeypatch.setattr(orchestrator, "_resolve_orch_session", lambda db, slug, role: (uuid.uuid4(), False))
-    monkeypatch.setattr(orchestrator, "_resolve_dispatch_overrides", lambda db, vid, role: (None, None))
-    state = await orchestrator.run_dispatch(db_session, version.id)
-    assert state.status == "blocked"
-    assert state.block_reason == "parse_exhaustion"
-    assert state.current_stage == "navrh"
-    assert not _epics(db_session, version.id)  # nothing written on a failed plan
+# ── Pure helpers / conventions ────────────────────────────────────────────────
 
 
 def test_navrh_design_doc_rel_path_convention():
@@ -494,125 +284,9 @@ def test_navrh_design_doc_rel_path_convention():
 def test_task_plan_skeleton_directive_mandates_coarse_granularity():
     """CR-V2-036: the skeleton pass decides the FEAT count, so the coarse-granularity rule + the hard cap
     must be stated HERE (not only in the per-feat task pass — too late). Without it the agent over-
-    decomposed (46 feats > MAX_PLAN_FEATS) and the engine rejected the whole plan."""
+    decomposed (46 feats > MAX_PLAN_FEATS) and the engine rejected the whole plan. (The skeleton pass now
+    runs at Programovanie entry, but the directive itself is unchanged.)"""
     d = orchestrator._task_plan_skeleton_directive()
     assert "HRUBOZRNNÁ" in d  # coarse granularity mandated in the skeleton pass
     assert "modul ≈ úloha" in d
     assert str(orchestrator.MAX_PLAN_FEATS) in d  # the cap is named so the agent stays well under it
-
-
-# ── CR-V2-037: per-feat pass resilience (a fast crash is retried, a timeout is not) ───────────────
-
-
-def _stub_plan_passes_faulty(monkeypatch, plan_spec, *, fault_feat, fault, fail_times=None, cross=_DEFAULT_CROSS):
-    """Like :func:`_stub_plan_passes`, but the per-feat pass for ``fault_feat`` RAISES ``fault`` (a
-    ``ClaudeAgentError`` / ``ClaudeAgentTimeout``). ``fail_times=None`` → always raise (persistent); an int
-    → raise that many times then succeed (transient — exercises the bounded re-invoke). Returns a ``calls``
-    dict counting the skeleton + fault-feat invocations so a test can assert retry vs no-retry."""
-    feat_by_title = {f_title: tasks for _e, feats in plan_spec for f_title, tasks in feats}
-    calls = {"skeleton": 0, fault_feat: 0}
-
-    async def _fake_invoke_claude(*, prompt, **_kw):
-        if "KOSTRU" in prompt:
-            calls["skeleton"] += 1
-            return ("", None, _skeleton_dict(plan_spec, cross))
-        for f_title, tasks in feat_by_title.items():
-            if f_title in prompt:
-                if f_title == fault_feat:
-                    calls[fault_feat] += 1
-                    if fail_times is None or calls[fault_feat] <= fail_times:
-                        raise fault
-                return ("", None, _feat_tasks_dict(tasks))
-        raise AssertionError(f"unexpected plan-pass prompt: {prompt[:80]}")
-
-    monkeypatch.setattr(orchestrator, "invoke_claude", _fake_invoke_claude)
-    monkeypatch.setattr(orchestrator, "_split_claude_result", lambda r: r)
-    monkeypatch.setattr(orchestrator, "_resolve_orch_session", lambda db, slug, role: (uuid.uuid4(), False))
-    monkeypatch.setattr(orchestrator, "_resolve_dispatch_overrides", lambda db, vid, role: (None, None))
-    return calls
-
-
-async def test_navrh_per_feat_crash_is_retried_then_succeeds(db_session, monkeypatch):
-    # A FAST crash (ClaudeAgentError, not a timeout) in a per-feat pass is re-invoked (bounded) rather than
-    # discarding the whole accumulated plan — crash once, then succeed → the FULL plan still materializes.
-    version, _ = _make_version(db_session, project_dial="po_kazdej_faze")
-    _seed_navrh(db_session, version.id)
-    _stub_design_turn(monkeypatch, _design_done())
-    plan = [
-        ("Foundation", [("Schema", [("t1", "migration", 60)])]),
-        ("Core", [("Engine", [("e1", "backend", 120)])]),
-    ]
-    calls = _stub_plan_passes_faulty(
-        monkeypatch,
-        plan,
-        fault_feat="Engine",
-        fault=orchestrator.ClaudeAgentError("claude exited with code 1: transient boom"),
-        fail_times=1,
-    )
-    state = await orchestrator.run_dispatch(db_session, version.id)
-    assert state.current_stage == "navrh" and state.status == "awaiting_manazer"
-    assert calls["Engine"] == 2  # crashed once → re-invoked once → succeeded
-    assert {e.title for e in _epics(db_session, version.id)} == {"Foundation", "Core"}
-    assert len(db_session.execute(select(Task)).scalars().all()) == 2  # nothing lost
-
-
-async def test_navrh_per_feat_persistent_crash_blocks_agent_error_not_parse_exhaustion(db_session, monkeypatch):
-    # A crash that keeps failing past the bounded re-invokes is an envelope-loss; with NO dispatch baseline
-    # it HALTs blocked with block_reason=agent_error (never the parse_exhaustion mislabel) + writes nothing.
-    version, _ = _make_version(db_session, project_dial="po_kazdej_faze")
-    _seed_navrh(db_session, version.id)
-    _stub_design_turn(monkeypatch, _design_done())
-    calls = _stub_plan_passes_faulty(
-        monkeypatch,
-        [("Core", [("Engine", [("e1", "backend", 120)])])],
-        fault_feat="Engine",
-        fault=orchestrator.ClaudeAgentError("claude exited with code 1: persistent boom"),
-    )
-    state = await orchestrator.run_dispatch(db_session, version.id)
-    assert state.status == "blocked" and state.block_reason == "agent_error"
-    assert calls["Engine"] == orchestrator._PARSE_RETRIES + 1  # initial attempt + the bounded re-invokes
-    assert not _epics(db_session, version.id)  # all-or-nothing: nothing written
-
-
-async def test_navrh_per_feat_persistent_crash_with_baseline_settles_review_continue(db_session, monkeypatch):
-    # With a dispatch baseline armed, a persistent crash settles awaiting_manazer ("review & continue") and
-    # the lost-work message tells the TRUTH — "Agent opakovane zlyhal", not the misleading "Vypršal čas".
-    version, _ = _make_version(db_session, project_dial="po_kazdej_faze")
-    _seed_navrh(db_session, version.id)
-    state0 = orchestrator._get_state(db_session, version.id)
-    state0.dispatch_baseline_sha = "deadbeefdeadbeef"
-    db_session.flush()
-    _stub_design_turn(monkeypatch, _design_done())
-    _stub_plan_passes_faulty(
-        monkeypatch,
-        [("Core", [("Engine", [("e1", "backend", 120)])])],
-        fault_feat="Engine",
-        fault=orchestrator.ClaudeAgentError("claude exited with code 1: persistent boom"),
-    )
-    state = await orchestrator.run_dispatch(db_session, version.id)
-    assert state.status == "awaiting_manazer"
-    assert "Agent opakovane zlyhal" in state.next_action
-    assert "Vypršal čas" not in state.next_action
-    assert not _epics(db_session, version.id)
-
-
-async def test_navrh_per_feat_timeout_is_not_retried(db_session, monkeypatch):
-    # A genuine TIMEOUT (ClaudeAgentTimeout) is NOT re-invoked — re-running just risks another long wait. It
-    # settles the R1 lost-work path at once: the per-feat pass is called exactly ONCE; message "Vypršal čas".
-    version, _ = _make_version(db_session, project_dial="po_kazdej_faze")
-    _seed_navrh(db_session, version.id)
-    state0 = orchestrator._get_state(db_session, version.id)
-    state0.dispatch_baseline_sha = "deadbeefdeadbeef"
-    db_session.flush()
-    _stub_design_turn(monkeypatch, _design_done())
-    calls = _stub_plan_passes_faulty(
-        monkeypatch,
-        [("Core", [("Engine", [("e1", "backend", 120)])])],
-        fault_feat="Engine",
-        fault=orchestrator.ClaudeAgentTimeout("claude invocation timed out after 1200s"),
-    )
-    state = await orchestrator.run_dispatch(db_session, version.id)
-    assert state.status == "awaiting_manazer"
-    assert calls["Engine"] == 1  # a timeout is NOT retried
-    assert "Vypršal čas agenta" in state.next_action
-    assert not _epics(db_session, version.id)

@@ -199,6 +199,9 @@ async def test_programovanie_boundary_always_stops_even_at_plna(db_session, monk
     # A: a new_version build STOPS at the Programovanie boundary even at plná (mandatory phase gate).
     version, _ = _make_version(db_session, project_dial="plna")
     _seed_state(db_session, version.id, stage="programovanie", actor="ai_agent")
+    # nex-studio-visual: the plan is built at Programovanie entry; here we exercise ONLY the boundary settle,
+    # so pretend the plan is already materialized (mid-build) — the empty task loop reaches the dial-settle.
+    monkeypatch.setattr(orchestrator, "navrh_plan_materialized", lambda db, vid: True)
     _stub_invoke(monkeypatch, _gate_report("programovanie"))
     state = await orchestrator.run_dispatch(db_session, version.id)
     assert state.current_stage == "programovanie"
@@ -218,6 +221,8 @@ async def test_po_kazdej_faze_stops_at_navrh(db_session, monkeypatch):
 async def test_po_kazdej_faze_stops_at_programovanie(db_session, monkeypatch):
     version, _ = _make_version(db_session, project_dial="po_kazdej_faze")
     _seed_state(db_session, version.id, stage="programovanie", actor="ai_agent")
+    # nex-studio-visual: exercise ONLY the boundary settle — pretend the plan is already materialized.
+    monkeypatch.setattr(orchestrator, "navrh_plan_materialized", lambda db, vid: True)
     _stub_invoke(monkeypatch, _gate_report("programovanie"))
     state = await orchestrator.run_dispatch(db_session, version.id)
     assert state.current_stage == "programovanie"
