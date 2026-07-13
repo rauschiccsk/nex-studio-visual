@@ -532,3 +532,52 @@ async def test_spustit_stavbu_from_vizual_advances_to_programovanie(db_session, 
     st = await orchestrator.apply_action(db_session, version_id=version.id, action="spustit_stavbu")
     assert st.current_stage == "programovanie"
     assert st.status == "agent_working"
+
+
+# ── #3 (Director 2026-07-13): Vizuál commits are squashed to ONE at approval, not per change ──────────
+def test_vizual_directive_tells_the_ai_not_to_commit_each_change(db_session):
+    version, _ = _make_version(db_session)
+    brief = orchestrator._vizual_directive(db_session, version.id, "make the header bigger")
+    # The AI only WRITES the FE (HMR reflects it live); it must NOT commit each change.
+    assert "NEcommituj" in brief
+    assert "COMMITni" not in brief  # the old per-change-commit instruction is gone
+
+
+def test_commit_vizual_changes_squashes_the_session_into_one_commit(tmp_path):
+    import subprocess
+
+    def git(*args):
+        subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
+
+    git("init", "-q")
+    git("config", "user.email", "t@t")
+    git("config", "user.name", "t")
+    fe = tmp_path / "frontend"
+    fe.mkdir()
+    (fe / "App.tsx").write_text("v1")
+    git("add", "-A")
+    git("commit", "-q", "-m", "init")
+
+    def head():
+        return subprocess.run(
+            ["git", "-C", str(tmp_path), "rev-parse", "HEAD"], capture_output=True, text=True
+        ).stdout.strip()
+
+    base = head()
+    # Nothing changed → NO empty commit.
+    orchestrator._commit_vizual_changes(tmp_path)
+    assert head() == base
+
+    # Several accumulated (uncommitted) FE tweaks → exactly ONE commit.
+    (fe / "App.tsx").write_text("v2")
+    (fe / "New.tsx").write_text("new component")
+    orchestrator._commit_vizual_changes(tmp_path)
+    assert head() != base
+    log = subprocess.run(["git", "-C", str(tmp_path), "log", "--oneline"], capture_output=True, text=True).stdout
+    assert log.count("\n") == 2  # init + the ONE squashed vizual commit
+    assert "vizuálne úpravy" in log
+
+
+def test_commit_vizual_changes_noop_without_checkout(tmp_path):
+    # No .git → best-effort no-op, never raises.
+    orchestrator._commit_vizual_changes(tmp_path)

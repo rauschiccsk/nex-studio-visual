@@ -1206,7 +1206,9 @@ def _vizual_directive(db: Session, version_id: uuid.UUID, manager_request: str) 
         "2. Obrazovky skladaj zo zdieľaného kitu `nex-shared` (rovnaké komponenty a štýl) — kvôli "
         "konzistentnému vzhľadu naprieč appkami.\n"
         f"3. Manažér žiada TÚTO zmenu: «{manager_request}». Aplikuj PRESNE ju — nič navyše, nič menej.\n"
-        "4. Zmenu zapíš do FE zdrojov a COMMITni (živý náhľad ju cez HMR premietne < 1 s).\n"
+        "4. Zmenu iba ZAPÍŠ do FE zdrojov — NEcommituj (živý náhľad ju cez HMR premietne < 1 s aj bez commitu). "
+        "Počas Vizuálu môže byť takýchto drobných úprav veľa; všetky sa spoločne uložia JEDNÝM commitom až keď "
+        "Manažér Vizuál schváli. Ži teda len v pracovnom strome, žiadny `git commit`.\n"
         "NEROB backendovú logiku ani dátové modely — to je Programovanie. Ak je požiadavka naozaj "
         "nejednoznačná, nastav `kind=question`, opýtaj sa PRÁVE JEDNU vec a ZASTAV; inak kolo UZAVRI "
         "`kind=done`.\n"
@@ -3501,6 +3503,23 @@ def _commit_release_note(db: Session, version_id: uuid.UUID, project_root: Path,
         project_root,
         ["commit", "-m", f"docs(release-notes): v{version_number} — user-facing changelog", "--", rel],
     )
+
+
+def _commit_vizual_changes(project_root: Path) -> None:
+    """Squash the whole Vizuál session into ONE commit at approval (#3, Director 2026-07-13).
+
+    The Vizuál round no longer commits each change — :func:`_vizual_directive` tells the AI to only WRITE the
+    FE sources (HMR reflects them live WITHOUT a commit), so many small live tweaks accumulate uncommitted in
+    the worktree. At the Vizuál schvaľovací bod (vizual → programovanie) the engine stages the whole
+    ``frontend/`` and makes ONE commit, so the visual session lands as a single tidy commit before the build.
+    BEST-EFFORT, NEVER raises (a git hiccup must not sink the approval). Nothing changed → ``git commit`` exits
+    non-zero → no empty commit. The sandbox's transient override config is ``.git/info/exclude``-d, so
+    ``git add -A`` never stages it (:mod:`vizual_sandbox`)."""
+    if not (project_root / ".git").is_dir():
+        return  # dry-run / no checkout — nothing to commit
+    if not _git_ok(project_root, ["add", "-A", "--", "frontend"]):
+        return
+    _git_ok(project_root, ["commit", "-m", "feat(vizual): manažérom schválené vizuálne úpravy"])
 
 
 def _write_release_note_to_disk(db: Session, version_id: uuid.UUID, project_root: Path) -> None:
@@ -8874,6 +8893,11 @@ async def apply_action(
                 "Hotovo nedovolené: overenie je zastarané — kód sa pohol za overený commit. "
                 "Najprv spusti Over znova, potom schváľ."
             )
+        # #3 (Director 2026-07-13): the Vizuál round no longer commits each change (the AI just writes the FE —
+        # HMR reflects it live), so squash the whole visual session into ONE commit now, at approval, before
+        # advancing vizual → programovanie. Best-effort; a no-op when nothing changed.
+        if state.current_stage == "vizual":
+            _commit_vizual_changes(claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id))
         _record_message(
             db,
             version_id=version_id,
