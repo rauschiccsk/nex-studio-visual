@@ -80,6 +80,7 @@ from backend.services.pipeline_status import (
     parse_structured_output,
     parse_task_plan_feat_tasks,
     parse_task_plan_skeleton,
+    relaxed_navrh_plan,
 )
 
 # NOTE (CR-V2-006): the v1 ``CoordinatorDirective`` / ``CoordinatorTarget`` / ``task_pass`` status-block
@@ -6155,15 +6156,22 @@ async def _run_navrh_round(
     actor = state.current_actor  # ai_agent
     # 1. The design-doc turn — directive (uprav/ask/answer) when the Manažér steered, else the Návrh brief.
     prompt = directive if directive is not None else _navrh_directive(db, state.version_id)
-    result = await invoke_agent_with_parse_retry(
-        db,
-        version_id=state.version_id,
-        role=actor,
-        stage="navrh",
-        prompt=prompt,
-        on_event=on_event,
-        on_message=on_message,
-    )
+    # A Návrh RE-WORK turn (directive set — e.g. applying the Auditor's decision cards) whose task plan is
+    # ALREADY materialized must NOT be forced to re-emit the whole EPIC→FEAT→TASK plan: the AI re-works the
+    # spec/design and the existing plan rows are reused (step 3 below). Relax the plan-required parse guard
+    # for exactly that turn (nex-studio-visual crash-test 2026-07-13 — the re-work's plan-less gate_report
+    # was rejected → parse_exhaustion on a turn that had done the work). First runs are unchanged.
+    plan_already_materialized = directive is not None and navrh_plan_materialized(db, state.version_id)
+    with relaxed_navrh_plan() if plan_already_materialized else contextlib.nullcontext():
+        result = await invoke_agent_with_parse_retry(
+            db,
+            version_id=state.version_id,
+            role=actor,
+            stage="navrh",
+            prompt=prompt,
+            on_event=on_event,
+            on_message=on_message,
+        )
     if isinstance(result, ParseFailure):
         if result.lost_work is not None:  # R1-c lost-work audit (safeguard #3) — never silently dropped
             state.status = "awaiting_manazer"
@@ -6205,6 +6213,12 @@ async def _run_navrh_round(
     # (no parse exhaustion on a large plan). Either path writes the navrh gate_report + Epic/Feat/Task rows.
     if result.plan is not None and result.plan.epics:
         settled = await _materialize_inline_navrh_plan(db, state, result, on_message=on_message)
+    elif navrh_plan_materialized(db, state.version_id):
+        # RE-WORK turn (e.g. applying decision cards): the plan already exists — reuse the materialized
+        # EPIC→FEAT→TASK rows, do NOT regenerate them (a re-fold would duplicate/overwrite the plan). The
+        # gate_report parsed WITHOUT an inline plan under ``relaxed_navrh_plan`` above; here we simply skip
+        # the fold and let the Auditor re-review + the dial-settle close the phase.
+        settled = None
     else:
         settled = await _fold_task_plan_into_navrh(db, state, on_event=on_event, directive=None, on_message=on_message)
     if settled is not None:

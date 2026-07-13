@@ -73,3 +73,76 @@ def test_framework_issue_blank_message_is_parse_failure() -> None:
         )
     )
     assert isinstance(result, ParseFailure)
+
+
+# ── Bare (UNfenced) status block fallback (nex-studio-visual crash-test 2026-07-13) ───────────────────
+# The model sometimes emits the status block as raw JSON WITHOUT the <<<PIPELINE_STATUS>>> fence, and when
+# the CLI also produces no structured_output, parse_status_block was the last resort — and it died with
+# "no PIPELINE_STATUS block found" → parse_exhaustion on a turn that had actually done the work. It now
+# recovers a bare status block, validated the SAME way as a fenced one.
+def test_bare_unfenced_status_block_parses() -> None:
+    # A question block emitted as bare JSON (no fence) is recovered + validated like a fenced one.
+    bare = json.dumps(
+        {
+            "stage": "priprava",
+            "kind": "question",
+            "summary": "Otváram konzultáciu.",
+            "awaiting": "manazer",
+            "question": "Otázka 1 z ~6 — ako to chápať?",
+        }
+    )
+    result = parse_status_block(bare)
+    assert isinstance(result, PipelineStatusBlock)
+    assert result.kind == "question"
+    assert result.stage == "priprava"
+
+
+def test_bare_block_after_prose_parses() -> None:
+    # Prose report + a trailing bare block (no fence) still recovers the block.
+    prose = "## Zhrnutie\n\n- pripravené\n\n"
+    bare = json.dumps(
+        {"stage": "priprava", "kind": "question", "summary": "x", "awaiting": "manazer", "question": "Prečo?"}
+    )
+    result = parse_status_block(prose + bare)
+    assert isinstance(result, PipelineStatusBlock)
+    assert result.kind == "question"
+
+
+def test_prose_with_no_block_still_fails() -> None:
+    # Plain prose with no status block (fenced OR bare) is still a deterministic ParseFailure — the fallback
+    # never fabricates a block.
+    result = parse_status_block('Len text, žiadny stavový blok. {"port": 8080}')
+    assert isinstance(result, ParseFailure)
+    assert "no PIPELINE_STATUS block found" in result.reason
+
+
+# ── Návrh plan-required guard + its re-work relaxation (nex-studio-visual crash-test 2026-07-13) ───────
+# A Návrh gate_report normally MUST carry the EPIC→FEAT→TASK plan (it closes the phase). But a RE-WORK turn
+# whose plan is ALREADY materialized (applying decision cards) correctly omits it — the exact case that
+# wedged nex-weblist. relaxed_navrh_plan() (entered by _run_navrh_round for that turn) accepts it.
+_NAVRH_GATE_NO_PLAN = {
+    "stage": "navrh",
+    "kind": "gate_report",
+    "summary": "Prepracoval som Špecifikáciu aj Návrh podľa 6 rozhodnutí.",
+    "awaiting": "manazer",
+    "deliverables": ["docs/specs/versions/v0.1.0/specification.md"],
+}
+
+
+def test_navrh_gate_report_without_plan_fails_by_default() -> None:
+    # First-run contract unchanged: a plan-less Návrh gate_report is rejected (must carry the plan).
+    result = parse_status_block(_fence(_NAVRH_GATE_NO_PLAN))
+    assert isinstance(result, ParseFailure)
+    assert "plan" in result.reason
+
+
+def test_navrh_gate_report_without_plan_ok_when_relaxed() -> None:
+    # Re-work turn (plan already materialized): relaxed_navrh_plan() accepts the plan-less gate_report,
+    # whether fenced OR bare (the nex-weblist shape). The relaxation is confined to the with-block.
+    with pipeline_status.relaxed_navrh_plan():
+        fenced = parse_status_block(_fence(_NAVRH_GATE_NO_PLAN))
+        bare = parse_status_block(json.dumps(_NAVRH_GATE_NO_PLAN))
+    assert isinstance(fenced, PipelineStatusBlock) and fenced.kind == "gate_report"
+    assert isinstance(bare, PipelineStatusBlock) and bare.kind == "gate_report"
+    # Outside the block the guard is active again (contextvar reset).
+    assert isinstance(parse_status_block(_fence(_NAVRH_GATE_NO_PLAN)), ParseFailure)

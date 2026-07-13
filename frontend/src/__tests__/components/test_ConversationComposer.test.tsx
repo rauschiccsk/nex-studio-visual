@@ -41,4 +41,13 @@ describe("ConversationComposer — framework_issue lock (Director obs #6)", () =
     render(<ConversationComposer onRelay={noopRelay} />);
     expect(screen.getByRole("textbox")).toHaveAttribute("spellcheck", "false");
   });
+
+  // nex-studio-visual crash-test 2026-07-13: when a recovery bar above owns the input (blockedAbove), the
+  // always-open composer COLLAPSES to a slim pointer — no second textarea, so the screen has exactly ONE input.
+  it("collapses to a pointer (no textarea) when blockedAbove", () => {
+    render(<ConversationComposer onRelay={noopRelay} blockedAbove />);
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Poslať/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/lištu vyššie/i)).toBeInTheDocument();
+  });
 });

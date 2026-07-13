@@ -89,8 +89,11 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
       </div>
 
       <div className="flex flex-col gap-2 px-4 py-3">
-        {/* The engine's own ready-made "čo ďalej" guidance — previously computed but never shown. */}
-        {guidance && <p className="text-xs text-[var(--color-text-muted)]">{guidance}</p>}
+        {/* The engine's own ready-made "čo ďalej" guidance. For an ERROR it's the recovery hint. For a
+            QUESTION it repeats the whole question — which already renders as the "Otázka — na rade si ty"
+            card in the thread right above — so it is SUPPRESSED here (nex-studio-visual crash-test
+            2026-07-13: the triple-rendered question read as clutter). */}
+        {!isQuestion && guidance && <p className="text-xs text-[var(--color-text-muted)]">{guidance}</p>}
 
         <div className="flex items-center gap-2">
           <input

@@ -30,10 +30,12 @@ Charter §5.3 contract (per Dedo 2026-06-03):
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, Union
+from typing import Any, Iterator, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -454,6 +456,27 @@ def _format_validation_errors(exc: ValidationError) -> str:
 PIPELINE_STATUS_JSON_SCHEMA = PipelineStatusBlock.model_json_schema()
 
 
+#: When a Návrh RE-WORK turn runs with the task plan ALREADY materialized (e.g. the AI applying the Auditor's
+#: decision cards), the AI correctly re-emits a ``gate_report`` WITHOUT re-listing the whole EPIC→FEAT→TASK
+#: plan — the plan already exists in the DB. ``_run_navrh_round`` enters :func:`relaxed_navrh_plan` for that
+#: case so :func:`_validate_block` does not demand the plan again (nex-studio-visual crash-test 2026-07-13:
+#: the re-work's plan-less gate_report was rejected → parse_exhaustion on a turn that had done the work).
+#: Default ``True`` = the first-run contract (a Návrh gate_report MUST carry the plan to close the phase).
+_require_navrh_plan: contextvars.ContextVar[bool] = contextvars.ContextVar("require_navrh_plan", default=True)
+
+
+@contextlib.contextmanager
+def relaxed_navrh_plan() -> Iterator[None]:
+    """Within this block, a Návrh ``gate_report`` need NOT carry an inline plan (the plan is already
+    materialized). Wraps the single re-work invoke in :func:`_run_navrh_round`; contextvar-scoped so the
+    relaxation is confined to that turn (incl. its parse-retries) and never leaks to another dispatch."""
+    token = _require_navrh_plan.set(False)
+    try:
+        yield
+    finally:
+        _require_navrh_plan.reset(token)
+
+
 def _validate_block(data: dict) -> ParseResult:
     """Validate a status-block dict through :class:`PipelineStatusBlock` + the imperative
     enum/cross-field rules. The SINGLE validation path shared by the fence transport
@@ -486,7 +509,12 @@ def _validate_block(data: dict) -> ParseResult:
     # allowed (re-plan dialogue); only the gate_report — the turn that closes the phase — requires
     # a non-empty 'plan'. (The narrowed skeleton/per-feat passes never hit this guard — they emit
     # a TaskPlanSkeleton/TaskPlanFeatTasks object, not a PipelineStatusBlock.)
-    if block.stage == "navrh" and block.kind == "gate_report" and (block.plan is None or not block.plan.epics):
+    if (
+        block.stage == "navrh"
+        and block.kind == "gate_report"
+        and _require_navrh_plan.get()
+        and (block.plan is None or not block.plan.epics)
+    ):
         return ParseFailure("navrh gate_report requires a non-empty 'plan' (EPIC→FEAT→TASK)")
     # CR-V2-041: a consultation turn must carry the decision queue, and each decision must have EXACTLY
     # one recommended option (so the card pre-highlights a default). decisions≥1 / options≥2 are enforced by
@@ -516,6 +544,13 @@ def parse_status_block(stdout: str) -> ParseResult:
     """
     matches = _FENCE_RE.findall(stdout or "")
     if not matches:
+        # Fallback (nex-studio-visual crash-test 2026-07-13): the model sometimes emits the status block as
+        # BARE JSON without the fence. When the CLI also produced no ``structured_output``, this fence-only
+        # path was the last resort and it found nothing → ``parse_exhaustion`` on a turn that had actually
+        # done the work. Recover a bare status block (validated the SAME way) instead of dying.
+        bare = _find_bare_status_block(stdout or "")
+        if bare is not None:
+            return _validate_block(bare)
         return ParseFailure("no PIPELINE_STATUS block found")
     if len(matches) > 1:
         return ParseFailure(f"expected exactly one PIPELINE_STATUS block, found {len(matches)}")
@@ -543,6 +578,71 @@ def parse_structured_output(obj: dict) -> ParseResult:
     return _validate_block(obj)
 
 
+#: A JSON decoder reused for bare-block detection (``raw_decode`` finds one object's exact extent — string-
+#: aware, so braces inside string values never confuse the scan).
+_JSON_DECODER = json.JSONDecoder()
+
+#: The four keys that together fingerprint a :class:`PipelineStatusBlock`. A legitimate markdown report never
+#: IS a bare JSON object carrying ≥3 of these, so the signature never false-strips real report content.
+_STATUS_BLOCK_SIGNATURE = ("stage", "kind", "summary", "awaiting")
+
+
+def _looks_like_status_block(obj: object) -> bool:
+    """True when *obj* is a dict fingerprinted as a status block (≥3 signature keys)."""
+    if not isinstance(obj, dict):
+        return False
+    return sum(k in obj for k in _STATUS_BLOCK_SIGNATURE) >= 3
+
+
+def _strip_bare_status_blocks(text: str) -> str:
+    """Remove every BARE (unfenced) status-block JSON object the model echoed as plain text.
+
+    Scans each ``{`` as a candidate object start, decodes exactly one JSON value there
+    (:meth:`json.JSONDecoder.raw_decode`, which respects string-quoted braces), and drops the span when it
+    fingerprints as a status block (:func:`_looks_like_status_block`). Non-block JSON (e.g. a small example
+    object) is left untouched. Handles a pure-block body, prose+trailing block, and multiple blocks.
+    Deterministic; never raises."""
+    result = text
+    idx = result.find("{")
+    while idx != -1:
+        try:
+            obj, end = _JSON_DECODER.raw_decode(result, idx)
+        except ValueError:
+            idx = result.find("{", idx + 1)
+            continue
+        if _looks_like_status_block(obj):
+            result = result[:idx] + result[end:]
+            idx = result.find("{", idx)  # text shrank — rescan from the same offset
+        else:
+            idx = result.find("{", idx + 1)
+    return result
+
+
+def _find_bare_status_block(text: str) -> Optional[dict]:
+    """Find a BARE (unfenced) status-block JSON object in *text* and return it (the LAST one — the
+    authoritative status block is emitted after any prose report). Returns ``None`` when none is present.
+
+    The model sometimes emits its status block as raw JSON WITHOUT the ``<<<PIPELINE_STATUS>>>`` fence; when
+    the CLI also produced no ``structured_output``, :func:`parse_status_block` (fence-only) found nothing and
+    the turn died with ``parse_exhaustion`` even though a perfectly valid block was right there (nex-studio-
+    visual crash-test 2026-07-13). Mirrors :func:`_strip_bare_status_blocks`' string-aware ``raw_decode``
+    scan. Deterministic; never raises."""
+    found: Optional[dict] = None
+    idx = text.find("{")
+    while idx != -1:
+        try:
+            obj, end = _JSON_DECODER.raw_decode(text, idx)
+        except ValueError:
+            idx = text.find("{", idx + 1)
+            continue
+        if _looks_like_status_block(obj):
+            found = obj  # keep scanning — the LAST status block wins
+            idx = text.find("{", end)
+        else:
+            idx = text.find("{", idx + 1)
+    return found
+
+
 def extract_report_body(text: str) -> str:
     """Return the agent's human-readable markdown report — everything in its raw output EXCEPT the
     machine sentinel fences (legible-cockpit-output fix).
@@ -564,6 +664,13 @@ def extract_report_body(text: str) -> str:
     very monolithic block this fix removes). The body is the surrounding TEXT, not a JSON field."""
     body = _FENCE_RE.sub("", text or "")
     body = _TASK_PLAN_FENCE_RE.sub("", body)
+    # Legibility fix (nex-studio-visual crash-test 2026-07-13): the model sometimes echoes the status block
+    # as BARE JSON in its text output — no ``<<<PIPELINE_STATUS>>>`` fence — alongside (or instead of) the
+    # grammar-constrained structured_output the orchestrator actually parses. The fence regexes can't catch
+    # an unfenced block, so the raw ``{"stage":…,"question":…}`` leaked into ``payload['report']`` and
+    # rendered as a raw-JSON cockpit bubble. Strip any bare status-block object too — it is the machine
+    # envelope, never a human report.
+    body = _strip_bare_status_blocks(body)
     return body.strip()
 
 

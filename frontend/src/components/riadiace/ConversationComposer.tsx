@@ -19,8 +19,10 @@ const ENGINE_BUSY_HINT = "AI Agent práve pracuje — správa sa pošle, keď do
 // technical team resolves it.
 const FRAMEWORK_ISSUE_BANNER = "Túto chybu rieši náš technický tím.";
 // Category I: when a recovery bar above owns the input (a blocked question / error), the always-open composer
-// is de-emphasised and this hint points the Manažér at the one obvious input above.
-const BLOCKED_ABOVE_HINT = "Najprv odpovedz na otázku vyššie.";
+// COLLAPSES to this slim pointer (nex-studio-visual crash-test 2026-07-13 — a second live textarea read as a
+// confusing duplicate input, "2 editory"). Neutral wording: a question is answered, an error is retried, both
+// "v lište vyššie".
+const BLOCKED_ABOVE_HINT = "Pokračuj cez lištu vyššie.";
 
 interface Props {
   /** Relay the text through the engine; resolves to whether it was ENQUEUED behind an in-flight turn. */
@@ -42,8 +44,9 @@ export function ConversationComposer({ onRelay, disabled, frameworkBlocked, bloc
 
   // A framework_issue escalation hard-disables the whole composer (Manažér has no recovery move here).
   const locked = disabled || frameworkBlocked;
-  // Category I: a recovery bar above owns the input — de-emphasise (don't lock; the Manažér may still type).
-  const deemphasized = !!blockedAbove && !frameworkBlocked;
+  // Category I: a recovery bar above owns the input — COLLAPSE the composer to a pointer (framework_issue keeps
+  // its own locked banner below, so it is excluded here).
+  const collapsed = !!blockedAbove && !frameworkBlocked;
 
   async function submit() {
     const trimmed = text.trim();
@@ -76,6 +79,16 @@ export function ConversationComposer({ onRelay, disabled, frameworkBlocked, bloc
     }
   }
 
+  // Category I: a recovery bar above owns the input — render only a slim pointer, so there is exactly ONE live
+  // input on screen (the bar above). No second textarea to read as a duplicate.
+  if (collapsed) {
+    return (
+      <div className="flex-shrink-0 border-t border-[var(--color-border-default)] bg-[var(--color-surface)] px-3 py-2">
+        <p className="text-[11px] font-medium text-[var(--color-text-muted)]">{BLOCKED_ABOVE_HINT}</p>
+      </div>
+    );
+  }
+
   return (
     <form
       onSubmit={onFormSubmit}
@@ -89,11 +102,6 @@ export function ConversationComposer({ onRelay, disabled, frameworkBlocked, bloc
           {FRAMEWORK_ISSUE_BANNER}
         </div>
       )}
-      {deemphasized && (
-        <div className="mb-2 rounded border border-[var(--color-state-warning-fg)]/30 bg-[var(--color-state-warning-bg)] px-2 py-1.5 text-[11px] font-medium text-[var(--color-state-warning-fg)]">
-          {BLOCKED_ABOVE_HINT}
-        </div>
-      )}
       {(hint || error) && (
         <div
           className={`mb-2 rounded px-2 py-1 text-[11px] ${
@@ -105,7 +113,7 @@ export function ConversationComposer({ onRelay, disabled, frameworkBlocked, bloc
           {error ? error.message : hint}
         </div>
       )}
-      <div className={`flex items-end gap-2 ${deemphasized ? "opacity-60" : ""}`}>
+      <div className="flex items-end gap-2">
         <textarea
           lang="sk"
           spellCheck={false}

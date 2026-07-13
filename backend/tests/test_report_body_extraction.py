@@ -38,3 +38,32 @@ def test_strips_task_plan_fence_too() -> None:
 def test_handles_empty_and_none_safely() -> None:
     assert extract_report_body("") == ""
     assert extract_report_body(None) == ""  # type: ignore[arg-type]
+
+
+# ── Bare (UNfenced) status block (nex-studio-visual crash-test 2026-07-13) ────────────────────────────
+# The model sometimes echoes the status block as raw JSON in its text — no ``<<<PIPELINE_STATUS>>>`` fence —
+# alongside the grammar-constrained structured_output the orchestrator actually parses. The fence regex can't
+# catch it, so the raw ``{"stage":…,"question":…}`` leaked into payload['report'] and rendered as a raw-JSON
+# cockpit bubble. extract_report_body must strip a bare status block too.
+_BARE_BLOCK = (
+    '{"stage": "priprava", "kind": "question", '
+    '"summary": "Načítal som Zadanie a otváram konzultáciu.", '
+    '"awaiting": "manazer", "question": "Otázka 1 z ~6 — ako to chápať?"}'
+)
+
+
+def test_strips_a_bare_unfenced_status_block() -> None:
+    # A pure-block turn (the observed Príprava question) → the report is empty, not the raw JSON.
+    assert extract_report_body(_BARE_BLOCK) == ""
+
+
+def test_strips_a_bare_block_after_prose() -> None:
+    body = extract_report_body(f"{_REPORT}\n\n{_BARE_BLOCK}")
+    assert body == _REPORT
+    assert "stage" not in body and "question" not in body
+
+
+def test_keeps_non_status_json_untouched() -> None:
+    # A small JSON example inside a real report is NOT a status block (lacks the signature keys) — kept.
+    text = 'Príklad konfigurácie: {"port": 8080, "host": "localhost"}'
+    assert extract_report_body(text) == text
