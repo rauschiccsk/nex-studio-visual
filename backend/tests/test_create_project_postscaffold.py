@@ -20,6 +20,8 @@ from backend.services.create_project_postscaffold import (
     ProvisioningError,
     _commit_and_push_scaffold_finalisation,
     _mark_project_trusted,
+    _provision_ci_runner,
+    deprovision_ci_runner,
     provision_v2_agent_charters,
 )
 
@@ -241,3 +243,87 @@ def test_scaffold_finalisation_noop_on_clean_tree(tmp_path: Path) -> None:
     _commit_and_push_scaffold_finalisation(tmp_path, "demo")  # clean tree → no commit
 
     assert _git(tmp_path, "rev-parse", "HEAD").stdout.strip() == head_before
+
+
+# --- Containerized CI runner provisioning (Director 2026-07-16) --------------
+
+
+class _FakeCompleted:
+    """Minimal ``subprocess.CompletedProcess`` stand-in for the docker-call mocks below."""
+
+    def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = "") -> None:
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def test_provision_ci_runner_runs_container_with_correct_label(monkeypatch) -> None:
+    """Happy path: no existing container → a ``docker run -d`` for the right repo/label, with the PAT passed
+    via the child ENV (name-only ``-e ACCESS_TOKEN``) and NEVER on argv (ps/log leak guard)."""
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_secretTOKEN")
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+
+    calls: list[tuple[list[str], dict]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        if len(cmd) > 1 and cmd[1] == "ps":
+            return _FakeCompleted(returncode=0, stdout="")  # no existing runner container
+        return _FakeCompleted(returncode=0, stdout="newcontainerid\n")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    _provision_ci_runner("nex-demo", "https://github.com/rauschiccsk/nex-demo")
+
+    run_cmd, run_kwargs = calls[-1]
+    assert run_cmd[:3] == ["docker", "run", "-d"]
+    assert "nex-ci-runner-nex-demo" in run_cmd
+    assert "LABELS=andros-ubuntu-nex-demo" in run_cmd
+    assert "RUNNER_NAME=andros-ubuntu-nex-demo" in run_cmd
+    assert "REPO_URL=https://github.com/rauschiccsk/nex-demo" in run_cmd
+    assert "/var/run/docker.sock:/var/run/docker.sock" in run_cmd
+    # PAT: passed via env, NOT baked onto argv; the ``-e ACCESS_TOKEN`` flag is name-only (no ``=value``).
+    assert "ghp_secretTOKEN" not in run_cmd
+    assert run_kwargs["env"]["ACCESS_TOKEN"] == "ghp_secretTOKEN"
+    assert "ACCESS_TOKEN" in run_cmd
+    assert not any(str(arg).startswith("ACCESS_TOKEN=") for arg in run_cmd)
+
+
+def test_provision_ci_runner_skips_without_token(monkeypatch) -> None:
+    """No GITHUB_TOKEN / GH_TOKEN → never shells out (best-effort skip, logged)."""
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+
+    calls: list = []
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: calls.append(a) or _FakeCompleted())
+
+    _provision_ci_runner("nex-demo", None)
+
+    assert calls == []
+
+
+def test_provision_ci_runner_idempotent_when_container_exists(monkeypatch) -> None:
+    """An existing ``nex-ci-runner-<slug>`` container → only the ``docker ps`` check runs, no ``docker run``."""
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_x")
+
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return _FakeCompleted(returncode=0, stdout="existingcontainerid\n")  # ps finds one
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    _provision_ci_runner("nex-demo", None)
+
+    assert len(calls) == 1
+    assert calls[0][1] == "ps"
+
+
+def test_deprovision_ci_runner_removes_container(monkeypatch) -> None:
+    calls: list[list[str]] = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **k: calls.append(cmd) or _FakeCompleted(returncode=0))
+
+    deprovision_ci_runner("nex-demo")
+
+    assert calls[0] == ["docker", "rm", "-f", "nex-ci-runner-nex-demo"]

@@ -36,6 +36,14 @@ SMOKE_FULL_TIMEOUT = 600  # 10 min — full smoke incl up + health
 CICD_TIMEOUT = 60
 BRANCH_PROTECTION_TIMEOUT = 30
 
+# Containerized self-hosted CI runner (Director 2026-07-16). The backend runs INSIDE a container and cannot
+# install a HOST systemd runner (no systemctl/sudo/host runner dir) like the 13 legacy ones — so it runs the
+# runner as a Docker container via the mounted docker.sock. See :func:`_provision_ci_runner` for the full why.
+# Image tag pinned to the SAME runner version as the host systemd runners (2.335.1).
+CI_RUNNER_IMAGE = "myoung34/github-runner:2.335.1"
+CI_RUNNER_PROVISION_TIMEOUT = 300  # a cold `docker run` may pull the runner image first
+CI_RUNNER_TEARDOWN_TIMEOUT = 60
+
 
 # --- CR-V2-005 archetype surface composition --------------------------------
 # A project archetype is a preset SURFACE COMPOSITION (design §4.2): a project
@@ -250,6 +258,9 @@ def run_post_scaffold_steps(
 
     if enable_cicd and target_path and target_path.is_dir():
         _wire_cicd_workflow(target_path, slug)
+        # The pushed ci.yml runs on ``andros-ubuntu-<slug>`` (self-hosted) — provision that runner now, else
+        # every job queues forever (the nex-shopify gap, Director 2026-07-16). Best-effort, never raises.
+        _provision_ci_runner(slug, repo_url)
 
     if enable_branch_protection and repo_url:
         _enable_branch_protection(repo_url, slug)
@@ -571,6 +582,107 @@ def _wire_cicd_workflow(target: Path, slug: str) -> None:
         return
 
     logger.info("K-005 CI/CD workflow committed + pushed (slug=%s)", slug)
+
+
+def _provision_ci_runner(slug: str, repo_url: str | None) -> None:
+    """Auto-provision a containerized self-hosted GitHub Actions runner for the new repo (Director 2026-07-16).
+
+    Closes the "CI pushed but no runner → every job queues forever" gap: :func:`_wire_cicd_workflow` pushes a
+    ci.yml whose jobs ``runs-on: andros-ubuntu-<slug>`` (self-hosted), but nothing registered such a runner.
+    The 13 legacy runners are HOST systemd services; the NEX Studio backend runs INSIDE a container with no
+    ``systemctl`` / ``sudo`` / host runner dir, so it cannot install one that way. It CAN, via the mounted
+    ``/var/run/docker.sock``, run the runner as a Docker container — the only zero-touch path from the cockpit.
+
+    ``myoung34/github-runner`` self-registers from the backend's GH PAT and bundles the docker CLI; the host
+    docker.sock is mounted in so the CI's ``docker compose build`` + service-container jobs execute against the
+    host daemon exactly like the systemd runners do. Persistent + self-healing (``--restart unless-stopped``).
+
+    Best-effort: any failure is logged, never raised (the Manažér can register a runner manually — the pushed
+    ci.yml still stands). Idempotent: skips when a runner container for this slug already exists. The PAT is
+    passed to ``docker`` via the child ENV (``-e ACCESS_TOKEN`` name-only), never on argv, so it never lands in
+    ``ps`` / logs.
+    """
+    from backend.services.template_bootstrap import _repo_from_url
+
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if not token:
+        logger.warning("CI runner provisioning SKIPPED — no GITHUB_TOKEN/GH_TOKEN in env (slug=%s)", slug)
+        return
+
+    repo_full = _repo_from_url(repo_url, slug)  # owner/repo
+    container = f"nex-ci-runner-{slug}"
+    label = f"andros-ubuntu-{slug}"
+
+    # Idempotent — a runner container for this slug already present (running or stopped) → leave it.
+    existing = subprocess.run(
+        ["docker", "ps", "-aq", "-f", f"name=^{container}$"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    if existing.returncode == 0 and existing.stdout.strip():
+        logger.info("CI runner provisioning SKIPPED — container %s already exists (slug=%s)", container, slug)
+        return
+
+    # Pass the PAT via the child ENV (``-e ACCESS_TOKEN`` name-only) so it is NEVER on argv (ps/logs).
+    child_env = {**os.environ, "ACCESS_TOKEN": token}
+    run = subprocess.run(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            container,
+            "--restart",
+            "unless-stopped",
+            "-e",
+            "ACCESS_TOKEN",
+            "-e",
+            f"REPO_URL=https://github.com/{repo_full}",
+            "-e",
+            "RUNNER_SCOPE=repo",
+            "-e",
+            f"RUNNER_NAME={label}",
+            "-e",
+            f"LABELS={label}",
+            "-e",
+            "DISABLE_AUTO_UPDATE=true",
+            "-v",
+            "/var/run/docker.sock:/var/run/docker.sock",
+            CI_RUNNER_IMAGE,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=CI_RUNNER_PROVISION_TIMEOUT,
+        check=False,
+        env=child_env,
+    )
+    if run.returncode != 0:
+        logger.warning("CI runner provisioning FAILED (slug=%s): %s", slug, run.stderr.strip())
+        return
+    logger.info("CI runner container provisioned (slug=%s, label=%s)", slug, label)
+
+
+def deprovision_ci_runner(slug: str) -> None:
+    """Best-effort teardown of the containerized CI runner for a deleted project (Director 2026-07-16).
+
+    Removes the ``nex-ci-runner-<slug>`` container (``docker rm -f``); GitHub then shows the runner offline
+    (reclaimed by a same-named ``--replace`` re-provision on re-create). Never raises — mirrors the UAT / KB /
+    RAG teardowns in the delete route. A no-op when no such container exists (project predates this feature or
+    had CI disabled)."""
+    container = f"nex-ci-runner-{slug}"
+    result = subprocess.run(
+        ["docker", "rm", "-f", container],
+        capture_output=True,
+        text=True,
+        timeout=CI_RUNNER_TEARDOWN_TIMEOUT,
+        check=False,
+    )
+    if result.returncode != 0:
+        logger.info("CI runner teardown — nothing removed for slug=%s (%s)", slug, result.stderr.strip())
+        return
+    logger.info("CI runner container removed (slug=%s)", slug)
 
 
 def _commit_and_push_scaffold_finalisation(target: Path, slug: str) -> None:

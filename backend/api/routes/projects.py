@@ -745,6 +745,13 @@ def delete_project(
         if not ok:
             logger.warning("UAT teardown failed for deleted project %r (uat_slug=%r): %s", slug, uat_slug, detail)
 
+    # CI runner teardown — orphan prevention (Director 2026-07-16). A deleted project's containerized
+    # self-hosted runner (nex-ci-runner-<slug>) would otherwise linger; remove it. Best-effort, never
+    # raises, never undoes the committed delete — mirrors the UAT teardown above.
+    from backend.services.create_project_postscaffold import deprovision_ci_runner
+
+    deprovision_ci_runner(slug)
+
     # KB cleanup — best-effort. A failure here does not undo the DB
     # delete (that has already committed); we log and return 204 so
     # the caller sees the project as gone, and a follow-up orphan
