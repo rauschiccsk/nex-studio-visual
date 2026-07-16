@@ -104,4 +104,47 @@ describe("SpecifikaciaPage badge", () => {
     expect(await screen.findByText("Rozpracované")).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByText("Schválená")).not.toBeInTheDocument());
   });
+
+  it("surfaces docs/contracts/ and docs/handoff/ as grouped pills alongside the version spec", async () => {
+    listProjectSpecsMock.mockResolvedValue({
+      documents: [
+        SPEC_DOC,
+        {
+          relative_path: "demo/docs/contracts/api_product_catalog.md",
+          filename: "api_product_catalog.md",
+          category: "demo/docs/contracts",
+          size_bytes: 10,
+          is_directory: false,
+        },
+        {
+          relative_path: "demo/docs/handoff/tibor-genesis-api.md",
+          filename: "tibor-genesis-api.md",
+          category: "demo/docs/handoff",
+          size_bytes: 10,
+          is_directory: false,
+        },
+        // Internal noise that must NOT be surfaced in Dokumenty.
+        {
+          relative_path: "demo/docs/session-logs/2026-07-16-001.md",
+          filename: "2026-07-16-001.md",
+          category: "demo/docs/session-logs",
+          size_bytes: 10,
+          is_directory: false,
+        },
+      ],
+      count: 4,
+    });
+    getPipelineBoardApiMock.mockResolvedValue({ spec_approved: false });
+
+    render(<SpecifikaciaPage />);
+
+    // Deliverable docs render as pills…
+    expect(await screen.findByRole("button", { name: "api_product_catalog" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "tibor-genesis-api" })).toBeInTheDocument();
+    // …grouped under their folder headings…
+    expect(screen.getByText("Kontrakty")).toBeInTheDocument();
+    expect(screen.getByText("Odovzdávka")).toBeInTheDocument();
+    // …while internal folders (session-logs) stay out.
+    expect(screen.queryByRole("button", { name: "2026-07-16-001" })).not.toBeInTheDocument();
+  });
 });

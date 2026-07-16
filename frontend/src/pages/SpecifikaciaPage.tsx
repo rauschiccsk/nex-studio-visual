@@ -9,6 +9,12 @@
  * with the SAME ``/project-specs/content`` + SpecMarkdown path. Defaults to the specification (unchanged
  * behaviour when it is the only doc). Read-only; the AI writes + maintains these during the conversation.
  *
+ * 2026-07-16: also surfaces the project-level HANDOVER docs that live OUTSIDE ``docs/specs/`` —
+ * ``docs/contracts/`` and ``docs/handoff/`` — as their own grouped pill rows, so an external developer
+ * (e.g. Tibor building the NEX Genesis API) can read the contracts + handoff note from the cockpit, not just
+ * via git. The version spec stays the primary group; ``docs/session-logs/`` and other internal noise are
+ * intentionally NOT included.
+ *
  * Honest states: no project pinned → guard; no docs on disk yet → "nothing agreed yet" + a link to the
  * Riadiace centrum; present → the doc picker + the rendered Markdown.
  */
@@ -43,6 +49,14 @@ const DOC_ORDER = [
   "RELEASE_NOTES.md",
 ];
 
+// Project-level handover folders under ``docs/`` (OUTSIDE the version spec) that also belong in Dokumenty —
+// the deliverables an external developer must be able to read from the cockpit. Order = display order after
+// the spec group. Deliberately a small allowlist: session-logs / other internal folders stay out.
+const DELIVERABLE_FOLDERS: { folder: string; title: string }[] = [
+  { folder: "contracts", title: "Kontrakty" },
+  { folder: "handoff", title: "Odovzdávka" },
+];
+
 function labelFor(filename: string): string {
   return DOC_LABELS[filename] ?? filename.replace(/\.md$/i, "");
 }
@@ -73,6 +87,21 @@ function filterVersionDocs(all: ProjectSpecDoc[], slug: string, versionNumber: s
     const ob = ib === -1 ? 999 : ib;
     return oa - ob || a.filename.localeCompare(b.filename);
   });
+}
+
+// Project-level deliverable docs (contracts / handoff) that live OUTSIDE ``docs/specs/``. Not tied to a
+// version's spec folder, but must be readable from the cockpit (handover to Tibor / external devs). Returns
+// the docs flattened in DELIVERABLE_FOLDERS order, alphabetical within each folder.
+function filterDeliverableDocs(all: ProjectSpecDoc[], slug: string): ProjectSpecDoc[] {
+  const out: ProjectSpecDoc[] = [];
+  for (const { folder } of DELIVERABLE_FOLDERS) {
+    const prefix = `${slug}/docs/${folder}/`;
+    const inFolder = all
+      .filter((d) => !d.is_directory && /\.md$/i.test(d.filename) && d.relative_path.startsWith(prefix))
+      .sort((a, b) => a.filename.localeCompare(b.filename));
+    out.push(...inFolder);
+  }
+  return out;
 }
 
 export default function SpecifikaciaPage() {
@@ -106,9 +135,13 @@ export default function SpecifikaciaPage() {
     listProjectSpecs()
       .then((res) => {
         if (cancelled) return;
-        const filtered = filterVersionDocs(res.documents, slug, versionNumber);
+        const specDocs = filterVersionDocs(res.documents, slug, versionNumber);
+        const deliverableDocs = filterDeliverableDocs(res.documents, slug);
+        const filtered = [...specDocs, ...deliverableDocs];
         setDocs(filtered);
-        const def = filtered.find((d) => d.filename === "specification.md") ?? filtered[0];
+        // Default to the specification (else the first spec doc, else the first deliverable) — unchanged
+        // behaviour for spec-only projects.
+        const def = specDocs.find((d) => d.filename === "specification.md") ?? filtered[0];
         setActivePath(def ? repoPath(def, slug) : null);
       })
       .catch(() => {
@@ -160,6 +193,20 @@ export default function SpecifikaciaPage() {
     };
   }, [versionId]);
 
+  // Group the pills: the version spec first, then each project-level handover folder (contracts / handoff).
+  // Group headings render only when there is more than one group — spec-only projects keep the plain row.
+  const groups = useMemo(() => {
+    const out: { key: string; title: string; docs: ProjectSpecDoc[] }[] = [];
+    if (!slug) return out;
+    const specDocs = docs.filter((d) => d.relative_path.startsWith(`${slug}/docs/specs/`));
+    if (specDocs.length) out.push({ key: "spec", title: "Špecifikácia", docs: specDocs });
+    for (const { folder, title } of DELIVERABLE_FOLDERS) {
+      const inFolder = docs.filter((d) => d.relative_path.startsWith(`${slug}/docs/${folder}/`));
+      if (inFolder.length) out.push({ key: folder, title, docs: inFolder });
+    }
+    return out;
+  }, [docs, slug]);
+
   const hasSpec = useMemo(() => docs.some((d) => d.filename === "specification.md"), [docs]);
   // Badge: approved → "Schválená"; a spec exists but isn't frozen → "Rozpracované"; no spec yet → none.
   const specBadge: "schvalena" | "rozpracovane" | null = specApproved ? "schvalena" : hasSpec ? "rozpracovane" : null;
@@ -207,28 +254,39 @@ export default function SpecifikaciaPage() {
         )}
       </div>
 
-      {/* Document picker — one pill per document the AI produced for this version. Hidden when there is ≤1. */}
+      {/* Document picker — one pill per document, grouped: the version spec first, then the project-level
+          handover folders (Kontrakty / Odovzdávka). Hidden when there is ≤1 doc; group headings appear only
+          when more than one group is present. */}
       {docs.length > 1 && (
-        <div className="flex flex-shrink-0 flex-wrap items-center gap-1.5 border-b border-[var(--color-border-default)] bg-[var(--color-surface)] px-4 py-2">
-          {docs.map((d) => {
-            const p = repoPath(d, slug!);
-            const active = p === activePath;
-            return (
-              <button
-                key={d.relative_path}
-                type="button"
-                onClick={() => setActivePath(p)}
-                title={labelFor(d.filename)}
-                className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                  active
-                    ? "border-primary-500 bg-primary-600 text-white"
-                    : "border-[var(--color-border-default)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
-                }`}
-              >
-                {labelFor(d.filename)}
-              </button>
-            );
-          })}
+        <div className="flex flex-shrink-0 flex-col gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-surface)] px-4 py-2">
+          {groups.map((g) => (
+            <div key={g.key} className="flex flex-wrap items-center gap-1.5">
+              {groups.length > 1 && (
+                <span className="mr-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+                  {g.title}
+                </span>
+              )}
+              {g.docs.map((d) => {
+                const p = repoPath(d, slug!);
+                const active = p === activePath;
+                return (
+                  <button
+                    key={d.relative_path}
+                    type="button"
+                    onClick={() => setActivePath(p)}
+                    title={labelFor(d.filename)}
+                    className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                      active
+                        ? "border-primary-500 bg-primary-600 text-white"
+                        : "border-[var(--color-border-default)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
+                    }`}
+                  >
+                    {labelFor(d.filename)}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </div>
       )}
 
