@@ -868,6 +868,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pipeline/{version_id}/vizual-mockup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Vizual Mockup
+         * @description PUBLIC (no auth): serve the version's self-contained Vizuál mockup HTML into the cockpit iframe (which
+         *     cannot carry the JWT header). Director 2026-07-17: the Vizuál preview serves the AI's self-contained
+         *     mockup — walkable with NO backend and NO login — instead of the auth-gated raw FE Vite scaffold. The mockup
+         *     is a design preview (mock data, no secrets), keyed on the unguessable version UUID;
+         *     ``read_vizual_mockup`` is path-scoped to ``docs/.../visual/`` (no arbitrary file read). 404 when no mockup
+         *     exists → the board's ``vizual_url`` then points at the live Vite sandbox instead.
+         */
+        get: operations["get_vizual_mockup_api_v1_pipeline__version_id__vizual_mockup_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/project-members": {
         parameters: {
             query?: never;
@@ -6616,6 +6641,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PipelineRelayResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_vizual_mockup_api_v1_pipeline__version_id__vizual_mockup_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
                 };
             };
             /** @description Validation Error */
