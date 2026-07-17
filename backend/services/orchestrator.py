@@ -1181,7 +1181,9 @@ def _navrh_directive(db: Session, version_id: uuid.UUID) -> str:
     )
 
 
-def _vizual_directive(db: Session, version_id: uuid.UUID, manager_request: str) -> str:
+def _vizual_directive(
+    db: Session, version_id: uuid.UUID, manager_request: str, mockup_rel: Optional[str] = None
+) -> str:
     """The Vizuál phase brief (CR-1, nex-studio-visual; spec §3.B) — the AI's VISUAL-CONSULTATION turn.
 
     A sibling of :func:`_priprava_directive` / :func:`_kontrola_directive`: the per-turn orchestrator
@@ -1196,6 +1198,22 @@ def _vizual_directive(db: Session, version_id: uuid.UUID, manager_request: str) 
     version_number = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
     spec_rel = _priprava_spec_rel(version_number)
     design_rel = _navrh_design_doc_rel(version_number)
+    if mockup_rel is not None:
+        # MOCKUP mode (Director 2026-07-17): the preview IS the self-contained clickable mockup (no backend, no
+        # login) — apply the Manažér's change DIRECTLY to that HTML file, keeping it self-contained.
+        return (
+            "Fáza VIZUÁLNA KONZULTÁCIA — dolaďuješ ŽIVÝ náhľad appky spolu s Manažérom. Náhľad je "
+            f"**samostatný klikací mockup** `{mockup_rel}` (self-contained HTML, bez reálneho backendu a bez "
+            "prihlásenia, reprezentatívne dáta).\n"
+            f"1. Pre kontext si prečítaj Špecifikáciu `{spec_rel}` a Návrh `{design_rel}`.\n"
+            f"2. Manažér žiada TÚTO zmenu: «{manager_request}». Aplikuj PRESNE ju PRIAMO do mockupu "
+            f"`{mockup_rel}` — nič navyše. Mockup nech ostane **self-contained** (inline štýly/skript, žiadny "
+            "reálny backend).\n"
+            "3. Zmenu iba ZAPÍŠ do mockupu — NEcommituj (náhľad ju premietne po obnovení). NEROB backend ani "
+            "dátové modely — to je Programovanie. Ak je požiadavka naozaj nejednoznačná, `kind=question`, "
+            "opýtaj sa PRÁVE JEDNU vec a ZASTAV; inak kolo UZAVRI `kind=done`.\n"
+            "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
+        )
     return (
         "Fáza VIZUÁLNA KONZULTÁCIA — staviaš a dolaďuješ ŽIVÝ vizuál appky spolu s Manažérom. Pracuješ "
         "VÝHRADNE vo FRONTENDE (adresár `frontend/`): reálne obrazovky, rozloženie a navigácia, vizuál-first "
@@ -8048,6 +8066,63 @@ def latest_vizual_url(db: Session, version_id: uuid.UUID) -> Optional[str]:
     ).scalar_one_or_none()
 
 
+def _vizual_mockup_rel(project_root: Path, version_number: str) -> Optional[str]:
+    """Repo-relative path of the version's Vizuál MOCKUP html, or ``None`` (Director 2026-07-17).
+
+    The AI's self-contained clickable mockup lives under ``docs/specs/versions/v<N>/visual/``. When present,
+    the Vizuál preview serves THIS (walkable with no backend and no login) instead of the auth-gated raw FE
+    Vite scaffold — a new project's FE is behind ``ProtectedRoute`` → login, and the sandbox has no backend /
+    user / token, so the live scaffold is a dead login screen (nex-shopify 2026-07-17). Prefers ``index.html``;
+    else the newest ``*.html`` in the dir."""
+    vis_dir = project_root / _version_spec_rel(version_number) / "visual"
+    if not vis_dir.is_dir():
+        return None
+    index = vis_dir / "index.html"
+    if index.is_file():
+        chosen = index
+    else:
+        htmls = sorted(
+            (p for p in vis_dir.glob("*.html") if p.is_file()),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if not htmls:
+            return None
+        chosen = htmls[0]
+    return chosen.relative_to(project_root).as_posix()
+
+
+def read_vizual_mockup(db: Session, version_id: uuid.UUID) -> Optional[str]:
+    """Return the version's Vizuál mockup HTML text, or ``None`` when there is none (the public
+    ``/{version_id}/vizual-mockup`` route serves this into the cockpit iframe). Path-scoped to the version's
+    ``visual/`` dir (defense-in-depth ``relative_to`` check) — never an arbitrary file read."""
+    slug = _project_slug_for_version(db, version_id)
+    version_number = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
+    project_root = claude_agent.PROJECTS_ROOT / slug
+    rel = _vizual_mockup_rel(project_root, version_number)
+    if rel is None:
+        return None
+    path = (project_root / rel).resolve()
+    vis_dir = (project_root / _version_spec_rel(version_number) / "visual").resolve()
+    try:
+        path.relative_to(vis_dir)
+    except ValueError:
+        return None
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def has_vizual_mockup(db: Session, version_id: uuid.UUID) -> bool:
+    """True iff a Vizuál mockup HTML exists for this version (lightweight — dir stat, no file read). The board
+    prefers the mockup preview route over any recorded live-sandbox URL when this is True (Director
+    2026-07-17)."""
+    slug = _project_slug_for_version(db, version_id)
+    version_number = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
+    return _vizual_mockup_rel(claude_agent.PROJECTS_ROOT / slug, version_number) is not None
+
+
 async def _run_vizual_round(
     db: Session,
     state: PipelineState,
@@ -8086,33 +8161,44 @@ async def _run_vizual_round(
     """
     version_id = state.version_id
     slug = _project_slug_for_version(db, version_id)
+    version_number = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
+    mockup_rel = _vizual_mockup_rel(claude_agent.PROJECTS_ROOT / slug, version_number)
 
-    # Lazy, module-level-style reference (avoids an import cycle at orchestrator load; the ``docker``-heavy
-    # sandbox module stays out of the hot import path). Referenced as ``vizual_sandbox.spin_up`` — a module
-    # attribute, NOT ``from ... import spin_up`` — so tests can monkeypatch ``spin_up`` without real docker.
-    from backend.services import vizual_sandbox
+    # Director 2026-07-17: when the AI's self-contained mockup exists, the preview serves IT (walkable with NO
+    # backend and NO login) via a same-origin backend route — NOT the auth-gated live FE Vite scaffold (a new
+    # project's FE is behind ProtectedRoute→login and the sandbox has no backend/token → a dead login screen).
+    url: str
+    if mockup_rel is not None:
+        url = f"/api/v1/pipeline/{version_id}/vizual-mockup"
+    else:
+        # Lazy, module-level-style reference (avoids an import cycle at orchestrator load; the ``docker``-heavy
+        # sandbox module stays out of the hot import path). Referenced as ``vizual_sandbox.spin_up`` — a module
+        # attribute, NOT ``from ... import spin_up`` — so tests can monkeypatch ``spin_up`` without real docker.
+        from backend.services import vizual_sandbox
 
-    try:
-        url = vizual_sandbox.spin_up(slug)
-    except Exception as exc:  # noqa: BLE001 — a sandbox failure must NEVER crash the pipeline; settle honestly.
-        logger.exception("vizual sandbox spin_up failed for %s", slug)
-        state.status = "blocked"
-        state.block_reason = "system_error"  # R4 (D1): an engine-side step (the live preview) failed
-        state.next_action = "Živý náhľad sa nepodarilo spustiť — skús to znova (Uprav) alebo počkaj na technický tím."
-        err_msg = _record_message(
-            db,
-            version_id=version_id,
-            stage="vizual",
-            author="system",
-            recipient="manazer",
-            kind="notification",
-            content="Živý náhľad projektu sa nepodarilo spustiť. Skús to znova alebo počkaj na technický tím.",
-            payload={"phase": "vizual", "vizual_error": str(exc)},
-        )
-        if on_message is not None:
-            await on_message(err_msg)
-        db.flush()
-        return state
+        try:
+            url = vizual_sandbox.spin_up(slug)
+        except Exception as exc:  # noqa: BLE001 — a sandbox failure must NEVER crash the pipeline; settle honestly.
+            logger.exception("vizual sandbox spin_up failed for %s", slug)
+            state.status = "blocked"
+            state.block_reason = "system_error"  # R4 (D1): an engine-side step (the live preview) failed
+            state.next_action = (
+                "Živý náhľad sa nepodarilo spustiť — skús to znova (Uprav) alebo počkaj na technický tím."
+            )
+            err_msg = _record_message(
+                db,
+                version_id=version_id,
+                stage="vizual",
+                author="system",
+                recipient="manazer",
+                kind="notification",
+                content="Živý náhľad projektu sa nepodarilo spustiť. Skús to znova alebo počkaj na technický tím.",
+                payload={"phase": "vizual", "vizual_error": str(exc)},
+            )
+            if on_message is not None:
+                await on_message(err_msg)
+            db.flush()
+            return state
 
     # Announce the preview URL ONCE — on the first entry into the stage (no prior vizual_url note on record).
     # The change-request loop re-enters this round every turn (spin_up is idempotent), so re-recording the URL
@@ -8146,7 +8232,7 @@ async def _run_vizual_round(
         version_id=version_id,
         role=AI_AGENT_ROLE,
         stage="vizual",
-        prompt=_vizual_directive(db, version_id, directive),
+        prompt=_vizual_directive(db, version_id, directive, mockup_rel=mockup_rel),
         on_event=on_event,
         recipient="manazer",
         on_message=on_message,

@@ -16,6 +16,7 @@ import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import HTMLResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -242,6 +243,11 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
     # entered the ``vizual`` stage). The FE Vizuál page embeds this in an iframe. One indexed probe; mirrors the
     # ``spec_approved`` / ``verified`` reads above.
     vizual_url = orchestrator.latest_vizual_url(db, version_id)
+    # Director 2026-07-17: when the AI's self-contained mockup exists, the preview IS that mockup (walkable,
+    # NO login, NO backend) via the same-origin route — override any (possibly stale) recorded live-sandbox
+    # URL. Guarded to the vizual stage so the filesystem probe only runs when the preview is actually shown.
+    if state is not None and state.current_stage == "vizual" and orchestrator.has_vizual_mockup(db, version_id):
+        vizual_url = f"/api/v1/pipeline/{version_id}/vizual-mockup"
     # CR-V2-057 + audit #8 (drift re-verify): OFFER ``overit_znovu`` when the live provenance is a DRIFT — the
     # version WAS verified but HEAD moved past the verified commit, so the green "overená" is stale. Both drift
     # shapes get the button (the handler routes each correctly): ``sha_drift`` (a phase build's Auditor PASS) →
@@ -347,6 +353,20 @@ def get_board(
     if not _version_exists(db, version_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
     return _board(db, version_id, limit)
+
+
+@router.get("/{version_id}/vizual-mockup", response_class=HTMLResponse)
+def get_vizual_mockup(version_id: uuid.UUID, db: Session = Depends(get_db)) -> HTMLResponse:
+    """PUBLIC (no auth): serve the version's self-contained Vizuál mockup HTML into the cockpit iframe (which
+    cannot carry the JWT header). Director 2026-07-17: the Vizuál preview serves the AI's self-contained
+    mockup — walkable with NO backend and NO login — instead of the auth-gated raw FE Vite scaffold. The mockup
+    is a design preview (mock data, no secrets), keyed on the unguessable version UUID;
+    ``read_vizual_mockup`` is path-scoped to ``docs/.../visual/`` (no arbitrary file read). 404 when no mockup
+    exists → the board's ``vizual_url`` then points at the live Vite sandbox instead."""
+    html = orchestrator.read_vizual_mockup(db, version_id)
+    if html is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No Vizuál mockup for this version.")
+    return HTMLResponse(content=html)
 
 
 @router.get("/{version_id}/messages", response_model=PaginatedResponse[PipelineMessageRead])

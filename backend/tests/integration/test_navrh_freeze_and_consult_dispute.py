@@ -236,3 +236,69 @@ def test_board_offers_schvalit_at_navrh_without_materialized_plan(db_session) ->
     board = _board(db_session, version.id)
 
     assert "schvalit" in board.available_actions
+
+
+# ── Vizuál preview serves the AI's self-contained mockup (not the auth-gated FE) ─
+
+
+def test_vizual_mockup_rel_prefers_index_else_newest(tmp_path) -> None:
+    vis = tmp_path / "docs" / "specs" / "versions" / "v0.1.0" / "visual"
+    vis.mkdir(parents=True)
+    assert orchestrator._vizual_mockup_rel(tmp_path, "0.1.0") is None  # empty dir → None
+    (vis / "app-mockup.html").write_text("<html>m</html>", encoding="utf-8")
+    assert orchestrator._vizual_mockup_rel(tmp_path, "0.1.0") == "docs/specs/versions/v0.1.0/visual/app-mockup.html"
+    (vis / "index.html").write_text("<html>i</html>", encoding="utf-8")
+    assert orchestrator._vizual_mockup_rel(tmp_path, "0.1.0") == "docs/specs/versions/v0.1.0/visual/index.html"
+
+
+def test_read_vizual_mockup_returns_html_and_none(db_session, tmp_path, monkeypatch) -> None:
+    from backend.db.models.projects import Project as _Project
+    from backend.services import claude_agent
+
+    version, _state = _seed_navrh_state(db_session, mode=None, status="awaiting_manazer")
+    slug = db_session.execute(
+        select(_Project.slug).join(Version, Version.project_id == _Project.id).where(Version.id == version.id)
+    ).scalar_one()
+    monkeypatch.setattr(claude_agent, "PROJECTS_ROOT", tmp_path)
+
+    assert orchestrator.read_vizual_mockup(db_session, version.id) is None  # no mockup yet
+    vis = tmp_path / slug / "docs" / "specs" / "versions" / "v0.1.0" / "visual"
+    vis.mkdir(parents=True)
+    (vis / "index.html").write_text("<html><body>Mockup panela</body></html>", encoding="utf-8")
+
+    html = orchestrator.read_vizual_mockup(db_session, version.id)
+    assert html is not None and "Mockup panela" in html
+
+
+def test_vizual_directive_mockup_mode_edits_the_mockup(db_session) -> None:
+    version, _state = _seed_navrh_state(db_session)
+    rel = "docs/specs/versions/v0.1.0/visual/index.html"
+
+    d = orchestrator._vizual_directive(db_session, version.id, "Zväčši písmo v hlavičke", mockup_rel=rel)
+    assert "mockup" in d.lower()
+    assert rel in d
+    assert "Zväčši písmo v hlavičke" in d
+
+    # FE mode (no mockup) keeps the live-FE instruction.
+    d_fe = orchestrator._vizual_directive(db_session, version.id, "Zväčši písmo v hlavičke")
+    assert "frontend/" in d_fe
+
+
+def test_board_vizual_url_prefers_mockup_route_when_present(db_session, tmp_path, monkeypatch) -> None:
+    from backend.api.routes.pipeline import _board
+    from backend.db.models.projects import Project as _Project
+    from backend.services import claude_agent
+
+    version, state = _seed_navrh_state(db_session, mode=None, status="awaiting_manazer")
+    state.current_stage = "vizual"  # the mockup override is guarded to the vizual stage
+    db_session.flush()
+    slug = db_session.execute(
+        select(_Project.slug).join(Version, Version.project_id == _Project.id).where(Version.id == version.id)
+    ).scalar_one()
+    monkeypatch.setattr(claude_agent, "PROJECTS_ROOT", tmp_path)
+    vis = tmp_path / slug / "docs" / "specs" / "versions" / "v0.1.0" / "visual"
+    vis.mkdir(parents=True)
+    (vis / "index.html").write_text("<html>m</html>", encoding="utf-8")
+
+    board = _board(db_session, version.id)
+    assert board.vizual_url == f"/api/v1/pipeline/{version.id}/vizual-mockup"
