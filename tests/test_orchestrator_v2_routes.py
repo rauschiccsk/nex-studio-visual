@@ -331,13 +331,17 @@ def test_board_current_task_at_programovanie(client, db_session):
     assert body["current_task"] == {"number": 2, "title": "AP tables"}
 
 
-# ── CR-V2-037: a settled Návrh hides "Schváliť" while the task plan is empty ─────
+# ── The Návrh "Schváliť" is offered whether or not the task plan is materialized ──
+# CR-V2-037 used to HIDE "Schváliť" at a settled Návrh while the task plan was empty. That guard was correct
+# when the EPIC→FEAT→TASK plan was built DURING Návrh, but the Director 2026-07-13 change moved plan
+# generation to Programovanie START — so the plan is ALWAYS empty at the Návrh gate, and the guard
+# permanently HID the button (nex-shopify 2026-07-17). Removed 2026-07-17; apply_action already dropped its
+# matching empty-plan gate the same day (schvalit advances navrh→vizual; the plan is built later).
 
 
-def test_board_hides_schvalit_when_navrh_plan_empty(client, db_session):
-    # At a settled Návrh the dial-governed "Schváliť" is normally offered — but NOT while the task plan is
-    # still EMPTY (a per-feat pass crashed past its retries → 0 tasks). The board drops the dead button so
-    # the Manažér can't advance into Programovanie with nothing to build (apply_action enforces it too).
+def test_board_offers_schvalit_at_navrh_even_with_empty_plan(client, db_session):
+    # A settled Návrh with an EMPTY task plan (the plan is now built at Programovanie start, not Návrh) MUST
+    # still offer "Schváliť" — otherwise the Návrh gate has no clickable advance action at all.
     version = _make_version(db_session, client._ri)
     db_session.add(
         PipelineState(
@@ -351,7 +355,7 @@ def test_board_hides_schvalit_when_navrh_plan_empty(client, db_session):
     )
     db_session.flush()
     actions = client.get(f"/api/v1/pipeline/{version.id}").json()["available_actions"]
-    assert "schvalit" not in actions  # dead button hidden
+    assert "schvalit" in actions  # button restored (was permanently hidden by the stale plan-empty guard)
     assert "uprav" in actions  # the re-work recovery is still offered
 
 
