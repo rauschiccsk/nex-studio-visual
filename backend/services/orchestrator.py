@@ -1336,8 +1336,7 @@ def _auditor_upfront_directive(db: Session, version_id: uuid.UUID) -> str:
         "   - ak nájdeš medzeru (HOLE) → `verdict=false` (FAIL); konkrétne diery vymenuj v `findings` a do "
         "`proposed_fix` napíš ZAMERANÝ rozsah vyjasnenia/úpravy pre Manažéra (NEvykonávaj ho). Medzera sa "
         "eskaluje Manažérovi — build sa zastaví na schvaľovacom bode po Návrhu.\n"
-        "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
-        + reverify_block
+        "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)." + reverify_block
     )
 
 
