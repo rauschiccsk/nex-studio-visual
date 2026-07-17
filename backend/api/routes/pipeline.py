@@ -108,13 +108,14 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
     # step3-plan-design.md FIX2): drives both the FE Špecifikácia badge below AND the STEP-3 zostav_plan
     # post-filter here. One indexed exists query; correct for conversation + legacy builds alike.
     spec_approved = orchestrator.spec_approved(db, version_id)
-    if (
-        state is not None
-        and state.current_stage == "navrh"
-        and "schvalit" in available_actions
-        and not orchestrator.navrh_plan_materialized(db, version_id)
-    ):
-        available_actions = [a for a in available_actions if a != "schvalit"]
+    # NOTE (Director 2026-07-17): the old "drop schvalit at navrh unless the task plan is materialized"
+    # post-filter is GONE. It was correct when the EPIC→FEAT→TASK plan was built DURING Návrh (CR-V2-011),
+    # but the Director 2026-07-13 change moved plan generation to Programovanie START (_run_build_round) —
+    # so navrh_plan_materialized is now ALWAYS False at the Návrh gate, which permanently HID the Návrh
+    # "Schváliť" button (nex-shopify, 2026-07-17: awaiting_manazer at navrh with no clickable action).
+    # apply_action's schvalit handler already dropped its matching empty-plan gate on 2026-07-13 (approving
+    # Návrh with no plan is the normal path now: schvalit advances navrh→vizual; the plan is built later at
+    # Programovanie start, which _run_build_round guards). The board must mirror that — so no filter here.
     # STEP 3 (step3-plan-design.md FIX2): the state-only ``determine_available_actions`` offers ``zostav_plan``
     # unconditionally at ``priprava``; POST-FILTER it here (mirror of the schvalit filter above) — drop it
     # unless this is a conversation build whose Špecifikácia is approved and whose plan is not yet

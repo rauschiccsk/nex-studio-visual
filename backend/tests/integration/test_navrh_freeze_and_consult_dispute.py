@@ -77,7 +77,9 @@ def test_commit_navrh_deliverables_noop_without_git(tmp_path) -> None:
 # ── Fix B — audit-vs-agent dispute is surfaced with both sides ────────────────
 
 
-def _seed_navrh_state(db) -> tuple[Version, PipelineState]:
+def _seed_navrh_state(
+    db, *, mode: str | None = "conversation", status: str = "agent_working"
+) -> tuple[Version, PipelineState]:
     suffix = _uuid.uuid4().hex[:8]
     user = User(username=f"cc_{suffix}", email=f"cc_{suffix}@test.local", password_hash="x", role="ri")
     db.add(user)
@@ -101,8 +103,8 @@ def _seed_navrh_state(db) -> tuple[Version, PipelineState]:
         flow_type="new_version",
         current_stage="navrh",
         current_actor="ai_agent",
-        status="agent_working",
-        mode="conversation",
+        status=status,
+        mode=mode,
     )
     db.add(state)
     db.flush()
@@ -216,3 +218,21 @@ def test_auditor_directive_rereview_threads_prior_findings_and_reaction(db_sessi
     assert "Platba nedefinovaná" in directive
     assert "Už vyriešené" in directive
     assert "ZNOVA over" in directive
+
+
+# ── Návrh Schváliť button restored — board offers schvalit at navrh w/o a plan ─
+
+
+def test_board_offers_schvalit_at_navrh_without_materialized_plan(db_session) -> None:
+    """The stale board post-filter dropped ``schvalit`` at navrh unless the task plan was materialized, but
+    the plan is built at Programovanie START since 2026-07-13 — so it was ALWAYS dropped, permanently hiding
+    the Návrh Schváliť button (nex-shopify 2026-07-17: no clickable action at the Návrh gate). The board must
+    offer it (apply_action already accepts it: schvalit advances navrh→vizual, plan built later)."""
+    from backend.api.routes.pipeline import _board
+
+    # A legacy (mode=None) phase-automaton build settled at the Návrh gate, NO task plan yet.
+    version, _state = _seed_navrh_state(db_session, mode=None, status="awaiting_manazer")
+
+    board = _board(db_session, version.id)
+
+    assert "schvalit" in board.available_actions
