@@ -1216,6 +1216,43 @@ def _vizual_directive(db: Session, version_id: uuid.UUID, manager_request: str) 
     )
 
 
+def _prior_auditor_review_context(db: Session, version_id: uuid.UUID) -> Optional[tuple[list[str], str]]:
+    """If the Auditor already reviewed this version (a PRIOR ``verdict``) and the AI Agent has spoken since,
+    return ``(prior_findings, agent_latest)`` so the upfront directive can turn a STATELESS re-run into a
+    dispute-aware RE-review that CONVERGES. Director 2026-07-17: the nex-shopify 3×-identical-verdict loop —
+    each review re-derived the SAME findings without re-checking the agent's rebuttal against the CURRENT
+    docs. ``None`` on the FIRST review (no prior verdict) → the review runs fresh, unchanged."""
+    prior = db.execute(
+        select(PipelineMessage)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.author == "auditor",
+            PipelineMessage.kind == "verdict",
+        )
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if prior is None:
+        return None
+    payload = prior.payload if isinstance(prior.payload, dict) else {}
+    raw_findings = payload.get("findings") or []
+    findings = [str(f) for f in raw_findings if isinstance(f, str)] if isinstance(raw_findings, list) else []
+    agent_latest = db.execute(
+        select(PipelineMessage.content)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.author == "ai_agent",
+            PipelineMessage.kind == "gate_report",
+            PipelineMessage.seq > prior.seq,
+        )
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if not findings and not agent_latest:
+        return None
+    return findings, (agent_latest or "").strip()
+
+
 def _auditor_upfront_directive(db: Session, version_id: uuid.UUID) -> str:
     """The Auditor's UPFRONT spec/design review brief (CR-V2-013; AUD-1(a), AUD-5, NAVRH-4, AUTON-5).
 
@@ -1261,6 +1298,23 @@ def _auditor_upfront_directive(db: Session, version_id: uuid.UUID) -> str:
         else "Miera autonómie je nižšia (Manažér kontroluje často) — rob ZAMERANÚ, ľahšiu previerku na "
         "rizikové miesta; ťažšiu kontrolu nesie Manažér + self-check AI Agenta."
     )
+    # Dispute-aware RE-review (Director 2026-07-17): if a prior verdict + the agent's reaction exist, thread
+    # them in so the Auditor RE-CHECKS the disputed findings against the CURRENT docs and CONVERGES, instead of
+    # statelessly re-deriving identical findings (the nex-shopify 3× loop).
+    prior_ctx = _prior_auditor_review_context(db, version_id)
+    reverify_block = ""
+    if prior_ctx is not None:
+        prior_findings, agent_latest = prior_ctx
+        findings_list = "\n".join(f"   - {f}" for f in prior_findings) or "   - (žiadne explicitné)"
+        reverify_block = (
+            "\n\nRE-PREVIERKA — už si raz posudzoval a AI Agent na tvoje nálezy reagoval; teraz KONVERGUJ, "
+            "neopakuj identicky to isté.\n"
+            f"Tvoje predošlé nálezy:\n{findings_list}\n"
+            + (f"Reakcia AI Agenta: {agent_latest}\n" if agent_latest else "")
+            + "Každý predošlý nález ZNOVA over proti AKTUÁLNYM dokumentom (prečítaj konkrétnu sekciu). ZAHOĎ "
+            "ho, ak je v aktuálnych dokumentoch naozaj vyriešený. PONECHAJ len tie, čo sú STÁLE naozaj "
+            "chýbajúce/nesprávne — a cituj presné miesto. Neopakuj identický nález bez nového overenia."
+        )
     return (
         "UPFRONT PREVIERKA (nezávislý Auditor, po fáze Návrh, pred začatím programovania).\n"
         f"1. NAČÍTAJ schválenú Špecifikáciu (`{spec_rel}`) + návrhový dokument (`{design_rel}`) + Zadanie a "
@@ -1269,6 +1323,10 @@ def _auditor_upfront_directive(db: Session, version_id: uuid.UUID) -> str:
         "2. Hľadaj MEDZERY / nejednoznačnosti / protirečenia v Špecifikácii a Návrhu: chýbajúce detaily, "
         "rozpory medzi zadaním a návrhom, nepokryté hraničné prípady, rizikové predpoklady (bezpečnosť, "
         "peniaze, hlavný kontrakt). Buď adverzariálny — aktívne hľadaj diery, nepotvrdzuj happy-path.\n"
+        "2b. Predtým než niečo označíš za MEDZERU, POTVRĎ, že to v AKTUÁLNYCH dokumentoch naozaj chýba alebo "
+        "je zle (cituj presné miesto). Požiadavka vyriešená cez KONFIGURÁCIU s bezpečným defaultom "
+        "(fail-safe), EXPLICITNE odložená mimo rozsah s odôvodnením, alebo HEDGE „re-overiť pri builde“ — "
+        "NIE je blokujúca medzera; neoznačuj ju za chýbajúcu.\n"
         f"3. {depth}\n"
         "4. SI READ + RUN-ONLY: smieš ČÍTAŤ (a prípadne spustiť aplikáciu na overenie), ale NIKDY neupravuj "
         "súbor, nepíš kód ani necommituj. TY NÁJDEŠ — opravuje AI Agent (zachovaná nezávislosť).\n"
@@ -1279,6 +1337,7 @@ def _auditor_upfront_directive(db: Session, version_id: uuid.UUID) -> str:
         "`proposed_fix` napíš ZAMERANÝ rozsah vyjasnenia/úpravy pre Manažéra (NEvykonávaj ho). Medzera sa "
         "eskaluje Manažérovi — build sa zastaví na schvaľovacom bode po Návrhu.\n"
         "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
+        + reverify_block
     )
 
 
@@ -1412,21 +1471,24 @@ async def _settle_for_consultation(
         on_message=on_message,
     )
     if isinstance(result, ParseFailure) or result.kind != "consultation" or result.consultation is None:
-        findings_lines = "\n".join(f"  • {f}" for f in findings)
+        # MARKDOWN (rendered by ConversationThread's SpecMarkdown): a proper ``- `` list with a blank line
+        # before it, so the findings render as a readable bulleted list — NOT one collapsed wall of text
+        # (Director 2026-07-17: the first cut used ``•`` + single newlines, which markdown glued into one blob).
+        findings_md = "\n".join(f"- {f}" for f in findings)
         # Fix B (Director 2026-07-17): the AI Agent DISPUTED the findings — it returned a normal block (e.g.
         # gate_report, judging them stale/already-resolved) instead of decision cards. Surface BOTH sides so
         # the Manažér decides with full context (the stale-audit → "nevidím konkrétne riešenie" dead-end).
         if not isinstance(result, ParseFailure) and result.kind != "consultation":
             agent_response = (result.summary or "").strip()
             content = (
-                f"Nezávislá previerka označila {len(findings)} bod(ov), ale agent ich rozporuje "
-                "(neurobil rozhodovacie karty — posúdil ich ako už vyriešené). Porovnaj oba pohľady "
-                "s aktuálnymi dokumentmi a rozhodni (Schváliť / Uprav)."
+                f"**Nezávislá previerka označila {len(findings)} bod(ov), ale agent ich rozporuje** — "
+                "neurobil rozhodovacie karty, posúdil ich ako už vyriešené. Porovnaj oba pohľady "
+                "s aktuálnymi dokumentmi a rozhodni (**Schváliť** / **Uprav**)."
             )
-            if findings_lines:
-                content += f"\n\nNálezy previerky:\n{findings_lines}"
+            if findings_md:
+                content += f"\n\n**Nálezy previerky:**\n\n{findings_md}"
             if agent_response:
-                content += f"\n\nOdpoveď agenta: {agent_response}"
+                content += f"\n\n**Odpoveď agenta:**\n\n{agent_response}"
             return await _consult_fallback(
                 db,
                 state,
@@ -1439,8 +1501,8 @@ async def _settle_for_consultation(
         # A genuine parse failure / empty consultation block → fail-open, but still list the findings for
         # context so the stop is never content-less.
         content = "Konzultáciu sa nepodarilo pripraviť — posúď návrh klasicky (Schváliť / Uprav)."
-        if findings_lines:
-            content += f"\n\nNálezy previerky:\n{findings_lines}"
+        if findings_md:
+            content += f"\n\n**Nálezy previerky:**\n\n{findings_md}"
         return await _consult_fallback(
             db,
             state,

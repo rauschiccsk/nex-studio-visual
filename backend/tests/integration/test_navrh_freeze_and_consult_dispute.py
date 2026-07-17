@@ -150,11 +150,69 @@ async def test_dispute_surfaces_both_findings_and_agent_response(db_session, mon
 
     # BOTH sides are surfaced in the content: the dispute framing, every finding, and the agent's response.
     assert "rozporuje" in note.content
-    assert "Rozpoznanie platby" in note.content
-    assert "serverovú zmluvu" in note.content
     assert "zastaraná" in note.content
+    # Rendered as MARKDOWN: the findings are a proper "- " bulleted list under a bold heading, so
+    # ConversationThread's SpecMarkdown shows a readable list — NOT one collapsed wall of text.
+    assert "**Nálezy previerky:**" in note.content
+    assert "\n- [BLOKUJÚCE] Rozpoznanie platby" in note.content
+    assert "\n- [BLOKUJÚCE] Token z NEX Managera" in note.content
     # …and structured in the payload for the UI.
     assert note.payload["auditor_findings"] == findings
     assert "zastaraná" in note.payload["agent_response"]
     # The state prompt stays short (the detail lives in the message content).
     assert "Spor previerka" in state.next_action
+
+
+# ── Auditor over-strictness + loop fix — calibrated, dispute-aware re-review ───
+
+
+def test_auditor_directive_first_review_calibrated_no_rereview(db_session) -> None:
+    version, _state = _seed_navrh_state(db_session)
+
+    directive = orchestrator._auditor_upfront_directive(db_session, version.id)
+
+    # Calibration is ALWAYS present: don't flag config+fail-safe / documented-deferral / build-hedge as a hole.
+    assert "fail-safe" in directive
+    assert "re-overiť pri builde" in directive
+    # FIRST review — no prior verdict → the review runs fresh, no re-review block.
+    assert "RE-PREVIERKA" not in directive
+
+
+def test_auditor_directive_rereview_threads_prior_findings_and_reaction(db_session) -> None:
+    version, _state = _seed_navrh_state(db_session)
+    # A prior Auditor verdict with findings…
+    db_session.add(
+        PipelineMessage(
+            version_id=version.id,
+            stage="navrh",
+            author="auditor",
+            recipient="manazer",
+            kind="verdict",
+            content="Predošlá previerka.",
+            status="delivered",
+            payload={"findings": ["[BLOKUJÚCE] Platba nedefinovaná", "Token bez zmluvy"]},
+        )
+    )
+    db_session.flush()
+    # …and the AI Agent's reaction after it.
+    db_session.add(
+        PipelineMessage(
+            version_id=version.id,
+            stage="navrh",
+            author="ai_agent",
+            recipient="manazer",
+            kind="gate_report",
+            content="Už vyriešené — pozri specification.md §5.3.",
+            status="delivered",
+            payload={},
+        )
+    )
+    db_session.flush()
+
+    directive = orchestrator._auditor_upfront_directive(db_session, version.id)
+
+    # RE-review mode: prior findings + the agent's reaction are threaded in with a converge instruction.
+    assert "RE-PREVIERKA" in directive
+    assert "Platba nedefinovaná" in directive
+    assert "Už vyriešené" in directive
+    assert "ZNOVA over" in directive
