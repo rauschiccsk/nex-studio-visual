@@ -1327,10 +1327,25 @@ async def _consult_fallback(
     note: str,
     on_message: Optional[MessageCallback],
     failure: Optional[ParseFailure] = None,
+    findings: Optional[list[str]] = None,
+    agent_response: Optional[str] = None,
+    next_action: Optional[str] = None,
 ) -> PipelineState:
     """CR-V2-041 fail-open: when a consultation can't be produced (parse failure / non-consultation output /
     re-consult cap), fall back to a plain ``awaiting_manazer`` stop (today's behaviour) so a flaky turn can
-    never wedge the build — the Manažér posúdi návrh klasicky (Schváliť / Uprav)."""
+    never wedge the build — the Manažér posúdi návrh klasicky (Schváliť / Uprav).
+
+    Fix B (Director 2026-07-17): carry the Auditor's ``findings`` and the AI Agent's dispute ``agent_response``
+    into the notification content + payload, so the Manažér sees BOTH sides concretely instead of a
+    context-less stop (the "nevidím konkrétne riešenie" gap). ``next_action`` keeps the state prompt short
+    while ``note`` carries the full both-sides detail as the message content."""
+    base_payload = (_failure_metrics_payload(failure) if failure is not None else None) or {
+        "phase": state.current_stage
+    }
+    if findings:
+        base_payload = {**base_payload, "auditor_findings": list(findings)}
+    if agent_response:
+        base_payload = {**base_payload, "agent_response": agent_response}
     msg = _record_message(
         db,
         version_id=state.version_id,
@@ -1339,13 +1354,13 @@ async def _consult_fallback(
         recipient="manazer",
         kind="notification",
         content=note,
-        payload=(_failure_metrics_payload(failure) if failure is not None else None) or {"phase": state.current_stage},
+        payload=base_payload,
     )
     if on_message is not None:
         await on_message(msg)
     state.status = "awaiting_manazer"
     state.block_reason = None
-    state.next_action = note
+    state.next_action = next_action or note
     db.flush()
     return state
 
@@ -1397,12 +1412,43 @@ async def _settle_for_consultation(
         on_message=on_message,
     )
     if isinstance(result, ParseFailure) or result.kind != "consultation" or result.consultation is None:
+        findings_lines = "\n".join(f"  • {f}" for f in findings)
+        # Fix B (Director 2026-07-17): the AI Agent DISPUTED the findings — it returned a normal block (e.g.
+        # gate_report, judging them stale/already-resolved) instead of decision cards. Surface BOTH sides so
+        # the Manažér decides with full context (the stale-audit → "nevidím konkrétne riešenie" dead-end).
+        if not isinstance(result, ParseFailure) and result.kind != "consultation":
+            agent_response = (result.summary or "").strip()
+            content = (
+                f"Nezávislá previerka označila {len(findings)} bod(ov), ale agent ich rozporuje "
+                "(neurobil rozhodovacie karty — posúdil ich ako už vyriešené). Porovnaj oba pohľady "
+                "s aktuálnymi dokumentmi a rozhodni (Schváliť / Uprav)."
+            )
+            if findings_lines:
+                content += f"\n\nNálezy previerky:\n{findings_lines}"
+            if agent_response:
+                content += f"\n\nOdpoveď agenta: {agent_response}"
+            return await _consult_fallback(
+                db,
+                state,
+                note=content,
+                next_action=f"Spor previerka↔agent ({len(findings)} bod.) — posúď oba pohľady (Schváliť / Uprav).",
+                on_message=on_message,
+                findings=findings or None,
+                agent_response=agent_response or None,
+            )
+        # A genuine parse failure / empty consultation block → fail-open, but still list the findings for
+        # context so the stop is never content-less.
+        content = "Konzultáciu sa nepodarilo pripraviť — posúď návrh klasicky (Schváliť / Uprav)."
+        if findings_lines:
+            content += f"\n\nNálezy previerky:\n{findings_lines}"
         return await _consult_fallback(
             db,
             state,
-            note="Konzultáciu sa nepodarilo pripraviť — posúď návrh klasicky (Schváliť / Uprav).",
+            note=content,
+            next_action="Konzultáciu sa nepodarilo pripraviť — posúď návrh klasicky (Schváliť / Uprav).",
             on_message=on_message,
             failure=result if isinstance(result, ParseFailure) else None,
+            findings=findings or None,
         )
     n = len(result.consultation.decisions)
     state.status = "blocked"
@@ -3520,6 +3566,28 @@ def _commit_vizual_changes(project_root: Path) -> None:
     if not _git_ok(project_root, ["add", "-A", "--", "frontend"]):
         return
     _git_ok(project_root, ["commit", "-m", "feat(vizual): manažérom schválené vizuálne úpravy"])
+
+
+def _commit_navrh_deliverables(project_root: Path) -> None:
+    """Fix A (Director 2026-07-17): freeze the Príprava/Návrh deliverables (Špecifikácia + design doc + spec
+    edits under ``docs/``) into ONE commit BEFORE the Auditor upfront review. Two payoffs:
+
+    * The audit reviews a STABLE, committed snapshot — not a working tree the agent turn was still writing.
+      (The stale-audit that FAILed on already-resolved gaps: the agent updates spec + design across a turn,
+      and a review reading the uncommitted tree can catch a partially-updated state.)
+    * The Príprava/Návrh output becomes DURABLE (it was otherwise uncommitted until a much later seam).
+
+    Scoped to ``docs`` so only the design deliverables land, never stray worktree changes (mirrors
+    :func:`_commit_vizual_changes` scoping to ``frontend``). BEST-EFFORT, NEVER raises (a git hiccup must not
+    sink the phase); nothing changed → ``git commit`` exits non-zero → no empty commit."""
+    if not (project_root / ".git").is_dir():
+        return  # dry-run / no checkout — nothing to commit
+    if not _git_ok(project_root, ["add", "-A", "--", "docs"]):
+        return
+    _git_ok(
+        project_root,
+        ["commit", "-m", "docs(navrh): Špecifikácia + návrhový dokument (zmrazené pred previerkou)"],
+    )
 
 
 def _write_release_note_to_disk(db: Session, version_id: uuid.UUID, project_root: Path) -> None:
@@ -6242,6 +6310,11 @@ async def _run_navrh_round(
     # EPIC→FEAT→TASK plan is generated at the START of Programovanie (:func:`_run_build_round`), from the FINAL
     # design + the Manažér's Vizuál changes (the warm session carries them). Any inline plan the design turn
     # happens to emit is ignored — the plan is always built fresh at build time.
+
+    # 3b. Fix A (Director 2026-07-17): freeze the deliverables into a commit BEFORE the Auditor reviews them,
+    # so the upfront review scans a STABLE committed snapshot (not a still-being-written worktree — the
+    # stale-audit that FAILed on already-resolved gaps) AND the Príprava/Návrh output becomes durable.
+    _commit_navrh_deliverables(claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, state.version_id))
 
     # 4. AUDITOR UPFRONT REVIEW (CR-V2-013; AUD-1(a)/AUD-5/NAVRH-4 — replaces the Gate-E Customer function).
     # The independent Auditor (READ + RUN-ONLY, no write/commit) scans the Špecifikácia + the design doc for

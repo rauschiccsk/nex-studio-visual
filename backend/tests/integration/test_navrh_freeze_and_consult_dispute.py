@@ -1,0 +1,160 @@
+"""Tests for the two Návrh-gate hardening fixes (Director 2026-07-17):
+
+* **Fix A** — :func:`orchestrator._commit_navrh_deliverables` freezes the Príprava/Návrh deliverables into a
+  commit BEFORE the Auditor upfront review, so the audit reviews a STABLE committed snapshot (not a still-
+  being-written worktree — the stale-audit that FAILed on already-resolved gaps) AND the output is durable.
+* **Fix B** — when the Auditor finds a hole and the AI Agent DISPUTES it (returns a gate_report judging it
+  already-resolved) instead of decision cards, :func:`orchestrator._settle_for_consultation` no longer stops
+  with a context-less "posúď klasicky"; it surfaces BOTH the Auditor findings AND the agent's response.
+"""
+
+from __future__ import annotations
+
+import subprocess
+import uuid as _uuid
+
+import pytest
+from sqlalchemy import select
+
+from backend.db.models.foundation import User
+from backend.db.models.pipeline import PipelineMessage, PipelineState
+from backend.db.models.projects import Project
+from backend.db.models.versions import Version
+from backend.services import orchestrator
+from backend.services.pipeline_status import PipelineStatusBlock
+
+# ── Fix A — deliverable freeze commit (plain, no DB) ──────────────────────────
+
+
+def _git(root, *args):
+    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=False)
+
+
+def test_commit_navrh_deliverables_commits_docs(tmp_path) -> None:
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "t@test.local")
+    _git(tmp_path, "config", "user.name", "T")
+    (tmp_path / "README.md").write_text("x\n", encoding="utf-8")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "init")
+    head_before = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
+
+    docs = tmp_path / "docs" / "specs" / "versions" / "v0.1.0"
+    docs.mkdir(parents=True)
+    (docs / "specification.md").write_text("# spec\n", encoding="utf-8")
+    (docs / "design.md").write_text("# design\n", encoding="utf-8")
+
+    orchestrator._commit_navrh_deliverables(tmp_path)
+
+    head_after = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
+    assert head_after != head_before, "deliverables were not frozen into a commit"
+    # Both deliverables are now tracked (the audit sees a committed snapshot).
+    tracked = _git(tmp_path, "ls-files", "docs").stdout
+    assert "docs/specs/versions/v0.1.0/specification.md" in tracked
+    assert "docs/specs/versions/v0.1.0/design.md" in tracked
+
+
+def test_commit_navrh_deliverables_noop_when_clean(tmp_path) -> None:
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "t@test.local")
+    _git(tmp_path, "config", "user.name", "T")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "x.md").write_text("x\n", encoding="utf-8")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "init")
+    head_before = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
+
+    orchestrator._commit_navrh_deliverables(tmp_path)  # nothing changed → no empty commit
+
+    assert _git(tmp_path, "rev-parse", "HEAD").stdout.strip() == head_before
+
+
+def test_commit_navrh_deliverables_noop_without_git(tmp_path) -> None:
+    # No .git checkout (dry-run / disabled bootstrap) → best-effort no-op, never raises.
+    orchestrator._commit_navrh_deliverables(tmp_path)
+
+
+# ── Fix B — audit-vs-agent dispute is surfaced with both sides ────────────────
+
+
+def _seed_navrh_state(db) -> tuple[Version, PipelineState]:
+    suffix = _uuid.uuid4().hex[:8]
+    user = User(username=f"cc_{suffix}", email=f"cc_{suffix}@test.local", password_hash="x", role="ri")
+    db.add(user)
+    db.flush()
+    project = Project(
+        name=f"Dispute {suffix}",
+        slug=f"disp-{suffix}",
+        type="standard",
+        auth_mode="password",
+        description="Dispute test project.",
+        created_by=user.id,
+        source_path=None,
+    )
+    db.add(project)
+    db.flush()
+    version = Version(project_id=project.id, version_number="0.1.0", status="active")
+    db.add(version)
+    db.flush()
+    state = PipelineState(
+        version_id=version.id,
+        flow_type="new_version",
+        current_stage="navrh",
+        current_actor="ai_agent",
+        status="agent_working",
+        mode="conversation",
+    )
+    db.add(state)
+    db.flush()
+    return version, state
+
+
+@pytest.mark.asyncio
+async def test_dispute_surfaces_both_findings_and_agent_response(db_session, monkeypatch) -> None:
+    version, state = _seed_navrh_state(db_session)
+
+    findings = [
+        "[BLOKUJÚCE] Rozpoznanie platby dobierka/prevod nie je definované.",
+        "[BLOKUJÚCE] Token z NEX Managera nemá serverovú zmluvu.",
+    ]
+    verdict = PipelineStatusBlock(
+        stage="navrh", kind="verdict", summary="Nezávislá previerka Návrhu.", findings=findings, awaiting="manazer"
+    )
+
+    # The AI Agent DISPUTES the findings — returns a gate_report (not a consultation block).
+    async def _fake_dispute(*args, **kwargs):
+        return PipelineStatusBlock(
+            stage="navrh",
+            kind="gate_report",
+            summary="Táto previerka je zastaraná — všetko je už vyriešené v aktuálnych dokumentoch.",
+            awaiting="manazer",
+        )
+
+    monkeypatch.setattr(orchestrator, "invoke_agent_with_parse_retry", _fake_dispute)
+
+    settled = await orchestrator._settle_for_consultation(db_session, state, source="auditor_upfront", verdict=verdict)
+
+    # Fail-open to a Manažér stop (never wedged), but NOT context-less.
+    assert settled.status == "awaiting_manazer"
+
+    note = db_session.execute(
+        select(PipelineMessage)
+        .where(
+            PipelineMessage.version_id == version.id,
+            PipelineMessage.author == "system",
+            PipelineMessage.kind == "notification",
+        )
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one()
+
+    # BOTH sides are surfaced in the content: the dispute framing, every finding, and the agent's response.
+    assert "rozporuje" in note.content
+    assert "Rozpoznanie platby" in note.content
+    assert "serverovú zmluvu" in note.content
+    assert "zastaraná" in note.content
+    # …and structured in the payload for the UI.
+    assert note.payload["auditor_findings"] == findings
+    assert "zastaraná" in note.payload["agent_response"]
+    # The state prompt stays short (the detail lives in the message content).
+    assert "Spor previerka" in state.next_action
