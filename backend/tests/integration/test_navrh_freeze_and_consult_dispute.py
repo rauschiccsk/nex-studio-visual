@@ -374,9 +374,10 @@ def test_auditor_directives_findings_are_plain_language(db_session) -> None:
     upfront = orchestrator._auditor_upfront_directive(db_session, version.id)
     verif = orchestrator._verifikacia_directive(db_session, version.id, smoke_block="", flow_type="new_version")
     for directive in (upfront, verif):
-        assert "ĽUDSKOU rečou" in directive
+        # v4.0.11: the manager-facing text must be plain for a non-expert, with a HIDDEN technical outlet.
         assert "NEŠPECIALISTA" in directive
-        assert "proposed_fix" in directive  # technical detail goes there, not into findings
+        assert "technical_detail" in directive  # all jargon goes to the collapsible outlet, not summary/findings
+        assert "proposed_fix" in directive  # the AI-Agent fix brief (may be technical) — distinct from findings
 
 
 def test_release_smoke_template_defaults_backend_port() -> None:
