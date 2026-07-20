@@ -153,6 +153,7 @@ export type PipelineActionName =
   | "pause" // cooperative pause of the Programovanie loop
   | "decide" // CR-V2-041: pick one consultation Decision Card option (decision_needed)
   | "overit_znovu" // CR-V2-057: "Over znova" — re-verify a drifted version (re-run Verifikácia vs current HEAD)
+  | "overit_bez_opravy" // v4.0.10: "Znova overiť bez opravy" — exit a Verifikácia fix-loop (external/no-project fix) → re-run the Verifikácia gate directly
   | "skontrolovat" // STEP 5 (Kontrola): the partner honestly re-checks its own FINISHED build against the approved Špecifikácia (stays priprava, never a verdict/deploy)
   | "hotovo" // STEP 6 (Hotovo): the Manažér's TERMINAL sign-off — makes the conversation version deployable (SHA-bound signature, stays priprava; never a verdict/deploy)
   | "nahlasit_znova"; // framework_issue recovery: re-report the NEX-Studio bug to the technical team — the Manažér's ONE concrete move on a framework_issue block. Hand-written union — no codegen regen for the verb.

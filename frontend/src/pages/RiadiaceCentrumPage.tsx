@@ -32,6 +32,7 @@ import DecisionCardsBar from "@/components/riadiace/DecisionCardsBar";
 import BlockRecoveryBar from "@/components/riadiace/BlockRecoveryBar";
 import NahlasitZnovaBar from "@/components/riadiace/NahlasitZnovaBar";
 import ReverifyBar from "@/components/riadiace/ReverifyBar";
+import ReverifyNoFixBar from "@/components/riadiace/ReverifyNoFixBar";
 import ChangeRequestBar from "@/components/riadiace/ChangeRequestBar";
 import PhaseBar from "@/components/riadiace/PhaseBar";
 import HonestStatusStrip from "@/components/riadiace/HonestStatusStrip";
@@ -173,6 +174,7 @@ export default function RiadiaceCentrumPage() {
         <SpecApprovalBar board={board} versionId={versionId} onBoard={setBoard} />
         <SchvalitBar board={board} versionId={versionId} onBoard={setBoard} />
         <ReverifyBar board={board} versionId={versionId} onBoard={setBoard} />
+        <ReverifyNoFixBar board={board} versionId={versionId} onBoard={setBoard} />
         <ChangeRequestBar board={board} versionId={versionId} />
       </div>
 

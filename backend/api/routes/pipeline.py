@@ -263,6 +263,21 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         and "overit_znovu" not in available_actions
     ):
         available_actions = sorted([*available_actions, "overit_znovu"])
+    # v4.0.10 (Director 2026-07-20): OFFER ``overit_bez_opravy`` inside a Verifikácia-originated fix-loop — a
+    # Programovanie state (blocked / paused) that has a Verifikácia fix-scope on record (the version reached
+    # Verifikácia, FAILed, and is now churning a targeted fix). When the ROOT CAUSE was fixed OUTSIDE the
+    # project (engine / framework / infra) the fix task has nothing to commit → it wedges (self-check demands a
+    # commit) or pressures the AI Agent into a spurious §15 patch; this gives the Manažér a clean "re-run the
+    # Verifikácia gate" exit. Honest-by-construction: appended ONLY when actually in that loop, so the FE bar
+    # is gated by available_actions like every other verb.
+    if (
+        state is not None
+        and state.current_stage == "programovanie"
+        and state.status in ("blocked", "paused")
+        and orchestrator._latest_verifikacia_fix_scope(db, version_id) is not None
+        and "overit_bez_opravy" not in available_actions
+    ):
+        available_actions = sorted([*available_actions, "overit_bez_opravy"])
     return PipelineBoardRead(
         state=PipelineStateRead.model_validate(state) if state is not None else None,
         recent_messages=[PipelineMessageRead.model_validate(m) for m in _recent_messages(db, version_id, limit)],

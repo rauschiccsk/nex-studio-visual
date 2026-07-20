@@ -215,3 +215,53 @@ async def test_decide_guide_note_routes_manager_directive_to_fixer(db_session, m
     # The manager's DIRECTIVE (typed into the note box) IS the fix brief — NOT the bare option label.
     assert captured.get("comment") == directive
     assert captured["comment"] != "Usmerniť opravu"
+
+
+@pytest.mark.asyncio
+async def test_overit_bez_opravy_reruns_verifikacia_gate(db_session, monkeypatch) -> None:
+    """v4.0.10: from a Verifikácia fix-loop (Programovanie, blocked) with a fix-scope on record, the Manažér's
+    'Znova overiť bez opravy' SKIPS the commit-demanding fix task and re-enters the Verifikácia gate directly —
+    for a root cause fixed OUTSIDE the project (engine/framework), where the fix loop would only churn."""
+    state = _seed_state_at_verifikacia(db_session)
+    version_id = state.version_id
+    state.current_stage = "programovanie"
+    state.current_actor = "ai_agent"
+    state.status = "blocked"
+    state.block_reason = "agent_question"
+    state.dispatch_baseline_sha = "deadbeef"
+    db_session.flush()
+    # A Verifikácia fix-scope on record (a manazer fix directive) → the action is meaningful.
+    orchestrator._record_message(
+        db_session,
+        version_id=version_id,
+        stage="verifikacia",
+        author="manazer",
+        recipient="ai_agent",
+        kind="return",
+        content="Usmerniť opravu",
+        payload={"phase": "verifikacia", "manazer_fix_directive": True},
+    )
+    # Don't touch a real repo when _begin_dispatch re-captures the baseline.
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda *a, **k: "cafef00d")
+
+    settled = await orchestrator.apply_action(db_session, version_id=version_id, action="overit_bez_opravy")
+
+    assert settled.current_stage == "verifikacia"
+    assert settled.current_actor == orchestrator.STAGE_ACTOR["verifikacia"]  # the independent Auditor
+    assert settled.status == "agent_working"  # _begin_dispatch → the background turn runs _run_verifikacia_round
+    assert settled.block_reason is None  # the fix-loop block is cleared
+
+
+@pytest.mark.asyncio
+async def test_overit_bez_opravy_rejected_outside_fix_loop(db_session) -> None:
+    """Invalid without a Verifikácia fix-scope on record (a fresh Programovanie build that never reached
+    Verifikácia) — it must never re-verify a build that was never verified."""
+    state = _seed_state_at_verifikacia(db_session)
+    version_id = state.version_id
+    state.current_stage = "programovanie"
+    state.current_actor = "ai_agent"
+    state.status = "blocked"
+    state.block_reason = "agent_question"
+    db_session.flush()
+    with pytest.raises(orchestrator.OrchestratorError):
+        await orchestrator.apply_action(db_session, version_id=version_id, action="overit_bez_opravy")

@@ -439,6 +439,14 @@ _ACTIONS = frozenset(
         # verified commit). Re-enters Verifikácia and re-runs the independent Auditor against HEAD; the fresh
         # verdict re-anchors (PASS bound to the new commit → drift gone) or re-gates (FAIL → targeted fix).
         "overit_znovu",
+        # v4.0.10 (Director 2026-07-20): "Znova overiť bez opravy" — a Verifikácia FAIL whose ROOT CAUSE was
+        # fixed OUTSIDE the project (engine / framework / infra) has NO project code to change. The fix-loop
+        # would churn (the per-task self-check demands a commit) and even PRESSURE the AI Agent into a spurious
+        # project patch (§15). This is the Manažér's clean exit: SKIP the fix task and re-run the Verifikácia
+        # GATE directly (release-acceptance + independent Auditor) against HEAD. Valid only inside a
+        # Verifikácia-originated fix-loop (board post-filter: programovanie ∧ blocked/paused ∧ a fix-scope on
+        # record). Reuses the ``overit_znovu`` sha_drift mechanics WITHOUT the settled-state/drift guard.
+        "overit_bez_opravy",
         # STEP 3 (step3-plan-design.md MD-1=A): "Zostaviť plán" — in a conversation build, AFTER the
         # Špecifikácia is approved, compose the task plan (EPIC→FEAT→TASK) from the frozen Špecifikácia.
         # Honest-by-construction like ``approve_spec`` (NOT advancing — it stays in the conversation register,
@@ -9260,6 +9268,31 @@ async def apply_action(
             _begin_dispatch(db, state)
             return state
         raise OrchestratorError("Over znova je platné len keď je overenie zastarané (kód sa pohol za overený commit).")
+
+    if action == "overit_bez_opravy":
+        # v4.0.10 (Director 2026-07-20): the Manažér's clean exit from a Verifikácia fix-loop when the root
+        # cause was fixed OUTSIDE the project (engine / framework / infra) — nothing to change in the project,
+        # so the commit-demanding fix task can only churn / pressure a spurious §15 patch. Skip it: re-run the
+        # Verifikácia GATE directly (release-acceptance + the INDEPENDENT Auditor against HEAD). PASS → sign-off
+        # (``schvalit`` → Hotovo); FAIL → the normal targeted fix loop resumes. Reuses the ``overit_znovu``
+        # sha_drift mechanics MINUS the settled/drift guard; gated to a real post-Verifikácia fix-loop (a
+        # fix-scope on record) so it can never re-verify a build that never reached Verifikácia.
+        if not (
+            state.current_stage == "programovanie"
+            and state.status in ("blocked", "paused")
+            and _latest_verifikacia_fix_scope(db, version_id) is not None
+        ):
+            raise OrchestratorError("Znova overiť bez opravy je platné len v opravnej slučke po Verifikácii.")
+        state.current_stage = "verifikacia"
+        state.is_regate = True
+        state.iteration += 1
+        state.block_reason = None  # leaving the fix-loop block; the re-verify turn is a fresh agent_working
+        state.dispatch_baseline_sha = None  # fresh dispatch → re-capture the baseline from a clean HEAD
+        db.flush()
+        # _begin_dispatch re-points the actor to the Auditor (STAGE_ACTOR['verifikacia']), flips to
+        # agent_working → the background turn routes to _run_verifikacia_round (fresh smoke + independent Auditor).
+        _begin_dispatch(db, state)
+        return state
 
     if action == "nahlasit_znova":
         # Audit P0: the manager's ONE action on a ``framework_issue`` block (a NEX-Studio-side bug only our
