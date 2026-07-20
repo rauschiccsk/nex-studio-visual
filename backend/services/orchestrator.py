@@ -7293,15 +7293,41 @@ def _ensure_verifikacia_fix_task(db: Session, version_id: uuid.UUID) -> None:
     the overnight-token-burn cause). The Auditor's findings ARE the fix brief: set as the task description AND
     threaded into attempt 1 by :func:`_run_build_round` (``is_regate`` → :func:`_latest_verifikacia_fix_scope`).
 
-    Creates a FRESH Epic→Feat→Task each FAIL round — it does NOT reuse-by-title: an Epic title has no unique
-    constraint, so a title-match query could hijack a user- OR agent-authored Epic of the same name and
-    corrupt the plan (review blocker, 2026-06-30). The loop is bounded by ``AUDITOR_LOOP_MAX``, so at most that
-    many small fix epics accrue — an acceptable, honest record of each fix attempt; the build loop's
-    ``get_next_todo_task`` picks the fresh todo fix task while the prior (done) plan tasks stay done."""
+    v4.0.15 (Director 2026-07-20): IDEMPOTENT. Every fix TRIGGER — a Verifikácia FAIL, a re-verify FAIL, a
+    "Nechaj to opraviť"/"Usmerniť" — used to create a FRESH epic, so three triggers in a row stacked THREE
+    identical "Oprava po Verifikácii" tasks and the AI Agent redid the SAME fix 3× (nex-shopify 2026-07-20).
+    Now: if a fix task from THIS loop is still OPEN (``todo``/``in_progress``), REUSE it (refresh its scope)
+    instead of stacking a duplicate; a fresh epic is created ONLY when no open fix task remains. The
+    2026-06-30 review blocker (a loose title match could hijack a user-authored Epic of the same name) is
+    honoured by a TIGHT match — Epic ∧ Feat ∧ Task ALL carry the internal fix title, are OPEN, and belong to
+    THIS version — a shape a hand-authored plan would not accidentally take. The loop stays bounded by
+    ``AUDITOR_LOOP_MAX``; ``get_next_todo_task`` picks the single open fix task while done plan tasks stay done."""
     version = db.get(Version, version_id)
     if version is None:
         return
     scope = _latest_verifikacia_fix_scope(db, version_id) or "Oprav blokujúce zlyhanie z koncovej Verifikácie."
+    existing = db.execute(
+        select(Task)
+        .join(Feat, Feat.id == Task.feat_id)
+        .join(Epic, Epic.id == Feat.epic_id)
+        .where(
+            Epic.version_id == version_id,
+            Epic.title == _VERIFIKACIA_FIX_TITLE,
+            Feat.title == _VERIFIKACIA_FIX_TITLE,
+            Task.title == _VERIFIKACIA_FIX_TITLE,
+            Task.status.in_(("todo", "in_progress")),
+        )
+        .order_by(Epic.number.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if existing is not None:
+        # Reuse the already-open fix task — refresh the brief, DON'T stack a duplicate.
+        existing.description = scope
+        feat = db.get(Feat, existing.feat_id)
+        if feat is not None:
+            feat.description = scope
+        db.flush()
+        return
     epic = epic_service.create(
         db, EpicCreate(project_id=version.project_id, version_id=version_id, title=_VERIFIKACIA_FIX_TITLE)
     )

@@ -497,3 +497,48 @@ async def test_verifikacia_brief_carries_build_fact(db_session, monkeypatch) -> 
     assert "BUILD-FAKT" in captured["prompt"]
     assert "abc1234567" in captured["prompt"]  # the HEAD commit prefix
     assert "NEPRIPISUJ zlyhanie starému" in captured["prompt"]
+
+
+def test_ensure_verifikacia_fix_task_idempotent(db_session) -> None:
+    """v4.0.15: repeated fix TRIGGERS (FAIL, re-verify, 'Nechaj to opraviť') must NOT stack duplicate
+    'Oprava po Verifikácii' tasks — the AI Agent would redo the SAME fix N× (nex-shopify 2026-07-20). The 2nd
+    trigger REUSES the still-open task; only after it is DONE does a new round get its own epic."""
+    from backend.db.models.tasks import Epic, Feat, Task
+
+    state = _seed_state_at_verifikacia(db_session)
+    version_id = state.version_id
+    orchestrator._record_message(
+        db_session,
+        version_id=version_id,
+        stage="verifikacia",
+        author="auditor",
+        recipient="manazer",
+        kind="verdict",
+        content="x",
+        payload={"verdict": "FAIL", "findings": ["y"], "proposed_fix": "z", "phase": "verifikacia"},
+    )
+
+    def _fix_epics():
+        return (
+            db_session.execute(
+                select(Epic).where(Epic.version_id == version_id, Epic.title == orchestrator._VERIFIKACIA_FIX_TITLE)
+            )
+            .scalars()
+            .all()
+        )
+
+    orchestrator._ensure_verifikacia_fix_task(db_session, version_id)
+    orchestrator._ensure_verifikacia_fix_task(db_session, version_id)  # 2nd trigger — must NOT stack a duplicate
+    assert len(_fix_epics()) == 1
+
+    # Close the open fix task → a later trigger legitimately gets its OWN epic (honest per-round record).
+    t = db_session.execute(
+        select(Task)
+        .join(Feat, Feat.id == Task.feat_id)
+        .join(Epic, Epic.id == Feat.epic_id)
+        .where(Epic.version_id == version_id, Epic.title == orchestrator._VERIFIKACIA_FIX_TITLE)
+    ).scalar_one()
+    t.status = "done"
+    db_session.flush()
+    orchestrator._ensure_verifikacia_fix_task(db_session, version_id)
+    assert len(_fix_epics()) == 2
