@@ -7300,7 +7300,12 @@ def _ensure_verifikacia_fix_task(db: Session, version_id: uuid.UUID) -> None:
 
 
 async def _route_manazer_fix_to_ai_agent(
-    db: Session, state: PipelineState, *, comment: str, on_message: Optional[MessageCallback] = None
+    db: Session,
+    state: PipelineState,
+    *,
+    comment: str,
+    on_message: Optional[MessageCallback] = None,
+    auto_dispatch: bool = False,
 ) -> PipelineState:
     """CR-V2-054 — route a Manažér-directed fix at Verifikácia to the AI Agent (the FIXER), NOT the Auditor
     (the finder). This is the operator-actionable half of safeguard #5: a release-gate blocker becomes a
@@ -7312,7 +7317,8 @@ async def _route_manazer_fix_to_ai_agent(
     directive), materialize ONE targeted fix task (the done plan tasks STAY done), RESET the bounded loop
     counter (a human now steers — ``AUDITOR_LOOP_MAX`` bounds the AUTONOMOUS re-verify loop, not human
     interventions), and re-enter Programovanie (``paused`` for a ``new_version`` so the Manažér confirms the
-    re-run via 'Pokračovať'; auto-dispatched on the ``fast_fix`` lane)."""
+    re-run via 'Pokračovať'; auto-dispatched on the ``fast_fix`` lane, or when ``auto_dispatch`` is set — the
+    v4.0.13 "Nechaj to opraviť" one-click, whose single click IS the confirmation, runs the fix immediately)."""
     version_id = state.version_id
     ret = _record_message(
         db,
@@ -7332,8 +7338,11 @@ async def _route_manazer_fix_to_ai_agent(
     state.current_stage = "programovanie"
     state.current_actor = "ai_agent"
     db.flush()
-    if state.flow_type == "fast_fix":
-        _begin_dispatch(db, state)  # zero-approval lane drives the fix through
+    if state.flow_type == "fast_fix" or auto_dispatch:
+        # fast_fix = zero-approval lane; auto_dispatch (v4.0.13) = the "Nechaj to opraviť" one-click, whose
+        # single click IS the confirmation → run the fix IMMEDIATELY, no redundant 'Pokračovať' step (a
+        # non-expert clicked "fix it" and expects it to run; the paused double-confirm was friction).
+        _begin_dispatch(db, state)
     else:
         state.status = "paused"  # mandatory phase gate — Manažér confirms the re-run via 'Pokračovať'
         state.next_action = "Oprava podľa tvojho pokynu je pripravená — 'Pokračovať' ju spustí."
@@ -9532,7 +9541,10 @@ async def apply_action(
                 brief = _latest_verifikacia_fix_scope(db, version_id) or (
                     "Oprav blokujúce zlyhanie z koncovej Verifikácie podľa nálezov Auditora."
                 )
-                return await _route_manazer_fix_to_ai_agent(db, state, comment=brief)
+                # v4.0.13: the one-click runs the fix IMMEDIATELY (auto_dispatch) — no redundant 'Pokračovať'
+                # (the click IS the confirmation; the state goes agent_working, so the "Znova overiť bez opravy"
+                # bar no longer competes for attention). A non-expert clicked "fix it" → it fixes.
+                return await _route_manazer_fix_to_ai_agent(db, state, comment=brief, auto_dispatch=True)
             # ``guide`` (or an ``accept_fix``/``fix_it`` the Manažér amended with a free-text/note steer) → route the
             # operator's brief to the AI Agent (fixer). The brief prefers free_text, then the note the manager
             # typed on the card (v4.0.9: the always-visible note box IS a valid directive, not a dropped

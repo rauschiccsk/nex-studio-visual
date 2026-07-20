@@ -382,8 +382,9 @@ async def test_decide_fix_it_routes_auditor_scope_no_writing(db_session, monkeyp
     )
     captured: dict[str, str] = {}
 
-    async def _capture(db, st, *, comment, on_message=None):
+    async def _capture(db, st, *, comment, on_message=None, auto_dispatch=False):
         captured["comment"] = comment
+        captured["auto_dispatch"] = auto_dispatch
         return st
 
     monkeypatch.setattr(orchestrator, "_route_manazer_fix_to_ai_agent", _capture)
@@ -397,3 +398,73 @@ async def test_decide_fix_it_routes_auditor_scope_no_writing(db_session, monkeyp
     assert captured.get("comment")
     assert "SAFETY 2" in captured["comment"] or "idempotent" in captured["comment"].lower()
     assert captured["comment"] != "Nechaj to opraviť"
+    # v4.0.13: the one-click RUNS the fix immediately — no redundant 'Pokračovať' confirmation step.
+    assert captured["auto_dispatch"] is True
+
+
+@pytest.mark.asyncio
+async def test_decide_fix_it_auto_runs_no_pokracovat(db_session, monkeypatch) -> None:
+    """v4.0.13: 'Nechaj to opraviť' runs the fix IMMEDIATELY (agent_working) — NOT paused awaiting a second
+    'Pokračovať' click. A non-expert clicks 'fix it' once and it fixes; no redundant confirmation step."""
+    state = _seed_state_at_verifikacia(db_session)
+    version_id = state.version_id
+    state.current_stage = "programovanie"
+    state.current_actor = "ai_agent"
+    state.status = "blocked"
+    state.block_reason = "decision_needed"
+    db_session.flush()
+    orchestrator._record_message(
+        db_session,
+        version_id=version_id,
+        stage="verifikacia",
+        author="auditor",
+        recipient="manazer",
+        kind="verdict",
+        content="Záverečná skúška nie je opakovateľná.",
+        payload={
+            "verdict": "FAIL",
+            "findings": ["Test sa nedá spustiť dvakrát."],
+            "proposed_fix": "Sprav test idempotentný.",
+            "phase": "verifikacia",
+        },
+    )
+    orchestrator._record_message(
+        db_session,
+        version_id=version_id,
+        stage="verifikacia",
+        author="system",
+        recipient="manazer",
+        kind="consultation",
+        content="Verifikácia našla chybu — potrebné je tvoje rozhodnutie.",
+        payload={
+            "phase": "verifikacia",
+            "consultation": {
+                "id": "vfix-2",
+                "source": "verifikacia_fix",
+                "decisions": [
+                    {
+                        "key": "verifikacia_fix_next",
+                        "question": "Ako chceš pokračovať?",
+                        "allow_free_text": True,
+                        "options": [
+                            {"id": "fix_it", "label": "Nechaj to opraviť"},
+                            {"id": "guide", "label": "Usmerniť opravu"},
+                            {"id": "hold", "label": "Zatiaľ podržať"},
+                        ],
+                    }
+                ],
+            },
+        },
+    )
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda *a, **k: "cafef00d")
+
+    settled = await orchestrator.apply_action(
+        db_session,
+        version_id=version_id,
+        action="decide",
+        payload={"decision_key": "verifikacia_fix_next", "option_id": "fix_it"},
+    )
+
+    # Runs immediately — NOT paused awaiting a second 'Pokračovať'.
+    assert settled.status == "agent_working"
+    assert settled.current_stage == "programovanie" and settled.current_actor == "ai_agent"
