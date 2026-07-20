@@ -509,6 +509,9 @@ def test_apply_action_is_sole_mutator_grep_guard():
             "pause",
             "decide",
             "overit_znovu",
+            # v4.0.10: + "overit_bez_opravy" ("Znova overiť bez opravy" — exit a Verifikácia fix-loop when the
+            # root cause was fixed OUTSIDE the project; re-run the Verifikácia gate directly, no project fix).
+            "overit_bez_opravy",
             "zostav_plan",
             "spustit_stavbu",
             "spustit_vizual",
