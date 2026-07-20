@@ -6600,8 +6600,9 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
             )
     else:
         explanation_parts.append(
-            "Navrhnutá oprava NEbola nezávisle preverená (kritik nebol dostupný alebo išlo o mechanické "
-            "engine-červené zlyhanie), preto ju nemôžem odporučiť na jednoklik."
+            "Navrhnutá oprava nebola nezávisle preverená (kritik nebol dostupný alebo išlo o mechanické "
+            "engine-červené zlyhanie). Môžeš ju napriek tomu nechať opraviť — AI Agent opraví podľa nálezov "
+            "Auditora a Auditor to znova preverí; nič nemusíš písať."
         )
     explanation = "\n\n".join(explanation_parts)
 
@@ -6617,13 +6618,30 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
                 recommended=True,
             )
         )
+    else:
+        # v4.0.12 (Director 2026-07-20, Tibor/Nazar lens): even when the fix was NOT critic-vetted, the non-
+        # expert ALWAYS gets a one-click forward path — NEVER forced to hand-write a technical directive (which
+        # Tibor/Nazar can't). "Nechaj to opraviť" routes the Auditor's OWN findings/scope to the AI Agent (which
+        # devises + applies the fix) and the Auditor RE-VERIFIES in the bounded loop — the re-verify IS the
+        # safety, so no pre-vet is needed here (distinct from accept_fix, which runs a SPECIFIC pre-materialized
+        # scope and STAYS critic-gated). This is the self-sufficiency-kernel fix: a non-expert resolves the card
+        # alone. "Usmerniť opravu" below stays an OPTIONAL expert refinement.
+        options.append(
+            ConsultOption(
+                id="fix_it",
+                label="Nechaj to opraviť",
+                detail="Jedným klikom — AI Agent opraví podľa nálezov Auditora a Auditor to znova preverí. "
+                "Nemusíš nič písať.",
+                recommended=True,
+            )
+        )
     options.append(
         ConsultOption(
             id="guide",
-            label="Usmerniť opravu",
-            detail="Napíš konkrétny pokyn (pole nižšie) — pošle sa AI Agentovi (opravárovi) ako cielená oprava "
-            "a Auditor ju znova overí. Odporúčané, keď navrhnutá oprava nie je preverená alebo bola zamietnutá.",
-            recommended=not positive,
+            label="Usmerniť opravu (napíš vlastný pokyn)",
+            detail="NEPOVINNÉ — ak chceš opravu nasmerovať sám, napíš pokyn (pole nižšie); pošle sa AI Agentovi "
+            "namiesto Auditorových nálezov a Auditor ho znova overí.",
+            recommended=False,
         )
     )
     options.append(
@@ -6634,9 +6652,10 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
             "usmerniť).",
         )
     )
-    # §2 by construction: exactly one recommended (positive → accept_fix; else → guide). Self-assert because
-    # engine cards bypass _validate_block; a future refactor that broke it would fail loudly here, never ship a
-    # card that recommends an un-vetted fix (or none).
+    # §2 by construction: exactly one recommended one-click FORWARD action (positive → accept_fix; else →
+    # fix_it, v4.0.12) — a non-expert ALWAYS has a recommended one-click, never only "write a directive".
+    # Self-assert because engine cards bypass _validate_block; a future refactor that broke it would fail loudly
+    # here, never ship a card that recommends an un-vetted SPECIFIC scope (accept_fix) or leaves a non-expert stuck.
     recommended_count = sum(1 for o in options if o.recommended)
     if recommended_count != 1:  # pragma: no cover - defensive; construction guarantees exactly one
         raise OrchestratorError(
@@ -6646,8 +6665,8 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
     rationale = (
         "Odporúčam spustiť pripravenú opravu — nezávislý kritik ju preveril (je vynútená konštrukciou)."
         if positive
-        else "Odporúčam usmerniť opravu — navrhnutá oprava nebola nezávisle preverená (alebo bola zamietnutá), "
-        "tak ju nespúšťaj naslepo; napíš adresný pokyn a Auditor ho znova overí."
+        else "Odporúčam nechať to opraviť — Auditor presne vie, čo je zle; AI Agent to opraví podľa jeho nálezov "
+        "a Auditor to znova preverí. Nemusíš nič písať. (Ak chceš, môžeš opravu nasmerovať sám cez 'Usmerniť opravu'.)"
     )
     return ConsultationBlock(
         id=f"verifikacia-fix-{version_id}-{state.iteration}",
@@ -9505,7 +9524,16 @@ async def apply_action(
                 # programovanie / actor=ai_agent and bumped the counter; _begin_dispatch just flips to working.
                 _begin_dispatch(db, state)
                 return state
-            # ``guide`` (or an ``accept_fix`` the Manažér amended with a free-text/note steer) → route the
+            if opt == "fix_it" and not ans.get("free_text") and not ans.get("note"):
+                # v4.0.12 (Tibor/Nazar lens): the non-expert ONE-CLICK — route the Auditor's OWN findings/scope
+                # to the AI Agent (the fixer devises + applies the fix; the Auditor re-verifies in the bounded
+                # loop). No manager writing → a non-expert resolves the card alone. A ``fix_it`` the Manažér
+                # amended with a steer (free_text/note) falls through to the brief below (the steer wins).
+                brief = _latest_verifikacia_fix_scope(db, version_id) or (
+                    "Oprav blokujúce zlyhanie z koncovej Verifikácie podľa nálezov Auditora."
+                )
+                return await _route_manazer_fix_to_ai_agent(db, state, comment=brief)
+            # ``guide`` (or an ``accept_fix``/``fix_it`` the Manažér amended with a free-text/note steer) → route the
             # operator's brief to the AI Agent (fixer). The brief prefers free_text, then the note the manager
             # typed on the card (v4.0.9: the always-visible note box IS a valid directive, not a dropped
             # annotation), then the option label. _route_manazer_fix_to_ai_agent resets the bounded loop.

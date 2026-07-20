@@ -378,7 +378,7 @@ async def test_fail_loops_targeted_fix_and_gates_new_version(db_session, monkeyp
     assert consult["source"] == "verifikacia_fix"
     opts = consult["decisions"][0]["options"]
     assert consult["decisions"][0]["key"] == "verifikacia_fix_next"
-    assert [o for o in opts if o.get("recommended")][0]["id"] == "guide"
+    assert [o for o in opts if o.get("recommended")][0]["id"] == "fix_it"  # v4.0.12: non-expert one-click
     assert "accept_fix" not in {o["id"] for o in opts}
     # the fix scope is readable for the re-run brief
     scope = orchestrator._latest_verifikacia_fix_scope(db_session, version.id)
@@ -577,7 +577,7 @@ async def test_manual_verdict_fail_creates_targeted_fix_and_gates(db_session, mo
     consult = cards[-1].payload["consultation"]
     assert consult["source"] == "verifikacia_fix"
     opts = consult["decisions"][0]["options"]
-    assert [o for o in opts if o.get("recommended")][0]["id"] == "guide"
+    assert [o for o in opts if o.get("recommended")][0]["id"] == "fix_it"  # v4.0.12: non-expert one-click
     assert "accept_fix" not in {o["id"] for o in opts}
 
 
@@ -1154,8 +1154,11 @@ def test_card_invariant_deterministic_safe_default(db_session):
         if expect_accept_recommended:
             assert "accept_fix" in opt_ids and recommended[0].id == "accept_fix", crit_verdict
         else:
-            assert "accept_fix" not in opt_ids, crit_verdict  # never a one-click un-vetted fix
-            assert recommended[0].id == "guide", crit_verdict
+            assert "accept_fix" not in opt_ids, crit_verdict  # never a one-click un-vetted SPECIFIC scope
+            # v4.0.12 (Tibor/Nazar lens): the recommended forward action is the non-expert one-click 'fix_it'
+            # (route the Auditor's findings to the fixer + re-verify), NOT 'guide' (write a directive).
+            assert recommended[0].id == "fix_it", crit_verdict
+            assert "fix_it" in opt_ids and "guide" in opt_ids, crit_verdict
         # guide + hold are always present; source/key are the distinct verifikacia_fix pair
         assert {"guide", "hold"} <= opt_ids
         assert consult.source == "verifikacia_fix" and consult.decisions[0].key == "verifikacia_fix_next"
@@ -1175,7 +1178,7 @@ def test_card_builder_reject_surfaces_why_and_hides_accept(db_session):
     )
     consult = orchestrator._build_fix_consultation(db_session, version.id, state)
     assert "accept_fix" not in {o.id for o in consult.decisions[0].options}
-    assert _one_recommended(consult)[0].id == "guide"
+    assert _one_recommended(consult)[0].id == "fix_it"  # v4.0.12: reject → still a non-expert one-click
     assert "--no-verify" in consult.decisions[0].explanation  # the critic's reason is on the card
 
 
@@ -1267,7 +1270,7 @@ async def test_fail_open_critic_parsefail_still_builds_card_with_guide(db_sessio
     consult = [m for m in _msgs(db_session, version.id) if m.kind == "consultation"][-1].payload["consultation"]
     opts = consult["decisions"][0]["options"]
     assert "accept_fix" not in {o["id"] for o in opts}
-    assert [o for o in opts if o.get("recommended")][0]["id"] == "guide"
+    assert [o for o in opts if o.get("recommended")][0]["id"] == "fix_it"  # v4.0.12: non-expert one-click
 
 
 async def test_critic_skipped_when_runtime_floor_red(db_session, monkeypatch):
@@ -1284,7 +1287,7 @@ async def test_critic_skipped_when_runtime_floor_red(db_session, monkeypatch):
     assert not cap.get("called")  # critic skipped on the engine-red floor
     assert state.status == "blocked" and state.block_reason == "decision_needed"
     consult = [m for m in _msgs(db_session, version.id) if m.kind == "consultation"][-1].payload["consultation"]
-    assert [o for o in consult["decisions"][0]["options"] if o.get("recommended")][0]["id"] == "guide"
+    assert [o for o in consult["decisions"][0]["options"] if o.get("recommended")][0]["id"] == "fix_it"
 
 
 async def test_fast_fix_fail_runs_no_critic_and_no_card(db_session, monkeypatch):

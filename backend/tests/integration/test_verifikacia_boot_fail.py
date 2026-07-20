@@ -295,3 +295,105 @@ def test_fix_consultation_leads_with_plain_summary_technical_collapsed(db_sessio
     assert "990001" not in dec.explanation
     # …it rides the collapsible technical_detail instead (nothing lost).
     assert "990001" in dec.technical_detail
+
+
+def test_fix_consultation_offers_nonexpert_one_click_when_unvetted(db_session) -> None:
+    """v4.0.12 (Tibor/Nazar lens): with NO positive critique the card STILL gives a non-expert a recommended
+    ONE-CLICK forward action ('fix_it' — no writing), not only 'guide' (write a directive). Exactly one recommended."""
+    state = _seed_state_at_verifikacia(db_session)
+    version_id = state.version_id
+    orchestrator._record_message(
+        db_session,
+        version_id=version_id,
+        stage="verifikacia",
+        author="auditor",
+        recipient="manazer",
+        kind="verdict",
+        content="Záverečná skúška nie je spoľahlivo opakovateľná.",
+        payload={
+            "verdict": "FAIL",
+            "findings": ["Jeden test sa nedá spustiť dvakrát."],
+            "proposed_fix": "Sprav negatívny test idempotentný.",
+            "phase": "verifikacia",
+        },
+    )
+    card = orchestrator._build_fix_consultation(db_session, version_id, state)
+    opts = card.decisions[0].options
+    ids = {o.id for o in opts}
+    # un-vetted → no one-click SPECIFIC scope (accept_fix stays critic-gated), but a one-click fix_it IS offered…
+    assert "fix_it" in ids and "accept_fix" not in ids
+    # …and the RECOMMENDED forward action is that non-expert one-click, NOT "guide" (write a directive).
+    assert [o.id for o in opts if o.recommended] == ["fix_it"]
+
+
+@pytest.mark.asyncio
+async def test_decide_fix_it_routes_auditor_scope_no_writing(db_session, monkeypatch) -> None:
+    """v4.0.12: picking 'Nechaj to opraviť' (fix_it) with NO manager text routes the Auditor's OWN findings/
+    scope to the AI Agent — a non-expert resolves the card without writing anything."""
+    state = _seed_state_at_verifikacia(db_session)
+    version_id = state.version_id
+    state.current_stage = "programovanie"
+    state.current_actor = "ai_agent"
+    state.status = "blocked"
+    state.block_reason = "decision_needed"
+    db_session.flush()
+    orchestrator._record_message(
+        db_session,
+        version_id=version_id,
+        stage="verifikacia",
+        author="auditor",
+        recipient="manazer",
+        kind="verdict",
+        content="Záverečná skúška nie je spoľahlivo opakovateľná.",
+        payload={
+            "verdict": "FAIL",
+            "findings": ["Test SAFETY 2 sa nedá spustiť dvakrát."],
+            "proposed_fix": "Sprav SAFETY 2 idempotentný.",
+            "phase": "verifikacia",
+        },
+    )
+    orchestrator._record_message(
+        db_session,
+        version_id=version_id,
+        stage="verifikacia",
+        author="system",
+        recipient="manazer",
+        kind="consultation",
+        content="Verifikácia našla chybu — potrebné je tvoje rozhodnutie.",
+        payload={
+            "phase": "verifikacia",
+            "consultation": {
+                "id": "vfix-1",
+                "source": "verifikacia_fix",
+                "decisions": [
+                    {
+                        "key": "verifikacia_fix_next",
+                        "question": "Ako chceš pokračovať?",
+                        "allow_free_text": True,
+                        "options": [
+                            {"id": "fix_it", "label": "Nechaj to opraviť"},
+                            {"id": "guide", "label": "Usmerniť opravu (napíš vlastný pokyn)"},
+                            {"id": "hold", "label": "Zatiaľ podržať"},
+                        ],
+                    }
+                ],
+            },
+        },
+    )
+    captured: dict[str, str] = {}
+
+    async def _capture(db, st, *, comment, on_message=None):
+        captured["comment"] = comment
+        return st
+
+    monkeypatch.setattr(orchestrator, "_route_manazer_fix_to_ai_agent", _capture)
+    await orchestrator.apply_action(
+        db_session,
+        version_id=version_id,
+        action="decide",
+        payload={"decision_key": "verifikacia_fix_next", "option_id": "fix_it"},
+    )
+    # The brief is the Auditor's OWN scope (findings + proposed_fix) — not empty, not the bare option label.
+    assert captured.get("comment")
+    assert "SAFETY 2" in captured["comment"] or "idempotent" in captured["comment"].lower()
+    assert captured["comment"] != "Nechaj to opraviť"
