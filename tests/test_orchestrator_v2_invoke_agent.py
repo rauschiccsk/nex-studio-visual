@@ -438,7 +438,7 @@ async def test_parse_retry_keeps_model_effort(db_session, monkeypatch):
     fake = _fake_claude(monkeypatch)
     version, _ = _make_version_with_owner_config(db_session, [("ai_agent", "claude-sonnet-4-6", "high")])
     # Primary (prompt "go") fails to parse; the retry (re-prompt starting "Tvoj…") emits a valid block.
-    fake.response = lambda prompt: (_navrh_block() if prompt.startswith("Tvoj") else "no status block")
+    fake.response = lambda prompt: _navrh_block() if prompt.startswith("Tvoj") else "no status block"
     result = await orchestrator.invoke_agent_with_parse_retry(
         db_session, version_id=version.id, role="ai_agent", stage="navrh", prompt="go"
     )

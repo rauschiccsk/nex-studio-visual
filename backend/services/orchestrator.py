@@ -1354,6 +1354,9 @@ def _auditor_upfront_directive(db: Session, version_id: uuid.UUID) -> str:
         "   - ak nájdeš medzeru (HOLE) → `verdict=false` (FAIL); konkrétne diery vymenuj v `findings` a do "
         "`proposed_fix` napíš ZAMERANÝ rozsah vyjasnenia/úpravy pre Manažéra (NEvykonávaj ho). Medzera sa "
         "eskaluje Manažérovi — build sa zastaví na schvaľovacom bode po Návrhu.\n"
+        "6. NÁLEZY PRE MANAŽÉRA — píš ĽUDSKOU rečou po slovensky (Manažér/junior je NEŠPECIALISTA): čo treba "
+        "rozhodnúť z pohľadu POUŽÍVATEĽA, v 1–2 vetách, BEZ ciest k súborom, názvov premenných/endpointov, "
+        "počtov testov a žargónu. Technické detaily patria do `proposed_fix`, nie do `findings`.\n"
         "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)." + reverify_block
     )
 
@@ -1751,6 +1754,11 @@ def _verifikacia_directive(
         "   - ak nájdeš zlyhanie → `verdict=false` (FAIL); konkrétne zlyhania vymenuj v `findings` a do "
         "`proposed_fix` napíš ZAMERANÝ rozsah opravy pre AI Agenta (NEvykonávaj ho — opravuje AI Agent, ty "
         "re-verifikuješ). FAIL sa vráti AI Agentovi do ohraničenej slučky.\n"
+        "7. NÁLEZY PRE MANAŽÉRA — píš ĽUDSKOU rečou po slovensky (Manažér aj junior operátor je "
+        "NEŠPECIALISTA): každý nález povedz tak, aby pochopil ČO nefunguje / čo treba rozhodnúť z pohľadu "
+        "POUŽÍVATEĽA, v 1–2 vetách. ŽIADNE cesty k súborom, názvy premenných/portov/endpointov, počty testov "
+        "ani žargón (ASSERTIONS_RUN, boot-floor, HMAC/JWT/exp, §4, EXPOSE…). Technické detaily daj do "
+        "`proposed_fix`, NIE do `findings`.\n"
         "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
     )
 
@@ -4693,7 +4701,11 @@ async def _run_release_acceptance(
         "SMOKE_OVERRIDE": str(stack.override),
         "SMOKE_BACKEND": stack.roles["backend"] or "",
         "SMOKE_FRONTEND": stack.roles["frontend"] or "",
-        "SMOKE_BACKEND_PORT": str(_compose_backend_port(stack.compose) or ""),
+        # Director 2026-07-20: default to the ICC container port 8000 (image EXPOSE 8000 / healthcheck /
+        # BACKEND_URL all use it) when the compose publishes NO host ports — NEVER emit an empty port, which
+        # made the smoke's boot-floor probe :80 → connection refused → 0 asserts run (release-acceptance
+        # verified NOTHING, nex-shopify 2026-07-20). The template boot-floor also defaults now (belt + braces).
+        "SMOKE_BACKEND_PORT": str(_compose_backend_port(stack.compose) or "8000"),
     }
     rc, out = await _run_acceptance_script(script, env)
     if rc != 0:

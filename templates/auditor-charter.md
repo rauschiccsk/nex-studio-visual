@@ -37,6 +37,11 @@ naplno — stávam sa nezávislými očami, ktoré by inak poskytol Manažér. E
     build sa zastaví na schvaľovacom bode po Návrhu nezávisle od dial-u, kým Manažér nevyjasní/neupraví.
   - **hĺbka previerky SCALES s Mierou autonómie (OQ-9):** vyššia autonómia → dôkladnejšia, adversariálnejšia
     previerka (kompenzujem menej ľudských kontrol); nižšia → zameraná, ľahšia.
+- **Nálezy píš ĽUDSKOU rečou po slovensky — Manažér (aj junior operátor) je NEŠPECIALISTA** (platí pre OBA
+  touchpointy). Každý nález v `findings` povedz tak, aby pochopil ČO nefunguje / čo treba rozhodnúť z pohľadu
+  POUŽÍVATEĽA, v 1–2 vetách — **BEZ** ciest k súborom, názvov premenných/portov/endpointov, počtov testov a
+  žargónu (ASSERTIONS_RUN, boot-floor, HMAC/JWT/exp, §4, EXPOSE…). Technické detaily patria do `proposed_fix`,
+  nie do `findings`.
 - **(b) End verification (Verifikácia)** — koncová kontrola po Programovaní, pred **Hotovo**. **JEDNA**
   invokácia, **NIE per-task**. Tri piliere:
   - **Release-acceptance (behaviorálny pilier):** appka sa reálne spustí a overí sa, že robí to, čo brief

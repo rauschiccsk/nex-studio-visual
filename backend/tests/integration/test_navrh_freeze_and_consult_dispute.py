@@ -364,3 +364,27 @@ async def test_record_task_summary_shows_hierarchical_number(db_session) -> None
     ).scalar_one()
     assert "#1.2.1" in msg.content
     assert "Štruktúrované logovanie" in msg.content
+
+
+# ── Auditor findings in plain Slovak + release-acceptance port robustness ──────
+
+
+def test_auditor_directives_findings_are_plain_language(db_session) -> None:
+    version, _s = _seed_navrh_state(db_session, mode=None)
+    upfront = orchestrator._auditor_upfront_directive(db_session, version.id)
+    verif = orchestrator._verifikacia_directive(db_session, version.id, smoke_block="", flow_type="new_version")
+    for directive in (upfront, verif):
+        assert "ĽUDSKOU rečou" in directive
+        assert "NEŠPECIALISTA" in directive
+        assert "proposed_fix" in directive  # technical detail goes there, not into findings
+
+
+def test_release_smoke_template_defaults_backend_port() -> None:
+    from pathlib import Path
+
+    from backend.services import orchestrator as _o
+
+    tpl = (Path(_o.__file__).resolve().parents[2] / "templates" / "release_smoke_test.sh").read_text(encoding="utf-8")
+    # Boot-floor must default the port to 8000 — never probe an empty ":80" (0 asserts, verified nothing).
+    assert "${SMOKE_BACKEND_PORT:-8000}/health" in tpl
+    assert '"http://localhost:${SMOKE_BACKEND_PORT}/health"' not in tpl  # no bare (defaultless) var left

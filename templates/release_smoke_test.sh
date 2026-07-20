@@ -58,10 +58,10 @@ dc_exec() {
 # Probe from inside the backend container with the stdlib (slim prod images ship no curl). A 4xx (e.g. a
 # 404 on a versioned health route) still means "up"; only a connection error / 5xx is a failure. This is a
 # boot assertion — it counts toward ASSERTIONS_RUN but is NEITHER a feature NOR a negative assertion.
-dc_exec python - <<PY || fail "app did not answer HTTP on :${SMOKE_BACKEND_PORT}"
+dc_exec python - <<PY || fail "app did not answer HTTP on :${SMOKE_BACKEND_PORT:-8000}"
 import sys, urllib.request, urllib.error
 try:
-    urllib.request.urlopen("http://localhost:${SMOKE_BACKEND_PORT}/health", timeout=5)
+    urllib.request.urlopen("http://localhost:${SMOKE_BACKEND_PORT:-8000}/health", timeout=5)
     sys.exit(0)
 except urllib.error.HTTPError as exc:
     sys.exit(0 if exc.code < 500 else 1)
