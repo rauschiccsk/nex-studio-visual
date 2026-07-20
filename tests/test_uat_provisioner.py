@@ -355,6 +355,24 @@ def test_env_secrets_synthetic_and_var_placeholder(tmp_path):
     assert env["PLAIN_SETTING"] == "keepme"
 
 
+def test_env_honours_var_default_for_nonsecret(tmp_path):
+    """v4.0.18: a NON-secret ``${VAR:-default}`` renders the compose DEFAULT — not the __UAT_SYNTHETIC__
+    placeholder, which crashed apps that VALIDATE the value (nex-shopify UAT 2026-07-20: the backend exited 1
+    because genesis_source ∈ {mock,http} rejected __UAT_SYNTHETIC__). A bare ${VAR} and secrets stay synthetic."""
+    env_example = (
+        "GENESIS_SOURCE=${GENESIS_SOURCE:-mock}\n"
+        "SHOPIFY_SOURCE=${SHOPIFY_SOURCE:-fake}\n"
+        "BARE_UNKNOWN=${BARE_UNKNOWN}\n"
+        "API_TOKEN=${API_TOKEN:-should-not-leak}\n"
+    )
+    res = _provision(tmp_path, "nex-asistent", "asistent", ASISTENT_COMPOSE, env_example=env_example)
+    env = {ln.split("=", 1)[0]: ln.split("=", 1)[1] for ln in res.env_path.read_text().splitlines() if "=" in ln}
+    assert env["GENESIS_SOURCE"] == "mock"  # the compose default is honoured (was __UAT_SYNTHETIC__ → app crash)
+    assert env["SHOPIFY_SOURCE"] == "fake"
+    assert env["BARE_UNKNOWN"] == "__UAT_SYNTHETIC__"  # no default → genuine unknown → synthetic
+    assert env["API_TOKEN"] == "__UAT_SYNTHETIC__"  # a SECRET keeps synthetic even WITH a default (never leak)
+
+
 def test_env_never_contains_var_expansion_for_secrets(tmp_path):
     res = _provision(tmp_path, "nex-asistent", "asistent", ASISTENT_COMPOSE)
     assert "${" not in res.env_path.read_text()

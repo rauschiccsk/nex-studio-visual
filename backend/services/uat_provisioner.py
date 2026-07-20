@@ -343,6 +343,20 @@ def _is_var_expansion(value: Any) -> bool:
     return isinstance(value, str) and value.startswith("${") and value.endswith("}")
 
 
+def _var_expansion_default(value: str) -> Optional[str]:
+    """v4.0.18: the DEFAULT of a ``${VAR:-default}`` / ``${VAR-default}`` expansion (the text after the ``-``),
+    or ``None`` for a bare ``${VAR}`` / a required ``${VAR:?err}`` with no usable default. Used so the UAT
+    ``.env`` renders the COMPOSE default for a non-secret var (e.g. ``GENESIS_SOURCE:-mock``) instead of the
+    ``__UAT_SYNTHETIC__`` placeholder — a placeholder crashed apps whose config VALIDATES the value
+    (nex-shopify: ``genesis_source`` ∈ {mock, http} rejected ``__UAT_SYNTHETIC__``)."""
+    inner = value[2:-1]  # strip the leading ``${`` and trailing ``}``
+    for marker in (":-", "-"):  # ``:-`` (unset OR empty) and ``-`` (unset) both supply a fallback
+        idx = inner.find(marker)
+        if idx != -1:
+            return inner[idx + len(marker) :]
+    return None  # ``${VAR}`` / ``${VAR:?err}`` — no default to honour
+
+
 def _parse_env_file(path: Path) -> dict[str, str]:
     """Parse a ``key=value`` env file into a dict (blank/``#`` lines ignored; no quote stripping,
     no ``${VAR}`` expansion). Empty dict when the file is absent."""
@@ -506,7 +520,16 @@ def generate_uat_env(
         if key_str in {"POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB", "DB_PASSWORD"}:
             continue  # already emitted above (single source of the shared password)
         if _is_var_expansion(value):
-            rendered[key_str] = USER_SECRET_PLACEHOLDER
+            # v4.0.18: honour a ``${VAR:-default}`` default on a NON-secret var — it IS the app's intended value
+            # (e.g. GENESIS_SOURCE:-mock / SHOPIFY_SOURCE:-fake). Blindly writing __UAT_SYNTHETIC__ crashed apps
+            # that VALIDATE the value (nex-shopify UAT 2026-07-20: genesis_source ∈ {mock,http} rejected it, the
+            # backend exited 1). Secrets + a bare ${VAR}/${VAR:?err} (no default) stay synthetic — a value the
+            # manager could never discover otherwise, so a placeholder they replace is correct.
+            default = _var_expansion_default(value)
+            if default is not None and not key_str.lower().endswith(SECRET_SUFFIXES):
+                rendered[key_str] = default
+            else:
+                rendered[key_str] = USER_SECRET_PLACEHOLDER
         elif key_str in DB_CONNECTION_VARS:
             rendered[key_str] = _rewrite_db_connection_var(
                 key_str, value, user=db_user, db_name=db_name, password=shared_db_password, db_host=db_host
