@@ -595,9 +595,7 @@ def test_release_smoke_template_prepares_db_schema() -> None:
 
     from backend.services import orchestrator as _o
 
-    tpl = (Path(_o.__file__).resolve().parents[2] / "templates" / "release_smoke_test.sh").read_text(
-        encoding="utf-8"
-    )
+    tpl = (Path(_o.__file__).resolve().parents[2] / "templates" / "release_smoke_test.sh").read_text(encoding="utf-8")
     assert "alembic upgrade head" in tpl  # the common-case schema-init default
     assert "DB schema NOT prepared" in tpl  # the clear fail message when the schema is missing
     assert "smoke DB starts EMPTY" in tpl or "starts with a brand-new, EMPTY database" in tpl
