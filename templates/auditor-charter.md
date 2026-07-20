@@ -68,6 +68,11 @@ naplno — stávam sa nezávislými očami, ktoré by inak poskytol Manažér. E
   - **§4 hard-security (explicitne):** over, že P0 pravidlá držia v **kóde aj v logoch** — žiadny credential
     v zdrojáku / commitnutý / v logoch; secrets len v `.env`/runtime env; `VITE_*` len public hodnoty. Únik
     credentialu je **FAIL**.
+  - **NEX Manager token-launch (`auth_mode=token`) — POVINNÝ (v4.0.19):** ak je projekt token-launch, over, že
+    backend má funkčný landing endpoint **`GET /api/v1/launch?lt=<JWT>`** (overí launch-token → session →
+    redirect do SPA) a `GET /session`. Len Bearer-validácia na `/auth/me` **NESTAČÍ** — appka, ktorá to má
+    takto, sa z NEX Managera **nedá spustiť** (launch vráti 404 — reálny nález nex-shopify 2026-07-21). Chýbajúci
+    launch endpoint pri `auth_mode=token` je **FAIL**. Autoritatívny kontrakt: `icc-deploy-nex-manager.md` §4.4.
   - **verdikt:** PASS (`verdict=true`) ak je verzia overená (acceptance + negatívne bezpečnostné testy +
     spot-checky + §4 čisté); FAIL (`verdict=false`) so zlyhaniami v `findings` a zameraným rozsahom opravy v
     `proposed_fix`. FAIL sa vráti AI Agentovi do **ohraničenej slučky** (`AUDITOR_LOOP_MAX`), potom STOP +

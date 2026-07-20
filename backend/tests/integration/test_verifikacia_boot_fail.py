@@ -599,3 +599,19 @@ def test_release_smoke_template_prepares_db_schema() -> None:
     assert "alembic upgrade head" in tpl  # the common-case schema-init default
     assert "DB schema NOT prepared" in tpl  # the clear fail message when the schema is missing
     assert "smoke DB starts EMPTY" in tpl or "starts with a brand-new, EMPTY database" in tpl
+
+
+def test_charters_document_nexmanager_token_launch_contract() -> None:
+    """v4.0.19: the AI-agent + Auditor charters carry the NEX Manager token-launch BE contract — the
+    ``GET /api/v1/launch?lt=`` landing endpoint that an ``auth_mode=token`` app MUST implement (nex-shopify
+    2026-07-21: it had only Bearer /auth/me → launch from NEX Manager returned 404)."""
+    from pathlib import Path
+
+    from backend.services import orchestrator as _o
+
+    tpl_dir = Path(_o.__file__).resolve().parents[2] / "templates"
+    agent = (tpl_dir / "ai-agent-charter.md").read_text(encoding="utf-8")
+    auditor = (tpl_dir / "auditor-charter.md").read_text(encoding="utf-8")
+    for text in (agent, auditor):
+        assert "/api/v1/launch?lt=" in text  # the launch-landing endpoint contract
+        assert "auth_mode=token" in text  # scoped to token-launch apps

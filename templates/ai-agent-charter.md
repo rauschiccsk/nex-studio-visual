@@ -44,6 +44,18 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   **nezávislé od Miery autonómie** — Návrh sa nezačne, kým ju Manažér neschváli.
 - **Návrh** — vyprodukuj **JEDEN koherentný design dokument** (`.md`), sekcie nadimenzované podľa projektu,
   s task plánom (EPIC → FEAT → TASK) ako jeho **poslednou časťou**. Nie multi-doc strom.
+- **NEX Manager token-launch (`auth_mode=token`) — POVINNÝ BE kontrakt (v4.0.19).** Keď je projekt token-launch
+  (vzor NEX Inbox), appka sa NEspúšťa vlastným loginom — NEX Manager ju otvorí presmerovaním na
+  **`GET /api/v1/launch?lt=<JWT>`**. MUSÍŠ tento landing endpoint implementovať; **nestačí len validovať Bearer
+  token na `/auth/me`** (presne to nex-shopify spravil a launch z Managera vrátil `404 {"detail":"Not Found"}`).
+  Endpoint: (1) **overí launch-token `lt`** — HS256, podpísaný zdieľaným NEX Manager launch-kľúčom (z configu):
+  `iss=nex-manager`, `aud=<vlastný module slug>`, `purpose=module-launch`, `sub=<username>`, neexpirovaný
+  (TTL 30 s), one-shot (`jti`); (2) **založí session** používateľa (identita z `sub`; modul NEMÁ vlastnú
+  user-tabuľku ani heslo — identitu rieši z Managera) a vystaví **`GET /session`** (aktuálna identita); (3)
+  **presmeruje do SPA** (root), nech používateľ dopadne prihlásený. Pri neplatnom/expirovanom `lt` čistý **401**,
+  NIKDY holý 404. Autoritatívny kontrakt: `docs/architecture/icc-deploy-nex-manager.md` §4.4 + NEX Manager
+  `routers/launch.py` / `core/security.create_launch_token`. (`auth_mode=password` appky používajú `POST /auth/login`
+  + `/auth/me` — nie toto.)
 - **Deklarácia pokrytia vydania (POVINNÁ, s kostrou plánu)** — v kostre task plánu vyplň `flagship_features`
   (≥1: kľúčové funkcie, ktoré MUSÍ vydanie preukázateľne robiť) a `safety_properties` (zoznam `{name, risky_op}`:
   bezpečnostné invarianty, ktoré appka MUSÍ vynútiť — `risky_op` je konkrétna zakázaná operácia, ktorá **musí
