@@ -222,7 +222,7 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
             spellCheck={false}
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="Poznámka (nepovinné)"
+            placeholder="Pokyn pre AI partnera (nepovinné) — napíš, čo má spraviť"
             className="mt-2 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-xs text-[var(--color-text-primary)] focus:border-primary-500 focus:outline-none"
           />
 

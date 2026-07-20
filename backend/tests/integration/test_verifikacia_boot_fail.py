@@ -151,3 +151,67 @@ async def test_boot_fail_at_loop_max_escalates_not_blocked_on_parse(db_session, 
     assert verdict.payload["verdict"] == "FAIL" and verdict.content.startswith("Appka sa nespustila")
     assert settled.status == "blocked" and settled.block_reason == "decision_needed"
     assert settled.block_reason != "agent_error"
+
+
+@pytest.mark.asyncio
+async def test_decide_guide_note_routes_manager_directive_to_fixer(db_session, monkeypatch) -> None:
+    """v4.0.9: the manager's typed directive on a ``verifikacia_fix`` Decision Card reaches the AI Agent
+    fixer even when it lands in the always-visible ``note`` box (not the hidden free-text escape). Before,
+    the fix brief read ONLY ``free_text`` → a directive typed as ``note`` was dropped and the agent got just
+    the option LABEL ('Usmerniť opravu') → it refused to 'fix blindly' (the nex-shopify 2026-07-20 wedge)."""
+    state = _seed_state_at_verifikacia(db_session)
+    version_id = state.version_id
+    # Park it exactly like a real per-FAIL escalation: blocked at Programovanie with a verifikacia_fix card.
+    state.current_stage = "programovanie"
+    state.current_actor = "ai_agent"
+    state.status = "blocked"
+    state.block_reason = "decision_needed"
+    db_session.flush()
+    orchestrator._record_message(
+        db_session,
+        version_id=version_id,
+        stage="verifikacia",
+        author="system",
+        recipient="manazer",
+        kind="consultation",
+        content="Verifikácia našla chybu — potrebné je tvoje rozhodnutie.",
+        payload={
+            "phase": "verifikacia",
+            "consultation": {
+                "id": "verifikacia-fix-test-1",
+                "source": "verifikacia_fix",
+                "intro": "Verifikácia našla chybu.",
+                "decisions": [
+                    {
+                        "key": "verifikacia_fix_next",
+                        "question": "Ako chceš pokračovať?",
+                        "allow_free_text": True,
+                        "options": [
+                            {"id": "guide", "label": "Usmerniť opravu"},
+                            {"id": "hold", "label": "Zatiaľ podržať"},
+                        ],
+                    }
+                ],
+            },
+        },
+    )
+
+    captured: dict[str, str] = {}
+
+    async def _capture_route(db, st, *, comment, on_message=None):
+        captured["comment"] = comment
+        return st
+
+    monkeypatch.setattr(orchestrator, "_route_manazer_fix_to_ai_agent", _capture_route)
+
+    directive = "Neupravuj projekt — engine bol opravený; iba znovu spusti Verifikáciu."
+    await orchestrator.apply_action(
+        db_session,
+        version_id=version_id,
+        action="decide",
+        payload={"decision_key": "verifikacia_fix_next", "option_id": "guide", "note": directive},
+    )
+
+    # The manager's DIRECTIVE (typed into the note box) IS the fix brief — NOT the bare option label.
+    assert captured.get("comment") == directive
+    assert captured["comment"] != "Usmerniť opravu"

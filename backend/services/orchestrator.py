@@ -9403,11 +9403,13 @@ async def apply_action(
         # via 'Uprav').
         if c.get("source") == "verifikacia_fail":
             ans = answered.get("verifikacia_fail_next") or {}
-            if ans.get("option_id") == "hold" and not ans.get("free_text"):
+            if ans.get("option_id") == "hold" and not ans.get("free_text") and not ans.get("note"):
                 state.next_action = "Podržané — usmerni opravu neskôr (Decision Card alebo 'Uprav')."
                 db.flush()
                 return state
-            brief = (ans.get("free_text") or ans.get("label") or "Oprav blokujúce zlyhanie z Verifikácie.").strip()
+            brief = (
+                ans.get("free_text") or ans.get("note") or ans.get("label") or "Oprav blokujúce zlyhanie z Verifikácie."
+            ).strip()
             return await _route_manazer_fix_to_ai_agent(db, state, comment=brief)
         # CR-V2-058 Part A: the PER-FAIL Decision Card (distinct source key ``verifikacia_fix`` so it never
         # collides with the exhaustion ``verifikacia_fail`` handler above — self-audit found the collision on
@@ -9420,20 +9422,24 @@ async def apply_action(
         if c.get("source") == "verifikacia_fix":
             ans = answered.get("verifikacia_fix_next") or {}
             opt = ans.get("option_id")
-            if opt == "hold" and not ans.get("free_text"):
+            if opt == "hold" and not ans.get("free_text") and not ans.get("note"):
                 state.next_action = (
                     "Podržané — rozhodni neskôr (Decision Card): spusti opravu, usmerni ju, alebo podrž."
                 )
                 db.flush()
                 return state
-            if opt == "accept_fix" and not ans.get("free_text"):
+            if opt == "accept_fix" and not ans.get("free_text") and not ans.get("note"):
                 # resume the already-materialized (and critic-vetted) fix task — the settle set stage=
                 # programovanie / actor=ai_agent and bumped the counter; _begin_dispatch just flips to working.
                 _begin_dispatch(db, state)
                 return state
-            # ``guide`` (or an ``accept_fix`` the Manažér amended with a free-text steer) → route the operator's
-            # brief to the AI Agent (fixer). _route_manazer_fix_to_ai_agent resets the bounded loop (human steers).
-            brief = (ans.get("free_text") or ans.get("label") or "Oprav blokujúce zlyhanie z Verifikácie.").strip()
+            # ``guide`` (or an ``accept_fix`` the Manažér amended with a free-text/note steer) → route the
+            # operator's brief to the AI Agent (fixer). The brief prefers free_text, then the note the manager
+            # typed on the card (v4.0.9: the always-visible note box IS a valid directive, not a dropped
+            # annotation), then the option label. _route_manazer_fix_to_ai_agent resets the bounded loop.
+            brief = (
+                ans.get("free_text") or ans.get("note") or ans.get("label") or "Oprav blokujúce zlyhanie z Verifikácie."
+            ).strip()
             return await _route_manazer_fix_to_ai_agent(db, state, comment=brief)
         # all decided → APPLY: re-dispatch the AI Agent (dispatch_directive frames every captured decision)
         _begin_dispatch(db, state)
