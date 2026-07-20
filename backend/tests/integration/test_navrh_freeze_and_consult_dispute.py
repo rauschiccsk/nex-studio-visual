@@ -302,3 +302,65 @@ def test_board_vizual_url_prefers_mockup_route_when_present(db_session, tmp_path
 
     board = _board(db_session, version.id)
     assert board.vizual_url == f"/api/v1/pipeline/{version.id}/vizual-mockup"
+
+
+# ── Manager-facing build reports: plain Slovak + hierarchical task number ──────
+
+
+def _seed_epic_feat_task(db, version, *, epic_n=1, feat_n=2, task_n=1, title="Štruktúrované logovanie"):
+    from backend.db.models.projects import Project as _Project
+    from backend.db.models.tasks import Epic, Feat, Task
+
+    project_id = db.execute(
+        select(_Project.id).join(Version, Version.project_id == _Project.id).where(Version.id == version.id)
+    ).scalar_one()
+    epic = Epic(project_id=project_id, version_id=version.id, number=epic_n, title="E", status="planned")
+    db.add(epic)
+    db.flush()
+    feat = Feat(epic_id=epic.id, number=feat_n, title="F", status="todo")
+    db.add(feat)
+    db.flush()
+    task = Task(feat_id=feat.id, number=task_n, title=title, status="todo", task_type="backend")
+    db.add(task)
+    db.flush()
+    return task
+
+
+def test_task_full_number_is_hierarchical(db_session) -> None:
+    version, _s = _seed_navrh_state(db_session, mode=None)
+    task = _seed_epic_feat_task(db_session, version, epic_n=1, feat_n=2, task_n=1)
+    assert orchestrator._task_full_number(db_session, task) == "1.2.1"
+
+
+def test_build_task_directive_is_plain_language_and_labeled() -> None:
+    from backend.db.models.tasks import Task
+
+    task = Task(number=1, title="Štruktúrované logovanie", description="Priprav logy.")
+    directive = orchestrator._directive_for_build_task(task, None, [], task_label="1.2.1")
+
+    assert "TASK #1.2.1" in directive  # hierarchical label, not the bare "#1"
+    # plain-language manager summary rule + jargon ban.
+    assert "ĽUDSKOU rečou" in directive
+    assert "NEŠPECIALISTA" in directive
+    assert "commits[]" in directive  # technical detail belongs there, not in summary
+
+
+@pytest.mark.asyncio
+async def test_record_task_summary_shows_hierarchical_number(db_session) -> None:
+    version, _s = _seed_navrh_state(db_session, mode=None, status="agent_working")
+    task = _seed_epic_feat_task(db_session, version, epic_n=1, feat_n=2, task_n=1)
+
+    await orchestrator._record_task_summary(db_session, version.id, task, status="done", attempts=1)
+
+    msg = db_session.execute(
+        select(PipelineMessage)
+        .where(
+            PipelineMessage.version_id == version.id,
+            PipelineMessage.author == "system",
+            PipelineMessage.kind == "notification",
+        )
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one()
+    assert "#1.2.1" in msg.content
+    assert "Štruktúrované logovanie" in msg.content

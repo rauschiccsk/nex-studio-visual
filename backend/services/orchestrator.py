@@ -7855,8 +7855,25 @@ def _fetch_cross_cutting_rules(db: Session, version_id: uuid.UUID) -> Optional[s
     return None
 
 
+def _task_full_number(db: Session, task: Task) -> str:
+    """Hierarchical EPIC.FEAT.TASK number (e.g. ``1.2.1``) — the Manažér-facing task identifier (Director
+    2026-07-20). The bare ``task.number`` restarts per FEAT (many "úloha #1"), so a manager can't locate a
+    task from it; the full path pins it. Falls back to the bare number if the parents are gone."""
+    row = db.execute(
+        select(Epic.number, Feat.number).join(Feat, Feat.epic_id == Epic.id).where(Feat.id == task.feat_id)
+    ).first()
+    if row is None:
+        return str(task.number)
+    epic_n, feat_n = row
+    return f"{epic_n}.{feat_n}.{task.number}"
+
+
 def _directive_for_build_task(
-    task: Task, cross_cutting_rules: Optional[str], prior_failures: list[str], flow_type: str = "new_version"
+    task: Task,
+    cross_cutting_rules: Optional[str],
+    prior_failures: list[str],
+    flow_type: str = "new_version",
+    task_label: Optional[str] = None,
 ) -> str:
     """Per-task brief for the AI Agent's Programovanie SELF-CHECKING loop (CR-V2-012; design §2.1 / §5.1(1)
     "self-check — continuous self-verification while coding, like Dedo").
@@ -7871,7 +7888,7 @@ def _directive_for_build_task(
     ``flow_type='fast_fix'`` (design §2.4): the Manažér's directive (the task description) IS the authority —
     there is no spec section to study, and the AI Agent must EXECUTE it directly rather than debate it on
     semantic/opinion grounds (the live v1 run blocked asking "naozaj to chceš premenovať?")."""
-    parts = [f"AI Agent, postav JEDNU úlohu (TASK #{task.number}): {task.title}"]
+    parts = [f"AI Agent, postav JEDNU úlohu (TASK #{task_label or task.number}): {task.title}"]
     if task.description:
         parts.append(f"Popis úlohy: {task.description}")
     if flow_type == "fast_fix":
@@ -7899,6 +7916,12 @@ def _directive_for_build_task(
         "línia kvality; nezávislý Auditor príde až raz vo Verifikácii, NIE po každej úlohe). "
         "Commitni zmeny a ukonči <<<PIPELINE_STATUS>>> blokom s commits[] + deliverables[] "
         "(F-007-orchestration-cockpit.md §5.3)."
+    )
+    parts.append(
+        "SÚHRN PRE MANAŽÉRA (`summary`): píš ĽUDSKOU rečou po slovensky — čo v appke pribudlo / čo teraz "
+        "funguje z pohľadu POUŽÍVATEĽA, v 1–2 vetách. Manažér je NEŠPECIALISTA. ŽIADNE cesty k súborom, "
+        "názvy endpointov, počty testov ani žargón (§4, type-check, lint, outbox, idempotentné, seam…). "
+        "Technické detaily patria do `commits[]` / `deliverables[]`, NIE do `summary`."
     )
     return "\n\n".join(parts)
 
@@ -7936,7 +7959,9 @@ async def _record_task_summary(
     errors = attempt_errors or []
     last_error = errors[-1] if errors else None
     done = status == "done"
-    content = f"Úloha #{task.number} „{task.title}“ — {'hotovo' if done else 'zlyhalo'} ({_pokusy(attempts)})"
+    content = (
+        f"Úloha #{_task_full_number(db, task)} „{task.title}“ — {'hotovo' if done else 'zlyhalo'} ({_pokusy(attempts)})"
+    )
     msg = _record_message(
         db,
         version_id=version_id,
@@ -8507,7 +8532,8 @@ async def _run_build_round(
             # once HEAD is readable; surface to the Manažér DIRECTLY (no Coordinator relay — retired in v2).
             state.status = "awaiting_manazer"
             state.next_action = (
-                f"Úloha #{task.number}: baseline nečitateľný (repo HEAD) — Manažér: oprav repo a pokračuj."
+                f"Úloha #{_task_full_number(db, task)}: baseline nečitateľný (repo HEAD) — "
+                "Manažér: oprav repo a pokračuj."
             )
             db.flush()
             return state
@@ -8524,7 +8550,7 @@ async def _run_build_round(
             author="system",
             recipient="manazer",
             kind="notification",
-            content=f"▶ Úloha #{task.number}: {task.title} — AI Agent začal.",
+            content=f"▶ Úloha #{_task_full_number(db, task)}: {task.title} — AI Agent začal.",
             payload={"task_id": str(task.id), "task_number": task.number, "phase": "programovanie"},
         )
         if on_message is not None:
@@ -8537,7 +8563,9 @@ async def _run_build_round(
                 prompt = pending_directive  # the Manažér's framed return/answer for the resumed task
                 pending_directive = None  # consume once — later attempts/tasks use generated briefs
             else:
-                prompt = _directive_for_build_task(task, cross_cutting, prior_failures, state.flow_type)
+                prompt = _directive_for_build_task(
+                    task, cross_cutting, prior_failures, state.flow_type, task_label=_task_full_number(db, task)
+                )
             result = await _dispatch_build_turn(
                 db,
                 version_id=version_id,
@@ -8682,7 +8710,7 @@ async def _run_build_round(
             # the AI Agent (``uprav``) or re-runs; the AI Agent fixes (design §2.2, division of labour).
             state.status = "awaiting_manazer"
             state.next_action = (
-                f"Úloha #{task.number} zlyhala po {_pokusy(_SELF_CHECK_RETRIES)} self-check — "
+                f"Úloha #{_task_full_number(db, task)} zlyhala po {_pokusy(_SELF_CHECK_RETRIES)} self-check — "
                 "Manažér: usmerni AI Agenta (Uprav) alebo rozhodni o ďalšom kroku."
             )
             db.flush()

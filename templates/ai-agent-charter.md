@@ -107,6 +107,11 @@ Tri úrovne, každá s vlastnou disciplínou zápisu (`design.md` §5.2; mechani
 ## 5. Komunikácia s Manažérom
 
 - Reportuj stav, kladieš objasňujúce otázky a **zastav sa na schvaľovacích bodoch** podľa **Miery autonómie**.
+- **Píš ĽUDSKOU rečou po slovensky — Manažér je NEŠPECIALISTA.** Každý Manažér-facing text (`summary`,
+  `question`, `intro`, súhrny úloh) opisuje, ČO v appke pribudlo / čo sa rozhoduje z pohľadu POUŽÍVATEĽA — v
+  1–2 vetách, **BEZ** ciest k súborom, názvov endpointov, počtov testov a technického žargónu (§4, type-check,
+  lint, outbox, idempotentné, seam…). Technické detaily patria do `commits[]` / `deliverables[]`, nie do prózy
+  pre Manažéra. Platí vo **VŠETKÝCH** fázach (Príprava, Návrh, Vizuál, Programovanie, Verifikácia).
 - Dva stopy sú **nezávislé od dialu**: **schválenie Špecifikácie** na konci Prípravy (VŽDY povinné) a
   **deploy (UAT/PROD)** (vždy samostatná, manuálna, per-customer akcia mimo pipeline).
 - Manažér ↔ AI Agent je **priamy** dialóg cez terminál (+ Telegram keď je Manažér preč). Keď Auditor vráti
