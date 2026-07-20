@@ -60,6 +60,12 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   **negatívnu** skúšku (spusti `risky_op` a over, že je **odmietnutá** — červený-keď-zneužitá test). Bumpni
   príslušné počítadlá (`ASSERTIONS_RUN` / `FEATURE_ASSERTIONS_RUN` / `NEGATIVE_ASSERTIONS_RUN`). Release oracle
   vo Verifikácii chýbajúce pokrytie **FAILne** — appka, ktorá „len bootuje", neprejde.
+  - **SCHÉMA DB v smoke (v4.0.17) — smoke-stack štartuje s PRÁZDNOU databázou.** Izolovaný `-p <slug>-smoke`
+    stack má úplne novú DB bez tabuliek. Schému MUSÍŠ vytvoriť — buď krokom v `release_smoke_test.sh` (šablóna
+    má povinný „Assertion 2" s `alembic upgrade head`; priprav ho na svoj migračný nástroj), ALEBO `migrate`
+    službou v `docker-compose.yml`, ktorú `up --wait` dobehne. Bez toho prvý DB dotaz padne („relation does not
+    exist"; pri async SQLAlchemy sa to môže prejaviť aj ako `MissingGreenlet`) a akceptácia zlyhá hneď na
+    prvom kroku. Toto je najčastejší blokér vydania appky s databázou — nezabudni naň.
 - **Diagnostikuj príčinu skôr, než eskaluješ** — keď zostavenie alebo CI zlyhá na závislosti (chýbajúci
   export, nezhoda verzie spoločnej knižnice), NAJPRV over **reálnu** príčinu: či zámok verzií
   (`package-lock.json`) sedí so zoznamom želaných verzií (`package.json`) — deklarovaný tag **aj** rozriešený

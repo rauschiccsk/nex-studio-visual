@@ -71,6 +71,17 @@ except Exception as exc:
 PY
 ASSERTIONS_RUN=$((ASSERTIONS_RUN + 1))
 
+# ── Assertion 2 (MANDATORY floor, v4.0.17): the DB SCHEMA exists — the isolated smoke DB starts EMPTY. ────
+# The smoke brings up a FRESH `-p <slug>-smoke` stack with a brand-new, EMPTY database — NO tables exist yet.
+# The schema MUST be created HERE (or by a migrate step in docker-compose.yml that `up --wait` completes),
+# else the FIRST DB query fails ("relation does not exist"; with async SQLAlchemy it can even surface as a
+# MissingGreenlet/connection error) and EVERY DB-touching feature crashes on step one. This is the single most
+# common release-gate blocker for a DB app. ADAPT the command to YOUR app's migration tool — do NOT delete
+# this step. Default below: Alembic (the common SQLAlchemy case).
+dc_exec sh -c 'alembic upgrade head' \
+  || fail "DB schema NOT prepared — the smoke database is empty. Create the schema HERE (your app's migrations, e.g. 'alembic upgrade head') OR add a migrate service to docker-compose.yml. Do not skip this step."
+ASSERTIONS_RUN=$((ASSERTIONS_RUN + 1))
+
 # ── FEATURE assertions (ADD ONE PER FLAGSHIP FEATURE). Positive behaviour — the spec's promise holds. ────
 # Example shape — replace with real spec-derived checks. Bump BOTH counters for each:
 #

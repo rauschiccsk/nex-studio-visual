@@ -585,3 +585,19 @@ def test_fix_consultation_fail_streak_broken_by_pass(db_session) -> None:
     assert orchestrator._verifikacia_fail_streak(db_session, version_id) == 1  # only the newest FAIL, PASS broke it
     card = orchestrator._build_fix_consultation(db_session, version_id, state)
     assert [o.id for o in card.decisions[0].options if o.recommended] == ["fix_it"]
+
+
+def test_release_smoke_template_prepares_db_schema() -> None:
+    """v4.0.17: the seeded release_smoke_test.sh has a MANDATORY DB-schema-preparation step (the isolated smoke
+    DB starts EMPTY) — the single most common release-gate blocker for a DB app (nex-shopify 2026-07-20: 10 fix
+    rounds because the smoke never created the tables)."""
+    from pathlib import Path
+
+    from backend.services import orchestrator as _o
+
+    tpl = (Path(_o.__file__).resolve().parents[2] / "templates" / "release_smoke_test.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "alembic upgrade head" in tpl  # the common-case schema-init default
+    assert "DB schema NOT prepared" in tpl  # the clear fail message when the schema is missing
+    assert "smoke DB starts EMPTY" in tpl or "starts with a brand-new, EMPTY database" in tpl
