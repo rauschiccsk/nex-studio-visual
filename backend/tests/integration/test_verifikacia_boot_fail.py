@@ -468,3 +468,32 @@ async def test_decide_fix_it_auto_runs_no_pokracovat(db_session, monkeypatch) ->
     # Runs immediately — NOT paused awaiting a second 'Pokračovať'.
     assert settled.status == "agent_working"
     assert settled.current_stage == "programovanie" and settled.current_actor == "ai_agent"
+
+
+@pytest.mark.asyncio
+async def test_verifikacia_brief_carries_build_fact(db_session, monkeypatch) -> None:
+    """v4.0.14: the Auditor's Verifikácia brief carries the BUILD-FACT (the acceptance ran on the freshly-built
+    current HEAD commit) so the Auditor can't MIS-attribute a failure to a "stale build" (nex-shopify 2026-07-20)."""
+    state = _seed_state_at_verifikacia(db_session)
+
+    async def _smoke(slug, version_label, coverage_req=(0, 0)):
+        return (True, "boot ok"), (False, "flake: MissingGreenlet on first query", False)
+
+    monkeypatch.setattr(orchestrator, "_run_release_smoke", _smoke)
+    monkeypatch.setattr(orchestrator, "_write_release_note_to_disk", lambda *a, **k: None)
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda *a, **k: "abc1234567deadbeef")
+
+    captured: dict[str, str] = {}
+
+    async def _capture_auditor(*a, **k):
+        captured["prompt"] = k.get("prompt", "")
+        raise RuntimeError("stop after capturing the brief")
+
+    monkeypatch.setattr(orchestrator, "invoke_agent_with_parse_retry", _capture_auditor)
+
+    with pytest.raises(RuntimeError):
+        await orchestrator._run_verifikacia_round(db_session, state)
+
+    assert "BUILD-FAKT" in captured["prompt"]
+    assert "abc1234567" in captured["prompt"]  # the HEAD commit prefix
+    assert "NEPRIPISUJ zlyhanie starému" in captured["prompt"]

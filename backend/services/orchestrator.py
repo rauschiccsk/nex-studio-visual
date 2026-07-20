@@ -7011,6 +7011,19 @@ async def _run_verifikacia_round(
     # (:func:`_commit_release_note`) is unchanged — this is an idempotent pre-write.
     _write_release_note_to_disk(db, version_id, claude_agent.PROJECTS_ROOT / slug)
     (smoke_ok, smoke_detail), acceptance = await _run_release_smoke(slug, version_label, coverage_req)
+    # v4.0.14 (Director 2026-07-20): the BUILD-FACT for the Auditor. _run_release_smoke runs `docker compose up
+    # --build`, which rebuilds the app image from the CURRENT working tree (HEAD) — a code change invalidates the
+    # COPY layer; a no-op is a cache-hit on the SAME HEAD. So the acceptance ALWAYS runs the current code. Handing
+    # the Auditor this ground truth stops it MIS-attributing a failure to a "stale build" (nex-shopify 2026-07-20:
+    # the Auditor wrongly blamed a stale image + escalated to Dedo, yet the image's app-code hash matched HEAD).
+    _build_sha = _repo_head(claude_agent.PROJECTS_ROOT / slug)
+    _build_fact = (
+        "   BUILD-FAKT (istota, nie dohad): akceptácia bežala na ČERSTVO ZOSTAVENOM builde z aktuálneho HEAD"
+        f"{f' (commit {_build_sha[:10]})' if _build_sha else ''} — engine spúšťa `docker compose up --build`, "
+        "ktorý image prestavia z aktuálneho pracovného stromu (zmena kódu invaliduje COPY vrstvu). Testuje sa "
+        "teda AKTUÁLNY kód. NEPRIPISUJ zlyhanie starému/neaktuálnemu buildu; ak akceptácia padá, príčina je v "
+        "aktuálnom kóde alebo je to nedeterministický flake — NIE stará verzia.\n"
+    )
     # Plain-language framing (self-sufficiency kernel): the manager-facing content is the HUMANISED WHY, never
     # the raw probe detail; the raw rides in payload.technical_detail for the FE's collapsible "Technický detail".
     smoke_content = (
@@ -7060,12 +7073,12 @@ async def _run_verifikacia_round(
         if on_message is not None:
             await on_message(acc_msg)
         acc_line = "PASS" if acc_ok else ("SKIP" if acc_skipped else "FAIL")
-        smoke_block = (
+        smoke_block = _build_fact + (
             f"   Engine release smoke (interné fixtúry): boot {'PASS' if smoke_ok else 'FAIL'} — {smoke_detail}; "
             f"acceptance {acc_line} — {acc_detail}.\n"
         )
     else:
-        smoke_block = (
+        smoke_block = _build_fact + (
             f"   Engine release smoke (interné fixtúry): boot FAIL — {smoke_detail} "
             "(acceptance sa nespustila). Zohľadni to vo verdikte.\n"
         )

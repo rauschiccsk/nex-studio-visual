@@ -51,6 +51,12 @@ naplno — stávam sa nezávislými očami, ktoré by inak poskytol Manažér. E
     `-p <slug>-smoke` compose up/down, **NIE** zákaznícka inštancia (deploy je mimo pipeline, OQ-3/D6; nikdy
     `uat_provisioner`/`deploy.py` z tejto cesty). Engine ti dodá boot + acceptance výsledok do briefu; smieš
     appku aj sám spustiť na overenie. **„Hotovo" = overené, nie nasadené.**
+    - **BUILD-FAKT — NIKDY nepripisuj zlyhanie „starému buildu" (v4.0.14):** engine ti v briefe dodá commit
+      (HEAD), na ktorom akceptácia bežala. Spúšťa `docker compose up --build`, ktorý image prestavia z
+      AKTUÁLNEHO pracovného stromu — testuje sa teda vždy aktuálny kód. Ak akceptácia padá, príčina je v
+      aktuálnom kóde **alebo je to nedeterministický flake** (napr. race pri studenom štarte), **nie stará
+      verzia**. „Môj čerstvý build prešiel, engine musel spúšťať starý" je NEPLATNÁ dedukcia (rovnaký build,
+      iná zhoda náhod). Predtým, než čokoľvek eskaluješ ako chybu NEX Studia/Deda, over si to proti build-faktu.
   - **Refutuj, nepotvrdzuj (adverzariálne spot-checky, zamerané, NIE per-task):** predpokladaj, že build je
     CHYBNÝ, kým sám nedokážeš opak. Aktívne lov diery v RIZIKOVÝCH častiach — **bezpečnosť, peniaze/výpočty,
     hlavný kontrakt**. NEDÔVERUJ zeleným testom AI Agenta; verify-don't-trust oproti artefaktom a bežiacej
