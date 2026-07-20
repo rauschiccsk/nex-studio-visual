@@ -32,6 +32,8 @@ interface ConsultDecision {
   key: string;
   question: string;
   explanation?: string;
+  /** v4.0.11: the jargon backing `explanation`, shown collapsed behind a "Technický detail" disclosure. */
+  technical_detail?: string;
   options: ConsultOption[];
   rationale?: string;
   allow_free_text?: boolean;
@@ -160,7 +162,21 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
           </div>
           <div className="text-sm font-medium text-[var(--color-text-primary)]">{current.question}</div>
           {current.explanation && (
-            <p className="mt-1 text-xs text-[var(--color-text-secondary)]">{current.explanation}</p>
+            <p className="mt-1 whitespace-pre-line text-xs text-[var(--color-text-secondary)]">
+              {current.explanation}
+            </p>
+          )}
+          {/* v4.0.11: the jargon (paths / codes / repro) is tucked behind a disclosure so the explanation
+              above stays plain for a non-expert — nothing lost, one click away. */}
+          {current.technical_detail && (
+            <details className="mt-1.5">
+              <summary className="cursor-pointer text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]">
+                Technický detail
+              </summary>
+              <pre className="mt-1 overflow-x-auto whitespace-pre-wrap rounded bg-[var(--color-canvas)] p-2 text-[11px] text-[var(--color-text-muted)]">
+                {current.technical_detail}
+              </pre>
+            </details>
           )}
 
           {/* Options as clickable buttons; the recommended one is badged. */}

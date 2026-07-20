@@ -265,3 +265,33 @@ async def test_overit_bez_opravy_rejected_outside_fix_loop(db_session) -> None:
     db_session.flush()
     with pytest.raises(orchestrator.OrchestratorError):
         await orchestrator.apply_action(db_session, version_id=version_id, action="overit_bez_opravy")
+
+
+def test_fix_consultation_leads_with_plain_summary_technical_collapsed(db_session) -> None:
+    """v4.0.11: the Verifikácia FAIL Decision Card LEADS with the PLAIN manager summary (the verdict content),
+    and the technical fix scope rides ``technical_detail`` (the FE's collapsible "Technický detail") — the
+    non-expert manager never faces the jargon wall, yet nothing is lost."""
+    state = _seed_state_at_verifikacia(db_session)
+    version_id = state.version_id
+    orchestrator._record_message(
+        db_session,
+        version_id=version_id,
+        stage="verifikacia",
+        author="auditor",
+        recipient="manazer",
+        kind="verdict",
+        content="Appka je v poriadku, ale záverečná skúška nie je spoľahlivo opakovateľná.",
+        payload={
+            "verdict": "FAIL",
+            "findings": ["Skúška občas zlyhá a jeden test sa nedá spustiť dvakrát."],
+            "proposed_fix": "release_smoke_test.sh SAFETY 2 hardcodes shopify_order_id=990001 — make it idempotent.",
+            "phase": "verifikacia",
+        },
+    )
+    card = orchestrator._build_fix_consultation(db_session, version_id, state)
+    dec = card.decisions[0]
+    # The card LEADS with the plain summary — the jargon is NOT in the manager-facing explanation…
+    assert dec.explanation.startswith("Appka je v poriadku")
+    assert "990001" not in dec.explanation
+    # …it rides the collapsible technical_detail instead (nothing lost).
+    assert "990001" in dec.technical_detail

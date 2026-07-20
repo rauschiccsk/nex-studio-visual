@@ -1362,9 +1362,11 @@ def _auditor_upfront_directive(db: Session, version_id: uuid.UUID) -> str:
         "   - ak nájdeš medzeru (HOLE) → `verdict=false` (FAIL); konkrétne diery vymenuj v `findings` a do "
         "`proposed_fix` napíš ZAMERANÝ rozsah vyjasnenia/úpravy pre Manažéra (NEvykonávaj ho). Medzera sa "
         "eskaluje Manažérovi — build sa zastaví na schvaľovacom bode po Návrhu.\n"
-        "6. NÁLEZY PRE MANAŽÉRA — píš ĽUDSKOU rečou po slovensky (Manažér/junior je NEŠPECIALISTA): čo treba "
-        "rozhodnúť z pohľadu POUŽÍVATEĽA, v 1–2 vetách, BEZ ciest k súborom, názvov premenných/endpointov, "
-        "počtov testov a žargónu. Technické detaily patria do `proposed_fix`, nie do `findings`.\n"
+        "6. MANAŽÉRSKY TEXT vs. TECHNICKÝ DETAIL — POVINNÉ rozdelenie (Manažér/junior je NEŠPECIALISTA): "
+        "`summary`/`findings` = 1–2 vety / krátke odrážky po slovensky (čo treba rozhodnúť z pohľadu POUŽÍVATEĽA), "
+        "BEZ ciest k súborom, názvov premenných/endpointov, kódov, čísel riadkov, počtov testov a žargónu. VŠETOK "
+        "technický rozbor daj do `technical_detail` — Manažérovi sa zobrazí ZBALENÝ v „Technický detail“, takže "
+        "sa nič nestratí a manažérsky text ostane čistý. (`proposed_fix` = rozsah pre AI Agenta, smie byť technický.)\n"
         "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)." + reverify_block
     )
 
@@ -1762,11 +1764,18 @@ def _verifikacia_directive(
         "   - ak nájdeš zlyhanie → `verdict=false` (FAIL); konkrétne zlyhania vymenuj v `findings` a do "
         "`proposed_fix` napíš ZAMERANÝ rozsah opravy pre AI Agenta (NEvykonávaj ho — opravuje AI Agent, ty "
         "re-verifikuješ). FAIL sa vráti AI Agentovi do ohraničenej slučky.\n"
-        "7. NÁLEZY PRE MANAŽÉRA — píš ĽUDSKOU rečou po slovensky (Manažér aj junior operátor je "
-        "NEŠPECIALISTA): každý nález povedz tak, aby pochopil ČO nefunguje / čo treba rozhodnúť z pohľadu "
-        "POUŽÍVATEĽA, v 1–2 vetách. ŽIADNE cesty k súborom, názvy premenných/portov/endpointov, počty testov "
-        "ani žargón (ASSERTIONS_RUN, boot-floor, HMAC/JWT/exp, §4, EXPOSE…). Technické detaily daj do "
-        "`proposed_fix`, NIE do `findings`.\n"
+        "7. MANAŽÉRSKY TEXT vs. TECHNICKÝ DETAIL — POVINNÉ rozdelenie (Manažér aj junior je NEŠPECIALISTA):\n"
+        "   • `summary` = JEDNA–DVE vety po slovensky: ČO nefunguje z pohľadu POUŽÍVATEĽA + čo treba rozhodnúť. "
+        "`findings` = krátke ľudské odrážky v tom istom duchu. V OBOCH: ŽIADNE cesty k súborom, názvy "
+        "premenných/portov/endpointov, chybové kódy, verzie knižníc, čísla riadkov, počty testov ani žargón "
+        "(MissingGreenlet, ASSERTIONS_RUN, boot-floor, HMAC/JWT/exp, §…).\n"
+        "   • `technical_detail` = SEM daj VŠETOK technický rozbor (cesty, kódy, verzie, čísla riadkov, repro, "
+        "počty). Manažérovi sa zobrazí ZBALENÝ v „Technický detail“, takže sa nič nestratí — a práve preto "
+        "`summary`/`findings` môžu byť úplne bez žargónu. `proposed_fix` je zameraný rozsah pre AI Agenta (smie "
+        "byť technický).\n"
+        "   • PRÍKLAD — ZLE `summary`: „Verifikácia FAIL — MissingGreenlet v catalog_import.py:93…”. "
+        "DOBRE `summary`: „Appka je v poriadku, ale záverečná automatická skúška občas zlyhá a jeden test sa nedá "
+        "spustiť dvakrát — treba ju spoľahlivo opakovateľnú.” (detaily → `technical_detail`).\n"
         "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
     )
 
@@ -6526,6 +6535,26 @@ def _latest_fix_critique(db: Session, version_id: uuid.UUID) -> Optional[dict[st
     return None
 
 
+def _latest_verifikacia_manager_lead(db: Session, version_id: uuid.UUID) -> Optional[str]:
+    """v4.0.11: the PLAIN, manager-facing lead for a Verifikácia FAIL — the ``content`` (the Auditor's plain
+    ``summary``) of the LATEST verifikacia verdict. The Decision Card leads with THIS non-expert sentence, not
+    the technical fix scope (which rides the card's collapsible "Technický detail" + is the AI-Agent fix brief).
+    ``None`` when no verdict is on record → the caller falls back to a generic plain sentence."""
+    row = db.execute(
+        select(PipelineMessage)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.stage == "verifikacia",
+            PipelineMessage.kind == "verdict",
+        )
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if row is None:
+        return None
+    return (row.content or "").strip() or None
+
+
 def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineState) -> ConsultationBlock:
     """CR-V2-058 Part A — the deliberated Decision Card on a Verifikácia FAIL (the FIRST FAIL onward, not only
     loop exhaustion). The SHARED, engine-side card builder that enforces the §2 nosný invariant BY
@@ -6544,10 +6573,14 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
     positive = bool(critique) and critique.get("verdict") in ("accept", "narrow")
     scope = _latest_verifikacia_fix_scope(db, version_id) or "Auditor našiel blokujúce zlyhanie vo Verifikácii."
 
-    explanation_parts = [
-        "Auditor (nezávislý overovateľ) našiel pri koncovej Verifikácii blokujúce zlyhanie a navrhol cielenú opravu:",
-        scope,
-    ]
+    # v4.0.11: LEAD with the PLAIN manager summary (the verdict's ``content``), NOT the technical fix scope.
+    # The scope (file paths / codes / repro / line numbers) rides the card's collapsible "Technický detail"
+    # below AND is still the AI Agent's fix brief — so the non-expert never faces a jargon wall, yet nothing
+    # is lost. Falls back to a generic plain sentence when no verdict summary is on record.
+    lead = _latest_verifikacia_manager_lead(db, version_id) or (
+        "Koncové overenie našlo blokujúcu chybu — treba tvoje rozhodnutie."
+    )
+    explanation_parts = [lead]
     if critique:
         crit_verdict = critique.get("verdict")
         crit_why = str(critique.get("why") or "").strip()
@@ -6625,6 +6658,9 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
                 key="verifikacia_fix_next",
                 question="Verifikácia našla blokujúcu chybu. Ako chceš pokračovať?",
                 explanation=explanation,
+                # v4.0.11: the technical scope (paths / codes / repro) behind the card's "Technický detail"
+                # disclosure — keeps ``explanation`` plain while preserving the full detail one click away.
+                technical_detail=scope,
                 options=options,
                 rationale=rationale,
                 allow_free_text=True,
@@ -7135,6 +7171,9 @@ async def _run_verifikacia_round(
             ),
             "proposed_fix": review.proposed_fix,
             "phase": "verifikacia",
+            # v4.0.11: the Auditor's technical dump rides here → the ConversationThread shows ``content``
+            # (the PLAIN summary) with this behind a collapsible "Technický detail" (no jargon wall).
+            **({"technical_detail": review.technical_detail} if review.technical_detail else {}),
             **({"engine_override": "runtime_floor_red"} if (llm_pass and runtime_floor_red) else {}),
             **({"verified_sha": verified_sha} if verified_sha else {}),
         },

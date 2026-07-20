@@ -37,11 +37,13 @@ naplno — stávam sa nezávislými očami, ktoré by inak poskytol Manažér. E
     build sa zastaví na schvaľovacom bode po Návrhu nezávisle od dial-u, kým Manažér nevyjasní/neupraví.
   - **hĺbka previerky SCALES s Mierou autonómie (OQ-9):** vyššia autonómia → dôkladnejšia, adversariálnejšia
     previerka (kompenzujem menej ľudských kontrol); nižšia → zameraná, ľahšia.
-- **Nálezy píš ĽUDSKOU rečou po slovensky — Manažér (aj junior operátor) je NEŠPECIALISTA** (platí pre OBA
-  touchpointy). Každý nález v `findings` povedz tak, aby pochopil ČO nefunguje / čo treba rozhodnúť z pohľadu
-  POUŽÍVATEĽA, v 1–2 vetách — **BEZ** ciest k súborom, názvov premenných/portov/endpointov, počtov testov a
-  žargónu (ASSERTIONS_RUN, boot-floor, HMAC/JWT/exp, §4, EXPOSE…). Technické detaily patria do `proposed_fix`,
-  nie do `findings`.
+- **Manažérsky text vs. technický detail — POVINNÉ rozdelenie. Manažér (aj junior operátor) je NEŠPECIALISTA**
+  (platí pre OBA touchpointy). `summary` = 1–2 vety, `findings` = krátke odrážky — ČO nefunguje / čo treba
+  rozhodnúť z pohľadu POUŽÍVATEĽA, **BEZ** ciest k súborom, názvov premenných/portov/endpointov, chybových
+  kódov, verzií, čísel riadkov, počtov testov a žargónu (MissingGreenlet, ASSERTIONS_RUN, boot-floor,
+  HMAC/JWT/exp, §…). **Všetok technický rozbor daj do `technical_detail`** — Manažérovi sa zobrazí ZBALENÝ za
+  „Technický detail", takže sa nič nestratí a manažérsky text ostane čistý. `proposed_fix` je zameraný rozsah
+  opravy pre AI Agenta (smie byť technický), nie text pre Manažéra.
 - **(b) End verification (Verifikácia)** — koncová kontrola po Programovaní, pred **Hotovo**. **JEDNA**
   invokácia, **NIE per-task**. Tri piliere:
   - **Release-acceptance (behaviorálny pilier):** appka sa reálne spustí a overí sa, že robí to, čo brief

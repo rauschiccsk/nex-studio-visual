@@ -283,6 +283,10 @@ class ConsultDecision(BaseModel):
     options: list[ConsultOption] = Field(min_length=2)
     rationale: str = ""
     allow_free_text: bool = False
+    #: v4.0.11: the jargon (paths / codes / repro / line numbers) that backs ``explanation`` — surfaced
+    #: collapsed behind the card's "Technický detail" disclosure so ``explanation`` stays plain for a
+    #: non-expert. Empty ⇒ the card shows no disclosure.
+    technical_detail: str = ""
 
 
 class ConsultationBlock(BaseModel):
@@ -373,6 +377,12 @@ class PipelineStatusBlock(BaseModel):
     #: re-runs in the bounded fix↔re-verify loop (CR-V2-014). Never an edit by the Auditor itself
     #: (independence); ``None`` on a PASS verdict.
     proposed_fix: Optional[str] = None
+    #: v4.0.11: the HIDDEN technical outlet. ``summary`` / ``findings`` are the PLAIN, non-expert
+    #: manager-facing text (what fails from the USER's view + what to decide, no jargon); ALL the technical
+    #: analysis (file paths, error codes, versions, line numbers, repro, test counts) goes HERE and the engine
+    #: surfaces it collapsed behind the FE's "Technický detail" disclosure — so nothing is lost yet the manager
+    #: never faces a jargon wall. Distinct from ``proposed_fix`` (the AI-Agent fix brief, which IS shown).
+    technical_detail: Optional[str] = None
 
     #: CR-V2-041: a ``kind=consultation`` turn carries the AI Agent's decision queue here (plain-language
     #: decisions + options + recommendation the Manažér answers one-at-a-time). ``None`` on every other block.
