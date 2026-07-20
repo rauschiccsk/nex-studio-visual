@@ -542,3 +542,46 @@ def test_ensure_verifikacia_fix_task_idempotent(db_session) -> None:
     db_session.flush()
     orchestrator._ensure_verifikacia_fix_task(db_session, version_id)
     assert len(_fix_epics()) == 2
+
+
+def test_fix_consultation_escalates_when_loop_not_converging(db_session) -> None:
+    """v4.0.16: after >= _VERIFIKACIA_STUCK_STREAK consecutive Verifikácia FAILs the card STOPS recommending
+    another fix and RECOMMENDS handing it to a developer — the non-expert isn't looped forever (nex-shopify 10×)."""
+    state = _seed_state_at_verifikacia(db_session)
+    version_id = state.version_id
+    for _ in range(orchestrator._VERIFIKACIA_STUCK_STREAK):
+        orchestrator._record_message(
+            db_session,
+            version_id=version_id,
+            stage="verifikacia",
+            author="auditor",
+            recipient="manazer",
+            kind="verdict",
+            content="stále tá istá príčina",
+            payload={"verdict": "FAIL", "findings": ["x"], "proposed_fix": "y", "phase": "verifikacia"},
+        )
+    assert orchestrator._verifikacia_fail_streak(db_session, version_id) >= orchestrator._VERIFIKACIA_STUCK_STREAK
+    card = orchestrator._build_fix_consultation(db_session, version_id, state)
+    dec = card.decisions[0]
+    assert [o.id for o in dec.options if o.recommended] == ["hold"]  # stuck → recommend stop/escalate, NOT a re-fix
+    assert "NEDARÍ" in card.intro and "nekonverguje" in dec.explanation.lower()
+
+
+def test_fix_consultation_fail_streak_broken_by_pass(db_session) -> None:
+    """A PASS breaks the FAIL streak → not stuck → the normal 'Nechaj to opraviť' one-click returns."""
+    state = _seed_state_at_verifikacia(db_session)
+    version_id = state.version_id
+    for v in ["FAIL", "FAIL", "FAIL", "PASS", "FAIL"]:
+        orchestrator._record_message(
+            db_session,
+            version_id=version_id,
+            stage="verifikacia",
+            author="auditor",
+            recipient="manazer",
+            kind="verdict",
+            content="x",
+            payload={"verdict": v, "findings": ["x"], "proposed_fix": "y", "phase": "verifikacia"},
+        )
+    assert orchestrator._verifikacia_fail_streak(db_session, version_id) == 1  # only the newest FAIL, PASS broke it
+    card = orchestrator._build_fix_consultation(db_session, version_id, state)
+    assert [o.id for o in card.decisions[0].options if o.recommended] == ["fix_it"]

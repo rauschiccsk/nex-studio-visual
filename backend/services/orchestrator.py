@@ -6555,6 +6555,39 @@ def _latest_verifikacia_manager_lead(db: Session, version_id: uuid.UUID) -> Opti
     return (row.content or "").strip() or None
 
 
+#: v4.0.16: after this many CONSECUTIVE Verifikácia FAIL verdicts (since the last PASS) the automated fix loop
+#: is judged NON-CONVERGENT — the same blocker keeps recurring and another round won't help. The card then
+#: RECOMMENDS handing it to a developer instead of another fix (manager-directed fixes reset ``iteration``, so
+#: the loop is otherwise unbounded — nex-shopify 2026-07-20: 10 identical fix rounds).
+_VERIFIKACIA_STUCK_STREAK = 3
+
+
+def _verifikacia_fail_streak(db: Session, version_id: uuid.UUID) -> int:
+    """v4.0.16: how many Verifikácia verdicts IN A ROW have been FAIL (newest-first, until the first non-FAIL /
+    PASS breaks the run). A high streak = the fix loop is NOT converging; the card escalates to a human instead
+    of looping the non-expert forever. Text-agnostic (counts FAILs, not finding wording) → robust."""
+    rows = (
+        db.execute(
+            select(PipelineMessage.payload)
+            .where(
+                PipelineMessage.version_id == version_id,
+                PipelineMessage.stage == "verifikacia",
+                PipelineMessage.kind == "verdict",
+            )
+            .order_by(PipelineMessage.seq.desc())
+        )
+        .scalars()
+        .all()
+    )
+    streak = 0
+    for p in rows:
+        if isinstance(p, dict) and p.get("verdict") == "FAIL":
+            streak += 1
+        else:
+            break
+    return streak
+
+
 def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineState) -> ConsultationBlock:
     """CR-V2-058 Part A — the deliberated Decision Card on a Verifikácia FAIL (the FIRST FAIL onward, not only
     loop exhaustion). The SHARED, engine-side card builder that enforces the §2 nosný invariant BY
@@ -6572,6 +6605,9 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
     critique = _latest_fix_critique(db, version_id)
     positive = bool(critique) and critique.get("verdict") in ("accept", "narrow")
     scope = _latest_verifikacia_fix_scope(db, version_id) or "Auditor našiel blokujúce zlyhanie vo Verifikácii."
+    # v4.0.16: non-converging loop breaker — when the SAME blocker keeps recurring, stop RECOMMENDING another
+    # fix and recommend handing it to a developer instead (honest escalation, not an endless non-expert loop).
+    stuck = _verifikacia_fail_streak(db, version_id) >= _VERIFIKACIA_STUCK_STREAK
 
     # v4.0.11: LEAD with the PLAIN manager summary (the verdict's ``content``), NOT the technical fix scope.
     # The scope (file paths / codes / repro / line numbers) rides the card's collapsible "Technický detail"
@@ -6604,6 +6640,13 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
             "engine-červené zlyhanie). Môžeš ju napriek tomu nechať opraviť — AI Agent opraví podľa nálezov "
             "Auditora a Auditor to znova preverí; nič nemusíš písať."
         )
+    if stuck:
+        explanation_parts.append(
+            "⚠️ To isté zlyhanie sa opakuje už niekoľko kôl po sebe a automatická oprava ho NEODSTRÁNILA — "
+            "AI Agent nekonverguje (zvyčajne sa zasekol na nesprávnej príčine). Ďalší pokus pravdepodobne "
+            "nepomôže; odporúčam build zastaviť a nechať sa naň pozrieť vývojára (technický tím / Dedo), "
+            "ktorý to vyrieši priamo."
+        )
     explanation = "\n\n".join(explanation_parts)
 
     options: list[ConsultOption] = []
@@ -6615,7 +6658,7 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
                 label="Spustiť pripravenú opravu",
                 detail="Spustí už pripravenú cielenú opravu (AI Agent ju vykoná v Programovaní a Auditor ju "
                 "znova overí). Navrhnutá oprava prešla nezávislým preverením kritika.",
-                recommended=True,
+                recommended=not stuck,  # v4.0.16: not the default once the loop is non-convergent
             )
         )
     else:
@@ -6629,10 +6672,15 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
         options.append(
             ConsultOption(
                 id="fix_it",
-                label="Nechaj to opraviť",
-                detail="Jedným klikom — AI Agent opraví podľa nálezov Auditora a Auditor to znova preverí. "
-                "Nemusíš nič písať.",
-                recommended=True,
+                label=("Skúsiť opraviť ešte raz" if stuck else "Nechaj to opraviť"),
+                detail=(
+                    "Pravdepodobne nepomôže — to isté zlyhanie sa opakuje a automatická oprava nekonverguje. "
+                    "Ak to chceš aj tak skúsiť, AI Agent opraví podľa nálezov Auditora."
+                    if stuck
+                    else "Jedným klikom — AI Agent opraví podľa nálezov Auditora a Auditor to znova preverí. "
+                    "Nemusíš nič písať."
+                ),
+                recommended=not stuck,  # v4.0.16: stop recommending another fix once the loop is non-convergent
             )
         )
     options.append(
@@ -6647,30 +6695,47 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
     options.append(
         ConsultOption(
             id="hold",
-            label="Zatiaľ podržať (rozhodnem neskôr)",
-            detail="Build ostane blokovaný, kým nerozhodneš; kartu môžeš vyriešiť neskôr (spustiť opravu alebo "
-            "usmerniť).",
+            label=("Zastaviť a odovzdať vývojárovi" if stuck else "Zatiaľ podržať (rozhodnem neskôr)"),
+            detail=(
+                "Automatická oprava nekonverguje — build sa zastaví a na chybu sa priamo pozrie vývojár (Dedo / "
+                "technický tím), mimo automatickej slučky. Odporúčané."
+                if stuck
+                else "Build ostane blokovaný, kým nerozhodneš; kartu môžeš vyriešiť neskôr (spustiť opravu alebo "
+                "usmerniť)."
+            ),
+            recommended=stuck,  # v4.0.16: the recommended action once the automated loop is non-convergent
         )
     )
-    # §2 by construction: exactly one recommended one-click FORWARD action (positive → accept_fix; else →
-    # fix_it, v4.0.12) — a non-expert ALWAYS has a recommended one-click, never only "write a directive".
-    # Self-assert because engine cards bypass _validate_block; a future refactor that broke it would fail loudly
-    # here, never ship a card that recommends an un-vetted SPECIFIC scope (accept_fix) or leaves a non-expert stuck.
+    # §2 by construction: EXACTLY ONE recommended option. Not stuck → the one-click FORWARD action (positive →
+    # accept_fix; else → fix_it, v4.0.12), so a non-expert always has a recommended one-click. Stuck (v4.0.16) →
+    # ``hold`` ("Zastaviť a odovzdať vývojárovi"), because another automated fix won't help. Self-assert because
+    # engine cards bypass _validate_block; a future refactor that broke it would fail loudly here.
     recommended_count = sum(1 for o in options if o.recommended)
     if recommended_count != 1:  # pragma: no cover - defensive; construction guarantees exactly one
         raise OrchestratorError(
             f"fix-consultation invariant violated: expected exactly one recommended option, got {recommended_count}"
         )
 
-    rationale = (
-        "Odporúčam spustiť pripravenú opravu — nezávislý kritik ju preveril (je vynútená konštrukciou)."
-        if positive
-        else "Odporúčam nechať to opraviť — Auditor presne vie, čo je zle; AI Agent to opraví podľa jeho nálezov "
-        "a Auditor to znova preverí. Nemusíš nič písať. (Ak chceš, môžeš opravu nasmerovať sám cez 'Usmerniť opravu'.)"
-    )
+    if stuck:
+        rationale = (
+            "Odporúčam build ZASTAVIŤ a odovzdať vývojárovi — rovnaké zlyhanie sa opakovalo už niekoľkokrát a "
+            "automatická oprava nekonverguje; ďalší pokus pravdepodobne nepomôže, len minie čas a tokeny."
+        )
+    elif positive:
+        rationale = "Odporúčam spustiť pripravenú opravu — nezávislý kritik ju preveril (je vynútená konštrukciou)."
+    else:
+        rationale = (
+            "Odporúčam nechať to opraviť — Auditor presne vie, čo je zle; AI Agent to opraví podľa jeho nálezov "
+            "a Auditor to znova preverí. Nemusíš nič písať. (Ak chceš, môžeš opravu nasmerovať sám cez "
+            "'Usmerniť opravu'.)"
+        )
     return ConsultationBlock(
         id=f"verifikacia-fix-{version_id}-{state.iteration}",
-        intro="Verifikácia našla chybu — potrebné je tvoje rozhodnutie.",
+        intro=(
+            "⚠️ Automatická oprava sa NEDARÍ — to isté zlyhanie sa opakuje. Treba tvoje rozhodnutie."
+            if stuck
+            else "Verifikácia našla chybu — potrebné je tvoje rozhodnutie."
+        ),
         source="verifikacia_fix",
         decisions=[
             ConsultDecision(
