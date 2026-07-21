@@ -4,9 +4,14 @@ import {
   listProjectsApi,
   getNexsharedStatusApi,
   upgradeNexsharedApi,
+  getGitStatusApi,
+  commitGitApi,
+  discardGitApi,
   type NexsharedStatus,
+  type GitStatus,
 } from "@/services/api/projects";
 import { NexsharedUpgradePrompt } from "@/components/riadiace/NexsharedUpgradePrompt";
+import { DirtyTreeGuard } from "@/components/riadiace/DirtyTreeGuard";
 import { listVersions, createVersion, writeZadanie } from "@/services/api/versions";
 import { postPipelineActionApi } from "@/services/api/pipeline";
 import { useActiveContextStore } from "@/store/activeContextStore";
@@ -76,6 +81,11 @@ export default function NewVersionPage() {
   const [nexBusy, setNexBusy] = useState(false);
   const [nexDismissed, setNexDismissed] = useState(false);
 
+  // v4.0.25 dirty-tree guard: block founding until the project's working tree is clean, so the
+  // pipeline never starts from an uncommitted baseline it can't scope (Tibor/Nazar lens).
+  const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
+  const [gitBusy, setGitBusy] = useState(false);
+
   const verRef = useRef<HTMLInputElement>(null);
 
   // Load project + existing versions
@@ -91,6 +101,10 @@ export default function NewVersionPage() {
         // #3: check nex-shared freshness (best-effort — a failure just skips the prompt).
         getNexsharedStatusApi(found.id)
           .then((st) => { if (!cancelled) setNexStatus(st); })
+          .catch(() => {});
+        // v4.0.25: preflight the working tree — a dirty tree blocks founding until resolved.
+        getGitStatusApi(found.id)
+          .then((gs) => { if (!cancelled) setGitStatus(gs); })
           .catch(() => {});
         return listVersions(found.id).then((vs) => {
           if (cancelled) return;
@@ -108,6 +122,9 @@ export default function NewVersionPage() {
     ? [...prevVersions].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
     : null;
 
+  // v4.0.25: a loaded-and-dirty tree blocks founding (null = not yet loaded → don't block).
+  const isDirty = gitStatus !== null && !gitStatus.clean;
+
   async function handleNexUpgrade(target: string) {
     if (!project) return;
     setNexBusy(true);
@@ -120,6 +137,43 @@ export default function NewVersionPage() {
       // Best-effort: leave the prompt up so the Manažér can retry or dismiss.
     } finally {
       setNexBusy(false);
+    }
+  }
+
+  async function refreshGitStatus() {
+    if (!project) return;
+    try {
+      setGitStatus(await getGitStatusApi(project.id));
+    } catch {
+      /* best-effort — leave the last known status */
+    }
+  }
+
+  // "Uložiť ich" — commit all pending changes (preserves work), then re-check the tree.
+  async function handleCommitTree() {
+    if (!project) return;
+    setGitBusy(true);
+    try {
+      await commitGitApi(project.id);
+      await refreshGitStatus();
+    } catch {
+      /* leave the guard up so the operator can retry or discard */
+    } finally {
+      setGitBusy(false);
+    }
+  }
+
+  // "Zahodiť" — discard all pending changes (destructive; the guard confirms first).
+  async function handleDiscardTree() {
+    if (!project) return;
+    setGitBusy(true);
+    try {
+      await discardGitApi(project.id);
+      await refreshGitStatus();
+    } catch {
+      /* leave the guard up */
+    } finally {
+      setGitBusy(false);
     }
   }
 
@@ -226,7 +280,19 @@ export default function NewVersionPage() {
       {/* Scrollable form */}
       <div className="flex-1 overflow-y-auto px-6 py-6">
         <div className="max-w-xl mx-auto">
-          {nexStatus && nexStatus.behind > 0 && !nexDismissed && !savedVersion && (
+          {/* v4.0.25 dirty-tree guard — blocks founding until the tree is clean; resolve it first. */}
+          {isDirty && !savedVersion && gitStatus && (
+            <div className="mb-5">
+              <DirtyTreeGuard
+                status={gitStatus}
+                busy={gitBusy}
+                onCommit={handleCommitTree}
+                onDiscard={handleDiscardTree}
+              />
+            </div>
+          )}
+          {/* nex-shared upgrade prompt — only once the tree is clean (resolve pending work first). */}
+          {!isDirty && nexStatus && nexStatus.behind > 0 && !nexDismissed && !savedVersion && (
             <div className="mb-5">
               <NexsharedUpgradePrompt
                 status={nexStatus}
@@ -345,6 +411,13 @@ export default function NewVersionPage() {
               </div>
             )}
 
+            {/* v4.0.25: while the tree is dirty, founding is blocked — resolve the guard above first. */}
+            {isDirty && !savedVersion && (
+              <p className="text-[12px] text-[var(--color-state-warning-fg)]">
+                Najprv vyrieš neuložené zmeny hore, potom môžeš založiť verziu.
+              </p>
+            )}
+
             {/* Actions */}
             {!savedVersion ? (
               // Step 1 — save the Zadanie.
@@ -358,7 +431,7 @@ export default function NewVersionPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={saving || !project}
+                  disabled={saving || !project || isDirty}
                   className="flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
                 >
                   {saving ? (

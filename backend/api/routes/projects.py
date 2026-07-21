@@ -53,6 +53,7 @@ from backend.schemas.project import (
 )
 from backend.schemas.version import VersionCreate
 from backend.services import deploy as deploy_service
+from backend.services import git_state as git_state_service
 from backend.services import github_validation as github_validation_service
 from backend.services import nexshared as nexshared_service
 from backend.services import port_registry as port_registry_service
@@ -453,6 +454,66 @@ def upgrade_nexshared(
         )
     committed = nexshared_service.commit_pin_upgrade(project.source_path, payload.target_version)
     return {"upgraded": True, "target_version": payload.target_version, "committed": committed}
+
+
+@router.get("/{project_id}/git-status")
+def get_git_status(project_id: UUID, db: Session = Depends(get_db)) -> dict:
+    """Working-tree preflight for the New-Version flow (v4.0.25): is the project's tree
+    clean enough to found a version? A dirty tree would surface uncommitted work to the
+    pipeline agent as an expert scope question the operator can't answer (Tibor/Nazar lens).
+    A project with no source path has nothing to guard → reported clean."""
+    try:
+        project = project_service.get_by_id(db, project_id)
+    except ValueError as exc:
+        raise _map_value_error(exc) from exc
+    if not project.source_path:
+        return {"clean": True, "dirty_count": 0, "files": [], "truncated": False}
+    try:
+        return git_state_service.working_tree_status(project.source_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+class _GitCommitRequest(BaseModel):
+    message: Optional[str] = None
+
+
+@router.post("/{project_id}/git-commit")
+def commit_git(project_id: UUID, payload: _GitCommitRequest, db: Session = Depends(get_db)) -> dict:
+    """Commit ALL pending changes so the tree is clean before founding (the guard's
+    "Uložiť ich" action). Preserves work — the safe, default resolution."""
+    try:
+        project = project_service.get_by_id(db, project_id)
+    except ValueError as exc:
+        raise _map_value_error(exc) from exc
+    if not project.source_path:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Projekt nemá zdrojovú cestu.")
+    try:
+        result = git_state_service.commit_all(project.source_path, payload.message or "")
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if not result.get("ok"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result.get("error", "Commit zlyhal"))
+    return result
+
+
+@router.post("/{project_id}/git-discard")
+def discard_git(project_id: UUID, db: Session = Depends(get_db)) -> dict:
+    """Discard ALL pending changes → clean tree (the guard's "Zahodiť" action).
+    Destructive; the FE gates it behind an explicit operator confirmation."""
+    try:
+        project = project_service.get_by_id(db, project_id)
+    except ValueError as exc:
+        raise _map_value_error(exc) from exc
+    if not project.source_path:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Projekt nemá zdrojovú cestu.")
+    try:
+        result = git_state_service.discard_all(project.source_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if not result.get("ok"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Zahodenie zmien zlyhalo")
+    return result
 
 
 @router.post(

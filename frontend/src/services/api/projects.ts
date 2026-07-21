@@ -53,6 +53,38 @@ export function upgradeNexsharedApi(
   });
 }
 
+/** One uncommitted entry in the project's working tree (git status --porcelain). */
+export interface GitStatusFile {
+  code: string;
+  path: string;
+}
+
+/** Working-tree preflight (v4.0.25): is the project clean enough to found a version? */
+export interface GitStatus {
+  clean: boolean;
+  dirty_count: number;
+  files: GitStatusFile[];
+  truncated: boolean;
+}
+
+/** Read the project's working-tree cleanliness — the dirty-tree guard gate. */
+export function getGitStatusApi(projectId: string): Promise<GitStatus> {
+  return api.get<GitStatus>(`/projects/${projectId}/git-status`);
+}
+
+/** "Uložiť ich" — commit ALL pending changes so the tree is clean (preserves work). */
+export function commitGitApi(
+  projectId: string,
+  message?: string,
+): Promise<{ ok: boolean; note?: string; error?: string }> {
+  return api.post(`/projects/${projectId}/git-commit`, { message: message ?? null });
+}
+
+/** "Zahodiť" — discard ALL pending changes (destructive; FE gates behind a confirm). */
+export function discardGitApi(projectId: string): Promise<{ ok: boolean }> {
+  return api.post(`/projects/${projectId}/git-discard`, {});
+}
+
 /**
  * Hard-delete a project (CR-V2-027). Admin-only (role `ri`) and rejected with 409 once the project
  * has had a PROD deploy — both enforced by the backend. When `deleteGithub` is true the backing
