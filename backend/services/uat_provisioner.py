@@ -372,6 +372,21 @@ def _parse_env_file(path: Path) -> dict[str, str]:
     return out
 
 
+def read_paired_manager_launch(manager_env_path: Path) -> tuple[Optional[str], Optional[str]]:
+    """Read the paired NEX Manager Deploy's ``LAUNCH_SIGNING_KEY`` + ``DEPLOY_SLUG``.
+
+    A NEX-Manager token-launch module must verify launch tokens with the SAME key the
+    Manager signs them with. The Manager Deploy lives as a sibling under the same
+    customer root (``<root>/<customer>/nex-manager/.env``), so a token-launch app's
+    ``MANAGER_LAUNCH_SIGNING_KEY`` is wired from there — not synthesised (a random key
+    would never match the Manager → every launch 401s). Returns ``(None, None)`` when
+    no Manager is deployed there (the app then falls back to preserved/empty — i.e.
+    token-launch stays off until a Manager is paired). The key is a secret — never logged.
+    """
+    mgr = _parse_env_file(manager_env_path)  # {} when the file is absent
+    return (mgr.get("LAUNCH_SIGNING_KEY") or None, mgr.get("DEPLOY_SLUG") or None)
+
+
 def detect_sqlalchemy_pg_drivers(project_path: Path) -> Optional[set[str]]:
     """The SQLAlchemy sync postgres driver tokens the source project DECLARES as dependencies (H1, CR-1).
 
@@ -481,6 +496,7 @@ def generate_uat_env(
     shared_db_password: str,
     preserved_secrets: Optional[dict[str, str]] = None,
     admin_password: Optional[str] = None,
+    manager_env_path: Optional[Path] = None,
 ) -> str:
     """Render the UAT ``.env`` content (detected DB creds + synthetic backend secrets).
 
@@ -491,6 +507,12 @@ def generate_uat_env(
     ``preserved_secrets`` value on a redeploy). The top-level POSTGRES_* + DB_PASSWORD lines are
     always written so the postgres service (which reads ``${POSTGRES_PASSWORD}``) and the backend
     agree on the same synthetic password.
+
+    Token-launch modules (those declaring ``MANAGER_LAUNCH_SIGNING_KEY``) are the ONE exception
+    to synthesis: that key + ``MANAGER_DEPLOY_SLUG`` are wired from the paired NEX Manager Deploy
+    (``manager_env_path``) so the module verifies launch tokens with the same key the Manager
+    signs them with. Everything else (incl. the module-private ``MANAGER_SESSION_SIGNING_KEY``)
+    stays synthetic/preserved as usual.
     """
     preserved_secrets = preserved_secrets or {}
     db_host = db_service or "postgres"
@@ -514,11 +536,30 @@ def generate_uat_env(
         if isinstance(be_env, dict):
             raw_env.update(be_env)
 
+    # NEX-Manager token-launch (self-describing): an app that declares
+    # ``MANAGER_LAUNCH_SIGNING_KEY`` is launched from the paired Manager and must share
+    # that Manager's launch key (a synthetic one never matches → every launch 401s). Wire
+    # it + the Manager's DEPLOY_SLUG from the paired Manager Deploy's ``.env``; resolved
+    # lazily so non-token apps never touch it.
+    mgr_launch_key: Optional[str] = None
+    mgr_deploy_slug: Optional[str] = None
+    if manager_env_path is not None and "MANAGER_LAUNCH_SIGNING_KEY" in raw_env:
+        mgr_launch_key, mgr_deploy_slug = read_paired_manager_launch(manager_env_path)
+
     rendered: dict[str, str] = {}
     for key, value in raw_env.items():
         key_str = str(key)
         if key_str in {"POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB", "DB_PASSWORD"}:
             continue  # already emitted above (single source of the shared password)
+        if key_str == "MANAGER_LAUNCH_SIGNING_KEY":
+            # Paired Manager's key wins (propagates a Manager key rotation on redeploy);
+            # else preserve the prior value; else empty (token-launch off, launch route
+            # cleanly rejects) — never a synthetic that would 401 every real launch.
+            rendered[key_str] = mgr_launch_key or preserved_secrets.get(key_str) or ""
+            continue
+        if key_str == "MANAGER_DEPLOY_SLUG":
+            rendered[key_str] = mgr_deploy_slug or ""
+            continue
         if _is_var_expansion(value):
             # v4.0.18: honour a ``${VAR:-default}`` default on a NON-secret var — it IS the app's intended value
             # (e.g. GENESIS_SOURCE:-mock / SHOPIFY_SOURCE:-fake). Blindly writing __UAT_SYNTHETIC__ crashed apps
@@ -1048,6 +1089,14 @@ def provision_uat(
         app=app,
     )
 
+    # Paired NEX Manager Deploy — a sibling under the same customer root
+    # (``<root>/<customer>/nex-manager/.env``). Only per-customer instances (cockpit
+    # deploy) can be Manager-launched; the flat project-level UAT path has no customer,
+    # so no pairing (token-launch stays off there).
+    manager_env_path: Optional[Path] = None
+    if per_customer and customer_slug:
+        manager_env_path = (prod_root if environment == "prod" else uat_root) / customer_slug / "nex-manager" / ".env"
+
     env_example = _parse_env_file(project_path / ".env.example")
     env_content = generate_uat_env(
         slug=uat_slug,
@@ -1062,6 +1111,7 @@ def provision_uat(
         shared_db_password=shared_db_password,
         preserved_secrets=preserved_secrets,
         admin_password=admin_password,
+        manager_env_path=manager_env_path,
     )
 
     # H1 (CR-1): driver↔URL self-validation BEFORE any file is written — fail LOUD at provision time for
