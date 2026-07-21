@@ -1735,6 +1735,20 @@ def _verifikacia_directive(
     # (Tibor/Nazar) is a non-expert who cannot backstop it. The old "depth scales inversely with human
     # oversight" down-scaled the gate exactly when it mattered — removed.
     coverage_brief = _release_coverage_brief(db, version_id)
+    # v4.0.23: the fidelity-to-Vizuál check — only when a Vizuál was approved (its FE commit recorded).
+    _vizual_sha = db.execute(select(Version.vizual_approved_sha).where(Version.id == version_id)).scalar_one_or_none()
+    vizual_block = (
+        (
+            "2b. VERNOSŤ VIZUÁLU (POVINNÉ — Manažér schválil vizuál appky): to, čo schválil vo Vizuáli, sa "
+            f"MUSÍ aj dodať. Sprav `git diff {_vizual_sha} -- frontend/` a over, že žiadna schválená "
+            "obrazovka nebola vizuálne PREROBENÁ — žiadny vypadnutý panel, zmenený layout / počet stĺpcov, "
+            "iná paleta ani vymenené komponenty. Programovanie smie dorobiť dáta a logiku, NIE meniť "
+            "schválený vzhľad/rozloženie. Prerobená schválená obrazovka = FAIL (do `proposed_fix`: vráť "
+            "obrazovku na schválený Vizuál, dorob len dáta).\n"
+        )
+        if _vizual_sha
+        else ""
+    )
     return (
         "VERIFIKÁCIA (nezávislý Auditor, koncová kontrola po Programovaní, pred Hotovo).\n"
         "1. Si NEZÁVISLÝ overovateľ MIMO tímu AI Agenta — over z VONKU (žiadny agent sa nevie auditovať sám). "
@@ -1744,6 +1758,7 @@ def _verifikacia_directive(
         "spustil appku proti INTERNÝM FIXTÚRAM (nie zákazníckej inštancii — deploy je mimo pipeline; "
         "„Hotovo“ = overené, nie nasadené) — výsledok je nižšie. Zohľadni ho v synthéze.\n"
         + smoke_block
+        + vizual_block
         + "3. REFUTUJ, NEPOTVRDZUJ (rovnaká PLNÁ hĺbka VŽDY — nezávisle od Miery autonómie): predpokladaj, že "
         "build je CHYBNÝ, kým sám nedokážeš opak. NEDÔVERUJ zeleným testom AI Agenta — over ich SÁM oproti "
         "bežiacej appke. Aktívne LOV diery v RIZIKOVÝCH častiach (bezpečnosť, peniaze/výpočty, hlavný "
@@ -9433,7 +9448,16 @@ async def apply_action(
         # HMR reflects it live), so squash the whole visual session into ONE commit now, at approval, before
         # advancing vizual → programovanie. Best-effort; a no-op when nothing changed.
         if state.current_stage == "vizual":
-            _commit_vizual_changes(claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id))
+            _vizual_root = claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id)
+            _commit_vizual_changes(_vizual_root)
+            # v4.0.23: record the approved-Vizuál commit as the binding contract — Programovanie
+            # preserves it (wire data, don't redesign) + the Auditor verifies the delivered FE
+            # still matches it. Best-effort: no SHA (dry-run / unreadable repo) → leave NULL.
+            _approved_sha = _repo_head(_vizual_root)
+            if _approved_sha:
+                _approved_version = db.get(Version, version_id)
+                if _approved_version is not None:
+                    _approved_version.vizual_approved_sha = _approved_sha
         _record_message(
             db,
             version_id=version_id,

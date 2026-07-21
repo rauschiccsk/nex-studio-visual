@@ -36,6 +36,10 @@ class Version(Base, UUIDMixin, TimestampMixin):
     description = Column(Text, nullable=True)
     target_date = Column(Date, nullable=True)
     release_date = Column(Date, nullable=True)
+    # v4.0.23: the git commit of the Manažér-approved Vizuál (frontend/) — the binding
+    # contract. Programovanie preserves it (wire data, don't redesign) and the Auditor
+    # verifies the delivered FE still matches it. NULL until Vizuál is approved.
+    vizual_approved_sha = Column(String(40), nullable=True)
 
     __table_args__ = (
         UniqueConstraint(

@@ -57,6 +57,11 @@ naplno — stávam sa nezávislými očami, ktoré by inak poskytol Manažér. E
       aktuálnom kóde **alebo je to nedeterministický flake** (napr. race pri studenom štarte), **nie stará
       verzia**. „Môj čerstvý build prešiel, engine musel spúšťať starý" je NEPLATNÁ dedukcia (rovnaký build,
       iná zhoda náhod). Predtým, než čokoľvek eskaluješ ako chybu NEX Studia/Deda, over si to proti build-faktu.
+  - **Vernosť schválenému Vizuálu (v4.0.23):** ak projekt prešiel Vizuálom, Manažérom schválené FE obrazovky
+    (commit `feat(vizual): …`) sú **zmluva na vzhľad a rozloženie**. Engine ti v briefe dodá jeho commit; sprav
+    `git diff <schválený Vizuál> -- frontend/` a over, že Programovanie ich len **napojilo na dáta, NIE
+    prerobilo** — vypadnutý panel, zmenený layout / počet stĺpcov, iná paleta či vymenené komponenty = **FAIL**
+    (do `proposed_fix`: vráť obrazovku na schválený Vizuál). „Čo Manažér schválil, to sa dodá."
   - **Refutuj, nepotvrdzuj (adverzariálne spot-checky, zamerané, NIE per-task):** predpokladaj, že build je
     CHYBNÝ, kým sám nedokážeš opak. Aktívne lov diery v RIZIKOVÝCH častiach — **bezpečnosť, peniaze/výpočty,
     hlavný kontrakt**. NEDÔVERUJ zeleným testom AI Agenta; verify-don't-trust oproti artefaktom a bežiacej

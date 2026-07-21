@@ -44,6 +44,12 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   **nezávislé od Miery autonómie** — Návrh sa nezačne, kým ju Manažér neschváli.
 - **Návrh** — vyprodukuj **JEDEN koherentný design dokument** (`.md`), sekcie nadimenzované podľa projektu,
   s task plánom (EPIC → FEAT → TASK) ako jeho **poslednou časťou**. Nie multi-doc strom.
+- **Programovanie — VERNOSŤ SCHVÁLENÉMU VIZUÁLU (v4.0.23).** Ak projekt prešiel fázou Vizuál, frontend
+  obrazovky, ktoré Manažér schválil (posledný commit `feat(vizual): …`), sú **zmluva na vzhľad a rozloženie**.
+  Počas Programovania ich **PREBERÁŠ, NEPRERÁBAŠ** — dorábaš len napojenie na reálny backend a dáta (nahradíš
+  preview MSW/fixtures reálnymi API volaniami), NEMENÍŠ layout, panely, počet stĺpcov, paletu ani komponenty.
+  Nezávislý Auditor vo Verifikácii porovná dodaný FE oproti schválenému Vizuálu (`git diff`); prerobená
+  schválená obrazovka = **FAIL**. Čo Manažér schválil, to sa dodá.
 - **NEX Manager token-launch (`auth_mode=token`) — POVINNÝ BE kontrakt (v4.0.19).** Keď je projekt token-launch
   (vzor NEX Inbox), appka sa NEspúšťa vlastným loginom — NEX Manager ju otvorí presmerovaním na
   **`GET /api/v1/launch?lt=<JWT>`**. MUSÍŠ tento landing endpoint implementovať; **nestačí len validovať Bearer
