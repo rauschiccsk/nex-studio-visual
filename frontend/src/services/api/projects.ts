@@ -23,6 +23,36 @@ export function getProjectApi(projectId: string): Promise<ProjectRead> {
   return api.get<ProjectRead>(`/projects/${projectId}`);
 }
 
+/** One changelog section shown as "Čo prinesie" in the nex-shared upgrade prompt. */
+export interface NexsharedChangelogEntry {
+  version: string;
+  body: string;
+}
+
+/** nex-shared upgrade status for the auto-notify prompt (#3). */
+export interface NexsharedStatus {
+  current: string | null;
+  latest: string | null;
+  behind: number;
+  up_to_date: boolean;
+  changelog: NexsharedChangelogEntry[];
+}
+
+/** The app's pinned nex-shared vs the latest published tag + the changelog delta. */
+export function getNexsharedStatusApi(projectId: string): Promise<NexsharedStatus> {
+  return api.get<NexsharedStatus>(`/projects/${projectId}/nexshared-status`);
+}
+
+/** Opt-in bump: rewrite the app's nex-shared pin to `targetVersion` + commit it. */
+export function upgradeNexsharedApi(
+  projectId: string,
+  targetVersion: string,
+): Promise<{ upgraded: boolean; target_version: string; committed: boolean }> {
+  return api.post(`/projects/${projectId}/nexshared-upgrade`, {
+    target_version: targetVersion,
+  });
+}
+
 /**
  * Hard-delete a project (CR-V2-027). Admin-only (role `ri`) and rejected with 409 once the project
  * has had a PROD deploy — both enforced by the backend. When `deleteGithub` is true the backing

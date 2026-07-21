@@ -30,6 +30,7 @@ from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.api.dependencies import get_knowledge_base_writer, get_rag_indexer
@@ -53,6 +54,7 @@ from backend.schemas.project import (
 from backend.schemas.version import VersionCreate
 from backend.services import deploy as deploy_service
 from backend.services import github_validation as github_validation_service
+from backend.services import nexshared as nexshared_service
 from backend.services import port_registry as port_registry_service
 from backend.services import project as project_service
 from backend.services import project_memory, uat_provisioner
@@ -409,6 +411,48 @@ def get_project(
     # delete control without a second round-trip. Only authoritative on this detail endpoint.
     result.has_prod_deploy = deploy_service.project_had_prod_deploy(db, project.id)
     return result
+
+
+@router.get("/{project_id}/nexshared-status")
+def get_nexshared_status(project_id: UUID, db: Session = Depends(get_db)) -> dict:
+    """nex-shared upgrade status for the auto-notify prompt (#3): the app's pinned version vs
+    the latest published tag + the "Čo prinesie" changelog delta. Drives the opt-in prompt shown
+    when the Manažér founds a new version. Never a false prompt (no pin / no source → offer nothing)."""
+    try:
+        project = project_service.get_by_id(db, project_id)
+    except ValueError as exc:
+        raise _map_value_error(exc) from exc
+    if not project.source_path:
+        return {"current": None, "latest": None, "behind": 0, "up_to_date": False, "changelog": []}
+    return nexshared_service.status_for_source(project.source_path)
+
+
+class _NexsharedUpgradeRequest(BaseModel):
+    target_version: str
+
+
+@router.post("/{project_id}/nexshared-upgrade")
+def upgrade_nexshared(
+    project_id: UUID,
+    payload: _NexsharedUpgradeRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Opt-in bump (#3): rewrite the app's ``frontend/package.json`` nex-shared pin to
+    ``target_version`` + commit it, so the new version's build (and its Vizuál preview) run on
+    the chosen nex-shared. The Manažér decides per version; nothing happens without this call."""
+    try:
+        project = project_service.get_by_id(db, project_id)
+    except ValueError as exc:
+        raise _map_value_error(exc) from exc
+    if not project.source_path:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Projekt nemá zdrojovú cestu.")
+    if not nexshared_service.upgrade_source_pin(project.source_path, payload.target_version):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Povýšenie zlyhalo — chýba nex-shared pin alebo neplatná verzia.",
+        )
+    committed = nexshared_service.commit_pin_upgrade(project.source_path, payload.target_version)
+    return {"upgraded": True, "target_version": payload.target_version, "committed": committed}
 
 
 @router.post(

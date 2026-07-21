@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { listProjectsApi } from "@/services/api/projects";
+import {
+  listProjectsApi,
+  getNexsharedStatusApi,
+  upgradeNexsharedApi,
+  type NexsharedStatus,
+} from "@/services/api/projects";
+import { NexsharedUpgradePrompt } from "@/components/riadiace/NexsharedUpgradePrompt";
 import { listVersions, createVersion, writeZadanie } from "@/services/api/versions";
 import { postPipelineActionApi } from "@/services/api/pipeline";
 import { useActiveContextStore } from "@/store/activeContextStore";
@@ -65,6 +71,11 @@ export default function NewVersionPage() {
   const [saving, setSaving] = useState(false);
   const [starting, setStarting] = useState(false);
 
+  // #3 auto-notify: is the app behind the latest nex-shared? (opt-in upgrade before the build)
+  const [nexStatus, setNexStatus] = useState<NexsharedStatus | null>(null);
+  const [nexBusy, setNexBusy] = useState(false);
+  const [nexDismissed, setNexDismissed] = useState(false);
+
   const verRef = useRef<HTMLInputElement>(null);
 
   // Load project + existing versions
@@ -77,6 +88,10 @@ export default function NewVersionPage() {
         const found = res.items.find((p) => p.slug === slug);
         if (!found) { setLoadError("Projekt nebol nájdený."); return; }
         setProject(found);
+        // #3: check nex-shared freshness (best-effort — a failure just skips the prompt).
+        getNexsharedStatusApi(found.id)
+          .then((st) => { if (!cancelled) setNexStatus(st); })
+          .catch(() => {});
         return listVersions(found.id).then((vs) => {
           if (cancelled) return;
           setPrevVersions(vs);
@@ -92,6 +107,21 @@ export default function NewVersionPage() {
   const lastVersion = prevVersions.length > 0
     ? [...prevVersions].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
     : null;
+
+  async function handleNexUpgrade(target: string) {
+    if (!project) return;
+    setNexBusy(true);
+    try {
+      await upgradeNexsharedApi(project.id, target);
+      // Reflect the bump locally + dismiss (the new version will build on the chosen nex-shared).
+      setNexStatus((s) => (s ? { ...s, current: target, behind: 0, up_to_date: true, changelog: [] } : s));
+      setNexDismissed(true);
+    } catch {
+      // Best-effort: leave the prompt up so the Manažér can retry or dismiss.
+    } finally {
+      setNexBusy(false);
+    }
+  }
 
   function validate(): boolean {
     const next: Record<string, string> = {};
@@ -196,6 +226,16 @@ export default function NewVersionPage() {
       {/* Scrollable form */}
       <div className="flex-1 overflow-y-auto px-6 py-6">
         <div className="max-w-xl mx-auto">
+          {nexStatus && nexStatus.behind > 0 && !nexDismissed && !savedVersion && (
+            <div className="mb-5">
+              <NexsharedUpgradePrompt
+                status={nexStatus}
+                busy={nexBusy}
+                onUpgrade={handleNexUpgrade}
+                onStay={() => setNexDismissed(true)}
+              />
+            </div>
+          )}
           <form onSubmit={handleSaveZadanie} noValidate className="space-y-5">
 
             {/* Version number + Name */}

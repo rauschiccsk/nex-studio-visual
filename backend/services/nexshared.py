@@ -19,10 +19,13 @@ from typing import Optional
 
 #: The shared-kit remote — every app pins a tag of this repo.
 NEX_SHARED_URL = "https://github.com/rauschiccsk/nex-shared.git"
+#: The raw CHANGELOG.md — feeds the prompt's "Čo prinesie" (the whole point of the changelog).
+CHANGELOG_RAW_URL = "https://raw.githubusercontent.com/rauschiccsk/nex-shared/main/CHANGELOG.md"
 
 _SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 _PIN_RE = re.compile(r"#v?(\d+\.\d+\.\d+)")
 _TAG_RE = re.compile(r"refs/tags/v(\d+\.\d+\.\d+)$")
+_SECTION_RE = re.compile(r"^## v(\d+\.\d+\.\d+)\s*$", re.MULTILINE)
 
 
 def parse_pin(package_json_text: str) -> Optional[str]:
@@ -81,23 +84,65 @@ def list_remote_tags(url: str = NEX_SHARED_URL, *, timeout: int = 30) -> list[st
     return out
 
 
-def status_for_source(source_path: str, *, tags: Optional[list[str]] = None) -> dict:
+def parse_changelog_sections(text: str, current: Optional[str], latest: Optional[str]) -> list[dict]:
+    """The ``## vX.Y.Z`` changelog sections in the half-open range ``(current, latest]``.
+
+    Returns ``[{version, body}]`` newest-first — the "Čo prinesie" the prompt renders (with its
+    ``[vzhľad]``/``[API]``/``[nové]``/``[oprava]`` tags). Empty when nothing is in range.
+    """
+    ck = _key(current) if current and _SEMVER.match(current) else None
+    lk = _key(latest) if latest and _SEMVER.match(latest) else None
+    matches = list(_SECTION_RE.finditer(text))
+    out: list[dict] = []
+    for i, m in enumerate(matches):
+        vk = _key(m.group(1))
+        if (ck is not None and vk <= ck) or (lk is not None and vk > lk):
+            continue
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        out.append({"version": m.group(1), "body": text[m.end() : end].strip()})
+    out.sort(key=lambda e: _key(e["version"]), reverse=True)
+    return out
+
+
+def fetch_changelog(url: str = CHANGELOG_RAW_URL, *, timeout: int = 15) -> str:
+    """Fetch the raw CHANGELOG.md (``""`` on any failure — the prompt degrades gracefully)."""
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 — fixed https URL
+            return resp.read().decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001 — network/parse failure → no changelog, never a crash
+        return ""
+
+
+def status_for_source(
+    source_path: str,
+    *,
+    tags: Optional[list[str]] = None,
+    changelog_text: Optional[str] = None,
+) -> dict:
     """Compare an app's pinned nex-shared vs the latest published tag.
 
-    ``tags`` (test seam) skips the network; otherwise ``git ls-remote`` is called.
-    Returns ``{current, latest, behind, up_to_date}`` — ``current``/``latest`` may be
-    None (no pin / no reachable tags → offer nothing, never a false prompt).
+    ``tags`` / ``changelog_text`` (test seams) skip the network; otherwise ``git ls-remote`` +
+    the raw CHANGELOG.md are fetched. Returns ``{current, latest, behind, up_to_date, changelog}``
+    — ``current``/``latest`` may be None (no pin / no reachable tags → offer nothing, never a
+    false prompt); ``changelog`` = the "Čo prinesie" sections in ``(current, latest]``.
     """
     pkg = Path(source_path) / "frontend" / "package.json"
     current = parse_pin(pkg.read_text(encoding="utf-8")) if pkg.is_file() else None
     all_tags = tags if tags is not None else list_remote_tags()
     latest = pick_latest(all_tags)
     behind = count_behind(current, all_tags)
+    changelog: list[dict] = []
+    if behind > 0:
+        text = changelog_text if changelog_text is not None else fetch_changelog()
+        changelog = parse_changelog_sections(text, current, latest)
     return {
         "current": current,
         "latest": latest,
         "behind": behind,
         "up_to_date": bool(current) and behind == 0,
+        "changelog": changelog,
     }
 
 
@@ -135,3 +180,34 @@ def upgrade_source_pin(source_path: str, target_version: str) -> bool:
         return False
     pkg.write_text(rewritten, encoding="utf-8")
     return True
+
+
+def commit_pin_upgrade(source_path: str, target_version: str, *, timeout: int = 30) -> bool:
+    """Stage + commit the pin bump so it is durable + lands in the new version's build.
+
+    Best-effort, never raises: no ``.git`` / nothing staged → returns False. The build's
+    ``npm ci`` reads the committed pin; a redeploy bakes it into the nginx bundle.
+    """
+    root = Path(source_path)
+    if not (root / ".git").is_dir():
+        return False
+    try:
+        add = subprocess.run(
+            ["git", "-C", str(root), "add", "frontend/package.json"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        if add.returncode != 0:
+            return False
+        commit = subprocess.run(
+            ["git", "-C", str(root), "commit", "-m", f"chore(deps): bump nex-shared → v{target_version}"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return commit.returncode == 0

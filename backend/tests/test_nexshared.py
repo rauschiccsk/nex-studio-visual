@@ -33,12 +33,32 @@ def test_pick_latest_and_count_behind() -> None:
     assert nexshared.count_behind(None, _TAGS) == 0
 
 
+_CHANGELOG = (
+    "# Changelog\n\n"
+    "## v0.15.0\n- `[vzhľad]` slovenské labely\n\n"
+    "## v0.14.0\n- `[nové]` voliteľný email\n\n"
+    "## v0.11.0\n- `[oprava]` staré\n"
+)
+
+
 def test_status_for_source_reports_the_gap(tmp_path: Path) -> None:
     fe = tmp_path / "frontend"
     fe.mkdir()
     (fe / "package.json").write_text(json.dumps(_PKG), encoding="utf-8")
-    st = nexshared.status_for_source(str(tmp_path), tags=_TAGS)
-    assert st == {"current": "0.11.0", "latest": "0.15.0", "behind": 2, "up_to_date": False}
+    st = nexshared.status_for_source(str(tmp_path), tags=_TAGS, changelog_text=_CHANGELOG)
+    assert st["current"] == "0.11.0" and st["latest"] == "0.15.0"
+    assert st["behind"] == 2 and st["up_to_date"] is False
+    # "Čo prinesie" = the (0.11.0, 0.15.0] sections, newest first — NOT the 0.11.0 section.
+    assert [c["version"] for c in st["changelog"]] == ["0.15.0", "0.14.0"]
+
+
+def test_parse_changelog_sections_range_is_half_open() -> None:
+    secs = nexshared.parse_changelog_sections(_CHANGELOG, "0.11.0", "0.15.0")
+    assert [s["version"] for s in secs] == ["0.15.0", "0.14.0"]  # excludes current 0.11.0
+    assert "vzhľad" in secs[0]["body"]
+    # No current pin → everything up to latest.
+    allsecs = nexshared.parse_changelog_sections(_CHANGELOG, None, "0.15.0")
+    assert [s["version"] for s in allsecs] == ["0.15.0", "0.14.0", "0.11.0"]
 
 
 def test_status_up_to_date_when_on_latest(tmp_path: Path) -> None:
