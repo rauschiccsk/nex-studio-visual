@@ -33,9 +33,7 @@ def parse_pin(package_json_text: str) -> Optional[str]:
         return None
     if not isinstance(data, dict):
         return None
-    dep = (data.get("dependencies") or {}).get("nex-shared") or (
-        data.get("devDependencies") or {}
-    ).get("nex-shared")
+    dep = (data.get("dependencies") or {}).get("nex-shared") or (data.get("devDependencies") or {}).get("nex-shared")
     if not isinstance(dep, str):
         return None
     m = _PIN_RE.search(dep)
