@@ -1166,6 +1166,50 @@ export interface paths {
         patch: operations["update_project_api_v1_projects__project_id__patch"];
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/nexshared-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Nexshared Status
+         * @description nex-shared upgrade status for the auto-notify prompt (#3): the app's pinned version vs
+         *     the latest published tag + the "Čo prinesie" changelog delta. Drives the opt-in prompt shown
+         *     when the Manažér founds a new version. Never a false prompt (no pin / no source → offer nothing).
+         */
+        get: operations["get_nexshared_status_api_v1_projects__project_id__nexshared_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/nexshared-upgrade": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upgrade Nexshared
+         * @description Opt-in bump (#3): rewrite the app's ``frontend/package.json`` nex-shared pin to
+         *     ``target_version`` + commit it, so the new version's build (and its Vizuál preview) run on
+         *     the chosen nex-shared. The Manažér decides per version; nothing happens without this call.
+         */
+        post: operations["upgrade_nexshared_api_v1_projects__project_id__nexshared_upgrade_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/versions": {
         parameters: {
             query?: never;
@@ -4895,6 +4939,11 @@ export interface components {
              */
             version_number?: string | null;
         };
+        /** _NexsharedUpgradeRequest */
+        _NexsharedUpgradeRequest: {
+            /** Target Version */
+            target_version: string;
+        };
         /**
          * _TaskPlanResponse
          * @description Response for GET /versions/{version_id}/task-plan.
@@ -7194,6 +7243,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_nexshared_status_api_v1_projects__project_id__nexshared_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upgrade_nexshared_api_v1_projects__project_id__nexshared_upgrade_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_NexsharedUpgradeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */
