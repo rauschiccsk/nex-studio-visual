@@ -3891,6 +3891,12 @@ UAT_ROOT: Path = Path("/opt/uat")
 # at ``/opt/customers/<customer-slug>/<full-project-slug>/`` (mirrors uat_provisioner.PROD_ROOT, §2).
 PROD_ROOT: Path = Path("/opt/customers")
 UAT_DEPLOY_TIMEOUT = 900
+# Post-``up`` DB migration (v4.0.21): one ``alembic upgrade head`` in the backend container for
+# an alembic app that ships no migrate service. The retry absorbs the brief window where the
+# just-recreated backend container is not yet execable; a real migration error fails fast.
+MIGRATE_TIMEOUT = 300
+MIGRATE_ATTEMPTS = 5
+MIGRATE_RETRY_DELAY = 5
 
 
 def _uat_compose_path(
@@ -3969,6 +3975,19 @@ async def _run_uat_deploy(
     if proc.returncode != 0:
         tail = (stdout or b"").decode("utf-8", "replace").strip()[-300:]
         return False, (f"exit {proc.returncode}: {tail}" if tail else f"exit {proc.returncode}")
+    # v4.0.21: migrate the DB before serve-verify — an alembic app with no migrate service of its
+    # own boots against an un-migrated schema otherwise (crash-test 2026-07-21). No-op for apps that
+    # already migrate on ``up``; a migration failure is a hard deploy failure (broken schema).
+    mig_ok, mig_detail = await _run_post_up_migration(
+        project_slug,
+        uat_slug,
+        environment=environment,
+        customer_slug=customer_slug,
+        app=app,
+        full_project_slug=full_project_slug,
+    )
+    if not mig_ok:
+        return False, mig_detail
     # ``up`` exit 0 only means the containers were created — NOT that the app serves (the nex-asistent
     # false-success bug). Verify the app actually responds before reporting success. UAT keeps the exact
     # 2-arg call (byte-identical — a monkeypatched serve-verify fake gets only project_slug + uat_slug);
@@ -4003,6 +4022,79 @@ async def _run_prod_deploy(
         full_project_slug=full_project_slug,
         version_number=version_number,
     )
+
+
+def _exec_not_ready(output: str) -> bool:
+    """True when a ``docker compose exec`` failure is the just-recreated container not being
+    execable yet (retry), vs a real command failure (fail fast)."""
+    low = output.lower()
+    return any(s in low for s in ("is not running", "not running", "no such", "is restarting"))
+
+
+async def _run_post_up_migration(
+    project_slug: str,
+    uat_slug: str,
+    *,
+    environment: str = "uat",
+    customer_slug: Optional[str] = None,
+    app: Optional[str] = None,
+    full_project_slug: Optional[str] = None,
+) -> tuple[bool, str]:
+    """Run ``alembic upgrade head`` in the backend container after ``up`` (v4.0.21).
+
+    Apps that ship their own ``migrate`` service already migrate on ``up`` (a ``depends_on``
+    gate); apps that DON'T (e.g. nex-shopify) would boot against an un-migrated schema — the
+    launch table simply wouldn't exist (crash-test 2026-07-21). This runs the one missing
+    migration. Idempotent (``alembic upgrade head`` is a no-op when already current).
+
+    Returns ``(True, "OK")`` when migrated OR when there is nothing to do (no alembic / a
+    migrate service already ran / no backend / no compose) — a defensive skip is never a new
+    false FAIL. Returns ``(False, reason)`` ONLY when the migration itself fails (a broken
+    schema is a broken deploy). Covers PROD too (``_run_prod_deploy`` delegates here)."""
+    src_root = claude_agent.PROJECTS_ROOT / project_slug
+    has_alembic = (src_root / "backend" / "alembic.ini").is_file() or (src_root / "alembic.ini").is_file()
+    if not has_alembic:
+        return True, "OK"  # no migrations to run
+
+    src_compose = src_root / "docker-compose.yml"
+    try:
+        services = (yaml.safe_load(src_compose.read_text()) or {}).get("services") or {}
+    except (OSError, yaml.YAMLError):
+        return True, "OK"  # unreadable source → defensive skip (never a new false FAIL)
+    if uat_provisioner.has_alembic_migrate_service(services):
+        return True, "OK"  # a dedicated migrate service already ran on `up`
+    be_role = uat_provisioner.identify_service_roles(services).get("backend")
+    if not be_role:
+        return True, "OK"  # no backend container to migrate in
+
+    compose = _uat_compose_path(
+        uat_slug, environment=environment, customer_slug=customer_slug, full_project_slug=full_project_slug
+    )
+    if not compose.is_file():
+        return True, "OK"
+
+    cmd = ["docker", "compose", "-f", str(compose), "exec", "-T", be_role, "alembic", "upgrade", "head"]
+    detail = ""
+    for attempt in range(MIGRATE_ATTEMPTS):
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=MIGRATE_TIMEOUT)
+        except OSError as exc:
+            return False, f"migrácia sa nepodarila spustiť: {exc}"
+        except asyncio.TimeoutError:
+            proc.kill()
+            return False, f"migrácia prekročila časový limit ({MIGRATE_TIMEOUT}s)"
+        if proc.returncode == 0:
+            return True, "OK"
+        detail = (stdout or b"").decode("utf-8", "replace").strip()[-300:]
+        # Container not execable yet (just recreated) → retry; a real alembic error fails fast.
+        if attempt < MIGRATE_ATTEMPTS - 1 and _exec_not_ready(detail):
+            await asyncio.sleep(MIGRATE_RETRY_DELAY)
+            continue
+        return False, f"migrácia zlyhala: {detail}"
+    return False, f"migrácia zlyhala (backend sa nespustil včas): {detail}"
 
 
 async def _verify_uat_serves(

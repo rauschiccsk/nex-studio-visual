@@ -241,6 +241,25 @@ def identify_service_roles(services: dict[str, Any]) -> dict[str, Optional[str]]
     }
 
 
+def has_alembic_migrate_service(services: dict[str, Any]) -> bool:
+    """True when a compose service runs ``alembic upgrade`` as its command.
+
+    Such a dedicated ``migrate`` service already migrates the DB on ``docker compose up``
+    (as a ``depends_on`` gate), so the deploy must NOT run migrations a second time. Apps
+    without one (e.g. nex-shopify) get a post-``up`` ``alembic upgrade head`` instead
+    (:func:`orchestrator._run_post_up_migration`). Detection is by command, not service
+    name, so it holds whatever the migrate service is called.
+    """
+    for svc in services.values():
+        if not isinstance(svc, dict):
+            continue
+        command = svc.get("command")
+        text = " ".join(str(c) for c in command) if isinstance(command, list) else str(command or "")
+        if "alembic" in text and "upgrade" in text:
+            return True
+    return False
+
+
 def _container_port(port_entry: Any) -> Optional[int]:
     """Container-side port from a compose ``ports`` entry (short ``H:C`` / ``IP:H:C`` /
     ``C/tcp`` or long-form ``{target: C}``); ``None`` on parse failure."""
