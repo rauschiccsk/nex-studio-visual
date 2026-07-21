@@ -284,6 +284,18 @@ def test_vizual_directive_mockup_mode_edits_the_mockup(db_session) -> None:
     assert "frontend/" in d_fe
 
 
+def test_vizual_directive_livefe_requires_msw_preview_harness(db_session) -> None:
+    version, _state = _seed_navrh_state(db_session)
+    # Live-FE mode (no mockup): the directive MUST instruct the MSW preview harness so the
+    # sandbox renders the REAL app without a backend/login (v4.0.22 — the faithful Vizuál).
+    d = orchestrator._vizual_directive(db_session, version.id, "Uprav obrazovku katalógu")
+    assert "MSW" in d
+    assert "VITE_PREVIEW" in d
+    assert "ProtectedRoute" in d
+    # And it reinforces the binding: what the Manažér approves is what Programovanie builds.
+    assert "schváli" in d and "Programovanie" in d
+
+
 def test_board_vizual_url_prefers_mockup_route_when_present(db_session, tmp_path, monkeypatch) -> None:
     from backend.api.routes.pipeline import _board
     from backend.db.models.projects import Project as _Project

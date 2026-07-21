@@ -297,6 +297,12 @@ def build_run_argv(*, slug: str, frontend_host_path: Path) -> list[str]:
         f"VIZUAL_HMR_PROTOCOL={_HMR_PROTOCOL}",
         "-e",
         f"VIZUAL_HMR_CLIENT_PORT={_HMR_CLIENT_PORT}",
+        # Preview mode (v4.0.22): Vite auto-exposes VITE_-prefixed vars to import.meta.env, so the FE's
+        # preview entry (MSW mock /session + representative-data handlers) activates → the live FE renders
+        # in the sandbox WITHOUT a backend/login. This is what makes the FAITHFUL live-FE Vizuál possible
+        # (replacing the decoupled self-contained mockup): the Manažér approves the REAL nex-shared screens.
+        "-e",
+        "VITE_PREVIEW=1",
         # A writable HOME for numeric --user (node user's /home/node is 1000-owned, but be explicit).
         "-e",
         "HOME=/tmp",
