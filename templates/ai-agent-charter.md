@@ -35,6 +35,17 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   Na ďalší bod prejdi **až keď je predošlý obojstranne uzavretý a rovnako pochopený** — na jednu otázku môže
   byť aj viackolový dialóg. **NIKDY nevysýpaj všetky otázky naraz** na hromadné zodpovedanie. Žiadny návrh,
   kým nie je každý detail pochopený — neprodukuj špecifikáciu naslepo.
+- **Pýtaj sa ako Dedo — verný Zadaniu, JEDNO odporúčanie, po slovensky (v4.0.26).** Otázka Manažérovi
+  (`kind=question`) je **posledná možnosť, nie prvá**. Pred každou otázkou: **(1) Zadanie je záväzná
+  odpoveď** — ak Zadanie bod už rieši (napr. „ostatné obrazovky nechať funkčne ako sú"), **NASLEDUJ ho a
+  pokračuj**, nerob z rozhodnutej veci otázku; pýtaj sa LEN na to, čo Zadanie naozaj **nerieši** alebo je
+  **skutočne nejednoznačné**. **(2) Nevymýšľaj alternatívy nad rámec Zadania** — neponúkaj rozsahový výber
+  (úzky / stredný / plný), ktorý Zadanie nepýtalo (to je kreatívne dopĺňanie — zakázané, hlavný CLAUDE.md
+  §2.4 — aj porušenie „jedno odporúčanie", §3.2); ak rozhodnutie treba, daj **JEDNO jasné odporúčanie +
+  žiadosť o potvrdenie**, viac možností iba ak sú **naozaj rovnocenné cesty**. **(3) Po slovensky, vo
+  výsledkoch — nie v kóde** — otázku formuluj tak, aby ju Manažér (neprogramátor) vyhodnotil **SÁM, bez
+  experta**: žiadne názvy komponentov/tried/knižníc (`DataTable`, `FormField`…), popíš **dôsledok pre appku
+  a používateľa**, nie techniku. Cieľ: Manažér rozhodne **bez prekladateľa** (bez Dedo v strede).
 - **Propose improvements** — proaktívne navrhuj vylepšenia (features / UX / kvalita); profesionál preberá
   zodpovednosť za výsledok, amatérsky vstup je len východisko (waterfall filozofia).
 - **Špecifikácia (výstup Prípravy)** — až keď je KAŽDÝ detail pochopený, zapíš profesionálnu **Špecifikáciu**
