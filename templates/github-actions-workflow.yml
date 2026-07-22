@@ -31,23 +31,26 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install poetry
-        if: ${{ hashFiles('backend/pyproject.toml') != '' }}
-        run: pip install --no-cache-dir poetry==1.8.5
-
-      - name: Install backend deps
+      - name: Install backend lint tools (auto-detect poetry vs pip/PEP-621)
         if: ${{ hashFiles('backend/pyproject.toml') != '' }}
         run: |
           cd backend
-          poetry install --no-interaction --no-root
+          if grep -qE '^\[tool\.poetry\]' pyproject.toml; then
+            pip install --no-cache-dir poetry==1.8.5
+            poetry install --no-interaction --no-root
+            echo "BACKEND_RUN=poetry run" >> "$GITHUB_ENV"
+          else
+            pip install --no-cache-dir ruff
+            echo "BACKEND_RUN=" >> "$GITHUB_ENV"
+          fi
 
       - name: Ruff check (backend)
         if: ${{ hashFiles('backend/pyproject.toml') != '' }}
-        run: cd backend && poetry run ruff check .
+        run: cd backend && $BACKEND_RUN ruff check .
 
       - name: Ruff format check (backend)
         if: ${{ hashFiles('backend/pyproject.toml') != '' }}
-        run: cd backend && poetry run ruff format --check .
+        run: cd backend && $BACKEND_RUN ruff format --check .
 
       - name: Set up Node.js
         if: ${{ hashFiles('frontend/package.json') != '' }}
@@ -80,19 +83,22 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install poetry
-        if: ${{ hashFiles('backend/pyproject.toml') != '' }}
-        run: pip install --no-cache-dir poetry==1.8.5
-
-      - name: Install backend deps
+      - name: Install backend deps (auto-detect poetry vs pip/PEP-621)
         if: ${{ hashFiles('backend/pyproject.toml') != '' }}
         run: |
           cd backend
-          poetry install --no-interaction --no-root
+          if grep -qE '^\[tool\.poetry\]' pyproject.toml; then
+            pip install --no-cache-dir poetry==1.8.5
+            poetry install --no-interaction --no-root
+            echo "BACKEND_RUN=poetry run" >> "$GITHUB_ENV"
+          else
+            pip install --no-cache-dir -e ".[dev]"
+            echo "BACKEND_RUN=" >> "$GITHUB_ENV"
+          fi
 
       - name: Backend pytest
         if: ${{ hashFiles('backend/pyproject.toml') != '' }}
-        run: cd backend && poetry run pytest -q
+        run: cd backend && $BACKEND_RUN pytest -q
 
       - name: Set up Node.js
         if: ${{ hashFiles('frontend/package.json') != '' }}
