@@ -27,6 +27,9 @@ logger = logging.getLogger(__name__)
 NEX_STUDIO_ROOT = Path(__file__).resolve().parents[2]
 NEX_STUDIO_TEMPLATES = NEX_STUDIO_ROOT / "templates"
 CICD_TEMPLATE = NEX_STUDIO_TEMPLATES / "github-actions-workflow.yml"
+#: The ruff / type-check pre-commit hook (blocks a commit that CI Lint would reject) — copied into
+#: each new project's ``.githooks/`` and activated via ``core.hooksPath`` at scaffold time (v4.0.29).
+PRECOMMIT_HOOK_TEMPLATE = NEX_STUDIO_TEMPLATES / "pre-commit-hook.sh"
 # gate-g-hardening GAP 1 (CR-B): the behavioural release-acceptance script the engine runs at gate_g.
 RELEASE_SMOKE_TEMPLATE = NEX_STUDIO_TEMPLATES / "release_smoke_test.sh"
 # CR-R2-3 (#3): the CI `migrate` job's dotenv renderer — shipped alongside ci.yml so the gate can run.
@@ -258,6 +261,7 @@ def run_post_scaffold_steps(
 
     if enable_cicd and target_path and target_path.is_dir():
         _wire_cicd_workflow(target_path, slug)
+        _wire_precommit_hook(target_path)
         # The pushed ci.yml runs on ``andros-ubuntu-<slug>`` (self-hosted) — provision that runner now, else
         # every job queues forever (the nex-shopify gap, Director 2026-07-16). Best-effort, never raises.
         _provision_ci_runner(slug, repo_url)
@@ -498,6 +502,50 @@ def _seed_ci_render_helper(target: Path, slug: str) -> None:
         return
 
     logger.info("ci_render_dotenv.py seeded (slug=%s)", slug)
+
+
+def _wire_precommit_hook(target: Path) -> None:
+    """Install + activate the ruff / type-check pre-commit hook in a new project (v4.0.29).
+
+    Blocks locally any commit that the CI Lint stage would reject, so the AI Agent can never push
+    known-red code (the root of the recurring 'CI / lint Failed' on generated projects). Copies the
+    hook template to ``.githooks/pre-commit`` (executable), tracks it in the repo, and points the
+    workdir clone at it via ``git config core.hooksPath .githooks``. Best-effort: a missing template
+    or a git failure is logged, never raised (mirrors :func:`_wire_cicd_workflow`)."""
+    if not PRECOMMIT_HOOK_TEMPLATE.is_file():
+        logger.warning("pre-commit hook wire-up SKIPPED — template missing at %s", PRECOMMIT_HOOK_TEMPLATE)
+        return
+
+    hooks_dir = target / ".githooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    hook = hooks_dir / "pre-commit"
+    hook.write_text(PRECOMMIT_HOOK_TEMPLATE.read_text(encoding="utf-8"), encoding="utf-8")
+    hook.chmod(0o755)
+
+    # Activate for the workdir clone (core.hooksPath is per-clone; the file is committed so it travels).
+    subprocess.run(
+        ["git", "-C", str(target), "config", "core.hooksPath", ".githooks"],
+        capture_output=True,
+        text=True,
+        timeout=CICD_TIMEOUT,
+        check=False,
+    )
+    subprocess.run(
+        ["git", "-C", str(target), "add", ".githooks/pre-commit"],
+        capture_output=True,
+        text=True,
+        timeout=CICD_TIMEOUT,
+        check=False,
+    )
+    commit = subprocess.run(
+        ["git", "-C", str(target), "commit", "-m", "chore: pre-commit ruff/type-check hook (block known-red commits)"],
+        capture_output=True,
+        text=True,
+        timeout=CICD_TIMEOUT,
+        check=False,
+    )
+    if commit.returncode != 0:
+        logger.info("pre-commit hook commit skipped/failed (slug workdir): %s", commit.stderr.strip()[:200])
 
 
 def _wire_cicd_workflow(target: Path, slug: str) -> None:

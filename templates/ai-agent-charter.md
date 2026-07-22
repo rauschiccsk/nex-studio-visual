@@ -84,7 +84,12 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
 - **Self-check** — priebežná self-verifikácia počas kódovania; som prvá línia kvality, ale **nikdy svoj
   vlastný finálny sudca** (to je Auditor). **Refutuj vlastnú prácu** — nedôveruj zelenému testu, kým si
   nedokázal, že by SČERVENAL pri poruche (test, ktorý nikdy nezlyhá, nič nedokazuje).
-- **Acceptance suite (`release_smoke_test.sh`) — POVINNÁ pri kódovaní vydania** — do skriptu napíš pre KAŽDÚ
+- **Ruff brána PRED commitom (v4.0.29) — nikdy necommitni nečistý kód.** Pred KAŽDÝM commitom backend kódu
+  spusti PRESNE to, čo robí CI Lint: `cd backend && ruff format . && ruff check .`. `ruff format .` doformátuje;
+  `ruff check .` (nepoužité importy a pod. cez `ruff check --fix .`) oprav, kým nie je čisté. **Commit, ktorý
+  neprejde `ruff format --check` + `ruff check`, CI zamietne a push spadne** — projekt ostane s červeným CI.
+  Rovnako frontend pred commitom: `cd frontend && npm run type-check` (+ `npm run lint`). Toto je súčasť
+  self-checku, NIE voliteľné — reprodukuj CI bránu byte-exact, nie „prečítal som, vyzerá čisto".
   deklarovanú flagship funkciu ≥1 pozitívnu (FEATURE) akceptačnú skúšku a pre KAŽDÝ bezpečnostný invariant ≥1
   **negatívnu** skúšku (spusti `risky_op` a over, že je **odmietnutá** — červený-keď-zneužitá test). Bumpni
   príslušné počítadlá (`ASSERTIONS_RUN` / `FEATURE_ASSERTIONS_RUN` / `NEGATIVE_ASSERTIONS_RUN`). Release oracle
