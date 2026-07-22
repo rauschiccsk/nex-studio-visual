@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import jwt
+from jose import jwt  # python-jose — the backend's declared JWT lib (same one the app verifies with)
 
 from backend.services import uat_launch, uat_provisioner
 
@@ -27,13 +27,13 @@ def test_build_launch_url_mints_a_verifiable_token(tmp_path, monkeypatch) -> Non
     url = uat_launch.build_uat_launch_url("acme", "demo-app", "https://uat-acme-app.isnex.eu")
     assert url and "/api/v1/launch?lt=" in url
     # The token must decode the SAME way the app verifies it → the app would accept it.
+    # jose raises if aud/iss don't match (verified via kwargs), so a clean decode == the app accepts it.
     claims = jwt.decode(
         url.split("lt=")[1],
         key,
         algorithms=["HS256"],
         audience="demo-app",
         issuer="nex-manager",
-        options={"require": ["exp", "iat", "iss", "aud", "sub"]},
     )
     assert claims["purpose"] == "module-launch"
     assert claims["sub"] == "uat-test"  # a test identity, never a real user

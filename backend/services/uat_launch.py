@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
-import jwt
+from jose import jwt  # python-jose — the backend's declared JWT lib (matches auth.py / core.security)
 
 from backend.services import uat_provisioner
 
