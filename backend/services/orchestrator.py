@@ -1032,7 +1032,9 @@ def _status_block_instruction(stage: str) -> str:
         "SAMOTNÉHO NEX Studia (nástroja/frameworku — NIE zákazníckeho projektu), NEOPAKUJ pokusy donekonečna "
         "a NEPÝTAJ Manažéra, nech to opraví — on to nevie. Eskaluj Dedovi (meta-vývojárovi NEX Studia): "
         "vráť stavový blok s `kind` = `framework_issue` a do poľa `question` napíš JASNÚ správu pre Deda — "
-        "čo zlyhalo (chyba), v akom kontexte, a akú zmenu NEX Studia to podľa teba potrebuje. `awaiting` daj "
+        "len POZOROVATEĽNÉ FAKTY: čo presne zlyhalo (chyba/hláška), v akom kontexte, čo si spravil a commitol "
+        "(hash). NENAVRHUJ zmenu vnútra NEX Studia ani neteoretizuj o jeho príčine — nevidíš jeho zdroják, "
+        "hádal by si a zavádzaš. `awaiting` daj "
         "`manazer`. Build sa zablokuje a Dedo dostane tvoju správu."
     )
 
@@ -3603,6 +3605,31 @@ def _git_ok(project_root: Path, args: list[str]) -> bool:
         )
     except (OSError, subprocess.SubprocessError):
         return False
+
+
+def _classify_machinery_false_negative(slug: str, prior_failures: list[str], last_result: object) -> Optional[str]:
+    """Decide whether an exhausted task's halt is a NEX Studio MACHINERY false-negative rather than a
+    genuine project failure (K2 / v4.0.27).
+
+    Signature of a false-negative: every recorded self-check failure is a ``commit ... not found``
+    verdict, yet the commits the agent reported ARE now reachable from HEAD in the project repo — a
+    self-contradiction in NEX Studio's own :func:`verify_mechanical` (correct, committed work rejected).
+    Returns a plain machinery-reason string in that case (→ route to the developer, NOT the Manažér);
+    ``None`` for a genuine project failure (the Manažér-steers path)."""
+    if not prior_failures or not all("not found in" in f for f in prior_failures):
+        return None
+    commits = last_result.commits if isinstance(last_result, PipelineStatusBlock) else []
+    if not commits:
+        return None
+    project_root = claude_agent.PROJECTS_ROOT / slug
+    reachable = [c for c in commits if _git_ok(project_root, ["merge-base", "--is-ancestor", c, "HEAD"])]
+    if reachable:
+        return (
+            "verify_mechanical opakovane hlásil „commit not found“, no nahlásené commity "
+            f"({', '.join(reachable)}) SÚ dosiahnuteľné z HEAD v {slug} — falošný poplach vo verify "
+            "(mašinéria NEX Studia), nie chyba projektu."
+        )
+    return None
 
 
 def _repo_head(project_root: Path) -> Optional[str]:
@@ -9009,8 +9036,56 @@ async def _run_build_round(
                 attempt_errors=prior_failures,
                 on_message=on_message,
             )
-            # No Coordinator relay (retired in v2) — settle ``awaiting_manazer`` DIRECTLY. The Manažér steers
-            # the AI Agent (``uprav``) or re-runs; the AI Agent fixes (design §2.2, division of labour).
+            # K2–K5 (v4.0.27): classify the halt. A NEX Studio MACHINERY false-negative (correct, committed
+            # work rejected by verify) is NOT the Manažér's to fix — route it through the SAME framework_issue
+            # machinery as an agent-initiated §15 escalation: blocked/block_reason=framework_issue (the FE then
+            # offers NO "usmerni", only Dedo clears it), a plain operator notice, and delivery to Dedo (A:
+            # .dedo-channel file; B: Telegram). Only a GENUINE project failure gets the "usmerni AI Agenta" steer.
+            machinery_reason = _classify_machinery_false_negative(slug, prior_failures, result)
+            if machinery_reason is not None:
+                state.status = "blocked"
+                state.block_reason = "framework_issue"
+                state.next_action = (
+                    "Túto chybu musí opraviť náš technický tím — nedá sa vyriešiť odtiaľto. Automaticky sme ho na "
+                    "ňu upozornili. Skús to o chvíľu znova (Nahlásiť znova), alebo zatiaľ pokračuj na inom projekte."
+                )
+                version_number = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
+                dedo_message = (
+                    f"Úloha #{_task_full_number(db, task)} „{task.title}“ zlyhala {_SELF_CHECK_RETRIES}× na "
+                    f"verify_mechanical („commit not found“), hoci nahlásený commit JE dosiahnuteľný z HEAD. "
+                    f"{machinery_reason} Posledné hlásenia verify: {' | '.join(prior_failures[-2:])}."
+                )
+                notif = _record_message(
+                    db,
+                    version_id=version_id,
+                    stage="programovanie",
+                    author="system",
+                    recipient="manazer",
+                    kind="notification",
+                    content=(
+                        "Narazili sme na technický problém NEX Studia pri overovaní práce AI — nie je to chyba "
+                        "tvojho projektu. Práca AI je hotová. Automaticky sme upozornili vývojára; skús to o chvíľu "
+                        "znova, alebo zatiaľ pokračuj na inom projekte."
+                    ),
+                    payload={"phase": "programovanie", "framework_issue": True, "dedo_message": dedo_message},
+                )
+                if on_message is not None:
+                    await on_message(notif)
+                await dedo_escalation.escalate_to_dedo(
+                    project_slug=slug,
+                    version_number=version_number,
+                    dedo_message=dedo_message,
+                    context=(
+                        f"Projekt: {slug} · Verzia: v{version_number} · Fáza: programovanie · "
+                        f"Úloha #{_task_full_number(db, task)} · verify_mechanical falošný poplach "
+                        "(commit not found, no dosiahnuteľný z HEAD)."
+                    ),
+                    owner_chat_id=_owner_chat_id_for_version(db, version_id),
+                )
+                db.flush()
+                return state
+            # Genuine project failure — settle awaiting_manazer; the Manažér steers the AI Agent (``uprav``) or
+            # re-runs (design §2.2, division of labour).
             state.status = "awaiting_manazer"
             state.next_action = (
                 f"Úloha #{_task_full_number(db, task)} zlyhala po {_pokusy(_SELF_CHECK_RETRIES)} self-check — "

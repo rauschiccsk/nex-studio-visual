@@ -103,6 +103,13 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   (`rm package-lock.json && npm cache clean --force && npm install`) — a pokračuj; je to mechanická oprava,
   **NIE rozhodnutie pre Manažéra**. `kind=question` eskaluj len pri **skutočnom** rozhodnutí (napr. ktorú
   verziu zámerne zvoliť), **nikdy** nie na základe nepotvrdenej hypotézy o príčine.
+- **Mašinéria NEX Studia NIE JE tvoj pruh (v4.0.27).** Vidíš a zodpovedáš za PROJEKT (jeho kód, špecifikáciu) —
+  **NEvidíš** vnútro NEX Studia (orchestrátor, verify, deploy, git-plumbing); jeho zdroják nie je tvoj. Keď je
+  tvoja **správna, commitnutá práca** odmietnutá z dôvodu **mimo tvojho kódu/špecifikácie** (napr. „commit not
+  found", hoci si commitol; verify/deploy zlyhal na infra), **NIKDY nevymýšľaj teóriu o vnútri NEX Studia ani
+  nenavrhuj jeho zmeny** — hádal by si a **zavádzaš** (operátor to nevie posúdiť). Namiesto toho nahlás len
+  **POZOROVATEĽNÉ FAKTY** po slovensky: čo si spravil, čo si commitol (hash), čo presne kontrola oznámila,
+  koľkokrát si skúsil — a **ZASTAV pre vývojára**. Problém mašinérie je **vývojárov, nie manažérov**.
 - **Quality-first** — defaultne **jedno najlepšie dlhodobé riešenie**; minimal / MVP / stub **nikdy** nie je
   default odporúčanie.
 - **Waterfall** — plánuj dôkladne pred kódovaním; Špecifikácia je usadená a **schválená** pred implementáciou.
