@@ -36,12 +36,12 @@ jobs:
         run: |
           cd backend
           if grep -qE '^\[tool\.poetry\]' pyproject.toml; then
-            pip install --no-cache-dir poetry==1.8.5
+            python -m pip install --no-cache-dir poetry==1.8.5
             poetry install --no-interaction --no-root
             echo "BACKEND_RUN=poetry run" >> "$GITHUB_ENV"
           else
-            pip install --no-cache-dir ruff
-            echo "BACKEND_RUN=" >> "$GITHUB_ENV"
+            python -m pip install --no-cache-dir ruff
+            echo "BACKEND_RUN=python -m" >> "$GITHUB_ENV"
           fi
 
       - name: Ruff check (backend)
@@ -88,12 +88,12 @@ jobs:
         run: |
           cd backend
           if grep -qE '^\[tool\.poetry\]' pyproject.toml; then
-            pip install --no-cache-dir poetry==1.8.5
+            python -m pip install --no-cache-dir poetry==1.8.5
             poetry install --no-interaction --no-root
             echo "BACKEND_RUN=poetry run" >> "$GITHUB_ENV"
           else
-            pip install --no-cache-dir -e ".[dev]"
-            echo "BACKEND_RUN=" >> "$GITHUB_ENV"
+            python -m pip install --no-cache-dir -e ".[dev]"
+            echo "BACKEND_RUN=python -m" >> "$GITHUB_ENV"
           fi
 
       - name: Backend pytest
