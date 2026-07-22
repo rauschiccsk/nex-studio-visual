@@ -50,3 +50,15 @@ def test_none_when_no_launch_key(tmp_path, monkeypatch) -> None:
 def test_none_when_no_uat_url(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(uat_provisioner, "UAT_ROOT", tmp_path)
     assert uat_launch.build_uat_launch_url("acme", "app", "") is None
+
+
+def test_customer_dir_slug_is_lowercased() -> None:
+    """v4.0.31 regression: the launch endpoint must locate the deploy .env under the CANONICAL customer
+    dir slug (lowercased subdomain-or-slug) — a mixed-case DB slug like 'ANDROS' → dir 'andros'. Passing
+    the raw slug pointed at a non-existent /opt/uat/ANDROS/... → no key → a spurious 400."""
+    from types import SimpleNamespace
+
+    from backend.services import deploy
+
+    assert deploy._customer_dir_slug(SimpleNamespace(slug="ANDROS", subdomain=None)) == "andros"
+    assert deploy._customer_dir_slug(SimpleNamespace(slug="X", subdomain=" Andros ")) == "andros"

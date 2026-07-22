@@ -116,7 +116,11 @@ def uat_launch(
             detail="Nie je token-launch aplikácia — použi „Otvoriť aplikáciu“.",
         )
     uat_url = deploy_service._instance_url(customer, "uat", project)
-    launch_url = uat_launch_service.build_uat_launch_url(customer.slug, project.slug, uat_url)
+    # The deploy .env lives under the CANONICAL customer dir slug (lowercased subdomain-or-slug), the same
+    # key the provisioner used — NOT the raw customer.slug (may be mixed-case, e.g. ANDROS → dir andros).
+    launch_url = uat_launch_service.build_uat_launch_url(
+        deploy_service._customer_dir_slug(customer), project.slug, uat_url
+    )
     if not launch_url:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

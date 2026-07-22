@@ -614,13 +614,20 @@ async def deploy(
     return event, (url if ok else None), bumped_to
 
 
+def _customer_dir_slug(customer: Customer) -> str:
+    """The canonical per-customer slug: ``(subdomain or slug)`` lowercased. The UAT/PROD instance
+    directory, Traefik host, and instance slug are ALL keyed on this — so anything locating a customer's
+    deployed instance on disk (e.g. its ``.env``) MUST derive the path from THIS, never the raw
+    ``customer.slug`` (which may be mixed-case, e.g. ``ANDROS`` → dir ``andros``)."""
+    return (customer.subdomain or customer.slug).strip().lower()
+
+
 def _instance_slug(customer: Customer, environment: str) -> str:
     """The per-customer instance slug carrying the ENV: ``<subdomain-or-slug>-<env>`` (``andros-uat`` /
     ``andros-prod``). The runner detects PROD via the ``-prod`` suffix and strips it back to the customer; the
     real instance DIR + name are the clean per-project ``[uat-]<customer>-<app>`` derived downstream (audit fix
     2026-07-11 — UAT no longer lands on the flat ``<customer>-uat``). Validated at provision time."""
-    base = (customer.subdomain or customer.slug).strip().lower()
-    return f"{base}-{environment}"
+    return f"{_customer_dir_slug(customer)}-{environment}"
 
 
 def _url_for_instance_slug(instance_slug: str) -> str:
@@ -638,7 +645,7 @@ def _instance_url(customer: Customer, environment: str, project: Project) -> str
     ``uat-<customer>-<app>.isnex.eu`` / PROD the clean ``<customer>-<app>.isnex.eu`` (via :func:`_prod_url`,
     NOT the ``uat-`` prefixed builder — a Theme-4 slip previously pointed the PROD matrix link at a
     non-existent ``uat-<customer>-prod`` host)."""
-    base = (customer.subdomain or customer.slug).strip().lower()
+    base = _customer_dir_slug(customer)
     app = uat_provisioner.derive_uat_slug(project.slug)
     if environment == "prod":
         return _prod_url(base, app)
