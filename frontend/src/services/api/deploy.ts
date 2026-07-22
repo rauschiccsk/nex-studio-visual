@@ -26,6 +26,12 @@ export function getDeployMatrix(slug: string): Promise<DeployMatrix> {
   return api.get<DeployMatrix>(`/projects/${slug}/deploy-matrix`);
 }
 
+/** Mint a short-lived UAT test launch URL for a token-launch app — open it to land LOGGED-IN in the
+ * deployed app directly from the UAT tab, without going through NEX Manager (v4.0.30). UAT-only. */
+export function uatLaunch(customerId: string, projectSlug: string): Promise<{ launch_url: string }> {
+  return api.post(`/customers/${customerId}/uat-launch`, { project_slug: projectSlug });
+}
+
 /** Every deploy/accept event for a project (newest first) — the audit trail. */
 export function listProjectDeployEvents(slug: string): Promise<DeployEventRead[]> {
   return api.get<DeployEventRead[]>(`/projects/${slug}/deploy-events`);

@@ -76,6 +76,8 @@ export interface DeployMatrixRow {
 /** The full version × customer matrix payload for a project's UAT/PROD tabs. */
 export interface DeployMatrix {
   project_slug: string;
+  /** Launch mode ('token' | 'password') — drives the UAT 'Spustiť' vs 'Otvoriť aplikáciu' (v4.0.30). */
+  auth_mode: string;
   /** Deployable (verified / Hotovo) version_numbers — the Nasadiť options. */
   verified_versions: string[];
   rows: DeployMatrixRow[];

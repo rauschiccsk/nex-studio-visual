@@ -461,6 +461,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/customers/{customer_id}/uat-launch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Uat Launch
+         * @description Mint a short-lived UAT test launch URL so the Manažér can open a deployed token-launch app
+         *     LOGGED-IN directly from the UAT tab (v4.0.30). Token-launch (``auth_mode='token'``) apps only — a
+         *     password app uses the plain 'Otvoriť aplikáciu' link. The launch key is used server-side only, never
+         *     returned; the token's ``sub`` is a UAT test identity (no impersonation). UAT-only convenience.
+         */
+        post: operations["uat_launch_api_v1_customers__customer_id__uat_launch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/epics": {
         parameters: {
             query?: never;
@@ -2906,6 +2929,11 @@ export interface components {
          *     accepted-for-PROD set (§3.3/§3.5).
          */
         DeployMatrix: {
+            /**
+             * Auth Mode
+             * @default password
+             */
+            auth_mode: string;
             /** Project Slug */
             project_slug: string;
             /** Rows */
@@ -5030,6 +5058,16 @@ export interface components {
             /** Task Count */
             task_count: number;
         };
+        /** _UatLaunchRequest */
+        _UatLaunchRequest: {
+            /** Project Slug */
+            project_slug: string;
+        };
+        /** _UatLaunchResponse */
+        _UatLaunchResponse: {
+            /** Launch Url */
+            launch_url: string;
+        };
         /**
          * _ZadanieReadResponse
          * @description Response for ``GET /versions/{version_id}/zadanie``.
@@ -6005,6 +6043,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeployEventRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    uat_launch_api_v1_customers__customer_id__uat_launch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                customer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_UatLaunchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["_UatLaunchResponse"];
                 };
             };
             /** @description Validation Error */

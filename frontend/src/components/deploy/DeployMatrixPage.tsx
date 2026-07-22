@@ -10,7 +10,7 @@ import {
   UploadCloud,
 } from "lucide-react";
 
-import { acceptCustomerUat, deployCustomer, getDeployMatrix } from "@/services/api/deploy";
+import { acceptCustomerUat, deployCustomer, getDeployMatrix, uatLaunch } from "@/services/api/deploy";
 import { ApiError } from "@/services/api";
 import { humanizeApiError } from "@/services/apiError";
 import { useActiveContextStore } from "@/store/activeContextStore";
@@ -79,6 +79,8 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
   // Audit Theme 4: the successful DeployResult per customer (url / bumped_to / warnings) — previously thrown
   // away, so the manager got no confirmation, no live link, no version-bump notice.
   const [rowResult, setRowResult] = useState<Record<string, DeployResult>>({});
+  // v4.0.30: the customer_id whose token-launch 'Spustiť' is mid-flight (minting + opening the app).
+  const [launching, setLaunching] = useState<string | null>(null);
 
   const load = useCallback(() => {
     if (!slug) return;
@@ -107,6 +109,60 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
       else next[customerId] = msg;
       return next;
     });
+  }
+
+  /** v4.0.30: token-launch 'Spustiť' — mint a short-lived UAT test launch token server-side and open the
+   * deployed app LOGGED-IN (no NEX Manager round-trip). UAT + token-launch apps only. */
+  async function handleLaunch(customerId: string) {
+    if (!slug) return;
+    setLaunching(customerId);
+    setRowMsg(customerId, null);
+    try {
+      const { launch_url } = await uatLaunch(customerId, slug);
+      window.open(launch_url, "_blank", "noopener");
+    } catch (err) {
+      setRowMsg(
+        customerId,
+        err instanceof ApiError ? humanizeApiError(err, "Spustenie zlyhalo").message : "Sieťová chyba pri spúšťaní.",
+      );
+    } finally {
+      setLaunching(null);
+    }
+  }
+
+  /** v4.0.30: the app-open control for a deployed cell. A token-launch app in UAT gets 'Spustiť'
+   * (mint a short-lived test launch token → land logged-in); every other case keeps the plain
+   * 'Otvoriť aplikáciu' link. Shared by the persistent cell link and the post-deploy result so an
+   * operator never lands on a bare 'spusti z NEX Managera' page after a UAT deploy. */
+  function renderLaunchOrOpen(customerId: string, url: string) {
+    if (environment === "uat" && matrix?.auth_mode === "token") {
+      return (
+        <button
+          type="button"
+          onClick={() => handleLaunch(customerId)}
+          disabled={launching === customerId}
+          className="mt-1 flex items-center gap-1 text-[11px] text-primary-500 hover:underline disabled:opacity-60"
+          title="Spustí appku prihlásenú (UAT test launch)"
+        >
+          {launching === customerId ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <ExternalLink className="h-3 w-3" />
+          )}
+          Spustiť
+        </button>
+      );
+    }
+    return (
+      <a
+        href={url}
+        target="_blank"
+        rel="noreferrer"
+        className="mt-1 flex items-center gap-1 text-[11px] text-primary-500 hover:underline"
+      >
+        <ExternalLink className="h-3 w-3" /> Otvoriť aplikáciu
+      </a>
+    );
   }
 
   /** The version a row's Nasadiť will deploy: the explicit pick, else newest verified. */
@@ -299,16 +355,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                           </span>
                         )}
                       </div>
-                      {liveUrl && (
-                        <a
-                          href={liveUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="mt-1 flex items-center gap-1 text-[11px] text-primary-500 hover:underline"
-                        >
-                          <ExternalLink className="h-3 w-3" /> Otvoriť aplikáciu
-                        </a>
-                      )}
+                      {liveUrl && renderLaunchOrOpen(row.customer_id, liveUrl)}
                     </td>
 
                     {/* Nasadiť version picker (verified versions only) */}
@@ -344,16 +391,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                       {result && !isBusy && (
                         <div className="mt-1 space-y-0.5 text-[11px] text-emerald-600 dark:text-emerald-400">
                           <div>✓ Nasadené{result.bumped_to ? ` — projekt povýšený na ${fmtVer(result.bumped_to)}` : ""}</div>
-                          {result.url && (
-                            <a
-                              href={result.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="flex items-center gap-1 hover:underline"
-                            >
-                              <ExternalLink className="h-3 w-3" /> Otvoriť aplikáciu
-                            </a>
-                          )}
+                          {result.url && renderLaunchOrOpen(row.customer_id, result.url)}
                           {result.warnings.map((w, i) => (
                             <div key={i} className="text-amber-600 dark:text-amber-400">
                               ⚠ {w}

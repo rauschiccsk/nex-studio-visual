@@ -315,6 +315,7 @@ def build_matrix(db: Session, project: Project) -> dict:
 
     return {
         "project_slug": project.slug,
+        "auth_mode": project.auth_mode,
         "verified_versions": list_verified_versions(db, project.id),
         "rows": rows,
     }

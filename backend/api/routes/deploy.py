@@ -25,10 +25,12 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.core.security import get_current_user, require_ri_role
+from backend.db.models.customers import Customer
 from backend.db.models.deploy import DeployEvent
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
@@ -41,6 +43,7 @@ from backend.schemas.deploy import (
     DeployResult,
 )
 from backend.services import deploy as deploy_service
+from backend.services import uat_launch as uat_launch_service
 
 router = APIRouter(tags=["Deploy"])
 
@@ -82,6 +85,44 @@ def get_deploy_matrix(
     """
     project = _resolve_project(db, slug)
     return DeployMatrix.model_validate(deploy_service.build_matrix(db, project))
+
+
+class _UatLaunchRequest(BaseModel):
+    project_slug: str
+
+
+class _UatLaunchResponse(BaseModel):
+    launch_url: str
+
+
+@router.post("/customers/{customer_id}/uat-launch", response_model=_UatLaunchResponse)
+def uat_launch(
+    customer_id: UUID,
+    payload: _UatLaunchRequest,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+) -> _UatLaunchResponse:
+    """Mint a short-lived UAT test launch URL so the Manažér can open a deployed token-launch app
+    LOGGED-IN directly from the UAT tab (v4.0.30). Token-launch (``auth_mode='token'``) apps only — a
+    password app uses the plain 'Otvoriť aplikáciu' link. The launch key is used server-side only, never
+    returned; the token's ``sub`` is a UAT test identity (no impersonation). UAT-only convenience."""
+    customer = db.execute(select(Customer).where(Customer.id == customer_id)).scalar_one_or_none()
+    if customer is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Zákazník nenájdený.")
+    project = _resolve_project(db, payload.project_slug)
+    if project.auth_mode != "token":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Nie je token-launch aplikácia — použi „Otvoriť aplikáciu“.",
+        )
+    uat_url = deploy_service._instance_url(customer, "uat", project)
+    launch_url = uat_launch_service.build_uat_launch_url(customer.slug, project.slug, uat_url)
+    if not launch_url:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Launch kľúč pre UAT nie je nastavený (chýba spárovaný NEX Manager).",
+        )
+    return _UatLaunchResponse(launch_url=launch_url)
 
 
 @router.get("/projects/{slug}/deploy-events", response_model=list[DeployEventRead])

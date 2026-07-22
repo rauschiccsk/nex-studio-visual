@@ -153,6 +153,9 @@ class DeployMatrix(BaseModel):
     """
 
     project_slug: str
+    #: The project's launch mode ('token' | 'password') — drives whether the UAT tab offers a
+    #: token-launch 'Spustiť' (opens the app logged-in) vs the plain 'Otvoriť aplikáciu' link (v4.0.30).
+    auth_mode: str = "password"
     verified_versions: list[str] = Field(
         default_factory=list,
         description="Deployable (verified / Hotovo) version_numbers — the Nasadiť dropdown options.",
