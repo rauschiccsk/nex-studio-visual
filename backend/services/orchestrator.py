@@ -3567,19 +3567,32 @@ def verify_mechanical(slug: str, block: PipelineStatusBlock, baseline_sha: Optio
             return "task reported no commits — no work landed on the task baseline"
         if not _commit_exists(project_root, baseline_sha):
             return f"task baseline {baseline_sha!r} not found in {slug}"
-        if not _git_ok(project_root, ["merge-base", "--is-ancestor", baseline_sha, "HEAD"]):
+        base = _bare_hash(baseline_sha)
+        if not _git_ok(project_root, ["merge-base", "--is-ancestor", base, "HEAD"]):
             return f"task baseline {baseline_sha!r} is not an ancestor of HEAD (history diverged)"
         for commit in block.commits:
-            if not _git_ok(project_root, ["merge-base", "--is-ancestor", commit, "HEAD"]):
+            sha = _bare_hash(commit)
+            if not _git_ok(project_root, ["merge-base", "--is-ancestor", sha, "HEAD"]):
                 return f"commit {commit!r} is not reachable from HEAD"
-            if _git_ok(project_root, ["merge-base", "--is-ancestor", commit, baseline_sha]):
+            if _git_ok(project_root, ["merge-base", "--is-ancestor", sha, base]):
                 return f"commit {commit!r} predates the task baseline (not in baseline..HEAD)"
     return None
+
+
+def _bare_hash(commit: str) -> str:
+    """The bare SHA from a reported commit entry (v4.0.28). Agents sometimes report the full
+    ``git log --oneline`` line ("<sha> <subject>") instead of just the SHA — a string with spaces
+    is NOT a resolvable revision for ``cat-file`` / ``merge-base`` (git errors "invalid object
+    name"), which surfaced as a FALSE "commit not found" verify failure that halted the build. Take
+    the first whitespace-delimited token (the SHA); pass through unchanged when there is none."""
+    parts = (commit or "").split()
+    return parts[0] if parts else (commit or "")
 
 
 def _commit_exists(project_root: Path, commit_hash: str) -> bool:
     import subprocess
 
+    commit_hash = _bare_hash(commit_hash)
     try:
         result = subprocess.run(
             ["git", "-C", str(project_root), "cat-file", "-e", f"{commit_hash}^{{commit}}"],
@@ -3622,7 +3635,7 @@ def _classify_machinery_false_negative(slug: str, prior_failures: list[str], las
     if not commits:
         return None
     project_root = claude_agent.PROJECTS_ROOT / slug
-    reachable = [c for c in commits if _git_ok(project_root, ["merge-base", "--is-ancestor", c, "HEAD"])]
+    reachable = [c for c in commits if _git_ok(project_root, ["merge-base", "--is-ancestor", _bare_hash(c), "HEAD"])]
     if reachable:
         return (
             "verify_mechanical opakovane hlásil „commit not found“, no nahlásené commity "
