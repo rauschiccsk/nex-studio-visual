@@ -30,6 +30,20 @@ RUN git config --global user.email "studio@isnex.eu" \
     && git config --global init.defaultBranch main \
     && git config --global --add safe.directory '*'
 
+# The backend orchestrates docker via the mounted /var/run/docker.sock: `docker compose build/up/down`
+# for the pipeline build + Verifikácia smoke, UAT/PROD deploy (uat_provisioner/orchestrator), and
+# `docker run` for per-project CI-runner provisioning. python:3.12-slim has no docker CLI, so those
+# shell-outs raised FileNotFoundError — which aborted even Create Project at the CI-runner step (v4.0.40).
+# Install the docker CLI + compose plugin (client only; the daemon is the host's, via the socket).
+RUN install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+    && chmod a+r /etc/apt/keyrings/docker.asc \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable" \
+        > /etc/apt/sources.list.d/docker.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install poetry and export requirements
 RUN pip install --no-cache-dir poetry==1.8.5
 

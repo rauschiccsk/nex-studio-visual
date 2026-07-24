@@ -428,3 +428,35 @@ def test_orchestrator_dispatches_all_three(tmp_path: Path) -> None:
     assert any("git" in cmd[0] and "push" in cmd for cmd in cmds)
     # Branch protection (gh api)
     assert any(cmd[0] == "gh" and cmd[1] == "api" for cmd in cmds)
+
+
+def test_post_scaffold_never_raises_on_step_failure(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """v4.0.40 fix B: a best-effort step raising (e.g. missing `docker` binary → FileNotFoundError, an
+    OSError) must NOT abort the create — run_post_scaffold_steps swallows + logs, so the project is
+    still created and the Manažér can finish CI/smoke manually."""
+    (tmp_path / "docker-compose.yml").write_text("services: {}\n")
+    with (
+        patch.object(mod, "_compose_archetype_surfaces"),
+        patch.object(mod, "_run_smoke_test"),
+        patch.object(mod, "_seed_release_smoke_test"),
+        patch.object(mod, "_commit_and_push_scaffold_finalisation"),
+        patch.object(mod, "_wire_cicd_workflow"),
+        patch.object(mod, "_wire_precommit_hook"),
+        patch.object(
+            mod,
+            "_provision_ci_runner",
+            side_effect=FileNotFoundError("[Errno 2] No such file or directory: 'docker'"),
+        ),
+    ):
+        # Must NOT raise despite the CI-runner step blowing up.
+        mod.run_post_scaffold_steps(
+            target=str(tmp_path),
+            slug="demo",
+            repo_url="rauschiccsk/demo",
+            project_type="standard",
+            auth_mode="token",
+            enable_cicd=True,
+            full_smoke=False,
+            enable_branch_protection=False,
+        )
+    assert "project still created" in caplog.text.lower()

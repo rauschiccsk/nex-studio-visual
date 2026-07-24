@@ -248,26 +248,38 @@ def run_post_scaffold_steps(
     """
     target_path = Path(target) if target else None
 
-    if target_path and target_path.is_dir():
-        _compose_archetype_surfaces(target_path, slug, project_type=project_type, auth_mode=auth_mode)
-        _run_smoke_test(target_path, slug, full=full_smoke)
-        _seed_release_smoke_test(target_path, slug)
-        # Commit + push the v2-shape normalisation (and archetype/smoke seeds) BEFORE the CI commit so the
-        # fresh project has a clean working tree and the remote reflects the real v2 shape (not the v1
-        # template it was bootstrapped from). Commit order: bootstrap → normalise → CI.
-        _commit_and_push_scaffold_finalisation(target_path, slug)
-    else:
-        logger.warning("Skipping K-004 smoke test — target %r not a directory", target)
+    # v4.0.40 (fix B): a HARD guard so NO best-effort step can 500 the create. The individual steps handle
+    # their own non-zero subprocess exits, but a MISSING binary (docker/gh not on PATH → FileNotFoundError,
+    # an OSError) or a TimeoutExpired would otherwise propagate to create_project's `except OSError` and
+    # abort the whole create. Partial success is acceptable here (the Manažér can finish CI/smoke manually),
+    # so swallow + log and let the project be created.
+    try:
+        if target_path and target_path.is_dir():
+            _compose_archetype_surfaces(target_path, slug, project_type=project_type, auth_mode=auth_mode)
+            _run_smoke_test(target_path, slug, full=full_smoke)
+            _seed_release_smoke_test(target_path, slug)
+            # Commit + push the v2-shape normalisation (and archetype/smoke seeds) BEFORE the CI commit so
+            # the fresh project has a clean working tree and the remote reflects the real v2 shape (not the
+            # v1 template it was bootstrapped from). Commit order: bootstrap → normalise → CI.
+            _commit_and_push_scaffold_finalisation(target_path, slug)
+        else:
+            logger.warning("Skipping K-004 smoke test — target %r not a directory", target)
 
-    if enable_cicd and target_path and target_path.is_dir():
-        _wire_cicd_workflow(target_path, slug)
-        _wire_precommit_hook(target_path)
-        # The pushed ci.yml runs on ``andros-ubuntu-<slug>`` (self-hosted) — provision that runner now, else
-        # every job queues forever (the nex-shopify gap, Director 2026-07-16). Best-effort, never raises.
-        _provision_ci_runner(slug, repo_url)
+        if enable_cicd and target_path and target_path.is_dir():
+            _wire_cicd_workflow(target_path, slug)
+            _wire_precommit_hook(target_path)
+            # The pushed ci.yml runs on ``andros-ubuntu-<slug>`` (self-hosted) — provision that runner now,
+            # else every job queues forever (the nex-shopify gap, Director 2026-07-16).
+            _provision_ci_runner(slug, repo_url)
 
-    if enable_branch_protection and repo_url:
-        _enable_branch_protection(repo_url, slug)
+        if enable_branch_protection and repo_url:
+            _enable_branch_protection(repo_url, slug)
+    except Exception as exc:  # noqa: BLE001 — best-effort by contract: never abort the create
+        logger.warning(
+            "Post-scaffold best-effort step failed (slug=%s) — project still created, finish manually: %s",
+            slug,
+            exc,
+        )
 
 
 def _compose_archetype_surfaces(target: Path, slug: str, *, project_type: str, auth_mode: str) -> None:
