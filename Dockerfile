@@ -44,6 +44,14 @@ RUN install -m 0755 -d /etc/apt/keyrings \
     && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
     && rm -rf /var/lib/apt/lists/*
 
+# Node.js — the AI Agent (claude) shells out to node/npm when it builds a generated app's frontend
+# (npm install / build), so the backend that hosts the agent needs a node runtime. The `claude` binary
+# itself is the proven host build, mounted read-only from /home/andros/.local at runtime (compose), so
+# the deployed agent is byte-identical to the one the team uses — no version drift. (v4.0.41)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends nodejs npm \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install poetry and export requirements
 RUN pip install --no-cache-dir poetry==1.8.5
 
