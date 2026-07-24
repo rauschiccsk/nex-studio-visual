@@ -52,6 +52,11 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 
+# The agent argv (build_claude_argv) invokes the BARE `claude` command, so it must resolve on PATH.
+# claude is mounted at /home/andros/.local/bin (off PATH) at runtime, so symlink it onto PATH. The
+# target resolves at exec time (when the mount is present). (v4.0.42)
+RUN ln -sf /home/andros/.local/bin/claude /usr/local/bin/claude
+
 # Install poetry and export requirements
 RUN pip install --no-cache-dir poetry==1.8.5
 
