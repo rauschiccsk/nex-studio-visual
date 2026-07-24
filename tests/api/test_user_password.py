@@ -1,10 +1,11 @@
 """Tests for POST /api/v1/users/{id}/change-password endpoint.
 
 Covers:
-    * ``ri`` user changes another user's password → 200.
-    * ``ha`` user attempts to change own password → 403 (ri-only endpoint).
+    * ``ri`` user changes another user's password → 200 (admin reset, no current password).
+    * ``ha`` user changes own password WITH the correct current password → 200 (v4.0.32 self-service).
+    * ``ha`` self change WITHOUT the current password → 400 (v4.0.32).
     * ``ha`` user attempts to change another user's password → 403.
-    * Short password (< 8 chars) → 422 validation error.
+    * Short password (< 5 chars) → 422 validation error.
     * Non-existent user_id → 404.
 """
 
@@ -43,7 +44,7 @@ class TestRiChangesOtherUser:
 
 
 class TestHaChangesSelf:
-    """ha role changes own password — allowed per DESIGN.md §2.2."""
+    """ha role changes own password — allowed, but must confirm the current password (v4.0.32)."""
 
     def test_returns_200(self, client, db_session):
         ha_user = seed_user(db_session, username="devha", password="OldPass123", role="ha")
@@ -52,11 +53,24 @@ class TestHaChangesSelf:
 
         resp = client.post(
             f"/api/v1/users/{ha_user.id}/change-password",
-            json={"new_password": "BrandNew88"},
+            json={"new_password": "BrandNew88", "current_password": "OldPass123"},
             headers={"Authorization": f"Bearer {token}"},
         )
 
         assert resp.status_code == 200
+
+    def test_missing_current_password_returns_400(self, client, db_session):
+        """A non-admin self change WITHOUT the current password is rejected (v4.0.32)."""
+        ha_user = seed_user(db_session, username="devha2", password="OldPass123", role="ha")
+        token = login_user(client, username="devha2", password="OldPass123")
+
+        resp = client.post(
+            f"/api/v1/users/{ha_user.id}/change-password",
+            json={"new_password": "BrandNew88"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert resp.status_code == 400
 
 
 class TestHaChangesOtherUser:
