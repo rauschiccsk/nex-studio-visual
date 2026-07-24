@@ -12,6 +12,15 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 
+# git needs a committer identity or `git commit` fails ("unable to auto-detect email address") — the
+# scaffolding init.sh commits the initial project, and the backend commits on the operator's behalf
+# (dirty-tree guard). safe.directory=* so the root-run backend can operate on host-owned project
+# checkouts under /opt/projects without git's "dubious ownership" refusal (v4.0.37).
+RUN git config --global user.email "studio@isnex.eu" \
+    && git config --global user.name "NEX Studio" \
+    && git config --global init.defaultBranch main \
+    && git config --global --add safe.directory '*'
+
 # Install poetry and export requirements
 RUN pip install --no-cache-dir poetry==1.8.5
 
