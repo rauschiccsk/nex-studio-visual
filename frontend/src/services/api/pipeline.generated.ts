@@ -153,7 +153,15 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update Me
+         * @description Update the current user's OWN profile — e-mail, display name, Telegram chat id (v4.0.33).
+         *
+         *     Self-service: every authenticated user may edit these safe fields on themselves (the admin
+         *     ``PATCH /users/{id}`` stays ri-only and also governs role / activation). ``username``, ``role`` and
+         *     ``is_active`` are never editable here; the password has its own endpoint.
+         */
+        patch: operations["update_me_api_v1_auth_me_patch"];
         trace?: never;
     };
     "/api/v1/auth/refresh": {
@@ -2267,6 +2275,8 @@ export interface components {
              * @enum {string}
              */
             role: "ri" | "ha" | "shu";
+            /** Telegram Chat Id */
+            telegram_chat_id?: string | null;
             /**
              * Updated At
              * Format: date-time
@@ -4308,6 +4318,25 @@ export interface components {
             x_faster: number | null;
         };
         /**
+         * SelfProfileUpdate
+         * @description Fields a user may change on their OWN profile via ``PATCH /auth/me`` (v4.0.33).
+         *
+         *     Deliberately EXCLUDES ``username`` (the login identity), ``role`` and ``is_active`` (admin-only) and
+         *     ``password`` (its own endpoint). Only the safe self-service fields — contact e-mail, display name and
+         *     the Telegram chat id — are editable here. PATCH semantics: only supplied fields are applied; an empty
+         *     string clears ``first_name`` / ``last_name`` / ``telegram_chat_id``.
+         */
+        SelfProfileUpdate: {
+            /** Email */
+            email?: string | null;
+            /** First Name */
+            first_name?: string | null;
+            /** Last Name */
+            last_name?: string | null;
+            /** Telegram Chat Id */
+            telegram_chat_id?: string | null;
+        };
+        /**
          * SystemOverheadRead
          * @description Un-phased engine (``system`` author with no phase stamp) tokens — info-only; foots the per-phase
          *     table but never enters the headline ROI. (In the v2 engine virtually every message carries a phase
@@ -5300,6 +5329,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuthUser"];
+                };
+            };
+        };
+    };
+    update_me_api_v1_auth_me_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SelfProfileUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthUser"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -23,6 +23,7 @@ import { createAuthStore, type LoginAuthState } from "nex-shared";
 import { TOKEN_STORAGE_KEY } from "@/services/api";
 import type { AuthUser } from "@/services/api/auth";
 import { loginApi, logoutApi, getMeApi } from "@/services/api/auth";
+import { useActiveContextStore } from "@/store/activeContextStore";
 import { usePresenceStore } from "@/store/usePresenceStore";
 
 export type { AuthUser };
@@ -54,7 +55,14 @@ const authModule = createAuthStore<AuthUser, [string, string]>({
   redirectOnUnauthorized: "/login",
   // E6 (CR-NS-038): a fresh login starts "at computer" — never carry a persisted
   // "away" from a prior session. App-side hook (presence is not lib concern).
-  onLogin: () => usePresenceStore.getState().setIsAway(false),
+  // v4.0.33: the selected/pinned project persists in this browser's localStorage
+  // (activeContextStore) — a DIFFERENT user logging in must NOT inherit the previous
+  // user's project (bug: Nazar saw the Director's pinned NEX Shopify in the sidebar +
+  // Metriky/UAT/PROD). Clear it on every login so each user starts with no pin.
+  onLogin: () => {
+    usePresenceStore.getState().setIsAway(false);
+    useActiveContextStore.getState().setSelectedProject(null);
+  },
 });
 
 export const useAuthStore: UseBoundStore<StoreApi<LoginAuthState<AuthUser, [string, string]>>> =

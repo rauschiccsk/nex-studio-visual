@@ -27,7 +27,7 @@ import pytest
 from backend.db.models.bugs import Bug
 from backend.db.models.foundation import User, UserSession
 from backend.db.models.projects import Project
-from backend.schemas.user import UserCreate, UserUpdate
+from backend.schemas.user import SelfProfileUpdate, UserCreate, UserUpdate
 from backend.services import user as service
 
 
@@ -499,3 +499,53 @@ class TestChangePassword:
         ri_user = service.create(db_session, _payload(username="ri_wc", email="ri_wc@ex.com", role="ri"))
         with pytest.raises(ValueError, match="Current password is incorrect"):
             service.change_password(db_session, ri_user.id, "RiReset1!", ri_user, current_password="wrong")
+
+
+class TestUpdateOwnProfile:
+    """v4.0.33 self-service profile edit — :func:`backend.services.user.update_own_profile`."""
+
+    def test_updates_safe_fields(self, db_session):
+        user = service.create(db_session, _payload(username="prof1", email="prof1@ex.com", role="shu"))
+        updated = service.update_own_profile(
+            db_session,
+            user.id,
+            SelfProfileUpdate(email="new@ex.com", first_name="Nazar", last_name="Teliuk", telegram_chat_id="12345"),
+        )
+        assert updated.email == "new@ex.com"
+        assert updated.first_name == "Nazar"
+        assert updated.last_name == "Teliuk"
+        assert updated.telegram_chat_id == "12345"
+
+    def test_never_touches_role_or_active_or_username(self, db_session):
+        """The self endpoint cannot escalate role, (de)activate, or rename the login identity."""
+        user = service.create(db_session, _payload(username="prof2", email="prof2@ex.com", role="shu"))
+        # extra="forbid" on the schema rejects any such field outright.
+        with pytest.raises(Exception):  # noqa: B017 - pydantic ValidationError
+            SelfProfileUpdate(role="ri")
+        # And a valid self update leaves them untouched.
+        service.update_own_profile(db_session, user.id, SelfProfileUpdate(first_name="X"))
+        assert user.role == "shu"
+        assert user.is_active is True
+        assert user.username == "prof2"
+
+    def test_email_collision_raises(self, db_session):
+        service.create(db_session, _payload(username="prof3", email="taken@ex.com", role="ha"))
+        me = service.create(db_session, _payload(username="prof4", email="mine@ex.com", role="shu"))
+        with pytest.raises(ValueError, match="already exists"):
+            service.update_own_profile(db_session, me.id, SelfProfileUpdate(email="taken@ex.com"))
+
+    def test_partial_update_leaves_others(self, db_session):
+        user = service.create(
+            db_session, _payload(username="prof5", email="prof5@ex.com", first_name="Keep", role="shu")
+        )
+        service.update_own_profile(db_session, user.id, SelfProfileUpdate(telegram_chat_id="999"))
+        assert user.telegram_chat_id == "999"
+        assert user.first_name == "Keep"
+        assert user.email == "prof5@ex.com"
+
+    def test_empty_string_clears_telegram(self, db_session):
+        user = service.create(
+            db_session, _payload(username="prof6", email="prof6@ex.com", telegram_chat_id="abc", role="shu")
+        )
+        service.update_own_profile(db_session, user.id, SelfProfileUpdate(telegram_chat_id=""))
+        assert user.telegram_chat_id == ""

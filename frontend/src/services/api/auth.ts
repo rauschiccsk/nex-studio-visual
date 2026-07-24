@@ -22,11 +22,21 @@ export interface AuthUser {
   first_name?: string | null;
   /** Family name — nullable (legacy users may lack it). CR-NS-089. */
   last_name?: string | null;
+  /** The user's own Telegram chat id (agent notifications) — editable in "Moje konto" (v4.0.33). */
+  telegram_chat_id?: string | null;
   /** True while the user still has an admin-set initial password that must be changed before using
    *  the app (v4.0.32). The app blocks behind a change-password screen while this is set. */
   must_change_password?: boolean;
   created_at: string;
   updated_at: string;
+}
+
+/** Payload for ``PATCH /auth/me`` — the SAFE self-editable profile fields (v4.0.33). */
+export interface SelfProfileUpdate {
+  email?: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  telegram_chat_id?: string | null;
 }
 
 /** Mirrors ``backend.schemas.auth.LoginResponse``. */
@@ -90,4 +100,12 @@ export function logoutApi(): Promise<void> {
  */
 export function getMeApi(): Promise<AuthUser> {
   return api.get<AuthUser>("/auth/me");
+}
+
+/**
+ * Update the current user's OWN profile (email / name / Telegram id) — self-service (v4.0.33).
+ * Maps to ``PATCH /auth/me``; role, activation and username are never editable here.
+ */
+export function updateMyProfileApi(data: SelfProfileUpdate): Promise<AuthUser> {
+  return api.patch<AuthUser>("/auth/me", data);
 }

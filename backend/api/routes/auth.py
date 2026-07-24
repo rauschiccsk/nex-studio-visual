@@ -15,7 +15,9 @@ from backend.core.security import get_current_user
 from backend.db.models.foundation import User
 from backend.db.session import get_db
 from backend.schemas.auth import AuthUser, LoginRequest, LoginResponse
+from backend.schemas.user import SelfProfileUpdate
 from backend.services import auth as auth_service
+from backend.services import user as user_service
 
 router = APIRouter(tags=["Auth"])
 
@@ -132,3 +134,34 @@ def me(
 ) -> AuthUser:
     """Return the currently authenticated user's profile."""
     return AuthUser.model_validate(current_user)
+
+
+@router.patch(
+    "/me",
+    response_model=AuthUser,
+    status_code=status.HTTP_200_OK,
+)
+def update_me(
+    payload: SelfProfileUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> AuthUser:
+    """Update the current user's OWN profile — e-mail, display name, Telegram chat id (v4.0.33).
+
+    Self-service: every authenticated user may edit these safe fields on themselves (the admin
+    ``PATCH /users/{id}`` stays ri-only and also governs role / activation). ``username``, ``role`` and
+    ``is_active`` are never editable here; the password has its own endpoint.
+    """
+    try:
+        user = user_service.update_own_profile(db, current_user.id, payload)
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        if "already exists" in str(exc).lower():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Tento e-mail už používa iný používateľ.",
+            ) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    db.refresh(user)
+    return AuthUser.model_validate(user)

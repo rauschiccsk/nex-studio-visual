@@ -42,7 +42,7 @@ from sqlalchemy.orm import Session
 from backend.db.models.bugs import Bug
 from backend.db.models.foundation import User, UserSession
 from backend.db.models.projects import Project
-from backend.schemas.user import UserCreate, UserRole, UserUpdate
+from backend.schemas.user import SelfProfileUpdate, UserCreate, UserRole, UserUpdate
 
 
 def list_users(
@@ -237,6 +237,35 @@ def update(db: Session, user_id: UUID, data: UserUpdate) -> User:
 
     for field, value in update_data.items():
         if field in allowed_fields and value is not None:
+            setattr(user, field, value)
+
+    db.flush()
+    return user
+
+
+def update_own_profile(db: Session, user_id: UUID, data: SelfProfileUpdate) -> User:
+    """Update the SAFE, self-editable fields of a user's OWN profile (v4.0.33).
+
+    Only ``email`` / ``first_name`` / ``last_name`` / ``telegram_chat_id`` may change — ``username``,
+    ``role`` and ``is_active`` are NOT touched here (role + activation are admin-only; username is the
+    login identity). PATCH semantics: only supplied fields are applied. ``email`` uniqueness is
+    re-validated so the caller gets a clean :class:`ValueError` (HTTP 409) rather than an IntegrityError.
+
+    Raises:
+        ValueError: If the user does not exist, or a new ``email`` collides with another user.
+    """
+    user = get_by_id(db, user_id)
+    update_data = data.model_dump(exclude_unset=True)
+
+    new_email = update_data.get("email")
+    if new_email is not None and new_email != user.email:
+        existing = _get_by_email(db, new_email)
+        if existing is not None and existing.id != user.id:
+            raise ValueError(f"User with email {new_email!r} already exists")
+
+    allowed_fields = {"email", "first_name", "last_name", "telegram_chat_id"}
+    for field, value in update_data.items():
+        if field in allowed_fields:
             setattr(user, field, value)
 
     db.flush()

@@ -17,6 +17,10 @@ RUN poetry export --without dev -f requirements.txt -o requirements.txt \
 COPY backend/ ./backend/
 COPY alembic.ini ./alembic.ini
 COPY migrations/ ./migrations/
+# The Aktualizácie changelog is served from the per-version RELEASE_NOTES.md files
+# (backend.services.release_notes reads /app/docs/specs/versions/v*/RELEASE_NOTES.md).
+# Without this the endpoint returns [] and the Aktualizácie tab is empty (v4.0.33).
+COPY docs/specs/versions/ ./docs/specs/versions/
 
 EXPOSE 9176
 

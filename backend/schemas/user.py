@@ -168,6 +168,23 @@ class ChangePasswordRequest(BaseModel):
     )
 
 
+class SelfProfileUpdate(BaseModel):
+    """Fields a user may change on their OWN profile via ``PATCH /auth/me`` (v4.0.33).
+
+    Deliberately EXCLUDES ``username`` (the login identity), ``role`` and ``is_active`` (admin-only) and
+    ``password`` (its own endpoint). Only the safe self-service fields — contact e-mail, display name and
+    the Telegram chat id — are editable here. PATCH semantics: only supplied fields are applied; an empty
+    string clears ``first_name`` / ``last_name`` / ``telegram_chat_id``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    email: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    first_name: Optional[str] = Field(default=None, max_length=100)
+    last_name: Optional[str] = Field(default=None, max_length=100)
+    telegram_chat_id: Optional[str] = Field(default=None, max_length=64)
+
+
 class UserRead(BaseModel):
     """Serialised representation of a user row.
 
