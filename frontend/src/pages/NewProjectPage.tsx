@@ -86,6 +86,13 @@ export default function NewProjectPage() {
   const [users, setUsers] = useState<UserRead[]>([]);
   const [ownerId, setOwnerId] = useState<string>("");
 
+  // v4.0.34: only an admin (ri) can list users (GET /users is ri-only) → only they get an owner
+  // PICKER; every other role creates a project owned by THEMSELVES (owner auto-filled, shown read-only).
+  const canPickOwner = user?.role === "ri";
+  const ownerSelfDisplay = user
+    ? [user.first_name, user.last_name].filter(Boolean).join(" ") || user.username
+    : "";
+
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -95,20 +102,27 @@ export default function NewProjectPage() {
   // Auto-focus name on mount
   useEffect(() => { nameRef.current?.focus(); }, []);
 
-  // Fetch users for the Owner picker; default to the current user when present.
+  // Owner defaults to the current user immediately — independent of the (ri-only) user-list fetch, so a
+  // non-admin never lands on an empty "— žiadny —" picker (v4.0.34).
+  useEffect(() => {
+    if (user?.id) setOwnerId((prev) => prev || user.id);
+  }, [user?.id]);
+
+  // Fetch users for the owner PICKER (admins only — GET /users is ri-only). A non-admin 403s here and
+  // simply keeps the self default above; the field renders read-only.
   useEffect(() => {
     let cancelled = false;
     listUsersApi({ limit: 100 })
       .then((res) => {
-        if (cancelled) return;
-        setUsers(res.items);
-        if (user?.id && res.items.some((u) => u.id === user.id)) {
-          setOwnerId(user.id);
-        }
+        if (!cancelled) setUsers(res.items);
       })
-      .catch(() => { /* owner is optional — silently leave the picker empty */ });
-    return () => { cancelled = true; };
-  }, [user?.id]);
+      .catch(() => {
+        /* non-admin: no user list — owner stays self (defaulted above) */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Load the github_org ICC setting — used to auto-fill repo_url as
   // "{github_org}/{slug}". Fails silently when the endpoint is
@@ -431,22 +445,32 @@ export default function NewProjectPage() {
               <label htmlFor="np-owner" className="block text-sm font-medium text-[var(--color-text-secondary)] mb-2">
                 Vlastník <span className="text-[var(--color-text-muted)] font-normal">(dostáva Telegram notifikácie od agenta)</span>
               </label>
-              <select
-                id="np-owner"
-                value={ownerId}
-                onChange={(e) => setOwnerId(e.target.value)}
-                className="w-full bg-[var(--color-surface)] border border-[var(--color-border-default)] rounded-lg px-3 py-2 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-primary-500"
-              >
-                <option value="">— žiadny —</option>
-                {users.map((u) => {
-                  const display = [u.first_name, u.last_name].filter(Boolean).join(" ") || u.username;
-                  return (
-                    <option key={u.id} value={u.id}>
-                      {display} ({u.username})
-                    </option>
-                  );
-                })}
-              </select>
+              {canPickOwner ? (
+                <select
+                  id="np-owner"
+                  value={ownerId}
+                  onChange={(e) => setOwnerId(e.target.value)}
+                  className="w-full bg-[var(--color-surface)] border border-[var(--color-border-default)] rounded-lg px-3 py-2 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-primary-500"
+                >
+                  <option value="">— žiadny —</option>
+                  {users.map((u) => {
+                    const display = [u.first_name, u.last_name].filter(Boolean).join(" ") || u.username;
+                    return (
+                      <option key={u.id} value={u.id}>
+                        {display} ({u.username})
+                      </option>
+                    );
+                  })}
+                </select>
+              ) : (
+                // Non-admin: the project is owned by the creator themselves (owner auto-filled, read-only).
+                <div
+                  id="np-owner"
+                  className="w-full rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-hover)] px-3 py-2 text-sm text-[var(--color-text-primary)]"
+                >
+                  {ownerSelfDisplay} <span className="text-[var(--color-text-muted)]">(ty)</span>
+                </div>
+              )}
             </div>
 
             {/* F-004 Setup options */}
