@@ -5,6 +5,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# git is required at runtime: the Create-Project scaffolding (init.sh: git init/add/commit) and the
+# backend's own git operations (dirty-tree guard, commit, discard) shell out to it. python:3.12-slim
+# ships without git, so project creation failed with "git: command not found" (exit 127) — v4.0.36.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install poetry and export requirements
 RUN pip install --no-cache-dir poetry==1.8.5
 
