@@ -46,6 +46,10 @@ COPY migrations/ ./migrations/
 # (backend.services.release_notes reads /app/docs/specs/versions/v*/RELEASE_NOTES.md).
 # Without this the endpoint returns [] and the Aktualizácie tab is empty (v4.0.33).
 COPY docs/specs/versions/ ./docs/specs/versions/
+# Create-Project scaffolding reads charter/CI/smoke templates from /app/templates (agent-shared-base.md,
+# ai-agent-charter.md, auditor-charter.md, release_smoke_test.sh, github-actions-workflow.yml, uat/, …).
+# Without this, v2 charter provisioning fails "shared base template missing" and create 500s (v4.0.39).
+COPY templates/ ./templates/
 
 EXPOSE 9176
 
