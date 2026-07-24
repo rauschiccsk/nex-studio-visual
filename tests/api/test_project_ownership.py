@@ -73,3 +73,18 @@ def test_admin_sees_every_project(client, db_session):
     # ri gets any
     got = client.get(f"/api/v1/projects/{theirs.id}", headers={"Authorization": f"Bearer {token}"})
     assert got.status_code == 200
+
+
+def test_junior_cannot_read_another_projects_specs(client, db_session):
+    """v4.0.43: /project-specs/content is owner-scoped — a non-owner Junior gets 403 before any fs read."""
+    owner = seed_user(db_session, username="specowner", password="InitPass1", role="shu")
+    seed_user(db_session, username="specother", password="InitPass1", role="shu")
+    theirs = _project(db_session, owner)
+
+    token = login_user(client, username="specother", password="InitPass1")
+    resp = client.get(
+        "/api/v1/project-specs/content",
+        params={"slug": theirs.slug, "path": "docs/specs/versions/v0.1.0/specification.md"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403

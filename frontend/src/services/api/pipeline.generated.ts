@@ -204,12 +204,15 @@ export interface paths {
         /**
          * List Backlog
          * @description Paginated backlog list (ordered ``number ASC`` = ``REQ-1, REQ-2, …``).
+         *
+         *     v4.0.43: a Junior (``shu``) MUST scope to a project they OWN (``project_id`` required + owner-checked);
+         *     ri/ha may list across all projects.
          */
         get: operations["list_backlog_api_v1_backlog_get"];
         put?: never;
         /**
          * Create Backlog Item
-         * @description Create a backlog item (``REQ-N`` auto-assigned; status ``open``).
+         * @description Create a backlog item (``REQ-N`` auto-assigned; status ``open``). v4.0.43: owner-or-ri/ha.
          */
         post: operations["create_backlog_item_api_v1_backlog_post"];
         delete?: never;
@@ -234,7 +237,8 @@ export interface paths {
         post?: never;
         /**
          * Delete Backlog Item
-         * @description Delete a backlog item — only when ``open`` (never delete realized/included History).
+         * @description Delete a backlog item — only when ``open`` (never delete realized/included History). v4.0.43:
+         *     owner-or-ri/ha of the item's project.
          */
         delete: operations["delete_backlog_item_api_v1_backlog__item_id__delete"];
         options?: never;
@@ -244,7 +248,8 @@ export interface paths {
          * @description Edit, reject, or assign-to-version.
          *
          *     A payload that sets ``version_id`` is an **assign** (→ ``status=included``); otherwise it edits
-         *     ``title`` / ``description`` / ``priority`` / ``status`` (reject = ``status='rejected'``).
+         *     ``title`` / ``description`` / ``priority`` / ``status`` (reject = ``status='rejected'``). v4.0.43:
+         *     owner-or-ri/ha of the item's project.
          */
         patch: operations["update_backlog_item_api_v1_backlog__item_id__patch"];
         trace?: never;
@@ -969,6 +974,9 @@ export interface paths {
         /**
          * List Project Members
          * @description List project memberships, optionally filtered by project or user.
+         *
+         *     v4.0.43: a Junior (``shu``) MUST scope to a project they OWN (``project_id`` required + owner-checked);
+         *     ri/ha may list across all projects.
          */
         get: operations["list_project_members_api_v1_project_members_get"];
         put?: never;
@@ -1013,12 +1021,13 @@ export interface paths {
          *     Returns text content for whitelisted text extensions (``.md``,
          *     ``.txt``, ``.csv``, ``.json``, ``.yaml``, source code, etc.); for
          *     binary files returns ``is_text=False`` + empty content so the
-         *     frontend can render a "cannot display" placeholder.
+         *     frontend can render a "cannot display" placeholder. v4.0.43: owner-or-privileged on ``slug``.
          */
         get: operations["get_project_spec_content_api_v1_project_specs_content_get"];
         /**
          * Update Project Spec Content
-         * @description Overwrite a single ``.md`` file. Director (``ri``) only.
+         * @description Overwrite a single ``.md`` file. v4.0.43: owner-OR-``ri`` (was ``ri`` only) — the project owner or
+         *     an ``ri`` may fix a typo; a Medior does not gain edits on projects it doesn't own.
          *
          *     The file must already exist — this endpoint does **not** create new
          *     documents. New spec docs are produced by the agents (Designer /
@@ -1045,6 +1054,9 @@ export interface paths {
          *
          *     Returns a flat list sorted by ``relative_path``. The frontend wraps
          *     this into a hierarchical tree via :file:`src/lib/kbTreeBuilder.ts`.
+         *
+         *     v4.0.43: a Junior (``shu``) sees only the docs of projects they OWN — the flat list is filtered to
+         *     their own slugs (the ``relative_path`` is ``<slug>/docs/…``); ri/ha see every project's docs.
          */
         get: operations["list_project_specs_api_v1_project_specs_list_get"];
         put?: never;

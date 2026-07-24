@@ -173,19 +173,25 @@ def test_invalid_priority_rejected(db_session):
 # ── access control (shu reads, ha writes) ───────────────────────────────────
 
 
-def test_shu_can_read_but_not_write(db_session):
-    ha = _make_user(db_session, "ha")
-    project = _make_project(db_session, ha)
-    # an existing item (created by ha) for the shu read
+def test_backlog_scoped_to_owner(db_session):
+    """v4.0.43: a Junior reads + writes ONLY their OWN project's backlog; a non-owner Junior is 403."""
+    owner = _make_user(db_session, "shu")
+    project = _make_project(db_session, owner)
     backlog_service.create(db_session, BacklogItemCreate(project_id=project.id, title="seed"))
     db_session.flush()
 
-    shu = _make_user(db_session, "shu")
-    shu_client = _client(db_session, shu)
+    # the OWNER shu reads + writes their own backlog (owner-or-ri/ha tier)
+    owner_client = _client(db_session, owner)
+    assert owner_client.get("/api/v1/backlog", params={"project_id": str(project.id)}).status_code == 200
+    created = owner_client.post("/api/v1/backlog", json={"project_id": str(project.id), "title": "mine"})
+    assert created.status_code == 201
 
-    assert shu_client.get("/api/v1/backlog", params={"project_id": str(project.id)}).status_code == 200
-    # writes are ha+ → shu is forbidden
-    assert shu_client.post("/api/v1/backlog", json={"project_id": str(project.id), "title": "nope"}).status_code == 403
+    # a DIFFERENT Junior (non-owner) can neither read nor write it
+    other_client = _client(db_session, _make_user(db_session, "shu"))
+    assert other_client.get("/api/v1/backlog", params={"project_id": str(project.id)}).status_code == 403
+    assert (
+        other_client.post("/api/v1/backlog", json={"project_id": str(project.id), "title": "nope"}).status_code == 403
+    )
 
 
 # ── realize-on-release (additive hook in version.release) ────────────────────

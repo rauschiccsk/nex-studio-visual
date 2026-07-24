@@ -138,10 +138,26 @@ class TestProjectMembersRouter:
         resp = client.get("/api/v1/project-members")
         assert resp.status_code == 200
 
-    def test_shu_forbidden_list(self, db_session, shu_user):
+    def test_shu_forbidden_list(self, db_session, shu_user, ri_user):
+        """v4.0.43: a Junior may not list members across all projects — must scope to an OWNED project."""
+        # A project owned by someone else (DB setup before any request).
+        project = Project(
+            name="proj-rbac-shu-list",
+            slug="proj-rbac-shu-list",
+            type="standard",
+            auth_mode="password",
+            description="",
+            created_by=ri_user.id,
+        )
+        db_session.add(project)
+        db_session.flush()
+        other_id = str(project.id)
+
         client = _build_client(db_session, shu_user)
-        resp = client.get("/api/v1/project-members")
-        assert resp.status_code == 403
+        # no project_id → cannot list across all projects → 400
+        assert client.get("/api/v1/project-members").status_code == 400
+        # a project owned by someone else → 403
+        assert client.get("/api/v1/project-members", params={"project_id": other_id}).status_code == 403
 
     def test_ha_forbidden_create(self, db_session, ha_user, ri_user):
         # ha cannot create project_members — only ri can

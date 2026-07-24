@@ -2,10 +2,10 @@
 
 M2.B milestone (2026-05-07). Mount prefix: ``/api/v1/project-members``.
 
-Auth surface:
-* ``GET`` — ``Depends(require_ha_or_above)`` (read access for ``ri`` and ``ha``)
-* ``POST`` / ``DELETE`` — ``Depends(require_ri_role)`` (assignment management
-  is a Director-only operation; ``ha`` cannot assign other users to projects).
+Auth surface (v4.0.43 — ownership-scoped via ``backend.core.authz``):
+* ``GET`` — any authenticated user; a Junior (``shu``) is scoped to projects they OWN, ri/ha see all.
+* ``POST`` / ``PATCH`` / ``DELETE`` — owner-OR-``ri`` of the member's project (``ha`` does not gain member
+  management on projects it doesn't own).
 
 Note: NEX Studio aktuálne má 1-3 aktívnych používateľov. Project
 membership becomes operationally relevant až keď ``shu`` users (Nazar)
@@ -22,7 +22,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from backend.core.security import require_ha_or_above, require_ri_role
+from backend.core import authz
+from backend.core.security import get_current_user, require_shu_or_above
 from backend.db.models.foundation import User
 from backend.db.models.project_member import ProjectMember
 from backend.db.session import get_db
@@ -39,10 +40,21 @@ router = APIRouter(tags=["Project Members"])
 def list_project_members(
     project_id: UUID | None = Query(default=None, description="Filter by project."),
     user_id: UUID | None = Query(default=None, description="Filter by user."),
-    _ha: User = Depends(require_ha_or_above),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[ProjectMemberRead]:
-    """List project memberships, optionally filtered by project or user."""
+    """List project memberships, optionally filtered by project or user.
+
+    v4.0.43: a Junior (``shu``) MUST scope to a project they OWN (``project_id`` required + owner-checked);
+    ri/ha may list across all projects.
+    """
+    if current_user.role not in authz.PRIVILEGED_ROLES:
+        if project_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="project_id je povinný — nemôžeš vypísať členov naprieč projektami.",
+            )
+        authz.assert_project_id_access(db, current_user, project_id)
     stmt = select(ProjectMember).order_by(ProjectMember.created_at.desc())
     if project_id is not None:
         stmt = stmt.where(ProjectMember.project_id == project_id)
@@ -55,21 +67,24 @@ def list_project_members(
 @router.get("/{member_id}", response_model=ProjectMemberRead)
 def get_project_member(
     member_id: UUID,
-    _ha: User = Depends(require_ha_or_above),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ProjectMemberRead:
     member = db.get(ProjectMember, member_id)
     if member is None:
         raise HTTPException(status_code=404, detail="ProjectMember not found")
+    authz.assert_project_id_access(db, current_user, member.project_id)
     return ProjectMemberRead.model_validate(member)
 
 
 @router.post("", response_model=ProjectMemberRead, status_code=status.HTTP_201_CREATED)
 def create_project_member(
     payload: ProjectMemberCreate,
-    _ri: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
     db: Session = Depends(get_db),
 ) -> ProjectMemberRead:
+    # v4.0.43: owner-or-ri may add members to a project they own.
+    authz.assert_project_id_access(db, current_user, payload.project_id, ri_only=True)
     member = ProjectMember(
         project_id=payload.project_id,
         user_id=payload.user_id,
@@ -98,12 +113,13 @@ def create_project_member(
 def update_project_member(
     member_id: UUID,
     payload: ProjectMemberUpdate,
-    _ri: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
     db: Session = Depends(get_db),
 ) -> ProjectMemberRead:
     member = db.get(ProjectMember, member_id)
     if member is None:
         raise HTTPException(status_code=404, detail="ProjectMember not found")
+    authz.assert_project_id_access(db, current_user, member.project_id, ri_only=True)
     if payload.role is not None:
         member.role = payload.role
     db.commit()
@@ -118,12 +134,13 @@ def update_project_member(
 )
 def delete_project_member(
     member_id: UUID,
-    _ri: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
     db: Session = Depends(get_db),
 ) -> Response:
     member = db.get(ProjectMember, member_id)
     if member is None:
         raise HTTPException(status_code=404, detail="ProjectMember not found")
+    authz.assert_project_id_access(db, current_user, member.project_id, ri_only=True)
     db.delete(member)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

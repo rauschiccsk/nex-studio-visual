@@ -20,7 +20,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
-from backend.core.security import require_ha_or_above, require_shu_or_above
+from backend.core import authz
+from backend.core.security import get_current_user
+from backend.db.models.foundation import User
 from backend.db.session import get_db
 from backend.schemas.backlog import (
     BacklogItemCreate,
@@ -45,7 +47,7 @@ def _map_value_error(exc: ValueError) -> HTTPException:
     return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=message)
 
 
-@router.get("", response_model=PaginatedResponse[BacklogItemRead], dependencies=[Depends(require_shu_or_above)])
+@router.get("", response_model=PaginatedResponse[BacklogItemRead])
 def list_backlog(
     project_id: Optional[UUID] = Query(default=None, description="Filter by project."),
     status_filter: Optional[BacklogStatus] = Query(
@@ -53,9 +55,21 @@ def list_backlog(
     ),
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=200),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> PaginatedResponse[BacklogItemRead]:
-    """Paginated backlog list (ordered ``number ASC`` = ``REQ-1, REQ-2, …``)."""
+    """Paginated backlog list (ordered ``number ASC`` = ``REQ-1, REQ-2, …``).
+
+    v4.0.43: a Junior (``shu``) MUST scope to a project they OWN (``project_id`` required + owner-checked);
+    ri/ha may list across all projects.
+    """
+    if current_user.role not in authz.PRIVILEGED_ROLES:
+        if project_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="project_id je povinný — nemôžeš vypísať zásobník naprieč projektami.",
+            )
+        authz.assert_project_id_access(db, current_user, project_id)
     rows = backlog_service.list_backlog(db, project_id=project_id, status=status_filter, limit=limit, offset=skip)
     total = backlog_service.count_backlog(db, project_id=project_id, status=status_filter)
     return PaginatedResponse[BacklogItemRead](
@@ -66,13 +80,18 @@ def list_backlog(
     )
 
 
-@router.get("/{item_id}", response_model=BacklogItemRead, dependencies=[Depends(require_shu_or_above)])
-def get_backlog_item(item_id: UUID, db: Session = Depends(get_db)) -> BacklogItemRead:
+@router.get("/{item_id}", response_model=BacklogItemRead)
+def get_backlog_item(
+    item_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> BacklogItemRead:
     """Return one backlog item."""
     try:
         item = backlog_service.get_by_id(db, item_id)
     except ValueError as exc:
         raise _map_value_error(exc) from exc
+    authz.assert_project_id_access(db, current_user, item.project_id)
     return BacklogItemRead.model_validate(item)
 
 
@@ -80,10 +99,14 @@ def get_backlog_item(item_id: UUID, db: Session = Depends(get_db)) -> BacklogIte
     "",
     response_model=BacklogItemRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_ha_or_above)],
 )
-def create_backlog_item(payload: BacklogItemCreate, db: Session = Depends(get_db)) -> BacklogItemRead:
-    """Create a backlog item (``REQ-N`` auto-assigned; status ``open``)."""
+def create_backlog_item(
+    payload: BacklogItemCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> BacklogItemRead:
+    """Create a backlog item (``REQ-N`` auto-assigned; status ``open``). v4.0.43: owner-or-ri/ha."""
+    authz.assert_project_id_access(db, current_user, payload.project_id)
     try:
         item = backlog_service.create(db, payload)
         db.commit()
@@ -94,18 +117,21 @@ def create_backlog_item(payload: BacklogItemCreate, db: Session = Depends(get_db
     return BacklogItemRead.model_validate(item)
 
 
-@router.patch("/{item_id}", response_model=BacklogItemRead, dependencies=[Depends(require_ha_or_above)])
+@router.patch("/{item_id}", response_model=BacklogItemRead)
 def update_backlog_item(
     item_id: UUID,
     payload: BacklogItemUpdate,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> BacklogItemRead:
     """Edit, reject, or assign-to-version.
 
     A payload that sets ``version_id`` is an **assign** (→ ``status=included``); otherwise it edits
-    ``title`` / ``description`` / ``priority`` / ``status`` (reject = ``status='rejected'``).
+    ``title`` / ``description`` / ``priority`` / ``status`` (reject = ``status='rejected'``). v4.0.43:
+    owner-or-ri/ha of the item's project.
     """
     try:
+        authz.assert_project_id_access(db, current_user, backlog_service.get_by_id(db, item_id).project_id)
         if "version_id" in payload.model_fields_set and payload.version_id is not None:
             item = backlog_service.assign_to_version(db, item_id, payload.version_id)
         else:
@@ -122,11 +148,16 @@ def update_backlog_item(
     "/{item_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
-    dependencies=[Depends(require_ha_or_above)],
 )
-def delete_backlog_item(item_id: UUID, db: Session = Depends(get_db)) -> Response:
-    """Delete a backlog item — only when ``open`` (never delete realized/included History)."""
+def delete_backlog_item(
+    item_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    """Delete a backlog item — only when ``open`` (never delete realized/included History). v4.0.43:
+    owner-or-ri/ha of the item's project."""
     try:
+        authz.assert_project_id_access(db, current_user, backlog_service.get_by_id(db, item_id).project_id)
         backlog_service.delete(db, item_id)
         db.commit()
     except ValueError as exc:

@@ -12,11 +12,10 @@ Designer / Implementer / Auditor agents write spec documents into
 Director had no UI to browse them — only ``ssh`` + ``nano``. This
 router closes that gap.
 
-Permissions (v1):
-- All endpoints require ``ri`` role (Director). The v1 cut keeps the
-  scope tight while the feature is validated. Per-project membership
-  filtering (``project_members`` table) can be added later for the
-  ``ha`` / ``shu`` cuts.
+Permissions (v4.0.43):
+- Any authenticated user; scoped by project ownership (``backend.core.authz``). A Junior (``shu``) sees +
+  reads only the docs of projects they OWN (``/list`` filtered to own slugs; ``/content`` owner-checked);
+  ri/ha see all. ``PUT /content`` (edit) is owner-OR-``ri``.
 
 Path safety:
 - ``slug`` is validated against the kebab-case regex.
@@ -34,9 +33,14 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from backend.core.security import require_ri_role
+from backend.core import authz
+from backend.core.security import get_current_user, require_shu_or_above
 from backend.db.models.foundation import User
+from backend.db.models.projects import Project
+from backend.db.session import get_db
 from backend.schemas.project_specs import (
     ProjectSpecContent,
     ProjectSpecListResponse,
@@ -51,14 +55,21 @@ router = APIRouter(tags=["Project Specs"])
 
 @router.get("/list", response_model=ProjectSpecListResponse)
 def list_project_specs(
-    _user: User = Depends(require_ri_role),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ) -> ProjectSpecListResponse:
     """List every ``.md`` file under ``/opt/projects/*/docs/``.
 
     Returns a flat list sorted by ``relative_path``. The frontend wraps
     this into a hierarchical tree via :file:`src/lib/kbTreeBuilder.ts`.
+
+    v4.0.43: a Junior (``shu``) sees only the docs of projects they OWN — the flat list is filtered to
+    their own slugs (the ``relative_path`` is ``<slug>/docs/…``); ri/ha see every project's docs.
     """
     docs = project_specs_service.list_all_specs()
+    if current_user.role not in authz.PRIVILEGED_ROLES:
+        own_slugs = set(db.execute(select(Project.slug).where(Project.created_by == current_user.id)).scalars().all())
+        docs = [d for d in docs if d.relative_path.split("/", 1)[0] in own_slugs]
     return ProjectSpecListResponse(documents=docs, count=len(docs))
 
 
@@ -69,15 +80,17 @@ def get_project_spec_content(
         ...,
         description="Path within the project, e.g. 'docs/specs/customer-requirements.md'",
     ),
-    _user: User = Depends(require_ri_role),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ) -> ProjectSpecContent:
     """Read a file under ``/opt/projects/<slug>/``.
 
     Returns text content for whitelisted text extensions (``.md``,
     ``.txt``, ``.csv``, ``.json``, ``.yaml``, source code, etc.); for
     binary files returns ``is_text=False`` + empty content so the
-    frontend can render a "cannot display" placeholder.
+    frontend can render a "cannot display" placeholder. v4.0.43: owner-or-privileged on ``slug``.
     """
+    authz.assert_project_slug_access(db, current_user, slug)
     try:
         content, is_text = project_specs_service.read_content(slug, path)
     except ProjectSpecsError as exc:
@@ -97,14 +110,17 @@ def update_project_spec_content(
     payload: ProjectSpecUpdate,
     slug: str = Query(..., description="Project slug"),
     path: str = Query(..., description="Path within the project"),
-    _user: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
+    db: Session = Depends(get_db),
 ) -> dict[str, str]:
-    """Overwrite a single ``.md`` file. Director (``ri``) only.
+    """Overwrite a single ``.md`` file. v4.0.43: owner-OR-``ri`` (was ``ri`` only) — the project owner or
+    an ``ri`` may fix a typo; a Medior does not gain edits on projects it doesn't own.
 
     The file must already exist — this endpoint does **not** create new
     documents. New spec docs are produced by the agents (Designer /
     Implementer / Auditor) directly in the project repo.
     """
+    authz.assert_project_slug_access(db, current_user, slug, ri_only=True)
     try:
         project_specs_service.write_content(slug, path, payload.content)
     except ProjectSpecsError as exc:
