@@ -5,11 +5,20 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# git is required at runtime: the Create-Project scaffolding (init.sh: git init/add/commit) and the
-# backend's own git operations (dirty-tree guard, commit, discard) shell out to it. python:3.12-slim
-# ships without git, so project creation failed with "git: command not found" (exit 127) — v4.0.36.
+# The Create-Project scaffolding + the backend's git ops shell out to git AND gh: init.sh does
+# git init/add/commit (needs git); Stage-4 push_and_verify runs `gh auth setup-git` then `git push`
+# (needs gh — it wires the HTTPS credential helper from the GH_TOKEN/GITHUB_TOKEN env). python:3.12-slim
+# ships neither, so project creation failed at `git init` (exit 127, v4.0.36) then at the push. Install
+# both. gh authenticates non-interactively from GH_TOKEN at runtime.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git \
+    && apt-get install -y --no-install-recommends git curl ca-certificates \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+        > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
 # git needs a committer identity or `git commit` fails ("unable to auto-detect email address") — the
