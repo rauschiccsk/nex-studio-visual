@@ -58,7 +58,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
-from backend.core.security import require_ha_or_above
+from backend.core import authz
+from backend.core.security import get_current_user, require_shu_or_above
+from backend.db.models.foundation import User
 from backend.db.session import get_db
 from backend.schemas.epic import (
     EpicCreate,
@@ -71,7 +73,9 @@ from backend.services import epic as epic_service
 
 router = APIRouter(
     tags=["Epics"],
-    dependencies=[Depends(require_ha_or_above)],
+    # v4.0.35: any authenticated user may reach the epics surface; per-route ownership checks
+    # (backend.core.authz) then scope a Junior (shu) to epics under their OWN projects.
+    dependencies=[Depends(require_shu_or_above)],
 )
 
 
@@ -108,6 +112,7 @@ def list_epics(
     ),
     skip: int = Query(default=0, ge=0, description="Number of rows to skip."),
     limit: int = Query(default=50, ge=1, le=100, description="Maximum rows to return."),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> PaginatedResponse[EpicRead]:
     """Return a paginated list of epics.
@@ -115,7 +120,18 @@ def list_epics(
     Results are ordered by ``number ASC`` (epic 1, epic 2, …) — owned by
     the service layer, matching the hierarchical-numbering convention
     (DESIGN.md §1.9) and the ``EpicList`` UI.
+
+    Ownership (v4.0.35): when ``project_id`` is supplied the caller must own that project
+    (ri/ha see all). A Junior (``shu``) MUST supply ``project_id`` — an unscoped list across
+    all projects would leak other owners' epics, so it is rejected with HTTP 400.
     """
+    if project_id is not None:
+        authz.assert_project_id_access(db, current_user, project_id)
+    elif current_user.role not in authz.PRIVILEGED_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="project_id je povinný — nemôžeš vypísať epiky naprieč projektami.",
+        )
     try:
         rows = epic_service.list_epics(
             db,
@@ -143,9 +159,11 @@ def list_epics(
 @router.get("/{epic_id}", response_model=EpicRead)
 def get_epic(
     epic_id: UUID,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> EpicRead:
     """Return a single epic by primary key."""
+    authz.assert_epic_access(db, current_user, epic_id)
     try:
         epic = epic_service.get_by_id(db, epic_id)
     except ValueError as exc:
@@ -160,6 +178,7 @@ def get_epic(
 )
 def create_epic(
     payload: EpicCreate,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> EpicRead:
     """Create a new epic.
@@ -172,7 +191,12 @@ def create_epic(
     on the same project surface as HTTP 409. Missing or invalid foreign
     keys (``project_id``, ``version_id``) are rejected by the DB-level FK
     and surface as HTTP 422.
+
+    Ownership (v4.0.35): the parent project (``payload.project_id``) must be owned by the
+    caller (ri/ha may create under any project); a Junior placing an epic under someone
+    else's project gets HTTP 403.
     """
+    authz.assert_project_id_access(db, current_user, payload.project_id)
     try:
         epic = epic_service.create(db, payload)
         db.commit()
@@ -187,6 +211,7 @@ def create_epic(
 def update_epic(
     epic_id: UUID,
     payload: EpicUpdate,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> EpicRead:
     """Partially update an epic's mutable fields.
@@ -197,7 +222,10 @@ def update_epic(
     rewritten after the fact; ``updated_at`` is refreshed by the ORM on
     flush via ``onupdate=func.now()``. Fields omitted from the payload
     are left unchanged.
+
+    Ownership (v4.0.35): the caller must own the epic's project (ri/ha see all).
     """
+    authz.assert_epic_access(db, current_user, epic_id)
     try:
         epic = epic_service.update(db, epic_id, payload)
         db.commit()
@@ -215,6 +243,7 @@ def update_epic(
 )
 def delete_epic(
     epic_id: UUID,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Response:
     """Hard-delete an epic by primary key.
@@ -223,7 +252,10 @@ def delete_epic(
     — dependent feats (and the tasks under them, via
     ``tasks.feat_id ON DELETE CASCADE``) are removed automatically at
     the DB level. No RESTRICT dependency check is required.
+
+    Ownership (v4.0.35): the caller must own the epic's project (ri/ha see all).
     """
+    authz.assert_epic_access(db, current_user, epic_id)
     try:
         epic_service.delete(db, epic_id)
         db.commit()

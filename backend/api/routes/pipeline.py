@@ -6,7 +6,10 @@
   then broadcasts ``state_changed`` + ``message_added`` to live board sockets.
 * ``WS     /pipeline/ws/{version_id}?token`` → live board feed + §9 presence.
 
-All Director-only (``require_ri_role`` / ``verify_ws_token`` + ``role == 'ri'``).
+v4.0.35: owner-or-ri (was Director-only). Any authenticated user reaches these routes; the authz layer
+(``backend.core.authz``, ``ri_only=True``) scopes them to the version's project OWNER or an ``ri`` — a
+Junior drives their OWN project's pipeline, a Medior does not gain the ri-tier drive on projects they
+don't own. The WS applies the same owner-or-ri check after ``verify_ws_token``.
 """
 
 from __future__ import annotations
@@ -20,7 +23,8 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from backend.core.security import require_ri_role, verify_ws_token
+from backend.core import authz
+from backend.core.security import require_shu_or_above, verify_ws_token
 from backend.db.models.foundation import User
 from backend.db.models.orchestrator import OrchestratorSession
 from backend.db.models.pipeline import PipelineMessage, PipelineState
@@ -55,10 +59,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Pipeline"])
 
 _DEFAULT_RECENT = 50
-
-
-def _version_exists(db: Session, version_id: uuid.UUID) -> bool:
-    return db.execute(select(Version.id).where(Version.id == version_id)).scalar_one_or_none() is not None
 
 
 def _recent_messages(db: Session, version_id: uuid.UUID, limit: int) -> list[PipelineMessage]:
@@ -306,7 +306,7 @@ def _map_orch_error(exc: OrchestratorError) -> HTTPException:
 @router.post("/fast-fix", response_model=FastFixStartResponse, status_code=status.HTTP_201_CREATED)
 async def start_fast_fix(
     payload: FastFixStartRequest,
-    _current_user: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
     db: Session = Depends(get_db),
 ) -> FastFixStartResponse:
     """Fast-Fix Lane entry (F-009, CR-NS-094; v2 short path CR-V2-028) — the "Rýchla oprava" one-prompt action.
@@ -319,14 +319,13 @@ async def start_fast_fix(
     deploy is the normal manual per-customer Nasadiť in the UAT/PROD tabs, CR-V2-027). Declared before the
     ``/{version_id}`` routes so ``fast-fix`` is never parsed as a version id.
     """
-    if db.execute(select(Project.id).where(Project.id == payload.project_id)).scalar_one_or_none() is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    authz.assert_project_id_access(db, current_user, payload.project_id, ri_only=True)
 
     pre_count = db.execute(
         select(func.count()).select_from(Version).where(Version.project_id == payload.project_id)
     ).scalar_one()
     try:
-        version = fast_fix_service.create_patch_version(db, project_id=payload.project_id, user_id=_current_user.id)
+        version = fast_fix_service.create_patch_version(db, project_id=payload.project_id, user_id=current_user.id)
         state = await orchestrator.apply_action(
             db,
             version_id=version.id,
@@ -361,12 +360,11 @@ async def start_fast_fix(
 def get_board(
     version_id: uuid.UUID,
     limit: int = Query(default=_DEFAULT_RECENT, ge=1, le=200),
-    _current_user: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
     db: Session = Depends(get_db),
 ) -> PipelineBoardRead:
     """Return the board snapshot. ``state`` is ``None`` until the pipeline starts."""
-    if not _version_exists(db, version_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+    authz.assert_version_access(db, current_user, version_id, ri_only=True)
     return _board(db, version_id, limit)
 
 
@@ -389,12 +387,11 @@ def list_messages(
     version_id: uuid.UUID,
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
-    _current_user: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
     db: Session = Depends(get_db),
 ) -> PaginatedResponse[PipelineMessageRead]:
     """Paginated message log (oldest→newest)."""
-    if not _version_exists(db, version_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+    authz.assert_version_access(db, current_user, version_id, ri_only=True)
     total = db.execute(
         select(func.count()).select_from(PipelineMessage).where(PipelineMessage.version_id == version_id)
     ).scalar_one()
@@ -421,12 +418,11 @@ def list_messages(
 async def post_action(
     version_id: uuid.UUID,
     payload: PipelineActionRequest,
-    _current_user: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
     db: Session = Depends(get_db),
 ) -> PipelineBoardRead:
     """Apply a Director action; broadcast the resulting state + new messages."""
-    if not _version_exists(db, version_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+    authz.assert_version_access(db, current_user, version_id, ri_only=True)
 
     pre_ids = {
         row for row in db.execute(select(PipelineMessage.id).where(PipelineMessage.version_id == version_id)).scalars()
@@ -472,7 +468,7 @@ async def post_action(
 async def post_relay(
     version_id: uuid.UUID,
     payload: PipelineRelayRequest,
-    _current_user: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
     db: Session = Depends(get_db),
 ) -> PipelineRelayResponse:
     """Relay a Manažér message to the AI Agent as the engine's next turn (CR-V2-015 / SPIKE-IO Model B).
@@ -482,8 +478,7 @@ async def post_relay(
     NEVER keystroked into the PTY (no concurrent second writer). When a turn is in flight the message is
     enqueued behind it (``deferred=True``) and the in-flight dispatch drains it next; when the build is
     settled it dispatches immediately as an ``ask``/``answer`` turn and we schedule the background run."""
-    if not _version_exists(db, version_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+    authz.assert_version_access(db, current_user, version_id, ri_only=True)
 
     pre_ids = {
         row for row in db.execute(select(PipelineMessage.id).where(PipelineMessage.version_id == version_id)).scalars()
@@ -522,7 +517,7 @@ async def post_relay(
 def post_change_request(
     version_id: uuid.UUID,
     payload: ChangeRequestCaptureRequest,
-    current_user: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
     db: Session = Depends(get_db),
 ) -> ChangeRequestCaptureResponse:
     """Capture a read-only consult's change request → a NEW draft version (konzultacia-mode.md Part 2; Fix 3/4).
@@ -533,8 +528,7 @@ def post_change_request(
     — the Manažér opens the new version and engages deliberately. Idempotent per source message: a repeat call
     returns the EXISTING minted version. Returns ``project_slug`` + version id/number so the FE navigates using
     the RETURNED slug (Fix 4)."""
-    if not _version_exists(db, version_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+    authz.assert_version_access(db, current_user, version_id, ri_only=True)
     # Defense: the source message must belong to the consulted version in the path (a mismatched id is a 404).
     msg_version_id = db.execute(
         select(PipelineMessage.version_id).where(PipelineMessage.id == payload.message_id)
@@ -565,7 +559,7 @@ def post_change_request(
 async def open_debug_terminal(
     version_id: uuid.UUID,
     role: str = Query(..., description="orchestrator agent role to attach to"),
-    current_user: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
     db: Session = Depends(get_db),
 ) -> AgentTerminalSessionRead:
     """Break-glass: attach an interactive Manažér terminal to the headless agent session (CR-V2-015).
@@ -578,8 +572,7 @@ async def open_debug_terminal(
     write-capable PTY mid-turn would be a second concurrent writer). When the engine IS driving, this
     returns 409; otherwise it attaches (and ``write_input`` is still per-keystroke-guarded as a backstop).
     """
-    if not _version_exists(db, version_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+    authz.assert_version_access(db, current_user, version_id, ri_only=True)
 
     # Debug-attach accepts the orchestrator roles (CR-V2-007: ai-agent / auditor) — NOT just the
     # spawn-API's AI-Agent-only set. Validate up front so a bad role is a clean 422, not a misleading 404.
@@ -660,11 +653,17 @@ async def pipeline_ws(
     db = SessionLocal()
     try:
         user = verify_ws_token(token, db)
-        if user is None or user.role != "ri":
+        if user is None:
             await websocket.close(code=4003)  # forbidden
             return
-        if not _version_exists(db, version_id):
+        # v4.0.35: owner-or-privileged for THIS version's project (ri/ha see all; a Junior only their own).
+        version = db.get(Version, version_id)
+        if version is None:
             await websocket.close(code=4004)  # not found
+            return
+        project = db.get(Project, version.project_id)
+        if project is None or not authz.is_owner_or_privileged(user, project.created_by, ri_only=True):
+            await websocket.close(code=4003)  # forbidden
             return
         snapshot = _board(db, version_id).model_dump(mode="json")
     finally:

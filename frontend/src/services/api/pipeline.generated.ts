@@ -18,7 +18,7 @@ export interface paths {
          *     Since CR-V2-007 the spawn API is AI-Agent-only, so this reports just
          *     ``{"ai-agent": <bool>}`` — true when ``.claude/agents/ai-agent/CLAUDE.md``
          *     exists in the project (the set mirrors ``_VALID_ROLES``). An invalid slug or
-         *     unknown project → 404.
+         *     unknown project → 404. v4.0.35: owner-or-privileged (a Junior only their own project).
          */
         get: operations["available_roles_api_v1_agent_terminal_available_roles_get"];
         put?: never;
@@ -81,6 +81,8 @@ export interface paths {
         /**
          * Spawn Session
          * @description Spawn a fresh claude CLI process for ``(role, project_slug)``.
+         *
+         *     v4.0.35: owner-or-privileged — a Junior may only attach a terminal to their OWN project.
          */
         post: operations["spawn_session_api_v1_agent_terminal_spawn_post"];
         delete?: never;
@@ -386,14 +388,20 @@ export interface paths {
         post?: never;
         /**
          * Delete Customer
-         * @description Delete a customer and its stored secret (if any). ``ri`` role only.
+         * @description Delete a customer and its stored secret (if any).
+         *
+         *     v4.0.35: was ri-only → now owner-OR-ri (the owner, or an ``ri`` lead, may delete a customer under their
+         *     OWN project; ``ha`` not privileged for this write); a Junior touching another user's project gets 403.
          */
         delete: operations["delete_customer_api_v1_customers__customer_id__delete"];
         options?: never;
         head?: never;
         /**
          * Update Customer
-         * @description Partially update a customer / rotate its secret. ``ri`` role only.
+         * @description Partially update a customer / rotate its secret.
+         *
+         *     v4.0.35: was ri-only → now owner-OR-ri (the owner, or an ``ri`` lead, may edit a customer under their
+         *     OWN project; ``ha`` not privileged for this write); a Junior touching another user's project gets 403.
          *
          *     A supplied ``secret`` overwrites the stored credentials-store content; the
          *     response never echoes it back.
@@ -441,6 +449,9 @@ export interface paths {
          *     accepted (§3.5). The first PROD deploy of a project bumps it to v1.0.0 (§3.6).
          *     A redeploy PRESERVES data + secrets + extra_hosts by default; ``force_fresh``
          *     opts into a fresh re-provision (§3.7).
+         *
+         *     v4.0.35 (Director decision D3): owner-or-privileged for the customer's project, AND a Junior may
+         *     deploy only to **UAT** of their own project — **PROD** deploy stays ``ri``-only (the Director gate).
          */
         post: operations["deploy_customer_api_v1_customers__customer_id__deploy_post"];
         delete?: never;
@@ -506,6 +517,10 @@ export interface paths {
          *     Results are ordered by ``number ASC`` (epic 1, epic 2, …) — owned by
          *     the service layer, matching the hierarchical-numbering convention
          *     (DESIGN.md §1.9) and the ``EpicList`` UI.
+         *
+         *     Ownership (v4.0.35): when ``project_id`` is supplied the caller must own that project
+         *     (ri/ha see all). A Junior (``shu``) MUST supply ``project_id`` — an unscoped list across
+         *     all projects would leak other owners' epics, so it is rejected with HTTP 400.
          */
         get: operations["list_epics_api_v1_epics_get"];
         put?: never;
@@ -521,6 +536,10 @@ export interface paths {
          *     on the same project surface as HTTP 409. Missing or invalid foreign
          *     keys (``project_id``, ``version_id``) are rejected by the DB-level FK
          *     and surface as HTTP 422.
+         *
+         *     Ownership (v4.0.35): the parent project (``payload.project_id``) must be owned by the
+         *     caller (ri/ha may create under any project); a Junior placing an epic under someone
+         *     else's project gets HTTP 403.
          */
         post: operations["create_epic_api_v1_epics_post"];
         delete?: never;
@@ -551,6 +570,8 @@ export interface paths {
          *     — dependent feats (and the tasks under them, via
          *     ``tasks.feat_id ON DELETE CASCADE``) are removed automatically at
          *     the DB level. No RESTRICT dependency check is required.
+         *
+         *     Ownership (v4.0.35): the caller must own the epic's project (ri/ha see all).
          */
         delete: operations["delete_epic_api_v1_epics__epic_id__delete"];
         options?: never;
@@ -565,6 +586,8 @@ export interface paths {
          *     rewritten after the fact; ``updated_at`` is refreshed by the ORM on
          *     flush via ``onupdate=func.now()``. Fields omitted from the payload
          *     are left unchanged.
+         *
+         *     Ownership (v4.0.35): the caller must own the epic's project (ri/ha see all).
          */
         patch: operations["update_epic_api_v1_epics__epic_id__patch"];
         trace?: never;
@@ -583,6 +606,10 @@ export interface paths {
          *     Results are ordered by ``number ASC`` (feat 1, feat 2, …) — owned
          *     by the service layer, matching the hierarchical-numbering
          *     convention (DESIGN.md §1.9) and the ``EpicList`` UI.
+         *
+         *     Ownership (v4.0.35): when ``epic_id`` is supplied the caller must own that epic's project
+         *     (ri/ha see all). A Junior (``shu``) MUST supply ``epic_id`` — an unscoped list across all
+         *     projects would leak other owners' feats, so it is rejected with HTTP 400.
          */
         get: operations["list_feats_api_v1_feats_get"];
         put?: never;
@@ -600,6 +627,10 @@ export interface paths {
          *     Concurrent-create races on the same epic surface as HTTP 409.
          *     Missing or invalid ``epic_id`` foreign keys are rejected by the
          *     DB-level FK and surface as HTTP 422.
+         *
+         *     Ownership (v4.0.35): the parent epic (``payload.epic_id``) must belong to a project the
+         *     caller owns (ri/ha may create under any epic); a Junior placing a feat under someone
+         *     else's epic gets HTTP 403.
          */
         post: operations["create_feat_api_v1_feats_post"];
         delete?: never;
@@ -632,6 +663,8 @@ export interface paths {
          *     handled at the DB level, so dependent rows are either removed or
          *     NULL-ed automatically on flush. No RESTRICT dependency check is
          *     required.
+         *
+         *     Ownership (v4.0.35): the caller must own the feat's project (ri/ha see all).
          */
         delete: operations["delete_feat_api_v1_feats__feat_id__delete"];
         options?: never;
@@ -654,6 +687,8 @@ export interface paths {
          *     independent writer of project status / history; the single source of
          *     truth is now the AI Agent's own ``MEMORY.md`` plus the Vývoj phase
          *     tabs (R-DOUBLEWRITE). This endpoint is now a pure DB update.
+         *
+         *     Ownership (v4.0.35): the caller must own the feat's project (ri/ha see all).
          */
         patch: operations["update_feat_api_v1_feats__feat_id__patch"];
         trace?: never;
@@ -1030,6 +1065,9 @@ export interface paths {
         /**
          * List Projects
          * @description Return a paginated list of projects.
+         *
+         *     A Junior (``shu``) sees ONLY their own projects (``created_by`` forced to self); ri/ha see all
+         *     (optionally narrowed by the ``created_by`` filter). (v4.0.35.)
          */
         get: operations["list_projects_api_v1_projects_get"];
         put?: never;
@@ -1156,7 +1194,8 @@ export interface paths {
          * Delete Project
          * @description Hard-delete a project by primary key.
          *
-         *     Guards (CR-V2-027): **admin only** (role ``ri`` via ``require_ri_role``; others get 403), and
+         *     Guards (CR-V2-027, v4.0.35): **owner or privileged** (the project's creator, or an ``ri``/``ha`` lead;
+         *     a Junior can delete only their OWN project, others get 403), and
          *     **only a project that has never had a successful PROD deploy** — once a project graduates to PROD it
          *     can only be archived (409 otherwise). Archiving is the preferred soft-disable path generally — callers
          *     should prefer ``PATCH`` with ``status='archived'`` and reserve delete for early/throwaway projects.
@@ -1325,6 +1364,9 @@ export interface paths {
          *     No pagination envelope: the version list per project is bounded by
          *     business reality (single-digit to low-double-digit counts) and the
          *     UI renders the entire collection at once.
+         *
+         *     v4.0.35: owner-or-privileged — a Junior (``shu``) sees only their OWN
+         *     project's versions; ri/ha see every project.
          */
         get: operations["list_versions_api_v1_projects__project_id__versions_get"];
         put?: never;
@@ -1338,8 +1380,9 @@ export interface paths {
          *     version_number)`` pair surface as HTTP 409 via the unique-constraint
          *     pre-check in :func:`backend.services.version.create`.
          *
-         *     Restricted to users with role ``ri`` (DESIGN.md §2.6 ``POST
-         *     /projects/{id}/versions``).
+         *     v4.0.35: any authenticated user may create a version, but only for a
+         *     project they own (``created_by`` == self); ri/ha may create on any
+         *     project — enforced by the ownership check below.
          */
         post: operations["create_version_api_v1_projects__project_id__versions_post"];
         delete?: never;
@@ -1363,7 +1406,10 @@ export interface paths {
         put?: never;
         /**
          * Create Customer
-         * @description Register a customer through the form (design §3.2). ``ri`` role only.
+         * @description Register a customer through the form (design §3.2).
+         *
+         *     v4.0.35: was ri-only → now owner-OR-ri (the creator, or an ``ri`` lead, may add customers to their OWN
+         *     project). ``ha`` is NOT privileged for this write; a Junior touching another user's project gets 403.
          *
          *     Internal apps register **ICC s.r.o.** through this same endpoint — one code
          *     path, no internal/external branch. A supplied ``secret`` is written to the
@@ -1622,6 +1668,10 @@ export interface paths {
          *     Results are ordered by ``number ASC`` (task 1, task 2, …) — owned
          *     by the service layer, matching the hierarchical-numbering
          *     convention (DESIGN.md §1.9) and the ``TaskItem`` UI.
+         *
+         *     Ownership (v4.0.35): when ``feat_id`` is supplied the caller must own that feat's project
+         *     (ri/ha see all). A Junior (``shu``) MUST supply ``feat_id`` — an unscoped list across all
+         *     projects would leak other owners' tasks, so it is rejected with HTTP 400.
          */
         get: operations["list_tasks_api_v1_tasks_get"];
         put?: never;
@@ -1637,6 +1687,10 @@ export interface paths {
          *     is no server default. Concurrent-create races on the same feat
          *     surface as HTTP 409. Missing or invalid ``feat_id`` foreign keys are
          *     rejected by the DB-level FK and surface as HTTP 422.
+         *
+         *     Ownership (v4.0.35): the parent feat (``payload.feat_id``) must belong to a project the
+         *     caller owns (ri/ha may create under any feat); a Junior placing a task under someone
+         *     else's feat gets HTTP 403.
          */
         post: operations["create_task_api_v1_tasks_post"];
         delete?: never;
@@ -1667,6 +1721,8 @@ export interface paths {
          *     ``execution_logs.task_id`` (``ON DELETE SET NULL``) — are handled
          *     at the DB level, so dependent rows are NULL-ed automatically on
          *     flush. No RESTRICT dependency check is required.
+         *
+         *     Ownership (v4.0.35): the caller must own the task's project (ri/ha see all).
          */
         delete: operations["delete_task_api_v1_tasks__task_id__delete"];
         options?: never;
@@ -1688,6 +1744,8 @@ export interface paths {
          *     independent writer of project status / history; the single source of
          *     truth is now the AI Agent's own ``MEMORY.md`` plus the Vývoj phase
          *     tabs (R-DOUBLEWRITE). This endpoint is now a pure DB update.
+         *
+         *     Ownership (v4.0.35): the caller must own the task's project (ri/ha see all).
          */
         patch: operations["update_task_api_v1_tasks__task_id__patch"];
         trace?: never;
@@ -1952,6 +2010,9 @@ export interface paths {
          *     The service eagerly loads ``epics`` and ``bugs`` via ``selectinload``
          *     so the ``VersionDetailPage`` UI can render the EPIC / BUG groups
          *     without an N+1 round-trip — see DESIGN.md §2.6 ``GET /versions/{id}``.
+         *
+         *     v4.0.35: owner-or-privileged — a Junior may read only their OWN
+         *     project's version.
          */
         get: operations["get_version_api_v1_versions__version_id__get"];
         put?: never;
@@ -1970,7 +2031,8 @@ export interface paths {
          *     * **409** — the version is ``released``, or it still has one or more
          *       EPICs attached (Task Plan not empty).
          *
-         *     Restricted to users with role ``ri``.
+         *     v4.0.35: owner-or-privileged — a Junior may delete only their OWN
+         *     project's version; ri/ha may delete any.
          */
         delete: operations["delete_version_api_v1_versions__version_id__delete"];
         options?: never;
@@ -1983,6 +2045,9 @@ export interface paths {
          *     ``description``, ``target_date``, ``release_date``. ``id``,
          *     ``project_id`` and ``created_at`` are immutable; ``updated_at`` is
          *     refreshed by the ORM ``onupdate=func.now()`` trigger.
+         *
+         *     v4.0.35: owner-or-privileged — a Junior may patch only their OWN
+         *     project's version; ri/ha may patch any.
          *
          *     .. note::
          *
@@ -2022,8 +2087,8 @@ export interface paths {
          *       "...", "blocking_epic_ids": ["<uuid>", ...]}`` so the
          *       ``VersionsPage`` UI can render the blockers inline.
          *
-         *     Restricted to users with role ``ri`` (DESIGN.md §2.6 ``POST
-         *     /versions/{id}/release``).
+         *     v4.0.35: owner-or-privileged — a Junior may release only their OWN
+         *     project's version; ri/ha may release any.
          */
         post: operations["release_version_api_v1_versions__version_id__release_post"];
         delete?: never;
@@ -2046,7 +2111,8 @@ export interface paths {
          * @description Delete the entire task plan for a version (all EPICs, Feats and Tasks).
          *
          *     Hard-deletes every Epic under this version. Feats and Tasks are removed
-         *     via ``ON DELETE CASCADE`` at the DB level. ``ri`` role only.
+         *     via ``ON DELETE CASCADE`` at the DB level. v4.0.35: owner-or-privileged —
+         *     a Junior may reset only their OWN project's version.
          */
         post: operations["reset_plan_api_v1_versions__version_id__reset_plan_post"];
         delete?: never;
@@ -2070,7 +2136,7 @@ export interface paths {
          *
          *     Sets every Task under every Epic of this version to ``todo``, and
          *     recomputes Feat / Epic statuses accordingly. Does not delete any records.
-         *     ``ri`` role only.
+         *     v4.0.35: owner-or-privileged — a Junior may reset only their OWN project's version.
          */
         post: operations["reset_tasks_api_v1_versions__version_id__reset_tasks_post"];
         delete?: never;
@@ -2091,6 +2157,9 @@ export interface paths {
          * @description Return the existing task plan (EPICs → Feats → Tasks) for a version.
          *
          *     Returns an empty plan (``epic_count=0``) when no EPICs exist yet.
+         *
+         *     v4.0.35: owner-or-privileged — a Junior may read only their OWN
+         *     project's task plan.
          */
         get: operations["get_task_plan_api_v1_versions__version_id__task_plan_get"];
         put?: never;
@@ -2115,6 +2184,8 @@ export interface paths {
          *     The version-page editor loads FROM HERE: the saved file is the source of truth, NOT ``Version.description``
          *     (2026-06-30 fix — loading from ``description`` showed an empty editor on re-open even though the Zadanie was
          *     saved, and never reflected a Zadanie edited directly on disk). **404** — the version/project does not exist.
+         *
+         *     v4.0.35: owner-or-privileged — a Junior may read only their OWN project's Zadanie.
          */
         get: operations["read_zadanie_api_v1_versions__version_id__zadanie_get"];
         /**
@@ -2123,7 +2194,8 @@ export interface paths {
          *
          *     The New-Version flow saves the brief here on "Uložiť Zadanie"; the Príprava phase (CR-V2-010)
          *     reads exactly this file when the build starts. Create-or-overwrite — the version's spec
-         *     directory is created if it does not yet exist. ``ri`` role only.
+         *     directory is created if it does not yet exist. v4.0.35: owner-or-privileged — a Junior may
+         *     write only their OWN project's Zadanie; ri/ha may write any.
          *
          *     * **404** — the version (or its project) does not exist.
          */

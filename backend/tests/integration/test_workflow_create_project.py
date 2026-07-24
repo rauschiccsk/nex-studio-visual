@@ -262,6 +262,12 @@ class TestCreateProjectHappyPath:
         # fills in ``id``, ``created_at``, ``updated_at``; ``status``
         # defaults to ``active`` and ``guardian_enabled`` to ``False``
         # — both per BEHAVIOR.md §3.6 postcondition.
+        # v4.0.35: create binds created_by to the AUTHENTICATED user → authenticate AS Zoltán (the §3.6
+        # founder) so the project is owned by him.
+        from backend.core.security import get_current_user, require_shu_or_above
+
+        client.app.dependency_overrides[get_current_user] = lambda: zoltan
+        client.app.dependency_overrides[require_shu_or_above] = lambda: zoltan
         create_resp = client.post(
             "/api/v1/projects",
             json=_project_payload(zoltan.id),
@@ -340,6 +346,11 @@ class TestCreateProjectHappyPath:
         projekt". Zoltán is the worked-example actor covered above;
         this test pins Tibor's equivalence.
         """
+        # v4.0.35: create binds created_by to the authenticated user → authenticate AS Tibor.
+        from backend.core.security import get_current_user, require_shu_or_above
+
+        client.app.dependency_overrides[get_current_user] = lambda: tibor
+        client.app.dependency_overrides[require_shu_or_above] = lambda: tibor
         resp = client.post(
             "/api/v1/projects",
             json=_project_payload(

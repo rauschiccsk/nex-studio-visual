@@ -34,7 +34,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.api.dependencies import get_knowledge_base_writer, get_rag_indexer
-from backend.core.security import require_ha_or_above, require_ri_role
+from backend.core import authz
+from backend.core.security import get_current_user, require_shu_or_above
 from backend.db.models.foundation import User
 from backend.db.session import get_db
 from backend.rag.indexer import RAGIndexer
@@ -74,29 +75,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(
     tags=["Projects"],
-    dependencies=[Depends(require_ha_or_above)],
+    # v4.0.35: any authenticated user may reach the projects surface; per-route ownership checks
+    # (backend.core.authz) then scope a Junior (shu) to their OWN projects (created_by == self).
+    dependencies=[Depends(require_shu_or_above)],
 )
-
-
-def _resolve_created_by(db: Session, created_by: Optional[UUID]) -> UUID:
-    """Return the supplied UUID or fall back to the first active 'ri' user.
-
-    This is a placeholder until JWT auth is wired up — at that point the
-    router will extract the user ID from the token instead.
-    """
-    if created_by is not None:
-        return created_by
-    from sqlalchemy import select
-
-    user = db.execute(
-        select(User).where(User.is_active.is_(True)).where(User.role == "ri").limit(1)
-    ).scalar_one_or_none()
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="No active 'ri' user found — cannot resolve created_by.",
-        )
-    return user.id
 
 
 def _validate_ports(db: Session, payload: ProjectCreate) -> None:
@@ -307,9 +289,16 @@ def list_projects(
     ),
     skip: int = Query(default=0, ge=0, description="Number of rows to skip."),
     limit: int = Query(default=50, ge=1, le=100, description="Maximum rows to return."),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> PaginatedResponse[ProjectRead]:
-    """Return a paginated list of projects."""
+    """Return a paginated list of projects.
+
+    A Junior (``shu``) sees ONLY their own projects (``created_by`` forced to self); ri/ha see all
+    (optionally narrowed by the ``created_by`` filter). (v4.0.35.)
+    """
+    if current_user.role not in authz.PRIVILEGED_ROLES:
+        created_by = current_user.id
     try:
         rows = project_service.list_projects(
             db,
@@ -400,6 +389,7 @@ def suggest_port_block(
 @router.get("/{project_id}", response_model=ProjectRead)
 def get_project(
     project_id: UUID,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ProjectRead:
     """Return a single project by primary key."""
@@ -407,6 +397,7 @@ def get_project(
         project = project_service.get_by_id(db, project_id)
     except ValueError as exc:
         raise _map_value_error(exc) from exc
+    authz.authorize_project(current_user, project)
     result = ProjectRead.model_validate(project)
     # CR-V2-027: compute the PROD-deploy flag here (one query) so the FE can disable + explain the
     # delete control without a second round-trip. Only authoritative on this detail endpoint.
@@ -415,7 +406,11 @@ def get_project(
 
 
 @router.get("/{project_id}/nexshared-status")
-def get_nexshared_status(project_id: UUID, db: Session = Depends(get_db)) -> dict:
+def get_nexshared_status(
+    project_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
     """nex-shared upgrade status for the auto-notify prompt (#3): the app's pinned version vs
     the latest published tag + the "Čo prinesie" changelog delta. Drives the opt-in prompt shown
     when the Manažér founds a new version. Never a false prompt (no pin / no source → offer nothing)."""
@@ -423,6 +418,7 @@ def get_nexshared_status(project_id: UUID, db: Session = Depends(get_db)) -> dic
         project = project_service.get_by_id(db, project_id)
     except ValueError as exc:
         raise _map_value_error(exc) from exc
+    authz.authorize_project(current_user, project)
     if not project.source_path:
         return {"current": None, "latest": None, "behind": 0, "up_to_date": False, "changelog": []}
     return nexshared_service.status_for_source(project.source_path)
@@ -436,6 +432,7 @@ class _NexsharedUpgradeRequest(BaseModel):
 def upgrade_nexshared(
     project_id: UUID,
     payload: _NexsharedUpgradeRequest,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
     """Opt-in bump (#3): rewrite the app's ``frontend/package.json`` nex-shared pin to
@@ -445,6 +442,7 @@ def upgrade_nexshared(
         project = project_service.get_by_id(db, project_id)
     except ValueError as exc:
         raise _map_value_error(exc) from exc
+    authz.authorize_project(current_user, project)
     if not project.source_path:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Projekt nemá zdrojovú cestu.")
     if not nexshared_service.upgrade_source_pin(project.source_path, payload.target_version):
@@ -457,7 +455,11 @@ def upgrade_nexshared(
 
 
 @router.get("/{project_id}/git-status")
-def get_git_status(project_id: UUID, db: Session = Depends(get_db)) -> dict:
+def get_git_status(
+    project_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
     """Working-tree preflight for the New-Version flow (v4.0.25): is the project's tree
     clean enough to found a version? A dirty tree would surface uncommitted work to the
     pipeline agent as an expert scope question the operator can't answer (Tibor/Nazar lens).
@@ -466,6 +468,7 @@ def get_git_status(project_id: UUID, db: Session = Depends(get_db)) -> dict:
         project = project_service.get_by_id(db, project_id)
     except ValueError as exc:
         raise _map_value_error(exc) from exc
+    authz.authorize_project(current_user, project)
     if not project.source_path:
         return {"clean": True, "dirty_count": 0, "files": [], "truncated": False}
     try:
@@ -479,13 +482,19 @@ class _GitCommitRequest(BaseModel):
 
 
 @router.post("/{project_id}/git-commit")
-def commit_git(project_id: UUID, payload: _GitCommitRequest, db: Session = Depends(get_db)) -> dict:
+def commit_git(
+    project_id: UUID,
+    payload: _GitCommitRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
     """Commit ALL pending changes so the tree is clean before founding (the guard's
     "Uložiť ich" action). Preserves work — the safe, default resolution."""
     try:
         project = project_service.get_by_id(db, project_id)
     except ValueError as exc:
         raise _map_value_error(exc) from exc
+    authz.authorize_project(current_user, project)
     if not project.source_path:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Projekt nemá zdrojovú cestu.")
     try:
@@ -498,13 +507,18 @@ def commit_git(project_id: UUID, payload: _GitCommitRequest, db: Session = Depen
 
 
 @router.post("/{project_id}/git-discard")
-def discard_git(project_id: UUID, db: Session = Depends(get_db)) -> dict:
+def discard_git(
+    project_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
     """Discard ALL pending changes → clean tree (the guard's "Zahodiť" action).
     Destructive; the FE gates it behind an explicit operator confirmation."""
     try:
         project = project_service.get_by_id(db, project_id)
     except ValueError as exc:
         raise _map_value_error(exc) from exc
+    authz.authorize_project(current_user, project)
     if not project.source_path:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Projekt nemá zdrojovú cestu.")
     try:
@@ -527,6 +541,7 @@ def discard_git(project_id: UUID, db: Session = Depends(get_db)) -> dict:
 )
 def create_project(
     payload: ProjectCreate,
+    current_user: User = Depends(require_shu_or_above),
     db: Session = Depends(get_db),
 ) -> ProjectRead:
     """Create a new project.
@@ -564,8 +579,10 @@ def create_project(
     # Pre-creation validation (ports).
     _validate_ports(db, payload)
 
-    # Resolve created_by — use supplied UUID or fall back to active ri user.
-    payload.created_by = _resolve_created_by(db, payload.created_by)
+    # v4.0.35: the creator is the AUTHENTICATED user — never a client-supplied UUID (that let any caller
+    # forge created_by / fall back to a random ri). This binds project ownership to the real creator, so
+    # the authz layer can scope a Junior to their own projects.
+    payload.created_by = current_user.id
 
     # Notification owner (CR-NS-012) defaults to the creator when omitted.
     if payload.owner_id is None:
@@ -744,6 +761,7 @@ def create_project(
 def update_project(
     project_id: UUID,
     payload: ProjectUpdate,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ProjectRead:
     """Partially update a project's mutable fields.
@@ -752,6 +770,7 @@ def update_project(
     ``created_at`` are immutable; ``updated_at`` is refreshed by the ORM. Fields omitted from
     the payload are left unchanged.
     """
+    authz.assert_project_id_access(db, current_user, project_id)
     try:
         project = project_service.update(db, project_id, payload)
         db.commit()
@@ -770,7 +789,7 @@ def update_project(
 def delete_project(
     project_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
     kb_writer: KnowledgeBaseWriter = Depends(get_knowledge_base_writer),
     rag_indexer: RAGIndexer = Depends(get_rag_indexer),
     delete_github: bool = Query(
@@ -784,7 +803,8 @@ def delete_project(
 ) -> Response:
     """Hard-delete a project by primary key.
 
-    Guards (CR-V2-027): **admin only** (role ``ri`` via ``require_ri_role``; others get 403), and
+    Guards (CR-V2-027, v4.0.35): **owner or privileged** (the project's creator, or an ``ri``/``ha`` lead;
+    a Junior can delete only their OWN project, others get 403), and
     **only a project that has never had a successful PROD deploy** — once a project graduates to PROD it
     can only be archived (409 otherwise). Archiving is the preferred soft-disable path generally — callers
     should prefer ``PATCH`` with ``status='archived'`` and reserve delete for early/throwaway projects.
@@ -818,6 +838,9 @@ def delete_project(
         project = project_service.get_by_id(db, project_id)
     except ValueError as exc:
         raise _map_value_error(exc) from exc
+    # v4.0.35: delete was ri-only — now owner-OR-ri (a Junior may delete their OWN throwaway project; a
+    # Medior does NOT gain delete on projects they don't own). ha is NOT privileged for this write.
+    authz.authorize_project(current_user, project, ri_only=True)
 
     slug = project.slug
     repo_url = project.repo_url

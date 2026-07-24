@@ -45,8 +45,12 @@ pytestmark = pytest.mark.usefixtures("_isolate_create_project_kb")
 
 
 @pytest.fixture()
-def router_client(db_session, tmp_path, monkeypatch):
+def router_client(db_session, tmp_path, monkeypatch, creator):
     """Mount the projects router on a fresh app with DB + KB + GitHub overrides.
+
+    v4.0.35: the client authenticates AS ``creator`` (an ``ri``), so ``create_project`` binds
+    ``created_by`` to the authenticated user (no longer trusts a payload UUID) and tests that assert
+    ``created_by == creator.id`` still hold.
 
     * DB is the SAVEPOINT-isolated session from the root conftest.
     * KB writes go to a ``tmp_path``-rooted writer — no test touches
@@ -73,10 +77,6 @@ def router_client(db_session, tmp_path, monkeypatch):
     # Auto-added by M2.D RBAC roll-out — override role gates so existing
     # tests (which never sent JWTs) keep working. Tests that exercise
     # role denial should re-override these to a lower-role user locally.
-    import uuid as _uuid_m2
-
-    import bcrypt as _bcrypt
-
     from backend.core.security import (
         get_current_user as _gcu_m2,
     )
@@ -89,21 +89,9 @@ def router_client(db_session, tmp_path, monkeypatch):
     from backend.core.security import (
         require_shu_or_above as _rshu_m2,
     )
-    from backend.db.models.foundation import User as _UserM2
 
-    _suffix_m2 = _uuid_m2.uuid4().hex[:8]
-    _ri_m2 = _UserM2(
-        username=f"ri_m2_{_suffix_m2}",
-        email=f"ri_m2_{_suffix_m2}@test.local",
-        password_hash=_bcrypt.hashpw(b"test", _bcrypt.gensalt(rounds=4)).decode(),
-        role="ri",
-        is_active=True,
-    )
-    db_session.add(_ri_m2)
-    db_session.flush()
-
-    def _override_user_m2() -> _UserM2:
-        return _ri_m2
+    def _override_user_m2():
+        return creator
 
     app.dependency_overrides[_gcu_m2] = _override_user_m2
     app.dependency_overrides[_rri_m2] = _override_user_m2
@@ -311,15 +299,27 @@ class TestProjectRouter:
         db_session.add(other)
         db_session.flush()
 
+        # The client authenticates as `creator`, so create binds created_by to it (v4.0.35). To have a
+        # project owned by `other`, seed it directly rather than via the (now self-binding) POST.
+        from backend.db.models.projects import Project
+
         router_client.post(
             "/api/v1/projects",
             json=_payload(creator.id),
         ).raise_for_status()
-        router_client.post(
-            "/api/v1/projects",
-            json=_payload(other.id),
-        ).raise_for_status()
+        db_session.add(
+            Project(
+                name=f"P {uuid.uuid4().hex[:6]}",
+                slug=f"p-{uuid.uuid4().hex[:8]}",
+                type="standard",
+                auth_mode="password",
+                description="",
+                created_by=other.id,
+            )
+        )
+        db_session.flush()
 
+        # creator is `ri` (privileged) → the created_by filter is honoured across all projects.
         resp = router_client.get(
             "/api/v1/projects",
             params={"created_by": str(other.id)},
@@ -928,10 +928,10 @@ class TestProjectDeletionGuards:
     """CR-V2-027 — guarded project deletion: admin-only + blocked once PROD-deployed."""
 
     def test_delete_requires_ri_role(self, router_client, creator, db_session):
-        """A non-``ri`` user (here ``shu``) is rejected with 403 — deletion is admin-only."""
+        """v4.0.35: delete is owner-OR-ri. A non-owner ``shu`` (nor the owner, nor an ``ri``) → 403."""
         created = router_client.post("/api/v1/projects", json=_payload(creator.id)).json()
 
-        from backend.core.security import get_current_user, require_ri_role
+        from backend.core.security import require_shu_or_above
 
         shu = User(
             username=f"shu_{uuid.uuid4().hex[:8]}",
@@ -942,9 +942,9 @@ class TestProjectDeletionGuards:
         )
         db_session.add(shu)
         db_session.flush()
-        # Point auth at the shu user and let the REAL ri-gate run (drop the fixture's blanket ri override).
-        router_client.app.dependency_overrides[get_current_user] = lambda: shu
-        del router_client.app.dependency_overrides[require_ri_role]
+        # Point the delete route's user at a NON-OWNER shu (the project is owned by ``creator``) → the
+        # owner-or-ri gate rejects them 403.
+        router_client.app.dependency_overrides[require_shu_or_above] = lambda: shu
 
         resp = router_client.delete(f"/api/v1/projects/{created['id']}")
         assert resp.status_code == 403

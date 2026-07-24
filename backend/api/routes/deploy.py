@@ -29,7 +29,8 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.core.security import get_current_user, require_ri_role
+from backend.core import authz
+from backend.core.security import get_current_user, require_ri_role, require_shu_or_above
 from backend.db.models.customers import Customer
 from backend.db.models.deploy import DeployEvent
 from backend.db.models.foundation import User
@@ -83,6 +84,7 @@ def get_deploy_matrix(
     and the accepted-for-PROD set (so the PROD tab disables Nasadiť until the
     (version, customer) pair is accepted — the never-bypassed gate).
     """
+    authz.assert_project_slug_access(db, _current_user, slug)
     project = _resolve_project(db, slug)
     return DeployMatrix.model_validate(deploy_service.build_matrix(db, project))
 
@@ -106,6 +108,7 @@ def uat_launch(
     LOGGED-IN directly from the UAT tab (v4.0.30). Token-launch (``auth_mode='token'``) apps only — a
     password app uses the plain 'Otvoriť aplikáciu' link. The launch key is used server-side only, never
     returned; the token's ``sub`` is a UAT test identity (no impersonation). UAT-only convenience."""
+    authz.assert_customer_access(db, _current_user, customer_id)
     customer = db.execute(select(Customer).where(Customer.id == customer_id)).scalar_one_or_none()
     if customer is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Zákazník nenájdený.")
@@ -136,6 +139,7 @@ def list_project_deploy_events(
     _current_user: User = Depends(get_current_user),
 ) -> list[DeployEvent]:
     """Return every deploy/accept event for the project ``slug`` (newest first)."""
+    authz.assert_project_slug_access(db, _current_user, slug)
     project = _resolve_project(db, slug)
     return deploy_service.list_project_events(db, project.id)
 
@@ -147,6 +151,7 @@ def list_customer_deploy_events(
     _current_user: User = Depends(get_current_user),
 ) -> list[DeployEvent]:
     """Return every deploy/accept event for one customer (newest first)."""
+    authz.assert_customer_access(db, _current_user, customer_id)
     return deploy_service.list_events(db, customer_id)
 
 
@@ -160,7 +165,7 @@ async def deploy_customer(
     customer_id: UUID,
     payload: DeployRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
 ) -> DeployResult:
     """Nasadiť — deploy a verified version to a customer's UAT/PROD instance (§3.4).
 
@@ -168,7 +173,17 @@ async def deploy_customer(
     accepted (§3.5). The first PROD deploy of a project bumps it to v1.0.0 (§3.6).
     A redeploy PRESERVES data + secrets + extra_hosts by default; ``force_fresh``
     opts into a fresh re-provision (§3.7).
+
+    v4.0.35 (Director decision D3): owner-or-privileged for the customer's project, AND a Junior may
+    deploy only to **UAT** of their own project — **PROD** deploy stays ``ri``-only (the Director gate).
     """
+    # Deploy was ri-only — now owner-OR-ri (a Junior deploys their OWN project's UAT; PROD stays ri below).
+    authz.assert_customer_access(db, current_user, customer_id, ri_only=True)
+    if payload.environment == "prod" and current_user.role != "ri":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Nasadenie do PROD môže vykonať iba správca (ri).",
+        )
     try:
         event, url, bumped_to = await deploy_service.deploy(
             db,

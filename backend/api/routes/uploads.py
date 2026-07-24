@@ -13,11 +13,13 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, UploadFile
 
-from backend.core.security import require_ha_or_above
+from backend.core.security import require_shu_or_above
 
 router = APIRouter(
     tags=["uploads"],
-    dependencies=[Depends(require_ha_or_above)],
+    # v4.0.35: any authenticated user may upload a screenshot (a Junior needs this too). These uploads
+    # carry NO project association, so there is nothing to ownership-check — just the role floor.
+    dependencies=[Depends(require_shu_or_above)],
 )
 
 UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "/app/uploads"))

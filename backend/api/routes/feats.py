@@ -65,7 +65,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
-from backend.core.security import require_ha_or_above
+from backend.core import authz
+from backend.core.security import get_current_user, require_shu_or_above
+from backend.db.models.foundation import User
 from backend.db.session import get_db
 from backend.schemas.feat import (
     FeatCreate,
@@ -78,7 +80,9 @@ from backend.services import feat as feat_service
 
 router = APIRouter(
     tags=["Feats"],
-    dependencies=[Depends(require_ha_or_above)],
+    # v4.0.35: any authenticated user may reach the feats surface; per-route ownership checks
+    # (backend.core.authz) then scope a Junior (shu) to feats under their OWN projects.
+    dependencies=[Depends(require_shu_or_above)],
 )
 
 
@@ -119,6 +123,7 @@ def list_feats(
     ),
     skip: int = Query(default=0, ge=0, description="Number of rows to skip."),
     limit: int = Query(default=50, ge=1, le=100, description="Maximum rows to return."),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> PaginatedResponse[FeatRead]:
     """Return a paginated list of feats.
@@ -126,7 +131,18 @@ def list_feats(
     Results are ordered by ``number ASC`` (feat 1, feat 2, …) — owned
     by the service layer, matching the hierarchical-numbering
     convention (DESIGN.md §1.9) and the ``EpicList`` UI.
+
+    Ownership (v4.0.35): when ``epic_id`` is supplied the caller must own that epic's project
+    (ri/ha see all). A Junior (``shu``) MUST supply ``epic_id`` — an unscoped list across all
+    projects would leak other owners' feats, so it is rejected with HTTP 400.
     """
+    if epic_id is not None:
+        authz.assert_epic_access(db, current_user, epic_id)
+    elif current_user.role not in authz.PRIVILEGED_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="epic_id je povinný — nemôžeš vypísať funkcie naprieč projektami.",
+        )
     try:
         rows = feat_service.list_feats(
             db,
@@ -154,9 +170,11 @@ def list_feats(
 @router.get("/{feat_id}", response_model=FeatRead)
 def get_feat(
     feat_id: UUID,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> FeatRead:
     """Return a single feat by primary key."""
+    authz.assert_feat_access(db, current_user, feat_id)
     try:
         feat = feat_service.get_by_id(db, feat_id)
     except ValueError as exc:
@@ -171,6 +189,7 @@ def get_feat(
 )
 def create_feat(
     payload: FeatCreate,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> FeatRead:
     """Create a new feat.
@@ -185,7 +204,12 @@ def create_feat(
     Concurrent-create races on the same epic surface as HTTP 409.
     Missing or invalid ``epic_id`` foreign keys are rejected by the
     DB-level FK and surface as HTTP 422.
+
+    Ownership (v4.0.35): the parent epic (``payload.epic_id``) must belong to a project the
+    caller owns (ri/ha may create under any epic); a Junior placing a feat under someone
+    else's epic gets HTTP 403.
     """
+    authz.assert_epic_access(db, current_user, payload.epic_id)
     try:
         feat = feat_service.create(db, payload)
         db.commit()
@@ -200,6 +224,7 @@ def create_feat(
 def update_feat(
     feat_id: UUID,
     payload: FeatUpdate,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> FeatRead:
     """Partially update a feat's mutable fields.
@@ -218,7 +243,10 @@ def update_feat(
     independent writer of project status / history; the single source of
     truth is now the AI Agent's own ``MEMORY.md`` plus the Vývoj phase
     tabs (R-DOUBLEWRITE). This endpoint is now a pure DB update.
+
+    Ownership (v4.0.35): the caller must own the feat's project (ri/ha see all).
     """
+    authz.assert_feat_access(db, current_user, feat_id)
     try:
         feat = feat_service.update(db, feat_id, payload)
         db.commit()
@@ -236,6 +264,7 @@ def update_feat(
 )
 def delete_feat(
     feat_id: UUID,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Response:
     """Hard-delete a feat by primary key.
@@ -246,7 +275,10 @@ def delete_feat(
     handled at the DB level, so dependent rows are either removed or
     NULL-ed automatically on flush. No RESTRICT dependency check is
     required.
+
+    Ownership (v4.0.35): the caller must own the feat's project (ri/ha see all).
     """
+    authz.assert_feat_access(db, current_user, feat_id)
     try:
         feat_service.delete(db, feat_id)
         db.commit()

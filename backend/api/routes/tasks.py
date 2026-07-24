@@ -65,7 +65,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
-from backend.core.security import require_ha_or_above
+from backend.core import authz
+from backend.core.security import get_current_user, require_shu_or_above
+from backend.db.models.foundation import User
 from backend.db.session import get_db
 from backend.schemas.pagination import PaginatedResponse
 from backend.schemas.task import (
@@ -79,7 +81,9 @@ from backend.services import task as task_service
 
 router = APIRouter(
     tags=["Tasks"],
-    dependencies=[Depends(require_ha_or_above)],
+    # v4.0.35: any authenticated user may reach the tasks surface; per-route ownership checks
+    # (backend.core.authz) then scope a Junior (shu) to tasks under their OWN projects.
+    dependencies=[Depends(require_shu_or_above)],
 )
 
 
@@ -124,6 +128,7 @@ def list_tasks(
     ),
     skip: int = Query(default=0, ge=0, description="Number of rows to skip."),
     limit: int = Query(default=50, ge=1, le=100, description="Maximum rows to return."),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> PaginatedResponse[TaskRead]:
     """Return a paginated list of tasks.
@@ -131,7 +136,18 @@ def list_tasks(
     Results are ordered by ``number ASC`` (task 1, task 2, …) — owned
     by the service layer, matching the hierarchical-numbering
     convention (DESIGN.md §1.9) and the ``TaskItem`` UI.
+
+    Ownership (v4.0.35): when ``feat_id`` is supplied the caller must own that feat's project
+    (ri/ha see all). A Junior (``shu``) MUST supply ``feat_id`` — an unscoped list across all
+    projects would leak other owners' tasks, so it is rejected with HTTP 400.
     """
+    if feat_id is not None:
+        authz.assert_feat_access(db, current_user, feat_id)
+    elif current_user.role not in authz.PRIVILEGED_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="feat_id je povinný — nemôžeš vypísať úlohy naprieč projektami.",
+        )
     try:
         rows = task_service.list_tasks(
             db,
@@ -161,9 +177,11 @@ def list_tasks(
 @router.get("/{task_id}", response_model=TaskRead)
 def get_task(
     task_id: UUID,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> TaskRead:
     """Return a single task by primary key."""
+    authz.assert_task_access(db, current_user, task_id)
     try:
         task = task_service.get_by_id(db, task_id)
     except ValueError as exc:
@@ -178,6 +196,7 @@ def get_task(
 )
 def create_task(
     payload: TaskCreate,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> TaskRead:
     """Create a new task.
@@ -190,7 +209,12 @@ def create_task(
     is no server default. Concurrent-create races on the same feat
     surface as HTTP 409. Missing or invalid ``feat_id`` foreign keys are
     rejected by the DB-level FK and surface as HTTP 422.
+
+    Ownership (v4.0.35): the parent feat (``payload.feat_id``) must belong to a project the
+    caller owns (ri/ha may create under any feat); a Junior placing a task under someone
+    else's feat gets HTTP 403.
     """
+    authz.assert_feat_access(db, current_user, payload.feat_id)
     try:
         task = task_service.create(db, payload)
         db.commit()
@@ -205,6 +229,7 @@ def create_task(
 def update_task(
     task_id: UUID,
     payload: TaskUpdate,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> TaskRead:
     """Partially update a task's mutable fields.
@@ -222,7 +247,10 @@ def update_task(
     independent writer of project status / history; the single source of
     truth is now the AI Agent's own ``MEMORY.md`` plus the Vývoj phase
     tabs (R-DOUBLEWRITE). This endpoint is now a pure DB update.
+
+    Ownership (v4.0.35): the caller must own the task's project (ri/ha see all).
     """
+    authz.assert_task_access(db, current_user, task_id)
     try:
         task = task_service.update(db, task_id, payload)
         db.commit()
@@ -240,6 +268,7 @@ def update_task(
 )
 def delete_task(
     task_id: UUID,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Response:
     """Hard-delete a task by primary key.
@@ -248,7 +277,10 @@ def delete_task(
     ``execution_logs.task_id`` (``ON DELETE SET NULL``) — are handled
     at the DB level, so dependent rows are NULL-ed automatically on
     flush. No RESTRICT dependency check is required.
+
+    Ownership (v4.0.35): the caller must own the task's project (ri/ha see all).
     """
+    authz.assert_task_access(db, current_user, task_id)
     try:
         task_service.delete(db, task_id)
         db.commit()

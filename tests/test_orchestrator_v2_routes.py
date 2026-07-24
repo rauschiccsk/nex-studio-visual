@@ -236,13 +236,15 @@ def test_non_ri_forbidden(db_session, monkeypatch):
     monkeypatch.setattr(orchestrator, "invoke_claude", _fake_claude)
     app = FastAPI()
     app.include_router(pipeline_router, prefix="/api/v1/pipeline")
-    ha = _seed_user(db_session, "ha")
-    version = _make_version(db_session, ha)
+    owner = _seed_user(db_session, "shu")
+    version = _make_version(db_session, owner)
+    ha = _seed_user(db_session, "ha")  # a Medior who does NOT own this project
 
     def _override_db():
         yield db_session
 
-    # get_current_user resolves the ha user; require_ri_role NOT overridden → the real gate rejects ha 403.
+    # v4.0.35: the pipeline is owner-or-ri. A ha who does NOT own this project is rejected 403 (ha is not
+    # privileged for the ri-tier pipeline drive; only the owner or an ri may reach it).
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[get_current_user] = lambda: ha
 

@@ -18,9 +18,8 @@
  */
 
 import { useNavigate } from "react-router-dom";
-import { Lock, FolderOpen } from "lucide-react";
+import { FolderOpen } from "lucide-react";
 
-import { useAuthStore } from "@/store/authStore";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import { usePipelineWs } from "@/hooks/usePipelineWs";
 import { relayPipelineMessageApi, postPipelineActionApi } from "@/services/api/pipeline";
@@ -38,12 +37,8 @@ import PhaseBar from "@/components/riadiace/PhaseBar";
 import HonestStatusStrip from "@/components/riadiace/HonestStatusStrip";
 import PlanUlohRail from "@/components/riadiace/PlanUlohRail";
 
-const PAGE_NAME = "Riadiace centrum";
-
 export default function RiadiaceCentrumPage() {
   const navigate = useNavigate();
-  const user = useAuthStore((s) => s.user);
-  const isDirector = user?.role === "ri";
 
   const selectedProject = useActiveContextStore((s) => s.selectedProject);
   const selectedVersion = useActiveContextStore((s) => s.selectedVersion);
@@ -75,18 +70,8 @@ export default function RiadiaceCentrumPage() {
   }
 
   // --- Render guards (salvaged from the retired AI Agent tab) ---
-
-  if (!isDirector) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 bg-[var(--color-canvas)] p-6 text-center">
-        <Lock className="h-10 w-10 text-[var(--color-text-muted)]" />
-        <h2 className="text-sm font-semibold text-[var(--color-text-secondary)]">{PAGE_NAME}</h2>
-        <p className="max-w-md text-xs text-[var(--color-text-muted)]">
-          Riadiace centrum je dostupné iba pre Manažéra.
-        </p>
-      </div>
-    );
-  }
+  // v4.0.35: no role gate here — any authenticated user reaches Riadiace centrum; the backend authz layer
+  // scopes a Junior to their OWN project's pipeline (they can only pin/drive projects they created).
 
   if (!selectedProject) {
     return (

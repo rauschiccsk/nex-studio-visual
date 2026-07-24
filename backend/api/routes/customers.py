@@ -22,13 +22,12 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.core.security import get_current_user, require_ri_role
+from backend.core import authz
+from backend.core.security import get_current_user, require_shu_or_above
 from backend.db.models.customers import Customer
 from backend.db.models.foundation import User
-from backend.db.models.projects import Project
 from backend.db.session import get_db
 from backend.schemas.customer import CustomerCreate, CustomerRead, CustomerUpdate
 from backend.services import customer as customer_service
@@ -62,13 +61,6 @@ def _to_read(customer: Customer) -> CustomerRead:
     )
 
 
-def _resolve_project(db: Session, slug: str) -> Project:
-    project = db.execute(select(Project).where(Project.slug == slug)).scalar_one_or_none()
-    if project is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Project not found: {slug}")
-    return project
-
-
 # ---------------------------------------------------------------------------
 # Project-scoped endpoints
 # ---------------------------------------------------------------------------
@@ -78,10 +70,11 @@ def _resolve_project(db: Session, slug: str) -> Project:
 def list_customers(
     slug: str,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> list[CustomerRead]:
     """Return every customer registered for the project ``slug`` (newest first)."""
-    project = _resolve_project(db, slug)
+    # v4.0.35: owner-or-privileged — a Junior sees only their OWN project's customers.
+    project = authz.assert_project_slug_access(db, current_user, slug)
     rows = customer_service.list_customers(db, project.id)
     return [_to_read(row) for row in rows]
 
@@ -95,15 +88,18 @@ def create_customer(
     slug: str,
     payload: CustomerCreate,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
 ) -> CustomerRead:
-    """Register a customer through the form (design §3.2). ``ri`` role only.
+    """Register a customer through the form (design §3.2).
+
+    v4.0.35: was ri-only → now owner-OR-ri (the creator, or an ``ri`` lead, may add customers to their OWN
+    project). ``ha`` is NOT privileged for this write; a Junior touching another user's project gets 403.
 
     Internal apps register **ICC s.r.o.** through this same endpoint — one code
     path, no internal/external branch. A supplied ``secret`` is written to the
     credentials store; the response never echoes it back.
     """
-    project = _resolve_project(db, slug)
+    project = authz.assert_project_slug_access(db, current_user, slug, ri_only=True)
     try:
         customer = customer_service.create(db, project.id, payload)
         db.commit()
@@ -123,8 +119,10 @@ def create_customer(
 def get_customer(
     customer_id: UUID,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> CustomerRead:
+    # v4.0.35: owner-or-privileged — a Junior may read a customer only under their OWN project.
+    authz.assert_customer_access(db, current_user, customer_id)
     try:
         customer = customer_service.get_by_id(db, customer_id)
     except ValueError as exc:
@@ -137,13 +135,18 @@ def update_customer(
     customer_id: UUID,
     payload: CustomerUpdate,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
 ) -> CustomerRead:
-    """Partially update a customer / rotate its secret. ``ri`` role only.
+    """Partially update a customer / rotate its secret.
+
+    v4.0.35: was ri-only → now owner-OR-ri (the owner, or an ``ri`` lead, may edit a customer under their
+    OWN project; ``ha`` not privileged for this write); a Junior touching another user's project gets 403.
 
     A supplied ``secret`` overwrites the stored credentials-store content; the
     response never echoes it back.
     """
+    # v4.0.35: ownership gate (owner-or-ri) before any mutation.
+    authz.assert_customer_access(db, current_user, customer_id, ri_only=True)
     try:
         customer = customer_service.update(db, customer_id, payload)
         db.commit()
@@ -162,9 +165,15 @@ def update_customer(
 def delete_customer(
     customer_id: UUID,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
 ) -> Response:
-    """Delete a customer and its stored secret (if any). ``ri`` role only."""
+    """Delete a customer and its stored secret (if any).
+
+    v4.0.35: was ri-only → now owner-OR-ri (the owner, or an ``ri`` lead, may delete a customer under their
+    OWN project; ``ha`` not privileged for this write); a Junior touching another user's project gets 403.
+    """
+    # v4.0.35: ownership gate (owner-or-ri) before the delete.
+    authz.assert_customer_access(db, current_user, customer_id, ri_only=True)
     try:
         customer_service.delete(db, customer_id)
         db.commit()

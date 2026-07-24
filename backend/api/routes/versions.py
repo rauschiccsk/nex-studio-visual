@@ -30,6 +30,15 @@ than a single resource prefix:
   one or more EPICs are still ``planned`` / ``in_progress``. ``ri`` role
   only.
 
+v4.0.35 (project-ownership authorization): the per-route role annotations
+above are superseded — EVERY endpoint here now floors at any authenticated
+user (``require_shu_or_above``) and is additionally gated by ownership
+(:mod:`backend.core.authz`). A Junior (``shu``) may list / read / create /
+patch / release / reset a version ONLY for a project they own
+(``Project.created_by == self``); privileged leads (``ri`` / ``ha``) may
+touch every project. The "Authenticated users only" / "``ri`` role only"
+notes above are retained only as pre-4.0.35 history.
+
 All endpoints are synchronous ``def`` — pg8000 is a synchronous driver
 and FastAPI dispatches sync endpoints to a thread pool automatically.
 The router delegates every persistence operation to
@@ -51,7 +60,8 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.core.security import get_current_user, require_ri_role
+from backend.core import authz
+from backend.core.security import get_current_user, require_shu_or_above
 from backend.db.models.foundation import User
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.session import get_db
@@ -112,7 +122,7 @@ def _parse_blocking_ids(message: str) -> list[str]:
 def list_versions(
     project_id: UUID,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> list[VersionRead]:
     """Return every version belonging to ``project_id``.
 
@@ -124,7 +134,11 @@ def list_versions(
     No pagination envelope: the version list per project is bounded by
     business reality (single-digit to low-double-digit counts) and the
     UI renders the entire collection at once.
+
+    v4.0.35: owner-or-privileged — a Junior (``shu``) sees only their OWN
+    project's versions; ri/ha see every project.
     """
+    authz.assert_project_id_access(db, current_user, project_id)
     rows = version_service.list_versions(db, project_id)
     return [VersionRead.model_validate(row) for row in rows]
 
@@ -138,7 +152,7 @@ def create_version(
     project_id: UUID,
     payload: VersionCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
 ) -> VersionRead:
     """Create a new version for ``project_id``.
 
@@ -148,9 +162,11 @@ def create_version(
     version_number)`` pair surface as HTTP 409 via the unique-constraint
     pre-check in :func:`backend.services.version.create`.
 
-    Restricted to users with role ``ri`` (DESIGN.md §2.6 ``POST
-    /projects/{id}/versions``).
+    v4.0.35: any authenticated user may create a version, but only for a
+    project they own (``created_by`` == self); ri/ha may create on any
+    project — enforced by the ownership check below.
     """
+    authz.assert_project_id_access(db, current_user, project_id, ri_only=True)
     try:
         version = version_service.create(db, project_id, payload, current_user.id)
         db.commit()
@@ -173,14 +189,18 @@ def create_version(
 def get_version(
     version_id: UUID,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> VersionRead:
     """Return a single version by primary key.
 
     The service eagerly loads ``epics`` and ``bugs`` via ``selectinload``
     so the ``VersionDetailPage`` UI can render the EPIC / BUG groups
     without an N+1 round-trip — see DESIGN.md §2.6 ``GET /versions/{id}``.
+
+    v4.0.35: owner-or-privileged — a Junior may read only their OWN
+    project's version.
     """
+    authz.assert_version_access(db, current_user, version_id)
     try:
         version = version_service.get_by_id(db, version_id)
     except ValueError as exc:
@@ -196,7 +216,7 @@ def update_version(
     version_id: UUID,
     payload: VersionUpdate,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
 ) -> VersionRead:
     """Partially update a version's mutable fields.
 
@@ -205,6 +225,9 @@ def update_version(
     ``project_id`` and ``created_at`` are immutable; ``updated_at`` is
     refreshed by the ORM ``onupdate=func.now()`` trigger.
 
+    v4.0.35: owner-or-privileged — a Junior may patch only their OWN
+    project's version; ri/ha may patch any.
+
     .. note::
 
        This endpoint is **not** the gated release transition. Patching
@@ -212,6 +235,7 @@ def update_version(
        §4.0 Rule 5) and is reserved for backfill / correction flows;
        production callers must use :func:`release_version`.
     """
+    authz.assert_version_access(db, current_user, version_id, ri_only=True)
     try:
         version = version_service.update(db, version_id, payload)
         db.commit()
@@ -229,7 +253,7 @@ def update_version(
 def delete_version(
     version_id: UUID,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
 ) -> Response:
     """Permanently delete a version.
 
@@ -243,8 +267,10 @@ def delete_version(
     * **409** — the version is ``released``, or it still has one or more
       EPICs attached (Task Plan not empty).
 
-    Restricted to users with role ``ri``.
+    v4.0.35: owner-or-privileged — a Junior may delete only their OWN
+    project's version; ri/ha may delete any.
     """
+    authz.assert_version_access(db, current_user, version_id, ri_only=True)
     try:
         version_service.delete(db, version_id)
         db.commit()
@@ -270,12 +296,16 @@ class _TaskPlanResponse(BaseModel):
 def get_task_plan(
     version_id: UUID,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> _TaskPlanResponse:
     """Return the existing task plan (EPICs → Feats → Tasks) for a version.
 
     Returns an empty plan (``epic_count=0``) when no EPICs exist yet.
+
+    v4.0.35: owner-or-privileged — a Junior may read only their OWN
+    project's task plan.
     """
+    authz.assert_version_access(db, current_user, version_id)
     epics = db.execute(select(Epic).where(Epic.version_id == version_id).order_by(Epic.number)).scalars().all()
 
     if not epics:
@@ -367,16 +397,18 @@ def write_zadanie(
     version_id: UUID,
     payload: _ZadanieWrite,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
 ) -> _ZadanieWriteResponse:
     """Save a version's free-text Zadanie to ``customer-requirements.md`` (CR-V2-024, design §4.3).
 
     The New-Version flow saves the brief here on "Uložiť Zadanie"; the Príprava phase (CR-V2-010)
     reads exactly this file when the build starts. Create-or-overwrite — the version's spec
-    directory is created if it does not yet exist. ``ri`` role only.
+    directory is created if it does not yet exist. v4.0.35: owner-or-privileged — a Junior may
+    write only their OWN project's Zadanie; ri/ha may write any.
 
     * **404** — the version (or its project) does not exist.
     """
+    authz.assert_version_access(db, current_user, version_id, ri_only=True)
     try:
         rel = version_service.write_zadanie(db, version_id, payload.content)
         db.commit()
@@ -396,14 +428,17 @@ class _ZadanieReadResponse(BaseModel):
 def read_zadanie(
     version_id: UUID,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> _ZadanieReadResponse:
     """Return a version's saved Zadanie — the ``customer-requirements.md`` content (``""`` if not yet created).
 
     The version-page editor loads FROM HERE: the saved file is the source of truth, NOT ``Version.description``
     (2026-06-30 fix — loading from ``description`` showed an empty editor on re-open even though the Zadanie was
     saved, and never reflected a Zadanie edited directly on disk). **404** — the version/project does not exist.
+
+    v4.0.35: owner-or-privileged — a Junior may read only their OWN project's Zadanie.
     """
+    authz.assert_version_access(db, current_user, version_id)
     try:
         content = version_service.read_zadanie(db, version_id)
     except ValueError as exc:
@@ -415,14 +450,15 @@ def read_zadanie(
 def reset_tasks(
     version_id: UUID,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
 ) -> dict:
     """Reset all tasks in a version back to ``todo`` status.
 
     Sets every Task under every Epic of this version to ``todo``, and
     recomputes Feat / Epic statuses accordingly. Does not delete any records.
-    ``ri`` role only.
+    v4.0.35: owner-or-privileged — a Junior may reset only their OWN project's version.
     """
+    authz.assert_version_access(db, current_user, version_id, ri_only=True)
     epics = db.execute(select(Epic).where(Epic.version_id == version_id)).scalars().all()
     epic_ids = [e.id for e in epics]
     if not epic_ids:
@@ -452,13 +488,15 @@ def reset_tasks(
 def reset_plan(
     version_id: UUID,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
 ) -> dict:
     """Delete the entire task plan for a version (all EPICs, Feats and Tasks).
 
     Hard-deletes every Epic under this version. Feats and Tasks are removed
-    via ``ON DELETE CASCADE`` at the DB level. ``ri`` role only.
+    via ``ON DELETE CASCADE`` at the DB level. v4.0.35: owner-or-privileged —
+    a Junior may reset only their OWN project's version.
     """
+    authz.assert_version_access(db, current_user, version_id, ri_only=True)
     epics = db.execute(select(Epic).where(Epic.version_id == version_id)).scalars().all()
     count = len(epics)
     for e in epics:
@@ -474,7 +512,7 @@ def reset_plan(
 def release_version(
     version_id: UUID,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
 ) -> VersionRead:
     """Release the version — the DESIGN.md §4.0 Rule 5 release gate.
 
@@ -493,9 +531,10 @@ def release_version(
       "...", "blocking_epic_ids": ["<uuid>", ...]}`` so the
       ``VersionsPage`` UI can render the blockers inline.
 
-    Restricted to users with role ``ri`` (DESIGN.md §2.6 ``POST
-    /versions/{id}/release``).
+    v4.0.35: owner-or-privileged — a Junior may release only their OWN
+    project's version; ri/ha may release any.
     """
+    authz.assert_version_access(db, current_user, version_id, ri_only=True)
     try:
         version = version_service.release(db, version_id)
         db.commit()

@@ -438,8 +438,10 @@ export default function ProjectDetailPage() {
           Zmazanie projektu je trvalé a nevratné. Ak chceš projekt len odložiť, archivuj ho.
         </p>
         {(() => {
-          const blockedReason = !isAdmin
-            ? "Projekt smie zmazať iba Manažér."
+          // v4.0.35: owner-or-privileged — the project's creator (or an ri/ha lead) may delete it.
+          const canDelete = isAdmin || project.created_by === user?.id;
+          const blockedReason = !canDelete
+            ? "Projekt smie zmazať iba jeho vlastník alebo Manažér."
             : project.has_prod_deploy
               ? "Projekt už bol nasadený do PROD — namiesto mazania ho archivuj."
               : null;

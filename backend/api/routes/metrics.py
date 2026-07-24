@@ -10,12 +10,12 @@ like the versions router).
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from backend.core import authz
 from backend.core.security import require_shu_or_above
-from backend.db.models.projects import Project
+from backend.db.models.foundation import User
 from backend.db.session import get_db
 from backend.schemas.metrics import ProjectMetricsRead
 from backend.services import metrics as metrics_service
@@ -26,11 +26,13 @@ router = APIRouter(tags=["Metrics"])
 @router.get(
     "/projects/{slug}/metrics",
     response_model=ProjectMetricsRead,
-    dependencies=[Depends(require_shu_or_above)],
 )
-def get_project_metrics(slug: str, db: Session = Depends(get_db)) -> ProjectMetricsRead:
+def get_project_metrics(
+    slug: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_shu_or_above),
+) -> ProjectMetricsRead:
     """Return the project's measured AI effort + cost + human-baseline ROI, per phase (E5)."""
-    project = db.execute(select(Project).where(Project.slug == slug)).scalar_one_or_none()
-    if project is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Project not found: {slug}")
+    # v4.0.35: owner-or-privileged — a Junior may read metrics only for their OWN project.
+    project = authz.assert_project_slug_access(db, current_user, slug)
     return metrics_service.compute_project_metrics(db, project)

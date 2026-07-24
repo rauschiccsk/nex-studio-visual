@@ -1,6 +1,7 @@
 """REST + WebSocket router for ``/api/v1/agent-terminal/*``.
 
-REST endpoints (Director-only, ``require_ri_role``):
+REST endpoints (v4.0.35: owner-or-ri via ``backend.core.authz`` — the project owner or an ``ri``; sessions
+are additionally per-user via ``user_id``):
 
 * ``POST /spawn`` — spawn a new claude CLI process under PTY for the
   given ``(role, project_slug)``. Returns the persisted session row.
@@ -50,7 +51,8 @@ from fastapi import (
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.core.security import require_ri_role, verify_ws_token
+from backend.core import authz
+from backend.core.security import require_shu_or_above, verify_ws_token
 from backend.db.models.agent_terminal import AgentTerminalSession
 from backend.db.models.foundation import User
 from backend.db.session import SessionLocal, get_db
@@ -82,10 +84,14 @@ router = APIRouter(tags=["Agent Terminal"])
 )
 async def spawn_session(
     payload: AgentTerminalSpawnRequest,
-    current_user: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
     db: Session = Depends(get_db),
 ) -> AgentTerminalSession:
-    """Spawn a fresh claude CLI process for ``(role, project_slug)``."""
+    """Spawn a fresh claude CLI process for ``(role, project_slug)``.
+
+    v4.0.35: owner-or-privileged — a Junior may only attach a terminal to their OWN project.
+    """
+    authz.assert_project_slug_access(db, current_user, payload.project_slug, ri_only=True)
     try:
         row = await service.spawn(
             user_id=current_user.id,
@@ -109,15 +115,17 @@ async def spawn_session(
 @router.get("/available-roles", response_model=dict[str, bool])
 def available_roles(
     project_slug: str = Query(..., description="Project slug to check charter availability for."),
-    _current_user: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
+    db: Session = Depends(get_db),
 ) -> dict[str, bool]:
     """Return per-role charter availability for ``project_slug``.
 
     Since CR-V2-007 the spawn API is AI-Agent-only, so this reports just
     ``{"ai-agent": <bool>}`` — true when ``.claude/agents/ai-agent/CLAUDE.md``
     exists in the project (the set mirrors ``_VALID_ROLES``). An invalid slug or
-    unknown project → 404.
+    unknown project → 404. v4.0.35: owner-or-privileged (a Junior only their own project).
     """
+    authz.assert_project_slug_access(db, current_user, project_slug, ri_only=True)
     try:
         return service.available_roles(project_slug)
     except AgentTerminalError as exc:
@@ -129,7 +137,7 @@ def available_roles(
 
 @router.get("/sessions", response_model=list[AgentTerminalSessionRead])
 def list_sessions(
-    current_user: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
     db: Session = Depends(get_db),
 ) -> list[AgentTerminalSession]:
     """List active sessions (``ended_at IS NULL``) for the current user."""
@@ -155,7 +163,7 @@ def list_sessions(
 )
 async def end_session(
     session_id: uuid.UUID,
-    current_user: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
     db: Session = Depends(get_db),
 ) -> Response:
     """Explicit End session — SIGTERM, grace, SIGKILL. Idempotent."""
@@ -186,9 +194,10 @@ async def terminal_ws(
     db = SessionLocal()
     try:
         user = verify_ws_token(token, db)
-        if user is None or user.role != "ri":
+        if user is None:
             await websocket.close(code=4003)  # forbidden
             return
+        # v4.0.35: a terminal session is per-user — a Junior (or anyone) may stream ONLY their own.
         row = db.get(AgentTerminalSession, session_id)
         if row is None or row.user_id != user.id:
             await websocket.close(code=4004)  # not found
