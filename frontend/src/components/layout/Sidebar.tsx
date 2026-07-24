@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { UserCog } from "lucide-react";
 import { Sidebar as ShellSidebar, NavItem, SectionLabel, Brand, UserCard, NavIcon } from "nex-shared";
 import { useAuthStore } from "@/store/authStore";
 import { useActiveContextStore } from "@/store/activeContextStore";
@@ -129,6 +130,20 @@ export default function Sidebar() {
           {!collapsed && <span>{isAway ? "Preč" : "Pri počítači"}</span>}
         </button>
       )}
+      {/* v4.0.32: every user reaches their own account (details + change password) here — the admin
+          "Používatelia" tab manages OTHER users and is ri-only. */}
+      <button
+        onClick={() => navigate("/account")}
+        title="Moje konto — údaje a zmena hesla"
+        className={`flex items-center gap-2 w-full rounded-lg px-2 py-1.5 mb-1 text-xs transition-colors ${
+          isActive("/account")
+            ? "bg-[var(--color-surface-active)] text-[var(--color-text-primary)]"
+            : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
+        } ${collapsed ? "justify-center" : ""}`}
+      >
+        <UserCog className="h-4 w-4" />
+        {!collapsed && <span>Moje konto</span>}
+      </button>
       <UserCard
         initials={initials}
         name={displayName}

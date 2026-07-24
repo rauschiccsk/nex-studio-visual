@@ -82,15 +82,19 @@ export function deleteUserApi(id: string): Promise<void> {
 /**
  * Change a user's password.
  *
- * Maps to ``POST /api/v1/users/{id}/change-password``.  The backend
- * hashes the new password with bcrypt and bumps ``token_version`` to
- * invalidate all existing JWTs for the target user.
+ * Maps to ``POST /api/v1/users/{id}/change-password``.  The backend hashes the new password with
+ * bcrypt and bumps ``token_version`` to invalidate all existing JWTs for the target user.
+ *
+ * ``currentPassword`` is required for a SELF-service change (a user changing their OWN password) — the
+ * backend verifies it (v4.0.32). An ``ri`` admin resetting ANOTHER user's password omits it.
  */
 export function changePasswordApi(
   userId: string,
   newPassword: string,
+  currentPassword?: string,
 ): Promise<UserRead> {
   return api.post<UserRead>(`/users/${userId}/change-password`, {
     new_password: newPassword,
+    ...(currentPassword !== undefined ? { current_password: currentPassword } : {}),
   });
 }

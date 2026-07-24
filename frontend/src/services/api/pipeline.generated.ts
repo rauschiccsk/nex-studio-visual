@@ -1917,10 +1917,11 @@ export interface paths {
         put?: never;
         /**
          * Change Password
-         * @description Change a user's password (ri role only).
+         * @description Change a user's password.
          *
-         *     The service layer hashes the new password with bcrypt and bumps
-         *     ``token_version`` to invalidate all existing JWTs for the target user.
+         *     Self-service (a user changing their OWN password) requires ``current_password``; an ``ri`` admin may
+         *     reset ANY user's password without it. The service hashes the new password with bcrypt, bumps
+         *     ``token_version`` to invalidate all existing JWTs, and manages the ``must_change_password`` flag.
          */
         post: operations["change_password_api_v1_users__user_id__change_password_post"];
         delete?: never;
@@ -2256,6 +2257,11 @@ export interface components {
             is_active: boolean;
             /** Last Name */
             last_name?: string | null;
+            /**
+             * Must Change Password
+             * @default false
+             */
+            must_change_password: boolean;
             /**
              * Role
              * @enum {string}
@@ -2594,10 +2600,18 @@ export interface components {
          * ChangePasswordRequest
          * @description Payload for the ``POST /users/{id}/change-password`` endpoint.
          *
-         *     Only the new plaintext password is required — the service layer hashes
-         *     it with bcrypt before persisting.
+         *     The service layer hashes ``new_password`` with bcrypt before persisting.
+         *
+         *     ``current_password`` is REQUIRED for a self-service change (a user changing their OWN password) —
+         *     the service verifies it so a hijacked session can't silently reset the password (v4.0.32). An admin
+         *     (``ri``) resetting ANOTHER user's password omits it (the admin doesn't know the target's password).
          */
         ChangePasswordRequest: {
+            /**
+             * Current Password
+             * @description Current plaintext password — required when changing your OWN password (self-service).
+             */
+            current_password?: string | null;
             /**
              * New Password
              * @description New plaintext password (min 5, max 128 characters). Min 5 — Director directive 2026-05-13, NEX Studio is internal.

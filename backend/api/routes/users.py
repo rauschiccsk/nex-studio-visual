@@ -213,10 +213,11 @@ def change_password(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> UserRead:
-    """Change a user's password (ri role only).
+    """Change a user's password.
 
-    The service layer hashes the new password with bcrypt and bumps
-    ``token_version`` to invalidate all existing JWTs for the target user.
+    Self-service (a user changing their OWN password) requires ``current_password``; an ``ri`` admin may
+    reset ANY user's password without it. The service hashes the new password with bcrypt, bumps
+    ``token_version`` to invalidate all existing JWTs, and manages the ``must_change_password`` flag.
     """
     try:
         user = user_service.change_password(
@@ -224,6 +225,7 @@ def change_password(
             user_id=user_id,
             new_password=payload.new_password,
             current_user=current_user,
+            current_password=payload.current_password,
         )
         db.commit()
     except ValueError as exc:
@@ -233,6 +235,11 @@ def change_password(
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=message,
+            ) from exc
+        if "current password" in message.lower():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Súčasné heslo je nesprávne.",
             ) from exc
         raise _map_value_error(exc) from exc
     db.refresh(user)

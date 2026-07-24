@@ -361,19 +361,25 @@ class TestChangePassword:
     def test_ri_can_change_own_password(self, db_session):
         """An ``ri`` user can change their own password."""
         ri_user = service.create(db_session, _payload(username="ri_self", email="ri_self@ex.com", role="ri"))
-        updated = service.change_password(db_session, ri_user.id, "MyNewPass!", ri_user)
+        updated = service.change_password(
+            db_session, ri_user.id, "MyNewPass!", ri_user, current_password="SecurePass123"
+        )
         assert bcrypt.checkpw(b"MyNewPass!", updated.password_hash.encode("utf-8"))
 
     def test_ha_can_change_own_password(self, db_session):
         """An ``ha`` user can change their own password."""
         ha_user = service.create(db_session, _payload(username="ha_user", email="ha@ex.com", role="ha"))
-        updated = service.change_password(db_session, ha_user.id, "HaNewPass!", ha_user)
+        updated = service.change_password(
+            db_session, ha_user.id, "HaNewPass!", ha_user, current_password="SecurePass123"
+        )
         assert bcrypt.checkpw(b"HaNewPass!", updated.password_hash.encode("utf-8"))
 
     def test_shu_can_change_own_password(self, db_session):
         """An ``shu`` user can change their own password."""
         shu_user = service.create(db_session, _payload(username="shu_user", email="shu@ex.com", role="shu"))
-        updated = service.change_password(db_session, shu_user.id, "ShuNewPass!", shu_user)
+        updated = service.change_password(
+            db_session, shu_user.id, "ShuNewPass!", shu_user, current_password="SecurePass123"
+        )
         assert bcrypt.checkpw(b"ShuNewPass!", updated.password_hash.encode("utf-8"))
 
     def test_ha_cannot_change_other_users_password(self, db_session):
@@ -427,7 +433,7 @@ class TestChangePassword:
     def test_change_password_produces_valid_bcrypt_hash(self, db_session):
         """The stored hash is a valid bcrypt hash verifiable with the new password."""
         user = service.create(db_session, _payload(username="hash_test", email="hash@ex.com", role="ri"))
-        service.change_password(db_session, user.id, "V3ryS3cure!", user)
+        service.change_password(db_session, user.id, "V3ryS3cure!", user, current_password="SecurePass123")
 
         # Verify the hash starts with the bcrypt prefix
         assert user.password_hash.startswith("$2")
@@ -435,3 +441,61 @@ class TestChangePassword:
         assert bcrypt.checkpw(b"V3ryS3cure!", user.password_hash.encode("utf-8"))
         # Verify the old password does NOT match
         assert not bcrypt.checkpw(b"SecurePass123", user.password_hash.encode("utf-8"))
+
+    # ── v4.0.32: self-service confirms the current password + must_change_password lifecycle ──
+
+    def test_self_change_requires_current_password(self, db_session):
+        """A self change without ``current_password`` is rejected (a hijacked session can't reset)."""
+        user = service.create(db_session, _payload(username="sc_none", email="sc_none@ex.com", role="shu"))
+        with pytest.raises(ValueError, match="Current password is incorrect"):
+            service.change_password(db_session, user.id, "NewPass!", user)
+
+    def test_self_change_rejects_wrong_current_password(self, db_session):
+        """A self change with the WRONG ``current_password`` is rejected."""
+        user = service.create(db_session, _payload(username="sc_wrong", email="sc_wrong@ex.com", role="ha"))
+        with pytest.raises(ValueError, match="Current password is incorrect"):
+            service.change_password(db_session, user.id, "NewPass!", user, current_password="nope")
+
+    def test_admin_reset_does_not_need_current_password(self, db_session):
+        """An ``ri`` resetting ANOTHER user's password never supplies a current password."""
+        ri_user = service.create(db_session, _payload(username="ri_reset", email="ri_reset@ex.com", role="ri"))
+        target = service.create(db_session, _payload(username="reset_t", email="reset_t@ex.com", role="ha"))
+        updated = service.change_password(db_session, target.id, "AdminSet1!", ri_user)
+        assert bcrypt.checkpw(b"AdminSet1!", updated.password_hash.encode("utf-8"))
+
+    def test_created_user_must_change_password(self, db_session):
+        """An admin-created user starts with ``must_change_password=True``."""
+        user = service.create(db_session, _payload(username="mcp_new", email="mcp_new@ex.com", role="shu"))
+        assert user.must_change_password is True
+
+    def test_self_change_clears_must_change_password(self, db_session):
+        """When the user chooses their OWN password, the forced-change flag is cleared."""
+        user = service.create(db_session, _payload(username="mcp_self", email="mcp_self@ex.com", role="shu"))
+        updated = service.change_password(db_session, user.id, "ChosenPass1!", user, current_password="SecurePass123")
+        assert updated.must_change_password is False
+
+    def test_admin_reset_sets_must_change_password(self, db_session):
+        """An admin reset hands out an initial password → the target must change it again."""
+        ri_user = service.create(db_session, _payload(username="ri_mcp", email="ri_mcp@ex.com", role="ri"))
+        target = service.create(db_session, _payload(username="mcp_reset", email="mcp_reset@ex.com", role="ha"))
+        # target chose a password first (flag cleared)…
+        service.change_password(db_session, target.id, "TargetChose1!", target, current_password="SecurePass123")
+        assert target.must_change_password is False
+        # …then the admin resets it → flag set again
+        service.change_password(db_session, target.id, "AdminReset1!", ri_user)
+        assert target.must_change_password is True
+
+    def test_ri_self_change_without_current_password_ok(self, db_session):
+        """An ``ri`` admin may reset their OWN password without the current one (admin capability) —
+        so the ri-only Users table's self-row keeps working."""
+        ri_user = service.create(db_session, _payload(username="ri_noc", email="ri_noc@ex.com", role="ri"))
+        updated = service.change_password(db_session, ri_user.id, "RiReset1!", ri_user)
+        assert bcrypt.checkpw(b"RiReset1!", updated.password_hash.encode("utf-8"))
+        assert updated.must_change_password is False
+
+    def test_ri_self_change_with_wrong_current_password_rejected(self, db_session):
+        """When a current password IS supplied (the Moje konto form always sends it), a WRONG one is
+        rejected even for an ``ri`` — a wrong entry never silently succeeds."""
+        ri_user = service.create(db_session, _payload(username="ri_wc", email="ri_wc@ex.com", role="ri"))
+        with pytest.raises(ValueError, match="Current password is incorrect"):
+            service.change_password(db_session, ri_user.id, "RiReset1!", ri_user, current_password="wrong")

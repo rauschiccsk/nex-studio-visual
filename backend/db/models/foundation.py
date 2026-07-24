@@ -32,6 +32,9 @@ class User(Base, UUIDMixin, TimestampMixin):
     # owns a project, this id is written into that project's .env as
     # TELEGRAM_NOTIFY_CHAT_ID so agent reports reach them.
     telegram_chat_id = Column(String(64), nullable=True)
+    # Force a change of an admin-set initial password before the user can use the app (v4.0.32).
+    # Set true on admin create + admin reset; cleared when the user changes their OWN password.
+    must_change_password = Column(Boolean, nullable=False, server_default="false")
 
     __table_args__ = (
         UniqueConstraint("username", name="uq_users_username"),

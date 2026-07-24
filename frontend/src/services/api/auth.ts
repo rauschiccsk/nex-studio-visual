@@ -22,6 +22,9 @@ export interface AuthUser {
   first_name?: string | null;
   /** Family name — nullable (legacy users may lack it). CR-NS-089. */
   last_name?: string | null;
+  /** True while the user still has an admin-set initial password that must be changed before using
+   *  the app (v4.0.32). The app blocks behind a change-password screen while this is set. */
+  must_change_password?: boolean;
   created_at: string;
   updated_at: string;
 }

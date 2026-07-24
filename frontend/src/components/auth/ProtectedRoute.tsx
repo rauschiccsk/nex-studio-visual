@@ -13,6 +13,8 @@ import { ProtectedRoute as SharedProtectedRoute } from "nex-shared";
 
 import { useAuthStore } from "@/store/authStore";
 
+import ForcedPasswordGate from "./ForcedPasswordGate";
+
 interface ProtectedRouteProps {
   children: React.ReactNode;
 }
@@ -30,7 +32,8 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
       isAuthed={() => Boolean(useAuthStore.getState().token)}
       redirect={<Navigate to="/login" state={{ from: location }} replace />}
     >
-      {children}
+      {/* v4.0.32: an admin-set initial password must be changed before the app is usable. */}
+      <ForcedPasswordGate>{children}</ForcedPasswordGate>
     </SharedProtectedRoute>
   );
 }

@@ -153,11 +153,16 @@ const SETTINGS_KIT_CONFIG: SettingsKitConfig = {
     users: "Používatelia",
     sessions: "Relácie",
   },
-  // Sessions is admin/ha tooling — gated ha-or-above to match the backend's
-  // `require_ha_or_above` on /api/v1/user-sessions. The other three tabs are
-  // visible to every authenticated user (unchanged from the old page).
+  // Sessions is admin/ha tooling — gated ha-or-above to match the backend's `require_ha_or_above` on
+  // /api/v1/user-sessions. Používatelia (v4.0.32) is the admin user-management surface — ri-only, matching
+  // the `require_ri_role` on every /api/v1/users endpoint (a non-admin saw an empty admin panel + a "Nový
+  // používateľ" button the backend rejects; self-service lives in "Moje konto"). System + Agents stay open.
   tabVisibleForRole: (tab, role) =>
-    tab === "sessions" ? role === "ri" || role === "ha" : true,
+    tab === "sessions"
+      ? role === "ri" || role === "ha"
+      : tab === "users"
+        ? role === "ri"
+        : true,
 };
 
 function roleCls(role: string) {

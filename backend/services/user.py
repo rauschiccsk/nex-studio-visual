@@ -175,6 +175,8 @@ def create(db: Session, data: UserCreate) -> User:
         first_name=data.first_name,
         last_name=data.last_name,
         telegram_chat_id=data.telegram_chat_id,
+        # Admin-created: the password is an INITIAL one the user must change on first login (v4.0.32).
+        must_change_password=True,
     )
     db.add(user)
     db.flush()
@@ -292,6 +294,7 @@ def change_password(
     user_id: UUID,
     new_password: str,
     current_user: User,
+    current_password: Optional[str] = None,
 ) -> User:
     """Change a user's password, hash it with bcrypt, and rotate tokens.
 
@@ -300,6 +303,12 @@ def change_password(
           password — this is the admin "reset password" flow.
         * Users with role ``ha`` or ``shu`` may only change **their own**
           password.
+
+    Self-service vs admin reset (v4.0.32):
+        * SELF change (``user_id == current_user.id``): ``current_password`` is REQUIRED and verified,
+          and ``must_change_password`` is CLEARED (the user has chosen their own password).
+        * ADMIN reset (``ri`` changing another user): no ``current_password``; ``must_change_password``
+          is SET (the new password is an initial one the target must change on next login).
 
     After updating ``password_hash`` the function bumps the user's
     ``token_version`` via :func:`backend.services.auth._bump_token_version`
@@ -310,21 +319,37 @@ def change_password(
         user_id: The target user whose password will be changed.
         new_password: The new plaintext password (will be bcrypt-hashed).
         current_user: The authenticated user performing the action.
+        current_password: The performer's current password — required for a self change.
 
     Returns:
         The updated :class:`User` instance with the new ``password_hash``.
 
     Raises:
         ValueError: If ``current_user`` lacks permission (not ``ri`` and
-            ``user_id != current_user.id``), or if the target user does
-            not exist.
+            ``user_id != current_user.id``), if a self change omits or gives a
+            wrong ``current_password``, or if the target user does not exist.
     """
+    from backend.services.auth import _bump_token_version, verify_password
+
+    is_self = current_user.id == user_id
+
     # --- Authorization ---
-    if current_user.role != "ri" and current_user.id != user_id:
+    if current_user.role != "ri" and not is_self:
         raise ValueError("Insufficient permissions: only ri role can change another user's password")
 
     # --- Fetch target user ---
     user = get_by_id(db, user_id)
+
+    # --- Self change: confirm identity with the current password ---
+    # A non-admin changing their OWN password MUST supply the correct current password (a hijacked session
+    # can't silently reset it). An admin (``ri``) may self-reset without it (admin capability, e.g. the
+    # Users table); but whenever a current password IS supplied (the "Moje konto" form always sends it) it
+    # is verified, so a wrong entry never silently succeeds.
+    if is_self:
+        if current_user.role != "ri" and not current_password:
+            raise ValueError("Current password is incorrect")
+        if current_password and not verify_password(current_password, user.password_hash):
+            raise ValueError("Current password is incorrect")
 
     # --- Hash and persist ---
     hashed = bcrypt.hashpw(
@@ -332,11 +357,12 @@ def change_password(
         bcrypt.gensalt(),
     ).decode("utf-8")
     user.password_hash = hashed
+    # A self change means the user chose their own password → no more forced change; an admin reset
+    # hands out a fresh initial password the target must change on next login.
+    user.must_change_password = not is_self
     db.flush()
 
     # --- Rotate tokens (invalidate all existing JWTs) ---
-    from backend.services.auth import _bump_token_version
-
     _bump_token_version(db, user_id)
 
     return user

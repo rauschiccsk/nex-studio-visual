@@ -49,6 +49,9 @@ class AuthUser(BaseModel):
     # from the ORM columns via ``from_attributes``.
     first_name: str | None = None
     last_name: str | None = None
+    # True when the user still has an admin-set initial password that must be changed before using
+    # the app (v4.0.32). The client blocks the app behind a change-password screen while this is set.
+    must_change_password: bool = False
     created_at: datetime
     updated_at: datetime
 

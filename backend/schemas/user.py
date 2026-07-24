@@ -145,8 +145,11 @@ class UserUpdate(BaseModel):
 class ChangePasswordRequest(BaseModel):
     """Payload for the ``POST /users/{id}/change-password`` endpoint.
 
-    Only the new plaintext password is required — the service layer hashes
-    it with bcrypt before persisting.
+    The service layer hashes ``new_password`` with bcrypt before persisting.
+
+    ``current_password`` is REQUIRED for a self-service change (a user changing their OWN password) —
+    the service verifies it so a hijacked session can't silently reset the password (v4.0.32). An admin
+    (``ri``) resetting ANOTHER user's password omits it (the admin doesn't know the target's password).
     """
 
     new_password: str = Field(
@@ -157,6 +160,11 @@ class ChangePasswordRequest(BaseModel):
             "New plaintext password (min 5, max 128 characters). "
             "Min 5 — Director directive 2026-05-13, NEX Studio is internal."
         ),
+    )
+    current_password: Optional[str] = Field(
+        default=None,
+        max_length=128,
+        description="Current plaintext password — required when changing your OWN password (self-service).",
     )
 
 
