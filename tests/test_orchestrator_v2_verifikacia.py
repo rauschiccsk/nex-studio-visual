@@ -705,7 +705,9 @@ async def test_red_boot_settles_honest_boot_fail_ahead_of_auditor(db_session, mo
     verdicts = [m for m in _msgs(db_session, version.id) if m.kind == "verdict"]
     assert verdicts[-1].payload["verdict"] == "FAIL"
     assert verdicts[-1].payload.get("engine_override") == "boot_fail"
-    assert verdicts[-1].content.startswith("Appka sa nespustila")
+    # v4.0.47: the finding is the HONEST headline — a stack that never came up ("up exit …") is framed as a
+    # startup failure ("aplikácia sa nespustila …"), no longer a hardcoded "Appka sa nespustila —" prefix.
+    assert "nespustila" in verdicts[-1].content.lower()
     assert state.current_stage != "done"
     assert orchestrator._verifikacia_passed(db_session, version.id) is False
 

@@ -61,6 +61,15 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   preview MSW/fixtures reálnymi API volaniami), NEMENÍŠ layout, panely, počet stĺpcov, paletu ani komponenty.
   Nezávislý Auditor vo Verifikácii porovná dodaný FE oproti schválenému Vizuálu (`git diff`); prerobená
   schválená obrazovka = **FAIL**. Čo Manažér schválil, to sa dodá.
+- **Oprava Verifikácie — OVER V KONTAJNERI, NIE LEN UNIT TESTAMI (v4.0.47).** Keď opravuješ zlyhanie zo skúšky po
+  spustení (Verifikácia FAIL), oprava je „hotová" AŽ keď si ju overil **tak, ako to robí engine**: appku POSTAV a
+  SPUSTI (`docker compose up`) a v BEŽIACOM KONTAJNERI zreprodukuj presne tú kontrolu, ktorá padla — konkrétny dôvod
+  máš v zadaní („Konkrétny dôvod zlyhania (zo skúšky po spustení, overené enginom): …"). **Zelené unit testy na
+  hoste NESTAČIA** — engine overuje SPRÁVANIE v kontajneri, kde sa rozloženie súborov, cesty aj to, čo sa zabalí do
+  image, líšia od hosta (napr. `/api/v1/release-notes` môže na hoste vracať správne dáta, ale v image prázdno alebo
+  verziu v zlom formáte — parser vytiahne z nadpisu `## v0.1.0 — Initial prototype` celý text namiesto `v0.1.0`).
+  Reprodukuj presne to, čo engine skúša (spusti aj appkin `release_smoke_test.sh` proti bežiacemu kontajneru), a kým
+  tá istá kontrola v kontajneri neprejde, oprava NIE JE hotová — inak sa Verifikácia zacyklí (to isté zlyhanie dokola).
 - **Vizuál — PREVIEW HARNESS NIKDY NESMIE UKÁZAŤ AUTH-STENU (v4.0.45).** Živý náhľad beží pod `VITE_PREVIEW`
   BEZ backendu (MSW mockne dáta + `GET /session`), aby Manažér videl **obrazovky appky**, nie login. Preto
   globálny handler neúspešnej autentifikácie (`onUnauthorized` v `createApiClient`) **MUSÍ byť v preview

@@ -28,7 +28,8 @@
 #     it does what the spec promises, nor that it refuses what the spec forbids.
 #
 # ADD YOUR SPEC-DERIVED ASSERTIONS where marked below: one FEATURE assertion per flagship feature, one NEGATIVE
-# assertion per safety property. The seeded floor is the app-starts assertion only.
+# assertion per safety property. The seeded floors are: app-starts, DB-schema, and the Aktualizácie changelog
+# shape — keep all three; add yours on top.
 
 set -euo pipefail
 
@@ -80,6 +81,39 @@ ASSERTIONS_RUN=$((ASSERTIONS_RUN + 1))
 # this step. Default below: Alembic (the common SQLAlchemy case).
 dc_exec sh -c 'alembic upgrade head' \
   || fail "DB schema NOT prepared — the smoke database is empty. Create the schema HERE (your app's migrations, e.g. 'alembic upgrade head') OR add a migrate service to docker-compose.yml. Do not skip this step."
+ASSERTIONS_RUN=$((ASSERTIONS_RUN + 1))
+
+# ── Assertion 3 (MANDATORY floor, v4.0.47): the Aktualizácie changelog serves CLEAN version numbers. ─────
+# The engine's release gate FAILs a full web app whose GET /api/v1/release-notes does not serve the completing
+# version. This mirrors the SHAPE half of that check IN THE CONTAINER — where the packaged files + import paths
+# differ from the host — so a broken changelog is caught HERE, not only by the engine: the endpoint must return
+# a NON-EMPTY JSON list whose every `version` is a CLEAN semver (`vMAJOR.MINOR.PATCH`, nothing more). Catches
+# BOTH a changelog that ships EMPTY in the image (Dockerfile forgot the notes / wrong path) AND a parser that
+# puts the whole H2 heading ("v0.1.0 — Initial prototype") into `version` instead of just "v0.1.0". A 404 →
+# SKIP (a pure API/worker with no Aktualizácie tab); the engine gate stays the authoritative "web app MUST
+# serve the CURRENT version" check. Counts as a floor assertion (neither feature nor negative).
+dc_exec python - <<PY || fail "Aktualizácie: /api/v1/release-notes neslúži čisté čísla verzií (prázdny zoznam, alebo verzia vo formáte nadpisu ako '0.1.0 — Initial prototype' namiesto '0.1.0'). Over v BEŽIACOM kontajneri."
+import json, re, sys, urllib.request, urllib.error
+url = "http://localhost:${SMOKE_BACKEND_PORT:-8000}/api/v1/release-notes"
+try:
+    body = urllib.request.urlopen(url, timeout=5).read().decode()
+except urllib.error.HTTPError as exc:
+    sys.exit(0 if exc.code == 404 else 1)   # no changelog endpoint → not a web app with Aktualizácie → skip
+except Exception as exc:
+    print("err", exc, file=sys.stderr); sys.exit(1)
+try:
+    data = json.loads(body)
+except Exception:
+    sys.exit(1)
+if not isinstance(data, list) or not data:
+    sys.exit(1)                              # empty changelog → the current version is not served
+semver = re.compile(r"v?\d+\.\d+\.\d+")
+for item in data:
+    v = str((item or {}).get("version", ""))
+    if not semver.fullmatch(v):              # rejects "0.1.0 — Initial prototype" (heading text, not a version)
+        print("bad version field:", repr(v), file=sys.stderr); sys.exit(1)
+sys.exit(0)
+PY
 ASSERTIONS_RUN=$((ASSERTIONS_RUN + 1))
 
 # ── FEATURE assertions (ADD ONE PER FLAGSHIP FEATURE). Positive behaviour — the spec's promise holds. ────

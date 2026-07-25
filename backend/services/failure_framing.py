@@ -57,9 +57,34 @@ def humanize_release_failure(raw: str) -> str:
     if "not serving" in low:
         return "webové rozhranie sa nespustilo"
 
+    # docker compose could not bring the stack UP (``up exit N: …`` from _run_release_smoke) — the containers
+    # never started, so no app-level check ran. A STARTUP failure, not an acceptance-script failure (checked
+    # BEFORE the generic ``exit N`` branch, which would otherwise misread the ``up exit`` as a failed check).
+    if low.startswith("up exit"):
+        return "aplikácia sa nespustila — kontajnery sa nepodarilo spustiť"
+
     # The acceptance script ran but some check did not pass (``release_smoke_test.sh exit N: …``).
     if "release_smoke_test" in low or re.search(r"\bexit\s+[1-9]", low):
         return "automatická skúška po spustení neprešla (niektoré kontroly zlyhali)"
 
     # Unrecognised — keep it plain (the raw detail is preserved as technical_detail by the caller).
     return "skúška po spustení zlyhala"
+
+
+def release_failure_headline(raw: str) -> str:
+    """The COMPLETE, capitalised manager-facing headline for a release-smoke FAIL — a full sentence, NOT the
+    after-a-dash clause of :func:`humanize_release_failure`.
+
+    v4.0.47 (honest framing): the engine collapses two very different outcomes into ONE smoke-FAIL signal —
+    a real BOOT failure (the app never came up) AND a behavioural acceptance failure where the app DID boot
+    (the Aktualizácie changelog gate: ``/api/v1/release-notes`` did not serve the current version, or the FE
+    tab is missing). Telling the manager — and the AI-Agent fixer, whose brief carries this finding — "Appka
+    sa nespustila" for the SECOND case is false and sends everyone boot-debugging instead of at the failing
+    check. This distinguishes them; the raw detail stays in ``technical_detail`` for the fixer either way."""
+    r = (raw or "").strip()
+    low = r.lower()
+    if low.startswith("aktualizácie"):
+        # The app BOOTED — only the changelog (Aktualizácie) acceptance check failed. Say so honestly.
+        return "Aplikácia sa spustila, ale kontrola Aktualizácie zlyhala — zoznam noviniek neukazuje aktuálnu verziu."
+    clause = humanize_release_failure(r)
+    return (clause[:1].upper() + clause[1:]) if clause else clause

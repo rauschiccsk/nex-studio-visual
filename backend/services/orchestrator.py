@@ -7314,11 +7314,13 @@ async def _run_verifikacia_round(
     # (_latest_verifikacia_fix_scope) threads it to the AI Agent as the fix brief. Settled via the SHARED
     # _settle_verifikacia_verdict (runtime_floor_red=True → the bounded fix loop / escalation, never a PASS).
     if not smoke_ok:
-        # Plain-language framing: the manager-facing finding is the humanised WHY (it flows into the Decision
-        # Card explanation via _latest_verifikacia_fix_scope), never the raw probe detail. The AI Agent fixer
-        # reproduces the boot failure itself (`docker compose up`, per proposed_fix); the raw probe string is
-        # kept in payload.technical_detail as a breadcrumb + the FE's collapsible "Technický detail".
-        boot_fail_content = f"Appka sa nespustila — {failure_framing.humanize_release_failure(smoke_detail)}"
+        # Plain-language framing (v4.0.47, honest): this branch fires for a real BOOT failure AND for a
+        # behavioural acceptance failure where the app DID boot (the Aktualizácie changelog gate — folded into
+        # smoke_ok at _run_release_smoke). release_failure_headline distinguishes them so the manager-facing
+        # finding (which ALSO flows to the AI-Agent fixer via _latest_verifikacia_fix_scope) never says "Appka
+        # sa nespustila" when the app actually started and only a check failed. The raw probe string stays in
+        # payload.technical_detail (the fixer's real lead, threaded by A) + the FE's collapsible detail.
+        smoke_fail_content = failure_framing.release_failure_headline(smoke_detail)
         boot_verdict_msg = _record_message(
             db,
             version_id=version_id,
@@ -7326,11 +7328,14 @@ async def _run_verifikacia_round(
             author="auditor",  # the release verdict channel (valid v2 token) — consistent with the CR-V2-050 floor
             recipient="manazer",
             kind="verdict",
-            content=boot_fail_content,
+            content=smoke_fail_content,
             payload={
                 "verdict": "FAIL",
-                "findings": [boot_fail_content],
-                "proposed_fix": ("Zisti a oprav dôvod, prečo sa appka nespustí (`docker compose up`), a over znova."),
+                "findings": [smoke_fail_content],
+                "proposed_fix": (
+                    "Spusti appku tak ako engine (`docker compose up`), zreprodukuj zlyhanú skúšku po spustení "
+                    "a oprav jej príčinu, potom over znova."
+                ),
                 "phase": "verifikacia",
                 "engine_override": "boot_fail",
                 "technical_detail": smoke_detail,
