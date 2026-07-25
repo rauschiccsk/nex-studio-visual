@@ -110,9 +110,12 @@ export default function Sidebar() {
   // ─── Footer slot ─────────────────────────────────────────────────────────
   const footer = (
     <>
-      {/* E6 (CR-NS-038): Manažér-only Telegram presence toggle. "Preč" → agent-needs-Manažér
-          events ping Telegram even with the cockpit open. Collapsed sidebar → icon only. */}
-      {user?.role === "ri" && (
+      {/* E6 (CR-NS-038; broadened v4.0.48): presence toggle for EVERY operator, not just the admin.
+          "Preč" → agent-needs-operator events ping Telegram even with the cockpit open. Since the v4.0.35
+          ownership model a Junior (shu) OWNS + operates their own projects, so they need the same presence
+          signal — the backend notify is already per-user (pings the AWAY user's OWN chat_id, board WS is
+          owner-or-ri). Was gated to role==="ri", a leftover from before ownership. Collapsed → icon only. */}
+      {user && (
         <button
           onClick={() => setIsAway(!isAway)}
           title={
