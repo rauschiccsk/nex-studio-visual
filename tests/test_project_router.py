@@ -989,3 +989,39 @@ def test_workspace_safe_to_remove(tmp_path):
     assert _workspace_safe_to_remove(str(tmp_path / "outside"), root) is False  # exists but outside root
     assert _workspace_safe_to_remove(str(root / "missing"), root) is False  # under root but not a dir
     assert _workspace_safe_to_remove("", root) is False  # empty path
+
+
+def test_chown_workspace_invokes_chown(monkeypatch):
+    """v4.0.44: the workspace is chowned to 1000:1000 so the non-root Vizuál sandbox can operate on it."""
+    from backend.api.routes import projects as projects_module
+
+    calls: list[list[str]] = []
+
+    class _Ok:
+        returncode = 0
+        stderr = ""
+
+    def _fake_run(argv, **_kwargs):
+        calls.append(argv)
+        return _Ok()
+
+    monkeypatch.setattr(projects_module.subprocess, "run", _fake_run)
+    projects_module._chown_workspace("/opt/projects/demo")
+
+    assert calls == [["chown", "-R", "1000:1000", "/opt/projects/demo"]]
+
+
+def test_chown_workspace_is_best_effort(monkeypatch):
+    """A chown failure (non-zero exit OR OSError) is logged, never raised — it must not abort a create."""
+    from backend.api.routes import projects as projects_module
+
+    # empty path → no-op, no subprocess call
+    projects_module._chown_workspace(None)
+    projects_module._chown_workspace("")
+
+    def _boom(argv, **_kwargs):
+        raise OSError("chown: not permitted")
+
+    monkeypatch.setattr(projects_module.subprocess, "run", _boom)
+    # must not raise
+    projects_module._chown_workspace("/opt/projects/demo")
