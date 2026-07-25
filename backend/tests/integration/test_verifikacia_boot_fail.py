@@ -6,9 +6,11 @@ fail-closed *"Verdikt Auditora sa nepodarilo spracovať"* / ``blocked`` branch. 
 couldn't be parsed", not the TRUTH — the app didn't boot.
 
 The fix: a boot-FAIL (``smoke_ok is False``) is a DECISIVE product FAIL and short-circuits AHEAD of the
-Auditor turn + its verdict-parse block — it records a clean ``kind=verdict`` FAIL carrying the boot reason
-("Appka sa nespustila: …") and settles the standard FAIL fix-loop, DETERMINISTICALLY, independent of whether
-the Auditor could emit a parseable verdict. These tests pin that against the real v2 DB.
+Auditor turn + its verdict-parse block — it records a clean ``kind=verdict`` FAIL carrying the HONEST reason
+(v4.0.47: ``release_failure_headline`` — a deployment-config miss → "… v nastavení nasadenia …", a real
+boot/up failure → "aplikácia sa nespustila …", never a blanket prefix) and settles the standard FAIL
+fix-loop, DETERMINISTICALLY, independent of whether the Auditor could emit a parseable verdict. These tests
+pin that against the real v2 DB.
 """
 
 from __future__ import annotations
@@ -102,7 +104,10 @@ async def test_boot_fail_settles_honest_fail_verdict_ahead_of_auditor(db_session
     # Honest-by-construction: the manager-facing content + findings are the HUMANISED why (never the raw probe
     # jargon / leaked env-var names); the raw probe string is preserved as a breadcrumb in technical_detail
     # (the FE's collapsible "Technický detail"), and the AI Agent fixer reproduces the boot failure itself.
-    assert verdict.content.startswith("Appka sa nespustila")
+    # v4.0.47 honest framing: an interpolation/config failure (missing POSTGRES_PASSWORD) is a DEPLOYMENT-
+    # config issue, not an app boot failure — say so ("... v nastavení nasadenia ... nie je to chyba v kóde"),
+    # no longer a blanket "Appka sa nespustila" prefix. engine_override stays boot_fail (a red smoke floors it).
+    assert "nasadenia" in verdict.content.lower()
     assert _BOOT_FAIL_DETAIL not in verdict.content
     assert _BOOT_FAIL_DETAIL in verdict.payload["technical_detail"]
     assert verdict.payload["findings"] == [verdict.content]
@@ -148,7 +153,7 @@ async def test_boot_fail_at_loop_max_escalates_not_blocked_on_parse(db_session, 
     verdict = db_session.execute(
         select(PipelineMessage).where(PipelineMessage.version_id == version_id, PipelineMessage.kind == "verdict")
     ).scalar_one()
-    assert verdict.payload["verdict"] == "FAIL" and verdict.content.startswith("Appka sa nespustila")
+    assert verdict.payload["verdict"] == "FAIL" and "nasadenia" in verdict.content.lower()  # v4.0.47 honest framing
     assert settled.status == "blocked" and settled.block_reason == "decision_needed"
     assert settled.block_reason != "agent_error"
 
