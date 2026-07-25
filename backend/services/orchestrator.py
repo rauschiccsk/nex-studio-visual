@@ -515,6 +515,13 @@ def _timeout_for(stage: str) -> int:
     return STAGE_TIMEOUT.get(stage, claude_agent.CLAUDE_INVOKE_TIMEOUT)
 
 
+#: Block reasons that mean the Verifikácia's OWN turn ERRORED (the Auditor's verdict timed out / could not be
+#: parsed / a system error) — as opposed to a FAIL verdict or an agent_question. In these the app may already
+#: be green; the clean recovery is to RE-RUN the check (``overit_bez_opravy``), never route to the fix Agent
+#: (there is nothing to fix). v4.0.49.
+VERIF_STALL_BLOCK_REASONS = ("agent_error", "parse_exhaustion", "system_error")
+
+
 def determine_available_actions(state: PipelineState) -> set[str]:
     """The Manažér actions valid to OFFER right now, derived from (current_stage, status) — WS-C1
     (CR-NS-030); rebuilt to the 4-phase model in CR-V2-009. The single backend source of truth for
@@ -9665,19 +9672,30 @@ async def apply_action(
         raise OrchestratorError("Over znova je platné len keď je overenie zastarané (kód sa pohol za overený commit).")
 
     if action == "overit_bez_opravy":
-        # v4.0.10 (Director 2026-07-20): the Manažér's clean exit from a Verifikácia fix-loop when the root
-        # cause was fixed OUTSIDE the project (engine / framework / infra) — nothing to change in the project,
-        # so the commit-demanding fix task can only churn / pressure a spurious §15 patch. Skip it: re-run the
-        # Verifikácia GATE directly (release-acceptance + the INDEPENDENT Auditor against HEAD). PASS → sign-off
-        # (``schvalit`` → Hotovo); FAIL → the normal targeted fix loop resumes. Reuses the ``overit_znovu``
-        # sha_drift mechanics MINUS the settled/drift guard; gated to a real post-Verifikácia fix-loop (a
-        # fix-scope on record) so it can never re-verify a build that never reached Verifikácia.
-        if not (
+        # Re-run the Verifikácia GATE directly (release-acceptance + the INDEPENDENT Auditor against HEAD), NO
+        # fixer. Two situations reach this, both "nothing to fix — just re-run the check":
+        #   (a) v4.0.10: a Verifikácia fix-loop whose root cause was fixed OUTSIDE the project (engine/infra) —
+        #       the commit-demanding fix task can only churn / pressure a spurious §15 patch. Skip it.
+        #   (b) v4.0.49: the Verifikácia's OWN turn ERRORED (the Auditor verdict timed out / could not be
+        #       parsed — block_reason agent_error/parse_exhaustion/system_error). The app may already be GREEN
+        #       (the smoke passed); the only other recovery was "Uprav" → the FIX Agent (the WRONG tool, there
+        #       is nothing to fix). This is the clean "just re-run the failed check" a non-expert needs.
+        # PASS → sign-off (``schvalit`` → Hotovo); FAIL → the normal targeted fix loop resumes.
+        _fix_loop = (
             state.current_stage == "programovanie"
             and state.status in ("blocked", "paused")
             and _latest_verifikacia_fix_scope(db, version_id) is not None
-        ):
-            raise OrchestratorError("Znova overiť bez opravy je platné len v opravnej slučke po Verifikácii.")
+        )
+        _verif_stall = (
+            state.current_stage == "verifikacia"
+            and state.status == "blocked"
+            and state.block_reason in VERIF_STALL_BLOCK_REASONS
+        )
+        if not (_fix_loop or _verif_stall):
+            raise OrchestratorError(
+                "Znova spustiť overenie je platné len v opravnej slučke po Verifikácii, "
+                "alebo keď zlyhal samotný overovací beh vo Verifikácii."
+            )
         state.current_stage = "verifikacia"
         state.is_regate = True
         state.iteration += 1

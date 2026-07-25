@@ -32,9 +32,21 @@ export default function ReverifyNoFixBar({ board, versionId, onBoard }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<HumanError | null>(null);
 
-  // Honest-by-construction gate: the bar exists ONLY when the backend offers `overit_bez_opravy` right now
-  // (a Verifikácia fix-loop the Manažér can exit by re-running the gate without a project change).
+  // Honest-by-construction gate: the bar exists ONLY when the backend offers `overit_bez_opravy` right now.
   if (!board?.available_actions?.includes("overit_bez_opravy")) return null;
+
+  // Two situations reach this action (v4.0.49); show the RIGHT plain-language label for each so the manager
+  // is never told "chyba bola mimo projektu" when the real reason is a stalled check.
+  //   • verifikacia block  → the Auditor's OWN turn stalled (timed out); the app already passed the smoke.
+  //   • programovanie loop → the root cause was fixed OUTSIDE the project; skip the fix, re-run the gate.
+  const isVerifStall = board.state?.current_stage === "verifikacia";
+  const heading = isVerifStall
+    ? "Overenie sa zaseklo — spusti ho znova"
+    : "Chyba bola mimo projektu? Znova over bez opravy";
+  const explanation = isVerifStall
+    ? "Predchádzajúci overovací beh sa zasekol (časový limit) — nie je to chyba aplikácie, tá prešla skúškou po spustení. „Znova spustiť overenie“ zopakuje koncové overenie (spustí aplikáciu a nezávislý Audítor ju posúdi). Ak prejde, verzia je pripravená na schválenie (Hotovo)."
+    : "Ak sa blokujúca chyba vyriešila mimo tohto projektu (v samotnom NEX Studiu), v projekte niet čo opravovať. „Znova overiť“ preskočí opravnú úlohu a rovno zopakuje koncové overenie (spustí aplikáciu a nezávislý Audítor ju posúdi). Ak prejde, verzia je pripravená na schválenie (Hotovo).";
+  const buttonLabel = isVerifStall ? "Znova spustiť overenie" : "Znova overiť bez opravy";
 
   async function submit() {
     setError(null);
@@ -53,16 +65,12 @@ export default function ReverifyNoFixBar({ board, versionId, onBoard }: Props) {
     <div className="border-t border-[var(--color-border-default)] bg-[var(--color-surface)]">
       <div className="flex items-center gap-2 border-l-4 border-l-[var(--color-status-info)] bg-[var(--color-state-info-bg)] px-4 py-2.5 text-sm font-semibold text-[var(--color-state-info-fg)]">
         <ShieldCheck className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
-        <span>Chyba bola mimo projektu? Znova over bez opravy</span>
+        <span>{heading}</span>
       </div>
 
       <div className="flex flex-col gap-2 px-4 py-3">
         <div className="flex items-center justify-between gap-3">
-          <p className="text-xs text-[var(--color-text-muted)]">
-            Ak sa blokujúca chyba vyriešila mimo tohto projektu (v samotnom NEX Studiu), v projekte niet čo
-            opravovať. „Znova overiť“ preskočí opravnú úlohu a rovno zopakuje koncové overenie (spustí aplikáciu
-            a nezávislý Audítor ju posúdi). Ak prejde, verzia je pripravená na schválenie (Hotovo).
-          </p>
+          <p className="text-xs text-[var(--color-text-muted)]">{explanation}</p>
           <button
             type="button"
             onClick={submit}
@@ -70,7 +78,7 @@ export default function ReverifyNoFixBar({ board, versionId, onBoard }: Props) {
             className="flex shrink-0 items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <RotateCw className={`h-3.5 w-3.5 ${submitting ? "animate-spin" : ""}`} aria-hidden="true" />
-            {submitting ? "Overujem…" : "Znova overiť bez opravy"}
+            {submitting ? "Overujem…" : buttonLabel}
           </button>
         </div>
         <ErrorNote error={error} />

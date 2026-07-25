@@ -270,13 +270,22 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
     # commit) or pressures the AI Agent into a spurious §15 patch; this gives the Manažér a clean "re-run the
     # Verifikácia gate" exit. Honest-by-construction: appended ONLY when actually in that loop, so the FE bar
     # is gated by available_actions like every other verb.
-    if (
+    _in_fix_loop = (
         state is not None
         and state.current_stage == "programovanie"
         and state.status in ("blocked", "paused")
         and orchestrator._latest_verifikacia_fix_scope(db, version_id) is not None
-        and "overit_bez_opravy" not in available_actions
-    ):
+    )
+    # v4.0.49: ALSO offer it when the Verifikácia's OWN turn ERRORED (the Auditor verdict timed out / could
+    # not be parsed). The app may already be GREEN (the smoke passed); the only other recovery was "Uprav" →
+    # the FIX Agent (the wrong tool — nothing to fix). This is the clean "just re-run the failed check" exit.
+    _verif_stall = (
+        state is not None
+        and state.current_stage == "verifikacia"
+        and state.status == "blocked"
+        and state.block_reason in orchestrator.VERIF_STALL_BLOCK_REASONS
+    )
+    if (_in_fix_loop or _verif_stall) and "overit_bez_opravy" not in available_actions:
         available_actions = sorted([*available_actions, "overit_bez_opravy"])
     return PipelineBoardRead(
         state=PipelineStateRead.model_validate(state) if state is not None else None,

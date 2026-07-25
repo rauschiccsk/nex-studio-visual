@@ -592,3 +592,37 @@ def test_board_route_v2_before_start(db_session, fake_claude):
     assert board.state is None
     assert board.available_actions == []
     assert board.agent_sessions == []
+
+
+# ── overit_bez_opravy — clean re-verify (fix-loop exit + Auditor-stall recovery, v4.0.49) ──────────
+
+
+async def test_overit_bez_opravy_reruns_gate_after_verifikacia_stall(db_session, fake_claude):
+    """v4.0.49: when the Verifikácia's OWN turn ERRORED (the Auditor verdict timed out → block_reason
+    agent_error), "Znova spustiť overenie" (overit_bez_opravy) re-runs the gate DIRECTLY — clears the error
+    block + re-dispatches the verification turn, NEVER routes to the fix Agent (there is nothing to fix)."""
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    st = _state(db_session, version.id)
+    st.current_stage = "verifikacia"
+    st.status = "blocked"
+    st.block_reason = "agent_error"
+    db_session.flush()
+
+    result = await orchestrator.apply_action(db_session, version_id=version.id, action="overit_bez_opravy")
+    assert result.current_stage == "verifikacia"
+    assert result.block_reason is None  # the error block is cleared
+    assert result.is_regate is True
+    assert result.status == "agent_working"  # re-dispatched to the verification turn, not the fix Agent
+
+
+async def test_overit_bez_opravy_rejected_at_settled_verifikacia(db_session, fake_claude):
+    """Guard: NOT valid at a normal SETTLED Verifikácia (no fix-loop, no error stall) — a footgun otherwise."""
+    version, _ = _make_version(db_session)
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start")
+    st = _state(db_session, version.id)
+    st.current_stage = "verifikacia"
+    st.status = "awaiting_manazer"
+    db_session.flush()
+    with pytest.raises(orchestrator.OrchestratorError):
+        await orchestrator.apply_action(db_session, version_id=version.id, action="overit_bez_opravy")
