@@ -581,3 +581,16 @@ def test_commit_vizual_changes_squashes_the_session_into_one_commit(tmp_path):
 def test_commit_vizual_changes_noop_without_checkout(tmp_path):
     # No .git → best-effort no-op, never raises.
     orchestrator._commit_vizual_changes(tmp_path)
+
+
+def test_override_config_prebundles_msw():
+    """v4.0.45: the injected override forces MSW into optimizeDeps so the live-preview mock backend is
+    ready on the FIRST load (no lazy re-optimize + reload race that bounces the preview to a login wall)."""
+    cfg = vizual_sandbox._render_override_config()
+    assert "optimizeDeps" in cfg
+    assert '"msw"' in cfg
+    assert '"msw/browser"' in cfg
+    # still extends the real project config (not a stripped shell) + keeps the HMR-through-proxy settings.
+    assert "mergeConfig" in cfg
+    assert "server.hmr" not in cfg  # sanity: hmr is nested under server, not a stray key
+    assert "hmr:" in cfg

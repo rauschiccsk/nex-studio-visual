@@ -61,6 +61,13 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   preview MSW/fixtures reálnymi API volaniami), NEMENÍŠ layout, panely, počet stĺpcov, paletu ani komponenty.
   Nezávislý Auditor vo Verifikácii porovná dodaný FE oproti schválenému Vizuálu (`git diff`); prerobená
   schválená obrazovka = **FAIL**. Čo Manažér schválil, to sa dodá.
+- **Vizuál — PREVIEW HARNESS NIKDY NESMIE UKÁZAŤ AUTH-STENU (v4.0.45).** Živý náhľad beží pod `VITE_PREVIEW`
+  BEZ backendu (MSW mockne dáta + `GET /session`), aby Manažér videl **obrazovky appky**, nie login. Preto
+  globálny handler neúspešnej autentifikácie (`onUnauthorized` v `createApiClient`) **MUSÍ byť v preview
+  no-op** — `if (import.meta.env.VITE_PREVIEW) return;` PRED akýmkoľvek `window.location.assign('/login')`
+  (resp. `/unauthorized` pri token-launch). Inak jediná uniknutá požiadavka tvrdo prehodí náhľad na
+  prihlasovaciu stenu. (`<ProtectedRoute>` v preview už renderuje priamo — drž rovnaký princíp aj v api
+  klientovi.) Predbundlovanie MSW rieši sandbox centrálne (`optimizeDeps`), to konfigurovať nemusíš.
 - **NEX Manager token-launch (`auth_mode=token`) — POVINNÝ BE kontrakt (v4.0.19).** Keď je projekt token-launch
   (vzor NEX Inbox), appka sa NEspúšťa vlastným loginom — NEX Manager ju otvorí presmerovaním na
   **`GET /api/v1/launch?lt=<JWT>`**. MUSÍŠ tento landing endpoint implementovať; **nestačí len validovať Bearer

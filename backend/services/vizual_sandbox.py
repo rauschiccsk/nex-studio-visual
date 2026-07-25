@@ -192,6 +192,16 @@ def _render_override_config() -> str:
     same file serves any slug. ``await base`` transparently handles both object- and function-form project
     configs. Written next to the project config at ``/app`` so its ``./vite.config`` import + node_modules +
     ``__dirname`` alias all resolve.
+
+    It ALSO forces ``optimizeDeps.include: ["msw", "msw/browser"]`` (v4.0.45 — the live-preview cold-start
+    fix). The preview harness every vizual app ships starts MSW (a Service-Worker mock backend) BEFORE first
+    render so the app runs with fixtures and no real backend. But Vite pre-bundles deps lazily: it discovers
+    ``msw`` only when the code first imports it, then re-optimizes and RELOADS the page — and in that window
+    the app's first request escapes the not-yet-active mock worker, hits the absent backend, and a stray
+    failure bounces the preview to a login/unauthorized wall (the manager sees a login form instead of the
+    app). Pre-including msw makes Vite bundle it at server STARTUP, so the mock worker is ready on the very
+    first load and no request ever leaks. Centralised here so EVERY app's preview is robust regardless of
+    what the AI generated (belt: the charter also has the app no-op ``onUnauthorized`` under ``VITE_PREVIEW``).
     """
     return (
         'import { defineConfig, mergeConfig } from "vite";\n'
@@ -214,6 +224,7 @@ def _render_override_config() -> str:
         "      allowedHosts: [publicHost],\n"
         "      hmr: { host: publicHost, clientPort: hmrClientPort, protocol: hmrProtocol },\n"
         "    },\n"
+        '    optimizeDeps: { include: ["msw", "msw/browser"] },\n'
         "  });\n"
         "});\n"
     )
