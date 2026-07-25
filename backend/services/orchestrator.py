@@ -7747,7 +7747,17 @@ def _latest_verifikacia_fix_scope(db: Session, version_id: uuid.UUID) -> Optiona
     critique = _latest_fix_critique(db, version_id)
     corrected = str((critique or {}).get("corrected_scope") or "").strip()
     proposed_fix = corrected or latest.payload.get("proposed_fix")
+    # v4.0.46: thread the smoke run's ``technical_detail`` — the CONCRETE, engine-verified reason the
+    # boot/acceptance check failed (e.g. "Aktualizácie chýba: /api/v1/release-notes neobsahuje verziu
+    # v0.1.0 (vrátené: žiadne)") — into the fix brief AS THE LEAD. Without it the AI Agent saw only the
+    # plain findings ("Appka sa nespustila") + a generic proposed_fix, could not locate the real cause,
+    # "fixed" an unrelated unit test, and the SAME smoke failed again → an endless fix↔re-verify loop. It
+    # flows from here into the fix_it one-click brief + the materialized fix task, so a non-expert's single
+    # click now hands the AI Agent the actual failure. The loop-breaker.
+    technical_detail = str(latest.payload.get("technical_detail") or "").strip()
     parts: list[str] = []
+    if technical_detail:
+        parts.append(f"Konkrétny dôvod zlyhania (zo skúšky po spustení, overené enginom): {technical_detail}")
     if proposed_fix:
         parts.append(str(proposed_fix).strip())
     if findings:

@@ -387,6 +387,36 @@ async def test_fail_loops_targeted_fix_and_gates_new_version(db_session, monkeyp
     assert orchestrator._verifikacia_passed(db_session, version.id) is False
 
 
+def test_fix_scope_threads_technical_detail(db_session):
+    """v4.0.46 (loop-breaker): the engine-verified smoke reason (``payload.technical_detail``) is threaded
+    into the AI-Agent fix brief AS THE LEAD. Without it the Agent saw only the plain finding ("Appka sa
+    nespustila") + a generic proposed_fix, could not locate the cause, "fixed" an unrelated unit test, and
+    the SAME smoke failed again → an endless fix↔re-verify loop (the nex-websites release-notes case)."""
+    version, _ = _make_version(db_session, project_dial="plna")
+    detail = "Aktualizácie chýba: /api/v1/release-notes neobsahuje verziu v0.1.0 (vrátené: žiadne)"
+    orchestrator._record_message(
+        db_session,
+        version_id=version.id,
+        stage="verifikacia",
+        author="auditor",
+        recipient="manazer",
+        kind="verdict",
+        content="Appka sa nespustila — skúška po spustení zlyhala",
+        payload={
+            "verdict": "FAIL",
+            "findings": ["Appka sa nespustila — skúška po spustení zlyhala"],
+            "proposed_fix": "Zisti a oprav dôvod, prečo sa appka nespustí (docker compose up), a over znova.",
+            "technical_detail": detail,
+        },
+    )
+    db_session.flush()
+    scope = orchestrator._latest_verifikacia_fix_scope(db_session, version.id)
+    assert scope is not None
+    assert detail in scope  # the CONCRETE reason reaches the Agent (was dropped before v4.0.46)
+    assert "Konkrétny dôvod zlyhania" in scope  # surfaced as the lead, not buried
+    assert "Verifikácia FAIL" in scope  # heading preserved
+
+
 async def test_fail_then_fix_reaches_hotovo_fast_fix(db_session, monkeypatch):
     # THE FULL LOOP on the fast_fix zero-approval lane: FAIL → AI Agent fixes (Programovanie re-run, stubbed)
     # → Auditor re-verifies PASS → reaches Hotovo, auto-chained (a new_version GATES each transition for the
