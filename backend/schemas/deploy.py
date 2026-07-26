@@ -235,4 +235,13 @@ class DeployMatrix(BaseModel):
     #: WHY Nasadiť is closed when ``verified_versions`` is empty — cause + implicated version + whether this
     #: user may re-verify it (v4.0.54). Defaulted so an older client / a fixture-built matrix stays valid.
     deployability: DeployBlock = Field(default_factory=DeployBlock)
+    can_accept: bool = Field(
+        default=False,
+        description=(
+            "True iff THIS user may record a UAT acceptance (``require_ri_role``). Acceptance is what OPENS "
+            "PROD for a (version, customer) — the ri-only Director gate of v4.0.35/D3, deliberately narrower "
+            "than the owner-or-ri UAT deploy. Surfaced so the button can be disabled WITH a reason instead of "
+            "looking live and then failing with 403."
+        ),
+    )
     rows: list[DeployMatrixRow] = Field(default_factory=list)

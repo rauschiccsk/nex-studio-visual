@@ -118,6 +118,12 @@ export interface DeployMatrix {
   verified_versions: string[];
   /** Why Nasadiť is closed when `verified_versions` is empty (v4.0.54). */
   deployability: DeployBlock;
+  /**
+   * Whether this user may record a UAT acceptance at all (v4.0.55). Acceptance OPENS PROD, so it is
+   * ri-only (D3) — deliberately narrower than the owner-or-ri UAT deploy. Backend-computed; used to
+   * disable "Akceptovať" WITH a reason instead of letting it look live and then 403.
+   */
+  can_accept: boolean;
   rows: DeployMatrixRow[];
 }
 

@@ -3100,6 +3100,12 @@ export interface components {
              * @default password
              */
             auth_mode: string;
+            /**
+             * Can Accept
+             * @description True iff THIS user may record a UAT acceptance (``require_ri_role``). Acceptance is what OPENS PROD for a (version, customer) — the ri-only Director gate of v4.0.35/D3, deliberately narrower than the owner-or-ri UAT deploy. Surfaced so the button can be disabled WITH a reason instead of looking live and then failing with 403.
+             * @default false
+             */
+            can_accept: boolean;
             deployability?: components["schemas"]["DeployBlock"];
             /** Project Slug */
             project_slug: string;

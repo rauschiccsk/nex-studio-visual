@@ -405,6 +405,7 @@ def build_matrix(db: Session, project: Project, user: Optional[object] = None) -
       * ``deployability`` — when that list is EMPTY, WHY it is empty, which version is implicated and
         whether this user may re-verify it (:func:`deployability`), so the screen explains a closed
         Nasadiť instead of just greying it out.
+      * ``can_accept`` — whether this user may record a UAT acceptance at all (the ri-only PROD gate).
       * ``rows`` — per customer: the currently-deployed UAT and PROD versions plus
         the versions accepted-for-PROD (so the PROD tab can disable Nasadiť until
         that (version, customer) is accepted — the never-bypassed gate).
@@ -448,6 +449,11 @@ def build_matrix(db: Session, project: Project, user: Optional[object] = None) -
         "project_slug": project.slug,
         "auth_mode": project.auth_mode,
         "verified_versions": verified,
+        # v4.0.55: mirrors the accept route's ``require_ri_role``. Acceptance OPENS PROD (§3.5), so it is
+        # deliberately ri-only (v4.0.35/D3 keeps PROD behind the Director gate even though a Junior owner
+        # may deploy their own UAT). Surfaced so the button is disabled with a reason rather than looking
+        # live and 403-ing — an owner-Junior saw it enabled on their own project.
+        "can_accept": getattr(user, "role", None) == "ri",
         # v4.0.54: WHY the Nasadiť button is closed, so the screen never greys out in silence. Computed from
         # the SAME verified list (no second recompute) — see :func:`deployability`.
         "deployability": deployability(db, project, verified_versions=verified, user=user),

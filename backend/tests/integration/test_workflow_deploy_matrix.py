@@ -913,3 +913,26 @@ class TestDeployabilityCause:
         assert body["deployability"]["version_number"] == "v0.1.0"
         assert body["deployability"]["version_id"] is not None
         assert body["deployability"]["can_reverify"] is True
+
+    def test_can_accept_mirrors_the_ri_only_prod_gate(self, db_session, monkeypatch, fake_repo_head):
+        """Acceptance OPENS PROD (§3.5), so it stays ri-only (v4.0.35/D3) even for a project's owner.
+
+        Deliberately NARROWER than the UAT deploy, which IS owner-or-ri. The flag exists so the button can
+        be disabled WITH a reason: an owner-Junior saw "Akceptovať" enabled on their own project and got a
+        403 on click. Widening the gate here would quietly widen the PROD gate — the opposite of D3.
+        """
+        owner = _seed_user(db_session, role="shu", prefix="accept_owner")
+        manager = _seed_user(db_session, role="ri", prefix="accept_ri")
+        medior = _seed_user(db_session, role="ha", prefix="accept_ha")
+        project = _seed_project(db_session, creator=owner)
+        _seed_verified_version(db_session, project, "v0.1.0")
+        _seed_customer(db_session, project, "andros")
+
+        def _can_accept(user) -> bool:
+            return deploy_service.build_matrix(db_session, project, user)["can_accept"]
+
+        assert _can_accept(manager) is True
+        assert _can_accept(owner) is False  # owner of the project, but acceptance is the PROD gate
+        assert _can_accept(medior) is False
+        # An unauthenticated/fixture-built matrix must never imply permission.
+        assert deploy_service.build_matrix(db_session, project)["can_accept"] is False

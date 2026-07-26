@@ -43,20 +43,29 @@ export interface DeployMatrixPageProps {
   environment: DeployEnvironment;
 }
 
-const LABELS: Record<DeployEnvironment, { title: string; intro: string; column: string }> = {
-  uat: {
-    title: "UAT",
-    intro:
-      "Per-zákazník testovacie nasadenie. Nasaď overenú verziu, otestuj ju na UAT URL a klikni Akceptovať — tým sa otvorí PROD pre danú verziu.",
-    column: "Verzia na UAT",
-  },
-  prod: {
-    title: "PROD",
-    intro:
-      "Per-zákazník produkčné nasadenie. PROD je možné nasadiť až po akceptácii UAT danej verzie — bez akceptácie je Nasadiť zablokované.",
-    column: "Verzia v PROD",
-  },
-};
+// ``introPaused`` (v4.0.55): while nothing is deployable, the normal intro instructs a sequence the manager
+// CANNOT start — and it sat directly above the notice explaining why. Telling someone to do the impossible
+// is the same defect as the silent grey button, one line higher up.
+const LABELS: Record<DeployEnvironment, { title: string; intro: string; introPaused: string; column: string }> =
+  {
+    uat: {
+      title: "UAT",
+      intro:
+        "Per-zákazník testovacie nasadenie. Nasaď overenú verziu, otestuj ju na UAT URL a klikni Akceptovať — tým sa otvorí PROD pre danú verziu.",
+      introPaused: "Per-zákazník testovacie nasadenie. Práve je pozastavené — dôvod aj ďalší krok sú nižšie.",
+      column: "Verzia na UAT",
+    },
+    prod: {
+      title: "PROD",
+      intro:
+        "Per-zákazník produkčné nasadenie. PROD je možné nasadiť až po akceptácii UAT danej verzie — bez akceptácie je Nasadiť zablokované.",
+      introPaused: "Per-zákazník produkčné nasadenie. Práve je pozastavené — dôvod aj ďalší krok sú nižšie.",
+      column: "Verzia v PROD",
+    },
+  };
+
+// The one reason string for a role-blocked Akceptovať — used by the button tooltip and its visible note.
+const ACCEPT_ROLE_REASON = "Akceptáciu (otvorenie PROD) môže vykonať iba Manažér.";
 
 // v4.0.54: while a re-verification runs, the version leaves the finished state — so the matrix reads exactly
 // like the blocked state for the WHOLE run (minutes). Poll quietly so the screen unblocks itself instead of
@@ -321,6 +330,12 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
 
   const verified = matrix?.verified_versions ?? [];
   const rows = matrix?.rows ?? [];
+  // v4.0.55: acceptance is the ri-only PROD gate (D3) — an owner-Junior saw "Akceptovať" enabled on their
+  // OWN project and got a 403 on click. Disabled-with-a-reason, never a live-looking dead button.
+  const canAccept = matrix?.can_accept ?? false;
+  // The intro tells the manager to deploy → test → accept. While deployment is paused that is an instruction
+  // they cannot follow, sitting directly above a notice saying so — so the paused state gets its own line.
+  const deployPaused = (matrix?.deployability?.cause ?? "ok") !== "ok";
   const currentCol = environment === "uat" ? (r: DeployMatrixRow) => r.uat_version : (r: DeployMatrixRow) => r.prod_version;
 
   return (
@@ -336,7 +351,8 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
         </button>
       </div>
       <p className="mb-4 text-xs text-[var(--color-text-muted)]">
-        Projekt <span className="text-[var(--color-text-secondary)]">{selectedProject.name}</span>. {labels.intro}
+        Projekt <span className="text-[var(--color-text-secondary)]">{selectedProject.name}</span>.{" "}
+        {deployPaused ? labels.introPaused : labels.intro}
       </p>
 
       {/* v4.0.54: WHY Nasadiť is closed + the way out, on BOTH tabs. Renders nothing when a version is
@@ -474,16 +490,23 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                         {environment === "uat" && (
                           <button
                             onClick={() => handleAccept(row)}
-                            disabled={isBusy || !row.uat_version}
+                            disabled={isBusy || !row.uat_version || !canAccept}
                             title={
-                              row.uat_version
-                                ? `Akceptovať UAT verziu ${fmtVer(row.uat_version)}`
-                                : "Najprv nasaď verziu na UAT"
+                              !canAccept
+                                ? ACCEPT_ROLE_REASON
+                                : row.uat_version
+                                  ? `Akceptovať UAT verziu ${fmtVer(row.uat_version)}`
+                                  : "Najprv nasaď verziu na UAT"
                             }
                             className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] disabled:opacity-40"
                           >
                             <CheckCircle2 className="h-3.5 w-3.5" /> Akceptovať
                           </button>
+                        )}
+                        {environment === "uat" && !canAccept && (
+                          <span className="text-[11px] text-[var(--color-text-muted)]">
+                            akceptáciu robí Manažér
+                          </span>
                         )}
                         <button
                           onClick={() => handleDeploy(row)}
