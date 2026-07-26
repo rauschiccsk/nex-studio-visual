@@ -59,6 +59,15 @@ from backend.db.models.deploy import DeployEvent
 from backend.db.models.pipeline import PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
+from backend.schemas.deploy import (
+    DEPLOY_CAUSE_AWAITING_SIGNOFF,
+    DEPLOY_CAUSE_DRIFT,
+    DEPLOY_CAUSE_NONE_FINISHED,
+    DEPLOY_CAUSE_OK,
+    DEPLOY_CAUSE_REVERIFY_RUNNING,
+    DEPLOY_CAUSE_STALE_SIGNOFF,
+    DEPLOY_CAUSE_VERSION_BUSY,
+)
 from backend.services import uat_provisioner
 
 # The terminal pipeline stage = "Hotovo" = a version is VERIFIED (design §3.1,
@@ -245,6 +254,124 @@ def list_verified_versions(db: Session, project_id: UUID) -> list[str]:
     return sorted(verified, key=_semver_sort_key, reverse=True)
 
 
+# ---------------------------------------------------------------------------
+# Why Nasadiť is closed (v4.0.54) — the cause the deploy screen renders
+# ---------------------------------------------------------------------------
+
+#: ``version_verified`` provenances that mean "was verified, the code then moved on" (both anchor shapes).
+DRIFT_PROVENANCES = ("hotovo_drift", "sha_drift")
+
+#: Pipeline statuses ``apply_action('overit_znovu')`` accepts — it fail-closes on everything else. The
+#: button may be offered ONLY for these, or it would 400 the moment a manager trusted it.
+REVERIFIABLE_STATUSES = ("done", "awaiting_manazer")
+
+#: The pipeline status that means a turn is in flight on this version.
+AGENT_WORKING_STATUS = "agent_working"
+
+
+def deployability(
+    db: Session,
+    project: Project,
+    *,
+    verified_versions: list[str],
+    user: Optional[object] = None,
+) -> dict:
+    """WHY the Nasadiť button is closed, in a form the deploy screen can render (v4.0.54).
+
+    ``list_verified_versions`` recomputes "verified" against live git, so a version silently drops out of the
+    deployable list when the repo moves past the commit it was checked at. The matrix used to carry only the
+    (now empty) list, so the UAT/PROD screen greyed Nasadiť out with no cause, no affected version and no way
+    back — the manager had to leave the cockpit (incident 2026-07-26, nex-websites). The backend ALREADY knows
+    the cause: :func:`orchestrator.version_verified` returns ``(is_verified, provenance)`` and the provenance
+    was thrown away. This surfaces it, plus the identity of the affected version and whether THIS user may
+    trigger the recovery.
+
+    Returns ``cause`` (one of the ``DEPLOY_CAUSE_*`` constants in :mod:`backend.schemas.deploy`), the
+    affected ``version_number`` / ``version_id`` (``None`` when no version is implicated), and
+    ``can_reverify``.
+
+    Both halves of ``version_verified`` matter. A version that IS verified but has not reached the deployable
+    ``done`` stage — the ordinary state right after a Verifikácia PASS, which settles at ``awaiting_manazer``
+    — is one approval click away, NOT stale; calling it stale would be a confidently false claim on the most
+    common not-deployable state. Only a version that is NOT verified and WAS signed off once is stale.
+
+    ``can_reverify`` is computed HERE, not in the frontend: the matrix is readable by any user with project
+    access, but ``overit_znovu`` goes through ``authz.assert_version_access(..., ri_only=True)``
+    (``api/routes/pipeline.py``), and the response carries no project owner for the frontend to check. It is
+    granted ONLY for :data:`DEPLOY_CAUSE_DRIFT` — a drifted version in a state the handler actually accepts
+    (:data:`REVERIFIABLE_STATUSES`). Every other shape gets no button: one that 400s or 403s would just move
+    the dead end one click further.
+
+    The candidate scan is newest-version-first and reports the FIRST version with a story to tell, so the
+    explanation is about the version the manager would actually deploy. Versions that never got anywhere are
+    skipped rather than reported as a cause. It is NOT capped: a cap would let a run of abandoned newer
+    versions hide an older, one-click-recoverable one behind a false "nothing was ever finished", and with
+    ``head`` supplied every probe is a DB read (no subprocess). The whole path runs only when nothing is
+    deployable.
+    """
+    from backend.core.authz import is_owner_or_privileged
+    from backend.services import claude_agent
+    from backend.services.orchestrator import (
+        _repo_head,
+        ever_signed_off,
+        reverify_in_flight,
+        version_verified,
+    )
+
+    none_implicated = {"version_number": None, "version_id": None, "can_reverify": False}
+    if verified_versions:
+        return {"cause": DEPLOY_CAUSE_OK, **none_implicated}
+
+    rows = db.execute(
+        select(
+            Version.id,
+            Version.version_number,
+            PipelineState.current_stage,
+            PipelineState.status,
+            PipelineState.is_regate,
+        )
+        .join(PipelineState, PipelineState.version_id == Version.id)
+        .where(Version.project_id == project.id)
+    ).all()
+    if not rows:
+        return {"cause": DEPLOY_CAUSE_NONE_FINISHED, **none_implicated}
+
+    candidates = sorted(rows, key=lambda row: _semver_sort_key(row[1]), reverse=True)
+    head = _repo_head(claude_agent.PROJECTS_ROOT / project.slug)  # read HEAD ONCE per project (batch)
+
+    for version_id, version_number, stage, status, is_regate in candidates:
+        is_verified, provenance = version_verified(db, version_id, head=head)
+        if provenance in DRIFT_PROVENANCES:
+            if status in REVERIFIABLE_STATUSES:
+                cause = DEPLOY_CAUSE_DRIFT
+            elif status == AGENT_WORKING_STATUS and reverify_in_flight(
+                db, version_id, current_stage=stage, is_regate=bool(is_regate)
+            ):
+                cause = DEPLOY_CAUSE_REVERIFY_RUNNING
+            else:
+                cause = DEPLOY_CAUSE_VERSION_BUSY
+        elif is_verified:
+            # Verified, yet absent from the deployable list ⇒ it has not reached the ``done`` stage. The
+            # normal post-PASS state: it needs the manager's Hotovo approval, nothing more.
+            cause = DEPLOY_CAUSE_AWAITING_SIGNOFF
+        elif ever_signed_off(db, version_id):
+            cause = DEPLOY_CAUSE_STALE_SIGNOFF
+        else:
+            continue  # never finished — no story to tell about this one, try the next older version
+        return {
+            "cause": cause,
+            "version_number": version_number,
+            "version_id": version_id,
+            "can_reverify": (
+                cause == DEPLOY_CAUSE_DRIFT
+                and user is not None
+                and is_owner_or_privileged(user, project.created_by, ri_only=True)
+            ),
+        }
+
+    return {"cause": DEPLOY_CAUSE_NONE_FINISHED, **none_implicated}
+
+
 def accepted_versions(db: Session, customer_id: UUID) -> list[str]:
     """The version_numbers a customer has a recorded UAT acceptance for (§3.5).
 
@@ -270,11 +397,14 @@ def accepted_versions(db: Session, customer_id: UUID) -> list[str]:
     return result
 
 
-def build_matrix(db: Session, project: Project) -> dict:
+def build_matrix(db: Session, project: Project, user: Optional[object] = None) -> dict:
     """Assemble the version × customer matrix for a project's UAT/PROD tabs (§3.3).
 
     One read returns everything both tabs render:
       * ``verified_versions`` — the deployable version_numbers (Nasadiť dropdown).
+      * ``deployability`` — when that list is EMPTY, WHY it is empty, which version is implicated and
+        whether this user may re-verify it (:func:`deployability`), so the screen explains a closed
+        Nasadiť instead of just greying it out.
       * ``rows`` — per customer: the currently-deployed UAT and PROD versions plus
         the versions accepted-for-PROD (so the PROD tab can disable Nasadiť until
         that (version, customer) is accepted — the never-bypassed gate).
@@ -313,10 +443,14 @@ def build_matrix(db: Session, project: Project) -> dict:
             }
         )
 
+    verified = list_verified_versions(db, project.id)
     return {
         "project_slug": project.slug,
         "auth_mode": project.auth_mode,
-        "verified_versions": list_verified_versions(db, project.id),
+        "verified_versions": verified,
+        # v4.0.54: WHY the Nasadiť button is closed, so the screen never greys out in silence. Computed from
+        # the SAME verified list (no second recompute) — see :func:`deployability`.
+        "deployability": deployability(db, project, verified_versions=verified, user=user),
         "rows": rows,
     }
 

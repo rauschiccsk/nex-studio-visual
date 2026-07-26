@@ -38,7 +38,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import yaml
 from pydantic import ValidationError
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -801,6 +801,70 @@ def hotovo_done(db: Session, version_id: uuid.UUID) -> bool:
         )
     ).scalar()
     return hotovo_seq is not None and hotovo_seq > prog_seq
+
+
+def ever_signed_off(db: Session, version_id: uuid.UUID) -> bool:
+    """True iff this version was EVER declared finished — a Hotovo signature or an Auditor PASS is on record,
+    STALENESS IGNORED (v4.0.54).
+
+    The deliberate complement of :func:`hotovo_done` / :func:`_manazer_signoff`, which both go False once a
+    fresher build outranks the signature. Those answer "is it finished NOW"; this answers "was it finished at
+    some point" — the difference between a version that never got anywhere (nothing to explain) and one whose
+    sign-off went stale (explainable, with a real next step). :func:`deploy.deployability` needs exactly that
+    split to tell the manager WHY Nasadiť is closed instead of showing an unexplained grey button."""
+    return (
+        db.execute(
+            select(PipelineMessage.id)
+            .where(
+                PipelineMessage.version_id == version_id,
+                or_(
+                    and_(
+                        PipelineMessage.stage == "priprava",
+                        PipelineMessage.kind == "notification",
+                        PipelineMessage.payload["hotovo"].astext == "true",
+                    ),
+                    and_(
+                        PipelineMessage.stage == "verifikacia",
+                        PipelineMessage.kind == "verdict",
+                        PipelineMessage.payload["verdict"].astext == "PASS",
+                    ),
+                ),
+            )
+            .limit(1)
+        ).scalar_one_or_none()
+        is not None
+    )
+
+
+def reverify_in_flight(db: Session, version_id: uuid.UUID, *, current_stage: str, is_regate: bool) -> bool:
+    """True iff the turn currently in flight IS a "Over znova" re-verification (v4.0.54).
+
+    A drifted version with a turn running is NOT automatically re-verifying — an ordinary chat turn or a
+    build round on the same version also runs ``agent_working``. Only the re-verification ends with the
+    version re-anchoring itself, so only it may be announced as "this will unlock on its own"; claiming that
+    for any busy turn is the same false-confidence bug this batch removes. Matches the two shapes
+    ``apply_action('overit_znovu')`` produces:
+
+    * ``sha_drift`` → re-enters Verifikácia as a re-gate (``is_regate``);
+    * ``hotovo_drift`` → returns to the conversation register with a durable ``auto_hotovo`` directive, which
+      must still be the LATEST manager directive (an older one is a previous, finished re-verification).
+    """
+    if current_stage == "verifikacia":
+        return bool(is_regate)
+    if current_stage != "priprava":
+        return False
+    latest = db.execute(
+        select(PipelineMessage.payload)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.author == "manazer",
+            PipelineMessage.recipient == "ai_agent",
+            PipelineMessage.kind == "directive",
+        )
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    return bool(latest and latest.get("auto_hotovo"))
 
 
 def spec_approved(db: Session, version_id: uuid.UUID) -> bool:

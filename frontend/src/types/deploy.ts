@@ -10,6 +10,8 @@
  * surface never echoes a secret into a request or a response.
  */
 
+import type { components } from "@/services/api/pipeline.generated";
+
 /** UAT or PROD — the two per-customer deploy environments (design §3.3). */
 export type DeployEnvironment = "uat" | "prod";
 
@@ -73,6 +75,40 @@ export interface DeployMatrixRow {
   prod_url: string | null;
 }
 
+/**
+ * WHY the Nasadiť button is closed (v4.0.54) — mirrors backend `DeployBlock`.
+ *
+ * `ok`               — a version is deployable, nothing to explain.
+ * `drift`            — the version WAS finished, but the project's code moved past the point it was
+ *                      checked at, so it auto-un-verified. Recoverable right here via "Over znova".
+ * `reverify_running` — that re-verification is running now (the version leaves the finished state for the
+ *                      whole run, so without this the screen would look identical to before the click).
+ * `stale_signoff`    — later work outranked the sign-off; "Over znova" is NOT offered for this shape
+ *                      anywhere (its handler rejects it) — route the manager to Riadiace centrum instead.
+ * `none_finished`    — no version of this project was ever finished.
+ */
+/**
+ * Aliased from the GENERATED contract, never restated by hand: the backend declares the vocabulary as a
+ * `Literal`, FastAPI emits it as an OpenAPI enum and `npm run codegen` carries it here. Adding a cause on
+ * the backend therefore makes `DeployBlockNotice`'s switch fail type-check until it is handled — which is
+ * the point (an unhandled cause used to render a confidently wrong explanation).
+ */
+export type DeployBlockCause = components["schemas"]["DeployBlock"]["cause"];
+
+export interface DeployBlock {
+  cause: DeployBlockCause;
+  /** The implicated version (the one a manager would deploy); null when no version is implicated. */
+  version_number: string | null;
+  /** The implicated version's id — what "Over znova" is posted against. */
+  version_id: string | null;
+  /**
+   * True iff THIS user may post `overit_znovu` for this version right now. Backend-computed: the matrix is
+   * readable more widely than the pipeline action is writable, and only `drift` has a handler that accepts
+   * the action — never re-derive this in the frontend.
+   */
+  can_reverify: boolean;
+}
+
 /** The full version × customer matrix payload for a project's UAT/PROD tabs. */
 export interface DeployMatrix {
   project_slug: string;
@@ -80,6 +116,8 @@ export interface DeployMatrix {
   auth_mode: string;
   /** Deployable (verified / Hotovo) version_numbers — the Nasadiť options. */
   verified_versions: string[];
+  /** Why Nasadiť is closed when `verified_versions` is empty (v4.0.54). */
+  deployability: DeployBlock;
   rows: DeployMatrixRow[];
 }
 

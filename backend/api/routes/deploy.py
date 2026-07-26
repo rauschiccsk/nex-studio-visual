@@ -86,7 +86,9 @@ def get_deploy_matrix(
     """
     authz.assert_project_slug_access(db, _current_user, slug)
     project = _resolve_project(db, slug)
-    return DeployMatrix.model_validate(deploy_service.build_matrix(db, project))
+    # v4.0.54: the user is passed through so the matrix can answer whether THIS user may re-verify a drifted
+    # version (the pipeline action is ri-or-owner while this read is wider — the frontend cannot derive it).
+    return DeployMatrix.model_validate(deploy_service.build_matrix(db, project, _current_user))
 
 
 class _UatLaunchRequest(BaseModel):

@@ -143,6 +143,78 @@ class DeployMatrixRow(BaseModel):
     )
 
 
+#: Nothing is blocking a deploy — at least one version is deployable.
+DEPLOY_CAUSE_OK = "ok"
+#: The version WAS finished, but the project's code moved past the point it was checked at, so it
+#: auto-un-verified. Recoverable in place with ``overit_znovu`` — the ONLY cause that offers a button.
+DEPLOY_CAUSE_DRIFT = "drift"
+#: A drifted version whose re-verification is running RIGHT NOW (evidence-checked, not merely "busy").
+DEPLOY_CAUSE_REVERIFY_RUNNING = "reverify_running"
+#: A drifted version that is mid-work or stuck for some OTHER reason (a build turn, a block, a pause).
+#: ``overit_znovu`` fail-closes on anything but a settled state, so no button — and no self-unlock promise.
+DEPLOY_CAUSE_VERSION_BUSY = "version_busy"
+#: The check PASSED and the version is only waiting for the manager's Hotovo approval — it has not reached
+#: the deployable stage yet. One approval click away; never describe this as "stale".
+DEPLOY_CAUSE_AWAITING_SIGNOFF = "awaiting_signoff"
+#: Later work outranked the sign-off. ``overit_znovu`` is not offered for this shape anywhere and its
+#: handler rejects it — the screen must route to the version instead of drawing a button that would fail.
+DEPLOY_CAUSE_STALE_SIGNOFF = "stale_signoff"
+#: No version of this project was ever finished — nothing to deploy, and nothing to re-verify.
+DEPLOY_CAUSE_NONE_FINISHED = "none_finished"
+
+#: The closed cause vocabulary. Declared as a ``Literal`` (like ``Environment`` / ``EventType`` above) so
+#: FastAPI emits an OpenAPI enum and ``npm run codegen`` carries it to the frontend as a union — the cause
+#: vocabulary then has ONE source of truth instead of a hand-synced copy in the TS types.
+DeployCause = Literal[
+    "ok",
+    "drift",
+    "reverify_running",
+    "version_busy",
+    "awaiting_signoff",
+    "stale_signoff",
+    "none_finished",
+]
+
+
+class DeployBlock(BaseModel):
+    """WHY the Nasadiť button is closed — the cause the UAT/PROD screen renders (v4.0.54).
+
+    "Verified" is recomputed against live git on every read, so a version drops out of
+    ``verified_versions`` the moment the project's code moves past the commit it was checked at. Without
+    this block the screen could only grey the button out in silence (incident 2026-07-26). Carries the
+    machine-readable cause, the implicated version's identity (so the screen can name it and act on it)
+    and whether THIS user may trigger the recovery.
+    """
+
+    cause: DeployCause = Field(
+        default=DEPLOY_CAUSE_OK,
+        description=(
+            "'ok' (a version is deployable) | 'drift' (code moved past the checked commit — re-verifiable "
+            "in place, the only cause with a button) | 'reverify_running' (that re-verification is running "
+            "now) | 'version_busy' (drifted, but mid-work or stuck — re-verify would be rejected) | "
+            "'awaiting_signoff' (the check passed; it only needs the manager's Hotovo approval) | "
+            "'stale_signoff' (later work outranked the sign-off — must be re-checked on the version) | "
+            "'none_finished' (no version was ever finished)."
+        ),
+    )
+    version_number: Optional[str] = Field(
+        default=None,
+        description="The implicated version (the one a manager would deploy); None when no version is implicated.",
+    )
+    version_id: Optional[UUID] = Field(
+        default=None,
+        description="The implicated version's id — what the re-verify action is posted against.",
+    )
+    can_reverify: bool = Field(
+        default=False,
+        description=(
+            "True iff THIS user may post 'overit_znovu' for this version right now. Backend-computed: the "
+            "matrix is readable more widely than the pipeline action is writable, and only the 'drift' cause "
+            "has a handler that accepts the action."
+        ),
+    )
+
+
 class DeployMatrix(BaseModel):
     """The full version × customer matrix payload for a project's UAT/PROD tabs.
 
@@ -160,4 +232,7 @@ class DeployMatrix(BaseModel):
         default_factory=list,
         description="Deployable (verified / Hotovo) version_numbers — the Nasadiť dropdown options.",
     )
+    #: WHY Nasadiť is closed when ``verified_versions`` is empty — cause + implicated version + whether this
+    #: user may re-verify it (v4.0.54). Defaulted so an older client / a fixture-built matrix stays valid.
+    deployability: DeployBlock = Field(default_factory=DeployBlock)
     rows: list[DeployMatrixRow] = Field(default_factory=list)

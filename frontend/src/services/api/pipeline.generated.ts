@@ -2995,6 +2995,41 @@ export interface components {
             subdomain?: string | null;
         };
         /**
+         * DeployBlock
+         * @description WHY the Nasadiť button is closed — the cause the UAT/PROD screen renders (v4.0.54).
+         *
+         *     "Verified" is recomputed against live git on every read, so a version drops out of
+         *     ``verified_versions`` the moment the project's code moves past the commit it was checked at. Without
+         *     this block the screen could only grey the button out in silence (incident 2026-07-26). Carries the
+         *     machine-readable cause, the implicated version's identity (so the screen can name it and act on it)
+         *     and whether THIS user may trigger the recovery.
+         */
+        DeployBlock: {
+            /**
+             * Can Reverify
+             * @description True iff THIS user may post 'overit_znovu' for this version right now. Backend-computed: the matrix is readable more widely than the pipeline action is writable, and only the 'drift' cause has a handler that accepts the action.
+             * @default false
+             */
+            can_reverify: boolean;
+            /**
+             * Cause
+             * @description 'ok' (a version is deployable) | 'drift' (code moved past the checked commit — re-verifiable in place, the only cause with a button) | 'reverify_running' (that re-verification is running now) | 'version_busy' (drifted, but mid-work or stuck — re-verify would be rejected) | 'awaiting_signoff' (the check passed; it only needs the manager's Hotovo approval) | 'stale_signoff' (later work outranked the sign-off — must be re-checked on the version) | 'none_finished' (no version was ever finished).
+             * @default ok
+             * @enum {string}
+             */
+            cause: "ok" | "drift" | "reverify_running" | "version_busy" | "awaiting_signoff" | "stale_signoff" | "none_finished";
+            /**
+             * Version Id
+             * @description The implicated version's id — what the re-verify action is posted against.
+             */
+            version_id?: string | null;
+            /**
+             * Version Number
+             * @description The implicated version (the one a manager would deploy); None when no version is implicated.
+             */
+            version_number?: string | null;
+        };
+        /**
          * DeployEventRead
          * @description Serialised deploy/accept audit-log row (who / when / version / customer).
          *
@@ -3065,6 +3100,7 @@ export interface components {
              * @default password
              */
             auth_mode: string;
+            deployability?: components["schemas"]["DeployBlock"];
             /** Project Slug */
             project_slug: string;
             /** Rows */

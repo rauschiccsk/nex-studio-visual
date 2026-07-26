@@ -621,3 +621,295 @@ class TestMatrixServiceHelpers:
         assert deploy_service._instance_url(customer, "uat", project) == f"https://uat-{base}-{app}.isnex.eu"
         # The env-carrying slug (used only to detect prod + recover the customer) stays <customer>-<env>.
         assert deploy_service._instance_slug(customer, "uat") == f"{base}-uat"
+
+
+# ---------------------------------------------------------------------------
+# WHY Nasadiť is closed (v4.0.54) — the ``deployability`` block behind the button
+# ---------------------------------------------------------------------------
+#
+# "Verified" is RECOMPUTED against live git on every matrix read, so a finished version silently drops out
+# of ``verified_versions`` the moment the project's code moves past the commit it was checked at. Until
+# v4.0.54 the matrix carried only that (now empty) list, so the UAT/PROD screen greyed Nasadiť out with NO
+# cause, NO named version and NO way back — a Junior had to leave the cockpit for a terminal to recover
+# (incident 2026-07-26, nex-websites). These pin the provenance → CAUSE mapping and the re-verify
+# authorization the frontend cannot derive.
+#
+# ``version_verified`` / ``_repo_head`` are monkeypatched on the ``orchestrator`` MODULE:
+# ``deploy.deployability`` imports both INSIDE its body, so the patched attributes are what it resolves at
+# call time (the same trick as integration/test_reverify_drift_offered.py) — no throwaway git repo needed.
+# The provenance computation itself is exercised end-to-end in tests/test_version_verified.py; these target
+# the mapping, not the drift detection.
+#
+# The cause STRINGS are asserted as literals on purpose: they are the wire contract the deploy screen
+# switches on (DeployBlockNotice.tsx), so a renamed constant must fail HERE, not silently in the browser.
+
+
+@pytest.fixture()
+def fake_repo_head(monkeypatch):
+    """Pin the repo HEAD read to a constant — no ``git`` is spawned for a project dir that isn't on disk.
+
+    ``deployability`` reads HEAD ONCE per project (batch) and hands it to every ``version_verified`` call,
+    so the value only has to be stable, not real.
+    """
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda *a, **k: "deadbeef")
+    return "deadbeef"
+
+
+def _force_provenance(monkeypatch, provenance: str) -> None:
+    """Make every ``version_verified`` call report NOT-verified with the given provenance.
+
+    ``deployability`` branches purely on the provenance string, so this drives each cause without building a
+    repo whose HEAD has genuinely moved past a recorded PASS/Hotovo SHA.
+    """
+    monkeypatch.setattr(orchestrator, "version_verified", lambda *a, **k: (False, provenance))
+
+
+def _seed_user(db, *, role: str, prefix: str) -> User:
+    """A user of the given ICC role (``ri``/``ha``/``shu``) — the authz subject of the re-verify offer."""
+    suffix = _uuid.uuid4().hex[:8]
+    user = User(
+        username=f"{prefix}_{suffix}",
+        email=f"{prefix}_{suffix}@test.local",
+        password_hash=bcrypt.hashpw(b"x", bcrypt.gensalt(rounds=4)).decode(),
+        role=role,
+        is_active=True,
+    )
+    db.add(user)
+    db.flush()
+    return user
+
+
+def _seed_signed_off_version(db, project: Project, version_number: str) -> Version:
+    """A version the Manažér SIGNED as Hotovo (conversation build) — the signature, NO Auditor verdict.
+
+    The signature is the one ``stage='priprava'`` ∧ ``kind='notification'`` ∧ ``payload.hotovo`` message
+    that ``orchestrator.apply_action('hotovo')`` records; ``orchestrator.ever_signed_off`` reads exactly
+    this shape (staleness ignored). No PASS verdict is written, so the version was finished ONCE without
+    ever being Auditor-verified — the input shape for the stale sign-off cause.
+    """
+    version = Version(project_id=project.id, version_number=version_number, name=version_number)
+    db.add(version)
+    db.flush()
+    db.add(
+        PipelineState(
+            version_id=version.id,
+            flow_type="new_version",
+            current_stage="done",
+            current_actor="ai_agent",
+            status="done",
+            next_action="",
+        )
+    )
+    db.flush()
+    orchestrator._record_message(
+        db,
+        version_id=version.id,
+        stage="priprava",
+        author="manazer",
+        recipient="ai_agent",
+        kind="notification",
+        content="Hotovo",
+        payload={"phase": "priprava", "hotovo": True, "hotovo_sha": "cafebabe"},
+    )
+    db.flush()
+    return version
+
+
+class TestDeployabilityCause:
+    """The matrix EXPLAINS a closed Nasadiť: cause + implicated version + who may recover it (v4.0.54)."""
+
+    def test_drift_names_the_affected_version(self, db_session, monkeypatch, fake_repo_head):
+        """⚠ THE INCIDENT (2026-07-26): a finished version whose code moved on leaves ``verified_versions``
+        EMPTY — the matrix must then say WHY and NAME the version, never grey the button out in silence.
+
+        The version is identified by id too: that id is what the re-verify action is posted against.
+        """
+        owner = _seed_user(db_session, role="ri", prefix="drift_owner")
+        project = _seed_project(db_session, creator=owner)
+        version = _seed_verified_version(db_session, project, "v0.1.0")
+        _force_provenance(monkeypatch, "hotovo_drift")  # signed at a commit the repo has since moved past
+
+        matrix = deploy_service.build_matrix(db_session, project)
+
+        # Nothing deployable — the state that used to render as an unexplained grey button.
+        assert matrix["verified_versions"] == []
+        block = matrix["deployability"]
+        assert block["cause"] == "drift"
+        assert block["version_number"] == "v0.1.0"
+        assert block["version_id"] == version.id
+        # No user was supplied → the offer is never granted on a guess.
+        assert block["can_reverify"] is False
+
+    def test_drift_mid_reverify_is_distinguished_from_plain_drift(self, db_session, monkeypatch, fake_repo_head):
+        """A drifted version whose re-verification is RUNNING reports its own cause.
+
+        The version leaves the ``done`` stage for the whole run, so the deployable list looks identical
+        before and after the click — without this cause the screen would keep offering "Over znova" for
+        minutes and read as if nothing happened.
+        """
+        owner = _seed_user(db_session, role="ri", prefix="running_owner")
+        project = _seed_project(db_session, creator=owner)
+        version = _seed_verified_version(db_session, project, "v0.1.0")
+        state = db_session.query(PipelineState).filter_by(version_id=version.id).one()
+        # The shape apply_action('overit_znovu') leaves for a sha_drift: re-entered Verifikácia as a RE-GATE,
+        # turn in flight. The re-gate flag is the evidence — a merely busy version is NOT re-verifying.
+        state.status = "agent_working"
+        state.current_stage = "verifikacia"
+        state.is_regate = True
+        db_session.flush()
+        _force_provenance(monkeypatch, "sha_drift")
+
+        block = deploy_service.deployability(db_session, project, verified_versions=[], user=owner)
+
+        assert block["cause"] == "reverify_running"
+        assert block["version_number"] == "v0.1.0"
+        # A run is already in flight — no second trigger, even for a user who would otherwise qualify.
+        assert block["can_reverify"] is False
+
+    def test_stale_signoff_offers_no_reverify_button(self, db_session, monkeypatch, fake_repo_head):
+        """⚠ REGRESSION GUARD: a sign-off outranked by later work is NOT re-verifiable.
+
+        ``overit_znovu``'s handler rejects this shape, so offering the button would only move the dead end
+        one click further (a 400 instead of a grey button). The project OWNER — an ``ri``, i.e. the most
+        privileged subject there is — is passed in deliberately: ``can_reverify`` must be False because of
+        the CAUSE, not because nobody was authorized.
+        """
+        owner = _seed_user(db_session, role="ri", prefix="stale_owner")
+        project = _seed_project(db_session, creator=owner)
+        version = _seed_signed_off_version(db_session, project, "v0.1.0")
+        # The Hotovo signature IS on record (staleness ignored) — this is what separates a stale sign-off
+        # from a version that never got anywhere.
+        assert orchestrator.ever_signed_off(db_session, version.id) is True
+        _force_provenance(monkeypatch, "no_pass")  # a fresher build outranked the signature
+
+        block = deploy_service.deployability(db_session, project, verified_versions=[], user=owner)
+
+        assert block["cause"] == "stale_signoff"
+        assert block["version_number"] == "v0.1.0"
+        assert block["version_id"] == version.id
+        assert block["can_reverify"] is False
+
+    def test_never_finished_project_implicates_no_version(self, db_session, fake_repo_head):
+        """A project whose only version never got anywhere has nothing to explain and nothing to re-verify —
+        so no version is named (the screen must not blame an innocent in-flight version)."""
+        owner = _seed_user(db_session, role="ri", prefix="fresh_owner")
+        project = _seed_project(db_session, creator=owner)
+        _seed_unverified_version(db_session, project, "v0.1.0")  # still in Programovanie, never signed off
+
+        block = deploy_service.deployability(db_session, project, verified_versions=[], user=owner)
+
+        assert block["cause"] == "none_finished"
+        assert block["version_number"] is None
+        assert block["version_id"] is None
+        assert block["can_reverify"] is False
+
+    def test_deployable_project_stays_silent(self, db_session, fake_repo_head):
+        """The happy path renders NOTHING: a deployable version → cause ``ok``, no version implicated, no
+        button — the notice is absent and the normal screen is untouched."""
+        owner = _seed_user(db_session, role="ri", prefix="ok_owner")
+        project = _seed_project(db_session, creator=owner)
+        _seed_verified_version(db_session, project, "v0.1.0")
+
+        matrix = deploy_service.build_matrix(db_session, project, owner)
+
+        assert matrix["verified_versions"] == ["v0.1.0"]
+        block = matrix["deployability"]
+        assert block["cause"] == "ok"
+        assert block["version_number"] is None
+        assert block["version_id"] is None
+        # Never offered while a deploy is actually possible — there is nothing to recover.
+        assert block["can_reverify"] is False
+
+    def test_reports_the_semantically_newest_drifted_version(self, db_session, monkeypatch, fake_repo_head):
+        """The candidate scan is NEWEST-FIRST by SEMVER — the explanation must be about the version the
+        manager would actually deploy.
+
+        ``v0.9.0`` is seeded FIRST and sorts ABOVE ``v0.10.0`` as a plain string, so both an insertion-order
+        scan and a string-order scan would name the wrong (older) version.
+        """
+        owner = _seed_user(db_session, role="ri", prefix="newest_owner")
+        project = _seed_project(db_session, creator=owner)
+        _seed_verified_version(db_session, project, "v0.9.0")
+        newest = _seed_verified_version(db_session, project, "v0.10.0")
+        _force_provenance(monkeypatch, "sha_drift")
+
+        block = deploy_service.deployability(db_session, project, verified_versions=[], user=owner)
+
+        assert block["cause"] == "drift"
+        assert block["version_number"] == "v0.10.0"
+        assert block["version_id"] == newest.id
+
+    def test_reverify_offer_follows_the_ri_only_authz_tier(self, db_session, monkeypatch, fake_repo_head):
+        """``can_reverify`` mirrors the action's own gate — the frontend cannot derive it (the payload
+        carries no project owner).
+
+        ``overit_znovu`` goes through ``authz.assert_version_access(..., ri_only=True)``: the project OWNER
+        (whatever their role) and any ``ri`` may post it; a ``ha`` who does NOT own the project does not gain
+        that sensitive-write tier (``authz.is_owner_or_privileged``, ``ri_only=True``).
+        """
+        owner = _seed_user(db_session, role="shu", prefix="junior_owner")  # owner, but NOT a privileged role
+        foreign_ri = _seed_user(db_session, role="ri", prefix="foreign_ri")
+        foreign_ha = _seed_user(db_session, role="ha", prefix="foreign_ha")
+        project = _seed_project(db_session, creator=owner)
+        _seed_verified_version(db_session, project, "v0.1.0")
+        _force_provenance(monkeypatch, "hotovo_drift")
+
+        def _can_reverify(user) -> bool:
+            block = deploy_service.deployability(db_session, project, verified_versions=[], user=user)
+            assert block["cause"] == "drift"  # the offer is only ever evaluated on the recoverable cause
+            return block["can_reverify"]
+
+        assert _can_reverify(owner) is True  # a Junior may recover THEIR OWN project without a terminal
+        assert _can_reverify(foreign_ri) is True  # ri drives every project
+        assert _can_reverify(foreign_ha) is False  # ha does NOT gain the ri_only tier on a foreign project
+
+    def test_awaiting_signoff_is_never_called_stale(self, db_session, monkeypatch, fake_repo_head):
+        """A version that PASSED but has not been approved yet is one click away — not "stale".
+
+        This is the ORDINARY post-PASS state: ``_settle_verifikacia`` leaves ``status='awaiting_manazer'``
+        with the stage still at Verifikácia, so ``list_verified_versions`` (which requires the ``done``
+        stage) excludes it while ``version_verified`` reports it VERIFIED. Reading only the provenance and
+        ignoring the verified flag made the screen announce "later work outranked the sign-off" — false on
+        both counts, on the single most common not-deployable state.
+        """
+        owner = _seed_user(db_session, role="ri", prefix="await_owner")
+        project = _seed_project(db_session, creator=owner)
+        version = _seed_verified_version(db_session, project, "v0.1.0")
+        state = db_session.query(PipelineState).filter_by(version_id=version.id).one()
+        state.current_stage = "verifikacia"  # PASS recorded, waiting for the Hotovo approval
+        state.status = "awaiting_manazer"
+        db_session.flush()
+        monkeypatch.setattr(orchestrator, "version_verified", lambda *a, **k: (True, "sha_match"))
+
+        block = deploy_service.deployability(db_session, project, verified_versions=[], user=owner)
+
+        assert block["cause"] == "awaiting_signoff"
+        assert block["version_number"] == "v0.1.0"
+        # Nothing to re-verify — the check already passed; the remedy is an approval, not a re-run.
+        assert block["can_reverify"] is False
+
+    def test_matrix_endpoint_carries_the_cause_and_evaluates_the_caller(
+        self, client, db_session, monkeypatch, fake_repo_head
+    ):
+        """The HTTP read must carry ``deployability`` AND evaluate ``can_reverify`` for the AUTHENTICATED
+        user — the one line that connects the service to the screen.
+
+        Without this, dropping the user argument in the route would keep every service test green while
+        ``can_reverify`` silently became False in production, putting the manager straight back at the
+        terminal-only dead end this whole change exists to remove.
+        """
+        user = _current_user(db_session)
+        project = _seed_project(db_session, creator=user)
+        _seed_verified_version(db_session, project, "v0.1.0")
+        _seed_customer(db_session, project, "andros")
+        _force_provenance(monkeypatch, "hotovo_drift")
+
+        resp = client.get(f"/api/v1/projects/{project.slug}/deploy-matrix")
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["verified_versions"] == []
+        assert body["deployability"]["cause"] == "drift"
+        assert body["deployability"]["version_number"] == "v0.1.0"
+        assert body["deployability"]["version_id"] is not None
+        assert body["deployability"]["can_reverify"] is True

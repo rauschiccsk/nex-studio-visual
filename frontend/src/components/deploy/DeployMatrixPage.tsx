@@ -15,6 +15,8 @@ import { ApiError } from "@/services/api";
 import { humanizeApiError } from "@/services/apiError";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import type { DeployEnvironment, DeployMatrix, DeployMatrixRow, DeployResult } from "@/types/deploy";
+import DeployBlockNotice from "./DeployBlockNotice";
+import { fmtVer } from "./version";
 
 /**
  * Shared version × customer matrix page for the UAT and PROD tabs (CR-V2-027,
@@ -56,10 +58,11 @@ const LABELS: Record<DeployEnvironment, { title: string; intro: string; column: 
   },
 };
 
-// Normalise a version_number for DISPLAY (audit obs #3): some are stored "v1.0.0" (the graduated first-PROD)
-// and some "1.1.0" — strip a leading "v" so UAT + PROD always read the same bare-semver form. The STORED value
-// (the deploy identifier used in requests / accepted_versions) is never touched — this is display-only.
-const fmtVer = (v: string | null | undefined): string => (v ?? "").replace(/^v/i, "");
+// v4.0.54: while a re-verification runs, the version leaves the finished state — so the matrix reads exactly
+// like the blocked state for the WHOLE run (minutes). Poll quietly so the screen unblocks itself instead of
+// leaving the manager to guess whether the click did anything.
+const REVERIFY_POLL_INTERVAL_MS = 15000;
+
 
 export default function DeployMatrixPage({ environment }: DeployMatrixPageProps) {
   const navigate = useNavigate();
@@ -82,25 +85,54 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
   // v4.0.30: the customer_id whose token-launch 'Spustiť' is mid-flight (minting + opening the app).
   const [launching, setLaunching] = useState<string | null>(null);
 
-  const load = useCallback(() => {
-    if (!slug) return;
-    setLoading(true);
-    setLoadError(null);
-    getDeployMatrix(slug)
-      .then(setMatrix)
-      .catch((err) => {
-        if (err instanceof ApiError) {
-          setLoadError(humanizeApiError(err, "Načítanie zlyhalo").message);
-        } else {
-          setLoadError("Sieťová chyba pri načítavaní matice nasadení.");
-        }
-      })
-      .finally(() => setLoading(false));
-  }, [slug]);
+  /** ``quiet`` skips the loading state — used by the re-verify poll so the table doesn't flash. */
+  const load = useCallback(
+    (quiet = false) => {
+      if (!slug) return;
+      if (!quiet) setLoading(true);
+      setLoadError(null);
+      getDeployMatrix(slug)
+        .then((next) => {
+          setMatrix(next);
+          // v4.0.54: drop picks that are no longer deployable. Without this a stale pick survived an
+          // emptied list, so `pickedVersion` still returned a version and the DISABLED button carried the
+          // POSITIVE tooltip "Nasadiť verziu X…" — the one explanation on screen asserting the opposite
+          // of what the button did.
+          setPicked((prev) => {
+            const allowed = new Set(next.verified_versions);
+            const kept = Object.fromEntries(Object.entries(prev).filter(([, v]) => allowed.has(v)));
+            return Object.keys(kept).length === Object.keys(prev).length ? prev : kept;
+          });
+        })
+        .catch((err) => {
+          // A QUIET (background poll) failure must not blank the screen: the table already on screen is
+          // still valid and the next tick retries. Only a load the user actually asked for reports an error,
+          // because only that one leaves them looking at nothing.
+          if (quiet) return;
+          if (err instanceof ApiError) {
+            setLoadError(humanizeApiError(err, "Načítanie zlyhalo").message);
+          } else {
+            setLoadError("Sieťová chyba pri načítavaní matice nasadení.");
+          }
+        })
+        .finally(() => {
+          if (!quiet) setLoading(false);
+        });
+    },
+    [slug],
+  );
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // Self-refresh while a re-verification is in flight, so "Nasadiť" re-opens on its own when it goes green.
+  const reverifyRunning = matrix?.deployability?.cause === "reverify_running";
+  useEffect(() => {
+    if (!reverifyRunning) return;
+    const timer = window.setInterval(() => load(true), REVERIFY_POLL_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [reverifyRunning, load]);
 
   function setRowMsg(customerId: string, msg: string | null) {
     setRowError((prev) => {
@@ -213,9 +245,19 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 409) {
-          // The backend gate (never bypassed) rejected, e.g. PROD without acceptance. Show the specific
-          // plain-Slovak acceptance-gate cause — never the raw English backend `err.message`.
-          setRowMsg(row.customer_id, "Nasadenie zablokované (akceptačná brána).");
+          // The backend gate (never bypassed) rejected. TWO shapes reach this, and calling both "akceptačná
+          // brána" was factually wrong on UAT, where no acceptance gate exists (v4.0.54): (a) the real PROD
+          // acceptance gate; (b) a verification that went stale between page load and click — the matrix is
+          // a snapshot and the page does not poll while a deploy is still possible. Never echo the raw
+          // English backend text; reload so the notice above states the real, current cause in Slovak.
+          const acceptanceGate = environment === "prod" && !row.accepted_versions.includes(version);
+          setRowMsg(
+            row.customer_id,
+            acceptanceGate
+              ? "Nasadenie zablokované (akceptačná brána)."
+              : "Nasadenie sa medzitým zablokovalo — dôvod je vysvetlený hore.",
+          );
+          load();
         } else if (err.status === 403) {
           setRowMsg(row.customer_id, "Nasadenie je dostupné len pre rolu Manažér.");
         } else {
@@ -286,7 +328,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
       <div className="mb-1 flex items-center justify-between">
         <h1 className="text-base font-bold text-[var(--color-text-primary)]">{labels.title}</h1>
         <button
-          onClick={load}
+          onClick={() => load()}
           title="Obnoviť"
           className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
         >
@@ -296,6 +338,17 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
       <p className="mb-4 text-xs text-[var(--color-text-muted)]">
         Projekt <span className="text-[var(--color-text-secondary)]">{selectedProject.name}</span>. {labels.intro}
       </p>
+
+      {/* v4.0.54: WHY Nasadiť is closed + the way out, on BOTH tabs. Renders nothing when a version is
+          deployable. Placed ABOVE the table so it can't be read as a per-row detail — one commit in the
+          project un-verifies every unreleased finished version at once, so the cause is project-wide. */}
+      {matrix && slug && (
+        <DeployBlockNotice
+          block={matrix.deployability}
+          projectSlug={slug}
+          onReverifyStarted={() => load()}
+        />
+      )}
 
       {loading ? (
         <div className="flex items-center gap-2 py-12 text-sm text-[var(--color-text-muted)]">
@@ -373,7 +426,9 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                     {/* Nasadiť version picker (verified versions only) */}
                     <td className="px-3 py-3">
                       {verified.length === 0 ? (
-                        <span className="text-xs text-[var(--color-text-muted)]">žiadna overená verzia</span>
+                        <span className="text-xs text-[var(--color-text-muted)]">
+                          nič na nasadenie — dôvod hore
+                        </span>
                       ) : (
                         <select
                           value={chosen}
@@ -446,9 +501,13 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                           Nasadiť
                         </button>
                       </div>
-                      {environment === "prod" && blocked && (
+                      {/* v4.0.54: this line used to be PROD-only and hardcoded to the acceptance gate — so on
+                          UAT (the incident tab) a disabled button got no visible line at all, and on PROD it
+                          asserted a cause that was often not the real one. Now both tabs get a line, and it
+                          names which of the two blocks is actually in force. */}
+                      {blocked && (
                         <div className="mt-1 text-right text-[11px] text-[var(--color-text-muted)]">
-                          čaká na akceptáciu UAT
+                          {chosen ? "čaká na akceptáciu UAT" : "pozastavené — dôvod hore"}
                         </div>
                       )}
                     </td>

@@ -23,6 +23,7 @@ from backend.db.models.foundation import User
 from backend.db.models.pipeline import PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
+from backend.services import deploy as deploy_service
 from backend.services import orchestrator
 
 
@@ -134,3 +135,77 @@ def test_overit_znovu_not_offered_mid_build_even_if_drifted(db_session, monkeypa
     board = _board(db_session, version.id)
 
     assert "overit_znovu" not in board.available_actions
+
+
+# ---------------------------------------------------------------------------
+# v4.0.54 — the SAME drift, seen from the UAT/PROD screen (``deploy.deployability``)
+#
+# Pressing "Over znova" takes the version OUT of the finished state for the WHOLE run (``apply_action``'s
+# ``overit_znovu``: current_stage → 'verifikacia' for sha_drift / 'priprava' for hotovo_drift, status →
+# 'agent_working'), so ``list_verified_versions`` stays EMPTY the entire time and the deploy screen would look
+# byte-identical before and after the click — for minutes on end.
+#
+# ``deployability`` therefore needs EVIDENCE that the running turn IS the re-verification: a busy version is
+# not automatically re-verifying (an ordinary chat turn or a build round also runs ``agent_working``), and
+# only the re-verification ends by re-anchoring itself. These pin all three drifted shapes apart.
+# ---------------------------------------------------------------------------
+
+
+def test_deployability_reverify_running_when_drifted_reverify_in_flight(db_session, monkeypatch) -> None:
+    """A drifted version whose RE-VERIFICATION is in flight reports ``reverify_running`` — and offers no
+    button, because the run the button would start is already going.
+
+    The evidence is the shape ``apply_action('overit_znovu')`` leaves behind for a ``sha_drift``: it re-enters
+    Verifikácia as a RE-GATE. Status alone is deliberately not enough (see the busy test below)."""
+    version = _seed_settled_version(db_session, state_status="agent_working")
+    state = db_session.query(PipelineState).filter_by(version_id=version.id).one()
+    state.current_stage = "verifikacia"
+    state.is_regate = True
+    db_session.flush()
+    project = db_session.get(Project, version.project_id)
+    owner = db_session.get(User, project.created_by)
+    monkeypatch.setattr(orchestrator, "version_verified", lambda *a, **k: (False, "sha_drift"))
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda *a, **k: "deadbeef")
+
+    block = deploy_service.deployability(db_session, project, verified_versions=[], user=owner)
+
+    assert block["cause"] == deploy_service.DEPLOY_CAUSE_REVERIFY_RUNNING
+    assert block["version_number"] == version.version_number
+    assert block["version_id"] == version.id
+    assert block["can_reverify"] is False
+
+
+def test_deployability_version_busy_when_the_running_turn_is_not_a_reverify(db_session, monkeypatch) -> None:
+    """A drifted version that is merely BUSY (a turn in flight that is NOT the re-verification) must NOT be
+    announced as "Overujem… odomkne sa samo" — nothing here re-anchors it, so that promise would be false.
+
+    Same status as the test above, WITHOUT the re-gate evidence → ``version_busy``, and still no button
+    (``overit_znovu`` fail-closes on any non-settled state, so one would 400)."""
+    version = _seed_settled_version(db_session, state_status="agent_working")
+    project = db_session.get(Project, version.project_id)
+    owner = db_session.get(User, project.created_by)
+    monkeypatch.setattr(orchestrator, "version_verified", lambda *a, **k: (False, "sha_drift"))
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda *a, **k: "deadbeef")
+
+    block = deploy_service.deployability(db_session, project, verified_versions=[], user=owner)
+
+    assert block["cause"] == deploy_service.DEPLOY_CAUSE_VERSION_BUSY
+    assert block["can_reverify"] is False
+
+
+def test_deployability_drift_when_the_same_version_is_settled(db_session, monkeypatch) -> None:
+    """The pair to the tests above: the SAME fixture, the SAME drift, a SETTLED ``done`` status → ``drift``,
+    re-verifiable by the owner. Proves the split really is the pipeline state and not something incidental
+    to the drift."""
+    version = _seed_settled_version(db_session, state_status="done")
+    project = db_session.get(Project, version.project_id)
+    owner = db_session.get(User, project.created_by)
+    monkeypatch.setattr(orchestrator, "version_verified", lambda *a, **k: (False, "sha_drift"))
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda *a, **k: "deadbeef")
+
+    block = deploy_service.deployability(db_session, project, verified_versions=[], user=owner)
+
+    assert block["cause"] == deploy_service.DEPLOY_CAUSE_DRIFT
+    assert block["version_number"] == version.version_number
+    assert block["version_id"] == version.id
+    assert block["can_reverify"] is True
