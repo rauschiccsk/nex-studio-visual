@@ -98,7 +98,29 @@ jobs:
 
       - name: Backend pytest
         if: ${{ hashFiles('backend/pyproject.toml') != '' }}
-        run: cd backend && $BACKEND_RUN pytest -q
+        run: |
+          set -euo pipefail
+          # Real Postgres if compose ships a `test` service (generated apps use Postgres-only SQL such
+          # as `RETURNING` that SQLite can't run); else host pytest for compose-less scaffolds.
+          if [ -f docker-compose.yml ] && docker compose config --services 2>/dev/null | grep -qx test; then
+            docker compose up -d db
+            cid=$(docker compose ps -q db)
+            status=unknown
+            for i in $(seq 1 60); do
+              status=$(docker inspect -f '{{.State.Health.Status}}' "$cid" 2>/dev/null || echo unknown)
+              echo "db health [$i]: $status"
+              [ "$status" = healthy ] && break
+              sleep 2
+            done
+            if [ "$status" != healthy ]; then echo "::error::db did not become healthy"; docker compose logs db; exit 1; fi
+            docker compose run --rm --build test
+          else
+            cd backend && $BACKEND_RUN pytest -q
+          fi
+
+      - name: Tear down test Postgres
+        if: ${{ always() && hashFiles('docker-compose.yml') != '' }}
+        run: docker compose down -v || true
 
       - name: Set up Node.js
         if: ${{ hashFiles('frontend/package.json') != '' }}

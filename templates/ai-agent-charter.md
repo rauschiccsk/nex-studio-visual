@@ -89,6 +89,12 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   NIKDY holý 404. Autoritatívny kontrakt: `docs/architecture/icc-deploy-nex-manager.md` §4.4 + NEX Manager
   `routers/launch.py` / `core/security.create_launch_token`. (`auth_mode=password` appky používajú `POST /auth/login`
   + `/auth/me` — nie toto.)
+  - **Presné názvy env premenných launch-kontraktu (v4.0.53) — MUSÍŠ ich takto deklarovať**, inak UAT „Spustiť"
+    zlyhá (provisioner vpisuje kľúč zo spárovaného NEX Managera práve pod týmito názvami): launch-kľúč čítaj
+    v configu z **`MANAGER_LAUNCH_SIGNING_KEY`** (nie vlastný názov ako `NEX_MANAGER_LAUNCH_KEY`); `aud` over
+    proti **`MANAGER_MODULE_SLUG`** (default = vlastný slug); a v `docker-compose.yml` deklaruj všetky tri —
+    `MANAGER_LAUNCH_SIGNING_KEY`, `MANAGER_MODULE_SLUG=<slug>`, `MANAGER_DEPLOY_SLUG` (vzor nex-shopify). UAT
+    launch mintuje token cez tie isté tri premenné z deploy `.env`, takže bez nich provisioner kľúč nevpíše.
 - **Deklarácia pokrytia vydania (POVINNÁ, s kostrou plánu)** — v kostre task plánu vyplň `flagship_features`
   (≥1: kľúčové funkcie, ktoré MUSÍ vydanie preukázateľne robiť) a `safety_properties` (zoznam `{name, risky_op}`:
   bezpečnostné invarianty, ktoré appka MUSÍ vynútiť — `risky_op` je konkrétna zakázaná operácia, ktorá **musí
@@ -116,6 +122,17 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
     službou v `docker-compose.yml`, ktorú `up --wait` dobehne. Bez toho prvý DB dotaz padne („relation does not
     exist"; pri async SQLAlchemy sa to môže prejaviť aj ako `MissingGreenlet`) a akceptácia zlyhá hneď na
     prvom kroku. Toto je najčastejší blokér vydania appky s databázou — nezabudni naň.
+- **Backend testy bežia proti REÁLNEMU PostgreSQL, NIE SQLite (v4.0.53).** Appky používajú Postgres-only SQL
+  (`RETURNING`, `unaccent`/`immutable_unaccent`, `pg_trgm` GIN indexy) — in-memory SQLite ticho diverguje a CI
+  SČERVENIE pri prvej zmene v backende (SQLite < 3.35 nevie `RETURNING`). Preto: **jeden zdieľaný** `conftest.py`
+  (žiadny per-modul vlastný sqlite engine) postaví schému cez `alembic upgrade head` proti Postgresu a izoluje
+  testy cez `TRUNCATE`; `client` používa `https://testserver`, nech hardened Secure cookie prejde. Test image je
+  **repo-root `Dockerfile.test`** (kontext `.`, `pip install -e ".[dev]"` — editable, aby `import app` = zdroj so
+  svojimi dátovými súbormi, nie balík bez nich; `COPY backend/... ./` + `COPY docs /docs`), spúšťaný compose
+  službou **`test`** na sieti s `db` cez `docker compose run --rm --build test`. **Pozor na DinD self-hosted
+  runner:** bind mount (`volumes: ./docs`) je pre daemon neviditeľný (prázdny) — súbory, ktoré test potrebuje
+  (napr. docs archív pre drift test), musia ísť do image cez **COPY** (build kontext sa streamuje daemonu).
+  Nikdy neznižuj prah (nezakazuj testy, nedvíhaj sqlite verziu) — testuj na tom, na čom appka beží.
 - **Diagnostikuj príčinu skôr, než eskaluješ** — keď zostavenie alebo CI zlyhá na závislosti (chýbajúci
   export, nezhoda verzie spoločnej knižnice), NAJPRV over **reálnu** príčinu: či zámok verzií
   (`package-lock.json`) sedí so zoznamom želaných verzií (`package.json`) — deklarovaný tag **aj** rozriešený
