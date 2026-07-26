@@ -77,3 +77,22 @@ describe("HonestStatusStrip — honest verification (#6)", () => {
     expect(screen.queryByText("Hotovo — overenie sa nedá potvrdiť")).not.toBeInTheDocument();
   });
 });
+
+// v4.0.56: the DRIFT case. Three surfaces used to disagree on the same screen — the strip said green
+// "pripravené na nasadenie", the Plán úloh card offered a deploy button, and ReverifyBar warned the check
+// was stale. Drift is not "we cannot confirm it": we KNOW the check no longer describes the current code.
+describe("HonestStatusStrip — a drifted sign-off never reads green", () => {
+  it.each(["sha_drift", "hotovo_drift"])(
+    "reads amber 'kód sa odvtedy zmenil' on a done version with drifted provenance '%s'",
+    (prov) => {
+      render(stripV({ current_stage: "done", status: "done", mode: "conversation" }, prov));
+      expect(screen.getByText("Hotovo — kód sa odvtedy zmenil, treba znova overiť")).toBeInTheDocument();
+      expect(screen.queryByText("Hotovo — pripravené na nasadenie")).not.toBeInTheDocument();
+    },
+  );
+
+  it("keeps drift distinct from unconfirmable — different cause, different remedy", () => {
+    render(stripV({ current_stage: "done", status: "done", mode: "conversation" }, "sha_drift"));
+    expect(screen.queryByText("Hotovo — overenie sa nedá potvrdiť")).not.toBeInTheDocument();
+  });
+});

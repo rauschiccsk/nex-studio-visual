@@ -659,6 +659,35 @@ describe("PlanUlohRail — Hotovo trigger (STEP 6)", () => {
     // The build-loop rungs are gone (no available_actions).
     expect(screen.queryByRole("button", { name: /Označiť ako hotové/ })).not.toBeInTheDocument();
   });
+
+  // v4.0.56: the same card, once the code moved on after the sign-off. It used to claim the version was
+  // "pripravená na nasadenie" and offer a live button into a deploy screen that refuses it — the cockpit
+  // contradicting itself across three surfaces on one screen (Director report, 2026-07-26).
+  it.each(["sha_drift", "hotovo_drift"])(
+    "tells the truth and disables the deploy button when the sign-off drifted ('%s')",
+    async (prov) => {
+      render(
+        <PlanUlohRail
+          versionId="v1"
+          messages={[]}
+          board={mkBoard({
+            available_actions: [],
+            state: mkState({ status: "done", mode: "conversation" }),
+            verified_provenance: prov,
+          })}
+          onBoard={() => {}}
+        />,
+      );
+
+      expect(await screen.findByText(/Kód sa po označení za hotové zmenil/)).toBeInTheDocument();
+      // The false claim is GONE, not merely accompanied by a warning.
+      expect(screen.queryByText(/Verzia je hotová a pripravená na nasadenie/)).not.toBeInTheDocument();
+      // The button stays visible (disabled-over-hidden) but cannot walk the manager into the paused screen.
+      const deploy = screen.getByRole("button", { name: /Prejsť na nasadenie/ });
+      expect(deploy).toBeDisabled();
+      expect(deploy).toHaveAttribute("title", expect.stringContaining("znova over"));
+    },
+  );
 });
 
 // Director observation #3 — REAL subtree collapse (the chevron hides the whole subtree, not just L2 detail) plus

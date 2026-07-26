@@ -45,7 +45,14 @@ import type {
   TaskPlanFeatNode,
   TaskPlanTaskNode,
 } from "../../types/task-plan";
-import { TASK_STATUS_LABELS, TASK_TYPE_LABELS, TASK_STATUS_TONE, TONE_DOT, verificationUnconfirmed } from "../cockpit/labels";
+import {
+  TASK_STATUS_LABELS,
+  TASK_TYPE_LABELS,
+  TASK_STATUS_TONE,
+  TONE_DOT,
+  verificationDrifted,
+  verificationUnconfirmed,
+} from "../cockpit/labels";
 import { SpecMarkdown } from "../markdown/SpecMarkdown";
 import { humanizeApiError, type HumanError } from "../../services/apiError";
 import ErrorNote from "../common/ErrorNote";
@@ -666,13 +673,30 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
               Overenie sa nedá potvrdiť — pred nasadením ho over.
             </p>
           )}
-          <p className="mb-2 text-xs text-[var(--color-text-muted)]">
-            Verzia je hotová a pripravená na nasadenie k zákazníkovi.
-          </p>
+          {/* v4.0.56: when the code moved on after the sign-off, this card used to state "hotová a pripravená
+              na nasadenie" and offer a primary button into a deploy screen that refuses the version. Say the
+              truth and point at the ONE action that fixes it — "Over znova", which sits on this same screen
+              (ReverifyBar). The button stays visible but disabled with its reason (disabled-over-hidden). */}
+          {verificationDrifted(board?.verified_provenance) ? (
+            <p className="mb-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-700 dark:text-amber-300">
+              Kód sa po označení za hotové zmenil — verziu treba znova overiť. Tlačidlo „Over znova" nájdeš
+              nižšie na tejto obrazovke.
+            </p>
+          ) : (
+            <p className="mb-2 text-xs text-[var(--color-text-muted)]">
+              Verzia je hotová a pripravená na nasadenie k zákazníkovi.
+            </p>
+          )}
           <button
             type="button"
             onClick={() => navigate("/uat")}
-            className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500"
+            disabled={verificationDrifted(board?.verified_provenance)}
+            title={
+              verificationDrifted(board?.verified_provenance)
+                ? "Najprv verziu znova over — kým sa kód nezhoduje s overením, nasadenie je pozastavené."
+                : "Prejsť na nasadenie k zákazníkovi"
+            }
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Rocket className="h-3.5 w-3.5" />
             Prejsť na nasadenie

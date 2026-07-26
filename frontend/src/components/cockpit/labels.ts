@@ -226,6 +226,19 @@ export function verificationUnconfirmed(provenance: string | null | undefined): 
   return provenance != null && (VERIFICATION_UNCONFIRMED_PROVENANCES as readonly string[]).includes(provenance);
 }
 
+// v4.0.56 — the DRIFT sibling, deliberately NOT folded into `verificationUnconfirmed`: "unconfirmed" means we
+// CANNOT TELL whether the check still holds, while drift means we KNOW it no longer does, and the two have
+// different remedies (verify before deploying vs. "Over znova" re-runs it for you). The comment above used to
+// argue drift needed no surface here because ReverifyBar warns about it — but ReverifyBar sits BELOW the
+// thread, while the status strip and the Plán úloh card kept reading a confident green "pripravené na
+// nasadenie" with a button into the paused deploy screen. Three signals, two of them wrong (Director report,
+// 2026-07-26). Whatever reads `verificationUnconfirmed` for an honest surface must read this too.
+export const VERIFICATION_DRIFTED_PROVENANCES = ["sha_drift", "hotovo_drift"] as const;
+
+export function verificationDrifted(provenance: string | null | undefined): boolean {
+  return provenance != null && (VERIFICATION_DRIFTED_PROVENANCES as readonly string[]).includes(provenance);
+}
+
 // NOTE (CR-V2-021): the v1 ``STAGE_ORDER`` / ``FAST_FIX_STAGE_ORDER`` / ``stageOrderForFlow`` /
 // ``REGATE_TARGETS`` / ``nextStageLabel`` (the 11-stage waterfall order + gate_g re-gate targets) are
 // REMOVED — the v2 Vývoj board uses the 4-phase :data:`PHASE_ORDER` + :func:`nextPhaseLabel` instead.

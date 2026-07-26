@@ -15,6 +15,7 @@ import {
   PIPELINE_STATUS_TONE,
   TONE_BANNER,
   TONE_DOT,
+  verificationDrifted,
   verificationUnconfirmed,
 } from "../cockpit/labels";
 import type { BuildPhase, StatusTone } from "../cockpit/labels";
@@ -89,10 +90,16 @@ export function HonestStatusStrip({
   // Honest #6: a settled `done` version whose verification could NOT be confirmed must read amber, never a
   // green "overená/Hotovo". Override the derived text + tone for exactly that case.
   const unconfirmed = state?.status === "done" && verificationUnconfirmed(verifiedProvenance);
-  const text = unconfirmed
-    ? "Hotovo — overenie sa nedá potvrdiť"
-    : statusText(state, projectName, versionNumber);
-  const tone: StatusTone = unconfirmed ? "amber" : statusTone(state);
+  // v4.0.56: the same applies — MORE strongly — when the code moved on after the sign-off. Here we do not
+  // merely fail to confirm the check, we KNOW it no longer describes the current code, so a green "pripravené
+  // na nasadenie" is an outright false statement (and the deploy screen refuses that version anyway).
+  const drifted = state?.status === "done" && verificationDrifted(verifiedProvenance);
+  const text = drifted
+    ? "Hotovo — kód sa odvtedy zmenil, treba znova overiť"
+    : unconfirmed
+      ? "Hotovo — overenie sa nedá potvrdiť"
+      : statusText(state, projectName, versionNumber);
+  const tone: StatusTone = unconfirmed || drifted ? "amber" : statusTone(state);
   const working = state?.status === "agent_working";
   // Konzultácia (Part 3): a terminal version (current_stage === 'done') is in read-only advisory mode.
   const consultMode = !!state && state.current_stage === "done";
