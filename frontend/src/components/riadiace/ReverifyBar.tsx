@@ -17,11 +17,11 @@
 // the state is settled (done / awaiting_manazer). So the warning shows exactly when re-verify is meaningful.
 
 import { useState } from "react";
-import { CircleAlert, RotateCw } from "lucide-react";
+import { RotateCw } from "lucide-react";
 
 import { postPipelineActionApi, type PipelineBoard } from "@/services/api/pipeline";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
-import ErrorNote from "@/components/common/ErrorNote";
+import WarningActionBar from "@/components/common/WarningActionBar";
 
 interface Props {
   board: PipelineBoard | null;
@@ -56,34 +56,25 @@ export default function ReverifyBar({ board, versionId, onBoard }: Props) {
   }
 
   return (
-    <div className="border-t border-[var(--color-border-default)] bg-[var(--color-surface)]">
-      {/* Honest stale-PASS warning — the green "overená" no longer reflects the current code. */}
-      <div className="flex items-center gap-2 border-l-4 border-l-[var(--color-state-warning-fg)] bg-[var(--color-state-warning-bg)] px-4 py-2.5 text-sm font-semibold text-[var(--color-state-warning-fg)]">
-        <CircleAlert className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
-        <span>Overenie je zastarané — kód sa odvtedy zmenil</span>
-      </div>
-
-      <div className="flex flex-col gap-2 px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-xs text-[var(--color-text-muted)]">
-            Táto verzia už bola overená, ale kód sa odvtedy posunul za overený bod — zelené „overená" už nemusí
-            platiť.{" "}
-            {isHotovoDrift
-              ? "„Over znova“ znova čestne prekontroluje aplikáciu proti aktuálnemu kódu; ak je beh v poriadku, verzia sa automaticky znovu označí ako hotová (bez ďalšieho kliku)."
-              : "„Over znova“ nechá Audítora zopakovať overenie proti aktuálnemu kódu (bez opravy, bez novej stavby)."}
-          </p>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={submitting}
-            className="flex shrink-0 items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <RotateCw className={`h-3.5 w-3.5 ${submitting ? "animate-spin" : ""}`} aria-hidden="true" />
-            {submitting ? "Overujem…" : "Over znova"}
-          </button>
-        </div>
-        <ErrorNote error={error} />
-      </div>
-    </div>
+    // Honest stale-PASS warning — the green "overená" no longer reflects the current code. Chrome shared
+    // with the deploy screen's notice (WarningActionBar) so the two ends of this flow can't drift apart.
+    <WarningActionBar
+      variant="docked"
+      title="Overenie je zastarané — kód sa odvtedy zmenil"
+      action={{
+        label: submitting ? "Overujem…" : "Over znova",
+        icon: RotateCw,
+        spinning: submitting,
+        disabled: submitting,
+        onClick: submit,
+      }}
+      error={error}
+    >
+      Táto verzia už bola overená, ale kód sa odvtedy posunul za overený bod — zelené „overená" už nemusí
+      platiť.{" "}
+      {isHotovoDrift
+        ? "„Over znova“ znova čestne prekontroluje aplikáciu proti aktuálnemu kódu; ak je beh v poriadku, verzia sa automaticky znovu označí ako hotová (bez ďalšieho kliku)."
+        : "„Over znova“ nechá Audítora zopakovať overenie proti aktuálnemu kódu (bez opravy, bez novej stavby)."}
+    </WarningActionBar>
   );
 }

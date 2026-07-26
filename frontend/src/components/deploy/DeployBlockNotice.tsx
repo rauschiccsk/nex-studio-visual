@@ -19,7 +19,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { CircleAlert, FolderOpen, Loader2, RotateCw } from "lucide-react";
 
-import ErrorNote from "@/components/common/ErrorNote";
+import WarningActionBar from "@/components/common/WarningActionBar";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { postPipelineActionApi } from "@/services/api/pipeline";
 import type { DeployBlock } from "@/types/deploy";
@@ -136,39 +136,29 @@ export default function DeployBlockNotice({ block, projectSlug, onReverifyStarte
   }
 
   const running = block.cause === "reverify_running";
+  const isReverify = action?.icon === "reverify";
 
   return (
-    <div className="mb-4 overflow-hidden rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface)]">
-      <div className="flex items-center gap-2 border-l-4 border-l-[var(--color-state-warning-fg)] bg-[var(--color-state-warning-bg)] px-4 py-2.5 text-sm font-semibold text-[var(--color-state-warning-fg)]">
-        {running ? (
-          <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin" aria-hidden="true" />
-        ) : (
-          <CircleAlert className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
-        )}
-        <span>{title}</span>
-      </div>
-
-      <div className="flex flex-col gap-2 px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-xs text-[var(--color-text-muted)]">{body}</p>
-          {action && (
-            <button
-              type="button"
-              onClick={action.run}
-              disabled={submitting}
-              className="flex shrink-0 items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {action.icon === "reverify" ? (
-                <RotateCw className={`h-3.5 w-3.5 ${submitting ? "animate-spin" : ""}`} aria-hidden="true" />
-              ) : (
-                <FolderOpen className="h-3.5 w-3.5" aria-hidden="true" />
-              )}
-              {action.label}
-            </button>
-          )}
-        </div>
-        <ErrorNote error={error} />
-      </div>
-    </div>
+    // Chrome shared with ReverifyBar (WarningActionBar) — the two ends of the drift flow, one click apart.
+    <WarningActionBar
+      variant="card"
+      title={title}
+      icon={running ? Loader2 : CircleAlert}
+      iconSpinning={running}
+      action={
+        action
+          ? {
+              label: action.label,
+              icon: isReverify ? RotateCw : FolderOpen,
+              spinning: isReverify && submitting,
+              disabled: submitting,
+              onClick: action.run,
+            }
+          : null
+      }
+      error={error}
+    >
+      {body}
+    </WarningActionBar>
   );
 }

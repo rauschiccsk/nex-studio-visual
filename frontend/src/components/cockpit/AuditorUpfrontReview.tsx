@@ -13,6 +13,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import type { PipelineMessage } from "../../services/api/pipeline";
+import { WARNING_CHROME } from "../common/WarningActionBar";
 
 interface UpfrontVerdict {
   findings: string[];
@@ -76,8 +77,9 @@ export function AuditorUpfrontReview({ messages }: { messages: PipelineMessage[]
   // (an absence that reads as a clean "bez nálezov" pass).
   const reviewDidNotRun = failureSeq >= 0 && (!verdict || failureSeq > verdict.seq);
   if (reviewDidNotRun) {
+    // Shares the amber TOKENS with WarningActionBar, not its structure (no action, no error tail).
     return (
-      <div className="flex-shrink-0 border-b border-l-4 border-l-[var(--color-state-warning-fg)] bg-[var(--color-state-warning-bg)] px-4 py-3">
+      <div className={`flex-shrink-0 border-b ${WARNING_CHROME} px-4 py-3`}>
         <div className="flex items-center gap-2 text-sm font-semibold text-[var(--color-state-warning-fg)]">
           <Bell className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
           <span>Predbežná previerka neprebehla — posúď návrh sám</span>
