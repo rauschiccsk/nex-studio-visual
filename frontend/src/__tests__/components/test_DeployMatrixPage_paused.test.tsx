@@ -14,11 +14,12 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 import DeployMatrixPage from "@/components/deploy/DeployMatrixPage";
-import { getDeployMatrix } from "@/services/api/deploy";
+import { deployCustomer, getDeployMatrix } from "@/services/api/deploy";
+import { ApiError } from "@/services/api";
 import type { DeployBlockCause, DeployMatrix } from "@/types/deploy";
 
 vi.mock("react-router-dom", async (importOriginal) => {
@@ -119,5 +120,27 @@ describe("DeployMatrixPage — no instruction the manager cannot follow", () => 
     const accept = await screen.findByRole("button", { name: /Akceptovať/ });
     expect(accept).toBeEnabled();
     expect(screen.queryByText(/akceptáciu robí Manažér/i)).not.toBeInTheDocument();
+  });
+
+  it("shows the deploy gate's own Slovak sentence instead of a generic 'zadané údaje' (v4.0.58)", async () => {
+    // The gates answer 422 with a curated sentence naming exactly what to fix. Humanising it would print
+    // "Nasadenie zlyhalo — zadané údaje nie sú v poriadku." and hide the truth in a detail nobody renders.
+    vi.mocked(getDeployMatrix).mockResolvedValue(
+      matrix({
+        verified_versions: ["0.2.0"],
+        deployability: { cause: "ok", version_number: null, version_id: null, can_reverify: false },
+        can_accept: true,
+      }),
+    );
+    const gateMessage =
+      "Nasadenie sa nedá spustiť: táto aplikácia sa otvára jedným kliknutím (bez hesla), ale nedeklaruje " +
+      "nastavenia, cez ktoré sa to zapája. Doplň do jej `.env.example` tieto názvy: MANAGER_LAUNCH_SIGNING_KEY.";
+    vi.mocked(deployCustomer).mockRejectedValueOnce(new ApiError(422, gateMessage));
+
+    render(<DeployMatrixPage environment="uat" />);
+    fireEvent.click(await screen.findByRole("button", { name: /Nasadiť/ }));
+
+    await waitFor(() => expect(screen.getByText(/nedeklaruje nastavenia/)).toBeInTheDocument());
+    expect(screen.queryByText(/zadané údaje nie sú v poriadku/)).not.toBeInTheDocument();
   });
 });

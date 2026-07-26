@@ -78,6 +78,16 @@ VERIFIED_STAGE = "done"
 # The version a first PROD deploy bumps the project to (§3.6).
 FIRST_PROD_VERSION = "v1.0.0"
 
+# v4.0.58 — the launch contract a token-launch app MUST declare in its own ``.env.example``.
+#
+# ``uat_provisioner._render_env`` keys off these EXACT names: it recognises a token-launch app by
+# ``MANAGER_LAUNCH_SIGNING_KEY`` appearing there, and only renders keys the app actually declares. An app
+# that names the same thing differently (nex-websites shipped ``NEX_MANAGER_LAUNCH_KEY``) is therefore not
+# recognised — its key is SYNTHESISED into a random value nobody else knows, the deploy reports success, and
+# the breakage only surfaces when a human clicks "Spustiť" hours later (incident 2026-07-26). Declaring all
+# three is the difference between a launchable instance and a dead one, so it is checked BEFORE deploying.
+LAUNCH_ENV_KEYS = ("MANAGER_LAUNCH_SIGNING_KEY", "MANAGER_MODULE_SLUG", "MANAGER_DEPLOY_SLUG")
+
 # A "deploy runner" provisions + brings up a customer instance and returns
 # ``(ok, detail, url)``. The default points at the real provisioner + docker
 # compose up (orchestrator-owned, async); tests inject a fake so no docker is
@@ -370,6 +380,60 @@ def deployability(
         }
 
     return {"cause": DEPLOY_CAUSE_NONE_FINISHED, **none_implicated}
+
+
+def missing_launch_env_keys(project_slug: str) -> list[str]:
+    """Which :data:`LAUNCH_ENV_KEYS` a token-launch app fails to declare (v4.0.58). Empty list = wireable.
+
+    Reads the SAME MERGED source ``uat_provisioner.generate_uat_env`` renders from — the project's
+    ``.env.example`` PLUS the backend service's ``environment:`` block in its ``docker-compose.yml`` — because
+    an app may legitimately declare its env in either. Checking only ``.env.example`` would have blocked BOTH
+    live token-launch apps (nex-shopify and nex-websites declare these three in compose, not in the env file),
+    i.e. it would have broken working deploys to prevent a broken one.
+
+    Fails OPEN on an unreadable/unparseable project: if we cannot tell, we must not block a deploy on a guess —
+    the post-deploy :func:`uat_launch_wired` proof still catches a genuinely unlaunchable instance, and it
+    catches it on evidence rather than on inference.
+    """
+    from backend.services import claude_agent
+
+    project_path = claude_agent.PROJECTS_ROOT / project_slug
+    declared: dict = {}
+    try:
+        declared.update(uat_provisioner._parse_env_file(project_path / ".env.example"))
+    except OSError:
+        pass
+    try:
+        services = uat_provisioner.load_source_compose(project_path)["services"]
+        be_service = uat_provisioner.identify_service_roles(services)["backend"]
+        be_env = (services.get(be_service) or {}).get("environment") or {}
+        if isinstance(be_env, dict):
+            declared.update(be_env)
+    except (OSError, KeyError, ValueError, TypeError):
+        if not declared:
+            return []  # nothing readable at all → do not guess; the post-deploy proof decides
+    return [key for key in LAUNCH_ENV_KEYS if key not in declared]
+
+
+def uat_launch_wired(customer: Customer, project: Project) -> bool:
+    """Can NEX Studio actually mint a launch ticket for this customer's deployed UAT? (v4.0.58)
+
+    The behavioural proof that the deploy delivered a USABLE instance: it reads the deployed ``.env`` exactly
+    as the "Spustiť" button does and mints against it. Catches what the up-front declaration gate cannot —
+    an app that names everything correctly but whose key was never wired (no paired NEX Manager), which the
+    provisioner writes as EMPTY rather than a mismatching synthetic.
+
+    The minted URL is DISCARDED; only the fact that minting succeeded is returned. No secret is read into
+    the caller (§4) — the key stays inside ``uat_launch``.
+    """
+    from backend.services import uat_launch
+
+    return (
+        uat_launch.build_uat_launch_url(
+            _customer_dir_slug(customer), project.slug, _instance_url(customer, "uat", project)
+        )
+        is not None
+    )
 
 
 def accepted_versions(db: Session, customer_id: UUID) -> list[str]:
@@ -702,6 +766,21 @@ async def deploy(
                 "zákazník ho nemá nastavené. Najprv nastav heslo zákazníka v sekcii Zákazníci a skús to znova."
             )
 
+    # Launch-contract gate (v4.0.58, sibling of the admin-password gate above). A ``token`` app is opened by a
+    # one-click launch ticket, not a password — so if it does not declare the launch vars under the names the
+    # provisioner keys off, NEX Studio cannot wire it and the deployed instance has NO way in. That used to
+    # deploy "successfully" and only fail hours later, at the click (incident 2026-07-26, nex-websites). Block
+    # BEFORE any teardown and name exactly what is missing, so the fix is obvious without reading our source.
+    if project.auth_mode == "token":
+        _missing = missing_launch_env_keys(project.slug)
+        if _missing:
+            raise ValueError(
+                "Nasadenie sa nedá spustiť: táto aplikácia sa otvára jedným kliknutím (bez hesla), ale "
+                "nedeklaruje nastavenia, cez ktoré sa to zapája. Doplň do jej `.env.example` tieto názvy: "
+                + ", ".join(_missing)
+                + ". Bez nich by sa appka nasadila, ale nedala by sa otvoriť."
+            )
+
     # The deployed app's initial admin login (username ``admin``) = the customer's OWN secret (set in Zákazníci),
     # so the manager KNOWS it — otherwise the app seeds ``admin`` with a random synthetic nobody can discover and
     # the manager is locked out of their own instance (self-sufficiency kernel, 2026-07-11). Read via the
@@ -723,6 +802,18 @@ async def deploy(
         force_fresh=force_fresh,
         admin_password=admin_password,
     )
+
+    # v4.0.58 — prove the UAT instance is actually OPENABLE before calling the deploy a success. A token-launch
+    # app whose ticket cannot be minted is a running instance with no way in; reporting green would be the same
+    # unverified-success this batch keeps removing. Runs only where the cockpit's "Spustiť" applies (UAT +
+    # token), and only on an otherwise-successful deploy — a failed deploy already reads red.
+    if ok and environment == "uat" and project.auth_mode == "token" and not uat_launch_wired(customer, project):
+        ok = False
+        detail = (
+            f"{detail} | Aplikácia sa nasadila, ale nedá sa otvoriť: chýba zapojenie jednoklikového "
+            "spustenia (podpisový kľúč z NEX Managera). Skontroluj, či je projekt spárovaný s NEX Managerom, "
+            "a nasaď znova."
+        )
 
     # Graduation (§3.6): on a SUCCESSFUL first PROD deploy, promote the BUILT version to v1.0.0 IN
     # PLACE + mark it released — never spin up a new empty v1.0.0 shell beside it (which would strand

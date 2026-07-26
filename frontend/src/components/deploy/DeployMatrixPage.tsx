@@ -270,7 +270,19 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
         } else if (err.status === 403) {
           setRowMsg(row.customer_id, "Nasadenie je dostupné len pre rolu Manažér.");
         } else {
-          setRowMsg(row.customer_id, humanizeApiError(err, "Nasadenie zlyhalo").message);
+          // v4.0.58: the deploy gates (missing admin password, missing launch wiring) answer with a curated
+          // plain-Slovak sentence that NAMES what to fix. Passing those through `humanizeApiError` replaced
+          // them with "zadané údaje nie sú v poriadku" and buried the real one in a technical detail this
+          // page never renders — the same silence this batch keeps removing, one layer down. Show a curated
+          // backend sentence as-is (mirrors the 'Spustiť' handler above); anything else stays humanised.
+          const curated =
+            (err.status === 400 || err.status === 422) &&
+            typeof err.message === "string" &&
+            err.message &&
+            err.message !== "[object Object]"
+              ? err.message
+              : null;
+          setRowMsg(row.customer_id, curated ?? humanizeApiError(err, "Nasadenie zlyhalo").message);
         }
       } else {
         setRowMsg(row.customer_id, "Sieťová chyba pri nasadení.");
