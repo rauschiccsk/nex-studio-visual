@@ -26,7 +26,6 @@ import CustomersPage from "./pages/CustomersPage";
 import UatPage from "./pages/UatPage";
 import ProdPage from "./pages/ProdPage";
 import SettingsPage from "./pages/SettingsPage";
-import AccountPage from "./pages/AccountPage";
 
 function App() {
   const username = useAuthStore((s) => s.user?.username);
@@ -89,7 +88,8 @@ function App() {
             <Route path="credentials" element={<CredentialsPage />} />
             <Route path="updates" element={<UpdatesPage />} />
             <Route path="settings" element={<SettingsPage />} />
-            <Route path="account" element={<AccountPage />} />
+            {/* v4.0.50: "Moje konto" is now a tab inside Nastavenia — redirect the old standalone page. */}
+            <Route path="account" element={<Navigate to="/settings" replace />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

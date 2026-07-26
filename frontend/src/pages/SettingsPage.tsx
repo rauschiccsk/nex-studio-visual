@@ -4,6 +4,7 @@ import {
   SystemSettingsPanel,
   AgentsPanel,
   UsersPanel,
+  MyAccountPanel,
   SessionsPanel,
   type SettingsKitConfig,
   type SettingsCategory,
@@ -20,6 +21,7 @@ import {
   deleteUserApi,
   changePasswordApi,
 } from "@/services/api/users";
+import { updateMyProfileApi } from "@/services/api/auth";
 import {
   listSystemSettingsApi,
   updateSystemSettingApi,
@@ -146,10 +148,14 @@ const USER_FIELD_SCHEMA: UserFieldSchema = {
 };
 
 const SETTINGS_KIT_CONFIG: SettingsKitConfig = {
-  tabs: ["system", "agents", "users", "sessions"],
+  // v4.0.50: "Moje konto" (self-service account) sits next to "Používatelia" (admin) — account management is
+  // systematically IN Settings, not the sidebar. konto is visible to EVERY role (falls into the `: true`
+  // branch below); users stays ri-only, sessions ha+.
+  tabs: ["system", "agents", "konto", "users", "sessions"],
   labels: {
     system: "Systém",
     agents: "Agenti",
+    konto: "Moje konto",
     users: "Používatelia",
     sessions: "Relácie",
   },
@@ -358,6 +364,27 @@ export default function SettingsPage() {
   const role = user?.role ?? "";
   const isRi = role === "ri";
   const isHaOrAbove = role === "ri" || role === "ha";
+  // "Moje konto" (v4.0.50): self-profile save + own-password change need the auth store (re-login after a
+  // password change, because it bumps token_version → the JWT is dead; refresh the store after a profile save).
+  const login = useAuthStore((s) => s.login);
+  const fetchMe = useAuthStore((s) => s.fetchMe);
+
+  const handleSaveMyProfile = useCallback(
+    async (data: { email: string; first_name: string; last_name: string; telegram_chat_id: string }) => {
+      await updateMyProfileApi(data);
+      await fetchMe(); // refresh the store so the sidebar display name / telegram reflect the save
+    },
+    [fetchMe],
+  );
+
+  const handleChangeMyPassword = useCallback(
+    async (currentPassword: string, newPassword: string) => {
+      if (!user) return;
+      await changePasswordApi(user.id, newPassword, currentPassword);
+      await login(user.username, newPassword); // token_version bumped → re-login for a live session
+    },
+    [user, login],
+  );
 
   // ── System settings ──
   const [settings, setSettings] = useState<SystemSettingRead[]>([]);
@@ -581,6 +608,24 @@ export default function SettingsPage() {
             onSave={handleSaveAgent}
           />
         ),
+        konto: user ? (
+          // "Moje konto" (v4.0.50): the self-scoped Users form — edit own name/e-mail/Telegram + change
+          // own password. Username (login) + role (access) are read-only. Every role sees this tab.
+          <MyAccountPanel
+            user={{
+              username: user.username,
+              role,
+              email: user.email,
+              first_name: user.first_name,
+              last_name: user.last_name,
+              telegram_chat_id: user.telegram_chat_id,
+            }}
+            roleLabel={USER_ROLE_LABELS[role] ?? role}
+            onSaveProfile={handleSaveMyProfile}
+            onChangePassword={handleChangeMyPassword}
+            passwordMinLength={5}
+          />
+        ) : null,
         users: (
           // canManage is unconditionally true: the old Users tab had no FE role
           // gate (the backend enforces authz), so to keep zero behaviour change
