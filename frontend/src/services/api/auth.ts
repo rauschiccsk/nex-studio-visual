@@ -109,3 +109,11 @@ export function getMeApi(): Promise<AuthUser> {
 export function updateMyProfileApi(data: SelfProfileUpdate): Promise<AuthUser> {
   return api.patch<AuthUser>("/auth/me", data);
 }
+
+/**
+ * Send a TEST Telegram to the current user's saved chat_id and report whether it arrived (v4.0.52).
+ * Maps to ``POST /auth/me/telegram-test``; lets a non-expert confirm their Telegram id actually works.
+ */
+export function telegramTestApi(): Promise<{ ok: boolean; detail: string }> {
+  return api.post<{ ok: boolean; detail: string }>("/auth/me/telegram-test", {});
+}

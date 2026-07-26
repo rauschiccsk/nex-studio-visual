@@ -21,7 +21,7 @@ import {
   deleteUserApi,
   changePasswordApi,
 } from "@/services/api/users";
-import { updateMyProfileApi } from "@/services/api/auth";
+import { updateMyProfileApi, telegramTestApi } from "@/services/api/auth";
 import {
   listSystemSettingsApi,
   updateSystemSettingApi,
@@ -623,6 +623,7 @@ export default function SettingsPage() {
             roleLabel={USER_ROLE_LABELS[role] ?? role}
             onSaveProfile={handleSaveMyProfile}
             onChangePassword={handleChangeMyPassword}
+            onTestTelegram={telegramTestApi}
             passwordMinLength={5}
           />
         ) : null,

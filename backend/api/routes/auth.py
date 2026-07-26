@@ -17,6 +17,7 @@ from backend.db.session import get_db
 from backend.schemas.auth import AuthUser, LoginRequest, LoginResponse
 from backend.schemas.user import SelfProfileUpdate
 from backend.services import auth as auth_service
+from backend.services import notify
 from backend.services import user as user_service
 
 router = APIRouter(tags=["Auth"])
@@ -165,3 +166,21 @@ def update_me(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     db.refresh(user)
     return AuthUser.model_validate(user)
+
+
+@router.post(
+    "/me/telegram-test",
+    status_code=status.HTTP_200_OK,
+)
+async def telegram_test(
+    current_user: User = Depends(get_current_user),
+) -> dict[str, object]:
+    """Send a test Telegram message to the current user's OWN chat_id and REPORT whether it arrived
+    (v4.0.52). Lets a non-expert confirm their Telegram id actually works — a silent failure ("chat not
+    found" because the bot was never started / the id is wrong) was the onboarding gap. No body; uses the
+    stored ``telegram_chat_id``. Returns ``{ok, detail}`` (plain-Slovak detail)."""
+    ok, detail = await notify.send_telegram_checked(
+        "✅ NEX Studio — testovacie upozornenie. Doručovanie na tvoj Telegram funguje.",
+        current_user.telegram_chat_id or "",
+    )
+    return {"ok": ok, "detail": detail}

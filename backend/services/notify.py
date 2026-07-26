@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -56,3 +57,41 @@ async def send_telegram(message: str, chat_id: str) -> None:
         await proc.wait()
     except Exception:
         logger.exception("Telegram notify failed (chat_id suppressed)")
+
+
+async def send_telegram_checked(message: str, chat_id: str) -> tuple[bool, str]:
+    """Send ``message`` to ``chat_id`` and REPORT the outcome — for the self-service "Poslať test" button
+    (v4.0.52). Runs the notify script in ``NOTIFY_CHECK=1`` mode, which prints ``TELEGRAM_OK`` or
+    ``TELEGRAM_FAIL:<description>`` parsed from the Telegram API response (the bot token is NEVER printed —
+    it lives only in the request URL, absent from the response body). Returns ``(ok, plain-Slovak detail)``.
+    Never raises. A non-expert uses this to learn their chat_id actually works (silent-fail was the gap)."""
+    chat_id = chat_id.strip() if chat_id else chat_id
+    if not chat_id:
+        return False, "Telegram chat ID nie je nastavené — najprv ho zadaj a ulož."
+    if not NOTIFY_SCRIPT.exists():
+        return False, "Odosielač Telegramu nie je na serveri dostupný."
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "bash",
+            str(NOTIFY_SCRIPT),
+            message,
+            chat_id,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+            env={**os.environ, "NOTIFY_CHECK": "1"},
+        )
+        out, _ = await proc.communicate()
+    except Exception:
+        logger.exception("Telegram checked send failed (chat_id suppressed)")
+        return False, "Odoslanie testu zlyhalo (chyba servera)."
+    text = (out or b"").decode("utf-8", "replace").strip()
+    if text.startswith("TELEGRAM_OK"):
+        return True, "Testovacia správa bola odoslaná — pozri Telegram."
+    if text.startswith("TELEGRAM_FAIL:"):
+        detail = text[len("TELEGRAM_FAIL:") :].strip() or "Nedoručené."
+        # "chat not found" is the classic "bot not started / wrong id" case — give the actionable hint.
+        if "chat not found" in detail.lower():
+            return False, "Nedoručené (chat not found) — spustil si nášho bota (/start) a je chat ID správne?"
+        return False, f"Nedoručené: {detail}"
+    # No marker on stdout → the script no-oped early (missing token / server env).
+    return False, "Telegram nie je na serveri nakonfigurovaný."

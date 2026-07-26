@@ -57,6 +57,25 @@ if [ "${NOTIFY_DRY_RUN:-}" = "1" ]; then
     exit 0
 fi
 
+# CHECKED mode (NOTIFY_CHECK=1) — for the "Poslať test" self-service button (v4.0.52): capture the API
+# RESPONSE and report the outcome so the caller (backend) can tell a valid chat_id from an unreachable one.
+# TOKEN-SAFE: the token lives ONLY in the request URL; the Telegram RESPONSE body never contains it — we
+# print only the parsed ``ok`` / ``description`` from that body. Prints ``TELEGRAM_OK`` (exit 0) or
+# ``TELEGRAM_FAIL:<description>`` (exit 3). The default path below stays fire-and-forget (stdout suppressed).
+if [ "${NOTIFY_CHECK:-}" = "1" ]; then
+    RESP="$(curl -s -m 10 -X POST \
+        "https://api.telegram.org/bot${TELEGRAM_ICC_BOT_TOKEN}/sendMessage" \
+        -d "chat_id=${CHAT_ID}" \
+        --data-urlencode "text=${MSG}" 2>/dev/null || true)"
+    if printf '%s' "$RESP" | grep -q '"ok":true'; then
+        echo "TELEGRAM_OK"
+        exit 0
+    fi
+    DESC="$(printf '%s' "$RESP" | grep -oE '"description":"[^"]*"' | head -1 | sed 's/^"description":"//; s/"$//')"
+    echo "TELEGRAM_FAIL:${DESC:-neznáma chyba (žiadna odpoveď)}"
+    exit 3
+fi
+
 # Suppress all curl output (stdout + stderr) so the token embedded in the URL
 # can never surface in logs; never fail the session.
 curl -s -m 10 -X POST \
