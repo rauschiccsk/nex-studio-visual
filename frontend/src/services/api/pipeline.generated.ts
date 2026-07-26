@@ -166,6 +166,29 @@ export interface paths {
         patch: operations["update_me_api_v1_auth_me_patch"];
         trace?: never;
     };
+    "/api/v1/auth/me/telegram-test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Telegram Test
+         * @description Send a test Telegram message to the current user's OWN chat_id and REPORT whether it arrived
+         *     (v4.0.52). Lets a non-expert confirm their Telegram id actually works — a silent failure ("chat not
+         *     found" because the bot was never started / the id is wrong) was the onboarding gap. No body; uses the
+         *     stored ``telegram_chat_id``. Returns ``{ok, detail}`` (plain-Slovak detail).
+         */
+        post: operations["telegram_test_api_v1_auth_me_telegram_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/refresh": {
         parameters: {
             query?: never;
@@ -5446,6 +5469,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    telegram_test_api_v1_auth_me_telegram_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
         };
