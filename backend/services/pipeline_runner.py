@@ -375,9 +375,13 @@ async def _maybe_notify(db, version_id: uuid.UUID, state: PipelineState) -> None
     # paused the build themselves just acted, so pinging them about their own pause would be spurious noise.
     if state.status == "paused" and not _is_token_stop_pause(db, version_id):
         return
-    if registry.active_director_ids(version_id):
-        # a Director is on the board AND not "away" (E6, CR-NS-038) — no out-of-band nudge. An away
-        # Director (board open but stepped away) is NOT active, so the ping fires.
+    # E6 (CR-NS-038; multi-user fix v4.0.51): ping the AWAY user(s) even if OTHER non-away directors are
+    # watching — an away user explicitly asked for the nudge (a Junior who OWNS the project stepped away
+    # while the admin happens to watch must still be pinged). Only the owner-FALLBACK nudge (nobody stepped
+    # away) is suppressed when an active director is on the board — they will see it there. Was: any active
+    # director suppressed ALL nudges, so an away Nazar never got pinged while Zoltán watched.
+    away = registry.away_director_ids(version_id)
+    if registry.active_director_ids(version_id) and not away:
         return
     chat_ids = _notify_chat_ids(db, version_id)
     if not chat_ids:

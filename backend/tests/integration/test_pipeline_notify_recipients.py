@@ -125,3 +125,61 @@ async def test_non_settled_status_no_nudge(monkeypatch) -> None:
 
     await pipeline_runner._maybe_notify(None, uuid.uuid4(), types.SimpleNamespace(status="agent_working"))
     assert sent == []
+
+
+@pytest.mark.asyncio
+async def test_away_user_pinged_even_when_another_active_director_watches(db_session, monkeypatch) -> None:
+    """v4.0.51 multi-user fix: an AWAY user is pinged even while ANOTHER non-away director watches the same
+    board (Nazar 'Preč' + Zoltán 'pri počítači' → Nazar STILL gets his ping). Before, any active director
+    suppressed ALL nudges, so the away owner was silenced whenever the admin had the board open."""
+    away = User(
+        username="away-owner",
+        email="away-owner@isnex.ai",
+        password_hash="x",
+        role="shu",
+        telegram_chat_id="555111",
+    )
+    watcher = User(
+        username="active-admin",
+        email="active-admin@isnex.ai",
+        password_hash="x",
+        role="ri",
+        telegram_chat_id="222333",
+    )
+    db_session.add_all([away, watcher])
+    db_session.flush()
+    project = Project(
+        name="Multi Proj",
+        slug="multi-proj",
+        type="standard",
+        auth_mode="password",
+        description="",
+        created_by=away.id,
+        owner_id=away.id,
+    )
+    db_session.add(project)
+    db_session.flush()
+    version = Version(project_id=project.id, version_number="v1.0.0", status="planned")
+    db_session.add(version)
+    db_session.flush()
+
+    away_ws, watcher_ws = object(), object()
+    await registry.connect(version.id, away_ws, away.id)
+    await registry.set_away(version.id, away_ws, True)
+    await registry.connect(version.id, watcher_ws, watcher.id)  # active, NOT away
+
+    sent: list[tuple[str, str]] = []
+
+    async def fake_send(message: str, chat_id: str) -> None:
+        sent.append((message, chat_id))
+
+    monkeypatch.setattr(pipeline_runner.notify, "send_telegram", fake_send)
+
+    try:
+        await pipeline_runner._maybe_notify(db_session, version.id, types.SimpleNamespace(status="awaiting_manazer"))
+    finally:
+        await registry.disconnect(version.id, away_ws)
+        await registry.disconnect(version.id, watcher_ws)
+
+    # ONLY the away user's own chat is pinged — never the active watcher's.
+    assert [chat for _, chat in sent] == ["555111"]
