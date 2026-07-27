@@ -64,12 +64,14 @@ Doc tree (`customer-requirements.md` → `development-spec.md` → BE/FE špec) 
 
 Release verification stojí na dvoch lacných, opakovateľných pilieroch:
 
-1. **Upfront — agent Zákazník (Gate E):** systematicky vyhľadáva nedomyslené a nejednoznačné časti zadania **pred** implementáciou. Diery v dokumentácii sa chytia skôr, než sa minie build.
+1. **Upfront — predbežná previerka Audítora:** nezávislý Auditor systematicky vyhľadáva nedomyslené a nejednoznačné časti **Špecifikácie a Návrhu pred implementáciou**; jeho posudok sa Manažérovi zobrazí pri schvaľovacom bode po fáze Návrh. Diery v dokumentácii sa chytia skôr, než sa minie build. *(CR-V2-013 — prevzalo funkciu pôvodného agenta Zákazník / Gate E, ktorý bol z produktu odstránený.)*
 2. **Pri vydaní — behaviorálne overenie:** appka sa reálne spustí (`docker compose up`) a beží proti nej spec-odvodená sada akceptačných (behaviorálnych) skúšok — testujú cez rozhranie, či robí to, čo dokumentácia sľubuje (nezávisle od vnútornej stavby). Nezávislý posudok, lacný a opakovateľne použiteľný. Plus per-task Auditor v build slučke chytá odchýlky od spec priebežne (kreatívne dopĺňanie mimo §2.4).
 
 Release verification je Auditorova primárna úloha pred povolením `released` stavu verzie.
 
-**Retired (2026-06-19): Dual-Build Audit (Tiborov test).** Pôvodný princíp — postaviť projekt druhýkrát nezávisle (Build B) a porovnať s Build A — bol najdrahší (celý druhý build), najšumivejší (dve nezávislé AI stavby zložitého zadania sa vždy legitímne líšia → falošné poplachy + drahé triedenie) a najneskorší (spätná väzba až po builde A) spôsob kontroly kvality dokumentácie. Vznikol v čase **pred** agentom Zákazníkom; ten dnes pokrýva upfront spec-completeness lacnejšie a skôr, a behaviorálne overenie dáva nezávislý posudok bez druhého buildu. Director decision 2026-06-19.
+**Predbežná previerka je povinná pred implementáciou.** Ak neprebehla alebo sa nedokončila, Manažér to musí vidieť pri schvaľovaní a posúdiť Návrh sám — nikdy sa nesmie tváriť, že previerka prešla bez nálezov.
+
+**Retired (2026-06-19): Dual-Build Audit (Tiborov test).** Pôvodný princíp — postaviť projekt druhýkrát nezávisle (Build B) a porovnať s Build A — bol najdrahší (celý druhý build), najšumivejší (dve nezávislé AI stavby zložitého zadania sa vždy legitímne líšia → falošné poplachy + drahé triedenie) a najneskorší (spätná väzba až po builde A) spôsob kontroly kvality dokumentácie. Vznikol v čase **pred upfront previerkou; tú dnes robí nezávislý Auditor** — lacnejšie a skôr — a behaviorálne overenie dáva nezávislý posudok bez druhého buildu. Director decision 2026-06-19.
 
 ---
 
