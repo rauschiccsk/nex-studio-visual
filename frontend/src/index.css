@@ -23,7 +23,14 @@
   body {
     /* CR-NS-058: the shared theme-aware tokens (dark = slate-900/100 via the .dark default) — a ≤1-shade
        shift from the old slate-950/100. Studio stays dark via <html class="dark">. */
-    @apply bg-[var(--color-canvas)] text-[var(--color-text-primary)] font-sans antialiased;
+    @apply bg-[var(--color-canvas)] text-[var(--color-text-primary)] font-sans;
+    /* NO `antialiased` here. Despite the name it improves nothing off macOS: it sets
+       -webkit-font-smoothing: antialiased, which DISABLES subpixel (LCD) rendering and forces
+       grayscale — on Linux and Windows that makes text visibly thinner, softer and lower in
+       contrast. The Director read the result as "poor quality, hard to read" (2026-07-27) and he
+       was right. Without it the OS uses its own subpixel rendering, which desktop text is tuned
+       for. Removed AFTER Inter itself started shipping (v4.0.67) — the font was only half the
+       problem. */
   }
 }
 
