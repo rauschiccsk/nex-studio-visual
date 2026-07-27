@@ -114,7 +114,7 @@ CONSULT_READ_ONLY_TOOLS: list[str] = ["Read", "Grep", "Glob"]
 #: (CR-V2-028). Both the AI Agent (the doer) and the Auditor (the verifier) are strong roles that own /
 #: verify the whole build, so the unconfigured default must be the strongest model — NOT the CLI's own
 #: default (which is a small/fast model). A per-user ``user_agent_settings`` row still overrides this.
-DEFAULT_AGENT_MODEL = "claude-opus-4-8"
+DEFAULT_AGENT_MODEL = "claude-opus-5"
 
 #: Default model the AI Agent spawns its ephemeral HELPERS on (Agent/Task tool) when the owner has set no
 #: explicit ``helper_model`` (CR-V2-038). Haiku by design: the AI Agent does the hard CORE itself on its own

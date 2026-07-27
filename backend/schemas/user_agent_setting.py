@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict
 # the user's ri/ha/shu access role.
 PipelineAgentRole = Literal["ai_agent", "auditor"]
 # Dispatchable model IDs (claude --model accepts the full name).
-AgentModel = Literal["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"]
+AgentModel = Literal["claude-opus-5", "claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"]
 # The 5 effort levels claude --effort accepts (NO ultracode — see module docstring).
 AgentEffort = Literal["low", "medium", "high", "xhigh", "max"]
 

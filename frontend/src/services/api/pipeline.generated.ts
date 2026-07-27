@@ -4791,9 +4791,9 @@ export interface components {
             /** Effort */
             effort?: ("low" | "medium" | "high" | "xhigh" | "max") | null;
             /** Helper Model */
-            helper_model?: ("claude-opus-4-8" | "claude-sonnet-4-6" | "claude-haiku-4-5-20251001") | null;
+            helper_model?: ("claude-opus-5" | "claude-opus-4-8" | "claude-sonnet-4-6" | "claude-haiku-4-5-20251001") | null;
             /** Model */
-            model?: ("claude-opus-4-8" | "claude-sonnet-4-6" | "claude-haiku-4-5-20251001") | null;
+            model?: ("claude-opus-5" | "claude-opus-4-8" | "claude-sonnet-4-6" | "claude-haiku-4-5-20251001") | null;
         };
         /**
          * UserAgentSettingUpsert
@@ -4803,9 +4803,9 @@ export interface components {
             /** Effort */
             effort?: ("low" | "medium" | "high" | "xhigh" | "max") | null;
             /** Helper Model */
-            helper_model?: ("claude-opus-4-8" | "claude-sonnet-4-6" | "claude-haiku-4-5-20251001") | null;
+            helper_model?: ("claude-opus-5" | "claude-opus-4-8" | "claude-sonnet-4-6" | "claude-haiku-4-5-20251001") | null;
             /** Model */
-            model?: ("claude-opus-4-8" | "claude-sonnet-4-6" | "claude-haiku-4-5-20251001") | null;
+            model?: ("claude-opus-5" | "claude-opus-4-8" | "claude-sonnet-4-6" | "claude-haiku-4-5-20251001") | null;
         };
         /**
          * UserCreate
