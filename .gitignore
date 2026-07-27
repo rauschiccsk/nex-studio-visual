@@ -53,3 +53,6 @@ migrations/versions/__pycache__/
 
 # Claude MAX OAuth session credentials (P0 — never commit)
 .claude/.credentials.json
+
+# Dedo ↔ Implementer message bus (session scratch, not tracked)
+.dedo-channel/
