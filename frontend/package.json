@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
+    "test": "vitest run",
     "type-check": "tsc -b --noEmit",
     "codegen:dump": "cd .. && poetry run python -m backend.scripts.dump_openapi frontend/openapi.json",
     "codegen": "npm run codegen:dump && openapi-typescript openapi.json -o src/services/api/pipeline.generated.ts"

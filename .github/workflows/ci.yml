@@ -109,6 +109,14 @@ jobs:
         working-directory: frontend
         run: npx tsc -b --noEmit 2>/dev/null || npx tsc -b
 
+      # The frontend suite was executed by nobody: `package.json` had no `test` script (vitest was a
+      # dependency with no npm alias), so CI never ran it and 52 files / 368 tests only ever went
+      # green on a developer's machine. A test that no gate runs is not a gate. The script now
+      # exists, so the obvious command is also the real one. (CR-V2-063 post-mortem.)
+      - name: Frontend tests
+        working-directory: frontend
+        run: npm test
+
       - name: Build
         working-directory: frontend
         env:
