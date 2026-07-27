@@ -13,6 +13,19 @@
  * nadpisy a dôrazy) sa nemenia, takže hierarchia ostáva zachovaná. */
 @theme {
   --font-weight-normal: 450;
+
+  /* 13 px a 15 px namiesto 12 a 14 (Riaditeľ 2026-07-27).
+   *
+   * Appka je postavená prakticky celá z týchto dvoch veľkostí — 245 + 172 miest v nej a ďalších
+   * ~100 v komponentoch zo zdieľanej knižnice. Dvanásťbodový text sa nečíta pohodlne bez ohľadu na
+   * to, aké písmo a aké vyhladzovanie sa použije; predošlé tri opravy (dodanie Interu, vypnutie
+   * vyhladzovania, hrúbka 450) boli všetky správne, ale hlavná príčina bola veľkosť.
+   *
+   * Prepisuje sa TOKEN, takže sa to prejaví naraz na všetkých ~500 miestach vrátane knižnice — bez
+   * zásahu do jediného komponentu. Výšky riadkov sú definované ako bezrozmerný pomer k veľkosti
+   * (napr. text-xs = 1/0.75), takže sa prispôsobia samy a zostanú v proporcii. */
+  --text-xs: 0.8125rem;
+  --text-sm: 0.9375rem;
 }
 
 /* @tailwindcss/typography (v4 plugin form) — `prose` is used in markdown viewers
