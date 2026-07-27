@@ -78,16 +78,9 @@ COPY docs/specs/versions/ ./docs/specs/versions/
 # Without this, v2 charter provisioning fails "shared base template missing" and create 500s (v4.0.39).
 COPY templates/ ./templates/
 
-# Migrations run at container start, not by hand. See docker-entrypoint.sh for why: no deploy path
-# applied them, so a schema change shipped only if someone remembered an undocumented step — and
-# forgetting it surfaced as a 500 on one screen, not as a failed deploy. (CR-V2-063 post-mortem.)
-COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
-
 EXPOSE 9176
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD python -m backend.scripts.healthcheck
 
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "9176"]
