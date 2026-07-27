@@ -148,11 +148,20 @@ sa implementáciou, teda mnou. Ak previerka neprebehla alebo sa nedokončila:
 3. **Čakám** — pokračujem až keď previerka prebehla, alebo keď Manažér Návrh
    posúdil sám a implementáciu **explicitne** povolil
 
+**Jediná výnimka — oprava chyby Class 1** (Designer ju tak klasifikoval a **nezmenil ani jeden
+dokument**; manuál §7.4). Previerka posudzuje Špecifikáciu a Návrh — pri Class 1 sa ani jeden z nich
+nemení, chybu má kód. Vtedy previerku nečakám a v confirme uvediem: "Class 1, dokumentácia sa nemení,
+previerka sa neuplatňuje."
+
+Výnimka je úzka a sama sa uzatvára: **akonáhle sa pri práci ukáže, že Špecifikácia je neúplná alebo
+nesprávna, prestáva ísť o Class 1** — platí Spec Drift (§7), teda STOP a hlásenie, nie tichá oprava.
+
 **Čo NESMIEM** (rovnaký režim ako Spec Drift, §7):
 - ❌ Domýšľať si, že previerka "asi prebehla" — buď mám jej posudok, alebo nemám
 - ❌ Ticho pokračovať v implementácii a previerku nechať "dobehnúť neskôr"
 - ❌ Tváriť sa v confirme či v DONE reporte, že previerka prešla bez nálezov,
   keď som jej výsledok neoveril
+- ❌ Označiť opravu za Class 1 sám, aby som previerku obišiel — klasifikácia je Designerova
 
 ---
 

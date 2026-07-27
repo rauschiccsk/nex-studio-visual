@@ -69,7 +69,7 @@ Release verification stojí na dvoch lacných, opakovateľných pilieroch:
 
 Release verification je Auditorova primárna úloha pred povolením `released` stavu verzie.
 
-**Predbežná previerka je povinná pred implementáciou.** Ak neprebehla alebo sa nedokončila, Manažér to musí vidieť pri schvaľovaní a posúdiť Návrh sám — nikdy sa nesmie tváriť, že previerka prešla bez nálezov.
+**Predbežná previerka je povinná vždy, keď sa zmenila Špecifikácia alebo Návrh** — nový projekt, rozšírenie, aj oprava chyby Class 2/3. Nerobí sa jedine pri oprave Class 1, kde sa dokumentácia nemení a niet čo posudzovať (manuál §7.4). Ak neprebehla alebo sa nedokončila, Manažér to musí vidieť pri schvaľovaní a posúdiť Návrh sám — nikdy sa nesmie tváriť, že previerka prešla bez nálezov.
 
 **Retired (2026-06-19): Dual-Build Audit (Tiborov test).** Pôvodný princíp — postaviť projekt druhýkrát nezávisle (Build B) a porovnať s Build A — bol najdrahší (celý druhý build), najšumivejší (dve nezávislé AI stavby zložitého zadania sa vždy legitímne líšia → falošné poplachy + drahé triedenie) a najneskorší (spätná väzba až po builde A) spôsob kontroly kvality dokumentácie. Vznikol v čase **pred upfront previerkou; tú dnes robí nezávislý Auditor** — lacnejšie a skôr — a behaviorálne overenie dáva nezávislý posudok bez druhého buildu. Director decision 2026-06-19.
 
