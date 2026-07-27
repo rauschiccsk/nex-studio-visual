@@ -11,7 +11,7 @@
 
 - **Rola**: CC agent pre NEX Studio Visual. Konkrétna identita (Designer / Implementer / Auditor) je appendovaná z `.claude/agents/<role>/CLAUDE.md` pri spustení wrapper skriptom.
 - **Director**: Zoltán Rausch (komunikuje priamo cez Claude Code CLI terminál).
-- **Model**: Claude Opus 4.7 (Claude MAX).
+- **Model**: Claude Opus 5 (Claude MAX).
 - **Prostredie**: ANDROS Ubuntu, projekt `/opt/projects/<slug>/`.
 
 ### Princíp fungovania
@@ -443,9 +443,9 @@ Mechanika PIV (spec compliance check, field-level verification, dead code detect
 ## 15. STRATEGICKÝ KONTEXT
 
 - **NEX Studio** = multi-module dev workbench. Aktuálne sa **používa výhradne na založenie projektu** ("Create new project"). Vývojové práce na projektoch realizujú CC agenti **Designer**, **Implementer**, **Auditor** mimo NEX Studio UI.
-- **NEX Command** = active single-module dev environment (predchodca NEX Studio, plne funkčný, aktívne používaný).
+- **NEX Command** = predchodca NEX Studio. **VYRADENÝ** — zdrojový adresár ani kontajnery už na ANDROSe nie sú (overené 2026-07-27). Zmienky v starších dokumentoch sú historické.
 - **NEX Test** (retired 2026-06-15) = bol dedikovaný crash-test projekt pre NEX Studio; rolu splnil a nahradilo ju crash-testovanie na ostrých projektoch (nex-inbox/MÁGERSTAV, nex-ledger). **Princíp trvá**: keď sa pri builde ktoréhokoľvek projektu nájde NEX Studio bug → STOP → fix NEX Studio → CONTINUE (cieľ je maximum NEX Studio quality, nie daný projekt).
-- **AI providers**: Claude MAX (Opus 4.7), Ollama (local). **NIKDY priamy Anthropic API.**
+- **AI providers**: Claude MAX (Opus 5), Ollama (local). **NIKDY priamy Anthropic API.**
 - **Platforma**: Ubuntu/ANDROS.
 
 ---
@@ -465,7 +465,7 @@ Tieto dáta majú **single source of truth v KB**. CLAUDE.md ich len odkazuje, n
 | Téma | Lokácia v KB |
 |---|---|
 | Aktuálny zoznam ICC projektov | `/home/icc/knowledge/projects/INDEX.md` |
-| Team & roly (Ri/Ha/Shu) | `/home/icc/knowledge/icc/TEAM.md` |
+| Team & roly (Ri/Ha/Shu) | `/home/icc/knowledge/icc/ICC_STANDARDS.md` (sekcia 9 Team & Roles) |
 | Port Registry (rozsahy portov per projekt) | `/home/icc/knowledge/icc/DECISIONS.md` (sekcia Port Registry v2) |
 | Tech Stack (povinné/zakázané technológie) | `/home/icc/knowledge/icc/ICC_STANDARDS.md` |
 | Filesystem štruktúra | `/home/icc/knowledge/icc/STRUCTURE.md` |
