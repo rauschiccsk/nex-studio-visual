@@ -199,7 +199,7 @@ function CurrentBuildBanner({
 }) {
   return (
     <div className="flex flex-shrink-0 items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-surface-hover)] px-4 py-2">
-      <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full bg-blue-500 ${working ? "animate-pulse" : ""}`} />
+      <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${TONE_DOT.blue} ${working ? "animate-pulse" : ""}`} />
       <span className="min-w-0 truncate text-[11px] text-[var(--color-text-secondary)]">
         <span className="font-medium text-[var(--color-text-primary)]">Práve robím:</span>{" "}
         {path

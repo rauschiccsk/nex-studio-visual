@@ -362,7 +362,7 @@ export default function ProjectDetailPage() {
                   setFastFixDirective("");
                   setFastFixOpen(true);
                 }}
-                className="flex items-center gap-1.5 border border-indigo-500/40 text-[var(--color-accent-primary)] hover:bg-indigo-500/10 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+                className="flex items-center gap-1.5 border border-[var(--color-accent-primary)]/40 text-[var(--color-accent-primary)] hover:bg-[var(--color-accent-primary)]/10 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
               >
                 <Zap className="w-3.5 h-3.5" />
                 Rýchla oprava

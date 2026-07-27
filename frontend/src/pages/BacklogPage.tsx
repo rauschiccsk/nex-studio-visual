@@ -472,7 +472,7 @@ export default function BacklogPage() {
                         <button
                           onClick={() => handleAssign(it.id)}
                           disabled={busyId === it.id || !assignVersionId}
-                          className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded"
+                          className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-white bg-[var(--color-accent-primary)] hover:bg-[var(--color-accent-primary-hover)] disabled:opacity-40 rounded"
                         >
                           <Check size={13} /> Priradiť
                         </button>
