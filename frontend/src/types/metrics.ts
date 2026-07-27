@@ -1,6 +1,8 @@
-// Per-phase project metrics / ROI (E5; v2 metrics per-phase basis, CR-V2-029). Mirrors
-// backend/schemas/metrics.py (ProjectMetricsRead). Honest by construction: any figure depending on an
-// unset price/rate/wage is null, never fabricated; a ratio is null whenever EITHER side is null.
+// Per-scope COST rows for the Náklady screen (CR-V2-063; replaces the v2 ROI shape, CR-V2-029).
+// Mirrors backend/schemas/metrics.py (ProjectCostsRead) — hand-written on purpose: the page does NOT
+// read the generated contract. Honest by construction: any figure depending on an unset price /
+// coefficient / wage is null and renders "—", never a fabricated 0. Measured and hand-entered figures
+// are summed but never merged — every total carries its `…_external` split.
 
 export interface UsageTotals {
   input_tokens: number;
@@ -9,39 +11,47 @@ export interface UsageTotals {
   messages: number;
 }
 
-export interface ModelTokens {
+// `phase` = a build phase (measured), `external` = the manually entered row, `system` = un-phased
+// engine tokens (agent-only: no human equivalent exists, so its human figures are always null).
+export type CostRowKind = "phase" | "external" | "system";
+
+export interface CostRow {
+  key: string; // phase key (COMPARISON_PHASES), or "externe", or "system"
+  kind: CostRowKind;
+  turns: number; // metered messages (external rows: number of entries)
   input_tokens: number;
   output_tokens: number;
+  // this row's tokens ÷ the scope's total tokens × 100 — always computable (never null), which is why
+  // it is a TOKEN share and not a cost share (cost is null whenever a model is unpriced).
+  share_pct: number;
+  agent_cost: number | null; // tokens × per-model price; null if any present model is unpriced
+  unpriced_model_keys: string[]; // drives the per-row "AI cena zatiaľ nie je k dispozícii" note
+  human_minutes: number | null; // always null for kind="system"
+  human_cost: number | null; // always null for kind="system"
+  active_seconds: number; // real measured compute time (0 for external rows)
 }
 
-export interface PhaseMetric {
-  phase: string; // one of COMPARISON_PHASES (priprava / navrh / programovanie / verifikacia)
-  // AGENT (measured)
-  active_seconds: number;
-  internal_idle_seconds: number | null; // inter-turn idle is not phase-attributable → always null
+export interface CostTotals {
+  // Counted figures carry the same measured/entered split as the money ones — a metered agent turn is
+  // never merged with a hand-entered record (the footer renders both halves).
+  turns: number;
+  turns_measured: number; // metered agent messages (phases + system)
+  turns_external: number; // number of hand-entered records, NOT agent messages
   input_tokens: number;
+  input_tokens_measured: number;
+  input_tokens_external: number;
   output_tokens: number;
-  parse_attempts: number; // rework evidence
-  agent_cost: number | null; // tokens × per-model API price; null if any present model unpriced
-  agent_value_in: number | null;
-  agent_value_out: number | null;
-  by_model: Record<string, ModelTokens>;
-  unpriced_model_keys: string[]; // drives the per-row "AI cena chýba: model X" badge
-  // HUMAN (token-derived)
-  human_minutes: number | null; // tokens × per-phase rate
-  human_cost: number | null; // human_minutes × per-phase wage
-  // ratios — null when EITHER side is null
-  x_faster: number | null;
-  m_cheaper: number | null;
-  eur_saved: number | null;
-}
-
-export interface SystemOverheadRow {
-  // un-phased engine tokens; info-only; foots the per-phase table
-  input_tokens: number;
-  output_tokens: number;
-  active_seconds: number;
-  agent_cost: number | null;
+  output_tokens_measured: number;
+  output_tokens_external: number;
+  agent_cost_measured: number | null;
+  agent_cost_external: number | null; // a real 0 when nothing was entered — never null for that reason
+  agent_cost_total: number | null; // null when EITHER half is null
+  human_minutes_measured: number | null;
+  human_minutes_external: number | null;
+  human_minutes_total: number | null;
+  human_cost_measured: number | null;
+  human_cost_external: number | null;
+  human_cost_total: number | null;
 }
 
 export interface ManagerOverhead {
@@ -50,46 +60,35 @@ export interface ManagerOverhead {
   wait_seconds: number; // measured (idle-a)
 }
 
-export interface RoiHeadline {
-  agent_active_minutes: number;
-  human_minutes_total: number | null;
-  agent_cost_total: number | null; // Σ phase agent cost (NOT incl. system)
-  human_cost_total: number | null;
-  x_faster: number | null; // human-time vs agent ACTIVE time
-  m_cheaper: number | null;
-  eur_saved: number | null;
-  unknown_model_token_pct: number; // model-drift visibility
-  flat_subscription: boolean;
-  marginal_cost_eur: number;
-  configured: boolean; // pricing AND rates AND wages
-  pricing_configured: boolean;
-  rates_configured: boolean;
-  wages_configured: boolean;
-  covered_versions: number; // cumulative coverage
-  total_versions: number;
-}
-
-export interface VersionMetrics {
+export interface VersionCosts {
   version_id: string;
   version_number: string;
-  status: string;
-  usage: UsageTotals;
-  by_phase: PhaseMetric[]; // 4 build phases
-  system_overhead: SystemOverheadRow;
+  // Shipped by the backend, never read by the screen (the per-version section renders `rows`/`totals`
+  // now) → declared optional so the mirror only OBLIGES what the screen actually consumes.
+  status?: string;
+  usage?: UsageTotals;
+  rows: CostRow[];
+  totals: CostTotals;
   manager: ManagerOverhead;
   manager_wait_seconds: number;
   internal_idle_seconds: number | null;
   total_time_seconds: number | null;
-  roi: RoiHeadline;
 }
 
-export interface ProjectMetrics {
-  project_id: string;
-  slug: string;
-  usage: UsageTotals; // cumulative grand total
-  by_phase: PhaseMetric[]; // cumulative per phase
-  system_overhead: SystemOverheadRow;
+export interface ProjectCosts {
+  // Identity fields — shipped by the backend, not consumed by the screen (see VersionCosts above).
+  project_id?: string;
+  slug?: string;
+  usage?: UsageTotals;
+  rows: CostRow[]; // cumulative, in payload order: phases → external → system
+  totals: CostTotals;
+  by_version: VersionCosts[];
   manager: ManagerOverhead;
-  by_version: VersionMetrics[];
-  roi: RoiHeadline; // cumulative
+  // ── assumption block (the screen must display it) ──────────────────────────
+  coefficient_minutes_per_mtok: number | null; // the single tokens→minutes setting; null when unset
+  wages: Record<string, number | null>; // row key → hourly wage; null when unset ("system" never present)
+  currency: string;
+  pricing_configured: boolean;
+  coefficient_configured: boolean;
+  wages_configured: boolean;
 }

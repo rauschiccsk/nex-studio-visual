@@ -102,8 +102,12 @@ class ExternalCost(Base):
         ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
     #: NULL = a project-level entry (counts in the project total, in no version).
+    #: SET NULL, not CASCADE: deleting a version must not erase hand-entered money. The entry
+    #: survives and degrades to project scope — which is exactly what NULL already means here.
+    #: (Corrected during the pre-push review; the first draft said CASCADE, an unrecoverable
+    #: data-loss path on a live cockpit.)
     version_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("versions.id", ondelete="CASCADE"), nullable=True, index=True
+        ForeignKey("versions.id", ondelete="SET NULL"), nullable=True, index=True
     )
     occurred_on: Mapped[date] = mapped_column(Date, nullable=False)
     description: Mapped[str] = mapped_column(String(500), nullable=False)
@@ -182,7 +186,21 @@ class CostTotalsRead(BaseModel):
     human_cost_measured: Optional[float]
     human_cost_external: Optional[float]
     human_cost_total: Optional[float]
+    #: The volume columns carry the split too, so the footer's "z toho namerané / ručne zadané" rows
+    #: cover ťahy and tokeny — not only money. Without these the footer merged measured turns with
+    #: hand-entered records in one cell, which the governing rule forbids. (Added during the
+    #: pre-push review.) `…_measured` = the phase + system rows; `…_external` = the external row.
+    turns_measured: int
+    turns_external: int
+    input_tokens_measured: int
+    input_tokens_external: int
+    output_tokens_measured: int
+    output_tokens_external: int
 ```
+
+**Empty-phase guard.** `human_*_measured` (and therefore the totals) are `None` when NO `kind="phase"`
+row carries tokens — an `all()` over an empty sequence is vacuously true and would otherwise report a
+fabricated `0,00 €` for a scope whose entire metered spend sits in the agent-only system row.
 
 **`None` propagation — scoped to `kind="phase"` rows.** A `…_measured` figure is `None` iff some
 `kind="phase"` row that carries tokens has that figure unconfigured (today's rule at `_cost_totals`,

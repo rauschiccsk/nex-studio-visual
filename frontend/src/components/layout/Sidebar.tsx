@@ -274,15 +274,16 @@ export default function Sidebar() {
         disabled={!hasProject}
         disabledTitle="Vyber projekt pre prístup k PROD"
       />
-      {/* E5 (CR-NS-044): per-project metrics / ROI. Project-scoped — disabled (not cross-domain
+      {/* E5 (CR-NS-044): per-project costs (CR-V2-063 renamed the screen Metriky → Náklady; the ROUTE
+          stays `/metrics` — renaming paths is churn). Project-scoped — disabled (not cross-domain
           fallback) when no project is selected. */}
       <NavItem
         icon={<IconMetrics />}
-        label="Metriky"
+        label="Náklady"
         active={hasProject ? isActive(`/projects/${selectedProject!.slug}/metrics`) : false}
         onClick={() => navigate(hasProject ? `/projects/${selectedProject!.slug}/metrics` : projectsFallback)}
         disabled={!hasProject}
-        disabledTitle="Vyber projekt pre prístup k metrikám"
+        disabledTitle="Vyber projekt pre prístup k nákladom"
       />
 
       <NavItem icon={<IconKbBook />} label="Dokumentácia" active={isActive("/kb")} onClick={() => navigate("/kb")} />

@@ -456,7 +456,7 @@ def test_build_phases_drops_zero_token_phases_keeps_canonical_order(db_session) 
         "verifikacia": _ut(300, 120),
     }
     rows = _build_phases(db_session, by_phase, 0.0, 0.0)
-    assert [r.phase for r in rows] == ["navrh", "programovanie", "verifikacia"]
+    assert [r.key for r in rows] == ["navrh", "programovanie", "verifikacia"]
 
 
 def test_build_phases_priprava_zero_row_dropped(db_session) -> None:
@@ -468,8 +468,8 @@ def test_build_phases_priprava_zero_row_dropped(db_session) -> None:
         "verifikacia": _ut(30, 12),
     }
     rows = _build_phases(db_session, by_phase, 0.0, 0.0)
-    assert [r.phase for r in rows] == ["navrh", "programovanie", "verifikacia"]
-    assert "priprava" not in [r.phase for r in rows]
+    assert [r.key for r in rows] == ["navrh", "programovanie", "verifikacia"]
+    assert "priprava" not in [r.key for r in rows]
 
 
 def test_build_phases_footing_preserved(db_session) -> None:
@@ -488,7 +488,7 @@ def test_build_phases_legacy_all_four_when_all_nonzero(db_session) -> None:
     """A legacy project that truly used all four phases still renders all four (regression guard)."""
     by_phase = {p: _ut(10, 5) for p in COMPARISON_PHASES}
     rows = _build_phases(db_session, by_phase, 0.0, 0.0)
-    assert [r.phase for r in rows] == list(COMPARISON_PHASES)
+    assert [r.key for r in rows] == list(COMPARISON_PHASES)
 
 
 def test_build_phases_empty_by_phase_yields_no_rows(db_session) -> None:
@@ -516,8 +516,8 @@ def test_build_phases_keeps_zero_token_nonzero_duration_phase(db_session) -> Non
         "programovanie": _ut(2000, 800),
     }
     rows = _build_phases(db_session, by_phase, 0.0, 0.0)
-    assert [r.phase for r in rows] == ["navrh", "programovanie"]  # navrh NOT dropped
-    navrh_row = next(r for r in rows if r.phase == "navrh")
+    assert [r.key for r in rows] == ["navrh", "programovanie"]  # navrh NOT dropped
+    navrh_row = next(r for r in rows if r.key == "navrh")
     assert navrh_row.active_seconds == 5.0
 
 
@@ -527,14 +527,14 @@ def test_build_phases_keeps_zero_token_nonzero_parse_attempts_phase(db_session) 
     t_pa.add(input_tokens=0, output_tokens=0, duration_seconds=0.0, parse_attempts=2, model="claude-opus-4-8")
     by_phase = {"verifikacia": t_pa, "programovanie": _ut(100, 40)}
     rows = _build_phases(db_session, by_phase, 0.0, 0.0)
-    assert [r.phase for r in rows] == ["programovanie", "verifikacia"]  # canonical order, verifikacia kept
+    assert [r.key for r in rows] == ["programovanie", "verifikacia"]  # canonical order, verifikacia kept
 
 
 def test_build_phases_still_drops_fully_empty_phase(db_session) -> None:
     """C2: a phase with NO metered activity (0 tokens, 0 time, 0 parse attempts) is still DROPPED."""
     by_phase = {"priprava": UsageTotals(), "navrh": _ut(100, 50)}
     rows = _build_phases(db_session, by_phase, 0.0, 0.0)
-    assert [r.phase for r in rows] == ["navrh"]
+    assert [r.key for r in rows] == ["navrh"]
 
 
 def test_build_phases_duration_footing_with_zero_token_phase(db_session) -> None:

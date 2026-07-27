@@ -45,8 +45,9 @@ class Settings(BaseSettings):
     # calc / UI uses them yet. The developer hourly rate baselines an agent run against a human
     # developer; the per-million-token API prices (IN / OUT separately, the natural Claude billing
     # unit) turn captured token usage into a money figure. Default 0.0 = "not configured" (never a
-    # fabricated price); set via env (DEVELOPER_HOURLY_RATE / API_PRICE_INPUT_PER_MTOK / ...).
-    developer_hourly_rate: float = 0.0
+    # fabricated price); set via env (API_PRICE_INPUT_PER_MTOK / ...). These are the FLAT fallback
+    # pair — the per-model-family prices live in system_settings only. (CR-V2-063 retired
+    # `developer_hourly_rate`: the human side is per-phase wages × one token→minutes coefficient.)
     api_price_input_per_mtok: float = 0.0
     api_price_output_per_mtok: float = 0.0
 

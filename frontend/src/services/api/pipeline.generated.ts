@@ -1502,6 +1502,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{slug}/external-costs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List External Costs
+         * @description The project's external-cost entries, newest ``occurred_on`` first (``created_at`` breaks ties).
+         */
+        get: operations["list_external_costs_api_v1_projects__slug__external_costs_get"];
+        put?: never;
+        /**
+         * Create External Cost
+         * @description Record one piece of work the cockpit could not meter.
+         */
+        post: operations["create_external_cost_api_v1_projects__slug__external_costs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{slug}/external-costs/{entry_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete External Cost
+         * @description Hard delete — a mistyped entry is noise in the totals, there is no history to preserve.
+         */
+        delete: operations["delete_external_cost_api_v1_projects__slug__external_costs__entry_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update External Cost
+         * @description Partial update — only the supplied fields change.
+         */
+        patch: operations["update_external_cost_api_v1_projects__slug__external_costs__entry_id__patch"];
+        trace?: never;
+    };
     "/api/v1/projects/{slug}/metrics": {
         parameters: {
             query?: never;
@@ -1511,7 +1559,7 @@ export interface paths {
         };
         /**
          * Get Project Metrics
-         * @description Return the project's measured AI effort + cost + human-baseline ROI, per phase (E5).
+         * @description Return what the project cost — per phase, per version, cumulative (E5).
          */
         get: operations["get_project_metrics_api_v1_projects__slug__metrics_get"];
         put?: never;
@@ -2773,6 +2821,85 @@ export interface components {
             /** Version Number */
             version_number: string;
         };
+        /**
+         * CostRowRead
+         * @description One cost row within a scope. `kind` keeps measured and entered figures distinguishable all
+         *     the way to the screen — a renderer must never present them as the same class of number.
+         */
+        CostRowRead: {
+            /** Active Seconds */
+            active_seconds: number;
+            /** Agent Cost */
+            agent_cost: number | null;
+            /** Human Cost */
+            human_cost: number | null;
+            /** Human Minutes */
+            human_minutes: number | null;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Key */
+            key: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "phase" | "external" | "system";
+            /** Output Tokens */
+            output_tokens: number;
+            /** Share Pct */
+            share_pct: number;
+            /** Turns */
+            turns: number;
+            /** Unpriced Model Keys */
+            unpriced_model_keys: string[];
+        };
+        /**
+         * CostTotalsRead
+         * @description Scope totals with the mandatory measured/entered split — on the VOLUME figures too.
+         *
+         *     ``turns`` / ``input_tokens`` / ``output_tokens`` are the combined totals; their ``…_measured``
+         *     (the ``phase`` + ``system`` rows) and ``…_external`` (the ``external`` row) halves ship alongside so
+         *     the screen's "z toho namerané / z toho ručne zadané" split covers EVERY column, not only money — a
+         *     merged turn/token count would be exactly the merge rule 2 above forbids.
+         */
+        CostTotalsRead: {
+            /** Agent Cost External */
+            agent_cost_external: number | null;
+            /** Agent Cost Measured */
+            agent_cost_measured: number | null;
+            /** Agent Cost Total */
+            agent_cost_total: number | null;
+            /** Human Cost External */
+            human_cost_external: number | null;
+            /** Human Cost Measured */
+            human_cost_measured: number | null;
+            /** Human Cost Total */
+            human_cost_total: number | null;
+            /** Human Minutes External */
+            human_minutes_external: number | null;
+            /** Human Minutes Measured */
+            human_minutes_measured: number | null;
+            /** Human Minutes Total */
+            human_minutes_total: number | null;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Input Tokens External */
+            input_tokens_external: number;
+            /** Input Tokens Measured */
+            input_tokens_measured: number;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Output Tokens External */
+            output_tokens_external: number;
+            /** Output Tokens Measured */
+            output_tokens_measured: number;
+            /** Turns */
+            turns: number;
+            /** Turns External */
+            turns_external: number;
+            /** Turns Measured */
+            turns_measured: number;
+        };
         /** CreateDocumentRequest */
         CreateDocumentRequest: {
             /** Category */
@@ -3345,6 +3472,108 @@ export interface components {
             title?: string | null;
         };
         /**
+         * ExternalCostCreate
+         * @description Payload for creating an entry. ``project_id`` comes from the route path and ``created_by`` from
+         *     the authenticated user — neither is client-supplied.
+         */
+        ExternalCostCreate: {
+            /**
+             * Description
+             * @description Čo sa robilo.
+             */
+            description: string;
+            /**
+             * Input Tokens
+             * @description Spotrebované vstupné tokeny.
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Model
+             * @description Úplné id modelu, napr. "claude-opus-5".
+             */
+            model: string;
+            /**
+             * Occurred On
+             * Format: date
+             * @description Deň, kedy práca prebehla (nesmie byť v budúcnosti).
+             */
+            occurred_on: string;
+            /**
+             * Output Tokens
+             * @description Spotrebované výstupné tokeny.
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Version Id
+             * @description Verzia projektu; prázdne = celý projekt (do súčtu projektu, do žiadnej verzie).
+             */
+            version_id?: string | null;
+        };
+        /**
+         * ExternalCostRead
+         * @description Serialised entry. ``from_attributes`` enables ``model_validate(orm_obj)``.
+         */
+        ExternalCostRead: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by?: string | null;
+            /** Description */
+            description: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Model */
+            model: string;
+            /**
+             * Occurred On
+             * Format: date
+             */
+            occurred_on: string;
+            /** Output Tokens */
+            output_tokens: number;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version Id */
+            version_id?: string | null;
+        };
+        /**
+         * ExternalCostUpdate
+         * @description Partial update — only the supplied fields change. ``version_id=None`` explicitly moves an entry
+         *     back to the project level (``model_fields_set`` distinguishes it from "not supplied").
+         */
+        ExternalCostUpdate: {
+            /** Description */
+            description?: string | null;
+            /** Input Tokens */
+            input_tokens?: number | null;
+            /** Model */
+            model?: string | null;
+            /** Occurred On */
+            occurred_on?: string | null;
+            /** Output Tokens */
+            output_tokens?: number | null;
+            /** Version Id */
+            version_id?: string | null;
+        };
+        /**
          * FastFixStartRequest
          * @description Body for ``POST /pipeline/fast-fix`` (F-009, CR-NS-094) — the "Rýchla oprava" entry.
          *
@@ -3596,16 +3825,6 @@ export interface components {
             /** Wait Seconds */
             wait_seconds: number;
         };
-        /**
-         * ModelTokensRead
-         * @description Token usage attributed to one model family/id within a phase's usage.
-         */
-        ModelTokensRead: {
-            /** Input Tokens */
-            input_tokens: number;
-            /** Output Tokens */
-            output_tokens: number;
-        };
         /** PaginatedResponse[BacklogItemRead] */
         PaginatedResponse_BacklogItemRead_: {
             /** Items */
@@ -3704,46 +3923,6 @@ export interface components {
             skip: number;
             /** Total */
             total: number;
-        };
-        /**
-         * PhaseMetricRead
-         * @description One build phase's agent side (measured) vs human side (token-derived) within a scope.
-         */
-        PhaseMetricRead: {
-            /** Active Seconds */
-            active_seconds: number;
-            /** Agent Cost */
-            agent_cost: number | null;
-            /** Agent Value In */
-            agent_value_in: number | null;
-            /** Agent Value Out */
-            agent_value_out: number | null;
-            /** By Model */
-            by_model: {
-                [key: string]: components["schemas"]["ModelTokensRead"];
-            };
-            /** Eur Saved */
-            eur_saved: number | null;
-            /** Human Cost */
-            human_cost: number | null;
-            /** Human Minutes */
-            human_minutes: number | null;
-            /** Input Tokens */
-            input_tokens: number;
-            /** Internal Idle Seconds */
-            internal_idle_seconds: number | null;
-            /** M Cheaper */
-            m_cheaper: number | null;
-            /** Output Tokens */
-            output_tokens: number;
-            /** Parse Attempts */
-            parse_attempts: number;
-            /** Phase */
-            phase: string;
-            /** Unpriced Model Keys */
-            unpriced_model_keys: string[];
-            /** X Faster */
-            x_faster: number | null;
         };
         /**
          * PipelineActionRequest
@@ -4005,6 +4184,40 @@ export interface components {
              */
             suggested_port: number;
         };
+        /** ProjectCostsRead */
+        ProjectCostsRead: {
+            /** By Version */
+            by_version: components["schemas"]["VersionCostsRead"][];
+            /** Coefficient Configured */
+            coefficient_configured: boolean;
+            /** Coefficient Minutes Per Mtok */
+            coefficient_minutes_per_mtok: number | null;
+            /**
+             * Currency
+             * @default EUR
+             */
+            currency: string;
+            manager: components["schemas"]["ManagerOverheadRead"];
+            /** Pricing Configured */
+            pricing_configured: boolean;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Rows */
+            rows: components["schemas"]["CostRowRead"][];
+            /** Slug */
+            slug: string;
+            totals: components["schemas"]["CostTotalsRead"];
+            usage: components["schemas"]["UsageTotalsRead"];
+            /** Wages */
+            wages: {
+                [key: string]: number | null;
+            };
+            /** Wages Configured */
+            wages_configured: boolean;
+        };
         /**
          * ProjectCreate
          * @description Payload for creating a new project.
@@ -4172,24 +4385,6 @@ export interface components {
         ProjectMemberUpdate: {
             /** Role */
             role?: string | null;
-        };
-        /** ProjectMetricsRead */
-        ProjectMetricsRead: {
-            /** By Phase */
-            by_phase: components["schemas"]["PhaseMetricRead"][];
-            /** By Version */
-            by_version: components["schemas"]["VersionMetricsRead"][];
-            manager: components["schemas"]["ManagerOverheadRead"];
-            /**
-             * Project Id
-             * Format: uuid
-             */
-            project_id: string;
-            roi: components["schemas"]["RoiHeadlineRead"];
-            /** Slug */
-            slug: string;
-            system_overhead: components["schemas"]["SystemOverheadRead"];
-            usage: components["schemas"]["UsageTotalsRead"];
         };
         /**
          * ProjectRead
@@ -4429,44 +4624,6 @@ export interface components {
             version: string;
         };
         /**
-         * RoiHeadlineRead
-         * @description Headline ROI over the comparison phases (NOT incl. the ``system`` row).
-         */
-        RoiHeadlineRead: {
-            /** Agent Active Minutes */
-            agent_active_minutes: number;
-            /** Agent Cost Total */
-            agent_cost_total: number | null;
-            /** Configured */
-            configured: boolean;
-            /** Covered Versions */
-            covered_versions: number;
-            /** Eur Saved */
-            eur_saved: number | null;
-            /** Flat Subscription */
-            flat_subscription: boolean;
-            /** Human Cost Total */
-            human_cost_total: number | null;
-            /** Human Minutes Total */
-            human_minutes_total: number | null;
-            /** M Cheaper */
-            m_cheaper: number | null;
-            /** Marginal Cost Eur */
-            marginal_cost_eur: number;
-            /** Pricing Configured */
-            pricing_configured: boolean;
-            /** Rates Configured */
-            rates_configured: boolean;
-            /** Total Versions */
-            total_versions: number;
-            /** Unknown Model Token Pct */
-            unknown_model_token_pct: number;
-            /** Wages Configured */
-            wages_configured: boolean;
-            /** X Faster */
-            x_faster: number | null;
-        };
-        /**
          * SelfProfileUpdate
          * @description Fields a user may change on their OWN profile via ``PATCH /auth/me`` (v4.0.33).
          *
@@ -4484,22 +4641,6 @@ export interface components {
             last_name?: string | null;
             /** Telegram Chat Id */
             telegram_chat_id?: string | null;
-        };
-        /**
-         * SystemOverheadRead
-         * @description Un-phased engine (``system`` author with no phase stamp) tokens — info-only; foots the per-phase
-         *     table but never enters the headline ROI. (In the v2 engine virtually every message carries a phase
-         *     stamp, so this row is usually empty; kept for completeness + back-compat.)
-         */
-        SystemOverheadRead: {
-            /** Active Seconds */
-            active_seconds: number;
-            /** Agent Cost */
-            agent_cost: number | null;
-            /** Input Tokens */
-            input_tokens: number;
-            /** Output Tokens */
-            output_tokens: number;
         };
         /**
          * SystemSettingRead
@@ -5055,6 +5196,29 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /** VersionCostsRead */
+        VersionCostsRead: {
+            /** Internal Idle Seconds */
+            internal_idle_seconds: number | null;
+            manager: components["schemas"]["ManagerOverheadRead"];
+            /** Manager Wait Seconds */
+            manager_wait_seconds: number;
+            /** Rows */
+            rows: components["schemas"]["CostRowRead"][];
+            /** Status */
+            status: string;
+            /** Total Time Seconds */
+            total_time_seconds: number | null;
+            totals: components["schemas"]["CostTotalsRead"];
+            usage: components["schemas"]["UsageTotalsRead"];
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+            /** Version Number */
+            version_number: string;
+        };
         /**
          * VersionCreate
          * @description Payload for creating a new version.
@@ -5088,30 +5252,6 @@ export interface components {
              * Version Number
              * @description Semver-style version string, e.g. '1.0.0' or '1.1.0'.
              */
-            version_number: string;
-        };
-        /** VersionMetricsRead */
-        VersionMetricsRead: {
-            /** By Phase */
-            by_phase: components["schemas"]["PhaseMetricRead"][];
-            /** Internal Idle Seconds */
-            internal_idle_seconds: number | null;
-            manager: components["schemas"]["ManagerOverheadRead"];
-            /** Manager Wait Seconds */
-            manager_wait_seconds: number;
-            roi: components["schemas"]["RoiHeadlineRead"];
-            /** Status */
-            status: string;
-            system_overhead: components["schemas"]["SystemOverheadRead"];
-            /** Total Time Seconds */
-            total_time_seconds: number | null;
-            usage: components["schemas"]["UsageTotalsRead"];
-            /**
-             * Version Id
-             * Format: uuid
-             */
-            version_id: string;
-            /** Version Number */
             version_number: string;
         };
         /**
@@ -8013,6 +8153,138 @@ export interface operations {
             };
         };
     };
+    list_external_costs_api_v1_projects__slug__external_costs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalCostRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_external_cost_api_v1_projects__slug__external_costs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExternalCostCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalCostRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_external_cost_api_v1_projects__slug__external_costs__entry_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_external_cost_api_v1_projects__slug__external_costs__entry_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExternalCostUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalCostRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_project_metrics_api_v1_projects__slug__metrics_get: {
         parameters: {
             query?: never;
@@ -8030,7 +8302,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProjectMetricsRead"];
+                    "application/json": components["schemas"]["ProjectCostsRead"];
                 };
             };
             /** @description Validation Error */

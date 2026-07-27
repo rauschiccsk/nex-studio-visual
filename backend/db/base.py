@@ -16,6 +16,7 @@ from backend.db.models.bugs import Bug
 from backend.db.models.credentials import Credential
 from backend.db.models.customers import Customer
 from backend.db.models.deploy import DeployEvent
+from backend.db.models.external_cost import ExternalCost
 from backend.db.models.foundation import User, UserAgentSettings, UserSession
 from backend.db.models.orchestrator import OrchestratorSession
 from backend.db.models.pipeline import PipelineMessage, PipelineState
@@ -47,6 +48,7 @@ ALL_MODELS: tuple[type, ...] = (
     Credential,
     Customer,
     DeployEvent,
+    ExternalCost,
 )
 
 __all__ = [
@@ -58,6 +60,7 @@ __all__ = [
     "Customer",
     "DeployEvent",
     "Epic",
+    "ExternalCost",
     "Feat",
     "OrchestratorSession",
     "PipelineMessage",

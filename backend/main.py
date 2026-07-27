@@ -16,6 +16,7 @@ from backend.api.routes.credentials import router as credentials_router
 from backend.api.routes.customers import router as customers_router
 from backend.api.routes.deploy import router as deploy_router
 from backend.api.routes.epics import router as epics_router
+from backend.api.routes.external_cost import router as external_cost_router
 from backend.api.routes.feats import router as feats_router
 from backend.api.routes.health import health_check as _health_check_handler
 from backend.api.routes.knowledge import router as knowledge_router
@@ -235,6 +236,9 @@ app.include_router(customers_router, prefix="/api/v1")
 # ``/customers/{id}/deploy`` | ``/accept``) — see design §3 Deploy & Customers.
 app.include_router(deploy_router, prefix="/api/v1")
 app.include_router(metrics_router, prefix="/api/v1")
+# The external-cost router (CR-V2-063) feeds the same Náklady screen as the metrics router and shares
+# its ``/projects/{slug}/…`` path family, so it mounts under the same bare ``/api/v1`` prefix.
+app.include_router(external_cost_router, prefix="/api/v1")
 app.include_router(uploads_router, prefix="/api/v1")
 # Public (no-auth) per-version changelog — the *Aktualizácie* feature. Mounted
 # under the bare ``/api/v1`` prefix; the route path is ``/release-notes``.

@@ -246,95 +246,55 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
         ),
     ),
     # ── Metrics / ROI pricing (E5, CR-NS-043) ───────────────────────
-    "developer_hourly_rate": _Default(
-        value="0.0",
-        value_type="float",
-        label="Hodinová sadzba vývojára",
-        unit="€ / hod",
-        description=(
-            "Priemerná hodinová sadzba ľudského vývojára pre porovnanie na stránke Metriky. "
-            "0 = nenastavené → návratnosť sa nezobrazí (nikdy sa nevymyslí číslo)."
-        ),
-    ),
+    # Prices are entered in EUR (CR-V2-063): the wages are € / hod and the Náklady screen renders €,
+    # so a $ price would silently mix two currencies in one sum. The stored values are NOT converted —
+    # a silent × rate would be worse than the mismatch; the Manažér re-enters them.
     "api_price_input_per_mtok": _Default(
         value="0.0",
         value_type="float",
         label="Cena za vstupné tokeny",
-        unit="$ / mil. tokenov",
+        unit="€ / mil. tokenov",
         description=(
             "Cena Claude API za 1 milión vstupných tokenov — pre výpočet nákladov na stránke "
-            "Metriky. 0 = nenastavené → náklad sa nezobrazí."
+            "Metriky. 0 = nenastavené → náklad sa nezobrazí. "
+            "Zadaj v eurách — všetky sumy na obrazovke Náklady sú v eurách."
         ),
     ),
     "api_price_output_per_mtok": _Default(
         value="0.0",
         value_type="float",
         label="Cena za výstupné tokeny",
-        unit="$ / mil. tokenov",
+        unit="€ / mil. tokenov",
         description=(
             "Cena Claude API za 1 milión výstupných tokenov — pre výpočet nákladov na stránke "
-            "Metriky. 0 = nenastavené → náklad sa nezobrazí."
+            "Metriky. 0 = nenastavené → náklad sa nezobrazí. "
+            "Zadaj v eurách — všetky sumy na obrazovke Náklady sú v eurách."
         ),
     ),
-    # ── Metrics / ROI — per-PHASE agent-vs-human model (v2 metrics per-phase basis, CR-V2-029) ─────
+    # ── Metrics / Náklady — agent-vs-human model (v2 per-phase basis, CR-V2-029; CR-V2-063) ────────
     # The v1 11 per-role keys (metrics_minutes_per_mtok_{coordinator,designer,customer,implementer,
     # auditor} + metrics_hourly_wage_{coordinator,designer,customer,implementer,auditor,director}) and
     # the now-dead director-rate (metrics_director_minutes_per_human_role_hour) are RETIRED here — the
-    # v2 AI-Agent + Auditor engine has no fixed roles, only the four visible build phases, and the priced
-    # Director overhead is gone (the Manažér overhead is info-only now). Replaced by per-PHASE rate +
-    # wage keys (4 phases × {rate, wage}), feeding services.metrics.compute_project_metrics.
+    # v2 AI-Agent + Auditor engine has no fixed roles, only the visible build phases (COMPARISON_PHASES
+    # derives from STAGE_VALUES — 5 today), and the priced Director overhead is gone (the Manažér
+    # overhead is info-only now).
     #
-    # Per-phase token→minutes conversion (human-time): minutes of equivalent human work per 1,000,000
-    # total tokens (IN+OUT) for that phase. 0 = unset → that phase's human-time/cost is null (never
-    # fabricated). Seeded via the Settings UI (NOT here — defaults stay 0.0 so a fresh install reads
-    # "not configured", not a fake number).
-    "metrics_minutes_per_mtok_priprava": _Default(
-        value="0.0",
+    # CR-V2-063 collapsed the five per-PHASE token→minutes coefficients into ONE key: five copies of the
+    # same hand-entered number only drifted apart (the two live cockpits reached 50–70 vs 600 and
+    # produced opposite verdicts from one engine), and the Manažér calibrated a single 600 on a real
+    # project. The registry therefore carries ONE coefficient + SIX wages (5 phases + externe) —
+    # wages genuinely differ per phase, the token→minutes conversion does not.
+    #
+    # Token→minutes conversion (human-time): minutes of equivalent human work per 1,000,000 total tokens
+    # (IN+OUT). 0 = unset → every human-time/cost figure is null (never fabricated).
+    "metrics_minutes_per_mtok": _Default(
+        value="600",
         value_type="float",
-        label="Ľudský čas — fáza Príprava",
+        label="Ľudský čas — koeficient",
         unit="min / mil. tokenov",
         description=(
-            "Koľko minút ľudskej práce zodpovedá 1 miliónu tokenov vo fáze Príprava. "
-            "0 = nenastavené → čas a náklad tejto fázy sa nezobrazia."
-        ),
-    ),
-    "metrics_minutes_per_mtok_navrh": _Default(
-        value="0.0",
-        value_type="float",
-        label="Ľudský čas — fáza Návrh",
-        unit="min / mil. tokenov",
-        description=(
-            "Koľko minút ľudskej práce zodpovedá 1 miliónu tokenov vo fáze Návrh. 0 = nenastavené → nezobrazí sa."
-        ),
-    ),
-    # CR-1 (nex-studio-visual): the Vizuál phase is a comparison phase too (COMPARISON_PHASES derives from
-    # STAGE_VALUES), so it carries its own rate/wage keys. Default 0.0 = unconfigured → its human-time/cost is null.
-    "metrics_minutes_per_mtok_vizual": _Default(
-        value="0.0",
-        value_type="float",
-        label="Ľudský čas — fáza Vizuál",
-        unit="min / mil. tokenov",
-        description=(
-            "Koľko minút ľudskej práce zodpovedá 1 miliónu tokenov vo fáze Vizuál. 0 = nenastavené → nezobrazí sa."
-        ),
-    ),
-    "metrics_minutes_per_mtok_programovanie": _Default(
-        value="0.0",
-        value_type="float",
-        label="Ľudský čas — fáza Programovanie",
-        unit="min / mil. tokenov",
-        description=(
-            "Koľko minút ľudskej práce zodpovedá 1 miliónu tokenov vo fáze Programovanie. "
-            "0 = nenastavené → nezobrazí sa."
-        ),
-    ),
-    "metrics_minutes_per_mtok_verifikacia": _Default(
-        value="0.0",
-        value_type="float",
-        label="Ľudský čas — fáza Verifikácia",
-        unit="min / mil. tokenov",
-        description=(
-            "Koľko minút ľudskej práce zodpovedá 1 miliónu tokenov vo fáze Verifikácia. 0 = nenastavené → nezobrazí sa."
+            "Koľko minút ľudskej práce zodpovedá 1 miliónu tokenov. Platí rovnako pre všetky fázy aj "
+            "pre externé náklady. 0 = nenastavené → ľudské stĺpce sa nezobrazia."
         ),
     ),
     # Per-phase hourly wage (currency-agnostic) for the human-cost side (human-time × wage). 0 = unset → null.
@@ -377,56 +337,76 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
         unit="€ / hod",
         description="Hodinová mzda ľudskej práce pre fázu Verifikácia. 0 = nenastavené → nezobrazí sa.",
     ),
-    # Per-family API price (IN/OUT per 1,000,000 tokens). Falls back to the flat api_price_*_per_mtok
-    # pair (which itself falls back to env) for the _unknown family + any family left at 0.
+    # CR-V2-063: the sixth wage — for the manually entered external cost row (work the cockpit cannot
+    # meter: Dedo in the terminal, a developer working directly). Not a build phase, hence its own key.
+    "metrics_hourly_wage_externe": _Default(
+        value="0.0",
+        value_type="float",
+        label="Hodinová sadzba — Externé náklady",
+        unit="€ / hod",
+        description="Sadzba pre ručne zadané externé náklady. 0 = nenastavené → nezobrazí sa.",
+    ),
+    # Per-family API price (IN/OUT per 1,000,000 tokens), in EUR like the flat pair above (CR-V2-063).
+    # Falls back to the flat api_price_*_per_mtok pair (which itself falls back to env) for the _unknown
+    # family + any family left at 0.
     "api_price_input_per_mtok_opus": _Default(
         value="0.0",
         value_type="float",
         label="Cena vstupu — Opus",
-        unit="$ / mil. tokenov",
-        description=("Cena za 1 milión vstupných tokenov pre modely Opus. Ak je 0, použije sa všeobecná cena vstupu."),
+        unit="€ / mil. tokenov",
+        description=(
+            "Cena za 1 milión vstupných tokenov pre modely Opus. Ak je 0, použije sa všeobecná cena vstupu. "
+            "Zadaj v eurách — všetky sumy na obrazovke Náklady sú v eurách."
+        ),
     ),
     "api_price_output_per_mtok_opus": _Default(
         value="0.0",
         value_type="float",
         label="Cena výstupu — Opus",
-        unit="$ / mil. tokenov",
+        unit="€ / mil. tokenov",
         description=(
-            "Cena za 1 milión výstupných tokenov pre modely Opus. Ak je 0, použije sa všeobecná cena výstupu."
+            "Cena za 1 milión výstupných tokenov pre modely Opus. Ak je 0, použije sa všeobecná cena výstupu. "
+            "Zadaj v eurách — všetky sumy na obrazovke Náklady sú v eurách."
         ),
     ),
     "api_price_input_per_mtok_sonnet": _Default(
         value="0.0",
         value_type="float",
         label="Cena vstupu — Sonnet",
-        unit="$ / mil. tokenov",
+        unit="€ / mil. tokenov",
         description=(
-            "Cena za 1 milión vstupných tokenov pre modely Sonnet. Ak je 0, použije sa všeobecná cena vstupu."
+            "Cena za 1 milión vstupných tokenov pre modely Sonnet. Ak je 0, použije sa všeobecná cena vstupu. "
+            "Zadaj v eurách — všetky sumy na obrazovke Náklady sú v eurách."
         ),
     ),
     "api_price_output_per_mtok_sonnet": _Default(
         value="0.0",
         value_type="float",
         label="Cena výstupu — Sonnet",
-        unit="$ / mil. tokenov",
+        unit="€ / mil. tokenov",
         description=(
-            "Cena za 1 milión výstupných tokenov pre modely Sonnet. Ak je 0, použije sa všeobecná cena výstupu."
+            "Cena za 1 milión výstupných tokenov pre modely Sonnet. Ak je 0, použije sa všeobecná cena výstupu. "
+            "Zadaj v eurách — všetky sumy na obrazovke Náklady sú v eurách."
         ),
     ),
     "api_price_input_per_mtok_haiku": _Default(
         value="0.0",
         value_type="float",
         label="Cena vstupu — Haiku",
-        unit="$ / mil. tokenov",
-        description=("Cena za 1 milión vstupných tokenov pre modely Haiku. Ak je 0, použije sa všeobecná cena vstupu."),
+        unit="€ / mil. tokenov",
+        description=(
+            "Cena za 1 milión vstupných tokenov pre modely Haiku. Ak je 0, použije sa všeobecná cena vstupu. "
+            "Zadaj v eurách — všetky sumy na obrazovke Náklady sú v eurách."
+        ),
     ),
     "api_price_output_per_mtok_haiku": _Default(
         value="0.0",
         value_type="float",
         label="Cena výstupu — Haiku",
-        unit="$ / mil. tokenov",
+        unit="€ / mil. tokenov",
         description=(
-            "Cena za 1 milión výstupných tokenov pre modely Haiku. Ak je 0, použije sa všeobecná cena výstupu."
+            "Cena za 1 milión výstupných tokenov pre modely Haiku. Ak je 0, použije sa všeobecná cena výstupu. "
+            "Zadaj v eurách — všetky sumy na obrazovke Náklady sú v eurách."
         ),
     ),
 }
@@ -503,7 +483,7 @@ def get_float_or_none(db: Session, key: str) -> Optional[float]:
     Unlike :func:`get_float` (which falls back to the registered default → 0.0 when no row exists),
     this distinguishes an explicitly-stored ``0.0`` from "never configured": a row → its value
     (including 0.0) is honored; no row → ``None``. Lets a caller honor an explicit 0 while still
-    treating "no row at all" as unset (e.g. the developer_hourly_rate fallback chain in metrics).
+    treating "no row at all" as unset (e.g. a wage the Manažér deliberately zeroed vs never touched).
     Not cached — it is read once on the read-time metrics path, not a hot request loop, and must see
     row presence directly (the typed cache stores only value+type, not whether a row backs it)."""
     row = db.execute(select(SystemSetting).where(SystemSetting.key == key)).scalar_one_or_none()
