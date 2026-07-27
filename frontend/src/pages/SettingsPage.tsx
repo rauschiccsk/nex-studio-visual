@@ -38,6 +38,8 @@ import {
   AutonomyDialPanel,
   type MieraAutonomieLevel,
 } from "@/components/settings/AutonomyDialPanel";
+import { TokenPricesPanel } from "@/components/settings/TokenPricesPanel";
+import { TOKEN_PRICE_KEYS } from "@/components/settings/tokenPrices";
 import { useAuthStore } from "@/store/authStore";
 import { ROLE_LABELS } from "@/components/cockpit/labels";
 import { humanizeApiError } from "@/services/apiError";
@@ -114,10 +116,10 @@ const SETTINGS_CATEGORIES: SettingsCategory[] = [
   },
   {
     id: "metrics",
-    label: "Náklady (koeficient, mzdy, ceny)",
+    label: "Náklady (koeficient, mzdy)",
     description:
-      "Jeden koeficient tokeny→minúty ľudskej práce (platí pre všetky fázy aj pre externé náklady), " +
-      "hodinová mzda za fázu a za externé náklady, a ceny modelov v eurách za milión tokenov. " +
+      "Jeden koeficient tokeny→minúty ľudskej práce (platí pre všetky fázy aj pre externé náklady) a " +
+      "hodinová mzda za fázu a za externé náklady. Ceny modelov sú vyššie v tabuľke „Ceny modelov\". " +
       "0 = nenastavené → údaj sa nezobrazí namiesto vymysleného čísla.",
     prefixes: ["metrics_", "api_price_"],
   },
@@ -190,6 +192,12 @@ function roleCls(role: string) {
 // AutonomyDialPanel at the TOP of the Systém tab (matching design §4.6 ordering).
 const MIERA_AUTONOMIE_KEY = "miera_autonomie";
 
+// Same split for the eight `api_price_*_per_mtok*` keys: as generic KV cards they
+// were several screens of scrolling to read three numbers the Manažér checks most
+// often, so TokenPricesPanel renders them as one compact per-model table and they
+// are filtered out of the generic panel here (never double-rendered).
+const PRICE_KEY_SET = new Set(TOKEN_PRICE_KEYS);
+
 function SystemTab({
   settings,
   loaded,
@@ -210,9 +218,26 @@ function SystemTab({
   }, [onLoad]);
 
   const dial = settings.find((s) => s.key === MIERA_AUTONOMIE_KEY);
-  // Keep the dial out of the generic KV list so it never double-renders as a
-  // free-text "Ostatné" row.
-  const rest = settings.filter((s) => s.key !== MIERA_AUTONOMIE_KEY);
+  // Keep the dial + the price keys out of the generic KV list so they never
+  // double-render as free-text rows.
+  const prices = settings.filter((s) => PRICE_KEY_SET.has(s.key));
+  const rest = settings.filter(
+    (s) => s.key !== MIERA_AUTONOMIE_KEY && !PRICE_KEY_SET.has(s.key),
+  );
+
+  // One tab, one load state. Each panel renders its own spinner/banner, so passing the shared
+  // loading+error down to all three stacked the SAME red box three times over two hairlines —
+  // reading as three separate failures instead of one. Render it once here and mount nothing else.
+  if (loadError) {
+    return (
+      <div className="p-4 text-sm text-[var(--color-status-error)]">{loadError}</div>
+    );
+  }
+  if (!loaded) {
+    return (
+      <div className="p-4 text-sm text-[var(--color-text-muted)]">Načítavam…</div>
+    );
+  }
 
   return (
     <div>
@@ -225,8 +250,16 @@ function SystemTab({
         onSave={(level: MieraAutonomieLevel) =>
           onSave(MIERA_AUTONOMIE_KEY, level).then(() => undefined)
         }
-        loading={!loaded}
-        loadError={loadError}
+        loading={false}
+        loadError=""
+      />
+      <div className="border-t border-[var(--color-border-default)]" />
+      <TokenPricesPanel
+        settings={prices}
+        canEdit={canEdit}
+        onSave={onSave}
+        loading={false}
+        loadError=""
       />
       <div className="border-t border-[var(--color-border-default)]" />
       <SystemSettingsPanel
@@ -234,8 +267,8 @@ function SystemTab({
         categories={SETTINGS_CATEGORIES}
         canEdit={canEdit}
         onSave={onSave}
-        loading={!loaded}
-        loadError={loadError}
+        loading={false}
+        loadError=""
       />
     </div>
   );
