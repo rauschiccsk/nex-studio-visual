@@ -749,7 +749,7 @@ export default function KnowledgeBasePage() {
                         <Loader2 size={16} className="animate-spin" /> Načítavam obsah...
                       </div>
                     ) : (
-                      <div className="prose prose-sm prose-invert max-w-none prose-headings:text-[var(--color-text-primary)] prose-p:text-[var(--color-text-primary)] prose-strong:text-[var(--color-text-primary)] prose-li:text-[var(--color-text-primary)] prose-code:text-[var(--color-text-primary)] prose-a:text-[var(--color-text-link)] prose-td:text-[var(--color-text-primary)] prose-th:text-[var(--color-text-primary)] prose-table:border prose-table:border-[var(--color-border-strong)] prose-td:border prose-td:border-[var(--color-border-default)] prose-td:px-3 prose-td:py-1 prose-th:border prose-th:border-[var(--color-border-strong)] prose-th:px-3 prose-th:py-1 prose-th:bg-[var(--color-surface)]">
+                      <div className="prose prose-sm dark:prose-invert max-w-none prose-headings:text-[var(--color-text-primary)] prose-p:text-[var(--color-text-primary)] prose-strong:text-[var(--color-text-primary)] prose-li:text-[var(--color-text-primary)] prose-code:text-[var(--color-text-primary)] prose-a:text-[var(--color-text-link)] prose-td:text-[var(--color-text-primary)] prose-th:text-[var(--color-text-primary)] prose-table:border prose-table:border-[var(--color-border-strong)] prose-td:border prose-td:border-[var(--color-border-default)] prose-td:px-3 prose-td:py-1 prose-th:border prose-th:border-[var(--color-border-strong)] prose-th:px-3 prose-th:py-1 prose-th:bg-[var(--color-surface)]">
                         <ReactMarkdown
                           remarkPlugins={[remarkGfm]}
                           components={{
