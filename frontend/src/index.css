@@ -1,6 +1,20 @@
 @import "tailwindcss";
 @import "nex-shared/tokens.css";
 
+/* Bežný text v hrúbke 450, nie 400 (Riaditeľ 2026-07-27).
+ *
+ * Na tmavom podklade svetlý text opticky redne — pri 400 pôsobil tenko a zle sa čítal. Inter je
+ * VARIABILNÉ písmo (os 100–900 v jednom súbore), takže medzihodnota 450 nestojí ani bajt navyše a
+ * nevyžaduje ďalší súbor.
+ *
+ * Prepisuje sa TOKEN, nie len telo dokumentu: `font-normal` je v kóde použité na 11 miestach
+ * výslovne, takže pri zmene len na tele by tie miesta ostali na 400 a boli by viditeľne tenšie než
+ * okolie. Takto sa posunie aj samotná trieda a písmo zostane jednotné. Vyššie hrúbky (500–800 pre
+ * nadpisy a dôrazy) sa nemenia, takže hierarchia ostáva zachovaná. */
+@theme {
+  --font-weight-normal: 450;
+}
+
 /* @tailwindcss/typography (v4 plugin form) — `prose` is used in markdown viewers
    (KnowledgeBase / Credentials / the Vývoj PhaseArtifact). */
 @plugin "@tailwindcss/typography";
@@ -23,7 +37,7 @@
   body {
     /* CR-NS-058: the shared theme-aware tokens (dark = slate-900/100 via the .dark default) — a ≤1-shade
        shift from the old slate-950/100. Studio stays dark via <html class="dark">. */
-    @apply bg-[var(--color-canvas)] text-[var(--color-text-primary)] font-sans;
+    @apply bg-[var(--color-canvas)] text-[var(--color-text-primary)] font-sans font-normal;
     /* NO `antialiased` here. Despite the name it improves nothing off macOS: it sets
        -webkit-font-smoothing: antialiased, which DISABLES subpixel (LCD) rendering and forces
        grayscale — on Linux and Windows that makes text visibly thinner, softer and lower in
