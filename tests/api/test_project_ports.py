@@ -223,14 +223,17 @@ class TestSuggestPortBlockEndpoint:
         resp = router_client.get("/api/v1/projects/ports/suggest-block")
         assert resp.status_code == 200
         body = resp.json()
-        assert body == {"base": 10100, "block_size": 10}
+        assert body["base"] == 10100
+        assert body["block_size"] == 10
 
     def test_first_block_occupied_returns_second(self, router_client, creator, db_session):
         """A single project in the first block pushes the suggestion to 10110."""
         _make_project(db_session, creator, backend_port=10105)
         resp = router_client.get("/api/v1/projects/ports/suggest-block")
         assert resp.status_code == 200
-        assert resp.json() == {"base": 10110, "block_size": 10}
+        body = resp.json()
+        assert body["base"] == 10110
+        assert body["block_size"] == 10
 
     def test_gap_block_preferred(self, router_client, creator, db_session):
         """Block 1 taken + Block 3 taken → Block 2 wins (first free)."""
@@ -239,3 +242,73 @@ class TestSuggestPortBlockEndpoint:
         resp = router_client.get("/api/v1/projects/ports/suggest-block")
         assert resp.status_code == 200
         assert resp.json()["base"] == 10110
+
+
+class TestPortEndpointsConsultTheHost:
+    """The endpoints answer from the HOST too, not just the cockpit's table.
+
+    Regression cover for the twelve-day silent double-book: the cockpit
+    recorded nex-websites on frontend port 10111 while the container
+    ``nex-manager-frontend`` was publishing 0.0.0.0:10111.
+    """
+
+    def test_check_reports_host_held_port_as_taken(self, router_client, host_ports):
+        host_ports[10111] = "nex-manager-frontend"
+        resp = router_client.get("/api/v1/projects/ports/check", params={"port": 10111})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["available"] is False
+        assert body["state"] == "taken"
+        assert body["source"] == "host"
+        assert body["holder"] == "nex-manager-frontend"
+        # No cockpit project owns it, so there is no project name to report.
+        assert body["conflict_project"] is None
+
+    def test_suggest_block_skips_host_held_block(self, router_client, host_ports):
+        host_ports[10100] = "some-neighbour"
+        resp = router_client.get("/api/v1/projects/ports/suggest-block")
+        assert resp.status_code == 200
+        assert resp.json()["base"] == 10110
+
+    def test_suggest_skips_host_held_port(self, router_client, host_ports):
+        host_ports[10100] = "some-neighbour"
+        resp = router_client.get("/api/v1/projects/ports/suggest", params={"type": "backend"})
+        assert resp.status_code == 200
+        assert resp.json()["suggested_port"] == 10101
+
+    def test_unconfigured_reservations_are_surfaced_to_the_operator(self, router_client):
+        """The empty ``reserved_port_ranges`` default is no longer inert."""
+        resp = router_client.get("/api/v1/projects/ports/suggest-block")
+        assert resp.status_code == 200
+        assert any("nie sú nastavené" in w for w in resp.json()["warnings"])
+
+
+class TestPortEndpointsFailClosed:
+    """An unverifiable port is reported as unknown and never suggested."""
+
+    @pytest.fixture()
+    def broken_probe(self, monkeypatch):
+        from backend.services import port_registry
+
+        def _raise(timeout=port_registry.HOST_PROBE_TIMEOUT_SECONDS):
+            raise port_registry.HostProbeError("daemon unreachable")
+
+        monkeypatch.setattr(port_registry, "_docker_published_ports", _raise)
+        port_registry.invalidate_host_port_cache()
+        return port_registry
+
+    def test_check_returns_unknown_not_available(self, router_client, broken_probe):
+        resp = router_client.get("/api/v1/projects/ports/check", params={"port": 10123})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["state"] == "unknown"
+        assert body["available"] is False
+        assert "daemon unreachable" in body["reason"]
+
+    def test_suggest_refuses_with_503(self, router_client, broken_probe):
+        resp = router_client.get("/api/v1/projects/ports/suggest", params={"type": "backend"})
+        assert resp.status_code == 503
+
+    def test_suggest_block_refuses_with_503(self, router_client, broken_probe):
+        resp = router_client.get("/api/v1/projects/ports/suggest-block")
+        assert resp.status_code == 503

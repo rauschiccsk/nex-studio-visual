@@ -12,6 +12,7 @@ network is a hard provisioning error).
 from __future__ import annotations
 
 import textwrap
+from itertools import takewhile
 from pathlib import Path
 
 import pytest
@@ -386,10 +387,14 @@ def test_redeploy_preserves_secrets_and_extra_hosts(tmp_path):
     res1 = _provision(tmp_path, "nex-asistent", "asistent", ASISTENT_COMPOSE)
     env1 = {ln.split("=", 1)[0]: ln.split("=", 1)[1] for ln in res1.env_path.read_text().splitlines() if "=" in ln}
 
-    # Simulate a live instance that grew an extra host (IMAP hairpin) on the backend.
-    compose1 = yaml.safe_load(res1.compose_path.read_text())
+    # Simulate a live instance that grew an extra host (IMAP hairpin) on the backend. The generated-by
+    # header is written back with it: it is the instance's provenance mark, and a compose without it is
+    # (correctly) refused as somebody else's deployment — see tests/test_provisioner_overwrite_guard.py.
+    text1 = res1.compose_path.read_text()
+    header = "".join(f"{ln}\n" for ln in takewhile(lambda ln: ln.startswith("#"), text1.splitlines()))
+    compose1 = yaml.safe_load(text1)
     compose1["services"]["backend"].setdefault("extra_hosts", []).append("mail.isnex.eu:192.168.55.250")
-    res1.compose_path.write_text(yaml.safe_dump(compose1, sort_keys=False))
+    res1.compose_path.write_text(header + yaml.safe_dump(compose1, sort_keys=False))
 
     # Redeploy (default — preserve).
     res2 = P.provision_uat("nex-asistent", "asistent", projects_root=tmp_path / "projects", uat_root=tmp_path / "uat")

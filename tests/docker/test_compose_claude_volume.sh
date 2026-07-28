@@ -79,16 +79,22 @@ IMAGE="nex-studio-backend:compose-test"
 # Build image if not already built
 if ! docker image inspect "${IMAGE}" >/dev/null 2>&1; then
     echo "  Building image ${IMAGE}..."
-    docker build -f backend/Dockerfile -t "${IMAGE}" . >/dev/null 2>&1
+    # Root Dockerfile — the single backend recipe (backend/Dockerfile was a decoy and is gone).
+    docker build -f Dockerfile -t "${IMAGE}" . >/dev/null 2>&1
 fi
 
+# The image supplies the PATH entry; the binary itself arrives at runtime from the
+# read-only /home/andros/.local mount (v4.0.41 — no bundled second copy, no version
+# drift against the host build). Without that mount the symlink target is absent, so
+# `which claude` finds nothing: check the symlink, which is what the image owns.
 CLAUDE_CHECK=$(docker run --rm -e CLAUDE_CONFIG_DIR=/root/.claude -e CLAUDE_CLI_PATH=claude \
-    "${IMAGE}" sh -c 'which claude 2>/dev/null || command -v claude 2>/dev/null || echo "NOT_FOUND"' 2>&1)
+    --entrypoint sh "${IMAGE}" -c \
+    'if [ -L /usr/local/bin/claude ]; then readlink /usr/local/bin/claude; else echo "NOT_FOUND"; fi' 2>&1)
 
 if [ "${CLAUDE_CHECK}" != "NOT_FOUND" ] && [ -n "${CLAUDE_CHECK}" ]; then
-    pass "Claude CLI accessible at: ${CLAUDE_CHECK}"
+    pass "claude on PATH via symlink → ${CLAUDE_CHECK} (mounted at runtime)"
 else
-    fail "Claude CLI not found in container"
+    fail "Claude CLI symlink not found in container"
 fi
 
 # ---------------------------------------------------------------------------

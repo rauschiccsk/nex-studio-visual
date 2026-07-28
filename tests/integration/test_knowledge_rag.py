@@ -28,6 +28,7 @@ from backend.core.security import (
 )
 from backend.db.models.foundation import User
 from backend.db.session import get_db
+from backend.rag.reader import RagUnavailableError
 
 
 def _make_user(db_session, role: str = "ri") -> User:
@@ -378,3 +379,121 @@ class TestRagRouter:
         assert "credentials" in cats
         assert "icc" in cats
         assert "projects" in cats
+
+
+# ---------------------------------------------------------------------------
+# RAG router — an unreachable index must SAY so (503), never look like "no hits"
+# ---------------------------------------------------------------------------
+
+
+def _raising_reader(exc: RagUnavailableError) -> type:
+    """A reader stand-in whose every entry point reports the same outage."""
+
+    def _boom(*_args, **_kwargs):
+        raise exc
+
+    return type(
+        "_OutageReader",
+        (),
+        {
+            "search": staticmethod(_boom),
+            "list_documents": staticmethod(_boom),
+            "get_document": staticmethod(_boom),
+            "get_stats": staticmethod(_boom),
+            "get_categories": staticmethod(_boom),
+        },
+    )
+
+
+class TestRagRouterReportsOutages:
+    """The endpoint must distinguish "index unreachable" from "nothing matched".
+
+    Browsing the KB reads Markdown off the disk and keeps working; only search
+    needs the vector index. When the index is silent the user is told exactly
+    that — with the service and address — rather than being handed an empty
+    result list (the old behaviour) or a bare generic failure.
+    """
+
+    def _client_with_outage(self, db_session, monkeypatch, exc: RagUnavailableError) -> TestClient:
+        from backend.api.routes import rag as rag_module
+
+        monkeypatch.setattr(rag_module, "reader", _raising_reader(exc))
+        return _build_client(db_session, _make_user(db_session, "ri"))
+
+    def test_search_unreachable_returns_503_naming_service_and_address(self, db_session, monkeypatch):
+        client = self._client_with_outage(
+            db_session,
+            monkeypatch,
+            RagUnavailableError("Qdrant", "http://localhost:9130", "Connection refused"),
+        )
+        resp = client.get("/api/v1/rag/search", params={"query": "faktúra"})
+        assert resp.status_code == 503
+        detail = resp.json()["detail"]
+        assert "Qdrant" in detail
+        assert "http://localhost:9130" in detail
+        # ...and it must not leave the user thinking the whole KB is gone.
+        assert "Prehliadanie dokumentov funguje" in detail
+
+    def test_search_not_configured_names_the_env_var(self, db_session, monkeypatch):
+        client = self._client_with_outage(
+            db_session,
+            monkeypatch,
+            RagUnavailableError("Ollama", "", "no address configured", kind="not_configured"),
+        )
+        resp = client.get("/api/v1/rag/search", params={"query": "faktúra"})
+        assert resp.status_code == 503
+        detail = resp.json()["detail"]
+        assert "OLLAMA_URL" in detail
+        assert "nie je nastaven" in detail
+
+    def test_search_missing_index_says_the_index_was_never_built(self, db_session, monkeypatch):
+        client = self._client_with_outage(
+            db_session,
+            monkeypatch,
+            RagUnavailableError(
+                "Qdrant", "http://qdrant:6333", "collection 'icc' does not exist", kind="missing_index"
+            ),
+        )
+        resp = client.get("/api/v1/rag/search", params={"query": "faktúra"})
+        assert resp.status_code == 503
+        assert "Index znalostnej bázy" in resp.json()["detail"]
+
+    def test_search_never_answers_200_with_an_empty_list_on_outage(self, db_session, monkeypatch):
+        """The exact regression: an outage rendered as a successful, empty search."""
+        client = self._client_with_outage(
+            db_session,
+            monkeypatch,
+            RagUnavailableError("Qdrant", "http://localhost:9130", "Connection refused"),
+        )
+        resp = client.get("/api/v1/rag/search", params={"query": "faktúra"})
+        assert resp.status_code != 200
+
+    @pytest.mark.parametrize(
+        ("path", "params"),
+        [
+            ("/api/v1/rag/list", {}),
+            ("/api/v1/rag/stats", {}),
+            ("/api/v1/rag/categories", {}),
+            ("/api/v1/rag/document", {"source_file": "icc/DECISIONS.md"}),
+        ],
+    )
+    def test_every_reader_backed_endpoint_reports_the_outage(self, db_session, monkeypatch, path, params):
+        client = self._client_with_outage(
+            db_session,
+            monkeypatch,
+            RagUnavailableError("Qdrant", "http://localhost:9130", "Connection refused"),
+        )
+        resp = client.get(path, params=params)
+        assert resp.status_code == 503, f"{path} did not report the outage"
+        assert "Qdrant" in resp.json()["detail"]
+
+    def test_outage_detail_never_leaks_credentials(self, db_session, monkeypatch):
+        """CLAUDE.md §4 — a basic-auth endpoint must not put its password in a response."""
+        client = self._client_with_outage(
+            db_session,
+            monkeypatch,
+            RagUnavailableError("Qdrant", "http://admin:hunter2@qdrant:6333", "auth failed for admin:hunter2"),
+        )
+        resp = client.get("/api/v1/rag/search", params={"query": "x"})
+        assert resp.status_code == 503
+        assert "hunter2" not in resp.text

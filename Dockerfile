@@ -1,3 +1,64 @@
+# =============================================================================
+# NEX Studio Visual — backend image. THE ONLY BACKEND RECIPE.
+#
+# There used to be two: this one and `backend/Dockerfile`. Everything that
+# actually ships is built from THIS file — CI (`docker build … .`, ci.yml job
+# "Build Docker Images") and the deployed PROD image alike — while
+# `backend/Dockerfile` was referenced only by the dev compose and a handful of
+# non-compose call sites (scripts + docs) — never by anything that ships. So fixes
+# written into that file silently never reached production: it baked
+# `scripts/notify_telegram.sh` into the image, and `/app/scripts` did not exist
+# in the running v4.0.76 PROD container. A second recipe is not redundancy, it
+# is a decoy that quietly absorbs fixes; it has been deleted and its genuine
+# contents merged here (notify script, binary verification, release-notes
+# pruning).
+#
+# DELIBERATELY NOT merged from the deleted file — these were divergences, not
+# omissions, and copying them would change the deployed runtime:
+#   * `npm install -g @anthropic-ai/claude-code` — this image does NOT bundle
+#     claude. The host's proven binary is mounted read-only from
+#     /home/andros/.local and symlinked onto PATH below (v4.0.41), so the
+#     deployed agent is byte-identical to the team's. Bundling a second copy
+#     would reintroduce version drift.
+#   * `useradd andros` + `USER andros` + docker group GID 110 — this container
+#     runs as ROOT on purpose; the prod compose sets IS_SANDBOX=1 so claude
+#     accepts --dangerously-skip-permissions inside the sandboxed container
+#     (v4.0.42). Adding a non-root user here would break agent dispatch.
+#   * NodeSource Node 20 — Debian's nodejs/npm is what the deployed image has
+#     been running on; swapping the runtime is a change of its own, not a fix.
+#
+# If a backend build problem needs fixing, it gets fixed HERE. Do not add a
+# second Dockerfile.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Stage: release-notes — isolate ONLY the per-version RELEASE_NOTES.md files
+# (the "Aktualizácie" changelog, served by GET /api/v1/release-notes).
+#
+# A flat `COPY docs/specs/versions/*/RELEASE_NOTES.md ./…` would collapse every
+# match into one dir by basename and collide, losing the v<X>/ parent the
+# service reads as the version. Copying the tree here then pruning everything
+# except RELEASE_NOTES.md preserves that structure, and — the point — keeps the
+# REST of docs/specs (development-spec, customer-dialogue, F-xxx internal dev
+# docs) in this throwaway stage only. The previous flat copy shipped all of it:
+# the v4.0.76 PROD image carried 132 files under /app/docs, 56 of them internal
+# design documents that no endpoint reads. `backend.services.release_notes`
+# already documented the pruned contract; now the deployed image honours it.
+#
+# `-mindepth 1` keeps the `versions/` root itself even when NO RELEASE_NOTES.md
+# exists yet, so the runtime `COPY --from` below never fails on a missing
+# source (it just copies an empty dir → the endpoint returns []).
+# ---------------------------------------------------------------------------
+FROM python:3.12-slim AS release-notes
+
+WORKDIR /notes
+COPY docs/specs/versions/ ./docs/specs/versions/
+RUN find docs/specs/versions -type f ! -name 'RELEASE_NOTES.md' -delete \
+    && find docs/specs/versions -mindepth 1 -type d -empty -delete
+
+# ---------------------------------------------------------------------------
+# Stage: base — the runtime image (default build target; must stay last).
+# ---------------------------------------------------------------------------
 FROM python:3.12-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -44,6 +105,17 @@ RUN install -m 0755 -d /etc/apt/keyrings \
     && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
     && rm -rf /var/lib/apt/lists/*
 
+# Verify the CLIs the backend shells out to actually landed — a silent apt install
+# failure would otherwise surface only at runtime, as a FileNotFoundError in the
+# middle of a Create Project or a UAT deploy (the §9.1 NEX Inbox v0.1.0 lesson).
+# `command -v` rather than a fixed path: docker-ce-cli may install into /usr/bin
+# or /usr/local/bin depending on Debian packaging.
+RUN docker_bin="$(command -v docker)" && test -x "$docker_bin" \
+    && gh_bin="$(command -v gh)" && test -x "$gh_bin" \
+    && git_bin="$(command -v git)" && test -x "$git_bin" \
+    && docker compose version \
+    && echo "Docker CLI at $docker_bin (+ compose plugin), GitHub CLI at $gh_bin, git at $git_bin"
+
 # Node.js — the AI Agent (claude) shells out to node/npm when it builds a generated app's frontend
 # (npm install / build), so the backend that hosts the agent needs a node runtime. The `claude` binary
 # itself is the proven host build, mounted read-only from /home/andros/.local at runtime (compose), so
@@ -69,14 +141,22 @@ RUN poetry export --without dev -f requirements.txt -o requirements.txt \
 COPY backend/ ./backend/
 COPY alembic.ini ./alembic.ini
 COPY migrations/ ./migrations/
-# The Aktualizácie changelog is served from the per-version RELEASE_NOTES.md files
-# (backend.services.release_notes reads /app/docs/specs/versions/v*/RELEASE_NOTES.md).
-# Without this the endpoint returns [] and the Aktualizácie tab is empty (v4.0.33).
-COPY docs/specs/versions/ ./docs/specs/versions/
 # Create-Project scaffolding reads charter/CI/smoke templates from /app/templates (agent-shared-base.md,
 # ai-agent-charter.md, auditor-charter.md, release_smoke_test.sh, github-actions-workflow.yml, uat/, …).
 # Without this, v2 charter provisioning fails "shared base template missing" and create 500s (v4.0.39).
 COPY templates/ ./templates/
+# Bake the notify script so send_telegram works in ANY instance. backend.services.notify prefers this
+# baked copy and otherwise falls back to /opt/projects/nex-studio/scripts/notify_telegram.sh — a path
+# that belongs to a DIFFERENT project's checkout and only resolves while /opt/projects happens to be
+# mounted and happens to contain it. The v4.0.76 PROD image had no /app/scripts at all, so every
+# Telegram nudge rode on that coincidence. (The deleted backend/Dockerfile had this COPY; nothing built
+# from it, which is exactly how the gap survived.)
+COPY scripts/notify_telegram.sh ./scripts/notify_telegram.sh
+# The Aktualizácie changelog is served from the per-version RELEASE_NOTES.md files
+# (backend.services.release_notes reads /app/docs/specs/versions/v*/RELEASE_NOTES.md).
+# Without this the endpoint returns [] and the Aktualizácie tab is empty (v4.0.33).
+# Taken from the pruned stage above — ONLY the notes files, never the full docs/specs tree.
+COPY --from=release-notes /notes/docs/specs/versions/ ./docs/specs/versions/
 
 EXPOSE 9176
 

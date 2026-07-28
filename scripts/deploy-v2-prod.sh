@@ -22,7 +22,8 @@ VER="2.0.$([ -n "$BASE" ] && git rev-list --count "${BASE}..HEAD" || git rev-lis
 echo "==> Deploying NEX Studio v2 PROD — version ${VER} (target: ${TARGET})"
 
 if [[ "${TARGET}" == "all" || "${TARGET}" == "backend" ]]; then
-  docker build -f backend/Dockerfile -t nex-studio-backend:v2.0.0 .
+  # Root Dockerfile — the single backend recipe (backend/Dockerfile was a decoy and is gone).
+  docker build -f Dockerfile -t nex-studio-backend:v2.0.0 .
 fi
 if [[ "${TARGET}" == "all" || "${TARGET}" == "frontend" ]]; then
   docker build -f frontend/Dockerfile -t nex-studio-frontend:v2.0.0 \

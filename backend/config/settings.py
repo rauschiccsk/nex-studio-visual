@@ -118,6 +118,24 @@ class Settings(BaseSettings):
     # the ``nomic-embed-text`` embedding model. Chunking parameters
     # match NEX Command exactly so re-indexing produces identical
     # collections and search results carry over 1:1.
+    #
+    # DEPLOYMENT — the two URLs below are the BARE-METAL defaults (backend
+    # started on the host, as in local dev and the CI test job). They are
+    # deliberately NOT container-aware: inside the backend container
+    # ``localhost`` is the container itself, where neither Qdrant nor Ollama
+    # runs, so a containerized deployment MUST override them via the env vars
+    # ``QDRANT_URL`` / ``OLLAMA_URL`` in its compose file (the addresses depend
+    # on how that instance reaches the shared infra — a docker network alias,
+    # the host gateway, …, which is an operator decision, not a code default).
+    # Until they are set, KB *search* cannot work — but it now SAYS so: the
+    # reader raises :class:`backend.rag.reader.RagUnavailableError` and the
+    # ``/rag`` routes answer HTTP 503 naming the service and the address,
+    # instead of the old behaviour where an unreachable index was swallowed
+    # into an empty result list and read as "nothing matched". Browsing the KB
+    # from disk (``/knowledge/*``) is unaffected either way.
+    #
+    # An EMPTY value is honoured as "not configured" and reported as such —
+    # use it to state plainly that this instance has no vector index.
     qdrant_url: str = "http://localhost:9130"
     ollama_url: str = "http://localhost:9132"
     embed_model: str = "nomic-embed-text"

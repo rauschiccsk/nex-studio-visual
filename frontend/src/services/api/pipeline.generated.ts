@@ -1157,6 +1157,11 @@ export interface paths {
         /**
          * Check Port
          * @description Check whether a port is available in the ICC Port Registry range.
+         *
+         *     Answers from all three sources (projects table + declared reservations +
+         *     the host's published-port map). Returns 200 with ``state="unknown"`` when
+         *     the host could not be consulted — the caller is told plainly that the port
+         *     is unverified instead of being shown a green "available".
          */
         get: operations["check_port_api_v1_projects_ports_check_get"];
         put?: never;
@@ -1177,6 +1182,10 @@ export interface paths {
         /**
          * Suggest Port
          * @description Suggest the next available port for the given type.
+         *
+         *     Refuses (503) rather than suggesting a port it cannot verify against the
+         *     host — an unverifiable suggestion is exactly how a port already published
+         *     by a neighbouring container gets handed out a second time.
          */
         get: operations["suggest_port_api_v1_projects_ports_suggest_get"];
         put?: never;
@@ -1201,6 +1210,10 @@ export interface paths {
          *     Used by the new-project form to auto-fill the three port inputs
          *     (backend / frontend / db) from a contiguous block per
          *     DECISIONS.md D-020 (Port Registry v2, 10-port blocks).
+         *
+         *     The block is free on all three sources — the cockpit's own table, the
+         *     declared reservations, and the host's published-port map. If the host
+         *     cannot be consulted no block is suggested (503).
          */
         get: operations["suggest_port_block_api_v1_projects_ports_suggest_block_get"];
         put?: never;
@@ -1230,17 +1243,25 @@ export interface paths {
          * @description Hard-delete a project by primary key.
          *
          *     Guards (CR-V2-027, v4.0.35): **owner or privileged** (the project's creator, or an ``ri``/``ha`` lead;
-         *     a Junior can delete only their OWN project, others get 403), and
+         *     a Junior can delete only their OWN project, others get 403),
          *     **only a project that has never had a successful PROD deploy** — once a project graduates to PROD it
-         *     can only be archived (409 otherwise). Archiving is the preferred soft-disable path generally — callers
-         *     should prefer ``PATCH`` with ``status='archived'`` and reserve delete for early/throwaway projects.
+         *     can only be archived (409 otherwise) — and **only a project whose UAT teardown destroys no data**
+         *     (409 otherwise): the teardown below is ``docker compose down -v``, so a UAT that was really deployed
+         *     would lose its database with it (see :func:`_uat_teardown_destroys_data`). Archiving is the preferred
+         *     soft-disable path generally — callers should prefer ``PATCH`` with ``status='archived'`` and reserve
+         *     delete for early/throwaway projects.
          *
          *     Every inbound FK to ``projects.id`` uses ``ON DELETE CASCADE``, so
          *     dependent rows (modules, specifications, design documents,
          *     KB docs, architect sessions, epics, bugs, delegations, migration
-         *     tables, report configs) are removed automatically.
+         *     tables, report configs — and the project's **customers** with their whole
+         *     **deploy/acceptance history**) are removed automatically.
          *
          *     Side effects on success:
+         *
+         *     * The project's UAT environment ``{uat_slug}`` is torn down with ``docker compose down -v``
+         *       (best-effort). The ``-v`` takes its volumes, so this is destructive — hence the guard above,
+         *       which lets the delete through only when there is no UAT data to lose.
          *
          *     * The on-disk project workspace ``{source_path}`` (= ``/opt/projects/{slug}``, incl. the per-project
          *       ``MEMORY.md``) is removed so the slug can be cleanly re-created (best-effort, guarded to a path
@@ -4139,15 +4160,27 @@ export interface components {
              * @description Number of consecutive ports reserved per project block.
              */
             block_size: number;
+            /**
+             * Warnings
+             * @description Configuration warnings gathered while resolving the block.
+             */
+            warnings?: string[];
         };
         /**
          * PortCheckResponse
          * @description Response for port availability check.
+         *
+         *     ``available`` is the historical boolean; ``state`` is the honest answer.
+         *     Availability is resolved against the cockpit's ``projects`` table, the
+         *     declared reservations AND the host's own published-port map, so a port a
+         *     neighbouring container is serving on no longer reads as free. When the
+         *     host cannot be consulted the state is ``unknown`` — the UI must render
+         *     that distinctly from ``taken`` and must NOT present it as available.
          */
         PortCheckResponse: {
             /**
              * Available
-             * @description Whether the port is available.
+             * @description True only when the port is provably free on every source.
              */
             available: boolean;
             /**
@@ -4155,6 +4188,33 @@ export interface components {
              * @description Name of the project occupying this port, if any.
              */
             conflict_project?: string | null;
+            /**
+             * Holder
+             * @description Who holds the port: project name, container name, or reserved range.
+             */
+            holder?: string | null;
+            /**
+             * Reason
+             * @description Human-readable explanation, always present for taken/unknown.
+             */
+            reason?: string | null;
+            /**
+             * Source
+             * @description Which source decided: projects | host | probe | reserved.
+             */
+            source?: string | null;
+            /**
+             * State
+             * @description free = provably free; taken = held; unknown = could not be verified.
+             * @default free
+             * @enum {string}
+             */
+            state: "free" | "taken" | "unknown";
+            /**
+             * Warnings
+             * @description Configuration warnings, e.g. reserved ranges not configured.
+             */
+            warnings?: string[];
         };
         /**
          * PortConflictError
@@ -4187,6 +4247,11 @@ export interface components {
              * @description The first free port in the ICC range.
              */
             suggested_port: number;
+            /**
+             * Warnings
+             * @description Configuration warnings gathered while resolving the suggestion.
+             */
+            warnings?: string[];
         };
         /** ProjectCostsRead */
         ProjectCostsRead: {

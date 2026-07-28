@@ -2,7 +2,7 @@
 
 Backs the *Aktualizácie* feature. A deployed app exposes its **own**
 changelog by reading the per-version ``RELEASE_NOTES.md`` files that were
-baked into its backend image (``backend/Dockerfile`` copies only those
+baked into its backend image (the root ``Dockerfile`` copies only those
 files — never the full ``docs/specs`` tree). This is the serving decision
 from the design (§0/§4): a backend endpoint reading image-baked committed
 notes, joined with the ``versions`` table for the release date + ordering.

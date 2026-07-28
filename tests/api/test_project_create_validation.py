@@ -377,3 +377,70 @@ class TestGitHubRepoValidation:
         resp = router_client.post("/api/v1/projects", json=payload)
         assert resp.status_code == 201
         assert resp.json()["repo_url"] is None
+
+
+class TestCreateRespectsHostPorts:
+    """Create must not allocate a port the HOST already publishes.
+
+    The cockpit's ``projects`` table used to be the only source consulted, so
+    a port a neighbouring container had been serving for twelve days (10111,
+    ``nex-manager-frontend``) was happily handed to a new project.
+    """
+
+    def test_host_held_port_rejected_with_409(self, router_client, creator, host_ports):
+        host_ports[10111] = "nex-manager-frontend"
+        payload = _payload(creator.id, backend_port=10110, frontend_port=10111)
+        resp = router_client.post("/api/v1/projects", json=payload)
+        assert resp.status_code == 409
+        error = resp.json()["detail"]
+        assert error["port"] == 10111
+        # The operator is told WHO holds it, which the table could never say.
+        assert "nex-manager-frontend" in error["detail"]
+        # No cockpit project owns it, so there is no project name to blame.
+        assert error["conflict_project"] is None
+
+    def test_creation_succeeds_when_host_is_clear(self, router_client, creator, host_ports):
+        host_ports[10111] = "nex-manager-frontend"
+        payload = _payload(creator.id, backend_port=10120, frontend_port=10121)
+        resp = router_client.post("/api/v1/projects", json=payload)
+        assert resp.status_code == 201
+
+    def test_reserved_range_rejected_with_422(self, router_client, creator, db_session):
+        """``reserved_port_ranges`` is enforced on the create path."""
+        from backend.services import system_setting as system_setting_service
+
+        system_setting_service.upsert(db_session, "reserved_port_ranges", "10110-10119")
+        payload = _payload(creator.id, backend_port=10110)
+        resp = router_client.post("/api/v1/projects", json=payload)
+        assert resp.status_code == 422
+        assert "10110-10119" in resp.json()["detail"]
+
+    def test_unverifiable_port_refuses_with_503(self, router_client, creator, monkeypatch):
+        """Fail CLOSED: a port we cannot verify is not allocated at all."""
+        from backend.services import port_registry
+
+        def _raise(timeout=port_registry.HOST_PROBE_TIMEOUT_SECONDS):
+            raise port_registry.HostProbeError("daemon unreachable")
+
+        monkeypatch.setattr(port_registry, "_docker_published_ports", _raise)
+        port_registry.invalidate_host_port_cache()
+
+        payload = _payload(creator.id, backend_port=10110)
+        resp = router_client.post("/api/v1/projects", json=payload)
+        assert resp.status_code == 503
+        assert "daemon unreachable" in resp.json()["detail"]
+
+    def test_no_project_row_is_left_behind_when_refused(self, router_client, creator, db_session, monkeypatch):
+        """A refusal must not half-create the project."""
+        from backend.services import port_registry
+
+        def _raise(timeout=port_registry.HOST_PROBE_TIMEOUT_SECONDS):
+            raise port_registry.HostProbeError("daemon unreachable")
+
+        monkeypatch.setattr(port_registry, "_docker_published_ports", _raise)
+        port_registry.invalidate_host_port_cache()
+
+        payload = _payload(creator.id, backend_port=10110)
+        resp = router_client.post("/api/v1/projects", json=payload)
+        assert resp.status_code == 503
+        assert db_session.query(Project).filter(Project.slug == payload["slug"]).first() is None

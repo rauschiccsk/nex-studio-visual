@@ -125,49 +125,45 @@ def _validate_ports(db: Session, payload: ProjectCreate) -> None:
                 detail=(f"Port {port_value} ({field_name}) is outside the allowed range ({range_min}–{range_max})."),
             )
 
-        # Uniqueness check
-        if not port_registry_service.check_port_available(db, port_value):
-            conflict_name = port_registry_service.get_conflict_project_name(db, port_value)
+        # Availability — resolved against the projects table, the declared
+        # reservations AND the host's own published-port map. The table alone
+        # used to decide this, which is why a port a neighbouring container had
+        # been publishing for twelve days could be handed out again.
+        verdict = port_registry_service.describe_port_availability(db, port_value)
+
+        # Fail CLOSED. "Could not verify" is not "free": creating a project on
+        # an unverified port is how a live customer deployment loses its port.
+        # 503 (not 4xx) because nothing is wrong with the request — the host
+        # check is unavailable and the operator should retry once it is back.
+        if verdict.state == port_registry_service.UNKNOWN:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    f"Port {port_value} ({field_name}) could not be verified against this host, "
+                    f"so it will not be allocated. {verdict.reason}"
+                ),
+            )
+
+        if verdict.state == port_registry_service.TAKEN:
+            if verdict.source == "reserved":
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        f"Port {port_value} ({field_name}) falls inside reserved range "
+                        f"{verdict.holder}. This range is reserved per ICC_STANDARDS / "
+                        f"DECISIONS — pick a different port block."
+                    ),
+                )
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=PortConflictError(
-                    detail=(
-                        f"Port {port_value} ({field_name}) is already allocated"
-                        f"{' to project ' + repr(conflict_name) if conflict_name else ''}."
-                    ),
+                    detail=f"Port {port_value} ({field_name}) is already allocated. {verdict.reason}",
                     port=port_value,
-                    conflict_project=conflict_name,
+                    # Only a cockpit project has a project name; a port held by a
+                    # neighbouring container reports its container in ``reason``.
+                    conflict_project=(verdict.holder if verdict.source == "projects" else None),
                 ).model_dump(),
             )
-
-        # Reserved-block check — read CSV from system_settings
-        # (key: reserved_port_ranges, e.g. "10110-10159,10200-10209").
-        # Externally-managed reservations (NEX Automat per D-022, etc.)
-        # not represented in the projects table go here.
-        reserved_csv = system_setting_service.get_str(db, "reserved_port_ranges")
-        if reserved_csv:
-            for spec in (s.strip() for s in reserved_csv.split(",")):
-                if not spec or "-" not in spec:
-                    continue
-                try:
-                    start_str, end_str = spec.split("-", 1)
-                    r_start = int(start_str.strip())
-                    r_end = int(end_str.strip())
-                except ValueError:
-                    # Malformed entry — skip (operator will see in logs);
-                    # don't block project creation on a config typo.
-                    logger.warning("Malformed reserved_port_ranges entry %r — skipped", spec)
-                    continue
-                if r_start <= port_value <= r_end:
-                    raise HTTPException(
-                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                        detail=(
-                            f"Port {port_value} ({field_name}) falls inside "
-                            f"reserved range {r_start}-{r_end}. This range is "
-                            f"reserved per ICC_STANDARDS / DECISIONS — pick a "
-                            f"different port block."
-                        ),
-                    )
 
     # Block-alignment check — backend_port must be at the start of a
     # 10-port block (10100, 10110, 10120, ...) when in commercial range
@@ -261,6 +257,23 @@ def _map_value_error(exc: ValueError) -> HTTPException:
     return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=message)
 
 
+def _host_probe_unavailable(exc: Exception) -> HTTPException:
+    """Translate a failed host port probe into 503.
+
+    Deliberately NOT a fallback to a table-only answer. Port availability is
+    only meaningful when the host has been consulted; degrading to "free"
+    because the probe broke is precisely the silent double-book this guard
+    exists to prevent, so the endpoint refuses and says why.
+    """
+    logger.warning("Host port probe unavailable — refusing to suggest a port: %s", exc)
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail=(
+            f"Port availability cannot be verified against this host right now, so no port is being suggested. {exc}"
+        ),
+    )
+
+
 def _workspace_safe_to_remove(source_path: str, root: Path) -> bool:
     """True iff ``source_path`` is an existing directory strictly UNDER ``root`` — never ``root`` itself,
     never a path outside it (CR-V2-027). The guard before ``shutil.rmtree`` of a deleted project's
@@ -271,6 +284,31 @@ def _workspace_safe_to_remove(source_path: str, root: Path) -> bool:
     ws = Path(source_path).resolve()
     r = root.resolve()
     return ws != r and ws.is_relative_to(r) and ws.is_dir()
+
+
+def _uat_teardown_destroys_data(db: Session, project_id: UUID, uat_slug: str) -> bool:
+    """True iff tearing this project's UAT down would really destroy data — the guard before a delete.
+
+    :func:`uat_provisioner.teardown_uat` runs ``docker compose down -v``; the ``-v`` takes the UAT
+    VOLUMES, i.e. the customer's UAT DATABASE and everything they have entered into it. Two independent
+    signals say a UAT holds data — EITHER is enough, because neither sees the whole picture:
+
+    * A rendered UAT stack on disk (``/opt/uat/<uat_slug>/docker-compose.yml``) — teardown shells out
+      against exactly this file. A UAT brought up by ``scripts/uat-deploy.py`` leaves no ``deploy_events``
+      row at all, so this is the ONLY signal that sees it (``/opt/uat/inbox`` is a live customer UAT).
+    * A recorded successful UAT deploy — the deploy went through the cockpit, so there is a database
+      behind it holding whatever the customer has entered since.
+
+    No compose AND no successful UAT deploy = teardown is its own documented no-op ("nothing to tear
+    down") and the delete destroys no data: the early/throwaway project the hard delete exists for.
+    ``UAT_ROOT`` is read off the module at call time so a test can point it at a tmp dir.
+    """
+    if (uat_provisioner.UAT_ROOT / uat_slug / "docker-compose.yml").is_file():
+        return True
+    return any(
+        event.environment == "uat" and event.event_type == "deploy" and event.status == "ok"
+        for event in deploy_service.list_project_events(db, project_id)
+    )
 
 
 def _discard_orphaned_workspace(source_path: str | None, slug: str) -> None:
@@ -400,17 +438,27 @@ def check_port(
     ),
     db: Session = Depends(get_db),
 ) -> PortCheckResponse:
-    """Check whether a port is available in the ICC Port Registry range."""
+    """Check whether a port is available in the ICC Port Registry range.
+
+    Answers from all three sources (projects table + declared reservations +
+    the host's published-port map). Returns 200 with ``state="unknown"`` when
+    the host could not be consulted — the caller is told plainly that the port
+    is unverified instead of being shown a green "available".
+    """
     try:
-        available = port_registry_service.check_port_available(db, port, project_id)
+        verdict = port_registry_service.describe_port_availability(db, port, project_id)
     except ValueError as exc:
         raise _map_value_error(exc) from exc
 
-    conflict_project: str | None = None
-    if not available:
-        conflict_project = port_registry_service.get_conflict_project_name(db, port, project_id)
-
-    return PortCheckResponse(available=available, conflict_project=conflict_project)
+    return PortCheckResponse(
+        available=verdict.available,
+        conflict_project=(verdict.holder if verdict.source == "projects" else None),
+        state=verdict.state,
+        holder=verdict.holder,
+        source=verdict.source,
+        reason=verdict.reason,
+        warnings=list(verdict.warnings),
+    )
 
 
 @router.get("/ports/suggest", response_model=PortSuggestResponse)
@@ -422,13 +470,23 @@ def suggest_port(
     ),
     db: Session = Depends(get_db),
 ) -> PortSuggestResponse:
-    """Suggest the next available port for the given type."""
+    """Suggest the next available port for the given type.
+
+    Refuses (503) rather than suggesting a port it cannot verify against the
+    host — an unverifiable suggestion is exactly how a port already published
+    by a neighbouring container gets handed out a second time.
+    """
     try:
         suggested = port_registry_service.suggest_next_port(db, type)
+    except port_registry_service.HostProbeError as exc:
+        raise _host_probe_unavailable(exc) from exc
     except ValueError as exc:
         raise _map_value_error(exc) from exc
 
-    return PortSuggestResponse(suggested_port=suggested)
+    return PortSuggestResponse(
+        suggested_port=suggested,
+        warnings=port_registry_service.reserved_ranges_status(db).warnings,
+    )
 
 
 @router.get("/ports/suggest-block", response_model=PortBlockSuggestResponse)
@@ -440,15 +498,22 @@ def suggest_port_block(
     Used by the new-project form to auto-fill the three port inputs
     (backend / frontend / db) from a contiguous block per
     DECISIONS.md D-020 (Port Registry v2, 10-port blocks).
+
+    The block is free on all three sources — the cockpit's own table, the
+    declared reservations, and the host's published-port map. If the host
+    cannot be consulted no block is suggested (503).
     """
     try:
         base = port_registry_service.suggest_next_port_block(db)
+    except port_registry_service.HostProbeError as exc:
+        raise _host_probe_unavailable(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
     return PortBlockSuggestResponse(
         base=base,
         block_size=system_setting_service.get_int(db, "port_block_size"),
+        warnings=port_registry_service.reserved_ranges_status(db).warnings,
     )
 
 
@@ -892,17 +957,25 @@ def delete_project(
     """Hard-delete a project by primary key.
 
     Guards (CR-V2-027, v4.0.35): **owner or privileged** (the project's creator, or an ``ri``/``ha`` lead;
-    a Junior can delete only their OWN project, others get 403), and
+    a Junior can delete only their OWN project, others get 403),
     **only a project that has never had a successful PROD deploy** — once a project graduates to PROD it
-    can only be archived (409 otherwise). Archiving is the preferred soft-disable path generally — callers
-    should prefer ``PATCH`` with ``status='archived'`` and reserve delete for early/throwaway projects.
+    can only be archived (409 otherwise) — and **only a project whose UAT teardown destroys no data**
+    (409 otherwise): the teardown below is ``docker compose down -v``, so a UAT that was really deployed
+    would lose its database with it (see :func:`_uat_teardown_destroys_data`). Archiving is the preferred
+    soft-disable path generally — callers should prefer ``PATCH`` with ``status='archived'`` and reserve
+    delete for early/throwaway projects.
 
     Every inbound FK to ``projects.id`` uses ``ON DELETE CASCADE``, so
     dependent rows (modules, specifications, design documents,
     KB docs, architect sessions, epics, bugs, delegations, migration
-    tables, report configs) are removed automatically.
+    tables, report configs — and the project's **customers** with their whole
+    **deploy/acceptance history**) are removed automatically.
 
     Side effects on success:
+
+    * The project's UAT environment ``{uat_slug}`` is torn down with ``docker compose down -v``
+      (best-effort). The ``-v`` takes its volumes, so this is destructive — hence the guard above,
+      which lets the delete through only when there is no UAT data to lose.
 
     * The on-disk project workspace ``{source_path}`` (= ``/opt/projects/{slug}``, incl. the per-project
       ``MEMORY.md``) is removed so the slug can be cleanly re-created (best-effort, guarded to a path
@@ -942,6 +1015,22 @@ def delete_project(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
                 f"Projekt {slug!r} už bol nasadený do PROD — namiesto mazania ho archivuj (PATCH status='archived')."
+            ),
+        )
+
+    # Same guard for a UAT that holds data (audit 2026-07-28). The teardown below is
+    # ``docker compose down -v`` — it takes the UAT database and everything the customer ever entered
+    # into it, which is exactly as irreversible as the PROD history the guard above protects. Covering
+    # PROD but not UAT was an oversight, not a policy: /opt/uat carries live customer data, and a
+    # project slug maps straight onto it (``nex-inbox`` → ``/opt/uat/inbox``). A project whose UAT
+    # would really be destroyed can therefore only be archived, same as a PROD one.
+    if uat_slug and _uat_teardown_destroys_data(db, project_id, uat_slug):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Projekt {slug!r} má UAT prostredie {uat_slug!r} s databázou — jeho zmazanie by ju aj so "
+                f"všetkými údajmi, ktoré do nej zákazník zadal, nenávratne odstránilo. Namiesto mazania ho "
+                f"archivuj (PATCH status='archived')."
             ),
         )
 

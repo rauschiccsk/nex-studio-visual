@@ -123,6 +123,22 @@ def creator(db_session) -> User:
     return user
 
 
+@pytest.fixture(autouse=True)
+def uat_root(tmp_path, monkeypatch):
+    """Point the delete route's UAT-data guard at a tmp ``/opt/uat`` — never the real one.
+
+    DELETE asks ``uat_provisioner.UAT_ROOT`` whether a teardown would destroy a customer's UAT
+    database. The real ``/opt/uat`` holds LIVE customer stacks (``/opt/uat/inbox`` is one), so no test
+    may consult it: a slug that happened to collide would read a real deployment and make the test's
+    verdict depend on production. Autouse — this must hold for every test in the module, not only the
+    ones that mean to exercise the guard. Yields the tmp root so a test can render a stack into it.
+    """
+    root = tmp_path / "uat"
+    root.mkdir()
+    monkeypatch.setattr("backend.services.uat_provisioner.UAT_ROOT", root)
+    return root
+
+
 def _payload(creator_id, **overrides) -> dict:
     """Return a project-create payload with deterministic-ish defaults."""
     suffix = uuid.uuid4().hex[:8]
@@ -974,6 +990,140 @@ class TestProjectDeletionGuards:
 
         _seed_prod_deploy(db_session, uuid.UUID(created["id"]))
         assert router_client.get(f"/api/v1/projects/{created['id']}").json()["has_prod_deploy"] is True
+
+
+def _seed_uat_deploy(db_session, project_id, *, status: str = "ok") -> None:
+    """Seed a UAT deploy event (with its required customer) for a project — the recorded proof that a
+    UAT database exists with the customer's data in it. ``status='failed'`` seeds an attempt that
+    deployed nothing."""
+    from backend.db.models.customers import Customer
+    from backend.db.models.deploy import DeployEvent
+
+    customer = Customer(project_id=project_id, name="ICC s.r.o.", slug=f"cust-{uuid.uuid4().hex[:6]}")
+    db_session.add(customer)
+    db_session.flush()
+    db_session.add(
+        DeployEvent(
+            customer_id=customer.id,
+            project_id=project_id,
+            version_number="v0.1.0",
+            environment="uat",
+            event_type="deploy",
+            status=status,
+        )
+    )
+    db_session.flush()
+
+
+class TestUatDataDeletionGuard:
+    """Audit 2026-07-28 — a UAT that holds data is protected exactly like PROD.
+
+    The delete route tears the UAT down with ``docker compose down -v``: the ``-v`` takes the volumes,
+    i.e. the customer's UAT DATABASE and everything they entered into it. Guarding PROD but not that
+    was an oversight; these tests pin the symmetry (409 → archive instead) and, just as importantly,
+    that a throwaway project with no UAT data is still deletable.
+    """
+
+    @pytest.fixture()
+    def no_teardown(self, monkeypatch):
+        """Record teardown calls instead of shelling out to docker — a blocked delete must make NONE."""
+        calls: list[str] = []
+        monkeypatch.setattr(
+            "backend.services.uat_provisioner.teardown_uat",
+            lambda slug, **kw: (calls.append(slug), (True, "OK"))[1],
+        )
+        return calls
+
+    def _project_with_uat(self, router_client, creator, db_session, uat_slug: str) -> dict:
+        """Create a project and give it ``uat_slug`` (no create/update API surface for that field)."""
+        from backend.db.models.projects import Project
+
+        created = router_client.post("/api/v1/projects", json=_payload(creator.id)).json()
+        project = db_session.get(Project, uuid.UUID(created["id"]))
+        project.uat_slug = uat_slug
+        db_session.flush()
+        return created
+
+    def test_delete_blocked_when_a_uat_stack_exists_on_disk(
+        self, router_client, creator, db_session, uat_root, no_teardown
+    ):
+        """A rendered UAT stack is the one signal that sees a UAT deployed by ``scripts/uat-deploy.py``
+        — it leaves no ``deploy_events`` row at all, yet ``down -v`` would still take its database."""
+        created = self._project_with_uat(router_client, creator, db_session, "livedata")
+        (uat_root / "livedata").mkdir()
+        (uat_root / "livedata" / "docker-compose.yml").write_text("# a real UAT stack\n")
+
+        resp = router_client.delete(f"/api/v1/projects/{created['id']}")
+
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert "databáz" in detail  # the message names what would be lost
+        assert "archivuj" in detail  # ...and the way out, same as the PROD guard
+        assert no_teardown == []  # nothing was torn down
+        assert router_client.get(f"/api/v1/projects/{created['id']}").status_code == 200
+
+    def test_delete_blocked_after_a_successful_uat_deploy(self, router_client, creator, db_session, no_teardown):
+        """A cockpit deploy renders its stack elsewhere (``/opt/uat/<customer>/<app>``), so the disk
+        signal can miss it — the recorded successful UAT deploy still blocks the delete."""
+        created = self._project_with_uat(router_client, creator, db_session, "cockpit-uat")
+        _seed_uat_deploy(db_session, uuid.UUID(created["id"]))
+
+        resp = router_client.delete(f"/api/v1/projects/{created['id']}")
+
+        assert resp.status_code == 409
+        assert no_teardown == []
+        assert router_client.get(f"/api/v1/projects/{created['id']}").status_code == 200
+
+    def test_delete_allowed_when_the_uat_deploy_only_failed(self, router_client, creator, db_session, no_teardown):
+        """A FAILED deploy attempt left no database behind — it must not strand the project."""
+        created = self._project_with_uat(router_client, creator, db_session, "never-came-up")
+        _seed_uat_deploy(db_session, uuid.UUID(created["id"]), status="failed")
+
+        resp = router_client.delete(f"/api/v1/projects/{created['id']}")
+
+        assert resp.status_code == 204
+        assert no_teardown == ["never-came-up"]  # the (no-op) teardown still runs
+
+    def test_delete_allowed_when_the_uat_was_never_deployed(self, router_client, creator, db_session, no_teardown):
+        """No stack on disk + no successful UAT deploy = nothing to lose. The early/throwaway project
+        the hard delete exists for stays deletable — the guard must not become a blanket ban."""
+        created = self._project_with_uat(router_client, creator, db_session, "just-a-name")
+
+        resp = router_client.delete(f"/api/v1/projects/{created['id']}")
+
+        assert resp.status_code == 204
+        assert no_teardown == ["just-a-name"]
+        assert router_client.get(f"/api/v1/projects/{created['id']}").status_code == 404
+
+    def test_delete_allowed_without_a_uat_slug_even_with_uat_history(
+        self, router_client, creator, db_session, no_teardown
+    ):
+        """No ``uat_slug`` → the route tears nothing down, so it destroys no UAT database and the guard
+        stays out of the way (the history alone is not what is being protected)."""
+        from backend.db.models.projects import Project
+
+        created = router_client.post("/api/v1/projects", json=_payload(creator.id)).json()
+        project = db_session.get(Project, uuid.UUID(created["id"]))
+        project.uat_slug = None
+        db_session.flush()
+        _seed_uat_deploy(db_session, uuid.UUID(created["id"]))
+
+        resp = router_client.delete(f"/api/v1/projects/{created['id']}")
+
+        assert resp.status_code == 204
+        assert no_teardown == []
+
+    def test_guard_reads_the_uat_root_at_call_time(self, db_session, uat_root):
+        """The disk signal is exactly ``teardown_uat``'s own precondition: the compose file it shells
+        against. Unit-level so the two cannot drift apart silently."""
+        from backend.api.routes.projects import _uat_teardown_destroys_data
+
+        project_id = uuid.uuid4()  # no rows — isolates the disk signal from the history signal
+        assert _uat_teardown_destroys_data(db_session, project_id, "ghost") is False
+
+        (uat_root / "ghost").mkdir()
+        (uat_root / "ghost" / "docker-compose.yml").write_text("# stack\n")
+        assert _uat_teardown_destroys_data(db_session, project_id, "ghost") is True
 
 
 def test_workspace_safe_to_remove(tmp_path):

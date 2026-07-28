@@ -373,3 +373,78 @@ def _isolate_create_project_kb(tmp_path, monkeypatch):
         f"Create-Project test polluted the real KB {real_kb_projects}: {sorted(new_dirs)} — "
         "KB isolation broke (docs/specs/kb-ghost-root-cause.md Fix 1 / kb-ghost-followup.md Fix A)."
     )
+
+
+# ---------------------------------------------------------------------------
+# Deterministic host port probe
+#
+# ``port_registry`` now resolves availability against the HOST (the Docker
+# published-port map) as well as the ``projects`` table — without that, a port
+# a neighbouring container is already serving on reads as free, which is how
+# the cockpit handed out 10111 while ``nex-manager-frontend`` was publishing it.
+#
+# That makes the real machine an input to the test suite, which it must never
+# be: ANDROS genuinely publishes 10111 / 10160-10162 / 10170-10173 and the
+# suite genuinely uses 10111 / 10160 / 10161 / 10170, so an unstubbed probe
+# would make port tests pass or fail depending on what happens to be running.
+# The probe is therefore stubbed for EVERY test, defaulting to "host holds
+# nothing"; a test that cares fills in ``host_ports``.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _isolate_system_setting_cache():
+    """Clear the process-global typed-settings cache around every test.
+
+    ``system_setting`` memoises ``get_str`` / ``get_int`` for 30s. The DB rows
+    a test writes are rolled back with its SAVEPOINT, but that cache is NOT —
+    so a test upserting e.g. ``reserved_port_ranges`` would leak its value into
+    later tests for half a minute, and the port range / block size / reserved
+    ranges are all read through those cached getters.
+    """
+    from backend.services import system_setting
+
+    system_setting.invalidate_cache()
+    yield
+    system_setting.invalidate_cache()
+
+
+@pytest.fixture()
+def host_ports() -> dict[int, str]:
+    """Fake ``{host_port: container_name}`` map the port registry sees.
+
+    Empty by default, so a test that says nothing about the host keeps its
+    original meaning ("free unless our own table says otherwise"). Request
+    this fixture and populate it to simulate a neighbouring container::
+
+        def test_x(host_ports, db_session):
+            host_ports[10111] = "nex-manager-frontend"
+            ...
+    """
+    return {}
+
+
+@pytest.fixture(autouse=True)
+def _deterministic_host_port_probe(monkeypatch, host_ports):
+    """Pin the host port probe to :func:`host_ports` and drop its cache.
+
+    Stubs the two host-facing primitives — the Docker map reader and the bind
+    probe — rather than the public helpers, so all the logic under test
+    (caching, fail-closed handling, the union in the allocators) really runs.
+    A test that wants to exercise probe FAILURE monkeypatches
+    ``_docker_published_ports`` itself to raise ``HostProbeError``.
+
+    The module-level snapshot cache is cleared on the way in AND out: it is
+    process-global, so a value cached by one test would otherwise leak into
+    the next.
+    """
+    from backend.services import port_registry
+
+    def _fake_docker_published_ports(timeout: float = port_registry.HOST_PROBE_TIMEOUT_SECONDS) -> dict[int, str]:
+        return dict(host_ports)
+
+    monkeypatch.setattr(port_registry, "_docker_published_ports", _fake_docker_published_ports)
+    monkeypatch.setattr(port_registry, "_bind_probe_says_taken", lambda port: False)
+    port_registry.invalidate_host_port_cache()
+    yield
+    port_registry.invalidate_host_port_cache()

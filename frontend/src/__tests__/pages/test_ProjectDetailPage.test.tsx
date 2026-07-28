@@ -223,3 +223,60 @@ describe("ProjectDetailPage — guarded delete (CR-V2-027)", () => {
     expect(await screen.findByRole("button", { name: /^zmazať projekt$/i })).toBeDisabled();
   });
 });
+
+describe("ProjectDetailPage — the delete dialog names everything it destroys (audit 2026-07-28)", () => {
+  /**
+   * The delete path runs `docker compose down -v` on the project's UAT — the `-v` takes the volumes,
+   * i.e. the customer's UAT DATABASE — and cascades away the project's customers with their whole
+   * deploy/acceptance history. The dialog used to promise only "kontajnery + port". Nobody can consent
+   * to losing data they were never told about, so these assertions are the consent itself.
+   */
+  async function openDeleteDialog() {
+    const ProjectDetailPage = await importPage();
+    render(<ProjectDetailPage />);
+    await userEvent.click(await screen.findByRole("button", { name: /^zmazať projekt$/i }));
+    return screen.getByRole("dialog");
+  }
+
+  it("says the UAT database and the customer's data in it go too", async () => {
+    const dialog = await openDeleteDialog();
+
+    expect(dialog).toHaveTextContent(/databáz/i); // the DB itself, not just containers
+    expect(dialog).toHaveTextContent(/údaje, ktoré do nej zákazník v UAT zadal/i);
+    // The old wording claimed the UAT teardown was containers + port and nothing more.
+    expect(dialog).not.toHaveTextContent(/UAT prostredie \(kontajnery \+ port\)/i);
+  });
+
+  it("says the project's customers and its deploy/acceptance history go too", async () => {
+    const dialog = await openDeleteDialog();
+
+    expect(dialog).toHaveTextContent(/zákazníkov/i);
+    expect(dialog).toHaveTextContent(/históriu nasadení a akceptácií/i);
+  });
+
+  it("still lists what it always listed — the warning grew, nothing was traded away", async () => {
+    const dialog = await openDeleteDialog();
+
+    expect(dialog).toHaveTextContent(/verzie, špecifikácie, návrhy, epiky, úlohy a chyby/i);
+    expect(dialog).toHaveTextContent(/priečinok v znalostnej báze/i);
+    expect(dialog).toHaveTextContent(/pracovný adresár na disku/i);
+    expect(dialog).toHaveTextContent(/nevratne/i);
+  });
+
+  it("surfaces the backend's refusal when the UAT holds data, and stays on the page", async () => {
+    // The guard the dialog is paired with: a UAT with a database can only be archived (409).
+    deleteProjectApiMock.mockRejectedValue(
+      new Error(
+        "Projekt 'demo' má UAT prostredie 'demo' s databázou — jeho zmazanie by ju aj so všetkými " +
+          "údajmi, ktoré do nej zákazník zadal, nenávratne odstránilo. Namiesto mazania ho archivuj.",
+      ),
+    );
+    await openDeleteDialog();
+
+    await userEvent.type(screen.getByLabelText(/na potvrdenie napíš/i), "ZMAZAŤ");
+    await userEvent.click(screen.getByRole("button", { name: /zmazať natrvalo/i }));
+
+    expect(await screen.findByText(/namiesto mazania ho archivuj/i)).toBeInTheDocument();
+    expect(navigateMock).not.toHaveBeenCalled();
+  });
+});

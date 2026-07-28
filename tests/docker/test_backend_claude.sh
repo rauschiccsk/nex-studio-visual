@@ -17,7 +17,8 @@ pass() { PASS=$((PASS + 1)); echo "  ✓ $1"; }
 fail() { FAIL=$((FAIL + 1)); echo "  ✗ $1"; }
 
 echo "=== Building test image: ${IMAGE} ==="
-docker build -f backend/Dockerfile -t "${IMAGE}" .
+# Root Dockerfile — the single backend recipe (backend/Dockerfile was a decoy and is gone).
+docker build -f Dockerfile -t "${IMAGE}" .
 
 echo ""
 echo "=== Running verification tests ==="
@@ -50,13 +51,18 @@ else
     fail "npm not found"
 fi
 
-# Test 4: Claude CLI installed
-echo "[4/6] Claude CLI installed"
-CLAUDE_VER=$(docker run --rm "${IMAGE}" claude --version 2>&1)
-if [ -n "${CLAUDE_VER}" ]; then
-    pass "Claude CLI available: ${CLAUDE_VER}"
+# Test 4: Claude CLI reachable on PATH once the host binary is mounted.
+# The image does NOT bundle claude — it symlinks /usr/local/bin/claude at the
+# read-only /home/andros/.local mount the compose file supplies, so the deployed
+# agent is byte-identical to the team's proven host build (v4.0.41). Asserting
+# `claude --version` inside a bare `docker run` therefore tests the wrong thing:
+# it passes only for an image that bundles its own copy — which is precisely the
+# drift this design avoids. Assert the PATH entry the runtime mount lands on.
+echo "[4/6] Claude CLI symlink on PATH"
+if docker run --rm --entrypoint sh "${IMAGE}" -c 'test -L /usr/local/bin/claude' 2>&1; then
+    pass "claude symlink present on PATH (binary arrives via the /home/andros/.local mount)"
 else
-    fail "Claude CLI not found"
+    fail "/usr/local/bin/claude symlink missing — the agent argv invokes bare 'claude'"
 fi
 
 # Test 5: uvicorn importable

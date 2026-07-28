@@ -111,34 +111,11 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
             "zastaví na najbližšej hranici úlohy a upozorní ťa. 0 = bez limitu (beží naraz)."
         ),
     ),
-    # ── Pipeline / AI ───────────────────────────────────────────────
-    "claude_stream_timeout_seconds": _Default(
-        value="1800",
-        value_type="int",
-        label="Časový limit toku AI",
-        unit="sekúnd",
-        description=(
-            "Najdlhší čas, počas ktorého môže bežať jeden tok AI, kým sa proces ukončí. "
-            "Zvýš, ak dlhé výpisy celej špecifikácie občas narazia na limit."
-        ),
-    ),
-    "claude_design_doc_timeout_seconds": _Default(
-        value="1800",
-        value_type="int",
-        label="Časový limit generovania návrhovej dokumentácie",
-        unit="sekúnd",
-        description=(
-            "Časový limit na vygenerovanie návrhových dokumentov (BEHAVIOR.md / DESIGN.md) "
-            "zo schválenej vývojovej dokumentácie."
-        ),
-    ),
-    "claude_task_plan_timeout_seconds": _Default(
-        value="1800",
-        value_type="int",
-        label="Časový limit generovania plánu úloh",
-        unit="sekúnd",
-        description="Časový limit na vygenerovanie plánu úloh (Epika → Funkcia → Úloha).",
-    ),
+    # ── GitHub ──────────────────────────────────────────────────────
+    # Read on the create/validate/delete-repo paths — see
+    # ``backend.api.routes.projects`` (``system_setting_service.get_int(db,
+    # "github_api_timeout_seconds")``) and the ``_DEFAULT_GITHUB_API_TIMEOUT``
+    # fallback in ``backend.services.github_validation``.
     "github_api_timeout_seconds": _Default(
         value="10",
         value_type="int",
@@ -146,26 +123,37 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
         unit="sekúnd",
         description="Časový limit HTTP volaní na GitHub (overenie, vytvorenie a zmazanie repozitára).",
     ),
-    "conversation_history_limit": _Default(
-        value="100",
-        value_type="int",
-        label="Limit histórie konverzácie",
-        unit="správ",
-        description=(
-            "Koľko posledných správ konverzácie s Architektom sa načíta ako kontext pre AI. "
-            "Staršie správy sa uchovávajú, ale AI sa už neposielajú."
-        ),
-    ),
-    "design_doc_max_chars": _Default(
-        value="12000",
-        value_type="int",
-        label="Maximálna dĺžka návrhovej dokumentácie",
-        unit="znakov",
-        description=(
-            "Najviac znakov z DESIGN.md, ktoré sa vložia do AI promptu pri programovaní úlohy, "
-            "aby sa nezahltil kontext."
-        ),
-    ),
+    # ── RETIRED: the "Priebeh / AI" category ────────────────────────
+    # Five keys used to live here — ``claude_stream_timeout_seconds``,
+    # ``claude_design_doc_timeout_seconds``, ``claude_task_plan_timeout_seconds``,
+    # ``conversation_history_limit`` and ``design_doc_max_chars`` — each with a
+    # Slovak label, a unit and a description promising a concrete effect. NO code
+    # read any of them: a full-repo search finds every one of the five only in
+    # this registry and in prose ABOUT it. They were a settings screen wired to
+    # nothing, and turning any dial did precisely nothing.
+    #
+    # They are removed rather than wired up, because the consumers their
+    # descriptions promise no longer exist in v4:
+    #   * ``claude_stream_timeout_seconds`` — ``run_claude_stream``
+    #     (claude_subprocess.py) has no production caller left; the live agent
+    #     path is ``claude_agent.py``, whose backstop is the env-level
+    #     ``Settings.claude_invoke_timeout``, not this key.
+    #   * ``claude_design_doc_timeout_seconds`` / ``design_doc_max_chars`` —
+    #     nothing generates or injects BEHAVIOR.md / DESIGN.md any more; the
+    #     agent reads project files itself through its own tools.
+    #   * ``claude_task_plan_timeout_seconds`` — the task plan is built by the
+    #     orchestrator's agent dispatch, which is governed by the same
+    #     ``claude_invoke_timeout``.
+    #   * ``conversation_history_limit`` — there is no Architekt conversation
+    #     loader to limit; the spine's conversation is the PipelineMessage log.
+    # Inventing a consumer to justify a dial would be worse than deleting it.
+    #
+    # Nothing else needs changing: the frontend renders only categories that have
+    # at least one setting (nex-shared ``SystemSettingsPanel`` returns null for an
+    # empty group), so the now-empty "Priebeh / AI" section simply stops being
+    # drawn, and ``github_api_timeout_seconds`` — the one key in that block that
+    # IS read — is classified under "GitHub" by its ``github_`` prefix, where it
+    # has always belonged.
     # ── Auth ────────────────────────────────────────────────────────
     "access_token_expire_minutes": _Default(
         value="480",
@@ -242,13 +230,27 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
             "60 pokrýva prvé vytváranie priečinkov a Docker."
         ),
     ),
+    # Default stays EMPTY on purpose — see the long note below. What was dangerous was never the
+    # empty value itself but that empty read as "everything else is free": port availability used to
+    # be computed from the cockpit's own `projects` table alone, so with no reservations declared
+    # NOTHING outside this database was considered. That is how the cockpit recorded nex-websites on
+    # frontend port 10111 while the container `nex-manager-frontend` had been publishing 10111 for
+    # twelve days. Inventing a plausible-looking default range here would NOT have caught that and
+    # would permanently block ports that later come free — a guess dressed as a guard. Instead
+    # `port_registry` now consults the HOST (Docker published-port map + bind probe) on every check,
+    # and `reserved_ranges_status()` reports `configured=False` for this empty value so the project
+    # forms show the operator, in words, that no external reservation is declared and what the
+    # remaining blind spot is (a service that is currently stopped, or does not run under Docker).
     "reserved_port_ranges": _Default(
         value="",
         label="Rezervované rozsahy portov",
         unit="",
         description=(
-            "Rozsahy portov vyhradené pre projekty spravované mimo NEX Studia (oddelené čiarkou, "
-            'napr. „10110-10159"). Z týchto rozsahov systém port nepridelí. Prázdne = žiadne rezervácie.'
+            "Rozsahy portov vyhradené pre systémy spravované mimo NEX Studia (oddelené čiarkou, "
+            'napr. „10110-10159"). Z týchto rozsahov systém port nepridelí. '
+            "Prázdne = žiadne rezervácie: vtedy sa NEX Studio spolieha len na vlastnú evidenciu "
+            "projektov a na porty, ktoré práve teraz drží Docker na tomto stroji. Službu, ktorá je "
+            "dočasne vypnutá alebo nebeží v Dockeri, takto nezistí — pre tie si rozsah dopíš sem."
         ),
     ),
     # ── Metrics / ROI pricing (E5, CR-NS-043) ───────────────────────

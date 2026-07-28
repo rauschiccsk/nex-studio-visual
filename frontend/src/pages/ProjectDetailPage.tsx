@@ -492,7 +492,16 @@ export default function ProjectDetailPage() {
               <li>projekt a všetky jeho verzie, špecifikácie, návrhy, epiky, úlohy a chyby</li>
               <li>jeho priečinok v znalostnej báze</li>
               <li>jeho pracovný adresár na disku (vrátane pamäte agenta)</li>
-              <li>jeho UAT prostredie (kontajnery + port), ak existuje</li>
+              {/* The delete path runs `docker compose down -v` on the UAT: the `-v` takes the volumes,
+                  i.e. the DATABASE. Saying "kontajnery + port" understated it by everything that
+                  matters — nobody can consent to losing data they were never told about. */}
+              <li>
+                jeho UAT prostredie, ak existuje — kontajnery, port{" "}
+                <span className="font-semibold">a aj jeho databázu</span>, teda všetky údaje, ktoré do nej
+                zákazník v UAT zadal
+              </li>
+              <li>jeho zákazníkov a celú históriu nasadení a akceptácií</li>
+              <li>jeho kontrolný beh — ak práve niečo kontroluje, prerušíme to</li>
               {project.repo_url && (
                 <li>
                   {deleteGithub ? "aj jeho GitHub repozitár " : "GitHub repozitár zostane zachovaný: "}

@@ -33,14 +33,49 @@ ProjectAuthMode = Literal["password", "token"]
 # on the ``projects`` table.
 ProjectStatus = Literal["active", "archived", "paused"]
 
+# Tri-state port verdict — mirrors ``backend.services.port_registry.PortState``.
+# "unknown" exists because a boolean forced callers to collapse "the host could
+# not be consulted" into one of the two answers, and it always collapsed into
+# "available" — which is how a port another container was already publishing got
+# handed out a second time.
+PortAvailabilityState = Literal["free", "taken", "unknown"]
+
 
 class PortCheckResponse(BaseModel):
-    """Response for port availability check."""
+    """Response for port availability check.
 
-    available: bool = Field(description="Whether the port is available.")
+    ``available`` is the historical boolean; ``state`` is the honest answer.
+    Availability is resolved against the cockpit's ``projects`` table, the
+    declared reservations AND the host's own published-port map, so a port a
+    neighbouring container is serving on no longer reads as free. When the
+    host cannot be consulted the state is ``unknown`` — the UI must render
+    that distinctly from ``taken`` and must NOT present it as available.
+    """
+
+    available: bool = Field(description="True only when the port is provably free on every source.")
     conflict_project: Optional[str] = Field(
         default=None,
         description="Name of the project occupying this port, if any.",
+    )
+    state: PortAvailabilityState = Field(
+        default="free",
+        description="free = provably free; taken = held; unknown = could not be verified.",
+    )
+    holder: Optional[str] = Field(
+        default=None,
+        description="Who holds the port: project name, container name, or reserved range.",
+    )
+    source: Optional[str] = Field(
+        default=None,
+        description="Which source decided: projects | host | probe | reserved.",
+    )
+    reason: Optional[str] = Field(
+        default=None,
+        description="Human-readable explanation, always present for taken/unknown.",
+    )
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="Configuration warnings, e.g. reserved ranges not configured.",
     )
 
 
@@ -48,6 +83,10 @@ class PortSuggestResponse(BaseModel):
     """Response for port suggestion."""
 
     suggested_port: int = Field(description="The first free port in the ICC range.")
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="Configuration warnings gathered while resolving the suggestion.",
+    )
 
 
 class PortBlockSuggestResponse(BaseModel):
@@ -63,6 +102,10 @@ class PortBlockSuggestResponse(BaseModel):
 
     base: int = Field(description="Base port of the first free block in the ICC range.")
     block_size: int = Field(description="Number of consecutive ports reserved per project block.")
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="Configuration warnings gathered while resolving the block.",
+    )
 
 
 class PortConflictError(BaseModel):

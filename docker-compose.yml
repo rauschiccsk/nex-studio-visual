@@ -25,7 +25,12 @@ services:
   backend:
     build:
       context: .
-      dockerfile: backend/Dockerfile
+      # The ROOT Dockerfile is the only backend recipe — the same one CI builds
+      # (`docker build … .`) and the one every deployed image comes from. This
+      # used to point at a second `backend/Dockerfile`, so dev and production
+      # were built from different files and fixes made in one never reached the
+      # other; that file is gone.
+      dockerfile: Dockerfile
     restart: unless-stopped
     ports:
       - "9213:9176"

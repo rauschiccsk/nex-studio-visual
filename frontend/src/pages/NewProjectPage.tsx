@@ -94,6 +94,7 @@ export default function NewProjectPage() {
     : "";
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [portsNote, setPortsNote] = useState<string>("");
   const [formError, setFormError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -157,9 +158,16 @@ export default function NewProjectPage() {
         setFrontendPort(String(block.base + 1));
         setDbPort(String(block.base + 2));
       })
-      .catch(() => {
-        // Registry exhausted or API unreachable — leave inputs empty,
-        // the user can still enter ports manually.
+      .catch((err: unknown) => {
+        // Say WHY the ports are blank. The endpoint is now fail-closed: rather than offering a port
+        // it cannot verify is free, it answers 503 when it cannot see the host (the docker socket
+        // momentarily gone is a documented landmine on this machine). Swallowing that left three
+        // empty fields with no explanation, and "free" is exactly the thing a person cannot check by
+        // hand — the cockpit has already double-booked a port once.
+        setPortsNote(
+          humanizeApiError(err, "Voľné porty sa nepodarilo zistiť").message +
+            " Zadaj ich ručne, alebo to skús znova o chvíľu.",
+        );
       });
   }, []);
 
@@ -409,6 +417,9 @@ export default function NewProjectPage() {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm font-medium text-[var(--color-text-secondary)]">Porty</span>
+                {portsNote && !backendPort && (
+                  <span className="text-[11px] text-[var(--color-status-warning)]">{portsNote}</span>
+                )}
                 {(backendPort || frontendPort || dbPort) && (
                   <span className="flex items-center gap-1 text-[11px] text-primary-400/70">
                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
