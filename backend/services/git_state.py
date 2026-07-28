@@ -43,6 +43,19 @@ def _project_root(source_path: str) -> Path:
     return root
 
 
+def workspace_is_git_repo(source_path: str) -> bool:
+    """True when ``source_path`` is a directory that is itself a git repository.
+
+    Lets a caller tell "there is no git history here" apart from "the git command failed", which the
+    preflight needs: a workspace with no repo has NOTHING to guard, exactly like a project with no
+    source path, and answering it with an error blocked founding behind a guard with nothing to guard.
+    """
+    if not source_path:
+        return False
+    root = Path(source_path).resolve()
+    return root.is_dir() and (root / ".git").exists()
+
+
 def _run(root: Path, args: list[str], *, timeout: int, c_locale: bool = False) -> subprocess.CompletedProcess:
     """Run ``git <args>`` inside ``root`` with a bounded timeout (never raises on nonzero).
 

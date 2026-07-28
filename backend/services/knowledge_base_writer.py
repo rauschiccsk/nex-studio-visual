@@ -1,6 +1,6 @@
 """Filesystem writer for per-project live documents in the Knowledge Base.
 
-Backs :mod:`backend.services.live_documents` with the narrow set of
+Provides the narrow set of
 I/O operations needed to maintain the two live project documents —
 ``STATUS.md`` and ``HISTORY.md`` — under
 ``{knowledge_base_path}/projects/{slug}/``.
@@ -28,7 +28,7 @@ Design notes (per ``docs/architect/live-docs-port.md``):
     * **Dedup on append.** The first line of the incoming ``entry`` is
       treated as a unique marker; if it already appears anywhere in
       the existing file, the append is skipped. Mirrors the NEX
-      Command behaviour (``backend/services/live_documents.py``
+      Command behaviour (the live-document generators, removed as dead code
       ``_append_to_kb``) so replaying a task completion stays
       idempotent.
     * **No DB access.** The writer is deliberately DB-agnostic —

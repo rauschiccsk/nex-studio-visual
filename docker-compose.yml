@@ -36,9 +36,11 @@ services:
       - "9213:9176"
     volumes:
       - /home/andros/.claude:/home/andros/.claude
-      # rw — backend writes per-project live documents
-      # (STATUS.md / HISTORY.md / ARCHITECT.md) under projects/{slug}/.
-      # See docs/architect/live-docs-port.md §3.
+      # rw — the backend writes per-project KB documents through KnowledgeBaseWriter
+      # (backend/api/dependencies.get_knowledge_base_writer), used by the project routes.
+      # It was justified here by the "live documents" generators (STATUS.md / HISTORY.md /
+      # ARCHITECT.md), which had no production caller and have since been deleted; the mount
+      # stays writable for the writer that IS live, not for the ones that were not.
       - /home/icc/knowledge:/home/icc/knowledge:rw
       # rw — backend bootstraps new projects into /opt/projects/<slug>/
       # via subprocess invocation of icc-claude-template/init.sh on

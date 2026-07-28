@@ -19,7 +19,6 @@ export * from "./userSession";
 export * from "./project";
 
 // Knowledge base.
-export * from "./kbDocument";
 
 // Task hierarchy (Epic → Feat → Task).
 export * from "./epic";

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
@@ -136,7 +137,7 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
     # They are removed rather than wired up, because the consumers their
     # descriptions promise no longer exist in v4:
     #   * ``claude_stream_timeout_seconds`` — ``run_claude_stream``
-    #     (claude_subprocess.py) has no production caller left; the live agent
+    #     (claude_subprocess.py, since deleted as dead code) had no production caller; the live agent
     #     path is ``claude_agent.py``, whose backstop is the env-level
     #     ``Settings.claude_invoke_timeout``, not this key.
     #   * ``claude_design_doc_timeout_seconds`` / ``design_doc_max_chars`` —
@@ -197,7 +198,8 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
         unit="",
         description=(
             'Kam sa štandardne uloží zdrojový kód projektu. „{slug}" sa nahradí názvom projektu. '
-            "Podľa konvencie žijú nové projekty v /opt/projects/<názov>/."
+            "Musí zostať priamo v /opt/projects/ — motor tam hľadá pravidlá agentov aj spúšťa ich prácu, "
+            "takže projekt založený inde by vznikol bez pravidiel a spadol by až pri prvom spustení agenta."
         ),
     ),
     "default_kb_path_template": _Default(
@@ -632,6 +634,28 @@ def _validate_value_for_type(value: str, value_type: SystemSettingValueType) -> 
 EMPTY_MEANS_OFF: frozenset[str] = frozenset({"template_init_script_path", "reserved_port_ranges"})
 
 
+def _validate_source_path_template(value: str) -> None:
+    """Refuse a source-path template the engine cannot run from.
+
+    The template decides where ``init.sh`` scaffolds a project, but the agent engine reads its charters
+    from — and runs with its cwd at — a HARDCODED ``/opt/projects/<slug>``
+    (``claude_agent.PROJECTS_ROOT``). Point this anywhere else and the two part company silently: the
+    scaffold lands in the new location, charter provisioning finds no directory at the old one and
+    SKIPS with an info log, the create answers 201, and the project only reveals itself as broken at
+    the first dispatch — "Agent dispatch failed", with nothing on screen connecting it to a setting
+    somebody changed weeks earlier. Editing a documented setting must not be able to produce that.
+    """
+    from backend.services.claude_agent import PROJECTS_ROOT
+
+    rendered = Path(value.replace("{slug}", "__slug__"))
+    if rendered.parent != PROJECTS_ROOT or "{slug}" not in value:
+        raise ValueError(
+            f"Umiestnenie zdrojového kódu musí byť priamo v {PROJECTS_ROOT}/ a obsahovať „{{slug}}“ "
+            f"(napríklad „{PROJECTS_ROOT}/{{slug}}“). Motor tam hľadá pravidlá agentov a spúšťa ich "
+            f"prácu — projekt založený inde by vznikol bez pravidiel."
+        )
+
+
 def upsert(
     db: Session,
     key: str,
@@ -656,6 +680,9 @@ def upsert(
 
     if value == "" and key not in EMPTY_MEANS_OFF:
         raise ValueError(f"System setting {key!r} may not be empty")
+
+    if key == "default_source_path_template":
+        _validate_source_path_template(value)
 
     _validate_value_for_type(value, default.value_type)
 

@@ -39,7 +39,7 @@
 
 /* App-specific only — the canonical @theme tokens, @custom-variant dark, the button-cursor pin, and the
    .btn/.card component classes now live in nex-shared/tokens.css (imported above). What stays here is
-   genuinely NEX-Studio-local: the dark page chrome + the Slovak-spellchecker underline. */
+   genuinely NEX-Studio-local: the dark page chrome. */
 @layer base {
   html,
   body,
@@ -61,16 +61,3 @@
   }
 }
 
-@layer components {
-  /*
-   * Wavy red underline on misspelled words inside the bundled Slovak
-   * spellchecker backdrop (SlovakTextarea). Text itself is rendered
-   * transparent in the backdrop, but text-decoration is still painted
-   * so the underline shows through to the transparent textarea above.
-   */
-  .nex-misspelled {
-    text-decoration: underline wavy #ef4444;
-    text-decoration-skip-ink: none;
-    text-underline-offset: 2px;
-  }
-}

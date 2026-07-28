@@ -297,7 +297,10 @@ def run_post_scaffold_steps(
 
     # Named so a failure can be REPORTED as the thing it was, not as "a post-scaffold step". Each label
     # is the Slovak the Manager reads in the cockpit; the English detail goes to the log.
-    steps: list[tuple[str, Callable[[], None]]] = []
+    # A step may RETURN a Slovak sentence: it finished, but with something the Manager must know
+    # (the app was built but never answered its health probe, say). That is not a failure — it does not
+    # stop the chain — but it is not silence either, which is what it used to be.
+    steps: list[tuple[str, Callable[[], str | None]]] = []
     if target_path and target_path.is_dir():
         steps += [
             (
@@ -340,7 +343,9 @@ def run_post_scaffold_steps(
     # so swallow + log and let the project be created — but SAY which step it was.
     for index, (label, step) in enumerate(steps):
         try:
-            step()
+            note = step()
+            if note:
+                warnings.append(note)
         except Exception as exc:  # noqa: BLE001 — best-effort by contract: never abort the create
             logger.warning(
                 "Post-scaffold step %r failed (slug=%s) — project still created, finish manually: %s",
@@ -443,7 +448,7 @@ def _compose_backend_published_port(compose_file: Path) -> int | None:
     return int(host) if host.isdigit() else None
 
 
-def _run_smoke_test(target: Path, slug: str, *, full: bool) -> None:
+def _run_smoke_test(target: Path, slug: str, *, full: bool) -> str | None:
     """K-004: docker compose build (minimal) alebo build + up + health (full)."""
     compose_file = target / "docker-compose.yml"
     if not compose_file.is_file():
@@ -455,6 +460,9 @@ def _run_smoke_test(target: Path, slug: str, *, full: bool) -> None:
         return
 
     logger.info("K-004 smoke test starting (slug=%s, full=%s)", slug, full)
+
+    # The health verdict, carried out of the try/finally below. None = nothing to report.
+    unhealthy: str | None = None
 
     # Minimal smoke: docker compose build (always run)
     build_result = subprocess.run(
@@ -525,6 +533,10 @@ def _run_smoke_test(target: Path, slug: str, *, full: bool) -> None:
                     slug,
                     health_url,
                 )
+                unhealthy = (
+                    "Projekt sa postavil a spustil, ale neodpovedal na kontrolu zdravia — appka sa "
+                    "pravdepodobne nerozbehla. Treba sa na to pozrieť pred prvým nasadením."
+                )
     finally:
         # Cleanup — always run docker compose down -v even if up failed
         subprocess.run(
@@ -535,7 +547,14 @@ def _run_smoke_test(target: Path, slug: str, *, full: bool) -> None:
             check=False,
         )
 
+    # Not "PASS" unconditionally. This line ran whatever happened above — after a health probe that timed
+    # out, and after one that was skipped entirely for want of a derivable port — so the one record of the
+    # check said the opposite of what the check found.
+    if unhealthy:
+        logger.warning("K-004 full smoke test FINISHED WITH A FAILED HEALTH PROBE (slug=%s)", slug)
+        return unhealthy
     logger.info("K-004 full smoke test PASS (slug=%s)", slug)
+    return None
 
 
 def _seed_release_smoke_test(target: Path, slug: str) -> None:

@@ -1,13 +1,14 @@
 # Pravidlá agenta — Spoločný základ (NEX Studio v2.0.0)
 
-> **Autoritatívna šablóna spoločného základu pre OBOCH v2.0.0 agentov** (AI Agent + Auditor).
-> Pri Create Project workflow sa obsah tohto súboru **konkatenuje pred** rolovo-špecifické
-> `Pravidlá agenta` a injektuje sa ako system prompt (`--append-system-prompt`).
-> Univerzálne pravidlá projektu (hlavný `CLAUDE.md`) tento dokument NIKDY neprepíše — len ich potvrdzuje.
+> **Spoločný základ pravidiel pre OBOCH agentov** (AI Agent + Auditor). Obsah sa pri založení projektu
+> **konkatenuje pred** rolovo-špecifické `Pravidlá agenta` a injektuje ako system prompt
+> (`--append-system-prompt`). Univerzálne pravidlá projektu (hlavný `CLAUDE.md`) tento dokument NIKDY
+> neprepíše — len ich potvrdzuje.
 >
-> ⚠️ **FLAG — návrh obsahu na revíziu Manažérom (CR-V2-007).** Štruktúra a zámer vychádzajú z
-> `docs/architecture/nex-studio-v2-design.md` §5.1 (Shared base). Presné znenie je návrh — Manažér ho
-> schvaľuje/upravuje. Tento súbor je **design-bearing**.
+> Tieto pravidlá sú **záväzné**. Predtým tu stálo varovanie, že ide o „návrh na revíziu Manažérom",
+> a odkaz na `docs/architecture/nex-studio-v2-design.md` — súbor, ktorý existuje v repozitári NEX
+> Studia, nie v projekte, kam sa táto šablóna kopíruje. Agent teda dostával svoje vlastné pravidlá
+> označené ako neschválené a s odkazom, ktorý si nemal ako otvoriť.
 
 ---
 

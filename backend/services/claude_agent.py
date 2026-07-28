@@ -271,8 +271,9 @@ def build_claude_argv(
     The SINGLE source of the per-turn ``claude`` flags (konzultacia-sidecar-sandbox.md Part 1): both
     :func:`_invoke_once` (in-process subprocess) and :func:`consult_sandbox.run_consult_in_sandbox` (the
     ``docker run --entrypoint claude`` sidecar) call this so the two transports stay byte-identical except
-    for the container wrapper. Returns the full argv beginning with the literal ``"claude"``; the sidecar
-    drops that leading element (the entrypoint provides it) and appends the rest after the image.
+    for the container wrapper. Returns the full argv beginning with the CLI binary
+    (``settings.claude_cli_path``, default ``"claude"``); the sidecar drops that leading element (the
+    entrypoint provides it) and appends the rest after the image.
 
     Flags, in order:
       * ``--output-format`` — ``stream-json`` (+ ``--verbose``) when ``streaming`` else ``json`` (WS-D,
@@ -304,10 +305,16 @@ def build_claude_argv(
         ``.claude/settings.json`` — the flag is the only mechanism that can select per dispatch.
     The positional ``prompt`` is always last.
     """
+    # ``settings.claude_cli_path`` decides WHICH binary runs — it used to decide only whether
+    # ``/health`` reported ``claude_cli_available`` (health.py asks ``shutil.which`` about it), while the
+    # live dispatch hardcoded the bare name. Point the setting at a specific build and the health check
+    # would follow it while every actual turn kept running whatever ``claude`` resolved to on PATH: the
+    # verdict and the reality could disagree without a word.
+    cli = settings.claude_cli_path
     if streaming:
-        args = ["claude", "-p", "--output-format", "stream-json", "--verbose"]
+        args = [cli, "-p", "--output-format", "stream-json", "--verbose"]
     else:
-        args = ["claude", "-p", "--output-format", "json"]
+        args = [cli, "-p", "--output-format", "json"]
     if charter_text is not None:
         args += ["--session-id", str(claude_session_id), "--append-system-prompt", charter_text]
     else:

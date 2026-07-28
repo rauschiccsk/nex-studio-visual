@@ -56,15 +56,26 @@ jobs:
 
       - name: Activity X.4 Full stack healthy
         run: |
+          # The loop used to just END after 30 tries and let the step exit 0 — a stack that never
+          # became healthy passed the gate it exists to be stopped by. `for` completing normally is
+          # NOT success; only the break is, so the timeout now fails, loudly and with the evidence.
+          set -euo pipefail
           docker compose up -d
+          HEALTHY=0
           for i in {1..30}; do
             UNHEALTHY=$(docker ps --filter "health=unhealthy" -q | wc -l)
             STARTING=$(docker ps --filter "health=starting" -q | wc -l)
-            if [ $UNHEALTHY -eq 0 ] && [ $STARTING -eq 0 ]; then
-              echo "PASS X.4"; break
+            if [ "$UNHEALTHY" -eq 0 ] && [ "$STARTING" -eq 0 ]; then
+              echo "PASS X.4"; HEALTHY=1; break
             fi
             sleep 5
           done
+          if [ "$HEALTHY" -ne 1 ]; then
+            echo "::error::FAIL X.4 — the stack never reached a healthy state within 150s"
+            docker compose ps
+            docker compose logs --tail=100
+            exit 1
+          fi
 
       - name: Activity X.5 Health endpoint
         run: |

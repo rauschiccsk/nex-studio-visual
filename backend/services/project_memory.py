@@ -39,7 +39,7 @@ provides only:
   here; only deliberate shared-KB writes are.
 
 The retired live-document writers (``STATUS.md`` / ``HISTORY.md`` DB-driven
-persistence) are gone — see :mod:`backend.services.live_documents`. The status /
+persistence) are gone, along with the live-document generators that read them. The status /
 history narrative now lives in this memory (agent-written) plus the Vývoj phase
 tabs (design §5.3).
 """

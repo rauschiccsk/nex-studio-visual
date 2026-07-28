@@ -58,20 +58,31 @@ The `docker-compose.yml` already contains the correct volume mount:
 ```yaml
 backend:
   volumes:
-    - /home/andros/.claude:/root/.claude:ro
+    - /home/andros/.claude:/home/andros/.claude
+  environment:
+    CLAUDE_CONFIG_DIR: "/home/andros/.claude"
 ```
 
-This mounts the host's Claude config directory into the container as **read-only** (`ro`),
-so the backend can use Claude CLI without being able to modify the host credentials.
+The config directory is mounted at **the same path inside the container as on the host**, and
+`CLAUDE_CONFIG_DIR` points the CLI at it. The path matters: this document used to describe a
+`/root/.claude:ro` mount that no compose file has, so the verification below reported a failure on a
+perfectly healthy system and sent whoever followed it looking for a problem that was not there.
+
+The mount is read-WRITE, not `:ro`, and deliberately: the CLI refreshes its own session state in
+place, and a read-only mount makes it fail on renewal.
 
 ### Verify the mount is active
 
 ```bash
-# Check if the volume is mounted
-docker compose exec backend ls -la /root/.claude/
+# Is the config directory visible inside the container, at the path the CLI is pointed at?
+docker compose exec backend test -d "$CLAUDE_CONFIG_DIR" && echo "mount OK"
 
-# Expected output: credentials.json, config.json, etc.
+# And does the CLI itself agree it can run?
+docker compose exec backend claude --version
 ```
+
+Do not `cat` or list the contents — the directory holds live credentials (CLAUDE.md §4). The two
+checks above answer the question without reading anything.
 
 If the directory is empty or missing, restart the backend:
 

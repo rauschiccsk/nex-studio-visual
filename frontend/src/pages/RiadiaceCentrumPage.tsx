@@ -48,7 +48,7 @@ export default function RiadiaceCentrumPage() {
 
   // The event-rendered transcript + live activity, streamed over the EXISTING pipeline WS (INVARIANT: no new
   // WS client — live streaming already reaches the FE over this hook).
-  const { board, activity, reconnecting, error, accessDenied, setBoard } = usePipelineWs(versionId);
+  const { board, activity, reconnecting, error, accessDenied, versionGone, setBoard } = usePipelineWs(versionId);
 
   async function handleSend(text: string): Promise<{ deferred: boolean }> {
     if (!versionId) throw new Error("Najprv vyber verziu (pin v Projektoch).");
@@ -128,6 +128,27 @@ export default function RiadiaceCentrumPage() {
           jeho Riadiace centrum nevieme otvoriť — nezobrazuje sa žiadny priebeh ani rozhovor. Riadiť ho môže
           jeho vlastník alebo Manažér; popros o to niekoho z nich, alebo si v Projektoch pripni vlastný
           projekt.
+        </p>
+        <button
+          onClick={() => navigate("/projects")}
+          className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500"
+        >
+          → Otvor Projekty
+        </button>
+      </div>
+    );
+  }
+
+  if (versionGone) {
+    // The pin lives in activeContextStore, so reopening Riadiace centrum after somebody deletes the pinned
+    // version is an ordinary path, not an exotic one. Say what happened and offer the way out; before this
+    // the socket simply reconnected once a second, forever, behind a board that never filled.
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-4 bg-[var(--color-canvas)] p-6 text-center">
+        <h2 className="text-sm font-semibold text-[var(--color-text-secondary)]">Táto verzia už neexistuje</h2>
+        <p className="max-w-md text-xs text-[var(--color-text-muted)]">
+          Verzia, ktorú máš pripnutú, bola medzitým zmazaná, takže jej Riadiace centrum sa nedá otvoriť.
+          Vyber si v projekte inú verziu.
         </p>
         <button
           onClick={() => navigate("/projects")}

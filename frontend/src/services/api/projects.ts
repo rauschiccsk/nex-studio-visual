@@ -96,13 +96,22 @@ export function deleteProjectApi(projectId: string, deleteGithub: boolean): Prom
 
 export function suggestPortApi(
   type: "backend" | "frontend" | "db",
-): Promise<{ suggested_port: number }> {
-  return api.get<{ suggested_port: number }>("/projects/ports/suggest", { params: { type } });
+): Promise<{ suggested_port: number; warnings?: string[] }> {
+  return api.get<{ suggested_port: number; warnings?: string[] }>("/projects/ports/suggest", {
+    params: { type },
+  });
 }
 
 export interface PortBlockSuggestion {
   base: number;
   block_size: number;
+  /**
+   * Slovak sentences the backend wrote FOR THE MANAGER — e.g. that no reserved port ranges are
+   * configured, so the suggestion could not be checked against them. The route has always sent them;
+   * this type omitted the field, so they were dropped at the seam and the form offered a port with a
+   * caveat nobody ever saw.
+   */
+  warnings?: string[];
 }
 
 /**

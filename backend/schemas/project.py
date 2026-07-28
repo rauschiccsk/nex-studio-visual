@@ -198,6 +198,11 @@ class ProjectCreate(BaseModel):
         default=None,
         description="Filesystem path to the project knowledge base directory.",
     )
+    #: INERT — settable at create and update, echoed back by ``ProjectRead``, and read by NO code: no
+    #: screen renders it, no agent brief carries it, no gate consults it. There is no Guardian review in
+    #: this product. It survives as a persisted column rather than being dropped, because removing a
+    #: column is a migration with a blast radius the finding does not justify — but nothing should be
+    #: built on it, and nothing should read it as a promise. (Closing audit, v4.0.80.)
     guardian_enabled: bool = Field(
         default=False,
         description="Whether Guardian review is enabled for this project.",

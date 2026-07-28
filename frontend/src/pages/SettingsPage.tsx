@@ -325,6 +325,7 @@ function AgentsTab({
 
 function UsersTab({
   users,
+  loadError,
   canManage,
   onLoad,
   onCreate,
@@ -334,6 +335,7 @@ function UsersTab({
   onToggleActive,
 }: {
   users: UserRead[];
+  loadError: string | null;
   canManage: boolean;
   onLoad: () => void;
   onCreate: (data: UserFormData) => Promise<void>;
@@ -346,6 +348,12 @@ function UsersTab({
     onLoad();
   }, [onLoad]);
   return (
+    <>
+      {loadError && (
+        <div className="mb-3 rounded-lg border border-[var(--color-state-error-bg)] bg-[var(--color-state-error-bg)] p-3 text-xs text-[var(--color-state-error-fg)]">
+          {loadError} Zoznam nižšie preto nemusí byť úplný — nie je to isté ako „žiadni používatelia“.
+        </div>
+      )}
     <UsersPanel
       users={users}
       roleOptions={ROLE_OPTIONS}
@@ -358,6 +366,7 @@ function UsersTab({
       onToggleActive={onToggleActive}
       roleClass={roleCls}
     />
+    </>
   );
 }
 
@@ -499,6 +508,10 @@ export default function SettingsPage() {
   // ── Users ──
   const [users, setUsers] = useState<UserRead[]>([]);
   const [usersLoaded, setUsersLoaded] = useState(false);
+  // An empty table is a claim ("there are no users"), and the catch below used to make it for every
+  // failure — an unreachable backend, an expired session, a 500. The sibling loaders on this very page
+  // already report theirs; this one matched "the old page's silent failure" instead.
+  const [usersLoadError, setUsersLoadError] = useState<string | null>(null);
 
   const loadUsers = useCallback(() => {
     if (usersLoaded) return;
@@ -506,10 +519,9 @@ export default function SettingsPage() {
       .then((res) => {
         setUsers(res.items);
         setUsersLoaded(true);
+        setUsersLoadError(null);
       })
-      .catch(() => {
-        /* matches the old page's silent failure → empty table */
-      });
+      .catch(() => setUsersLoadError("Nepodarilo sa načítať používateľov."));
   }, [usersLoaded]);
 
   const handleCreateUser = useCallback(
@@ -669,6 +681,7 @@ export default function SettingsPage() {
           // the management UI stays visible to every role.
           <UsersTab
             users={users}
+            loadError={usersLoadError}
             canManage
             onLoad={loadUsers}
             onCreate={handleCreateUser}

@@ -53,17 +53,23 @@ Per F-003 §7 — pri 50% threshold-e Koordinátor flag-uje urgent.
 
 ---
 
-## Krok 4: NGINX aktivácia (per uat-deploy)
+## Krok 4: Smerovanie — RUČNÝ KROK UŽ NIE JE
 
-`scripts/uat-deploy.py` zapíše config do `/etc/nginx/sites-available/uat-<slug>.conf` a printne pokyn:
+Smerovanie zabezpečuje **Traefik** (Phase-1 infra). `scripts/uat-deploy.py` to hovorí sám
+(`"Routing": "Traefik (nex-proxy-net) — no manual nginx step"`) a **žiadny nginx config nezapisuje**;
+vygenerovaný compose pripojí inštanciu do siete `nex-proxy-net` a Traefik ju podľa značiek zverejní.
+
+Tento krok tu roky prikazoval `ln -sf` do `/etc/nginx/sites-enabled/`, `nginx -t` a reload —
+príkazy nad súborom, ktorý nikto nevytvorí. Kto sa runbookom riadil, hľadal chybu tam, kde žiadna
+nebola, a mohol si myslieť, že bez toho URL nefunguje.
+
+Ak `https://uat-<slug>.isnex.eu` neodpovedá, príčina je inde — najčastejšie kontajner, ktorý
+nenabehol, alebo chýbajúca sieť `nex-proxy-net`:
 
 ```bash
-sudo ln -sf /etc/nginx/sites-available/uat-<slug>.conf /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl reload nginx
+docker compose -f /opt/uat/<slug>/docker-compose.yml ps
+docker network inspect nex-proxy-net --format '{{len .Containers}} kontajnerov'
 ```
-
-Bez tohto kroku URL `https://uat-<slug>.isnex.eu` nie je accessible.
 
 Per F-003 §10 — UAT URL je accessible iba cez Tailscale/RDP/intranet (Cloudflare access list zabezpečí na úrovni siete).
 
@@ -84,12 +90,13 @@ Ak chyba "Permission denied: /opt/uat/", krok 1 nebol vykonaný. Ak chyba "comma
 
 ## Krok 6: Teardown cleanup (per uat-teardown)
 
-`scripts/uat-teardown.py` zachová `snapshots/`, `customer-test-data/`, `logs/` a odstráni `docker-compose.yml`, `.env`, Docker volumes. Plus printne NGINX cleanup pokyn:
+`scripts/uat-teardown.py` zachová `snapshots/`, `customer-test-data/`, `logs/` a odstráni
+`docker-compose.yml`, `.env` a Docker volumes.
 
-```bash
-sudo rm /etc/nginx/sites-enabled/uat-<slug>.conf
-sudo systemctl reload nginx
-```
+**Žiadny ručný nginx krok tu nie je.** Skript maže len prípadný pozostatok `nginx-uat-vhost.conf`
+priamo v priečinku inštancie; do `/etc/nginx/sites-enabled/` nesiaha, lebo tam nič nevytvoril —
+smerovanie rieši Traefik (viď Krok 4). Predchádzajúca verzia tohto runbooku tu prikazovala
+`sudo rm /etc/nginx/sites-enabled/uat-<slug>.conf`, teda zmazať súbor, ktorý nikdy nevznikol.
 
 Per F-003 §8 retention policy: DB snapshots **bez expirácie** (forever) — mazanie iba s explicit Direktorovým schválením cez Inbox Deda žiadosť.
 

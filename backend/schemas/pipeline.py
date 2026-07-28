@@ -98,16 +98,19 @@ class AgentSession(BaseModel):
 
 
 class PipelineBoardRead(BaseModel):
-    """Vývoj board snapshot: current 4-phase state + the most recent messages (CR-V2-021).
+    """Vývoj board snapshot: current 5-phase state + the most recent messages (CR-V2-021).
 
-    The v2 Vývoj board (design §4.4.2) renders a horizontal 4-phase bar (Príprava → Návrh → Programovanie
-    → Verifikácia → Hotovo) whose chips ARE the tabs; each phase's durable artifact (Špecifikácia .md /
+    The v2 Vývoj board (design §4.4.2) renders a horizontal bar (Príprava → Návrh → Vizuál →
+    Programovanie → Verifikácia → Hotovo) whose chips ARE the tabs. The description used to enumerate
+    four phases and omit VIZUÁL — the phase this product is named for and the one added by CR-1 —
+    while ``STAGE_VALUES`` has carried it all along; the count and the list are taken from there.
+    Each phase's durable artifact (Špecifikácia .md /
     design doc / coding log / Auditor verdict) is read by the FE from ``recent_messages`` (the phase
     gate_report / verdict carries it in ``payload['report']``). ``state`` is ``None`` until ``start``.
 
     The v1 Gate-E / gate_g / Coordinator board fields (``gate_e_open_findings`` / ``release_acceptance_
     satisfied`` / ``regate_proposal`` / ``coordinator_triage`` / ``autonomous_decisions_summary``) are
-    DROPPED — there is no Gate E, no gate_g release-gate, and no Coordinator hub in the 4-phase model.
+    DROPPED — there is no Gate E, no gate_g release-gate, and no Coordinator hub in this model.
     """
 
     state: Optional[PipelineStateRead] = None

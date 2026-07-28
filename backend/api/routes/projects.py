@@ -654,6 +654,14 @@ def get_git_status(
     authz.authorize_project(current_user, project)
     if not project.source_path:
         return {"clean": True, "dirty_count": 0, "files": [], "truncated": False}
+    if not git_state_service.workspace_is_git_repo(project.source_path):
+        # A workspace with no git repository has nothing to guard — the same answer as a project with no
+        # source path, and for the same reason. This used to be a 400, which the New-Version screen turned
+        # into a permanently disabled "Uložiť Zadanie" with no stated reason and no way to clear it: the
+        # only controls that reset the error live in a panel that renders solely for a DIRTY tree, and a
+        # 400 leaves the status null, so that panel could never appear. Founding was blocked outright for
+        # every project whose workspace is not a checkout.
+        return {"clean": True, "dirty_count": 0, "files": [], "truncated": False, "not_a_repo": True}
     try:
         return git_state_service.working_tree_status(project.source_path)
     except ValueError as exc:

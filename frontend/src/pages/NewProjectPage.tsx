@@ -158,6 +158,10 @@ export default function NewProjectPage() {
         setBackendPort(String(block.base));
         setFrontendPort(String(block.base + 1));
         setDbPort(String(block.base + 2));
+        // The suggestion can succeed WITH a caveat — most often that no reserved ranges are configured,
+        // so it could not be checked against them. That caveat is written in Slovak for the Manager and
+        // was being thrown away here, leaving a confidently-filled form with an unspoken condition.
+        setPortsNote(block.warnings?.length ? block.warnings.join(" ") : "");
       })
       .catch((err: unknown) => {
         // Say WHY the ports are blank. The endpoint is now fail-closed: rather than offering a port
@@ -508,7 +512,11 @@ export default function NewProjectPage() {
                   onChange={(e) => setEnableCicd(e.target.checked)}
                   className="w-4 h-4 rounded border-[var(--color-border-default)] bg-[var(--color-canvas)] text-primary-500 focus:ring-primary-500"
                 />
-                <span>Automaticky zostaviť a nasadiť po každej zmene</span>
+                {/* Said what it DOES. The CI workflow this ships (templates/github-actions-workflow.yml)
+                    runs lint, type-check, tests and a Docker build — it has no deploy job at all, so the
+                    old "a nasadiť" promised a step that was never going to happen and the Manager would
+                    wait for a deployment that never came. */}
+                <span>Automaticky kontrolovať a zostaviť po každej zmene (bez nasadenia)</span>
               </label>
               <label className="flex items-center gap-3 text-sm text-[var(--color-text-primary)] cursor-pointer">
                 <input
@@ -528,14 +536,26 @@ export default function NewProjectPage() {
                 />
                 <span>Chrániť hlavnú vetvu (zmeny len cez schválenú žiadosť, bez prepisovania histórie)</span>
               </label>
-              <label className="flex items-center gap-3 text-sm text-[var(--color-text-primary)] cursor-pointer">
+              {/* Disabled, with the reason on screen — not hidden, and not left working-looking. The value
+                  is stored on the project and read by NOTHING: no screen, no agent brief, no generator
+                  consults it, so ticking it permitted exactly nothing while claiming to permit a deviation
+                  from the company design. A control that does nothing is worse than an absent one, because
+                  the Manager plans around it. */}
+              <label
+                className="flex items-center gap-3 text-sm text-[var(--color-text-muted)] cursor-not-allowed"
+                title="Zatiaľ nie je zapojené — hodnota by sa uložila, ale nič sa ňou neriadi."
+              >
                 <input
                   type="checkbox"
                   checked={customDevelopment}
                   onChange={(e) => setCustomDevelopment(e.target.checked)}
-                  className="w-4 h-4 rounded border-[var(--color-border-default)] bg-[var(--color-canvas)] text-primary-500 focus:ring-primary-500"
+                  disabled
+                  className="w-4 h-4 rounded border-[var(--color-border-default)] bg-[var(--color-canvas)] text-primary-500 focus:ring-primary-500 disabled:opacity-50"
                 />
-                <span>Vývoj na zákazku (povoľuje odchýliť sa od jednotného firemného dizajnu)</span>
+                <span>
+                  Vývoj na zákazku (odchýlka od jednotného firemného dizajnu) —{" "}
+                  <span className="italic">zatiaľ nezapojené</span>
+                </span>
               </label>
             </div>
 

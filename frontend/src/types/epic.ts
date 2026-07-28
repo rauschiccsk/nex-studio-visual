@@ -20,7 +20,6 @@ export type EpicStatus = "planned" | "in_progress" | "done";
 export interface EpicCreate {
   project_id: string;
   /** ``null`` denotes a project-level epic (single-module projects). */
-  module_id?: string | null;
   title: string;
   /** Lifecycle status; server default ``planned``. */
   status?: EpicStatus;
@@ -29,11 +28,10 @@ export interface EpicCreate {
 /**
  * Partial update for an existing epic.
  *
- * ``project_id`` and ``number`` are immutable; ``module_id`` remains
+ * ``project_id`` and ``number`` are immutable; the fields below remain
  * mutable.
  */
 export interface EpicUpdate {
-  module_id?: string | null;
   title?: string;
   status?: EpicStatus;
 }
@@ -42,7 +40,6 @@ export interface EpicUpdate {
 export interface EpicRead {
   id: string;
   project_id: string;
-  module_id: string | null;
   number: number;
   title: string;
   status: EpicStatus;

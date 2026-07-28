@@ -142,7 +142,12 @@ export default function BacklogPage() {
     [versions],
   );
 
-  const backlogItems = items.filter((i) => i.status === "open" || i.status === "included");
+  // "rejected" is included on purpose. It used to appear in NEITHER view — not the backlog, not the
+  // history — so pressing "Zamietnuť" made the request vanish from the cockpit entirely, with no undo and
+  // no list that still held it. The row stays, visibly struck through, and can be taken back.
+  const backlogItems = items.filter(
+    (i) => i.status === "open" || i.status === "included" || i.status === "rejected",
+  );
   const realizedItems = items.filter((i) => i.status === "realized");
 
   // realized grouped by version_id (preserve version_number order).
@@ -215,6 +220,20 @@ export default function BacklogPage() {
       setAssignVersionId("");
     } catch {
       setRowError((p) => ({ ...p, [id]: "Priradenie zlyhalo." }));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  /** Undo a rejection — back to "open", where it can be edited or assigned again. */
+  async function handleRestore(id: string) {
+    if (!project) return;
+    setBusyId(id);
+    try {
+      await updateBacklogApi(id, { status: "open" });
+      await reloadBacklog(project.id);
+    } catch {
+      setRowError((p) => ({ ...p, [id]: "Vrátenie zlyhalo." }));
     } finally {
       setBusyId(null);
     }
@@ -435,14 +454,25 @@ export default function BacklogPage() {
                         >
                           <Pencil size={13} />
                         </button>
-                        <button
-                          onClick={() => handleReject(it.id)}
-                          disabled={busyId === it.id}
-                          title="Zamietnuť"
-                          className="px-2 py-1 text-[11px] text-[var(--color-state-error-fg)] bg-[var(--color-state-error-bg)] hover:bg-[var(--color-state-error-bg)] disabled:opacity-40 rounded"
-                        >
-                          Zamietnuť
-                        </button>
+                        {it.status === "rejected" ? (
+                          <button
+                            onClick={() => handleRestore(it.id)}
+                            disabled={busyId === it.id}
+                            title="Vrátiť do zásobníka"
+                            className="px-2 py-1 text-[11px] text-[var(--color-accent-primary)] bg-[var(--color-accent-primary)]/10 hover:bg-[var(--color-accent-primary)]/20 disabled:opacity-40 rounded"
+                          >
+                            Vrátiť
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleReject(it.id)}
+                            disabled={busyId === it.id}
+                            title="Zamietnuť"
+                            className="px-2 py-1 text-[11px] text-[var(--color-state-error-fg)] bg-[var(--color-state-error-bg)] hover:bg-[var(--color-state-error-bg)] disabled:opacity-40 rounded"
+                          >
+                            Zamietnuť
+                          </button>
+                        )}
                         {it.status === "open" && (
                           <button
                             onClick={() => handleDelete(it.id)}

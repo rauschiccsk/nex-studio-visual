@@ -755,12 +755,18 @@ Directorovi). **P1 process violation.**
 
 ### 21.1 Definícia
 
-Activity X = 5 sub-aktivít over end-to-end build + boot pipeline:
+Activity X = 5 sub-aktivít over end-to-end build + boot pipeline. Číslovanie je PREVZATÉ
+z runbooku v §21.2, ktorý je záväzný — tento zoznam ho len opakuje:
 - **X.1** — Backend build (Docker image build, no cache)
 - **X.2** — Frontend build (production bundle, no cache)
-- **X.3** — Bootability check (compose up, container reaches healthy state)
-- **X.4** — Health endpoint verify (`GET /health` returns 200)
-- **X.5** — Functional smoke (1-3 critical user paths run successfully)
+- **X.3** — Databázové migrácie (`alembic upgrade head` prejde)
+- **X.4** — Full stack up + healthy (compose up, kontajnery dosiahnu healthy)
+- **X.5** — Health endpoint verify (`GET /health` vráti 200)
+
+> Tento zoznam sa s runbookom rozchádzal: charta mala X.3 = spustenie a X.5 = funkčný smoke,
+> runbook X.3 = migrácie a X.5 = health endpoint. Pravidlo pre hot-fix nižšie sa tým rozpadlo —
+> „minimum X.3 + X.4" znamenalo podľa runbooku migrácie + spustenie, teda presne BEZ overenia,
+> že aplikácia odpovedá. Čísla teraz pochádzajú z jedného miesta.
 
 ### 21.2 Canonical runbook
 
@@ -779,8 +785,10 @@ amendment.
 
 - **Release audit** (`active` → `released` transition) — VŽDY, žiadna výnimka.
 - **Major version audit** — VŽDY.
-- **Hot-fix release** — minimum X.3 + X.4 (boot + health) na FE alebo BE
-  podľa scope hot-fixu.
+- **Hot-fix release** — minimum **X.4 + X.5** (spustenie + health endpoint) na FE alebo BE
+  podľa scope hot-fixu. Toto sú tie dve podaktivity, ktoré dokazujú, že appka nabehla a odpovedá;
+  pravidlo predtým menovalo X.3 + X.4, čo je v runbooku migrácie + spustenie — hot-fix teda mohol
+  prejsť bez jediného dôkazu, že aplikácia funguje.
 
 ### 21.4 Kedy SKIPPABLE
 

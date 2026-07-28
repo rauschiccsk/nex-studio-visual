@@ -177,9 +177,15 @@ export default function CredentialsPage() {
           {items.length} záznamov
         </span>
         <div className="ml-auto">
+          {/* Disabled WITH a reason when the list could not be loaded. The whole body — including the
+              create form this button switches to — is hidden behind `!accessError`, so the button stayed
+              enabled and clicking it produced nothing at all: the one interaction on screen, silently
+              inert, with no hint that the cause was the failed load reported right below it. */}
           <button
             onClick={handleStartCreate}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary-600 hover:bg-primary-500 text-white rounded-lg transition-colors"
+            disabled={accessError !== null}
+            title={accessError ? "Zoznam prístupov sa nenačítal — nový sa zatiaľ pridať nedá." : undefined}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary-600 hover:bg-primary-500 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary-600"
           >
             + Nový prístup
           </button>
