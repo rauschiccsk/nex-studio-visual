@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createProjectApi, suggestPortBlockApi } from "@/services/api/projects";
-import { humanizeApiError } from "@/services/apiError";
+import ErrorNote from "@/components/common/ErrorNote";
+import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { getSystemSettingApi } from "@/services/api/systemSettings";
 import { listUsersApi } from "@/services/api/users";
 import { useAuthStore } from "@/store/authStore";
@@ -95,7 +96,7 @@ export default function NewProjectPage() {
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [portsNote, setPortsNote] = useState<string>("");
-  const [formError, setFormError] = useState("");
+  const [formError, setFormError] = useState<HumanError | null>(null);
   const [loading, setLoading] = useState(false);
 
   const nameRef = useRef<HTMLInputElement>(null);
@@ -199,7 +200,7 @@ export default function NewProjectPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!validate()) return;
-    setFormError("");
+    setFormError(null);
     setLoading(true);
     try {
       const project = await createProjectApi({
@@ -229,12 +230,20 @@ export default function NewProjectPage() {
           backendPort: project.backend_port,
           frontendPort: project.frontend_port,
           dbPort: project.db_port,
+          // What did not finish. The founding steps are best-effort and never block the create, so the
+          // project really does exist — but CI, the runner or the smoke test may be waiting for a hand.
+          setupWarnings: project.setup_warnings ?? [],
         },
       });
     } catch (err: unknown) {
       // Audit Theme 2: the raw backend detail (English "…D-020…", or an object-shaped detail rendering as
       // "[object Object]") used to surface verbatim. Frame it in plain Slovak; the raw text stays as the detail.
-      setFormError(humanizeApiError(err, "Projekt sa nepodarilo vytvoriť").message);
+      // Keep the WHOLE HumanError, not just its opening sentence. Storing `.message` alone threw away
+      // the `.detail` carrying the backend's real text, so every HTTP 500 — a missing template, a git
+      // failure, a refused slug — read as the same "skús to o chvíľu znova", which is false advice for
+      // all of them. ErrorNote renders the plain-Slovak line and tucks the technical text behind a
+      // disclosure, exactly as every other screen in the cockpit does.
+      setFormError(humanizeApiError(err, "Projekt sa nepodarilo vytvoriť"));
     } finally {
       setLoading(false);
     }
@@ -532,9 +541,10 @@ export default function NewProjectPage() {
 
             {/* Error banner */}
             {formError && (
-              <div className="rounded-lg bg-[var(--color-state-error-bg)] border border-[var(--color-state-error-bg)] p-3 text-sm text-[var(--color-state-error-fg)]">
-                {formError}
-              </div>
+              <ErrorNote
+                error={formError}
+                className="rounded-lg bg-[var(--color-state-error-bg)] border border-[var(--color-state-error-bg)] p-3"
+              />
             )}
 
             {/* Actions */}

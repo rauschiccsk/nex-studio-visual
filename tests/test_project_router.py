@@ -1141,6 +1141,53 @@ def test_workspace_safe_to_remove(tmp_path):
     assert _workspace_safe_to_remove("", root) is False  # empty path
 
 
+def test_workspace_holds_foreign_files(tmp_path):
+    """Origin, sampled before Stage 3: empty or absent is ours to scaffold, anything else is not."""
+    from backend.api.routes.projects import _workspace_holds_foreign_files
+
+    (tmp_path / "empty").mkdir()
+    adopted = tmp_path / "adopted"
+    adopted.mkdir()
+    (adopted / "main.py").write_text("print('the Manager's code')\n")
+
+    assert _workspace_holds_foreign_files(str(adopted)) is True  # an existing checkout
+    assert _workspace_holds_foreign_files(str(tmp_path / "empty")) is False  # greenfield shape
+    assert _workspace_holds_foreign_files(str(tmp_path / "absent")) is True  # unreadable → do not delete
+    assert _workspace_holds_foreign_files(None) is False  # nothing to protect
+
+
+def test_discard_never_removes_an_adopted_workspace(tmp_path, monkeypatch, caplog):
+    """The regression this guard exists for: adopt an existing checkout, fail, keep every file.
+
+    Greenfield auto-founding is refused, so a populated ``source_path`` can only be an ADOPTED
+    tree — the Manager's own source. ``_workspace_safe_to_remove`` proves the path sits under
+    PROJECTS_ROOT, which is equally true of every project he already has, so location alone once
+    let a Stage-4 push failure ``rmtree`` the lot. Origin is what decides.
+    """
+    from backend.api.routes.projects import _discard_orphaned_workspace
+
+    root = tmp_path / "projects"
+    adopted = root / "nex-inbox"
+    adopted.mkdir(parents=True)
+    (adopted / "main.py").write_text("print('twelve months of work')\n")
+    monkeypatch.setattr("backend.services.claude_agent.PROJECTS_ROOT", root)
+
+    _discard_orphaned_workspace(str(adopted), "nex-inbox", scaffolded_by_this_create=False)
+
+    assert adopted.is_dir(), "an adopted workspace must survive a failed create"
+    assert (adopted / "main.py").read_text() == "print('twelve months of work')\n"
+
+    # ...while a workspace this create really did scaffold is still cleaned up, so one half-way
+    # failure does not block the slug forever.
+    ours = root / "fresh"
+    ours.mkdir()
+    (ours / "CLAUDE.md").write_text("# scaffolded by init.sh\n")
+
+    _discard_orphaned_workspace(str(ours), "fresh", scaffolded_by_this_create=True)
+
+    assert not ours.exists()
+
+
 def test_chown_workspace_invokes_chown(monkeypatch):
     """v4.0.44: the workspace is chowned to 1000:1000 so the non-root Vizuál sandbox can operate on it."""
     from backend.api.routes import projects as projects_module

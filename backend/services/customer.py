@@ -25,10 +25,11 @@ import re
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.db.models.customers import Customer
+from backend.db.models.deploy import DeployEvent
 from backend.db.models.projects import Project
 from backend.schemas.credentials import CredentialCreate
 from backend.schemas.customer import CustomerCreate, CustomerUpdate
@@ -261,11 +262,30 @@ def delete(db: Session, customer_id: UUID) -> None:
     so no orphan secret survives. ``ON DELETE SET NULL`` on ``credential_id``
     is the defensive fallback; here we delete the credential explicitly.
 
+    Refuses a customer that has a DEPLOY HISTORY. ``deploy_events.customer_id`` is ``ON DELETE
+    CASCADE`` (migration 076), so deleting the row silently erases every deploy and accept event
+    recorded for that customer — and those rows are not merely history: the project hard-delete guard
+    reads them to decide whether a project still has a live PROD deployment. Deleting a customer
+    therefore destroyed the evidence a DIFFERENT safety check depends on, and the next hard delete
+    would find a clean slate and proceed. Nothing warned; the cascade is silent by design.
+
+    A customer with deployments is a customer with something running. If the intent really is to
+    remove them, the deployments come down first — which is a deliberate act, not a side effect.
+
     Raises:
-        ValueError: customer not found (router → 404).
+        ValueError: customer not found (router → 404), or the customer still has deploy events
+            (router → 409).
     """
     customer = get_by_id(db, customer_id)
     credential_id = customer.credential_id
+
+    event_count = db.scalar(select(func.count()).select_from(DeployEvent).where(DeployEvent.customer_id == customer_id))
+    if event_count:
+        raise ValueError(
+            f"Zákazník má v evidencii {event_count} záznamov o nasadení, ktoré by sa spolu s ním "
+            f"nenávratne zmazali — a práve tie rozhodujú, či sa projekt smie zmazať. Conflict: "
+            f"najprv zruš nasadenia tohto zákazníka, potom ho odstráň."
+        )
 
     db.delete(customer)
     db.flush()

@@ -86,6 +86,7 @@ const project: ProjectRead = {
   source_path: "/opt/projects/demo",
   kb_path: null,
   guardian_enabled: false,
+  setup_warnings: [],
   custom_development_enabled: false,
   created_by: "u1",
   owner_id: null,

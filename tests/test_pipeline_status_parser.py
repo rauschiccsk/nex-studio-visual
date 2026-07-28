@@ -308,11 +308,28 @@ def test_parse_task_plan_skeleton_accepts_feats_without_tasks():
             }
         ],
         "cross_cutting_rules": "## Invarianty\n- audit",
+        # Required: the release risk floor is derived from this, so it may not be omitted.
+        "flagship_features": ["Používateľ sa prihlási"],
     }
     res = parse_task_plan_skeleton(obj)
     assert isinstance(res, TaskPlanSkeleton)
     assert res.epics[0].feats[0].title == "Schema"
     assert res.cross_cutting_rules.startswith("## Invarianty")
+
+
+def test_parse_task_plan_skeleton_rejects_a_missing_release_declaration():
+    """No declared flagship feature = no risk floor. It used to default to an empty list, so a skeleton
+    that declared nothing sailed through and the release oracle then held it to nothing."""
+    obj = {
+        "epics": [
+            {
+                "title": "Foundation",
+                "feats": [{"title": "Schema", "description": "tables", "estimated_minutes": 120}],
+            }
+        ],
+    }
+    assert isinstance(parse_task_plan_skeleton(obj), ParseFailure)
+    assert isinstance(parse_task_plan_skeleton({**obj, "flagship_features": []}), ParseFailure)
 
 
 def test_parse_task_plan_skeleton_rejects_empty_and_non_object():
@@ -338,10 +355,14 @@ def test_parse_task_plan_skeleton_carries_release_coverage_declaration():
     # a safety property missing risky_op → ParseFailure (both fields required)
     bad = {**obj, "safety_properties": [{"name": "no op"}]}
     assert isinstance(parse_task_plan_skeleton(bad), ParseFailure)
-    # the fields are OPTIONAL (default empty) — a skeleton without them still validates (non-breaking)
+    # flagship_features is REQUIRED — it is the release risk floor, and an optional floor is no floor.
     minimal = {"epics": [{"title": "E", "feats": [{"title": "F"}]}]}
-    ok = parse_task_plan_skeleton(minimal)
-    assert isinstance(ok, TaskPlanSkeleton) and ok.flagship_features == [] and ok.safety_properties == []
+    assert isinstance(parse_task_plan_skeleton(minimal), ParseFailure)
+    # safety_properties stays optional: a version may genuinely enforce no new safety invariant, and the
+    # oracle's negative-test requirement then correctly has nothing to demand.
+    no_safety = {**minimal, "flagship_features": ["F funguje"]}
+    ok = parse_task_plan_skeleton(no_safety)
+    assert isinstance(ok, TaskPlanSkeleton) and ok.safety_properties == []
 
 
 def test_parse_task_plan_feat_tasks_accepts_tasks_only():
@@ -405,12 +426,15 @@ def test_parse_skeleton_accepts_features_alias_and_drops_unknown_keys():
         "level": "skeleton",
         "epics": [{"id": "EPIC-1", "title": "Foundation", "features": [{"id": "FEAT-1", "title": "Schema"}]}],
         "cross_cutting_rules": "inv",
+        "flagship_features": ["Schéma sa vytvorí"],
     }
     res = parse_task_plan_skeleton(drift)
     assert isinstance(res, TaskPlanSkeleton)
     assert res.epics[0].feats[0].title == "Schema"  # features → feats normalised
     # canonical `feats` still works (the alias does not break the normal name)
-    ok = parse_task_plan_skeleton({"epics": [{"title": "E", "feats": [{"title": "F"}]}]})
+    ok = parse_task_plan_skeleton(
+        {"epics": [{"title": "E", "feats": [{"title": "F"}]}], "flagship_features": ["F funguje"]}
+    )
     assert isinstance(ok, TaskPlanSkeleton) and ok.epics[0].feats[0].title == "F"
 
 

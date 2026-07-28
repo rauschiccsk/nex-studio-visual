@@ -144,6 +144,34 @@ def _charter_slug_for_role(role: str) -> str:
     return _CHARTER_PATH_SLUG.get(role, role)
 
 
+def _agent_settings_path(slug: str, role: str) -> Optional[Path]:
+    """The dispatched role's permission profile — the file that makes its ``deny`` rules real.
+
+    Create Project writes ``.claude/agents/<role>/settings.json`` per role, and the dispatch used to
+    pass NOTHING, so those rules governed nothing: ``--setting-sources`` loads only ``user`` /
+    ``project`` / ``local``, and this path is none of them. Every build turn therefore ran under the
+    mounted user config's ``defaultMode: bypassPermissions`` — full auto-approval, including the
+    ``git push --force`` / ``git reset --hard`` / rewrite-your-own-charter the profile forbids.
+    ``--settings`` is the only mechanism that can select ONE OF TWO roles against a single project
+    root, and a deny arriving that way is honoured even under ``bypassPermissions`` (verified against
+    the real CLI; see :func:`backend.services.claude_agent.build_claude_argv`).
+
+    ``None`` when the file is absent — a project founded before CR-V2-018, or a dry-run workspace.
+    That is the pre-existing behaviour, not a new hole, and it is logged by the caller rather than
+    passed to the CLI, which would fail the turn outright on a missing path.
+    """
+    path = claude_agent.PROJECTS_ROOT / slug / ".claude" / "agents" / _charter_slug_for_role(role) / "settings.json"
+    if not path.is_file():
+        logger.warning(
+            "No permission profile for role=%s slug=%s at %s — this turn runs unconstrained",
+            role,
+            slug,
+            path,
+        )
+        return None
+    return path
+
+
 def db_role_for_charter_slug(slug: str) -> str:
     """Map a charter-path slug (hyphen) to its DB role value (underscore) — inverse of
     :func:`_charter_slug_for_role`. ``ai-agent`` → ``ai_agent``; ``auditor`` → ``auditor``. Used at the
@@ -3090,6 +3118,7 @@ async def invoke_agent(
                     claude_session_id=session_id,
                     prompt=prompt,
                     charter_path=charter_path,
+                    settings_path=_agent_settings_path(slug, role),
                     timeout=timeout if timeout is not None else _timeout_for(stage),
                     on_event=tagged_on_event,
                     model=model_override,
@@ -3456,6 +3485,7 @@ async def _plan_pass_once(
                     claude_session_id=session_id,
                     prompt=prompt,
                     charter_path=charter_path,
+                    settings_path=_agent_settings_path(slug, AI_AGENT_ROLE),
                     timeout=_timeout_for("navrh"),
                     on_event=tagged_on_event,
                     model=model_override,
@@ -4989,6 +5019,15 @@ def _evaluate_release_coverage(
     n_features, n_safety = coverage_req
     if not total:  # None (no sentinel) or 0 — the anti-empty floor.
         return False, f"anti-empty floor: ASSERTIONS_RUN={total} — the acceptance script ran no assertions"
+    if n_features < 1:
+        # The floor is derived from the Návrh declaration, so an EMPTY declaration used to mean no floor
+        # at all: any script printing one assertion passed. Refuse instead. A release that names nothing
+        # it must demonstrate is not a low-risk release, it is an unverifiable one.
+        return False, (
+            "missing declaration: the Návrh design declared no flagship features, so there is nothing for "
+            "the release acceptance to demonstrate — the risk floor cannot be derived and the release is "
+            "not verifiable"
+        )
     if feature < n_features:
         return False, (
             f"missing behavioural coverage: the design declared {n_features} flagship feature(s) but the "
@@ -5028,7 +5067,7 @@ async def _run_acceptance_script(script: Path, env: dict[str, str]) -> tuple[int
 
 
 async def _run_release_acceptance(
-    stack: _SmokeStack, project_slug: str, coverage_req: tuple[int, int] = (0, 0)
+    stack: _SmokeStack, project_slug: str, coverage_req: tuple[int, int]
 ) -> tuple[bool, str, bool]:
     """Release-acceptance leg (gate-g-hardening GAP 1 A1; CR-V2-051 risk floor): run the project's black-box
     host-executable ``release_smoke_test.sh`` against the ALREADY-BOOTED isolated *stack* (NOT pytest in the
@@ -5291,7 +5330,7 @@ async def _run_aktualizacie_gate(stack: "_SmokeStack", proj_root: Path, version_
 
 
 async def _run_release_smoke(
-    project_slug: str, version_label: str, coverage_req: tuple[int, int] = (0, 0)
+    project_slug: str, version_label: str, coverage_req: tuple[int, int]
 ) -> tuple[tuple[bool, str], Optional[tuple[bool, str, bool]]]:
     """gate-g-hardening GAP 1: the boot leg + the release-acceptance leg in ONE up/down cycle (A2). Returns
     ``((boot_ok, boot_detail), acceptance)`` where ``acceptance`` is ``(ok, detail, skipped)`` — or ``None``
@@ -7295,6 +7334,7 @@ async def _invoke_fix_critique(
                     claude_session_id=session_id,
                     prompt=prompt,
                     charter_path=charter_path,
+                    settings_path=_agent_settings_path(slug, AUDITOR_ROLE),
                     timeout=_timeout_for("verifikacia"),
                     on_event=on_event,
                     model=model_override,

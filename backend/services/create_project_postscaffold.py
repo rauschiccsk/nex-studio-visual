@@ -13,6 +13,7 @@ import logging
 import os
 import shutil
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import yaml
@@ -91,7 +92,7 @@ _CHARTER_SEP = "\n\n---\n\n"
 _V1_AGENT_DIRS = ("designer", "implementer", "customer")
 
 
-def provision_v2_agent_charters(project_root: Path, slug: str, project_name: str) -> None:
+def provision_v2_agent_charters(project_root: Path, slug: str, project_name: str, *, adopted: bool) -> None:
     """Write the v2 two-agent ``Pravidlá agenta`` charters into the freshly-scaffolded project and
     normalise it to v2 shape. HARD requirement (raises :class:`ProvisioningError` on failure).
 
@@ -126,7 +127,16 @@ def provision_v2_agent_charters(project_root: Path, slug: str, project_name: str
     base_text = base_tpl.read_text(encoding="utf-8").rstrip()
     # <PROJECT_ROOT> = the project root = the agent's cwd at dispatch (claude_agent runs with
     # cwd=PROJECTS_ROOT/slug), so the absolute deny/allow globs match the files the agent touches.
-    project_root_str = str(project_root)
+    #
+    # The LEADING EXTRA SLASH is not a typo and is load-bearing. Claude Code's path rules spell an
+    # ABSOLUTE path with a double slash — ``Edit(//opt/projects/demo/CLAUDE.md)``; a single slash is
+    # read as relative to the settings file's own directory, so it silently matches nothing. Verified
+    # against the real CLI: a deny on ``Read(/tmp/x/target.txt)`` let the read through, the same rule
+    # written ``Read(//tmp/x/target.txt)`` blocked it. Every path deny in these profiles was written
+    # the single-slash way, so even once the profile is actually loaded (it now is — see
+    # ``build_claude_argv``), the file rules would have gone on matching nothing while the ``Bash(...)``
+    # rules beside them worked. Two bugs, one appearance.
+    project_root_str = "//" + str(project_root).lstrip("/")
 
     for role_slug, (charter_tpl_name, settings_tpl_name) in _V2_AGENTS.items():
         charter_tpl = NEX_STUDIO_TEMPLATES / charter_tpl_name
@@ -157,25 +167,48 @@ def provision_v2_agent_charters(project_root: Path, slug: str, project_name: str
         raise ProvisioningError(
             f"v2 charter provisioning failed (slug={slug}): universal CLAUDE.md template missing at {universal_tpl}"
         )
+    # An ADOPTED project's CLAUDE.md is the Manager's own, written before the cockpit ever saw this
+    # directory — so it is kept, not clobbered. This whole block only ever checked that the directory
+    # exists, which is equally true of every project on this host, and then overwrote the root charter
+    # unconditionally. On a NEW project that is right (the file is init.sh's own template output); on an
+    # adopted one it silently destroyed hand-written rules. The v2 charter still lands, so the project
+    # is normalised either way — the previous file simply survives beside it.
+    universal_text = universal_tpl.read_text(encoding="utf-8").replace("{{PROJECT_NAME}}", project_name)
+    existing_charter = project_root / "CLAUDE.md"
     try:
-        (project_root / "CLAUDE.md").write_text(
-            universal_tpl.read_text(encoding="utf-8").replace("{{PROJECT_NAME}}", project_name),
-            encoding="utf-8",
-        )
+        if adopted and existing_charter.is_file():
+            preserved = project_root / "CLAUDE.md.pre-nex-studio"
+            if not preserved.exists():  # a re-run must not overwrite the ORIGINAL with our own copy
+                shutil.copy2(existing_charter, preserved)
+                logger.warning(
+                    "Adopted project slug=%s already had a CLAUDE.md — kept it as %s before writing the v2 charter",
+                    slug,
+                    preserved.name,
+                )
+        existing_charter.write_text(universal_text, encoding="utf-8")
     except OSError as exc:
         raise ProvisioningError(
             f"v2 charter provisioning failed (slug={slug}): writing universal CLAUDE.md: {exc}"
         ) from exc
 
-    # Remove the v1-only charter dirs (cosmetic clutter the engine never reads) — best-effort within this
-    # hard step: a leftover dir does not block the build, so cleanup failure is swallowed, not raised.
-    for v1_dir in _V1_AGENT_DIRS:
-        shutil.rmtree(claude_dir / "agents" / v1_dir, ignore_errors=True)
-    # Also drop the stale v1-role session-state files at the project root (.nex-{designer,implementer,
-    # customer}-state.md) — a v2 project only has the ai-agent + auditor roles. Gitignored, disk-only
-    # clutter; best-effort (a leftover file does not block the build).
-    for v1_role in _V1_AGENT_DIRS:
-        (project_root / f".nex-{v1_role}-state.md").unlink(missing_ok=True)
+    if adopted:
+        # The v1 role names are NOT ours to reclaim in a directory we did not create. An adopted ICC
+        # project carries real ``.claude/agents/{designer,implementer}`` charters the Director wrote;
+        # deleting them as "v1 clutter" would destroy live configuration on the strength of a name.
+        logger.info(
+            "Adopted project slug=%s — left the pre-existing agent charters and state files untouched",
+            slug,
+        )
+    else:
+        # Remove the v1-only charter dirs (cosmetic clutter the engine never reads) — best-effort within
+        # this hard step: a leftover dir does not block the build, so cleanup failure is swallowed.
+        for v1_dir in _V1_AGENT_DIRS:
+            shutil.rmtree(claude_dir / "agents" / v1_dir, ignore_errors=True)
+        # Also drop the stale v1-role session-state files at the project root (.nex-{designer,implementer,
+        # customer}-state.md) — a v2 project only has the ai-agent + auditor roles. Gitignored, disk-only
+        # clutter; best-effort (a leftover file does not block the build).
+        for v1_role in _V1_AGENT_DIRS:
+            (project_root / f".nex-{v1_role}-state.md").unlink(missing_ok=True)
 
     # CR-V2-030: mark the project trusted so claude — the interactive "Surový terminál" OR the headless
     # dispatch — never hits its first-run "Do you trust this folder?" dialog. A NEX-Studio-created project
@@ -241,11 +274,18 @@ def run_post_scaffold_steps(
     full_smoke: bool,
     enable_branch_protection: bool,
     github_org: str | None = None,
-) -> None:
+) -> list[str]:
     """Orchestrate archetype surface composition + K-004 (smoke) + K-005 (CI/CD) + branch protection.
 
     Best-effort — every step caught + logged as warning. Žiadny step nezdvíha
     HTTPException; partial success je acceptable (Manažér can finish manually).
+
+    RETURNS the Slovak warnings describing what did NOT finish, so "the Manager can finish manually"
+    stops being a promise nobody keeps. This was declared ``-> None`` and every failure ended in
+    ``logger.warning(); return``; the route ignored it, committed, and answered 201. The cockpit then
+    drew a fully-created project whose CI was never wired, whose runner was never provisioned and whose
+    smoke test never ran — the failure existing only in a backend log nobody reads. The steps are still
+    best-effort and still never abort the create; the difference is that the Manager is told.
 
     ``github_org`` is the configured organisation (``template_bootstrap.resolve_github_org``),
     threaded through so the steps that derive an ``owner/repo`` from a MISSING ``repo_url`` use the
@@ -253,39 +293,68 @@ def run_post_scaffold_steps(
     for the module's direct callers (tests/manual re-runs) with the registry default as fallback.
     """
     target_path = Path(target) if target else None
+    warnings: list[str] = []
+
+    # Named so a failure can be REPORTED as the thing it was, not as "a post-scaffold step". Each label
+    # is the Slovak the Manager reads in the cockpit; the English detail goes to the log.
+    steps: list[tuple[str, Callable[[], None]]] = []
+    if target_path and target_path.is_dir():
+        steps += [
+            (
+                "príprava štruktúry projektu",
+                lambda: _compose_archetype_surfaces(target_path, slug, project_type=project_type, auth_mode=auth_mode),
+            ),
+            ("overovací (smoke) test", lambda: _run_smoke_test(target_path, slug, full=full_smoke)),
+            ("príprava testu pre vydanie", lambda: _seed_release_smoke_test(target_path, slug)),
+            # Commit + push the v2-shape normalisation (and archetype/smoke seeds) BEFORE the CI commit so
+            # the fresh project has a clean working tree and the remote reflects the real v2 shape (not the
+            # v1 template it was bootstrapped from). Commit order: bootstrap → normalise → CI.
+            (
+                "uloženie a odoslanie štruktúry na GitHub",
+                lambda: _commit_and_push_scaffold_finalisation(target_path, slug),
+            ),
+        ]
+        if enable_cicd:
+            steps += [
+                ("nastavenie automatickej kontroly (CI)", lambda: _wire_cicd_workflow(target_path, slug)),
+                ("nastavenie kontroly pred uložením", lambda: _wire_precommit_hook(target_path)),
+                # The pushed ci.yml runs on ``andros-ubuntu-<slug>`` (self-hosted) — provision that runner
+                # now, else every job queues forever (the nex-shopify gap, Director 2026-07-16).
+                ("spustenie vykonávača kontrol", lambda: _provision_ci_runner(slug, repo_url, github_org=github_org)),
+            ]
+    else:
+        logger.warning("Skipping K-004 smoke test — target %r not a directory", target)
+        warnings.append("Projekt nemá na disku priečinok, takže sa nepripravila jeho štruktúra ani overovacie testy.")
+    if enable_branch_protection and repo_url:
+        steps.append(
+            (
+                "ochrana hlavnej vetvy na GitHube",
+                lambda: _enable_branch_protection(repo_url, slug, github_org=github_org),
+            )
+        )
 
     # v4.0.40 (fix B): a HARD guard so NO best-effort step can 500 the create. The individual steps handle
     # their own non-zero subprocess exits, but a MISSING binary (docker/gh not on PATH → FileNotFoundError,
     # an OSError) or a TimeoutExpired would otherwise propagate to create_project's `except OSError` and
     # abort the whole create. Partial success is acceptable here (the Manažér can finish CI/smoke manually),
-    # so swallow + log and let the project be created.
-    try:
-        if target_path and target_path.is_dir():
-            _compose_archetype_surfaces(target_path, slug, project_type=project_type, auth_mode=auth_mode)
-            _run_smoke_test(target_path, slug, full=full_smoke)
-            _seed_release_smoke_test(target_path, slug)
-            # Commit + push the v2-shape normalisation (and archetype/smoke seeds) BEFORE the CI commit so
-            # the fresh project has a clean working tree and the remote reflects the real v2 shape (not the
-            # v1 template it was bootstrapped from). Commit order: bootstrap → normalise → CI.
-            _commit_and_push_scaffold_finalisation(target_path, slug)
-        else:
-            logger.warning("Skipping K-004 smoke test — target %r not a directory", target)
+    # so swallow + log and let the project be created — but SAY which step it was.
+    for index, (label, step) in enumerate(steps):
+        try:
+            step()
+        except Exception as exc:  # noqa: BLE001 — best-effort by contract: never abort the create
+            logger.warning(
+                "Post-scaffold step %r failed (slug=%s) — project still created, finish manually: %s",
+                label,
+                slug,
+                exc,
+            )
+            warnings.append(f"Nedokončil sa krok „{label}“ — projekt je založený, tento krok treba dorobiť ručne.")
+            remaining = [lbl for lbl, _ in steps[index + 1 :]]
+            if remaining:
+                warnings.append("Preskočili sa preto aj ďalšie kroky: " + ", ".join(remaining) + ".")
+            break
 
-        if enable_cicd and target_path and target_path.is_dir():
-            _wire_cicd_workflow(target_path, slug)
-            _wire_precommit_hook(target_path)
-            # The pushed ci.yml runs on ``andros-ubuntu-<slug>`` (self-hosted) — provision that runner now,
-            # else every job queues forever (the nex-shopify gap, Director 2026-07-16).
-            _provision_ci_runner(slug, repo_url, github_org=github_org)
-
-        if enable_branch_protection and repo_url:
-            _enable_branch_protection(repo_url, slug, github_org=github_org)
-    except Exception as exc:  # noqa: BLE001 — best-effort by contract: never abort the create
-        logger.warning(
-            "Post-scaffold best-effort step failed (slug=%s) — project still created, finish manually: %s",
-            slug,
-            exc,
-        )
+    return warnings
 
 
 def _compose_archetype_surfaces(target: Path, slug: str, *, project_type: str, auth_mode: str) -> None:

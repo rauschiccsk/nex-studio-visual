@@ -112,3 +112,41 @@ async def test_build_turn_passes_no_tool_or_permission_flags(monkeypatch) -> Non
     assert "--permission-mode" not in argv
     assert "--allowedTools" not in argv
     assert "--disallowedTools" not in argv
+
+
+# ---------------------------------------------------------------------------
+# The role permission profile actually reaches the CLI
+# ---------------------------------------------------------------------------
+
+
+async def test_build_turn_passes_the_role_permission_profile(monkeypatch, tmp_path) -> None:
+    """``--settings`` is what makes the profile real; without it every deny rule is decoration.
+
+    ``--setting-sources`` loads only ``user`` / ``project`` / ``local``, and Create Project writes the
+    profile to ``.claude/agents/<role>/settings.json`` — none of those. The dispatch passed no
+    ``--settings``, so build turns ran under the mounted user config's ``defaultMode:
+    bypassPermissions``: fully auto-approved, free to ``git push --force``, ``git reset --hard`` and
+    rewrite the very charter that forbids it.
+    """
+    profile = tmp_path / "settings.json"
+    profile.write_text('{"permissions":{"deny":["Bash(git push:*)"]}}', encoding="utf-8")
+
+    mock_exec = AsyncMock(return_value=_ok_proc())
+    monkeypatch.setattr(claude_agent.asyncio, "create_subprocess_exec", mock_exec)
+    await claude_agent.invoke_claude(
+        project_slug="p",
+        claude_session_id=uuid4(),
+        prompt="postav",
+        settings_path=profile,
+    )
+    argv = list(mock_exec.call_args.args)
+
+    assert "--settings" in argv
+    assert _value_after(argv, "--settings") == str(profile)
+
+
+async def test_no_profile_means_no_flag(monkeypatch) -> None:
+    """A project founded before CR-V2-018 has no profile on disk — pass no flag rather than a dead path
+    (``--settings <missing>`` fails the whole turn). The caller logs the unconstrained dispatch."""
+    argv = await _argv_for(monkeypatch, allowed_tools=None)
+    assert "--settings" not in argv

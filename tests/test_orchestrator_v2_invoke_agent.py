@@ -134,6 +134,7 @@ class FakeClaude:
         claude_session_id,
         prompt,
         charter_path=None,
+        settings_path=None,
         timeout=180,
         on_event=None,
         model=None,

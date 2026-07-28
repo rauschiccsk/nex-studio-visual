@@ -200,7 +200,14 @@ class TaskPlanSkeleton(BaseModel):
     cross_cutting_rules: Optional[str] = None
     #: CR-V2-052: the behaviour-bearing features the release must DEMONSTRATE (≥1 FEATURE assertion each in
     #: release_smoke_test.sh — the risk-floored oracle CR-V2-051). Declared once, with the skeleton.
-    flagship_features: list[str] = Field(default_factory=list)
+    #:
+    #: ``min_length=1`` — the risk floor must not be OPT-IN. This defaulted to an empty list, which
+    #: Pydantic accepted without error, without retry and without a log line; the oracle then read
+    #: ``(0, 0)`` and collapsed to "at least one assertion ran", so a version that declared nothing was
+    #: held to nothing. An agent that omits the field now fails validation and is asked again, and the
+    #: grammar (``--json-schema``) constrains it to emit one at the source. Every version demonstrates at
+    #: least one behaviour; a release with nothing to show cannot be verified.
+    flagship_features: list[str] = Field(min_length=1)
     #: CR-V2-052: the safety invariants the app must ENFORCE (≥1 NEGATIVE assertion each — the risky op MUST
     #: be rejected). The oracle FAILs a build that declares a property but ships no negative test for it.
     safety_properties: list[SafetyProperty] = Field(default_factory=list)

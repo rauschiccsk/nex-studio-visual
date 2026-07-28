@@ -94,7 +94,9 @@ def _make_project(root: Path, slug: str, *, compose_yml: str = COMPOSE_YML, scri
     proj.mkdir(parents=True, exist_ok=True)
     (proj / "docker-compose.yml").write_text(compose_yml)
     if script:
-        (proj / "release_smoke_test.sh").write_text("#!/usr/bin/env bash\necho ASSERTIONS_RUN=1\n")
+        (proj / "release_smoke_test.sh").write_text(
+            "#!/usr/bin/env bash\necho ASSERTIONS_RUN=1\necho FEATURE_ASSERTIONS_RUN=1\n"
+        )
     if compose_yml == COMPOSE_YML:  # only a full web app has the FE tab requirement
         _seed_frontend(proj, **fe)
     return proj
@@ -467,7 +469,7 @@ async def test_gate_skips_for_non_web_app(tmp_path) -> None:
 # Integration through _run_release_smoke (compliant → pass / non-compliant → blocked)
 # ===========================================================================
 async def _script_ok(script, env):
-    return 0, "ASSERTIONS_RUN=3"
+    return 0, "ASSERTIONS_RUN=3\nFEATURE_ASSERTIONS_RUN=1\n"
 
 
 async def test_integration_compliant_app_passes(tmp_path, monkeypatch) -> None:
@@ -480,7 +482,7 @@ async def test_integration_compliant_app_passes(tmp_path, monkeypatch) -> None:
     )
     monkeypatch.setattr(orchestrator, "_run_acceptance_script", _script_ok)
 
-    (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("green", "v1.0.0")
+    (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("green", "v1.0.0", (1, 0))
 
     assert boot_ok is True and boot_detail == "app booted + responds"
     assert acceptance is not None and acceptance[0] is True  # acceptance ran → the gate let it through
@@ -498,11 +500,11 @@ async def test_integration_missing_fe_tab_is_blocked(tmp_path, monkeypatch) -> N
 
     async def _acc(script, env):
         called["acc"] = True
-        return 0, "ASSERTIONS_RUN=3"
+        return 0, "ASSERTIONS_RUN=3\nFEATURE_ASSERTIONS_RUN=1\n"
 
     monkeypatch.setattr(orchestrator, "_run_acceptance_script", _acc)
 
-    (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("nofe", "v1.0.0")
+    (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("nofe", "v1.0.0", (1, 0))
 
     assert boot_ok is False and "Aktualizácie chýba vo frontende" in boot_detail and "UpdatesPage.tsx" in boot_detail
     assert acceptance is None
@@ -524,11 +526,11 @@ async def test_integration_endpoint_missing_version_is_blocked(tmp_path, monkeyp
 
     async def _acc(script, env):
         called["acc"] = True
-        return 0, "ASSERTIONS_RUN=3"
+        return 0, "ASSERTIONS_RUN=3\nFEATURE_ASSERTIONS_RUN=1\n"
 
     monkeypatch.setattr(orchestrator, "_run_acceptance_script", _acc)
 
-    (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("noserve", "v1.0.0")
+    (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("noserve", "v1.0.0", (1, 0))
 
     assert boot_ok is False and "/api/v1/release-notes" in boot_detail and "neobsahuje verziu v1.0.0" in boot_detail
     assert acceptance is None
@@ -545,7 +547,7 @@ async def test_integration_endpoint_404_is_blocked(tmp_path, monkeypatch) -> Non
         _Recorder(release_notes=(0, "RELEASE_NOTES_STATUS 404\nRELEASE_NOTES_BODY Not Found")),
     )
 
-    (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("no404", "v1.0.0")
+    (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("no404", "v1.0.0", (1, 0))
 
     assert boot_ok is False and "HTTP 404" in boot_detail
     assert acceptance is None
@@ -586,13 +588,13 @@ async def test_second_version_gate_resolved_by_pre_smoke_note(tmp_path, monkeypa
     monkeypatch.setattr(orchestrator, "_run_acceptance_script", _script_ok)
 
     # WITHOUT the completing version's note on disk → the served list lacks v1.0.0 → 2a BLOCKS (the deadlock).
-    (boot_ok, boot_detail), _acc = await orchestrator._run_release_smoke("second", "v1.0.0")
+    (boot_ok, boot_detail), _acc = await orchestrator._run_release_smoke("second", "v1.0.0", (1, 0))
     assert boot_ok is False and "neobsahuje verziu v1.0.0" in boot_detail
 
     # The pre-smoke write puts the completing version's note on disk (the fix) → the baked endpoint now serves
     # it → 2a PASSES. (In the live round this write runs before _run_release_smoke; here we invoke it directly.)
     (versions_dir / "v1.0.0").mkdir()
     (versions_dir / "v1.0.0" / "RELEASE_NOTES.md").write_text("## v1.0.0\n\n- Druhé vydanie.\n", encoding="utf-8")
-    (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("second", "v1.0.0")
+    (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("second", "v1.0.0", (1, 0))
     assert boot_ok is True and boot_detail == "app booted + responds"
     assert acceptance is not None and acceptance[0] is True

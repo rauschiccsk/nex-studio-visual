@@ -263,7 +263,13 @@ async def test_plan_pass_stamps_metrics_phase_navrh_keeps_stage(db_session, monk
     project = _seed_project(db_session, creator=creator)
     version = _seed_version(db_session, project)
     state = _seed_state(db_session, version)
-    skeleton = json.dumps({"epics": [{"title": "E1", "feats": [{"title": "F1"}]}], "cross_cutting_rules": "none"})
+    skeleton = json.dumps(
+        {
+            "epics": [{"title": "E1", "feats": [{"title": "F1"}]}],
+            "cross_cutting_rules": "none",
+            "flagship_features": ["F1 funguje"],
+        }
+    )
     _mock_claude(monkeypatch, f"<<<TASK_PLAN_JSON>>>\n{skeleton}\n<<<END_TASK_PLAN_JSON>>>")
 
     await orchestrator._invoke_plan_pass(
@@ -289,7 +295,13 @@ async def test_plan_pass_legacy_phase_equals_stage(db_session, monkeypatch) -> N
     project = _seed_project(db_session, creator=creator)
     version = _seed_version(db_session, project)
     state = _seed_state(db_session, version, mode=None, stage="navrh")
-    skeleton = json.dumps({"epics": [{"title": "E1", "feats": [{"title": "F1"}]}], "cross_cutting_rules": "none"})
+    skeleton = json.dumps(
+        {
+            "epics": [{"title": "E1", "feats": [{"title": "F1"}]}],
+            "cross_cutting_rules": "none",
+            "flagship_features": ["F1 funguje"],
+        }
+    )
     _mock_claude(monkeypatch, f"<<<TASK_PLAN_JSON>>>\n{skeleton}\n<<<END_TASK_PLAN_JSON>>>")
 
     await orchestrator._invoke_plan_pass(

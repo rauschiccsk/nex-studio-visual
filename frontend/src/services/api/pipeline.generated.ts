@@ -4524,6 +4524,8 @@ export interface components {
             owner_id?: string | null;
             /** Repo Url */
             repo_url?: string | null;
+            /** Setup Warnings */
+            setup_warnings?: string[];
             /** Slug */
             slug: string;
             /** Source Path */

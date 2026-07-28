@@ -20,8 +20,11 @@ verdict Activity X = FAIL.
 
 ```bash
 cd /opt/projects/<slug>
+# `$?` after a pipeline is the exit status of its LAST element — `tee`, which returns 0
+# whenever it can write its log. Read literally, `EXIT` was ALWAYS 0, the guard below never
+# fired, and a failed build printed PASS. `PIPESTATUS[0]` is the build's own status.
 docker compose build backend 2>&1 | tee /tmp/audit-<slug>-x1-backend-build.log
-EXIT=$?
+EXIT=${PIPESTATUS[0]}
 if [ $EXIT -ne 0 ]; then
     echo "FAIL X.1: docker compose build backend exit $EXIT"
     echo "Log v /tmp/audit-<slug>-x1-backend-build.log"
@@ -56,8 +59,11 @@ Toto explicit ošetruje **P0-RG3 saxonche silent install fail** ktorý sa stal v
 ### Sub-aktivita X.2 Frontend build
 
 ```bash
+# `$?` after a pipeline is the exit status of its LAST element — `tee`, which returns 0
+# whenever it can write its log. Read literally, `EXIT` was ALWAYS 0, the guard below never
+# fired, and a failed build printed PASS. `PIPESTATUS[0]` is the build's own status.
 docker compose build frontend 2>&1 | tee /tmp/audit-<slug>-x2-frontend-build.log
-EXIT=$?
+EXIT=${PIPESTATUS[0]}
 if [ $EXIT -ne 0 ]; then
     echo "FAIL X.2: docker compose build frontend exit $EXIT"
     exit 1

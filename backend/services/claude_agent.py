@@ -264,6 +264,7 @@ def build_claude_argv(
     effort: Optional[str] = None,
     json_schema: Optional[dict] = None,
     allowed_tools: Optional[list[str]] = None,
+    settings_path: Optional[Path] = None,
 ) -> list[str]:
     """Compose the ``claude -p`` argv shared by the in-process turn AND the OS-isolated consult sidecar.
 
@@ -287,6 +288,20 @@ def build_claude_argv(
         wins over the project ``settings.json`` allow), and ``--permission-mode default`` makes the allow
         list exclusive (every other/MCP/future tool denied in headless). Unset → no tool flags (build
         turns, byte-identical).
+      * ``--settings`` — the dispatched role's permission profile
+        (``.claude/agents/<role>/settings.json``). WITHOUT THIS FLAG THE PROFILE IS INERT. Create
+        Project writes one per role and this argv used to pass nothing, while the docstring claimed
+        "the project settings.json governs"; it does not. ``--setting-sources`` accepts only ``user``,
+        ``project`` and ``local`` — i.e. ``~/.claude/settings.json``, ``.claude/settings.json`` and
+        ``.claude/settings.local.json`` — and ``.claude/agents/<role>/settings.json`` is none of them,
+        so every ``deny`` in it (``git push --force``, ``git reset --hard``, rewriting its own charter)
+        was decoration. The mounted user config sets ``defaultMode: bypassPermissions``, so what the
+        build turn actually ran with was: everything auto-approved.
+        Verified against the real CLI inside this backend's own container, because the merge semantics
+        are not obvious: with ``bypassPermissions`` active, ``--disallowedTools`` alone does NOT block
+        (the mode wins), but a ``deny`` rule arriving via ``--settings`` DOES. Deny is what we need and
+        deny is what survives. Two roles share one project root, so the profile cannot live at
+        ``.claude/settings.json`` — the flag is the only mechanism that can select per dispatch.
     The positional ``prompt`` is always last.
     """
     if streaming:
@@ -303,6 +318,8 @@ def build_claude_argv(
         args += ["--effort", effort]
     if json_schema is not None:
         args += ["--json-schema", json.dumps(json_schema)]
+    if settings_path is not None:
+        args += ["--settings", str(settings_path)]
     if allowed_tools is not None:
         args += ["--allowedTools", ",".join(allowed_tools)]
         deny = [t for t in _MUTATING_TOOLS if t not in allowed_tools]
@@ -325,6 +342,7 @@ async def invoke_claude(
     effort: Optional[str] = None,
     json_schema: Optional[dict] = None,
     allowed_tools: Optional[list[str]] = None,
+    settings_path: Optional[Path] = None,
     sandbox: bool = False,
     log_dir: Optional[Path] = None,
     log_label: Optional[str] = None,
@@ -375,6 +393,7 @@ async def invoke_claude(
                 effort=effort,
                 json_schema=json_schema,
                 allowed_tools=allowed_tools,
+                settings_path=settings_path,
                 sandbox=sandbox,
                 log_dir=log_dir,
                 log_label=log_label,
@@ -407,6 +426,7 @@ async def _invoke_once(
     effort: Optional[str] = None,
     json_schema: Optional[dict] = None,
     allowed_tools: Optional[list[str]] = None,
+    settings_path: Optional[Path] = None,
     sandbox: bool = False,
     log_dir: Optional[Path] = None,
     log_label: Optional[str] = None,
@@ -479,6 +499,7 @@ async def _invoke_once(
                     effort=effort,
                     json_schema=json_schema,
                     allowed_tools=allowed_tools,
+                    settings_path=settings_path,
                 )
             except consult_sandbox.SidecarUnavailable as exc:
                 # LOUD, not a warning buried in a log: a promised kernel boundary that is not in effect gets
@@ -505,6 +526,7 @@ async def _invoke_once(
         effort=effort,
         json_schema=json_schema,
         allowed_tools=allowed_tools,
+        settings_path=settings_path,
     )
 
     logger.info(

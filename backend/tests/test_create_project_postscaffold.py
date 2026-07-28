@@ -54,7 +54,7 @@ def _make_v1_scaffold(root: Path) -> None:
 def test_provision_writes_both_v2_charters_concatenated(tmp_path: Path) -> None:
     _make_v1_scaffold(tmp_path)
 
-    provision_v2_agent_charters(tmp_path, "demo", "Demo Project")
+    provision_v2_agent_charters(tmp_path, "demo", "Demo Project", adopted=False)
 
     agents = tmp_path / ".claude" / "agents"
     ai_charter = (agents / "ai-agent" / "CLAUDE.md").read_text(encoding="utf-8")
@@ -72,7 +72,7 @@ def test_provision_writes_both_v2_charters_concatenated(tmp_path: Path) -> None:
 def test_provision_substitutes_project_root_in_settings(tmp_path: Path) -> None:
     _make_v1_scaffold(tmp_path)
 
-    provision_v2_agent_charters(tmp_path, "demo", "Demo Project")
+    provision_v2_agent_charters(tmp_path, "demo", "Demo Project", adopted=False)
 
     for role in ("ai-agent", "auditor"):
         settings = (tmp_path / ".claude" / "agents" / role / "settings.json").read_text(encoding="utf-8")
@@ -80,10 +80,34 @@ def test_provision_substitutes_project_root_in_settings(tmp_path: Path) -> None:
         assert str(tmp_path) in settings  # to the concrete project root (== agent cwd at dispatch)
 
 
+def test_provisioned_deny_rules_use_the_syntax_the_cli_actually_matches(tmp_path: Path) -> None:
+    """A rule the CLI does not match is not a rule. Both halves are verified against the real binary:
+
+    * an absolute path is spelled with a DOUBLE slash — ``Edit(//opt/projects/demo/CLAUDE.md)``. Written
+      with one, it is read as relative to the settings file and matches nothing, which is how every path
+      deny in these profiles was written.
+    * ``Write(path)`` rules are not applied to files at all; the CLI says so on stderr and points at
+      ``Edit(path)``, which covers every file-editing tool. So path rules exist only as ``Edit(...)``.
+    """
+    _make_v1_scaffold(tmp_path)
+
+    provision_v2_agent_charters(tmp_path, "demo", "Demo Project", adopted=False)
+
+    for role in ("ai-agent", "auditor"):
+        profile = json.loads((tmp_path / ".claude" / "agents" / role / "settings.json").read_text(encoding="utf-8"))
+        deny = profile["permissions"]["deny"]
+        path_rules = [r for r in deny if not r.startswith("Bash(")]
+        assert path_rules, f"{role}: the profile has no file rules left to check"
+        for rule in path_rules:
+            assert rule.startswith("Edit("), f"{role}: {rule} — Write(path) is never matched, use Edit(path)"
+            inner = rule[len("Edit(") : -1]
+            assert inner.startswith("//"), f"{role}: {rule} — an absolute path needs a leading double slash"
+
+
 def test_provision_normalises_to_v2_shape(tmp_path: Path) -> None:
     _make_v1_scaffold(tmp_path)
 
-    provision_v2_agent_charters(tmp_path, "demo", "Demo Project")
+    provision_v2_agent_charters(tmp_path, "demo", "Demo Project", adopted=False)
 
     agents = tmp_path / ".claude" / "agents"
     # v1-only agent dirs removed (the engine never reads them); v2 dirs kept.
@@ -99,6 +123,44 @@ def test_provision_normalises_to_v2_shape(tmp_path: Path) -> None:
     assert "Gate E" not in universal  # no v1 5-role guidance leaks in
 
 
+def test_adopting_a_project_destroys_none_of_its_own_configuration(tmp_path: Path) -> None:
+    """Adoption must add the v2 shape without taking anything away.
+
+    The only precondition this step ever checked was "the directory and .claude exist" — true of every
+    project on this host — and it then overwrote the root CLAUDE.md and rmtree'd
+    ``.claude/agents/{designer,implementer,customer}``. On a NEW project that is correct; on an ADOPTED
+    one those are the Manager's own hand-written charters, deleted on the strength of a directory name.
+    """
+    _make_v1_scaffold(tmp_path)
+    (tmp_path / "CLAUDE.md").write_text("# the Manager's own rules\n", encoding="utf-8")
+    (tmp_path / ".nex-designer-state.md").write_text("session state\n", encoding="utf-8")
+
+    provision_v2_agent_charters(tmp_path, "demo", "Demo Project", adopted=True)
+
+    agents = tmp_path / ".claude" / "agents"
+    # Nothing pre-existing was removed...
+    for kept in ("designer", "implementer", "customer"):
+        assert (agents / kept / "CLAUDE.md").read_text(encoding="utf-8") == f"v1 {kept} charter\n"
+    assert (tmp_path / ".nex-designer-state.md").is_file()
+    # ...the Manager's charter survives verbatim beside the new one...
+    assert (tmp_path / "CLAUDE.md.pre-nex-studio").read_text(encoding="utf-8") == "# the Manager's own rules\n"
+    # ...and the project is still normalised to v2, which is the point of the step.
+    assert "Demo Project" in (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+    assert (agents / "ai-agent" / "CLAUDE.md").is_file()
+    assert (agents / "auditor" / "CLAUDE.md").is_file()
+
+
+def test_adoption_rerun_keeps_the_original_not_our_copy(tmp_path: Path) -> None:
+    """A second adoption must not overwrite the preserved original with the v2 charter we just wrote."""
+    _make_v1_scaffold(tmp_path)
+    (tmp_path / "CLAUDE.md").write_text("# the original\n", encoding="utf-8")
+
+    provision_v2_agent_charters(tmp_path, "demo", "Demo Project", adopted=True)
+    provision_v2_agent_charters(tmp_path, "demo", "Demo Project", adopted=True)
+
+    assert (tmp_path / "CLAUDE.md.pre-nex-studio").read_text(encoding="utf-8") == "# the original\n"
+
+
 # ─── provision_v2_agent_charters — edge cases ──────────────────────────────────
 
 
@@ -107,7 +169,7 @@ def test_provision_noop_without_checkout(tmp_path: Path) -> None:
     target = tmp_path / "empty"
     target.mkdir()
 
-    provision_v2_agent_charters(target, "demo", "Demo Project")  # must not raise
+    provision_v2_agent_charters(target, "demo", "Demo Project", adopted=False)  # must not raise
 
     assert not (target / "CLAUDE.md").exists()
     assert not (target / ".claude").exists()
@@ -123,7 +185,7 @@ def test_provision_raises_when_templates_missing(tmp_path: Path, monkeypatch: py
     )
 
     with pytest.raises(ProvisioningError) as exc_info:
-        provision_v2_agent_charters(tmp_path, "demo", "Demo Project")
+        provision_v2_agent_charters(tmp_path, "demo", "Demo Project", adopted=False)
     assert "template" in str(exc_info.value).lower()
 
 
@@ -196,7 +258,7 @@ def test_provision_removes_stale_v1_state_files(tmp_path: Path) -> None:
     for role in ("designer", "implementer", "customer", "auditor"):
         (tmp_path / f".nex-{role}-state.md").write_text("stale\n", encoding="utf-8")
 
-    provision_v2_agent_charters(tmp_path, "demo", "Demo Project")
+    provision_v2_agent_charters(tmp_path, "demo", "Demo Project", adopted=False)
 
     # v1-only role state files removed; auditor (a v2 role) kept.
     for v1_role in ("designer", "implementer", "customer"):

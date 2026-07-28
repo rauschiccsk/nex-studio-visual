@@ -196,7 +196,7 @@ async def test_driver_skips_without_compose(monkeypatch, tmp_path) -> None:
     rec = _StepRecorder({})
     monkeypatch.setattr(orchestrator, "_compose_smoke_step", rec)
 
-    (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("noc", "v1.0.0")
+    (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("noc", "v1.0.0", (0, 0))
 
     assert boot_ok is True and "SKIPPED" in boot_detail and "docker-compose.yml" in boot_detail
     assert acceptance == (True, "SKIPPED — no docker-compose.yml", True)
@@ -211,7 +211,7 @@ async def test_driver_fails_when_backend_present_no_frontend(monkeypatch, tmp_pa
     rec = _StepRecorder({})
     monkeypatch.setattr(orchestrator, "_compose_smoke_step", rec)
 
-    (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("nofe", "v1.0.0")
+    (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("nofe", "v1.0.0", (0, 0))
 
     assert boot_ok is False
     assert boot_detail == "compose has a backend web app but no frontend service"
@@ -227,7 +227,7 @@ async def test_driver_up_fail_returns_reason_and_tears_down(monkeypatch, tmp_pat
     rec = _StepRecorder({"up": (1, "build error: missing base image")})
     monkeypatch.setattr(orchestrator, "_compose_smoke_step", rec)
 
-    (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("boom", "v1.0.0")
+    (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("boom", "v1.0.0", (0, 0))
 
     assert boot_ok is False
     assert boot_detail.startswith("up exit 1:") and "build error" in boot_detail
@@ -246,7 +246,7 @@ async def test_driver_pass_runs_acceptance_no_pytest(monkeypatch, tmp_path) -> N
     monkeypatch.setattr(orchestrator, "_compose_smoke_step", rec)
 
     async def _script(script, env):
-        return 0, "ASSERTIONS_RUN=3"
+        return 0, "ASSERTIONS_RUN=3\nFEATURE_ASSERTIONS_RUN=1\n"
 
     monkeypatch.setattr(orchestrator, "_run_acceptance_script", _script)
 
@@ -257,13 +257,13 @@ async def test_driver_pass_runs_acceptance_no_pytest(monkeypatch, tmp_path) -> N
 
     monkeypatch.setattr(orchestrator, "_probe_release_notes", _akt_probe)
 
-    (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("green", "v1.0.0")
+    (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("green", "v1.0.0", (1, 0))
 
     assert (boot_ok, boot_detail) == (True, "app booted + responds")
     # CR-V2-051: no declaration → (0,0) floor; PASS detail now carries the feature/negative breakdown.
     assert acceptance == (
         True,
-        "release acceptance PASS — 3 assertions (0 feature / 0 negative; declared 0 feature / 0 safety)",
+        "release acceptance PASS — 3 assertions (1 feature / 0 negative; declared 1 feature / 0 safety)",
         False,
     )
     assert rec.ran("up") and rec.ran("python") and rec.ran("down")
@@ -293,7 +293,7 @@ async def test_driver_boot_fail_skips_acceptance(monkeypatch, tmp_path) -> None:
 
     monkeypatch.setattr(orchestrator, "_run_acceptance_script", _script)
 
-    (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("slowboot", "v1.0.0")
+    (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("slowboot", "v1.0.0", (0, 0))
 
     assert boot_ok is False and boot_detail.startswith("app did not boot / not responding within 120s:")
     assert acceptance is None
@@ -398,7 +398,7 @@ async def test_driver_renders_env_file_when_live_env_incomplete(monkeypatch, tmp
 
     monkeypatch.setattr(orchestrator, "_probe_release_notes", _akt_probe)
 
-    (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("envr", "v1.1.0")
+    (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("envr", "v1.1.0", (0, 0))
 
     assert boot_ok is True, boot_detail
     up_cmd = next(cmd for cmd in rec.calls if "up" in cmd)
@@ -480,7 +480,7 @@ async def test_acceptance_web_app_missing_script_is_fail(monkeypatch, tmp_path) 
     _make_project(tmp_path, "web", script=False)
     stack = _mk_stack(tmp_path)  # COMPOSE_YML has a backend → web app
 
-    ok, detail, skipped = await orchestrator._run_release_acceptance(stack, "web")
+    ok, detail, skipped = await orchestrator._run_release_acceptance(stack, "web", (1, 0))
 
     assert ok is False and skipped is False
     assert "required but missing" in detail
@@ -493,7 +493,7 @@ async def test_acceptance_worker_missing_script_is_skip(monkeypatch, tmp_path) -
     _make_project(tmp_path, "wk", compose_yml=COMPOSE_YML_WORKER_ONLY, script=False)
     stack = _mk_stack(tmp_path, compose_yml=COMPOSE_YML_WORKER_ONLY, slug="wk")
 
-    ok, detail, skipped = await orchestrator._run_release_acceptance(stack, "wk")
+    ok, detail, skipped = await orchestrator._run_release_acceptance(stack, "wk", (1, 0))
 
     assert ok is True and skipped is True
     assert "SKIPPED" in detail
@@ -510,16 +510,16 @@ async def test_acceptance_script_pass_with_assertions(monkeypatch, tmp_path) -> 
     async def _script(script, env):
         seen["script"] = script
         seen["env"] = env
-        return 0, "some output\nASSERTIONS_RUN=5\n"
+        return 0, "some output\nASSERTIONS_RUN=5\nFEATURE_ASSERTIONS_RUN=1\n"
 
     monkeypatch.setattr(orchestrator, "_run_acceptance_script", _script)
 
-    ok, detail, skipped = await orchestrator._run_release_acceptance(stack, "ok")
+    ok, detail, skipped = await orchestrator._run_release_acceptance(stack, "ok", (1, 0))
 
     assert (ok, skipped) == (True, False)
     # CR-V2-051: PASS detail now reports the feature/negative breakdown + the declared floor (0/0 here — no
     # declaration → degrades to the anti-empty floor).
-    assert detail == "release acceptance PASS — 5 assertions (0 feature / 0 negative; declared 0 feature / 0 safety)"
+    assert detail == "release acceptance PASS — 5 assertions (1 feature / 0 negative; declared 1 feature / 0 safety)"
     assert seen["script"].name == "release_smoke_test.sh"
     assert seen["env"]["SMOKE_PROJECT"] == "ok-smoke" and seen["env"]["SMOKE_BACKEND"] == "backend"
     assert seen["env"]["SMOKE_BACKEND_PORT"] == "10180"
@@ -539,11 +539,11 @@ async def test_acceptance_script_empty_is_anti_empty_fail(monkeypatch, tmp_path)
         return 0, "ran nothing, exited clean\n"
 
     monkeypatch.setattr(orchestrator, "_run_acceptance_script", _zero)
-    ok, detail, skipped = await orchestrator._run_release_acceptance(stack, "empty")
+    ok, detail, skipped = await orchestrator._run_release_acceptance(stack, "empty", (1, 0))
     assert ok is False and skipped is False and "anti-empty floor" in detail
 
     monkeypatch.setattr(orchestrator, "_run_acceptance_script", _none)
-    ok2, detail2, _ = await orchestrator._run_release_acceptance(stack, "empty")
+    ok2, detail2, _ = await orchestrator._run_release_acceptance(stack, "empty", (1, 0))
     assert ok2 is False and "anti-empty floor" in detail2
 
 
@@ -559,7 +559,7 @@ async def test_acceptance_script_nonzero_exit_is_fail(monkeypatch, tmp_path) -> 
 
     monkeypatch.setattr(orchestrator, "_run_acceptance_script", _script)
 
-    ok, detail, skipped = await orchestrator._run_release_acceptance(stack, "bad")
+    ok, detail, skipped = await orchestrator._run_release_acceptance(stack, "bad", (1, 0))
 
     assert ok is False and skipped is False
     assert detail.startswith("release_smoke_test.sh exit 1:") and "ASSERTION FAILED" in detail
@@ -594,9 +594,16 @@ def test_evaluate_release_coverage_risk_floor() -> None:
     # anti-empty floor (no declaration)
     assert ev(total=None, feature=0, negative=0, coverage_req=(0, 0))[0] is False
     assert ev(total=0, feature=0, negative=0, coverage_req=(0, 0))[0] is False
-    # no declaration + ≥1 assertion → PASS (backward compatible)
+    # no declaration → FAIL, whatever the script printed. This used to PASS on a single assertion, so a
+    # design that declared nothing bought itself the weakest possible floor; an undeclared release is not
+    # a low-risk release, it is an unverifiable one.
     ok, detail = ev(total=1, feature=0, negative=0, coverage_req=(0, 0))
-    assert ok is True and "1 assertions" in detail
+    assert ok is False and "missing declaration" in detail
+    ok, detail = ev(total=9, feature=9, negative=9, coverage_req=(0, 0))
+    assert ok is False and "missing declaration" in detail
+    # a declared feature with no safety property is legitimate and still passes on its feature assertion
+    ok, detail = ev(total=1, feature=1, negative=0, coverage_req=(1, 0))
+    assert ok is True
     # declared 2 features, only 1 feature assertion → FAIL (missing behavioural coverage)
     ok, detail = ev(total=3, feature=1, negative=1, coverage_req=(2, 1))
     assert ok is False and "missing behavioural coverage" in detail and "2 flagship" in detail

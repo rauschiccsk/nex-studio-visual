@@ -312,7 +312,23 @@ def _uat_teardown_destroys_data(db: Session, project_id: UUID, uat_slug: str) ->
     )
 
 
-def _discard_orphaned_workspace(source_path: str | None, slug: str) -> None:
+def _workspace_holds_foreign_files(source_path: str | None) -> bool:
+    """True when ``source_path`` already holds files — i.e. it is NOT ours to delete.
+
+    Sampled BEFORE Stage 3 scaffolds anything, which is the only moment the answer is knowable:
+    afterwards init.sh's own output is indistinguishable from the Manager's. A missing or empty
+    directory is not foreign — that is the greenfield shape init.sh creates and may therefore undo.
+    Unreadable is treated as foreign: when we cannot tell, we do not delete.
+    """
+    if not source_path:
+        return False
+    try:
+        return any(Path(source_path).iterdir())
+    except OSError:
+        return True
+
+
+def _discard_orphaned_workspace(source_path: str | None, slug: str, *, scaffolded_by_this_create: bool) -> None:
     """Remove a workspace left behind by a create that failed AFTER init.sh scaffolded it.
 
     Without this, one half-way failure kills that project name FOREVER. The DB row is rolled back,
@@ -321,11 +337,31 @@ def _discard_orphaned_workspace(source_path: str | None, slug: str) -> None:
     unless --force, which we never pass. The Manager was left with a slug he could not create and a
     directory he could not reach from the cockpit, with no message saying so.
 
-    Guarded by ``_workspace_safe_to_remove`` (strictly under PROJECTS_ROOT, never the root itself)
-    and never raises: a cleanup failure must not replace the real error with its own.
+    ``scaffolded_by_this_create`` decides whether there is anything to clean up at all, and it is
+    KEYWORD-ONLY WITH NO DEFAULT so that no future caller can reach the ``rmtree`` without having
+    answered the question. It exists because location is not origin, and this function once trusted
+    location alone: ``_workspace_safe_to_remove`` proves the path lies under ``PROJECTS_ROOT``, which
+    is equally true of every project the Manager already has. Greenfield auto-founding is now refused
+    (:mod:`backend.services.template_bootstrap`), so the ONLY remaining way to reach a create with a
+    populated ``source_path`` is BROWNFIELD ADOPTION — pointing the cockpit at an existing checkout.
+    A Stage-4 push failure there (bad token, no network, a rejected verify) would have deleted the
+    Manager's entire source tree, and the very fix that stops a failed create from blocking a project
+    name is what put that tree within reach. So: we discard only what we ourselves scaffolded, and an
+    adopted workspace is left exactly as we found it.
+
+    Also guarded by ``_workspace_safe_to_remove`` (strictly under PROJECTS_ROOT, never the root
+    itself) and never raises: a cleanup failure must not replace the real error with its own.
     """
     from backend.services.claude_agent import PROJECTS_ROOT
 
+    if not scaffolded_by_this_create:
+        logger.info(
+            "Kept the workspace after a failed create: slug=%s path=%s — it already held files before "
+            "this request, so it is an adopted checkout, not ours to remove",
+            slug,
+            source_path,
+        )
+        return
     if not source_path or not _workspace_safe_to_remove(source_path, PROJECTS_ROOT):
         return
     try:
@@ -768,6 +804,11 @@ def create_project(
                 detail=f"GitHub API unreachable while creating '{payload.repo_url}': {exc}",
             ) from exc
 
+    # Did WE scaffold the workspace this request is about? Only then may a failure discard it.
+    # Starts False so the exits that fire before any scaffolding — a duplicate slug, a rejected
+    # payload — can never reach the rmtree, and is answered for real just before Stage 3 runs.
+    scaffolded_here = False
+
     try:
         project = project_service.create(db, payload)
         # CR-V2-016: STATUS.md/HISTORY.md DB-driven seeding is RETIRED — the AI Agent's
@@ -796,10 +837,22 @@ def create_project(
         # Stage 3 — filesystem bootstrap via icc-claude-template/init.sh.
         # Runs BEFORE db.commit() so a bootstrap failure rolls back the
         # DB row cleanly. Disabled when template_init_script_path is empty.
+        # Sampled HERE, the last instant the answer is knowable: once init.sh has run, its own output
+        # is indistinguishable from files the Manager brought. Everything below keys its cleanup off
+        # this one reading.
+        scaffolded_here = not _workspace_holds_foreign_files(project.source_path)
+
         try:
             invoke_init_script(db, project)
         except TemplateBootstrapError as exc:
             db.rollback()
+            # init.sh runs under `set -euo pipefail` and writes CLAUDE.md well before it finishes, so
+            # anything failing after that point — the nex-shared lock guard, a git commit, a full
+            # disk, the subprocess timeout — leaves a half-scaffolded directory behind. That directory
+            # then blocks the slug FOREVER: the DB row is gone, so no delete route can reach it, and a
+            # retry dies in Stage 1 on the leftover. This exit was the one most likely to produce it
+            # and the one that did not clean up.
+            _discard_orphaned_workspace(project.source_path, project.slug, scaffolded_by_this_create=scaffolded_here)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Filesystem bootstrap failed: {exc}",
@@ -820,10 +873,12 @@ def create_project(
         )
 
         try:
-            provision_v2_agent_charters(PROJECTS_ROOT / project.slug, project.slug, project.name)
+            provision_v2_agent_charters(
+                PROJECTS_ROOT / project.slug, project.slug, project.name, adopted=not scaffolded_here
+            )
         except ProvisioningError as exc:
             db.rollback()
-            _discard_orphaned_workspace(project.source_path, project.slug)
+            _discard_orphaned_workspace(project.source_path, project.slug, scaffolded_by_this_create=scaffolded_here)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"v2 agent charter provisioning failed: {exc}",
@@ -860,7 +915,9 @@ def create_project(
                     delete_github_repo=False,  # Director confirms manually
                 )
                 db.rollback()
-                _discard_orphaned_workspace(project.source_path, project.slug)
+                _discard_orphaned_workspace(
+                    project.source_path, project.slug, scaffolded_by_this_create=scaffolded_here
+                )
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail=(
@@ -886,7 +943,7 @@ def create_project(
             run_post_scaffold_steps,
         )
 
-        run_post_scaffold_steps(
+        setup_warnings = run_post_scaffold_steps(
             target=project.source_path or "",
             slug=project.slug,
             repo_url=payload.repo_url,
@@ -914,7 +971,11 @@ def create_project(
             detail=f"Failed to create project filesystem state: {exc}",
         ) from exc
     db.refresh(project)
-    return ProjectRead.model_validate(project)
+    result = ProjectRead.model_validate(project)
+    # What did NOT finish. The steps are best-effort by design and the project is genuinely created,
+    # but "the Manager can finish manually" only works if he is told there is something to finish.
+    result.setup_warnings = setup_warnings
+    return result
 
 
 @router.patch("/{project_id}", response_model=ProjectRead)

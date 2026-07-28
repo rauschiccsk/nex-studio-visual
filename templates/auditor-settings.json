@@ -1,6 +1,6 @@
 {
   "model": "claude-opus-4-8",
-  "_comment": "v2.0.0 Auditor (the independent verifier) settings.json template (CR-V2-007). Pri Create Project sa <PROJECT_ROOT> nahradí konkrétnou cestou (/opt/projects/<slug>/), kópia ide do <PROJECT_ROOT>/.claude/agents/auditor/settings.json. Per memory L-016: absolútne cesty. FLAG (CR-V2-007): permission profile je DESIGN-BEARING návrh na revíziu Manažérom. Auditor LEN nachádza/overuje — NEPÍŠE kód a NECOMMITUJE (nezávislosť: opravy patria AI Agentovi). Smie čítať, spúšťať appku (docker/pytest) a robiť behaviorálne + adversariálne overenie; effort default = max (AUTON-5), hĺbka škáluje s Mierou autonómie (OQ-9).",
+  "_comment": "v2.0.0 Auditor (the independent verifier) settings.json template (CR-V2-007). Pri Create Project sa <PROJECT_ROOT> nahradí konkrétnou cestou (/opt/projects/<slug>/), kópia ide do <PROJECT_ROOT>/.claude/agents/auditor/settings.json. SYNTAX PRAVIDIEL — overené proti reálnemu CLI: (1) absolútna cesta sa píše DVOJITOU lomkou ('Edit(//opt/projects/demo/CLAUDE.md)'); jedna lomka sa číta ako relatívna a nesedí na nič — dosadenie <PROJECT_ROOT> tú druhú lomku doplní. (2) 'Write(cesta)' pravidlá sa na súbory NEAPLIKUJÚ; pokrýva ich 'Edit(cesta)', preto sú tu path pravidlá len ako Edit(...). (3) Profil je účinný LEN preto, že dispatch ho posiela cez '--settings' — bez toho prepínača ho nečíta nikto a agent beží pod 'bypassPermissions'. FLAG (CR-V2-007): permission profile je DESIGN-BEARING návrh na revíziu Manažérom. Auditor LEN nachádza/overuje — NEPÍŠE kód a NECOMMITUJE (nezávislosť: opravy patria AI Agentovi). Smie čítať, spúšťať appku (docker/pytest) a robiť behaviorálne + adversariálne overenie; effort default = max (AUTON-5), hĺbka škáluje s Mierou autonómie (OQ-9).",
   "permissions": {
     "allow": [
       "Read",
@@ -29,16 +29,11 @@
       "Bash(docker-compose:*)"
     ],
     "deny": [
-      "Write(<PROJECT_ROOT>/backend/**)",
-      "Write(<PROJECT_ROOT>/frontend/**)",
-      "Write(<PROJECT_ROOT>/.claude/agents/**)",
-      "Write(<PROJECT_ROOT>/CLAUDE.md)",
-      "Write(/home/icc/knowledge/icc/**)",
       "Edit(<PROJECT_ROOT>/backend/**)",
       "Edit(<PROJECT_ROOT>/frontend/**)",
       "Edit(<PROJECT_ROOT>/.claude/agents/**)",
       "Edit(<PROJECT_ROOT>/CLAUDE.md)",
-      "Edit(/home/icc/knowledge/icc/**)",
+      "Edit(//home/icc/knowledge/icc/**)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git push:*)",

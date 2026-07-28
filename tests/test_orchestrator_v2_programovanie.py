@@ -438,7 +438,9 @@ def _skeleton_dict(plan_spec, cross=_DEFAULT_CROSS, *, flagship=None, safety=Non
                 f["estimated_minutes"] = sum(ests)
             fs.append(f)
         epics.append({"title": e_title, "feats": fs})
-    obj = {"epics": epics, "cross_cutting_rules": cross}
+    # flagship_features is REQUIRED (the release risk floor is derived from it and an optional floor is
+    # no floor), so the default is a real declaration rather than an omission.
+    obj = {"epics": epics, "cross_cutting_rules": cross, "flagship_features": ["Appka sa spustí"]}
     if flagship is not None:  # CR-V2-052 release-coverage declaration
         obj["flagship_features"] = flagship
     if safety is not None:

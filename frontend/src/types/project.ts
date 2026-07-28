@@ -102,6 +102,13 @@ export interface ProjectRead {
   source_path: string | null;
   kb_path: string | null;
   guardian_enabled: boolean;
+  /**
+   * Founding steps that did NOT finish — CI wiring, the CI runner, the smoke test, branch protection.
+   * Populated only by `POST /projects`; empty everywhere else. These steps are best-effort by design and
+   * never block a create, but the route used to discard their outcome and answer 201, so the cockpit drew
+   * a finished project whose CI had never been wired.
+   */
+  setup_warnings: string[];
   /** STEP 6 (R9): "Vývoj na zákazku" — permits deviating from the unified company design. Fixed at creation. */
   custom_development_enabled: boolean;
   created_by: string;

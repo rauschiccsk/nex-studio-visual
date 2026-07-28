@@ -301,6 +301,13 @@ class ProjectRead(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    #: Slovak sentences naming the founding steps that did NOT finish (CI wiring, the runner, the smoke
+    #: test, branch protection). Populated ONLY by ``POST /projects``; every other route leaves it empty,
+    #: which is why it is not a column. The post-scaffold steps are best-effort by design and never abort
+    #: a create — but the route used to discard their outcome entirely and answer 201, so the cockpit drew
+    #: a finished project whose CI had never been wired and said nothing. Empty list = everything ran.
+    setup_warnings: list[str] = Field(default_factory=list)
+
     id: UUID
     name: str = Field(..., min_length=1, max_length=255)
     slug: str = Field(..., min_length=1, max_length=100)

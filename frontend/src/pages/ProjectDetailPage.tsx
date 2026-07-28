@@ -17,6 +17,8 @@ interface JustCreatedState {
   backendPort?: number | null;
   frontendPort?: number | null;
   dbPort?: number | null;
+  /** Founding steps that did NOT finish (CI, the runner, the smoke test, branch protection). */
+  setupWarnings?: string[];
 }
 
 // ─── Pipeline bar ─────────────────────────────────────────────────────────────
@@ -177,7 +179,9 @@ export default function ProjectDetailPage() {
       setJustCreated(st);
       // Wipe location.state so refresh / back navigation does not re-show.
       window.history.replaceState({}, "");
-      // Auto-dismiss after 8 seconds.
+      // Auto-dismiss after 8 seconds — but ONLY when everything finished. An unfinished step is
+      // something the Manager has to act on; hiding it after eight seconds is how it gets missed.
+      if (st.setupWarnings && st.setupWarnings.length > 0) return;
       const timer = setTimeout(() => setJustCreated(null), 8000);
       return () => clearTimeout(timer);
     }
@@ -227,11 +231,25 @@ export default function ProjectDetailPage() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
-      {/* "Just created" banner — visible for 8s right after POST /projects. */}
-      {justCreated && (
-        <div className="mb-4 rounded-lg border border-[var(--color-state-success-bg)] bg-[var(--color-state-success-bg)] px-4 py-3 flex items-start gap-3">
+      {/* "Just created" banner — 8s when everything ran; stays put when a step did not finish. */}
+      {justCreated && (() => {
+        // A green tick over an unfinished setup is the cockpit lying about its own work. When a founding
+        // step failed the project genuinely EXISTS — so this is a warning, not an error — but it says
+        // plainly what is missing and does not disappear on its own.
+        const unfinished = justCreated.setupWarnings ?? [];
+        const ok = unfinished.length === 0;
+        return (
+        <div
+          className={`mb-4 rounded-lg border px-4 py-3 flex items-start gap-3 ${
+            ok
+              ? "border-[var(--color-state-success-bg)] bg-[var(--color-state-success-bg)]"
+              : "border-[var(--color-state-warning-bg)] bg-[var(--color-state-warning-bg)]"
+          }`}
+        >
           <svg
-            className="w-5 h-5 text-[var(--color-status-success)] mt-0.5 flex-shrink-0"
+            className={`w-5 h-5 mt-0.5 flex-shrink-0 ${
+              ok ? "text-[var(--color-status-success)]" : "text-[var(--color-status-warning)]"
+            }`}
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -240,11 +258,24 @@ export default function ProjectDetailPage() {
               strokeLinecap="round"
               strokeLinejoin="round"
               strokeWidth={2}
-              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+              d={
+                ok
+                  ? "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                  : "M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.48 0L3.16 16.25A2 2 0 005 19z"
+              }
             />
           </svg>
-          <div className="flex-1 text-sm text-[var(--color-state-success-fg)]">
-            <div className="font-medium">Projekt vytvorený.</div>
+          <div className={`flex-1 text-sm ${ok ? "text-[var(--color-state-success-fg)]" : "text-[var(--color-state-warning-fg)]"}`}>
+            <div className="font-medium">
+              {ok ? "Projekt vytvorený." : "Projekt vytvorený, ale nie všetko sa dokončilo."}
+            </div>
+            {!ok && (
+              <ul className="mt-1 list-disc pl-5 text-[12px] space-y-0.5">
+                {unfinished.map((w) => (
+                  <li key={w}>{w}</li>
+                ))}
+              </ul>
+            )}
             <div className="text-[12px] text-[var(--color-state-success-fg)] mt-0.5 flex flex-wrap gap-x-3">
               {justCreated.repoUrl && (
                 <span>
@@ -269,7 +300,11 @@ export default function ProjectDetailPage() {
           </div>
           <button
             onClick={() => setJustCreated(null)}
-            className="text-[var(--color-status-success)] hover:text-[var(--color-state-success-fg)] transition-colors"
+            className={`transition-colors ${
+              ok
+                ? "text-[var(--color-status-success)] hover:text-[var(--color-state-success-fg)]"
+                : "text-[var(--color-status-warning)] hover:text-[var(--color-state-warning-fg)]"
+            }`}
             aria-label="Zavrieť"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -277,7 +312,8 @@ export default function ProjectDetailPage() {
             </svg>
           </button>
         </div>
-      )}
+        );
+      })()}
 
       {/* Header */}
       <div className="flex items-center gap-3 mb-6">
