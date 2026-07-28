@@ -217,13 +217,19 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
         unit="",
         description="Predvolený priečinok pre živé dokumenty jednotlivého projektu.",
     ),
+    # Default stays EMPTY on purpose — the whole test suite creates projects in this mode. What used
+    # to be dangerous was not the empty value but the SILENCE: a fresh or forked install founded a
+    # hollow project (no workspace, charters, git or CI — every downstream step has its own skip
+    # branch) and reported 201 Created. `invoke_init_script` now refuses that case out loud instead,
+    # so an unconfigured install cannot quietly produce a project that will fail at first build.
     "template_init_script_path": _Default(
         value="",
         label="Cesta k inicializačnému skriptu šablóny",
         unit="",
         description=(
             "Úplná cesta k skriptu init.sh, ktorý pri vytvorení projektu založí jeho priečinok "
-            "a základné súbory. Prázdne = automatické zakladanie je vypnuté."
+            "a základné súbory. Prázdne = automatické zakladanie je vypnuté — vtedy sa projekt "
+            "vytvorí BEZ pracovného priečinka a dá sa použiť len na už existujúci projekt na disku."
         ),
     ),
     "template_init_timeout_seconds": _Default(

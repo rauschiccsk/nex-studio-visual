@@ -136,12 +136,31 @@ def invoke_init_script(
     """
     init_script_path = system_setting_service.get_str(db, "template_init_script_path")
     if not init_script_path:
-        # Empty path = operator opt-out (per docstring). Graceful no-op
-        # so test environments + brownfield projects can disable
-        # auto-bootstrap without 500-ing project creation.
-        logger.info(
-            "Auto-bootstrap disabled (template_init_script_path empty) — skipping subprocess for slug=%s",
+        # Empty path = operator opt-out. That is legitimate for a BROWNFIELD project — the files
+        # already exist on disk and we are only registering them. It is NOT legitimate for a
+        # greenfield one: every downstream step (charters, memory seed, git push, smoke, CI runner)
+        # has its own silent skip branch, so the create used to return 201 for a project with NO
+        # workspace at all, and the Manager only found out when his first build died on a missing
+        # charter with advice ("re-create the project") that could not work.
+        #
+        # So: skip quietly only when there is genuinely something to register. Otherwise refuse, in
+        # words that say what to do about it.
+        target_dir = Path(project.source_path) if project.source_path else None
+        brownfield = target_dir is not None and target_dir.is_dir() and any(target_dir.iterdir())
+        # `dry_run` is the tests' deliberate 'scaffold nothing' mode (see the isolation fixture in
+        # tests/conftest.py) — no workspace is expected there, so there is nothing to warn about.
+        if not brownfield and not dry_run:
+            raise TemplateBootstrapError(
+                "Automatické zakladanie je vypnuté (v Nastaveniach → Systém je prázdna cesta "
+                "k inicializačnému skriptu šablóny) a priečinok projektu neexistuje. Projekt by vznikol "
+                "prázdny — bez pravidiel agenta, bez gitu, bez CI — a prvé zostavenie by zlyhalo. "
+                "Doplň cestu k init.sh, alebo projekt zakladaj len nad už existujúcim priečinkom."
+            )
+        logger.warning(
+            "Auto-bootstrap disabled (template_init_script_path empty) — registering EXISTING "
+            "workspace for slug=%s at %s without scaffolding",
             project.slug,
+            project.source_path,
         )
         return BootstrapResult(target=project.source_path or "", init_script="", stdout_tail="")
 

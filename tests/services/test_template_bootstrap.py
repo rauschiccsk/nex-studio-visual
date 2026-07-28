@@ -461,3 +461,78 @@ def test_init_script_accepts_the_argv_the_cockpit_builds(db_session, tmp_path):
 
     assert result.init_script == str(ICC_INIT_SCRIPT)
     assert result.target == str(target)
+
+
+def test_disabled_bootstrap_refuses_a_greenfield_project_instead_of_founding_a_hollow_one(db_session, tmp_path):
+    """Empty `template_init_script_path` + no workspace on disk + a REAL run = refuse, loudly.
+
+    `dry_run` is exempt: that is the tests' deliberate scaffold-nothing mode.
+
+    It used to return a clean 201 for a project with NO directory, NO agent charters, NO git and NO
+    CI — every downstream step has its own silent skip branch, so nothing complained. The Manager
+    found out only when his first build died on a missing charter, with advice ("re-create the
+    project") that could not work because re-creating produced the same hollow project.
+    """
+    system_setting_service.upsert(db_session, "template_init_script_path", "")
+    db_session.flush()
+
+    user = User(
+        username=f"hollow-{uuid.uuid4().hex[:8]}",
+        email=f"hollow-{uuid.uuid4().hex[:8]}@example.com",
+        password_hash="x",
+        role="ri",
+    )
+    db_session.add(user)
+    db_session.flush()
+
+    project = Project(
+        name="Hollow Probe",
+        description="Regression probe",
+        slug=f"hollow-{uuid.uuid4().hex[:8]}",
+        type="standard",
+        auth_mode="password",
+        created_by=user.id,
+        source_path=str(tmp_path / "does-not-exist"),
+        backend_port=14990,
+    )
+    db_session.add(project)
+    db_session.flush()
+
+    with pytest.raises(TemplateBootstrapError, match="Automatické zakladanie je vypnuté"):
+        invoke_init_script(db_session, project)
+
+
+def test_disabled_bootstrap_still_registers_an_existing_brownfield_workspace(db_session, tmp_path):
+    """The opt-out stays usable for its real purpose: adopting a project that already exists."""
+    system_setting_service.upsert(db_session, "template_init_script_path", "")
+    db_session.flush()
+
+    existing = tmp_path / "already-here"
+    existing.mkdir()
+    (existing / "CLAUDE.md").write_text("# existing project\n")
+
+    user = User(
+        username=f"brown-{uuid.uuid4().hex[:8]}",
+        email=f"brown-{uuid.uuid4().hex[:8]}@example.com",
+        password_hash="x",
+        role="ri",
+    )
+    db_session.add(user)
+    db_session.flush()
+
+    project = Project(
+        name="Brownfield Probe",
+        description="Regression probe",
+        slug=f"brown-{uuid.uuid4().hex[:8]}",
+        type="standard",
+        auth_mode="password",
+        created_by=user.id,
+        source_path=str(existing),
+        backend_port=14990,
+    )
+    db_session.add(project)
+    db_session.flush()
+
+    result = invoke_init_script(db_session, project)
+    assert result.target == str(existing)
+    assert result.init_script == ""

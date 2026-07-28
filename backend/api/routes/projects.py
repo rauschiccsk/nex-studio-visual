@@ -273,6 +273,35 @@ def _workspace_safe_to_remove(source_path: str, root: Path) -> bool:
     return ws != r and ws.is_relative_to(r) and ws.is_dir()
 
 
+def _discard_orphaned_workspace(source_path: str | None, slug: str) -> None:
+    """Remove a workspace left behind by a create that failed AFTER init.sh scaffolded it.
+
+    Without this, one half-way failure kills that project name FOREVER. The DB row is rolled back,
+    so DELETE /projects/{id} — the only route that removes a workspace — has nothing to delete; and
+    a retry cannot succeed either, because init.sh refuses a target that already holds a CLAUDE.md
+    unless --force, which we never pass. The Manager was left with a slug he could not create and a
+    directory he could not reach from the cockpit, with no message saying so.
+
+    Guarded by ``_workspace_safe_to_remove`` (strictly under PROJECTS_ROOT, never the root itself)
+    and never raises: a cleanup failure must not replace the real error with its own.
+    """
+    from backend.services.claude_agent import PROJECTS_ROOT
+
+    if not source_path or not _workspace_safe_to_remove(source_path, PROJECTS_ROOT):
+        return
+    try:
+        shutil.rmtree(source_path)
+        logger.info("Removed orphaned workspace after failed create: slug=%s path=%s", slug, source_path)
+    except OSError as exc:  # pragma: no cover - defensive
+        logger.warning(
+            "Could not remove orphaned workspace after failed create (slug=%s, path=%s): %s — "
+            "the next create for this slug will fail on the leftover directory",
+            slug,
+            source_path,
+            exc,
+        )
+
+
 # The standard owner for a project workspace: uid:gid 1000:1000 — the host user, matching every existing
 # tree under ``/opt/projects`` AND the Vizuál sandbox's ``SANDBOX_USER``. It is NOT the backend's own uid:
 # the backend container runs as root (0:0), so a freshly scaffolded workspace lands root-owned. That breaks
@@ -709,6 +738,7 @@ def create_project(
             provision_v2_agent_charters(PROJECTS_ROOT / project.slug, project.slug, project.name)
         except ProvisioningError as exc:
             db.rollback()
+            _discard_orphaned_workspace(project.source_path, project.slug)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"v2 agent charter provisioning failed: {exc}",
@@ -745,11 +775,13 @@ def create_project(
                     delete_github_repo=False,  # Director confirms manually
                 )
                 db.rollback()
+                _discard_orphaned_workspace(project.source_path, project.slug)
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail=(
-                        f"Stage 4 push+verify failed: {exc}. Local .git rolled back. "
-                        f"GitHub repo {repo_full_name} preserved — Director cleanup if needed."
+                        f"Stage 4 push+verify failed: {exc}. Local workspace removed so the same "
+                        f"project name can be created again. GitHub repo {repo_full_name} "
+                        f"preserved — Director cleanup if needed."
                     ),
                 ) from exc
         elif payload.repo_url and project.source_path:
