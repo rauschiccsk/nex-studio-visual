@@ -10,14 +10,19 @@ from __future__ import annotations
 
 import os
 import subprocess
+import uuid
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+from backend.db.models.foundation import User
+from backend.db.models.projects import Project
+from backend.services import system_setting as system_setting_service
 from backend.services.template_bootstrap import (
     GitPushVerificationError,
     TemplateBootstrapError,
+    invoke_init_script,
     push_and_verify,
     rollback_partial_state,
 )
@@ -396,3 +401,63 @@ def test_gh_auth_setup_git_runs_before_push(monkeypatch):
     gh_idx = next(i for i, c in enumerate(calls) if c == ("gh", ("auth", "setup-git")))
     push_idx = next(i for i, c in enumerate(calls) if c[0] == "git" and c[1] and c[1][0] == "push")
     assert gh_idx < push_idx
+
+
+# ─── Regression: the cockpit's argv must stay valid for the REAL init.sh ─────
+
+
+ICC_INIT_SCRIPT = Path("/home/icc/knowledge/templates/claude-project/init.sh")
+
+
+def test_init_script_accepts_the_argv_the_cockpit_builds(db_session, tmp_path):
+    """Run the REAL init.sh with the REAL argv `invoke_init_script` builds, dry-run.
+
+    The cockpit and init.sh live in two different repositories and drift apart silently. On
+    2026-07-27 the Koordinátor role was retired from init.sh — including the `--no-coordinator`
+    flag that opted out of it — while the cockpit went on sending that flag. init.sh's argument
+    parser ends in a catch-all that prints usage and EXITS 1 on anything it does not recognise, so
+    from that moment EVERY project creation failed with HTTP 500 and no project could be founded.
+
+    Nothing caught it: no test had ever executed the real script. `conftest` forces dry_run and
+    leaves `template_init_script_path` unset in the test DB, so the subprocess never ran at all —
+    the mocked tests all passed while founding was completely broken in production.
+
+    This test closes that gap. It is the only place the two repositories are checked against each
+    other, so it deliberately uses the real script rather than a fixture: a copy would drift the
+    same way the assumption did. It runs in CI because the Test job is self-hosted on ANDROS, where
+    the KB is present; elsewhere it skips with a stated reason rather than passing vacuously.
+    """
+    if not ICC_INIT_SCRIPT.is_file():
+        pytest.skip(f"real init.sh not on this host ({ICC_INIT_SCRIPT}) — cockpit/template drift unchecked here")
+
+    system_setting_service.upsert(db_session, "template_init_script_path", str(ICC_INIT_SCRIPT))
+    db_session.flush()
+
+    user = User(
+        username=f"boot-{uuid.uuid4().hex[:8]}",
+        email=f"boot-{uuid.uuid4().hex[:8]}@example.com",
+        password_hash="x",
+        role="ri",
+    )
+    db_session.add(user)
+    db_session.flush()
+
+    target = tmp_path / "argv-probe"
+    project = Project(
+        name="Argv Probe",
+        slug=f"argv-probe-{uuid.uuid4().hex[:8]}",
+        type="standard",
+        auth_mode="password",
+        description="Regression probe for cockpit↔init.sh argv compatibility",
+        created_by=user.id,
+        source_path=str(target),
+        backend_port=14990,
+    )
+    db_session.add(project)
+    db_session.flush()
+
+    # Raises TemplateBootstrapError on a non-zero exit — which is exactly the production failure.
+    result = invoke_init_script(db_session, project, dry_run=True)
+
+    assert result.init_script == str(ICC_INIT_SCRIPT)
+    assert result.target == str(target)

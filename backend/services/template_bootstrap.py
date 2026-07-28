@@ -185,10 +185,11 @@ def invoke_init_script(
     ]
     if dry_run:
         args.append("--dry-run")
-    # v2.0.0 (CR-V2-005): the v1 Koordinátor role is retired — the two-agent
-    # model is AI Agent + Auditor. Never bootstrap a coordinator; init.sh's
-    # default is opted out unconditionally.
-    args.append("--no-coordinator")
+    # NO `--no-coordinator` here. The v1 Koordinátor role is retired (CR-V2-005), and on 2026-07-27
+    # it was removed from init.sh itself — including the flag that opted out of it. init.sh's arg
+    # parser ends in a catch-all that PRINTS USAGE AND EXITS 1 on anything it does not recognise, so
+    # sending the flag made every single project creation fail with HTTP 500. There is no coordinator
+    # left to opt out of; the correct argv is simply not to mention it.
 
     # CR-NS-012: route agent notifications to the project owner. init.sh
     # writes the value into the new project's .env as TELEGRAM_NOTIFY_CHAT_ID.
