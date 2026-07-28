@@ -88,8 +88,9 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
   // The customer_id currently mid-action (deploy/accept) → disables its row.
   const [busy, setBusy] = useState<string | null>(null);
   const [rowError, setRowError] = useState<Record<string, string>>({});
-  // Audit Theme 4: the successful DeployResult per customer (url / bumped_to / warnings) — previously thrown
-  // away, so the manager got no confirmation, no live link, no version-bump notice.
+  // Audit Theme 4: the last DeployResult per customer (ok / url / bumped_to / warnings) — previously thrown
+  // away, so the manager got no confirmation, no live link, no version-bump notice. It holds FAILED results
+  // too (`ok: false` arrives as HTTP 200), and the render branches on `ok`.
   const [rowResult, setRowResult] = useState<Record<string, DeployResult>>({});
   // v4.0.30: the customer_id whose token-launch 'Spustiť' is mid-flight (minting + opening the app).
   const [launching, setLaunching] = useState<string | null>(null);
@@ -483,10 +484,27 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                           {rowError[row.customer_id]}
                         </div>
                       )}
+                      {/* A RUNTIME deploy failure answers HTTP 200 with `ok: false` (build failed, container
+                          never came up, '/api' silent, migration failed, public route down, launch ticket not
+                          mintable) — so the catch above never runs and this block painted the green "✓ Nasadené"
+                          over a deploy that did not happen. Branch on `result.ok`; the reason is the backend's own
+                          non-secret `event.detail` (schemas/deploy.py). */}
                       {result && !isBusy && (
-                        <div className="mt-1 space-y-0.5 text-[11px] text-emerald-600 dark:text-emerald-400">
-                          <div>✓ Nasadené{result.bumped_to ? ` — projekt povýšený na ${fmtVer(result.bumped_to)}` : ""}</div>
-                          {result.url && renderLaunchOrOpen(row.customer_id, result.url)}
+                        <div
+                          className={`mt-1 space-y-0.5 text-[11px] ${
+                            result.ok
+                              ? "text-emerald-600 dark:text-emerald-400"
+                              : "text-[var(--color-state-error-fg)]"
+                          }`}
+                        >
+                          {result.ok ? (
+                            <div>✓ Nasadené{result.bumped_to ? ` — projekt povýšený na ${fmtVer(result.bumped_to)}` : ""}</div>
+                          ) : (
+                            <div>
+                              ✗ Nasadenie zlyhalo{result.event.detail ? ` — ${result.event.detail}` : ""}
+                            </div>
+                          )}
+                          {result.ok && result.url && renderLaunchOrOpen(row.customer_id, result.url)}
                           {result.warnings.map((w, i) => (
                             <div key={i} className="text-amber-600 dark:text-amber-400">
                               ⚠ {w}

@@ -23,6 +23,10 @@ function versionStatusLabel(status: string) {
   return "Plánované";
 }
 
+// The one reason string for both controls closed by an unreadable Zadanie (tooltip on Uložiť and Spustiť).
+const ZADANIE_UNKNOWN_REASON =
+  "Zadanie sa nepodarilo načítať — jeho obsah nepoznáme. Skús ho načítať znova.";
+
 // ─── VersionDetailPage ────────────────────────────────────────────────────────
 
 export default function VersionDetailPage() {
@@ -41,6 +45,10 @@ export default function VersionDetailPage() {
   const [savingZadanie, setSavingZadanie] = useState(false);
   const [starting, setStarting] = useState(false);
   const [zadanieError, setZadanieError] = useState<HumanError | null>(null);
+  // The THIRD Zadanie state: not "empty", not "written" — UNKNOWN, because the read itself failed. Set → the
+  // editor is locked and Uložiť/Spustiť are closed, so an empty editor can never truncate the saved file.
+  const [zadanieUnreadable, setZadanieUnreadable] = useState<HumanError | null>(null);
+  const [reloadingZadanie, setReloadingZadanie] = useState(false);
 
   useActiveContextSync(project, version);
 
@@ -53,14 +61,22 @@ export default function VersionDetailPage() {
       getVersion(versionId),
       // Load the Zadanie from the SAVED FILE (source of truth), not version.description (2026-06-30 fix):
       // description was never written, so the editor showed empty on re-open + missed a directly-edited file.
-      readZadanie(versionId).catch(() => ({ content: "" })),
+      // A FAILED read is NOT an empty Zadanie: the backend already answers "" for a file that does not exist
+      // yet, so anything thrown here (403 on someone else's project, 404, 500, network) means the real content
+      // is unknown. Swallowing it into "" gave an editor indistinguishable from "nothing written yet" — and
+      // Uložiť then overwrote the real file with nothing. Keep the failure; the UI shows it.
+      readZadanie(versionId).then(
+        (res) => ({ content: res.content ?? "", error: null as HumanError | null }),
+        (e: unknown) => ({ content: "", error: humanizeApiError(e, "Načítanie Zadania zlyhalo") }),
+      ),
     ])
       .then(([proj, ver, zad]) => {
         if (cancelled) return;
         if (!proj) { setError("Projekt nebol nájdený."); return; }
         setProject(proj);
         setVersion(ver);
-        setZadanie(zad.content ?? "");
+        setZadanie(zad.content);
+        setZadanieUnreadable(zad.error);
       })
       .catch(() => { if (!cancelled) setError("Nepodarilo sa načítať dáta."); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -71,7 +87,9 @@ export default function VersionDetailPage() {
   // Persist the Zadanie to docs/specs/versions/v<N>/customer-requirements.md (the file Príprava reads),
   // then reveal "Spustiť tvorbu špecifikácie". Two-step, no autopilot (design §4.3).
   const handleSaveZadanie = async () => {
-    if (!versionId || !zadanie.trim()) return;
+    // Never write over a Zadanie we could not read — the editor is empty because the READ failed, not because
+    // the file is. The disabled button is the visible guard; this is the one that cannot be raced.
+    if (!versionId || zadanieUnreadable || !zadanie.trim()) return;
     setSavingZadanie(true);
     setZadanieError(null);
     try {
@@ -84,10 +102,29 @@ export default function VersionDetailPage() {
     }
   };
 
+  // Re-read the Zadanie after a failed load (403 aside, these are usually transient). Only a SUCCESSFUL read
+  // clears the locked state — that is the single place the content stops being unknown.
+  const handleReloadZadanie = async () => {
+    if (!versionId) return;
+    setReloadingZadanie(true);
+    try {
+      const { content } = await readZadanie(versionId);
+      setZadanie(content ?? "");
+      setZadanieSaved(false);
+      setZadanieUnreadable(null);
+    } catch (e: unknown) {
+      setZadanieUnreadable(humanizeApiError(e, "Načítanie Zadania zlyhalo"));
+    } finally {
+      setReloadingZadanie(false);
+    }
+  };
+
   // Begin the Príprava phase (engine ``start`` → injects the init prompt), then open the AI Agent tab
   // to watch the interactive spec dialogue. The active context (project+version) is already synced.
   const handleStart = async () => {
-    if (!versionId) return;
+    // Same rule as Uložiť: Príprava reads the Zadanie file, so starting while its content is unknown would
+    // launch the whole phase from a brief nobody on this screen has seen.
+    if (!versionId || zadanieUnreadable) return;
     setStarting(true);
     setZadanieError(null);
     try {
@@ -179,27 +216,52 @@ export default function VersionDetailPage() {
               <div className="text-sm font-semibold text-[var(--color-text-primary)] mb-1">
                 Zadanie — {version.version_number}
               </div>
-              <div className="text-xs text-[var(--color-text-muted)] mb-3">
-                Voľný text — hlavný vstup pre Prípravu. Opíš, čo má aplikácia robiť (ciele, funkcie,
-                hraničné prípady). Po „Spustiť tvorbu špecifikácie" AI Agent prečíta Zadanie, doplní
-                objasňujúce otázky a vytvorí Špecifikáciu. Zadanie je nepovinné — ak ho necháš prázdne,
-                dohodnete sa priamo v rozhovore.
-              </div>
-              <textarea
-                lang="sk"
-                spellCheck={false}
-                value={zadanie}
-                onChange={(e) => { setZadanie(e.target.value); setZadanieSaved(false); }}
-                rows={14}
-                placeholder="Opíš, čo má aplikácia robiť…"
-                className="w-full resize-y rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] transition-colors focus:border-primary-500 focus:outline-none"
-              />
+              {/* While the Zadanie is unknown this text instructs a sequence the manager cannot start
+                  ("necháš prázdne … spustíš"), directly above the panel saying both actions are locked. */}
+              {!zadanieUnreadable && (
+                <div className="text-xs text-[var(--color-text-muted)] mb-3">
+                  Voľný text — hlavný vstup pre Prípravu. Opíš, čo má aplikácia robiť (ciele, funkcie,
+                  hraničné prípady). Po „Spustiť tvorbu špecifikácie" AI Agent prečíta Zadanie, doplní
+                  objasňujúce otázky a vytvorí Špecifikáciu. Zadanie je nepovinné — ak ho necháš prázdne,
+                  dohodnete sa priamo v rozhovore.
+                </div>
+              )}
+              {zadanieUnreadable ? (
+                /* Locked state — an unreadable Zadanie must never look like an empty one. No textarea at all:
+                   a disabled empty box still reads as "nothing written yet", which is exactly the lie. */
+                <div className="rounded-lg border border-[var(--color-status-error)] bg-[var(--color-state-error-bg)] px-3 py-2">
+                  <p className="text-xs font-medium text-[var(--color-state-error-fg)]">
+                    Zadanie sa nepodarilo načítať, takže jeho obsah nepoznáme. Editor je zamknutý — inak by
+                    uloženie prepísalo uložený súbor prázdnym textom.
+                  </p>
+                  <ErrorNote error={zadanieUnreadable} className="mt-1" />
+                  <button
+                    type="button"
+                    onClick={handleReloadZadanie}
+                    disabled={reloadingZadanie}
+                    className="mt-2 rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50 transition-colors"
+                  >
+                    {reloadingZadanie ? "Načítavam…" : "Skúsiť znova"}
+                  </button>
+                </div>
+              ) : (
+                <textarea
+                  lang="sk"
+                  spellCheck={false}
+                  value={zadanie}
+                  onChange={(e) => { setZadanie(e.target.value); setZadanieSaved(false); }}
+                  rows={14}
+                  placeholder="Opíš, čo má aplikácia robiť…"
+                  className="w-full resize-y rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] transition-colors focus:border-primary-500 focus:outline-none"
+                />
+              )}
               <ErrorNote error={zadanieError} className="mt-2" />
               <div className="mt-3 flex items-center justify-end gap-2">
                 <button
                   type="button"
                   onClick={handleSaveZadanie}
-                  disabled={savingZadanie || !zadanie.trim()}
+                  disabled={savingZadanie || !!zadanieUnreadable || !zadanie.trim()}
+                  title={zadanieUnreadable ? ZADANIE_UNKNOWN_REASON : undefined}
                   className="rounded-lg border border-[var(--color-border-strong)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50 transition-colors"
                 >
                   {savingZadanie ? "Ukladám…" : zadanieSaved ? "Zadanie uložené ✓" : "Uložiť Zadanie"}
@@ -207,11 +269,13 @@ export default function VersionDetailPage() {
                 <button
                   type="button"
                   onClick={handleStart}
-                  disabled={starting || (!!zadanie.trim() && !zadanieSaved)}
+                  disabled={starting || !!zadanieUnreadable || (!!zadanie.trim() && !zadanieSaved)}
                   title={
-                    !!zadanie.trim() && !zadanieSaved
-                      ? "Najprv ulož Zadanie (alebo ho vymaž a spusti od nuly)"
-                      : undefined
+                    zadanieUnreadable
+                      ? ZADANIE_UNKNOWN_REASON
+                      : !!zadanie.trim() && !zadanieSaved
+                        ? "Najprv ulož Zadanie (alebo ho vymaž a spusti od nuly)"
+                        : undefined
                   }
                   className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500 disabled:opacity-50 transition-colors"
                 >

@@ -512,9 +512,16 @@ def upgrade_nexshared(
     if not project.source_path:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Projekt nemá zdrojovú cestu.")
     if not nexshared_service.upgrade_source_pin(project.source_path, payload.target_version):
+        # Since the lockfile step exists, this covers far more than a bad pin: npm unreachable, the
+        # resolver failing, or the lockfile not actually reaching the target. Saying "neplatná verzia"
+        # for a network blip sent the Manager looking for a typo that was not there.
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Povýšenie zlyhalo — chýba nex-shared pin alebo neplatná verzia.",
+            detail=(
+                "Povýšenie sa nepodarilo dokončiť — verzia knižnice sa nezapísala do zámku "
+                "závislostí, takže by sa zostavovala pôvodná. V projekte sa nič nezmenilo. "
+                "Skús to znova; ak to potrvá, over dostupnosť GitHubu."
+            ),
         )
     committed = nexshared_service.commit_pin_upgrade(project.source_path, payload.target_version)
     return {"upgraded": True, "target_version": payload.target_version, "committed": committed}
@@ -592,7 +599,14 @@ def discard_git(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if not result.get("ok"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Zahodenie zmien zlyhalo")
+        # Pass the service's own reason through. It distinguishes "nothing was deleted, these items
+        # cannot be discarded" from "the tree is still dirty afterwards" — a difference the Manager
+        # must see, because one of them means his work is intact and the other does not. The generic
+        # sentence that used to be here hid both.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result.get("error") or "Zahodenie zmien zlyhalo.",
+        )
     return result
 
 

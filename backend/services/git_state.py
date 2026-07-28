@@ -18,8 +18,10 @@ secrets are never staged. This service never pushes — commits stay local.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
+from typing import Optional
 
 #: Cap the surfaced file list so a huge dirty tree can't bloat the payload. The
 #: ``dirty_count`` is always the EXACT total; ``truncated`` flags when the list was cut.
@@ -41,8 +43,13 @@ def _project_root(source_path: str) -> Path:
     return root
 
 
-def _run(root: Path, args: list[str], *, timeout: int) -> subprocess.CompletedProcess:
-    """Run ``git <args>`` inside ``root`` with a bounded timeout (never raises on nonzero)."""
+def _run(root: Path, args: list[str], *, timeout: int, c_locale: bool = False) -> subprocess.CompletedProcess:
+    """Run ``git <args>`` inside ``root`` with a bounded timeout (never raises on nonzero).
+
+    ``c_locale`` forces untranslated English output — needed only by the one call whose
+    stdout is parsed as prose (``git clean -nd``). Off by default so git keeps reading the
+    ambient locale for everything else (Slovak commit messages).
+    """
     return subprocess.run(
         ["git", *args],
         cwd=str(root),
@@ -50,6 +57,7 @@ def _run(root: Path, args: list[str], *, timeout: int) -> subprocess.CompletedPr
         text=True,
         timeout=timeout,
         check=False,
+        env={**os.environ, "LC_ALL": "C"} if c_locale else None,
     )
 
 
@@ -100,14 +108,75 @@ def commit_all(source_path: str, message: str, *, timeout: int = 60) -> dict:
     return {"ok": True}
 
 
-def discard_all(source_path: str, *, timeout: int = 60) -> dict:
-    """Discard ALL pending changes (tracked + untracked) → clean tree.
+def _untracked_paths(root: Path, *, timeout: int) -> list[str]:
+    """Untracked entries from ``git status --porcelain -z`` (``-z`` emits paths RAW, never quoted)."""
+    proc = _run(root, ["status", "--porcelain", "-z"], timeout=timeout)
+    if proc.returncode != 0:
+        raise ValueError("git status zlyhal")
+    return [entry[3:] for entry in proc.stdout.split("\0") if entry[:2] == "??"]
 
-    ``git checkout -- .`` (revert tracked edits/deletes) + ``git clean -fd`` (remove
-    untracked files/dirs). Destructive — the router gates this behind an explicit
-    operator confirmation. Returns ``{ok: bool}`` (true when the tree ends up clean).
+
+def _cleanable_paths(root: Path, *, timeout: int) -> Optional[set[str]]:
+    """What ``git clean -fd`` WOULD remove, asked via its own dry run. None when git failed.
+
+    ``core.quotepath=false`` + the C locale keep the output raw + English so the
+    ``Would remove `` prefix parses deterministically; anything that fails to parse simply
+    stays out of the set, which makes the caller refuse rather than destroy.
+    """
+    proc = _run(root, ["-c", "core.quotepath=false", "clean", "-nd"], timeout=timeout, c_locale=True)
+    if proc.returncode != 0:
+        return None
+    prefix = "Would remove "
+    cleanable: set[str] = set()
+    for ln in proc.stdout.splitlines():
+        if not ln.startswith(prefix):
+            continue
+        path = ln[len(prefix) :]
+        # git still C-quotes a path containing a quote, a backslash or a newline even with
+        # core.quotepath=false. Unquoting it correctly is not worth the risk here: an unparsed path
+        # simply never joins the set, so the caller REFUSES instead of destroying — which is the safe
+        # direction. The refusal now names the file (see discard_all), so the Manager can remove it
+        # himself rather than facing a permanent, unexplained "cannot discard".
+        if path.startswith('"'):
+            continue
+        cleanable.add(path)
+    return cleanable
+
+
+def discard_all(source_path: str, *, timeout: int = 60) -> dict:
+    """Discard ALL pending changes (index + tracked + untracked) → clean tree.
+
+    ``git reset --hard HEAD`` (index AND working tree — plain ``git checkout -- .`` leaves
+    STAGED changes behind, so the tree stayed dirty) + ``git clean -fd`` (untracked
+    files/dirs).
+
+    Fail-fast by construction: everything that could make the discard incomplete is checked
+    BEFORE anything is destroyed, because the destruction is irreversible and "your work is
+    gone, and by the way it failed" is the worst outcome this action can have. Preflight:
+
+    * ``HEAD`` must resolve — with no commit there is no baseline to reset to;
+    * every untracked entry must be one git says it would remove — ``git clean -fd``
+      silently SKIPS nested git repositories, which would survive and leave the tree dirty.
+
+    Destructive — the router gates this behind an explicit operator confirmation.
+    Returns ``{ok: bool, error?: str}``.
     """
     root = _project_root(source_path)
-    _run(root, ["checkout", "--", "."], timeout=timeout)
-    _run(root, ["clean", "-fd"], timeout=timeout)
-    return {"ok": working_tree_status(source_path, timeout=timeout)["clean"]}
+    if _run(root, ["rev-parse", "--verify", "HEAD"], timeout=timeout).returncode != 0:
+        return {"ok": False, "error": "Projekt nemá žiadny commit, ku ktorému by sa dalo vrátiť."}
+    cleanable = _cleanable_paths(root, timeout=timeout)
+    if cleanable is None:
+        return {"ok": False, "error": "git clean zlyhal"}
+    surviving = [p for p in _untracked_paths(root, timeout=timeout) if p not in cleanable]
+    if surviving:
+        shown = ", ".join(surviving[:5]) + (" …" if len(surviving) > 5 else "")
+        return {"ok": False, "error": f"Tieto položky sa nedajú zahodiť, nič sa nezmazalo: {shown}"}
+
+    # Preflight passed — only now destroy.
+    if _run(root, ["reset", "--hard", "HEAD"], timeout=timeout).returncode != 0:
+        return {"ok": False, "error": "git reset zlyhal"}
+    if _run(root, ["clean", "-fd"], timeout=timeout).returncode != 0:
+        return {"ok": False, "error": "git clean zlyhal"}
+    if not working_tree_status(source_path, timeout=timeout)["clean"]:
+        return {"ok": False, "error": "Pracovný strom je aj po zahodení zmenený."}
+    return {"ok": True}

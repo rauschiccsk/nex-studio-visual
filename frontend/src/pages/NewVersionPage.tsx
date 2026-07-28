@@ -80,11 +80,16 @@ export default function NewVersionPage() {
   const [nexStatus, setNexStatus] = useState<NexsharedStatus | null>(null);
   const [nexBusy, setNexBusy] = useState(false);
   const [nexDismissed, setNexDismissed] = useState(false);
+  const [nexError, setNexError] = useState<HumanError | null>(null);
 
   // v4.0.25 dirty-tree guard: block founding until the project's working tree is clean, so the
   // pipeline never starts from an uncommitted baseline it can't scope (Tibor/Nazar lens).
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
   const [gitBusy, setGitBusy] = useState(false);
+  // The guard's own error slot. Commit / discard / re-check used to fail into an empty catch: the
+  // button flipped back and the same warning card stayed, so a failure was indistinguishable from a
+  // no-op click and the Manažér clicked forever. Every failure now renders.
+  const [gitError, setGitError] = useState<HumanError | null>(null);
 
   const verRef = useRef<HTMLInputElement>(null);
 
@@ -103,9 +108,13 @@ export default function NewVersionPage() {
           .then((st) => { if (!cancelled) setNexStatus(st); })
           .catch(() => {});
         // v4.0.25: preflight the working tree — a dirty tree blocks founding until resolved.
+        // A failed preflight leaves the page unable to tell clean from dirty; say so instead of
+        // silently reading "unknown" as "clean" and founding on an unseen baseline.
         getGitStatusApi(found.id)
           .then((gs) => { if (!cancelled) setGitStatus(gs); })
-          .catch(() => {});
+          .catch((err: unknown) => {
+            if (!cancelled) setGitError(humanizeApiError(err, "Overenie neuložených zmien projektu zlyhalo"));
+          });
         return listVersions(found.id).then((vs) => {
           if (cancelled) return;
           setPrevVersions(vs);
@@ -124,28 +133,53 @@ export default function NewVersionPage() {
 
   // v4.0.25: a loaded-and-dirty tree blocks founding (null = not yet loaded → don't block).
   const isDirty = gitStatus !== null && !gitStatus.clean;
+  // ...and so does a preflight that FAILED. Rendering the red "Overenie neuložených zmien zlyhalo"
+  // note while leaving the founding button live meant the guard was decorative: on a 500 the status
+  // stayed null, `isDirty` stayed false, and the Manager founded a version over a tree nobody had
+  // checked — which is the exact loss the guard exists to prevent. Unknown is not clean.
+  const treeUnverified = gitError !== null;
 
   async function handleNexUpgrade(target: string) {
     if (!project) return;
     setNexBusy(true);
+    setNexError(null);
     try {
-      await upgradeNexsharedApi(project.id, target);
-      // Reflect the bump locally + dismiss (the new version will build on the chosen nex-shared).
-      setNexStatus((s) => (s ? { ...s, current: target, behind: 0, up_to_date: true, changelog: [] } : s));
-      setNexDismissed(true);
-    } catch {
-      // Best-effort: leave the prompt up so the Manažér can retry or dismiss.
+      const res = await upgradeNexsharedApi(project.id, target);
+      if (res.committed) {
+        // Reflect the bump locally + dismiss (the new version will build on the chosen nex-shared).
+        setNexStatus((s) => (s ? { ...s, current: target, behind: 0, up_to_date: true, changelog: [] } : s));
+        setNexDismissed(true);
+      } else {
+        // The pin WAS rewritten on disk but could not be committed — the project now carries an
+        // uncommitted change. Reporting "up to date" here was the lie: keep the prompt live and
+        // name what actually happened, so the dirty tree below is not a mystery.
+        setNexError({
+          message:
+            `Povýšenie na v${target} sa zapísalo do súborov projektu, ale nepodarilo sa ho uložiť — ` +
+            "projekt má teraz neuložené zmeny. Vyrieš ich v karte s neuloženými zmenami a skús to znova.",
+        });
+      }
+    } catch (err: unknown) {
+      setNexError(humanizeApiError(err, `Povýšenie nex-shared na v${target} zlyhalo`));
     } finally {
       setNexBusy(false);
+      // Always re-read the tree: an upgrade can leave an uncommitted pin behind, and the founding
+      // guard must judge the tree as it is now — not what the page believed before the upgrade.
+      await refreshGitStatus();
     }
   }
 
-  async function refreshGitStatus() {
-    if (!project) return;
+  // Re-read the working tree. Returns the fresh status, or null when the re-check itself failed —
+  // callers must not treat "couldn't ask" as "clean".
+  async function refreshGitStatus(): Promise<GitStatus | null> {
+    if (!project) return null;
     try {
-      setGitStatus(await getGitStatusApi(project.id));
-    } catch {
-      /* best-effort — leave the last known status */
+      const gs = await getGitStatusApi(project.id);
+      setGitStatus(gs);
+      return gs;
+    } catch (err: unknown) {
+      setGitError(humanizeApiError(err, "Overenie neuložených zmien projektu zlyhalo"));
+      return null;
     }
   }
 
@@ -153,11 +187,25 @@ export default function NewVersionPage() {
   async function handleCommitTree() {
     if (!project) return;
     setGitBusy(true);
+    setGitError(null);
     try {
-      await commitGitApi(project.id);
-      await refreshGitStatus();
-    } catch {
-      /* leave the guard up so the operator can retry or discard */
+      const res = await commitGitApi(project.id);
+      // The endpoint answers 400 on a failed commit, but its payload also carries an ``ok`` flag —
+      // honour both shapes rather than assuming success from a 200.
+      if (!res.ok) {
+        setGitError({ message: "Uloženie zmien zlyhalo — zmeny zostali neuložené.", detail: res.error });
+        return;
+      }
+      const gs = await refreshGitStatus();
+      if (gs && !gs.clean) {
+        setGitError({ message: "Uloženie prebehlo, ale projekt má stále neuložené zmeny." });
+      } else if (gs) {
+        // A verified-clean tree also settles a nex-shared pin that was written but not saved —
+        // this commit saved it. Leaving that note up would be the same lie in the other direction.
+        setNexError(null);
+      }
+    } catch (err: unknown) {
+      setGitError(humanizeApiError(err, "Uloženie zmien zlyhalo"));
     } finally {
       setGitBusy(false);
     }
@@ -167,11 +215,22 @@ export default function NewVersionPage() {
   async function handleDiscardTree() {
     if (!project) return;
     setGitBusy(true);
+    setGitError(null);
     try {
-      await discardGitApi(project.id);
-      await refreshGitStatus();
-    } catch {
-      /* leave the guard up */
+      const res = await discardGitApi(project.id);
+      if (!res.ok) {
+        setGitError({ message: "Zahodenie zmien zlyhalo — zmeny zostali v projekte." });
+        return;
+      }
+      const gs = await refreshGitStatus();
+      if (gs && !gs.clean) {
+        setGitError({ message: "Zahodenie prebehlo, ale projekt má stále neuložené zmeny." });
+      } else if (gs) {
+        // Discarding threw the unsaved pin away too — the note about it no longer applies.
+        setNexError(null);
+      }
+    } catch (err: unknown) {
+      setGitError(humanizeApiError(err, "Zahodenie zmien zlyhalo"));
     } finally {
       setGitBusy(false);
     }
@@ -280,14 +339,22 @@ export default function NewVersionPage() {
       {/* Scrollable form */}
       <div className="flex-1 overflow-y-auto px-6 py-6">
         <div className="max-w-xl mx-auto">
-          {/* v4.0.25 dirty-tree guard — blocks founding until the tree is clean; resolve it first. */}
-          {isDirty && !savedVersion && gitStatus && (
-            <div className="mb-5">
-              <DirtyTreeGuard
-                status={gitStatus}
-                busy={gitBusy}
-                onCommit={handleCommitTree}
-                onDiscard={handleDiscardTree}
+          {/* v4.0.25 dirty-tree guard — blocks founding until the tree is clean; resolve it first.
+              The error of a failed commit / discard / re-check renders right under the card: the
+              guard has no error slot of its own, and a swallowed failure looked like a dead button. */}
+          {!savedVersion && (isDirty || gitError) && (
+            <div className="mb-5 space-y-2">
+              {isDirty && gitStatus && (
+                <DirtyTreeGuard
+                  status={gitStatus}
+                  busy={gitBusy}
+                  onCommit={handleCommitTree}
+                  onDiscard={handleDiscardTree}
+                />
+              )}
+              <ErrorNote
+                error={gitError}
+                className="rounded-lg bg-[var(--color-state-error-bg)] border border-[var(--color-state-error-bg)] p-3"
               />
             </div>
           )}
@@ -301,6 +368,14 @@ export default function NewVersionPage() {
                 onStay={() => setNexDismissed(true)}
               />
             </div>
+          )}
+          {/* An upgrade that wrote the pin but could not save it leaves the tree dirty — which hides
+              the prompt above — so its failure has to stand on its own line. */}
+          {!savedVersion && (
+            <ErrorNote
+              error={nexError}
+              className="mb-5 rounded-lg bg-[var(--color-state-error-bg)] border border-[var(--color-state-error-bg)] p-3"
+            />
           )}
           <form onSubmit={handleSaveZadanie} noValidate className="space-y-5">
 
@@ -431,7 +506,7 @@ export default function NewVersionPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={saving || !project || isDirty}
+                  disabled={saving || !project || isDirty || treeUnverified}
                   className="flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
                 >
                   {saving ? (

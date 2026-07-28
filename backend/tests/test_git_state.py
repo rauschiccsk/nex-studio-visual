@@ -72,6 +72,50 @@ def test_discard_all_reverts_tracked_and_removes_untracked(tmp_path: Path) -> No
     assert not (repo / "junk.txt").exists()  # cleaned
 
 
+def test_discard_all_clears_staged_changes(tmp_path: Path) -> None:
+    # `git checkout -- .` left the INDEX untouched, so staged work survived the discard and
+    # the tree stayed dirty. `git reset --hard` is what actually clears it.
+    repo = tmp_path / "proj"
+    _init_repo(repo)
+    (repo / "README.md").write_text("staged change\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    res = git_state.discard_all(str(repo))
+    assert res["ok"] is True
+    assert git_state.working_tree_status(str(repo))["clean"] is True
+    assert (repo / "README.md").read_text(encoding="utf-8") == "hello\n"
+
+
+def test_discard_all_refuses_before_destroying_anything(tmp_path: Path) -> None:
+    # A nested git repo is untracked but `git clean -fd` SKIPS it → the discard cannot finish.
+    # The old order destroyed everything else first and only then reported failure; the
+    # preflight must refuse with every edit still on disk.
+    repo = tmp_path / "proj"
+    _init_repo(repo)
+    (repo / "README.md").write_text("changed\n", encoding="utf-8")
+    (repo / "junk.txt").write_text("junk\n", encoding="utf-8")
+    nested = repo / "vendor"
+    nested.mkdir()
+    _git(nested, "init", "-q")
+    res = git_state.discard_all(str(repo))
+    assert res["ok"] is False
+    assert "vendor/" in res["error"]
+    # Nothing was destroyed.
+    assert (repo / "README.md").read_text(encoding="utf-8") == "changed\n"
+    assert (repo / "junk.txt").exists()
+    assert (nested / ".git").exists()
+
+
+def test_discard_all_refuses_repo_without_commits(tmp_path: Path) -> None:
+    # No HEAD → nothing to reset to. Refuse; never clean the tree into an unrecoverable state.
+    repo = tmp_path / "fresh"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "work.txt").write_text("work\n", encoding="utf-8")
+    res = git_state.discard_all(str(repo))
+    assert res["ok"] is False
+    assert (repo / "work.txt").exists()
+
+
 def test_missing_or_non_git_path_raises(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         git_state.working_tree_status("")
