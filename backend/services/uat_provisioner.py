@@ -835,13 +835,23 @@ def hand_authored_refusal(instance_dir: Path, found: str) -> str:
     (nothing), and WHAT to do next. Names the directory + the file that proved it foreign; carries no
     file CONTENT, so no secret can leak into the deploy detail (§4).
     """
+    # Only a directory DIRECTLY under UAT_ROOT is named by its own slug. A customer instance lives at
+    # ``/opt/customers/<customer>/<app>``, where the directory name is the APP, not the slug the CLI
+    # takes — printing it would hand the operator a command that fails, or worse, names a different
+    # instance. Where we cannot know it, say so instead of guessing.
+    slug_hint = instance_dir.name if instance_dir.parent == UAT_ROOT else "<skratka-inštalácie>"
     return (
         f"Priečinok „{instance_dir}“ už obsahuje nasadenie, ktoré NEX Studio nevygenerovalo "
         f"(súbor {found} nemá hlavičku generovanú provisionerom) — takto vyzerajú ručne písané, "
         "spravidla živé zákaznícke nasadenia. Nechal som ho nedotknuté: neprepísal som ani "
-        "docker-compose.yml, ani .env, a nič som nespustil. Skontroluj, či ide o správneho zákazníka "
-        "a projekt; ak sa toto nasadenie má naozaj prepísať, treba nasadenie zopakovať s výslovným "
-        "povolením prepisu (allow_overwrite) — samo sa to nikdy nestane."
+        "docker-compose.yml, ani .env, a nič som nespustil.\n\n"
+        "Skontroluj, či ide o správneho zákazníka a projekt. Ak sa toto nasadenie má naozaj prepísať, "
+        "dá sa to urobiť VÝSLOVNE z terminálu:\n"
+        f"    python scripts/uat-deploy.py {slug_hint} --adopt --dry-run   # najprv ukáž, čo by sa prepísalo\n"
+        f"    python scripts/uat-deploy.py {slug_hint} --adopt\n\n"
+        "Pozor: prepis do priečinka zapíše hlavičku, a práve tá rozhoduje o tom, či sem NEX Studio smie "
+        "písať. Od tej chvíle je tento priečinok bez tejto ochrany — aj pri budúcich nasadeniach z kokpitu. "
+        "Samo sa to nikdy nestane; tlačidlo „Nasadiť“ v kokpite túto možnosť nemá."
     )
 
 

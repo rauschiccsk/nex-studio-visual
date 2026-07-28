@@ -176,7 +176,10 @@ def test_refusal_message_names_the_path_the_file_and_that_nothing_changed(tmp_pa
     assert str(tmp_path / "customers" / "mager" / "nex-inbox") in message  # WHICH path
     assert "docker-compose.yml" in message  # WHAT proved it foreign
     assert "neprepísal" in message and ".env" in message  # nothing was touched
-    assert "allow_overwrite" in message  # the one way forward, named
+    # The way forward, named as something the operator can actually TYPE. This used to assert the
+    # message contained "allow_overwrite" — an internal keyword argument no operator can pass, so
+    # the refusal named an exit that did not exist from where they were standing.
+    assert "--adopt" in message and "uat-deploy.py" in message
     # The refusal reports on the file, never FROM it — no line of the customer's compose/.env leaks.
     assert "the-customers-real-password" not in message
     assert "nex-inbox-backend:1.4.0" not in message
@@ -290,3 +293,59 @@ def test_unreadable_or_absent_compose_is_not_ours(tmp_path):
     assert P.is_provisioner_generated(tmp_path / "nope" / "docker-compose.yml") is False
     (tmp_path / "docker-compose.yml").mkdir()
     assert P.is_provisioner_generated(tmp_path / "docker-compose.yml") is False
+
+
+# ─── the deliberate override, and where it is NOT available ────────────────────
+
+
+def test_refusal_tells_the_operator_how_to_proceed_deliberately(tmp_path, monkeypatch):
+    """A refusal that names no way forward is a dead end, and this one used to name an internal keyword
+    argument (``allow_overwrite``) the operator has no way to pass. It now prints the actual command."""
+    monkeypatch.setattr(P, "UAT_ROOT", tmp_path)
+    instance = tmp_path / "inbox"
+    instance.mkdir()
+    (instance / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+
+    with pytest.raises(P.HandAuthoredDeploymentError) as exc:
+        P.assert_writable_instance_dir(instance)
+    message = str(exc.value)
+
+    assert "uat-deploy.py inbox --adopt --dry-run" in message  # look before you leap
+    assert "uat-deploy.py inbox --adopt" in message
+    # …and it says what adopting COSTS, because that is the part nobody would guess: the marker IS the
+    # permission, so writing it removes this protection for good.
+    assert "bez tejto ochrany" in message
+    assert "„Nasadiť" in message  # the cockpit button has no equivalent
+
+
+def test_refusal_does_not_invent_a_slug_it_cannot_know(tmp_path, monkeypatch):
+    """Only a directory directly under UAT_ROOT is named by its slug. A customer instance lives at
+    ``/opt/customers/<customer>/<app>`` — printing the directory name there would hand the operator a
+    command that fails, or names a DIFFERENT instance. A placeholder is honest; a guess is not."""
+    monkeypatch.setattr(P, "UAT_ROOT", tmp_path / "uat")
+    customer_instance = tmp_path / "customers" / "mager" / "nex-inbox"
+    customer_instance.mkdir(parents=True)
+    (customer_instance / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+
+    with pytest.raises(P.HandAuthoredDeploymentError) as exc:
+        P.assert_writable_instance_dir(customer_instance)
+    message = str(exc.value)
+
+    assert "<skratka-inštalácie>" in message
+    assert "uat-deploy.py nex-inbox" not in message  # the app name is NOT the slug
+
+
+def test_cockpit_deploy_button_never_passes_the_override():
+    """The override is a terminal act, deliberately. ``deploy._default_deploy_runner`` — what the
+    cockpit's "Nasadiť" reaches — must never pass ``allow_overwrite``, or a click could render over a
+    hand-authored customer deployment. Asserted against the SOURCE so a future edit has to face it.
+    """
+    import inspect
+
+    from backend.services import deploy as deploy_service
+
+    source = inspect.getsource(deploy_service)
+    assert "allow_overwrite" not in source, (
+        "the cockpit deploy path must not pass allow_overwrite — the guard is what stands between a "
+        "'Nasadiť' click and a live hand-authored deployment"
+    )

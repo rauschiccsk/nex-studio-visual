@@ -12,10 +12,19 @@ carries the Traefik labels + joins ``nex-proxy-net``. Per CR-NS-061 a redeploy P
 existing instance's secrets + backend ``extra_hosts`` by default (``--rotate-secrets`` forces a
 fresh re-provision).
 
+The provisioner REFUSES to render over a directory it did not generate (``assert_writable_instance_dir``)
+— thirteen live installations on this host were hand-authored years before that marker existed, including
+MÁGERSTAV's production inbox and the shared Traefik proxy. ``--adopt`` is the deliberate override for the
+one instance you actually mean to rebuild, at the moment you mean it. It is never a default and never
+implied; the cockpit's own "Nasadiť" button does NOT have it, so a click can never reach a hand-authored
+directory. Adopting is irreversible in the sense that matters: the marker is what the guard reads, so once
+written, that directory is no longer protected.
+
 Usage:
     python scripts/uat-deploy.py <slug>
     python scripts/uat-deploy.py mager --project nex-inbox
     python scripts/uat-deploy.py dev --dry-run
+    python scripts/uat-deploy.py dev --adopt --dry-run   # see what adopting would overwrite, first
 """
 
 from __future__ import annotations
@@ -82,6 +91,7 @@ def deploy(
     dry_run: bool = False,
     version: str = "v0.0.0-dev",
     rotate_secrets: bool = False,
+    adopt: bool = False,
 ) -> int:
     """Deploy orchestrator (thin wrapper): allocate port → provision (render) → snapshot → build →
     up → wait-healthy → summary. Returns 0 on success, 1 on any failure (port released on a
@@ -144,6 +154,9 @@ def deploy(
             uat_root=UAT_ROOT,
             loopback_base_port=port,
             rotate_secrets=rotate_secrets,
+            # The deliberate override, and the ONLY way to reach a hand-authored directory. Off unless
+            # the operator typed --adopt for this one invocation.
+            allow_overwrite=adopt,
         )
         if result.is_redeploy:
             _uat_lib.console.print(
@@ -216,6 +229,14 @@ def main() -> int:
         help="Print plan without invoking docker / writing files",
     )
     parser.add_argument(
+        "--adopt",
+        action="store_true",
+        help="Take over a HAND-AUTHORED instance directory: render over it even though this provisioner "
+        "did not create it. Off by default, and the cockpit UI has no equivalent — a directory without "
+        "the generated-by marker is otherwise refused outright. Writing the marker also REMOVES that "
+        "protection permanently, so run with --dry-run first and be sure you mean this instance.",
+    )
+    parser.add_argument(
         "--rotate-secrets",
         action="store_true",
         help="Force FRESH secrets (true re-provision). By DEFAULT an existing instance's secrets + "
@@ -231,6 +252,7 @@ def main() -> int:
             dry_run=args.dry_run,
             version=args.version,
             rotate_secrets=args.rotate_secrets,
+            adopt=args.adopt,
         )
     except ValueError as exc:
         _uat_lib.error_console.print(f"[red]ERROR:[/red] slug: {exc}")
