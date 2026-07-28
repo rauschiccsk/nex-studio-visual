@@ -3,7 +3,7 @@
 Builds a v1-SHAPED source DB and a v2-head target DB (both throwaway, on the test
 server :9178, both names distinct from PROD so the guards pass) and drives the real
 tool. Proves: dry-run rolls back, apply preserves every row field-by-field
-(including project_members), module_id is dropped, the pipeline delta is 0 (OQ-6),
+module_id is dropped, the pipeline delta is 0 (OQ-6),
 the deploy_events seq high-water-mark advances, idempotent re-run skips, slug
 conflict skips, per-project isolation on failure, credential WARN vs OK, and the
 FULL referenced-user pre-flight fails closed with the target untouched.
@@ -146,7 +146,6 @@ def test_dry_run_changes_nothing(source_url, target, tmp_path):
     assert res.slug == ALPHA
     assert res.status == "dry_run"
     assert res.counts["versions"] == 2
-    assert res.counts["project_members"] == 1
     assert res.counts["deploy_events"] == 2
     assert [f for f in res.findings if f["severity"] == "CRITICAL"] == []
     assert report.overall == "ok"
@@ -172,8 +171,9 @@ def test_apply_parity_and_no_data_loss(source_url, target):
         pid = _pid(tgt, ALPHA)
         assert _pid(src, ALPHA) == pid  # PK UUID preserved
 
-        # per-table count parity (incl. project_members — B1)
-        for tbl in ("versions", "epics", "bugs", "backlog_items", "deploy_events", "project_members", "customers"):
+        # per-table count parity. project_members is absent by design — membership is not a concept in
+        # V2, so the copy no longer carries the table and there is nothing to compare.
+        for tbl in ("versions", "epics", "bugs", "backlog_items", "deploy_events", "customers"):
             s = _scalar(src, f"SELECT COUNT(*) FROM {tbl} WHERE project_id=:p", p=pid)  # noqa: S608 fixed names
             t = _scalar(tgt, f"SELECT COUNT(*) FROM {tbl} WHERE project_id=:p", p=pid)  # noqa: S608
             assert s == t, f"{tbl} parity"

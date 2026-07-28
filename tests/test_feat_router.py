@@ -85,7 +85,9 @@ def router_client(db_session, tmp_path):
 
     _suffix_m2 = _uuid_m2.uuid4().hex[:8]
     _ri_m2 = _UserM2(
-        username=f"ri_m2_{_suffix_m2}",
+        # The ACCOUNT named admin — the only user who may operate a project he did not create.
+        # Was role="ri", which meant that under the abolished tier model and means nothing now.
+        username="admin",
         email=f"ri_m2_{_suffix_m2}@test.local",
         password_hash=_bcrypt.hashpw(b"test", _bcrypt.gensalt(rounds=4)).decode(),
         role="ri",

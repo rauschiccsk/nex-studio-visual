@@ -452,6 +452,11 @@ export interface paths {
          *
          *     Logs who/when/version/customer. Requires the version to have been deployed to
          *     this customer's UAT first.
+         *
+         *     Guarded by OWNERSHIP, which it was not before: the role dependency was the ONLY gate here, with no
+         *     ownership call at all — so under the tier model any ``ri`` accepted any customer's UAT, and removing
+         *     the role gate without adding ownership would have opened it to every authenticated user. This is the
+         *     step that OPENS PROD, so it gets the same explicit check as the deploy above.
          */
         post: operations["accept_customer_uat_api_v1_customers__customer_id__accept_post"];
         delete?: never;
@@ -478,8 +483,9 @@ export interface paths {
          *     A redeploy PRESERVES data + secrets + extra_hosts by default; ``force_fresh``
          *     opts into a fresh re-provision (§3.7).
          *
-         *     v4.0.35 (Director decision D3): owner-or-privileged for the customer's project, AND a Junior may
-         *     deploy only to **UAT** of their own project — **PROD** deploy stays ``ri``-only (the Director gate).
+         *     The project's owner deploys his own project — both environments. The second, role-based PROD gate
+         *     that used to stand here is gone with the tier model: the owner may do everything on his own project,
+         *     and a separate "PROD needs role ri" clause would be the one rule the simplification did not reach.
          */
         post: operations["deploy_customer_api_v1_customers__customer_id__deploy_post"];
         delete?: never;
@@ -985,49 +991,6 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
-        trace?: never;
-    };
-    "/api/v1/project-members": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Project Members
-         * @description List project memberships, optionally filtered by project or user.
-         *
-         *     v4.0.43: a Junior (``shu``) MUST scope to a project they OWN (``project_id`` required + owner-checked);
-         *     ri/ha may list across all projects.
-         */
-        get: operations["list_project_members_api_v1_project_members_get"];
-        put?: never;
-        /** Create Project Member */
-        post: operations["create_project_member_api_v1_project_members_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/project-members/{member_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Project Member */
-        get: operations["get_project_member_api_v1_project_members__member_id__get"];
-        put?: never;
-        post?: never;
-        /** Delete Project Member */
-        delete: operations["delete_project_member_api_v1_project_members__member_id__delete"];
-        options?: never;
-        head?: never;
-        /** Update Project Member */
-        patch: operations["update_project_member_api_v1_project_members__member_id__patch"];
         trace?: never;
     };
     "/api/v1/project-specs/content": {
@@ -4420,59 +4383,6 @@ export interface components {
              */
             type: "standard" | "web";
         };
-        /** ProjectMemberCreate */
-        ProjectMemberCreate: {
-            /**
-             * Project Id
-             * Format: uuid
-             */
-            project_id: string;
-            /**
-             * Role
-             * @default member
-             */
-            role: string;
-            /**
-             * User Id
-             * Format: uuid
-             */
-            user_id: string;
-        };
-        /** ProjectMemberRead */
-        ProjectMemberRead: {
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /**
-             * Project Id
-             * Format: uuid
-             */
-            project_id: string;
-            /** Role */
-            role: string;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-            /**
-             * User Id
-             * Format: uuid
-             */
-            user_id: string;
-        };
-        /** ProjectMemberUpdate */
-        ProjectMemberUpdate: {
-            /** Role */
-            role?: string | null;
-        };
         /**
          * ProjectRead
          * @description Serialised representation of a project row.
@@ -7345,168 +7255,6 @@ export interface operations {
                 };
                 content: {
                     "text/html": string;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_project_members_api_v1_project_members_get: {
-        parameters: {
-            query?: {
-                /** @description Filter by project. */
-                project_id?: string | null;
-                /** @description Filter by user. */
-                user_id?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProjectMemberRead"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_project_member_api_v1_project_members_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ProjectMemberCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProjectMemberRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_project_member_api_v1_project_members__member_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                member_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProjectMemberRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_project_member_api_v1_project_members__member_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                member_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_project_member_api_v1_project_members__member_id__patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                member_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ProjectMemberUpdate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProjectMemberRead"];
                 };
             };
             /** @description Validation Error */

@@ -347,14 +347,19 @@ def test_secret_file_lands_in_credentials_store_dir(db_session, tmp_path, monkey
 
 
 def _auth_ri(client):
-    """Override RBAC so the customers router's ri-gated POST/PATCH/DELETE pass."""
+    """Authenticate as the ``admin`` ACCOUNT so the customers router's writes pass.
+
+    The customers routes authorize through the owning PROJECT, and the ri role no longer reaches a
+    project it does not own — only the admin account does.
+    """
+    from backend.core import authz
     from backend.core.security import get_current_user, require_ri_role
     from backend.main import app
 
     ri_user = User(
         id=uuid.uuid4(),
-        username="ri_tester",
-        email="ri@example.com",
+        username=authz.ADMIN_USERNAME,
+        email="admin@example.com",
         password_hash="x",
         role="ri",
     )

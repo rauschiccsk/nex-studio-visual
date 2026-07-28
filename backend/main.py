@@ -22,7 +22,6 @@ from backend.api.routes.health import health_check as _health_check_handler
 from backend.api.routes.knowledge import router as knowledge_router
 from backend.api.routes.metrics import router as metrics_router
 from backend.api.routes.pipeline import router as pipeline_router
-from backend.api.routes.project_members import router as project_members_router
 from backend.api.routes.project_specs import router as project_specs_router
 from backend.api.routes.projects import router as projects_router
 from backend.api.routes.rag import router as rag_router
@@ -224,7 +223,6 @@ app.include_router(projects_router, prefix="/api/v1/projects")
 app.include_router(knowledge_router, prefix="/api/v1/knowledge")
 app.include_router(project_specs_router, prefix="/api/v1/project-specs")
 app.include_router(rag_router, prefix="/api/v1/rag")
-app.include_router(project_members_router, prefix="/api/v1/project-members")
 app.include_router(credentials_router, prefix="/api/v1/credentials")
 app.include_router(epics_router, prefix="/api/v1/epics")
 app.include_router(feats_router, prefix="/api/v1/feats")

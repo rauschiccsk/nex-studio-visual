@@ -63,7 +63,7 @@ def list_backlog(
     v4.0.43: a Junior (``shu``) MUST scope to a project they OWN (``project_id`` required + owner-checked);
     ri/ha may list across all projects.
     """
-    if current_user.role not in authz.PRIVILEGED_ROLES:
+    if not authz.is_admin(current_user):
         if project_id is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

@@ -334,7 +334,7 @@ async def start_fast_fix(
     deploy is the normal manual per-customer Nasadiť in the UAT/PROD tabs, CR-V2-027). Declared before the
     ``/{version_id}`` routes so ``fast-fix`` is never parsed as a version id.
     """
-    authz.assert_project_id_access(db, current_user, payload.project_id, ri_only=True)
+    authz.assert_project_id_access(db, current_user, payload.project_id)
 
     pre_count = db.execute(
         select(func.count()).select_from(Version).where(Version.project_id == payload.project_id)
@@ -379,7 +379,7 @@ def get_board(
     db: Session = Depends(get_db),
 ) -> PipelineBoardRead:
     """Return the board snapshot. ``state`` is ``None`` until the pipeline starts."""
-    authz.assert_version_access(db, current_user, version_id, ri_only=True)
+    authz.assert_version_access(db, current_user, version_id)
     return _board(db, version_id, limit)
 
 
@@ -406,7 +406,7 @@ def list_messages(
     db: Session = Depends(get_db),
 ) -> PaginatedResponse[PipelineMessageRead]:
     """Paginated message log (oldest→newest)."""
-    authz.assert_version_access(db, current_user, version_id, ri_only=True)
+    authz.assert_version_access(db, current_user, version_id)
     total = db.execute(
         select(func.count()).select_from(PipelineMessage).where(PipelineMessage.version_id == version_id)
     ).scalar_one()
@@ -437,7 +437,7 @@ async def post_action(
     db: Session = Depends(get_db),
 ) -> PipelineBoardRead:
     """Apply a Director action; broadcast the resulting state + new messages."""
-    authz.assert_version_access(db, current_user, version_id, ri_only=True)
+    authz.assert_version_access(db, current_user, version_id)
 
     pre_ids = {
         row for row in db.execute(select(PipelineMessage.id).where(PipelineMessage.version_id == version_id)).scalars()
@@ -493,7 +493,7 @@ async def post_relay(
     NEVER keystroked into the PTY (no concurrent second writer). When a turn is in flight the message is
     enqueued behind it (``deferred=True``) and the in-flight dispatch drains it next; when the build is
     settled it dispatches immediately as an ``ask``/``answer`` turn and we schedule the background run."""
-    authz.assert_version_access(db, current_user, version_id, ri_only=True)
+    authz.assert_version_access(db, current_user, version_id)
 
     pre_ids = {
         row for row in db.execute(select(PipelineMessage.id).where(PipelineMessage.version_id == version_id)).scalars()
@@ -543,7 +543,7 @@ def post_change_request(
     — the Manažér opens the new version and engages deliberately. Idempotent per source message: a repeat call
     returns the EXISTING minted version. Returns ``project_slug`` + version id/number so the FE navigates using
     the RETURNED slug (Fix 4)."""
-    authz.assert_version_access(db, current_user, version_id, ri_only=True)
+    authz.assert_version_access(db, current_user, version_id)
     # Defense: the source message must belong to the consulted version in the path (a mismatched id is a 404).
     msg_version_id = db.execute(
         select(PipelineMessage.version_id).where(PipelineMessage.id == payload.message_id)
@@ -587,7 +587,7 @@ async def open_debug_terminal(
     write-capable PTY mid-turn would be a second concurrent writer). When the engine IS driving, this
     returns 409; otherwise it attaches (and ``write_input`` is still per-keystroke-guarded as a backstop).
     """
-    authz.assert_version_access(db, current_user, version_id, ri_only=True)
+    authz.assert_version_access(db, current_user, version_id)
 
     # Debug-attach accepts the orchestrator roles (CR-V2-007: ai-agent / auditor) — NOT just the
     # spawn-API's AI-Agent-only set. Validate up front so a bad role is a clean 422, not a misleading 404.
@@ -690,7 +690,7 @@ async def pipeline_ws(
             await websocket.close(code=4004)  # not found
             return
         project = db.get(Project, version.project_id)
-        if project is None or not authz.is_owner_or_privileged(user, project.created_by, ri_only=True):
+        if project is None or not authz.is_owner_or_admin(user, project.created_by):
             await websocket.close(code=4003)  # forbidden
             return
         snapshot = _board(db, version_id).model_dump(mode="json")

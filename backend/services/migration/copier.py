@@ -5,7 +5,7 @@ so a v1-shaped schema is read as-is), applies the pure transforms, and INSERTs i
 into the TARGET preserving PK UUIDs + created_at/updated_at, in the CORRECTED FK
 order:
 
-    projects → project_members → credentials(subset via customers.credential_id)
+    projects → credentials(subset via customers.credential_id)
     → customers → versions → epics → feats → tasks → bugs → backlog_items → deploy_events
 
 Invariants:
@@ -311,10 +311,9 @@ def copy_project(
     _insert_many(target_conn, "projects", [_project_dict(project_row, config)])
     counts["projects"] = 1
 
-    # 2. project_members (RBAC — B1)
-    members = _select_by(source_conn, source_tables["project_members"], project_id=pid)
-    _insert_many(target_conn, "project_members", [_member_dict(r) for r in members])
-    counts["project_members"] = len(members)
+    # project_members is NOT carried over. The V2 target has no such table: a project belongs to the one
+    # user who created it and membership no longer exists as a concept, so there is nothing to copy into.
+    # Leaving the copy in place would fail the whole migration on the INSERT.
 
     # 3. credentials (subset referenced by this project's customers) — BEFORE customers (FK)
     customers = _select_by(source_conn, source_tables["customers"], project_id=pid)

@@ -99,7 +99,7 @@ def create_customer(
     path, no internal/external branch. A supplied ``secret`` is written to the
     credentials store; the response never echoes it back.
     """
-    project = authz.assert_project_slug_access(db, current_user, slug, ri_only=True)
+    project = authz.assert_project_slug_access(db, current_user, slug)
     try:
         customer = customer_service.create(db, project.id, payload)
         db.commit()
@@ -146,7 +146,7 @@ def update_customer(
     response never echoes it back.
     """
     # v4.0.35: ownership gate (owner-or-ri) before any mutation.
-    authz.assert_customer_access(db, current_user, customer_id, ri_only=True)
+    authz.assert_customer_access(db, current_user, customer_id)
     try:
         customer = customer_service.update(db, customer_id, payload)
         db.commit()
@@ -173,7 +173,7 @@ def delete_customer(
     OWN project; ``ha`` not privileged for this write); a Junior touching another user's project gets 403.
     """
     # v4.0.35: ownership gate (owner-or-ri) before the delete.
-    authz.assert_customer_access(db, current_user, customer_id, ri_only=True)
+    authz.assert_customer_access(db, current_user, customer_id)
     try:
         customer_service.delete(db, customer_id)
         db.commit()

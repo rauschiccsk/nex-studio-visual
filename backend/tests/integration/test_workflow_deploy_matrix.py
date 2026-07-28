@@ -839,17 +839,20 @@ class TestDeployabilityCause:
         assert block["version_number"] == "v0.10.0"
         assert block["version_id"] == newest.id
 
-    def test_reverify_offer_follows_the_ri_only_authz_tier(self, db_session, monkeypatch, fake_repo_head):
+    def test_reverify_offer_follows_ownership(self, db_session, monkeypatch, fake_repo_head):
         """``can_reverify`` mirrors the action's own gate — the frontend cannot derive it (the payload
         carries no project owner).
 
-        ``overit_znovu`` goes through ``authz.assert_version_access(..., ri_only=True)``: the project OWNER
-        (whatever their role) and any ``ri`` may post it; a ``ha`` who does NOT own the project does not gain
-        that sensitive-write tier (``authz.is_owner_or_privileged``, ``ri_only=True``).
+        ``overit_znovu`` goes through ``authz.assert_version_access(...)``, which under the ownership
+        model asks one question: is it his project (or is he ``admin``)? The role is irrelevant, and the
+        test previously asserted the opposite — that ``ri`` drives every project and ``ha`` does not.
         """
-        owner = _seed_user(db_session, role="shu", prefix="junior_owner")  # owner, but NOT a privileged role
+        owner = _seed_user(db_session, role="shu", prefix="junior_owner")
         foreign_ri = _seed_user(db_session, role="ri", prefix="foreign_ri")
         foreign_ha = _seed_user(db_session, role="ha", prefix="foreign_ha")
+        admin = _seed_user(db_session, role="shu", prefix="admin_acct")
+        admin.username = "admin"  # the ACCOUNT; note its role here is shu and it does not matter
+        db_session.flush()
         project = _seed_project(db_session, creator=owner)
         _seed_verified_version(db_session, project, "v0.1.0")
         _force_provenance(monkeypatch, "hotovo_drift")
@@ -859,9 +862,10 @@ class TestDeployabilityCause:
             assert block["cause"] == "drift"  # the offer is only ever evaluated on the recoverable cause
             return block["can_reverify"]
 
-        assert _can_reverify(owner) is True  # a Junior may recover THEIR OWN project without a terminal
-        assert _can_reverify(foreign_ri) is True  # ri drives every project
-        assert _can_reverify(foreign_ha) is False  # ha does NOT gain the ri_only tier on a foreign project
+        assert _can_reverify(owner) is True  # his project
+        assert _can_reverify(admin) is True  # the admin account reaches everything
+        assert _can_reverify(foreign_ri) is False  # the ri ROLE grants nothing here any more
+        assert _can_reverify(foreign_ha) is False
 
     def test_awaiting_signoff_is_never_called_stale(self, db_session, monkeypatch, fake_repo_head):
         """A version that PASSED but has not been approved yet is one click away — not "stale".
@@ -914,7 +918,7 @@ class TestDeployabilityCause:
         assert body["deployability"]["version_id"] is not None
         assert body["deployability"]["can_reverify"] is True
 
-    def test_can_accept_mirrors_the_ri_only_prod_gate(self, db_session, monkeypatch, fake_repo_head):
+    def test_can_accept_follows_ownership(self, db_session, monkeypatch, fake_repo_head):
         """Acceptance OPENS PROD (§3.5), so it stays ri-only (v4.0.35/D3) even for a project's owner.
 
         Deliberately NARROWER than the UAT deploy, which IS owner-or-ri. The flag exists so the button can
@@ -928,16 +932,23 @@ class TestDeployabilityCause:
         _seed_verified_version(db_session, project, "v0.1.0")
         _seed_customer(db_session, project, "andros")
 
+        admin = _seed_user(db_session, role="shu", prefix="accept_admin")
+        admin.username = "admin"
+        db_session.flush()
+
         def _can_accept(user) -> bool:
             return deploy_service.build_matrix(db_session, project, user)["can_accept"]
 
-        assert _can_accept(manager) is True
-        assert _can_accept(owner) is False  # owner of the project, but acceptance is the PROD gate
+        # Ownership decides, here as everywhere. The owner may accept his OWN project's UAT — the
+        # separate "acceptance is the PROD gate, so it needs role ri" clause went with the tier model.
+        assert _can_accept(owner) is True
+        assert _can_accept(admin) is True
+        assert _can_accept(manager) is False  # the ri ROLE, on a project he does not own
         assert _can_accept(medior) is False
         # An unauthenticated/fixture-built matrix must never imply permission.
         assert deploy_service.build_matrix(db_session, project)["can_accept"] is False
 
-    def test_can_deploy_prod_mirrors_the_ri_only_prod_deploy_gate(self, db_session, fake_repo_head):
+    def test_can_deploy_prod_follows_ownership(self, db_session, fake_repo_head):
         """The PROD 'Nasadiť' carries the same ri-only gate as acceptance — and needs its own flag.
 
         v4.0.55 gave 'Akceptovať' this treatment and stopped there, so the PROD tab's deploy button went on
@@ -951,10 +962,17 @@ class TestDeployabilityCause:
         _seed_verified_version(db_session, project, "v0.1.0")
         _seed_customer(db_session, project, "andros")
 
+        admin = _seed_user(db_session, role="shu", prefix="depl_admin")
+        admin.username = "admin"
+        db_session.flush()
+
         def _can_deploy_prod(user) -> bool:
             return deploy_service.build_matrix(db_session, project, user)["can_deploy_prod"]
 
-        assert _can_deploy_prod(manager) is True
-        assert _can_deploy_prod(owner) is False  # may deploy their own UAT, never PROD
+        # The owner deploys his own project to BOTH environments. The old "PROD stays behind the ri
+        # role" clause was the last survivor of the tier model and went with it.
+        assert _can_deploy_prod(owner) is True
+        assert _can_deploy_prod(admin) is True
+        assert _can_deploy_prod(manager) is False
         assert _can_deploy_prod(medior) is False
         assert deploy_service.build_matrix(db_session, project)["can_deploy_prod"] is False

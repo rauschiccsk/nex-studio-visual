@@ -36,7 +36,6 @@ from tests._db_guard import assert_test_db_distinct, database_name
 # under their epic/feat; pipeline_state/pipeline_message are NEVER read (OQ-6).
 SOURCE_TABLE_NAMES: tuple[str, ...] = (
     "projects",
-    "project_members",
     "credentials",
     "customers",
     "versions",
@@ -206,7 +205,7 @@ def collect_referenced_user_ids(
 
     The FULL set across all five referencing columns on copied tables:
     projects.created_by, projects.owner_id, bugs.created_by,
-    deploy_events.actor_id, project_members.user_id. ``owner_id`` is read only if
+    deploy_events.actor_id. ``owner_id`` is read only if
     the v1 source actually has that column (it is a v2-added column that some v1
     snapshots carry via CR-NS-012). NULLs are ignored (SET NULL columns).
     """
@@ -235,11 +234,6 @@ def collect_referenced_user_ids(
     ):
         if actor_id is not None:
             referenced.add(actor_id)
-
-    members = source_tables["project_members"]
-    for (user_id,) in source_conn.execute(select(members.c.user_id).where(members.c.project_id.in_(project_ids))):
-        if user_id is not None:
-            referenced.add(user_id)
 
     return referenced
 

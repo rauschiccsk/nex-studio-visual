@@ -166,7 +166,7 @@ def create_version(
     project they own (``created_by`` == self); ri/ha may create on any
     project — enforced by the ownership check below.
     """
-    authz.assert_project_id_access(db, current_user, project_id, ri_only=True)
+    authz.assert_project_id_access(db, current_user, project_id)
     try:
         version = version_service.create(db, project_id, payload, current_user.id)
         db.commit()
@@ -235,7 +235,7 @@ def update_version(
        §4.0 Rule 5) and is reserved for backfill / correction flows;
        production callers must use :func:`release_version`.
     """
-    authz.assert_version_access(db, current_user, version_id, ri_only=True)
+    authz.assert_version_access(db, current_user, version_id)
     try:
         version = version_service.update(db, version_id, payload)
         db.commit()
@@ -270,7 +270,7 @@ def delete_version(
     v4.0.35: owner-or-privileged — a Junior may delete only their OWN
     project's version; ri/ha may delete any.
     """
-    authz.assert_version_access(db, current_user, version_id, ri_only=True)
+    authz.assert_version_access(db, current_user, version_id)
     try:
         version_service.delete(db, version_id)
         db.commit()
@@ -408,7 +408,7 @@ def write_zadanie(
 
     * **404** — the version (or its project) does not exist.
     """
-    authz.assert_version_access(db, current_user, version_id, ri_only=True)
+    authz.assert_version_access(db, current_user, version_id)
     try:
         rel = version_service.write_zadanie(db, version_id, payload.content)
         db.commit()
@@ -458,7 +458,7 @@ def reset_tasks(
     recomputes Feat / Epic statuses accordingly. Does not delete any records.
     v4.0.35: owner-or-privileged — a Junior may reset only their OWN project's version.
     """
-    authz.assert_version_access(db, current_user, version_id, ri_only=True)
+    authz.assert_version_access(db, current_user, version_id)
     epics = db.execute(select(Epic).where(Epic.version_id == version_id)).scalars().all()
     epic_ids = [e.id for e in epics]
     if not epic_ids:
@@ -496,7 +496,7 @@ def reset_plan(
     via ``ON DELETE CASCADE`` at the DB level. v4.0.35: owner-or-privileged —
     a Junior may reset only their OWN project's version.
     """
-    authz.assert_version_access(db, current_user, version_id, ri_only=True)
+    authz.assert_version_access(db, current_user, version_id)
     epics = db.execute(select(Epic).where(Epic.version_id == version_id)).scalars().all()
     count = len(epics)
     for e in epics:
@@ -534,7 +534,7 @@ def release_version(
     v4.0.35: owner-or-privileged — a Junior may release only their OWN
     project's version; ri/ha may release any.
     """
-    authz.assert_version_access(db, current_user, version_id, ri_only=True)
+    authz.assert_version_access(db, current_user, version_id)
     try:
         version = version_service.release(db, version_id)
         db.commit()

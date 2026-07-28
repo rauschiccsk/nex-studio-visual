@@ -465,7 +465,9 @@ def client(db_session, monkeypatch):
     app = FastAPI()
     app.include_router(pipeline_router, prefix="/api/v1/pipeline")
     ri = User(
-        username=f"u_{uuid.uuid4().hex[:8]}",
+        # The ACCOUNT named admin — this drives the pipeline of a project seeded by another fixture,
+        # which the ri role no longer permits.
+        username="admin",
         email=f"{uuid.uuid4().hex[:8]}@test.local",
         password_hash=bcrypt.hashpw(b"test", bcrypt.gensalt(rounds=4)).decode(),
         role="ri",

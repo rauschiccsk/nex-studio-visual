@@ -38,7 +38,7 @@ const {
   startFastFixApiMock: vi.fn(),
   setSelectedProjectMock: vi.fn(),
   setSelectedVersionMock: vi.fn(),
-  authStateMock: { user: { role: "ri" } as { role: string } | null },
+  authStateMock: { user: { role: "ri", username: "admin", id: "u-admin" } as { role: string; username: string; id: string } | null },
 }));
 
 vi.mock("react-router-dom", async (importOriginal) => {
@@ -118,7 +118,8 @@ beforeEach(() => {
   listVersionsMock.mockResolvedValue([baseVersion]);
   getVersionMock.mockResolvedValue(patchVersion);
   startFastFixApiMock.mockResolvedValue({ version_id: "v2", board: { state: null, recent_messages: [] } });
-  authStateMock.user = { role: "ri" }; // admin by default; individual tests may override
+  // The ACCOUNT named admin — the ri ROLE no longer confers anything over a project (permissions.ts).
+  authStateMock.user = { role: "ri", username: "admin", id: "u-admin" };
 });
 
 async function importPage() {
@@ -208,8 +209,10 @@ describe("ProjectDetailPage — guarded delete (CR-V2-027)", () => {
     expect(deleteProjectApiMock).not.toHaveBeenCalled();
   });
 
-  it("disables delete for a non-admin (role shu)", async () => {
-    authStateMock.user = { role: "shu" };
+  it("disables delete for someone who is neither the owner nor admin", async () => {
+    // A different user entirely: not `created_by` ("u1"), not the admin account. Under the old model a
+    // role could rescue him; it cannot now.
+    authStateMock.user = { role: "ri", username: "somebody", id: "u-other" };
     const ProjectDetailPage = await importPage();
     render(<ProjectDetailPage />);
 

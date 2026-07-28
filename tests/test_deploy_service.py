@@ -546,14 +546,20 @@ async def test_list_events_and_project_events(db_session):
 
 
 def _auth_ri(client, db_session):
-    """Override auth to an ri user that is PERSISTED — deploy_events FK actor_id to it."""
+    """Authenticate as the ``admin`` ACCOUNT, persisted — deploy_events FKs actor_id to it.
+
+    Was a throwaway ``ri_deploy_<hex>`` user. The ri ROLE no longer grants anything over a project, so
+    that user is now a stranger to the fixtures' projects and every deploy route answers 403; the
+    account named ``admin`` is what may operate a project it did not create.
+    """
+    from backend.core import authz
     from backend.core.security import get_current_user, require_ri_role
     from backend.main import app
 
     ri_user = _make_user(
         db_session,
-        username=f"ri_deploy_{uuid.uuid4().hex[:8]}",
-        email=f"ri-deploy-{uuid.uuid4().hex[:8]}@example.com",
+        username=authz.ADMIN_USERNAME,
+        email=f"admin-deploy-{uuid.uuid4().hex[:8]}@example.com",
         password_hash="x",
     )
     app.dependency_overrides[require_ri_role] = lambda: ri_user

@@ -67,7 +67,7 @@ def list_project_specs(
     their own slugs (the ``relative_path`` is ``<slug>/docs/…``); ri/ha see every project's docs.
     """
     docs = project_specs_service.list_all_specs()
-    if current_user.role not in authz.PRIVILEGED_ROLES:
+    if not authz.is_admin(current_user):
         own_slugs = set(db.execute(select(Project.slug).where(Project.created_by == current_user.id)).scalars().all())
         docs = [d for d in docs if d.relative_path.split("/", 1)[0] in own_slugs]
     return ProjectSpecListResponse(documents=docs, count=len(docs))
@@ -120,7 +120,7 @@ def update_project_spec_content(
     documents. New spec docs are produced by the agents (Designer /
     Implementer / Auditor) directly in the project repo.
     """
-    authz.assert_project_slug_access(db, current_user, slug, ri_only=True)
+    authz.assert_project_slug_access(db, current_user, slug)
     try:
         project_specs_service.write_content(slug, path, payload.content)
     except ProjectSpecsError as exc:

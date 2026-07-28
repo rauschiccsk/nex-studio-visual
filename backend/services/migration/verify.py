@@ -49,7 +49,6 @@ COMPARE_COLUMNS: dict[str, tuple[str, ...]] = {
         "created_at",
         "updated_at",
     ),
-    "project_members": ("id", "project_id", "user_id", "role", "created_at", "updated_at"),
     "customers": (
         "id",
         "project_id",
@@ -249,7 +248,7 @@ def verify_project(
     _compare_rows("projects", [project_row], t_project, src_cols("projects"), findings)
 
     # --- direct project-scoped tables ---
-    for name in ("project_members", "customers", "versions", "epics", "bugs", "backlog_items", "deploy_events"):
+    for name in ("customers", "versions", "epics", "bugs", "backlog_items", "deploy_events"):
         s_rows = _src_by(source_conn, st[name], project_id=pid)
         t_rows = _tgt_by(target_conn, name, project_id=pid)
         _compare_rows(name, s_rows, t_rows, src_cols(name), findings)

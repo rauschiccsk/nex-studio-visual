@@ -31,6 +31,7 @@ import bcrypt
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.core import authz
 from backend.core.security import (
     get_current_user,
     require_ha_or_above,
@@ -58,12 +59,20 @@ from tests.conftest import (  # noqa: F401
 
 @pytest.fixture()
 def client(db_session):  # noqa: F811
-    """TestClient with DB + RBAC dependencies overridden to an ri user."""
+    """TestClient authenticated as the ``admin`` ACCOUNT — the one user who may touch every project.
+
+    It used to seed ``role="ri"``, which under the old tier model meant "may touch every project". The
+    role means nothing about projects any more (it governs only the Knowledge Base), so a workflow test
+    that operates on a project it did not create needs the admin ACCOUNT, not the ri role — which is
+    exactly the distinction the new model rests on, and exactly what these tests should be exercising.
+    The username is the load-bearing part; the role below is incidental and kept as ``ri`` only so the
+    KB-flavoured assertions that share this fixture keep their existing meaning.
+    """
 
     suffix = _uuid.uuid4().hex[:8]
     ri_user = User(
-        username=f"ri_workflow_{suffix}",
-        email=f"ri_workflow_{suffix}@test.local",
+        username=authz.ADMIN_USERNAME,
+        email=f"admin_workflow_{suffix}@test.local",
         password_hash=bcrypt.hashpw(b"test", bcrypt.gensalt(rounds=4)).decode(),
         role="ri",
         is_active=True,

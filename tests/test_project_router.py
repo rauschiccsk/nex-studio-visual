@@ -113,7 +113,9 @@ def router_client(db_session, tmp_path, monkeypatch, creator):
 def creator(db_session) -> User:
     """Persist a user that may own the projects created in a test."""
     user = User(
-        username=f"owner_{uuid.uuid4().hex[:8]}",
+        # The ACCOUNT named admin: this fixture backs the whole router suite, which lists and reads
+        # projects created by OTHER fixtures. Role "ri" used to carry that and no longer does.
+        username="admin",
         email=f"{uuid.uuid4().hex[:8]}@example.com",
         password_hash="hashed_password_placeholder",
         role="ri",
@@ -335,7 +337,7 @@ class TestProjectRouter:
         )
         db_session.flush()
 
-        # creator is `ri` (privileged) → the created_by filter is honoured across all projects.
+        # the admin account → the created_by filter is honoured across all projects.
         resp = router_client.get(
             "/api/v1/projects",
             params={"created_by": str(other.id)},

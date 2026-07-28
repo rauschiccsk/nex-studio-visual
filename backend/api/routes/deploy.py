@@ -30,7 +30,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.core import authz
-from backend.core.security import get_current_user, require_ri_role, require_shu_or_above
+from backend.core.security import get_current_user, require_shu_or_above
 from backend.db.models.customers import Customer
 from backend.db.models.deploy import DeployEvent
 from backend.db.models.foundation import User
@@ -176,16 +176,11 @@ async def deploy_customer(
     A redeploy PRESERVES data + secrets + extra_hosts by default; ``force_fresh``
     opts into a fresh re-provision (§3.7).
 
-    v4.0.35 (Director decision D3): owner-or-privileged for the customer's project, AND a Junior may
-    deploy only to **UAT** of their own project — **PROD** deploy stays ``ri``-only (the Director gate).
+    The project's owner deploys his own project — both environments. The second, role-based PROD gate
+    that used to stand here is gone with the tier model: the owner may do everything on his own project,
+    and a separate "PROD needs role ri" clause would be the one rule the simplification did not reach.
     """
-    # Deploy was ri-only — now owner-OR-ri (a Junior deploys their OWN project's UAT; PROD stays ri below).
-    authz.assert_customer_access(db, current_user, customer_id, ri_only=True)
-    if payload.environment == "prod" and current_user.role != "ri":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Nasadenie do PROD môže vykonať iba správca (ri).",
-        )
+    authz.assert_customer_access(db, current_user, customer_id)
     try:
         # Keep the outcome itself, do not destructure it away. `DeployOutcome` IS the (event, url,
         # bumped_to) tuple for every existing caller, but it also carries `.warnings` — the channel
@@ -221,13 +216,19 @@ def accept_customer_uat(
     customer_id: UUID,
     payload: AcceptRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_ri_role),
+    current_user: User = Depends(require_shu_or_above),
 ) -> DeployEvent:
     """Akceptovať — record a Manažér's UAT acceptance, opening PROD (§3.5).
 
     Logs who/when/version/customer. Requires the version to have been deployed to
     this customer's UAT first.
+
+    Guarded by OWNERSHIP, which it was not before: the role dependency was the ONLY gate here, with no
+    ownership call at all — so under the tier model any ``ri`` accepted any customer's UAT, and removing
+    the role gate without adding ownership would have opened it to every authenticated user. This is the
+    step that OPENS PROD, so it gets the same explicit check as the deploy above.
     """
+    authz.assert_customer_access(db, current_user, customer_id)
     try:
         event = deploy_service.accept(db, customer_id, payload.version_number, current_user.id)
         db.commit()

@@ -91,7 +91,7 @@ async def spawn_session(
 
     v4.0.35: owner-or-privileged — a Junior may only attach a terminal to their OWN project.
     """
-    authz.assert_project_slug_access(db, current_user, payload.project_slug, ri_only=True)
+    authz.assert_project_slug_access(db, current_user, payload.project_slug)
     try:
         row = await service.spawn(
             user_id=current_user.id,
@@ -125,7 +125,7 @@ def available_roles(
     exists in the project (the set mirrors ``_VALID_ROLES``). An invalid slug or
     unknown project → 404. v4.0.35: owner-or-privileged (a Junior only their own project).
     """
-    authz.assert_project_slug_access(db, current_user, project_slug, ri_only=True)
+    authz.assert_project_slug_access(db, current_user, project_slug)
     try:
         return service.available_roles(project_slug)
     except AgentTerminalError as exc:

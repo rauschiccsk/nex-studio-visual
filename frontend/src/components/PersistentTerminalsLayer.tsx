@@ -43,6 +43,7 @@ import {
   type SlotState,
 } from "@/store/agentTerminalStore";
 import { useAuthStore } from "@/store/authStore";
+import { isAdminAccount } from "@/services/permissions";
 
 function matchActiveRole(): AgentRole | null {
   // v2 spine STEP 1 (Chrbtica): the /ai-agent route retired to a redirect onto /riadiace-centrum (App.tsx),
@@ -62,7 +63,9 @@ export function PersistentTerminalsLayer() {
   const refresh = useAgentTerminalStore((s) => s.refresh);
   const reset = useAgentTerminalStore((s) => s.reset);
 
-  const isDirector = user?.role === "ri";
+  // Agent terminals attach to PROJECTS, so this is the project world: the admin account, not the
+  // ri role. A project owner reaches his own agents through the project screens.
+  const isDirector = isAdminAccount(user);
 
   // Init + teardown driven by auth. The store rebuilds itself from the
   // backend after every login; ``reset()`` clears it on logout so a

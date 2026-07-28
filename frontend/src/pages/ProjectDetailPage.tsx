@@ -10,6 +10,7 @@ import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
+import { mayOperateProject } from "@/services/permissions";
 
 interface JustCreatedState {
   justCreated?: boolean;
@@ -126,7 +127,6 @@ export default function ProjectDetailPage() {
   // Guarded project deletion (CR-V2-027): admin-only (role `ri`) + only before any PROD deploy. The
   // backend enforces both; the UI mirrors them (disabled-over-hidden) and adds a type-DELETE confirm.
   const user = useAuthStore((s) => s.user);
-  const isAdmin = user?.role === "ri";
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteGithub, setDeleteGithub] = useState(true);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
@@ -475,7 +475,7 @@ export default function ProjectDetailPage() {
         </p>
         {(() => {
           // v4.0.35: owner-or-privileged — the project's creator (or an ri/ha lead) may delete it.
-          const canDelete = isAdmin || project.created_by === user?.id;
+          const canDelete = mayOperateProject(user, project.created_by);
           const blockedReason = !canDelete
             ? "Projekt smie zmazať iba jeho vlastník alebo Manažér."
             : project.has_prod_deploy

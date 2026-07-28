@@ -8,6 +8,7 @@ import { listUsersApi } from "@/services/api/users";
 import { useAuthStore } from "@/store/authStore";
 import type { ProjectAuthMode, ProjectType } from "@/types";
 import type { UserRead } from "@/types/user";
+import { isAdminAccount } from "@/services/permissions";
 
 // ─── Slug helper ─────────────────────────────────────────────────────────────
 
@@ -87,9 +88,10 @@ export default function NewProjectPage() {
   const [users, setUsers] = useState<UserRead[]>([]);
   const [ownerId, setOwnerId] = useState<string>("");
 
-  // v4.0.34: only an admin (ri) can list users (GET /users is ri-only) → only they get an owner
-  // PICKER; every other role creates a project owned by THEMSELVES (owner auto-filled, shown read-only).
-  const canPickOwner = user?.role === "ri";
+  // Only the admin account can list users (GET /users), so only it gets a picker for the notification
+  // recipient; everyone else's project notifies themselves. NOTE this has nothing to do with who OWNS
+  // the project — that is always the person creating it and is not selectable.
+  const canPickOwner = isAdminAccount(user);
   const ownerSelfDisplay = user
     ? [user.first_name, user.last_name].filter(Boolean).join(" ") || user.username
     : "";
@@ -469,8 +471,12 @@ export default function NewProjectPage() {
 
             {/* CR-NS-012 — notification owner */}
             <div>
+              {/* Was labelled "Vlastník", which it is not. The project belongs to whoever creates it and
+                  that cannot be reassigned here; this field only picks who the agent writes to. The old
+                  label put the word "owner" on the one thing in the system that is NOT ownership. */}
               <label htmlFor="np-owner" className="block text-sm font-medium text-[var(--color-text-secondary)] mb-2">
-                Vlastník <span className="text-[var(--color-text-muted)] font-normal">(dostáva Telegram notifikácie od agenta)</span>
+                Komu chodia správy od agenta{" "}
+                <span className="text-[var(--color-text-muted)] font-normal">(Telegram)</span>
               </label>
               {canPickOwner ? (
                 <select
@@ -490,7 +496,8 @@ export default function NewProjectPage() {
                   })}
                 </select>
               ) : (
-                // Non-admin: the project is owned by the creator themselves (owner auto-filled, read-only).
+                // Everyone else notifies themselves. The project is theirs either way — that is decided by
+                // who creates it, not by this field.
                 <div
                   id="np-owner"
                   className="w-full rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-hover)] px-3 py-2 text-sm text-[var(--color-text-primary)]"

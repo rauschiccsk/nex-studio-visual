@@ -34,12 +34,14 @@ U_BUG = uuid.UUID("00000000-0000-0000-0000-0000000000c3")
 U_ACTOR = uuid.UUID("00000000-0000-0000-0000-0000000000c4")
 U_MEMBER = uuid.UUID("00000000-0000-0000-0000-0000000000c5")
 
+#: The columns whose user references the preflight must find in the target, so a migration cannot land a
+#: row pointing at a user who does not exist. ``project_members.user_id`` is NOT among them any more: the
+#: table is not carried across (membership does not exist in V2), so it references nothing to check.
 ALL_USER_IDS: dict[str, uuid.UUID] = {
     "created_by": U_CREATOR,
     "owner_id": U_OWNER,
     "bugs.created_by": U_BUG,
     "deploy_events.actor_id": U_ACTOR,
-    "project_members.user_id": U_MEMBER,
 }
 
 # Source project slugs.
@@ -721,11 +723,14 @@ def bring_to_v2_head(url: str) -> None:
     engine.dispose()
 
 
+# The TARGET is a V2 database. ``project_members`` is deliberately absent from this list: the table was
+# dropped with the ownership model (migration 087), so truncating it raises "relation does not exist".
+# The SOURCE fixture below still CREATEs and populates it, because a real V1 database has it — the
+# migration simply no longer carries it across.
 _TARGET_TRUNCATE_TABLES = (
     "user_sessions",
     "users",
     "projects",
-    "project_members",
     "credentials",
     "customers",
     "versions",

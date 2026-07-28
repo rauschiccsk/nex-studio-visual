@@ -63,14 +63,16 @@ def test_junior_gets_own_project(client, db_session):
 
 def test_admin_sees_every_project(client, db_session):
     junior = seed_user(db_session, username="jr", password="InitPass1", role="shu")
-    seed_user(db_session, username="boss", password="InitPass1", role="ri")
+    # The ACCOUNT named admin — the test was seeding "boss" with role ri, which used to mean the same
+    # thing and now means nothing about projects at all.
+    seed_user(db_session, username="admin", password="InitPass1", role="ri")
     theirs = _project(db_session, junior)
 
-    token = login_user(client, username="boss", password="InitPass1")
-    # ri lists all
+    token = login_user(client, username="admin", password="InitPass1")
+    # admin lists all
     listed = client.get("/api/v1/projects", headers={"Authorization": f"Bearer {token}"})
     assert theirs.slug in {row["slug"] for row in listed.json()["items"]}
-    # ri gets any
+    # admin gets any
     got = client.get(f"/api/v1/projects/{theirs.id}", headers={"Authorization": f"Bearer {token}"})
     assert got.status_code == 200
 

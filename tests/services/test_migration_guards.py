@@ -6,7 +6,7 @@ Covers, per the STEP 8 design:
   (c) FULL referenced-user existence (guard 3)   — collection over all five
       referencing columns + fail-closed abort, one case each for
       projects.created_by / projects.owner_id / bugs.created_by /
-      deploy_events.actor_id / project_members.user_id
+      deploy_events.actor_id
   (d) report serialization carries NO secret material.
 
 The genuine two-DB "target untouched" fail-closed is additionally proven end to
@@ -26,7 +26,6 @@ import pytest
 from backend.db.models.customers import Customer
 from backend.db.models.deploy import DeployEvent
 from backend.db.models.foundation import User
-from backend.db.models.project_member import ProjectMember
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic  # noqa: F401 — ensures model registration
 from backend.services.migration import runner
@@ -80,7 +79,7 @@ def test_assert_target_not_prod_passes_for_test_db(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def _seed_tree_with_five_roles(db_session):
+def _seed_tree_with_four_roles(db_session):
     """Seed a valid v2 tree whose referenced users cover all five columns.
 
     Returns (project_id, role_ids) where role_ids maps a label to the seeded
@@ -102,7 +101,7 @@ def _seed_tree_with_five_roles(db_session):
     owner = _user("owner")
     bug_creator = _user("bug")
     actor = _user("actor")
-    member = _user("member")
+    _member = _user("member")
 
     project = Project(
         name=f"Proj {uuid.uuid4().hex[:6]}",
@@ -149,21 +148,20 @@ def _seed_tree_with_five_roles(db_session):
     )
     db_session.add(deploy)
 
-    membership = ProjectMember(project_id=project.id, user_id=member.id, role="member")
-    db_session.add(membership)
     db_session.flush()
 
+    # project_members is gone with the ownership model — a project belongs to its creator, membership is
+    # not a concept, and the V1→V2 copy no longer carries the table. Four referencing columns remain.
     return project.id, {
         "created_by": creator.id,
         "owner_id": owner.id,
         "bugs.created_by": bug_creator.id,
         "deploy_events.actor_id": actor.id,
-        "project_members.user_id": member.id,
     }
 
 
-def test_collect_referenced_user_ids_gathers_all_five_columns(db_session):
-    project_id, role_ids = _seed_tree_with_five_roles(db_session)
+def test_collect_referenced_user_ids_gathers_all_four_columns(db_session):
+    project_id, role_ids = _seed_tree_with_four_roles(db_session)
     conn = db_session.connection()
     tables = runner.reflect_source_tables(conn)
     refs = runner.collect_referenced_user_ids(conn, tables, [project_id])
@@ -172,10 +170,10 @@ def test_collect_referenced_user_ids_gathers_all_five_columns(db_session):
 
 @pytest.mark.parametrize(
     "column",
-    ["created_by", "owner_id", "bugs.created_by", "deploy_events.actor_id", "project_members.user_id"],
+    ["created_by", "owner_id", "bugs.created_by", "deploy_events.actor_id"],
 )
 def test_find_missing_users_flags_each_referencing_column(db_session, column):
-    _project_id, role_ids = _seed_tree_with_five_roles(db_session)
+    _project_id, role_ids = _seed_tree_with_four_roles(db_session)
     referenced = set(role_ids.values())
     missing_uid = role_ids[column]
     existing = referenced - {missing_uid}
@@ -183,7 +181,7 @@ def test_find_missing_users_flags_each_referencing_column(db_session, column):
 
 
 def test_assert_referenced_users_exist_passes_when_all_present(db_session):
-    project_id, _ = _seed_tree_with_five_roles(db_session)
+    project_id, _ = _seed_tree_with_four_roles(db_session)
     conn = db_session.connection()
     tables = runner.reflect_source_tables(conn)
     # No raise — all five users exist in the (same) target.
@@ -192,10 +190,10 @@ def test_assert_referenced_users_exist_passes_when_all_present(db_session):
 
 @pytest.mark.parametrize(
     "column",
-    ["created_by", "owner_id", "bugs.created_by", "deploy_events.actor_id", "project_members.user_id"],
+    ["created_by", "owner_id", "bugs.created_by", "deploy_events.actor_id"],
 )
 def test_assert_referenced_users_exist_fails_closed_per_column(db_session, monkeypatch, column):
-    project_id, role_ids = _seed_tree_with_five_roles(db_session)
+    project_id, role_ids = _seed_tree_with_four_roles(db_session)
     conn = db_session.connection()
     tables = runner.reflect_source_tables(conn)
     missing_uid = role_ids[column]

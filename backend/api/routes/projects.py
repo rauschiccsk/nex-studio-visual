@@ -446,7 +446,7 @@ def list_projects(
     A Junior (``shu``) sees ONLY their own projects (``created_by`` forced to self); ri/ha see all
     (optionally narrowed by the ``created_by`` filter). (v4.0.35.)
     """
-    if current_user.role not in authz.PRIVILEGED_ROLES:
+    if not authz.is_admin(current_user):
         created_by = current_user.id
     try:
         rows = project_service.list_projects(
@@ -1085,7 +1085,7 @@ def delete_project(
         raise _map_value_error(exc) from exc
     # v4.0.35: delete was ri-only — now owner-OR-ri (a Junior may delete their OWN throwaway project; a
     # Medior does NOT gain delete on projects they don't own). ha is NOT privileged for this write.
-    authz.authorize_project(current_user, project, ri_only=True)
+    authz.authorize_project(current_user, project)
 
     slug = project.slug
     repo_url = project.repo_url

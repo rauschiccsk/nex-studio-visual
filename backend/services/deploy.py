@@ -64,6 +64,7 @@ from uuid import UUID
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from backend.core import authz
 from backend.db.models.customers import Customer
 from backend.db.models.deploy import DeployEvent
 from backend.db.models.pipeline import PipelineState
@@ -358,7 +359,7 @@ def deployability(
     common not-deployable state. Only a version that is NOT verified and WAS signed off once is stale.
 
     ``can_reverify`` is computed HERE, not in the frontend: the matrix is readable by any user with project
-    access, but ``overit_znovu`` goes through ``authz.assert_version_access(..., ri_only=True)``
+    access, but ``overit_znovu`` goes through ``authz.assert_version_access(...)``
     (``api/routes/pipeline.py``), and the response carries no project owner for the frontend to check. It is
     granted ONLY for :data:`DEPLOY_CAUSE_DRIFT` — a drifted version in a state the handler actually accepts
     (:data:`REVERIFIABLE_STATUSES`). Every other shape gets no button: one that 400s or 403s would just move
@@ -371,7 +372,6 @@ def deployability(
     ``head`` supplied every probe is a DB read (no subprocess). The whole path runs only when nothing is
     deployable.
     """
-    from backend.core.authz import is_owner_or_privileged
     from backend.services import claude_agent
     from backend.services.orchestrator import (
         _repo_head,
@@ -425,9 +425,7 @@ def deployability(
             "version_number": version_number,
             "version_id": version_id,
             "can_reverify": (
-                cause == DEPLOY_CAUSE_DRIFT
-                and user is not None
-                and is_owner_or_privileged(user, project.created_by, ri_only=True)
+                cause == DEPLOY_CAUSE_DRIFT and user is not None and authz.is_owner_or_admin(user, project.created_by)
             ),
         }
 
@@ -563,30 +561,24 @@ def build_matrix(db: Session, project: Project, user: Optional[object] = None) -
         )
 
     verified = list_verified_versions(db, project.id)
+    # One predicate, read three times below — see the note on the flags.
+    _may_operate = user is not None and authz.is_owner_or_admin(user, authz.project_owner_id(project))
+
     return {
         "project_slug": project.slug,
         "auth_mode": project.auth_mode,
         "verified_versions": verified,
-        # v4.0.55: mirrors the accept route's ``require_ri_role``. Acceptance OPENS PROD (§3.5), so it is
-        # deliberately ri-only (v4.0.35/D3 keeps PROD behind the Director gate even though a Junior owner
-        # may deploy their own UAT). Surfaced so the button is disabled with a reason rather than looking
-        # live and 403-ing — an owner-Junior saw it enabled on their own project.
-        "can_accept": getattr(user, "role", None) == "ri",
-        # Mirrors the deploy route's PROD role gate (``payload.environment == 'prod' and role != 'ri'`` →
-        # 403). Same defect and same treatment as ``can_accept`` above: a Junior owner / a Medior saw a
-        # live-looking "Nasadiť" on the PROD tab, waited through the click, and got a 403 — while UAT
-        # deploy IS open to them (D3), so the button cannot simply be hidden by role for the whole page.
-        "can_deploy_prod": getattr(user, "role", None) == "ri",
-        # The deploy route has TWO gates and the PROD one above is only the second. The FIRST is
-        # ``assert_customer_access(..., ri_only=True)`` = owner-OR-ri, which refuses a Medior who does
-        # not own the project — for BOTH environments. The matrix GET uses the laxer owner-or-ha read,
-        # so such a Medior LOADS the page and then sees a live-looking "Nasadiť" on the UAT tab that
-        # 403s: the exact defect fixed for PROD, surviving one tab over. Surfaced so the button can be
-        # disabled with a reason there too.
-        "can_deploy": (
-            getattr(user, "role", None) == "ri"
-            or (user is not None and getattr(user, "id", None) == project.created_by)
-        ),
+        # All three collapse to ONE rule under the ownership model: the owner may do everything on his own
+        # project — deploy UAT, deploy PROD, record an acceptance — and so may ``admin``. Nobody else can
+        # see the project at all, so there is no third case left to express.
+        #
+        # They are computed from ``authz.is_owner_or_admin``, the SAME predicate the routes enforce, and
+        # not re-derived by hand. Three hand-rolled copies of a rule is how the screen and the API came to
+        # disagree in both directions before: a live-looking button that 403s, and a greyed-out button on
+        # an action the caller was in fact allowed. One source, one answer.
+        "can_accept": _may_operate,
+        "can_deploy_prod": _may_operate,
+        "can_deploy": _may_operate,
         # v4.0.54: WHY the Nasadiť button is closed, so the screen never greys out in silence. Computed from
         # the SAME verified list (no second recompute) — see :func:`deployability`.
         "deployability": deployability(db, project, verified_versions=verified, user=user),

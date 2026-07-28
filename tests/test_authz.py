@@ -51,18 +51,26 @@ def _version(db_session, project: Project) -> Version:
     return v
 
 
-class TestIsOwnerOrPrivileged:
-    def test_ri_and_ha_always_privileged(self, db_session):
+class TestIsOwnerOrAdmin:
+    def test_no_role_grants_anything_over_a_foreign_project(self, db_session):
+        """The old rule was "ri and ha are always privileged". Roles now govern the Knowledge Base and
+        nothing else, so holding one confers no standing on somebody else's project."""
         owner = _user(db_session, "shu")
-        other_created_by = owner.id
-        assert authz.is_owner_or_privileged(_user(db_session, "ri"), other_created_by) is True
-        assert authz.is_owner_or_privileged(_user(db_session, "ha"), other_created_by) is True
+        assert authz.is_owner_or_admin(_user(db_session, "ri"), owner.id) is False
+        assert authz.is_owner_or_admin(_user(db_session, "ha"), owner.id) is False
 
-    def test_shu_only_owns_own(self, db_session):
+    def test_owner_may_touch_his_own_whatever_his_role(self, db_session):
         owner = _user(db_session, "shu")
         other = _user(db_session, "shu")
-        assert authz.is_owner_or_privileged(owner, owner.id) is True
-        assert authz.is_owner_or_privileged(other, owner.id) is False
+        assert authz.is_owner_or_admin(owner, owner.id) is True
+        assert authz.is_owner_or_admin(other, owner.id) is False
+
+    def test_only_the_admin_account_reaches_a_foreign_project(self, db_session):
+        owner = _user(db_session, "shu")
+        admin = _user(db_session, "shu")
+        admin.username = authz.ADMIN_USERNAME  # the ACCOUNT — note its role is shu, and it does not matter
+        db_session.flush()
+        assert authz.is_owner_or_admin(admin, owner.id) is True
 
 
 class TestAssertProjectAccess:
@@ -79,11 +87,21 @@ class TestAssertProjectAccess:
             authz.assert_project_id_access(db_session, other, project.id)
         assert exc.value.status_code == 403
 
-    def test_privileged_ok_on_others_project(self, db_session):
+    def test_a_role_holder_is_refused_on_a_foreign_project(self, db_session):
         owner = _user(db_session, "shu")
         project = _project(db_session, owner)
-        assert authz.assert_project_id_access(db_session, _user(db_session, "ha"), project.id).id == project.id
-        assert authz.assert_project_id_access(db_session, _user(db_session, "ri"), project.id).id == project.id
+        for role in ("ha", "ri"):
+            with pytest.raises(HTTPException) as exc:
+                authz.assert_project_id_access(db_session, _user(db_session, role), project.id)
+            assert exc.value.status_code == 403
+
+    def test_the_admin_account_is_allowed_on_a_foreign_project(self, db_session):
+        owner = _user(db_session, "shu")
+        project = _project(db_session, owner)
+        admin = _user(db_session, "shu")
+        admin.username = authz.ADMIN_USERNAME
+        db_session.flush()
+        assert authz.assert_project_id_access(db_session, admin, project.id).id == project.id
 
     def test_missing_project_404(self, db_session):
         with pytest.raises(HTTPException) as exc:
@@ -109,10 +127,19 @@ class TestAssertVersionAccess:
         with pytest.raises(HTTPException) as exc:
             authz.assert_version_access(db_session, other, version.id)
         assert exc.value.status_code == 403
-        # privileged sees it
-        assert authz.assert_version_access(db_session, _user(db_session, "ri"), version.id).id == version.id
+        # the admin ACCOUNT sees it; the ri ROLE does not — the walk up to the project ends at the same
+        # single rule as everything else.
+        admin = _user(db_session, "shu")
+        admin.username = authz.ADMIN_USERNAME
+        db_session.flush()
+        assert authz.assert_version_access(db_session, admin, version.id).id == version.id
+        with pytest.raises(HTTPException):
+            authz.assert_version_access(db_session, _user(db_session, "ri"), version.id)
 
     def test_missing_version_404(self, db_session):
+        admin = _user(db_session, "shu")
+        admin.username = authz.ADMIN_USERNAME
+        db_session.flush()
         with pytest.raises(HTTPException) as exc:
-            authz.assert_version_access(db_session, _user(db_session, "ri"), uuid.uuid4())
+            authz.assert_version_access(db_session, admin, uuid.uuid4())
         assert exc.value.status_code == 404

@@ -43,46 +43,28 @@ def get_allowed_kb_categories(user: User, db: Session) -> list[str]:
 
     * ``ri`` users get ``["*"]`` (full access).
     * ``ha`` users get the configured ``ha`` list.
-    * ``shu`` users get the configured ``shu`` baseline plus their
-      assigned project paths (resolved via ``project_members``).
+    * ``shu`` users get the configured ``shu`` baseline.
+
+    The Knowledge Base is the ONE place the Shuhari roles still decide anything (Director, 2026-07-28);
+    projects are governed by ownership and know nothing about roles. This function is therefore
+    unchanged in intent — but a ``shu`` user no longer gains extra project folders, because the
+    ``project_members`` table that granted them is gone with the ownership simplification: a junior
+    works under his manager's login, so there is no second account to widen.
+
+    The removal deliberately took the CALL SITE and the model together. The lookup used to sit inside a
+    bare ``except Exception: logger.warning(...)``, so dropping the table while leaving the call would
+    not have raised anything — a junior would simply have stopped seeing project documents, with one
+    warning line as the only trace. There is nothing left to swallow.
+
+    ``db`` is retained in the signature: every caller passes the request-scoped session, and the
+    parameter is part of a widely-used contract that a future per-project KB rule would need again.
 
     Args:
         user: Authenticated user.
-        db: Active SQLAlchemy session — used to resolve ``shu`` user's
-            project memberships. Pass the request-scoped session from
-            ``Depends(get_db)`` so the lookup observes the same
-            transaction the rest of the request runs in.
+        db: Active SQLAlchemy session (unused today — see above).
     """
     role = (user.role or "shu").lower()
-    allowed = _kb_access_for_role(role)
-
-    if role == "shu" and "*" not in allowed:
-        _add_assigned_projects(user, allowed, db)
-
-    return allowed
-
-
-def _add_assigned_projects(user: User, allowed: list[str], db: Session) -> None:
-    """Append ``projects/<slug>/`` paths the user is a member of."""
-    try:
-        from backend.db.models.project_member import ProjectMember
-        from backend.db.models.projects import Project
-
-        rows = (
-            db.query(Project.slug)
-            .join(ProjectMember, ProjectMember.project_id == Project.id)
-            .filter(ProjectMember.user_id == user.id)
-            .filter(Project.slug.isnot(None))
-            .all()
-        )
-        for (slug,) in rows:
-            if not slug:
-                continue
-            project_path = f"projects/{slug}/"
-            if project_path not in allowed:
-                allowed.append(project_path)
-    except Exception as exc:
-        logger.warning("Failed to load assigned projects for %s: %s", user.username, exc)
+    return _kb_access_for_role(role)
 
 
 def filter_kb_documents(documents: Iterable[dict], user: User, db: Session) -> list[dict]:
