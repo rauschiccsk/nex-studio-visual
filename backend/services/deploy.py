@@ -29,6 +29,16 @@ Four load-bearing invariants this module enforces (all tested):
    This module has no autonomy hooks; it is driven only by an explicit Manažér
    action (the Nasadiť / Akceptovať buttons).
 
+5. **A deploy fails only when the DEPLOY failed.** An instance that is built, up
+   and serving is a success even when something around it is still missing — most
+   often the paired NEX Manager a token-launch app takes its signing key from,
+   which NEX Studio never creates and which a brand-new customer simply does not
+   have yet. Such a gap is reported through ``warnings`` (see :class:`DeployOutcome`
+   → ``DeployResult.warnings``), naming what is missing and what to do about it.
+   Recording it as ``failed`` instead would ALSO bar :func:`accept` — which requires
+   a successful UAT deploy — and so close PROD for that customer permanently, from
+   inside the cockpit, over something the deploy did not get wrong (2026-07-28).
+
 **Secret governance (OQ-5 / CLAUDE.md §4/§5).** This module NEVER reads, writes,
 logs, or returns secret material. Per-customer secrets live only in the
 credentials store (``backend/services/credentials.py``); the deploy backend
@@ -91,8 +101,50 @@ LAUNCH_ENV_KEYS = ("MANAGER_LAUNCH_SIGNING_KEY", "MANAGER_MODULE_SLUG", "MANAGER
 # A "deploy runner" provisions + brings up a customer instance and returns
 # ``(ok, detail, url)``. The default points at the real provisioner + docker
 # compose up (orchestrator-owned, async); tests inject a fake so no docker is
-# spawned. ``detail`` / ``url`` are non-secret.
+# spawned. ``detail`` / ``url`` are non-secret. The default runner returns a
+# :class:`RunnerResult` — that same 3-tuple, additionally carrying ``.warnings``;
+# a runner that returns a plain 3-tuple is read as "no warnings" (see :func:`deploy`).
 DeployRunner = Callable[..., Awaitable[tuple[bool, str, Optional[str]]]]
+
+
+class _WarningTuple(tuple):
+    """A plain tuple that ALSO carries ``warnings`` — how both deploy seams gained a warnings channel
+    without changing their arity.
+
+    Provisioning has always produced non-fatal notes (no frontend service, an unverifiable DB driver, no
+    paired NEX Manager) and they were folded into a ``detail`` string that the screen only shows when a
+    deploy FAILED — so on the successful deploys they are about, nobody ever saw them. ``DeployResult``
+    has carried a ``warnings`` list for exactly this since it was written; nothing populated it.
+
+    Widening the two seams to 4-tuples would have broken every caller that unpacks them (the HTTP route,
+    the injected fake runners in the tests). Subclassing ``tuple`` keeps ``a, b, c = value`` byte-for-byte
+    identical while ``value.warnings`` carries the notes to whoever wants them.
+    """
+
+    def __new__(cls, items: tuple, warnings: Optional[list[str]] = None):
+        outcome = super().__new__(cls, items)
+        outcome.warnings = list(warnings or [])
+        return outcome
+
+
+class RunnerResult(_WarningTuple):
+    """What :func:`_default_deploy_runner` returns: ``(ok, detail, url)`` + the provisioner's ``warnings``."""
+
+    def __new__(cls, ok: bool, detail: str, url: Optional[str], warnings: Optional[list[str]] = None):
+        return super().__new__(cls, (ok, detail, url), warnings)
+
+
+class DeployOutcome(_WarningTuple):
+    """What :func:`deploy` returns: ``(event, url, bumped_to)`` + ``warnings``.
+
+    It IS that 3-tuple, so ``event, url, bumped_to = await deploy(...)`` is unchanged for every existing
+    caller; a caller that wants the notes reads ``.warnings`` and hands it to ``DeployResult.warnings``
+    (schemas/deploy.py), the field the deploy screen renders as amber ⚠ lines under the customer's row.
+    Warnings never mean failure — ``event.status`` stays ``ok``.
+    """
+
+    def __new__(cls, event, url: Optional[str], bumped_to: Optional[str], warnings: Optional[list[str]] = None):
+        return super().__new__(cls, (event, url, bumped_to), warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -549,9 +601,10 @@ async def _default_deploy_runner(
 
     Renders via :func:`uat_provisioner.provision_uat` (``rotate_secrets=force_fresh`` — default False
     PRESERVES secrets + data + extra_hosts and runs migrations on ``up``), then delegates the build/up
-    + serve-verify to the orchestrator (``_run_uat_deploy`` / ``_run_prod_deploy``). Returns
-    ``(ok, detail, url)``; never raises (the orchestrator leg already returns a tuple). The ``.env``
-    content is never read/returned here — only the non-secret deploy outcome.
+    + serve-verify to the orchestrator (``_run_uat_deploy`` / ``_run_prod_deploy``). Returns a
+    :class:`RunnerResult` — the unchanged ``(ok, detail, url)`` triple, additionally carrying the
+    provisioner's non-fatal ``warnings``; never raises (the orchestrator leg already returns a tuple).
+    The ``.env`` content is never read/returned here — only the non-secret deploy outcome.
 
     Imported lazily (the orchestrator imports the deploy chain transitively;
     keeping the import inside the function avoids an import cycle at module load).
@@ -585,7 +638,7 @@ async def _default_deploy_runner(
     try:
         result = await asyncio.to_thread(_provision)
     except (FileNotFoundError, ValueError) as exc:
-        return False, f"provision failed: {exc}", None
+        return RunnerResult(False, f"provision failed: {exc}", None)
 
     if is_prod:
         ok, detail = await orchestrator._run_prod_deploy(
@@ -603,10 +656,13 @@ async def _default_deploy_runner(
             version_number=version_number,
         )
         url = _url_for_instance_slug(f"{customer_slug}-{app}") if result.fe_service else None
-    # Surface any provision warnings in the recorded (non-secret) detail.
-    if result.warnings:
-        detail = f"{detail} | warnings: {'; '.join(result.warnings)}"
-    return ok, detail, url
+    # Surface any provision warnings in the recorded (non-secret) detail — AND return them typed, so the
+    # deploy screen can show them on a SUCCESSFUL deploy (``detail`` is only rendered on a failure, which is
+    # how every provisioning warning has been silently discarded until now).
+    warnings = list(result.warnings)
+    if warnings:
+        detail = f"{detail} | warnings: {'; '.join(warnings)}"
+    return RunnerResult(ok, detail, url, warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -675,14 +731,18 @@ async def deploy(
     actor_id: Optional[UUID],
     force_fresh: bool = False,
     deploy_runner: Optional[DeployRunner] = None,
-) -> tuple[DeployEvent, Optional[str], Optional[str]]:
+) -> DeployOutcome:
     """Deploy a verified ``version_number`` to a customer's ``environment`` instance (§3.4).
 
-    Returns ``(event, url, bumped_to)``:
+    Returns a :class:`DeployOutcome` — the ``(event, url, bumped_to)`` triple (unpacks exactly as before)
+    plus ``warnings``:
       * ``event`` — the recorded deploy audit-log row (who/when/version/customer/status).
       * ``url`` — the deployed instance URL (None when no FE route / on failure).
       * ``bumped_to`` — the new project version_number when a first-PROD deploy
         bumped to v1.0.0 (§3.6), else None.
+      * ``warnings`` — non-fatal, non-secret notes about a deploy that SUCCEEDED (provisioning warnings,
+        a missing NEX Manager pairing). They belong in ``DeployResult.warnings``, which the deploy screen
+        renders; a warning NEVER downgrades ``event.status``.
 
     Enforces, in order:
       1. The version exists for the project (verified-version boundary, CR-V2-014).
@@ -795,25 +855,36 @@ async def deploy(
         except (ValueError, OSError):
             admin_password = None
 
-    ok, detail, url = await runner(
+    outcome = await runner(
         project_slug=project.slug,
         uat_slug=instance_slug,
         version_number=deployed_version,
         force_fresh=force_fresh,
         admin_password=admin_password,
     )
+    ok, detail, url = outcome
+    # The provisioner's non-fatal notes, if this runner carries any: the default runner returns a
+    # :class:`RunnerResult`, an injected/faked runner a plain 3-tuple (→ no warnings). Read via ``getattr``
+    # so the seam stays the 3-tuple every existing fake already returns.
+    warnings: list[str] = list(getattr(outcome, "warnings", None) or [])
 
-    # v4.0.58 — prove the UAT instance is actually OPENABLE before calling the deploy a success. A token-launch
-    # app whose ticket cannot be minted is a running instance with no way in; reporting green would be the same
-    # unverified-success this batch keeps removing. Runs only where the cockpit's "Spustiť" applies (UAT +
-    # token), and only on an otherwise-successful deploy — a failed deploy already reads red.
+    # v4.0.58 — prove the UAT instance is actually OPENABLE, i.e. that a launch ticket can be minted for it.
+    # Runs only where the cockpit's "Spustiť" applies (UAT + token), and only on an otherwise-successful
+    # deploy — a failed deploy already reads red for its own reason.
+    #
+    # This used to force ``ok = False``, which was wrong twice over (Director decision 2026-07-28). The
+    # deploy DID succeed: the app is built, up, serving. What is missing is the launch wiring — the signing
+    # key of a paired NEX Manager, which NEX Studio never creates and which is simply absent for a customer
+    # whose first deploy this is. Recording that as a failed deploy also barred ``accept()`` (it requires a
+    # successful UAT deploy), so PROD became unreachable for that customer with no way out of the cockpit —
+    # a dead end manufactured by the report, not by the app. So: SUCCESS, carrying a warning that names the
+    # missing pairing and the remedy. Same string the provisioner emits for the same gap, so if it already
+    # reported it (real deploy) this collapses into one line instead of saying it twice.
     if ok and environment == "uat" and project.auth_mode == "token" and not uat_launch_wired(customer, project):
-        ok = False
-        detail = (
-            f"{detail} | Aplikácia sa nasadila, ale nedá sa otvoriť: chýba zapojenie jednoklikového "
-            "spustenia (podpisový kľúč z NEX Managera). Skontroluj, či je projekt spárovaný s NEX Managerom, "
-            "a nasaď znova."
-        )
+        warning = uat_provisioner.launch_pairing_warning(_customer_dir_slug(customer))
+        if warning not in warnings:
+            warnings.append(warning)
+            detail = f"{detail} | {warning}"
 
     # Graduation (§3.6): on a SUCCESSFUL first PROD deploy, promote the BUILT version to v1.0.0 IN
     # PLACE + mark it released — never spin up a new empty v1.0.0 shell beside it (which would strand
@@ -842,7 +913,7 @@ async def deploy(
     if not ok:
         bumped_to = None
 
-    return event, (url if ok else None), bumped_to
+    return DeployOutcome(event, (url if ok else None), bumped_to, warnings)
 
 
 def _customer_dir_slug(customer: Customer) -> str:

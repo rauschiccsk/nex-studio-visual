@@ -9,11 +9,41 @@ import { useActiveContextStore } from "@/store/activeContextStore";
 import type { CustomerRead } from "@/types/customer";
 
 /**
+ * The shape the deploy path can actually use. `deploy._customer_dir_slug` derives a customer's instance
+ * directory / Traefik host from `(subdomain or slug).lower()` and `validate_uat_slug` enforces exactly this
+ * pattern on it. The form used to accept anything (only a length limit + a trim), so `andros s.r.o.` was taken
+ * happily here and rejected days later as a failed deploy. Same rule, enforced next to the keyboard.
+ */
+const INSTANCE_LABEL_RE = /^[a-z0-9][a-z0-9-]*$/;
+
+/** Always-visible rule under the field — teaches the shape while typing, not after a failed deploy. */
+const INSTANCE_LABEL_HINT = "Len malé písmená a-z, číslice 0-9 a spojovník (-); na začiatku písmeno alebo číslica.";
+
+/** The full Slovak rule, shown when the typed value cannot be used. Mirrors the backend 422 message. */
+function instanceLabelError(fieldLabel: string): string {
+  return (
+    `${fieldLabel} smie obsahovať len malé písmená a-z, číslice 0-9 a spojovník (-) a musí začínať písmenom ` +
+    `alebo číslicou (napr. „andros-sk“). Medzery, bodky, podčiarkovníky ani diakritika povolené nie sú.`
+  );
+}
+
+/** True when a non-empty value would be refused by the deploy path (empty = "not filled in yet", not an error). */
+function isInstanceLabelInvalid(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed.length > 0 && !INSTANCE_LABEL_RE.test(trimmed);
+}
+
+/**
  * Zákazníci — the per-project customer registry (CR-V2-025, design §3.2).
  *
  * Project-scoped: lists the pinned project's customers and adds new ones via a
  * single form. Internal apps register ICC s.r.o. through this same form — there
  * is no internal/external branch in the UI.
+ *
+ * Identifiers (audit fix): "Skratka" / "Subdoména" are the customer's deploy identity — the instance
+ * directory, Traefik host and instance slug are all derived from `(subdomain or slug).lower()`. The form
+ * therefore enforces the very pattern the deploy path enforces, so a space / dot / underscore is caught
+ * while typing instead of days later as a failed deploy.
  *
  * Secret handling (CLAUDE.md §4/§5, OQ-5): the form has a write-only "secret"
  * field whose value is sent to the backend credentials store and NEVER read
@@ -79,8 +109,10 @@ export default function CustomersPage() {
   function startEdit(c: CustomerRead) {
     setEditingCustomerId(c.id);
     setName(c.name);
-    setCustomerSlug(c.slug);
-    setSubdomain(c.subdomain ?? "");
+    // Lowercased on load too: a legacy row saved before the rule existed (e.g. `ANDROS`) must stay EDITABLE —
+    // it loads in its canonical form and saves back canonical, instead of tripping its own validation.
+    setCustomerSlug(c.slug.toLowerCase());
+    setSubdomain((c.subdomain ?? "").toLowerCase());
     setIntegrations(c.integrations ? JSON.stringify(c.integrations, null, 2) : "");
     setNotes(c.notes ?? "");
     setSecret("");
@@ -92,6 +124,18 @@ export default function CustomersPage() {
     e.preventDefault();
     if (!slug) return;
     setFormError(null);
+
+    // Refuse deploy-hostile identifiers HERE — the same pattern the deploy path enforces. Without this the
+    // save succeeded and the mistake resurfaced days later as a failed deploy, with nothing pointing back
+    // to this form.
+    if (isInstanceLabelInvalid(customerSlug)) {
+      setFormError(instanceLabelError("Skratka"));
+      return;
+    }
+    if (isInstanceLabelInvalid(subdomain)) {
+      setFormError(instanceLabelError("Subdoména"));
+      return;
+    }
 
     let integrationsParsed: Record<string, unknown> | null = null;
     if (integrations.trim()) {
@@ -126,7 +170,13 @@ export default function CustomersPage() {
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 409) {
-          setFormError("Zákazník s touto skratkou už v projekte existuje.");
+          // Two shapes of conflict, two different fixes: a taken slug vs. two customers resolving to ONE
+          // instance directory (same subdomain, or a subdomain equal to another customer's skratka).
+          setFormError(
+            /instance directory/i.test(err.message ?? "")
+              ? "Iný zákazník projektu už používa tú istú subdoménu (alebo skratku) — obaja by skončili v jednom priečinku inštancie. Zvoľ inú subdoménu."
+              : "Zákazník s touto skratkou už v projekte existuje.",
+          );
         } else if (err.status === 403) {
           setFormError("Pridanie zákazníka je dostupné len pre rolu Manažér.");
         } else {
@@ -216,20 +266,40 @@ export default function CustomersPage() {
               <span className="text-[var(--color-text-secondary)]">Skratka *</span>
               <input
                 value={customerSlug}
-                onChange={(e) => setCustomerSlug(e.target.value)}
+                // Lowercased as typed: the instance directory is `(subdomain or slug).lower()`, so what is
+                // stored is what gets deployed — no silent difference between the two.
+                onChange={(e) => setCustomerSlug(e.target.value.toLowerCase())}
                 required
                 placeholder="icc"
+                aria-invalid={isInstanceLabelInvalid(customerSlug) || undefined}
                 className="mt-1 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-sm font-mono text-[var(--color-text-primary)]"
               />
+              {isInstanceLabelInvalid(customerSlug) ? (
+                <span className="mt-1 block text-[11px] text-[var(--color-state-error-fg)]">
+                  {instanceLabelError("Skratka")}
+                </span>
+              ) : (
+                <span className="mt-1 block text-[11px] text-[var(--color-text-muted)]">{INSTANCE_LABEL_HINT}</span>
+              )}
             </label>
             <label className="block text-xs">
               <span className="text-[var(--color-text-secondary)]">Subdoména</span>
               <input
                 value={subdomain}
-                onChange={(e) => setSubdomain(e.target.value)}
+                onChange={(e) => setSubdomain(e.target.value.toLowerCase())}
                 placeholder="icc"
+                aria-invalid={isInstanceLabelInvalid(subdomain) || undefined}
                 className="mt-1 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-sm font-mono text-[var(--color-text-primary)]"
               />
+              {isInstanceLabelInvalid(subdomain) ? (
+                <span className="mt-1 block text-[11px] text-[var(--color-state-error-fg)]">
+                  {instanceLabelError("Subdoména")}
+                </span>
+              ) : (
+                <span className="mt-1 block text-[11px] text-[var(--color-text-muted)]">
+                  Prázdne = použije sa skratka. {INSTANCE_LABEL_HINT}
+                </span>
+              )}
             </label>
             <label className="block text-xs">
               <span className="text-[var(--color-text-secondary)]">Tajný kľúč (pre zákazníka)</span>

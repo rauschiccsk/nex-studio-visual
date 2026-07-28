@@ -167,8 +167,12 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
     # STEP 5 (step5-kontrola-design.md K-1): POST-FILTER ``skontrolovat`` (mirror of the spustit_stavbu filter
     # above) — the state-only ``determine_available_actions`` offers it unconditionally at ``priprava``; drop it
     # here unless this is a conversation build whose Špecifikácia is approved, whose Programovanie has COMPLETED,
-    # and whose latest completed build has NOT yet been checked (K-4). ``apply_action`` enforces the same rule
-    # authoritatively; this hides the dead button. Reuses the ``spec_approved`` local computed above.
+    # and whose latest completed build has not already PASSED a kontrola (K-4). ``apply_action`` enforces the
+    # same rule authoritatively; this hides the dead button. Reuses the ``spec_approved`` local computed above.
+    # Audit P0 (2026-07-28): gate on kontrola_PASSED, not the pass-blind kontrola_done — a RED-floor Kontrola
+    # settles with "oprav to a spusti kontrolu znova" and Kontrola is the ONLY gate a conversation build has,
+    # so hiding the button on a red floor left the Manažér with an instruction they could not follow. One
+    # kontrola per GREEN build (mirrors the ``skontrolovat`` guard in ``orchestrator.apply_action``).
     if (
         state is not None
         and "skontrolovat" in available_actions
@@ -176,7 +180,7 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
             state.mode == "conversation"
             and spec_approved
             and orchestrator.programming_complete(db, version_id)
-            and not orchestrator.kontrola_done(db, version_id)
+            and not orchestrator.kontrola_passed(db, version_id)
         )
     ):
         available_actions = [a for a in available_actions if a != "skontrolovat"]
@@ -658,13 +662,26 @@ async def pipeline_ws(
     version_id: uuid.UUID,
     token: str = Query(...),
 ) -> None:
-    """Live board feed for a version. The connection doubles as the §9 presence."""
+    """Live board feed for a version. The connection doubles as the §9 presence.
+
+    Two different refusals, deliberately handled differently:
+
+    * **No / bad token** — rejected BEFORE ``accept()``. An unauthenticated client never gets an
+      open socket; that is the property ``test_ws_bad_token_closes_4003`` defends.
+    * **Authenticated but not permitted** — ``accept()`` FIRST, then close with 4003. Closing before
+      accept makes Starlette reject the handshake, and the browser then reports a plain abnormal
+      closure (1006) and never sees the code. That is why a Medior opening someone else's project
+      saw a calm empty board while the socket retried forever against a door that will never open:
+      the frontend keys its permanent-refusal latch on 4003, which could not arrive.
+    """
     db = SessionLocal()
     try:
         user = verify_ws_token(token, db)
         if user is None:
             await websocket.close(code=4003)  # forbidden
             return
+        # Authenticated → open the socket, so every refusal below reaches the client AS A CODE.
+        await websocket.accept()
         # v4.0.35: owner-or-privileged for THIS version's project (ri/ha see all; a Junior only their own).
         version = db.get(Version, version_id)
         if version is None:
@@ -678,7 +695,6 @@ async def pipeline_ws(
     finally:
         db.close()
 
-    await websocket.accept()
     await registry.connect(version_id, websocket, user.id)
     try:
         await websocket.send_json({"type": "state_changed", "board": snapshot})

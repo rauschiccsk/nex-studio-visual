@@ -79,6 +79,14 @@ UAT_DB_PORT = "5432"
 # Synthetic secret detection (case-insensitive suffix match) + the ${VAR} placeholder.
 SECRET_SUFFIXES = ("_password", "_secret", "_key", "_token")
 
+# The env var whose presence MAKES an app token-launch (NEX Manager opens it with a signed ticket instead of a
+# password). Its value is the ONE thing this provisioner cannot produce: it belongs to the paired NEX Manager
+# Deploy, and nothing in NEX Studio ever CREATES ``<root>/<customer>/nex-manager/.env`` — it exists only once
+# NEX Manager itself is deployed to that customer. So a customer's FIRST token-launch deploy routinely renders
+# it EMPTY. That is a missing PAIRING, not a failed deploy (the app is built, started and serving), and it is
+# reported as a WARNING naming the gap + the remedy — never as a failure (Director decision 2026-07-28).
+LAUNCH_KEY_ENV = "MANAGER_LAUNCH_SIGNING_KEY"
+
 # The ONE env var that is a HUMAN's login (the initial admin password), not a machine secret. The manager must
 # KNOW it to use the deployed app, so a per-customer deploy sets it to the customer secret (which the manager
 # themselves set), never a random synthetic they could never discover (self-sufficiency kernel, 2026-07-11).
@@ -562,7 +570,7 @@ def generate_uat_env(
     # lazily so non-token apps never touch it.
     mgr_launch_key: Optional[str] = None
     mgr_deploy_slug: Optional[str] = None
-    if manager_env_path is not None and "MANAGER_LAUNCH_SIGNING_KEY" in raw_env:
+    if manager_env_path is not None and LAUNCH_KEY_ENV in raw_env:
         mgr_launch_key, mgr_deploy_slug = read_paired_manager_launch(manager_env_path)
 
     rendered: dict[str, str] = {}
@@ -570,7 +578,7 @@ def generate_uat_env(
         key_str = str(key)
         if key_str in {"POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB", "DB_PASSWORD"}:
             continue  # already emitted above (single source of the shared password)
-        if key_str == "MANAGER_LAUNCH_SIGNING_KEY":
+        if key_str == LAUNCH_KEY_ENV:
             # Paired Manager's key wins (propagates a Manager key rotation on redeploy);
             # else preserve the prior value; else empty (token-launch off, launch route
             # cleanly rejects) — never a synthetic that would 401 every real launch.
@@ -677,6 +685,49 @@ def validate_rendered_db_drivers(
 def _fmt_drivers(drivers: set[str]) -> str:
     """Deterministic ``{a, b}`` rendering of a driver set (sorted — set repr order is non-deterministic)."""
     return "{" + ", ".join(sorted(drivers)) + "}"
+
+
+def launch_pairing_warning(customer_slug: Optional[str] = None) -> str:
+    """The sentence a manager reads when a token-launch app deployed but has no paired NEX Manager.
+
+    ONE source of the text, because the SAME missing pairing is seen from two sides: here at render time (the
+    launch key comes out empty) and again after the deploy, from :mod:`backend.services.deploy`, whose launch
+    proof cannot mint a ticket against that empty key. Emitting the identical string lets the caller collapse
+    the two into a single line instead of telling the manager the same thing twice.
+
+    Slovak, because it is read in the deploy screen; it names the missing piece and the remedy (deploy NEX
+    Manager to this customer, then redeploy) — both doable from the cockpit, no terminal. Non-secret: no key,
+    no path into the credentials store, no ``.env`` location (§4).
+    """
+    who = f" pre zákazníka „{customer_slug}“" if customer_slug else ""
+    return (
+        "Aplikácia je nasadená a beží, ale spustenie jedným kliknutím (tlačidlo „Spustiť“) zatiaľ nefunguje: "
+        f"nie je nasadený NEX Manager{who}, od ktorého sa preberá podpisový kľúč. Nasaď tomuto zákazníkovi "
+        "NEX Manager a potom nasaď túto aplikáciu znova — dovtedy „Spustiť“ ohlási, že kľúč chýba."
+    )
+
+
+def validate_rendered_launch_wiring(env_content: str, *, customer_slug: Optional[str] = None) -> list[str]:
+    """Warn when a token-launch app's rendered ``.env`` carries an EMPTY launch key (no paired Manager).
+
+    Sibling of :func:`validate_rendered_db_drivers`, and deliberately WARN-only — it returns warnings, never
+    failures, and there is no fail branch to add: the instance itself is complete and serving, so refusing the
+    deploy (or recording it as failed) would block the acceptance that opens PROD over a gap that has nothing
+    to do with this app's code (2026-07-28).
+
+    Judged on the RENDERED env — the same evidence the launch button reads later — not on inference about the
+    customer's directory: an app that does not declare :data:`LAUNCH_KEY_ENV` is not token-launch (``[]``),
+    and a declared-and-filled key is wired (``[]``).
+    """
+    for raw in env_content.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        if key.strip() != LAUNCH_KEY_ENV:
+            continue
+        return [] if value.strip() else [launch_pairing_warning(customer_slug)]
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -1000,7 +1051,13 @@ def render_uat_compose(compose: dict[str, Any]) -> str:
 
 @dataclass
 class ProvisionResult:
-    """Outcome of :func:`provision_uat` — paths + the resolved layout the caller (CLI / engine) needs."""
+    """Outcome of :func:`provision_uat` — paths + the resolved layout the caller (CLI / engine) needs.
+
+    ``warnings`` are non-fatal, non-secret notes about an instance that WAS rendered: things the manager must
+    know although nothing failed (no frontend service, an unverifiable DB driver, no paired NEX Manager). The
+    cockpit deploy carries them through to ``DeployResult.warnings`` and shows them under the customer's row —
+    they must never be dropped, and they never mean the deploy failed.
+    """
 
     uat_slug: str
     uat_dir: Path
@@ -1143,6 +1200,11 @@ def provision_uat(
     if fail_msgs:
         raise ValueError("; ".join(fail_msgs))
     warnings.extend(warn_msgs)
+
+    # The pairing gap (2026-07-28): a token-launch app whose launch key rendered EMPTY has no NEX Manager
+    # deployed for this customer to take the key from — and NOTHING here can create that pairing. The
+    # instance is still complete, so this is a warning that names the gap, NOT a provisioning failure.
+    warnings.extend(validate_rendered_launch_wiring(env_content, customer_slug=customer_slug))
 
     # Write: dirs first, then compose + chmod-600 .env.
     uat_dir.mkdir(parents=True, exist_ok=True)

@@ -187,7 +187,13 @@ async def deploy_customer(
             detail="Nasadenie do PROD môže vykonať iba správca (ri).",
         )
     try:
-        event, url, bumped_to = await deploy_service.deploy(
+        # Keep the outcome itself, do not destructure it away. `DeployOutcome` IS the (event, url,
+        # bumped_to) tuple for every existing caller, but it also carries `.warnings` — the channel
+        # that reports a deploy which SUCCEEDED yet could not wire something (a customer with no NEX
+        # Manager pairing). Unpacking straight into three names dropped it here, severing the channel
+        # at the HTTP boundary: the schema declares the field, the screen renders it, and nothing ever
+        # arrived.
+        outcome = await deploy_service.deploy(
             db,
             customer_id,
             version_number=payload.version_number,
@@ -195,6 +201,7 @@ async def deploy_customer(
             actor_id=current_user.id,
             force_fresh=payload.force_fresh,
         )
+        event, url, bumped_to = outcome
         db.commit()
     except ValueError as exc:
         db.rollback()
@@ -205,6 +212,7 @@ async def deploy_customer(
         event=DeployEventRead.model_validate(event),
         url=url,
         bumped_to=bumped_to,
+        warnings=list(outcome.warnings),
     )
 
 

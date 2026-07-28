@@ -512,6 +512,11 @@ def test_apply_action_is_sole_mutator_grep_guard():
             # v4.0.10: + "overit_bez_opravy" ("Znova overiť bez opravy" — exit a Verifikácia fix-loop when the
             # root cause was fixed OUTSIDE the project; re-run the Verifikácia gate directly, no project fix).
             "overit_bez_opravy",
+            # Audit P0 (2026-07-28): + "nahlasit_znova" ("Nahlásiť znova" — re-send the escalation on a
+            # framework_issue block). ``determine_available_actions`` has offered it as the SOLE action on that
+            # block since Director observation #6, but it was never registered here, so ``apply_action`` raised
+            # "Unknown action" — the one button on a locked screen could only error. NOT advancing.
+            "nahlasit_znova",
             "zostav_plan",
             "spustit_stavbu",
             "spustit_vizual",

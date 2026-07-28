@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { ApiError } from "../services/api";
 import { useAuthStore } from "../store/authStore";
 import { usePresenceStore } from "../store/usePresenceStore";
 import {
@@ -19,6 +20,22 @@ import {
 import { humanizeApiError } from "../services/apiError";
 
 const _MAX_ACTIVITY = 50;
+
+// The WS close code the backend answers a refused board with (backend/api/routes/pipeline.py `pipeline_ws`).
+// Every pipeline read is owner-or-ri, but the project LIST shows a Medior every project — so he can pin one he
+// does not own and land here. A 4003 is an authorization VERDICT, not a network blip: retrying with the same
+// token can only be refused again, forever, behind a board that looks calmly empty. It must stop the loop dead
+// (every other close — idle timeout, redeploy, network drop — stays transient and keeps its backoff retry).
+const _WS_CLOSE_FORBIDDEN = 4003;
+
+/** The one plain-Slovak sentence for a permission refusal (mirrors the backend's 403 detail). Exported so
+ *  every surface that must SAY it — Riadiace centrum, the sidebar entry — uses the same wording. */
+export const PIPELINE_ACCESS_DENIED_MESSAGE = "Nemáš prístup k tomuto projektu.";
+
+/** True for the REST half of the same verdict (`GET /pipeline/{id}` and its `/messages` are owner-or-ri too). */
+function isForbidden(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 403;
+}
 
 // CR-V2-018: an empty helper feed (count 0) ⇒ the Helpers panel hides.
 const _EMPTY_HELPERS: HelpersFeed = { stage: "priprava", count: 0, line: "", helpers: [] };
@@ -48,6 +65,11 @@ export interface UsePipelineWs {
   /** The socket dropped AFTER being established and is auto-reconnecting — drives a "stale" banner
    *  (false during the initial connect, so it never flashes on load). */
   reconnecting: boolean;
+  /** This user may NOT read this version's pipeline (WS close 4003 / REST 403) — a PERMANENT refusal, not a
+   *  transient drop: the socket stops reconnecting and `error` holds {@link PIPELINE_ACCESS_DENIED_MESSAGE}.
+   *  Screens must SAY this (disabled with a reason / an explicit no-access panel) — an empty board reads as
+   *  "Voľný", which is a lie about a permission denial. */
+  accessDenied: boolean;
   /** Replace the board (e.g. with the fresh board returned by a POST action). */
   setBoard: (board: PipelineBoard) => void;
 }
@@ -64,10 +86,44 @@ export function usePipelineWs(versionId: string | null): UsePipelineWs {
   const [helpers, setHelpers] = useState<HelpersFeed>(_EMPTY_HELPERS);
   const [writeRejected, setWriteRejected] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
+  const [accessDenied, setAccessDenied] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const everConnectedRef = useRef(false);
+  // Mirrors `accessDenied` SYNCHRONOUSLY: the socket / REST handlers below run outside React's render cycle,
+  // so a state read would still be `false` on the tick the refusal lands and one more retry would be armed.
+  const deniedRef = useRef(false);
+
+  // Latch a PERMANENT refusal (WS 4003 / REST 403). Kills the socket, stops the reconnect loop for good, and
+  // OWNS `error` from here on — `scheduleReconnect` clears `error` on every drop, so without the latch the
+  // refusal message would be wiped by the very loop it has to stop, leaving a calm empty board behind.
+  const denyAccess = useCallback(() => {
+    if (deniedRef.current) return;
+    deniedRef.current = true;
+    setAccessDenied(true);
+    setConnected(false);
+    setReconnecting(false);
+    setError(PIPELINE_ACCESS_DENIED_MESSAGE);
+    const ws = wsRef.current;
+    if (ws) {
+      ws.onclose = null;
+      ws.onerror = null; // detach BEFORE closing so this close cannot schedule one last retry
+      try {
+        ws.close();
+      } catch {
+        /* already closing */
+      }
+    }
+  }, []);
 
   useEffect(() => {
+    // A version / token change starts from a clean slate — a refusal latched for the PREVIOUS version must
+    // never leak onto this one, and the reconnect loop below has to be allowed to run again.
+    if (deniedRef.current) {
+      deniedRef.current = false;
+      setError(null);
+    }
+    setAccessDenied(false);
+
     if (!versionId || !token) {
       setBoard(null);
       setConnected(false);
@@ -91,25 +147,34 @@ export function usePipelineWs(versionId: string | null): UsePipelineWs {
     const fetchSnapshot = () => {
       getPipelineBoardApi(versionId)
         .then((b) => {
-          if (!cancelled) setBoard(b);
+          if (!cancelled && !deniedRef.current) setBoard(b);
         })
         .catch((e: unknown) => {
+          if (cancelled) return;
+          // A 403 is the SAME verdict the socket answers with 4003 (both gates are owner-or-ri) — permanent.
+          // Latch it here too, so the refusal is named even if the close code never arrives (e.g. the socket
+          // is still connecting, or a proxy swallowed the code).
+          if (isForbidden(e)) {
+            denyAccess();
+            return;
+          }
+          if (deniedRef.current) return; // a latched refusal owns the messaging
           // Plain-Slovak framing — HonestStatusStrip renders this string raw, so it must never be a raw
           // English backend detail (audit Theme 2). We keep the hook's `error: string` shape and surface
           // only the manager-facing sentence.
-          if (!cancelled) setError(humanizeApiError(e, "Načítanie prehľadu zlyhalo").message);
+          setError(humanizeApiError(e, "Načítanie prehľadu zlyhalo").message);
         });
     };
 
     const connect = () => {
-      if (cancelled) return;
+      if (cancelled || deniedRef.current) return;
       fetchSnapshot();
 
       const ws = new WebSocket(buildPipelineWsUrl(versionId, token));
       wsRef.current = ws;
 
       ws.onopen = () => {
-        if (cancelled) return;
+        if (cancelled || deniedRef.current) return;
         attempt = 0; // reset backoff after a successful connect
         everConnectedRef.current = true;
         setConnected(true);
@@ -126,7 +191,7 @@ export function usePipelineWs(versionId: string | null): UsePipelineWs {
       };
 
       ws.onmessage = (ev) => {
-        if (cancelled) return;
+        if (cancelled || deniedRef.current) return;
         let frame: PipelineWsFrame;
         try {
           frame = JSON.parse(ev.data) as PipelineWsFrame;
@@ -172,7 +237,7 @@ export function usePipelineWs(versionId: string | null): UsePipelineWs {
       // handlers (so it can't re-fire) and keep retryTimer non-null through connect() — together
       // those guarantee one drop schedules exactly one retry, with no double-socket.
       const scheduleReconnect = () => {
-        if (cancelled) return;
+        if (cancelled || deniedRef.current) return; // a refused board never becomes reachable by retrying
         ws.onclose = null;
         ws.onerror = null; // this socket is dead — ignore any further events from it
         setConnected(false);
@@ -187,8 +252,17 @@ export function usePipelineWs(versionId: string | null): UsePipelineWs {
         }, delay);
       };
 
-      ws.onclose = scheduleReconnect;
-      ws.onerror = scheduleReconnect;
+      // A close carrying the "forbidden" code is the ONE case that must not be retried — it is a verdict on
+      // this user, not a broken pipe. Everything else (no code, any other code) stays transient.
+      // `ev` is optional: `onerror` and non-DOM callers fire without a CloseEvent.
+      ws.onclose = (ev?: CloseEvent) => {
+        if (ev?.code === _WS_CLOSE_FORBIDDEN) {
+          denyAccess();
+          return;
+        }
+        scheduleReconnect();
+      };
+      ws.onerror = scheduleReconnect; // an error event carries no close code → treated as transient
     };
 
     connect();
@@ -203,7 +277,7 @@ export function usePipelineWs(versionId: string | null): UsePipelineWs {
       }
       wsRef.current = null;
     };
-  }, [versionId, token]);
+  }, [versionId, token, denyAccess]);
 
   // Periodic reconcile (CR 2026-06-12): a SILENT safety net over the WS. Auto-reconnect heals a dropped
   // socket, but a board can still go stale on a LIVE socket if a single state_changed frame is missed
@@ -213,9 +287,16 @@ export function usePipelineWs(versionId: string | null): UsePipelineWs {
   // a live WS frame recovers. Independent of the socket lifecycle (keyed on [versionId, token]).
   useEffect(() => {
     if (!versionId || !token) return;
+    // A tick can still be in flight when the pin moves to another version; its answer belongs to the version
+    // it was asked about, so it must not land on (nor deny) the new one.
+    let cancelled = false;
     const id = setInterval(() => {
+      // A latched refusal stops this net too — otherwise every tick would 403 again, forever, on a board this
+      // user is never allowed to read.
+      if (deniedRef.current) return;
       getPipelineBoardApi(versionId)
-        .then((snapshot) =>
+        .then((snapshot) => {
+          if (cancelled || deniedRef.current) return; // version changed / refused while this tick was in flight
           setBoard((prev) => {
             if (!prev) return snapshot;
             // Take the AUTHORITATIVE state + board-level fields from the snapshot (this is what unsticks
@@ -224,14 +305,20 @@ export function usePipelineWs(versionId: string | null): UsePipelineWs {
             const byId = new Map(snapshot.recent_messages.map((m) => [m.id, m] as const));
             for (const m of prev.recent_messages) if (!byId.has(m.id)) byId.set(m.id, m);
             return { ...snapshot, recent_messages: [...byId.values()].sort((a, b) => a.seq - b.seq) };
-          }),
-        )
-        .catch(() => {
-          /* transient — the next reconcile tick (or the WS) recovers */
+          });
+        })
+        .catch((e: unknown) => {
+          // A 403 is the same permanent verdict as the socket's 4003 — latch it (the loop would otherwise
+          // keep polling a door that never opens). Anything else is transient: the next tick (or the WS)
+          // recovers, so it stays silent as before.
+          if (!cancelled && isForbidden(e)) denyAccess();
         });
     }, 25_000);
-    return () => clearInterval(id);
-  }, [versionId, token]);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [versionId, token, denyAccess]);
 
   // E6 (CR-NS-038): push the away state live whenever it toggles, over the EXISTING socket — no
   // reconnect. On first mount / before open this no-ops (the onopen handler sends the initial state).
@@ -265,6 +352,7 @@ export function usePipelineWs(versionId: string | null): UsePipelineWs {
     writeRejected,
     clearWriteRejected,
     reconnecting,
+    accessDenied,
     setBoard: replaceBoard,
   };
 }

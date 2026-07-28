@@ -86,6 +86,7 @@ class DeployResult(BaseModel):
     summary. ``url`` is the customer instance's public URL (None when no
     frontend route exists). ``bumped_to`` carries the new version_number when a
     first-PROD deploy bumped the project to v1.0.0 (§3.6), else None.
+    ``warnings`` carries what went imperfectly on a deploy that SUCCEEDED.
     """
 
     ok: bool
@@ -95,7 +96,19 @@ class DeployResult(BaseModel):
         default=None,
         description="Set when a first-PROD deploy bumped the project version (e.g. 'v1.0.0'); else None.",
     )
-    warnings: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(
+        default_factory=list,
+        # Populated from ``deploy_service.deploy(...).warnings`` (a ``DeployOutcome``, backend/services/
+        # deploy.py): the provisioner's non-fatal notes plus a missing NEX Manager pairing, which leaves a
+        # token-launch app's one-click "Spustiť" off while the app itself is deployed and serving. The deploy
+        # screen renders each as an amber ⚠ line under the customer's row — the ONLY place these reach a human,
+        # since ``event.detail`` is shown only when a deploy failed.
+        description=(
+            "Non-fatal, non-secret notes about a deploy that SUCCEEDED — what a manager must know and act on "
+            "although nothing failed (e.g. no paired NEX Manager, so one-click launch stays off until one is "
+            "deployed for this customer). A warning NEVER means failure: ``ok`` stays True."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------

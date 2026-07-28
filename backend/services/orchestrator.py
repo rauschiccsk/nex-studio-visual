@@ -447,6 +447,13 @@ _ACTIONS = frozenset(
         # Verifikácia-originated fix-loop (board post-filter: programovanie ∧ blocked/paused ∧ a fix-scope on
         # record). Reuses the ``overit_znovu`` sha_drift mechanics WITHOUT the settled-state/drift guard.
         "overit_bez_opravy",
+        # Audit P0 (2026-07-28): "Nahlásiť znova" — the Manažér's ONE move on a ``framework_issue`` block (a
+        # NEX-Studio-side bug only our technical team can clear, so no Uprav / answer / decide applies).
+        # :func:`determine_available_actions` OFFERS it as the sole action on that block; it must therefore be
+        # EXECUTABLE — an offered verb missing from this set makes the single button on an otherwise locked
+        # screen raise "Unknown action" (a dead end with no way out). Re-sends the recorded escalation and
+        # records a fresh "re-reported" notification. NOT advancing (nothing about the phase changes).
+        "nahlasit_znova",
         # STEP 3 (step3-plan-design.md MD-1=A): "Zostaviť plán" — in a conversation build, AFTER the
         # Špecifikácia is approved, compose the task plan (EPIC→FEAT→TASK) from the frozen Špecifikácia.
         # Honest-by-construction like ``approve_spec`` (NOT advancing — it stays in the conversation register,
@@ -776,7 +783,13 @@ def kontrola_passed(db: Session, version_id: uuid.UUID) -> bool:
     """True iff Kontrola has run for the latest completed build (:func:`kontrola_done`) AND its runtime floor
     was NOT red (:func:`kontrola_floor_red`). This — not the pass-blind ``kontrola_done`` — gates the ``hotovo``
     sign-off (board post-filter + the authoritative ``apply_action`` guard): K-3 = Kontrola never signs off on
-    a red build, so a non-booting build can never reach the deployable ``done`` state via one manager click."""
+    a red build, so a non-booting build can never reach the deployable ``done`` state via one manager click.
+
+    Audit P0 (2026-07-28): it ALSO gates the ``skontrolovat`` RE-OFFER (same two places), so "one kontrola per
+    completed build" (K-4) means one kontrola per **GREEN** build. A red floor settles with "oprav to a spusti
+    kontrolu znova" while its honest ``gate_report`` is already on record — gating the re-offer on the pass-blind
+    ``kontrola_done`` would hide/refuse the very button that message points at, and Kontrola is the ONLY gate a
+    conversation build has, so the build would be stuck with an instruction it cannot follow."""
     return kontrola_done(db, version_id) and not kontrola_floor_red(db, version_id)
 
 
@@ -9514,16 +9527,25 @@ async def apply_action(
         # to the release/deploy path (a verdict at ``verifikacia`` reads as a release PASS to _verifikacia_passed
         # / version_verified / deploy.list_verified_versions — kontrola must NEVER touch that path). AUTHORITATIVE
         # gate (the board post-filter merely hides the button): valid ONLY in a conversation build whose spec is
-        # approved, whose Programovanie has COMPLETED, and whose latest completed build has NOT yet been checked
-        # (a repeat is refused — one kontrola per completed build, K-4; a new build/fix re-opens it).
+        # approved, whose Programovanie has COMPLETED, and whose latest completed build has not already PASSED a
+        # kontrola (a repeat is refused — one kontrola per GREEN build, K-4; a new build/fix re-opens it).
+        #
+        # Audit P0 (2026-07-28): the repeat guard reads ``kontrola_passed``, NOT the pass-blind ``kontrola_done``.
+        # A RED runtime floor settles the round ``awaiting_manazer`` telling the Manažér to "oprav to a spusti
+        # kontrolu znova" — but the red turn ALSO recorded its honest ``gate_report``, so a ``kontrola_done`` gate
+        # would refuse exactly the re-run the message demands, with Kontrola the ONLY gate a conversation build
+        # has. Message and offered action must agree: a red Kontrola stays RE-OPENABLE (and re-running it is the
+        # only way back to green), while a GREEN one is still one-per-build as K-4 requires.
         if state.mode != "conversation":
             raise OrchestratorError("Skontrolovať je platné len v rozhovorovom režime.")
         if not spec_approved(db, version_id):
             raise OrchestratorError("Skontrolovať je platné až po schválení Špecifikácie.")
         if not programming_complete(db, version_id):
             raise OrchestratorError("Skontrolovať je platné až po dokončení Programovania.")
-        if kontrola_done(db, version_id):
-            raise OrchestratorError("Kontrola pre túto stavbu už prebehla — nová stavba/oprava ju znovu otvorí.")
+        if kontrola_passed(db, version_id):
+            raise OrchestratorError(
+                "Kontrola pre túto stavbu už prebehla a beh appky bol v poriadku — nová stavba/oprava ju znovu otvorí."
+            )
         # Durable, restart-safe trigger (mirror of the compose_plan marker, FIX3): record a manazer→ai_agent
         # kind='directive' marker carrying payload.check. ``run_conversation_turn`` delegates to the kontrola
         # round SOLELY on this DB marker — the in-memory dispatch directive is None for ``skontrolovat`` and is

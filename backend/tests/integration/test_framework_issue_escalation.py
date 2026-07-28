@@ -219,3 +219,95 @@ async def test_run_dispatch_framework_issue_settles(db_session, monkeypatch) -> 
     assert state.block_reason == "framework_issue"
     assert captured["project_slug"] == project.slug
     assert captured["owner_chat_id"] is None  # owner had no chat_id
+
+
+# ---------------------------------------------------------------------------
+# (iv) OFFER → EXECUTE round trip: the ONE offered button must actually work
+# ---------------------------------------------------------------------------
+
+
+async def _settle_framework_issue(db_session, monkeypatch, *, version_number="4.0.0"):
+    """Drive the REAL settle path to a framework_issue block (no hand-seeded state) and return
+    ``(project, version, deliveries)`` where ``deliveries`` accumulates every escalation call."""
+    owner = _seed_user(db_session, chat_id="909090")
+    project = _seed_project(db_session, owner=owner)
+    version = Version(project_id=project.id, version_number=version_number, status="active")
+    db_session.add(version)
+    db_session.flush()
+    _seed_conversation_state(db_session, version)
+
+    async def _fake_invoke(db, **kw):
+        return _framework_issue_block()
+
+    monkeypatch.setattr(orchestrator, "invoke_agent_with_parse_retry", _fake_invoke)
+
+    deliveries: list[dict] = []
+
+    async def _fake_escalate(**kwargs):
+        deliveries.append(kwargs)
+        return None
+
+    monkeypatch.setattr(orchestrator.dedo_escalation, "escalate_to_dedo", _fake_escalate)
+
+    await orchestrator.run_conversation_turn(db_session, version.id)
+    return project, version, deliveries
+
+
+@pytest.mark.asyncio
+async def test_offered_action_on_framework_issue_block_is_executable(db_session, monkeypatch) -> None:
+    """Audit P0 (2026-07-28): ``nahlasit_znova`` was OFFERED as the sole action on this block but was never a
+    member of ``_ACTIONS``, so ``apply_action`` rejected it on its first line — one button on an otherwise
+    locked screen (the composer is locked too), and pressing it errored. No way out without a terminal.
+    Round-trip EVERY offered verb through ``apply_action``: offer ⇒ execute."""
+    project, version, deliveries = await _settle_framework_issue(db_session, monkeypatch)
+    state = db_session.execute(select(PipelineState).where(PipelineState.version_id == version.id)).scalar_one()
+
+    offered = orchestrator.determine_available_actions(state)
+    assert offered == {"nahlasit_znova"}  # the ONE action on this block — so it had better run
+
+    for verb in sorted(offered):
+        assert verb in orchestrator._ACTIONS, f"offered verb {verb!r} is not registered in _ACTIONS"
+        after = await orchestrator.apply_action(db_session, version_id=version.id, action=verb)
+        # The block is NOT cleared by re-reporting (only our technical team clears it) — but it must not error,
+        # and the state must stay actionable so the manager can press it again.
+        assert after.status == "blocked" and after.block_reason == "framework_issue"
+
+    # The report actually went out AGAIN (1 from the settle + 1 from the manager's button).
+    assert len(deliveries) == 2
+    assert deliveries[-1]["project_slug"] == project.slug
+    assert deliveries[-1]["version_number"] == version.version_number
+    assert deliveries[-1]["dedo_message"] == DEDO_MSG
+    assert deliveries[-1]["owner_chat_id"] == "909090"
+
+    # …and the manager can SEE it went out: a fresh plain-Slovak notification, no internal "Dedo" jargon.
+    notes = (
+        db_session.execute(
+            select(PipelineMessage)
+            .where(PipelineMessage.version_id == version.id, PipelineMessage.kind == "notification")
+            .order_by(PipelineMessage.seq.asc())
+        )
+        .scalars()
+        .all()
+    )
+    assert len(notes) == 2
+    assert notes[-1].author == "system" and notes[-1].recipient == "manazer"
+    assert notes[-1].payload["framework_issue"] is True
+    assert "znova nahlásili" in notes[-1].content
+    assert "Dedo" not in notes[-1].content
+
+    # Still offered afterwards — a re-report never removes the manager's only move.
+    assert "nahlasit_znova" in orchestrator.determine_available_actions(state)
+
+
+@pytest.mark.asyncio
+async def test_nahlasit_znova_refused_when_not_a_framework_issue_block(db_session, monkeypatch) -> None:
+    """Registering the verb must not make it a free-for-all: it stays valid ONLY on a framework_issue block,
+    and the refusal is plain Slovak (never a bare "Unknown action")."""
+    _project, version, _deliveries = await _settle_framework_issue(db_session, monkeypatch, version_number="4.1.0")
+    state = db_session.execute(select(PipelineState).where(PipelineState.version_id == version.id)).scalar_one()
+    state.status = "blocked"
+    state.block_reason = "agent_question"  # a plain question, not a NEX-Studio-side bug
+    db_session.flush()
+
+    with pytest.raises(orchestrator.OrchestratorError, match="chybe NEX Studia"):
+        await orchestrator.apply_action(db_session, version_id=version.id, action="nahlasit_znova")

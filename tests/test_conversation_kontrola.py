@@ -16,7 +16,9 @@ CHECKs). Proves, per the design's verification plan:
   verifikacia); settles ``awaiting_manazer`` with ``current_stage`` unchanged, and NEVER calls
   ``_settle_phase_boundary`` / ``_next_stage``.
 * **(d) runtime floor red** — a red boot / red acceptance records a ``kontrola_floor_red`` notification and
-  still settles ``awaiting_manazer`` (K-3 = NO auto-fix loop).
+  still settles ``awaiting_manazer`` (K-3 = NO auto-fix loop), and the check stays RE-OPENABLE: the settle
+  message says "spusti kontrolu znova", so the button must be offered AND executable (audit P0, 2026-07-28 —
+  the re-offer gates on kontrola PASSED, not on kontrola RECORDED; one kontrola per GREEN build).
 * **(e) invisibility / safety** — the kontrola gate_report is invisible to ``_verifikacia_passed`` /
   ``version_verified`` / ``deploy.list_verified_versions``; a real Verifikácia verdict is still visible
   (legacy Auditor path byte-identical); a second kontrola is refused; a new build re-opens it.
@@ -409,6 +411,84 @@ class TestRuntimeFloorRed:
 
         await _drive_kontrola(db_session, version.id)
         assert _floor_red_notes(db_session, version.id) == []
+
+
+# ── (d2) a RED Kontrola stays RE-OPENABLE — message and button must agree ─────
+
+
+class TestRedKontrolaIsReopenable:
+    """Audit P0 (2026-07-28): a red runtime floor settles ``awaiting_manazer`` telling the Manažér to
+    "oprav to a spusti kontrolu znova" — but the SAME turn already recorded its honest ``kontrola``
+    gate_report, so the pass-blind ``kontrola_done`` was True and "Skontrolovať" was hidden AND refused.
+    Kontrola is the ONLY gate a conversation build has, so the build was stuck with an instruction it
+    could not follow. The re-offer now gates on kontrola PASSED: one kontrola per GREEN build."""
+
+    @staticmethod
+    def _settle(db_session, version_id):
+        """Clear the in-flight dispatch so the next apply_action is not refused (mirrors the K-4 test)."""
+        state = db_session.execute(select(PipelineState).where(PipelineState.version_id == version_id)).scalar_one()
+        state.status = "awaiting_manazer"
+        state.dispatch_in_flight = False
+        db_session.flush()
+        return state
+
+    async def _red_kontrola(self, db_session, monkeypatch):
+        version, _ = _make_version(db_session)
+        _seed_priprava(db_session, version.id)
+        _approve_spec(db_session, version.id)
+        _seed_programming_complete(db_session, version.id)
+        _stub_smoke(monkeypatch, boot_ok=False, boot_detail="up exit 1", acceptance=None)
+        _stub_partner_turn(monkeypatch, _gate_report_block("appka nenaštartovala — VRATKÉ"))
+        state = await _drive_kontrola(db_session, version.id)
+        return version, state
+
+    async def test_red_floor_next_action_and_offered_button_agree(self, db_session, monkeypatch):
+        version, state = await self._red_kontrola(db_session, monkeypatch)
+
+        # The message the Manažér reads points at exactly one button…
+        assert "spusti kontrolu znova" in state.next_action
+        # …and that button is on the board. (This is the whole invariant: the instruction must be followable.)
+        assert "skontrolovat" in _board_actions(db_session, version.id)
+        # The probes underneath: the check RAN (pass-blind) but did NOT pass — hence re-openable.
+        assert orchestrator.kontrola_done(db_session, version.id) is True
+        assert orchestrator.kontrola_floor_red(db_session, version.id) is True
+        assert orchestrator.kontrola_passed(db_session, version.id) is False
+
+    async def test_red_kontrola_can_actually_be_re_run(self, db_session, monkeypatch):
+        version, _ = await self._red_kontrola(db_session, monkeypatch)
+        self._settle(db_session, version.id)
+
+        # Offer ⇒ execute: apply_action ACCEPTS the re-run (it used to raise "už prebehla"), and this time
+        # the app boots → the second turn records a SECOND gate_report and the floor note falls behind.
+        _stub_smoke(monkeypatch, boot_ok=True, acceptance=(True, "3 assertions", False))
+        _stub_partner_turn(monkeypatch, _gate_report_block("po oprave PEVNÉ"))
+        state = await _drive_kontrola(db_session, version.id)
+
+        assert state.status == "awaiting_manazer" and state.current_stage == "priprava"
+        assert len(_kontrola_reports(db_session, version.id)) == 2
+        assert orchestrator.kontrola_floor_red(db_session, version.id) is False  # green run outranks the note
+        assert orchestrator.kontrola_passed(db_session, version.id) is True
+        # Green now → the sign-off opens and the check closes (K-4 = one kontrola per GREEN build).
+        self._settle(db_session, version.id)
+        actions = _board_actions(db_session, version.id)
+        assert "skontrolovat" not in actions
+        assert "hotovo" in actions
+
+    async def test_green_kontrola_still_one_per_build(self, db_session, monkeypatch):
+        # Guardrail — K-4 is UNCHANGED for a green build: the second attempt is still refused in plain Slovak.
+        version, _ = _make_version(db_session)
+        _seed_priprava(db_session, version.id)
+        _approve_spec(db_session, version.id)
+        _seed_programming_complete(db_session, version.id)
+        _stub_smoke(monkeypatch)
+        _stub_partner_turn(monkeypatch, _gate_report_block())
+        await _drive_kontrola(db_session, version.id)
+        self._settle(db_session, version.id)
+
+        assert orchestrator.kontrola_passed(db_session, version.id) is True
+        assert "skontrolovat" not in _board_actions(db_session, version.id)
+        with pytest.raises(OrchestratorError, match="už prebehla"):
+            await orchestrator.apply_action(db_session, version_id=version.id, action="skontrolovat")
 
 
 # ── (e) invisibility / safety: release gate never sees kontrola; second refused; re-open ──

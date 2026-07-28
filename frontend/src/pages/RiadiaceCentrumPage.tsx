@@ -13,12 +13,14 @@
  *   - ConversationComposer — the relay send box at the bottom.
  *   - PlanUlohRail — the right rail (placeholder; the real task-plan lands in step 3, same cell, no churn).
  *
- * Permissions: ``ri`` only (Manažér). Non-ri users see a Lock panel. Project- + version-scoped (follows the
- * pin); the transcript + relay are keyed on the selected version.
+ * Permissions: the pipeline is owner-or-``ri``. Any authenticated user reaches this route (the project list
+ * is deliberately wider — a Medior sees every project and can pin one), so a refusal is a NORMAL state here,
+ * not an impossible one: `usePipelineWs` latches it (`accessDenied`) and this page SAYS it, with the way out.
+ * Project- + version-scoped (follows the pin); the transcript + relay are keyed on the selected version.
  */
 
 import { useNavigate } from "react-router-dom";
-import { FolderOpen } from "lucide-react";
+import { FolderOpen, Lock } from "lucide-react";
 
 import { useActiveContextStore } from "@/store/activeContextStore";
 import { usePipelineWs } from "@/hooks/usePipelineWs";
@@ -46,7 +48,7 @@ export default function RiadiaceCentrumPage() {
 
   // The event-rendered transcript + live activity, streamed over the EXISTING pipeline WS (INVARIANT: no new
   // WS client — live streaming already reaches the FE over this hook).
-  const { board, activity, reconnecting, error, setBoard } = usePipelineWs(versionId);
+  const { board, activity, reconnecting, error, accessDenied, setBoard } = usePipelineWs(versionId);
 
   async function handleSend(text: string): Promise<{ deferred: boolean }> {
     if (!versionId) throw new Error("Najprv vyber verziu (pin v Projektoch).");
@@ -99,6 +101,33 @@ export default function RiadiaceCentrumPage() {
         <p className="max-w-md text-xs text-[var(--color-text-muted)]">
           Vyber verziu projektu <span className="font-medium">{selectedProject.name}</span> (pin v Projektoch)
           — Riadiace centrum pracuje a komunikuje nad konkrétnou verziou.
+        </p>
+        <button
+          onClick={() => navigate("/projects")}
+          className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500"
+        >
+          → Otvor Projekty
+        </button>
+      </div>
+    );
+  }
+
+  if (accessDenied) {
+    // A permission refusal, said out loud. Every pipeline read for this version is owner-or-ri, but the
+    // project list shows a Medior EVERY project — so he can pin one he does not own and land here. Before
+    // this, the board simply stayed empty and the status strip read a calm "Voľný" while the socket retried
+    // a door that never opens: the screen lied, and there was no way out without a terminal.
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-4 bg-[var(--color-canvas)] p-6 text-center">
+        <Lock className="h-10 w-10 text-[var(--color-text-muted)]" />
+        <h2 className="text-sm font-semibold text-[var(--color-text-secondary)]">
+          Nemáš prístup k tomuto projektu
+        </h2>
+        <p className="max-w-md text-xs text-[var(--color-text-muted)]">
+          Projekt <span className="font-medium">{selectedProject.name}</span> patrí niekomu inému, preto ti
+          jeho Riadiace centrum nevieme otvoriť — nezobrazuje sa žiadny priebeh ani rozhovor. Riadiť ho môže
+          jeho vlastník alebo Manažér; popros o to niekoho z nich, alebo si v Projektoch pripni vlastný
+          projekt.
         </p>
         <button
           onClick={() => navigate("/projects")}

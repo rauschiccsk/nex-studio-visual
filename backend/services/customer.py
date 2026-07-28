@@ -21,6 +21,7 @@ customer — there is exactly one code path.
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 from uuid import UUID
 
@@ -85,23 +86,88 @@ def _get_by_project_and_slug(db: Session, project_id: UUID, slug: str) -> Option
     return db.execute(stmt).scalar_one_or_none()
 
 
+_INSTANCE_DIR_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+
+
+def _assert_deploy_safe_instance_dir(dir_slug: str) -> None:
+    """Refuse an instance directory the deploy path cannot use.
+
+    Mirrors ``uat_provisioner.validate_uat_slug`` (``^[a-z0-9][a-z0-9-]*$``) — no more and no less,
+    so the form never rejects something that would in fact deploy.
+    """
+    if not _INSTANCE_DIR_RE.match(dir_slug):
+        raise ValueError(
+            f"Z údajov zákazníka vychádza názov priečinka {dir_slug!r}, ktorý sa pri nasadzovaní "
+            "nedá použiť. Povolené sú len malé písmená bez diakritiky, číslice a spojovník, "
+            "pričom prvý znak musí byť písmeno alebo číslica."
+        )
+
+
+def _instance_dir_slug(subdomain: Optional[str], slug: str) -> str:
+    """The instance DIRECTORY a customer resolves to — mirrors ``deploy._customer_dir_slug``.
+
+    Kept as a local one-liner rather than importing :mod:`backend.services.deploy`
+    (which pulls in the provisioner / runner) — the formula is one expression and
+    the mirroring is asserted by a test.
+    """
+    return (subdomain or slug).strip().lower()
+
+
+def _find_instance_dir_conflict(
+    db: Session,
+    project_id: UUID,
+    dir_slug: str,
+    *,
+    exclude_id: Optional[UUID] = None,
+) -> Optional[Customer]:
+    """Return the customer in ``project_id`` already occupying ``dir_slug``, if any.
+
+    The DB unique constraint covers ``(project_id, slug)`` only — but the deploy path
+    keys the instance directory, Traefik host and instance slug on
+    ``(subdomain or slug).lower()``. So two DIFFERENT slugs sharing one subdomain (or a
+    subdomain equal to another customer's slug) collide on ONE directory: the second
+    deploy silently lands on the first customer's instance. That is unrecoverable
+    through the UI and near-undiagnosable — refuse it at registration instead.
+
+    Scanned in Python rather than SQL: the comparison is over the DERIVED value
+    (``coalesce`` + ``lower``) and a project's customer list is small (single digits).
+    """
+    for other in list_customers(db, project_id):
+        if exclude_id is not None and other.id == exclude_id:
+            continue
+        if _instance_dir_slug(other.subdomain, other.slug) == dir_slug:
+            return other
+    return None
+
+
 def create(db: Session, project_id: UUID, data: CustomerCreate) -> Customer:
     """Register a new customer for ``project_id`` (design §3.2).
 
-    Validates the project exists and the ``(project_id, slug)`` pair is free.
+    Validates the project exists, the ``(project_id, slug)`` pair is free, and the
+    customer's derived instance directory ``(subdomain or slug)`` is not already
+    taken by another customer of the project.
     If ``data.secret`` is supplied, it is written to the credentials store and
     only the resulting ``credential_id`` is recorded — the secret value never
     touches a ``customers`` column (CLAUDE.md §4/§5, OQ-5).
 
     Raises:
-        ValueError: project not found, or a customer with the same slug already
-            exists in the project (router → 404 / 409).
+        ValueError: project not found, a customer with the same slug already
+            exists in the project, or another customer already resolves to the
+            same instance directory (router → 404 / 409).
     """
     if db.get(Project, project_id) is None:
         raise ValueError(f"Project {project_id} not found")
 
     if _get_by_project_and_slug(db, project_id, data.slug) is not None:
         raise ValueError(f"Customer with slug {data.slug!r} already exists in this project")
+
+    dir_slug = _instance_dir_slug(data.subdomain, data.slug)
+    conflict = _find_instance_dir_conflict(db, project_id, dir_slug)
+    if conflict is not None:
+        raise ValueError(
+            f"Customer {conflict.slug!r} already exists in this project with instance directory "
+            f"{dir_slug!r} — two customers cannot share one instance directory"
+        )
 
     credential_id: UUID | None = None
     if data.secret:
@@ -131,15 +197,42 @@ def update(db: Session, customer_id: UUID, data: CustomerUpdate) -> Customer:
     persisted on the row or echoed back.
 
     Raises:
-        ValueError: customer not found, or the new slug collides with another
-            customer in the same project (router → 404 / 409).
+        ValueError: customer not found, the new slug collides with another
+            customer in the same project, or the edit would make this customer
+            resolve to another customer's instance directory (router → 404 / 409).
     """
     customer = get_by_id(db, customer_id)
 
+    # Every conflict check runs BEFORE any mutation — a rejected edit must leave the
+    # in-session row untouched, not half-applied waiting on the router's rollback.
     if data.slug is not None and data.slug != customer.slug:
         existing = _get_by_project_and_slug(db, customer.project_id, data.slug)
         if existing is not None and existing.id != customer.id:
             raise ValueError(f"Customer with slug {data.slug!r} already exists in this project")
+
+    # ``None`` = field omitted from the PATCH → the stored value stays in force.
+    new_slug = data.slug if data.slug is not None else customer.slug
+    new_subdomain = data.subdomain if data.subdomain is not None else customer.subdomain
+    dir_slug = _instance_dir_slug(new_subdomain, new_slug)
+    # Only an edit that MOVES the customer to a different instance directory is checked. A row that
+    # already collides (registered before this guard existed) must stay editable — otherwise every save
+    # would be refused, including the subdomain change that would resolve the collision, and the person
+    # would be locked out of their own record with no way forward.
+    if dir_slug != _instance_dir_slug(customer.subdomain, customer.slug):
+        # The EFFECTIVE label is what deploy validates, so it is checked here rather than per field
+        # on the schema: a legacy row with slug ``icc.sk`` and subdomain ``icc`` resolves to ``icc``
+        # and deploys fine, and refusing its slug on the schema would block every unrelated edit.
+        # An edit that MOVES the customer must still land somewhere deploy can use — otherwise the
+        # mistake surfaces days later as a failed deploy, far from the form where it was made.
+        _assert_deploy_safe_instance_dir(dir_slug)
+        conflict = _find_instance_dir_conflict(db, customer.project_id, dir_slug, exclude_id=customer.id)
+        if conflict is not None:
+            raise ValueError(
+                f"Customer {conflict.slug!r} already exists in this project with instance directory "
+                f"{dir_slug!r} — two customers cannot share one instance directory"
+            )
+
+    if data.slug is not None:
         customer.slug = data.slug
 
     if data.name is not None:

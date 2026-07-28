@@ -31,7 +31,7 @@ from backend.db.models.pipeline import PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.services import deploy as deploy_service
-from backend.services import orchestrator
+from backend.services import orchestrator, uat_provisioner
 
 
 def _write_project(tmp_path, slug: str, *, env_example: dict, compose_backend_env: dict):
@@ -224,15 +224,17 @@ async def _ok_runner(**kwargs):
 
 
 class TestPostDeployLaunchProof:
-    """The deploy may only report GREEN once the instance is provably openable. A running instance nobody
-    can get into is exactly the unverified success this whole batch removes."""
+    """The launch proof mints a ticket exactly as "Spustiť" does. What it finds is a WIRING gap, not a
+    deploy failure — the app is built, up and serving — so it warns instead of failing (2026-07-28)."""
 
     def _wire(self, monkeypatch, wired: bool) -> None:
         monkeypatch.setattr(deploy_service, "uat_launch_wired", lambda *a, **k: wired)
 
-    async def test_unlaunchable_uat_is_recorded_as_FAILED_not_green(
+    async def test_unwired_launch_is_a_SUCCESSFUL_deploy_carrying_a_warning(
         self, db_session, projects_root, tmp_path, deploy_fixture, monkeypatch
     ):
+        """The pairing is missing, not the app. Recording ``failed`` here was a dead end of our own making:
+        it also barred Akceptovať (see the test below), and nothing in the cockpit creates the pairing."""
         customer, project = deploy_fixture(auth_mode="token")
         _write_project(
             tmp_path,
@@ -242,7 +244,7 @@ class TestPostDeployLaunchProof:
         )
         self._wire(monkeypatch, False)
 
-        event, url, _ = await deploy_service.deploy(
+        outcome = await deploy_service.deploy(
             db_session,
             customer.id,
             version_number="v0.1.0",
@@ -250,10 +252,76 @@ class TestPostDeployLaunchProof:
             actor_id=None,
             deploy_runner=_ok_runner,
         )
+        event, url, _ = outcome
 
-        assert event.status == "failed"  # the runner said OK; the launch proof overrides it
-        assert url is None  # no link to an instance that cannot be opened
-        assert "nedá sa otvoriť" in (event.detail or "")  # plain Slovak, states the cause
+        assert event.status == "ok"  # the app deployed and serves — that is what a deploy status reports
+        assert url is not None  # and the manager gets the link to it
+        assert outcome.warnings, "the missing pairing must be reported, not swallowed"
+        message = outcome.warnings[0]
+        assert "NEX Manager" in message  # names exactly what is missing
+        assert "nasaď" in message.lower()  # and what to do about it
+        assert message in (event.detail or "")  # persisted in the audit row too, not only in the response
+
+    async def test_a_warned_deploy_can_still_be_accepted_so_PROD_stays_reachable(
+        self, db_session, projects_root, tmp_path, deploy_fixture, monkeypatch
+    ):
+        """The whole point of the change. ``accept`` requires a SUCCESSFUL UAT deploy, and accepting is the
+        only thing that opens PROD — so recording the unwired deploy as failed locked the customer out of
+        PROD for good, from inside the cockpit, with no way to unstick it."""
+        customer, project = deploy_fixture(auth_mode="token")
+        _write_project(
+            tmp_path,
+            project.slug,
+            env_example={},
+            compose_backend_env={k: "" for k in deploy_service.LAUNCH_ENV_KEYS},
+        )
+        self._wire(monkeypatch, False)
+
+        await deploy_service.deploy(
+            db_session,
+            customer.id,
+            version_number="v0.1.0",
+            environment="uat",
+            actor_id=None,
+            deploy_runner=_ok_runner,
+        )
+        accepted = deploy_service.accept(db_session, customer.id, "v0.1.0", None)
+
+        assert accepted.event_type == "accept"
+        assert deploy_service.is_accepted(db_session, customer.id, "v0.1.0") is True
+
+    async def test_the_pairing_warning_is_reported_once_not_twice(
+        self, db_session, projects_root, tmp_path, deploy_fixture, monkeypatch
+    ):
+        """A real deploy sees the same gap twice — the provisioner renders an empty key, then the launch
+        proof cannot mint against it. The manager must read about it once."""
+        customer, project = deploy_fixture(auth_mode="token")
+        _write_project(
+            tmp_path,
+            project.slug,
+            env_example={},
+            compose_backend_env={k: "" for k in deploy_service.LAUNCH_ENV_KEYS},
+        )
+        self._wire(monkeypatch, False)
+        pairing_warning = uat_provisioner.launch_pairing_warning(deploy_service._customer_dir_slug(customer))
+
+        async def _runner_that_already_warned(**kwargs):
+            # Mirrors the real runner: the provisioner's warnings go into BOTH the detail and the list.
+            return deploy_service.RunnerResult(
+                True, f"OK (faked) | warnings: {pairing_warning}", "https://uat-x.isnex.eu", [pairing_warning]
+            )
+
+        outcome = await deploy_service.deploy(
+            db_session,
+            customer.id,
+            version_number="v0.1.0",
+            environment="uat",
+            actor_id=None,
+            deploy_runner=_runner_that_already_warned,
+        )
+
+        assert outcome.warnings.count(pairing_warning) == 1
+        assert (outcome[0].detail or "").count(pairing_warning) == 1
 
     async def test_launchable_uat_stays_green(self, db_session, projects_root, tmp_path, deploy_fixture, monkeypatch):
         customer, project = deploy_fixture(auth_mode="token")
@@ -332,3 +400,83 @@ class TestPostDeployLaunchProof:
         assert event.status == "failed"
         assert "provision failed" in (event.detail or "")
         assert url is None
+
+
+class TestWarningsChannel:
+    """``DeployResult.warnings`` has existed since the schema was written and nothing ever filled it, so the
+    provisioner's notes — an app with no frontend service, a DB driver that could not be verified, a missing
+    NEX Manager pairing — reached the manager only inside a ``detail`` string the screen shows on FAILURE. On
+    the successful deploys they are actually about, they were thrown away."""
+
+    async def test_provisioning_warnings_reach_the_caller(
+        self, db_session, projects_root, tmp_path, deploy_fixture, monkeypatch
+    ):
+        customer, project = deploy_fixture(auth_mode="password")
+        _write_project(tmp_path, project.slug, env_example={}, compose_backend_env={})
+
+        async def _warning_runner(**kwargs):
+            return deploy_service.RunnerResult(
+                True, "OK (faked)", "https://uat-x.isnex.eu", ["v appke nie je frontend — beží len /api"]
+            )
+
+        outcome = await deploy_service.deploy(
+            db_session,
+            customer.id,
+            version_number="v0.1.0",
+            environment="uat",
+            actor_id=None,
+            deploy_runner=_warning_runner,
+        )
+
+        assert outcome.warnings == ["v appke nie je frontend — beží len /api"]
+        assert outcome[0].status == "ok"  # a warning is a note about a success, never a failure
+
+    async def test_a_runner_returning_a_plain_triple_still_works(
+        self, db_session, projects_root, tmp_path, deploy_fixture
+    ):
+        """The runner seam stays a 3-tuple: every injected/faked runner in the suite returns one, and the
+        warnings ride along as an attribute rather than a fourth element nobody unpacks."""
+        customer, project = deploy_fixture(auth_mode="password")
+        _write_project(tmp_path, project.slug, env_example={}, compose_backend_env={})
+
+        outcome = await deploy_service.deploy(
+            db_session,
+            customer.id,
+            version_number="v0.1.0",
+            environment="uat",
+            actor_id=None,
+            deploy_runner=_ok_runner,
+        )
+        event, url, bumped_to = outcome  # the historic 3-way unpack, unchanged
+
+        assert outcome.warnings == []
+        assert (event.status, bool(url), bumped_to) == ("ok", True, None)
+
+    def test_the_default_runner_carries_the_provisioners_warnings(self, monkeypatch):
+        """The real runner's own seam: whatever ``provision_uat`` warned about comes back on the result AND
+        stays in the recorded detail (the audit row keeps its full story)."""
+        import asyncio
+
+        from backend.services import orchestrator as orch
+
+        class _Result:
+            warnings = ["chýba spárovaný NEX Manager"]
+            fe_service = "frontend"
+
+        async def _fake_up(*a, **k):
+            return True, "OK"
+
+        monkeypatch.setattr(uat_provisioner, "provision_uat", lambda *a, **k: _Result())
+        monkeypatch.setattr(orch, "_run_uat_deploy", _fake_up)
+
+        result = asyncio.run(
+            deploy_service._default_deploy_runner(
+                project_slug="nex-shopify", uat_slug="andros-uat", version_number="v0.1.0", force_fresh=False
+            )
+        )
+        ok, detail, url = result
+
+        assert ok is True
+        assert result.warnings == ["chýba spárovaný NEX Manager"]
+        assert "chýba spárovaný NEX Manager" in detail
+        assert url == "https://uat-andros-shopify.isnex.eu"

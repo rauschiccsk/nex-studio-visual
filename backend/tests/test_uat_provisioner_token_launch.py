@@ -11,9 +11,16 @@ the paired Manager's ``.env`` (a sibling under the same customer root). Test val
 
 from __future__ import annotations
 
+import textwrap
 from pathlib import Path
 
-from backend.services.uat_provisioner import generate_uat_env, read_paired_manager_launch
+from backend.services.uat_provisioner import (
+    generate_uat_env,
+    launch_pairing_warning,
+    provision_uat,
+    read_paired_manager_launch,
+    validate_rendered_launch_wiring,
+)
 
 # A token-launch app's declared env (as it appears in the source compose / .env.example).
 _TOKEN_LAUNCH_ENV = {
@@ -109,3 +116,93 @@ def test_redeploy_manager_key_wins_over_preserved(tmp_path: Path) -> None:
     )
     assert "MANAGER_LAUNCH_SIGNING_KEY=manager-shared-launch-key-FAKE" in env
     assert "stale-old-key" not in env
+
+
+# ── the missing pairing is a WARNING, never a failure (2026-07-28) ────────────
+#
+# Nothing in NEX Studio creates ``<root>/<customer>/nex-manager/.env`` — it appears only once NEX Manager
+# is itself deployed to that customer — so a customer's FIRST token-launch deploy renders the key empty.
+# The instance is nonetheless complete and serving, so the provisioner reports the gap and carries on.
+
+
+def test_unpaired_render_warns_and_names_the_remedy(tmp_path: Path) -> None:
+    env = _render(_TOKEN_LAUNCH_ENV, manager_env_path=tmp_path / "absent" / ".env")
+    warnings = validate_rendered_launch_wiring(env, customer_slug="andros")
+    assert warnings == [launch_pairing_warning("andros")]
+    message = warnings[0]
+    assert "andros" in message  # WHICH customer is unpaired
+    assert "NEX Manager" in message  # WHAT is missing
+    assert "nasaď" in message.lower()  # WHAT to do about it — an action, not a diagnosis
+
+
+def test_wired_render_produces_no_warning(tmp_path: Path) -> None:
+    env = _render(_TOKEN_LAUNCH_ENV, manager_env_path=_write_manager_env(tmp_path))
+    assert validate_rendered_launch_wiring(env, customer_slug="andros") == []
+
+
+def test_non_token_app_produces_no_launch_warning(tmp_path: Path) -> None:
+    """An app that never declares the launch key is not token-launch — warning about a pairing it does not
+    need would be noise on every ordinary password app."""
+    env = _render({"SOME_SECRET_KEY": "${SOME_SECRET_KEY:-}"}, manager_env_path=_write_manager_env(tmp_path))
+    assert validate_rendered_launch_wiring(env, customer_slug="andros") == []
+
+
+# ── provision_uat end-to-end: a first deploy to a new customer ───────────────
+
+_TOKEN_APP_COMPOSE = textwrap.dedent(
+    """
+    services:
+      db:
+        image: postgres:16-alpine
+      backend:
+        build: .
+        environment:
+          MANAGER_LAUNCH_SIGNING_KEY: ${MANAGER_LAUNCH_SIGNING_KEY:-}
+          MANAGER_MODULE_SLUG: ${MANAGER_MODULE_SLUG:-shopify}
+          MANAGER_DEPLOY_SLUG: ${MANAGER_DEPLOY_SLUG:-}
+      frontend:
+        build: ./frontend
+    """
+)
+
+
+def _provision_token_app(tmp_path: Path, *, paired: bool):
+    """Provision nex-shopify UAT for customer ``andros`` — with or without a paired NEX Manager deploy."""
+    project = tmp_path / "projects" / "nex-shopify"
+    project.mkdir(parents=True)
+    (project / "docker-compose.yml").write_text(_TOKEN_APP_COMPOSE, encoding="utf-8")
+    if paired:
+        manager_dir = tmp_path / "uat" / "andros" / "nex-manager"
+        manager_dir.mkdir(parents=True)
+        _write_manager_env(manager_dir)
+    return provision_uat(
+        "nex-shopify",
+        "andros-uat",
+        projects_root=tmp_path / "projects",
+        uat_root=tmp_path / "uat",
+        prod_root=tmp_path / "customers",
+        environment="uat",
+        customer_slug="andros",
+        app="shopify",
+        full_project_slug="nex-shopify",
+    )
+
+
+def test_first_deploy_to_an_unpaired_customer_provisions_AND_warns(tmp_path: Path) -> None:
+    """The provisioning itself SUCCEEDS — compose + .env are on disk — and the missing pairing comes back
+    as a warning. It must never become an exception: the caller records a failed deploy for a raise, and a
+    failed UAT deploy also blocks Akceptovať, i.e. PROD, for that customer."""
+    result = _provision_token_app(tmp_path, paired=False)
+
+    assert result.compose_path.is_file()
+    assert result.env_path.is_file()
+    assert launch_pairing_warning("andros") in result.warnings
+    # Rendered EMPTY (never a synthetic that would 401 every launch) — the evidence the warning is about.
+    assert "MANAGER_LAUNCH_SIGNING_KEY=\n" in result.env_path.read_text(encoding="utf-8")
+
+
+def test_first_deploy_to_a_paired_customer_warns_about_nothing(tmp_path: Path) -> None:
+    result = _provision_token_app(tmp_path, paired=True)
+
+    assert result.warnings == []
+    assert "MANAGER_LAUNCH_SIGNING_KEY=manager-shared-launch-key-FAKE" in result.env_path.read_text(encoding="utf-8")

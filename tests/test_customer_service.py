@@ -13,7 +13,10 @@ per the CR's safety invariants:
   form / code path as any external customer — one path, no internal branch
   (design §3.2);
 * slug uniqueness within a project; project-scoping; secret rotation; delete
-  also removes the stored secret.
+  also removes the stored secret;
+* **deploy-safe identifiers** — the form refuses exactly what the deploy path
+  refuses (``^[a-z0-9][a-z0-9-]*$`` on ``(subdomain or slug)``), and no two
+  customers of a project may resolve to ONE instance directory.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from pydantic import ValidationError
 
 from backend.config.settings import settings
 from backend.db.models.foundation import User
@@ -28,6 +32,8 @@ from backend.db.models.projects import Project
 from backend.schemas.customer import CustomerCreate, CustomerRead, CustomerUpdate
 from backend.services import credentials as credentials_service
 from backend.services import customer as service
+from backend.services import deploy as deploy_service
+from backend.services import uat_provisioner
 
 # ---------------------------------------------------------------------------
 # Isolation — every test in this module writes secrets to a throwaway store,
@@ -403,3 +409,218 @@ def test_http_duplicate_slug_409(client, db_session):
     client.post(f"/api/v1/projects/{project.slug}/customers", json={"name": "A", "slug": "dup"})
     resp = client.post(f"/api/v1/projects/{project.slug}/customers", json={"name": "B", "slug": "dup"})
     assert resp.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# Deploy-safe identifiers — the form refuses what the deploy path refuses
+#
+# Audit finding: ``slug`` / ``subdomain`` carried only length limits, while the deploy
+# path derives the instance directory from ``(subdomain or slug).lower()`` and runs it
+# through ``uat_provisioner.validate_uat_slug`` (``^[a-z0-9][a-z0-9-]*$``). A space / dot /
+# underscore was accepted at the form and only surfaced days later as a FAILED DEPLOY.
+# ---------------------------------------------------------------------------
+
+# Values the deploy path cannot use — each was accepted by the old form.
+_DEPLOY_HOSTILE = [
+    "andros s.r.o.",  # space
+    "andros.sk",  # dot
+    "andros_sk",  # underscore
+    "-andros",  # leading hyphen
+    "andros/uat",  # slash
+    "androš",  # diacritics
+    "   ",  # whitespace only → empty after trim
+    "@ndros",  # punctuation
+]
+
+
+@pytest.mark.parametrize("bad", _DEPLOY_HOSTILE)
+def test_create_schema_rejects_deploy_hostile_slug(bad):
+    with pytest.raises(ValidationError) as exc:
+        CustomerCreate(name="X", slug=bad)
+    # The message must TEACH the rule in Slovak, not just say "invalid".
+    message = str(exc.value)
+    assert "Skratka" in message
+    assert "malé písmená a-z" in message
+    assert "spojovník" in message
+
+
+@pytest.mark.parametrize("bad", [v for v in _DEPLOY_HOSTILE if v.strip()])
+def test_create_schema_rejects_deploy_hostile_subdomain(bad):
+    with pytest.raises(ValidationError) as exc:
+        CustomerCreate(name="X", slug="ok", subdomain=bad)
+    assert "Subdoména" in str(exc.value)
+
+
+@pytest.mark.parametrize("bad", _DEPLOY_HOSTILE)
+def test_update_schema_accepts_a_slug_the_effective_label_can_still_survive(bad):
+    """The PATCH shape is deliberately LENIENT on ``slug`` — the service checks the real thing.
+
+    Deploy validates the DERIVED label ``(subdomain or slug)``, not the two fields separately. A
+    customer registered before the rule — slug ``icc.sk`` with subdomain ``icc`` — resolves to
+    ``icc`` and deploys perfectly well, and the edit form resends the stored slug on every save. A
+    per-field rejection here would therefore block every unrelated edit (fixing a typo in the name)
+    on a row that is not broken. The guard that matters lives in ``customer_service.update``, which
+    knows both values after the merge — see the test below.
+    """
+    assert CustomerUpdate(slug=bad).slug == bad.strip().lower()
+
+
+def test_update_service_refuses_an_edit_that_moves_the_customer_to_an_unusable_directory(db_session):
+    """...and that is where the real guard is: the EFFECTIVE label must stay deploy-safe."""
+    project = _make_project(db_session)
+    customer = service.create(
+        db_session,
+        project.id,
+        CustomerCreate(name="ANDROS", slug="andros", subdomain=None),
+    )
+    with pytest.raises(ValueError, match="nedá použiť"):
+        service.update(db_session, customer.id, CustomerUpdate(slug="andros.sk"))
+
+
+def test_schema_normalizes_to_the_value_the_deploy_path_will_use():
+    """Stored value == deploy-derived value: trimmed + lowercased, so the two cannot drift."""
+    payload = CustomerCreate(name="ANDROS", slug="  ANDROS-SK  ", subdomain="  Andros  ")
+    assert payload.slug == "andros-sk"
+    assert payload.subdomain == "andros"
+
+
+def test_schema_blank_subdomain_becomes_none_not_an_empty_instance_dir():
+    """A whitespace-only subdomain is truthy in ``(subdomain or slug)`` → it would reach the deploy
+    path as an EMPTY instance directory. It must normalise to None (= fall back to the slug)."""
+    assert CustomerCreate(name="X", slug="x", subdomain="   ").subdomain is None
+    assert CustomerCreate(name="X", slug="x", subdomain="").subdomain is None
+    assert CustomerUpdate(subdomain="  ").subdomain is None
+
+
+@pytest.mark.parametrize("good", ["icc", "andros", "andros-sk", "a1", "9lives", "x-y-z"])
+def test_schema_accepts_what_the_deploy_path_accepts(good):
+    """Whatever the form accepts, ``validate_uat_slug`` must accept — that is the whole point.
+
+    Asserted against the REAL validator (not a copy of the pattern), so a future change to
+    the deploy rule that this schema does not follow fails here.
+    """
+    payload = CustomerCreate(name="X", slug=good, subdomain=good)
+    uat_provisioner.validate_uat_slug(payload.slug)
+    uat_provisioner.validate_uat_slug(payload.subdomain)
+    # …and the directory the deploy path derives from the stored row is likewise valid.
+    uat_provisioner.validate_uat_slug(deploy_service._customer_dir_slug(payload))
+
+
+def test_every_accepted_slug_survives_the_deploy_validator(db_session):
+    """End-to-end on a PERSISTED row: what the registry stores, the deploy path can use."""
+    project = _make_project(db_session)
+    customer = service.create(
+        db_session,
+        project.id,
+        CustomerCreate(name="ANDROS", slug=" ANDROS ", subdomain=" ANDROS-UAT "),
+    )
+    uat_provisioner.validate_uat_slug(deploy_service._customer_dir_slug(customer))
+    assert customer.slug == "andros"
+    assert customer.subdomain == "andros-uat"
+
+
+# ---------------------------------------------------------------------------
+# Instance-directory collisions — two customers, one directory
+# ---------------------------------------------------------------------------
+
+
+def test_create_duplicate_subdomain_in_project_rejected(db_session):
+    """Two customers sharing a subdomain resolve to ONE instance directory — refuse at registration."""
+    project = _make_project(db_session)
+    service.create(db_session, project.id, CustomerCreate(name="A", slug="a", subdomain="shared"))
+    with pytest.raises(ValueError, match="already exists"):  # 'already exists' ⇒ router maps to 409
+        service.create(db_session, project.id, CustomerCreate(name="B", slug="b", subdomain="shared"))
+
+
+def test_create_subdomain_colliding_with_another_slug_rejected(db_session):
+    """The collision unit is the DERIVED directory: a subdomain equal to another customer's slug
+    (which has no subdomain of its own) lands both on ``/opt/customers/alpha``."""
+    project = _make_project(db_session)
+    service.create(db_session, project.id, CustomerCreate(name="A", slug="alpha"))
+    with pytest.raises(ValueError, match="already exists"):
+        service.create(db_session, project.id, CustomerCreate(name="B", slug="beta", subdomain="alpha"))
+
+
+def test_same_subdomain_allowed_across_projects(db_session):
+    """The registry is project-scoped — two projects may each have an 'icc' customer."""
+    p1 = _make_project(db_session)
+    p2 = _make_project(db_session)
+    c1 = service.create(db_session, p1.id, CustomerCreate(name="A", slug="a1", subdomain="icc"))
+    c2 = service.create(db_session, p2.id, CustomerCreate(name="A", slug="a2", subdomain="icc"))
+    assert c1.id != c2.id
+
+
+def test_update_subdomain_collision_rejected_and_row_untouched(db_session):
+    """A rejected edit must leave the row EXACTLY as it was — not half-applied."""
+    project = _make_project(db_session)
+    service.create(db_session, project.id, CustomerCreate(name="A", slug="a", subdomain="taken"))
+    other = service.create(db_session, project.id, CustomerCreate(name="B", slug="b", subdomain="free"))
+
+    with pytest.raises(ValueError, match="already exists"):
+        service.update(db_session, other.id, CustomerUpdate(slug="b2", subdomain="taken", name="B2"))
+
+    assert other.slug == "b"  # the slug assignment must NOT have run before the conflict check
+    assert other.subdomain == "free"
+    assert other.name == "B"
+
+
+def test_pre_existing_collision_does_not_lock_the_customer_out_of_editing(db_session):
+    """A row registered BEFORE this guard existed may already collide. It must stay editable —
+    refusing every save would trap the person in a record they cannot fix, and the escape (changing
+    the subdomain) is itself a save. Only an edit that MOVES the customer is checked."""
+    from backend.db.models.customers import Customer
+
+    project = _make_project(db_session)
+    # Two colliding rows inserted straight through the model — the state the old form could produce.
+    db_session.add(Customer(project_id=project.id, name="A", slug="a", subdomain="dup"))
+    stuck = Customer(project_id=project.id, name="B", slug="b", subdomain="dup")
+    db_session.add(stuck)
+    db_session.flush()
+
+    # An unrelated edit still goes through (the directory is not changing).
+    renamed = service.update(db_session, stuck.id, CustomerUpdate(name="B s.r.o."))
+    assert renamed.name == "B s.r.o."
+
+    # …and the way OUT — moving to a free directory — works.
+    fixed = service.update(db_session, stuck.id, CustomerUpdate(subdomain="b-uat"))
+    assert fixed.subdomain == "b-uat"
+
+
+def test_update_keeping_own_subdomain_is_not_a_collision(db_session):
+    """Editing a customer without changing its subdomain must not collide with ITSELF."""
+    project = _make_project(db_session)
+    customer = service.create(db_session, project.id, CustomerCreate(name="A", slug="a", subdomain="andros"))
+    updated = service.update(db_session, customer.id, CustomerUpdate(name="A2", subdomain="andros"))
+    assert updated.name == "A2"
+    assert updated.subdomain == "andros"
+
+
+def test_http_deploy_hostile_slug_422_with_slovak_reason(client, db_session):
+    """Over HTTP the refusal arrives as 422 carrying the Slovak rule — the FE can show it verbatim."""
+    _auth_ri(client)
+    project = _make_project(db_session)
+    db_session.commit()
+    resp = client.post(
+        f"/api/v1/projects/{project.slug}/customers",
+        json={"name": "ANDROS", "slug": "andros s.r.o."},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "malé písmená a-z" in resp.text
+
+
+def test_http_duplicate_subdomain_409(client, db_session):
+    _auth_ri(client)
+    project = _make_project(db_session)
+    db_session.commit()
+    first = client.post(
+        f"/api/v1/projects/{project.slug}/customers",
+        json={"name": "A", "slug": "a", "subdomain": "shared"},
+    )
+    assert first.status_code == 201, first.text
+    resp = client.post(
+        f"/api/v1/projects/{project.slug}/customers",
+        json={"name": "B", "slug": "b", "subdomain": "shared"},
+    )
+    assert resp.status_code == 409, resp.text
+    # The detail names the real cause so the FE can offer the right fix (change the subdomain).
+    assert "instance directory" in resp.json()["detail"]

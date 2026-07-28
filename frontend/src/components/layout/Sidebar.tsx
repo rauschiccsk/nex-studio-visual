@@ -77,7 +77,13 @@ export default function Sidebar() {
 
   // Sidebar-level pipeline WS on the pinned version (F-007 §7). Doubles as the
   // §9 Manažér-presence signal; drives the cockpit "awaiting" attention dot.
-  const { board: pipelineBoard } = usePipelineWs(selectedVersion?.versionId ?? null);
+  // `accessDenied` = the pinned project's pipeline is owner-or-ri and this user is
+  // neither (the project LIST is wider than the pipeline gate, so a Medior CAN pin
+  // a project he may not drive) — the Riadiace centrum entry then says so instead
+  // of opening a screen that can only show an empty board.
+  const { board: pipelineBoard, accessDenied: pipelineAccessDenied } = usePipelineWs(
+    selectedVersion?.versionId ?? null,
+  );
   const cockpitAwaiting = pipelineBoard?.state?.status === "awaiting_manazer";
 
   const isActive = (path: string) =>
@@ -220,9 +226,15 @@ export default function Sidebar() {
         label="Riadiace centrum"
         active={hasProject ? isActive("/riadiace-centrum") : false}
         onClick={() => navigate(hasProject ? "/riadiace-centrum" : projectsFallback)}
-        disabled={!hasProject}
-        disabledTitle="Vyber projekt pre prístup k Riadiacemu centru"
-        badge={hasProject && cockpitAwaiting}
+        // Disabled WITH A REASON (never silently, never hidden — the deploy-matrix treatment) when the
+        // pinned project's pipeline refuses this user: the screen behind it could only show an empty board.
+        disabled={!hasProject || pipelineAccessDenied}
+        disabledTitle={
+          pipelineAccessDenied
+            ? "Nemáš prístup k tomuto projektu — Riadiace centrum môže otvoriť jeho vlastník alebo Manažér. V Projektoch si pripni vlastný projekt."
+            : "Vyber projekt pre prístup k Riadiacemu centru"
+        }
+        badge={hasProject && !pipelineAccessDenied && cockpitAwaiting}
         badgeLabel="čaká na Manažéra"
       />
       {/* CR-1 (nex-studio-visual): the Vizuál surface — the live app preview (monitor 2), shown while the AI
