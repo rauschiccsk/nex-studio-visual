@@ -158,7 +158,8 @@ Výnimka: ak Zoltán v tom istom promte explicitne povie "oprav" alebo "implemen
    - Týka sa aj `/api/v1/credentials/*` endpointov (vyžadujú JWT `ri`)
 
 6. **NEVER read NEX Studio credentials store priamo**
-   - `/opt/data/nex-studio/credentials/**` je gated cez REST API `/api/v1/credentials` s JWT `ri` — priamy Read by obišiel API governance
+   - `/opt/data/nex-studio-visual/credentials/**` — trezor TEJTO inštancie (`settings.credentials_storage_path`). Je gated cez REST API `/api/v1/credentials` s JWT `ri`; priamy Read by obišiel API governance
+   - `/opt/data/nex-studio/credentials/**` — trezor v3 inštancie, platí to isté
    - Legacy `/home/icc/knowledge/credentials/` tiež nikdy čítať
 
 ### ALLOWED actions:

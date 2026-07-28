@@ -29,6 +29,8 @@ import { useActiveContextStore } from "@/store/activeContextStore";
 import { getProjectSpecContent, listProjectSpecs, type ProjectSpecDoc } from "@/services/api/projectSpecs";
 import { getPipelineBoardApi } from "@/services/api/pipeline";
 import { SpecMarkdown } from "@/components/markdown/SpecMarkdown";
+import ErrorNote from "@/components/common/ErrorNote";
+import { humanizeApiError, type HumanError } from "@/services/apiError";
 
 // Friendly Slovak names for the known spec documents (fallback = the filename without .md).
 const DOC_LABELS: Record<string, string> = {
@@ -126,6 +128,8 @@ export default function SpecifikaciaPage() {
 
   const [docs, setDocs] = useState<ProjectSpecDoc[]>([]);
   const [docsLoading, setDocsLoading] = useState(false);
+  const [docsError, setDocsError] = useState<HumanError | null>(null);
+  const [bodyError, setBodyError] = useState<HumanError | null>(null);
   const [activePath, setActivePath] = useState<string | null>(null);
   // Version-bound documents the project has on disk, regardless of what is pinned (see countVersionBoundDocs).
   const [versionBoundCount, setVersionBoundCount] = useState(0);
@@ -163,8 +167,10 @@ export default function SpecifikaciaPage() {
         const def = specDocs.find((d) => d.filename === "specification.md") ?? filtered[0];
         setActivePath(def ? repoPath(def, slug) : null);
       })
-      .catch(() => {
-        /* unreachable / none → honest "nothing agreed yet" empty state */
+      .catch((err: unknown) => {
+        // "Nothing agreed yet" and "the list could not be loaded" are different facts, and this used
+        // to render the first for both — telling the Manager his agreed specification does not exist.
+        if (!cancelled) setDocsError(humanizeApiError(err, "Dokumenty sa nepodarilo načítať"));
       })
       .finally(() => {
         if (!cancelled) setDocsLoading(false);
@@ -178,14 +184,15 @@ export default function SpecifikaciaPage() {
   useEffect(() => {
     let cancelled = false;
     setBody(null);
+    setBodyError(null);
     if (!slug || !activePath) return;
     setContentLoading(true);
     getProjectSpecContent(slug, activePath)
       .then((res) => {
         if (!cancelled && res.is_text) setBody(res.content);
       })
-      .catch(() => {
-        /* unreadable → fall through to the empty note */
+      .catch((err: unknown) => {
+        if (!cancelled) setBodyError(humanizeApiError(err, "Dokument sa nepodarilo otvoriť"));
       })
       .finally(() => {
         if (!cancelled) setContentLoading(false);
@@ -336,6 +343,13 @@ export default function SpecifikaciaPage() {
         <div className="flex flex-1 items-center justify-center p-6 text-center">
           <p className="text-xs text-[var(--color-text-muted)]">Načítavam…</p>
         </div>
+      ) : bodyError ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+          <ErrorNote error={bodyError} />
+          <p className="max-w-md text-xs text-[var(--color-text-muted)]">
+            Dokument existuje — len sa ho nepodarilo otvoriť.
+          </p>
+        </div>
       ) : body !== null ? (
         body.trim() ? (
           <div className="flex-1 overflow-y-auto">
@@ -358,6 +372,13 @@ export default function SpecifikaciaPage() {
           >
             → Otvor projekt a vyber verziu
           </button>
+        </div>
+      ) : docsError ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+          <ErrorNote error={docsError} />
+          <p className="max-w-md text-xs text-[var(--color-text-muted)]">
+            Toto neznamená, že dokumenty neexistujú — nepodarilo sa ich načítať.
+          </p>
         </div>
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center">

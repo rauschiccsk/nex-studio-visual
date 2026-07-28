@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { listProjectsApi } from "@/services/api/projects";
 import type { ProjectRead } from "@/types";
+import ErrorNote from "@/components/common/ErrorNote";
+import { humanizeApiError, type HumanError } from "@/services/apiError";
 
 const SLUG_COLORS = [
   "bg-primary-600/20 border-primary-600/30 text-primary-700 dark:text-primary-400",
@@ -65,12 +67,16 @@ export default function DashboardPage() {
   const navigate = useNavigate();
   const [projects, setProjects] = useState<ProjectRead[]>([]);
   const [loading, setLoading] = useState(true);
+  // A failed load is NOT an empty list. The catch was `() => {}`, so an unreachable backend, an
+  // expired session or a 500 all rendered "Žiadne projekty — Vytvor prvý projekt" on the landing
+  // page: the cockpit telling the Manager his projects do not exist.
+  const [loadError, setLoadError] = useState<HumanError | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     listProjectsApi({ limit: 6, status: "active" })
-      .then((res) => { if (!cancelled) setProjects(res.items); })
-      .catch(() => {})
+      .then((res) => { if (!cancelled) { setProjects(res.items); setLoadError(null); } })
+      .catch((err: unknown) => { if (!cancelled) setLoadError(humanizeApiError(err, "Projekty sa nepodarilo načítať")); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
@@ -96,6 +102,13 @@ export default function DashboardPage() {
 
         {loading ? (
           <div className="flex justify-center py-10 text-[var(--color-text-muted)] text-sm">Načítavam…</div>
+        ) : loadError ? (
+          <div className="rounded-xl border border-dashed border-[var(--color-border-default)] p-10 text-center">
+            <ErrorNote error={loadError} />
+            <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+              Toto neznamená, že projekty neexistujú — nepodarilo sa ich načítať.
+            </p>
+          </div>
         ) : projects.length === 0 ? (
           <div className="rounded-xl border border-dashed border-[var(--color-border-default)] p-10 text-center">
             <div className="w-10 h-10 rounded-xl bg-[var(--color-surface)] flex items-center justify-center mx-auto mb-3">

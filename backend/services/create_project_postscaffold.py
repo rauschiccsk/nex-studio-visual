@@ -891,19 +891,28 @@ def _enable_branch_protection(repo_url: str, slug: str, *, github_org: str | Non
     # Minimal protection: require PR review + no force push.
     api_path = f"repos/{repo_full_name}/branches/main/protection"
     # See https://docs.github.com/en/rest/branches/branch-protection#update-branch-protection
+    #
+    # EVERY field here is -F, not -f, and the difference decided whether this call worked at all.
+    # `gh api -f` sends a raw STRING; `-F` applies type conversion, so true/false/null and integers
+    # arrive as JSON types. GitHub requires `required_status_checks` and `restrictions` to be an
+    # object-or-null and the review count to be an integer — they were sent as the strings "null",
+    # "null" and "1", so the PUT was rejected 422 EVERY time. The caller is best-effort and only
+    # logged a warning, so the create still answered 201 while the box the Manager ticked did nothing
+    # and `main` stayed open to force-push on every new repository. Reproduced against the real gh
+    # binary (2.87.2 on the host, 2.96.0 in this image): both emitted the malformed body verbatim.
     args = [
         "gh",
         "api",
         "--method",
         "PUT",
         api_path,
-        "-f",
+        "-F",
         "required_status_checks=null",
         "-F",
         "enforce_admins=false",
-        "-f",
+        "-F",
         "required_pull_request_reviews[required_approving_review_count]=1",
-        "-f",
+        "-F",
         "restrictions=null",
         "-F",
         "allow_force_pushes=false",

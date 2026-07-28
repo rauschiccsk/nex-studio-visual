@@ -8,8 +8,10 @@ Project management and AI delegation platform.
 # Start all services
 docker compose up -d
 
-# Backend:  http://localhost:9176
-# Frontend: http://localhost:9177
+# From the HOST, reach it on the PUBLISHED ports — 9176/9177 are what the containers listen on
+# INTERNALLY and nothing on the host answers there:
+# Backend:  http://localhost:9216
+# Frontend: http://localhost:9217
 ```
 
 ## Prerequisites
@@ -22,11 +24,15 @@ docker compose up -d
 
 ## Architecture
 
-| Service  | Port | Description                    |
-|----------|------|--------------------------------|
-| Backend  | 9176 | FastAPI REST API               |
-| Frontend | 9177 | React SPA (Vite)               |
-| Database | 9178 | PostgreSQL 16 (mapped from 5432) |
+Two numbers per service, and confusing them is why this table was wrong: the container LISTENS on one
+port and the host PUBLISHES it on another. Use the host column; the container column matters only when
+you are inside the network (a healthcheck, a sibling container).
+
+| Service  | Host | In container | Description                      |
+|----------|------|--------------|----------------------------------|
+| Backend  | 9216 | 9176         | FastAPI REST API                 |
+| Frontend | 9217 | 9177         | React SPA (nginx, prod build)    |
+| Database | 9218 | 5432         | PostgreSQL 16                    |
 
 ## Architect AI Configuration
 
@@ -66,7 +72,7 @@ For a detailed step-by-step guide, see [docs/ARCHITECT_SETUP.md](docs/ARCHITECT_
 ### Backend (Poetry)
 
 ```bash
-cd /opt/nex-studio-src
+cd /opt/projects/nex-studio-visual
 poetry install --no-interaction
 poetry run pytest
 ```

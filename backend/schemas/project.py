@@ -15,11 +15,12 @@ narrowest faithful representation — consistent with the approach used in
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Mirrors the CHECK constraint `type IN ('standard', 'web')` on the
 # ``projects`` table — the project archetype (preset surface composition).
@@ -126,6 +127,11 @@ class GitHubRepoNotFoundError(BaseModel):
     repo_url: str = Field(description="The repository URL that was not found.")
 
 
+#: The scaffolder's own slug rule (``init.sh``: ``^[a-z][a-z0-9-]*[a-z0-9]$``), mirrored so the
+#: cockpit refuses a name it would reject — before a GitHub repo exists to clean up.
+_SLUG_RE = re.compile(r"^[a-z][a-z0-9-]*[a-z0-9]$")
+
+
 class ProjectCreate(BaseModel):
     """Payload for creating a new project.
 
@@ -145,8 +151,12 @@ class ProjectCreate(BaseModel):
         ...,
         min_length=1,
         max_length=100,
-        description="URL-safe identifier, unique across the system.",
+        description=(
+            "URL-safe identifier, unique across the system. Kebab-case, mirroring the scaffolder's own "
+            "rule (^[a-z][a-z0-9-]*[a-z0-9]$) so a name it would reject never reaches it."
+        ),
     )
+
     type: ProjectType = Field(
         ...,
         description="Project archetype (surface composition): standard | web.",
@@ -232,6 +242,25 @@ class ProjectCreate(BaseModel):
             "no force push). Default False per spec O-3 + Dedo approval."
         ),
     )
+
+    @field_validator("slug")
+    @classmethod
+    def _slug_must_match_the_scaffolder(cls, value: str) -> str:
+        """Reject here what ``init.sh`` would reject later, in Slovak, before anything is created.
+
+        The scaffolder enforces ``^[a-z][a-z0-9-]*[a-z0-9]$`` and exits 1 on anything else. This field
+        accepted any string of 1..100 characters, so a name like ``Demo`` or ``my_project`` sailed
+        through validation, the GitHub REPOSITORY WAS ALREADY CREATED, and the create then died in
+        Stage 3 with a raw English regex — leaving a repo behind and no project. Same rule, stated at
+        the only point where refusing it is free.
+        """
+        if not _SLUG_RE.match(value):
+            raise ValueError(
+                "Skratka projektu smie obsahovať len malé písmená bez diakritiky, číslice a spojovník. "
+                "Musí sa začínať písmenom, končiť písmenom alebo číslicou a mať aspoň dva znaky "
+                "(napríklad „nex-inbox“)."
+            )
+        return value
 
 
 class ProjectUpdate(BaseModel):

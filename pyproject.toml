@@ -16,6 +16,12 @@ alembic = "^1.14"
 pydantic = "^2.10"
 pydantic-settings = "^2.7"
 python-jose = {version = "^3.3", extras = ["cryptography"]}
+# bcrypt is the module auth ACTUALLY imports (backend/services/auth.py, user.py). It is here only as
+# passlib's extra, so "remove the unused passlib" would silently take bcrypt with it and break every
+# login. Declared directly, so the dependency that matters stands on its own name.
+bcrypt = "^5.0"
+# passlib itself: no module imports it (grep: zero hits outside this file). Kept ONLY because dropping
+# it is a lockfile change with a login-shaped blast radius, and this is not the commit for that.
 passlib = {version = "^1.7", extras = ["bcrypt"]}
 python-multipart = "^0.0.20"
 httpx = "^0.28.1"

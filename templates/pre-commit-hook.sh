@@ -41,6 +41,18 @@ if [[ "${NEEDS_FRONTEND}" == "1" && -f frontend/package.json ]]; then
     echo "pre-commit: frontend — type-check"
     ( cd frontend && npm run type-check ) \
         || { echo "❌ frontend type-check FAILED"; exit 1; }
+    # ESLint runs here because the CI this hook exists to MIRROR makes `npm run lint` a hard gate
+    # (templates/github-actions-workflow.yml). Without it the hook announced "Lint checks passed"
+    # having run no linter at all, and the developer first heard about it from a red CI minutes later
+    # — the precise failure this hook is for. Skipped, with a reason, when the project defines no
+    # `lint` script: silence would be the same lie in the other direction.
+    if ( cd frontend && node -e "process.exit(require('./package.json').scripts?.lint ? 0 : 1)" ) 2>/dev/null; then
+        echo "pre-commit: frontend — eslint"
+        ( cd frontend && npm run lint ) \
+            || { echo "❌ frontend eslint FAILED — CI gates on this too"; exit 1; }
+    else
+        echo "pre-commit: frontend — eslint SKIPPED (no 'lint' script in frontend/package.json)"
+    fi
 fi
 
-echo "pre-commit: ✓ Lint checks passed"
+echo "pre-commit: ✓ all checks passed"
