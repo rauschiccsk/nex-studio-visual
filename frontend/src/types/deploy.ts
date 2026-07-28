@@ -124,6 +124,14 @@ export interface DeployMatrix {
    * disable "Akceptovať" WITH a reason instead of letting it look live and then 403.
    */
   can_accept: boolean;
+  /**
+   * Whether this user may deploy to PROD. Same ri-only Director gate as acceptance, while UAT deploy is
+   * open to the project owner — so the PROD "Nasadiť" needs its own flag rather than a page-level role
+   * check, or it looks live to a Junior/Medior and then 403s on click.
+   */
+  can_deploy_prod: boolean;
+  /** First deploy gate — owner-or-ri, applies to BOTH environments. */
+  can_deploy: boolean;
   rows: DeployMatrixRow[];
 }
 

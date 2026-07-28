@@ -70,9 +70,11 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.core.security import require_ha_or_above
+from backend.db.models.foundation import User
 from backend.db.session import get_db
 from backend.schemas.pagination import PaginatedResponse
 from backend.schemas.user_session import (
@@ -124,6 +126,11 @@ def list_user_sessions(
     Results are ordered by ``created_at DESC`` so the most recently
     opened sessions appear first — matching the "Active sessions" UI
     convention on the settings page.
+
+    Each row carries the owner's ``username``. This endpoint is ``ha``+, but the user directory
+    (``GET /users``) is ``ri``-only, so the Relácie tab could not resolve the ids on its own: a Medior
+    saw a column of raw UUIDs next to a per-row "Odvolať" and had to decide whether to cut a session
+    without knowing whose it was. One extra query for the page's user ids, not a join per row.
     """
     try:
         rows = user_session_service.list_user_sessions(
@@ -139,8 +146,22 @@ def list_user_sessions(
     except ValueError as exc:
         raise _map_value_error(exc) from exc
 
+    owner_ids = {row.user_id for row in rows}
+    usernames: dict[UUID, str] = (
+        {uid: name for uid, name in db.execute(select(User.id, User.username).where(User.id.in_(owner_ids))).all()}
+        if owner_ids
+        else {}
+    )
+
+    items = []
+    for row in rows:
+        item = UserSessionRead.model_validate(row)
+        # None when the owner row is gone — the panel then falls back to the id rather than inventing a name.
+        item.username = usernames.get(row.user_id)
+        items.append(item)
+
     return PaginatedResponse[UserSessionRead](
-        items=[UserSessionRead.model_validate(row) for row in rows],
+        items=items,
         total=total,
         skip=skip,
         limit=limit,

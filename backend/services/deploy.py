@@ -522,6 +522,8 @@ def build_matrix(db: Session, project: Project, user: Optional[object] = None) -
         whether this user may re-verify it (:func:`deployability`), so the screen explains a closed
         Nasadiť instead of just greying it out.
       * ``can_accept`` — whether this user may record a UAT acceptance at all (the ri-only PROD gate).
+      * ``can_deploy_prod`` — whether this user may deploy to PROD at all (the ri-only deploy gate; UAT
+        deploy stays open to the project owner).
       * ``rows`` — per customer: the currently-deployed UAT and PROD versions plus
         the versions accepted-for-PROD (so the PROD tab can disable Nasadiť until
         that (version, customer) is accepted — the never-bypassed gate).
@@ -570,6 +572,21 @@ def build_matrix(db: Session, project: Project, user: Optional[object] = None) -
         # may deploy their own UAT). Surfaced so the button is disabled with a reason rather than looking
         # live and 403-ing — an owner-Junior saw it enabled on their own project.
         "can_accept": getattr(user, "role", None) == "ri",
+        # Mirrors the deploy route's PROD role gate (``payload.environment == 'prod' and role != 'ri'`` →
+        # 403). Same defect and same treatment as ``can_accept`` above: a Junior owner / a Medior saw a
+        # live-looking "Nasadiť" on the PROD tab, waited through the click, and got a 403 — while UAT
+        # deploy IS open to them (D3), so the button cannot simply be hidden by role for the whole page.
+        "can_deploy_prod": getattr(user, "role", None) == "ri",
+        # The deploy route has TWO gates and the PROD one above is only the second. The FIRST is
+        # ``assert_customer_access(..., ri_only=True)`` = owner-OR-ri, which refuses a Medior who does
+        # not own the project — for BOTH environments. The matrix GET uses the laxer owner-or-ha read,
+        # so such a Medior LOADS the page and then sees a live-looking "Nasadiť" on the UAT tab that
+        # 403s: the exact defect fixed for PROD, surviving one tab over. Surfaced so the button can be
+        # disabled with a reason there too.
+        "can_deploy": (
+            getattr(user, "role", None) == "ri"
+            or (user is not None and getattr(user, "id", None) == project.created_by)
+        ),
         # v4.0.54: WHY the Nasadiť button is closed, so the screen never greys out in silence. Computed from
         # the SAME verified list (no second recompute) — see :func:`deployability`.
         "deployability": deployability(db, project, verified_versions=verified, user=user),

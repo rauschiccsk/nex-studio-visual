@@ -6,7 +6,9 @@ continue") with tasks STILL remaining. The state-only ``determine_available_acti
 FINISHES a half-built version (a footgun). These pin the board finalizer that gates ``schvalit`` vs
 ``pokracovat`` on the DB-derived tasks-remaining signal:
 
-  * **Tasks remain** — the board offers ``pokracovat`` (resume the build loop) and NOT ``schvalit``.
+  * **Tasks remain** — the board offers ``pokracovat`` (resume the build loop) and NOT ``schvalit``. This
+    includes the case where NO task is ``todo`` but the last one is ``failed`` / stuck ``in_progress``:
+    "no todo remains" is not "the build finished", and the signal used to be blind to it.
   * **All tasks done** — the board offers ``schvalit`` (advance to Verifikácia) and NOT ``pokracovat``.
   * **Resume** — ``apply_action("pokracovat")`` RESUMES the per-task build loop from an
     ``awaiting_manazer``-with-todo state (not only from ``paused``).
@@ -147,6 +149,35 @@ def test_board_offers_schvalit_not_pokracovat_when_all_tasks_done(db_session) ->
     assert "schvalit" in board.available_actions  # advance to Verifikácia, as today
     assert "pokracovat" not in board.available_actions  # nothing left to resume
     assert "uprav" in board.available_actions
+
+
+# ---------------------------------------------------------------------------
+# (ii-b) The LAST task is unfinished (in_progress / failed) → still "work remains"
+# ---------------------------------------------------------------------------
+#
+# ``get_next_todo_task`` — the probe ``all_tasks_done`` was built on — skips ``failed`` and
+# ``in_progress`` rows. So a timeout (or a backend restart) on the FINAL task left no ``todo``
+# behind and the board read "all done": it hid "Pokračovať v stavbe" and offered "Schváliť", which
+# advances Programovanie → Verifikácia with no open-findings guard of its own. One click FINISHED a
+# version whose last task never landed. These two pin the honest signal.
+
+
+@pytest.mark.parametrize("unfinished_status", ["in_progress", "failed"])
+def test_board_offers_pokracovat_when_the_last_task_is_unfinished(db_session, unfinished_status: str) -> None:
+    creator = _seed_user(db_session)
+    project = _seed_project(db_session, creator=creator)
+    version = _seed_version(db_session, project)
+    _seed_programovanie_state(db_session, version)
+    # No task is ``todo`` — the plan's last task is stuck / failed, which is NOT "the build finished".
+    _seed_task(db_session, version, number=1, status="done")
+    _seed_task(db_session, version, number=2, status=unfinished_status)
+
+    board = _board(db_session, version.id)
+
+    assert board.all_tasks_done is False
+    assert board.build_open_findings == 1
+    assert "pokracovat" in board.available_actions  # resume (which resets failed → todo)
+    assert "schvalit" not in board.available_actions  # never finish over an unfinished task
 
 
 # ---------------------------------------------------------------------------

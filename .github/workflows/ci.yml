@@ -105,9 +105,27 @@ jobs:
         working-directory: frontend
         run: npm install
 
+      # Was `npx tsc -b --noEmit 2>/dev/null || npx tsc -b`: a "try, then try again" shape that hid
+      # the first run's stderr and re-ran the compiler in emit mode. It could still fail (the
+      # fallback propagates), but the fallback only ever masked a FLAG problem, and `tsc -b --noEmit`
+      # is supported by the pinned TypeScript. One unambiguous command, byte-identical to the
+      # `type-check` npm script the pre-commit hook runs.
       - name: TypeScript check
         working-directory: frontend
-        run: npx tsc -b --noEmit 2>/dev/null || npx tsc -b
+        run: npm run type-check
+
+      # ESLint was fully configured (`eslint.config.js`, two plugins, typescript-eslint, an npm
+      # `lint` script) and executed by NOTHING in this repo — while the cockpit's own project
+      # template (`templates/github-actions-workflow.yml`) makes `npm run lint` a hard gate in every
+      # project it generates. We now eat what we cook.
+      #
+      # Warnings policy (decision, CR-V2 audit): errors ALWAYS fail — eslint exits 1 on any error.
+      # Warnings are frozen at today's baseline via `--max-warnings` inside the `lint` script, so
+      # the count can never grow unnoticed; see `frontend/eslint.config.js` for the baseline list
+      # and the ratchet rule (the number may only ever go DOWN).
+      - name: ESLint
+        working-directory: frontend
+        run: npm run lint
 
       # The frontend suite was executed by nobody: `package.json` had no `test` script (vitest was a
       # dependency with no npm alias), so CI never ran it and 52 files / 368 tests only ever went
@@ -207,16 +225,53 @@ jobs:
         env:
           VITE_APP_VERSION: "0.1.${{ github.run_number }}"
         run: |
+          set -euo pipefail
           git pull origin main --ff-only
           # nex-shared is PUBLIC → `docker compose build` builds the SPA in-container
           # (multi-stage Dockerfile); VITE_APP_VERSION flows via the compose build-arg.
+          # `|| true` is deliberate and stays: on a first deploy there is nothing to bring down.
           docker compose down --remove-orphans || true
           docker compose pull db
           docker compose build backend frontend
           docker compose up -d --force-recreate
-          sleep 5
 
+      # A deploy whose stack never comes up is a FAILED deploy. This step used to read
+      # `python -m backend.scripts.healthcheck || echo "Health check pending — ..."` — broken twice
+      # over, and both faults hidden by the same `|| echo`:
+      #   1. It threw away the exit code, so the job could not go red whatever the stack did.
+      #   2. The command could never have succeeded here anyway. `backend/scripts/healthcheck.py`
+      #      is the IN-CONTAINER probe (Dockerfile HEALTHCHECK): it dials localhost:9176, the port
+      #      inside the container, while on the host the backend is published on 9213. Un-muting it
+      #      as-is would have made every deploy red.
+      # So the gate now asks compose for the health each service declares for itself (correct ports,
+      # no duplicated literals, no `python` on the runner) — the same idiom the project template
+      # uses for its `db` gate. Waits up to 60 s per service, then fails with the evidence attached.
       - name: Health check
         working-directory: /opt/projects/nex-studio-visual
         run: |
-          python -m backend.scripts.healthcheck || echo "Health check pending — backend may still be starting"
+          set -euo pipefail
+          for service in backend frontend; do
+            cid="$(docker compose ps -q "${service}")"
+            if [ -z "${cid}" ]; then
+              echo "::error::compose service '${service}' is not running after deploy"
+              docker compose ps
+              exit 1
+            fi
+            status=none
+            for attempt in $(seq 1 30); do
+              # 'none' when the service declares no healthcheck — reported, never silently passed.
+              status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${cid}")"
+              echo "${service} health [${attempt}/30]: ${status}"
+              [ "${status}" = healthy ] && break
+              [ "${status}" = none ] && break
+              sleep 2
+            done
+            if [ "${status}" != healthy ]; then
+              echo "::error::${service} is '${status}' after deploy, expected 'healthy' — deploy FAILED"
+              set +e  # diagnostics are best-effort; the `exit 1` below must always be reached
+              docker compose ps
+              docker compose logs --tail=100 "${service}"
+              exit 1
+            fi
+          done
+          echo "deploy verified — backend + frontend both report healthy"

@@ -43,6 +43,8 @@ function deployableMatrix(): DeployMatrix {
     verified_versions: ["0.2.0"],
     deployability: { cause: "ok", version_number: null, version_id: null, can_reverify: false },
     can_accept: true,
+    can_deploy_prod: true,
+    can_deploy: true,
     rows: [
       {
         customer_id: "cust-1",

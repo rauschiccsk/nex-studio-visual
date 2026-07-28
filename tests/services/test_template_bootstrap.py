@@ -22,8 +22,10 @@ from backend.services import system_setting as system_setting_service
 from backend.services.template_bootstrap import (
     GitPushVerificationError,
     TemplateBootstrapError,
+    _repo_from_url,
     invoke_init_script,
     push_and_verify,
+    resolve_github_org,
     rollback_partial_state,
 )
 
@@ -500,6 +502,86 @@ def test_disabled_bootstrap_refuses_a_greenfield_project_instead_of_founding_a_h
 
     with pytest.raises(TemplateBootstrapError, match="Automatické zakladanie je vypnuté"):
         invoke_init_script(db_session, project)
+
+
+# ─── github_org is authoritative for every repo-derived step, not just repo creation ─────
+
+
+def test_repo_from_url_keeps_the_owner_of_the_short_form_projects_actually_store():
+    """``repo_url`` is stored as ``owner/name`` (the new-project form fills it from ``github_org``).
+
+    Only the full-URL shape used to be recognised, so the short one fell through to the fallback and
+    the owner was replaced by a hardcoded organisation: the repo was created under the configured org
+    (that path passes ``repo_url`` through verbatim) while the scaffold argv, the push+verify target,
+    the CI runner's REPO_URL and branch protection all pointed at the wrong owner.
+    """
+    assert _repo_from_url("acme-org/nex-thing", "nex-thing", default_owner="ignored") == "acme-org/nex-thing"
+    # The legacy full-URL shape keeps working, with and without the .git suffix.
+    assert _repo_from_url("https://github.com/acme-org/nex-thing.git", "nex-thing", default_owner="x") == (
+        "acme-org/nex-thing"
+    )
+
+
+def test_repo_from_url_falls_back_to_the_configured_org_not_a_hardcoded_one():
+    """No usable ``repo_url`` → the owner comes from the caller's ``github_org``, not a literal."""
+    assert _repo_from_url(None, "nex-thing", default_owner="acme-org") == "acme-org/nex-thing"
+    assert _repo_from_url("   ", "nex-thing", default_owner="acme-org") == "acme-org/nex-thing"
+    # An unparseable value must not silently become part of the repo name either.
+    assert _repo_from_url("ssh://git@example.com/a/b/c", "nex-thing", default_owner="acme-org") == "acme-org/nex-thing"
+
+
+def test_resolve_github_org_reads_the_setting(db_session):
+    system_setting_service.upsert(db_session, "github_org", "acme-org")
+    db_session.flush()
+    assert resolve_github_org(db_session) == "acme-org"
+
+
+def test_init_script_receives_the_configured_org_when_repo_url_is_absent(db_session, tmp_path, monkeypatch):
+    """End-to-end for the scaffold stage: a project with no ``repo_url`` under a non-default org must
+    still be scaffolded as ``<configured-org>/<slug>``."""
+    from backend.services import template_bootstrap as mod
+
+    script = tmp_path / "init.sh"
+    script.write_text("#!/bin/sh\nexit 0\n")
+    script.chmod(0o755)
+    system_setting_service.upsert(db_session, "template_init_script_path", str(script))
+    system_setting_service.upsert(db_session, "github_org", "acme-org")
+    db_session.flush()
+
+    user = User(
+        username=f"org-{uuid.uuid4().hex[:8]}",
+        email=f"org-{uuid.uuid4().hex[:8]}@example.com",
+        password_hash="x",
+        role="ri",
+    )
+    db_session.add(user)
+    db_session.flush()
+
+    project = Project(
+        name="Org Probe",
+        slug=f"org-probe-{uuid.uuid4().hex[:8]}",
+        type="standard",
+        auth_mode="password",
+        description="github_org threading probe",
+        created_by=user.id,
+        source_path=str(tmp_path / "org-probe"),
+        backend_port=14990,
+    )
+    db_session.add(project)
+    db_session.flush()
+
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(args, **kwargs):
+        captured["argv"] = list(args)
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+
+    invoke_init_script(db_session, project)
+
+    argv = captured["argv"]
+    assert argv[argv.index("--repo") + 1] == f"acme-org/{project.slug}"
 
 
 def test_disabled_bootstrap_still_registers_an_existing_brownfield_workspace(db_session, tmp_path):

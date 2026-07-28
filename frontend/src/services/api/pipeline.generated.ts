@@ -1931,6 +1931,11 @@ export interface paths {
          *     Results are ordered by ``created_at DESC`` so the most recently
          *     opened sessions appear first — matching the "Active sessions" UI
          *     convention on the settings page.
+         *
+         *     Each row carries the owner's ``username``. This endpoint is ``ha``+, but the user directory
+         *     (``GET /users``) is ``ri``-only, so the Relácie tab could not resolve the ids on its own: a Medior
+         *     saw a column of raw UUIDs next to a per-row "Odvolať" and had to decide whether to cut a session
+         *     without knowing whose it was. One extra query for the page's user ids, not a join per row.
          */
         get: operations["list_user_sessions_api_v1_user_sessions_get"];
         put?: never;
@@ -3254,6 +3259,18 @@ export interface components {
              * @default false
              */
             can_accept: boolean;
+            /**
+             * Can Deploy
+             * @description Či tento používateľ smie nasadzovať tento projekt VÔBEC — prvá bránka trasy nasadenia (vlastník alebo správca), platná pre UAT aj PROD. Bez nej sa tlačidlo „Nasadiť“ tvárilo živo aj pre Mediora, ktorý projekt nevlastní, a skončilo zamietnutím — tá istá chyba, akú ``can_deploy_prod`` rieši pre PROD.
+             * @default true
+             */
+            can_deploy: boolean;
+            /**
+             * Can Deploy Prod
+             * @description True iff THIS user may deploy to PROD (the deploy route's ``environment == 'prod'`` role gate). PROD deploy is ri-only by the same v4.0.35/D3 Director gate as acceptance, while UAT deploy is open to the project owner — so the PROD 'Nasadiť' cannot be hidden by page-level role and needs its own flag, or it looks live to a Junior/Medior and then fails with 403.
+             * @default false
+             */
+            can_deploy_prod: boolean;
             deployability?: components["schemas"]["DeployBlock"];
             /** Project Slug */
             project_slug: string;
@@ -5187,6 +5204,11 @@ export interface components {
              * Format: uuid
              */
             user_id: string;
+            /**
+             * Username
+             * @description Login name of the session's owner, resolved by the list route. The Relácie tab shows one row per session and offers 'Odvolať' on each; without this it printed the raw ``user_id`` UUID to anyone who cannot list users (``GET /users`` is ri-only), so a Medior decided whether to cut someone's session without knowing whose it was. ``None`` when the owner row is gone.
+             */
+            username?: string | null;
         };
         /**
          * UserSessionUpdate

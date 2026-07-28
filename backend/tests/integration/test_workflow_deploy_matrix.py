@@ -936,3 +936,25 @@ class TestDeployabilityCause:
         assert _can_accept(medior) is False
         # An unauthenticated/fixture-built matrix must never imply permission.
         assert deploy_service.build_matrix(db_session, project)["can_accept"] is False
+
+    def test_can_deploy_prod_mirrors_the_ri_only_prod_deploy_gate(self, db_session, fake_repo_head):
+        """The PROD 'Nasadiť' carries the same ri-only gate as acceptance — and needs its own flag.
+
+        v4.0.55 gave 'Akceptovať' this treatment and stopped there, so the PROD tab's deploy button went on
+        looking live to a Junior owner / a Medior and 403-ing on click. It cannot be hidden by page-level
+        role either: the SAME button on the UAT tab is legitimately open to the project owner (D3).
+        """
+        owner = _seed_user(db_session, role="shu", prefix="depl_owner")
+        manager = _seed_user(db_session, role="ri", prefix="depl_ri")
+        medior = _seed_user(db_session, role="ha", prefix="depl_ha")
+        project = _seed_project(db_session, creator=owner)
+        _seed_verified_version(db_session, project, "v0.1.0")
+        _seed_customer(db_session, project, "andros")
+
+        def _can_deploy_prod(user) -> bool:
+            return deploy_service.build_matrix(db_session, project, user)["can_deploy_prod"]
+
+        assert _can_deploy_prod(manager) is True
+        assert _can_deploy_prod(owner) is False  # may deploy their own UAT, never PROD
+        assert _can_deploy_prod(medior) is False
+        assert deploy_service.build_matrix(db_session, project)["can_deploy_prod"] is False

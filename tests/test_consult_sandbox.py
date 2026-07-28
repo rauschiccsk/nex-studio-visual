@@ -62,6 +62,28 @@ def _value_after(argv: list[str], flag: str) -> str:
     return argv[argv.index(flag) + 1]
 
 
+def _mounts(argv: list[str]) -> list[dict[str, str]]:
+    """Parse every ``--mount type=bind,source=…,target=…[,readonly]`` spec into a dict.
+
+    The binds moved from ``-v`` to ``--mount`` deliberately: ``-v`` CREATES a missing bind source as an
+    empty host dir, so a wrong host path silently mounted an EMPTY project :ro and the consult answered
+    about nothing. ``--mount`` refuses instead.
+    """
+    specs = [argv[i + 1] for i, a in enumerate(argv) if a == "--mount"]
+    parsed: list[dict[str, str]] = []
+    for spec in specs:
+        fields: dict[str, str] = {}
+        for part in spec.split(","):
+            key, _, value = part.partition("=")
+            fields[key] = value
+        parsed.append(fields)
+    return parsed
+
+
+def _mount_for(argv: list[str], target: str) -> dict[str, str]:
+    return next(m for m in _mounts(argv) if m.get("target") == target)
+
+
 # ---------------------------------------------------------------------------
 # The docker argv — the POSITIVE half of the guarantee (mounts that MUST be present)
 # ---------------------------------------------------------------------------
@@ -79,20 +101,31 @@ async def test_sidecar_launches_ephemeral_unprivileged_container(monkeypatch) ->
 
 async def test_sidecar_mounts_project_read_only_at_host_path(monkeypatch) -> None:
     argv = await _sidecar_argv(monkeypatch, project_slug="acme")
-    # -v <HOST_PROJECT_PATH>:/opt/projects/<slug>:ro — the HARD guarantee. Host path is translated from the
-    # backend's in-container /opt/projects view to the daemon-resolvable /opt/projects-v3 host path.
-    binds = [argv[i + 1] for i, a in enumerate(argv) if a == "-v"]
-    assert "/opt/projects-v3/acme:/opt/projects/acme:ro" in binds
+    # bind <HOST_PROJECT_PATH> → /opt/projects/<slug> readonly — the HARD guarantee. Host path is translated
+    # from the backend's in-container /opt/projects view to the daemon-resolvable /opt/projects-v3 host path.
+    project = _mount_for(argv, "/opt/projects/acme")
+    assert project["type"] == "bind"
+    assert project["source"] == "/opt/projects-v3/acme"
+    assert "readonly" in project
     assert _value_after(argv, "-w") == "/opt/projects/acme"  # cwd = project, as in-process
+
+
+async def test_sidecar_refuses_to_auto_create_a_missing_bind_source(monkeypatch) -> None:
+    # The audited silent failure: with ``-v`` docker CREATES an absent host source as an empty dir, so a
+    # wrong/missing host path mounted an EMPTY project :ro and the consult answered confidently about
+    # nothing — no error anywhere. ``--mount`` is what makes that an explicit docker refusal.
+    argv = await _sidecar_argv(monkeypatch, project_slug="acme")
+    assert "-v" not in argv, "a -v bind silently auto-creates a missing host source — use --mount"
 
 
 async def test_sidecar_mounts_auth_writable_no_tmpfs(monkeypatch) -> None:
     argv = await _sidecar_argv(monkeypatch)
-    binds = [argv[i + 1] for i, a in enumerate(argv) if a == "-v"]
     # MAX-subscription OAuth auth/config dir mounted READ-WRITE so claude can persist + --resume its own
     # session state (exactly as the in-container build turns already do). CLAUDE_CONFIG_DIR points at it.
-    assert "/home/andros/.claude:/home/andros/.claude" in binds
-    assert "/home/andros/.claude:/home/andros/.claude:ro" not in binds  # NOT read-only anymore
+    auth = _mount_for(argv, "/home/andros/.claude")
+    assert auth["type"] == "bind"
+    assert auth["source"] == "/home/andros/.claude"
+    assert "readonly" not in auth  # NOT read-only anymore
     # The dead --tmpfs scratch (only existed for the :ro scenario) is gone — claude writes ~/.claude directly.
     assert "--tmpfs" not in argv
     assert "/home/andros/.claude-scratch" not in " ".join(argv)
@@ -102,11 +135,9 @@ async def test_sidecar_mounts_auth_writable_no_tmpfs(monkeypatch) -> None:
 async def test_auth_dir_writable_so_resume_can_persist(monkeypatch) -> None:
     # Regression guard for the LIVE bug (v3 2026-07-08): the real consult runs `claude --resume`, which
     # WRITES session state into CLAUDE_CONFIG_DIR = the mounted ~/.claude. A :ro auth mount kernel-refused
-    # that write (EROFS) → the turn failed. The auth bind MUST be writable (no :ro suffix).
+    # that write (EROFS) → the turn failed. The auth bind MUST be writable.
     argv = await _sidecar_argv(monkeypatch)
-    binds = [argv[i + 1] for i, a in enumerate(argv) if a == "-v"]
-    auth_bind = next(b for b in binds if b.startswith("/home/andros/.claude:"))
-    assert not auth_bind.endswith(":ro"), f"auth bind must be writable for --resume, got {auth_bind!r}"
+    assert "readonly" not in _mount_for(argv, "/home/andros/.claude")
 
 
 async def test_sidecar_reuses_readonly_tool_flags(monkeypatch) -> None:
@@ -326,9 +357,7 @@ def test_good_slug_bind_source_realpath_contained() -> None:
     argv = consult_sandbox.build_sidecar_argv(
         project_slug="acme", container_name="nex-consult-test", claude_argv=["claude", "-p", "q"]
     )
-    binds = [argv[i + 1] for i, a in enumerate(argv) if a == "-v"]
-    # bind format is SOURCE:DEST:ro (paths carry no colon) → SOURCE is the first field
-    project_source = next(b.split(":")[0] for b in binds if b.endswith(":ro") and "/projects" in b)
+    project_source = _mount_for(argv, "/opt/projects/acme")["source"]
     real = os.path.realpath(project_source)
     assert real == os.path.realpath("/opt/projects-v3/acme")
     assert real.startswith(os.path.realpath("/opt/projects-v3") + os.sep)

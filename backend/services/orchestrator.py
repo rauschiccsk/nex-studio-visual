@@ -654,7 +654,16 @@ def build_readiness(db: Session, version_id: uuid.UUID) -> tuple[bool, int]:
         ).scalar_one()
         > 0
     )
-    return (no_todo and has_any_task), _build_open_findings(db, version_id)
+    # …and "no todo remains" is not "every task is DONE" either. ``get_next_todo_task`` skips ``failed`` and
+    # ``in_progress`` rows, so a build that timed out (or was killed by a restart) ON ITS LAST TASK reported
+    # all_tasks_done=True with that task still unfinished. The board reads this flag to decide whether to
+    # offer ``schvalit`` (advance Programovanie → Verifikácia, FINISHING the version) or ``pokracovat``
+    # (resume the loop): it hid the resume button and offered the finish, and ``apply_action('schvalit')``
+    # has no open-findings guard — so one click closed a half-built version over dropped work. Remaining work
+    # is exactly ``todo`` (no_todo) PLUS the open findings (``failed`` / stuck ``in_progress``), the same
+    # count already computed here — no extra query.
+    open_findings = _build_open_findings(db, version_id)
+    return (no_todo and has_any_task and open_findings == 0), open_findings
 
 
 def navrh_plan_materialized(db: Session, version_id: uuid.UUID) -> bool:
@@ -3750,7 +3759,10 @@ def _git_tag_version(project_root: Path, version_number: str, sha: str) -> None:
     """CR-V2-056 (layer-1): create/refresh an annotated git tag ``v{version_number}`` at the verified commit.
     BEST-EFFORT, NEVER raises — the payload ``verified_sha`` (:func:`version_verified`) is the authoritative
     anchor; the tag is the reproducible human artifact. ``-f`` re-anchors on a FAIL→fix→re-PASS (the verified
-    commit legitimately moved to the new PASS commit)."""
+    commit legitimately moved to the new PASS commit).
+
+    The tag is PUBLISHED by :func:`_push_release_artifacts` at the same seam — a "reproducible human
+    artifact" that exists only in one container's filesystem is neither reproducible nor an artifact."""
     import subprocess
 
     tag = f"v{version_number}"
@@ -3764,6 +3776,100 @@ def _git_tag_version(project_root: Path, version_number: str, sha: str) -> None:
         )
     except (OSError, subprocess.SubprocessError):
         pass
+
+
+#: Network git operations need more than the 15s a local git command gets.
+_GIT_PUSH_TIMEOUT = 60
+
+
+def _push_release_artifacts(project_root: Path, version_number: str) -> bool:
+    """Publish the completing version's release artifacts — the RELEASE_NOTES commit + the ``v{N}`` tag.
+
+    The audited gap: :func:`_commit_release_note` committed and :func:`_git_tag_version` tagged, and NOTHING
+    ever pushed either. Both artifacts existed only inside the backend container's checkout — the changelog
+    the "Aktualizácie" tab promises and the tag a release is meant to be reproducible from were invisible to
+    every other machine, and vanish with the volume. A release that is not on the remote is not a release.
+
+    BEST-EFFORT, NEVER raises (a network hiccup must not sink a sign-off), but never SILENT either: a failed
+    push is logged at WARNING naming git's own reason, so "committed locally, push deferred" is a statement
+    somebody can act on rather than an assumption nobody made.
+
+    Returns True iff both the branch and the tag reached ``origin``. A project with no ``origin`` (a purely
+    local checkout) is not a failure — there is nothing to publish to — and returns False after an INFO.
+    """
+    import subprocess
+
+    def _git(args: list[str]) -> tuple[int, str, str]:
+        """``(returncode, stdout, stderr)`` — both streams, because the branch name comes back on stdout
+        and every failure reason comes back on stderr."""
+        try:
+            proc = subprocess.run(
+                ["git", "-C", str(project_root), *args],
+                capture_output=True,
+                text=True,
+                timeout=_GIT_PUSH_TIMEOUT,
+                check=False,
+            )
+            return proc.returncode, (proc.stdout or "").strip(), (proc.stderr or "").strip()
+        except (OSError, subprocess.SubprocessError) as exc:
+            return 1, "", str(exc)
+
+    if not (project_root / ".git").is_dir():
+        return False  # dry-run / no checkout — nothing to publish
+    if _git(["remote", "get-url", "origin"])[0] != 0:
+        logger.info("release artifacts for v%s stay local — %s has no 'origin' remote", version_number, project_root)
+        return False
+
+    # Wire the HTTPS credential helper before pushing, exactly as
+    # :func:`template_bootstrap.push_and_verify` does at project creation. That call writes the helper into
+    # the CONTAINER's global gitconfig, which is lost on every recreate — so without repeating it here a
+    # release push would start failing on credentials the first time a container was recreated without a
+    # project being created in it. Idempotent; a non-zero exit is non-fatal (the push below surfaces the real
+    # error, and the container has no ssh binary so HTTPS+gh is the only authenticated path).
+    try:
+        subprocess.run(
+            ["gh", "auth", "setup-git"], capture_output=True, text=True, timeout=_GIT_PUSH_TIMEOUT, check=False
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    # Read the branch rather than assuming "main": pushing to the wrong branch is worse than not pushing.
+    branch_rc, branch, _ = _git(["rev-parse", "--abbrev-ref", "HEAD"])
+    if branch_rc != 0 or not branch or branch == "HEAD":
+        logger.warning(
+            "release artifacts for v%s NOT pushed — %s is not on a named branch (detached HEAD)",
+            version_number,
+            project_root,
+        )
+        return False
+
+    rc, _, err = _git(["push", "origin", f"HEAD:refs/heads/{branch}"])
+    if rc != 0:
+        logger.warning(
+            "release-notes commit for v%s NOT pushed (branch %s): %s — the changelog exists only in this "
+            "checkout; push it by hand or fix the remote credentials",
+            version_number,
+            branch,
+            err,
+        )
+        return False
+
+    tag = f"v{version_number}"
+    # ``--force`` on the TAG ref only (never the branch): _git_tag_version re-anchors the tag with ``-f`` on a
+    # FAIL→fix→re-PASS, so the remote tag must be allowed to move with it or the two disagree about which
+    # commit was verified.
+    rc, _, err = _git(["push", "--force", "origin", f"refs/tags/{tag}"])
+    if rc != 0:
+        logger.warning(
+            "verified tag %s NOT pushed: %s — the release commit is on the remote but the tag that names it "
+            "is not, so the release is not reproducible from origin",
+            tag,
+            err,
+        )
+        return False
+
+    logger.info("release artifacts published for %s: branch %s + tag %s pushed to origin", project_root, branch, tag)
+    return True
 
 
 def _commit_release_note(db: Session, version_id: uuid.UUID, project_root: Path, version_number: str) -> None:
@@ -5930,6 +6036,9 @@ def _apply_hotovo_signoff(
     hotovo_sha = _repo_head(proj_root)
     if hotovo_sha:
         _git_tag_version(proj_root, _vnum, hotovo_sha)
+        # Publish both artifacts — a release-notes commit and a verified tag that live only in this
+        # container's checkout are not a release (audit finding).
+        _push_release_artifacts(proj_root, _vnum)
     signoff_payload: dict[str, Any] = {"phase": "priprava", "hotovo": True}
     if hotovo_sha:
         signoff_payload["hotovo_sha"] = hotovo_sha
@@ -7488,6 +7597,9 @@ async def _run_verifikacia_round(
     verified_sha = _repo_head(claude_agent.PROJECTS_ROOT / slug) if is_pass else None
     if verified_sha:
         _git_tag_version(claude_agent.PROJECTS_ROOT / slug, version_label, verified_sha)
+        # Publish both artifacts — a release-notes commit and a verified tag that live only in this
+        # container's checkout are not a release (audit finding).
+        _push_release_artifacts(claude_agent.PROJECTS_ROOT / slug, version_label)
     verdict_msg = _record_message(
         db,
         version_id=version_id,
@@ -9237,7 +9349,7 @@ async def apply_action(
     ``_begin_dispatch``) mutates state too, but always as a CONSEQUENCE of an action routed here. No
     other code path writes ``current_stage`` / ``current_actor`` / ``status`` on a Manažér action.
 
-    The 4 phases (priprava → navrh → programovanie → verifikacia → done) collapse the v1 11-stage
+    The 5 phases (priprava → navrh → vizual → programovanie → verifikacia → done) collapse the v1 11-stage
     waterfall. The action verbs (:data:`_ACTIONS`): ``start``, the always-mandatory ``approve_spec``
     end-Príprava stop, the dial-governed ``schvalit``/``uprav`` schvaľovacie body, ``pokracovat`` (resume
     a paused build), the Auditor ``verdict`` (PASS→Hotovo / FAIL→bounded AI-Agent fix loop), ``ask`` /
@@ -10017,6 +10129,9 @@ async def apply_action(
             verified_sha = _repo_head(_proj_root)
             if verified_sha:
                 _git_tag_version(_proj_root, _vnum, verified_sha)
+                # Publish both artifacts — a release-notes commit and a verified tag that live only in this
+                # container's checkout are not a release (audit finding).
+                _push_release_artifacts(_proj_root, _vnum)
         verdict_payload: dict[str, Any] = {"verdict": effective_verdict, "phase": "verifikacia"}
         if verified_sha:
             verdict_payload["verified_sha"] = verified_sha

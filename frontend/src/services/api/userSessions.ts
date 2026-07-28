@@ -21,6 +21,17 @@ import api from "../api";
 import type { PaginatedResponse } from "../../types";
 import type { UserSessionRead } from "nex-shared";
 
+/**
+ * The list row: the kit shape plus the owner's login name, which the LIST endpoint resolves server-side.
+ * The panel renders the "Používateľ" column through a ``resolveUsername(userId)`` callback, and the only
+ * directory the page could build that from — ``GET /users`` — is ri-only. A Medior therefore saw raw
+ * UUIDs next to a per-row "Odvolať". Carrying the name on the session row makes the column readable for
+ * everyone allowed on the tab, without widening who may list users.
+ */
+export interface UserSessionListRow extends UserSessionRead {
+  username?: string | null;
+}
+
 /** Query parameters accepted by the list endpoint. */
 export interface ListUserSessionsParams {
   /** Filter to the sessions of a single user (defaults to all). */
@@ -36,8 +47,8 @@ export interface ListUserSessionsParams {
  */
 export function listUserSessionsApi(
   params: ListUserSessionsParams = {},
-): Promise<PaginatedResponse<UserSessionRead>> {
-  return api.get<PaginatedResponse<UserSessionRead>>("/user-sessions", {
+): Promise<PaginatedResponse<UserSessionListRow>> {
+  return api.get<PaginatedResponse<UserSessionListRow>>("/user-sessions", {
     params: {
       user_id: params.user_id,
       skip: params.skip,

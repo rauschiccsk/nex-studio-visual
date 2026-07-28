@@ -2,9 +2,11 @@
 //
 // The self-sufficiency kernel: a non-expert (Tibor/Nazar) must be able to run the cockpit ALONE. This page
 // walks them, in friendly plain Slovak with no dev-jargon, through the ACTUAL flow: prihlásenie → vytvoriť
-// projekt → vytvoriť verziu a napísať Zadanie → čo znamenajú jednotlivé fázy (Príprava / Návrh / Programovanie
-// / Overenie) → ako schvaľovať a odpovedať na otázky → nasadenie k zákazníkovi. Steps are derived from the real
-// pages (NewProjectPage, NewVersionPage, RiadiaceCentrumPage, the phase labels + the Nasadenie/UAT flow).
+// projekt → vytvoriť verziu a napísať Zadanie → čo znamenajú jednotlivé fázy (Príprava / Návrh / Vizuál /
+// Programovanie / Overenie) → ako schvaľovať a odpovedať na otázky → nasadenie k zákazníkovi. Steps are derived
+// from the real pages (NewProjectPage, NewVersionPage, RiadiaceCentrumPage, the phase labels + the Nasadenie/UAT
+// flow). The phase list MUST stay in sync with PHASE_ORDER (components/cockpit/labels.ts) — an operator who is
+// told to expect four phases is ambushed when the build stops at Vizuál for their approval.
 
 import { useNavigate } from "react-router-dom";
 
@@ -50,10 +52,10 @@ const STEPS: Step[] = [
   },
   {
     n: 4,
-    title: "Sleduj štyri fázy",
+    title: "Sleduj päť fáz",
     body: (
       <>
-        Prácu vidíš v <strong>Riadiacom centre</strong> ako rozhovor s AI Agentom. Postup má štyri fázy:
+        Prácu vidíš v <strong>Riadiacom centre</strong> ako rozhovor s AI Agentom. Postup má päť fáz:
         <ul className="mt-2 space-y-1.5">
           <li>
             <strong>Príprava</strong> — AI Agent z tvojho Zadania spíše presnú špecifikáciu a doptá sa na
@@ -63,11 +65,17 @@ const STEPS: Step[] = [
             <strong>Návrh</strong> — pripraví návrh riešenia a rozpíše ho na plán úloh.
           </li>
           <li>
-            <strong>Programovanie</strong> — naprogramuje aplikáciu podľa schváleného plánu.
+            <strong>Vizuál</strong> — ukáže ti <strong>živý náhľad aplikácie</strong>: klikneš si po
+            obrazovkách presne tak, ako budú vyzerať. Tu si vypýtaj zmeny vzhľadu — po tvojom schválení sa
+            podľa neho programuje a už sa neprerába. Bez tvojho schválenia sa ďalej nepokračuje.
           </li>
           <li>
-            <strong>Overenie</strong> — nezávislý Audítor skontroluje, či hotová aplikácia naozaj robí to, čo
-            bolo dohodnuté.
+            <strong>Programovanie</strong> — naprogramuje aplikáciu podľa schváleného plánu a schváleného
+            vzhľadu.
+          </li>
+          <li>
+            <strong>Verifikácia</strong> (overenie) — nezávislý Audítor skontroluje, či hotová aplikácia
+            naozaj robí to, čo bolo dohodnuté.
           </li>
         </ul>
       </>

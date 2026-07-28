@@ -59,6 +59,7 @@ import ptyprocess
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.constants.paths import TERMINAL_LOG_DIR as DURABLE_TERMINAL_LOG_DIR
 from backend.db.models.agent_terminal import AgentTerminalSession
 
 logger = logging.getLogger(__name__)
@@ -92,9 +93,12 @@ IDLE_TTL_SECONDS = 24 * 3600
 #: Grace period between SIGTERM and SIGKILL when ending a session.
 SIGTERM_GRACE_SECONDS = 5
 
-#: Directory for durable PTY output logs. Mounted as a Docker volume
-#: in production (docker-compose.yml backend service).
-TERMINAL_LOG_DIR = Path("/var/lib/nex-studio/terminal-logs")
+#: Directory for durable PTY output logs. Mounted as a Docker volume in production
+#: (docker-compose.yml backend service, named volume ``terminal_logs``). Derived from the
+#: SHARED :data:`backend.constants.paths.TERMINAL_LOG_DIR` — this used to be an independent
+#: literal (``/var/lib/nex-studio/terminal-logs``) that no compose file mounts, so the
+#: scrollback lived in the container's writable layer and died with the container.
+TERMINAL_LOG_DIR = DURABLE_TERMINAL_LOG_DIR
 
 #: Hard cap on per-session log file size. When exceeded, the oldest
 #: half is truncated in-place (see :func:`_rotate_log_if_needed`).

@@ -74,6 +74,16 @@ if [[ "${NEEDS_FRONTEND}" == "1" ]]; then
         cat /tmp/pre-commit-typecheck.log
         exit 1
     fi
+
+    # eslint is a CI gate (job "Build Frontend"), so it belongs here too — same command, so a
+    # commit that passes the hook passes CI. Warnings are capped at the baseline inside the
+    # `lint` script; see frontend/eslint.config.js for the ratchet rule.
+    echo "pre-commit: frontend — eslint"
+    if ! (cd frontend && npm run lint > /tmp/pre-commit-eslint.log 2>&1); then
+        echo "❌ ESLint FAILED:"
+        cat /tmp/pre-commit-eslint.log
+        exit 1
+    fi
 fi
 
 echo "pre-commit: ✓ all checks passed"

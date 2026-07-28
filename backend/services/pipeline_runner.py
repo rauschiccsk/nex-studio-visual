@@ -361,6 +361,36 @@ def _is_token_stop_pause(db, version_id: uuid.UUID) -> bool:
     return bool(msg is not None and msg.author == "system" and (msg.payload or {}).get("token_stop") is True)
 
 
+#: Appended to a nudge when the deployment has no public URL configured. The nudge exists to bring an AWAY
+#: Manažér back into the cockpit; with ``app_public_url`` empty the link was silently dropped and they got a
+#: ping with no way in — and nothing anywhere said why. Naming the missing setting in the message reaches
+#: exactly the person who can fix it (they are the one holding the phone), and ``GET /health`` carries
+#: ``app_public_url_configured`` for the operator side.
+_NO_LINK_NOTE = "\n(odkaz do kokpitu chýba — na serveri nie je nastavené APP_PUBLIC_URL)"
+
+#: Log the missing-URL warning ONCE per process, not once per nudge — the condition is static config.
+_no_link_warning_logged = False
+
+
+def _cockpit_link() -> str:
+    """The ``/riadiace-centrum`` deep link for a Telegram nudge, or an explicit note that it is unconfigured.
+
+    Returns the trailing line appended to every nudge body (leading newline included, empty never)."""
+    global _no_link_warning_logged
+
+    base = settings.app_public_url.strip()
+    if base:
+        return f"\n{base.rstrip('/')}/riadiace-centrum"
+    if not _no_link_warning_logged:
+        logger.warning(
+            "app_public_url is not configured — Telegram nudges carry NO cockpit link, so an away Manažér "
+            "has no way back into the board from the notification. Set APP_PUBLIC_URL to the deployment's "
+            "public frontend URL."
+        )
+        _no_link_warning_logged = True
+    return _NO_LINK_NOTE
+
+
 async def _maybe_notify(db, version_id: uuid.UUID, state: PipelineState) -> None:
     """Presence-aware Telegram nudge (F-007 §9). Never blocks dispatch.
 
@@ -398,7 +428,7 @@ async def _maybe_notify(db, version_id: uuid.UUID, state: PipelineState) -> None
     # Spine STEP 1 (adversarial fix): deep-link straight to /riadiace-centrum (the spine page) instead of the
     # retired /vyvoj route (which now only redirects onward), so the out-of-band nudge lands the away Manažér
     # on the live conversation, not a bounce.
-    link = f"\n{settings.app_public_url.rstrip('/')}/riadiace-centrum" if settings.app_public_url else ""
+    link = _cockpit_link()
     # CR-V2-017 COMMS-5: a Hotovo (``done``) settle is a "build finished" notification, not a "you're up"
     # nudge — distinct copy so an away Manažér knows the autonomous build COMPLETED (vs needing an action).
     # Spine STEP 1: a ``paused`` settle is the token-stop poistka — distinct copy so an away Manažér knows
@@ -409,8 +439,24 @@ async def _maybe_notify(db, version_id: uuid.UUID, state: PipelineState) -> None
         message = f"⏸️ {label}: build pozastavený — prekročený token-limit — NEX Studio{link}"
     else:
         message = f"🔔 {label}: si na rade v NEX Studio{link}"
+    # The send is VERIFIED now (notify.send_telegram runs the script in checked mode and returns whether
+    # Telegram accepted the message). Delivery is still best-effort — a nudge must never sink a settle — but
+    # a nudge that reached NOBODY is stated plainly instead of being indistinguishable from a delivered one.
+    delivered = 0
     for chat_id in chat_ids:
-        await notify.send_telegram(message, chat_id)
+        if await notify.send_telegram(message, chat_id):
+            delivered += 1
+    if delivered == len(chat_ids):
+        logger.info("version %s: telegram nudge delivered to %d recipient(s)", version_id, delivered)
+    else:
+        logger.warning(
+            "version %s: telegram nudge delivered to %d of %d recipient(s) — the away Manažér may never "
+            "learn the build settled to %r (see notify.ledger / GET /health)",
+            version_id,
+            delivered,
+            len(chat_ids),
+            state.status,
+        )
 
 
 def _mark_blocked(

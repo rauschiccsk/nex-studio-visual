@@ -80,21 +80,48 @@ def _port_base_from_backend(backend_port: int | None) -> int | None:
     return backend_port - (backend_port % 10)
 
 
-# Extract owner/name from a GitHub URL. ``init.sh --repo`` requires
-# the ``owner/name`` short form (regex ``^[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+$``).
-# Returns None if the URL doesn't match, in which case we fall back to
-# a sensible default (``rauschiccsk/<slug>``) — init.sh stores it as
-# metadata only, so an approximation is acceptable for bootstrap.
+# Extract owner/name from a project's ``repo_url``. ``init.sh --repo`` requires the ``owner/name``
+# short form (regex ``^[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+$``), and so does every other repo-derived step
+# (push+verify, CI runner registration, branch protection).
+#
+# BOTH stored shapes are accepted. The new-project form fills ``repo_url`` in the SHORT form
+# (``{github_org}/{slug}``); only older rows carry a full ``https://github.com/owner/name`` URL.
+# Matching the URL shape ALONE is how the configured organisation was silently thrown away: the short
+# form fell through to the fallback, which re-attached a hardcoded owner. The repo was then created
+# under the configured org (that path reads ``repo_url`` verbatim) while the scaffold, the push, the
+# CI runner and branch protection all pointed at ``<hardcoded>/<slug>`` — a foreign org half-worked.
 _GH_URL_PATTERN = re.compile(r"https?://github\.com/([a-zA-Z0-9_-]+)/([a-zA-Z0-9_-]+?)(?:\.git)?/?$")
+_GH_SHORT_PATTERN = re.compile(r"^([a-zA-Z0-9_-]+)/([a-zA-Z0-9_-]+)$")
 
 
-def _repo_from_url(repo_url: str | None, slug: str) -> str:
+def _default_github_owner() -> str:
+    """Registry default for ``github_org`` — the last-resort owner when a caller could not resolve
+    the setting from the DB. Read from the settings registry rather than written as a literal, so
+    the fallback always tracks the shipped default."""
+    return system_setting_service.DEFAULT_SETTINGS["github_org"].value
+
+
+def resolve_github_org(db: Session) -> str:
+    """The effective ``github_org`` setting — the organisation EVERY repo-derived step must use.
+
+    Single resolution point so the setting is authoritative end-to-end, not only at repo creation.
+    Falls back to the registry default when the stored value is blank."""
+    return system_setting_service.get_str(db, "github_org").strip() or _default_github_owner()
+
+
+def _repo_from_url(repo_url: str | None, slug: str, *, default_owner: str | None = None) -> str:
+    """Return ``owner/name`` for a project's ``repo_url`` (either stored shape).
+
+    ``default_owner`` is the configured ``github_org`` (see :func:`resolve_github_org`) and is used
+    only when there is no usable ``repo_url`` to read the owner from; callers with a DB session
+    should always pass it so the fallback honours the operator's configuration."""
     if repo_url:
-        match = _GH_URL_PATTERN.match(repo_url.strip())
+        candidate = repo_url.strip()
+        match = _GH_URL_PATTERN.match(candidate) or _GH_SHORT_PATTERN.match(candidate)
         if match:
             return f"{match.group(1)}/{match.group(2)}"
-    # Fallback — init.sh requires --repo, default to rauschiccsk org.
-    return f"rauschiccsk/{slug}"
+    owner = (default_owner or "").strip() or _default_github_owner()
+    return f"{owner}/{slug}"
 
 
 def invoke_init_script(
@@ -182,7 +209,7 @@ def invoke_init_script(
             "Allocate a port block before creating the project."
         )
 
-    repo = _repo_from_url(project.repo_url, project.slug)
+    repo = _repo_from_url(project.repo_url, project.slug, default_owner=resolve_github_org(db))
 
     args = [
         str(script),

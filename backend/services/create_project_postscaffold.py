@@ -240,11 +240,17 @@ def run_post_scaffold_steps(
     enable_cicd: bool,
     full_smoke: bool,
     enable_branch_protection: bool,
+    github_org: str | None = None,
 ) -> None:
     """Orchestrate archetype surface composition + K-004 (smoke) + K-005 (CI/CD) + branch protection.
 
     Best-effort — every step caught + logged as warning. Žiadny step nezdvíha
     HTTPException; partial success je acceptable (Manažér can finish manually).
+
+    ``github_org`` is the configured organisation (``template_bootstrap.resolve_github_org``),
+    threaded through so the steps that derive an ``owner/repo`` from a MISSING ``repo_url`` use the
+    operator's setting instead of a hardcoded owner. The route always passes it; it stays optional
+    for the module's direct callers (tests/manual re-runs) with the registry default as fallback.
     """
     target_path = Path(target) if target else None
 
@@ -270,10 +276,10 @@ def run_post_scaffold_steps(
             _wire_precommit_hook(target_path)
             # The pushed ci.yml runs on ``andros-ubuntu-<slug>`` (self-hosted) — provision that runner now,
             # else every job queues forever (the nex-shopify gap, Director 2026-07-16).
-            _provision_ci_runner(slug, repo_url)
+            _provision_ci_runner(slug, repo_url, github_org=github_org)
 
         if enable_branch_protection and repo_url:
-            _enable_branch_protection(repo_url, slug)
+            _enable_branch_protection(repo_url, slug, github_org=github_org)
     except Exception as exc:  # noqa: BLE001 — best-effort by contract: never abort the create
         logger.warning(
             "Post-scaffold best-effort step failed (slug=%s) — project still created, finish manually: %s",
@@ -644,7 +650,7 @@ def _wire_cicd_workflow(target: Path, slug: str) -> None:
     logger.info("K-005 CI/CD workflow committed + pushed (slug=%s)", slug)
 
 
-def _provision_ci_runner(slug: str, repo_url: str | None) -> None:
+def _provision_ci_runner(slug: str, repo_url: str | None, *, github_org: str | None = None) -> None:
     """Auto-provision a containerized self-hosted GitHub Actions runner for the new repo (Director 2026-07-16).
 
     Closes the "CI pushed but no runner → every job queues forever" gap: :func:`_wire_cicd_workflow` pushes a
@@ -669,7 +675,7 @@ def _provision_ci_runner(slug: str, repo_url: str | None) -> None:
         logger.warning("CI runner provisioning SKIPPED — no GITHUB_TOKEN/GH_TOKEN in env (slug=%s)", slug)
         return
 
-    repo_full = _repo_from_url(repo_url, slug)  # owner/repo
+    repo_full = _repo_from_url(repo_url, slug, default_owner=github_org)  # owner/repo
     container = f"nex-ci-runner-{slug}"
     label = f"andros-ubuntu-{slug}"
 
@@ -806,11 +812,11 @@ def _commit_and_push_scaffold_finalisation(target: Path, slug: str) -> None:
     logger.info("scaffold finalise — v2-shape normalisation committed + pushed (slug=%s)", slug)
 
 
-def _enable_branch_protection(repo_url: str, slug: str) -> None:
+def _enable_branch_protection(repo_url: str, slug: str, *, github_org: str | None = None) -> None:
     """O-3: configure GitHub branch protection (require PR, no force push)."""
     from backend.services.template_bootstrap import _repo_from_url
 
-    repo_full_name = _repo_from_url(repo_url, slug)
+    repo_full_name = _repo_from_url(repo_url, slug, default_owner=github_org)
 
     # gh CLI: PUT /repos/{owner}/{repo}/branches/main/protection
     # Minimal protection: require PR review + no force push.

@@ -33,12 +33,14 @@ import {
 import {
   listUserSessionsApi,
   deleteUserSessionApi,
+  type UserSessionListRow,
 } from "@/services/api/userSessions";
 import {
   AutonomyDialPanel,
   type MieraAutonomieLevel,
 } from "@/components/settings/AutonomyDialPanel";
 import { TokenPricesPanel } from "@/components/settings/TokenPricesPanel";
+import { buildUsernameIndex } from "@/components/settings/sessionUsernames";
 import { TOKEN_PRICE_KEYS } from "@/components/settings/tokenPrices";
 import { useAuthStore } from "@/store/authStore";
 import { ROLE_LABELS } from "@/components/cockpit/labels";
@@ -564,7 +566,7 @@ export default function SettingsPage() {
   );
 
   // ── Sessions (ha-or-above; live /user-sessions, CR-NS-079) ──
-  const [sessions, setSessions] = useState<UserSessionRead[]>([]);
+  const [sessions, setSessions] = useState<UserSessionListRow[]>([]);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [sessionsLoadError, setSessionsLoadError] = useState("");
 
@@ -578,8 +580,10 @@ export default function SettingsPage() {
       .catch(() => setSessionsLoadError("Nepodarilo sa načítať relácie."));
   }, [sessionsLoaded]);
 
-  // The Sessions panel resolves user ids → names from the users list, so make
-  // sure both are loaded when the tab opens.
+  // The Sessions panel resolves user ids → names. The primary source is the session row itself (the list
+  // endpoint returns the owner's username), because this tab is ha+ while the user directory below is
+  // ri-only — a Medior used to see a column of bare UUIDs and had to judge a revoke blind. The directory
+  // is still loaded when the caller may read it, as a fallback for rows whose owner name is missing.
   const loadSessionsTab = useCallback(() => {
     loadSessions();
     loadUsers();
@@ -593,11 +597,9 @@ export default function SettingsPage() {
     [],
   );
 
-  const usernameById = useMemo(() => {
-    const m: Record<string, string> = {};
-    for (const u of users) m[u.id] = u.username;
-    return m;
-  }, [users]);
+  // Session rows first (every role on the tab gets those), user directory second (ri-only, empty for a
+  // Medior) — see sessionUsernames.ts for why the column cannot rely on the directory alone.
+  const usernameById = useMemo(() => buildUsernameIndex(sessions, users), [sessions, users]);
 
   const resolveUsername = useCallback(
     (uid: string) => usernameById[uid] ?? uid,

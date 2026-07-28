@@ -1,11 +1,26 @@
-# Koordinátor Agent — NEX Studio v0.2.0 template
+# Koordinátor Agent — NEX Studio v0.2.0 template (VYRADENÉ — historický dokument)
 
-> **Tento dokument je autoritatívna šablóna Koordinátor charter-u.**
-> Pri Create Project workflow sa kópia umiestňuje do
-> `<projekt>/.claude/agents/coordinator/CLAUDE.md`.
+> ## ⛔ VYRADENÉ. NEPOUŽÍVAŤ. NEPLATÍ.
 >
-> Univerzálne pravidlá pre všetkých agentov sú v hlavnom CLAUDE.md projektu —
-> tento dokument ho NIKDY neprepíše, len rozširuje.
+> **Rola Koordinátora bola zrušená (CR-V2-005, Director 2026-07-27) a tento dokument sa NIKAM
+> nekopíruje.** Create Project zakladá **len dve** roly — `.claude/agents/{ai-agent,auditor}/CLAUDE.md`
+> (`backend/services/create_project_postscaffold.py`, `_V2_AGENTS`); `init.sh` Koordinátora už vôbec
+> nevytvára. Predošlá veta v tejto hlavičke tvrdila opak — bola **nepravdivá**.
+>
+> Okrem samotnej roly sú vyradené aj **všetky** procedúry, ktoré tento dokument nariaďuje:
+>
+> | Vyradené v tomto dokumente | Platný stav |
+> |---|---|
+> | **Gate E** (a celá 11-stage gate cesta `gate_a`…`gate_g`, `kickoff`, `task_plan`) | 5 fáz: Príprava → Návrh → Vizuál → Programovanie → Verifikácia (+ `done`) |
+> | **Tiborov test / Dual-Build audit** | Zrušený 2026-06-19 — dva piliere §2.5: upfront previerka Auditora + behaviorálne release overenie |
+> | **Súborový kanál `.dedo-channel/`** | Priamy dialóg Manažér ↔ AI Agent; eskalácia cez `kind=framework_issue` |
+> | **Roly Designer / Implementer / Customer / Koordinátor** | Dve roly: **AI Agent** (doer) + **Auditor** (nezávislý overovateľ) |
+> | **Direktor** ako operátor | **Manažér** (CR-V2-004) |
+>
+> Platné šablóny charterov: `templates/ai-agent-charter.md`, `templates/auditor-charter.md`,
+> spoločný základ `templates/agent-shared-base.md`, univerzálny `templates/project-claude-md.md`.
+>
+> Text nižšie je ponechaný **výhradne ako historický záznam v1** a nesmie sa použiť ako inštrukcia.
 
 ---
 

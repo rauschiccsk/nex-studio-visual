@@ -24,13 +24,15 @@ Dvaja agenti, žiadne 5-rolové handoffy:
 Operátor je **Manažér** (komunikuje cez terminál + Telegram). Žiadny súborový `.dedo-channel` — priama
 komunikácia Manažér ↔ AI Agent.
 
-## 2. Fázy (Príprava → Návrh → Programovanie → Verifikácia)
+## 2. Fázy (Príprava → Návrh → Vizuál → Programovanie → Verifikácia)
 
 1. **Príprava** — z `customer-requirements.md` (Zadanie) vznikne **Špecifikácia**. Schválenie špecifikácie
    Manažérom je **vždy povinné** (nezávisle od Miery autonómie).
 2. **Návrh** — jeden návrhový dokument + plán úloh (task plan).
-3. **Programovanie** — implementácia podľa plánu úloh.
-4. **Verifikácia** — Auditor; nálezy → AI Agent opravuje (bounded, potom eskalácia na Manažéra).
+3. **Vizuál** — živý náhľad frontendu v kokpite. Manažér si obrazovky prejde a **schváli vzhľad a
+   rozloženie ešte pred programovaním**. Schválený vizuál je pre Programovanie **zmluva** — nepredrába sa.
+4. **Programovanie** — implementácia podľa plánu úloh, verne voči schválenému Vizuálu.
+5. **Verifikácia** — Auditor; nálezy → AI Agent opravuje (bounded, potom eskalácia na Manažéra).
 
 Nasadenie (UAT/PROD) je **mimo** tejto pipeline a je per-zákazník.
 

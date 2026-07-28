@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "lint": "eslint .",
+    "lint": "eslint . --max-warnings 5",
     "test": "vitest run",
     "type-check": "tsc -b --noEmit",
     "codegen:dump": "cd .. && poetry run python -m backend.scripts.dump_openapi frontend/openapi.json",

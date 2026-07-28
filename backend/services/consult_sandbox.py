@@ -34,6 +34,10 @@ import json
 import logging
 import os
 import re
+import shutil
+import subprocess
+import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 from uuid import UUID, uuid4
@@ -90,7 +94,11 @@ _SIDECAR_UNAVAILABLE_RE = re.compile(
     r"|/var/run/docker\.sock"
     r"|unable to find image"
     r"|no such image"
-    r"|pull access denied)",
+    r"|pull access denied"
+    # ``--mount type=bind`` refusing an absent host source (see :func:`build_sidecar_argv`). The sidecar
+    # never ran claude, so it belongs here — a COUNTED degrade, not a hard consult failure.
+    r"|bind source path does not exist"
+    r"|invalid mount config)",
     re.IGNORECASE,
 )
 
@@ -121,6 +129,209 @@ def sandbox_enabled() -> bool:
     the in-process read-only fallback (still tool-profile read-only, just not kernel-isolated). Read at turn
     time (env, not a cached setting) so the operational kill-switch flips without a process restart."""
     return os.environ.get("CONSULT_SANDBOX", "1").strip().lower() not in ("0", "false", "no", "off", "")
+
+
+# --------------------------------------------------------------------------------------------------------
+# Readiness — the sidecar is enabled by default, so an UNSATISFIABLE precondition must be LOUD, not silent
+# --------------------------------------------------------------------------------------------------------
+#
+# Audited failure: ``consult_sandbox_image`` defaulted to a tag that does not exist on this host, so EVERY
+# consult raised :class:`SidecarUnavailable` ("unable to find image") and degraded to the in-process turn.
+# The degrade path logged one WARNING per turn and nothing else — no operator surface said so — so the
+# kernel-enforced read-only guarantee the design promises was not in effect on ANY consult, while every
+# health surface read fine. Readiness is therefore PROBED and PUBLISHED:
+#
+#   * :func:`preflight` answers "could a sidecar run right now, and if not, exactly why" — surfaced by
+#     ``GET /health`` (``consult_sandbox``) and logged at ERROR on startup when enabled-but-not-ready;
+#   * :func:`record_degradation` counts the turns that actually fell back, so the health payload shows the
+#     guarantee lapsing in real time rather than only the static config being wrong.
+#
+# Building the missing image is a Director decision, NOT something this module papers over: an unready
+# sandbox still degrades (a consult must not become unusable), it simply can no longer do so quietly.
+
+#: How long a successful/failed docker+image probe is reused before re-probing. ``GET /health`` is polled by
+#: the container HEALTHCHECK every 30s and a ``docker image inspect`` is a daemon round-trip, so the answer
+#: is cached — short enough that a freshly built image shows up on the next poll.
+_PREFLIGHT_TTL_SECONDS = 60.0
+
+
+@dataclass(frozen=True)
+class SandboxStatus:
+    """Whether the OS-isolated consult sidecar can actually run, and what has happened to it so far.
+
+    ``ready`` is the honest verdict: ``enabled and not problems``. ``problems`` are operator-facing English
+    strings naming the exact missing precondition (same register as this module's logs), never a vague
+    "unhealthy". ``degraded_turns``/``last_degradation`` accumulate for the process lifetime so a lapsed
+    guarantee is visible even when the static config later gets fixed."""
+
+    enabled: bool
+    ready: bool
+    image: str
+    problems: tuple[str, ...] = ()
+    degraded_turns: int = 0
+    last_degradation: Optional[str] = None
+
+    def as_dict(self) -> dict:
+        """JSON-safe payload for ``GET /health``.
+
+        ``host_bind_sources`` publishes the container→HOST path translation the sidecar will bind
+        (:data:`_CONTAINER_TO_HOST_PREFIX`). It is reported, never asserted: the backend container cannot
+        stat a host path it does not itself mount, and claiming a verification we did not perform is exactly
+        the dishonesty this whole payload exists to end. An operator reading a host prefix that does not
+        exist on the host has found the problem."""
+        return {
+            "enabled": self.enabled,
+            "ready": self.ready,
+            "image": self.image,
+            "problems": list(self.problems),
+            "degraded_turns": self.degraded_turns,
+            "last_degradation": self.last_degradation,
+            "host_bind_sources": {container: host for container, host in _CONTAINER_TO_HOST_PREFIX},
+        }
+
+
+@dataclass
+class _DegradationLedger:
+    """Process-lifetime tally of consult turns that ran WITHOUT the kernel guarantee."""
+
+    count: int = 0
+    last_reason: Optional[str] = None
+
+
+_ledger = _DegradationLedger()
+
+#: ``(monotonic_deadline, problems)`` — the cached result of the docker/image probe. ``None`` = never probed.
+_preflight_cache: Optional[tuple[float, tuple[str, ...]]] = None
+
+#: Signatures that mean the DAEMON is unreachable rather than the image being absent. Deliberately narrower
+#: than :data:`_SIDECAR_UNAVAILABLE_RE` — "Error response from daemon: No such image" also contains "daemon",
+#: so the two causes must not be told apart by that word.
+_DAEMON_UNREACHABLE_RE = re.compile(
+    r"(cannot connect to the docker daemon|is the docker daemon running|permission denied while trying to connect)",
+    re.IGNORECASE,
+)
+
+
+def _auth_dir_present() -> bool:
+    """Whether the MAX-subscription auth/config dir the sidecar binds exists. Its own function so a test can
+    stub THIS rather than ``Path.is_dir`` globally (which would silently answer for every other caller)."""
+    try:
+        return Path(_CLAUDE_AUTH_DIR).is_dir()
+    except OSError:
+        return False
+
+
+def _probe_problems() -> tuple[str, ...]:
+    """Probe the sidecar's hard preconditions. Pure I/O, no caching — :func:`preflight` owns the cache."""
+    problems: list[str] = []
+    if shutil.which("docker") is None:
+        # Without the CLI nothing else is checkable — the daemon and image probes both go through it.
+        return ("docker CLI is not on PATH — the sidecar cannot be launched at all",)
+    image = settings.consult_sandbox_image
+    try:
+        proc = subprocess.run(
+            ["docker", "image", "inspect", "--format", "{{.Id}}", image],
+            capture_output=True,
+            text=True,
+            # 3s, not 10. `/health` is the container's OWN healthcheck (compose: timeout 5s, retries 3),
+            # and this probe is a Docker-daemon round-trip. A 10s worst case exceeds the probe budget, so a
+            # merely SLOW daemon (a heavy image build, socket contention) would mark a perfectly healthy
+            # backend unhealthy — and the CI deploy gate, now un-muted, would fail the deploy on that
+            # verdict. A timeout here reports "sandbox unverifiable", which is the honest answer and does
+            # not take the whole container down with it.
+            timeout=3,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return (f"docker image inspect {image} could not be run ({exc}) — sidecar readiness is unknown",)
+    if proc.returncode != 0:
+        stderr = (proc.stderr or "").strip().splitlines()
+        detail = stderr[-1] if stderr else "no detail"
+        if _DAEMON_UNREACHABLE_RE.search(detail):
+            problems.append(f"docker daemon is unreachable ({detail}) — the sidecar cannot be launched")
+        else:
+            problems.append(
+                f"consult sandbox image {image!r} does not exist on this host ({detail}) — every consult "
+                f"falls back to the in-process turn, so the project is NOT kernel-enforced read-only. "
+                f"Build/pull the image or point CONSULT_SANDBOX_IMAGE at an existing tag."
+            )
+    if not _auth_dir_present():
+        problems.append(
+            f"the Claude auth/config dir {_CLAUDE_AUTH_DIR} is missing — the sidecar would start "
+            f"unauthenticated (no MAX-subscription OAuth token to read)"
+        )
+    return tuple(problems)
+
+
+def preflight(*, refresh: bool = False) -> SandboxStatus:
+    """Report whether a consult sidecar could run RIGHT NOW, naming every unmet precondition.
+
+    Cached for :data:`_PREFLIGHT_TTL_SECONDS` (the probe is a daemon round-trip and ``/health`` is polled);
+    pass ``refresh=True`` to force a re-probe. Never raises — an unprobeable environment is reported as a
+    problem, never swallowed into a healthy-looking ``ready``."""
+    global _preflight_cache
+
+    enabled = sandbox_enabled()
+    if not enabled:
+        # The kill-switch is a DELIBERATE operator choice, not a fault — report it as such (ready=False,
+        # because the kernel guarantee is genuinely not in effect) with no probe and no alarming problem.
+        return SandboxStatus(
+            enabled=False,
+            ready=False,
+            image=settings.consult_sandbox_image,
+            problems=("CONSULT_SANDBOX is switched off — consults run in-process (tool-profile read-only only)",),
+            degraded_turns=_ledger.count,
+            last_degradation=_ledger.last_reason,
+        )
+    now = time.monotonic()
+    if refresh or _preflight_cache is None or _preflight_cache[0] <= now:
+        _preflight_cache = (now + _PREFLIGHT_TTL_SECONDS, _probe_problems())
+    problems = _preflight_cache[1]
+    return SandboxStatus(
+        enabled=True,
+        ready=not problems,
+        image=settings.consult_sandbox_image,
+        problems=problems,
+        degraded_turns=_ledger.count,
+        last_degradation=_ledger.last_reason,
+    )
+
+
+def record_degradation(reason: str) -> None:
+    """Count a consult turn that ran WITHOUT the kernel-enforced read-only guarantee, and say so loudly.
+
+    Called from the single degrade seam in :func:`claude_agent._invoke_once`. ERROR, not WARNING: a promised
+    security boundary that is not in effect is not routine noise. The tally rides on ``GET /health`` so the
+    lapse is visible without grepping logs."""
+    _ledger.count += 1
+    _ledger.last_reason = reason
+    logger.error(
+        "CONSULT SANDBOX DEGRADED (%d turn(s) this process): %s — the consult ran in-process, so the project "
+        "was tool-profile read-only but NOT kernel-enforced read-only (konzultacia-sidecar-sandbox.md). "
+        "Preflight: %s",
+        _ledger.count,
+        reason,
+        "; ".join(preflight().problems) or "no static problem found — a transient daemon failure?",
+    )
+
+
+def log_startup_readiness() -> SandboxStatus:
+    """Announce sidecar readiness once at boot; returns the status so the caller can act on it.
+
+    An enabled-but-unready sandbox is logged at ERROR with the exact remediation. The audited deployment had
+    no such line anywhere: it booted, reported healthy, and every consult quietly lost the guarantee."""
+    status = preflight(refresh=True)
+    if status.ready:
+        logger.info("Consult sidecar READY (image=%s) — consults are kernel-enforced read-only", status.image)
+    elif not status.enabled:
+        logger.warning("Consult sidecar OFF: %s", "; ".join(status.problems))
+    else:
+        logger.error(
+            "Consult sidecar ENABLED but NOT READY — every Konzultácia will silently lose its kernel "
+            "read-only guarantee and fall back in-process. Problems: %s",
+            "; ".join(status.problems),
+        )
+    return status
 
 
 def _host_project_path(container_project_dir: str) -> str:
@@ -206,14 +417,21 @@ def build_sidecar_argv(
         _SIDECAR_USER,
         # project → KERNEL read-only (the hard guarantee). Same in-container path the backend drives claude
         # with, so --resume/cwd/relative reads all resolve identically to the in-process turn.
-        "-v",
-        f"{host_project_dir}:{container_project_dir}:ro",
+        #
+        # ``--mount`` rather than ``-v`` ON PURPOSE (and the reason both binds below moved): ``-v`` CREATES a
+        # missing bind source as an empty root-owned host dir, so a wrong/absent host path mounts an EMPTY
+        # project :ro and the consult answers confidently about nothing — a wrong answer with no error
+        # anywhere. ``--mount`` refuses ("bind source path does not exist"), which
+        # :data:`_SIDECAR_UNAVAILABLE_RE` classifies as unavailable → an honest, COUNTED degrade
+        # (:func:`record_degradation`) instead of a silent lie.
+        "--mount",
+        f"type=bind,source={host_project_dir},target={container_project_dir},readonly",
         # MAX-subscription auth/config dir mounted WRITABLE (OAuth token in). A live consult runs
         # `claude --resume`, which WRITES session state under CLAUDE_CONFIG_DIR → a :ro mount kernel-refused
         # it (EROFS, live bug v3 2026-07-08). Writable so claude persists/resumes its own session, exactly as
         # the in-container build turns do — the project stays :ro (the guarantee) and the AI has no write tools.
-        "-v",
-        f"{_CLAUDE_AUTH_DIR}:{_CLAUDE_AUTH_DIR}",
+        "--mount",
+        f"type=bind,source={_CLAUDE_AUTH_DIR},target={_CLAUDE_AUTH_DIR}",
         "-e",
         f"CLAUDE_CONFIG_DIR={_CLAUDE_AUTH_DIR}",
         "-w",

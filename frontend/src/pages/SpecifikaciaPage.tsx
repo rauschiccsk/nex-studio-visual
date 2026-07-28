@@ -15,8 +15,10 @@
  * via git. The version spec stays the primary group; ``docs/session-logs/`` and other internal noise are
  * intentionally NOT included.
  *
- * Honest states: no project pinned → guard; no docs on disk yet → "nothing agreed yet" + a link to the
- * Riadiace centrum; present → the doc picker + the rendered Markdown.
+ * Honest states: no project pinned → guard; a project WITH version-bound documents but no version pinned
+ * → say they exist and how to see them (it used to claim the project had none, on projects with dozens);
+ * no docs on disk yet → "nothing agreed yet" + a link to the Riadiace centrum; present → the doc picker +
+ * the rendered Markdown.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -59,6 +61,15 @@ const DELIVERABLE_FOLDERS: { folder: string; title: string }[] = [
 
 function labelFor(filename: string): string {
   return DOC_LABELS[filename] ?? filename.replace(/\.md$/i, "");
+}
+
+// How many version-BOUND spec documents the project has on disk, across ALL its versions. Counted from
+// the unfiltered list so the page can tell "this project has no documents" apart from "you have not
+// pinned a version yet" — two states that used to render the same, false, "there are none" sentence.
+function countVersionBoundDocs(all: ProjectSpecDoc[], slug: string): number {
+  const versionsPrefix = `${slug}/docs/specs/versions/`;
+  return all.filter((d) => !d.is_directory && /\.md$/i.test(d.filename) && d.relative_path.startsWith(versionsPrefix))
+    .length;
 }
 
 // The content endpoint's ``path`` is repo-relative (``docs/...``); the list's ``relative_path`` is prefixed
@@ -116,6 +127,8 @@ export default function SpecifikaciaPage() {
   const [docs, setDocs] = useState<ProjectSpecDoc[]>([]);
   const [docsLoading, setDocsLoading] = useState(false);
   const [activePath, setActivePath] = useState<string | null>(null);
+  // Version-bound documents the project has on disk, regardless of what is pinned (see countVersionBoundDocs).
+  const [versionBoundCount, setVersionBoundCount] = useState(0);
 
   const [body, setBody] = useState<string | null>(null);
   const [contentLoading, setContentLoading] = useState(false);
@@ -123,19 +136,25 @@ export default function SpecifikaciaPage() {
   // Durable "Schválená" signal from the board (spine STEP 2) — TRUE once the Špecifikácia was frozen.
   const [specApproved, setSpecApproved] = useState(false);
 
-  // Load the pinned version's document list, filter it, and pick a sensible default (the specification, else
-  // the first doc). Re-fetched when the pinned project / version changes.
+  // Load the project's document list, filter it, and pick a sensible default (the specification, else the
+  // first doc). Re-fetched when the pinned project / version changes. The fetch runs as soon as a PROJECT is
+  // pinned — the version only narrows WHICH spec folder is shown; gating the whole fetch on a pinned version
+  // is what made a project with dozens of documents report having none.
   useEffect(() => {
     let cancelled = false;
     setDocs([]);
     setActivePath(null);
     setBody(null);
-    if (!slug || !versionNumber) return;
+    setVersionBoundCount(0);
+    if (!slug) return;
     setDocsLoading(true);
     listProjectSpecs()
       .then((res) => {
         if (cancelled) return;
-        const specDocs = filterVersionDocs(res.documents, slug, versionNumber);
+        setVersionBoundCount(countVersionBoundDocs(res.documents, slug));
+        // No version pinned → no version spec to show (the project-level handover docs are not
+        // version-bound, so they still render, and the note below explains what is missing).
+        const specDocs = versionNumber ? filterVersionDocs(res.documents, slug, versionNumber) : [];
         const deliverableDocs = filterDeliverableDocs(res.documents, slug);
         const filtered = [...specDocs, ...deliverableDocs];
         setDocs(filtered);
@@ -211,6 +230,13 @@ export default function SpecifikaciaPage() {
   // Badge: approved → "Schválená"; a spec exists but isn't frozen → "Rozpracované"; no spec yet → none.
   const specBadge: "schvalena" | "rozpracovane" | null = specApproved ? "schvalena" : hasSpec ? "rozpracovane" : null;
 
+  // The project HAS documents, they are just bound to a version nobody pinned. Say that — the page used to
+  // render the "nothing has been agreed yet" empty state here, which is false on a project with dozens.
+  const needsVersionPick = !versionNumber && versionBoundCount > 0;
+  const versionPickText =
+    `Dokumenty tohto projektu sú viazané na verziu (na disku: ${versionBoundCount}). ` +
+    "Vyber verziu projektu a otvoria sa tu.";
+
   if (!selectedProject) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 bg-[var(--color-canvas)] p-6 text-center">
@@ -253,6 +279,22 @@ export default function SpecifikaciaPage() {
           </span>
         )}
       </div>
+
+      {/* No version pinned, yet the project HAS version-bound documents — and something else (a contract, a
+          handover note) is already on screen, so the empty state below never runs. Say what is missing here
+          instead of letting the page imply the version spec does not exist. */}
+      {needsVersionPick && docs.length > 0 && (
+        <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-surface)] px-4 py-2">
+          <span className="text-[11px] text-[var(--color-text-muted)]">{versionPickText}</span>
+          <button
+            type="button"
+            onClick={() => navigate(`/projects/${slug}`)}
+            className="rounded-full border border-[var(--color-border-default)] px-2.5 py-1 text-[11px] font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
+          >
+            → Vybrať verziu
+          </button>
+        </div>
+      )}
 
       {/* Document picker — one pill per document, grouped: the version spec first, then the project-level
           handover folders (Kontrakty / Odovzdávka). Hidden when there is ≤1 doc; group headings appear only
@@ -307,6 +349,16 @@ export default function SpecifikaciaPage() {
             <p className="text-xs text-[var(--color-text-muted)]">Tento dokument je zatiaľ prázdny.</p>
           </div>
         )
+      ) : needsVersionPick ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
+          <p className="max-w-md text-xs text-[var(--color-text-muted)]">{versionPickText}</p>
+          <button
+            onClick={() => navigate(`/projects/${slug}`)}
+            className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500"
+          >
+            → Otvor projekt a vyber verziu
+          </button>
+        </div>
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
           <p className="max-w-md text-xs text-[var(--color-text-muted)]">

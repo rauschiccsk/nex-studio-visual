@@ -7,6 +7,12 @@ A ``shu`` user can only see KB documents under
 ``projects/<slug>/`` for projects they are explicitly a member of.
 ``ri`` and ``ha`` users see all projects regardless of membership.
 
+Scope of that gate (be precise — the two are often confused): membership is read ONLY by
+:mod:`backend.utils.kb_access`, i.e. the Znalostná báza (``/knowledge``) and RAG (``/rag``) surfaces
+over ``/home/icc/knowledge/``. It is NOT what :mod:`backend.core.authz` uses — every project-scoped
+route (projects, versions, deploy, ``/project-specs``) authorizes on ``Project.created_by`` and never
+consults this table. Adding a member therefore opens the KB project folder and nothing else.
+
 Differences from NEX Command source:
 
 * ``user_id`` is an FK on ``users.id`` (UUID) instead of a free-text
@@ -25,7 +31,7 @@ from backend.db.models.base import Base, TimestampMixin, UUIDMixin
 
 
 class ProjectMember(Base, UUIDMixin, TimestampMixin):
-    """Membership of a user in a project — gates KB access for ``shu`` role."""
+    """Membership of a user in a project — gates KB access for ``shu`` role (see the module docstring)."""
 
     __tablename__ = "project_members"
 

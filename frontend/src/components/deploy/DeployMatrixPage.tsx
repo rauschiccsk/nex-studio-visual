@@ -66,6 +66,10 @@ const LABELS: Record<DeployEnvironment, { title: string; intro: string; introPau
 
 // The one reason string for a role-blocked Akceptovať — used by the button tooltip and its visible note.
 const ACCEPT_ROLE_REASON = "Akceptáciu (otvorenie PROD) môže vykonať iba Manažér.";
+// The same treatment for the PROD "Nasadiť": the deploy route lets the project owner deploy to UAT but
+// keeps PROD for the Manažér (ri), so on the PROD tab the button looked live to a Junior/Medior and then
+// failed with 403 after the click. Disabled WITH a reason, exactly like Akceptovať.
+const DEPLOY_PROD_ROLE_REASON = "Nasadenie do PROD môže vykonať iba Manažér.";
 
 // v4.0.54: while a re-verification runs, the version leaves the finished state — so the matrix reads exactly
 // like the blocked state for the WHOLE run (minutes). Poll quietly so the screen unblocks itself instead of
@@ -225,15 +229,34 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
   }
 
   /**
-   * The PROD acceptance gate (§3.5): for PROD, a version may be deployed ONLY if
-   * the customer has accepted it. UAT has no such gate. Returns the reason a
-   * deploy is blocked, or null when it is allowed.
+   * Why this row's Nasadiť cannot run — the full sentence for the tooltip plus the short line rendered
+   * under the button. Three blocks, checked in the order the backend would reject them:
+   *   1. role — PROD deploy is ri-only (UAT deploy is open to the project owner), so this one is
+   *      per-environment, not per-page;
+   *   2. nothing deployable — no verified version at all (the cause is explained above the table);
+   *   3. the PROD acceptance gate (§3.5) — that (version, customer) has no recorded UAT acceptance.
+   * Returns null when the deploy is allowed.
    */
-  function deployBlockedReason(row: DeployMatrixRow): string | null {
+  function deployBlock(row: DeployMatrixRow): { title: string; note: string } | null {
+    // The route's FIRST gate (owner-or-ri) applies to BOTH tabs, so it is checked before the
+    // PROD-only one. Without it a Medior who does not own the project loaded the page — the matrix
+    // read is laxer — and met a live-looking "Nasadiť" on UAT that 403s: the same defect one tab over.
+    if (!canDeploy) {
+      return {
+        title: "Nasadzovať tento projekt môže jeho vlastník alebo Manažér.",
+        note: "nemáš oprávnenie",
+      };
+    }
+    if (environment === "prod" && !canDeployProd) {
+      return { title: DEPLOY_PROD_ROLE_REASON, note: "nasadzuje Manažér" };
+    }
     const version = pickedVersion(row);
-    if (!version) return "Žiadna overená verzia na nasadenie.";
+    if (!version) return { title: "Žiadna overená verzia na nasadenie.", note: "pozastavené — dôvod hore" };
     if (environment === "prod" && !row.accepted_versions.includes(version)) {
-      return `PROD je zablokované: verzia ${fmtVer(version)} nemá akceptované UAT pre tohto zákazníka.`;
+      return {
+        title: `PROD je zablokované: verzia ${fmtVer(version)} nemá akceptované UAT pre tohto zákazníka.`,
+        note: "čaká na akceptáciu UAT",
+      };
     }
     return null;
   }
@@ -346,6 +369,11 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
   // v4.0.55: acceptance is the ri-only PROD gate (D3) — an owner-Junior saw "Akceptovať" enabled on their
   // OWN project and got a 403 on click. Disabled-with-a-reason, never a live-looking dead button.
   const canAccept = matrix?.can_accept ?? false;
+  // v4.0.55 fixed the same defect for "Akceptovať" only. PROD deploy carries its own ri-only gate on the
+  // route, so a Junior owner / a Medior got a live-looking "Nasadiť" on the PROD tab and a 403 on click.
+  const canDeployProd = matrix?.can_deploy_prod ?? false;
+  // The other half of the same story: the deploy route refuses a non-owner Medior on BOTH tabs.
+  const canDeploy = matrix?.can_deploy ?? false;
   // The intro tells the manager to deploy → test → accept. While deployment is paused that is an instruction
   // they cannot follow, sitting directly above a notice saying so — so the paused state gets its own line.
   const deployPaused = (matrix?.deployability?.cause ?? "ok") !== "ok";
@@ -406,7 +434,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
             <tbody className="divide-y divide-[var(--color-border-default)]">
               {rows.map((row) => {
                 const isBusy = busy === row.customer_id;
-                const blocked = deployBlockedReason(row);
+                const blocked = deployBlock(row);
                 const current = currentCol(row);
                 const chosen = pickedVersion(row);
                 // Env-generic live link (UAT or PROD), the last successful deploy result, and the UAT-accepted flag.
@@ -541,7 +569,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                         <button
                           onClick={() => handleDeploy(row)}
                           disabled={isBusy || verified.length === 0 || blocked !== null}
-                          title={blocked ?? `Nasadiť verziu ${fmtVer(chosen)} do ${labels.title}`}
+                          title={blocked?.title ?? `Nasadiť verziu ${fmtVer(chosen)} do ${labels.title}`}
                           className="flex items-center gap-1.5 rounded-lg bg-primary-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-primary-500 disabled:opacity-40"
                         >
                           {isBusy ? (
@@ -557,10 +585,10 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                       {/* v4.0.54: this line used to be PROD-only and hardcoded to the acceptance gate — so on
                           UAT (the incident tab) a disabled button got no visible line at all, and on PROD it
                           asserted a cause that was often not the real one. Now both tabs get a line, and it
-                          names which of the two blocks is actually in force. */}
+                          names which of the three blocks (role / nothing deployable / acceptance) is in force. */}
                       {blocked && (
                         <div className="mt-1 text-right text-[11px] text-[var(--color-text-muted)]">
-                          {chosen ? "čaká na akceptáciu UAT" : "pozastavené — dôvod hore"}
+                          {blocked.note}
                         </div>
                       )}
                     </td>

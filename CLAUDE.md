@@ -275,9 +275,18 @@ Platí pre všetkých agentov a aj "obyčajné" CC sessions bez per-agent wrappe
 
 ```bash
 git push origin main
-# OKAMŽITE potom — žiadny ďalší commit pred CI confirmom:
-gh run watch           # alebo: gh run list --limit 1 && gh run view <id>
+# OKAMŽITE potom — žiadny ďalší commit pred CI confirmom.
+# PREDVOLENE: lacná kontrola stavu (NIE watch slučka):
+gh run list --limit 1 --json databaseId,status,conclusion
+# ak ešte beží, zopakuj o chvíľu; po dobehnutí detail jobov:
+gh run view <id> --json status,conclusion,jobs
 ```
+
+**Prečo nie `gh run watch` (Director 2026-07-27):** watch slučka drží session otvorenú a po dobehnutí ju
+znovu vyvolá — vtedy sa ZNOVA načíta celý rozhovor, čo pri dlhej session stojí neúmerne veľa zo spoločného
+týždenného limitu. Povinnosť sa **NEMENÍ** (pushol si → musíš vedieť výsledok a ohlásiť ho); mení sa len
+spôsob zistenia: **jedna lacná otázka na stav namiesto čakacej slučky**. `gh run watch` použi len vtedy, keď
+na výsledku bezprostredne závisí ďalší krok a čakanie je kratšie než opakované dopytovanie.
 
 V reporte uveď run ID + stav každého jobu:
 ```

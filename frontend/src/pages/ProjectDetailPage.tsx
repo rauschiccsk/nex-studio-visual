@@ -384,7 +384,7 @@ export default function ProjectDetailPage() {
           <>
             <div className="rounded-xl border border-dashed border-[var(--color-border-default)] p-8 text-center mb-3">
               <p className="text-sm text-[var(--color-text-muted)]">Žiadne verzie</p>
-              <p className="text-xs text-[var(--color-text-muted)] mt-1">Vytvor prvú verziu a spusti 4-fázový postup.</p>
+              <p className="text-xs text-[var(--color-text-muted)] mt-1">Vytvor prvú verziu a spusti päťfázový postup.</p>
             </div>
             <button
               onClick={() => navigate(`/projects/${slug}/versions/new`)}

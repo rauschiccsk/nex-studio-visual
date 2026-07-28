@@ -207,7 +207,9 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
     # (FINISH). After a build TIMEOUT settles the round ``awaiting_manazer`` ("review & continue") with tasks
     # still REMAINING, that is a footgun: it would FINISH a half-built version, and there is no clean
     # "Pokračovať v stavbe". Gate ``schvalit`` vs ``pokracovat`` on the DB-derived tasks-remaining signal
-    # (``all_tasks_done`` from ``build_readiness`` above — the SAME probe, no extra query): tasks REMAIN →
+    # (``all_tasks_done`` from ``build_readiness`` above — the SAME probe, no extra query; it counts a
+    # ``failed`` / stuck ``in_progress`` task as remaining too, so a timeout on the LAST task of the plan no
+    # longer reads as a finished build and re-offers the FINISH): tasks REMAIN →
     # DROP ``schvalit`` and OFFER ``pokracovat`` (resume the build loop, ``apply_action`` re-dispatches
     # ``_run_build_round`` from awaiting_manazer); ``all_tasks_done`` → keep ``schvalit`` (advance to
     # Verifikácia), as today. Placed BEFORE the conversation-mode ``schvalit`` drop so a conversation build's

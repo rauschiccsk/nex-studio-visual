@@ -62,8 +62,9 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
         label="GitHub organizácia",
         unit="",
         description=(
-            "Organizácia na GitHube, ktorou sa predvyplnia adresy repozitárov na formulári "
-            'nového projektu (v tvare „organizácia/názov-projektu").'
+            "Organizácia na GitHube, pod ktorou vznikajú repozitáre projektov. Predvyplní adresu na "
+            'formulári nového projektu (v tvare „organizácia/názov-projektu") a použije sa aj tam, kde '
+            "adresa chýba — pri zakladaní priečinka projektu, registrácii CI runnera a ochrane hlavnej vetvy."
         ),
     ),
     # ── Miera autonómie — the autonomy dial (v2.0.0, CR-V2-008 / AUTON-1, AUTON-6) ──

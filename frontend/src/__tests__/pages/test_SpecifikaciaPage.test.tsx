@@ -9,7 +9,7 @@
  *   * no spec on disk                    → no badge at all
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
@@ -146,5 +146,61 @@ describe("SpecifikaciaPage badge", () => {
     expect(screen.getByText("Odovzdávka")).toBeInTheDocument();
     // …while internal folders (session-logs) stay out.
     expect(screen.queryByRole("button", { name: "2026-07-16-001" })).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * "No version pinned" is NOT "this project has no documents".
+ *
+ * The whole document fetch used to be gated on a pinned version, so a project with dozens of documents on
+ * disk rendered the "Zatiaľ tu nie sú žiadne dokumenty. Vznikajú v Riadiacom centre…" empty state — telling
+ * the manager to go and create what already exists. The page now says what is true: they exist, pick a
+ * version. The genuinely-empty project keeps the original state.
+ */
+describe("SpecifikaciaPage without a pinned version", () => {
+  beforeEach(() => {
+    getProjectSpecContentMock.mockReset();
+    listProjectSpecsMock.mockReset();
+    getPipelineBoardApiMock.mockReset();
+    getPipelineBoardApiMock.mockResolvedValue({ spec_approved: false });
+    getProjectSpecContentMock.mockResolvedValue({ is_text: true, content: "# Obsah" });
+    contextMock.selectedVersion = null;
+  });
+
+  afterEach(() => {
+    contextMock.selectedVersion = { versionId: "v-1", versionNumber: "2.0.0" };
+  });
+
+  it("says the documents exist and how to see them, instead of claiming there are none", async () => {
+    listProjectSpecsMock.mockResolvedValue({
+      documents: [
+        SPEC_DOC,
+        {
+          relative_path: "demo/docs/specs/versions/v1.0.0/design.md",
+          filename: "design.md",
+          category: "docs/specs/versions/v1.0.0",
+          size_bytes: 42,
+          is_directory: false,
+        },
+      ],
+      count: 2,
+    });
+
+    render(<SpecifikaciaPage />);
+
+    expect(
+      await screen.findByText(/Dokumenty tohto projektu sú viazané na verziu \(na disku: 2\)/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Zatiaľ tu nie sú žiadne dokumenty/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /vyber verziu/i })).toBeInTheDocument();
+  });
+
+  it("keeps the honest 'nothing agreed yet' state for a project that really has no documents", async () => {
+    listProjectSpecsMock.mockResolvedValue({ documents: [], count: 0 });
+
+    render(<SpecifikaciaPage />);
+
+    expect(await screen.findByText(/Zatiaľ tu nie sú žiadne dokumenty/)).toBeInTheDocument();
+    expect(screen.queryByText(/viazané na verziu/)).not.toBeInTheDocument();
   });
 });

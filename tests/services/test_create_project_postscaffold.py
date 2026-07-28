@@ -354,6 +354,17 @@ def test_branch_protection_invokes_gh_api(caplog: pytest.LogCaptureFixture) -> N
     assert any("Branch protection enabled" in r.message for r in caplog.records)
 
 
+def test_branch_protection_targets_the_configured_organisation(caplog: pytest.LogCaptureFixture) -> None:
+    """The short ``owner/name`` shape projects actually store must reach the gh API path unchanged —
+    it used to be replaced by a hardcoded organisation, so on any other org the PUT protected somebody
+    else's repo (or 404'd) while the create reported success."""
+    with patch.object(mod, "subprocess") as ps:
+        ps.run.return_value = subprocess.CompletedProcess(args=["gh"], returncode=0, stdout="{}", stderr="")
+        mod._enable_branch_protection("acme-org/test-proj", "test-proj")
+
+    assert "repos/acme-org/test-proj/branches/main/protection" in ps.run.call_args.args[0]
+
+
 def test_branch_protection_failure_logged_not_raised(caplog: pytest.LogCaptureFixture) -> None:
     """Mandatory negative test: gh api fails → warning, no exception."""
     with patch.object(mod, "subprocess") as ps:

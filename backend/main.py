@@ -37,6 +37,7 @@ from backend.api.routes.versions import router as versions_router
 from backend.config.settings import settings
 from backend.db.session import SessionLocal
 from backend.services import agent_terminal as agent_terminal_service
+from backend.services import consult_sandbox as consult_sandbox_service
 from backend.services import orchestrator as orchestrator_service
 
 # Route application loggers at INFO to stderr so ``docker logs`` surfaces
@@ -150,8 +151,15 @@ async def lifespan(app: FastAPI):
       cannot survive a BE container restart.
     * Spawn the periodic idle-cleanup task that kills sessions idle
       beyond :data:`agent_terminal.IDLE_TTL_SECONDS`.
+
+    Consult sidecar readiness (added after the audit): the OS-isolated Konzultácia sandbox is enabled by
+    default and degrades QUIETLY when it cannot launch, so its preconditions are probed once at boot and an
+    enabled-but-unready sandbox is logged at ERROR. Never fatal — a consult must stay usable — but the
+    deployment can no longer run without its promised kernel read-only guarantee and look healthy doing it.
     """
     _run_alembic_upgrade()
+
+    consult_sandbox_service.log_startup_readiness()
 
     db = SessionLocal()
     try:

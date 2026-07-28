@@ -251,6 +251,23 @@ class TestUserSessionRouter:
         assert body["total"] >= 1
         assert all(item["user_id"] == str(user.id) for item in body["items"])
 
+    def test_list_carries_the_owner_username(self, router_client, db_session):
+        """Each listed session names its owner.
+
+        The Relácie tab renders a "Používateľ" column and a per-row "Odvolať". It resolved the id through
+        the user directory, and ``GET /users`` is ri-only while this tab is ha+ — so a Medior was shown a
+        column of bare UUIDs and had to decide whether to cut someone's session without knowing whose it
+        was. Resolving the name here keeps the directory closed and the column readable.
+        """
+        owner = _make_user(db_session, username=f"owner_{uuid.uuid4().hex[:8]}")
+        router_client.post("/api/v1/user-sessions", json=_payload(user_id=owner.id)).raise_for_status()
+
+        resp = router_client.get("/api/v1/user-sessions", params={"user_id": str(owner.id)})
+
+        assert resp.status_code == 200, resp.text
+        items = resp.json()["items"]
+        assert items and all(item["username"] == owner.username for item in items)
+
     def test_list_limit_over_100_returns_422(self, router_client):
         resp = router_client.get("/api/v1/user-sessions", params={"limit": 101})
         assert resp.status_code == 422

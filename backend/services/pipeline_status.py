@@ -14,7 +14,7 @@ invalid JSON, schema/enum violation, ``question``-required-but-absent) returns
 a :class:`ParseFailure`. The orchestrator maps that to ``status=blocked`` +
 escalation and **never guesses** (F-007 §5.3, §11.3).
 
-``stage`` is one of the **4 v2 phases** (Príprava → Návrh → Programovanie →
+``stage`` is one of the **5 v2 phases** (Príprava → Návrh → Vizuál → Programovanie →
 Verifikácia) + ``done`` (CR-V2-006, matching the DB ``STAGE_VALUES`` tuple); the
 v1 11-stage gate path (``gate_a``…``gate_g``/``release``) is gone.
 
@@ -56,7 +56,7 @@ _TASK_PLAN_FENCE_RE = re.compile(
 #: Tolerate the model wrapping the sentinel-fenced JSON in an inner markdown ```json … ``` block.
 _MD_JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
 
-#: Phases an agent may report (CR-V2-006 — the 4 v2 phases + ``done``; matches the DB
+#: Phases an agent may report (CR-V2-006 — the 5 v2 phases + ``done``; matches the DB
 #: ``STAGE_VALUES`` tuple in ``backend/db/models/pipeline.py``, the single source). The v1
 #: 11-stage gate path (kickoff/gate_a…gate_g/release/task_plan/build) is removed.
 STAGES = frozenset(

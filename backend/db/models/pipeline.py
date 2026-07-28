@@ -46,7 +46,7 @@ from backend.db.models.base import Base, TimestampMixin, UUIDMixin
 # into the OpenAPI ``enum`` arrays and the generated FE union member order (R2-b).
 # v2.0.0 (CR-V2-001): the v1 5-role serial waterfall (Designer/Customer/Implementer/Auditor/
 # Coordinator across 11 stages) collapses to TWO agents — AI Agent (doer) + Auditor (independent
-# verifier) — across 4 phases (priprava → navrh → programovanie → verifikacia) + done. flow_type
+# verifier) — across 5 phases (priprava → navrh → vizual → programovanie → verifikacia) + done. flow_type
 # drops 'cr'/'bug' (OQ-1): every change is a 'new_version' (full 4-phase) or a 'fast_fix' (short path).
 FLOW_TYPE_VALUES = ("new_version", "fast_fix")
 STAGE_VALUES = (

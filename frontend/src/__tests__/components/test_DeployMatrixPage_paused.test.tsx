@@ -50,6 +50,8 @@ function matrix(over: Partial<DeployMatrix> = {}): DeployMatrix {
       can_reverify: false,
     },
     can_accept: false,
+    can_deploy_prod: false,
+    can_deploy: true,
     rows: [
       {
         customer_id: "cust-1",

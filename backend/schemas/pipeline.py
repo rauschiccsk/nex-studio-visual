@@ -118,7 +118,9 @@ class PipelineBoardRead(BaseModel):
     #: the pipeline hasn't started.
     available_actions: list[str] = Field(default_factory=list)
     #: Build-readiness facts (WS-C1, CR-NS-030) the FE uses to DISABLE the Programovanie sign-off button when
-    #: not satisfiable: ``all_tasks_done`` False → a task is still ``todo``; ``build_open_findings`` > 0 → a
+    #: not satisfiable. ``all_tasks_done`` is TRUE only when the plan exists and EVERY task reached ``done`` —
+    #: a ``todo``, a ``failed`` or a stuck ``in_progress`` task all read as work remaining (the last of those
+    #: used to slip through and let the board finish a half-built version). ``build_open_findings`` > 0 → a
     #: failed/unverified task. Defaults are the permissive "ready" values so an absent field never disables.
     #: Also feeds the Programovanie split-view task progress (design §4.5).
     all_tasks_done: bool = True

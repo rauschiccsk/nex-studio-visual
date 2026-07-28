@@ -388,7 +388,10 @@ export default function NewProjectPage() {
             <Field label="GitHub úložisko">
               <input
                 type="text"
-                placeholder={githubOrg ? `${githubOrg}/project-name` : "rauschiccsk/project-name"}
+                // The org comes from the github_org setting. When it could not be read, show the
+                // SHAPE of the value — never a hardcoded organisation name, which read as a fact
+                // about this install and was wrong for anyone who configured a different one.
+                placeholder={githubOrg ? `${githubOrg}/nazov-projektu` : "organizacia/nazov-projektu"}
                 autoComplete="off"
                 spellCheck={false}
                 value={repo}

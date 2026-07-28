@@ -289,6 +289,34 @@ def test_provision_ci_runner_runs_container_with_correct_label(monkeypatch) -> N
     assert not any(str(arg).startswith("ACCESS_TOKEN=") for arg in run_cmd)
 
 
+def test_provision_ci_runner_registers_against_the_configured_organisation(monkeypatch) -> None:
+    """The runner must register against the project's REAL owner.
+
+    ``repo_url`` is stored short (``owner/name``), which used to be unparseable here — so the runner was
+    registered against ``<hardcoded-org>/<slug>``: on any other organisation it points at a repo that is
+    not the project's (or does not exist), and every CI job then queues forever. The org setting is also
+    the fallback when there is no ``repo_url`` at all.
+    """
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_x")
+
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        if len(cmd) > 1 and cmd[1] == "ps":
+            return _FakeCompleted(returncode=0, stdout="")
+        return _FakeCompleted(returncode=0, stdout="cid\n")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    _provision_ci_runner("nex-demo", "acme-org/nex-demo")
+    assert "REPO_URL=https://github.com/acme-org/nex-demo" in calls[-1]
+
+    calls.clear()
+    _provision_ci_runner("nex-demo", None, github_org="acme-org")
+    assert "REPO_URL=https://github.com/acme-org/nex-demo" in calls[-1]
+
+
 def test_provision_ci_runner_skips_without_token(monkeypatch) -> None:
     """No GITHUB_TOKEN / GH_TOKEN → never shells out (best-effort skip, logged)."""
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)

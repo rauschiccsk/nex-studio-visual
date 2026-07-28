@@ -51,11 +51,15 @@ services:
       # up. ri-gated REST API at /api/v1/credentials is the only way in.
       - /opt/data/nex-studio-visual/credentials:/opt/data/nex-studio-visual/credentials:rw
       - uploads:/app/uploads
-      # rw — durable PTY output logs per agent terminal session.
-      # Survives BE container restart so the visual scrollback is
-      # preserved + ``claude --resume <uuid>`` can continue AI memory.
-      # Director directive 2026-05-19. Retention: 30 days, rotation
+      # rw — durable PTY output logs per agent terminal session + the per-turn
+      # agent crash diagnostics. Survives BE container restart so the visual
+      # scrollback is preserved + ``claude --resume <uuid>`` can continue AI
+      # memory. Director directive 2026-05-19. Retention: 30 days, rotation
       # at 100 MB/file (in-place truncate of older half).
+      # The target MUST equal backend.constants.paths.TERMINAL_LOG_DIR — a
+      # mount at any other path leaves the volume empty while the writes go to
+      # the container's writable layer and die on recreate. Pinned by
+      # tests/test_durable_log_volume.py.
       - terminal_logs:/var/lib/nex-studio-visual/terminal-logs
       # ro — Docker socket bind mount so AG agents inside the BE
       # container can drive the host Docker daemon (testcontainers

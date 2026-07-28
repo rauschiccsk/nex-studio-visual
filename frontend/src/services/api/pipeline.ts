@@ -106,8 +106,9 @@ export interface PipelineBoard {
   // dial-governed v2 verbs). The action bar renders only these; absent → fall back to the FE's own logic.
   available_actions?: PipelineActionName[];
   // Build-readiness facts (WS-C1, CR-NS-030): the FE disables the Programovanie sign-off button when not
-  // satisfiable (all_tasks_done false → a todo remains; build_open_findings > 0 → a failed/unverified task)
-  // and drives the Programovanie split-view task progress. Absent → permissive (don't disable).
+  // satisfiable (all_tasks_done false → work remains: a todo, a failed, or a stuck in_progress task;
+  // build_open_findings > 0 → a failed/unverified task) and drives the Programovanie split-view task
+  // progress. Absent → permissive (don't disable).
   all_tasks_done?: boolean;
   build_open_findings?: number;
   // The Programovanie task currently in focus (WS-C2, CR-NS-035) — the who's-up status shows "#N: title".

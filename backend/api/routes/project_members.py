@@ -11,6 +11,20 @@ Note: NEX Studio aktuálne má 1-3 aktívnych používateľov. Project
 membership becomes operationally relevant až keď ``shu`` users (Nazar)
 začnú reálne pracovať na konkrétnych projektoch. Foundation existuje
 od dnes — používatelia sa pridajú podľa potreby cez tieto endpointy.
+
+What a membership row actually does: :mod:`backend.utils.kb_access` appends ``projects/<slug>/`` to a
+``shu`` user's allowed KB categories for every project they are a member of, which is what opens that
+project's folder in the Znalostná báza (``/knowledge``) and in RAG search (``/rag``). Without a row a
+Junior sees only the ``kb_access_shu`` baseline (``icc/``, ``shuhari/``). It does NOT affect
+:mod:`backend.core.authz` — projects, versions, deploy and ``/project-specs`` authorize on
+``Project.created_by`` and never read this table.
+
+There is still NO screen for these endpoints anywhere in the frontend, so the one lever that opens a
+Junior's project documentation can only be pulled by calling the API by hand. Building it is blocked
+on a permission decision, not on effort: a member picker needs the user directory, and ``GET /users``
+is ``ri``-only while member management here is owner-OR-``ri`` — so either the screen is ``ri``-only
+(and a Junior owner still cannot manage his own project) or the directory is widened. That is a
+Director call; see the audit note rather than guessing one here.
 """
 
 from __future__ import annotations

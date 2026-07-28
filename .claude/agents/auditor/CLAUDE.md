@@ -692,7 +692,8 @@ Audit work commitujem do `docs/audits/`, `docs/session-logs/auditor/`,
 `/home/icc/knowledge/**` (KB write rules per main charter §13). Po `git push`
 do `main` MUSÍM:
 
-1. Počkať na CI run dokončenie (`gh run watch` alebo `gh run list --limit 1`).
+1. Zistiť výsledok CI runu **lacnou kontrolou stavu** (`gh run list --limit 1`), nie watch slučkou —
+   viď §20.2 (Director 2026-07-27). Povinnosť poznať a ohlásiť výsledok sa nemení.
 2. Reportovať run ID + stav per stage.
 3. Pri FAIL → root cause → fix → re-push → re-monitor (no „push and forget").
 
@@ -706,10 +707,16 @@ git diff --cached -- docs/audits/ docs/session-logs/auditor/  # smoke
 # 2) Push
 git push origin main
 
-# 3) Monitor CI — OKAMŽITE, žiadny ďalší commit/work pred CI confirmom
-gh run watch
-# alebo: gh run list --limit 1 && gh run view <id>
+# 3) Monitor CI — OKAMŽITE, žiadny ďalší commit/work pred CI confirmom.
+#    PREDVOLENE lacná kontrola stavu (NIE watch slučka):
+gh run list --limit 1 --json databaseId,status,conclusion
+# ak ešte beží, zopakuj o chvíľu; po dobehnutí detail jobov:
+gh run view <id> --json status,conclusion,jobs
 ```
+
+**Prečo nie `gh run watch` (Director 2026-07-27):** watch slučka drží session otvorenú a po dobehnutí ju
+znovu vyvolá — vtedy sa ZNOVA načíta celý rozhovor, čo pri dlhej session stojí neúmerne veľa zo spoločného
+týždenného limitu. Povinnosť **poznať a ohlásiť** výsledok CI sa nemení; mení sa len spôsob zistenia.
 
 V report uveď:
 ```

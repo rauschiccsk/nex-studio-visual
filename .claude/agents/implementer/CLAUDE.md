@@ -796,13 +796,18 @@ sleep 8
 RUN=$(gh api repos/<owner>/<repo>/actions/runs --jq '.workflow_runs[0].id')
 echo "RUN=$RUN"
 
-# 2. Wait for CI completion (blocks until done; ~5-15 min)
-gh run watch $RUN
+# 2. Zisti stav LACNOU kontrolou (NIE watch slučka — Director 2026-07-27).
+#    Ak je status ešte "in_progress", zopakuj tento jeden dotaz o chvíľu.
+gh api repos/<owner>/<repo>/actions/runs/$RUN --jq '{status, conclusion}'
 
-# 3. Confirm conclusion + per-job status
+# 3. Po dobehnutí confirm conclusion + per-job status
 gh api repos/<owner>/<repo>/actions/runs/$RUN --jq '.conclusion'
 gh api repos/<owner>/<repo>/actions/runs/$RUN/jobs --jq '[.jobs[] | {name, conclusion}]'
 ```
+
+**Prečo nie `gh run watch`:** watch slučka drží session otvorenú a po dobehnutí ju znovu vyvolá — vtedy sa
+ZNOVA načíta celý rozhovor, čo pri dlhej session stojí neúmerne veľa zo spoločného týždenného limitu.
+Povinnosť **poznať a ohlásiť** výsledok CI v DONE reporte sa NEMENÍ; mení sa len spôsob zistenia.
 
 **Report v DONE:**
 ```

@@ -22,6 +22,7 @@ from typing import Optional
 from uuid import UUID
 
 from backend.config.settings import settings
+from backend.constants.paths import TERMINAL_LOG_DIR as DURABLE_TERMINAL_LOG_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -99,9 +100,12 @@ class ClaudeAgentTimeout(ClaudeAgentError):
 # --------------------------------------------------------------------------------------------------------
 
 #: Per-turn diagnostic log root. Same DURABLE volume as the PTY logs (docker-compose ``terminal_logs`` →
-#: ``/var/lib/nex-studio/terminal-logs``), so a crash/timeout leaves a trace on disk (the volume was empty
-#: → a crash was undiagnosable). Env-overridable (``NEX_TURN_LOG_DIR``) for a non-container run / tests.
-TURN_LOG_DIR = Path(os.environ.get("NEX_TURN_LOG_DIR", "/var/lib/nex-studio/terminal-logs"))
+#: :data:`backend.constants.paths.TERMINAL_LOG_DIR`), so a crash/timeout leaves a trace on disk. It did NOT:
+#: this literal used to read ``/var/lib/nex-studio/terminal-logs``, a path no compose file mounts, so every
+#: turn log went into the container's writable layer and died with the container while the volume stayed
+#: empty — the exact undiagnosable-crash failure this log was added to prevent. Derived from the shared
+#: constant now; env-overridable (``NEX_TURN_LOG_DIR``) for a non-container run / tests.
+TURN_LOG_DIR = Path(os.environ.get("NEX_TURN_LOG_DIR", str(DURABLE_TERMINAL_LOG_DIR)))
 
 #: Bounded tail (bytes) of stdout / stream-events kept in a turn log — a single ``result`` line can be a
 #: whole spec file, so only the TAIL is durable. The stderr (where a crash cause lives) is kept up to the
@@ -477,11 +481,11 @@ async def _invoke_once(
                     allowed_tools=allowed_tools,
                 )
             except consult_sandbox.SidecarUnavailable as exc:
-                logger.warning(
-                    "consult sidecar unavailable (%s) — DEGRADED to in-process read-only turn: the project is "
-                    "tool-profile read-only but NOT kernel-isolated this turn (konzultacia-sidecar-sandbox.md)",
-                    exc,
-                )
+                # LOUD, not a warning buried in a log: a promised kernel boundary that is not in effect gets
+                # counted + published on ``GET /health`` (consult_sandbox.degraded_turns) and logged at ERROR
+                # with the failing precondition. The audited deployment degraded on EVERY consult — the
+                # configured image did not exist — and nothing outside the log file ever said so.
+                consult_sandbox.record_degradation(str(exc))
         else:
             logger.info(
                 "CONSULT_SANDBOX disabled — running the consult turn in-process (tool-profile read-only, "

@@ -291,7 +291,7 @@ export default function VersionDetailPage() {
               <div className="text-xs text-[var(--color-text-muted)]">
                 {epicCount} celkov · {epicsDone} hotových · {version.bug_count} chýb.
                 Špecifikáciu, návrh a kód tejto verzie pripravuje AI Agent; výsledok overuje Audítor.
-                Fázy (Príprava → Návrh → Programovanie → Verifikácia) sleduješ v Riadiacom centre.
+                Fázy (Príprava → Návrh → Vizuál → Programovanie → Verifikácia) sleduješ v Riadiacom centre.
               </div>
               <button
                 type="button"

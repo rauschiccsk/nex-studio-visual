@@ -257,4 +257,22 @@ class DeployMatrix(BaseModel):
             "looking live and then failing with 403."
         ),
     )
+    can_deploy_prod: bool = Field(
+        default=False,
+        description=(
+            "True iff THIS user may deploy to PROD (the deploy route's ``environment == 'prod'`` role gate). "
+            "PROD deploy is ri-only by the same v4.0.35/D3 Director gate as acceptance, while UAT deploy is "
+            "open to the project owner — so the PROD 'Nasadiť' cannot be hidden by page-level role and needs "
+            "its own flag, or it looks live to a Junior/Medior and then fails with 403."
+        ),
+    )
+    can_deploy: bool = Field(
+        default=True,
+        description=(
+            "Či tento používateľ smie nasadzovať tento projekt VÔBEC — prvá bránka trasy "
+            "nasadenia (vlastník alebo správca), platná pre UAT aj PROD. Bez nej sa tlačidlo "
+            "„Nasadiť“ tvárilo živo aj pre Mediora, ktorý projekt nevlastní, a skončilo "
+            "zamietnutím — tá istá chyba, akú ``can_deploy_prod`` rieši pre PROD."
+        ),
+    )
     rows: list[DeployMatrixRow] = Field(default_factory=list)

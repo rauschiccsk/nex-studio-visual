@@ -69,6 +69,7 @@ from backend.services.template_bootstrap import (
     TemplateBootstrapError,
     invoke_init_script,
     push_and_verify,
+    resolve_github_org,
     rollback_partial_state,
 )
 
@@ -734,6 +735,11 @@ def create_project(
         payload.owner_id = payload.created_by
 
     gh_timeout = float(system_setting_service.get_int(db, "github_api_timeout_seconds"))
+    # The configured organisation, resolved ONCE and threaded through every repo-derived stage below
+    # (scaffold argv, push+verify, CI runner, branch protection). Stage 1 honours ``repo_url``
+    # verbatim; the later stages used to re-derive an owner and fell back to a hardcoded one, so a
+    # non-default organisation was honoured at repo creation and nowhere else.
+    github_org = resolve_github_org(db)
 
     # Stage 1 — GitHub repo. Runs before any DB state so a failure is
     # fully reversible (nothing has happened yet on our side).
@@ -843,7 +849,7 @@ def create_project(
         if stage4_should_run:
             from backend.services.template_bootstrap import _repo_from_url
 
-            repo_full_name = _repo_from_url(payload.repo_url, project.slug)
+            repo_full_name = _repo_from_url(payload.repo_url, project.slug, default_owner=github_org)
             try:
                 push_and_verify(target=project.source_path, repo_full_name=repo_full_name)
             except GitPushVerificationError as exc:
@@ -889,6 +895,7 @@ def create_project(
             enable_cicd=payload.enable_cicd,
             full_smoke=payload.full_smoke,
             enable_branch_protection=payload.enable_branch_protection,
+            github_org=github_org,
         )
 
         # Align the freshly scaffolded (root-owned) workspace with the 1000:1000 convention so the

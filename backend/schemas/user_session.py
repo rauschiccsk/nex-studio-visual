@@ -93,3 +93,12 @@ class UserSessionRead(BaseModel):
     last_seen_at: datetime
     created_at: datetime
     updated_at: datetime
+    username: Optional[str] = Field(
+        default=None,
+        description=(
+            "Login name of the session's owner, resolved by the list route. The Relácie tab shows one row "
+            "per session and offers 'Odvolať' on each; without this it printed the raw ``user_id`` UUID to "
+            "anyone who cannot list users (``GET /users`` is ri-only), so a Medior decided whether to cut "
+            "someone's session without knowing whose it was. ``None`` when the owner row is gone."
+        ),
+    )
