@@ -64,5 +64,12 @@ def update_system_setting(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        # An UNKNOWN KEY is a 404; a rejected VALUE is a 422. Both used to answer 404, so the Settings
+        # UI reported "this setting does not exist" for a value it had simply refused to store — a
+        # misdirection that sends the operator looking for the wrong problem.
+        unknown_key = "unknown system setting" in str(exc).lower()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND if unknown_key else status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
     return result

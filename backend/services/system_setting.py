@@ -622,6 +622,16 @@ def _validate_value_for_type(value: str, value_type: SystemSettingValueType) -> 
             raise ValueError(f"Value {value!r} is not a valid bool — use true/false/1/0/yes/no/on/off")
 
 
+#: Settings whose EMPTY value is a documented state rather than a mistake. Emptiness used to be
+#: refused by a blanket ``min_length=1`` on the update schema, which made these states unreachable
+#: from the very UI that manages them: ``template_init_script_path=""`` means "filesystem bootstrap
+#: off" and ``reserved_port_ranges=""`` means "no ranges declared" (``reserved_ranges_status()``
+#: reports ``configured=False`` for exactly that value). Every other key still refuses empty — an
+#: empty ``github_org`` would break repository creation — but the rule now lives beside the meaning
+#: instead of on the envelope that carries every setting alike.
+EMPTY_MEANS_OFF: frozenset[str] = frozenset({"template_init_script_path", "reserved_port_ranges"})
+
+
 def upsert(
     db: Session,
     key: str,
@@ -643,6 +653,9 @@ def upsert(
     default = DEFAULT_SETTINGS.get(key)
     if default is None:
         raise ValueError(f"Unknown system setting: {key!r}")
+
+    if value == "" and key not in EMPTY_MEANS_OFF:
+        raise ValueError(f"System setting {key!r} may not be empty")
 
     _validate_value_for_type(value, default.value_type)
 

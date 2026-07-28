@@ -175,13 +175,21 @@ def _validate_ports(db: Session, payload: ProjectCreate) -> None:
     # deterministically.
     bp = payload.backend_port
     if bp is not None and bp >= 10100:
-        if bp % 10 != 0:
+        # Read the CONFIGURED block size rather than a hardcoded 10. ``port_block_size`` is a live,
+        # editable setting that ``port_registry.suggest_next_port_block`` honours — so with any value
+        # other than 10, the cockpit SUGGESTED a correctly-aligned base and then rejected it here for
+        # not being a multiple of ten. One source, not two.
+        block_size = system_setting_service.get_int(db, "port_block_size")
+        if block_size < 1:  # a nonsensical setting must not disable the check
+            block_size = 10
+        if bp % block_size != 0:
+            first = 10100 - (10100 % block_size)
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=(
-                    f"backend_port {bp} must be 10-aligned (10100, 10110, "
-                    f"10120, ...) per D-020 commercial-range layout. The "
-                    f"first port of a 10-port block starts the project's "
+                    f"backend_port {bp} must be aligned to the configured {block_size}-port block "
+                    f"({first}, {first + block_size}, {first + 2 * block_size}, ...) per the D-020 "
+                    f"commercial-range layout. The first port of a block starts the project's "
                     f"reserved slot."
                 ),
             )

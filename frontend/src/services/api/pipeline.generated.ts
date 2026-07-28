@@ -4395,7 +4395,7 @@ export interface components {
             repo_url?: string | null;
             /**
              * Slug
-             * @description URL-safe identifier, unique across the system.
+             * @description URL-safe identifier, unique across the system. Kebab-case, mirroring the scaffolder's own rule (^[a-z][a-z0-9-]*[a-z0-9]$) so a name it would reject never reaches it.
              */
             slug: string;
             /**

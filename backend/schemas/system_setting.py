@@ -72,4 +72,11 @@ class SystemSettingUpdate(BaseModel):
     server-managed.
     """
 
-    value: str = Field(..., min_length=1)
+    #: No ``min_length``: for several settings the EMPTY string is a documented, meaningful state, and
+    #: requiring one character made those states unreachable from the UI that is supposed to manage
+    #: them. ``template_init_script_path=""`` means "filesystem bootstrap off" and
+    #: ``reserved_port_ranges=""`` means "no ranges declared" (``reserved_ranges_status()`` reports
+    #: ``configured=False`` for exactly that value) — both are how the registry documents itself, and
+    #: both were rejected with a validation error. Per-setting meaning belongs to the setting, not to a
+    #: blanket rule on the envelope.
+    value: str = Field(...)
