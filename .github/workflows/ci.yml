@@ -87,7 +87,12 @@ jobs:
           SECRET_KEY: "ci-test-secret-key"
           BACKEND_PORT: "9176"
           FRONTEND_PORT: "9177"
-        run: poetry run pytest --tb=short -q
+        # Coverage was configured (pytest-cov, [tool.coverage.*]) and INVOKED BY NOTHING — nobody,
+        # Manager or agent, could say what fraction of a 52k-line backend the suite touches, and no
+        # floor existed to stop it drifting down. First measurement: 90%. The floor is set slightly
+        # below that so ordinary variation does not turn a green suite red, and it may only ever be
+        # RAISED — never lowered to make a run pass (see feedback_threshold_downgrade_antipattern).
+        run: poetry run pytest --tb=short -q --cov=backend --cov-report=term --cov-fail-under=88
 
   build-frontend:
     name: Build Frontend

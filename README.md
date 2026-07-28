@@ -93,8 +93,8 @@ ruff format --check .
 | `DATABASE_URL` | `postgresql+pg8000://...` | PostgreSQL connection string (pg8000 driver) |
 | `TEST_DATABASE_URL` | `postgresql+pg8000://...` | Test database connection string |
 | `SECRET_KEY` | `change-me-in-production` | JWT signing key |
-| `BACKEND_PORT` | `9176` | Backend listening port |
-| `FRONTEND_PORT` | `9177` | Frontend listening port |
+| `BACKEND_PORT` | `9176` | Backend port as OTHER code reads it — the image hardcodes where it actually listens; changing this changes nothing |
+| `FRONTEND_PORT` | `9177` | Frontend port as OTHER code reads it — nginx hardcodes where it actually listens; changing this changes nothing |
 | `CLAUDE_CONFIG_DIR` | `/root/.claude` | Claude CLI config directory inside container |
 | `CLAUDE_CLI_PATH` | `claude` | Path to Claude CLI binary |
 

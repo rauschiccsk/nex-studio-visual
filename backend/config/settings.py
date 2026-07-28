@@ -8,6 +8,13 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+pg8000://nexstudiovisual:nexstudiovisual@localhost:9215/nexstudiovisual"
     test_database_url: str = "postgresql+pg8000://nexstudiovisual:nexstudiovisual@localhost:9215/nexstudiovisual_test"
     secret_key: str = "change-me-in-production"
+    # DECLARED, NOT HONOURED — read this before wiring anything to them. The container images
+    # hardcode the ports: the backend CMD is `uvicorn --port 9176` and nginx serves 9177, and the
+    # healthcheck hardcodes 9176 too. Setting BACKEND_PORT / FRONTEND_PORT in an .env or a compose
+    # file changes NOTHING, and there is not even a failure to notice — the container keeps listening
+    # where it always did and the healthcheck keeps passing. They survive as the value other code
+    # READS when it needs to know where the app listens; they do not decide it. Changing where it
+    # listens means editing the Dockerfile CMD and the nginx config, not this.
     backend_port: int = 9176
     frontend_port: int = 9177
     vite_api_base_url: str = "http://localhost:9213"

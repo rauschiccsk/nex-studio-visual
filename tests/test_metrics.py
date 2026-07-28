@@ -385,7 +385,9 @@ def test_metrics_unconfigured_returns_nulls(db_session, monkeypatch):
     assert m.totals.human_cost_measured is None and m.totals.human_cost_total is None
     assert m.coefficient_minutes_per_mtok is None
     assert m.pricing_configured is False
-    assert m.coefficient_configured is False
+    # `coefficient_configured` was removed: the screen derives the same fact from the coefficient
+    # itself, and one fact with two sources is how they drift apart. Assert the source.
+    assert m.coefficient_minutes_per_mtok is None
     assert m.wages_configured is False
 
 
@@ -432,7 +434,7 @@ def test_metrics_configured_computes_costs(db_session, monkeypatch):
     assert m.wages["priprava"] is None  # unset → None, never 0
     assert m.currency == "EUR"
     assert m.pricing_configured is True
-    assert m.coefficient_configured is True
+    assert m.coefficient_minutes_per_mtok is not None
     assert m.wages_configured is True
 
 
@@ -638,7 +640,9 @@ def test_coefficient_unset_nulls_every_human_figure_but_no_cost(db_session, monk
     assert t.agent_cost_external == pytest.approx(0.021)
     assert t.agent_cost_total == pytest.approx(0.0315)
     assert m.coefficient_minutes_per_mtok is None
-    assert m.coefficient_configured is False
+    # `coefficient_configured` was removed: the screen derives the same fact from the coefficient
+    # itself, and one fact with two sources is how they drift apart. Assert the source.
+    assert m.coefficient_minutes_per_mtok is None
 
 
 def test_wage_missing_on_one_phase_nulls_the_human_cost_totals_only(db_session, monkeypatch):

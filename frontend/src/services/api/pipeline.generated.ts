@@ -4274,8 +4274,6 @@ export interface components {
         ProjectCostsRead: {
             /** By Version */
             by_version: components["schemas"]["VersionCostsRead"][];
-            /** Coefficient Configured */
-            coefficient_configured: boolean;
             /** Coefficient Minutes Per Mtok */
             coefficient_minutes_per_mtok: number | null;
             /**

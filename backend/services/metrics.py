@@ -516,7 +516,9 @@ def compute_project_metrics(db: Session, project: Project) -> ProjectCostsRead:
     """Aggregate the project's cost per phase / version / project — measured + hand-entered, split."""
     flat_in = _effective_price(db, "api_price_input_per_mtok", settings.api_price_input_per_mtok)
     flat_out = _effective_price(db, "api_price_output_per_mtok", settings.api_price_output_per_mtok)
-    pricing_configured, coefficient_configured, wages_configured = _config_flags(db, flat_in, flat_out)
+    # `coefficient_configured` is intentionally NOT shipped: the screen derives the same state from
+    # `coefficient_minutes_per_mtok is None`, and two sources for one fact is how they drift apart.
+    pricing_configured, _coefficient_configured, wages_configured = _config_flags(db, flat_in, flat_out)
 
     versions = (
         db.execute(select(Version).where(Version.project_id == project.id).order_by(Version.version_number.asc()))
@@ -577,6 +579,5 @@ def compute_project_metrics(db: Session, project: Project) -> ProjectCostsRead:
         wages=_wages(db),
         currency="EUR",
         pricing_configured=pricing_configured,
-        coefficient_configured=coefficient_configured,
         wages_configured=wages_configured,
     )

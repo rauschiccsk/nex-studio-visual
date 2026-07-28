@@ -461,7 +461,11 @@ Mechanika PIV (spec compliance check, field-level verification, dead code detect
 
 ## 16. NAMING & CONVENTIONS
 
-- **Architect** (nie Director) pre strategické/plánovacie časti v kóde — `services/api/architect.ts`, `ArchitecturePage.tsx`, `/api/architect/*`, architect system prompt identifiers
+- **Architect** (nie Director) pre strategické/plánovacie časti v kóde a v promptoch agentov.
+  Je to pomenovacia konvencia, nie odkaz na konkrétne súbory — tri, ktoré tu boli uvedené ako
+  príklad (`services/api/architect.ts`, `ArchitecturePage.tsx`, `/api/architect/*`), v tomto
+  repozitári NEEXISTUJÚ. Agent, ktorý ich podľa pravidla „čítaj, kým premýšľaš“ otvoril, nenašiel
+  nič a musel usúdiť, či pravidlo ešte platí. Platí; kotvy boli zdedené z iného repozitára.
 - **GitHub raw URL**: vždy `rauschiccsk` (NIKDY `icc-zoltan`)
 - **Filesystem layout**: `/opt/projects/<slug>/` pre source, `/opt/customers/<slug>/` pre tenants, `/opt/infra/<service>/` pre shared infra (viď `STRUCTURE.md` v KB)
 

@@ -89,6 +89,5 @@ export interface ProjectCosts {
   wages: Record<string, number | null>; // row key → hourly wage; null when unset ("system" never present)
   currency: string;
   pricing_configured: boolean;
-  coefficient_configured: boolean;
   wages_configured: boolean;
 }

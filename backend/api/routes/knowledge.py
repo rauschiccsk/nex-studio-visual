@@ -23,12 +23,14 @@ Differences from NEX Command source:
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from backend.config.settings import settings
 from backend.core.security import get_current_user, has_full_kb_access
 from backend.db.models.foundation import User
 from backend.db.session import get_db
@@ -142,6 +144,23 @@ def get_document_content(
         raise HTTPException(status_code=403, detail="Prístup zamietnutý na základe Shuhari role")
 
     manager = _get_manager()
+
+    # Enforce the ceiling `kb_content_max_bytes` has always PROMISED. Its comment described a 422 for
+    # oversized files; no code implemented it, so the KB (mounted rw into this container) could be
+    # read fully into memory and serialised into a JSON body with no limit at all. Stat before read —
+    # the same shape credentials.py already uses.
+    try:
+        size = (Path(settings.knowledge_base_path) / relative_path).stat().st_size
+    except OSError:
+        size = 0  # unreadable/absent → let the read below produce the real 404/403
+    if size > settings.kb_content_max_bytes:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Dokument je príliš veľký ({size // 1024} kB); limit je "
+                f"{settings.kb_content_max_bytes // 1024} kB. Otvor ho priamo na disku."
+            ),
+        )
 
     try:
         content = manager.read_document(relative_path)

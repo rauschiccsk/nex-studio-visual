@@ -84,7 +84,6 @@ function project(rows: CostRow[], totals: CostTotals, over: Partial<ProjectCosts
     wages: Object.fromEntries([...PHASES, "externe"].map((k) => [k, 12])),
     currency: "EUR",
     pricing_configured: true,
-    coefficient_configured: true,
     wages_configured: true,
     ...over,
   };
@@ -154,7 +153,6 @@ const UNSET = project(
     coefficient_minutes_per_mtok: null,
     wages: Object.fromEntries([...PHASES, "externe"].map((k) => [k, null])),
     pricing_configured: false,
-    coefficient_configured: false,
     wages_configured: false,
   },
 );

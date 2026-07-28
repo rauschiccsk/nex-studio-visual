@@ -137,5 +137,4 @@ class ProjectCostsRead(BaseModel):
     wages: dict[str, Optional[float]]
     currency: str = "EUR"
     pricing_configured: bool
-    coefficient_configured: bool
     wages_configured: bool
