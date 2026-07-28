@@ -3035,12 +3035,12 @@ export interface components {
             secret?: string | null;
             /**
              * Slug
-             * @description URL-safe customer slug, unique within the project.
+             * @description URL-safe customer slug, unique within the project. Pattern: ^[a-z0-9][a-z0-9-]*$.
              */
             slug: string;
             /**
              * Subdomain
-             * @description Customer URL host label (e.g. 'andros').
+             * @description Customer URL host label (e.g. 'andros'). Pattern: ^[a-z0-9][a-z0-9-]*$.
              */
             subdomain?: string | null;
         };
@@ -3343,6 +3343,7 @@ export interface components {
          *     summary. ``url`` is the customer instance's public URL (None when no
          *     frontend route exists). ``bumped_to`` carries the new version_number when a
          *     first-PROD deploy bumped the project to v1.0.0 (§3.6), else None.
+         *     ``warnings`` carries what went imperfectly on a deploy that SUCCEEDED.
          */
         DeployResult: {
             /**
@@ -3355,7 +3356,10 @@ export interface components {
             ok: boolean;
             /** Url */
             url?: string | null;
-            /** Warnings */
+            /**
+             * Warnings
+             * @description Non-fatal, non-secret notes about a deploy that SUCCEEDED — what a manager must know and act on although nothing failed (e.g. no paired NEX Manager, so one-click launch stays off until one is deployed for this customer). A warning NEVER means failure: ``ok`` stays True.
+             */
             warnings?: string[];
         };
         /**
