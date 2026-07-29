@@ -9,6 +9,7 @@ Per Implementer charter §10.d (CR-029 test approach matrix):
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import uuid
 from pathlib import Path
@@ -463,6 +464,65 @@ def test_init_script_accepts_the_argv_the_cockpit_builds(db_session, tmp_path):
 
     assert result.init_script == str(ICC_INIT_SCRIPT)
     assert result.target == str(target)
+
+
+def test_real_founding_actually_completes_not_just_its_plan(db_session, tmp_path):
+    """Found a project FOR REAL into tmp_path. The dry-run above is not enough, and here is why.
+
+    The dry-run validates the PLAN. Several of init.sh's own guards only execute on the real path — in
+    particular the one that checks the frontend skeleton's ``package.json`` and ``package-lock.json``
+    agree on the nex-shared pin. Bumping the skeleton to v0.19.0 (to ship the mono font) changed only
+    ``package.json``; the lock still said v0.11.0, so EVERY real project creation exited 1 while the
+    dry-run kept passing and this file's other test stayed green. The break was found by founding a
+    project, not by reading, and the only test that can hold that ground is one that founds one.
+
+    Skipped where the template is not on the host, like its dry-run sibling.
+    """
+    if not ICC_INIT_SCRIPT.is_file():
+        pytest.skip(f"real init.sh not on this host ({ICC_INIT_SCRIPT}) — cockpit/template drift unchecked here")
+
+    system_setting_service.upsert(db_session, "template_init_script_path", str(ICC_INIT_SCRIPT))
+    db_session.flush()
+
+    user = User(
+        username=f"boot-real-{uuid.uuid4().hex[:8]}",
+        email=f"boot-real-{uuid.uuid4().hex[:8]}@example.com",
+        password_hash="x",
+        role="ri",
+    )
+    db_session.add(user)
+    db_session.flush()
+
+    target = tmp_path / "real-probe"
+    project = Project(
+        name="Real Probe",
+        slug=f"real-probe-{uuid.uuid4().hex[:8]}",
+        type="standard",
+        auth_mode="password",
+        description="Regression probe: a REAL scaffold, not a validated plan",
+        created_by=user.id,
+        source_path=str(target),
+        backend_port=14992,
+    )
+    db_session.add(project)
+    db_session.flush()
+
+    invoke_init_script(db_session, project, dry_run=False)
+
+    # The scaffold exists and carries what the engine needs downstream.
+    assert (target / "CLAUDE.md").is_file()
+    assert (target / ".claude" / "agents").is_dir()
+    assert (target / ".git").is_dir()
+
+    # The pinned pair AGREES — the specific break this test exists for.
+    lock = (target / "frontend" / "package-lock.json").read_text(encoding="utf-8")
+    package = (target / "frontend" / "package.json").read_text(encoding="utf-8")
+    pin = re.search(r"nex-shared#v([0-9]+\.[0-9]+\.[0-9]+)", package)
+    assert pin, "the skeleton's package.json no longer pins nex-shared by tag"
+    assert f"nex-shared#v{pin.group(1)}" in lock, (
+        f"skeleton lockfile disagrees with package.json (wants v{pin.group(1)}) — init.sh exits 1 on this "
+        f"and every project creation fails"
+    )
 
 
 def test_disabled_bootstrap_refuses_a_greenfield_project_instead_of_founding_a_hollow_one(db_session, tmp_path):
