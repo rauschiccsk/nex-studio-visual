@@ -75,7 +75,9 @@ def router_client(db_session):
 
     _suffix_m2 = _uuid_m2.uuid4().hex[:8]
     _ri_m2 = _UserM2(
-        username=f"ri_m2_{_suffix_m2}",
+        # The ACCOUNT named admin — bugs now authorize on the OWNING PROJECT, and this client
+        # operates on projects other fixtures created. Role "ri" no longer carries that.
+        username="admin",
         email=f"ri_m2_{_suffix_m2}@test.local",
         password_hash=_bcrypt.hashpw(b"test", _bcrypt.gensalt(rounds=4)).decode(),
         role="ri",
@@ -290,7 +292,7 @@ class TestBugRouter:
                 json=_payload(project_id=project.id, created_by=reporter.id, version_id=version.id),
             ).raise_for_status()
 
-        resp = router_client.get("/api/v1/bugs", params={"skip": 0, "limit": 2})
+        resp = router_client.get("/api/v1/bugs", params={"project_id": str(project.id), "skip": 0, "limit": 2})
         assert resp.status_code == 200
         body = resp.json()
         assert set(body.keys()) >= {"items", "total", "skip", "limit"}
@@ -301,7 +303,7 @@ class TestBugRouter:
 
         page2 = router_client.get(
             "/api/v1/bugs",
-            params={"skip": 2, "limit": 2},
+            params={"project_id": str(project.id), "skip": 2, "limit": 2},
         ).json()
         page1_ids = {row["id"] for row in body["items"]}
         page2_ids = {row["id"] for row in page2["items"]}
@@ -362,7 +364,7 @@ class TestBugRouter:
             ),
         ).raise_for_status()
 
-        resp = router_client.get("/api/v1/bugs", params={"status": "accepted"})
+        resp = router_client.get("/api/v1/bugs", params={"project_id": str(project.id), "status": "accepted"})
         assert resp.status_code == 200
         body = resp.json()
         assert body["total"] >= 1
@@ -388,7 +390,7 @@ class TestBugRouter:
             ),
         ).raise_for_status()
 
-        resp = router_client.get("/api/v1/bugs", params={"severity": "critical"})
+        resp = router_client.get("/api/v1/bugs", params={"project_id": str(project.id), "severity": "critical"})
         assert resp.status_code == 200
         body = resp.json()
         assert body["total"] >= 1
@@ -414,7 +416,7 @@ class TestBugRouter:
             ),
         ).raise_for_status()
 
-        resp = router_client.get("/api/v1/bugs", params={"source": "customer"})
+        resp = router_client.get("/api/v1/bugs", params={"project_id": str(project.id), "source": "customer"})
         assert resp.status_code == 200
         body = resp.json()
         assert body["total"] >= 1
@@ -441,7 +443,7 @@ class TestBugRouter:
 
         resp = router_client.get(
             "/api/v1/bugs",
-            params={"created_by": str(other.id)},
+            params={"project_id": str(project.id), "created_by": str(other.id)},
         )
         assert resp.status_code == 200
         body = resp.json()

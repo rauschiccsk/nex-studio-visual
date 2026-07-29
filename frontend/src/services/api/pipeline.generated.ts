@@ -18,7 +18,7 @@ export interface paths {
          *     Since CR-V2-007 the spawn API is AI-Agent-only, so this reports just
          *     ``{"ai-agent": <bool>}`` — true when ``.claude/agents/ai-agent/CLAUDE.md``
          *     exists in the project (the set mirrors ``_VALID_ROLES``). An invalid slug or
-         *     unknown project → 404. v4.0.35: owner-or-privileged (a Junior only their own project).
+         *     unknown project → 404. v4.0.35: owner-or-admin (a Junior only their own project).
          */
         get: operations["available_roles_api_v1_agent_terminal_available_roles_get"];
         put?: never;
@@ -82,7 +82,7 @@ export interface paths {
          * Spawn Session
          * @description Spawn a fresh claude CLI process for ``(role, project_slug)``.
          *
-         *     v4.0.35: owner-or-privileged — a Junior may only attach a terminal to their OWN project.
+         *     v4.0.35: owner-or-admin — a Junior may only attach a terminal to their OWN project.
          */
         post: operations["spawn_session_api_v1_agent_terminal_spawn_post"];
         delete?: never;
@@ -160,7 +160,7 @@ export interface paths {
          * @description Update the current user's OWN profile — e-mail, display name, Telegram chat id (v4.0.33).
          *
          *     Self-service: every authenticated user may edit these safe fields on themselves (the admin
-         *     ``PATCH /users/{id}`` stays ri-only and also governs role / activation). ``username``, ``role`` and
+         *     ``PATCH /users/{id}`` stays owner-or-admin and also governs role / activation). ``username``, ``role`` and
          *     ``is_active`` are never editable here; the password has its own endpoint.
          */
         patch: operations["update_me_api_v1_auth_me_patch"];
@@ -235,7 +235,7 @@ export interface paths {
         put?: never;
         /**
          * Create Backlog Item
-         * @description Create a backlog item (``REQ-N`` auto-assigned; status ``open``). v4.0.43: owner-or-ri/ha.
+         * @description Create a backlog item (``REQ-N`` auto-assigned; status ``open``). v4.0.43: owner-or-admin/ha.
          */
         post: operations["create_backlog_item_api_v1_backlog_post"];
         delete?: never;
@@ -261,7 +261,7 @@ export interface paths {
         /**
          * Delete Backlog Item
          * @description Delete a backlog item — only when ``open`` (never delete realized/included History). v4.0.43:
-         *     owner-or-ri/ha of the item's project.
+         *     owner-or-admin/ha of the item's project.
          */
         delete: operations["delete_backlog_item_api_v1_backlog__item_id__delete"];
         options?: never;
@@ -272,7 +272,7 @@ export interface paths {
          *
          *     A payload that sets ``version_id`` is an **assign** (→ ``status=included``); otherwise it edits
          *     ``title`` / ``description`` / ``priority`` / ``status`` (reject = ``status='rejected'``). v4.0.43:
-         *     owner-or-ri/ha of the item's project.
+         *     owner-or-admin/ha of the item's project.
          */
         patch: operations["update_backlog_item_api_v1_backlog__item_id__patch"];
         trace?: never;
@@ -286,7 +286,7 @@ export interface paths {
         };
         /**
          * List Bugs
-         * @description Return a paginated list of bugs.
+         * @description Return a paginated list of one project's bugs — if the caller owns it.
          */
         get: operations["list_bugs_api_v1_bugs_get"];
         put?: never;
@@ -314,7 +314,7 @@ export interface paths {
         };
         /**
          * Get Bug
-         * @description Return a single bug by primary key.
+         * @description Return a single bug by primary key — if the caller owns its project.
          */
         get: operations["get_bug_api_v1_bugs__bug_id__get"];
         put?: never;
@@ -418,7 +418,7 @@ export interface paths {
          * Delete Customer
          * @description Delete a customer and its stored secret (if any).
          *
-         *     v4.0.35: was ri-only → now owner-OR-ri (the owner, or an ``ri`` lead, may delete a customer under their
+         *     v4.0.35: was owner-or-admin → now owner-or-admin (the owner, or an ``ri`` lead, may delete a customer under their
          *     OWN project; ``ha`` not privileged for this write); a Junior touching another user's project gets 403.
          */
         delete: operations["delete_customer_api_v1_customers__customer_id__delete"];
@@ -428,7 +428,7 @@ export interface paths {
          * Update Customer
          * @description Partially update a customer / rotate its secret.
          *
-         *     v4.0.35: was ri-only → now owner-OR-ri (the owner, or an ``ri`` lead, may edit a customer under their
+         *     v4.0.35: was owner-or-admin → now owner-or-admin (the owner, or an ``ri`` lead, may edit a customer under their
          *     OWN project; ``ha`` not privileged for this write); a Junior touching another user's project gets 403.
          *
          *     A supplied ``secret`` overwrites the stored credentials-store content; the
@@ -1007,7 +1007,7 @@ export interface paths {
          *     Returns text content for whitelisted text extensions (``.md``,
          *     ``.txt``, ``.csv``, ``.json``, ``.yaml``, source code, etc.); for
          *     binary files returns ``is_text=False`` + empty content so the
-         *     frontend can render a "cannot display" placeholder. v4.0.43: owner-or-privileged on ``slug``.
+         *     frontend can render a "cannot display" placeholder. v4.0.43: owner-or-admin on ``slug``.
          */
         get: operations["get_project_spec_content_api_v1_project_specs_content_get"];
         /**
@@ -1384,7 +1384,7 @@ export interface paths {
          *     business reality (single-digit to low-double-digit counts) and the
          *     UI renders the entire collection at once.
          *
-         *     v4.0.35: owner-or-privileged — a Junior (``shu``) sees only their OWN
+         *     v4.0.35: owner-or-admin — a Junior (``shu``) sees only their OWN
          *     project's versions; ri/ha see every project.
          */
         get: operations["list_versions_api_v1_projects__project_id__versions_get"];
@@ -1427,7 +1427,7 @@ export interface paths {
          * Create Customer
          * @description Register a customer through the form (design §3.2).
          *
-         *     v4.0.35: was ri-only → now owner-OR-ri (the creator, or an ``ri`` lead, may add customers to their OWN
+         *     v4.0.35: was owner-or-admin → now owner-or-admin (the creator, or an ``ri`` lead, may add customers to their OWN
          *     project). ``ha`` is NOT privileged for this write; a Junior touching another user's project gets 403.
          *
          *     Internal apps register **ICC s.r.o.** through this same endpoint — one code
@@ -2083,7 +2083,7 @@ export interface paths {
          *     so the ``VersionDetailPage`` UI can render the EPIC / BUG groups
          *     without an N+1 round-trip — see DESIGN.md §2.6 ``GET /versions/{id}``.
          *
-         *     v4.0.35: owner-or-privileged — a Junior may read only their OWN
+         *     v4.0.35: owner-or-admin — a Junior may read only their OWN
          *     project's version.
          */
         get: operations["get_version_api_v1_versions__version_id__get"];
@@ -2103,7 +2103,7 @@ export interface paths {
          *     * **409** — the version is ``released``, or it still has one or more
          *       EPICs attached (Task Plan not empty).
          *
-         *     v4.0.35: owner-or-privileged — a Junior may delete only their OWN
+         *     v4.0.35: owner-or-admin — a Junior may delete only their OWN
          *     project's version; ri/ha may delete any.
          */
         delete: operations["delete_version_api_v1_versions__version_id__delete"];
@@ -2118,7 +2118,7 @@ export interface paths {
          *     ``project_id`` and ``created_at`` are immutable; ``updated_at`` is
          *     refreshed by the ORM ``onupdate=func.now()`` trigger.
          *
-         *     v4.0.35: owner-or-privileged — a Junior may patch only their OWN
+         *     v4.0.35: owner-or-admin — a Junior may patch only their OWN
          *     project's version; ri/ha may patch any.
          *
          *     .. note::
@@ -2159,7 +2159,7 @@ export interface paths {
          *       "...", "blocking_epic_ids": ["<uuid>", ...]}`` so the
          *       ``VersionsPage`` UI can render the blockers inline.
          *
-         *     v4.0.35: owner-or-privileged — a Junior may release only their OWN
+         *     v4.0.35: owner-or-admin — a Junior may release only their OWN
          *     project's version; ri/ha may release any.
          */
         post: operations["release_version_api_v1_versions__version_id__release_post"];
@@ -2183,7 +2183,7 @@ export interface paths {
          * @description Delete the entire task plan for a version (all EPICs, Feats and Tasks).
          *
          *     Hard-deletes every Epic under this version. Feats and Tasks are removed
-         *     via ``ON DELETE CASCADE`` at the DB level. v4.0.35: owner-or-privileged —
+         *     via ``ON DELETE CASCADE`` at the DB level. v4.0.35: owner-or-admin —
          *     a Junior may reset only their OWN project's version.
          */
         post: operations["reset_plan_api_v1_versions__version_id__reset_plan_post"];
@@ -2208,7 +2208,7 @@ export interface paths {
          *
          *     Sets every Task under every Epic of this version to ``todo``, and
          *     recomputes Feat / Epic statuses accordingly. Does not delete any records.
-         *     v4.0.35: owner-or-privileged — a Junior may reset only their OWN project's version.
+         *     v4.0.35: owner-or-admin — a Junior may reset only their OWN project's version.
          */
         post: operations["reset_tasks_api_v1_versions__version_id__reset_tasks_post"];
         delete?: never;
@@ -2230,7 +2230,7 @@ export interface paths {
          *
          *     Returns an empty plan (``epic_count=0``) when no EPICs exist yet.
          *
-         *     v4.0.35: owner-or-privileged — a Junior may read only their OWN
+         *     v4.0.35: owner-or-admin — a Junior may read only their OWN
          *     project's task plan.
          */
         get: operations["get_task_plan_api_v1_versions__version_id__task_plan_get"];
@@ -2257,7 +2257,7 @@ export interface paths {
          *     (2026-06-30 fix — loading from ``description`` showed an empty editor on re-open even though the Zadanie was
          *     saved, and never reflected a Zadanie edited directly on disk). **404** — the version/project does not exist.
          *
-         *     v4.0.35: owner-or-privileged — a Junior may read only their OWN project's Zadanie.
+         *     v4.0.35: owner-or-admin — a Junior may read only their OWN project's Zadanie.
          */
         get: operations["read_zadanie_api_v1_versions__version_id__zadanie_get"];
         /**
@@ -2266,7 +2266,7 @@ export interface paths {
          *
          *     The New-Version flow saves the brief here on "Uložiť Zadanie"; the Príprava phase (CR-V2-010)
          *     reads exactly this file when the build starts. Create-or-overwrite — the version's spec
-         *     directory is created if it does not yet exist. v4.0.35: owner-or-privileged — a Junior may
+         *     directory is created if it does not yet exist. v4.0.35: owner-or-admin — a Junior may
          *     write only their OWN project's Zadanie; ri/ha may write any.
          *
          *     * **404** — the version (or its project) does not exist.
@@ -5867,9 +5867,9 @@ export interface operations {
     };
     list_bugs_api_v1_bugs_get: {
         parameters: {
-            query?: {
-                /** @description Filter by project id. */
-                project_id?: string | null;
+            query: {
+                /** @description The project whose bugs to list. REQUIRED — the caller is authorized against it. It used to be an optional filter, so omitting it returned every project's bugs to anyone the role gate let through: a list that fails OPEN, raising nothing and returning more. */
+                project_id: string;
                 /** @description Filter by lifecycle status (new | accepted | in_progress | resolved | wont_fix). */
                 status?: ("new" | "accepted" | "in_progress" | "resolved" | "wont_fix") | null;
                 /** @description Filter by severity (critical | major | minor). */

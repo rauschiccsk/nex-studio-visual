@@ -6,10 +6,10 @@
   then broadcasts ``state_changed`` + ``message_added`` to live board sockets.
 * ``WS     /pipeline/ws/{version_id}?token`` → live board feed + §9 presence.
 
-v4.0.35: owner-or-ri (was Director-only). Any authenticated user reaches these routes; the authz layer
-(``backend.core.authz``, ``ri_only=True``) scopes them to the version's project OWNER or an ``ri`` — a
+v4.0.35: owner-or-admin (was Director-only). Any authenticated user reaches these routes; the authz layer
+(``backend.core.authz``, owner-or-admin) scopes them to the version's project OWNER or an ``ri`` — a
 Junior drives their OWN project's pipeline, a Medior does not gain the ri-tier drive on projects they
-don't own. The WS applies the same owner-or-ri check after ``verify_ws_token``.
+don't own. The WS applies the same owner-or-admin check after ``verify_ws_token``.
 """
 
 from __future__ import annotations
@@ -684,7 +684,7 @@ async def pipeline_ws(
             return
         # Authenticated → open the socket, so every refusal below reaches the client AS A CODE.
         await websocket.accept()
-        # v4.0.35: owner-or-privileged for THIS version's project (ri/ha see all; a Junior only their own).
+        # v4.0.35: owner-or-admin for THIS version's project (ri/ha see all; a Junior only their own).
         version = db.get(Version, version_id)
         if version is None:
             await websocket.close(code=4004)  # not found

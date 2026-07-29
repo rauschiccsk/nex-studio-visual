@@ -1,6 +1,6 @@
 """REST + WebSocket router for ``/api/v1/agent-terminal/*``.
 
-REST endpoints (v4.0.35: owner-or-ri via ``backend.core.authz`` — the project owner or an ``ri``; sessions
+REST endpoints (v4.0.35: owner-or-admin via ``backend.core.authz`` — the project owner or an ``ri``; sessions
 are additionally per-user via ``user_id``):
 
 * ``POST /spawn`` — spawn a new claude CLI process under PTY for the
@@ -89,7 +89,7 @@ async def spawn_session(
 ) -> AgentTerminalSession:
     """Spawn a fresh claude CLI process for ``(role, project_slug)``.
 
-    v4.0.35: owner-or-privileged — a Junior may only attach a terminal to their OWN project.
+    v4.0.35: owner-or-admin — a Junior may only attach a terminal to their OWN project.
     """
     authz.assert_project_slug_access(db, current_user, payload.project_slug)
     try:
@@ -123,7 +123,7 @@ def available_roles(
     Since CR-V2-007 the spawn API is AI-Agent-only, so this reports just
     ``{"ai-agent": <bool>}`` — true when ``.claude/agents/ai-agent/CLAUDE.md``
     exists in the project (the set mirrors ``_VALID_ROLES``). An invalid slug or
-    unknown project → 404. v4.0.35: owner-or-privileged (a Junior only their own project).
+    unknown project → 404. v4.0.35: owner-or-admin (a Junior only their own project).
     """
     authz.assert_project_slug_access(db, current_user, project_slug)
     try:

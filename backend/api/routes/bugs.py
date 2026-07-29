@@ -29,7 +29,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
-from backend.core.security import require_ha_or_above
+from backend.core import authz
+from backend.core.security import require_shu_or_above
+from backend.db.models.foundation import User
 from backend.db.session import get_db
 from backend.schemas.bug import (
     BugCreate,
@@ -44,7 +46,11 @@ from backend.services import bug as bug_service
 
 router = APIRouter(
     tags=["Bugs"],
-    dependencies=[Depends(require_ha_or_above)],
+    # Any authenticated user reaches the surface; each route then authorizes on the bug's OWNING
+    # PROJECT. The router used to be gated by the ha ROLE and nothing else — not one endpoint
+    # resolved the project — so under the ownership model any ha/ri account could read, edit and
+    # hard-delete every project's bugs. It was a sibling of the accept-route hole, one file over.
+    dependencies=[Depends(require_shu_or_above)],
 )
 
 
@@ -66,9 +72,12 @@ def _map_value_error(exc: ValueError) -> HTTPException:
 
 @router.get("", response_model=PaginatedResponse[BugRead])
 def list_bugs(
-    project_id: Optional[UUID] = Query(
-        default=None,
-        description="Filter by project id.",
+    project_id: UUID = Query(
+        description=(
+            "The project whose bugs to list. REQUIRED — the caller is authorized against it. It used to "
+            "be an optional filter, so omitting it returned every project's bugs to anyone the role gate "
+            "let through: a list that fails OPEN, raising nothing and returning more."
+        ),
     ),
     status_filter: Optional[BugStatus] = Query(
         default=None,
@@ -90,8 +99,10 @@ def list_bugs(
     skip: int = Query(default=0, ge=0, description="Number of rows to skip."),
     limit: int = Query(default=50, ge=1, le=100, description="Maximum rows to return."),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_shu_or_above),
 ) -> PaginatedResponse[BugRead]:
-    """Return a paginated list of bugs."""
+    """Return a paginated list of one project's bugs — if the caller owns it."""
+    authz.assert_project_id_access(db, current_user, project_id)
     try:
         rows = bug_service.list_bugs(
             db,
@@ -126,12 +137,14 @@ def list_bugs(
 def get_bug(
     bug_id: UUID,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_shu_or_above),
 ) -> BugRead:
-    """Return a single bug by primary key."""
+    """Return a single bug by primary key — if the caller owns its project."""
     try:
         bug = bug_service.get_by_id(db, bug_id)
     except ValueError as exc:
         raise _map_value_error(exc) from exc
+    authz.assert_project_id_access(db, current_user, bug.project_id)
     return BugRead.model_validate(bug)
 
 
@@ -143,6 +156,7 @@ def get_bug(
 def create_bug(
     payload: BugCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_shu_or_above),
 ) -> BugRead:
     """Create a new bug.
 
@@ -151,6 +165,7 @@ def create_bug(
     creates that race on the same project surface as HTTP 409.
     """
     try:
+        authz.assert_project_id_access(db, current_user, payload.project_id)
         bug = bug_service.create(db, payload)
         db.commit()
     except ValueError as exc:
@@ -165,6 +180,7 @@ def update_bug(
     bug_id: UUID,
     payload: BugUpdate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_shu_or_above),
 ) -> BugRead:
     """Partially update a bug's mutable fields.
 
@@ -175,6 +191,7 @@ def update_bug(
     explicitly, the service stamps ``resolved_at = now()`` automatically.
     """
     try:
+        authz.assert_project_id_access(db, current_user, bug_service.get_by_id(db, bug_id).project_id)
         bug = bug_service.update(db, bug_id, payload)
         db.commit()
     except ValueError as exc:
@@ -192,6 +209,7 @@ def update_bug(
 def delete_bug(
     bug_id: UUID,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_shu_or_above),
 ) -> Response:
     """Hard-delete a bug by primary key.
 
@@ -202,6 +220,7 @@ def delete_bug(
     tooling.
     """
     try:
+        authz.assert_project_id_access(db, current_user, bug_service.get_by_id(db, bug_id).project_id)
         bug_service.delete(db, bug_id)
         db.commit()
     except ValueError as exc:

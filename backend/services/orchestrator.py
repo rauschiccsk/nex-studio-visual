@@ -969,7 +969,11 @@ def _resolve_dispatch_overrides(db: Session, version_id: uuid.UUID, role: str) -
     """
     row = db.execute(
         select(UserAgentSettings.model, UserAgentSettings.effort)
-        .join(Project, Project.owner_id == UserAgentSettings.user_id)
+        # created_by, NOT owner_id. Whose preferences drive the build is a question about the project's
+        # OWNER; owner_id is the Telegram notification target, which is nullable and may legitimately
+        # point at somebody else. Joined on owner_id this silently returned no row whenever that column
+        # was NULL, and the agent fell back to defaults without a word.
+        .join(Project, Project.created_by == UserAgentSettings.user_id)
         .join(Version, Version.project_id == Project.id)
         .where(Version.id == version_id, UserAgentSettings.agent_role == role)
     ).first()
@@ -998,7 +1002,11 @@ def _resolve_helper_model(db: Session, version_id: uuid.UUID) -> str:
     """
     row = db.execute(
         select(UserAgentSettings.helper_model)
-        .join(Project, Project.owner_id == UserAgentSettings.user_id)
+        # created_by, NOT owner_id. Whose preferences drive the build is a question about the project's
+        # OWNER; owner_id is the Telegram notification target, which is nullable and may legitimately
+        # point at somebody else. Joined on owner_id this silently returned no row whenever that column
+        # was NULL, and the agent fell back to defaults without a word.
+        .join(Project, Project.created_by == UserAgentSettings.user_id)
         .join(Version, Version.project_id == Project.id)
         .where(Version.id == version_id, UserAgentSettings.agent_role == AI_AGENT_ROLE)
     ).first()
@@ -1680,10 +1688,13 @@ async def _settle_for_consultation(
 
 
 def _owner_chat_id_for_version(db: Session, version_id: uuid.UUID) -> Optional[str]:
-    """Telegram chat_id of the version's project owner, or ``None`` (mirrors
+    """Telegram chat_id of the version's NOTIFICATION target, or ``None`` (mirrors
     ``pipeline_runner._owner_chat_id`` — the recipient of the agent → Dedo escalation ping, Director obs #6)."""
     return db.execute(
         select(User.telegram_chat_id)
+        # owner_id is RIGHT here, and only here: this is the Telegram recipient, which is exactly what
+        # that column means. The two sibling queries above wanted the project's owner and were joined on
+        # this column by mistake.
         .join(Project, Project.owner_id == User.id)
         .join(Version, Version.project_id == Project.id)
         .where(Version.id == version_id)

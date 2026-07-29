@@ -34,6 +34,6 @@ def get_project_metrics(
     current_user: User = Depends(require_shu_or_above),
 ) -> ProjectCostsRead:
     """Return what the project cost — per phase, per version, cumulative (E5)."""
-    # v4.0.35: owner-or-privileged — a Junior may read metrics only for their OWN project.
+    # v4.0.35: owner-or-admin — a Junior may read metrics only for their OWN project.
     project = authz.assert_project_slug_access(db, current_user, slug)
     return metrics_service.compute_project_metrics(db, project)

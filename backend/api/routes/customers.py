@@ -73,7 +73,7 @@ def list_customers(
     current_user: User = Depends(get_current_user),
 ) -> list[CustomerRead]:
     """Return every customer registered for the project ``slug`` (newest first)."""
-    # v4.0.35: owner-or-privileged — a Junior sees only their OWN project's customers.
+    # v4.0.35: owner-or-admin — a Junior sees only their OWN project's customers.
     project = authz.assert_project_slug_access(db, current_user, slug)
     rows = customer_service.list_customers(db, project.id)
     return [_to_read(row) for row in rows]
@@ -92,7 +92,7 @@ def create_customer(
 ) -> CustomerRead:
     """Register a customer through the form (design §3.2).
 
-    v4.0.35: was ri-only → now owner-OR-ri (the creator, or an ``ri`` lead, may add customers to their OWN
+    v4.0.35: was owner-or-admin → now owner-or-admin (the creator, or an ``ri`` lead, may add customers to their OWN
     project). ``ha`` is NOT privileged for this write; a Junior touching another user's project gets 403.
 
     Internal apps register **ICC s.r.o.** through this same endpoint — one code
@@ -121,7 +121,7 @@ def get_customer(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CustomerRead:
-    # v4.0.35: owner-or-privileged — a Junior may read a customer only under their OWN project.
+    # v4.0.35: owner-or-admin — a Junior may read a customer only under their OWN project.
     authz.assert_customer_access(db, current_user, customer_id)
     try:
         customer = customer_service.get_by_id(db, customer_id)
@@ -139,13 +139,13 @@ def update_customer(
 ) -> CustomerRead:
     """Partially update a customer / rotate its secret.
 
-    v4.0.35: was ri-only → now owner-OR-ri (the owner, or an ``ri`` lead, may edit a customer under their
+    v4.0.35: was owner-or-admin → now owner-or-admin (the owner, or an ``ri`` lead, may edit a customer under their
     OWN project; ``ha`` not privileged for this write); a Junior touching another user's project gets 403.
 
     A supplied ``secret`` overwrites the stored credentials-store content; the
     response never echoes it back.
     """
-    # v4.0.35: ownership gate (owner-or-ri) before any mutation.
+    # v4.0.35: ownership gate (owner-or-admin) before any mutation.
     authz.assert_customer_access(db, current_user, customer_id)
     try:
         customer = customer_service.update(db, customer_id, payload)
@@ -169,10 +169,10 @@ def delete_customer(
 ) -> Response:
     """Delete a customer and its stored secret (if any).
 
-    v4.0.35: was ri-only → now owner-OR-ri (the owner, or an ``ri`` lead, may delete a customer under their
+    v4.0.35: was owner-or-admin → now owner-or-admin (the owner, or an ``ri`` lead, may delete a customer under their
     OWN project; ``ha`` not privileged for this write); a Junior touching another user's project gets 403.
     """
-    # v4.0.35: ownership gate (owner-or-ri) before the delete.
+    # v4.0.35: ownership gate (owner-or-admin) before the delete.
     authz.assert_customer_access(db, current_user, customer_id)
     try:
         customer_service.delete(db, customer_id)

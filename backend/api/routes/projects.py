@@ -330,9 +330,18 @@ def _workspace_holds_foreign_files(source_path: str | None) -> bool:
     """
     if not source_path:
         return False
+    path = Path(source_path)
+    if not path.exists():
+        # GREENFIELD — the ordinary case, and the one this used to get wrong. The directory does not
+        # exist yet; init.sh creates it. Treating "missing" as foreign (which ``iterdir`` did, by
+        # raising FileNotFoundError into the except below) meant the cleanup NEVER ran on a normal
+        # create, so one failed founding left the scaffold behind and burned that project name for
+        # good — the exact harm the cleanup exists to prevent.
+        return False
     try:
-        return any(Path(source_path).iterdir())
+        return any(path.iterdir())
     except OSError:
+        # It exists but cannot be read. That is genuinely unknown, and unknown is not ours to delete.
         return True
 
 
@@ -1083,7 +1092,7 @@ def delete_project(
         project = project_service.get_by_id(db, project_id)
     except ValueError as exc:
         raise _map_value_error(exc) from exc
-    # v4.0.35: delete was ri-only — now owner-OR-ri (a Junior may delete their OWN throwaway project; a
+    # v4.0.35: delete was owner-or-admin — now owner-or-admin (a Junior may delete their OWN throwaway project; a
     # Medior does NOT gain delete on projects they don't own). ha is NOT privileged for this write.
     authz.authorize_project(current_user, project)
 

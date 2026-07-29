@@ -1154,8 +1154,14 @@ def test_workspace_holds_foreign_files(tmp_path):
 
     assert _workspace_holds_foreign_files(str(adopted)) is True  # an existing checkout
     assert _workspace_holds_foreign_files(str(tmp_path / "empty")) is False  # greenfield shape
-    assert _workspace_holds_foreign_files(str(tmp_path / "absent")) is True  # unreadable → do not delete
     assert _workspace_holds_foreign_files(None) is False  # nothing to protect
+
+    # A MISSING directory is greenfield — the ordinary create — not something foreign. This asserted
+    # the opposite, and the code agreed with it: `iterdir()` raises FileNotFoundError on a path that
+    # does not exist, the except returned True, and so EVERY normal founding was classified as an
+    # adopted workspace. The cleanup then never ran, and one failed create burned the project name
+    # for good, which is the precise harm the cleanup was added to prevent.
+    assert _workspace_holds_foreign_files(str(tmp_path / "absent")) is False
 
 
 def test_discard_never_removes_an_adopted_workspace(tmp_path, monkeypatch, caplog):

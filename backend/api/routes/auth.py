@@ -150,7 +150,7 @@ def update_me(
     """Update the current user's OWN profile — e-mail, display name, Telegram chat id (v4.0.33).
 
     Self-service: every authenticated user may edit these safe fields on themselves (the admin
-    ``PATCH /users/{id}`` stays ri-only and also governs role / activation). ``username``, ``role`` and
+    ``PATCH /users/{id}`` stays owner-or-admin and also governs role / activation). ``username``, ``role`` and
     ``is_active`` are never editable here; the password has its own endpoint.
     """
     try:

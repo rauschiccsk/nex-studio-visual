@@ -88,7 +88,7 @@ def get_project_spec_content(
     Returns text content for whitelisted text extensions (``.md``,
     ``.txt``, ``.csv``, ``.json``, ``.yaml``, source code, etc.); for
     binary files returns ``is_text=False`` + empty content so the
-    frontend can render a "cannot display" placeholder. v4.0.43: owner-or-privileged on ``slug``.
+    frontend can render a "cannot display" placeholder. v4.0.43: owner-or-admin on ``slug``.
     """
     authz.assert_project_slug_access(db, current_user, slug)
     try:

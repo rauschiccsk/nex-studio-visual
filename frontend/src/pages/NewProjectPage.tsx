@@ -485,7 +485,10 @@ export default function NewProjectPage() {
                   onChange={(e) => setOwnerId(e.target.value)}
                   className="w-full bg-[var(--color-surface)] border border-[var(--color-border-default)] rounded-lg px-3 py-2 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-primary-500"
                 >
-                  <option value="">— žiadny —</option>
+                  {/* No "— žiadny —" option. Picking it did not mean "no notifications": the service
+                      enforces an invariant that a project ALWAYS has a recipient (CR-NS-074) and
+                      silently rewrote the empty choice to the creator. The form offered a state the
+                      system does not have. */}
                   {users.map((u) => {
                     const display = [u.first_name, u.last_name].filter(Boolean).join(" ") || u.username;
                     return (

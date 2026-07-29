@@ -135,7 +135,7 @@ def list_versions(
     business reality (single-digit to low-double-digit counts) and the
     UI renders the entire collection at once.
 
-    v4.0.35: owner-or-privileged — a Junior (``shu``) sees only their OWN
+    v4.0.35: owner-or-admin — a Junior (``shu``) sees only their OWN
     project's versions; ri/ha see every project.
     """
     authz.assert_project_id_access(db, current_user, project_id)
@@ -197,7 +197,7 @@ def get_version(
     so the ``VersionDetailPage`` UI can render the EPIC / BUG groups
     without an N+1 round-trip — see DESIGN.md §2.6 ``GET /versions/{id}``.
 
-    v4.0.35: owner-or-privileged — a Junior may read only their OWN
+    v4.0.35: owner-or-admin — a Junior may read only their OWN
     project's version.
     """
     authz.assert_version_access(db, current_user, version_id)
@@ -225,7 +225,7 @@ def update_version(
     ``project_id`` and ``created_at`` are immutable; ``updated_at`` is
     refreshed by the ORM ``onupdate=func.now()`` trigger.
 
-    v4.0.35: owner-or-privileged — a Junior may patch only their OWN
+    v4.0.35: owner-or-admin — a Junior may patch only their OWN
     project's version; ri/ha may patch any.
 
     .. note::
@@ -267,7 +267,7 @@ def delete_version(
     * **409** — the version is ``released``, or it still has one or more
       EPICs attached (Task Plan not empty).
 
-    v4.0.35: owner-or-privileged — a Junior may delete only their OWN
+    v4.0.35: owner-or-admin — a Junior may delete only their OWN
     project's version; ri/ha may delete any.
     """
     authz.assert_version_access(db, current_user, version_id)
@@ -302,7 +302,7 @@ def get_task_plan(
 
     Returns an empty plan (``epic_count=0``) when no EPICs exist yet.
 
-    v4.0.35: owner-or-privileged — a Junior may read only their OWN
+    v4.0.35: owner-or-admin — a Junior may read only their OWN
     project's task plan.
     """
     authz.assert_version_access(db, current_user, version_id)
@@ -403,7 +403,7 @@ def write_zadanie(
 
     The New-Version flow saves the brief here on "Uložiť Zadanie"; the Príprava phase (CR-V2-010)
     reads exactly this file when the build starts. Create-or-overwrite — the version's spec
-    directory is created if it does not yet exist. v4.0.35: owner-or-privileged — a Junior may
+    directory is created if it does not yet exist. v4.0.35: owner-or-admin — a Junior may
     write only their OWN project's Zadanie; ri/ha may write any.
 
     * **404** — the version (or its project) does not exist.
@@ -436,7 +436,7 @@ def read_zadanie(
     (2026-06-30 fix — loading from ``description`` showed an empty editor on re-open even though the Zadanie was
     saved, and never reflected a Zadanie edited directly on disk). **404** — the version/project does not exist.
 
-    v4.0.35: owner-or-privileged — a Junior may read only their OWN project's Zadanie.
+    v4.0.35: owner-or-admin — a Junior may read only their OWN project's Zadanie.
     """
     authz.assert_version_access(db, current_user, version_id)
     try:
@@ -456,7 +456,7 @@ def reset_tasks(
 
     Sets every Task under every Epic of this version to ``todo``, and
     recomputes Feat / Epic statuses accordingly. Does not delete any records.
-    v4.0.35: owner-or-privileged — a Junior may reset only their OWN project's version.
+    v4.0.35: owner-or-admin — a Junior may reset only their OWN project's version.
     """
     authz.assert_version_access(db, current_user, version_id)
     epics = db.execute(select(Epic).where(Epic.version_id == version_id)).scalars().all()
@@ -493,7 +493,7 @@ def reset_plan(
     """Delete the entire task plan for a version (all EPICs, Feats and Tasks).
 
     Hard-deletes every Epic under this version. Feats and Tasks are removed
-    via ``ON DELETE CASCADE`` at the DB level. v4.0.35: owner-or-privileged —
+    via ``ON DELETE CASCADE`` at the DB level. v4.0.35: owner-or-admin —
     a Junior may reset only their OWN project's version.
     """
     authz.assert_version_access(db, current_user, version_id)
@@ -531,7 +531,7 @@ def release_version(
       "...", "blocking_epic_ids": ["<uuid>", ...]}`` so the
       ``VersionsPage`` UI can render the blockers inline.
 
-    v4.0.35: owner-or-privileged — a Junior may release only their OWN
+    v4.0.35: owner-or-admin — a Junior may release only their OWN
     project's version; ri/ha may release any.
     """
     authz.assert_version_access(db, current_user, version_id)

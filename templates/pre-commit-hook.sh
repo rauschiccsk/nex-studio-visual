@@ -29,12 +29,23 @@ if [[ "${NEEDS_BACKEND}" == "1" && -f backend/pyproject.toml ]]; then
     # Prefer `ruff` on PATH; fall back to the pip module form.
     RUFF="ruff"
     command -v ruff >/dev/null 2>&1 || RUFF="python3 -m ruff"
-    echo "pre-commit: backend — ruff format --check"
-    ( cd backend && ${RUFF} format --check . ) \
-        || { echo "❌ ruff format --check FAILED — run: cd backend && ${RUFF} format ."; exit 1; }
-    echo "pre-commit: backend — ruff check"
-    ( cd backend && ${RUFF} check . ) \
-        || { echo "❌ ruff check FAILED — run: cd backend && ${RUFF} check --fix ."; exit 1; }
+
+    # Is the tool actually THERE? This distinction is load-bearing, not defensive padding. The AI Agent
+    # commits from inside the backend container, where ruff is present neither on PATH nor as a module —
+    # so without this check its very first backend commit died on "❌ ruff format --check FAILED", a
+    # message that blames the code when the truth is that the linter is not installed. A hook that
+    # cannot run its check must say so; it must not convict.
+    if ! ${RUFF} --version >/dev/null 2>&1; then
+        echo "pre-commit: backend — ruff SKIPPED (nie je nainštalovaný v tomto prostredí)"
+        echo "            CI ho spustí tak či tak; lokálne doinštaluj: pip install ruff"
+    else
+        echo "pre-commit: backend — ruff format --check"
+        ( cd backend && ${RUFF} format --check . ) \
+            || { echo "❌ ruff format --check FAILED — run: cd backend && ${RUFF} format ."; exit 1; }
+        echo "pre-commit: backend — ruff check"
+        ( cd backend && ${RUFF} check . ) \
+            || { echo "❌ ruff check FAILED — run: cd backend && ${RUFF} check --fix ."; exit 1; }
+    fi
 fi
 
 if [[ "${NEEDS_FRONTEND}" == "1" && -f frontend/package.json ]]; then

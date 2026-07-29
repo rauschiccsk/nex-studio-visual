@@ -105,7 +105,7 @@ def create_backlog_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> BacklogItemRead:
-    """Create a backlog item (``REQ-N`` auto-assigned; status ``open``). v4.0.43: owner-or-ri/ha."""
+    """Create a backlog item (``REQ-N`` auto-assigned; status ``open``). v4.0.43: owner-or-admin/ha."""
     authz.assert_project_id_access(db, current_user, payload.project_id)
     try:
         item = backlog_service.create(db, payload)
@@ -128,7 +128,7 @@ def update_backlog_item(
 
     A payload that sets ``version_id`` is an **assign** (→ ``status=included``); otherwise it edits
     ``title`` / ``description`` / ``priority`` / ``status`` (reject = ``status='rejected'``). v4.0.43:
-    owner-or-ri/ha of the item's project.
+    owner-or-admin/ha of the item's project.
     """
     try:
         authz.assert_project_id_access(db, current_user, backlog_service.get_by_id(db, item_id).project_id)
@@ -155,7 +155,7 @@ def delete_backlog_item(
     db: Session = Depends(get_db),
 ) -> Response:
     """Delete a backlog item — only when ``open`` (never delete realized/included History). v4.0.43:
-    owner-or-ri/ha of the item's project."""
+    owner-or-admin/ha of the item's project."""
     try:
         authz.assert_project_id_access(db, current_user, backlog_service.get_by_id(db, item_id).project_id)
         backlog_service.delete(db, item_id)
