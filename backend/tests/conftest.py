@@ -96,23 +96,3 @@ def client(db_session):  # noqa: F811
         yield c
 
     app.dependency_overrides.clear()
-
-
-@pytest.fixture(autouse=True)
-def _isolate_port_registry(tmp_path_factory, monkeypatch):
-    """Keep tests off the LIVE KB port registry.
-
-    ``reserved_ranges_status`` reads ``/home/icc/knowledge/infrastructure/port-registry.yaml``
-    (ICCINT-2). Left alone, every create-project test would depend on which blocks ICC has
-    allocated in real life — four tests picked 10180, which became reserved for NEX Asistent
-    the moment the registry landed, and turned red for a reason that had nothing to do with
-    what they were testing. Point the service at an absent file so tests see "no external
-    reservations" unless they say otherwise.
-
-    A test that WANTS the real registry (``test_port_registry_reservations``) undoes this
-    by setting the attribute back.
-    """
-    from backend.services import port_registry
-
-    absent = tmp_path_factory.mktemp("no-registry") / "port-registry.yaml"
-    monkeypatch.setattr(port_registry, "PORT_REGISTRY_FILE", absent)

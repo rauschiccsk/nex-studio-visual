@@ -1,10 +1,16 @@
 """Reserved port ranges — the guard that stops the cockpit handing out a neighbour's block.
 
-This guard had NO test at all, which is exactly why it sat broken: the
-``reserved_port_ranges`` setting was never filled, ``reserved_ranges_status`` therefore
-reported "no reservations", and the cockpit offered 10120-10122 to a new project — inside
-NEX Automat's reserved 10110-10159 (D-022). Nothing failed; the suggestion simply looked
-plausible and would have collided the day NEX Automat started.
+The setting-based path IS covered — ``tests/services/test_port_registry.py`` has
+``test_reserved_port_is_taken`` and friends. What no test could catch is that the setting
+was never FILLED: an empty reservation list is configuration, not code, so the suite stayed
+green while ``reserved_ranges_status`` reported "no reservations" and the cockpit offered
+10120-10122 to a new project — inside NEX Automat's reserved 10110-10159 (D-022). Nothing
+failed; the suggestion simply looked plausible and would have collided the day NEX Automat
+started.
+
+These tests cover the file-based path that replaced it, and the last one asserts against
+the REAL registry — so an empty or broken registry now fails the build instead of quietly
+disarming the guard.
 
 Since ICCINT-2 the source of record is the KB registry file, not the setting.
 """
