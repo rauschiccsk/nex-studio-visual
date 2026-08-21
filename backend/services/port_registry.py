@@ -50,9 +50,11 @@ import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
+import yaml
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
@@ -686,15 +688,94 @@ class ReservedRangesStatus:
 _reserved_warning_logged: set[str] = set()
 
 
+#: The one registry of record — read, never copied (ICCINT-2). Before it existed the
+#: same allocations lived in four places (DECISIONS.md, ICC_STANDARDS.md §5, the orphaned
+#: PORTS.md, and the ``reserved_port_ranges`` setting) and none of them was complete: the
+#: cockpit offered 10120-10122 to a new project, inside NEX Automat's reserved 10110-10159.
+PORT_REGISTRY_FILE = Path("/home/icc/knowledge/infrastructure/port-registry.yaml")
+
+
+def _ranges_from_registry_file() -> tuple[tuple[tuple[int, int], ...], tuple[str, ...], bool]:
+    """Read reserved ranges from the KB registry. Returns ``(ranges, malformed, found)``.
+
+    Only entries the cockpit CANNOT see for itself are returned — every ``bloky`` entry
+    whose ``druh`` is not ``kokpit``, plus everything in ``mimo_rozsahu``.
+
+    A cockpit-owned block is deliberately excluded. Reserved ranges are consulted AFTER
+    the projects table but they do not know which project is asking, so reserving a
+    cockpit block would answer "reserved" when a project re-checks its OWN port — the
+    projects-table lookup excludes the asking project, and the reserved check would then
+    refuse it. Cockpit projects are already protected by that table; they need no second
+    guard, and a second guard here would be actively wrong.
+    """
+    if not PORT_REGISTRY_FILE.exists():
+        return (), (), False
+    try:
+        doc = yaml.safe_load(PORT_REGISTRY_FILE.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        # Loud: a registry we cannot read is a guard the operator believes is protecting
+        # ranges that are in fact wide open. Never downgrade this to "no reservations".
+        logger.warning("Port registry %s could not be read: %s", PORT_REGISTRY_FILE, exc)
+        return (), (), False
+
+    entries: list[tuple[str, str]] = []
+    for block in doc.get("bloky") or []:
+        if isinstance(block, dict) and block.get("druh") != "kokpit":
+            entries.append((str(block.get("rozsah", "")), str(block.get("vlastník", "?"))))
+    for block in doc.get("mimo_rozsahu") or []:
+        if isinstance(block, dict):
+            entries.append((str(block.get("rozsah", "")), str(block.get("vlastník", "?"))))
+
+    ranges: list[tuple[int, int]] = []
+    malformed: list[str] = []
+    for spec, owner in entries:
+        start_str, sep, end_str = spec.partition("-")
+        if not sep:
+            malformed.append(f"{owner}: {spec}")
+            continue
+        try:
+            start, end = int(start_str.strip()), int(end_str.strip())
+        except ValueError:
+            malformed.append(f"{owner}: {spec}")
+            continue
+        if start > end:
+            malformed.append(f"{owner}: {spec}")
+            continue
+        ranges.append((start, end))
+    return tuple(ranges), tuple(malformed), True
+
+
 def reserved_ranges_status(db: Session) -> ReservedRangesStatus:
-    """Parse the ``reserved_port_ranges`` setting into a :class:`ReservedRangesStatus`.
+    """Reserved ranges, from the KB registry file — the setting is only the fallback.
+
+    :data:`PORT_REGISTRY_FILE` is the source of record. The ``reserved_port_ranges``
+    setting remains as a fallback for an instance that cannot see the KB (a detached
+    container, a fresh machine), so losing the mount degrades to the old behaviour
+    instead of silently declaring "no reservations".
 
     External reservations (NEX Automat per D-022, per-customer stacks and
-    other neighbours managed outside NEX Studio) are configured as a CSV of
-    ``<start>-<end>`` ranges. Every allocation path consults this — not just
+    other neighbours managed outside NEX Studio) name the ranges the cockpit
+    cannot see for itself. Every allocation path consults this — not just
     the block suggester as before — so a reserved port can no longer be
     handed out by :func:`suggest_next_port` and then rejected at create time.
     """
+    file_ranges, file_malformed, found = _ranges_from_registry_file()
+    if found and (file_ranges or file_malformed):
+        if file_malformed:
+            logger.warning(
+                "Malformed entries in %s are NOT being enforced: %s",
+                PORT_REGISTRY_FILE,
+                ", ".join(repr(entry) for entry in file_malformed),
+            )
+        return ReservedRangesStatus(configured=True, ranges=file_ranges, malformed=file_malformed)
+
+    if found and "empty-file" not in _reserved_warning_logged:
+        _reserved_warning_logged.add("empty-file")
+        logger.warning(
+            "Port registry %s declares no reservations — falling back to the 'reserved_port_ranges' setting.",
+            PORT_REGISTRY_FILE,
+        )
+
     raw = (system_setting_service.get_str(db, "reserved_port_ranges") or "").strip()
     if not raw:
         if "unset" not in _reserved_warning_logged:
