@@ -8,6 +8,7 @@ import { useActiveContextStore } from "@/store/activeContextStore";
 import { useAuthStore } from "@/store/authStore";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
+import ProjectSettingsSection from "@/components/project/ProjectSettingsSection";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
 import { mayOperateProject } from "@/services/permissions";
@@ -383,6 +384,14 @@ export default function ProjectDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Nastavenia projektu (ICCINT-7) — the only in-product way to correct a value typed at
+          creation. Before this, a wrong port could be repaired only in the database. */}
+      <ProjectSettingsSection
+        project={project}
+        canEdit={mayOperateProject(user, project.created_by)}
+        onSaved={setProject}
+      />
 
       {/* Versions */}
       <div>

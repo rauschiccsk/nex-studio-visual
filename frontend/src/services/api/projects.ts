@@ -1,5 +1,5 @@
 import api from "../api";
-import type { PaginatedResponse, ProjectCreate, ProjectRead } from "../../types";
+import type { PaginatedResponse, ProjectCreate, ProjectRead, ProjectUpdate } from "../../types";
 
 export interface ListProjectsParams {
   skip?: number;
@@ -21,6 +21,23 @@ export function createProjectApi(data: ProjectCreate): Promise<ProjectRead> {
 
 export function getProjectApi(projectId: string): Promise<ProjectRead> {
   return api.get<ProjectRead>(`/projects/${projectId}`);
+}
+
+/**
+ * Patch a project's mutable fields (ICCINT-7).
+ *
+ * The backend has always accepted this; the cockpit never called it, so a value typed
+ * at creation could not be corrected afterwards without going into the database — which
+ * is what had to be done on 21.08.2026 when a project was recorded on another system's
+ * reserved port block.
+ *
+ * Ports are validated exactly as on create (range, reserved blocks, other projects, what
+ * Docker holds) and a change moves the block in the KB port registry. If that registry
+ * write fails, the response carries ``setup_warnings`` — show them; the project is saved
+ * either way, but an unrecorded block is how the next project gets handed this one.
+ */
+export function updateProjectApi(projectId: string, data: ProjectUpdate): Promise<ProjectRead> {
+  return api.patch<ProjectRead>(`/projects/${projectId}`, data);
 }
 
 /** One changelog section shown as "Čo prinesie" in the nex-shared upgrade prompt. */
