@@ -128,3 +128,130 @@ def test_live_registry_protects_the_block_that_was_handed_out(
     assert malformed == (), f"live registry has malformed entries: {malformed}"
     ports = {p for start, end in ranges for p in range(start, end + 1)}
     assert 10120 in ports, "10120 was offered to nex-productcatalogs; it belongs to NEX Automat"
+
+
+# ── Zápis späť ────────────────────────────────────────────────────────────────
+# Reading one registry stops the cockpit handing out a neighbour's block; writing
+# back is what stops the registry going stale again.
+
+_REGISTRY = """\
+# hlavička s vysvetlením, ktorá musí prežiť
+verzia: 1
+aktualizované: 2026-01-01
+
+rozsahy:
+  komerčné:
+    next_free: 10230          # udržiavať pri každom pridelení
+
+bloky:
+  # komentár vnútri zoznamu blokov
+  - rozsah: 10110-10159
+    vlastník: NEX Automat
+    druh: externý
+
+# ── Mimo komerčného rozsahu ──────────────────────────────────────────────
+mimo_rozsahu:
+  - rozsah: 9100-9299
+    vlastník: interné aplikácie ICC
+"""
+
+
+@pytest.fixture
+def writable_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    path = tmp_path / "port-registry.yaml"
+    path.write_text(_REGISTRY, encoding="utf-8")
+    monkeypatch.setattr(port_registry, "PORT_REGISTRY_FILE", path)
+    return path
+
+
+def _record(**kw):
+    base = kw.pop("base", 10230)
+    return port_registry.record_allocation(
+        slug=kw.pop("slug", "novy-projekt"),
+        base=base,
+        block_size=10,
+        backend_port=base,
+        frontend_port=base + 1,
+        db_port=base + 2,
+        **kw,
+    )
+
+
+def test_allocation_is_recorded_and_next_free_advances(writable_registry: Path) -> None:
+    assert _record() is None
+    text = writable_registry.read_text(encoding="utf-8")
+    assert "rozsah: 10230-10239" in text
+    assert "vlastník: novy-projekt" in text
+    assert "druh: kokpit" in text
+    assert "next_free: 10240" in text
+
+
+def test_comments_survive_the_write(writable_registry: Path) -> None:
+    """The registry is a document a human maintains — round-tripping it through the YAML
+    dumper would hand back a machine's idea of the same data and drop every explanation."""
+    before = writable_registry.read_text(encoding="utf-8").count("#")
+    _record()
+    after = writable_registry.read_text(encoding="utf-8")
+    assert after.count("#") == before
+    assert "# hlavička s vysvetlením, ktorá musí prežiť" in after
+    assert "# komentár vnútri zoznamu blokov" in after
+
+
+def test_entry_lands_inside_bloky_not_in_the_next_section(writable_registry: Path) -> None:
+    _record()
+    text = writable_registry.read_text(encoding="utf-8")
+    assert text.index("10230-10239") < text.index("mimo_rozsahu:")
+    assert text.index("10230-10239") > text.index("bloky:")
+
+
+def test_recording_twice_does_not_duplicate(writable_registry: Path) -> None:
+    """Creates get retried. A second run must be a no-op, not a second entry."""
+    _record()
+    assert _record() is None
+    assert writable_registry.read_text(encoding="utf-8").count("rozsah: 10230-10239") == 1
+
+
+def test_written_file_is_still_valid_yaml(writable_registry: Path) -> None:
+    import yaml
+
+    _record()
+    doc = yaml.safe_load(writable_registry.read_text(encoding="utf-8"))
+    assert [b["rozsah"] for b in doc["bloky"]] == ["10110-10159", "10230-10239"]
+    assert doc["rozsahy"]["komerčné"]["next_free"] == 10240
+
+
+def test_missing_file_returns_a_warning_and_does_not_raise(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A project that exists must never be rolled back because a file could not be written —
+    but the Manažér has to be told, or the next project gets handed the same block."""
+    monkeypatch.setattr(port_registry, "PORT_REGISTRY_FILE", tmp_path / "absent.yaml")
+    warning = _record()
+    assert warning is not None
+    assert "10230-10239" in warning
+    assert "ručne" in warning
+
+
+def test_registry_without_the_anchor_section_warns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "port-registry.yaml"
+    path.write_text("bloky: []\n", encoding="utf-8")
+    monkeypatch.setattr(port_registry, "PORT_REGISTRY_FILE", path)
+    warning = _record()
+    assert warning is not None
+    assert "mimo_rozsahu" in warning
+
+
+def test_project_without_ports_records_nothing_and_warns_about_nothing(
+    writable_registry: Path,
+) -> None:
+    """``backend_port`` is nullable. No block means nothing to write down — and nothing to
+    warn about either, or every portless project would nag the Manažér about a non-problem."""
+    before = writable_registry.read_text(encoding="utf-8")
+    warning = port_registry.record_allocation(
+        slug="bez-portov",
+        base=None,
+        block_size=10,
+        backend_port=None,
+        frontend_port=None,
+        db_port=None,
+    )
+    assert warning is None
+    assert writable_registry.read_text(encoding="utf-8") == before

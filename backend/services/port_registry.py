@@ -50,6 +50,7 @@ import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Literal
 from uuid import UUID
@@ -883,3 +884,90 @@ def suggest_next_port_block(db: Session, block_size: int | None = None) -> int:
             return base
 
     raise ValueError(f"No free {block_size}-port block in range {range_min}–{range_max}.")
+
+
+def record_allocation(
+    *,
+    slug: str,
+    base: int | None,
+    block_size: int,
+    backend_port: int | None,
+    frontend_port: int | None,
+    db_port: int | None,
+) -> str | None:
+    """Write a freshly allocated block into the KB registry. Returns a warning, or ``None``.
+
+    Closes the loop that ICCINT-2 opened. Reading one registry stops the cockpit handing out
+    a neighbour's block; writing back is what stops the registry going stale again. Every
+    hole we found on 21.08.2026 — ``nex-manager`` 10210-10219, ``nex-payables`` 10220-10229,
+    ``nex-shopify`` inheriting the retired NEX Test block — came from an allocation nobody
+    remembered to copy into the knowledge base by hand.
+
+    The file is edited as TEXT, never round-tripped through the YAML dumper. It is a document
+    a human maintains: ranges carry comments explaining why a block is 50 ports wide, which
+    decision allocated it, and which collision is still open. ``yaml.safe_dump`` would drop
+    every one of them and hand back a machine's idea of the same data.
+
+    Best-effort by design — a project that exists must not be rolled back because a file could
+    not be written — but NEVER silent: the caller puts the returned string in ``setup_warnings``,
+    which the create response shows the Manažér. A best-effort step nobody is told about is the
+    defect ICCINT-3 is open on.
+
+    A project without ports records nothing and warns about nothing — ``backend_port`` is
+    nullable and a project may legitimately have none. There is no block to write down, so
+    silence here is the honest answer rather than a swallowed failure.
+    """
+    if base is None:
+        return None
+    end = base + block_size - 1
+    entry = (
+        f"\n  - rozsah: {base}-{end}\n"
+        f"    vlastník: {slug}\n"
+        f"    druh: kokpit\n"
+        f"    porty: {{backend: {backend_port}, frontend: {frontend_port}, db: {db_port}}}\n"
+        f"    pridelené: {date.today().isoformat()}\n"
+    )
+
+    try:
+        text = PORT_REGISTRY_FILE.read_text(encoding="utf-8")
+    except OSError as exc:
+        return (
+            f"Blok {base}-{end} sa nepodarilo zapísať do evidencie portov "
+            f"({PORT_REGISTRY_FILE}): {exc}. Dopíš ho ručne, inak ho ďalší projekt môže dostať tiež."
+        )
+
+    if re.search(rf"^\s*-\s*rozsah:\s*{base}-{end}\s*$", text, re.MULTILINE):
+        return None  # already recorded — a re-run must not duplicate the entry
+
+    lines = text.splitlines(keepends=True)
+    anchor = next((i for i, line in enumerate(lines) if line.startswith("mimo_rozsahu:")), None)
+    if anchor is None:
+        return (
+            f"Blok {base}-{end} sa nepodarilo zapísať do evidencie portov: v súbore chýba sekcia "
+            f"„mimo_rozsahu“, podľa ktorej sa hľadá koniec zoznamu blokov. Dopíš blok ručne."
+        )
+    # Walk back over the blank lines and the comment block that introduce `mimo_rozsahu`,
+    # so the new entry lands at the END of `bloky` rather than inside someone's heading.
+    while anchor > 0 and (not lines[anchor - 1].strip() or lines[anchor - 1].lstrip().startswith("#")):
+        anchor -= 1
+
+    updated = "".join(lines[:anchor]) + entry + "".join(lines[anchor:])
+    updated = re.sub(r"^(\s*next_free:\s*)\d+", rf"\g<1>{base + block_size}", updated, count=1, flags=re.MULTILINE)
+    updated = re.sub(
+        r"^(aktualizované:\s*).*$", rf"\g<1>{date.today().isoformat()}", updated, count=1, flags=re.MULTILINE
+    )
+
+    try:
+        # Write via a sibling temp file + rename: a half-written registry would read as
+        # "no reservations" on the next allocation, which is the failure we are removing.
+        tmp = PORT_REGISTRY_FILE.with_suffix(".yaml.tmp")
+        tmp.write_text(updated, encoding="utf-8")
+        tmp.replace(PORT_REGISTRY_FILE)
+    except OSError as exc:
+        return (
+            f"Blok {base}-{end} sa nepodarilo zapísať do evidencie portov "
+            f"({PORT_REGISTRY_FILE}): {exc}. Dopíš ho ručne, inak ho ďalší projekt môže dostať tiež."
+        )
+
+    logger.info("Port block %s-%s recorded in %s for %s", base, end, PORT_REGISTRY_FILE, slug)
+    return None

@@ -986,6 +986,23 @@ def create_project(
         _chown_workspace(project.source_path)
 
         db.commit()
+
+        # Record the block in the ONE registry (ICCINT-2). Runs after the commit so we never
+        # claim a block for a create that rolled back. Reading the registry stops us handing out
+        # a neighbour's ports; writing back is what stops the registry going stale again — every
+        # hole found on 21.08.2026 came from an allocation nobody copied into the KB by hand.
+        # Best-effort, but the failure travels to the Manažér in setup_warnings rather than dying
+        # in the log: an unrecorded block is exactly how the next project gets handed this one.
+        block_warning = port_registry_service.record_allocation(
+            slug=project.slug,
+            base=project.backend_port,
+            block_size=system_setting_service.get_int(db, "port_block_size") or 10,
+            backend_port=project.backend_port,
+            frontend_port=project.frontend_port,
+            db_port=project.db_port,
+        )
+        if block_warning:
+            setup_warnings = [*setup_warnings, block_warning]
     except ValueError as exc:
         db.rollback()
         raise _map_value_error(exc) from exc
