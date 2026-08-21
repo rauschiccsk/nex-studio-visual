@@ -12,19 +12,29 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 
-const { refreshApi, setState } = vi.hoisted(() => ({
-  refreshApi: vi.fn(),
-  setState: vi.fn(),
-}));
+const { refreshApi, setState, FakeApiError } = vi.hoisted(() => {
+  class FakeApiError extends Error {
+    status: number;
+    constructor(status: number) {
+      super(`HTTP ${status}`);
+      this.status = status;
+    }
+  }
+  return { refreshApi: vi.fn(), setState: vi.fn(), FakeApiError };
+});
 
 vi.mock("@/services/api/auth", () => ({ refreshApi }));
 vi.mock("@/store/authStore", () => ({ useAuthStore: { setState } }));
-vi.mock("@/services/api", () => ({ TOKEN_STORAGE_KEY: "nex_studio_token" }));
+vi.mock("@/services/api", () => ({
+  TOKEN_STORAGE_KEY: "nex_studio_token",
+  ApiError: FakeApiError,
+}));
 
 import {
   useSessionKeepAlive,
   KEEPALIVE_CHECK_INTERVAL_MS,
   KEEPALIVE_RENEW_FRACTION,
+  KEEPALIVE_RETRY_BASE_MS,
 } from "@/hooks/useSessionKeepAlive";
 
 const TOKEN_KEY = "nex_studio_token";
@@ -114,11 +124,11 @@ describe("useSessionKeepAlive", () => {
     expect(window.localStorage.getItem(TOKEN_KEY)).toBe(nearExpiryToken(t0));
   });
 
-  it("falls through (no retry, no loop-spam) when a refresh fails", async () => {
+  it("stops retrying after a 401 — the token is dead, asking again cannot help", async () => {
     const t0 = Date.now();
     const token = nearExpiryToken(t0);
     window.localStorage.setItem(TOKEN_KEY, token);
-    refreshApi.mockRejectedValue(new Error("network"));
+    refreshApi.mockRejectedValue(new FakeApiError(401));
 
     renderHook(() => useSessionKeepAlive());
     act(() => {
@@ -132,14 +142,70 @@ describe("useSessionKeepAlive", () => {
     });
     expect(refreshApi).toHaveBeenCalledTimes(1);
 
-    // Keep ticking — the failed token must NOT be retried (no loop-spam).
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(5 * KEEPALIVE_CHECK_INTERVAL_MS);
+      await vi.advanceTimersByTimeAsync(20 * KEEPALIVE_CHECK_INTERVAL_MS);
     });
     expect(refreshApi).toHaveBeenCalledTimes(1);
-    // Token unchanged → the existing 401 → /login flow takes over on the next
-    // real request.
     expect(window.localStorage.getItem(TOKEN_KEY)).toBe(token);
     expect(setState).not.toHaveBeenCalled();
+  });
+
+  it("RETRIES after a transient failure — the token is still valid", async () => {
+    // The regression this exists for: one failed attempt used to mark the token as
+    // "tried" and it was never retried, so a backend restart during the renewal window
+    // ended a session that had hours left. Five cockpit deploys in an afternoon is
+    // exactly that shape of failure.
+    const t0 = Date.now();
+    window.localStorage.setItem(TOKEN_KEY, nearExpiryToken(t0));
+    refreshApi.mockRejectedValue(new Error("network"));
+
+    renderHook(() => useSessionKeepAlive());
+    const keepActive = () => window.dispatchEvent(new Event("pointerdown"));
+    act(keepActive);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(
+        RENEW_AFTER_INTERVALS * KEEPALIVE_CHECK_INTERVAL_MS,
+      );
+    });
+    expect(refreshApi).toHaveBeenCalledTimes(1);
+
+    // Inside the backoff → still just the one attempt.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(KEEPALIVE_RETRY_BASE_MS / 2);
+      keepActive();
+    });
+    expect(refreshApi).toHaveBeenCalledTimes(1);
+
+    // Past the backoff → it tries again instead of giving up.
+    await act(async () => {
+      keepActive();
+      await vi.advanceTimersByTimeAsync(KEEPALIVE_RETRY_BASE_MS);
+    });
+    expect(refreshApi.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it("a retry that succeeds stores the fresh token", async () => {
+    const t0 = Date.now();
+    window.localStorage.setItem(TOKEN_KEY, nearExpiryToken(t0));
+    refreshApi.mockRejectedValueOnce(new Error("backend restarting"));
+    refreshApi.mockResolvedValue({ access_token: "fresh.token.value" });
+
+    renderHook(() => useSessionKeepAlive());
+    const keepActive = () => window.dispatchEvent(new Event("pointerdown"));
+    act(keepActive);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(
+        RENEW_AFTER_INTERVALS * KEEPALIVE_CHECK_INTERVAL_MS,
+      );
+    });
+    await act(async () => {
+      keepActive();
+      await vi.advanceTimersByTimeAsync(KEEPALIVE_RETRY_BASE_MS + KEEPALIVE_CHECK_INTERVAL_MS);
+    });
+
+    expect(window.localStorage.getItem(TOKEN_KEY)).toBe("fresh.token.value");
+    expect(setState).toHaveBeenCalledWith({ token: "fresh.token.value" });
   });
 });
