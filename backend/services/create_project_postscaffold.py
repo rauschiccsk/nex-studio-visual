@@ -900,8 +900,12 @@ def _commit_and_push_scaffold_finalisation(target: Path, slug: str) -> None:
     logger.info("scaffold finalise — v2-shape normalisation committed + pushed (slug=%s)", slug)
 
 
-def _enable_branch_protection(repo_url: str, slug: str, *, github_org: str | None = None) -> None:
-    """O-3: configure GitHub branch protection (require PR, no force push)."""
+def _enable_branch_protection(repo_url: str, slug: str, *, github_org: str | None = None) -> str | None:
+    """O-3: configure GitHub branch protection (require PR, no force push).
+
+    Returns a Slovak warning when the branch was NOT protected, ``None`` when it was.
+    The caller puts it in ``setup_warnings``, which the create response shows the Manažér.
+    """
     from backend.services.template_bootstrap import _repo_from_url
 
     repo_full_name = _repo_from_url(repo_url, slug, default_owner=github_org)
@@ -946,10 +950,29 @@ def _enable_branch_protection(repo_url: str, slug: str, *, github_org: str | Non
         check=False,
     )
     if result.returncode != 0:
+        stderr = result.stderr.strip()
         logger.warning(
             "Branch protection setup failed (repo=%s): %s — Manažér can configure manually",
             repo_full_name,
-            result.stderr.strip(),
+            stderr,
         )
-        return
+        # The Manažér ticked a box that promised a result. Returning None here logged the
+        # failure and answered 201, so `main` stayed open to force-push and nobody knew —
+        # for nex-productcatalogs on 21.08.2026 it went unnoticed until someone read the log.
+        # A best-effort step is allowed to fail; it is not allowed to fail in silence.
+        if "Upgrade to GitHub Pro" in stderr or "make this repository public" in stderr:
+            # Not transient and not worth retrying: GitHub refuses branch protection on a
+            # PRIVATE repository under the free plan. Say what the choice actually is.
+            return (
+                f"Ochrana hlavnej vetvy sa NEZAPLA — GitHub ju na súkromnom repozitári "
+                f"v bezplatnom pláne nepovoľuje. Vetva „main“ v {repo_full_name} zostáva "
+                f"otvorená prepísaniu. Buď repozitár zverejni, alebo prejdi na GitHub Pro, "
+                f"alebo tú voľbu pri zakladaní nezaškrtávaj — inak sľubuje niečo, čo nenastane."
+            )
+        return (
+            f"Ochrana hlavnej vetvy sa NEZAPLA pre {repo_full_name} — vetva „main“ zostáva "
+            f"otvorená prepísaniu. Dôvod od GitHubu: {stderr or 'bez správy'}. "
+            f"Nastav ju ručne v Settings → Branches."
+        )
     logger.info("Branch protection enabled (repo=%s)", repo_full_name)
+    return None
