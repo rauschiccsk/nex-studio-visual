@@ -886,6 +886,47 @@ def suggest_next_port_block(db: Session, block_size: int | None = None) -> int:
     raise ValueError(f"No free {block_size}-port block in range {range_min}–{range_max}.")
 
 
+def _drop_block_for(text: str, slug: str) -> str:
+    """Remove the ``bloky`` entry owned by *slug*, if there is one.
+
+    Used when a project's ports change: without it the registry would carry two claims for
+    the same project and the abandoned block would stay reserved against everyone else.
+    Only entries the cockpit owns (``druh: kokpit``) are removed — an externally managed
+    block that happens to share a name is not ours to delete.
+
+    Operates on text, like the rest of the writer: the file is a document a human maintains
+    and a YAML round-trip would drop every comment in it.
+    """
+    lines = text.splitlines(keepends=True)
+    start: int | None = None
+    for i, line in enumerate(lines):
+        if re.match(r"^\s*-\s*rozsah:", line):
+            start = i
+            owned_by_us = False
+            is_ours = False
+            continue
+        if start is not None:
+            if re.match(rf"^\s+vlastník:\s*{re.escape(slug)}\s*$", line):
+                owned_by_us = True
+            elif re.match(r"^\s+druh:\s*kokpit\s*$", line):
+                is_ours = True
+            # entry ends at the next item, the next top-level key, or a blank line run
+            ends = (
+                i + 1 >= len(lines)
+                or re.match(r"^\s*-\s*rozsah:", lines[i + 1])
+                or not lines[i + 1].startswith((" ", "\t"))
+            )
+            if ends and owned_by_us and is_ours:
+                end = i + 1
+                # swallow one trailing blank line so removal does not leave a gap
+                if end < len(lines) and not lines[end].strip():
+                    end += 1
+                return "".join(lines[:start] + lines[end:])
+            if ends:
+                start = None
+    return text
+
+
 def record_allocation(
     *,
     slug: str,
@@ -938,6 +979,11 @@ def record_allocation(
 
     if re.search(rf"^\s*-\s*rozsah:\s*{base}-{end}\s*$", text, re.MULTILINE):
         return None  # already recorded — a re-run must not duplicate the entry
+
+    # A project whose ports were CHANGED must not end up owning two blocks. Drop the old
+    # entry first, otherwise the registry grows a second claim for the same slug and the
+    # abandoned block stays reserved against everyone else forever.
+    text = _drop_block_for(text, slug)
 
     lines = text.splitlines(keepends=True)
     anchor = next((i for i, line in enumerate(lines) if line.startswith("mimo_rozsahu:")), None)

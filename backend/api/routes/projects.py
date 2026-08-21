@@ -83,11 +83,17 @@ router = APIRouter(
 )
 
 
-def _validate_ports(db: Session, payload: ProjectCreate) -> None:
+def _validate_ports(db: Session, payload: ProjectCreate | ProjectUpdate, *, project_id: UUID | None = None) -> None:
     """Validate that all supplied ports are in range and not already allocated.
 
     Raises :class:`~fastapi.HTTPException` directly — 422 for out-of-range,
     409 for conflicts.
+
+    ``project_id`` is passed on an UPDATE so the project's OWN current ports are not
+    reported as a conflict with itself. Until v4.0.90 this ran on create only: ``PATCH``
+    set the columns with no checking at all, so the one path that could repair a bad
+    allocation was also the one path that could write a port the create route refuses —
+    a reserved block, or one another project already holds.
     """
     ports = [
         ("backend_port", payload.backend_port),
@@ -130,7 +136,7 @@ def _validate_ports(db: Session, payload: ProjectCreate) -> None:
         # reservations AND the host's own published-port map. The table alone
         # used to decide this, which is why a port a neighbouring container had
         # been publishing for twelve days could be handed out again.
-        verdict = port_registry_service.describe_port_availability(db, port_value)
+        verdict = port_registry_service.describe_port_availability(db, port_value, project_id)
 
         # Fail CLOSED. "Could not verify" is not "free": creating a project on
         # an unverified port is how a live customer deployment loses its port.
@@ -1034,6 +1040,14 @@ def update_project(
     the payload are left unchanged.
     """
     authz.assert_project_id_access(db, current_user, project_id)
+
+    # Ports get the SAME scrutiny as on create. Without this the update path could write a
+    # port the create path refuses — a reserved block, or one another project already holds.
+    # ``project_id`` keeps the project's own current ports from reading as a conflict.
+    touches_ports = any(field in payload.model_fields_set for field in ("backend_port", "frontend_port", "db_port"))
+    if touches_ports:
+        _validate_ports(db, payload, project_id=project_id)
+
     try:
         project = project_service.update(db, project_id, payload)
         db.commit()
@@ -1041,7 +1055,23 @@ def update_project(
         db.rollback()
         raise _map_value_error(exc) from exc
     db.refresh(project)
-    return ProjectRead.model_validate(project)
+
+    # Move the block in the registry too. A port changed here and left unrecorded there is
+    # exactly the drift ICCINT-2 removed: the abandoned block would stay reserved against
+    # everyone else and the new one would look free to the next project.
+    result = ProjectRead.model_validate(project)
+    if touches_ports:
+        block_warning = port_registry_service.record_allocation(
+            slug=project.slug,
+            base=project.backend_port,
+            block_size=system_setting_service.get_int(db, "port_block_size") or 10,
+            backend_port=project.backend_port,
+            frontend_port=project.frontend_port,
+            db_port=project.db_port,
+        )
+        if block_warning:
+            result.setup_warnings = [block_warning]
+    return result
 
 
 @router.delete(
