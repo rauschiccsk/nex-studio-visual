@@ -79,8 +79,16 @@ const AGENT_MODELS: { id: AgentModel; label: string }[] = [
 const AGENT_EFFORTS: AgentEffort[] = ["low", "medium", "high", "xhigh", "max"];
 
 // System-settings categories. Every key whose prefix matches one of `prefixes`
-// is rendered under the category; keys matching none fall into the trailing
-// "Ostatné" bucket the kit panel appends itself.
+// is rendered under the category.
+//
+// ⚠️ A key matching NO prefix is NOT rendered at all — it is silently dropped.
+// There is no trailing "Ostatné" bucket; this comment used to claim there was
+// one and that cost an afternoon. `reserved_port_ranges` was returned by the
+// API, had a label, a description and a default, and was unreachable from the
+// UI for exactly this reason — so the port reservations that stop the cockpit
+// handing out a neighbour's block could never be entered. When adding a
+// setting, add its prefix here too, or it will not exist as far as the
+// Manažér is concerned.
 const SETTINGS_CATEGORIES: SettingsCategory[] = [
   {
     id: "pipeline",
@@ -106,8 +114,9 @@ const SETTINGS_CATEGORIES: SettingsCategory[] = [
     id: "ports",
     label: "Rozsah portov",
     description:
-      "Rozsah portov prideľovaných projektom a veľkosť per-project bloku. Zmena má dosah len na nové projekty.",
-    prefixes: ["port_"],
+      "Rozsah portov prideľovaných projektom, veľkosť per-project bloku a rozsahy vyhradené pre systémy " +
+      "spravované mimo NEX Studia. Zmena má dosah len na nové projekty.",
+    prefixes: ["port_", "reserved_port_"],
   },
   {
     id: "paths",
