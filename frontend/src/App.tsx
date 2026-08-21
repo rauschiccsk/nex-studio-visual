@@ -3,7 +3,9 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import AppLayout from "./components/layout/AppLayout";
 import ProtectedRoute from "./components/auth/ProtectedRoute";
 import { ThemeProvider } from "./contexts/ThemeContext";
+import { useEffect } from "react";
 import { useAuthStore } from "./store/authStore";
+import { scopeActiveContextTo } from "./store/activeContextStore";
 import { useSessionKeepAlive } from "./hooks/useSessionKeepAlive";
 
 import LoginPage from "./pages/LoginPage";
@@ -29,6 +31,14 @@ import SettingsPage from "./pages/SettingsPage";
 
 function App() {
   const username = useAuthStore((s) => s.user?.username);
+
+  // The pinned project lives in localStorage PER USER (v4.0.90). Point the store
+  // at this user's slot as soon as we know who they are — before that it reads the
+  // anonymous slot, which is never written and so is always empty. Runs on logout
+  // too (username → undefined), which parks the store back on the empty slot.
+  useEffect(() => {
+    scopeActiveContextTo(username);
+  }, [username]);
 
   // Silently renew the session while the user is actively working so a
   // short-lived JWT never bounces them to /login mid-work (idle sessions still

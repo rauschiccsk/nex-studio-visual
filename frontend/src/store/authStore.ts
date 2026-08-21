@@ -58,7 +58,15 @@ const authModule = createAuthStore<AuthUser, [string, string]>({
   // v4.0.33: the selected/pinned project persists in this browser's localStorage
   // (activeContextStore) — a DIFFERENT user logging in must NOT inherit the previous
   // user's project (bug: Nazar saw the Director's pinned NEX Shopify in the sidebar +
-  // Metriky/UAT/PROD). Clear it on every login so each user starts with no pin.
+  // Metriky/UAT/PROD).
+  //
+  // v4.0.90: the persisted key is now scoped per user, so another user's pin is no
+  // longer reachable at all. This clear stays as the IN-MEMORY half of the handover:
+  // `onLogin` runs before App's effect re-points the store, so without it the previous
+  // user's selection would sit on screen for those few frames. The incoming user's own
+  // pin is restored by that effect (scopeActiveContextTo → rehydrate) — which is what
+  // v4.0.33 could not do, and why a returning user used to lose their project on every
+  // expired session.
   onLogin: () => {
     usePresenceStore.getState().setIsAway(false);
     useActiveContextStore.getState().setSelectedProject(null);
