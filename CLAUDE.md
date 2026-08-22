@@ -152,10 +152,25 @@ Výnimka: ak Zoltán v tom istom promte explicitne povie "oprav" alebo "implemen
 4. **NEVER push credentials to GitHub**
    - Vyplýva z #3, ale platí aj pre PR/issue komentáre, release notes
 
-5. **NEVER authenticate to NEX Command / NEX Studio API**
-   - `POST /api/auth/login`, `POST /api/v1/auth/login`
+5. **NEVER authenticate to NEX Command / NEX Studio API ako POUŽÍVATEĽ**
+   - `POST /api/auth/login`, `POST /api/v1/auth/login` — zakázané bez výnimky
    - CC nemá user account a nesmie nikoho impersonovať
    - Týka sa aj `/api/v1/credentials/*` endpointov (vyžadujú JWT `ri`)
+
+   **Výnimka — vlastná strojová identita Deda** (Director 22.08.2026, `ICCINT-14`).
+   Dôvodom zákazu je **impersonácia**, nie prístup ako taký. Dedo preto smie volať NEX Studio
+   Visual API **vlastnou strojovou identitou** (`dedo` — vlastný token, vlastné meno v protokole,
+   **nikdy prevzatý účet**), a to výhradne v tomto rozsahu:
+   - **čítať** — stav ktorejkoľvek stavby, protokol správ, dôvod zablokovania
+   - **písať** — správu do rozhovoru ako `dedo`
+   - **meniť stav** — jedine odblokovať stavbu zaseknutú na `framework_issue`
+
+   Všetko ostatné zostáva zakázané: schváliť bránu, spustiť či zastaviť stavbu, odpovedať za
+   Manažéra, rozhodnúť, siahnuť na `/api/v1/credentials/*`.
+
+   ⚠️ **Kým tá identita neexistuje, platí pôvodný zákaz bez výnimky.** Toto nie je povolenie
+   prihlásiť sa akokoľvek inak — je to popis **jediného** povoleného spôsobu. Hranica má byť
+   vynútená tokenom, nie disciplínou volajúceho.
 
 6. **NEVER read NEX Studio credentials store priamo**
    - `/opt/data/nex-studio-visual/credentials/**` — trezor TEJTO inštancie (`settings.credentials_storage_path`). Je gated cez REST API `/api/v1/credentials` s JWT `ri`; priamy Read by obišiel API governance
