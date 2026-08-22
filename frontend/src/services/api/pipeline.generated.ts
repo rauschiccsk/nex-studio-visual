@@ -537,6 +537,113 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/dedo/builds/{version_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Build
+         * @description Where one build stands: phase, status, and why it is blocked.
+         *
+         *     ANY build, not only a blocked one — Dedo diagnoses NEX Studio, and "the build that did NOT get stuck"
+         *     is half of every such diagnosis. Reading is the wide half of the charter's grant; writing is the narrow
+         *     one.
+         */
+        get: operations["get_build_api_v1_dedo_builds__version_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dedo/builds/{version_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Build Messages
+         * @description The build's message log — the escalation in the agent's own words, and everything around it.
+         *
+         *     Returns the LAST ``limit`` entries in chronological order: a long build's thread runs to thousands of
+         *     rows and the end is what an escalation is about.
+         */
+        get: operations["list_build_messages_api_v1_dedo_builds__version_id__messages_get"];
+        put?: never;
+        /**
+         * Post Build Message
+         * @description Write one message into the build's thread AS DEDO — the single thing Dedo may say.
+         *
+         *     Straight through :func:`~backend.services.dedo_message.record_dedo_message`, the same writer the host
+         *     CLI uses. The message lands ``pending`` and reaches the agent on its next turn; on a build blocked on a
+         *     NEX Studio bug that turn only comes after the unblock below, which is the honest behaviour and not a
+         *     bug — nothing runs while the framework is broken.
+         *
+         *     ONLY into a build that escalated: see :func:`_require_a_build_that_asked_for_dedo`.
+         */
+        post: operations["post_build_message_api_v1_dedo_builds__version_id__messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dedo/builds/{version_id}/unblock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unblock Build
+         * @description Release a build stuck on ``framework_issue`` — the ONLY state change on this door.
+         *
+         *     Straight through :func:`~backend.services.dedo_unblock.unblock_framework_issue`, so every guard that
+         *     protects the host command protects this one too: a build that is not stuck on a NEX Studio bug is
+         *     refused (409), an empty reason is refused, and the reason is recorded as Dedo's own message before the
+         *     state moves. What the release does NOT do is resume the build — it lands back on the Manažér's desk
+         *     with a single "Pokračovať". The human keeps the last word; Dedo only reports the repair.
+         */
+        post: operations["unblock_build_api_v1_dedo_builds__version_id__unblock_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dedo/waiting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Waiting Builds
+         * @description Every build, in every project, currently stuck on a NEX Studio bug — Dedo's queue.
+         *
+         *     Cross-project by design: an escalation is a NEX Studio problem, and which customer's build tripped over
+         *     it is incidental. Oldest wait first, because that is the one that has been costing the longest.
+         */
+        get: operations["list_waiting_builds_api_v1_dedo_waiting_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/epics": {
         parameters: {
             query?: never;
@@ -3109,6 +3216,72 @@ export interface components {
             slug?: string | null;
             /** Subdomain */
             subdomain?: string | null;
+        };
+        /**
+         * DedoBuildRead
+         * @description One build as Dedo needs to see it: which project, where it stands, and why it is stuck.
+         *
+         *     Flat on purpose — Dedo's client is a terminal, not the cockpit, so the project a version belongs to is
+         *     inlined instead of being a second lookup he has no endpoint for.
+         */
+        DedoBuildRead: {
+            /** Block Reason */
+            block_reason?: string | null;
+            /** Current Actor */
+            current_actor: string;
+            /** Current Stage */
+            current_stage: string;
+            /** Next Action */
+            next_action: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Project Name */
+            project_name: string;
+            /** Project Slug */
+            project_slug: string;
+            /**
+             * Resume After Framework Fix
+             * @default false
+             */
+            resume_after_framework_fix: boolean;
+            /** Status */
+            status: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+            /** Version Number */
+            version_number: string;
+            /** Waiting Since */
+            waiting_since?: string | null;
+        };
+        /**
+         * DedoMessageCreate
+         * @description Dedo's answer to the build's AI Agent.
+         */
+        DedoMessageCreate: {
+            /** Content */
+            content: string;
+        };
+        /**
+         * DedoUnblockRequest
+         * @description Release a build stuck on a NEX Studio bug. The reason is mandatory, not paperwork.
+         *
+         *     It becomes the build's only permanent record of who let it go on and why, and the agent reads it as the
+         *     answer to its escalation on the very next turn.
+         */
+        DedoUnblockRequest: {
+            /** Reason */
+            reason: string;
         };
         /**
          * DeployBlock
@@ -6483,6 +6656,160 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_build_api_v1_dedo_builds__version_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DedoBuildRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_build_messages_api_v1_dedo_builds__version_id__messages_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineMessageRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_build_message_api_v1_dedo_builds__version_id__messages_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DedoMessageCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineMessageRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unblock_build_api_v1_dedo_builds__version_id__unblock_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DedoUnblockRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DedoBuildRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_waiting_builds_api_v1_dedo_waiting_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DedoBuildRead"][];
                 };
             };
         };
