@@ -55,7 +55,11 @@ export const PHASE_CODES: Record<BuildPhase, string> = {
 // Agent does the whole build, the Auditor independently verifies, the Manažér approves.
 // (No Coordinator / Designer / Customer / Implementer — those v1 roles collapse into
 // the single AI Agent; `system` stays for system-authored notices.)
-export type V2Participant = "ai_agent" | "auditor" | "manazer" | "system";
+//
+// ICCINT-12 adds `dedo` — the NEX Studio technical team, who answers an agent's
+// `framework_issue` escalation (a bug in NEX Studio itself, which the Manažér cannot fix).
+// A message author/recipient only: Dedo is never `current_actor`, never on turn.
+export type V2Participant = "ai_agent" | "auditor" | "manazer" | "system" | "dedo";
 
 // Slovak label per v2 participant — the 3-role vocabulary. Replaces the v1 7-role
 // ROLE_LABELS for v2 surfaces (who's-up status, the AI Agent header, message bubbles).
@@ -64,6 +68,10 @@ export const V2_ROLE_LABELS: Record<V2Participant, string> = {
   auditor: "Audítor",
   manazer: "Manažér",
   system: "Systém",
+  // "Dedo" verbatim — the product already calls him that everywhere the Manažér can see it
+  // (the escalation channel file, the Telegram ping), so a second name for one person would
+  // be the confusing choice here, not the friendly one.
+  dedo: "Dedo",
 };
 
 // Human label of the phase that follows `phase` (clamped at the terminal `done`). Drives
@@ -93,6 +101,8 @@ export const ROLE_LABELS: Record<PipelineParticipant, string> = {
   auditor: "Audítor",
   manazer: "Manažér",
   system: "Systém",
+  // ICCINT-12: our technical team, answering an agent's framework_issue escalation.
+  dedo: "Dedo",
 };
 
 // NOTE (CR-V2-021): the v1 Coordinator message-badge labels (SYNTHESIS_LABEL / RAW_REPORT_LABEL /

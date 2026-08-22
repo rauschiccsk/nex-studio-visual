@@ -39,6 +39,11 @@ function bubbleClass(author: PipelineParticipant, frameworkIssue = false): strin
     return "bg-[var(--color-accent-primary)]/10 border-[var(--color-accent-primary)]/30";
   if (author === "auditor")
     return "bg-[var(--color-state-warning-bg)] border-[var(--color-state-warning-fg)]/20";
+  // ICCINT-12: Dedo answering a framework_issue escalation. Green — the counterpart of the red escalation
+  // bubble above (the block has an answer), and the only green in the thread, so it can never be confused
+  // with the neutral `system` notice, the amber Auditor or the indigo Manažér.
+  if (author === "dedo")
+    return "bg-[var(--color-state-success-bg)] border-[var(--color-state-success-fg)]/40";
   if (author === "system")
     return "bg-[var(--color-surface-hover)] border-[var(--color-border-default)]";
   // AI Agent (the doer) — the default surface.

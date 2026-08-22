@@ -71,12 +71,15 @@ describe("v2 vocabulary collapse", () => {
     expect(nextPhaseLabel("done")).toBe("Hotovo");
   });
 
-  it("V2_ROLE_LABELS are exactly {AI Agent, Auditor, Manažér, system} — no v1 roles", () => {
-    const roles: V2Participant[] = ["ai_agent", "auditor", "manazer", "system"];
+  it("V2_ROLE_LABELS are exactly {AI Agent, Auditor, Manažér, system, Dedo} — no v1 roles", () => {
+    // ICCINT-12 adds `dedo` (our technical team, answering a framework_issue escalation) — a message
+    // participant, never an actor.
+    const roles: V2Participant[] = ["ai_agent", "auditor", "manazer", "system", "dedo"];
     expect(Object.keys(V2_ROLE_LABELS).sort()).toEqual([...roles].sort());
     expect(V2_ROLE_LABELS.ai_agent).toBe("AI Agent");
     expect(V2_ROLE_LABELS.auditor).toBe("Audítor");
     expect(V2_ROLE_LABELS.manazer).toBe("Manažér");
+    expect(V2_ROLE_LABELS.dedo).toBe("Dedo");
     for (const dead of ["coordinator", "designer", "customer", "implementer"]) {
       expect(Object.keys(V2_ROLE_LABELS)).not.toContain(dead);
     }

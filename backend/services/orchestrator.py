@@ -52,7 +52,7 @@ from backend.db.models.versions import Version
 from backend.schemas.epic import EpicCreate
 from backend.schemas.feat import FeatCreate
 from backend.schemas.task import TaskCreate
-from backend.services import claude_agent, dedo_escalation, failure_framing, fast_fix, uat_provisioner
+from backend.services import claude_agent, dedo_escalation, dedo_message, failure_framing, fast_fix, uat_provisioner
 from backend.services import epic as epic_service
 from backend.services import feat as feat_service
 from backend.services import system_setting as system_setting_service
@@ -3344,6 +3344,7 @@ async def invoke_agent_with_parse_retry(
     metrics_phase: Optional[str] = None,
     allowed_tools: Optional[list[str]] = None,
     sandbox: bool = False,
+    deliver_dedo: bool = True,
 ) -> PipelineStatusBlock | ParseFailure:
     """Invoke the actor; on a status-block ``ParseFailure``, re-invoke (bounded).
 
@@ -3358,12 +3359,46 @@ async def invoke_agent_with_parse_retry(
     Distinct from :func:`_verify_with_retries`, which retries a *valid* report
     that failed verification. Only the first (primary) invocation streams via
     ``on_event``; the cheap re-emit retries don't stream.
+
+    ``deliver_dedo`` (ICCINT-12): whether pending Dedo messages for this build are folded into the PRIMARY
+    prompt. This function is the choke point EVERY build turn goes through in every phase and every round
+    (the INVARIANT the round runners document), which is exactly why the delivery sits here rather than in
+    each round's own prompt builder — the reply lands whichever phase the build resumes in. ``False`` only
+    for the read-only Konzultácia turn, which advises the Manažér on a finished build and could otherwise
+    swallow an answer meant for a live one.
+
+    DEVIATION FROM THE ICCINT-12 BRIEF — raised by the implementer, RATIFIED BY DEDO 22.08.2026. The brief
+    said to carry Dedo's answer "the same way" the Manažér's note is carried, i.e. via
+    :func:`directive_for_action` → :func:`dispatch_directive` →
+    ``pipeline_runner.schedule_dispatch(version_id, directive)``. That path cannot be reused, and this was
+    verified rather than assumed: the directive is an in-memory Python string handed from ONE HTTP request
+    to the in-process background dispatch (:file:`backend/api/routes/pipeline.py`, ``schedule_dispatch``).
+    Dedo writes from a host-side CLI in a DIFFERENT process (and, until ICCINT-14, with no HTTP surface at
+    all), so it can never place a string there, and a backend restart would drop it anyway.
+
+    The durable equivalent — pending rows in the database, folded in at this chokepoint — is therefore not
+    a preference but the only mechanism that satisfies what the brief actually required: that the message
+    REACH the agent. The brief named a means; the requirement was the end. Ratified at the technical level
+    because the choice is invisible outside the engine — no product behaviour, no Manažér-facing screen and
+    no decision of the Director's rides on it. What WOULD need the Director is the release condition below.
     """
     # WS-D (CR-NS-036): one accumulator for the whole turn — failed re-emits burn tokens too, so the
     # surviving (successful) message's payload reflects the SUM across the primary + every retry. A
     # caller may pre-seed it (the Coordinator relay carries a failed worker's lost tokens into its
     # relay message — see _coordinator_relay_engine_failure).
     turn_metrics = metrics if metrics is not None else _DispatchMetrics()
+    # ICCINT-12: Dedo's answer to a ``framework_issue`` escalation rides into the AI Agent's NEXT turn the
+    # same way the Manažér's ``uprav``/``ask``/``answer`` note does — as text at the top of the prompt the
+    # agent is actually handed. PREPENDED (never substituted), so the phase's own brief survives; addressed
+    # to ``recipient='ai_agent'``, so an Auditor turn never eats it. The rows stay ``pending`` until an
+    # envelope has actually come back from the CLI (see the receipt below the dispatch) — a turn that raises,
+    # crashes or times out leaves them pending and the next turn re-delivers, because a message the agent
+    # never sees is a failed delivery, not a partial one.
+    dedo_block, dedo_rows = (
+        dedo_message.pending_for_prompt(db, version_id) if (deliver_dedo and role == AI_AGENT_ROLE) else (None, [])
+    )
+    if dedo_block:
+        prompt = f"{dedo_block}\n\n---\n\n{prompt}"
     # CR-V2-029: the whole turn (primary + every re-emit) shares ONE wall-clock budget. Previously each
     # of the 1+_PARSE_RETRIES invocations got a fresh full timeout, so a turn could legally run up to
     # 3×900s = 45 min. Now each retry gets only the time that REMAINS, and we never launch a re-emit with
@@ -3386,6 +3421,20 @@ async def invoke_agent_with_parse_retry(
         allowed_tools=allowed_tools,
         sandbox=sandbox,
     )
+    # ICCINT-12 delivery receipt. Marked delivered ONLY when an envelope actually came back from the CLI —
+    # i.e. the prompt provably reached the model. ``invoke_agent`` does NOT raise on a lost envelope: it
+    # catches ``ClaudeAgentTimeout`` / ``ClaudeAgentError`` and RETURNS a ``ParseFailure`` carrying
+    # ``envelope_loss_kind`` ('timeout' | 'crash'). An unconditional mark here therefore consumed the message
+    # on a crashed turn where ``claude`` never even started — and the build-round auto-retry
+    # (build-robustness-crash-handling.md Fix 2, via :func:`_dispatch_build_turn`) then re-ran WITHOUT Dedo's
+    # block, losing the one answer to the escalation silently. An ORDINARY ParseFailure is different: the
+    # envelope came back, so the agent DID read the prompt — that counts as delivered, and the cheap re-emit
+    # retries below (which carry only "fix your status block") must not send it a second time.
+    # Both loss kinds are treated as non-delivery: nothing came back from either, so we have no evidence the
+    # model saw the block. The contract is at-least-once (module docstring), so re-delivering a message the
+    # agent may already have read is the correct trade against losing it outright.
+    if not (isinstance(result, ParseFailure) and result.envelope_loss_kind):
+        dedo_message.mark_delivered(db, dedo_rows)
     attempts = 0
     while isinstance(result, ParseFailure) and attempts < _PARSE_RETRIES:
         attempts += 1
@@ -5941,6 +5990,10 @@ async def run_consult_turn(
         # (KERNEL-``:ro`` project, host unreachable). Honest in-process fallback if the sidecar is
         # unavailable (logged by claude_agent._invoke_once). Build turns never set this.
         sandbox=True,
+        # ICCINT-12: a read-only advisory turn on a FINISHED build must not consume a Dedo message. It
+        # cannot act on it (no Write/Edit/Bash) and the message is meant for a live build's agent, so
+        # letting this turn mark it delivered would lose it silently.
+        deliver_dedo=False,
         # Part 1.5 metrics safety: NO metrics_phase → the recorded message carries no payload.phase, so
         # aggregate_usage_by_phase folds the consult usage/timing into the 'done' bucket (system-overhead),
         # NEVER a COMPARISON_PHASES bucket. The navrh/programovanie/verifikacia totals are untouched.

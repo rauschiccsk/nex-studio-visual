@@ -62,9 +62,16 @@ STAGE_VALUES = (
 )
 # Actors (PipelineState.current_actor) = the AGENTS on turn: AI Agent + Auditor. Participants
 # (message author/recipient) additionally include the human operator (``manazer`` — renamed from
-# ``director`` in CR-V2-004) and ``system`` (message-only). (F-007 §3.1, §4.2.)
+# ``director`` in CR-V2-004), ``system`` (message-only) and ``dedo`` (message-only). (F-007 §3.1, §4.2.)
 ACTOR_VALUES = ("ai_agent", "auditor")
-PARTICIPANT_VALUES = ACTOR_VALUES + ("manazer", "system")
+# ICCINT-12: ``dedo`` — the NEX Studio technical team. The AI Agent can already escalate TO Dedo
+# (``block_reason='framework_issue'``, delivered by :mod:`backend.services.dedo_escalation`); the way BACK did
+# not exist, so Dedo's answer had to be retyped by a human into the Manažér's box. Dedo is a PARTICIPANT,
+# never an ACTOR: he is never "on turn" — he does not build, he only answers — so ``current_actor`` stays
+# restricted to :data:`ACTOR_VALUES` and no state machine can ever wait on him. Appended LAST so the
+# declaration order of the existing values (which is preserved into OpenAPI enums, see the note above) is
+# untouched. See :mod:`backend.services.dedo_message` for the write path + prompt delivery.
+PARTICIPANT_VALUES = ACTOR_VALUES + ("manazer", "system", "dedo")
 STATUS_VALUES = ("agent_working", "awaiting_manazer", "blocked", "paused", "done")
 # Why a ``blocked`` state happened (v0.7.0 R4, D1) — the authoritative, persisted reason the FE
 # reads INSTEAD of the fragile ``lastMessage.author == "system"`` heuristic. ``agent_question`` = the

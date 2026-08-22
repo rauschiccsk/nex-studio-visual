@@ -71,4 +71,36 @@ describe("ConversationThread — full body + question (CR-V2-032)", () => {
     expect(screen.getByText(/Nahlásené technickému tímu/i)).toBeInTheDocument(); // the escalation-message block label
     expect(screen.getByText(/Chýba docker socket mount/)).toBeInTheDocument(); // the actual Dedo message
   });
+
+  // ICCINT-12: the return leg — Dedo answering the escalation is a participant in the thread, labelled as
+  // himself and visually his own, so the Manažér can see the answer arrived without reading it as a system
+  // notice or as something he said.
+  it("renders a Dedo message under his own name and his own accent", () => {
+    const dedoMsg: PipelineMessage = {
+      id: "d1",
+      version_id: "v1",
+      stage: "programovanie",
+      author: "dedo",
+      recipient: "ai_agent",
+      kind: "answer",
+      content: "Opravené v NEX Studiu v4.0.58 — skús ten build znova.",
+      status: "delivered",
+      payload: { dedo_reply: true },
+      created_at: "2026-08-22T00:00:00Z",
+      seq: 3,
+    };
+    const systemMsg: PipelineMessage = { ...dedoMsg, id: "s1", author: "system", content: "Systémová poznámka." };
+    const { container } = render(
+      <ConversationThread messages={[dedoMsg, systemMsg]} activity={[]} working={false} />,
+    );
+
+    expect(screen.getByText("Dedo")).toBeInTheDocument(); // the author label, not "Systém"
+    expect(screen.getByText(/Opravené v NEX Studiu v4.0.58/)).toBeInTheDocument();
+
+    // Distinguishable from `system`: the two bubbles must not share a class list.
+    const bubbles = Array.from(container.querySelectorAll("li > div")).map((el) => el.className);
+    expect(bubbles).toHaveLength(2);
+    expect(bubbles[0]).not.toEqual(bubbles[1]);
+    expect(bubbles[0]).toContain("var(--color-state-success-bg)");
+  });
 });

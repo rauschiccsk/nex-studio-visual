@@ -241,6 +241,27 @@ class TestPipelineMessage:
         db_session.add(_message(version, author="system", kind="notification"))
         db_session.flush()  # no raise
 
+    def test_dedo_may_author_and_be_addressed(self, db_session):
+        """ICCINT-12 (migration 088): both participant CHECKs accept ``dedo``.
+
+        The escalation had only one direction — the agent could reach Dedo, Dedo could not reach the agent,
+        because the DB refused the author. Both columns are asserted: ``author`` is Dedo's reply, and
+        ``recipient`` is the agent addressing him back."""
+        version = _make_version(db_session)
+        db_session.add(_message(version, author="dedo", recipient="ai_agent", kind="answer"))
+        db_session.add(_message(version, author="ai_agent", recipient="dedo", kind="question"))
+        db_session.flush()  # no raise
+
+    def test_dedo_is_not_a_pipeline_actor(self, db_session):
+        """ICCINT-12: widening the MESSAGE participants must not make Dedo something the build waits on.
+
+        Dedo never builds, he only answers, so ``ck_pipeline_state_current_actor`` still rejects him —
+        otherwise a build could settle "on turn: Dedo" and hang with nobody able to act."""
+        version = _make_version(db_session)
+        db_session.add(_state(version, current_actor="dedo"))
+        with pytest.raises((IntegrityError, ProgrammingError)):
+            db_session.flush()
+
     def test_rejects_task_plan_stage(self, db_session):
         # v2 4-phase model: ``ck_pipeline_message_stage`` REJECTS the removed v1 ``task_plan`` stage.
         version = _make_version(db_session)

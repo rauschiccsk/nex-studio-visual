@@ -25,10 +25,13 @@ export type PipelineStage = PipelineSchemas["PipelineStateRead"]["current_stage"
 
 export type PipelineActor = PipelineSchemas["PipelineStateRead"]["current_actor"];
 
-// `manazer` (the human operator) and `system` are message-only participants (never a state ACTOR — the
-// actor union is the two agents). The BE keeps author/recipient as plain str, so this composite stays
-// hand-written over the generated actor union + the two human/system authors.
-export type PipelineParticipant = PipelineActor | "manazer" | "system";
+// `manazer` (the human operator), `system` and `dedo` are message-only participants (never a state ACTOR
+// — the actor union is the two agents). The BE keeps author/recipient as plain str, so this composite
+// stays hand-written over the generated actor union + the human/system/Dedo authors.
+//
+// ICCINT-12: `dedo` is the NEX Studio technical team answering an agent's `framework_issue` escalation.
+// It can appear as a message author/recipient but never as `current_actor` — Dedo is never on turn.
+export type PipelineParticipant = PipelineActor | "manazer" | "system" | "dedo";
 
 export type PipelineStatus = PipelineSchemas["PipelineStateRead"]["status"];
 
