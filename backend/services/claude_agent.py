@@ -23,6 +23,7 @@ from uuid import UUID
 
 from backend.config.settings import settings
 from backend.constants.paths import TERMINAL_LOG_DIR as DURABLE_TERMINAL_LOG_DIR
+from backend.core.agent_env import agent_env
 
 logger = logging.getLogger(__name__)
 
@@ -549,6 +550,11 @@ async def _invoke_once(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=str(project_root),
+        # EXPLICIT env, never the inherited default: a build turn runs with an unrestricted Bash tool, so
+        # every variable this process holds is a variable the agent can print. Dedo's machine token
+        # (ICCINT-14) must not be among them — the agent is the party that RAISES the ``framework_issue``
+        # blocks that token clears, and holding it would let a stuck build unstick itself as ``dedo``.
+        env=agent_env(),
         # Generous StreamReader buffer: a single stream-json NDJSON event (e.g. a
         # gate's full openapi.yaml in one `result` line) can far exceed the 64 KB
         # default and would raise LimitOverrunError on readline (CR-NS-018).

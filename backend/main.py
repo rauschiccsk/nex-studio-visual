@@ -14,6 +14,7 @@ from backend.api.routes.backlog import router as backlog_router
 from backend.api.routes.bugs import router as bugs_router
 from backend.api.routes.credentials import router as credentials_router
 from backend.api.routes.customers import router as customers_router
+from backend.api.routes.dedo import router as dedo_router
 from backend.api.routes.deploy import router as deploy_router
 from backend.api.routes.epics import router as epics_router
 from backend.api.routes.external_cost import router as external_cost_router
@@ -253,6 +254,11 @@ app.include_router(system_settings_router, prefix="/api/v1/system-settings")
 app.include_router(user_agent_settings_router, prefix="/api/v1/user-agent-settings")
 app.include_router(agent_terminal_router, prefix="/api/v1/agent-terminal")
 app.include_router(pipeline_router, prefix="/api/v1/pipeline")
+# Dedo's own door (ICCINT-14, charter §4.5) — the NEX Studio technical team's MACHINE identity, mounted
+# apart from every user-facing router because that separation IS the permission model: the router carries
+# its own auth dependency (``X-Dedo-Token``, never a user JWT) and exposes exactly five endpoints, so
+# Dedo's abilities are bounded by what is mounted here rather than by a check somebody has to remember.
+app.include_router(dedo_router, prefix="/api/v1/dedo")
 
 
 @app.get("/health")

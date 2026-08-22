@@ -22,7 +22,6 @@ import asyncio
 import contextlib
 import json
 import logging
-import os
 import re
 import shutil
 import subprocess
@@ -42,6 +41,7 @@ from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from backend.core.agent_env import agent_env
 from backend.db.models.backlog import BacklogItem
 from backend.db.models.foundation import User, UserAgentSettings
 from backend.db.models.orchestrator import OrchestratorSession
@@ -4396,7 +4396,10 @@ async def _run_uat_deploy(
     # counter (obs P2-1: a counter is the very thing Director 2026-07-11 rejected for generated apps).
     stamp = (version_number[1:] if version_number[:1].lower() == "v" else version_number) if version_number else None
     build_ver = stamp or "0.1.0"
-    env = {**os.environ, "APP_VERSION": build_ver, "VITE_APP_VERSION": build_ver}
+    # Agent-controlled input again, less obviously: the compose file being brought up is one the AI Agent
+    # wrote, and compose INTERPOLATES this environment into it (``${DEDO_API_TOKEN}`` in a generated
+    # service block would hand the secret to the deployed app). Same withholding as every other spawn.
+    env = agent_env({"APP_VERSION": build_ver, "VITE_APP_VERSION": build_ver})
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=env
@@ -5207,7 +5210,10 @@ async def _run_acceptance_script(script: Path, env: dict[str, str]) -> tuple[int
     :func:`_compose_smoke_step`: a spawn failure → ``(127, reason)``, a timeout → ``(124, reason)``
     (sentinel non-zero codes the caller treats as a FAIL). The script reaches the app via ``docker compose
     exec`` (host ports are stripped), so the compose project/files are passed through ``env``."""
-    full_env = {**os.environ, **env}
+    # NOT ``{**os.environ, **env}``: ``release_smoke_test.sh`` lives in the built project's work tree, which
+    # the AI Agent WRITES — running it hands the agent a shell with this process's environment. Dedo's
+    # machine token (ICCINT-14) is withheld from it, same as from the agent itself.
+    full_env = agent_env(env)
     try:
         proc = await asyncio.create_subprocess_exec(
             "bash", str(script), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=full_env

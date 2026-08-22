@@ -112,6 +112,17 @@ services:
       # Same PAT as GITHUB_TOKEN typically; gh CLI prefers GH_TOKEN env name.
       # Per CR-NS-002 Director directive 2026-06-01.
       GH_TOKEN: "${GH_TOKEN:-}"
+      # Dedo's machine identity (ICCINT-14, charter §4.5). What goes in is the SHA-256 DIGEST of Dedo's
+      # token, NOT the token: this container also runs the AI Agent with a root shell, so anything the
+      # container holds the agent can read — and the agent is the party the boundary binds. The digest
+      # verifies Dedo and cannot be replayed by whoever reads it. Passthrough only; the value lives in
+      # /opt/projects/nex-studio-visual/.env, never in this file and never in the image. Unset = Dedo's
+      # door (/api/v1/dedo/*) stays closed (503), which is the correct default.
+      #
+      # THIS FILE IS THE DEV/REPO STACK. The PROD instance (v4, ports 9216/9217) is started from
+      # /opt/customers/dev/nex-studio-visual/docker-compose.yml, which is hand-maintained and does NOT
+      # inherit anything from here — adding the line there is a separate, deliberate step (see .env.example).
+      DEDO_API_TOKEN_SHA256: "${DEDO_API_TOKEN_SHA256:-}"
     depends_on:
       db:
         condition: service_healthy

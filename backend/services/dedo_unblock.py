@@ -59,12 +59,23 @@ __all__ = ["DedoMessageError", "unblock_framework_issue", "version_awaiting_dedo
 UNBLOCK_NEXT_ACTION = "Chybu v NEX Studiu sme opravili. Stlač „Pokračovať“ — AI Agent bude pokračovať tam, kde prestal."
 
 
-def unblock_framework_issue(db: Session, *, version_id: uuid.UUID, reason: str) -> PipelineState:
+def unblock_framework_issue(
+    db: Session,
+    *,
+    version_id: uuid.UUID,
+    reason: str,
+    payload_extra: dict | None = None,
+) -> PipelineState:
     """Release ``version_id`` from its ``framework_issue`` block; return the settled state.
 
     ``reason`` is MANDATORY (see the module docstring) and is recorded as a Dedo message before the state
     moves, so a build can never be found unblocked with no explanation of why. The caller commits — this
     only flushes, the same contract every other writer in this codebase follows.
+
+    ``payload_extra`` is merged into that message's payload alongside the ``dedo_unblock`` marker. ICCINT-14
+    uses it to stamp the TRANSPORT (``dedo_transport='api'``) so the thread records that Dedo released the
+    build over the network rather than from the host — the same one-writer discipline as everything else
+    here: the HTTP route adds a label, not a second way to unblock.
 
     Raises :class:`~backend.services.dedo_message.DedoMessageError` when the reason is empty, the version has
     no build, or the build is not blocked on ``framework_issue``.
@@ -107,7 +118,13 @@ def unblock_framework_issue(db: Session, *, version_id: uuid.UUID, reason: str) 
             "button that does nothing for Dedo's answer"
         )
 
-    msg = record_dedo_message(db, version_id=version_id, content=text, payload_extra={"dedo_unblock": True})
+    msg = record_dedo_message(
+        db,
+        version_id=version_id,
+        content=text,
+        # ``dedo_unblock`` is written LAST so a caller's extras can label the write but never disown it.
+        payload_extra={**(payload_extra or {}), "dedo_unblock": True},
+    )
 
     # Order matters only for legibility: the ``status`` set-listener (``_clear_block_reason_on_unblock``)
     # already drops ``block_reason`` on the way out of ``blocked``. It is written explicitly anyway so the

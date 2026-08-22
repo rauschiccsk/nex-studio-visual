@@ -60,6 +60,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.constants.paths import TERMINAL_LOG_DIR as DURABLE_TERMINAL_LOG_DIR
+from backend.core.agent_env import agent_env
 from backend.db.models.agent_terminal import AgentTerminalSession
 
 logger = logging.getLogger(__name__)
@@ -338,7 +339,10 @@ def _spawn_pty(
         resume: ``True`` → resume existing session by uuid; ``False`` →
             create new session with charter injection.
     """
-    env = {**os.environ, "TERM": "xterm-256color", "FORCE_COLOR": "1"}
+    # NOT ``{**os.environ, ...}``: this PTY is a live shell for the AI Agent, so the environment it gets is
+    # the environment the agent can print. Dedo's machine token (ICCINT-14) is withheld — see
+    # :mod:`backend.core.agent_env`.
+    env = agent_env({"TERM": "xterm-256color", "FORCE_COLOR": "1"})
     if resume:
         argv = ["claude", "--resume", str(claude_session_id)]
     else:

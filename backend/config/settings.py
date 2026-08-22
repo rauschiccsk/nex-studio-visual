@@ -1,5 +1,29 @@
+import os
+
 from pydantic import Field
 from pydantic_settings import BaseSettings
+
+#: Environment variable carrying Dedo's PLAINTEXT machine secret (ICCINT-14). Read ONCE, at import, and
+#: REMOVED from ``os.environ`` as it is read — see :func:`_take_dedo_plaintext_token`.
+DEDO_TOKEN_ENV = "DEDO_API_TOKEN"
+
+
+def _take_dedo_plaintext_token() -> str:
+    """Read Dedo's plaintext secret out of the environment and TAKE IT WITH US — leaving nothing behind.
+
+    This process spawns the AI Agent (``claude`` with an unrestricted Bash tool) and every child inherits
+    this process's environment. A secret left in ``os.environ`` is therefore a secret handed to the very
+    party Dedo's door exists to keep out: an agent whose build is blocked could read ``DEDO_API_TOKEN`` with
+    ``printenv`` and clear its own escalation. So the variable is popped here, at import, long before any
+    spawn can happen — the one place that covers EVERY child, including the ones that inherit implicitly.
+
+    It does NOT make the plaintext configuration safe, and nothing can: ``/proc/1/environ`` still shows what
+    the process was started with (``unsetenv`` does not rewrite that region), and the agent has a root shell
+    in this container. That is why the deployed shape is the DIGEST
+    (:data:`Settings.dedo_api_token_sha256`), which leaves nothing here to steal; this path exists for local
+    development, where the agent and the attacker are the same person and it does not matter.
+    """
+    return os.environ.pop(DEDO_TOKEN_ENV, "").strip()
 
 
 class Settings(BaseSettings):
@@ -165,6 +189,43 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Dedo's machine identity (ICCINT-14, charter §4.5) — TWO fields, ONE of which should be used in a
+    # deployment. What opens Dedo's OWN door (``/api/v1/dedo/*``) is never a user account and never a JWT:
+    # a user login would be the impersonation the charter forbids, and a JWT-shaped value could be replayed
+    # against the USER doors, which is the one crossing this design exists to prevent.
+    #
+    # EMPTY IS THE DEFAULT AND MEANS "CLOSED", not "open": with neither field configured the whole router
+    # answers 503 and nothing behind it can be reached.
+    #
+    # PREFER THE DIGEST (``DEDO_API_TOKEN_SHA256``). This process also runs the AI Agent — with a Bash tool,
+    # as root, in this very container — so ANYTHING this container holds, the agent can read
+    # (``/proc/1/environ`` keeps the value the process started with even after ``os.environ.pop``, and a
+    # mounted secret file is one ``cat`` away). A verifier is all the door needs: it must recognise Dedo's
+    # secret, not possess it. With only the SHA-256 digest here, reading everything this container has
+    # yields nothing that opens the door — the boundary is enforced by the token, which is what charter §4.5
+    # demands, instead of by the agent not thinking to look.
+    dedo_api_token_sha256: str = Field(
+        default="",
+        description=(
+            "SHA-256 hex digest of Dedo's machine token (ICCINT-14) — the RECOMMENDED configuration: the "
+            "server verifies, it does not hold the secret. Empty = fall back to dedo_api_token."
+        ),
+    )
+
+    # The PLAINTEXT secret — LOCAL DEVELOPMENT ONLY. Still honoured (it is the shape ICCINT-14 was
+    # specified in, and it is the convenient one for a local run), but weaker than the digest for the
+    # reason above: the value is inside the process the agent runs in. It is taken out of ``os.environ``
+    # at import (see :func:`_take_dedo_plaintext_token`) so no child process inherits it, and
+    # :mod:`backend.core.agent_env` strips it again at every agent spawn — but neither of those can undo
+    # ``/proc/1/environ``. Never generated here, never written to the repository, never logged or echoed.
+    dedo_api_token: str = Field(
+        default="",
+        description=(
+            "Opaque random secret for Dedo's machine identity (ICCINT-14), plaintext. Prefer "
+            "dedo_api_token_sha256. Empty = Dedo's door is closed. Never a JWT, never committed, never logged."
+        ),
+    )
+
     app_version: str = "0.1.0"
 
     # Frontend Vite build version — written to ``.env`` by the
@@ -184,4 +245,9 @@ class Settings(BaseSettings):
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 
-settings = Settings()
+# Dedo's plaintext secret is taken from the environment BEFORE the settings object is built and is passed
+# in explicitly, so pydantic never has to re-read a variable that is (deliberately) no longer there. Passed
+# only when non-empty: an empty kwarg would override a value legitimately set in a dev ``.env``.
+_dedo_plaintext_token = _take_dedo_plaintext_token()
+
+settings = Settings(**({"dedo_api_token": _dedo_plaintext_token} if _dedo_plaintext_token else {}))
