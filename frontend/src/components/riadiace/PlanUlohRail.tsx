@@ -481,7 +481,12 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
   // hidden once you are IN the Vizuál stage (so `spustit_stavbu` remains the proceed-to-build path there).
   // Rendered as a secondary button next to "Spustiť stavbu" in the same rung (they co-exist, not exclusive).
   const canVizual = !!board?.available_actions?.includes("spustit_vizual");
-  const canResume = !!board?.available_actions?.includes("pokracovat");
+  // ICCINT-13: `pokracovat` is ALSO the restart of a build our technical team just released from a NEX Studio
+  // bug — and that one belongs to PokracovatPoOpraveBar in the main column, which explains what was repaired.
+  // Yield the rung to it: two buttons firing the same verb, one of them labelled "Pokračovať v stavbe" for a
+  // build that may never have reached the build phase, is exactly the near-duplicate this avoids.
+  const releasedAfterFix = !!board?.state?.resume_after_framework_fix;
+  const canResume = !!board?.available_actions?.includes("pokracovat") && !releasedAfterFix;
   // A running Programovanie loop offers `pause` (BE determine_available_actions → {"pause"}); the rung below
   // fires the same postPipelineActionApi(action:'pause'). Mutually exclusive with `pokracovat` by construction.
   const canPause = !!board?.available_actions?.includes("pause");

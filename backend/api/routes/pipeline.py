@@ -293,6 +293,21 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
     )
     if (_in_fix_loop or _verif_stall) and "overit_bez_opravy" not in available_actions:
         available_actions = sorted([*available_actions, "overit_bez_opravy"])
+    # ICCINT-13 — THE SINGLE-BUTTON CLAMP. A build stopped on a NEX Studio bug, and a build Dedo has just
+    # released from one, are the two states whose whole point is that the Manažér has exactly ONE move:
+    # ``nahlasit_znova`` while it is blocked, ``pokracovat`` once it is released. The route-level appends
+    # above do not know that — ``overit_znovu`` in particular attaches to ANY settled drifted version, and a
+    # released build is settled (``awaiting_manazer``), so the promised one button arrived as two (audit
+    # finding, 2026-08-22: ``['overit_znovu', 'pokracovat']`` through the real route). Re-verifying a build
+    # that is mid-escalation is also simply the wrong move. So the offered set is clamped back to exactly
+    # what the state-only :func:`determine_available_actions` returned — stated once, here, where every
+    # present and future append is already behind us. (Removals above cannot apply: neither verb is one of
+    # the post-filtered ones.)
+    if state is not None and (
+        (state.status == "blocked" and state.block_reason == "framework_issue")
+        or (state.status == "awaiting_manazer" and state.resume_after_framework_fix)
+    ):
+        available_actions = sorted(orchestrator.determine_available_actions(state))
     return PipelineBoardRead(
         state=PipelineStateRead.model_validate(state) if state is not None else None,
         recent_messages=[PipelineMessageRead.model_validate(m) for m in _recent_messages(db, version_id, limit)],

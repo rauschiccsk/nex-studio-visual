@@ -221,3 +221,47 @@ describe("PhaseBar — conversation (spine) strip derived from board signals (ST
     expect(screen.getByText("●")).toBeInTheDocument();
   });
 });
+
+// ICCINT-13: after our technical team releases a build that died on a NEX Studio bug, the board offers
+// EXACTLY {"pokracovat"} — in whatever phase the escalation happened. `pokracovat` had been a reliable
+// "this build is in Programovanie" signal because it was offered nowhere else; reading it as one made the
+// strip claim a build was three phases further along than it was.
+describe("PhaseBar — the unblock window does not move the build (ICCINT-13)", () => {
+  function releasedBoard(over: { currentStage?: PipelineState["current_stage"]; specApproved?: boolean } = {}) {
+    return mkBoard({
+      state: mkState({
+        mode: "conversation",
+        status: "awaiting_manazer",
+        current_stage: over.currentStage ?? "priprava",
+        resume_after_framework_fix: true,
+      }),
+      available_actions: ["pokracovat"],
+      recent_messages: [],
+      spec_approved: over.specApproved ?? false,
+    });
+  }
+
+  it("a build released while still writing the Špecifikácia stays at Špecifikácia", () => {
+    render(<PhaseBar board={releasedBoard()} />);
+    expect(isCurrent("Špecifikácia")).toBe(true);
+    expect(isCurrent("Programovanie")).toBe(false);
+    // Nothing is ticked off: the build has not passed a single phase.
+    expect(screen.queryAllByText("✓")).toHaveLength(0);
+  });
+
+  it("a build released after the Špecifikácia was frozen stays at Plán", () => {
+    render(<PhaseBar board={releasedBoard({ specApproved: true })} />);
+    expect(isCurrent("Plán")).toBe(true);
+    expect(isCurrent("Programovanie")).toBe(false);
+  });
+
+  it("a build released during the Vizuál stays at Vizuál", () => {
+    render(<PhaseBar board={releasedBoard({ currentStage: "vizual", specApproved: true })} />);
+    expect(isCurrent("Vizuál")).toBe(true);
+  });
+
+  it("a build released mid-build still reads Programovanie (the stage says so, not the button)", () => {
+    render(<PhaseBar board={releasedBoard({ currentStage: "programovanie", specApproved: true })} />);
+    expect(isCurrent("Programovanie")).toBe(true);
+  });
+});

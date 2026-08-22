@@ -60,6 +60,15 @@ function conversationPhase(board: PipelineBoard | null): ConvPhase {
   const msgHasFlag = (flag: string) => msgs.some((m) => m.payload?.[flag] === true);
   const working = board?.state?.status === "agent_working";
   const stage = board?.state?.current_stage;
+  // ICCINT-13: while a build our technical team has just released is waiting for "Pokračovať", the offered
+  // set is EXACTLY {"pokracovat"} — in whatever phase the escalation happened. `pokracovat` used to be a
+  // reliable "the build is in Programovanie" signal (it was offered nowhere else); now it is not, and
+  // reading it as one made the strip LIE: a build that escalated during the Špecifikácia showed
+  // "✓Špecifikácia › ✓Plán › ✓Vizuál › ●Programovanie" — three phases it had never reached — while the
+  // Špecifikácia was not even approved (audit finding, 2026-08-22). The unblock window changes nothing
+  // about WHERE the build is, so it must contribute nothing to that derivation. (Same exception
+  // `PlanUlohRail` makes for the same reason: the button belongs to `PokracovatPoOpraveBar`.)
+  const releasedAfterFix = !!board?.state?.resume_after_framework_fix;
 
   // Hotovo (STEP 6) — the Manažér's terminal sign-off has settled the version to 'done'. Furthest-right
   // terminal phase, evaluated FIRST so it wins over every earlier signal and back-marks Kontrola ✓.
@@ -72,7 +81,7 @@ function conversationPhase(board: PipelineBoard | null): ConvPhase {
   // Programovanie because `spustit_stavbu` (its "proceed to build" verb) is offered while at Vizuál.
   if (stage === "vizual") return "vizual";
   // Programovanie — the build is running / paused, or is built-and-ready to start.
-  if (has("pause") || has("pokracovat") || has("spustit_stavbu") || stage === "programovanie") {
+  if (has("pause") || (has("pokracovat") && !releasedAfterFix) || has("spustit_stavbu") || stage === "programovanie") {
     return "programovanie";
   }
   // Plán — the Špecifikácia is frozen and no build/check has started yet.

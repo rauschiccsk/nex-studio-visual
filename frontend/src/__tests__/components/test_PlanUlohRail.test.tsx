@@ -393,6 +393,26 @@ describe("PlanUlohRail — Programovanie build controls (STEP 4)", () => {
     await waitFor(() => expect(onBoard).toHaveBeenCalledWith(fresh));
   });
 
+  it("yields the resume rung to the after-a-fix bar, so the screen never shows two 'continue' buttons", async () => {
+    // ICCINT-13: a build our technical team released from a NEX Studio bug offers the SAME `pokracovat` verb,
+    // but that one belongs to PokracovatPoOpraveBar in the main column, which explains what was repaired.
+    // This rung would say "Pokračovať v stavbe" — wrong for a build that may never have reached the build
+    // phase, and a second button for one action.
+    render(
+      <PlanUlohRail
+        versionId="v1"
+        messages={[]}
+        board={mkBoard({
+          available_actions: ["pokracovat"],
+          state: mkState({ status: "awaiting_manazer", resume_after_framework_fix: true }),
+        })}
+        onBoard={() => {}}
+      />,
+    );
+    await waitFor(() => expect(getTaskPlan).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: /Pokračovať v stavbe/ })).not.toBeInTheDocument();
+  });
+
   it("shows the amber paused note above 'Pokračovať v stavbe' when status is paused, and NOT otherwise", async () => {
     const { rerender } = render(
       <PlanUlohRail

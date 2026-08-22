@@ -53,6 +53,13 @@ function statusText(state: PipelineState | null, projectName: string, versionNum
   if (state.status === "blocked") {
     return (state.block_reason && BLOCK_REASON_LABELS[state.block_reason]) || "Čaká na súhlas";
   }
+  // ICCINT-13: a build our technical team just released from a NEX Studio bug is waiting for the Manažér —
+  // but "Čaká na súhlas" would be the wrong sentence: nothing is being approved, and the reader has been
+  // staring at "NEX Studio má chybu" until a moment ago. Say what changed. MUST precede the generic
+  // awaiting_manazer branch below.
+  if (state.status === "awaiting_manazer" && state.resume_after_framework_fix) {
+    return "Chyba NEX Studia opravená — čaká na tvoje „Pokračovať“";
+  }
   if (state.status === "awaiting_manazer") return "Čaká na súhlas";
   if (state.status === "paused") return "Pozastavené";
   // agent_working — name the project, version, and live phase. version_number is stored without a leading

@@ -20,8 +20,10 @@ These tests assert the BEHAVIOUR of the return leg, not its shape:
    from ``invoke_agent``, not as a raised exception — leaves it pending and the next turn carries it.
 4. **The build resolution Dedo replies through** — ``version_awaiting_dedo`` finds the build blocked on
    ``framework_issue`` and refuses to guess when the answer is ambiguous.
-5. **The trigger that does not exist yet** — pinned: a ``framework_issue`` block offers no action that runs
-   an agent turn, so ICCINT-12 has no effect until ICCINT-13 ships with it.
+5. **The trigger** — pinned from both sides: a ``framework_issue`` block neither OFFERS nor EXECUTES any
+   action that runs an agent turn (so the Manažér can never release it himself — asserted by calling each
+   verb, and the chat relay too, not by reading the menu), and Dedo's ICCINT-13 unblock arms exactly one
+   that does.
 6. **The host CLI** — the only way back today, exercised end-to-end including the commit.
 """
 
@@ -40,7 +42,7 @@ from backend.db.models.foundation import User
 from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
-from backend.services import dedo_message, orchestrator
+from backend.services import dedo_message, dedo_unblock, orchestrator
 from backend.services.claude_agent import ClaudeAgentError, ClaudeAgentTimeout
 
 # (pytest ``asyncio_mode = auto`` — async tests run without an explicit mark.)
@@ -339,20 +341,28 @@ class TestVersionAwaitingDedo:
             dedo_message.version_awaiting_dedo(db_session, project.slug)
 
 
-# ── 5. the trigger that is NOT here ───────────────────────────────────────────
+# ── 5. the trigger — absent while blocked, armed by Dedo's unblock ────────────
 
 
-class TestTheMissingTrigger:
-    """ICCINT-12 delivers nothing on its own — it must ship with ICCINT-13. Pinned, not merely commented.
+class TestTheTriggerThatNowExists:
+    """ICCINT-12 delivered nothing on its own; ICCINT-13 is what carries the message. Pinned, not described.
 
-    A build blocked on ``framework_issue`` — the ONLY situation Dedo answers — offers the Manažér exactly
-    one action, and that action does not dispatch an agent turn. So the message below is written, shown in
-    the thread, and never carried. This is asserted rather than described so the gap cannot quietly persist:
-    when ICCINT-13 adds the resume verb, this test goes red and forces the release note + the module
-    docstring to be corrected in the same change.
+    This class used to be ``TestTheMissingTrigger`` and asserted the DEAD END: a build blocked on
+    ``framework_issue`` offered ``{"nahlasit_znova"}``, which dispatches no turn, so Dedo's message stayed
+    ``pending`` forever. The first half of that is still true and still pinned — while the build is BLOCKED
+    nothing runs, and in particular the Manažér has no way to release it himself. What changed is the way
+    out: Dedo's host-side unblock arms exactly one action, and that action carries the message.
+    (The end-to-end path lives in ``tests/test_dedo_unblock.py``; this stays with the delivery tests because
+    it is the release condition of THIS module.)
+
+    "No way to release it himself" is asserted as EXECUTABILITY. The earlier version of this class checked
+    only the OFFER (``determine_available_actions``) while saying the stronger thing in its docstring — and
+    the stronger thing was not true: ``ask`` / ``answer`` / ``uprav`` all ran and cleared the block (audit,
+    2026-08-22). A release condition that reads as satisfied while the hole is open is worse than one that
+    stays silent, so it now tests what it claims.
     """
 
-    def test_a_framework_issue_block_offers_no_action_that_runs_the_agent(self, db_session):
+    def test_a_blocked_build_still_offers_no_action_that_runs_the_agent(self, db_session):
         version, _ = _make_version(db_session)
         state = _seed_state(db_session, version.id, status="blocked", block_reason="framework_issue")
 
@@ -361,6 +371,51 @@ class TestTheMissingTrigger:
         assert actions == {"nahlasit_znova"}
         # ``nahlasit_znova`` re-sends the escalation TO Dedo; none of the verbs that arm a turn are offered.
         assert not actions & {"pokracovat", "uprav", "answer", "ask", "schvalit"}
+
+    @pytest.mark.parametrize(
+        "action,payload",
+        [
+            ("pokracovat", {}),
+            ("uprav", {"comment": "sprav to inak"}),
+            ("ask", {"text": "Čo sa deje?"}),
+            ("answer", {"text": "Skús znova."}),
+        ],
+    )
+    async def test_and_none_of_them_runs_it_when_called_anyway(self, db_session, action, payload):
+        """Not offered AND not executable — the difference between a UI that hides a door and an engine that
+        locks it. Each of these ends in ``_begin_dispatch``; each would have carried Dedo's message into a
+        turn the Manažér started, in a NEX Studio that may not be fixed at all."""
+        version, _ = _make_version(db_session)
+        state = _seed_state(db_session, version.id, status="blocked", block_reason="framework_issue")
+        msg = dedo_message.record_dedo_message(db_session, version_id=version.id, content=_DEDO_TEXT)
+
+        with pytest.raises(orchestrator.OrchestratorError, match="technický tím"):
+            await orchestrator.apply_action(db_session, version_id=version.id, action=action, payload=payload)
+
+        assert (state.status, state.block_reason) == ("blocked", "framework_issue")
+        db_session.refresh(msg)
+        assert msg.status == "pending"  # nothing ran; nobody carried it
+
+    async def test_nor_does_typing_into_the_chat(self, db_session):
+        """The relay is the path with no button at all: it maps a typed message onto ``ask``/``answer``."""
+        version, _ = _make_version(db_session)
+        state = _seed_state(db_session, version.id, status="blocked", block_reason="framework_issue")
+
+        with pytest.raises(orchestrator.OrchestratorError, match="technický tím"):
+            await orchestrator.relay_manazer_message(db_session, version_id=version.id, text="Pokračuj")
+
+        assert (state.status, state.block_reason) == ("blocked", "framework_issue")
+
+    def test_dedos_unblock_arms_exactly_one_action_that_does(self, db_session):
+        """The release condition, the other way round: after the unblock there IS a trigger, it is a single
+        button, and it is the resume verb (so the next turn — and Dedo's pending message with it) can run."""
+        version, _ = _make_version(db_session)
+        _seed_state(db_session, version.id, status="blocked", block_reason="framework_issue")
+        dedo_message.record_dedo_message(db_session, version_id=version.id, content=_DEDO_TEXT)
+
+        state = dedo_unblock.unblock_framework_issue(db_session, version_id=version.id, reason="Opravené.")
+
+        assert orchestrator.determine_available_actions(state) == {"pokracovat"}
 
     async def test_nahlasit_znova_does_not_arm_a_turn_so_the_message_stays_pending(self, db_session, monkeypatch):
         """The one available button, exercised for real: the state stays ``blocked`` (never

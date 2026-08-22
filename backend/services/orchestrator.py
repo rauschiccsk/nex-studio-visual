@@ -104,6 +104,29 @@ logger = logging.getLogger(__name__)
 AI_AGENT_ROLE = "ai_agent"
 AUDITOR_ROLE = "auditor"
 
+#: What the engine says to the Manažér when he tries to act on a build blocked on a NEX Studio bug
+#: (ICCINT-13, Director decision 1 — only Dedo releases it). One sentence, used by BOTH refusal sites
+#: (:func:`apply_action`'s framework-block gate and :func:`relay_manazer_message`) so the Manažér never
+#: gets two different explanations of the same rule.
+FRAMEWORK_BLOCK_REFUSAL = (
+    "Stavba je zablokovaná na chybe NEX Studia — ďalej ju pustí až náš technický tím, keď ju opraví."
+)
+
+#: What the Manažér's "Pokračovať" says to the build Dedo has just released (ICCINT-13). Recorded as the
+#: Manažér→AI-Agent approval message AND — via :func:`framework_resume_directive` — threaded into the
+#: resumed turn as its directive, so the agent is TOLD it is resuming after a framework fix instead of
+#: re-reading a generic phase brief. One text, one meaning, two consumers.
+FRAMEWORK_RESUME_CONTENT = "Chybu v NEX Studiu opravil náš technický tím — pokračuj v práci tam, kde si prestal."
+
+#: The same fact framed FOR THE AGENT (:func:`framework_resume_directive`): it is the resumed turn's
+#: directive, so the round runner treats the press as a change-request (dispatch the agent) and not as a
+#: fresh-phase entry (show the preview, call nobody). Dedo's own answer rides ABOVE it in the prompt —
+#: ``invoke_agent_with_parse_retry`` prepends the pending ``author='dedo'`` block — hence "vyššie".
+FRAMEWORK_RESUME_DIRECTIVE = (
+    "Chybu v NEX Studiu, ktorú si eskaloval, náš technický tím (Dedo) opravil. Jeho odpoveď máš vyššie. "
+    "Pokračuj v práci tam, kde si prestal."
+)
+
 #: Read-only tool profile for a Konzultácia turn (konzultacia-mode.md Part 1). Passed to
 #: :func:`invoke_agent` → :func:`claude_agent.invoke_claude` so a consult on a finished version can ONLY
 #: read the project (Read/Grep/Glob) — every mutating/exec/spawn tool is hard-denied there. The
@@ -442,7 +465,11 @@ MAX_PLAN_FEATS = 40
 #                        (after Návrh / Programovanie / Verifikácia) → advance to the next phase / Hotovo.
 #   * ``uprav``        — "Uprav": send the Manažér's correction back to the AI Agent at a schvaľovací bod
 #                        (re-work the current phase); the phase does NOT advance.
-#   * ``pokracovat``   — "Pokračovať": resume a build the Manažér paused (cooperative pause boundary).
+#   * ``pokracovat``   — "Pokračovať": resume a build the Manažér paused (cooperative pause boundary), and
+#                        — ICCINT-13 — restart a build Dedo has just released from a ``framework_issue``
+#                        block (``resume_after_framework_fix``), which can be ANY phase. Deliberately the
+#                        SAME verb: both mean "run the next turn from where we stopped", and a second
+#                        near-identical resume verb would put two similar buttons on the Manažér's screen.
 #   * ``verdict``      — the Auditor's Verifikácia verdict (PASS → Hotovo; FAIL → loop fix to the AI Agent,
 #                        bounded by :data:`AUDITOR_LOOP_MAX`, then escalate to the Manažér).
 #   * ``ask``/``answer`` — direct Manažér↔AI Agent comms (the Coordinator relay is retired; design §2.2).
@@ -581,6 +608,20 @@ def determine_available_actions(state: PipelineState) -> set[str]:
         # A paused Programovanie loop: only the resume verb (CR-V2-009 collapses end_build away — a
         # paused build resumes via ``pokracovat`` or the Manažér steers it with ``uprav``).
         return {"pokracovat", "uprav"}
+
+    # ICCINT-13: Dedo has fixed the NEX Studio bug this build escalated and released it
+    # (:func:`backend.services.dedo_unblock.unblock_framework_issue`). The build is settled and waiting for the
+    # Manažér to start the next turn — so offer ``pokracovat`` and NOTHING ELSE, whatever the phase.
+    #
+    # Exactly one action on purpose. The escalation can strike in any phase, and the phase's usual menu would
+    # be actively misleading here: at Príprava it offers "Schváliť špecifikáciu" and four build verbs, none of
+    # which is "carry on with what you were doing when NEX Studio broke". One button, one meaning. (The chat
+    # composer is NOT an action and stays open, so the Manažér can still ask before pressing it.) The flag is
+    # cleared the moment any turn starts (the ``status`` listener on the model), so this window closes by
+    # itself and cannot leave a stale resume button behind a running build. MUST precede the generic
+    # settled-state defaults below.
+    if status == "awaiting_manazer" and state.resume_after_framework_fix:
+        return {"pokracovat"}
 
     # Director observation #6: a ``framework_issue`` block is an escalation to our technical team — the fix
     # needs a change to NEX Studio ITSELF, which the Manažér objectively CANNOT do (no Uprav / answer / decide
@@ -1714,8 +1755,10 @@ async def _settle_framework_issue(
     Called from the agent-output settle path (:func:`run_conversation_turn`, :func:`run_dispatch`) when the
     parsed block carries ``kind='framework_issue'`` — the AI Agent hit a problem it CANNOT fix because the
     fix needs a change to NEX Studio ITSELF (§15). The build settles ``blocked``/``block_reason=
-    'framework_issue'`` (``determine_available_actions`` then offers the Manažér NO recovery actions — only
-    Dedo clears it), records a readable ``system→manazer`` notification carrying the Dedo-message +
+    'framework_issue'`` (``determine_available_actions`` then offers the Manažér only ``nahlasit_znova`` —
+    re-send the report; the block itself is cleared by DEDO, via
+    :func:`backend.services.dedo_unblock.unblock_framework_issue`, once NEX Studio is actually fixed —
+    ICCINT-13), records a readable ``system→manazer`` notification carrying the Dedo-message +
     ``payload.framework_issue=True`` (the FE renders it with an amber/red accent), and DELIVERS the message
     to Dedo two ways (A: the ``.dedo-channel/inbox`` audit file; B: a Telegram ping to the project owner).
 
@@ -2149,6 +2192,12 @@ def directive_for_action(action: str, payload: dict[str, Any], stage: str) -> Op
     For a fresh-phase dispatch (``start`` / ``approve_spec`` / ``schvalit`` / ``verdict`` / ``pokracovat``)
     there is no Manažér-specific instruction → ``None``, and the caller falls back to
     :func:`_directive_for`. The agent runs ``--resume`` (full thread), so the framed line lands in context.
+
+    ``pokracovat`` is the one verb with two meanings, and only ONE of them is a fresh-phase dispatch: an
+    ordinary pause-resume is (the Programovanie loop just re-picks its next task), an ICCINT-13 resume after
+    Dedo's framework fix is NOT. The DB is what tells them apart, so that case is resolved one level up in
+    :func:`dispatch_directive` (which has the session) via :func:`framework_resume_directive`; this pure
+    function stays payload-only.
     """
     if action == "uprav":
         comment = str(payload.get("comment", "")).strip()
@@ -2160,6 +2209,34 @@ def directive_for_action(action: str, payload: dict[str, Any], stage: str) -> Op
         text = str(payload.get("text", "")).strip()
         return f"Manažér odpovedal na tvoju otázku: {text}" if text else None
     return None
+
+
+def framework_resume_directive(db: Session, version_id: uuid.UUID) -> Optional[str]:
+    """The framed instruction for a ``pokracovat`` that RESUMES a build Dedo released (ICCINT-13), else
+    ``None`` for an ordinary pause-resume.
+
+    Read from the message the ``pokracovat`` handler has just written (``payload.framework_fix_resume``)
+    rather than from ``resume_after_framework_fix``: by the time the route asks for a directive the action
+    has already run and the status write has spent the flag. The message is the durable record of the same
+    fact, and it is the LATEST message on the build at that moment — hence the "newest row" check, which
+    also stops an OLD resume from re-framing an unrelated pause-resume later.
+
+    Why a resume needs a directive at all: ``directive=None`` means "fresh-phase dispatch" to every round
+    runner, and at Vizuál a fresh entry re-shows the live preview and settles back to the Manažér WITHOUT
+    calling the agent (that is what the fresh entry is FOR). A resume routed that way is a dead button: the
+    press is spent, the flag is gone, Dedo's answer stays ``pending`` and the build cannot be released a
+    second time (it is no longer blocked). With a directive the resume is what it actually is — a
+    change-request turn — and every phase dispatches it the same way.
+    """
+    latest = db.execute(
+        select(PipelineMessage)
+        .where(PipelineMessage.version_id == version_id)
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if latest is None or not (latest.payload or {}).get("framework_fix_resume"):
+        return None
+    return FRAMEWORK_RESUME_DIRECTIVE
 
 
 # NOTE (CR-V2-021): the v1 ``latest_coordinator_report`` (Coordinator gate_report, fed the removed
@@ -2854,9 +2931,15 @@ def dispatch_directive(
 
     Single entry point for the route (CR-NS-018): payload-framed for ``uprav`` / ``ask`` / ``answer``
     (delegates to :func:`directive_for_action`), the aggregated decision brief for the FINAL ``decide``
-    (CR-V2-041 — reads ALL captured decisions from the DB), ``None`` for a fresh-phase dispatch (``start`` /
-    ``approve_spec`` / ``schvalit`` / ``verdict`` / ``pokracovat``).
+    (CR-V2-041 — reads ALL captured decisions from the DB), the framework-fix framing for an ICCINT-13
+    resume (:func:`framework_resume_directive` — DB-resolved, see there), ``None`` for a genuinely
+    fresh-phase dispatch (``start`` / ``approve_spec`` / ``schvalit`` / ``verdict`` / an ordinary
+    pause-``pokracovat``).
     """
+    if action == "pokracovat":
+        # ICCINT-13: a resume after Dedo's framework fix carries a directive (so every phase DISPATCHES it);
+        # an ordinary pause-resume returns None and keeps the fresh-phase behaviour it always had.
+        return framework_resume_directive(db, version_id)
     if action == "decide":
         # CR-V2-041: only the LAST decide re-dispatches (status went agent_working). APPLY = rework per ALL
         # captured decisions; aggregate them from the DB here (directive_for_action has no DB to do this).
@@ -2906,7 +2989,10 @@ async def relay_manazer_message(db: Session, *, version_id: uuid.UUID, text: str
       else ``ask`` (direct consult; threads the message into the actor's next turn). Both go through the
       sole-mutator + ``dispatch_in_flight`` single-flight guard, so the relay is just another serialized turn.
 
-    Raises :class:`OrchestratorError` when the pipeline has not started for this version."""
+    ONE state is refused outright: a build blocked on a NEX Studio bug (ICCINT-13) — see the guard below.
+
+    Raises :class:`OrchestratorError` when the pipeline has not started for this version, or when the build
+    is blocked on a NEX Studio bug (only Dedo releases that one)."""
     if not text or not str(text).strip():
         raise OrchestratorError("relay requires a non-empty message")
     state = _get_state(db, version_id)
@@ -2933,6 +3019,16 @@ async def relay_manazer_message(db: Session, *, version_id: uuid.UUID, text: str
         )
         db.flush()
         return RelayResult(state=state, deferred=True, action=None)
+
+    # ICCINT-13: a build blocked on a NEX Studio bug is Dedo's to release, and a relayed chat message would
+    # release it — the relay maps onto ``ask``/``answer``, both of which dispatch a turn and clear
+    # ``block_reason`` on the way to ``agent_working``. ``apply_action``'s framework-block gate already
+    # refuses it; refusing HERE too means the relay never gets as far as recording the message, and the
+    # reader gets the one sentence that explains the state instead of a generic action error. The cockpit
+    # composer is closed on this block anyway (``ConversationComposer``) — this is the engine saying the
+    # same thing, so the decision does not rest on the UI.
+    if state.status == "blocked" and state.block_reason == "framework_issue":
+        raise OrchestratorError(FRAMEWORK_BLOCK_REFUSAL)
 
     # Konzultácia (konzultacia-mode.md Part 1): a SETTLED TERMINAL version (``current_stage == 'done'`` —
     # covers a done conversation build signed off via ``hotovo``, a legacy schvalit-done build, AND a
@@ -8832,6 +8928,8 @@ async def _run_vizual_round(
       4a. ``directive`` is None (a FRESH entry into the stage): settle ``awaiting_manazer`` — the Manažér
           reviews the vizual and either asks for a change (relayed back as the next turn's ``directive``) or
           advances with ``schvalit`` (the ``vizual → programovanie`` phase gate; dial-independent).
+          EXCEPT when a Dedo answer is still ``pending`` (ICCINT-12/13): a turn was armed to CARRY it, and
+          settling here would swallow it — see the guard at 4a for why that was a dead end.
       4b. ``directive`` is set (a Manažér CHANGE-REQUEST): DISPATCH the AI Agent full-auto
           (:func:`invoke_agent_with_parse_retry`, :func:`_vizual_directive`) to apply the change to the FE +
           commit. On the parsed result, settle the way :func:`run_conversation_turn` does — a ``ParseFailure``
@@ -8899,6 +8997,17 @@ async def _run_vizual_round(
         )
         if on_message is not None:
             await on_message(ready_msg)
+
+    # ICCINT-13 backstop — an armed turn must REACH the agent. A pending Dedo message means the technical
+    # team answered this build's ``framework_issue`` escalation and something armed a turn to carry the
+    # answer; the fresh-entry settle below would spend that turn on re-showing the preview and leave the
+    # message ``pending`` with no second chance (the build is no longer blocked, so it cannot be released
+    # again). ``framework_resume_directive`` normally supplies the directive at the route, which keeps this
+    # unreachable on the ``pokracovat`` path — this is the structural guarantee for EVERY other way in
+    # (a drained relay, a future caller), stated where the swallow would happen. A fresh ``spustit_vizual``
+    # with nothing pending is untouched: no Dedo message, no directive, preview + settle exactly as before.
+    if directive is None and dedo_message.pending_messages(db, version_id):
+        directive = FRAMEWORK_RESUME_DIRECTIVE
 
     # FRESH entry (no change-request): hand the Manažér the live preview to WALK + approve (sub-task 3 behaviour).
     if directive is None:
@@ -9546,6 +9655,22 @@ async def apply_action(
 
     if state is None:
         raise OrchestratorError("Pipeline not started for this version")
+
+    # ICCINT-13 THE FRAMEWORK-BLOCK GATE (Director decision 1: "only Dedo releases it"). While a build is
+    # blocked on a bug in NEX Studio ITSELF, ``nahlasit_znova`` (re-send the report) is the ONLY executable
+    # verb — every other one would start a turn, and the status write would clear ``block_reason`` on the way
+    # out, leaving a build that was released by the Manažér and a record that no longer says so.
+    #
+    # This is a WHOLE-VERB gate on purpose. The first cut of ICCINT-13 guarded only ``pokracovat`` (the verb
+    # it was extending) and left ``ask`` / ``answer`` / ``uprav`` — and the relay that maps a typed chat
+    # message onto them — as executable side doors: the cockpit hides them, so the decision rested on the UI
+    # rather than on the engine. Audit finding (2026-08-22), confirmed by run: all three flipped the build to
+    # ``agent_working`` and cleared the reason. The Manažér cannot judge whether NEX Studio was really fixed;
+    # resuming into the same broken version burns a round and re-blocks. He keeps the ONE move that helps
+    # (re-report) and the composer is closed for the duration — :func:`relay_manazer_message` refuses with
+    # the same sentence rather than routing around this gate.
+    if state.status == "blocked" and state.block_reason == "framework_issue" and action != "nahlasit_znova":
+        raise OrchestratorError(FRAMEWORK_BLOCK_REFUSAL)
 
     # Status guard (CR-NS-018): never act on / advance past an agent that is still working. The advancing
     # actions need a SETTLED agent (awaiting_manazer or a blocked ratify-out-of-a-question); answer needs
@@ -10264,23 +10389,53 @@ async def apply_action(
     if action == "pokracovat":
         # Resume a Programovanie loop the Manažér paused (cooperative pause boundary) — no comment, no phase
         # change: just re-dispatch the loop (it re-picks the next todo task). The record is Manažér→AI Agent
-        # (direct comms). Only valid in Programovanie (the only phase with a pause boundary).
-        if state.current_stage != "programovanie":
+        # (direct comms). Only valid in Programovanie (the only phase with a pause boundary) — except after
+        # ICCINT-13's framework unblock, see the two guards below.
+        #
+        # ICCINT-13, guard 1 lives at the TOP of this function now (the framework-block gate): while the
+        # build is still blocked on a NEX Studio bug NOTHING but ``nahlasit_znova`` executes — including at
+        # Programovanie, where the phase check below would otherwise have let ``pokracovat`` through. It was
+        # here, guarding this one verb, and that left ask/answer/uprav as side doors (see the gate's note).
+        # ICCINT-13, guard 2: a NEX Studio bug can block a build in ANY phase, so the restart Dedo's fix
+        # earns must work in any phase too. ``resume_after_framework_fix`` (set ONLY by
+        # :func:`backend.services.dedo_unblock.unblock_framework_issue`, never by the Manažér) is what lifts
+        # the Programovanie-only restriction, and only for that one settled window. Same verb rather than a
+        # new one: two buttons that both mean "run the next turn" is the confusion this avoids.
+        framework_resume = bool(state.resume_after_framework_fix)
+        if not framework_resume and state.current_stage != "programovanie":
             raise OrchestratorError("Pokračovať je platné len vo fáze Programovanie")
         # P0 (audit 2026-07-12): resuming the build also re-runs any ``failed`` tasks (else they stay skipped
-        # and the build silently completes over dropped work — mirrors the ``uprav`` reset).
-        _reset_failed_tasks_to_todo(db, version_id)
+        # and the build silently completes over dropped work — mirrors the ``uprav`` reset). Kept scoped to
+        # Programovanie: outside the coding loop there is no task the Manažér just asked to re-run, and
+        # resurrecting old failures from another phase would be an invisible side effect of a resume click.
+        if state.current_stage == "programovanie":
+            _reset_failed_tasks_to_todo(db, version_id)
         _record_message(
             db,
             version_id=version_id,
-            stage="programovanie",
+            stage=state.current_stage,
             author="manazer",
             recipient="ai_agent",
             kind="approval",
-            content="Stavba pokračuje.",
-            payload={"phase": "programovanie"},
+            content=(FRAMEWORK_RESUME_CONTENT if framework_resume else "Stavba pokračuje."),
+            payload={
+                "phase": state.current_stage,
+                **({"framework_fix_resume": True} if framework_resume else {}),
+            },
         )
-        _begin_dispatch(db, state)  # phase stays programovanie; status → agent_working
+        # Arms the next turn (status → agent_working), which is also what CONSUMES any pending Dedo message:
+        # the answer he wrote before unblocking is folded into this turn's prompt by
+        # ``invoke_agent_with_parse_retry``. The phase is unchanged either way. The status write clears
+        # ``resume_after_framework_fix`` via the model listener, so the button is spent by one press.
+        #
+        # The message recorded just above is ALSO the turn's directive: the route reads it back through
+        # :func:`framework_resume_directive` (the flag is already spent by the time it asks) and hands it to
+        # the dispatch. That matters beyond politeness — a round that gets ``directive=None`` is a FRESH-phase
+        # entry, and at Vizuál a fresh entry only re-shows the preview and settles WITHOUT calling the agent.
+        # Audit finding (2026-08-22), reproduced end-to-end: the press was spent, the flag gone, Dedo's answer
+        # still ``pending``, and the build could not be unblocked a second time. A resume is a change-request,
+        # not a fresh entry, and it must reach the agent as one.
+        _begin_dispatch(db, state)
         return state
 
     # action == "pause" (CR-NS-027): a genuine paused status, not just a label. The running Programovanie

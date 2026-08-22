@@ -27,17 +27,24 @@ This module is that return leg, and it is deliberately ONE function deep:
 Dedo has his own machine identity — charter §4.5) must call the SAME function rather than grow a parallel
 one, so there is one way for Dedo to speak, not two that drift.
 
-Out of scope here (by decision): this does NOT unblock a ``framework_issue`` build (ICCINT-13) and does NOT
-expose any HTTP surface (ICCINT-14).
+Out of scope here (by decision): unblocking a ``framework_issue`` build is :mod:`backend.services.dedo_unblock`
+(ICCINT-13), and no HTTP surface exists for either (ICCINT-14).
 
-RELEASE CONDITION — ICCINT-12 MUST SHIP TOGETHER WITH ICCINT-13. On its own this delivers nothing. A build
-blocked on ``framework_issue`` offers the Manažér exactly ONE action —
-:func:`~backend.services.orchestrator.determine_available_actions` returns ``{"nahlasit_znova"}`` — and that
-action only re-sends the escalation to Dedo; it dispatches no agent turn. Nothing else on that screen starts
-one (the FE renders buttons strictly from ``board.available_actions``). So the write path below works, the
-message is visible in the thread, and it stays ``pending`` forever, because no turn ever runs to carry it.
-The trigger is ICCINT-13's job. Pinned by ``TestTheMissingTrigger`` in ``tests/test_dedo_message.py``: that
-test goes RED the moment the action set changes, which is the signal to revisit this note.
+RELEASE CONDITION — SATISFIED BY ICCINT-13 (was: "must ship together with it"). On its own this module still
+delivers nothing, and that has not changed: a build blocked on ``framework_issue`` offers the Manažér only
+``nahlasit_znova``, which re-sends the escalation and dispatches no turn — and, since the audit of
+2026-08-22, it also EXECUTES nothing else: ``apply_action``'s framework-block gate refuses every other verb
+and :func:`~backend.services.orchestrator.relay_manazer_message` refuses a typed message, so the Manažér
+cannot start the turn by a side door either. A message written here therefore sits ``pending`` until Dedo
+acts. What ICCINT-13 added is the way OUT of that state:
+:func:`backend.services.dedo_unblock.unblock_framework_issue` — Dedo's, not the Manažér's — settles the build
+to ``awaiting_manazer`` and sets ``pipeline_state.resume_after_framework_fix``, whereupon
+:func:`~backend.services.orchestrator.determine_available_actions` offers exactly ONE action, ``pokracovat``,
+in whichever phase the escalation happened. That click runs a turn — the resume carries a directive so that
+every phase DISPATCHES it (at Vizuál a directive-less turn only re-shows the preview and calls nobody; that
+was the dead end the 2026-08-22 audit found) — and the turn carries whatever is pending here. Pinned
+end-to-end by ``TestTheTriggerThatNowExists`` in ``tests/test_dedo_message.py`` and by the per-phase
+routed-press test in ``tests/test_dedo_unblock.py``.
 """
 
 from __future__ import annotations
@@ -76,16 +83,27 @@ class DedoMessageError(Exception):
     """Raised when a Dedo message cannot be recorded (unknown version, empty text, no build to answer)."""
 
 
-def record_dedo_message(db: Session, *, version_id: uuid.UUID, content: str) -> PipelineMessage:
+def record_dedo_message(
+    db: Session,
+    *,
+    version_id: uuid.UUID,
+    content: str,
+    payload_extra: Optional[dict] = None,
+) -> PipelineMessage:
     """Record a message from Dedo to the AI Agent of ``version_id``; return the persisted row.
 
-    The SINGLE write path for Dedo's voice (the CLI today, the ICCINT-14 endpoint tomorrow). The row is
-    written ``status='pending'`` — :func:`pending_for_prompt` is what turns it into something the agent
+    The SINGLE write path for Dedo's voice (the two host CLIs today, the ICCINT-14 endpoint tomorrow). The row
+    is written ``status='pending'`` — :func:`pending_for_prompt` is what turns it into something the agent
     actually reads, and it stays pending until a turn has carried it, so a crash between the write and the
     next dispatch re-delivers instead of swallowing.
 
     ``stage`` is stamped from the build's CURRENT phase so the message sits in the thread where the
     escalation happened. The caller commits (this only flushes) — same contract as every other writer.
+
+    ``payload_extra`` merges extra keys into the recorded payload. ICCINT-13's unblock uses it to mark its
+    reason ``dedo_unblock=True`` — the same row, written the same way, just labelled so the cockpit can say
+    "Dedo let the build go on, and here is why" instead of showing an unattributed green bubble. A second
+    writer for that one flag would be exactly the drift this module exists to prevent.
     """
     text = (content or "").strip()
     if not text:
@@ -109,7 +127,7 @@ def record_dedo_message(db: Session, *, version_id: uuid.UUID, content: str) -> 
         kind=DEDO_MESSAGE_KIND,
         content=text,
         status="pending",
-        payload={"phase": state.current_stage, "dedo_reply": True},
+        payload={"phase": state.current_stage, "dedo_reply": True, **(payload_extra or {})},
     )
     logger.info("Dedo message recorded for version %s (message %s)", version_id, msg.id)
     return msg

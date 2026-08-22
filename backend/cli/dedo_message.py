@@ -20,7 +20,10 @@ With ``--project`` the build is resolved to the project's one build blocked on `
 Dedo is answering. The command REFUSES an ambiguous target rather than picking one; ``--version-id`` names
 a build directly.
 
-This does NOT unblock the build (ICCINT-13) — it only makes sure the answer reaches the agent.
+This does NOT unblock the build — that is ``python -m backend.cli.dedo_unblock`` (ICCINT-13), and until it
+runs, the message written here waits: a blocked build dispatches no turn to carry it. Because the unblock
+records ITS reason the same way, one command is usually enough; reach for this one when the answer to the
+agent needs more than the reason line.
 """
 
 from __future__ import annotations
@@ -92,8 +95,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Správa od Deda zapísaná (verzia {version_id}, správa {msg_id}).")
     print(
         "Agent ju dostane pri NAJBLIŽŠOM svojom ťahu. POZOR: samotný zápis build neodblokuje — build "
-        "zablokovaný na chybe NEX Studia dnes nemá tlačidlo, ktoré by agenta znova spustilo (to je "
-        "ICCINT-13). Kým to nepribudne, správa čaká v poradí a agentovi sa nedoručí.",
+        "zablokovaný na chybe NEX Studia nespustí žiadny ťah, takže správa dovtedy čaká v poradí. Keď je "
+        "chyba naozaj opravená, odblokuj ho: python -m backend.cli.dedo_unblock --project <slug> "
+        '--reason "<čo bolo opravené>".',
         file=sys.stderr,
     )
     return 0

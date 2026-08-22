@@ -32,6 +32,7 @@ import SchvalitBar from "@/components/riadiace/SchvalitBar";
 import DecisionCardsBar from "@/components/riadiace/DecisionCardsBar";
 import BlockRecoveryBar from "@/components/riadiace/BlockRecoveryBar";
 import NahlasitZnovaBar from "@/components/riadiace/NahlasitZnovaBar";
+import PokracovatPoOpraveBar from "@/components/riadiace/PokracovatPoOpraveBar";
 import ReverifyBar from "@/components/riadiace/ReverifyBar";
 import ReverifyNoFixBar from "@/components/riadiace/ReverifyNoFixBar";
 import ChangeRequestBar from "@/components/riadiace/ChangeRequestBar";
@@ -206,6 +207,10 @@ export default function RiadiaceCentrumPage() {
         <DecisionCardsBar board={board} versionId={versionId} onBoard={setBoard} />
         <BlockRecoveryBar board={board} versionId={versionId} onBoard={setBoard} />
         <NahlasitZnovaBar board={board} versionId={versionId} onBoard={setBoard} />
+        {/* ICCINT-13: the same story's next beat — NahlasitZnovaBar says "our technical team is on it";
+            once they have fixed it and released the build, this is the ONE button that carries it on.
+            The two are mutually exclusive by construction (blocked vs. settled-after-fix). */}
+        <PokracovatPoOpraveBar board={board} versionId={versionId} onBoard={setBoard} />
         <SpecApprovalBar board={board} versionId={versionId} onBoard={setBoard} />
         <SchvalitBar board={board} versionId={versionId} onBoard={setBoard} />
         <ReverifyBar board={board} versionId={versionId} onBoard={setBoard} />

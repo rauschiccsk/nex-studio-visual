@@ -173,6 +173,52 @@ def _activity_callback(version_id: uuid.UUID, stage: str, fallback_actor: str):
     return _cb
 
 
+async def run_one_turn(
+    db,
+    version_id: uuid.UUID,
+    on_event=None,
+    directive: str | None = None,
+    on_message=None,
+    *,
+    state: PipelineState | None = None,
+) -> PipelineState | None:
+    """Run ONE engine turn through the runner that owns this build's state; return the settled state.
+
+    THE single source of truth for "which turn runner does this state use" — extracted out of :func:`_run`
+    so that tests exercising a press end-to-end route the way production routes instead of calling one
+    runner directly and hoping it is the right one. That gap is not hypothetical: an ICCINT-13 test asserted
+    delivery by calling ``run_conversation_turn`` — the correct runner for Príprava and for nothing else —
+    and so never touched the Vizuál path, where the press reached no agent at all (audit, 2026-08-22).
+
+    ``state`` may be passed by a caller that already loaded it (``_run`` needs it for the activity
+    callback); otherwise it is read here.
+    """
+    if state is None:
+        state = db.execute(select(PipelineState).where(PipelineState.version_id == version_id)).scalar_one_or_none()
+    # Konzultácia (konzultacia-mode.md Part 1): a TERMINAL version (``current_stage == 'done'`` — a
+    # hotovo-signed conversation build, a legacy schvalit-done build, or a PROD-released version) answers in
+    # READ-ONLY advisory mode. Routed by the STAGE (mode-agnostic — both a conversation and a legacy done
+    # build reach here), BEFORE the conversation/dispatch split. ``run_consult_turn`` guards
+    # ``agent_working`` (a spurious run on a settled done version is a no-op), so it fires only when a
+    # consult relay/drain armed it; it never advances a phase (returns to terminal rest).
+    if state is not None and state.current_stage == "done":
+        return await orchestrator.run_consult_turn(db, version_id, on_event, on_message=on_message)
+    # Spine STEP 1: a ``mode='conversation'`` build runs the non-phase conversation loop
+    # (``run_conversation_turn``) instead of the 4-phase automaton (``run_dispatch``) — NULL mode = the phase
+    # automaton, UNCHANGED. STEP 4 (step4-programovanie-design.md MD-A): a conversation build that is
+    # MID-BUILD (``current_stage == 'programovanie'``, set by ``spustit_stavbu``) routes through
+    # ``run_dispatch`` → ``_run_build_round`` (the EXISTING self-checking loop, reused VERBATIM — routed by
+    # STAGE); the completion tail (MD-B) returns the stage to ``priprava``, so subsequent turns route back to
+    # the conversation loop. CR-1 (nex-studio-visual): a conversation build at ``current_stage == 'vizual'``
+    # (set by ``spustit_vizual``) ALSO routes through ``run_dispatch`` → ``_run_vizual_round`` — a fresh entry
+    # (directive None) spins up the live preview; a ``directive`` threads a change-request into the SAME round
+    # (the "type a request → AI edits the live FE" HMR loop, spec §1) — and, ICCINT-13, that is also how a
+    # resume after a framework fix reaches the agent instead of re-showing the preview.
+    if state is not None and state.mode == "conversation" and state.current_stage not in ("programovanie", "vizual"):
+        return await orchestrator.run_conversation_turn(db, version_id, on_event, directive, on_message=on_message)
+    return await orchestrator.run_dispatch(db, version_id, on_event, directive, on_message=on_message)
+
+
 async def _run(version_id: uuid.UUID, directive: str | None = None) -> None:
     """Run one agent dispatch and broadcast the result. Owns its own session."""
     db = SessionLocal()
@@ -183,37 +229,13 @@ async def _run(version_id: uuid.UUID, directive: str | None = None) -> None:
         # via on_message the moment it's recorded — so the end batch is gone.
         on_message = _message_callback(db, version_id)
         try:
-            # Spine STEP 1: a ``mode='conversation'`` build runs the non-phase conversation loop
-            # (``run_conversation_turn``) instead of the 4-phase automaton (``run_dispatch``). The
-            # conversation loop ALWAYS settles (awaiting_manazer / blocked), so there is no auto-chain to
-            # run (``chain_limit`` below stays 0 by the ``agent_working`` guard); the relay-drain loop is
-            # KEPT for both — it is the "message-lands-after-the-turn" rhythm, and ``drain_relay_turn`` is
-            # itself mode-aware. NULL mode = the phase automaton, UNCHANGED. STEP 4
-            # (step4-programovanie-design.md MD-A): a conversation build that is MID-BUILD
-            # (``current_stage == 'programovanie'``, set by ``spustit_stavbu``) routes through
-            # ``run_dispatch`` → ``_run_build_round`` (the EXISTING self-checking loop, reused VERBATIM —
-            # routed by STAGE) instead of the conversation loop; the completion tail (MD-B) returns the stage
-            # to ``priprava``, so subsequent turns route back to ``run_conversation_turn``. CR-1
-            # (nex-studio-visual): a conversation build at ``current_stage == 'vizual'`` (set by
-            # ``spustit_vizual``) ALSO routes through ``run_dispatch`` → ``_run_vizual_round`` — the fresh entry
-            # (directive None) spins up the live preview; each relayed change-request threads a ``directive``
-            # into the SAME round (the iterative "type a request → AI edits the live FE" HMR loop, spec §1).
-            # Konzultácia (konzultacia-mode.md Part 1): a TERMINAL version (``current_stage == 'done'`` — a
-            # hotovo-signed conversation build, a legacy schvalit-done build, or a PROD-released version)
-            # answers in READ-ONLY advisory mode. Routed by the STAGE (mode-agnostic — both a conversation and
-            # a legacy done build reach here), BEFORE the conversation/dispatch split. ``run_consult_turn``
-            # guards ``agent_working`` (a spurious _run on a settled done version is a no-op), so it fires
-            # only when a consult relay/drain armed it; it never advances a phase (returns to terminal rest).
-            if pre is not None and pre.current_stage == "done":
-                state = await orchestrator.run_consult_turn(db, version_id, on_event, on_message=on_message)
-            elif (
-                pre is not None and pre.mode == "conversation" and pre.current_stage not in ("programovanie", "vizual")
-            ):
-                state = await orchestrator.run_conversation_turn(
-                    db, version_id, on_event, directive, on_message=on_message
-                )
-            else:
-                state = await orchestrator.run_dispatch(db, version_id, on_event, directive, on_message=on_message)
+            # WHICH runner this build's turn belongs to — and why — is :func:`run_one_turn` above (one
+            # source of truth, so a test can take the SAME road a press takes). What matters HERE is what
+            # comes back: the conversation loop ALWAYS settles (awaiting_manazer / blocked), so there is no
+            # auto-chain to run (``chain_limit`` below stays 0 by the ``agent_working`` guard); the
+            # relay-drain loop is KEPT for both — it is the "message-lands-after-the-turn" rhythm, and
+            # ``drain_relay_turn`` is itself mode-aware.
+            state = await run_one_turn(db, version_id, on_event, directive, on_message, state=pre)
             db.commit()
             # Engine auto-chain (CR-NS-097; v2 4-phase CR-V2-009): run_dispatch returns status=agent_working
             # ONLY when it DELIBERATELY auto-advanced the phase and wants the next phase run in THIS same

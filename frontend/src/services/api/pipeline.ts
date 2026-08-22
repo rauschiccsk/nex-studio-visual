@@ -62,6 +62,11 @@ export interface PipelineState {
   // end-to-end, so its four phases (Špecifikácia → Plán → Programovanie → Kontrola) are DERIVED from board
   // signals, not the stage index. Absent (older board / legacy) → the legacy stage-index strip renders.
   mode?: string | null;
+  // ICCINT-13: our technical team has fixed the NEX Studio bug this build escalated, and the build is waiting
+  // for the Manažér to start the next turn. `true` ⇒ the board offers exactly ONE action (`pokracovat`) and
+  // PokracovatPoOpraveBar owns it — the words matter (a build released after a repair is not a build the
+  // manager paused, and the PlanUlohRail resume rung would say the wrong thing). Absent on an older board.
+  resume_after_framework_fix?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -150,7 +155,7 @@ export type PipelineActionName =
   | "spustit_vizual" // CR-1 (nex-studio-visual): Spustiť vizuál — enter the Vizuál stage (live FE preview walk) before the build; offered alongside spustit_stavbu after the plan
   | "schvalit" // Schváliť (dial-governed advance after Návrh / Programovanie / Verifikácia)
   | "uprav" // Uprav (rework the current phase / "Skús znova" on an error block)
-  | "pokracovat" // Pokračovať (resume a paused Programovanie loop)
+  | "pokracovat" // Pokračovať (resume a paused Programovanie loop — and, ICCINT-13, restart a build our technical team just released from a NEX Studio bug, in ANY phase)
   | "verdict" // the Auditor's Verifikácia verdict (PASS / FAIL)
   | "ask" // open a direct AI-Agent consult
   | "answer" // answer an agent QUESTION on a blocked state

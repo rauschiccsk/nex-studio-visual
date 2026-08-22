@@ -4106,6 +4106,11 @@ export interface components {
             /** Next Action */
             next_action: string;
             /**
+             * Resume After Framework Fix
+             * @default false
+             */
+            resume_after_framework_fix: boolean;
+            /**
              * Status
              * @enum {string}
              */

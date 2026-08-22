@@ -53,6 +53,11 @@ class PipelineStateRead(BaseModel):
     #: model — CR spine STEP 1): the FE PhaseBar branches its phase strip on ``board.state.mode`` and could
     #: not compile without it exposed here. Legacy consumers ignore the extra optional field.
     mode: Optional[str] = None
+    #: ICCINT-13: Dedo has fixed the NEX Studio bug this build escalated and the build is waiting for the
+    #: Manažér to start the next agent turn. Exposed so the cockpit can render the ONE resume affordance
+    #: (``PokracovatPoOpraveBar``) with the right words — "we fixed it, press Pokračovať" — rather than the
+    #: generic build-resume rung, which is about a PAUSED build and would be a lie here.
+    resume_after_framework_fix: bool = False
     created_at: datetime
     updated_at: datetime
 

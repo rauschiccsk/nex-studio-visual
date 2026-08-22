@@ -86,8 +86,9 @@ STATUS_VALUES = ("agent_working", "awaiting_manazer", "blocked", "paused", "done
 # Director observation #6: ``framework_issue`` — AGENT-INITIATED escalation to Dedo. The AI Agent hit an
 # error it CANNOT fix because the fix requires a change to NEX Studio ITSELF (the framework/tooling, §15) —
 # something the Manažér objectively cannot do. The build settles ``blocked``/``framework_issue`` with a
-# message for Dedo (delivered via the Dedo escalation channel inbox + a Telegram ping) and offers the
-# Manažér NO recovery actions (``determine_available_actions`` returns EMPTY): only Dedo clears it.
+# message for Dedo (delivered via the Dedo escalation channel inbox + a Telegram ping) and offers the Manažér
+# the ONE move he has — ``nahlasit_znova`` (re-send the report). Only DEDO clears the block, from the host
+# (``backend.services.dedo_unblock`` — ICCINT-13); the build then waits on the Manažér's "Pokračovať".
 BLOCK_REASON_VALUES = (
     "agent_question",
     "decision_needed",
@@ -197,6 +198,21 @@ class PipelineState(Base, UUIDMixin, TimestampMixin):
     #: ACTOR_VALUES — a conversation turn still carries the valid ``current_stage='priprava'`` +
     #: ``current_actor='ai_agent'``; the mode column, not the stage, distinguishes the loop.
     mode = Column(String(16), nullable=True)
+    #: ICCINT-13: Dedo has FIXED the NEX Studio bug this build escalated, and the build is now waiting for the
+    #: Manažér to start the next agent turn. Written ONLY by
+    #: :func:`backend.services.dedo_unblock.unblock_framework_issue` (the host-side tool — the Manažér cannot
+    #: set it: he cannot judge whether NEX Studio was really fixed, and resuming into the same broken version
+    #: would just burn another round and re-block).
+    #:
+    #: It exists as a COLUMN because :func:`~backend.services.orchestrator.determine_available_actions` is
+    #: state-only by design — the button presence must be derivable from ``pipeline_state`` alone. With the
+    #: flag set the board offers exactly ONE action, ``pokracovat``, in WHICHEVER phase the escalation
+    #: happened (a NEX Studio bug can strike in any of them), instead of the phase's usual menu.
+    #:
+    #: Cleared caller-agnostically the moment a turn actually starts (``status`` → ``agent_working``) by
+    #: :func:`_clear_framework_resume_on_work` below — it is a WAITING flag, not a history record; the
+    #: history lives in the ``author='dedo'`` message the unblock writes.
+    resume_after_framework_fix = Column(Boolean, nullable=False, server_default="false")
 
     __table_args__ = (
         UniqueConstraint("version_id", name="uq_pipeline_state_version_id"),
@@ -360,3 +376,19 @@ def _clear_block_reason_on_unblock(target, value, oldvalue, initiator):
     if value == oldvalue or value == "blocked":
         return
     target.block_reason = None
+
+
+@event.listens_for(PipelineState.status, "set")
+def _clear_framework_resume_on_work(target, value, oldvalue, initiator):
+    """Clear :attr:`PipelineState.resume_after_framework_fix` the moment a turn STARTS (ICCINT-13).
+
+    The flag means "Dedo fixed NEX Studio, the build is waiting for the Manažér to start the next turn" —
+    so it is spent the instant anything flips the pipeline to ``agent_working``, whether that was the
+    ``pokracovat`` button, a relayed chat message (``relay_manazer_message`` → ``ask``/``answer``) or any
+    future path. Keyed on the status write rather than on ``_begin_dispatch`` for exactly that reason:
+    a flag left set behind a turn that started some OTHER way would re-offer the resume button after that
+    turn settled, telling the Manažér to restart a build that is already running. Mirrors
+    :func:`_clear_block_reason_on_unblock` (same listener discipline, same no-bulk-UPDATE assumption)."""
+    if value == oldvalue or value != "agent_working":
+        return
+    target.resume_after_framework_fix = False
