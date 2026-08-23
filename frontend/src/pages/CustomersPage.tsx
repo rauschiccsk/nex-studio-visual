@@ -255,6 +255,7 @@ export default function CustomersPage() {
             <label className="block text-xs">
               <span className="text-[var(--color-text-secondary)]">Názov *</span>
               <input
+                spellCheck={false}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
@@ -265,6 +266,7 @@ export default function CustomersPage() {
             <label className="block text-xs">
               <span className="text-[var(--color-text-secondary)]">Skratka *</span>
               <input
+                spellCheck={false}
                 value={customerSlug}
                 // Lowercased as typed: the instance directory is `(subdomain or slug).lower()`, so what is
                 // stored is what gets deployed — no silent difference between the two.
@@ -285,6 +287,7 @@ export default function CustomersPage() {
             <label className="block text-xs">
               <span className="text-[var(--color-text-secondary)]">Subdoména</span>
               <input
+                spellCheck={false}
                 value={subdomain}
                 onChange={(e) => setSubdomain(e.target.value.toLowerCase())}
                 placeholder="icc"
@@ -304,6 +307,7 @@ export default function CustomersPage() {
             <label className="block text-xs">
               <span className="text-[var(--color-text-secondary)]">Tajný kľúč (pre zákazníka)</span>
               <input
+                spellCheck={false}
                 type="password"
                 value={secret}
                 onChange={(e) => setSecret(e.target.value)}
@@ -320,6 +324,7 @@ export default function CustomersPage() {
           <label className="block text-xs">
             <span className="text-[var(--color-text-secondary)]">Integrácie (JSON, voliteľné)</span>
             <textarea
+              spellCheck={false}
               value={integrations}
               onChange={(e) => setIntegrations(e.target.value)}
               rows={2}

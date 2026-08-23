@@ -167,6 +167,7 @@ export default function ProjectSettingsSection({ project, onSaved, canEdit }: Pr
             Názov
           </label>
           <input
+            spellCheck={false}
             id="proj-name"
             className={INPUT_CLS}
             value={editing ? form.name : project.name}
@@ -186,6 +187,7 @@ export default function ProjectSettingsSection({ project, onSaved, canEdit }: Pr
             Popis
           </label>
           <textarea
+            spellCheck={false}
             id="proj-desc"
             rows={2}
             className={INPUT_CLS}
@@ -201,6 +203,7 @@ export default function ProjectSettingsSection({ project, onSaved, canEdit }: Pr
               {["Backend", "Frontend", "Databáza"][i]}
             </label>
             <input
+              spellCheck={false}
               id={`proj-${field}`}
               inputMode="numeric"
               className={`${INPUT_CLS} font-mono`}
@@ -261,6 +264,7 @@ export default function ProjectSettingsSection({ project, onSaved, canEdit }: Pr
                   {label}
                 </label>
                 <input
+                  spellCheck={false}
                   id={id}
                   className={`${INPUT_CLS} font-mono`}
                   value={value}

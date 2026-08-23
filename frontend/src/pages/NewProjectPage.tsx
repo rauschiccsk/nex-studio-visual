@@ -365,6 +365,7 @@ export default function NewProjectPage() {
             {/* Name */}
             <Field label="Názov projektu *" error={errors.name}>
               <input
+                spellCheck={false}
                 ref={nameRef}
                 type="text"
                 placeholder="NEX Ledger"

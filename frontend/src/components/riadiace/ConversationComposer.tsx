@@ -11,6 +11,7 @@
 import { useState, type FormEvent, type KeyboardEvent } from "react";
 import { Loader2, Send } from "lucide-react";
 
+import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 
 const ENGINE_BUSY_HINT = "AI Agent práve pracuje — správa sa pošle, keď dokončí.";
@@ -44,6 +45,8 @@ export function ConversationComposer({ onRelay, disabled, frameworkBlocked, bloc
   const [sending, setSending] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
   const [error, setError] = useState<HumanError | null>(null);
+  // Same growth rule as the recovery bar — the two boxes the Manažér writes to must behave alike.
+  const growRef = useAutoGrowTextarea(text);
 
   // A framework_issue escalation hard-disables the whole composer (Manažér has no recovery move here).
   const locked = disabled || frameworkBlocked;
@@ -120,11 +123,12 @@ export function ConversationComposer({ onRelay, disabled, frameworkBlocked, bloc
         <textarea
           lang="sk"
           spellCheck={false}
+          ref={growRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
           disabled={locked || sending}
-          rows={2}
+          rows={1}
           placeholder={
             frameworkBlocked
               ? "Zablokované — túto chybu rieši náš technický tím."

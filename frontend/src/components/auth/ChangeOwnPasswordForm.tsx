@@ -84,6 +84,7 @@ export default function ChangeOwnPasswordForm({ onSuccess }: { onSuccess?: () =>
           Súčasné heslo
         </label>
         <input
+          spellCheck={false}
           id="current-password"
           type="password"
           autoComplete="current-password"
@@ -98,6 +99,7 @@ export default function ChangeOwnPasswordForm({ onSuccess }: { onSuccess?: () =>
           Nové heslo
         </label>
         <input
+          spellCheck={false}
           id="new-password"
           type="password"
           autoComplete="new-password"
@@ -112,6 +114,7 @@ export default function ChangeOwnPasswordForm({ onSuccess }: { onSuccess?: () =>
           Zopakuj nové heslo
         </label>
         <input
+          spellCheck={false}
           id="confirm-password"
           type="password"
           autoComplete="new-password"

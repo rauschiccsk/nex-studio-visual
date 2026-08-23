@@ -224,6 +224,7 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
           )}
           {showFree && (
             <textarea
+              spellCheck={false}
               lang="sk"
               value={freeText}
               onChange={(e) => setFreeText(e.target.value)}

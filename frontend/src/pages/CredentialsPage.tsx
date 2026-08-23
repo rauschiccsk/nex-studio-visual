@@ -338,6 +338,7 @@ export default function CredentialsPage() {
                 <div>
                   <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">Názov súboru (bez lomítka)</label>
                   <input
+                    spellCheck={false}
                     type="text"
                     value={createFilename}
                     onChange={(e) => setCreateFilename(e.target.value)}

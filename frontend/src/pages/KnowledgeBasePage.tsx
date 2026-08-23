@@ -384,6 +384,7 @@ export default function KnowledgeBasePage() {
                 size={14}
               />
               <input
+                spellCheck={false}
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -594,6 +595,7 @@ export default function KnowledgeBasePage() {
                         Názov súboru
                       </label>
                       <input
+                        spellCheck={false}
                         type="text"
                         value={newFilename}
                         onChange={(e) => setNewFilename(e.target.value)}

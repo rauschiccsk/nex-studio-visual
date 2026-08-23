@@ -568,6 +568,7 @@ export default function ProjectDetailPage() {
               Na potvrdenie napíš <span className="font-mono font-bold">ZMAZAŤ</span>
             </label>
             <input
+              spellCheck={false}
               id="delete-confirm"
               autoFocus
               value={deleteConfirmText}

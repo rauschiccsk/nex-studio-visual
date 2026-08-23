@@ -18,6 +18,8 @@
 import { useState } from "react";
 import { CircleAlert, MessageCircle, RotateCw } from "lucide-react";
 
+import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
+
 import { postPipelineActionApi, type PipelineBoard, type BlockReason } from "@/services/api/pipeline";
 import { BLOCK_REASON_LABELS } from "@/components/cockpit/labels";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
@@ -37,6 +39,9 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
   const [text, setText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<HumanError | null>(null);
+  // Called BEFORE the honest-by-construction early return below — a hook after a conditional return
+  // is a hook that sometimes does not run, which React forbids.
+  const growRef = useAutoGrowTextarea(text);
 
   const state = board?.state ?? null;
   const reason = state?.block_reason ?? null;
@@ -96,16 +101,28 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
         {!isQuestion && guidance && <p className="text-xs text-[var(--color-text-muted)]">{guidance}</p>}
 
         <div className="flex items-center gap-2">
-          <input
+          <textarea
             lang="sk"
-            type="text"
+            spellCheck={false}
+            ref={growRef}
+            rows={1}
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder={isQuestion ? "Tvoja odpoveď…" : "Usmernenie k oprave (nepovinné)"}
+            placeholder={
+              isQuestion
+                ? "Tvoja odpoveď… (Enter odošle, Shift+Enter nový riadok)"
+                : "Usmernenie k oprave (nepovinné) — Enter odošle, Shift+Enter nový riadok"
+            }
             disabled={submitting}
-            className="flex-1 rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-3 py-1.5 text-xs text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:border-primary-500 focus:outline-none disabled:opacity-60"
+            className="flex-1 resize-none rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-3 py-1.5 text-xs text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:border-primary-500 focus:outline-none disabled:opacity-60"
             onKeyDown={(e) => {
-              if (e.key === "Enter" && canSubmit) submit();
+              // Shift+Enter is a newline; plain Enter sends. Matches ConversationComposer — the other
+              // box the Manažér writes to — because two message boxes that answer the same key
+              // differently is a trap you only find by losing a paragraph.
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                if (canSubmit) submit();
+              }
             }}
           />
           <button

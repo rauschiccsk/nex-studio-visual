@@ -682,6 +682,7 @@ export default function MetricsPage() {
             <label className="block text-xs md:col-span-2">
               <span className="text-[var(--color-text-secondary)]">Popis *</span>
               <input
+                spellCheck={false}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 required

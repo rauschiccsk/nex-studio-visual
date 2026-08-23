@@ -429,6 +429,7 @@ export default function NewVersionPage() {
                   Názov <span className="text-[var(--color-text-muted)] font-normal text-xs">(voliteľné)</span>
                 </label>
                 <input
+                  spellCheck={false}
                   type="text"
                   placeholder="napr. platobný modul"
                   value={name}
