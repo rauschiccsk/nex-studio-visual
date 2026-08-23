@@ -83,6 +83,11 @@ router = APIRouter(
 )
 
 
+#: Manager-facing names for the three port fields. The wire names (``backend_port``) are ours, not his:
+#: an error he is expected to act on must name the field the way the screen labels it.
+_FIELD_SK = {"backend_port": "Backend", "frontend_port": "Frontend", "db_port": "Databáza"}
+
+
 def _validate_ports(db: Session, payload: ProjectCreate | ProjectUpdate, *, project_id: UUID | None = None) -> None:
     """Validate that all supplied ports are in range and not already allocated.
 
@@ -146,8 +151,8 @@ def _validate_ports(db: Session, payload: ProjectCreate | ProjectUpdate, *, proj
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=(
-                    f"Port {port_value} ({field_name}) could not be verified against this host, "
-                    f"so it will not be allocated. {verdict.reason}"
+                    f"Port {port_value} ({_FIELD_SK.get(field_name, field_name)}) sa na tomto stroji "
+                    f"nedal overiť, takže sa nepridelí. {verdict.reason}"
                 ),
             )
 
@@ -156,15 +161,17 @@ def _validate_ports(db: Session, payload: ProjectCreate | ProjectUpdate, *, proj
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail=(
-                        f"Port {port_value} ({field_name}) falls inside reserved range "
-                        f"{verdict.holder}. This range is reserved per ICC_STANDARDS / "
-                        f"DECISIONS — pick a different port block."
+                        f"Port {port_value} ({_FIELD_SK.get(field_name, field_name)}) patrí do "
+                        f"rezervovaného bloku, ktorý má pridelený {verdict.holder}. "
+                        f"Vyber port z bloku tohto projektu."
                     ),
                 )
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=PortConflictError(
-                    detail=f"Port {port_value} ({field_name}) is already allocated. {verdict.reason}",
+                    detail=(
+                        f"Port {port_value} ({_FIELD_SK.get(field_name, field_name)}) je už pridelený. {verdict.reason}"
+                    ),
                     port=port_value,
                     # Only a cockpit project has a project name; a port held by a
                     # neighbouring container reports its container in ``reason``.
@@ -193,10 +200,9 @@ def _validate_ports(db: Session, payload: ProjectCreate | ProjectUpdate, *, proj
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=(
-                    f"backend_port {bp} must be aligned to the configured {block_size}-port block "
-                    f"({first}, {first + block_size}, {first + 2 * block_size}, ...) per the D-020 "
-                    f"commercial-range layout. The first port of a block starts the project's "
-                    f"reserved slot."
+                    f"Port backendu {bp} musí byť začiatkom bloku po {block_size} portoch "
+                    f"({first}, {first + block_size}, {first + 2 * block_size}, …) — tak je rozdelený "
+                    f"komerčný rozsah (D-020). Prvý port bloku otvára pridelený úsek projektu."
                 ),
             )
         layout = [

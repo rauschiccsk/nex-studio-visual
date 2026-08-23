@@ -47,9 +47,24 @@ export function humanizeApiError(err: unknown, phrase: string): HumanError {
     // The lib parses the FastAPI {detail}; a non-string/object detail can render as "[object Object]" — never
     // show that. Keep a clean raw detail only when it's a meaningful string.
     const raw = typeof err.message === "string" && err.message && err.message !== "[object Object]" ? err.message : "";
+    // SHOW the backend's own sentence when there is one (ICCINT-22). The first version of this helper
+    // replaced it ALWAYS with `reasonFor(status)` and filed the truth under a collapsible — so a refusal
+    // that knew exactly what was wrong ("Port 10225 patrí do rezervovaného bloku, ktorý má pridelený
+    // nex-payables") reached the Manažér as "zadané údaje nie sú v poriadku". Every screen in the cockpit
+    // went through here, so that was not one bad message: it was the app knowing the answer and withholding
+    // it, everywhere.
+    //
+    // The guard the original was reaching for is real — an English or raw detail helps nobody. But the
+    // answer to "some backend messages are English" is to TRANSLATE them, not to hide all of them: hidden,
+    // they are never fixed either. Surfacing them makes the remaining ones visible, which is how they get
+    // corrected. The canned reason stays as the fallback for when there is no sentence at all (a bare 500,
+    // a FastAPI validation object).
+    // The detail carries ONLY the status once the sentence is in the message: repeating it under
+    // "Technický detail" puts the same words on screen twice and makes the collapsible look like it holds
+    // something more.
     return {
-      message: `${phrase} — ${reasonFor(err.status)}.`,
-      detail: raw ? `HTTP ${err.status}: ${raw}` : `HTTP ${err.status}`,
+      message: raw ? `${phrase} — ${raw}` : `${phrase} — ${reasonFor(err.status)}.`,
+      detail: `HTTP ${err.status}`,
     };
   }
   if (err instanceof Error && err.message && err.message !== "[object Object]") {
