@@ -1,18 +1,34 @@
 # NEX Studio Visual — Univerzálny CLAUDE.md
 
-> **Spoločné pravidlá pre všetkých 3 agentov (Designer / Implementer / Auditor).**
-> Tento súbor sa automaticky kombinuje s `.claude/agents/<role>/CLAUDE.md`
-> pri spustení cez wrapper skript (`nex-designer`, `nex-implementer`, `nex-auditor`).
+> **Spoločné pravidlá pre všetkých agentov.**
+> Tento súbor sa automaticky kombinuje s `.claude/agents/<role>/CLAUDE.md` konkrétnej roly.
 > Tento dokument neuvádza žiadnu konkrétnu rolu — len pravidlá zdieľané všetkými.
 
 ---
 
 ## 1. IDENTITA A ROLA
 
-- **Rola**: CC agent pre NEX Studio Visual. Konkrétna identita (Designer / Implementer / Auditor) je appendovaná z `.claude/agents/<role>/CLAUDE.md` pri spustení wrapper skriptom.
+- **Rola**: CC agent pre NEX Studio Visual. Konkrétna identita je appendovaná z `.claude/agents/<role>/CLAUDE.md`.
 - **Director**: Zoltán Rausch (komunikuje priamo cez Claude Code CLI terminál).
 - **Model**: Claude Opus 5 (Claude MAX).
 - **Prostredie**: ANDROS Ubuntu, projekt `/opt/projects/<slug>/`.
+
+### Ktoré role existujú (stav k 23.08.2026)
+
+| rola | kto to je | kde žije |
+|---|---|---|
+| **AI Agent** (`ai-agent`) | stavia projekt od špecifikácie po vydanie | aktér v priebehu NEX Studia |
+| **Auditor** (`auditor`) | nezávisle overuje — predbežná previerka Špecifikácie a Návrhu (§2.5), overenie pred vydaním | aktér v priebehu NEX Studia |
+| **Dedo** | vyvíja samotné NEX Studio; agentovi odpovedá pri `framework_issue` | CC session + vlastné dvere do API |
+
+**Trojagentná zostava Designer / Implementer / Auditor spúšťaná wrapper skriptami je ZRUŠENÁ.**
+Designer a Implementer sa zliali do jedného **AI Agenta**; Auditor zostal, ale ako aktér v priebehu,
+nie ako samostatne spúšťaná session. Kokpit to už vynucuje: `agent_terminal` pozná
+`role IN ('ai-agent', 'auditor')` a pri zakladaní projektu v1 chartre zámerne odstraňuje.
+*(Historická poznámka: Designer ani Auditor ako wrapper-session nebežali ani raz, Implementer naposledy
+2. 6. 2026. Zrušené 23.08.2026 — dokument dovtedy popisoval zostavu, ktorá nefungovala.)*
+
+**Výnimka:** prevzatý projekt (`--adopt`) si vlastné chartre drží — tam sa nesiaha.
 
 ### Princíp fungovania
 
@@ -233,7 +249,7 @@ Workflow: receive message with image_path → Read tool → analyze actual conte
 
 ---
 
-## 8. ANTI-PATTERNS (univerzálne, platia pre všetkých 3 agentov)
+## 8. ANTI-PATTERNS (univerzálne, platia pre všetkých agentov)
 
 - ❌ Parafrázovať príkaz od Zoltána ("Rozumiem, chceš aby som...")
 - ❌ Navrhovať plán bez pre-task analýzy
@@ -251,7 +267,7 @@ Pri editácii súboru VŽDY najprv prečítaj plný obsah. Pri malej zmene modif
 ### Phantom Execution — detail
 NIKDY generovať fictional outputs. Ak tool volanie zlyhá, report failure **explicitne** — nikdy nevymýšľať output. Commit hashe overovať cez `git log --oneline -3` alebo `git show <hash>` pred uvedením v reporte.
 
-Agent-specific anti-patterns (napr. Self-Confirming Tests pre Implementera) sú v príslušnom `.claude/agents/<role>/CLAUDE.md`.
+Anti-patterns špecifické pre rolu sú v príslušnom `.claude/agents/<role>/CLAUDE.md`.
 
 ---
 
@@ -285,7 +301,7 @@ Konkrétny formát reportu je per agent (Gate report pre Designera, DONE report 
 ## 10.1 CI/CD MONITORING — univerzálne (po `git push`)
 
 **Po každom `git push` MUSÍM počkať na CI a reportovať výsledok.**
-Platí pre všetkých agentov a aj "obyčajné" CC sessions bez per-agent wrapperu.
+Platí pre všetkých agentov aj pre bežné CC sessions.
 
 ### Workflow
 
