@@ -61,15 +61,28 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   preview MSW/fixtures reálnymi API volaniami), NEMENÍŠ layout, panely, počet stĺpcov, paletu ani komponenty.
   Nezávislý Auditor vo Verifikácii porovná dodaný FE oproti schválenému Vizuálu (`git diff`); prerobená
   schválená obrazovka = **FAIL**. Čo Manažér schválil, to sa dodá.
-- **Oprava Verifikácie — OVER V KONTAJNERI, NIE LEN UNIT TESTAMI (v4.0.47).** Keď opravuješ zlyhanie zo skúšky po
-  spustení (Verifikácia FAIL), oprava je „hotová" AŽ keď si ju overil **tak, ako to robí engine**: appku POSTAV a
-  SPUSTI (`docker compose up`) a v BEŽIACOM KONTAJNERI zreprodukuj presne tú kontrolu, ktorá padla — konkrétny dôvod
-  máš v zadaní („Konkrétny dôvod zlyhania (zo skúšky po spustení, overené enginom): …"). **Zelené unit testy na
-  hoste NESTAČIA** — engine overuje SPRÁVANIE v kontajneri, kde sa rozloženie súborov, cesty aj to, čo sa zabalí do
-  image, líšia od hosta (napr. `/api/v1/release-notes` môže na hoste vracať správne dáta, ale v image prázdno alebo
-  verziu v zlom formáte — parser vytiahne z nadpisu `## v0.1.0 — Initial prototype` celý text namiesto `v0.1.0`).
-  Reprodukuj presne to, čo engine skúša (spusti aj appkin `release_smoke_test.sh` proti bežiacemu kontajneru), a kým
-  tá istá kontrola v kontajneri neprejde, oprava NIE JE hotová — inak sa Verifikácia zacyklí (to isté zlyhanie dokola).
+- **Oprava Verifikácie — ZREPRODUKUJ ZLYHANIE, NIE LEN „testy sú zelené" (v4.0.47, upravené ICCINT-16).**
+  Keď opravuješ zlyhanie zo skúšky po spustení (Verifikácia FAIL), konkrétny dôvod máš v zadaní („Konkrétny
+  dôvod zlyhania (zo skúšky po spustení, overené enginom): …"). Pôvodné pravidlo znelo „postav a spusti appku
+  (`docker compose up`) a zreprodukuj tú kontrolu v bežiacom kontajneri". **Opravné kolo beží vo fáze
+  Programovanie, ktorá je od ICCINT-16 izolovaná a Docker v nej NEMÁŠ** — to pravidlo tam teda doslova
+  vykonať nejde a neplatí. Namiesto neho platí toto, a je to hranica, nie výhovorka:
+  - **Vyčerpaj, čo sa v izolácii overiť DÁ, a rob to naozaj.** Spusti **celú** testovú sadu backendu proti
+    `DATABASE_URL` cez `.venv` (postup nižšie), nie len tie testy, ktorých sa oprava dotkla; k tomu
+    `type-check` + `lint` frontendu a `ruff` backendu. Ak sa dá zlyhanie zachytiť testom, **napíš ten test**
+    — najlepší dôkaz opravy je test, ktorý by pred ňou sčervenel.
+  - **Vedz, čo takto overiť NEVIEŠ, a povedz to.** Rozdiel hosť ↔ kontajner (čo sa zabalí do image,
+    rozloženie súborov, cesty, `release_smoke_test.sh`, schéma v prázdnej smoke DB) je presne to, čo zelené
+    testy v izolácii nezachytia — napr. `/api/v1/release-notes` môže lokálne vracať správne dáta a v image
+    prázdno alebo verziu v zlom formáte (parser vytiahne z nadpisu `## v0.1.0 — Initial prototype` celý text
+    namiesto `v0.1.0`). Preto pri takom dôvode zlyhania **čítaj, čo sa do image kopíruje** (`Dockerfile`,
+    `.dockerignore`, `docker-compose.yml`, `release_smoke_test.sh`) a oprav príčinu tam; do `summary` napíš,
+    že overenie v bežiacom kontajneri urobí až skúška po spustení.
+  - **Overenie v bežiacom kontajneri robí Verifikácia** — má Docker a spúšťa presne tú kontrolu, ktorá
+    padla. Nehlás „overené v kontajneri", keď si to spraviť nemohol; **nepravdivé DONE je horšie než
+    priznaná hranica** a druhé kolo Verifikácie ti povie pravdu tak či tak.
+  - **Nikdy neopakuj tú istú opravu naslepo.** Ak ti Verifikácia vráti to isté zlyhanie druhýkrát, tvoja
+    hypotéza o príčine bola zlá — zmeň hypotézu (čítaj build/deploy súbory appky), nie formuláciu.
 - **Vizuál — PREVIEW HARNESS NIKDY NESMIE UKÁZAŤ AUTH-STENU (v4.0.45).** Živý náhľad beží pod `VITE_PREVIEW`
   BEZ backendu (MSW mockne dáta + `GET /session`), aby Manažér videl **obrazovky appky**, nie login. Preto
   globálny handler neúspešnej autentifikácie (`onUnauthorized` v `createApiClient`) **MUSÍ byť v preview
@@ -129,7 +142,9 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   testy cez `TRUNCATE`; `client` používa `https://testserver`, nech hardened Secure cookie prejde. Test image je
   **repo-root `Dockerfile.test`** (kontext `.`, `pip install -e ".[dev]"` — editable, aby `import app` = zdroj so
   svojimi dátovými súbormi, nie balík bez nich; `COPY backend/... ./` + `COPY docs /docs`), spúšťaný compose
-  službou **`test`** na sieti s `db` cez `docker compose run --rm --build test`. **Pozor na DinD self-hosted
+  službou **`test`** na sieti s `db` cez `docker compose run --rm --build test` — to je cesta pre **CI**;
+  v izolovanom Programovaní spúšťaj ten istý `pytest` proti `DATABASE_URL` z engine-u, cez `.venv` (presný
+  postup je nižšie v bode „Programovanie beží v IZOLOVANOM PRIESTORE"). **Pozor na DinD self-hosted
   runner:** bind mount (`volumes: ./docs`) je pre daemon neviditeľný (prázdny) — súbory, ktoré test potrebuje
   (napr. docs archív pre drift test), musia ísť do image cez **COPY** (build kontext sa streamuje daemonu).
   Nikdy neznižuj prah (nezakazuj testy, nedvíhaj sqlite verziu) — testuj na tom, na čom appka beží.
@@ -150,6 +165,42 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   koľkokrát si skúsil — a **ZASTAV pre vývojára**. Problém mašinérie je **vývojárov, nie manažérov**.
 - **Quality-first** — defaultne **jedno najlepšie dlhodobé riešenie**; minimal / MVP / stub **nikdy** nie je
   default odporúčanie.
+- **Programovanie beží v IZOLOVANOM PRIESTORE — máš DATABÁZU, NEMÁŠ Docker (ICCINT-16).** Fáza Programovanie
+  (rovnako ako Príprava a Návrh) beží v kontajneri, ktorý vidí LEN tvoj projekt a znalostnú bázu (read-only).
+  Čo z toho pre teba prakticky vyplýva:
+  - **Databázu ti dá engine.** Pred každým ťahom Programovania naštartuje čerstvý PostgreSQL a jeho adresu ti
+    vloží do premennej **`DATABASE_URL`**. Databáza je **prázdna** a po ťahu **zaniká** — schému si postav sám
+    (`alembic upgrade head`, presne ako to robí `conftest.py`) a nespoliehaj sa na dáta z minulého ťahu.
+  - **Prostredie testov si postav do `.venv` — `pip install --user` v izolovanom priestore ZLYHÁ.** Obraz
+    izolovaného priestoru nesie závislosti NEX Studia, **nie tvojho projektu**: `pytest` nie je na `PATH` a
+    `asyncpg` ani `pyjwt` (`import jwt` v `conftest.py`) v ňom nie sú. `pip install --user` skončí tvrdo na
+    `Read-only file system`, lebo `$HOME/.local` je pripojený len na čítanie — **nie je to porucha a nie je to
+    `framework_issue`**, len tam tá cesta nevedie. Toto je overený postup (raz za ťah; `.venv/` je v
+    `.gitignore`, takže sa nikdy nezakomituje, a medzi ťahmi v projekte prežije):
+
+    ```bash
+    cd backend
+    python3 -m venv .venv                  # ak .venv už je z minulého ťahu, tento a ďalší riadok preskoč
+    .venv/bin/pip install -e ".[dev]"      # ~20 s
+    export PATH="$PWD/.venv/bin:$PATH"     # POVINNÉ — pozri nižšie
+    alembic upgrade head                   # schéma do DATABASE_URL, presne ako conftest.py
+    pytest -q
+    ```
+
+    **`export PATH` nevynechaj.** Nestačí volať `.venv/bin/pytest` — `conftest.py` si sám púšťa
+    `subprocess.run(["alembic", "upgrade", "head"])`, čiže hľadá `alembic` na `PATH`; bez toho exportu padne
+    **každý** test na `subprocess.CalledProcessError` (overené: 100 chýb → po exporte 99 prešlo, 1 padol z
+    iného dôvodu). Backend testy spúšťaj **takto, priamo proti `DATABASE_URL`** — **nie** cez
+    `docker compose run --rm test` (to je cesta pre CI, kde Docker je).
+  - **`docker` ti v tejto fáze nebude fungovať** — v izolovanom priestore nie je soket Dockera, takže
+    `docker compose up/build/run` skončí na „Cannot connect to the Docker daemon". **Nie je to porucha
+    NEX Studia** a NEeskaluj ju ako `framework_issue`.
+  - **Postaviť a spustiť CELÚ appku patrí do Vizuálu a Verifikácie** — tie fázy Docker majú. Keď oprava
+    naozaj vyžaduje overenie v bežiacom kontajneri, urobí ho skúška po spustení vo Verifikácii; v
+    Programovaní dotiahni všetko, čo sa dá overiť lokálne proti `DATABASE_URL`.
+  - **Engine dodáva LEN PostgreSQL.** Ak `docker-compose.yml` deklaruje ďalšiu hotovú službu (Redis, MinIO,
+    broker…), ťah Programovania sa **zastaví a vypíše jej meno** — radšej priznaná hranica než ticho
+    polovičné prostredie. Ak taká služba naozaj treba, je to `framework_issue` pre Deda, nie tvoja oprava.
 - **Waterfall** — plánuj dôkladne pred kódovaním; Špecifikácia je usadená a **schválená** pred implementáciou.
 
 ## 3. KB + vlastná pamäť ("presne ako Dedo")
@@ -175,11 +226,11 @@ Tri úrovne, každá s vlastnou disciplínou zápisu (`design.md` §5.2; mechani
   `project_memory.reindex_shared_kb_write`, tenant `icc`) — žiadny drift filesystem ↔ vector store
   (CLAUDE.md §13).
 
-> **V Prípravé a Návrhu je zdieľaný KB LEN NA ČÍTANIE.** Tie dve fázy bežia v izolovanom priestore
-> (ICCINT-16): `/home/icc/knowledge` je pripojený read-only, RAG cez `scripts/rag_query.py` funguje.
-> Bod **(3)** — zámerný príspevok do zdieľaného KB + reindex — tam **zlyhá na úrovni jadra** (`Read-only
-> file system`). Nie je to porucha: je to rozhodnutie Directora z 23.08.2026. Ak počas Prípravy alebo
-> Návrhu nájdeš lekciu hodnú zdieľaného KB, **zapíš si ju do vlastného `MEMORY.md`** (bod 2, ten píšeš
+> **V Prípravé, Návrhu a Programovaní je zdieľaný KB LEN NA ČÍTANIE.** Tie tri fázy bežia v izolovanom
+> priestore (ICCINT-16): `/home/icc/knowledge` je pripojený read-only, RAG cez `scripts/rag_query.py`
+> funguje. Bod **(3)** — zámerný príspevok do zdieľaného KB + reindex — tam **zlyhá na úrovni jadra**
+> (`Read-only file system`). Nie je to porucha: je to rozhodnutie Directora z 23.08.2026. Ak v niektorej
+> z tých fáz nájdeš lekciu hodnú zdieľaného KB, **zapíš si ju do vlastného `MEMORY.md`** (bod 2, ten píšeš
 > voľne) a prispej ňou v neskoršej fáze. Nepokúšaj sa obísť read-only mount.
 
 ## 4. Spúšťanie pomocníkov (helpers)

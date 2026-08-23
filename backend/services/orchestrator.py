@@ -3238,10 +3238,11 @@ async def invoke_agent(
                     # konzultacia-sidecar-sandbox.md Part 2: route the consult turn through the OS-isolated
                     # sidecar (True only from run_consult_turn); build turns pass False → in-process.
                     sandbox=sandbox,
-                    # ICCINT-16 STEP 1: the phase decides the TRANSPORT of a build turn — Príprava/Návrh run
-                    # inside a container that sees only their own project. Passing the phase (which every
-                    # dispatch already has) rather than a boolean means no call site can forget to ask for
-                    # the isolation; the other phases are excluded inside claude_agent, by name.
+                    # ICCINT-16 STEP 2: the phase decides the TRANSPORT of a build turn —
+                    # Príprava/Návrh/Programovanie run inside a container that sees only their own project.
+                    # Passing the phase (which every dispatch already has) rather than a boolean means no
+                    # call site can forget to ask for the isolation; Vizuál and Verifikácia are excluded
+                    # inside claude_agent, by name, because they run the whole app through docker compose.
                     stage=stage,
                     # Fix 1: persist this turn's output to a durable per-turn log (redacted, §4).
                     log_dir=log_dir,
@@ -3652,14 +3653,14 @@ async def _plan_pass_once(
                     model=model_override,
                     effort=effort_override,
                     json_schema=json_schema,
-                    # ICCINT-16 STEP 1 — the phase decides the TRANSPORT, and this pass has one. Omitting it
+                    # ICCINT-16 STEP 2 — the phase decides the TRANSPORT, and this pass has one. Omitting it
                     # sent ``stage=None`` into ``phase_uses_sandbox``, which answers False, so EVERY task-plan
                     # pass — the skeleton, one pass per feature, every parse-retry — ran UNISOLATED as root
                     # with /opt/customers, /opt/uat, /opt/infra and the docker socket in reach. Nothing said
                     # so: the WARNING lives behind the same phase check, and the log line read
                     # ``transport=in-process``. Both callers are sandboxed phases (``priprava`` from the
                     # KROK 3 conversation round, ``navrh`` from the design round), so this was the majority
-                    # of the very work STEP 1 exists to isolate.
+                    # of the very work the isolation exists for.
                     stage=stage,
                 )
             )
@@ -7520,8 +7521,8 @@ async def _invoke_fix_critique(
                     model=model_override,
                     effort=effort_override,
                     json_schema=FIX_CRITIQUE_JSON_SCHEMA,
-                    # ICCINT-16 STEP 1 — stated, not left to the default. Verifikácia is NOT a sandboxed
-                    # phase (its charter has it run ``docker compose up`` against a real PostgreSQL), so
+                    # ICCINT-16 STEP 2 — stated, not left to the default. Verifikácia is NOT a sandboxed
+                    # phase (it brings the whole app up through ``docker compose`` and probes it), so
                     # this turn deliberately stays an in-process subprocess. Passing the phase explicitly
                     # is what lets the test that walks every ``invoke_claude`` call site distinguish "this
                     # phase does not want isolation" from "somebody forgot the argument" — the exact

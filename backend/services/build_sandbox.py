@@ -1,4 +1,4 @@
-"""OS-isolated container for the BUILD turns of the Príprava and Návrh phases (ICCINT-16, STEP 1 of 2).
+"""OS-isolated container for the BUILD turns of Príprava, Návrh and Programovanie (ICCINT-16, STEP 2).
 
 THE PROBLEM. A build turn is ``claude`` with an unrestricted Bash/Write/Edit profile, and today it runs as
 a subprocess OF THE BACKEND — inside a container that bind-mounts ``/opt/customers`` read-write, ``/opt/uat``
@@ -50,14 +50,38 @@ a later Programovanie turn runs project source as root — but that turn WRITES 
 the sandbox grants no capability there; the pipeline's trust in its own repository is a property of the
 pipeline, not a hole this module opened. The network is NOT restricted (see :data:`NETWORK_RESIDUAL`).
 
-WHAT THIS IS NOT — SAY IT OUT LOUD. This is STEP 1 of two, and step 1 is not the fix; it is the half of the
-fix that can ship without breaking anything. Only the **Príprava** and **Návrh** turns move in here
-(:data:`SANDBOXED_PHASES`), because those two write documents. **Programovanie, Vizuál and Verifikácia keep
-running as backend subprocesses, with the docker socket and every one of those host mounts**, because the
-agent charter orders them to run ``docker compose up`` and to test against a real PostgreSQL — take the
-socket away today and those phases simply stop working. Brokered access to Docker is STEP 2. Until step 2
-lands, the exposure this module removes is removed for two phases out of five and for no others. Anyone
-reading a summary that says "build turns are now isolated" is reading something untrue.
+AND THE MOUNT LIST BOUNDS PATHS, NOT INODES. A HARD LINK inside the project tree is a second name for a file
+that may live anywhere on the same filesystem — ``/opt/projects``, ``/opt/customers``, ``/opt/uat`` and
+``/opt/infra`` are one device on this host — so mounting the project directory exposes it, read AND write,
+with nothing in the mount list to say so. Planting one needs a namespace where ``/opt`` is a single mount,
+i.e. the docker socket, i.e. a Vizuál/Verifikácia turn: the same STEP 1 pattern of a file placed for a later
+privileged turn to honour, which is why ``.claude`` was frozen. Audit also found this module's own
+preparation step made it worse — :func:`_chown_tree_sync` would ``lchown`` such an entry and thereby GRANT
+the sandbox uid a foreign, root-only inode — so multiply-linked regular files are now skipped and reported
+at ERROR (:func:`prepare_turn`). Detecting them is not the same as preventing them: the honest statement is
+that the mount list bounds every PATH the sandbox can name, and a hard link is how something outside gets a
+path inside.
+
+STEP 2 BRINGS IN PROGRAMOVANIE — THE PHASE THAT CAN ACTUALLY HURT SOMEBODY. Príprava and Návrh write
+documents; Programovanie writes code, moves files and runs processes, and until now it ran as a backend
+SUBPROCESS: root, docker socket, ``/opt/customers`` read-write. It is the phase the isolation was worth
+building for, and it stayed outside for one stated reason — the charter has it test against a real
+PostgreSQL, so it needed Docker.
+
+That premise was checked rather than believed, and it is narrower than the charter's wording: the generated
+project's own ``conftest.py`` asks for *"a reachable Postgres: the compose db service in CI, or a local
+docker compose up -d db"* and nothing else (verified on ``/opt/projects/nex-websites``). So the engine hands
+the turn a database — a per-build PostgreSQL on a per-build network (:mod:`build_db`) — and the turn needs
+no daemon at all. **There is no docker socket here and no broker to one.** A broker would have been a new
+security-critical component of our own making, built to reduce the attack surface; the whole point is to
+have less of that, not more. Building and running the WHOLE app is genuinely a Docker job, and it belongs
+to Vizuál and Verifikácia.
+
+WHAT THIS IS STILL NOT — SAY IT OUT LOUD. **Vizuál and Verifikácia keep running as backend subprocesses,
+with the docker socket and every one of those host mounts**: they bring the real compose stack up and probe
+it, which is exactly what the socket is for. So after STEP 2 the exposure is removed for THREE phases out of
+five, and for no others. Anyone reading a summary that says "the build is now isolated" is still reading
+something untrue.
 
 THE KNOWLEDGE BASE IS READABLE, NOT WRITABLE (Director decision, 23.08.2026). The AI Agent charter §3 gives
 the agent three knowledge levels. An earlier version of this sandbox took two of them away; the Director's
@@ -69,11 +93,14 @@ decision was *"pripoj znalostnú bázu read-only"*, and BOTH halves of "read" ar
   2. **§3(1) the RAG path** (*"Prístup: RAG (Qdrant + Ollama embeddings) + priame čítanie súborov"*) — the
      project's own ``scripts/rag_query.py`` talks to Qdrant directly, so mounting files alone would NOT have
      revived it. ``QDRANT_URL`` and ``OLLAMA_URL`` are therefore in :data:`_PASSTHROUGH_ENV`; both point at
-     the docker bridge gateway, which the sandbox reaches on the default bridge.
+     a docker bridge gateway, which the sandbox reaches from the default bridge (Príprava/Návrh) and from
+     the per-build network a Programovanie turn joins alike — measured on this host from both.
   3. **§3(3) deliberate writes into the shared KB + reindex** — DELIBERATELY still unavailable: read-only is
      what was decided. The agent must not discover this by having a write fail mid-build, so the charter
-     §3 says outright that in Príprava and Návrh the shared KB is read-only and a contribution waits for a
-     later phase. A rule the agent cannot see is a trap, not a rule.
+     §3 says outright that in every SANDBOXED phase — Príprava, Návrh and, since STEP 2, Programovanie —
+     the shared KB is read-only and a contribution waits for a later one. A rule the agent cannot see is a
+     trap, not a rule, which is why widening :data:`SANDBOXED_PHASES` means editing the charter in the same
+     change.
 
 §3(2), the per-project ``MEMORY.md``, is in the project tree and was never affected.
 """
@@ -87,14 +114,18 @@ import os
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 from dataclasses import dataclass
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 from uuid import uuid4
 
 from backend.config.settings import settings
 from backend.services import sandbox_paths
 from backend.services.claude_agent import ClaudeAgentError
+
+if TYPE_CHECKING:  # runtime import is local, per call — ``build_db`` imports ``claude_agent`` (a cycle)
+    from backend.services import build_db
 
 logger = logging.getLogger(__name__)
 
@@ -102,11 +133,16 @@ logger = logging.getLogger(__name__)
 _SANDBOX_LABEL = "build sandbox"
 
 #: The phases whose build turns run in here. Príprava and Návrh produce DOCUMENTS (the Zadanie/Špecifikácia
-#: dialogue, the design doc, the task plan) — no ``docker compose up``, no real PostgreSQL, nothing that
-#: needs the host — which is precisely why they are the two that can move first. The routing keys on THIS
-#: value, i.e. on the phase the engine is already in, so nothing has to be remembered or configured per
-#: dispatch: a phase cannot be forgotten the way a per-call ``sandbox=True`` flag can.
-SANDBOXED_PHASES: tuple[str, ...] = ("priprava", "navrh")
+#: dialogue, the design doc, the task plan) — nothing that needs the host — which is why they moved first
+#: (STEP 1). **Programovanie** joined them in STEP 2: it needs a real PostgreSQL, and the engine now hands
+#: it one (:mod:`build_db`) instead of handing it a docker socket. Vizuál and Verifikácia are deliberately
+#: NOT here — they build and run the whole app through ``docker compose``, which is what the socket is for.
+#:
+#: The routing keys on THIS value, i.e. on the phase the engine is already in, so nothing has to be
+#: remembered or configured per dispatch: a phase cannot be forgotten the way a per-call ``sandbox=True``
+#: flag can. Adding a phase here is never only a code change — see the charter obligation in the KB section
+#: of this module's docstring, and :data:`build_db.DATABASE_PHASES` for what a phase is GIVEN once it is in.
+SANDBOXED_PHASES: tuple[str, ...] = ("priprava", "navrh", "programovanie")
 
 #: ``HOME`` inside the sandbox — an EPHEMERAL tmpfs, not a bind. Set explicitly because the container runs
 #: under a NUMERIC uid with no ``/etc/passwd`` entry, so ``HOME`` would otherwise be unset or inherited from
@@ -250,22 +286,43 @@ _GIT_IDENTITY_ENV: tuple[tuple[str, str], ...] = (
 #: lost its guarantee. ``BUILD_SANDBOX_IMAGE`` overrides.
 _DEFAULT_IMAGE_REPO = "nex-studio-visual-backend"
 
-#: HONEST RECORD OF WHAT IS **NOT** ISOLATED — the network. Audit measured it from inside the container:
-#: the default bridge gateway reaches the host, and through it this Studio's own API (9217), the v3 API
-#: (9207) and Traefik (80/443), i.e. every deployed customer app and every UAT. Postgres, Ollama and Qdrant
-#: were NOT reachable. There is no docker-native way to say "internet yes, host no": ``--network none`` cuts
-#: the Anthropic API too (measured — the turn hangs until its timeout and produces nothing), ``--internal``
-#: cuts all egress, and a user-defined bridge still has a gateway to the host. Restricting this needs a host
-#: firewall rule in the ``DOCKER-USER`` chain (drop new connections from the sandbox subnet to the host),
-#: which is an infrastructure change outside this module and outside STEP 1. Until it exists, the sentence
-#: "the sandbox sees its own project and its own login" is true of the FILESYSTEM only, and this constant is
-#: logged once per process so nobody has to infer that from silence.
+#: HONEST RECORD OF WHAT IS **NOT** ISOLATED — the network. This constant is the ONE statement anybody reads
+#: to learn what a build turn can still reach, so it must not read like a short, reassuring list.
+#:
+#: An earlier version named "the Studio API (9217), the v3 API (9207) and Traefik (80/443)" and added that
+#: "Postgres, Ollama and Qdrant were NOT reachable". Audit re-measured from a container on a freshly created
+#: user-defined network — the exact shape :func:`build_db.network_create_argv` makes — and the truth is
+#: categorical rather than enumerable: the bridge gateway answers on EVERY port published to ``0.0.0.0`` on
+#: this host. On this machine that included SIX PostgreSQL instances (this Studio's own production database,
+#: the v3 production one, UAT, two development ones and the shared platform ``nex-postgres``), Vaultwarden,
+#: the NEX Manager API, Prometheus, Alertmanager and Grafana, alongside the three that used to be named.
+#: None of it is a breach on its own — the sandbox is given no credential to any of them, and this was
+#: equally true in STEP 1 on the default bridge, so it is not a regression — but a constant that names three
+#: services and omits the databases turns an admitted limit into a reassurance, which is the failure mode
+#: this module exists to avoid. It therefore states the RULE, not a sample.
+#:
+#: Measured in the sandbox's favour at the same time: other stacks' own networks are NOT reachable by IP
+#: (``mager-inbox-postgres``, ``uat-andros-shopify-postgres`` both refused) — docker's inter-network
+#: isolation holds, so what is exposed is the HOST's published surface and nothing behind it.
+#:
+#: There is no docker-native way to say "internet yes, host no": ``--network none`` cuts the Anthropic API
+#: too (measured — the turn hangs until its timeout and produces nothing), ``--internal`` cuts all egress,
+#: and a user-defined bridge still has a gateway to the host. Restricting this needs a host firewall rule in
+#: the ``DOCKER-USER`` chain (drop new connections from the sandbox subnets to the host), which is an
+#: infrastructure change outside this module and outside STEP 2. Until it exists, "the sandbox sees its own
+#: project and its own login" is true of the FILESYSTEM only, and this constant is logged once per process
+#: so nobody has to infer that from silence.
 NETWORK_RESIDUAL = (
-    "build sandbox runs on the default docker bridge: outbound internet is REQUIRED (the Claude MAX "
-    "endpoint; --network none was measured to kill the turn), and the host gateway therefore stays "
-    "reachable — the Studio API (9217), the v3 API (9207) and Traefik (80/443) answer from inside the "
-    "sandbox. The filesystem isolation is unaffected; restricting this needs a DOCKER-USER firewall rule on "
-    "the host and is NOT implemented (ICCINT-16 STEP 1)."
+    "build sandbox network is NOT isolated: outbound internet is REQUIRED (the Claude MAX endpoint; "
+    "--network none was measured to kill the turn), so the docker bridge gateway to the host stays "
+    "reachable — and through it EVERYTHING PUBLISHED ON 0.0.0.0 ON THIS HOST, not a short list. Measured "
+    "here that is six PostgreSQL instances (including this Studio's own production database), Vaultwarden, "
+    "the NEX Manager API, Prometheus, Alertmanager, Grafana, the Studio API (9217), the v3 API (9207) and "
+    "Traefik (80/443). The sandbox is given no credentials for any of them, and other stacks' private "
+    "networks are NOT reachable (docker inter-network isolation, measured) — but the host's published "
+    "surface is. Identical on the default bridge (Príprava/Návrh) and on the per-build network "
+    "(Programovanie). The FILESYSTEM isolation is unaffected; restricting this needs a DOCKER-USER firewall "
+    "rule on the host and is NOT implemented (ICCINT-16 STEP 2)."
 )
 _network_residual_logged = False
 
@@ -289,7 +346,8 @@ _UNAVAILABLE_RE = re.compile(
 #: moves, and the message names both rather than leaving them to be guessed.
 _REMEDIATION = (
     "Build the sandbox image (or point BUILD_SANDBOX_IMAGE at an existing tag). If builds must not wait, "
-    "set BUILD_SANDBOX=0 — that is a DELIBERATE choice to run Príprava/Návrh as backend subprocesses again, "
+    "set BUILD_SANDBOX=0 — that is a DELIBERATE choice to run Príprava/Návrh/Programovanie as backend "
+    "subprocesses again, "
     "with /opt/customers, /opt/uat, /opt/infra and the docker socket in reach."
 )
 
@@ -319,7 +377,7 @@ class BuildSandboxUnavailable(ClaudeAgentError):
 
 
 def sandbox_enabled() -> bool:
-    """Whether Príprava/Návrh turns route through the sandbox. Default ON — and EMPTY still means ON.
+    """Whether the sandboxed phases' turns route through the sandbox. Default ON — and EMPTY still means ON.
 
     ``BUILD_SANDBOX=0``/``false``/``no``/``off`` sends them back to the in-process subprocess. Read from the
     environment at TURN time, not cached at import, so the switch takes effect without restarting the
@@ -333,8 +391,8 @@ def phase_uses_sandbox(stage: Optional[str]) -> bool:
     """Whether ``stage`` is one of the phases whose build turns are isolated (:data:`SANDBOXED_PHASES`).
 
     Unknown / missing phase → ``False``: an unrecognised caller keeps today's behaviour instead of being
-    silently routed somewhere it was never tested. Programovanie, Vizuál and Verifikácia answer ``False``
-    by construction, which is what keeps STEP 1 from breaking the phases that still need Docker.
+    silently routed somewhere it was never tested. Vizuál and Verifikácia answer ``False`` by construction,
+    which is what keeps STEP 2 from breaking the two phases that genuinely need Docker.
 
     A ``False`` here is only ever safe when every dispatch actually PASSES its phase. It did not: the audit
     found ``_plan_pass_once`` — the turn behind every task-plan pass in BOTH Príprava and Návrh — omitting
@@ -351,9 +409,23 @@ def sandbox_image() -> str:
     return settings.build_sandbox_image or f"{_DEFAULT_IMAGE_REPO}:v{settings.app_version}"
 
 
-def container_name() -> str:
-    """A unique, greppable name per turn, so a container left behind by a timeout can be found and reaped."""
-    return f"nex-build-{uuid4().hex[:16]}"
+def turn_token() -> str:
+    """The random suffix EVERY docker object of one turn shares — container, database, network.
+
+    One token per turn rather than one per object, so a leak is traceable: everything stamped with it was
+    created by the same dispatch, and two builds running at the same moment cannot collide on any of the
+    three names (:func:`container_name`, :func:`build_db.container_name`, :func:`build_db.network_name`).
+    """
+    return uuid4().hex[:12]
+
+
+def container_name(project_slug: str, token: str) -> str:
+    """A unique, greppable name per turn, so a container left behind by a timeout can be found and reaped.
+
+    The slug is IN the name on purpose: ``docker ps | grep <slug>`` is how an operator answers "is anything
+    still running for this project", and a name made only of hex answers nothing.
+    """
+    return f"nex-build-{project_slug}-{token}"
 
 
 def looks_unavailable(stderr_text: str) -> bool:
@@ -396,11 +468,28 @@ def _host_session_dir(container_project_dir: str) -> str:
 # --------------------------------------------------------------------------------------------------------
 
 
-def _chown_tree_sync(root: str, *, uid: int, gid: int) -> tuple[int, list[str]]:
-    """``chown -R`` in pure Python; returns ``(changed, paths_it_could_not_change)``.
+def _chown_tree_sync(root: str, *, uid: int, gid: int) -> tuple[int, list[str], list[str]]:
+    """``chown -R`` in pure Python; returns ``(changed, could_not_change, multiply_linked_files_skipped)``.
 
     Symlinks are chowned with ``lchown`` (never followed — following one would let a link inside the project
     redirect the chown at an arbitrary host path).
+
+    A HARD LINK IS NOT A SYMLINK AND ``lchown`` DOES NOT SAVE US FROM IT. ``lchown`` closes the symlink case
+    completely, and the third mount-list guarantee — "the sandbox sees its own project and nothing else" —
+    is closed by the mount list for everything a path can express. A hard link is neither: it is a second
+    directory entry for an inode that may live anywhere on the same filesystem, indistinguishable from an
+    ordinary file by ``lstat`` except for ``st_nlink``. ``/opt/projects``, ``/opt/customers``, ``/opt/uat``
+    and ``/opt/infra`` are all one device here (66306, verified), so a link planted in a project tree exposes
+    a file outside the mount roots — and audit showed this step made it WORSE than passive: chowning that
+    entry hands the sandbox uid ownership of a foreign, previously root-only inode, i.e. the preparation
+    step grants the write it was meant to scope. (Planting it needs the docker socket, so it is a VIZUÁL /
+    VERIFIKÁCIA turn's reach, not the sandbox's own — but that is precisely the STEP 1 pattern of a file
+    placed for a later privileged turn, and the answer there was the same: refuse it structurally.)
+
+    So a regular file with ``st_nlink > 1`` is SKIPPED and REPORTED, never chowned. Directories always carry
+    ``st_nlink > 1`` (``.`` and every child's ``..``) and are unaffected; a project that legitimately holds
+    hard links (``git clone --local`` shares object files this way) loses only the re-owning of those files,
+    which the caller says out loud so a later permission error has a name.
 
     A single failure never aborts the walk, but it is NOT swallowed either: the caller reports it. Changing
     the owner of somebody else's file needs ``CAP_CHOWN``, which the backend container has (it runs as root)
@@ -409,11 +498,15 @@ def _chown_tree_sync(root: str, *, uid: int, gid: int) -> tuple[int, list[str]]:
     """
     changed = 0
     failed: list[str] = []
+    linked: list[str] = []
 
     def _one(path: str) -> None:
         nonlocal changed
         try:
             st = os.lstat(path)
+            if stat.S_ISREG(st.st_mode) and st.st_nlink > 1:
+                linked.append(path)
+                return
             if st.st_uid == uid and st.st_gid == gid:
                 return
             os.lchown(path, uid, gid)
@@ -426,7 +519,7 @@ def _chown_tree_sync(root: str, *, uid: int, gid: int) -> tuple[int, list[str]]:
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
         for name in dirnames + filenames:
             _one(os.path.join(dirpath, name))
-    return changed, failed
+    return changed, failed, linked
 
 
 async def prepare_turn(project_slug: str) -> None:
@@ -473,23 +566,23 @@ async def prepare_turn(project_slug: str) -> None:
     container_project_dir = str(PROJECTS_ROOT / project_slug)
     session_dir = _host_session_dir(container_project_dir)
 
-    def _prepare() -> tuple[int, list[str]]:
+    def _prepare() -> tuple[int, list[str], list[str]]:
         try:
             os.makedirs(session_dir, exist_ok=True)
         except OSError as exc:
             raise unavailable(f"cannot create the session transcript dir {session_dir} ({exc})") from exc
-        sessions, session_failures = _chown_tree_sync(session_dir, uid=_SANDBOX_UID, gid=_SANDBOX_GID)
+        sessions, session_failures, session_links = _chown_tree_sync(session_dir, uid=_SANDBOX_UID, gid=_SANDBOX_GID)
         # The project tree may legitimately be absent (a dry-run workspace); the mount then fails and is
         # classified as unavailable, which is the honest answer — do not invent a directory here.
-        project, project_failures = (
+        project, project_failures, project_links = (
             _chown_tree_sync(container_project_dir, uid=_SANDBOX_UID, gid=_SANDBOX_GID)
             if os.path.isdir(container_project_dir)
-            else (0, [])
+            else (0, [], [])
         )
-        return sessions + project, session_failures + project_failures
+        return sessions + project, session_failures + project_failures, session_links + project_links
 
     # os.walk over a project tree is blocking I/O; keep it off the event loop.
-    changed, failures = await asyncio.to_thread(_prepare)
+    changed, failures, multiply_linked = await asyncio.to_thread(_prepare)
     if changed:
         logger.info(
             "build sandbox: re-owned %d path(s) to %s for %s — root-owned leftovers from the non-sandboxed "
@@ -510,6 +603,21 @@ async def prepare_turn(project_slug: str) -> None:
             project_slug,
             _SANDBOX_USER,
             ", ".join(failures[:3]),
+        )
+    if multiply_linked:
+        # A boundary event, not housekeeping: every one of these is a second name for an inode that may sit
+        # outside the mount roots, on a tree the sandbox is not supposed to reach. Not chowned (that would
+        # HAND it over), and named here because nothing else in the pipeline would ever mention it.
+        logger.error(
+            "build sandbox: %d file(s) in %s have more than one hard link (e.g. %s) — NOT re-owned. A hard "
+            "link is a second directory entry for an inode that can live anywhere on the same filesystem "
+            "(/opt/projects, /opt/customers, /opt/uat and /opt/infra share one here), so the mount list does "
+            "not bound it and chowning it would give the sandbox uid a file outside its roots. Check where "
+            "these point (ls -li) before the next turn; a legitimate cause is a local git clone sharing "
+            "objects.",
+            len(multiply_linked),
+            project_slug,
+            ", ".join(multiply_linked[:3]),
         )
 
 
@@ -591,7 +699,58 @@ def frozen_project_paths(host_project_dir: str) -> list[str]:
     return present
 
 
-def build_run_argv(*, project_slug: str, container_name: str, claude_argv: list[str]) -> list[str]:
+def _host_project_dir(project_slug: str) -> tuple[str, str]:
+    """``(in-container project dir, HOST project dir)`` — validated, translated and containment-asserted.
+
+    The three guards run together and in this order at EVERY entry point that turns a slug into a path, so
+    no caller can acquire a widened one by taking a different door (the mount composer and the database
+    planner are two such doors today).
+
+    Raises:
+        BuildSandboxUnavailable: unsafe slug, or a host path that is unmappable or escapes the roots.
+    """
+    try:
+        sandbox_paths.validate_project_slug(project_slug, sandbox=_SANDBOX_LABEL)
+        # Import here rather than at module scope: ``claude_agent`` imports this module lazily for the same
+        # reason (a cycle), and tests monkeypatch ``claude_agent.PROJECTS_ROOT``, which a module-level
+        # ``from … import PROJECTS_ROOT`` would freeze at import time.
+        from backend.services.claude_agent import PROJECTS_ROOT
+
+        container_project_dir = str(PROJECTS_ROOT / project_slug)
+        host_project_dir = sandbox_paths.container_to_host(
+            container_project_dir, _CONTAINER_TO_HOST_PREFIX, sandbox=_SANDBOX_LABEL
+        )
+        sandbox_paths.assert_host_source_contained(host_project_dir, _CONTAINER_TO_HOST_PREFIX, sandbox=_SANDBOX_LABEL)
+    except sandbox_paths.SandboxPathError as exc:
+        raise BuildSandboxUnavailable(str(exc)) from exc
+    return container_project_dir, host_project_dir
+
+
+def plan_turn_database(*, project_slug: str, stage: Optional[str], token: str) -> Optional["build_db.BuildDatabase"]:
+    """What database THIS turn gets, or ``None`` for a phase that needs none. Decides; starts nothing.
+
+    Keyed on the phase for the same reason the sandbox itself is (:func:`phase_uses_sandbox`): only
+    Programovanie runs a test suite, and a database nobody queries is a container nobody reaps.
+
+    Raises:
+        BuildSandboxUnavailable: the slug/path guards refused.
+        build_db.UnsupportedProjectService: the project needs a supporting service the engine cannot supply.
+    """
+    from backend.services import build_db  # local import — cycle (build_db imports claude_agent)
+
+    if not build_db.phase_needs_database(stage):
+        return None
+    _container_dir, host_project_dir = _host_project_dir(project_slug)
+    return build_db.plan_database(slug=project_slug, host_project_dir=host_project_dir, token=token)
+
+
+def build_run_argv(
+    *,
+    project_slug: str,
+    container_name: str,
+    claude_argv: list[str],
+    database: Optional["build_db.BuildDatabase"] = None,
+) -> list[str]:
     """Compose the EXACT ``docker run`` argv for a sandboxed build turn. The mount list IS the guarantee.
 
     ``claude_argv`` is the full ``["claude", …]`` from :func:`claude_agent.build_claude_argv`; the leading
@@ -618,31 +777,32 @@ def build_run_argv(*, project_slug: str, container_name: str, claude_argv: list[
         executes** (:func:`frozen_project_paths`) — settings, agent deny profiles, skills, MCP config and
         the hook scripts those settings name;
       * ``~/.local`` read-only (the ``claude`` binary itself, which this image does not bundle);
-      * ``-w`` the project — cwd = project, as in-process.
+      * ``-w`` the project — cwd = project, as in-process;
+      * **only when a ``database`` is given (Programovanie, STEP 2)**: ``--network`` the per-build network
+        and ``DATABASE_URL`` pointing at the throwaway PostgreSQL on it. That pair is the whole reason
+        Programovanie can be in here at all — it replaces the docker socket the phase used to need, and
+        it is what makes "no broker to the daemon" an option rather than a slogan.
 
     ABSENT, and this is the point — asserted by the tests so a future addition turns them red: NO
     ``/var/run/docker.sock``, NO ``/opt/customers``, NO ``/opt/uat``, NO ``/opt/infra``, NO
-    ``/home/icc/knowledge``, NO credentials store, NO shared ``~/.claude``. On the FILESYSTEM the sandbox
-    sees its own project, its own transcript and its own binary — the network is a different question and
-    :data:`NETWORK_RESIDUAL` answers it honestly.
+    ``/home/icc/knowledge``, NO credentials store, NO shared ``~/.claude``. The mount list is IDENTICAL for
+    all three sandboxed phases: Programovanie gets a network and one environment variable more, and not one
+    path more. On the FILESYSTEM the sandbox sees its own project, its own transcript and its own binary —
+    the network is a different question and :data:`NETWORK_RESIDUAL` answers it honestly.
+
+    WHY ``DATABASE_URL`` IS PASSED BY VALUE when every other variable is passed BY NAME. The by-name rule
+    exists so a secret never lands in an argv that any process can read out of ``ps``. Here the rule would
+    invert its own purpose: ``-e DATABASE_URL`` copies the value from the docker CLI's OWN environment,
+    which is the backend's — and the backend's ``DATABASE_URL`` is the NEX Studio production database. The
+    day an override stops being applied, by-name hands the agent that URL instead of failing; by-value can
+    only ever hand it the string composed here. What is exposed in exchange is a random password to an empty
+    database that lives on a private network for the length of one turn and is destroyed with it — and the
+    agent is given that password anyway, in this very variable.
 
     Raises:
         BuildSandboxUnavailable: unsafe slug, unmappable/escaping host path, or a malformed claude argv.
     """
-    try:
-        sandbox_paths.validate_project_slug(project_slug, sandbox=_SANDBOX_LABEL)
-        # Import here rather than at module scope: ``claude_agent`` imports this module lazily for the same
-        # reason (a cycle), and tests monkeypatch ``claude_agent.PROJECTS_ROOT``, which a module-level
-        # ``from … import PROJECTS_ROOT`` would freeze at import time.
-        from backend.services.claude_agent import PROJECTS_ROOT
-
-        container_project_dir = str(PROJECTS_ROOT / project_slug)
-        host_project_dir = sandbox_paths.container_to_host(
-            container_project_dir, _CONTAINER_TO_HOST_PREFIX, sandbox=_SANDBOX_LABEL
-        )
-        sandbox_paths.assert_host_source_contained(host_project_dir, _CONTAINER_TO_HOST_PREFIX, sandbox=_SANDBOX_LABEL)
-    except sandbox_paths.SandboxPathError as exc:
-        raise BuildSandboxUnavailable(str(exc)) from exc
+    container_project_dir, host_project_dir = _host_project_dir(project_slug)
 
     if not claude_argv or not claude_argv[0]:
         raise BuildSandboxUnavailable(f"{_SANDBOX_LABEL}: unexpected claude argv (empty)")
@@ -659,6 +819,12 @@ def build_run_argv(*, project_slug: str, container_name: str, claude_argv: list[
         container_name,
         "--user",
         _SANDBOX_USER,
+        # STEP 2: Programovanie joins the per-build network its throwaway PostgreSQL is alone on, so the
+        # database resolves by the project's own compose service name through docker's embedded DNS. A
+        # user-defined bridge keeps outbound internet (the Claude MAX endpoint, npm/pip, gh) and keeps the
+        # Qdrant/Ollama gateway reachable — both measured on this host. Príprava/Návrh pass no database and
+        # stay on the default bridge, byte-identical to STEP 1.
+        *(["--network", database.network] if database is not None else []),
         # Nothing in a document-writing turn needs a capability, and no setuid binary may hand one back.
         "--cap-drop=ALL",
         "--security-opt",
@@ -707,6 +873,9 @@ def build_run_argv(*, project_slug: str, container_name: str, claude_argv: list[
         # ``-e NAME`` with no ``=`` — docker copies the value from its own environment, so the value never
         # lands in the argv (and therefore never in ``ps``). An unset name is simply not passed.
         argv += ["-e", name]
+    if database is not None:
+        # BY VALUE, deliberately — the docstring argues why by-name would be the dangerous option here.
+        argv += ["-e", f"DATABASE_URL={database.url}"]
     argv += [
         "-w",
         container_project_dir,
@@ -796,7 +965,8 @@ def preflight() -> SandboxStatus:
             ready=False,
             image=image,
             problems=(
-                "BUILD_SANDBOX is switched off — Príprava/Návrh run as backend subprocesses, with "
+                "BUILD_SANDBOX is switched off — Príprava/Návrh/Programovanie run as backend subprocesses, "
+                "with "
                 "/opt/customers, /opt/uat, /opt/infra and the docker socket in reach",
             ),
         )
@@ -827,7 +997,7 @@ def preflight() -> SandboxStatus:
         detail = (proc.stderr or "").strip().splitlines()
         problems.append(
             f"build sandbox image {image!r} is not available on this host "
-            f"({detail[-1] if detail else 'no detail'}) — every Príprava/Návrh turn will FAIL. {_REMEDIATION}"
+            f"({detail[-1] if detail else 'no detail'}) — every sandboxed build turn will FAIL. {_REMEDIATION}"
         )
     # The tmpfs HOME means the sandbox no longer inherits ``~/.claude/.credentials.json``: the subscription
     # token in the environment is now the ONLY way it authenticates. Unset = every turn fails at the CLI,
@@ -836,7 +1006,7 @@ def preflight() -> SandboxStatus:
         problems.append(
             "CLAUDE_CODE_OAUTH_TOKEN is not set — the sandbox has an ephemeral HOME and no mounted "
             "~/.claude/.credentials.json, so the Claude MAX subscription token in the environment is the "
-            "only authentication it has; every Príprava/Návrh turn would start unauthenticated"
+            "only authentication it has; every sandboxed build turn would start unauthenticated"
         )
     if not os.path.isdir(_CLAUDE_BIN_DIR):
         problems.append(
@@ -856,7 +1026,7 @@ def log_startup_readiness() -> SandboxStatus:
     if status.ready:
         logger.info(
             "Build sandbox READY (image=%s) — %s turns run OS-isolated; every other phase still runs "
-            "in-process with the host mounts (ICCINT-16 STEP 1 of 2). %s",
+            "in-process with the host mounts (ICCINT-16 STEP 2 — three phases of five). %s",
             status.image,
             "/".join(SANDBOXED_PHASES),
             NETWORK_RESIDUAL,
@@ -865,7 +1035,7 @@ def log_startup_readiness() -> SandboxStatus:
         logger.warning("Build sandbox OFF: %s", "; ".join(status.problems))
     else:
         logger.error(
-            "Build sandbox ENABLED but NOT READY — every Príprava/Návrh turn will fail until this is "
+            "Build sandbox ENABLED but NOT READY — every sandboxed build turn will fail until this is "
             "fixed. Problems: %s",
             "; ".join(status.problems),
         )

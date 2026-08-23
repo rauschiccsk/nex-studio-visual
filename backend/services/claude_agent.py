@@ -259,9 +259,11 @@ def _structured_from(envelope: dict) -> Optional[dict]:
 #:
 #: ``local`` is ``<project>/.claude/settings.local.json``: a file Create Project never writes, that no ICC
 #: project has, and that a build turn can CREATE inside its own read-write project tree. Hooks declared
-#: there are shell commands executed by whatever runs next — and Programovanie/Vizuál/Verifikácia still run
-#: as ROOT inside the backend container, with the docker socket and ``/opt/customers`` (ICCINT-16 is STEP 1
-#: of 2). The project's own ``settings.json`` is re-mounted read-only for a sandboxed turn
+#: there are shell commands executed by whatever runs next — and since ICCINT-16 STEP 2 that means Vizuál and
+#: Verifikácia, which still run as ROOT inside the backend container with the docker socket and
+#: ``/opt/customers`` (Príprava, Návrh and Programovanie are isolated; see
+#: :data:`build_sandbox.SANDBOXED_PHASES`). The project's own ``settings.json`` is re-mounted read-only for a
+#: sandboxed turn
 #: (:func:`build_sandbox.frozen_project_paths`), but a file that does not yet exist cannot be frozen by a
 #: mount — so the second half of that guarantee is here, on the LOADING side: the source is never consulted.
 _SETTING_SOURCES = "user,project"
@@ -413,14 +415,15 @@ async def invoke_claude(
     unavailable it degrades to the in-process read-only turn with an honest WARNING (see
     :func:`_invoke_once`). Default ``False`` → today's in-process behavior, byte-identical.
 
-    ``stage`` (ICCINT-16 STEP 1): the pipeline phase this turn belongs to. A BUILD turn in one of
-    :data:`build_sandbox.SANDBOXED_PHASES` (``priprava`` / ``navrh``) runs inside an OS-isolated container
-    whose FILESYSTEM is its own project and nothing else — see :func:`_invoke_once`. Routing keys on the
-    PHASE, not on a per-call flag, so it cannot be forgotten at a call site — but a call site that omits the
-    argument gets ``None``, which routes IN-PROCESS, so ``tests/test_build_sandbox.py`` walks the
-    orchestrator's AST and fails on any ``invoke_claude`` call without ``stage=`` (one had it missing and
-    every task-plan pass ran unisolated). Programovanie/Vizuál/Verifikácia are unchanged — they still need
-    Docker — and say so explicitly rather than by omission.
+    ``stage`` (ICCINT-16 STEP 2): the pipeline phase this turn belongs to. A BUILD turn in one of
+    :data:`build_sandbox.SANDBOXED_PHASES` (``priprava`` / ``navrh`` / ``programovanie``) runs inside an
+    OS-isolated container whose FILESYSTEM is its own project and nothing else — see :func:`_invoke_once`.
+    Routing keys on the PHASE, not on a per-call flag, so it cannot be forgotten at a call site — but a call
+    site that omits the argument gets ``None``, which routes IN-PROCESS, so ``tests/test_build_sandbox.py``
+    walks the orchestrator's AST and fails on any ``invoke_claude`` call without ``stage=`` (one had it
+    missing and every task-plan pass ran unisolated). ``Vizuál`` and ``Verifikácia`` are the two phases still
+    running as backend subprocesses — they bring the whole app up through ``docker compose``, which is what
+    the socket is for — and say so explicitly rather than by omission.
 
     Delegates to :func:`_invoke_once`; on a **transient** ``ClaudeAgentError``
     (529 / overloaded / 429 / rate limit in stderr) retries with bounded backoff
@@ -517,14 +520,17 @@ async def _invoke_once(
             unreachable) instead of this in-process subprocess; the sidecar produces the same
             ``--output-format json`` envelope so the return contract is unchanged. Build turns
             (``allowed_tools is None``) never take the sidecar path. ``None``/``False`` → in-process.
-        stage: ICCINT-16 STEP 1. The pipeline phase this turn belongs to. A BUILD turn
+        stage: ICCINT-16 STEP 2. The pipeline phase this turn belongs to. A BUILD turn
             (``allowed_tools is None``) whose phase is in :data:`build_sandbox.SANDBOXED_PHASES` has its
             argv WRAPPED in a ``docker run`` with an ephemeral HOME that mounts only the project (rw, with
-            its executable config re-mounted read-only), that project's own claude transcript and the
-            claude binary — the claude flags, streaming, timeout, per-turn logging and return contract are
-            untouched, because only the transport and the permission-mode FLAG change. Every other phase,
-            and an unknown/``None`` phase, runs the in-process subprocess exactly as before. The
-            FILESYSTEM is what is isolated; :data:`build_sandbox.NETWORK_RESIDUAL` states what is not.
+            its executable config re-mounted read-only), that project's own claude transcript, the shared
+            knowledge base (read-only) and the claude binary — the claude flags, streaming, timeout,
+            per-turn logging and return contract are untouched, because only the transport and the
+            permission-mode FLAG change. ``programovanie`` additionally gets a throwaway PostgreSQL on a
+            per-build network and its ``DATABASE_URL`` (:mod:`build_db`) INSTEAD of the docker socket it
+            used to need. Every other phase — Vizuál and Verifikácia — and an unknown/``None`` phase runs
+            the in-process subprocess exactly as before. The FILESYSTEM is what is isolated;
+            :data:`build_sandbox.NETWORK_RESIDUAL` states what is not.
 
     Returns:
         ``(text, usage, structured_output)`` — the result text (stripped) + token usage + the
@@ -577,16 +583,18 @@ async def _invoke_once(
                 "not kernel-isolated)",
             )
 
-    # ICCINT-16 STEP 1: a BUILD turn in the Príprava/Návrh phases is WRAPPED in a ``docker run`` that mounts
-    # only its own project (rw), its own session transcript and the claude binary — no docker socket, no
-    # /opt/customers, no /opt/uat, no /opt/infra, no knowledge, no credential store, no shared ~/.claude.
-    # Only the TRANSPORT changes: the claude flags are the same argv, and streaming, the timeout, the
-    # per-turn log and the return contract are untouched.
+    # ICCINT-16 STEP 2: a BUILD turn in the Príprava/Návrh/Programovanie phases is WRAPPED in a ``docker
+    # run`` that mounts only its own project (rw), its own session transcript, the shared knowledge base
+    # (read-only) and the claude binary — no docker socket, no /opt/customers, no /opt/uat, no /opt/infra, no
+    # credential store, no shared ~/.claude. Only the TRANSPORT changes: the claude flags are the same argv,
+    # and streaming, the timeout, the per-turn log and the return contract are untouched.
     #
-    # The switch is the PHASE the engine is already in — not a per-call flag somebody has to remember. The
-    # other phases are excluded by construction because their charter orders them to run ``docker compose
-    # up`` against a real PostgreSQL; taking the socket away from them is STEP 2, and until it lands this
-    # covers two phases out of five. ``allowed_tools is None`` keeps a consult turn (handled above) out.
+    # The switch is the PHASE the engine is already in — not a per-call flag somebody has to remember.
+    # Programovanie is in the list since STEP 2 because the engine hands it a throwaway PostgreSQL
+    # (:mod:`build_db`) instead of the docker socket its charter used to need. Vizuál and Verifikácia stay
+    # OUT: they build and run the whole app through ``docker compose``, which is what the socket is for — so
+    # this covers three phases out of five, and no more. ``allowed_tools is None`` keeps a consult turn
+    # (handled above) out.
     #
     # Decided BEFORE the argv is composed, because the isolation changes one claude flag as well as the
     # transport: a sandboxed turn carries ``--permission-mode bypassPermissions`` in its ARGV instead of
@@ -620,19 +628,87 @@ async def _invoke_once(
     )
 
     sandbox_container: Optional[str] = None
-    if use_sandbox:
-        # The sandbox is uid 1000; every turn so far ran as root, so the project tree and the session
-        # transcript are littered with root-owned files that uid 1000 can neither ``--resume`` nor rewrite.
-        # Re-own them (and create the transcript dir a brand-new project does not have yet) BEFORE the
-        # container starts — a failure here raises BuildSandboxUnavailable, never a silent downgrade.
-        await build_sandbox.prepare_turn(project_slug)
-        build_sandbox.log_network_residual_once()
-        sandbox_container = build_sandbox.container_name()
-        args = build_sandbox.build_run_argv(
+    turn_database = None
+    # THE ``try`` OPENS BEFORE THE DATABASE IS CREATED, and that placement is the whole point. It used to
+    # open after ``build_run_argv``, i.e. the composing of the argv sat BETWEEN ``build_db.start`` and the
+    # only ``finally`` that reaps it — and ``build_run_argv`` declares ``Raises: BuildSandboxUnavailable``
+    # (empty claude argv, unreachable session dir, a mount it cannot compose). On that path a PostgreSQL
+    # container and a docker network were already running and nothing removed them: ``--rm`` cannot, because
+    # the container must OUTLIVE the docker CLI that created it. "The database dies with the turn on every
+    # way out" is only true if every way out is inside this block.
+    try:
+        if use_sandbox:
+            # The sandbox is uid 1000; every turn so far ran as root, so the project tree and the session
+            # transcript are littered with root-owned files that uid 1000 can neither ``--resume`` nor
+            # rewrite. Re-own them (and create the transcript dir a brand-new project does not have yet)
+            # BEFORE the container starts — a failure raises BuildSandboxUnavailable, never a silent
+            # downgrade.
+            await build_sandbox.prepare_turn(project_slug)
+            build_sandbox.log_network_residual_once()
+            token = build_sandbox.turn_token()
+            sandbox_container = build_sandbox.container_name(project_slug, token)
+            # ICCINT-16 STEP 2: a Programovanie turn gets a throwaway PostgreSQL on a per-build network
+            # INSTEAD of the docker socket it used to need — the project's conftest asks for a reachable
+            # Postgres and nothing more. Planned first (it can refuse a project needing a service we do not
+            # supply, and that refusal must happen before anything is created), then started, then wired
+            # into the argv. Every phase that is NOT Programovanie plans ``None`` and this is a no-op.
+            turn_database = build_sandbox.plan_turn_database(project_slug=project_slug, stage=stage, token=token)
+            if turn_database is not None:
+                from backend.services import build_db  # local import — cycle (see above)
+
+                await build_db.start(turn_database)
+            args = build_sandbox.build_run_argv(
+                project_slug=project_slug,
+                container_name=sandbox_container,
+                claude_argv=args,
+                database=turn_database,
+            )
+
+        return await _run_turn(
+            args,
+            project_root=project_root,
             project_slug=project_slug,
-            container_name=sandbox_container,
-            claude_argv=args,
+            claude_session_id=claude_session_id,
+            charter_path=charter_path,
+            prompt=prompt,
+            timeout=timeout,
+            on_event=on_event,
+            log_dir=log_dir,
+            log_label=log_label,
+            sandbox_container=sandbox_container,
         )
+    finally:
+        # THE DATABASE MUST DIE WITH THE TURN — on the clean return, the crash, the timeout and the cancel
+        # alike. ``--rm`` cannot do it (the container has to OUTLIVE the docker CLI that created it), and a
+        # forgotten PostgreSQL is the quietest leak there is: nobody notices until the host's disk is full.
+        if turn_database is not None:
+            from backend.services import build_db  # local import — cycle (see above)
+
+            await build_db.release(turn_database)
+
+
+async def _run_turn(
+    args: list[str],
+    *,
+    project_root: Path,
+    project_slug: str,
+    claude_session_id: UUID,
+    charter_path: Optional[Path],
+    prompt: str,
+    timeout: int,
+    on_event: Optional[EventCallback],
+    log_dir: Optional[Path],
+    log_label: Optional[str],
+    sandbox_container: Optional[str],
+) -> tuple[str, Optional["UsageMetadata"], Optional[dict]]:
+    """Launch the composed argv and turn its output into ``(text, usage, structured_output)``.
+
+    Split out of :func:`_invoke_once` for ONE reason: the per-turn database has to be released on every
+    exit path, and a ``finally`` around a body with this many ``return``/``raise`` sites is only readable
+    if the body is a call. The behaviour is unchanged — this is the same code, at the same indentation,
+    with its inputs named.
+    """
+    from backend.services import build_sandbox  # local import — cycle (see :func:`_invoke_once`)
 
     logger.info(
         "Invoking claude agent: project=%s session=%s charter=%s prompt_len=%d transport=%s",

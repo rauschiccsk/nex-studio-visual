@@ -37,6 +37,7 @@ from backend.api.routes.versions import router as versions_router
 from backend.config.settings import settings
 from backend.db.session import SessionLocal
 from backend.services import agent_terminal as agent_terminal_service
+from backend.services import build_db as build_db_service
 from backend.services import build_sandbox as build_sandbox_service
 from backend.services import consult_sandbox as consult_sandbox_service
 from backend.services import orchestrator as orchestrator_service
@@ -158,7 +159,7 @@ async def lifespan(app: FastAPI):
     enabled-but-unready sandbox is logged at ERROR. Never fatal — a consult must stay usable — but the
     deployment can no longer run without its promised kernel read-only guarantee and look healthy doing it.
 
-    Build sandbox readiness (ICCINT-16 STEP 1): the Príprava/Návrh build turns run OS-isolated and, unlike
+    Build sandbox readiness (ICCINT-16 STEP 2): the Príprava/Návrh/Programovanie build turns run OS-isolated and, unlike
     the consult sidecar, do NOT fall back to a subprocess when the sandbox cannot start — the fallback is
     the exposure the sandbox removes. An unmet precondition therefore FAILS those turns, so it is probed at
     boot and logged at ERROR: the operator learns the image is missing now, not when the first build stops.
@@ -167,6 +168,12 @@ async def lifespan(app: FastAPI):
 
     consult_sandbox_service.log_startup_readiness()
     build_sandbox_service.log_startup_readiness()
+    # …and sweep what the LAST process did not live to clean up. A Programovanie turn holds a PostgreSQL
+    # container and a docker network that its ``finally`` releases — a ``docker compose up -d`` deploy in the
+    # middle of that turn re-creates this container and no ``finally`` ever runs. Both objects carry
+    # ``build_db.OWNER_LABEL`` precisely so they can be found; until now nothing looked. Safe HERE and only
+    # here: this process owns no turn yet, so everything wearing the label is garbage by definition.
+    await build_db_service.reap_orphans()
 
     db = SessionLocal()
     try:

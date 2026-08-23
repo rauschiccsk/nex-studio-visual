@@ -26,9 +26,17 @@ assertions here are EQUALITIES over a parsed argv (:func:`_scan`):
 :func:`test_the_structural_check_catches_every_addition_the_audit_slipped_through` runs the audit's own
 mutations against the checker and proves each one now fails.
 
-Scope reminder that these tests also pin: only ``priprava`` and ``navrh`` route here
-(``test_every_other_phase_still_runs_as_a_subprocess``). Programovanie/Vizuál/Verifikácia still run as
-backend subprocesses with the host mounts, because their charter has them run ``docker compose up``.
+Scope reminder that these tests also pin: since STEP 2, ``priprava``, ``navrh`` and ``programovanie`` route
+here (``test_every_other_phase_still_runs_as_a_subprocess``). Vizuál and Verifikácia still run as backend
+subprocesses with the host mounts, because they bring the whole app up through ``docker compose``.
+
+STEP 2 ADDS A SECOND THING TO CHECK, AND IT IS CHECKED THE SAME WAY. Programovanie is in here only because
+the engine hands it a throwaway PostgreSQL instead of the docker socket it used to need. So the tests assert
+that the database is really reachable-by-construction (same network, matching alias in the URL), that
+Programovanie's MOUNT SET is byte-for-byte the one Príprava gets — a database is not an excuse for one extra
+path — and that the container and the network are destroyed on every exit path. The docker control calls are
+recorded rather than executed (:func:`docker_calls`), so what is asserted is the exact argv, never a mock's
+opinion of it.
 """
 
 from __future__ import annotations
@@ -45,7 +53,7 @@ from uuid import uuid4
 
 import pytest
 
-from backend.services import build_sandbox, claude_agent, orchestrator
+from backend.services import build_db, build_sandbox, claude_agent, orchestrator
 
 
 @pytest.fixture(autouse=True)
@@ -68,6 +76,32 @@ def _sandbox_on(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat-test")
     monkeypatch.setattr(build_sandbox.settings, "build_sandbox_image", "nex-studio-visual-backend:vTEST")
     monkeypatch.setattr(build_sandbox, "_CLAUDE_HOME_DIR", str(tmp_path / "claude-home"))
+
+
+@pytest.fixture(autouse=True)
+def docker_calls(monkeypatch) -> list[tuple[str, ...]]:
+    """Record every docker CONTROL call :mod:`build_db` makes; execute none of them.
+
+    The seam is deliberately :func:`build_db._docker` — the ONE place the module shells out — rather than
+    the public ``start``/``release``. Stubbing those would leave the argv that creates the network, starts
+    the database and reaps both entirely unasserted, which is the same mistake the old deny-list version of
+    this file made: the thing that carries the guarantee has to be the thing the test reads.
+    """
+    calls: list[tuple[str, ...]] = []
+
+    async def _fake(*args: str, **_kwargs) -> tuple[int, str]:
+        calls.append(tuple(args))
+        return 0, ""
+
+    monkeypatch.setattr(build_db, "_docker", _fake)
+    return calls
+
+
+def _control(calls: list[tuple[str, ...]], *prefix: str) -> tuple[str, ...]:
+    """The one recorded docker call starting with ``prefix`` (fails loudly on none / several)."""
+    matches = [c for c in calls if c[: len(prefix)] == prefix]
+    assert len(matches) == 1, f"expected exactly one {' '.join(prefix)} call, got {matches}"
+    return matches[0]
 
 
 def _ok_proc(envelope: dict | None = None) -> MagicMock:
@@ -147,7 +181,7 @@ async def _streaming_turn_argv(monkeypatch, *, stage: str, slug: str = "acme", *
 #: Docker options the sandbox is allowed to pass with NO value.
 _BOOLEAN_OPTS = frozenset({"--rm", "--cap-drop=ALL"})
 #: Docker options the sandbox is allowed to pass WITH exactly one value.
-_VALUED_OPTS = frozenset({"--name", "--user", "--security-opt", "--mount", "-e", "-w", "--entrypoint"})
+_VALUED_OPTS = frozenset({"--name", "--user", "--security-opt", "--mount", "-e", "-w", "--entrypoint", "--network"})
 
 
 def _scan(argv: list[str]) -> tuple[list[tuple[str, str | None]], list[str]]:
@@ -193,6 +227,39 @@ def _mount_specs(opts: list[tuple[str, str | None]]) -> list[dict[str, str]]:
 
 def _value_after(argv: list[str], flag: str) -> str:
     return argv[argv.index(flag) + 1]
+
+
+def _mount_identity(opts: list[tuple[str, str | None]]) -> set[tuple[str, str, str, bool]]:
+    """The mount list reduced to ``(type, source, target, readonly)`` — the form the EQUALITIES compare.
+
+    One helper, used by every phase's mount assertion, so "Príprava's mounts" and "Programovanie's mounts"
+    cannot be checked by two subtly different rules that drift apart.
+    """
+    return {
+        (
+            m.get("type", ""),
+            m.get("source", m.get("destination", "")),
+            m.get("target", m.get("destination", "")),
+            "readonly" in m,
+        )
+        for m in _mount_specs(opts)
+    }
+
+
+def _expected_mounts(slug: str) -> set[tuple[str, str, str, bool]]:
+    """The five mounts a project with no ``.claude`` config to freeze is entitled to — and no others."""
+    return {
+        ("tmpfs", "/home/andros", "/home/andros", False),
+        (
+            "bind",
+            str(Path(build_sandbox._CLAUDE_HOME_DIR) / "projects" / f"-opt-projects-{slug}"),
+            f"/home/andros/.claude/projects/-opt-projects-{slug}",
+            False,
+        ),
+        ("bind", f"/opt/projects/{slug}", f"/opt/projects/{slug}", False),
+        ("bind", build_sandbox._KB_DIR, build_sandbox._KB_DIR, True),
+        ("bind", "/home/andros/.local", "/home/andros/.local", True),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -249,23 +316,7 @@ async def test_the_mount_list_is_exactly_these_five_and_nothing_else(monkeypatch
     """
     argv = await _turn_argv(monkeypatch, stage="priprava", slug="acme")
     opts, _ = _scan(argv)
-    mounts = _mount_specs(opts)
-    session_dir = "/home/andros/.claude/projects/-opt-projects-acme"
-    assert {
-        (
-            m.get("type"),
-            m.get("source", m.get("destination", "")),
-            m.get("target", m.get("destination", "")),
-            "readonly" in m,
-        )
-        for m in mounts
-    } == {
-        ("tmpfs", "/home/andros", "/home/andros", False),
-        ("bind", str(Path(build_sandbox._CLAUDE_HOME_DIR) / "projects" / "-opt-projects-acme"), session_dir, False),
-        ("bind", "/opt/projects/acme", "/opt/projects/acme", False),
-        ("bind", build_sandbox._KB_DIR, build_sandbox._KB_DIR, True),
-        ("bind", "/home/andros/.local", "/home/andros/.local", True),
-    }
+    assert _mount_identity(opts) == _expected_mounts("acme")
 
 
 async def test_the_shared_claude_config_dir_is_gone_and_home_is_ephemeral(monkeypatch) -> None:
@@ -295,8 +346,19 @@ async def test_the_shared_claude_config_dir_is_gone_and_home_is_ephemeral(monkey
         assert gone not in joined
 
 
-async def test_a_second_user_flag_or_any_unknown_option_is_impossible(monkeypatch) -> None:
-    argv = await _turn_argv(monkeypatch, stage="priprava")
+@pytest.mark.parametrize("stage", build_sandbox.SANDBOXED_PHASES)
+async def test_a_second_user_flag_or_any_unknown_option_is_impossible(monkeypatch, stage) -> None:
+    """EVERY sandboxed phase, not just the first one somebody wrote a test for.
+
+    This ran with ``stage="priprava"`` alone, and audit showed what that costs: appending
+    ``argv += ["--user", "0:0"]`` inside ``build_run_argv``'s ``if database is not None:`` branch — the
+    Programovanie-only block — left the whole suite GREEN at 112 passed, while docker (which honours the
+    LAST ``--user``) would have run the riskiest phase as ROOT. The same mutation applied unconditionally is
+    red here, which is the proof that the assertion was fine and its COVERAGE was the hole. Parametrising on
+    :data:`build_sandbox.SANDBOXED_PHASES` also means a phase added to that tuple is checked the day it is
+    added, without anyone remembering to widen this.
+    """
+    argv = await _turn_argv(monkeypatch, stage=stage)
     opts, _ = _scan(argv)
     # Exactly ONE --user. Audit added ``-u 0:0`` after it and the container ran as ROOT while the old
     # "never root" test — which read the FIRST --user — stayed green.
@@ -308,15 +370,25 @@ async def test_a_second_user_flag_or_any_unknown_option_is_impossible(monkeypatc
     assert _values(opts, "--security-opt") == ["no-new-privileges"]
 
 
-async def test_the_env_allow_list_is_exactly_this_set(monkeypatch) -> None:
+@pytest.mark.parametrize("stage", build_sandbox.SANDBOXED_PHASES)
+async def test_the_env_allow_list_is_exactly_this_set(monkeypatch, stage) -> None:
     """An EQUALITY, because audit added ``AWS_SECRET_ACCESS_KEY`` and ``NEX_MASTER_KEY`` to the pass-through
-    list and every test stayed green."""
+    list and every test stayed green.
+
+    …and an equality that runs for EVERY sandboxed phase, because audit then put ``-e NEX_MASTER_KEY`` into
+    the ``if database is not None:`` branch and the suite stayed green at 112 passed: this test only ever
+    drove ``navrh``, and Programovanie — the phase whose own docstring calls it the one that can really hurt
+    somebody — was covered by nothing stronger than "there is exactly one ``DATABASE_URL=``". The database
+    is the ONLY difference a phase is allowed to make.
+    """
     monkeypatch.setenv("GITHUB_TOKEN", "ghp-should-never-appear")
-    argv = await _turn_argv(monkeypatch, stage="navrh")
+    argv = await _turn_argv(monkeypatch, stage=stage)
     opts, _ = _scan(argv)
     env = _values(opts, "-e")
     by_name = {e for e in env if "=" not in e}
     by_value = {e.split("=", 1)[0] for e in env if "=" in e}
+    # The one legitimate per-phase difference: Programovanie is handed its throwaway database BY VALUE.
+    extra_by_value = {"DATABASE_URL"} if build_db.phase_needs_database(stage) else set()
     assert by_name == {
         "CLAUDE_CODE_OAUTH_TOKEN",
         "IS_SANDBOX",
@@ -329,22 +401,31 @@ async def test_the_env_allow_list_is_exactly_this_set(monkeypatch) -> None:
         "QDRANT_URL",
         "OLLAMA_URL",
     }
-    assert by_value == {
-        "HOME",
-        "CLAUDE_CONFIG_DIR",
-        "GIT_AUTHOR_NAME",
-        "GIT_AUTHOR_EMAIL",
-        "GIT_COMMITTER_NAME",
-        "GIT_COMMITTER_EMAIL",
-        "GIT_CONFIG_COUNT",
-        "GIT_CONFIG_KEY_0",
-        "GIT_CONFIG_VALUE_0",
-    }
+    assert (
+        by_value
+        == {
+            "HOME",
+            "CLAUDE_CONFIG_DIR",
+            "GIT_AUTHOR_NAME",
+            "GIT_AUTHOR_EMAIL",
+            "GIT_COMMITTER_NAME",
+            "GIT_COMMITTER_EMAIL",
+            "GIT_CONFIG_COUNT",
+            "GIT_CONFIG_KEY_0",
+            "GIT_CONFIG_VALUE_0",
+        }
+        | extra_by_value
+    )
     # Env handed over BY NAME → docker copies the value from its own environment, so no secret lands in an
     # argv that anybody on the host can read out of ``ps``.
     assert "ghp-should-never-appear" not in " ".join(argv)
-    for never in ("DATABASE_URL", "TEST_DATABASE_URL", "SECRET_KEY", "DEDO_API_TOKEN", "DEDO_CHANNEL_DIR"):
+    for never in ("TEST_DATABASE_URL", "SECRET_KEY", "DEDO_API_TOKEN", "DEDO_CHANNEL_DIR"):
         assert never not in " ".join(argv)
+    # ``DATABASE_URL`` is never passed BY NAME (that would copy the BACKEND's own production URL); the
+    # database phase carries exactly one, composed by value — pinned in full by
+    # ``test_the_database_url_can_never_be_the_studios_own``.
+    assert "DATABASE_URL" not in by_name
+    assert ("DATABASE_URL" in by_value) is build_db.phase_needs_database(stage)
 
 
 def test_the_structural_check_catches_every_addition_the_audit_slipped_through() -> None:
@@ -370,6 +451,10 @@ def test_the_structural_check_catches_every_addition_the_audit_slipped_through()
         ["--security-opt", "apparmor=unconfined"],
         ["--privileged"],
         ["-e", "AWS_SECRET_ACCESS_KEY"],
+        # STEP 2 made ``--network`` a LEGAL option, which is exactly how a checker starts letting things
+        # through: ``--network host`` now parses, so the scanner alone no longer stops it and the equality
+        # below has to. A base argv with no database must carry no ``--network`` at all.
+        ["--network", "host"],
     )
     for extra in mutations:
         mutated = base[:2] + extra + base[2:]
@@ -385,6 +470,8 @@ def test_the_structural_check_catches_every_addition_the_audit_slipped_through()
             or len(_values(opts, "--security-opt")) != 1
             or any(src in ("/", "/opt", "/home/icc", "/var/run/docker.sock") for src, _ in mounts)
             or "AWS_SECRET_ACCESS_KEY" in env
+            # No database was planned for this argv, so no network may be joined either.
+            or _values(opts, "--network") != []
         )
         assert caught, f"mutation {extra} slipped through the structural check"
 
@@ -512,7 +599,9 @@ async def test_sandboxed_turn_carries_bypass_permissions_as_a_flag(monkeypatch) 
 
 
 async def test_an_in_process_build_turn_is_byte_identical_to_before(monkeypatch) -> None:
-    argv = await _turn_argv(monkeypatch, stage="programovanie")
+    # ``verifikacia``, not ``programovanie``: STEP 2 moved Programovanie INTO the sandbox, and this test
+    # exists to pin what an UNSANDBOXED turn still looks like.
+    argv = await _turn_argv(monkeypatch, stage="verifikacia")
     assert argv[0] == "claude"
     assert "--permission-mode" not in argv
 
@@ -565,12 +654,14 @@ async def test_prepare_reowns_root_owned_leftovers(monkeypatch, tmp_path) -> Non
 
     chowned: list[tuple[str, int, int]] = []
     monkeypatch.setattr(build_sandbox.os, "lchown", lambda p, u, g: chowned.append((p, u, g)))
-    # Pretend everything on disk belongs to root, as it does after a non-sandboxed phase.
+    # Pretend everything on disk belongs to root, as it does after a non-sandboxed phase. ``st_nlink=1``
+    # says "one directory entry for this inode" — an ordinary file; the multiply-linked case has its own
+    # test below, because it is the one the chown must NOT touch.
     real_lstat = build_sandbox.os.lstat
     monkeypatch.setattr(
         build_sandbox.os,
         "lstat",
-        lambda p: type("S", (), {"st_uid": 0, "st_gid": 0, "st_mode": real_lstat(p).st_mode})(),
+        lambda p: type("S", (), {"st_uid": 0, "st_gid": 0, "st_mode": real_lstat(p).st_mode, "st_nlink": 1})(),
     )
 
     await build_sandbox.prepare_turn("acme")
@@ -579,6 +670,59 @@ async def test_prepare_reowns_root_owned_leftovers(monkeypatch, tmp_path) -> Non
     session = Path(build_sandbox._CLAUDE_HOME_DIR) / "projects" / build_sandbox.session_dir_name(str(root / "acme"))
     assert str(session) in targets
     assert all((u, g) == (1000, 1000) for _, u, g in chowned)
+
+
+async def test_a_hard_link_in_the_project_is_never_chowned_to_the_sandbox_uid(monkeypatch, tmp_path, caplog) -> None:
+    """The mount list bounds PATHS; a hard link is how something outside gets a path inside.
+
+    Audit planted a second directory entry, inside a project tree, for an inode living OUTSIDE every mount
+    root — legal because ``/opt/projects``, ``/opt/customers``, ``/opt/uat`` and ``/opt/infra`` are one
+    device on this host — and the sandbox read AND wrote the file through it. The preparation step made it
+    worse rather than catching it: ``lchown`` cannot tell a hard link from an ordinary file, so this step
+    would hand the sandbox uid a foreign, root-only inode and thereby GRANT the write it exists to scope.
+
+    So: a regular file with ``st_nlink > 1`` is skipped and reported at ERROR. Directories always have
+    ``st_nlink > 1`` and must be unaffected — that is asserted here too, because skipping them would leave
+    every project directory root-owned and break the sandbox outright.
+    """
+    root = tmp_path / "projects"
+    (root / "acme").mkdir(parents=True)
+    ordinary = root / "acme" / "app.py"
+    ordinary.write_text("code", encoding="utf-8")
+    # The bait lives outside the projects root, on the same filesystem — exactly the audit's shape.
+    bait = tmp_path / "outside-the-roots.txt"
+    bait.write_text("SECRET-OUTSIDE-THE-SANDBOX-ROOTS", encoding="utf-8")
+    link = root / "acme" / "innocent-looking.txt"
+    os.link(bait, link)
+    assert os.stat(link).st_ino == os.stat(bait).st_ino
+
+    monkeypatch.setattr(claude_agent, "PROJECTS_ROOT", root)
+    monkeypatch.setattr(build_sandbox, "_CONTAINER_TO_HOST_PREFIX", ((str(root), str(root)),))
+    chowned: list[str] = []
+    monkeypatch.setattr(build_sandbox.os, "lchown", lambda p, u, g: chowned.append(p))
+    # Everything looks root-owned (the state a non-sandboxed phase leaves), so nothing is skipped merely for
+    # already having the right owner — the REAL ``st_mode`` and ``st_nlink`` are kept, which is the point.
+    real_lstat = build_sandbox.os.lstat
+    monkeypatch.setattr(
+        build_sandbox.os,
+        "lstat",
+        lambda p: type(
+            "S", (), {"st_uid": 0, "st_gid": 0, "st_mode": real_lstat(p).st_mode, "st_nlink": real_lstat(p).st_nlink}
+        )(),
+    )
+
+    # ``backend.main`` sets ``propagate = False`` on the ``backend`` logger (its own stderr handler), so
+    # caplog — which listens on the root logger — sees nothing unless propagation is restored for the test.
+    monkeypatch.setattr(logging.getLogger("backend"), "propagate", True)
+    with caplog.at_level(logging.ERROR, logger=build_sandbox.logger.name):
+        await build_sandbox.prepare_turn("acme")
+
+    assert str(link) not in chowned, "a multiply-linked file must never be re-owned to the sandbox uid"
+    assert str(ordinary) in chowned, "an ordinary file still has to be re-owned or the sandbox cannot write"
+    assert str(root / "acme") in chowned, "directories always have st_nlink > 1 and must NOT be skipped"
+    # …and it is never silent: nothing else in the pipeline would ever mention this file.
+    reported = [rec.getMessage() for rec in caplog.records if rec.levelno >= logging.ERROR]
+    assert any("hard link" in msg and str(link) in msg for msg in reported), reported
 
 
 async def test_prepare_failure_is_unavailability_not_a_silent_downgrade(monkeypatch) -> None:
@@ -647,20 +791,20 @@ def test_good_slug_source_resolves_strictly_under_the_projects_root() -> None:
 
 
 # ---------------------------------------------------------------------------
-# (e) routing — the PHASE decides, only two phases move, and NO call site may omit it
+# (e) routing — the PHASE decides, three phases move, and NO call site may omit it
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("stage", ["priprava", "navrh"])
-async def test_priprava_and_navrh_run_in_the_sandbox(monkeypatch, stage) -> None:
+@pytest.mark.parametrize("stage", ["priprava", "navrh", "programovanie"])
+async def test_the_three_sandboxed_phases_run_in_the_sandbox(monkeypatch, stage) -> None:
     assert (await _turn_argv(monkeypatch, stage=stage))[0] == "docker"
 
 
-@pytest.mark.parametrize("stage", ["programovanie", "vizual", "verifikacia", "hotovo", None, "", "unknown"])
+@pytest.mark.parametrize("stage", ["vizual", "verifikacia", "hotovo", None, "", "unknown"])
 async def test_every_other_phase_still_runs_as_a_subprocess(monkeypatch, stage) -> None:
-    # STEP 1 moves exactly two phases. The rest are told by their charter to run ``docker compose up``
-    # against a real PostgreSQL, so taking the socket away from them TODAY would simply break them —
-    # brokered Docker access is STEP 2. An unknown/absent phase also keeps today's behaviour.
+    """STEP 2 moves three phases of five. Vizuál and Verifikácia stay OUT and that is not an oversight:
+    they build and run the whole app through ``docker compose``, which is what the socket is for, and no
+    engine-supplied database replaces that. An unknown/absent phase also keeps today's behaviour."""
     assert (await _turn_argv(monkeypatch, stage=stage))[0] == "claude"
 
 
@@ -672,10 +816,11 @@ async def test_a_consult_turn_never_takes_the_build_sandbox(monkeypatch) -> None
 
 
 def test_phase_gate_is_the_single_source_of_the_routing() -> None:
-    assert build_sandbox.SANDBOXED_PHASES == ("priprava", "navrh")
+    assert build_sandbox.SANDBOXED_PHASES == ("priprava", "navrh", "programovanie")
     assert build_sandbox.phase_uses_sandbox("priprava") is True
     assert build_sandbox.phase_uses_sandbox("NAVRH") is True  # normalised, not case-fragile
-    for other in ("programovanie", "vizual", "verifikacia", None, "", 7):
+    assert build_sandbox.phase_uses_sandbox("programovanie") is True
+    for other in ("vizual", "verifikacia", None, "", 7):
         assert build_sandbox.phase_uses_sandbox(other) is False
 
 
@@ -919,6 +1064,293 @@ async def test_a_timed_out_sandbox_container_is_reaped(monkeypatch) -> None:
 
 
 # ---------------------------------------------------------------------------
+# STEP 2 — Programovanie: a database INSTEAD of the docker socket
+# ---------------------------------------------------------------------------
+
+
+async def test_programovanie_gets_a_database_it_can_actually_reach(monkeypatch, docker_calls) -> None:
+    """(a) The whole justification for sandboxing this phase, asserted end to end.
+
+    "It has a DATABASE_URL" would be worth nothing on its own — a URL pointing at a host the container has
+    no route to is exactly the failure this is meant to prevent. So the three facts are checked TOGETHER and
+    against the real argv: the sandbox joins network N, the database container was created on network N, and
+    the hostname inside the URL is the alias that container answers to on it.
+    """
+    argv = await _turn_argv(monkeypatch, stage="programovanie", slug="acme")
+    opts, _ = _scan(argv)
+
+    networks = _values(opts, "--network")
+    assert len(networks) == 1, f"exactly one network, got {networks}"
+    urls = [e.split("=", 1)[1] for e in _values(opts, "-e") if e.startswith("DATABASE_URL=")]
+    assert len(urls) == 1, f"exactly one DATABASE_URL, got {urls}"
+
+    created = _control(docker_calls, "docker", "network", "create")
+    started = _control(docker_calls, "docker", "run")
+    assert created[-1] == networks[0]
+    assert started[started.index("--network") + 1] == networks[0]
+
+    alias = started[started.index("--network-alias") + 1]
+    assert f"@{alias}:{build_db.POSTGRES_PORT}/" in urls[0], urls[0]
+    # …and the engine waited for it to answer before handing the turn a URL (a cold postgres needs seconds).
+    assert any(c[:3] == ("docker", "exec", started[started.index("--name") + 1]) for c in docker_calls)
+
+
+async def test_the_database_url_can_never_be_the_studios_own(monkeypatch) -> None:
+    """Why ``DATABASE_URL`` is passed BY VALUE and not by name, as a test rather than a comment.
+
+    ``-e DATABASE_URL`` (by name) copies the value from the docker CLI's own environment — which is the
+    BACKEND's, whose ``DATABASE_URL`` is the NEX Studio production database. By-name would therefore hand
+    the agent that URL the moment an override stopped being applied; by-value can only hand it the string
+    the planner composed. This pins the composed one and that the ambient one never travels.
+    """
+    monkeypatch.setenv("DATABASE_URL", "postgresql+pg8000://studio:studio@db:5432/nexstudiovisual_ambient")
+    argv = await _turn_argv(monkeypatch, stage="programovanie", slug="acme")
+    opts, _ = _scan(argv)
+    env = _values(opts, "-e")
+    assert "DATABASE_URL" not in env, "by NAME would copy the backend's own database URL into the sandbox"
+    assert "nexstudiovisual_ambient" not in " ".join(argv)
+    assert [e for e in env if e.startswith("DATABASE_URL=")]
+
+
+async def test_a_database_buys_a_network_and_not_one_extra_path(monkeypatch) -> None:
+    """(b) The socket is absent as an EQUALITY over the mount set — never a list of forbidden strings.
+
+    The deny-list version of this file stayed green while audit mounted the whole host disk, so "no
+    ``docker.sock`` in the argv" is not the assertion. The assertion is that Programovanie's mount set is
+    the SAME SET as Príprava's: whatever STEP 2 handed the riskiest phase, it was not a path.
+    """
+    priprava, _ = _scan(await _turn_argv(monkeypatch, stage="priprava", slug="acme"))
+    programovanie, _ = _scan(await _turn_argv(monkeypatch, stage="programovanie", slug="acme"))
+    assert _mount_identity(programovanie) == _expected_mounts("acme")
+    assert _mount_identity(programovanie) == _mount_identity(priprava)
+    # The difference between the two phases is exactly: one network and one variable.
+    assert _values(priprava, "--network") == []
+    assert len(_values(programovanie, "--network")) == 1
+
+
+def _phase_invariant_opts(opts: list[tuple[str, str | None]]) -> list[tuple[str, str | None]]:
+    """The argv options with ONLY the three things a phase is allowed to differ in removed.
+
+    ``--name`` carries the per-turn token, ``--network`` is the per-build network and ``-e DATABASE_URL=``
+    is the composed URL — everything else must be identical for every sandboxed phase, in ORDER and in
+    MULTIPLICITY (a list, not a set, so a duplicated flag is a difference too — docker honours the last
+    occurrence of ``--user``, which is exactly how a second one becomes a root escalation).
+    """
+    return [
+        (flag, value)
+        for flag, value in opts
+        if flag not in ("--name", "--network") and not (flag == "-e" and (value or "").startswith("DATABASE_URL="))
+    ]
+
+
+@pytest.mark.parametrize("stage", [s for s in build_sandbox.SANDBOXED_PHASES if s != "priprava"])
+async def test_every_sandboxed_phase_gets_the_same_argv_but_its_database(monkeypatch, stage) -> None:
+    """THE WHOLE ARGV, phase against phase — the assertion the per-branch mutations walked straight past.
+
+    ``test_a_database_buys_a_network_and_not_one_extra_path`` compares the MOUNT SET and counts networks,
+    and its own comment claims "the difference between the two phases is exactly: one network and one
+    variable" — but it never compared the other options, so ``build_run_argv``'s ``if database is not None:``
+    branch was outside every equality in this file. Audit put ``--user 0:0`` there (root, since docker
+    honours the last one) and then ``-e NEX_MASTER_KEY``; both left the suite green at 112 passed, and both
+    are red here.
+
+    Stated as "identical except for the three per-turn/per-phase values" rather than as another hand-written
+    list, because a list is a thing that drifts: whatever is added to that branch tomorrow — a mount, a
+    capability, an environment variable, a second ``--user`` — is a difference this test names.
+    """
+    priprava, _ = _scan(await _turn_argv(monkeypatch, stage="priprava", slug="acme"))
+    other, _ = _scan(await _turn_argv(monkeypatch, stage=stage, slug="acme"))
+    assert _phase_invariant_opts(other) == _phase_invariant_opts(priprava)
+
+
+async def test_the_database_container_is_not_reachable_from_anywhere_else(monkeypatch, docker_calls) -> None:
+    """The per-build database publishes NO port and mounts NO volume.
+
+    A published port would put an empty, freshly-passworded PostgreSQL on the host's interfaces for the
+    length of every build; a volume would let one build's test data survive into the next one. Neither is a
+    hypothetical addition — both are one line in a ``docker run``.
+    """
+    await _turn_argv(monkeypatch, stage="programovanie", slug="acme")
+    started = _control(docker_calls, "docker", "run")
+    assert "-p" not in started and "--publish" not in started
+    assert "-v" not in started and "--volume" not in started and "--mount" not in started
+    assert "--network" in started  # …and it is on the private per-build network, not the default bridge
+
+
+async def test_a_project_needing_more_than_postgres_fails_loudly_and_names_it(monkeypatch, tmp_path) -> None:
+    """(d) An admitted boundary, never a silent half-environment.
+
+    A build turn given half its services produces failures nobody can attribute — the agent "fixes" code
+    that was never broken. So the turn dies before anything starts, and the message carries the name of the
+    service the engine did not supply, because "unsupported service" would send somebody reading YAML.
+    """
+    root = tmp_path / "projects"
+    (root / "acme").mkdir(parents=True)
+    (root / "acme" / "docker-compose.yml").write_text(
+        "services:\n"
+        "  db:\n    image: postgres:16-alpine\n"
+        "  cache:\n    image: redis:7-alpine\n"
+        "  backend:\n    build: ./backend\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(claude_agent, "PROJECTS_ROOT", root)
+    monkeypatch.setattr(build_sandbox, "_CONTAINER_TO_HOST_PREFIX", ((str(root), str(root)),))
+    mock_exec = AsyncMock(return_value=_ok_proc())
+    monkeypatch.setattr(claude_agent.asyncio, "create_subprocess_exec", mock_exec)
+
+    with pytest.raises(build_db.UnsupportedProjectService) as exc:
+        await claude_agent.invoke_claude(
+            project_slug="acme", claude_session_id=uuid4(), prompt="p", stage="programovanie"
+        )
+    assert "cache" in str(exc.value)
+    # The project's OWN services are not mistaken for infrastructure — only the off-the-shelf one is named.
+    assert "backend" not in str(exc.value)
+    mock_exec.assert_not_called()
+
+
+@pytest.mark.parametrize("outcome", ["clean", "crash", "timeout"])
+async def test_the_database_and_its_network_die_with_the_turn(monkeypatch, docker_calls, outcome) -> None:
+    """(c) Cleanup on EVERY exit path — the leak nobody notices until the disk is full.
+
+    ``--rm`` cannot do this job: the database has to outlive the docker CLI that created it, and on a
+    timeout that CLI is killed anyway. So the release runs from a ``finally``, and all three shapes of exit
+    are driven here rather than trusting that one implies the others.
+    """
+    if outcome == "clean":
+        proc = _ok_proc()
+    elif outcome == "crash":
+        proc = _failing_proc(1, b"claude: some model error")
+    else:
+        proc = MagicMock()
+        proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
+    monkeypatch.setattr(claude_agent.asyncio, "create_subprocess_exec", AsyncMock(return_value=proc))
+    monkeypatch.setattr(claude_agent, "_kill_process_tree", AsyncMock())
+    monkeypatch.setattr(build_sandbox, "reap_container", AsyncMock())
+
+    async def _run() -> None:
+        await claude_agent.invoke_claude(
+            project_slug="acme", claude_session_id=uuid4(), prompt="p", stage="programovanie", timeout=1
+        )
+
+    if outcome == "clean":
+        await _run()
+    else:
+        with pytest.raises(claude_agent.ClaudeAgentError):
+            await _run()
+
+    started = _control(docker_calls, "docker", "run")
+    container = started[started.index("--name") + 1]
+    network = started[started.index("--network") + 1]
+    assert ("docker", "rm", "-f", container) in docker_calls
+    assert ("docker", "network", "rm", network) in docker_calls
+
+
+async def test_a_cancelled_dispatch_takes_its_database_with_it(monkeypatch, docker_calls) -> None:
+    """The fourth exit path, and the one a ``finally`` exists for: the coroutine is cancelled mid-turn."""
+    proc = MagicMock()
+    proc.communicate = AsyncMock(side_effect=asyncio.CancelledError())
+    monkeypatch.setattr(claude_agent.asyncio, "create_subprocess_exec", AsyncMock(return_value=proc))
+    monkeypatch.setattr(claude_agent, "_kill_process_tree", AsyncMock())
+    monkeypatch.setattr(build_sandbox, "reap_container", AsyncMock())
+    with pytest.raises(asyncio.CancelledError):
+        await claude_agent.invoke_claude(
+            project_slug="acme", claude_session_id=uuid4(), prompt="p", stage="programovanie"
+        )
+    started = _control(docker_calls, "docker", "run")
+    assert ("docker", "rm", "-f", started[started.index("--name") + 1]) in docker_calls
+    assert ("docker", "network", "rm", started[started.index("--network") + 1]) in docker_calls
+
+
+async def test_a_failure_between_the_database_and_the_container_leaks_neither(monkeypatch, docker_calls) -> None:
+    """THE FIFTH EXIT PATH — the one the ``finally`` did not cover, because it was not yet open.
+
+    ``_invoke_once`` used to run ``build_db.start`` and then compose the sandbox argv BEFORE the ``try``:
+
+        642  await build_db.start(turn_database)      ← network + PostgreSQL now running
+        643  args = build_sandbox.build_run_argv(…)   ← declares Raises: BuildSandboxUnavailable
+        650  try: … 664 finally: release(…)
+
+    So every way ``build_run_argv`` can refuse — an empty claude argv, an unreachable session dir, a mount
+    it cannot compose — left a PostgreSQL and a per-build network running with nothing to remove them.
+    ``--rm`` cannot save it: the container must OUTLIVE the docker CLI that created it, which is the whole
+    reason ``release`` exists. The other four exit paths (clean/crash/timeout/cancel) all run AFTER the argv
+    is built, so none of them touched this and the module's claim that the database dies with the turn "on
+    every path out" was simply untrue.
+    """
+    monkeypatch.setattr(
+        build_sandbox,
+        "build_run_argv",
+        MagicMock(side_effect=build_sandbox.BuildSandboxUnavailable("composing the argv failed")),
+    )
+    mock_exec = AsyncMock(return_value=_ok_proc())
+    monkeypatch.setattr(claude_agent.asyncio, "create_subprocess_exec", mock_exec)
+
+    with pytest.raises(build_sandbox.BuildSandboxUnavailable):
+        await claude_agent.invoke_claude(
+            project_slug="acme", claude_session_id=uuid4(), prompt="p", stage="programovanie"
+        )
+
+    mock_exec.assert_not_called()  # no turn ever ran…
+    started = _control(docker_calls, "docker", "run")  # …but the database HAD been started
+    assert ("docker", "rm", "-f", started[started.index("--name") + 1]) in docker_calls
+    assert ("docker", "network", "rm", started[started.index("--network") + 1]) in docker_calls
+
+
+async def test_two_concurrent_builds_cannot_collide(monkeypatch, docker_calls) -> None:
+    """(f) Two builds of the SAME project at the same moment must not share a name — of anything.
+
+    The worst version of this bug is not a crash: it is the second build attaching to the first build's
+    database and the two test suites truncating each other's tables, which reads as flaky tests forever.
+    Every docker object of a turn is therefore named after the project AND a per-turn token.
+    """
+    first = await _turn_argv(monkeypatch, stage="programovanie", slug="acme")
+    calls_first = list(docker_calls)
+    docker_calls.clear()
+    second = await _turn_argv(monkeypatch, stage="programovanie", slug="acme")
+
+    def _names(argv: list[str], calls: list[tuple[str, ...]]) -> tuple[str, str, str]:
+        opts, _ = _scan(argv)
+        run = _control(calls, "docker", "run")
+        return (
+            _values(opts, "--name")[0],
+            run[run.index("--name") + 1],
+            _control(calls, "docker", "network", "create")[-1],
+        )
+
+    a = _names(first, calls_first)
+    b = _names(second, list(docker_calls))
+    assert not set(a) & set(b), f"two concurrent builds share a docker object name: {set(a) & set(b)}"
+    # …and the project is still IN each name, so an operator can find a leak by project.
+    assert all("acme" in name for name in a + b)
+
+
+def test_a_turn_names_all_three_objects_after_one_token(monkeypatch) -> None:
+    """One token per TURN, not one per object — so everything a leaked dispatch left behind is traceable
+    to the same dispatch instead of being three unrelated names."""
+    token = build_sandbox.turn_token()
+    plan = build_db.plan_database(slug="acme", host_project_dir="/nonexistent", token=token)
+    assert build_sandbox.container_name("acme", token).endswith(token)
+    assert plan.container.endswith(token)
+    assert plan.network.endswith(token)
+
+
+def test_only_programovanie_is_given_a_database(monkeypatch) -> None:
+    """A database for a phase that never queries one is a container nobody reaps."""
+    token = "0123456789ab"
+    for stage in ("priprava", "navrh", "vizual", "verifikacia", None, ""):
+        assert build_sandbox.plan_turn_database(project_slug="acme", stage=stage, token=token) is None
+    assert build_sandbox.plan_turn_database(project_slug="acme", stage="programovanie", token=token) is not None
+
+
+async def test_the_kill_switch_also_switches_the_database_off(monkeypatch, docker_calls) -> None:
+    """(7) One lever, not two. ``BUILD_SANDBOX=0`` sends Programovanie back to the subprocess — where it has
+    the docker socket and starts its own database — so the engine must not also be starting one."""
+    monkeypatch.setenv("BUILD_SANDBOX", "0")
+    assert (await _turn_argv(monkeypatch, stage="programovanie"))[0] == "claude"
+    assert docker_calls == []
+
+
+# ---------------------------------------------------------------------------
 # Readiness — an unmet precondition is visible at boot, not at the first stalled build
 # ---------------------------------------------------------------------------
 
@@ -960,15 +1392,27 @@ def test_preflight_reports_the_kill_switch_as_a_choice_not_a_fault(monkeypatch) 
 
 
 def test_the_network_residual_is_published_not_implied() -> None:
-    """What the sandbox does NOT isolate has to be readable, not inferred from silence. Measured from
-    inside the container: the host gateway answers on 9217 (this Studio's API), 9207 (v3) and 80/443
-    (Traefik → every deployed customer app and UAT). ``--network none`` is not an option — it cuts the
-    Claude MAX endpoint too and the turn hangs until its timeout, measured. The fix is a DOCKER-USER
-    firewall rule on the host, which is infrastructure and not STEP 1."""
+    """What the sandbox does NOT isolate has to be readable, not inferred from silence — AND IT HAS TO BE
+    THE WHOLE ANSWER.
+
+    The published sentence used to name three services (the Studio API, the v3 API, Traefik) and add that
+    "Postgres, Ollama and Qdrant were NOT reachable". Audit re-measured from a container on a user-defined
+    network of the exact shape ``build_db.network_create_argv`` makes, and the truth is categorical: the
+    bridge gateway answers on EVERY port published to 0.0.0.0 on this host — six PostgreSQL instances (this
+    Studio's own production database among them), Vaultwarden, the NEX Manager API, Prometheus, Alertmanager
+    and Grafana included. A short list where the rule is "everything published" reads as a reassurance, so
+    this test pins the CATEGORY and the databases by name; naming three ports again turns it red.
+
+    ``--network none`` is not an option — it cuts the Claude MAX endpoint too and the turn hangs until its
+    timeout, measured. The fix is a DOCKER-USER firewall rule on the host, which is infrastructure.
+    """
     payload = build_sandbox.preflight().as_dict()
     assert "network_residual" in payload
-    for expected in ("default docker bridge", "host gateway", "not implemented"):
-        assert expected.lower() in payload["network_residual"].lower()
+    residual = payload["network_residual"].lower()
+    for expected in ("published on 0.0.0.0", "not a short list", "postgresql", "not implemented"):
+        assert expected in residual, f"{expected!r} missing from the published network residual"
+    # The honest half in the sandbox's favour is stated too: other stacks' own networks are NOT reachable.
+    assert "private networks are not reachable" in residual
 
 
 def test_reading_the_knowledge_base_works_BOTH_ways_or_neither(monkeypatch) -> None:

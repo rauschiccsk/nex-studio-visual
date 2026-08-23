@@ -72,7 +72,7 @@ class Settings(BaseSettings):
     # which is the tag the deploy script actually built. ``CONSULT_SANDBOX_IMAGE`` still overrides.
     consult_sandbox_image: str = ""
 
-    # Build sandbox (ICCINT-16 STEP 1) — the image the Príprava/Návrh build turns run inside, a sibling of
+    # Build sandbox (ICCINT-16 STEP 2) — the image the Príprava/Návrh/Programovanie build turns run inside, a sibling of
     # THIS backend image (it needs the same git/gh/node tooling and the same mounted ``claude`` binary).
     # EMPTY on purpose: :func:`backend.services.build_sandbox.sandbox_image` then derives
     # ``nex-studio-visual-backend:v<app_version>``, i.e. the tag the deploy script actually built for the
