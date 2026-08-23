@@ -3,9 +3,17 @@
 Uses TEST_DATABASE_URL — NEVER the production DATABASE_URL.
 Each test runs in a savepoint that is rolled back after the test,
 keeping the test database clean without costly create/drop cycles.
+
+ONE DATABASE PER RUN (audit 2026-08-23, finding 6). The base name comes from ``TEST_DATABASE_URL`` /
+``settings.test_database_url``; ``_get_test_database_url`` then suffixes it with the running
+process (xdist worker id, else PID). Before this, two pytest runs in the same checkout — two agents
+working the same ticket, which is the normal case here — shared one database whose schema each of them
+DROPs at startup, and the loser reported failures that did not exist. See ``tests._db_guard.run_scoped_url``
+for the measurements. The per-run database is created at session start and DROPPED at session end.
 """
 
 import os
+import re
 from pathlib import Path
 
 # Set required env vars BEFORE any backend imports trigger Settings() instantiation
@@ -41,15 +49,92 @@ from backend.db.session import _ensure_pg8000_driver, get_db
 from backend.main import app
 from backend.services import template_bootstrap
 from backend.services.knowledge_base_writer import KnowledgeBaseWriter
-from tests._db_guard import assert_test_db_distinct
+from tests._db_guard import assert_test_db_distinct, run_scoped_url
+
+#: Suffix pattern of a run-scoped database (``…_test_gw0`` / ``…_test_p12345``). Used to sweep databases
+#: left behind by a run that was killed before its teardown — a stray one is harmless but they accumulate.
+_RUN_DB_SUFFIX = re.compile(r"_(?:gw\d+|p\d+)$")
 
 
-def _get_test_database_url() -> str:
-    """Return the test database URL, ensuring pg8000 driver."""
+def _run_token() -> str:
+    """Identify THIS pytest process: the xdist worker id when sharded, else the PID."""
+    worker = os.environ.get("PYTEST_XDIST_WORKER")
+    return worker if worker else f"p{os.getpid()}"
+
+
+def _base_test_database_url() -> str:
+    """The configured test database URL (shared name, no run suffix), ensuring pg8000 driver."""
     from backend.config.settings import settings
 
     url = os.environ.get("TEST_DATABASE_URL", settings.test_database_url)
     return _ensure_pg8000_driver(url)
+
+
+def _get_test_database_url() -> str:
+    """The database THIS run owns: the configured URL, suffixed per process.
+
+    Computed once and cached in the environment, so every caller in the run (the ``test_engine``
+    fixture, the ``_guard_prod_db_isolation`` re-assertion, ``backend/tests`` which re-imports the
+    fixture) agrees on one name — a second call must never mint a second database.
+    """
+    cached = os.environ.get("_NEXSTUDIO_RUN_TEST_DATABASE_URL")
+    if cached:
+        return cached
+    url = run_scoped_url(_base_test_database_url(), _run_token())
+    os.environ["_NEXSTUDIO_RUN_TEST_DATABASE_URL"] = url
+    return url
+
+
+def _drop_database(url: str) -> None:
+    """Drop the database named by ``url`` (best effort — a leftover is junk, not a failure)."""
+    head, _, tail = url.rpartition("/")
+    db_name = tail.split("?")[0]
+    admin_engine = create_engine(head + "/postgres", isolation_level="AUTOCOMMIT")
+    try:
+        with admin_engine.connect() as conn:
+            # FORCE (PG 13+) evicts a connection some test left open; without it the DROP would block.
+            conn.execute(text(f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)'))
+    except Exception as exc:  # pragma: no cover - cleanup must never fail a green run
+        print(f"[conftest] could not drop the run database {db_name!r}: {exc}")
+    finally:
+        admin_engine.dispose()
+
+
+def _sweep_orphaned_run_databases(base_url: str) -> None:
+    """Drop run databases whose pytest process is gone (a run killed before teardown).
+
+    Only ``<base>_p<pid>`` names are considered, and only when no process with that PID is alive — an
+    xdist worker database (``…_gw0``) carries no PID and is left alone, as is any database that does not
+    look like ours. Best effort: this is housekeeping, never a gate.
+    """
+    head, _, tail = base_url.rpartition("/")
+    base_name = tail.split("?")[0]
+    admin_engine = create_engine(head + "/postgres", isolation_level="AUTOCOMMIT")
+    try:
+        with admin_engine.connect() as conn:
+            names = [
+                row
+                for row in conn.execute(
+                    text("SELECT datname FROM pg_database WHERE datname LIKE :pat"),
+                    {"pat": f"{base_name}_p%"},
+                ).scalars()
+            ]
+        for name in names:
+            if not _RUN_DB_SUFFIX.search(name):
+                continue
+            pid = int(name.rsplit("_p", 1)[1])
+            try:
+                os.kill(pid, 0)
+                continue  # that run is alive — its database is in use
+            except PermissionError:
+                continue  # alive, owned by another user
+            except (OSError, ProcessLookupError):
+                pass
+            _drop_database(f"{head}/{name}")
+    except Exception as exc:  # pragma: no cover - housekeeping must never fail a run
+        print(f"[conftest] run-database sweep skipped: {exc}")
+    finally:
+        admin_engine.dispose()
 
 
 def _ensure_test_database_exists(test_url: str) -> None:
@@ -126,6 +211,10 @@ def test_engine():
     ``_reset_test_schema_to_head``) rather than via ``Base.metadata.create_all``,
     so the persistent test DB always reflects migrations 001..074 and never a
     stale v1 schema.
+
+    The database is PRIVATE TO THIS RUN (see the module docstring): created here, dropped on teardown.
+    Two concurrent runs in the same checkout therefore cannot drop each other's schema mid-test, which
+    is what made this gate report failures that did not exist (audit 2026-08-23, finding 6).
     """
     from backend.config.settings import settings
 
@@ -141,6 +230,10 @@ def test_engine():
     # re-imports this fixture but not the autouse one below.
     assert_test_db_distinct(settings.database_url, url)
 
+    # Only AFTER the distinctness guard: the sweep issues DROP DATABASE, so it must never run against a
+    # configuration the guard would have rejected.
+    _sweep_orphaned_run_databases(_base_test_database_url())
+
     _ensure_test_database_exists(url)
 
     # Reset the persistent test DB to the v2 migration head before any test
@@ -154,6 +247,10 @@ def test_engine():
     yield engine
 
     engine.dispose()
+    # The run owns this database and nothing outlives the run — drop it, so repeated runs do not leave a
+    # trail of ``…_test_p<pid>`` databases behind. A failure here is logged, never raised: cleanup must
+    # not turn a green suite red.
+    _drop_database(url)
 
 
 @pytest.fixture(scope="session", autouse=True)

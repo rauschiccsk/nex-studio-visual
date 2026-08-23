@@ -19,7 +19,6 @@ import pytest
 from sqlalchemy import create_engine, insert, text
 from sqlalchemy.orm import Session
 
-from backend.config.settings import settings
 from backend.db.base import Base
 from backend.db.models.deploy import DeployEvent
 from backend.db.session import _ensure_pg8000_driver
@@ -43,8 +42,19 @@ from tests.integration.fixtures.synthetic_v1 import (
 
 
 def _url_with_db(name: str) -> str:
-    base, _ = settings.test_database_url.rsplit("/", 1)
-    return _ensure_pg8000_driver(f"{base}/{name}")
+    """A sibling database of THIS RUN's test database.
+
+    The name carries the run's own suffix (``…_p12345``) because these two databases are created and
+    DROPPED wholesale: with a fixed name, a second pytest run in the same checkout would drop them from
+    under the first mid-test — the shared-database defect the run-scoping removed (audit 2026-08-23,
+    finding 6).
+    """
+    from tests.conftest import _get_test_database_url
+
+    run_url = _get_test_database_url()
+    base, run_db = run_url.rsplit("/", 1)
+    suffix = run_db.split("?")[0].rsplit("_", 1)[-1]
+    return _ensure_pg8000_driver(f"{base}/{name}_{suffix}")
 
 
 SOURCE_URL = _url_with_db("nexstudio_mig_src")

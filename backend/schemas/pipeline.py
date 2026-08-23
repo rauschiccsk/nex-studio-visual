@@ -87,6 +87,27 @@ class PipelineMessageRead(BaseModel):
     seq: int
 
 
+class DedoProposalRead(BaseModel):
+    """A finding from our technical team WAITING for the Manažér's click (ICCINT-24).
+
+    Board-level rather than "the FE finds it in ``recent_messages``" on purpose: that list is the last N
+    messages, so on a busy build a proposal would silently scroll out of the tail and the cockpit would
+    stop offering something that still exists. A bar that renders from THIS field is honest in both
+    directions — present exactly when there is an open proposal, absent exactly when there is not.
+
+    ``proposed_action`` is the verb the send will use (``uprav`` / ``answer`` / ``ask``) — the same one the
+    Manažér would have clicked himself. The cockpit says in plain Slovak what it will do; it never asks him
+    to choose an engine verb.
+    """
+
+    message_id: UUID
+    #: Dedo's own wording, verbatim. The cockpit shows it EDITABLE — the Manažér may add to it or rephrase
+    #: it, and what he actually sends is what goes to the agent (this text stays on the archived row).
+    content: str
+    proposed_action: str
+    created_at: datetime
+
+
 class BoardTask(BaseModel):
     """The Programovanie task currently in focus, for the who's-up status (WS-C2, CR-NS-035; v2 §4.4.2)."""
 
@@ -159,6 +180,42 @@ class PipelineBoardRead(BaseModel):
     #: iframe so the Manažér can walk the running app while the AI edits it. Additive, no migration; ``None``
     #: whenever the version never entered the ``vizual`` stage (or no URL was recorded yet).
     vizual_url: Optional[str] = None
+    #: ICCINT-24: the open proposal from our technical team, or ``None`` when there is none (the usual
+    #: case). Honest-by-construction: the cockpit bar renders IF AND ONLY IF this field is set, so a
+    #: proposal can never be silently pending behind a screen that offers nothing — and a handled one
+    #: (sent or rejected) is never offered twice, because resolving it archives the row.
+    dedo_proposal: Optional[DedoProposalRead] = None
+
+
+class DedoProposalSendRequest(BaseModel):
+    """Body for ``POST /pipeline/{version_id}/dedo-proposal/send`` (ICCINT-24) — what the Manažér is
+    actually sending, and WHICH finding he decided about.
+
+    ``text`` is the content of the box he was shown: Dedo's wording, possibly edited. It is required and
+    non-empty on purpose — this endpoint sends what the MANAŽÉR has in front of him, never a text the
+    server substitutes on his behalf; an empty box is a mistake, not consent to send the original.
+
+    ``message_id`` is the proposal that was ON HIS SCREEN, and it is what makes the guarantee true rather
+    than probable (audit 2026-08-23, finding 1). Without it the server looked up "the currently open
+    proposal" again at click time, so a finding Dedo wrote in between — the cockpit reconciles every 25 s,
+    and re-measuring is his normal mode — would be executed with ITS verb, not the one written on the
+    button the Manažér pressed. Naming the row means the server either does exactly what he decided, or
+    refuses (409) and tells him what changed.
+    """
+
+    message_id: UUID = Field(..., description="The proposal the Manažér was shown (PipelineBoardRead.dedo_proposal).")
+    text: str = Field(..., min_length=1, description="The text to send — Dedo's proposal as the Manažér edited it.")
+
+
+class DedoProposalRejectRequest(BaseModel):
+    """Body for ``POST /pipeline/{version_id}/dedo-proposal/reject`` (ICCINT-24).
+
+    Declining names the proposal too, and for the same reason as the send: a reject that re-resolved "the
+    open one" declined whatever had arrived most recently while the finding the Manažér actually rejected
+    stayed open, ready to be offered again as though he had never looked at it.
+    """
+
+    message_id: UUID = Field(..., description="The proposal the Manažér was shown and is declining.")
 
 
 class PipelineActionRequest(BaseModel):

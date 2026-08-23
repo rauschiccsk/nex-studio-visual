@@ -54,6 +54,21 @@ class DedoMessageCreate(BaseModel):
     content: str = Field(min_length=1)
 
 
+class DedoProposalCreate(BaseModel):
+    """A finding Dedo PROPOSES the Manažér send to the agent (ICCINT-24) — not a message to the agent.
+
+    The extra field over :class:`DedoMessageCreate` is the whole point: a proposal carries the ACTION it
+    should be sent with, because the Manažér must not be asked to pick a verb out of the engine's
+    vocabulary. It is one of the three he already uses (``uprav`` / ``answer`` / ``ask``); the send goes
+    through that action with all of its guards, so there is no second way into the agent's prompt.
+    """
+
+    content: str = Field(min_length=1)
+    #: Validated against :data:`~backend.services.dedo_message.PROPOSAL_ACTIONS` in the service (409), so
+    #: the allowed set lives in ONE place next to the writer instead of being restated as a Literal here.
+    proposed_action: str = Field(min_length=1, description="uprav | answer | ask")
+
+
 class DedoUnblockRequest(BaseModel):
     """Release a build stuck on a NEX Studio bug. The reason is mandatory, not paperwork.
 

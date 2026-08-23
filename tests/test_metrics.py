@@ -14,7 +14,6 @@ what it cost, not whether we beat a human — so nothing here asserts on it.
 
 from __future__ import annotations
 
-import os
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -925,9 +924,12 @@ _MIGRATION_086_CALIBRATED = "777"
 
 
 def _test_database_url() -> str:
-    from backend.config.settings import settings
+    """The RUN-SCOPED test database URL (``tests.conftest``) — the throwaway ``…_mig086`` below is derived
+    from it, and a base name here would give two concurrent runs the same throwaway database (audit
+    2026-08-23, finding 6)."""
+    from tests.conftest import _get_test_database_url
 
-    return _ensure_pg8000_driver(os.environ.get("TEST_DATABASE_URL", settings.test_database_url))
+    return _ensure_pg8000_driver(_get_test_database_url())
 
 
 def _drop_database_if_exists(admin_url: str, db_name: str) -> None:

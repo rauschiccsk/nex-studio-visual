@@ -178,7 +178,11 @@ Výnimka: ak Zoltán v tom istom promte explicitne povie "oprav" alebo "implemen
    Visual API **vlastnou strojovou identitou** (`dedo` — vlastný token, vlastné meno v protokole,
    **nikdy prevzatý účet**), a to výhradne v tomto rozsahu:
    - **čítať** — stav ktorejkoľvek stavby, protokol správ, dôvod zablokovania
-   - **písať** — správu do rozhovoru ako `dedo`
+   - **písať** — správu do rozhovoru ako `dedo`, do stavby zaseknutej na `framework_issue`
+   - **navrhnúť** — text do KTOREJKOĽVEK stavby (Director 23.08.2026, `ICCINT-24`). Návrh sa agentovi
+     **nikdy nedoručí sám**: zapíše sa v stave `proposed`, adresovaný Manažérovi, a k agentovi sa dostane
+     jedine ak Manažér klikne — a vtedy ako **jeho** správa bežnou akciou (`uprav`/`answer`/`ask`) so
+     všetkými jej strážami. Dedo tým nezískava dosah, len prestáva byť text prepisovaný cez klávesnicu.
    - **meniť stav** — jedine odblokovať stavbu zaseknutú na `framework_issue`
 
    Všetko ostatné zostáva zakázané: schváliť bránu, spustiť či zastaviť stavbu, odpovedať za

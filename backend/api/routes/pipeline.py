@@ -4,6 +4,8 @@
 * ``GET    /pipeline/{version_id}/messages`` → paginated message log
 * ``POST   /pipeline/{version_id}/action``   → Director action → orchestrator,
   then broadcasts ``state_changed`` + ``message_added`` to live board sockets.
+* ``POST   /pipeline/{version_id}/dedo-proposal/send|reject`` → ICCINT-24: the Manažér sends (through the
+  ordinary action the proposal names) or declines a finding our technical team left for him.
 * ``WS     /pipeline/ws/{version_id}?token`` → live board feed + §9 presence.
 
 v4.0.35: owner-or-admin (was Director-only). Any authenticated user reaches these routes; the authz layer
@@ -17,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from typing import Callable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import HTMLResponse
@@ -38,6 +41,9 @@ from backend.schemas.pipeline import (
     BoardTask,
     ChangeRequestCaptureRequest,
     ChangeRequestCaptureResponse,
+    DedoProposalRead,
+    DedoProposalRejectRequest,
+    DedoProposalSendRequest,
     FastFixStartRequest,
     FastFixStartResponse,
     PipelineActionRequest,
@@ -49,6 +55,7 @@ from backend.schemas.pipeline import (
 )
 from backend.services import agent_terminal as agent_terminal_service
 from backend.services import change_request as change_request_service
+from backend.services import dedo_message as dedo_message_service
 from backend.services import fast_fix as fast_fix_service
 from backend.services import orchestrator, pipeline_runner
 from backend.services.agent_terminal import AgentTerminalError, SessionConflictError
@@ -308,6 +315,10 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         or (state.status == "awaiting_manazer" and state.resume_after_framework_fix)
     ):
         available_actions = sorted(orchestrator.determine_available_actions(state))
+    # ICCINT-24: the open proposal from our technical team, read from the DB rather than left for the FE to
+    # find in the ``recent_messages`` tail — a busy build would push it out of that tail and the cockpit
+    # would stop offering a proposal that still exists. One indexed query; ``None`` in the ordinary case.
+    proposal = dedo_message_service.open_proposal(db, version_id) if state is not None else None
     return PipelineBoardRead(
         state=PipelineStateRead.model_validate(state) if state is not None else None,
         recent_messages=[PipelineMessageRead.model_validate(m) for m in _recent_messages(db, version_id, limit)],
@@ -320,6 +331,16 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         verified_provenance=verified_provenance,
         spec_approved=spec_approved,
         vizual_url=vizual_url,
+        dedo_proposal=(
+            DedoProposalRead(
+                message_id=proposal.id,
+                content=proposal.content,
+                proposed_action=str((proposal.payload or {}).get("proposed_action", "")),
+                created_at=proposal.created_at,
+            )
+            if proposal is not None
+            else None
+        ),
     )
 
 
@@ -444,26 +465,35 @@ def list_messages(
     )
 
 
-@router.post("/{version_id}/action", response_model=PipelineBoardRead)
-async def post_action(
+async def _apply_and_publish(
+    db: Session,
     version_id: uuid.UUID,
-    payload: PipelineActionRequest,
-    current_user: User = Depends(require_shu_or_above),
-    db: Session = Depends(get_db),
-) -> PipelineBoardRead:
-    """Apply a Director action; broadcast the resulting state + new messages."""
-    authz.assert_version_access(db, current_user, version_id)
+    action: str,
+    payload: Optional[dict],
+    *,
+    on_applied: Optional[Callable[[PipelineState], None]] = None,
+) -> PipelineState:
+    """Run one Manažér action and publish its consequences — the ONE path an action takes to the engine.
 
+    Extracted from ``post_action`` when ICCINT-24 added a second caller, precisely so there is no second
+    path: apply, commit, broadcast the new state + every message the action wrote, and schedule the
+    background dispatch with the action's own directive. A caller that skipped any of those would be a
+    button that half-works.
+
+    ``on_applied`` runs INSIDE the same transaction, after the action succeeded and before the commit — so
+    a bookkeeping write that belongs to the action (ICCINT-24 marks the proposal handled) lands if and only
+    if the action itself did. An ``OrchestratorError`` rolls back both.
+    """
     pre_ids = {
         row for row in db.execute(select(PipelineMessage.id).where(PipelineMessage.version_id == version_id)).scalars()
     }
     try:
-        state = await orchestrator.apply_action(
-            db, version_id=version_id, action=payload.action, payload=payload.payload
-        )
+        state = await orchestrator.apply_action(db, version_id=version_id, action=action, payload=payload)
     except OrchestratorError as exc:
         db.rollback()
         raise _map_orch_error(exc) from exc
+    if on_applied is not None:
+        on_applied(state)
     db.commit()
     db.refresh(state)
 
@@ -486,11 +516,155 @@ async def post_action(
     # (The v1 Gate-E sub-flow selector was removed in CR-V2-017 — the 4-phase model has no Gate E;
     # the Auditor's upfront review after Návrh replaces it.)
     if state.status == "agent_working":
-        directive = orchestrator.dispatch_directive(
-            db, version_id, payload.action, payload.payload or {}, state.current_stage
-        )
+        directive = orchestrator.dispatch_directive(db, version_id, action, payload or {}, state.current_stage)
         pipeline_runner.schedule_dispatch(version_id, directive)
+    return state
 
+
+@router.post("/{version_id}/action", response_model=PipelineBoardRead)
+async def post_action(
+    version_id: uuid.UUID,
+    payload: PipelineActionRequest,
+    current_user: User = Depends(require_shu_or_above),
+    db: Session = Depends(get_db),
+) -> PipelineBoardRead:
+    """Apply a Director action; broadcast the resulting state + new messages."""
+    authz.assert_version_access(db, current_user, version_id)
+    await _apply_and_publish(db, version_id, payload.action, payload.payload)
+    return _board(db, version_id)
+
+
+def _proposal_he_decided_about(
+    db: Session,
+    version_id: uuid.UUID,
+    message_id: uuid.UUID,
+    *,
+    verb: str,
+) -> PipelineMessage:
+    """The proposal the Manažér was LOOKING AT, or an HTTP refusal — never a substitute (ICCINT-24).
+
+    Shared by send and reject so the two cannot drift into treating "which finding is this decision about"
+    differently. 404 when the build has no such proposal at all (a stale link, a wrong version); 409 when it
+    exists but was already sent, declined, or replaced by a newer one — with the reason in the Manažér's own
+    words, because "409" on a screen he cannot correlate with anything is not an answer.
+    """
+    try:
+        return dedo_message_service.proposal_for_decision(db, version_id, message_id)
+    except dedo_message_service.ProposalNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pre túto verziu nie je taký návrh od technického tímu — nie je čo {verb}.",
+        ) from exc
+    except dedo_message_service.ProposalGone as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.message_sk) from exc
+
+
+@router.post("/{version_id}/dedo-proposal/send", response_model=PipelineBoardRead)
+async def send_dedo_proposal(
+    version_id: uuid.UUID,
+    body: DedoProposalSendRequest,
+    current_user: User = Depends(require_shu_or_above),
+    db: Session = Depends(get_db),
+) -> PipelineBoardRead:
+    """Send the technical team's finding to the agent — as the Manažér, with one click (ICCINT-24).
+
+    NO NEW PATH TO THE AGENT. The text travels through :func:`_apply_and_publish` on the action the
+    proposal named (``uprav`` / ``answer`` / ``ask``) — byte for byte what happens when the Manažér types
+    the same words into the same verb himself, including every guard: ``uprav`` needs a non-empty comment,
+    ``answer`` is refused unless the build is actually blocked on a question, a build stopped on a NEX
+    Studio bug refuses all of them, and the single-flight guard refuses a second turn while one is running.
+    A refusal leaves the proposal OPEN (the whole call rolls back), so the bar is still there to try again
+    once the state allows it.
+
+    WHAT IS SENT IS WHAT HE HAD IN THE BOX — ``body.text``, i.e. Dedo's wording as the Manažér edited it.
+    The recorded ``manazer`` message therefore says what he really sent; Dedo's original stays on the
+    archived proposal row and is stamped onto that message (``dedo_proposal_origin``), so "what did Dedo
+    propose vs. what went out" is answerable months later.
+
+    WHAT RUNS IS THE VERB HE SAW. ``body.message_id`` names the proposal that was on his screen and the
+    verb is read off THAT row — never off "whatever is open now" (audit 2026-08-23, finding 1). The cockpit
+    reconciles every 25 s and Dedo re-measures constantly, so re-resolving at click time meant a finding
+    written in that gap could be executed with its own verb: the Manažér pressed "Spýtať sa agenta" and the
+    engine ran ``uprav`` — work handed back, failed tasks reset, the whole loop re-dispatched — while the
+    finding he had read was archived as "sent" without going anywhere. If the named proposal is no longer
+    open, this refuses with 409 and says what changed; it never substitutes another one.
+
+    Handling the proposal happens in the SAME transaction as the action (``on_applied``): it cannot be
+    marked sent by an action that did not run, and it cannot run twice.
+    """
+    authz.assert_version_access(db, current_user, version_id)
+    proposal = _proposal_he_decided_about(db, version_id, body.message_id, verb="odoslať")
+    action = str((proposal.payload or {}).get("proposed_action", ""))
+    if action not in dedo_message_service.PROPOSAL_ACTIONS:
+        # A proposal whose verb we no longer honour is not sendable — refusing beats guessing a verb the
+        # Manažér never saw described.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Návrh nesie neznámu akciu ({action!r}) — odoslať sa nedá.",
+        )
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Text návrhu je prázdny.")
+    # The payload key each verb reads (orchestrator.apply_action): ``uprav`` takes a comment, the other two
+    # take text. One mapping, in one place — the FE never composes engine payloads.
+    action_payload = {"comment": text} if action == "uprav" else {"text": text}
+
+    def _mark_sent(_state: PipelineState) -> None:
+        sent = db.execute(
+            select(PipelineMessage)
+            .where(PipelineMessage.version_id == version_id, PipelineMessage.author == "manazer")
+            .order_by(PipelineMessage.seq.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        if sent is not None:
+            # Provenance ON the message that actually went out: this is Dedo's finding, sent by the
+            # Manažér, and here is what Dedo originally wrote (which differs whenever he edited it).
+            sent.payload = {
+                **(sent.payload or {}),
+                "dedo_proposal_origin": {
+                    "proposal_message_id": str(proposal.id),
+                    "original_content": proposal.content,
+                    "proposed_action": action,
+                },
+            }
+        dedo_message_service.resolve_proposal(
+            db,
+            proposal,
+            resolution="sent",
+            sent_text=text,
+            sent_action=action,
+            sent_message_id=sent.id if sent is not None else None,
+        )
+
+    await _apply_and_publish(db, version_id, action, action_payload, on_applied=_mark_sent)
+    logger.info("Dedo proposal %s sent by %s as %r on version %s", proposal.id, current_user.id, action, version_id)
+    return _board(db, version_id)
+
+
+@router.post("/{version_id}/dedo-proposal/reject", response_model=PipelineBoardRead)
+def reject_dedo_proposal(
+    version_id: uuid.UUID,
+    body: DedoProposalRejectRequest,
+    current_user: User = Depends(require_shu_or_above),
+    db: Session = Depends(get_db),
+) -> PipelineBoardRead:
+    """Decline the technical team's finding (ICCINT-24) — the Manažér is not obliged to forward it.
+
+    Nothing is sent and no turn runs; the proposal is archived, so the bar disappears and never re-offers
+    it. The row (and Dedo's wording) stays in the log, marked ``rejected`` — a declined finding is part of
+    the record, not something that quietly never existed.
+
+    THE ONE HE DECLINED IS THE ONE THAT GETS DECLINED. ``body.message_id`` names it, for the same reason
+    the send does (audit 2026-08-23, finding 1): re-resolving "the open proposal" at click time declined
+    whatever had arrived most recently — a finding he had never read — while the one he actually rejected
+    stayed open and came back at him as if new. A proposal that is no longer open is a 409 with the reason,
+    not a silent substitution.
+    """
+    authz.assert_version_access(db, current_user, version_id)
+    proposal = _proposal_he_decided_about(db, version_id, body.message_id, verb="odmietnuť")
+    dedo_message_service.resolve_proposal(db, proposal, resolution="rejected")
+    db.commit()
+    logger.info("Dedo proposal %s rejected by %s (version %s)", proposal.id, current_user.id, version_id)
     return _board(db, version_id)
 
 

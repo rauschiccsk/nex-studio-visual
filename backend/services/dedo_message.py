@@ -22,6 +22,15 @@ This module is that return leg, and it is deliberately ONE function deep:
     ``envelope_loss_kind`` set and does NOT consume the message, because on that path the prompt may never
     have reached the model at all (and the build round's crash auto-retry would re-run without the block).
 
+ICCINT-24 ADDS A SECOND TRACK, and it is the common one. The above is Dedo ANSWERING an escalation — a case
+that has not occurred once in the product's life. What happens constantly is the opposite direction: the
+Director asks Dedo to review an agent's work, Dedo measures and finds mistakes, and those findings reached
+the agent only because the Director read Dedo's text and retyped it into the cockpit (four times in one
+day). :func:`record_dedo_proposal` records such a finding as ``status='proposed'`` — recorded, shown to the
+Manažér, delivered to NOBODY — and the cockpit turns it into one click. The decision stays exactly where
+ICCINT-14 put it (the Manažér's); only the retyping goes away. "The Manažér decides" and "the Manažér
+transcribes" are not the same thing.
+
 ``record_dedo_message`` is the single write path ON PURPOSE. The thin host CLI
 (``python -m backend.cli.dedo_message``) calls it today; the authenticated HTTP endpoint (ICCINT-14, once
 Dedo has his own machine identity — charter §4.5) must call the SAME function rather than grow a parallel
@@ -78,9 +87,82 @@ DEDO_MESSAGE_KIND = "answer"
 #: instruction for the Manažér's (a Manažér cannot answer a framework issue — that is the whole point).
 _PROMPT_HEADING = "## Odpoveď od Deda (technický tím NEX Studia)"
 
+#: The ONE status a message must be in to be delivered to the agent (see :func:`pending_messages`). Named
+#: rather than inlined so the delivery filter and the proposal writer below cannot drift apart silently.
+PENDING_STATUS = "pending"
+
+#: ICCINT-24: a finding that is NOT delivery. See :data:`~backend.db.models.pipeline.MESSAGE_STATUS_VALUES`.
+PROPOSED_STATUS = "proposed"
+
+#: Terminal status of a handled proposal — sent or rejected, either way never offered again and never
+#: ``pending``. The row stays in the log, so the original wording remains findable afterwards.
+ARCHIVED_STATUS = "archived"
+
+#: Who a PROPOSAL is addressed to. The Manažér, not the agent — a second, structural reason a proposal
+#: cannot leak into a prompt: even a delivery query that forgot the status filter would be looking for
+#: ``recipient='ai_agent'`` rows and would not find one.
+PROPOSAL_RECIPIENT = "manazer"
+
+#: ``kind`` of a proposal: a notice to the Manažér, which is what it is until he acts on it.
+PROPOSAL_KIND = "notification"
+
+#: Payload marker every proposal carries — what the cockpit keys its bar on, and what keeps a proposal out
+#: of the conversation transcript (it was never said to the agent).
+PROPOSAL_MARKER = "dedo_proposal"
+
+#: The verbs a proposal may be sent WITH — exactly the ones the Manažér already uses to speak to the agent
+#: (:func:`~backend.services.orchestrator.apply_action`): ``uprav`` (send it back for rework), ``answer``
+#: (answer the agent's question), ``ask`` (ask him something). ICCINT-24 deliberately adds NO fourth verb
+#: and no delivery path of its own: the proposal is sent by the very action the Manažér would have clicked
+#: himself, so every guard that action has (a non-empty comment, ``answer`` only on a blocked build, the
+#: framework-block gate, the single-flight dispatch guard) applies unchanged.
+PROPOSAL_ACTIONS = ("uprav", "answer", "ask")
+
+#: Why a proposal was archived without the Manažér deciding on it: Dedo wrote a NEWER one. Kept distinct
+#: from ``sent`` / ``rejected`` so the log never claims he handled something he never saw.
+SUPERSEDED_RESOLUTION = "superseded"
+
+#: Human wording per resolution, for the refusal the Manažér reads when he acts on a proposal that is no
+#: longer open. Says WHAT happened to it — "už nie je aktuálny" alone would leave him guessing.
+_GONE_REASON_SK = {
+    "sent": "Tento návrh už bol odoslaný agentovi.",
+    "rejected": "Tento návrh už bol odmietnutý.",
+    SUPERSEDED_RESOLUTION: "Technický tím medzitým poslal novší návrh — na obrazovke máš starý.",
+}
+_GONE_FALLBACK_SK = "Tento návrh už nie je otvorený."
+
 
 class DedoMessageError(Exception):
     """Raised when a Dedo message cannot be recorded (unknown version, empty text, no build to answer)."""
+
+
+class ProposalNotFound(Exception):
+    """The named proposal does not exist on this build at all (a wrong id, a wrong version → 404)."""
+
+
+class ProposalGone(Exception):
+    """The named proposal exists but is no longer open — sent, rejected, or superseded (→ 409).
+
+    Carries the row and its resolution so the caller can tell the Manažér WHICH of those it was, in his own
+    words. Never resolved by substituting whatever is open instead: that substitution is the whole defect
+    this class exists to prevent (:func:`proposal_for_decision`).
+    """
+
+    def __init__(self, proposal: PipelineMessage, resolution: Optional[str]) -> None:
+        self.proposal = proposal
+        self.resolution = resolution
+        super().__init__(f"Proposal {proposal.id} is no longer open ({resolution or proposal.status})")
+
+    @property
+    def message_sk(self) -> str:
+        """What the Manažér is told — what happened to his finding, and what he does now.
+
+        Deliberately does not promise anything about the screen (the cockpit refreshes itself on this
+        refusal, but that is the cockpit's business): it states the fact and points at the decision that
+        is actually his to make.
+        """
+        why = _GONE_REASON_SK.get(self.resolution or "", _GONE_FALLBACK_SK)
+        return f"{why} Nič sa neodoslalo — rozhodni o tom, ktorý návrh je na obrazovke teraz."
 
 
 def record_dedo_message(
@@ -126,22 +208,213 @@ def record_dedo_message(
         recipient=DEDO_RECIPIENT,
         kind=DEDO_MESSAGE_KIND,
         content=text,
-        status="pending",
+        status=PENDING_STATUS,
         payload={"phase": state.current_stage, "dedo_reply": True, **(payload_extra or {})},
     )
     logger.info("Dedo message recorded for version %s (message %s)", version_id, msg.id)
     return msg
 
 
-def pending_messages(db: Session, version_id: uuid.UUID) -> list[PipelineMessage]:
-    """Dedo messages for ``version_id`` that no agent turn has carried yet, oldest first."""
+def record_dedo_proposal(
+    db: Session,
+    *,
+    version_id: uuid.UUID,
+    content: str,
+    proposed_action: str,
+    payload_extra: Optional[dict] = None,
+) -> PipelineMessage:
+    """Record a finding Dedo PROPOSES the Manažér send to the agent; return the persisted row (ICCINT-24).
+
+    The ordinary case the product was missing. :func:`record_dedo_message` is Dedo ANSWERING an escalation:
+    it writes ``pending``, so the next turn carries it, which is why ICCINT-14 confines it to a build that
+    asked for Dedo. But most of Dedo's findings are about a build that never escalated — the Director asks
+    him to review the agent's work, he measures, he finds mistakes — and the only way those reached the
+    agent was the Director reading Dedo's text and retyping it into the cockpit.
+
+    This is the same text on a different track. The row is written ``status='proposed'`` and addressed to
+    the ``manazer``, so:
+
+    * NOTHING delivers it. Delivery keys on ``pending`` (:func:`pending_messages` → :func:`pending_for_prompt`),
+      and a proposal is not pending — not "not yet", but never: its only transitions are to ``archived``.
+    * The agent does not learn it exists. It is not addressed to him and it is not in his prompt.
+    * The decision stays with the Manažér, exactly as before. What changes is only that he no longer has to
+      retype the text to make it — the cockpit offers Dedo's wording, editable, behind one button that
+      sends it as HIS message through ``proposed_action`` (see :data:`PROPOSAL_ACTIONS`).
+
+    Because it delivers nothing, this write is allowed into ANY build — that is the whole difference from
+    :func:`record_dedo_message`, whose HTTP door refuses a build that never escalated. A proposal into a
+    healthy build is a suggestion on the Manažér's desk, not an instruction in the agent's prompt.
+
+    AT MOST ONE PROPOSAL IS EVER OPEN PER BUILD, and this writer is what makes that true: a new finding
+    ARCHIVES every still-open one first (``resolution='superseded'``). Dedo re-measuring and proposing again
+    is the normal case, and the older row is by then a stale reading of a build that has moved on. Before
+    this (audit 2026-08-23, finding 2) the rows simply piled up and only the newest was OFFERED — so the
+    moment the Manažér sent or declined it, the bar came back carrying an obsolete finding that looked
+    exactly like a new one, and one click would have sent it to the agent. "Handled" has to be a property of
+    the BUILD's desk, not of one row; the superseded rows stay in the log, marked, so what was proposed and
+    when is still answerable.
+
+    Refuses an empty text, an unknown ``proposed_action``, and a version with no build (there is no agent
+    to propose anything to). The caller commits (this only flushes) — same contract as every other writer.
+    """
+    text = (content or "").strip()
+    if not text:
+        raise DedoMessageError("Dedo proposal is empty — there is nothing to propose")
+    if proposed_action not in PROPOSAL_ACTIONS:
+        raise DedoMessageError(
+            f"Unknown proposed action {proposed_action!r} — Dedo may propose only: {', '.join(PROPOSAL_ACTIONS)}"
+        )
+
+    state = db.execute(select(PipelineState).where(PipelineState.version_id == version_id)).scalar_one_or_none()
+    if state is None:
+        raise DedoMessageError(f"No pipeline started for version {version_id} — there is no agent to write to")
+
+    from backend.services.orchestrator import _record_message  # local import: see record_dedo_message
+
+    # ONE open proposal per build (see the docstring): whatever was still waiting is now stale, so it is
+    # archived rather than left to resurface behind the finding that replaced it.
+    for stale in _open_proposals(db, version_id):
+        resolve_proposal(db, stale, resolution=SUPERSEDED_RESOLUTION)
+
+    msg = _record_message(
+        db,
+        version_id=version_id,
+        stage=state.current_stage,
+        author=DEDO_PARTICIPANT,
+        recipient=PROPOSAL_RECIPIENT,
+        kind=PROPOSAL_KIND,
+        content=text,
+        status=PROPOSED_STATUS,
+        payload={
+            "phase": state.current_stage,
+            PROPOSAL_MARKER: True,
+            "proposed_action": proposed_action,
+            **(payload_extra or {}),
+        },
+    )
+    logger.info(
+        "Dedo proposal recorded for version %s (message %s, action %s)",
+        version_id,
+        msg.id,
+        proposed_action,
+    )
+    return msg
+
+
+def _open_proposals(db: Session, version_id: uuid.UUID) -> list[PipelineMessage]:
+    """Every still-open proposal of a build, newest first. Normally 0 or 1 (see :func:`record_dedo_proposal`)."""
     return list(
         db.execute(
             select(PipelineMessage)
             .where(
                 PipelineMessage.version_id == version_id,
                 PipelineMessage.author == DEDO_PARTICIPANT,
-                PipelineMessage.status == "pending",
+                PipelineMessage.status == PROPOSED_STATUS,
+            )
+            .order_by(PipelineMessage.seq.desc())
+        )
+        .scalars()
+        .all()
+    )
+
+
+def open_proposal(db: Session, version_id: uuid.UUID) -> Optional[PipelineMessage]:
+    """The build's proposal still waiting for the Manažér; ``None`` when there is none.
+
+    There is AT MOST ONE, and that is enforced at the write: :func:`record_dedo_proposal` archives any
+    still-open proposal as ``superseded`` before recording a new one, because Dedo re-measuring and
+    proposing again is the normal case and the older reading is stale by then. The newest-first ordering is
+    therefore belt-and-braces (a row written before that rule existed, or by a future second writer), not
+    the mechanism — "handled" is a property of the build's desk, not of a single row.
+
+    NOT the authority for acting on a proposal: :func:`proposal_for_decision` is, because the send/reject
+    the Manažér clicked names the row he was LOOKING at, and this function answers a different question
+    ("what is open now?"). Using this one to resolve a click is the TOCTOU the 2026-08-23 audit found.
+    """
+    rows = _open_proposals(db, version_id)
+    return rows[0] if rows else None
+
+
+def proposal_for_decision(db: Session, version_id: uuid.UUID, message_id: uuid.UUID) -> PipelineMessage:
+    """The proposal the Manažér was LOOKING AT when he pressed a button; raise when it is not actionable.
+
+    This exists because "what is open now" is not the same question as "what did he decide about", and the
+    difference is not theoretical (audit 2026-08-23, finding 1): the cockpit reconciles every 25 s, Dedo
+    re-measures and re-proposes constantly, and both send and reject used to look the CURRENT open proposal
+    up again. So a finding written in the gap between his reading and his click would be executed with ITS
+    verb instead of the one on the button he pressed — he presses "Spýtať sa agenta" (a question) and the
+    engine runs ``uprav`` (work handed back, tasks reset, the loop re-dispatched) — while the finding he
+    actually read was archived as "sent" without ever going anywhere. Rejecting mirrored it: the wrong one
+    declined, the one on his screen still open.
+
+    Naming the row closes it: it is either the one he saw and still open, or the call is refused and he is
+    told why. Raises :class:`ProposalGone` — the caller maps it to a 409, never a silent substitution.
+    """
+    row = db.execute(
+        select(PipelineMessage).where(
+            PipelineMessage.id == message_id,
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.author == DEDO_PARTICIPANT,
+        )
+    ).scalar_one_or_none()
+    if row is None or not (row.payload or {}).get(PROPOSAL_MARKER):
+        raise ProposalNotFound(f"No proposal {message_id} on version {version_id}")
+    if row.status != PROPOSED_STATUS:
+        raise ProposalGone(row, (row.payload or {}).get("dedo_proposal_resolution"))
+    return row
+
+
+def resolve_proposal(
+    db: Session,
+    proposal: PipelineMessage,
+    *,
+    resolution: str,
+    sent_text: Optional[str] = None,
+    sent_action: Optional[str] = None,
+    sent_message_id: Optional[uuid.UUID] = None,
+) -> PipelineMessage:
+    """Mark a proposal handled — ``sent``, ``rejected`` or ``superseded`` — so it is never offered again.
+
+    The first two are the Manažér's decision. ``superseded`` is NOT a decision and is deliberately spelled
+    differently: it means Dedo replaced the finding before anyone acted on it (:func:`record_dedo_proposal`),
+    and the log must not read as though the Manažér handled something he never saw.
+
+    The row moves to ``archived`` (never ``pending``: a handled proposal is not a queued delivery) and
+    keeps its ORIGINAL ``content`` untouched. What actually went to the agent is a separate ``manazer``
+    message written by the action; the link between the two is recorded here (``sent_message_id``) and
+    stamped on that message by the route, so both directions are traceable — including the case that
+    matters most, where the Manažér rewrote Dedo's wording before sending it.
+    """
+    payload = dict(proposal.payload or {})
+    payload["dedo_proposal_resolution"] = resolution
+    if sent_text is not None:
+        payload["sent_text"] = sent_text
+        payload["edited"] = sent_text.strip() != (proposal.content or "").strip()
+    if sent_action is not None:
+        payload["sent_action"] = sent_action
+    if sent_message_id is not None:
+        payload["sent_message_id"] = str(sent_message_id)
+    proposal.payload = payload  # reassign: JSONB change tracking is by identity
+    proposal.status = ARCHIVED_STATUS
+    db.flush()
+    logger.info("Dedo proposal %s resolved: %s", proposal.id, resolution)
+    return proposal
+
+
+def pending_messages(db: Session, version_id: uuid.UUID) -> list[PipelineMessage]:
+    """Dedo messages for ``version_id`` that no agent turn has carried yet, oldest first.
+
+    ``status == PENDING_STATUS`` is the load-bearing clause, not a formality: it is what keeps an ICCINT-24
+    ``proposed`` finding — one the Manažér has NOT clicked — out of every prompt the agent is ever handed.
+    ``tests/test_dedo_message.py::TestAProposalNeverReachesTheAgent`` fails the moment it is widened.
+    """
+    return list(
+        db.execute(
+            select(PipelineMessage)
+            .where(
+                PipelineMessage.version_id == version_id,
+                PipelineMessage.author == DEDO_PARTICIPANT,
+                PipelineMessage.status == PENDING_STATUS,
             )
             .order_by(PipelineMessage.seq.asc())
         )

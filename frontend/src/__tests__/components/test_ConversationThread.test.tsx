@@ -103,4 +103,93 @@ describe("ConversationThread — full body + question (CR-V2-032)", () => {
     expect(bubbles[0]).not.toEqual(bubbles[1]);
     expect(bubbles[0]).toContain("var(--color-state-success-bg)");
   });
+
+  // ICCINT-24: a PROPOSAL is not a message in the conversation — it was never said to the agent. It waits
+  // for the Manažér in DedoProposalBar; a bubble here would claim a delivery that did not happen.
+  it("does NOT render a Dedo proposal as a bubble in the transcript", () => {
+    const proposal: PipelineMessage = {
+      id: "p1",
+      version_id: "v1",
+      stage: "priprava",
+      author: "dedo",
+      recipient: "manazer",
+      kind: "notification",
+      content: "Úloha #4 nemá test na zápornú cenu.",
+      status: "proposed",
+      payload: { dedo_proposal: true, proposed_action: "uprav" },
+      created_at: "2026-08-23T00:00:00Z",
+      seq: 4,
+    };
+    const { container } = render(<ConversationThread messages={[proposal]} activity={[]} working={false} />);
+
+    expect(screen.queryByText(/Úloha #4 nemá test/)).not.toBeInTheDocument();
+    expect(container.querySelectorAll("li")).toHaveLength(0);
+  });
+
+  // The internal self-check chatter this thread hides is the AI Agent's own (author=system) — never the
+  // human's. Until ICCINT-24 the predicate omitted the author, so the Manažér's "Uprav" (recorded
+  // manazer→ai_agent kind="return") disappeared from his own transcript.
+  //
+  // NOTE FOR THE DIRECTOR: this narrowing is retroactive — it also un-hides the steers in transcripts of
+  // builds that are long finished. It rides in this bundle because the ICCINT-24 send writes exactly this
+  // shape and would otherwise be invisible, but it is a decision of its own; see the comment in
+  // ConversationThread.tsx. This test is where a "no" would land.
+  it("hides the agent's system self-check chatter but never the Manažér's own steer", () => {
+    const base = {
+      version_id: "v1",
+      stage: "programovanie" as const,
+      recipient: "ai_agent" as const,
+      kind: "return" as const,
+      status: "delivered",
+      payload: null,
+      created_at: "2026-08-23T00:00:00Z",
+    };
+    const selfCheck = {
+      ...base,
+      id: "sc1",
+      author: "system" as const,
+      content: "Self-check 3/5: deliverable 'x' missing on disk.",
+      seq: 1,
+    };
+    const steer = {
+      ...base,
+      id: "st1",
+      author: "manazer" as const,
+      content: "Doplň prosím test na zápornú cenu.",
+      seq: 2,
+    };
+    render(<ConversationThread messages={[selfCheck, steer]} activity={[]} working={false} />);
+
+    expect(screen.queryByText(/Self-check 3\/5/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Doplň prosím test na zápornú cenu/)).toBeInTheDocument();
+  });
+
+  // …and once he sends it, the message in the thread is HIS — with where the wording came from said on it,
+  // and Dedo's original kept visible when he rewrote it before sending.
+  it("marks a sent proposal on the Manažér's own message and keeps Dedo's original when edited", () => {
+    const sent: PipelineMessage = {
+      id: "s2",
+      version_id: "v1",
+      stage: "priprava",
+      author: "manazer",
+      recipient: "ai_agent",
+      kind: "return",
+      content: "Doplň test na zápornú cenu. Prosím, začni tým.",
+      status: "delivered",
+      payload: {
+        dedo_proposal_origin: {
+          proposal_message_id: "p1",
+          original_content: "Doplň test na zápornú cenu.",
+          proposed_action: "uprav",
+        },
+      },
+      created_at: "2026-08-23T00:01:00Z",
+      seq: 5,
+    };
+    render(<ConversationThread messages={[sent]} activity={[]} working={false} />);
+
+    expect(screen.getByText(/Podnet od Deda/i)).toBeInTheDocument();
+    expect(screen.getByText(/odoslal si ho upravený/i)).toBeInTheDocument();
+    expect(screen.getByText("Doplň test na zápornú cenu.")).toBeInTheDocument(); // Dedo's original
+  });
 });

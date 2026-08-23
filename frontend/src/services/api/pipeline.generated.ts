@@ -595,6 +595,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/dedo/builds/{version_id}/proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Propose Build Message
+         * @description Propose a finding for the Manažér to send to the agent — the ordinary case (ICCINT-24).
+         *
+         *     THE SIXTH ENDPOINT — MOUNTED, AND AWAITING THE DIRECTOR'S DECISION (23.08.2026; see the module
+         *     docstring). What follows is the argument for keeping it, made by the implementer; it is not a
+         *     ratification, and nobody should read it as one.
+         *
+         *     The reason it may exist is the reason it is not a widening: unlike
+         *     :func:`post_build_message` above, this one delivers NOTHING. The row lands ``status='proposed'``,
+         *     addressed to the Manažér; no prompt ever carries it (delivery keys on ``pending``), and the agent is
+         *     not told it exists. It appears in the cockpit as an editable proposal behind one button, and the text
+         *     reaches the agent only if the Manažér presses it — as HIS message, through the ordinary ``uprav`` /
+         *     ``answer`` / ``ask`` action named in ``proposed_action``, with every guard that action already has.
+         *
+         *     THAT is why it takes ANY build while the message endpoint takes only a build that escalated. The
+         *     ICCINT-14 boundary is untouched: what it forbids is Dedo putting a directive at the top of a stranger's
+         *     agent prompt, and a proposal cannot do that from any angle. What it never forbade — and what the product
+         *     was missing — is Dedo telling the MANAŽÉR what he found, without the Director acting as a typist.
+         *
+         *     Refuses an unknown ``proposed_action`` and a version with no build (409): a proposal about a build that
+         *     was never started has no recipient and no meaning.
+         */
+        post: operations["propose_build_message_api_v1_dedo_builds__version_id__proposals_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/dedo/builds/{version_id}/unblock": {
         parameters: {
             query?: never;
@@ -1023,6 +1062,80 @@ export interface paths {
          *     returns 409; otherwise it attaches (and ``write_input`` is still per-keystroke-guarded as a backstop).
          */
         post: operations["open_debug_terminal_api_v1_pipeline__version_id__debug_terminal_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pipeline/{version_id}/dedo-proposal/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject Dedo Proposal
+         * @description Decline the technical team's finding (ICCINT-24) — the Manažér is not obliged to forward it.
+         *
+         *     Nothing is sent and no turn runs; the proposal is archived, so the bar disappears and never re-offers
+         *     it. The row (and Dedo's wording) stays in the log, marked ``rejected`` — a declined finding is part of
+         *     the record, not something that quietly never existed.
+         *
+         *     THE ONE HE DECLINED IS THE ONE THAT GETS DECLINED. ``body.message_id`` names it, for the same reason
+         *     the send does (audit 2026-08-23, finding 1): re-resolving "the open proposal" at click time declined
+         *     whatever had arrived most recently — a finding he had never read — while the one he actually rejected
+         *     stayed open and came back at him as if new. A proposal that is no longer open is a 409 with the reason,
+         *     not a silent substitution.
+         */
+        post: operations["reject_dedo_proposal_api_v1_pipeline__version_id__dedo_proposal_reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pipeline/{version_id}/dedo-proposal/send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Dedo Proposal
+         * @description Send the technical team's finding to the agent — as the Manažér, with one click (ICCINT-24).
+         *
+         *     NO NEW PATH TO THE AGENT. The text travels through :func:`_apply_and_publish` on the action the
+         *     proposal named (``uprav`` / ``answer`` / ``ask``) — byte for byte what happens when the Manažér types
+         *     the same words into the same verb himself, including every guard: ``uprav`` needs a non-empty comment,
+         *     ``answer`` is refused unless the build is actually blocked on a question, a build stopped on a NEX
+         *     Studio bug refuses all of them, and the single-flight guard refuses a second turn while one is running.
+         *     A refusal leaves the proposal OPEN (the whole call rolls back), so the bar is still there to try again
+         *     once the state allows it.
+         *
+         *     WHAT IS SENT IS WHAT HE HAD IN THE BOX — ``body.text``, i.e. Dedo's wording as the Manažér edited it.
+         *     The recorded ``manazer`` message therefore says what he really sent; Dedo's original stays on the
+         *     archived proposal row and is stamped onto that message (``dedo_proposal_origin``), so "what did Dedo
+         *     propose vs. what went out" is answerable months later.
+         *
+         *     WHAT RUNS IS THE VERB HE SAW. ``body.message_id`` names the proposal that was on his screen and the
+         *     verb is read off THAT row — never off "whatever is open now" (audit 2026-08-23, finding 1). The cockpit
+         *     reconciles every 25 s and Dedo re-measures constantly, so re-resolving at click time meant a finding
+         *     written in that gap could be executed with its own verb: the Manažér pressed "Spýtať sa agenta" and the
+         *     engine ran ``uprav`` — work handed back, failed tasks reset, the whole loop re-dispatched — while the
+         *     finding he had read was archived as "sent" without going anywhere. If the named proposal is no longer
+         *     open, this refuses with 409 and says what changed; it never substitutes another one.
+         *
+         *     Handling the proposal happens in the SAME transaction as the action (``on_applied``): it cannot be
+         *     marked sent by an action that did not run, and it cannot run twice.
+         */
+        post: operations["send_dedo_proposal_api_v1_pipeline__version_id__dedo_proposal_send_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3273,6 +3386,98 @@ export interface components {
             content: string;
         };
         /**
+         * DedoProposalCreate
+         * @description A finding Dedo PROPOSES the Manažér send to the agent (ICCINT-24) — not a message to the agent.
+         *
+         *     The extra field over :class:`DedoMessageCreate` is the whole point: a proposal carries the ACTION it
+         *     should be sent with, because the Manažér must not be asked to pick a verb out of the engine's
+         *     vocabulary. It is one of the three he already uses (``uprav`` / ``answer`` / ``ask``); the send goes
+         *     through that action with all of its guards, so there is no second way into the agent's prompt.
+         */
+        DedoProposalCreate: {
+            /** Content */
+            content: string;
+            /**
+             * Proposed Action
+             * @description uprav | answer | ask
+             */
+            proposed_action: string;
+        };
+        /**
+         * DedoProposalRead
+         * @description A finding from our technical team WAITING for the Manažér's click (ICCINT-24).
+         *
+         *     Board-level rather than "the FE finds it in ``recent_messages``" on purpose: that list is the last N
+         *     messages, so on a busy build a proposal would silently scroll out of the tail and the cockpit would
+         *     stop offering something that still exists. A bar that renders from THIS field is honest in both
+         *     directions — present exactly when there is an open proposal, absent exactly when there is not.
+         *
+         *     ``proposed_action`` is the verb the send will use (``uprav`` / ``answer`` / ``ask``) — the same one the
+         *     Manažér would have clicked himself. The cockpit says in plain Slovak what it will do; it never asks him
+         *     to choose an engine verb.
+         */
+        DedoProposalRead: {
+            /** Content */
+            content: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Message Id
+             * Format: uuid
+             */
+            message_id: string;
+            /** Proposed Action */
+            proposed_action: string;
+        };
+        /**
+         * DedoProposalRejectRequest
+         * @description Body for ``POST /pipeline/{version_id}/dedo-proposal/reject`` (ICCINT-24).
+         *
+         *     Declining names the proposal too, and for the same reason as the send: a reject that re-resolved "the
+         *     open one" declined whatever had arrived most recently while the finding the Manažér actually rejected
+         *     stayed open, ready to be offered again as though he had never looked at it.
+         */
+        DedoProposalRejectRequest: {
+            /**
+             * Message Id
+             * Format: uuid
+             * @description The proposal the Manažér was shown and is declining.
+             */
+            message_id: string;
+        };
+        /**
+         * DedoProposalSendRequest
+         * @description Body for ``POST /pipeline/{version_id}/dedo-proposal/send`` (ICCINT-24) — what the Manažér is
+         *     actually sending, and WHICH finding he decided about.
+         *
+         *     ``text`` is the content of the box he was shown: Dedo's wording, possibly edited. It is required and
+         *     non-empty on purpose — this endpoint sends what the MANAŽÉR has in front of him, never a text the
+         *     server substitutes on his behalf; an empty box is a mistake, not consent to send the original.
+         *
+         *     ``message_id`` is the proposal that was ON HIS SCREEN, and it is what makes the guarantee true rather
+         *     than probable (audit 2026-08-23, finding 1). Without it the server looked up "the currently open
+         *     proposal" again at click time, so a finding Dedo wrote in between — the cockpit reconciles every 25 s,
+         *     and re-measuring is his normal mode — would be executed with ITS verb, not the one written on the
+         *     button the Manažér pressed. Naming the row means the server either does exactly what he decided, or
+         *     refuses (409) and tells him what changed.
+         */
+        DedoProposalSendRequest: {
+            /**
+             * Message Id
+             * Format: uuid
+             * @description The proposal the Manažér was shown (PipelineBoardRead.dedo_proposal).
+             */
+            message_id: string;
+            /**
+             * Text
+             * @description The text to send — Dedo's proposal as the Manažér edited it.
+             */
+            text: string;
+        };
+        /**
          * DedoUnblockRequest
          * @description Release a build stuck on a NEX Studio bug. The reason is mandatory, not paperwork.
          *
@@ -4149,6 +4354,7 @@ export interface components {
              */
             build_open_findings: number;
             current_task?: components["schemas"]["BoardTask"] | null;
+            dedo_proposal?: components["schemas"]["DedoProposalRead"] | null;
             /** Recent Messages */
             recent_messages?: components["schemas"]["PipelineMessageRead"][];
             /**
@@ -6759,6 +6965,41 @@ export interface operations {
             };
         };
     };
+    propose_build_message_api_v1_dedo_builds__version_id__proposals_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DedoProposalCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineMessageRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     unblock_build_api_v1_dedo_builds__version_id__unblock_post: {
         parameters: {
             query?: never;
@@ -7487,6 +7728,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentTerminalSessionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_dedo_proposal_api_v1_pipeline__version_id__dedo_proposal_reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DedoProposalRejectRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineBoardRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_dedo_proposal_api_v1_pipeline__version_id__dedo_proposal_send_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DedoProposalSendRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineBoardRead"];
                 };
             };
             /** @description Validation Error */

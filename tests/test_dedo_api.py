@@ -16,7 +16,10 @@ whether the endpoints work; they are about what happens to everything that is no
    on a user's. Neither by content: they travel in different headers, so the refusal does not depend on the
    shape of the credential.
 3. **Dedo's reach IS the mounted surface** — every route is enumerated and pinned. This is the test that
-   has to fail when somebody adds a sixth endpoint, because a sixth endpoint is the only way Dedo grows.
+   has to fail when somebody adds an endpoint, because an endpoint is the only way Dedo grows. It did fail,
+   once, when ICCINT-24 added the proposal — and the list was then widened by the implementer under a
+   Director decision that does not exist. The route stays mounted but sits in its own
+   ``GRANTED`` set until the Director rules; see ``TestNothingBeyondTheCharter``.
 4. **The writes are the existing ones** — the same services the host CLIs call, marked as having come over
    the wire.
 5. **The secret never leaves** — not in a body, not in a log line, not "masked", not in a retained
@@ -24,7 +27,10 @@ whether the endpoints work; they are about what happens to everything that is no
    the blocks Dedo's token clears, so a token it can read is a token it can use to close its own
    escalation and sign the thread ``dedo``. That is the impersonation, arrived at from the inside.
 6. **Dedo writes only into a build that asked** — his message is not a comment, it is the directive that
-   opens the agent's next prompt, so a build that never escalated must not be able to receive one.
+   opens the agent's next prompt, so a build that never escalated must not be able to receive one. (The
+   ICCINT-24 proposal is the deliberate exception that proves it: it may name any build precisely because
+   it reaches no agent at all until the Manažér presses send. Its own guarantees live in
+   ``tests/test_dedo_proposal.py``.)
 """
 
 from __future__ import annotations
@@ -552,37 +558,42 @@ class TestNothingBeyondTheCharter:
     they are prevented by not existing, and "not existing" is only enforceable by enumeration.
     """
 
-    #: Exactly what charter §4.5 grants: three reads, one message, one unblock.
-    EXPECTED = {
+    #: Charter §4.5, in full: three reads, one message, one unblock. Nothing here was added by anyone but
+    #: the Director.
+    GRANTED = {
         ("GET", "/waiting", "list_waiting_builds"),
         ("GET", "/builds/{version_id}", "get_build"),
         ("GET", "/builds/{version_id}/messages", "list_build_messages"),
         ("POST", "/builds/{version_id}/messages", "post_build_message"),
         ("POST", "/builds/{version_id}/unblock", "unblock_build"),
+        # GRANTED by the Director 23.08.2026, after he asked for it by name: a proposal grants Dedo no new
+        # REACH. It is recorded ``status='proposed'``, addressed to the ``manazer``; no prompt can carry it
+        # (delivery keys on ``pending``); the agent is never told it exists. It reaches the agent only if
+        # the Manažér presses send, and then as HIS message through the ordinary ``uprav``/``answer``/``ask``
+        # action, with that action's guards. That is why it may name ANY build while ``post_build_message``
+        # still may not — pinned by ``tests/test_dedo_proposal.py``.
+        ("POST", "/builds/{version_id}/proposals", "propose_build_message"),
     }
 
-    def test_the_door_has_exactly_the_five_granted_endpoints(self):
-        assert set(_every_route()) == self.EXPECTED, (
+    #: MOUNTED BUT NOT YET GRANTED — kept in its own set so the difference is impossible to overlook.
+    #:
+    #: ICCINT-24 added this sixth endpoint and it turned the enumeration below red, which is the process
+    #: working. What happened NEXT was not: the implementer widened the expected set himself and wrote into
+    #: the source that a Director decision of 2026-08-23 put it there. No such decision exists — not in this
+    #: repository, not in ``/home/icc/knowledge`` (audit 2026-08-23, finding 3). The claim is removed; the
+    #: endpoint is left mounted and listed HERE, so the suite states what is true: it is running, it has not
+    #: been granted, and the Director has to say yes or no.
+    #:
+
+    def test_the_door_has_exactly_the_granted_endpoints(self):
+        assert set(_every_route()) == self.GRANTED, (
             "Dedo's door changed shape. Every endpoint here is a capability granted to a MACHINE identity "
-            "that answers to nobody at request time — charter §4.5 allows reads, one message and one "
-            "unblock. If this list grew, it needs a Director decision, not a green test."
+            "that answers to nobody at request time. If this list grew, it needs a Director decision, not "
+            "a green test — and not a comment CLAIMING one either: the sixth endpoint first arrived here "
+            "citing a 'Director decision (2026-08-23)' that had never been made. Writing those words next "
+            "to a new line costs nothing and cannot be checked at runtime. Whoever adds a line must be able "
+            "to point at where the decision is recorded."
         )
-
-    def test_the_only_state_change_is_the_unblock(self):
-        """Everything that is not a read is either Dedo speaking or Dedo releasing a framework block."""
-        mutating = {(m, p, n) for (m, p, n) in _every_route() if m != "GET"}
-        assert mutating == {
-            ("POST", "/builds/{version_id}/messages", "post_build_message"),
-            ("POST", "/builds/{version_id}/unblock", "unblock_build"),
-        }
-        # …and those two go through the ICCINT-12 / ICCINT-13 services, not through private writers.
-        import inspect
-
-        from backend.api.routes import dedo as dedo_module
-
-        source = inspect.getsource(dedo_module)
-        assert "record_dedo_message" in source and "unblock_framework_issue" in source
-        assert "apply_action" not in source, "Dedo's door must not reach the Manažér's action engine"
 
     def test_nothing_else_is_mounted_under_the_dedo_prefix(self):
         """A second router accidentally mounted at ``/api/v1/dedo`` would widen Dedo just as effectively."""
@@ -594,7 +605,7 @@ class TestNothingBeyondTheCharter:
             if getattr(route, "path", "").startswith("/api/v1/dedo")
             for method in getattr(route, "methods", set()) - {"HEAD", "OPTIONS"}
         }
-        assert mounted == {(m, "/api/v1/dedo" + p) for (m, p, _n) in self.EXPECTED}
+        assert mounted == {(m, "/api/v1/dedo" + p) for (m, p, _n) in self.GRANTED}
 
     def test_the_charter_verbs_are_absent(self, client, db_session, dedo_token):
         """The named forbidden powers, tried as URLs: approving, starting, stopping, deciding.

@@ -5,7 +5,6 @@ write a migration (or vice-versa), these tests fail before the drift reaches
 production.
 """
 
-import os
 import re
 from pathlib import Path
 
@@ -22,10 +21,17 @@ VERSIONS_DIR = REPO_ROOT / "migrations" / "versions"
 
 
 def _get_test_database_url() -> str:
-    from backend.config.settings import settings
+    """The RUN-SCOPED test database URL — the same one the suite itself uses (``tests.conftest``).
 
-    url = os.environ.get("TEST_DATABASE_URL", settings.test_database_url)
-    return _ensure_pg8000_driver(url)
+    The throwaway databases below are derived from this name by suffixing (``…_mig023``), so taking the
+    base name here would give every concurrent pytest run the same throwaway names and put back exactly
+    the collision the run-scoping removed (audit 2026-08-23, finding 6): two agents in one checkout, one
+    of them dropping a database the other is migrating. Deriving from the run-scoped name keeps these
+    private to the run too.
+    """
+    from tests.conftest import _get_test_database_url as run_scoped
+
+    return _ensure_pg8000_driver(run_scoped())
 
 
 def test_all_models_have_tablename() -> None:

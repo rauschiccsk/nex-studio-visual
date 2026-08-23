@@ -33,6 +33,7 @@ import DecisionCardsBar from "@/components/riadiace/DecisionCardsBar";
 import BlockRecoveryBar from "@/components/riadiace/BlockRecoveryBar";
 import NahlasitZnovaBar from "@/components/riadiace/NahlasitZnovaBar";
 import PokracovatPoOpraveBar from "@/components/riadiace/PokracovatPoOpraveBar";
+import DedoProposalBar from "@/components/riadiace/DedoProposalBar";
 import ReverifyBar from "@/components/riadiace/ReverifyBar";
 import ReverifyNoFixBar from "@/components/riadiace/ReverifyNoFixBar";
 import ChangeRequestBar from "@/components/riadiace/ChangeRequestBar";
@@ -211,6 +212,9 @@ export default function RiadiaceCentrumPage() {
             once they have fixed it and released the build, this is the ONE button that carries it on.
             The two are mutually exclusive by construction (blocked vs. settled-after-fix). */}
         <PokracovatPoOpraveBar board={board} versionId={versionId} onBoard={setBoard} />
+        {/* ICCINT-24: a finding our technical team left for the Manažér — editable, and sent to the agent
+            only by his click, through the ordinary verb it names. Renders only when one is open. */}
+        <DedoProposalBar board={board} versionId={versionId} onBoard={setBoard} />
         <SpecApprovalBar board={board} versionId={versionId} onBoard={setBoard} />
         <SchvalitBar board={board} versionId={versionId} onBoard={setBoard} />
         <ReverifyBar board={board} versionId={versionId} onBoard={setBoard} />

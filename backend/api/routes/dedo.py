@@ -12,27 +12,43 @@ that this must be enforced by the TOKEN and not by the caller's discipline, so:
 
 * the router hangs off :func:`~backend.core.dedo_auth.require_dedo_identity` (a router-level dependency, so
   it cannot be forgotten on a route added later) and off NOTHING else — no ``get_current_user``, no role;
-* Dedo's abilities ARE the five endpoints below. "He cannot approve a gate" is not a rule enforced
-  somewhere; there is no endpoint to call. Adding a sixth one would be the only way to widen him, and
-  ``tests/test_dedo_api.py::TestNothingBeyondTheCharter`` fails the moment anyone does.
+* Dedo's abilities ARE the endpoints below. "He cannot approve a gate" is not a rule enforced somewhere;
+  there is no endpoint to call. Adding one is the only way to widen him, and
+  ``tests/test_dedo_api.py::TestNothingBeyondTheCharter`` fails the moment anyone does — which is exactly
+  what happened when ICCINT-24 added the sixth (``POST /builds/{id}/proposals``).
 
-THE TWO WRITES GO THROUGH THE EXISTING SERVICES — :func:`~backend.services.dedo_message.record_dedo_message`
-and :func:`~backend.services.dedo_unblock.unblock_framework_issue`, the very functions the CLIs call. One
-way for Dedo to speak and one way to release a build, not two that drift. The CLIs stay exactly as they
-were: same services, different transport.
+  THAT SIXTH ENDPOINT IS AWAITING THE DIRECTOR'S DECISION AT THE TIME OF WRITING (23.08.2026). It was
+  added by the ICCINT-24 implementation and the enumeration test was widened for it deliberately, by the
+  implementer, not by anyone with the authority to grant a machine identity a new capability; the earlier
+  version of this note asserted a Director decision that does not exist in the repository or in the
+  knowledge base, and asserting authority one cannot produce is worse than the widening itself. The
+  argument FOR it is that it grants no new reach — it delivers nothing to anybody, it only puts a finding
+  on the MANAŽÉR's desk (see :func:`propose_build_message`) — but the argument is the implementer's, and
+  the decision is the Director's. ``tests/test_dedo_api.py`` states the same, in the one place that fails
+  if the door changes shape again.
 
-BOTH WRITES ARE CONFINED TO A BUILD THAT ASKED. Reading is the wide half of the grant and covers every
-build; writing is the narrow half and reaches only a build stuck on a NEX Studio bug (or one Dedo has just
-released). The unblock has always refused the rest inside its service; the message does too, at
-:func:`_require_a_build_that_asked_for_dedo` — because a Dedo message is not a comment, it is the directive
-that opens the agent's next prompt, and a build that never escalated must not receive one.
+EVERY WRITE GOES THROUGH AN EXISTING SERVICE — :func:`~backend.services.dedo_message.record_dedo_message`,
+:func:`~backend.services.dedo_message.record_dedo_proposal` and
+:func:`~backend.services.dedo_unblock.unblock_framework_issue`, the very functions the CLIs call. One way
+for Dedo to speak, one to propose, one to release a build — never a second writer per transport that drifts
+from the first. The CLIs stay exactly as they were: same services, different transport.
+
+BOTH WRITES THAT REACH AN AGENT ARE CONFINED TO A BUILD THAT ASKED. Reading is the wide half of the grant
+and covers every build; writing is the narrow half and reaches only a build stuck on a NEX Studio bug (or
+one Dedo has just released). The unblock has always refused the rest inside its service; the message does
+too, at :func:`_require_a_build_that_asked_for_dedo` — because a Dedo message is not a comment, it is the
+directive that opens the agent's next prompt, and a build that never escalated must not receive one. The
+ICCINT-24 PROPOSAL is the deliberate exception and proves the rule from the other side: it may name any
+build precisely BECAUSE it reaches no agent at all until a human presses a button.
 
 EVERY WRITE SAYS IT CAME OVER THE WIRE. Both writes stamp ``dedo_transport='api'`` into the recorded
 message payload, so the thread distinguishes "Dedo typed this on the host" from "Dedo sent this over the
 network" months later, when it matters and nobody remembers.
 
-There is no frontend for any of this, on purpose: the Manažér has no use for Dedo's door, and a screen for
-it would only invite someone to hand a human the machine's token.
+There is no frontend for THIS DOOR, on purpose: the Manažér has no use for Dedo's door, and a screen for it
+would only invite someone to hand a human the machine's token. What ICCINT-24 gives the cockpit is a screen
+for the PROPOSAL — on the Manažér's own routes, with his own login (``/pipeline/{id}/dedo-proposal/…``),
+reading the row this door wrote. Dedo writes the finding; the Manažér, and only the Manažér, sends it.
 """
 
 from __future__ import annotations
@@ -49,7 +65,7 @@ from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.db.session import get_db
-from backend.schemas.dedo import DedoBuildRead, DedoMessageCreate, DedoUnblockRequest
+from backend.schemas.dedo import DedoBuildRead, DedoMessageCreate, DedoProposalCreate, DedoUnblockRequest
 from backend.schemas.pipeline import PipelineMessageRead
 from backend.services import dedo_message as dedo_message_service
 from backend.services import dedo_unblock as dedo_unblock_service
@@ -228,6 +244,54 @@ def post_build_message(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     db.commit()
     logger.info("Dedo (API) recorded a message for version %s (message %s)", version_id, msg.id)
+    return msg
+
+
+@router.post(
+    "/builds/{version_id}/proposals",
+    response_model=PipelineMessageRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def propose_build_message(
+    version_id: uuid.UUID,
+    body: DedoProposalCreate,
+    db: Session = Depends(get_db),
+) -> PipelineMessage:
+    """Propose a finding for the Manažér to send to the agent — the ordinary case (ICCINT-24).
+
+    THE SIXTH ENDPOINT — MOUNTED, AND AWAITING THE DIRECTOR'S DECISION (23.08.2026; see the module
+    docstring). What follows is the argument for keeping it, made by the implementer; it is not a
+    ratification, and nobody should read it as one.
+
+    The reason it may exist is the reason it is not a widening: unlike
+    :func:`post_build_message` above, this one delivers NOTHING. The row lands ``status='proposed'``,
+    addressed to the Manažér; no prompt ever carries it (delivery keys on ``pending``), and the agent is
+    not told it exists. It appears in the cockpit as an editable proposal behind one button, and the text
+    reaches the agent only if the Manažér presses it — as HIS message, through the ordinary ``uprav`` /
+    ``answer`` / ``ask`` action named in ``proposed_action``, with every guard that action already has.
+
+    THAT is why it takes ANY build while the message endpoint takes only a build that escalated. The
+    ICCINT-14 boundary is untouched: what it forbids is Dedo putting a directive at the top of a stranger's
+    agent prompt, and a proposal cannot do that from any angle. What it never forbade — and what the product
+    was missing — is Dedo telling the MANAŽÉR what he found, without the Director acting as a typist.
+
+    Refuses an unknown ``proposed_action`` and a version with no build (409): a proposal about a build that
+    was never started has no recipient and no meaning.
+    """
+    _load(db, version_id)  # 404 for an unknown version / a version with no build
+    try:
+        msg = dedo_message_service.record_dedo_proposal(
+            db,
+            version_id=version_id,
+            content=body.content,
+            proposed_action=body.proposed_action,
+            payload_extra=dict(API_TRANSPORT),
+        )
+    except DedoMessageError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    db.commit()
+    logger.info("Dedo (API) proposed a message for version %s (message %s)", version_id, msg.id)
     return msg
 
 

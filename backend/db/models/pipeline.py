@@ -111,7 +111,17 @@ MESSAGE_KIND_VALUES = (
     # with options + a recommendation) the Manažér resolves one-at-a-time; payload carries the decisions[].
     "consultation",
 )
-MESSAGE_STATUS_VALUES = ("pending", "delivered", "answered", "archived")
+#: Lifecycle of one recorded message. ``pending`` is a PROMISE OF DELIVERY: the message is queued for the
+#: agent and the next turn WILL carry it (ICCINT-12 — ``dedo_message.pending_for_prompt`` folds it into the
+#: top of the prompt, then flips it ``delivered``).
+#:
+#: ``proposed`` (ICCINT-24) is the opposite of that promise and exists to make the difference structural
+#: rather than a matter of care: the message is a FINDING WAITING FOR THE MANAŽÉR'S CLICK, and the agent
+#: does not know it exists. Nothing delivers a ``proposed`` row — every delivery query keys on ``pending``
+#: — so a proposal reaches the agent only when the Manažér presses send, and then as HIS message, through
+#: the ordinary ``uprav``/``answer``/``ask`` verbs. It ends ``archived`` — sent, rejected, or superseded by
+#: a newer finding — never ``pending``: there is no transition from "proposed" to "queued for the agent".
+MESSAGE_STATUS_VALUES = ("pending", "delivered", "answered", "archived", "proposed")
 
 
 def _sql_in_list(values: tuple[str, ...]) -> str:

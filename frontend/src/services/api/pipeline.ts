@@ -107,6 +107,20 @@ export interface PipelineMessage {
   seq: number;
 }
 
+// ICCINT-24: a finding from our technical team WAITING for the Manažér's click. Written by Dedo on his own
+// door (`POST /api/v1/dedo/builds/{id}/proposals`), it is recorded `status='proposed'` and delivered to
+// NOBODY — the AI Agent is not told it exists and no prompt can carry it. It reaches the agent only if the
+// Manažér presses send, and then as HIS message, through `proposed_action` (one of the three verbs he
+// already uses). Mirrors backend DedoProposalRead.
+export interface DedoProposal {
+  message_id: string;
+  /** Dedo's own wording, verbatim — shown EDITABLE; what the Manažér sends is what goes out. */
+  content: string;
+  /** The action the send will use: `uprav` | `answer` | `ask`. */
+  proposed_action: string;
+  created_at: string;
+}
+
 export interface PipelineBoard {
   state: PipelineState | null;
   recent_messages: PipelineMessage[];
@@ -139,6 +153,11 @@ export interface PipelineBoard {
   // carries one, else null/absent. The Vizuál page embeds this in an iframe so the Manažér can walk the
   // running app while the AI edits it. Absent whenever the version never entered the vizual stage.
   vizual_url?: string | null;
+  // ICCINT-24: the OPEN proposal from our technical team, or null/absent when there is none (the usual
+  // case). Board-level, not dug out of `recent_messages`: that list is truncated, and a proposal that
+  // scrolled out of the tail would silently stop being offered. DedoProposalBar renders IF AND ONLY IF
+  // this is set — so an existing proposal is always on screen, and a handled one never comes back.
+  dedo_proposal?: DedoProposal | null;
 }
 
 // ── action requests ──────────────────────────────────────────────────────────
@@ -227,6 +246,28 @@ export function postPipelineActionApi(
   body: PipelineActionRequest,
 ): Promise<PipelineBoard> {
   return api.post<PipelineBoard>(`/pipeline/${versionId}/action`, body);
+}
+
+// ICCINT-24: send our technical team's finding to the agent, as the Manažér. `text` is what he has in the
+// box — Dedo's wording, possibly edited — and it is what actually goes out. The backend sends it through the
+// action the proposal named (uprav / answer / ask) with all of that action's guards, marks the proposal
+// handled in the same transaction, and returns the fresh board. A refusal (e.g. "answer" on a build that is
+// not asking anything) leaves the proposal open, so the bar stays and the Manažér can act when it applies.
+//
+// `messageId` is the proposal HE WAS SHOWN, and it is what makes the button honest: the backend acts on
+// that row and reads the verb off it, instead of looking up "the open proposal" again when the click
+// arrives. Without it, a finding Dedo wrote during the 25s reconcile window would be the one executed — the
+// button said "Spýtať sa agenta" and the engine ran "uprav" (audit 2026-08-23). If the named proposal is no
+// longer open the call is refused with 409 and the reason is shown; nothing is ever substituted for it.
+export function sendDedoProposalApi(versionId: string, messageId: string, text: string): Promise<PipelineBoard> {
+  return api.post<PipelineBoard>(`/pipeline/${versionId}/dedo-proposal/send`, { message_id: messageId, text });
+}
+
+// ICCINT-24: decline the finding. Nothing is sent, no turn runs; the proposal is archived (marked rejected,
+// kept in the log) and never offered again. `messageId` names the one he declined, for the same reason as
+// the send — otherwise the decline lands on whatever arrived most recently.
+export function rejectDedoProposalApi(versionId: string, messageId: string): Promise<PipelineBoard> {
+  return api.post<PipelineBoard>(`/pipeline/${versionId}/dedo-proposal/reject`, { message_id: messageId });
 }
 
 export function openDebugTerminalApi(
