@@ -102,6 +102,10 @@ cp -a "$COMPOSE" "${COMPOSE}.bak-${CURRENT}"
 SERVICES=()
 if [[ "$TARGET" == "all" || "$TARGET" == "backend" ]]; then
   sed -i "s|image: ${BACKEND_IMAGE}:v[0-9.]*|image: ${BACKEND_IMAGE}:v${VERSION}|" "$COMPOSE"
+  # ``APP_VERSION`` is what /health reports. Its default in the compose had been left at 4.0.78 while the
+  # image moved on sixteen deploys, so the backend spent all of them claiming to be a version it was not.
+  # A version that is only right when somebody remembers to update it will be wrong; bump it with the tag.
+  sed -i "s|APP_VERSION: \"\${APP_VERSION:-[0-9.]*}\"|APP_VERSION: \"\${APP_VERSION:-${VERSION}}\"|" "$COMPOSE"
   SERVICES+=(backend)
 fi
 if [[ "$TARGET" == "all" || "$TARGET" == "frontend" ]]; then
