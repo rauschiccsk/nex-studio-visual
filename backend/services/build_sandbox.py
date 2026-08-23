@@ -59,22 +59,23 @@ socket away today and those phases simply stop working. Brokered access to Docke
 lands, the exposure this module removes is removed for two phases out of five and for no others. Anyone
 reading a summary that says "build turns are now isolated" is reading something untrue.
 
-KNOWN CONSEQUENCE OF THE ISOLATION (Director decision needed, deliberately NOT papered over here). The AI
-Agent charter §3 gives the agent THREE knowledge levels, and the sandbox takes TWO of them away — not just
-the file reads the first version of this docstring admitted to:
+THE KNOWLEDGE BASE IS READABLE, NOT WRITABLE (Director decision, 23.08.2026). The AI Agent charter §3 gives
+the agent three knowledge levels. An earlier version of this sandbox took two of them away; the Director's
+decision was *"pripoj znalostnú bázu read-only"*, and BOTH halves of "read" are implemented — a half-working
+§3 would be the same trap in a smaller size:
 
-  1. **§3(1) direct reads of ``/home/icc/knowledge``** — the KB is on the forbidden mount list by explicit
-     instruction, so ``Read``/``Grep`` against it FAIL inside the sandbox;
+  1. **§3(1) direct reads** — ``/home/icc/knowledge`` is bind-mounted ``readonly``. ``Read``/``Grep`` work;
+     a write is kernel-refused (EROFS).
   2. **§3(1) the RAG path** (*"Prístup: RAG (Qdrant + Ollama embeddings) + priame čítanie súborov"*) — the
-     sandbox has neither ``QDRANT_URL`` nor ``OLLAMA_URL`` (they are not in :data:`_PASSTHROUGH_ENV`) and is
-     not on those services' docker network, so the indexed path is gone as well;
-  3. **§3(3) "prispievaj do zdieľaného ICC KB … každý zápis MUSÍ nasledovať RAG reindex"** — there is
-     nowhere to write and nothing to reindex.
+     project's own ``scripts/rag_query.py`` talks to Qdrant directly, so mounting files alone would NOT have
+     revived it. ``QDRANT_URL`` and ``OLLAMA_URL`` are therefore in :data:`_PASSTHROUGH_ENV`; both point at
+     the docker bridge gateway, which the sandbox reaches on the default bridge.
+  3. **§3(3) deliberate writes into the shared KB + reindex** — DELIBERATELY still unavailable: read-only is
+     what was decided. The agent must not discover this by having a write fail mid-build, so the charter
+     §3 says outright that in Príprava and Návrh the shared KB is read-only and a contribution waits for a
+     later phase. A rule the agent cannot see is a trap, not a rule.
 
-Only §3(2), the per-project ``MEMORY.md`` in the project tree, still works. Príprava and Návrh are precisely
-the phases that lean on §3, so the decision in front of the Director is about the WHOLE of §3 — mount the KB
-read-only, serve it through the backend, or accept two isolated phases without shared institutional memory —
-and not about "file reads" alone. Nothing here silently substitutes for any of it.
+§3(2), the per-project ``MEMORY.md``, is in the project tree and was never affected.
 """
 
 from __future__ import annotations
@@ -206,7 +207,15 @@ _PASSTHROUGH_ENV: tuple[str, ...] = (
     "GITHUB_TOKEN",  # the agent commits and pushes its own work
     "GH_TOKEN",
     "LANG",
+    # Charter §3(1) reaches the KB two ways and the file mount only revives one of them: the project's own
+    # ``scripts/rag_query.py`` talks to Qdrant directly. Both URLs point at the docker bridge gateway, which
+    # the sandbox reaches on the default bridge. Not secrets — plain service addresses.
+    "QDRANT_URL",
+    "OLLAMA_URL",
 )
+
+#: The shared ICC knowledge base, mounted read-only (charter §3(1)). Same path inside and out.
+_KB_DIR = "/home/icc/knowledge"
 
 #: Git identity for the sandbox, passed BY VALUE (it is not a secret) as the env vars git itself honours.
 #:
@@ -670,6 +679,12 @@ def build_run_argv(*, project_slug: str, container_name: str, claude_argv: list[
         # refusal is classified as unavailability — an honest failure rather than a silent lie.
         "--mount",
         f"type=bind,source={host_project_dir},target={container_project_dir}",
+        # The shared ICC knowledge base — READ-ONLY (Director decision 23.08.2026). Charter §3(1) sends the
+        # agent here for standards, decisions and past lessons; §3(3) would have it write back, and that
+        # half stays refused by the kernel on purpose. Same in-container path as the backend uses, so a
+        # path the agent read in an earlier phase still resolves.
+        "--mount",
+        f"type=bind,source={_KB_DIR},target={_KB_DIR},readonly",
     ]
     # …and the read-only re-deploy of everything in the project that governs a later, PRIVILEGED turn.
     # Kernel-refused both ways: writing gives EROFS, deleting-and-recreating gives EBUSY (both measured).

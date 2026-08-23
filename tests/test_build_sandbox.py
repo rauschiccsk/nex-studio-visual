@@ -236,14 +236,16 @@ async def test_claude_flags_are_unchanged_by_the_wrapper(monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_the_mount_list_is_exactly_these_four_and_nothing_else(monkeypatch) -> None:
+async def test_the_mount_list_is_exactly_these_five_and_nothing_else(monkeypatch) -> None:
     """The whole guarantee, stated as an EQUALITY so an ADDITION fails.
 
-    Four mounts, for a project (``acme``) that has no ``.claude`` config to freeze: the ephemeral HOME, this
-    project's own transcript directory, the project itself and the read-only ``claude`` binary. Every other
-    path the BACKEND holds — the docker socket, ``/opt/customers``, ``/opt/uat``, ``/opt/infra``, the
-    knowledge base, the credential store, and the shared ``~/.claude`` that used to be here — is simply not
-    in this set, and cannot be added without turning this red.
+    Five mounts, for a project (``acme``) that has no ``.claude`` config to freeze: the ephemeral HOME, this
+    project's own transcript directory, the project itself, the read-only ``claude`` binary, and the shared
+    knowledge base READ-ONLY (charter §3(1); Director 23.08.2026). Every other path the BACKEND holds — the
+    docker socket, ``/opt/customers``, ``/opt/uat``, ``/opt/infra``, the credential store, and the shared
+    ``~/.claude`` that used to be here — is simply not in this set, and cannot be added without turning this
+    red. The knowledge base being in the set with ``readonly=True`` is itself the assertion: mounted, and
+    writes kernel-refused.
     """
     argv = await _turn_argv(monkeypatch, stage="priprava", slug="acme")
     opts, _ = _scan(argv)
@@ -261,6 +263,7 @@ async def test_the_mount_list_is_exactly_these_four_and_nothing_else(monkeypatch
         ("tmpfs", "/home/andros", "/home/andros", False),
         ("bind", str(Path(build_sandbox._CLAUDE_HOME_DIR) / "projects" / "-opt-projects-acme"), session_dir, False),
         ("bind", "/opt/projects/acme", "/opt/projects/acme", False),
+        ("bind", build_sandbox._KB_DIR, build_sandbox._KB_DIR, True),
         ("bind", "/home/andros/.local", "/home/andros/.local", True),
     }
 
@@ -321,6 +324,10 @@ async def test_the_env_allow_list_is_exactly_this_set(monkeypatch) -> None:
         "GITHUB_TOKEN",
         "GH_TOKEN",
         "LANG",
+        # Charter §3(1) reaches the KB two ways; the file mount alone revives only one, because the
+        # project's own rag_query.py talks to Qdrant directly (Director 23.08.2026).
+        "QDRANT_URL",
+        "OLLAMA_URL",
     }
     assert by_value == {
         "HOME",
@@ -964,20 +971,23 @@ def test_the_network_residual_is_published_not_implied() -> None:
         assert expected.lower() in payload["network_residual"].lower()
 
 
-def test_the_docstring_states_the_whole_of_charter_paragraph_3_not_just_file_reads() -> None:
-    """The KB consequence is a DIRECTOR decision, and it has to be posed over the whole of charter §3.
+def test_reading_the_knowledge_base_works_BOTH_ways_or_neither(monkeypatch) -> None:
+    """Director 23.08.2026: *"pripoj znalostnú bázu read-only"* — and reading means BOTH halves of §3(1).
 
-    Audit's point: the module admitted only that direct ``/home/icc/knowledge`` reads fail. The RAG path is
-    gone too (``QDRANT_URL``/``OLLAMA_URL`` are not in the pass-through allow-list and the container is not
-    on those services' network), and §3(3) "prispievaj do zdieľaného ICC KB … každý zápis MUSÍ nasledovať
-    RAG reindex" has nowhere to write. Only §3(2), the per-project ``MEMORY.md``, still works.
+    Charter §3(1) says the access is *"RAG (Qdrant + Ollama embeddings) + priame čítanie súborov"*. Mounting
+    the files alone would have left the agent with a knowledge base it can open but not search, because the
+    project's own ``scripts/rag_query.py`` talks to Qdrant directly — a half-working §3 is the same trap in
+    a smaller size. So this pins BOTH, and pins the writes as still refused: read-only was the decision.
     """
     doc = build_sandbox.__doc__ or ""
-    assert "QDRANT_URL" in doc and "OLLAMA_URL" in doc
+    # RAG half — reachable.
+    assert "QDRANT_URL" in build_sandbox._PASSTHROUGH_ENV
+    assert "OLLAMA_URL" in build_sandbox._PASSTHROUGH_ENV
+    # File half — mounted, and mounted READ-ONLY (the mount-equality test asserts the readonly flag).
+    assert build_sandbox._KB_DIR == "/home/icc/knowledge"
+    # §3(3) stays refused, and the docstring must say so rather than let it be discovered by a failed write.
+    assert "read-only" in doc.lower()
     assert "MEMORY.md" in doc
-    assert "reindex" in doc.lower()
-    assert "QDRANT_URL" not in build_sandbox._PASSTHROUGH_ENV
-    assert "OLLAMA_URL" not in build_sandbox._PASSTHROUGH_ENV
 
 
 def test_the_two_transports_of_a_consult_turn_cannot_drift_apart(monkeypatch) -> None:

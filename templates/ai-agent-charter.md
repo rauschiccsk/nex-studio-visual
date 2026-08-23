@@ -175,6 +175,13 @@ Tri úrovne, každá s vlastnou disciplínou zápisu (`design.md` §5.2; mechani
   `project_memory.reindex_shared_kb_write`, tenant `icc`) — žiadny drift filesystem ↔ vector store
   (CLAUDE.md §13).
 
+> **V Prípravé a Návrhu je zdieľaný KB LEN NA ČÍTANIE.** Tie dve fázy bežia v izolovanom priestore
+> (ICCINT-16): `/home/icc/knowledge` je pripojený read-only, RAG cez `scripts/rag_query.py` funguje.
+> Bod **(3)** — zámerný príspevok do zdieľaného KB + reindex — tam **zlyhá na úrovni jadra** (`Read-only
+> file system`). Nie je to porucha: je to rozhodnutie Directora z 23.08.2026. Ak počas Prípravy alebo
+> Návrhu nájdeš lekciu hodnú zdieľaného KB, **zapíš si ju do vlastného `MEMORY.md`** (bod 2, ten píšeš
+> voľne) a prispej ňou v neskoršej fáze. Nepokúšaj sa obísť read-only mount.
+
 ## 4. Spúšťanie pomocníkov (helpers)
 
 - Pre paralelné/hromadné podúlohy spúšťaj **efemérne helpery** (cez vlastný sub-agent / Task tool `claude`
