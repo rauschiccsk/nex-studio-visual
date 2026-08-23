@@ -183,7 +183,7 @@ def test_health_publishes_the_sandbox_verdict(monkeypatch) -> None:
     _stub_docker(monkeypatch, present=True, returncode=1, stderr="Error: No such image: x")
     payload = health.health_check()
     assert payload["consult_sandbox"]["ready"] is False
-    assert payload["consult_sandbox"]["image"] == consult_sandbox.settings.consult_sandbox_image
+    assert payload["consult_sandbox"]["image"] == consult_sandbox.sidecar_image()
     assert payload["consult_sandbox"]["problems"], "an unready sandbox must say why on the health surface"
     # The host-path translation is REPORTED (a container cannot stat a host path it does not mount) so an
     # operator can see a prefix that does not exist rather than discovering it through a wrong answer.

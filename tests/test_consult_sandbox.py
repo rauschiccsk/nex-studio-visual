@@ -27,8 +27,11 @@ _READ_ONLY = ["Read", "Grep", "Glob"]
 
 @pytest.fixture(autouse=True)
 def _pin_projects_root(monkeypatch):
-    """These tests assert the FIXED in-container ``/opt/projects`` → host ``/opt/projects-v3`` sidecar path
-    translation, so ``PROJECTS_ROOT`` must be the real ``/opt/projects`` here. The suite-wide
+    """These tests assert the FIXED in-container ``/opt/projects`` → host ``/opt/projects`` sidecar path
+    translation (the IDENTITY — ``docker inspect`` on the running backend shows ``bind /opt/projects ->
+    /opt/projects``; the ``/opt/projects-v3`` this used to encode does not exist on the host at all, so every
+    consult composed a bind source ``--mount`` refused and silently degraded), so ``PROJECTS_ROOT`` must be
+    the real ``/opt/projects`` here. The suite-wide
     ``_isolate_projects_root`` default (a temp dir, so scaffold WRITES never pollute the real workspace) would
     otherwise break the translation — but the consult sidecar tests do NO scaffolding (docker is mocked), so
     pinning the real prefix is correct and leak-free."""
@@ -95,17 +98,18 @@ async def test_sidecar_launches_ephemeral_unprivileged_container(monkeypatch) ->
     assert _value_after(argv, "--user") == "andros"  # unprivileged, never root
     assert _value_after(argv, "--entrypoint") == "claude"
     assert _value_after(argv, "--name").startswith("nex-consult-")  # named so a hung one can be reaped
-    # image = the running backend image tag (dedicated setting; default v3 backend image)
-    assert consult_sandbox.settings.consult_sandbox_image in argv
+    # image = the running backend image tag. DERIVED from app_version when the setting is empty: the
+    # literal default it used to carry (v3.0.0) names a tag absent from this host, so every consult degraded.
+    assert consult_sandbox.sidecar_image() in argv
 
 
 async def test_sidecar_mounts_project_read_only_at_host_path(monkeypatch) -> None:
     argv = await _sidecar_argv(monkeypatch, project_slug="acme")
-    # bind <HOST_PROJECT_PATH> → /opt/projects/<slug> readonly — the HARD guarantee. Host path is translated
-    # from the backend's in-container /opt/projects view to the daemon-resolvable /opt/projects-v3 host path.
+    # bind <HOST_PROJECT_PATH> → /opt/projects/<slug> readonly — the HARD guarantee. /opt/projects is bind-
+    # mounted IDENTICALLY into the backend, so the daemon-resolvable host path is the same path.
     project = _mount_for(argv, "/opt/projects/acme")
     assert project["type"] == "bind"
-    assert project["source"] == "/opt/projects-v3/acme"
+    assert project["source"] == "/opt/projects/acme"
     assert "readonly" in project
     assert _value_after(argv, "-w") == "/opt/projects/acme"  # cwd = project, as in-process
 
@@ -180,8 +184,9 @@ async def test_sidecar_omits_all_forbidden_mounts(monkeypatch) -> None:
 
 
 def test_host_path_translation() -> None:
-    # backend /opt/projects view → daemon-resolvable /opt/projects-v3 host path; customer projects identity.
-    assert consult_sandbox._host_project_path("/opt/projects/p") == "/opt/projects-v3/p"
+    # backend /opt/projects view → daemon-resolvable host path: the IDENTITY on this deployment (the old
+    # /opt/projects-v3 does not exist on the host). Customer projects were always identity.
+    assert consult_sandbox._host_project_path("/opt/projects/p") == "/opt/projects/p"
     assert consult_sandbox._host_project_path("/opt/customers/acme") == "/opt/customers/acme"
     with pytest.raises(consult_sandbox.SidecarUnavailable):
         consult_sandbox._host_project_path("/somewhere/else")
@@ -329,7 +334,7 @@ async def test_sidecar_daemon_error_is_unavailable(monkeypatch) -> None:
     ["..", "../other", "../../etc", "/", "", ".", "a/b", "a/../../etc", "foo/..", "/opt", "-leading"],
 )
 def test_traversal_slug_raises_before_composing_bind(bad_slug) -> None:
-    # An unvalidated `..` slug composes the -v SOURCE /opt/projects-v3/.. → docker would mount ALL of /opt
+    # An unvalidated `..` slug composes the bind SOURCE /opt/projects/.. → docker would mount ALL of /opt
     # :ro (every customer/uat/infra/project) into the sidecar. The slug MUST be rejected at the
     # mount-composition boundary, BEFORE any -v is composed.
     with pytest.raises(consult_sandbox.SidecarUnavailable):
@@ -359,19 +364,19 @@ def test_good_slug_bind_source_realpath_contained() -> None:
     )
     project_source = _mount_for(argv, "/opt/projects/acme")["source"]
     real = os.path.realpath(project_source)
-    assert real == os.path.realpath("/opt/projects-v3/acme")
-    assert real.startswith(os.path.realpath("/opt/projects-v3") + os.sep)
+    assert real == os.path.realpath("/opt/projects/acme")
+    assert real.startswith(os.path.realpath("/opt/projects") + os.sep)
 
 
 def test_containment_assert_rejects_out_of_prefix_source() -> None:
     # Belt-and-suspenders: even if a future prefix change / symlink composed a source that escaped the
     # project roots, the realpath containment assertion refuses it (rather than silently broadening the mount).
     with pytest.raises(consult_sandbox.SidecarUnavailable):
-        consult_sandbox._assert_host_source_contained("/opt/projects-v3/../secret")  # resolves to /opt/secret
+        consult_sandbox._assert_host_source_contained("/opt/projects/../secret")  # resolves to /opt/secret
     with pytest.raises(consult_sandbox.SidecarUnavailable):
         consult_sandbox._assert_host_source_contained("/opt")  # the bare parent, not a project dir
     # a legitimately-contained source passes
-    consult_sandbox._assert_host_source_contained("/opt/projects-v3/acme")
+    consult_sandbox._assert_host_source_contained("/opt/projects/acme")
     consult_sandbox._assert_host_source_contained("/opt/customers/acme")
 
 
@@ -407,3 +412,53 @@ async def test_clean_exit_does_not_double_reap(monkeypatch) -> None:
         project_slug="p", claude_session_id=uuid4(), prompt="otázka", allowed_tools=_READ_ONLY
     )
     reap_spy.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# The two transports must accept the same arguments (audit: they did not)
+# ---------------------------------------------------------------------------
+
+
+async def test_the_sidecar_accepts_and_forwards_the_role_permission_profile(monkeypatch, tmp_path) -> None:
+    """``claude_agent._invoke_once`` was already passing ``settings_path=`` while this function's signature
+    did not declare it, so EVERY live consult raised ``TypeError``. ``except SidecarUnavailable`` does not
+    catch a ``TypeError``, so the turn died outright AND :func:`consult_sandbox.record_degradation` never
+    ran — leaving ``GET /health``'s ``degraded_turns`` at 0 for a guarantee that was failing every time.
+    That counter exists precisely so a lapse cannot be silent."""
+    profile = tmp_path / "settings.json"
+    profile.write_text('{"permissions":{"deny":["Bash(git push:*)"]}}', encoding="utf-8")
+    argv = await _sidecar_argv(monkeypatch, settings_path=profile)
+    assert _value_after(argv, "--settings") == str(profile)
+
+
+async def test_a_live_consult_dispatch_reaches_the_sidecar_without_a_typeerror(monkeypatch, tmp_path) -> None:
+    """The end-to-end shape of the bug: drive the REAL seam in ``claude_agent`` rather than the sidecar
+    directly, because the drift was between the caller and the callee, not inside either."""
+    profile = tmp_path / "settings.json"
+    profile.write_text("{}", encoding="utf-8")
+    mock_exec = AsyncMock(return_value=_ok_proc())
+    monkeypatch.setattr(consult_sandbox.asyncio, "create_subprocess_exec", mock_exec)
+    degraded: list[str] = []
+    monkeypatch.setattr(consult_sandbox, "record_degradation", lambda reason: degraded.append(reason))
+
+    text, _usage, _structured = await claude_agent.invoke_claude(
+        project_slug="acme",
+        claude_session_id=uuid4(),
+        prompt="otázka",
+        allowed_tools=list(_READ_ONLY),
+        sandbox=True,
+        settings_path=profile,
+    )
+    assert text == "ok"
+    assert degraded == []  # it ran IN the sidecar — no degradation to record
+    assert mock_exec.call_args.args[0] == "docker"
+
+
+def test_an_empty_kill_switch_value_means_on(monkeypatch) -> None:
+    """``CONSULT_SANDBOX=`` used to disable the sidecar — the same defect as ``BUILD_SANDBOX``. The compose
+    idioms ``CONSULT_SANDBOX=${CONSULT_SANDBOX}`` (unexported) and ``environment: - CONSULT_SANDBOX`` both
+    produce exactly the empty string."""
+    monkeypatch.setenv("CONSULT_SANDBOX", "")
+    assert consult_sandbox.sandbox_enabled() is True
+    monkeypatch.setenv("CONSULT_SANDBOX", "0")
+    assert consult_sandbox.sandbox_enabled() is False

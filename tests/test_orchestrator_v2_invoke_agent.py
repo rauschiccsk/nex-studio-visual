@@ -23,6 +23,7 @@ import json
 import uuid
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from sqlalchemy import select, update
 
 from backend.db.models.foundation import User, UserAgentSettings
@@ -142,14 +143,17 @@ class FakeClaude:
         json_schema=None,
         allowed_tools=None,
         sandbox=False,
+        stage=None,
         log_dir=None,
         log_label=None,
     ):
         # konzultacia-followup.md Fix 1: ``invoke_agent`` now forwards ``allowed_tools=`` on EVERY turn (the
         # read-only consult profile, or ``None`` for a build). konzultacia-sidecar-sandbox.md Part 2 adds
         # ``sandbox=`` (``True`` only for a consult turn). build-robustness-crash-handling.md Fix 1 adds
-        # ``log_dir=``/``log_label=`` (the per-turn diagnostic log). Accept all so this fake mirrors the real
-        # ``invoke_claude`` signature (else a TypeError — the regression this fixes).
+        # ``log_dir=``/``log_label=`` (the per-turn diagnostic log). ICCINT-16 STEP 1 adds ``stage=`` — the
+        # phase, which is what decides whether a build turn runs OS-isolated or as a subprocess. Accept all
+        # so this fake mirrors the real ``invoke_claude`` signature (else a TypeError — the regression this
+        # fixes).
         self.calls.append(
             {
                 "prompt": prompt,
@@ -158,6 +162,7 @@ class FakeClaude:
                 "json_schema": json_schema,
                 "allowed_tools": allowed_tools,
                 "sandbox": sandbox,
+                "stage": stage,
             }
         )
         return self.response(prompt) if callable(self.response) else self.response
@@ -240,6 +245,22 @@ async def test_invoke_agent_records_message(db_session, monkeypatch):
     assert msgs[0].kind == "gate_report"
     assert msgs[0].recipient == "manazer"
     assert msgs[0].payload["commits"] == ["abc123"]
+
+
+@pytest.mark.parametrize("stage", ["priprava", "navrh", "programovanie", "verifikacia"])
+async def test_invoke_agent_forwards_the_phase_to_the_cli_seam(db_session, monkeypatch, stage):
+    # ICCINT-16 STEP 1: the phase is what decides a build turn's TRANSPORT (Príprava/Návrh run OS-isolated,
+    # everything else stays a backend subprocess), and ``claude_agent`` can only decide that if the phase
+    # actually arrives. This pins the wiring: drop the ``stage=`` forwarding in ``invoke_agent`` and every
+    # Príprava/Návrh build silently goes back to running with /opt/customers in reach, with no other test
+    # noticing — the isolation would be off while the sandbox's own tests still passed.
+    fake = _fake_claude(monkeypatch)
+    version, _ = _make_version(db_session)
+    fake.response = _navrh_block()
+    await orchestrator.invoke_agent(
+        db_session, version_id=version.id, role=orchestrator.AI_AGENT_ROLE, stage=stage, prompt="go"
+    )
+    assert fake.calls[0]["stage"] == stage
 
 
 async def test_invoke_agent_parse_failure_is_silent(db_session, monkeypatch):

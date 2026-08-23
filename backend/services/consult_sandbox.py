@@ -43,7 +43,12 @@ from typing import Optional
 from uuid import UUID, uuid4
 
 from backend.config.settings import settings
-from backend.services import claude_agent
+
+# ``sandbox_paths`` holds the bind-mount path guards (slug rule + host translation + containment assert) in
+# ONE place shared by every project sandbox — see that module for why a second copy is a hazard rather than
+# redundancy. The wrappers below add only this module's error type and label; the logic being trusted is
+# the shared one.
+from backend.services import claude_agent, sandbox_paths
 from backend.services.claude_agent import (
     ClaudeAgentError,
     ClaudeAgentTimeout,
@@ -53,11 +58,6 @@ from backend.services.claude_agent import (
     _structured_from,
     _usage_from,
 )
-
-#: The ICC-canonical kebab-case project-slug rule, reused verbatim (DRY) so the sidecar accepts EXACTLY the
-#: slugs the project system considers valid (identical rule in ``project_specs`` and ``agent_terminal``).
-#: Rejects ``..`` / ``/`` / empty / anything non-slug BEFORE it is composed into a ``-v`` bind source (Fix 1).
-from backend.services.project_specs import _SLUG_RE as _PROJECT_SLUG_RE
 
 logger = logging.getLogger(__name__)
 
@@ -73,12 +73,19 @@ _CLAUDE_AUTH_DIR = "/home/andros/.claude"
 #: The sidecar runs as this unprivileged host user (the same user the backend runs as) — never root.
 _SIDECAR_USER = "andros"
 
-#: In-container project dir → HOST path for the sidecar ``-v`` bind. A sibling ``docker run`` is resolved
-#: by the daemon on the HOST, so the bind SOURCE must be the host path, not the backend's in-container view
-#: (konzultacia-sidecar-sandbox.md §Proven feasibility). Regular projects live under ``/opt/projects-v3`` on
-#: the host but are mounted at ``/opt/projects`` in the backend; customer projects are the same path on both.
+#: In-container project dir → HOST path for the sidecar bind. A sibling ``docker run`` is resolved by the
+#: daemon on the HOST, so the bind SOURCE must be the host path, not the backend's in-container view
+#: (konzultacia-sidecar-sandbox.md §Proven feasibility).
+#:
+#: The first entry used to read ``/opt/projects-v3``, a directory that DOES NOT EXIST on this host
+#: (``ls -d /opt/projects-v3`` → No such file or directory). Every consult on a regular project therefore
+#: composed a bind source that ``--mount`` refused, which :data:`_SIDECAR_UNAVAILABLE_RE` classified as
+#: unavailability — so the kernel read-only guarantee was never in effect for any of them. ``docker inspect``
+#: on the running backend shows ``bind /opt/projects -> /opt/projects``: the translation is the IDENTITY,
+#: exactly as :mod:`build_sandbox` and :mod:`vizual_sandbox` record it. Customer projects were always the
+#: same path on both sides.
 _CONTAINER_TO_HOST_PREFIX: tuple[tuple[str, str], ...] = (
-    ("/opt/projects", "/opt/projects-v3"),
+    ("/opt/projects", "/opt/projects"),
     ("/opt/customers", "/opt/customers"),
 )
 
@@ -127,8 +134,27 @@ def sandbox_enabled() -> bool:
 
     Default ON ("default on in prod"); set ``CONSULT_SANDBOX`` to ``0``/``false``/``no``/``off`` to force
     the in-process read-only fallback (still tool-profile read-only, just not kernel-isolated). Read at turn
-    time (env, not a cached setting) so the operational kill-switch flips without a process restart."""
-    return os.environ.get("CONSULT_SANDBOX", "1").strip().lower() not in ("0", "false", "no", "off", "")
+    time (env, not a cached setting) so the operational kill-switch flips without a process restart.
+
+    An EMPTY value means "unset", i.e. ON — it used to be in the off-list, so the ordinary compose idioms
+    ``CONSULT_SANDBOX=${CONSULT_SANDBOX}`` (unexported) and ``environment: - CONSULT_SANDBOX`` disabled the
+    sidecar. Same defect, same fix as :func:`build_sandbox.sandbox_enabled`."""
+    return os.environ.get("CONSULT_SANDBOX", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+#: Default image repository for the sidecar — a sibling of THIS backend image, tagged with the running
+#: ``APP_VERSION``. Same fix, same reason, as :data:`build_sandbox._DEFAULT_IMAGE_REPO`.
+_DEFAULT_IMAGE_REPO = "nex-studio-visual-backend"
+
+
+def sidecar_image() -> str:
+    """The image the sidecar runs — ``CONSULT_SANDBOX_IMAGE`` if set, else this backend's own version tag.
+
+    Deriving the default from ``app_version`` rather than pinning a literal is the fix for the failure this
+    module was audited for: the pinned ``nex-studio-visual-backend:v3.0.0`` does not exist on this host, so
+    every consult degraded and the kernel read-only guarantee was never in effect.
+    """
+    return settings.consult_sandbox_image or f"{_DEFAULT_IMAGE_REPO}:v{settings.app_version}"
 
 
 # --------------------------------------------------------------------------------------------------------
@@ -227,7 +253,7 @@ def _probe_problems() -> tuple[str, ...]:
     if shutil.which("docker") is None:
         # Without the CLI nothing else is checkable — the daemon and image probes both go through it.
         return ("docker CLI is not on PATH — the sidecar cannot be launched at all",)
-    image = settings.consult_sandbox_image
+    image = sidecar_image()
     try:
         proc = subprocess.run(
             ["docker", "image", "inspect", "--format", "{{.Id}}", image],
@@ -278,7 +304,7 @@ def preflight(*, refresh: bool = False) -> SandboxStatus:
         return SandboxStatus(
             enabled=False,
             ready=False,
-            image=settings.consult_sandbox_image,
+            image=sidecar_image(),
             problems=("CONSULT_SANDBOX is switched off — consults run in-process (tool-profile read-only only)",),
             degraded_turns=_ledger.count,
             last_degradation=_ledger.last_reason,
@@ -290,7 +316,7 @@ def preflight(*, refresh: bool = False) -> SandboxStatus:
     return SandboxStatus(
         enabled=True,
         ready=not problems,
-        image=settings.consult_sandbox_image,
+        image=sidecar_image(),
         problems=problems,
         degraded_turns=_ledger.count,
         last_degradation=_ledger.last_reason,
@@ -334,14 +360,17 @@ def log_startup_readiness() -> SandboxStatus:
     return status
 
 
+#: This module's label in the shared path guards' error messages (kept byte-identical to the messages this
+#: module raised when it owned the logic).
+_SANDBOX_LABEL = "consult sidecar"
+
+
 def _host_project_path(container_project_dir: str) -> str:
     """Translate the backend's in-container project dir → the HOST path for the ``-v`` bind source."""
-    for container_prefix, host_prefix in _CONTAINER_TO_HOST_PREFIX:
-        if container_project_dir == container_prefix or container_project_dir.startswith(container_prefix + "/"):
-            return host_prefix + container_project_dir[len(container_prefix) :]
-    raise SidecarUnavailable(
-        f"consult sidecar: cannot map in-container project path {container_project_dir!r} to a host path"
-    )
+    try:
+        return sandbox_paths.container_to_host(container_project_dir, _CONTAINER_TO_HOST_PREFIX, sandbox=_SANDBOX_LABEL)
+    except sandbox_paths.SandboxPathError as exc:
+        raise SidecarUnavailable(str(exc)) from exc
 
 
 def _validate_project_slug(project_slug: str) -> None:
@@ -350,10 +379,12 @@ def _validate_project_slug(project_slug: str) -> None:
     ``pathlib`` does NOT normalize ``..``, so an unvalidated slug of ``..`` would compose the bind SOURCE
     ``/opt/projects-v3/..`` → docker would mount ALL of ``/opt`` (every customer / uat / infra / project)
     ``:ro`` into the sidecar, defeating the NEGATIVE half of the read-only guarantee (a cross-tenant leak,
-    even though nothing is writable). Reuses the ICC-canonical :data:`_PROJECT_SLUG_RE` (DRY); a bad slug
-    raises :class:`SidecarUnavailable` so the caller degrades to the in-process read-only turn."""
-    if not _PROJECT_SLUG_RE.match(project_slug):
-        raise SidecarUnavailable(f"consult sidecar: refusing unsafe project slug {project_slug!r}")
+    even though nothing is writable). Reuses the shared :func:`sandbox_paths.validate_project_slug` (DRY);
+    a bad slug raises :class:`SidecarUnavailable` so the caller degrades to the in-process read-only turn."""
+    try:
+        sandbox_paths.validate_project_slug(project_slug, sandbox=_SANDBOX_LABEL)
+    except sandbox_paths.SandboxPathError as exc:
+        raise SidecarUnavailable(str(exc)) from exc
 
 
 def _assert_host_source_contained(host_project_dir: str) -> None:
@@ -362,13 +393,10 @@ def _assert_host_source_contained(host_project_dir: str) -> None:
     that escaped ``/opt/projects-v3/<slug>`` or ``/opt/customers/<slug>``, refuse it here rather than
     silently broadening the ``:ro`` mount. Independent of :func:`_validate_project_slug` on purpose — two
     orthogonal layers guarding the same invariant."""
-    real = os.path.realpath(host_project_dir)
-    for _container_prefix, host_prefix in _CONTAINER_TO_HOST_PREFIX:
-        if real.startswith(os.path.realpath(host_prefix) + os.sep):
-            return
-    raise SidecarUnavailable(
-        f"consult sidecar: refusing bind source {host_project_dir!r} — resolves outside the project roots"
-    )
+    try:
+        sandbox_paths.assert_host_source_contained(host_project_dir, _CONTAINER_TO_HOST_PREFIX, sandbox=_SANDBOX_LABEL)
+    except sandbox_paths.SandboxPathError as exc:
+        raise SidecarUnavailable(str(exc)) from exc
 
 
 def build_sidecar_argv(
@@ -403,7 +431,7 @@ def build_sidecar_argv(
     container_project_dir = str(claude_agent.PROJECTS_ROOT / project_slug)
     host_project_dir = _host_project_path(container_project_dir)
     _assert_host_source_contained(host_project_dir)
-    image = settings.consult_sandbox_image
+    image = sidecar_image()
     if not claude_argv or claude_argv[0] != "claude":
         raise SidecarUnavailable("consult sidecar: unexpected claude argv (missing 'claude' head)")
     entrypoint_args = claude_argv[1:]
@@ -474,8 +502,18 @@ async def run_consult_in_sandbox(
     effort: Optional[str] = None,
     json_schema: Optional[dict] = None,
     allowed_tools: Optional[list[str]] = None,
+    settings_path: Optional[Path] = None,
 ) -> tuple[str, Optional[UsageMetadata], Optional[dict]]:
     """Run ONE read-only consult turn inside an isolated sidecar; return ``(text, usage, structured_output)``.
+
+    ``settings_path`` is the dispatched role's permission profile. The parameter was MISSING while
+    :func:`claude_agent._invoke_once` was already passing it, so every live call raised ``TypeError`` —
+    which ``except SidecarUnavailable`` does not catch, so the consult turn died outright AND
+    :func:`record_degradation` never ran, leaving ``GET /health``'s ``degraded_turns`` at zero for a
+    guarantee that was failing on every single turn. The counter exists precisely so a lapse cannot be
+    silent; a signature drift between the two transports made it silent anyway. The parameter is here now,
+    and ``tests/test_consult_sandbox.py`` binds the two signatures with
+    :func:`inspect.signature` so they cannot drift again.
 
     Transport-agnostic mirror of :func:`claude_agent._invoke_once`'s json path: it composes the SAME
     per-turn ``claude`` flags (:func:`claude_agent.build_claude_argv`, always ``--output-format json`` —
@@ -504,6 +542,7 @@ async def run_consult_in_sandbox(
         effort=effort,
         json_schema=json_schema,
         allowed_tools=allowed_tools,
+        settings_path=settings_path,
     )
 
     container_name = f"nex-consult-{uuid4().hex[:16]}"

@@ -255,6 +255,24 @@ def _structured_from(envelope: dict) -> Optional[dict]:
     return obj if isinstance(obj, dict) else None
 
 
+#: The setting sources EVERY turn loads — deliberately NOT the CLI default (``user,project,local``).
+#:
+#: ``local`` is ``<project>/.claude/settings.local.json``: a file Create Project never writes, that no ICC
+#: project has, and that a build turn can CREATE inside its own read-write project tree. Hooks declared
+#: there are shell commands executed by whatever runs next — and Programovanie/Vizuál/Verifikácia still run
+#: as ROOT inside the backend container, with the docker socket and ``/opt/customers`` (ICCINT-16 is STEP 1
+#: of 2). The project's own ``settings.json`` is re-mounted read-only for a sandboxed turn
+#: (:func:`build_sandbox.frozen_project_paths`), but a file that does not yet exist cannot be frozen by a
+#: mount — so the second half of that guarantee is here, on the LOADING side: the source is never consulted.
+_SETTING_SOURCES = "user,project"
+
+#: ``--strict-mcp-config`` — same reasoning, for the other executable project config. ``.mcp.json`` declares
+#: MCP servers that the CLI SPAWNS AS PROCESSES; it is absent from every ICC project, lives in the writable
+#: project root, and could therefore be created by a build turn for a later privileged turn to launch.
+#: With this flag (and no ``--mcp-config``) the CLI uses none of it, whatever appears on disk.
+_STRICT_MCP_CONFIG = "--strict-mcp-config"
+
+
 def build_claude_argv(
     *,
     streaming: bool,
@@ -266,6 +284,7 @@ def build_claude_argv(
     json_schema: Optional[dict] = None,
     allowed_tools: Optional[list[str]] = None,
     settings_path: Optional[Path] = None,
+    permission_mode: Optional[str] = None,
 ) -> list[str]:
     """Compose the ``claude -p`` argv shared by the in-process turn AND the OS-isolated consult sidecar.
 
@@ -290,6 +309,16 @@ def build_claude_argv(
         wins over the project ``settings.json`` allow), and ``--permission-mode default`` makes the allow
         list exclusive (every other/MCP/future tool denied in headless). Unset → no tool flags (build
         turns, byte-identical).
+      * ``--setting-sources user,project`` + ``--strict-mcp-config`` — on EVERY turn, sandboxed or not.
+        Both exist to make a file a build turn could CREATE in its own project tree un-loadable by the
+        turns that still run as root: see :data:`_SETTING_SOURCES` / :data:`_STRICT_MCP_CONFIG`. Freezing
+        the files that EXIST is the sandbox's job (a read-only re-mount); a file that does not exist yet
+        can only be neutralised where it would be read.
+      * ``permission_mode`` — an explicit ``--permission-mode``. A read-only consult passes ``default``
+        (the allow-list must be exclusive); a SANDBOXED build turn passes ``bypassPermissions``, which is
+        exactly what it used to inherit from the mounted user ``settings.json`` — except that the mounted
+        file was writable BY the turn and the flag is not (ICCINT-16). An in-process build turn passes
+        nothing, byte-identical to before.
       * ``--settings`` — the dispatched role's permission profile
         (``.claude/agents/<role>/settings.json``). WITHOUT THIS FLAG THE PROFILE IS INERT. Create
         Project writes one per role and this argv used to pass nothing, while the docstring claimed
@@ -316,6 +345,7 @@ def build_claude_argv(
         args = [cli, "-p", "--output-format", "stream-json", "--verbose"]
     else:
         args = [cli, "-p", "--output-format", "json"]
+    args += ["--setting-sources", _SETTING_SOURCES, _STRICT_MCP_CONFIG]
     if charter_text is not None:
         args += ["--session-id", str(claude_session_id), "--append-system-prompt", charter_text]
     else:
@@ -334,6 +364,8 @@ def build_claude_argv(
         if deny:
             args += ["--disallowedTools", ",".join(deny)]
         args += ["--permission-mode", "default"]
+    elif permission_mode:
+        args += ["--permission-mode", permission_mode]
     args.append(prompt)
     return args
 
@@ -352,6 +384,7 @@ async def invoke_claude(
     allowed_tools: Optional[list[str]] = None,
     settings_path: Optional[Path] = None,
     sandbox: bool = False,
+    stage: Optional[str] = None,
     log_dir: Optional[Path] = None,
     log_label: Optional[str] = None,
 ) -> tuple[str, Optional["UsageMetadata"], Optional[dict]]:
@@ -380,6 +413,15 @@ async def invoke_claude(
     unavailable it degrades to the in-process read-only turn with an honest WARNING (see
     :func:`_invoke_once`). Default ``False`` → today's in-process behavior, byte-identical.
 
+    ``stage`` (ICCINT-16 STEP 1): the pipeline phase this turn belongs to. A BUILD turn in one of
+    :data:`build_sandbox.SANDBOXED_PHASES` (``priprava`` / ``navrh``) runs inside an OS-isolated container
+    whose FILESYSTEM is its own project and nothing else — see :func:`_invoke_once`. Routing keys on the
+    PHASE, not on a per-call flag, so it cannot be forgotten at a call site — but a call site that omits the
+    argument gets ``None``, which routes IN-PROCESS, so ``tests/test_build_sandbox.py`` walks the
+    orchestrator's AST and fails on any ``invoke_claude`` call without ``stage=`` (one had it missing and
+    every task-plan pass ran unisolated). Programovanie/Vizuál/Verifikácia are unchanged — they still need
+    Docker — and say so explicitly rather than by omission.
+
     Delegates to :func:`_invoke_once`; on a **transient** ``ClaudeAgentError``
     (529 / overloaded / 429 / rate limit in stderr) retries with bounded backoff
     (:data:`_TRANSIENT_BACKOFF` → up to 4 attempts) so a transient overload doesn't
@@ -403,6 +445,7 @@ async def invoke_claude(
                 allowed_tools=allowed_tools,
                 settings_path=settings_path,
                 sandbox=sandbox,
+                stage=stage,
                 log_dir=log_dir,
                 log_label=log_label,
             )
@@ -436,6 +479,7 @@ async def _invoke_once(
     allowed_tools: Optional[list[str]] = None,
     settings_path: Optional[Path] = None,
     sandbox: bool = False,
+    stage: Optional[str] = None,
     log_dir: Optional[Path] = None,
     log_label: Optional[str] = None,
 ) -> tuple[str, Optional["UsageMetadata"], Optional[dict]]:
@@ -473,6 +517,14 @@ async def _invoke_once(
             unreachable) instead of this in-process subprocess; the sidecar produces the same
             ``--output-format json`` envelope so the return contract is unchanged. Build turns
             (``allowed_tools is None``) never take the sidecar path. ``None``/``False`` → in-process.
+        stage: ICCINT-16 STEP 1. The pipeline phase this turn belongs to. A BUILD turn
+            (``allowed_tools is None``) whose phase is in :data:`build_sandbox.SANDBOXED_PHASES` has its
+            argv WRAPPED in a ``docker run`` with an ephemeral HOME that mounts only the project (rw, with
+            its executable config re-mounted read-only), that project's own claude transcript and the
+            claude binary — the claude flags, streaming, timeout, per-turn logging and return contract are
+            untouched, because only the transport and the permission-mode FLAG change. Every other phase,
+            and an unknown/``None`` phase, runs the in-process subprocess exactly as before. The
+            FILESYSTEM is what is isolated; :data:`build_sandbox.NETWORK_RESIDUAL` states what is not.
 
     Returns:
         ``(text, usage, structured_output)`` — the result text (stripped) + token usage + the
@@ -484,6 +536,10 @@ async def _invoke_once(
         ClaudeAgentError: subprocess non-zero exit, timeout, decode/JSON failure, or a
             json envelope with no ``result`` field.
     """
+    # local import — avoids a claude_agent↔build_sandbox cycle (build_sandbox raises a ClaudeAgentError
+    # subclass, so it imports this module at its own module scope).
+    from backend.services import build_sandbox
+
     project_root = PROJECTS_ROOT / project_slug
 
     # konzultacia-sidecar-sandbox.md Part 2: a CONSULT turn (read-only tool profile active) requested to run
@@ -521,6 +577,31 @@ async def _invoke_once(
                 "not kernel-isolated)",
             )
 
+    # ICCINT-16 STEP 1: a BUILD turn in the Príprava/Návrh phases is WRAPPED in a ``docker run`` that mounts
+    # only its own project (rw), its own session transcript and the claude binary — no docker socket, no
+    # /opt/customers, no /opt/uat, no /opt/infra, no knowledge, no credential store, no shared ~/.claude.
+    # Only the TRANSPORT changes: the claude flags are the same argv, and streaming, the timeout, the
+    # per-turn log and the return contract are untouched.
+    #
+    # The switch is the PHASE the engine is already in — not a per-call flag somebody has to remember. The
+    # other phases are excluded by construction because their charter orders them to run ``docker compose
+    # up`` against a real PostgreSQL; taking the socket away from them is STEP 2, and until it lands this
+    # covers two phases out of five. ``allowed_tools is None`` keeps a consult turn (handled above) out.
+    #
+    # Decided BEFORE the argv is composed, because the isolation changes one claude flag as well as the
+    # transport: a sandboxed turn carries ``--permission-mode bypassPermissions`` in its ARGV instead of
+    # inheriting it from a user ``settings.json`` it could itself rewrite.
+    use_sandbox = allowed_tools is None and build_sandbox.phase_uses_sandbox(stage) and build_sandbox.sandbox_enabled()
+    if allowed_tools is None and build_sandbox.phase_uses_sandbox(stage) and not use_sandbox:
+        # The kill-switch was thrown deliberately; say so at WARNING every turn, naming what is back in
+        # reach. A boundary that is not in effect must never be inferable only from its absence.
+        logger.warning(
+            "BUILD_SANDBOX is off — the %s turn for %s runs as a backend subprocess, with "
+            "/opt/customers, /opt/uat, /opt/infra and the docker socket in reach (ICCINT-16)",
+            stage,
+            project_slug,
+        )
+
     # First invocation for this claude session loads the charter (a missing one raises a descriptive
     # ClaudeAgentError — the "re-create through NEX Studio v2" hint — not a raw FileNotFoundError); a
     # subsequent turn passes None and the argv builder emits ``--resume`` instead.
@@ -535,38 +616,73 @@ async def _invoke_once(
         json_schema=json_schema,
         allowed_tools=allowed_tools,
         settings_path=settings_path,
+        permission_mode=build_sandbox.SANDBOX_PERMISSION_MODE if use_sandbox else None,
     )
 
+    sandbox_container: Optional[str] = None
+    if use_sandbox:
+        # The sandbox is uid 1000; every turn so far ran as root, so the project tree and the session
+        # transcript are littered with root-owned files that uid 1000 can neither ``--resume`` nor rewrite.
+        # Re-own them (and create the transcript dir a brand-new project does not have yet) BEFORE the
+        # container starts — a failure here raises BuildSandboxUnavailable, never a silent downgrade.
+        await build_sandbox.prepare_turn(project_slug)
+        build_sandbox.log_network_residual_once()
+        sandbox_container = build_sandbox.container_name()
+        args = build_sandbox.build_run_argv(
+            project_slug=project_slug,
+            container_name=sandbox_container,
+            claude_argv=args,
+        )
+
     logger.info(
-        "Invoking claude agent: project=%s session=%s charter=%s prompt_len=%d",
+        "Invoking claude agent: project=%s session=%s charter=%s prompt_len=%d transport=%s",
         project_slug,
         claude_session_id,
         "yes" if charter_path else "no",
         len(prompt),
+        f"sandbox:{sandbox_container}" if sandbox_container else "in-process",
     )
 
-    proc = await asyncio.create_subprocess_exec(
-        *args,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        cwd=str(project_root),
-        # EXPLICIT env, never the inherited default: a build turn runs with an unrestricted Bash tool, so
-        # every variable this process holds is a variable the agent can print. Dedo's machine token
-        # (ICCINT-14) must not be among them — the agent is the party that RAISES the ``framework_issue``
-        # blocks that token clears, and holding it would let a stuck build unstick itself as ``dedo``.
-        env=agent_env(),
-        # Generous StreamReader buffer: a single stream-json NDJSON event (e.g. a
-        # gate's full openapi.yaml in one `result` line) can far exceed the 64 KB
-        # default and would raise LimitOverrunError on readline (CR-NS-018).
-        limit=_STREAM_LINE_LIMIT,
-        # CR-V2-029: make the agent its own session/process-group leader so a timeout can SIGKILL the
-        # WHOLE tree (parent + the helper sub-agents the claude CLI spawns via its Task tool). Killing
-        # only ``proc.pid`` orphaned those helpers — they kept a Príprava turn alive at ~1200% CPU.
-        start_new_session=True,
-    )
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=str(project_root),
+            # EXPLICIT env, never the inherited default: a build turn runs with an unrestricted Bash tool, so
+            # every variable this process holds is a variable the agent can print. Dedo's machine token
+            # (ICCINT-14) must not be among them — the agent is the party that RAISES the ``framework_issue``
+            # blocks that token clears, and holding it would let a stuck build unstick itself as ``dedo``.
+            # In the sandboxed case this is the env of the ``docker run`` CLIENT: the sandbox itself receives
+            # only ``build_sandbox``'s explicit allow-list, passed by NAME so no value reaches the argv.
+            env=agent_env(),
+            # Generous StreamReader buffer: a single stream-json NDJSON event (e.g. a
+            # gate's full openapi.yaml in one `result` line) can far exceed the 64 KB
+            # default and would raise LimitOverrunError on readline (CR-NS-018).
+            limit=_STREAM_LINE_LIMIT,
+            # CR-V2-029: make the agent its own session/process-group leader so a timeout can SIGKILL the
+            # WHOLE tree (parent + the helper sub-agents the claude CLI spawns via its Task tool). Killing
+            # only ``proc.pid`` orphaned those helpers — they kept a Príprava turn alive at ~1200% CPU.
+            start_new_session=True,
+        )
+    except FileNotFoundError as exc:
+        # No ``docker`` CLI at all. For a sandboxed turn this is the sandbox being unavailable, and it is
+        # reported as such — never retried in-process, which would be the silent downgrade to the very
+        # exposure the sandbox removes. For an in-process turn the missing binary is ``claude`` itself and
+        # the error propagates exactly as it did before.
+        if sandbox_container is not None:
+            raise build_sandbox.unavailable(str(exc)) from exc
+        raise
 
     if on_event is not None:
-        return await _invoke_streaming(proc, timeout=timeout, on_event=on_event, log_dir=log_dir, log_label=log_label)
+        return await _invoke_streaming(
+            proc,
+            timeout=timeout,
+            on_event=on_event,
+            log_dir=log_dir,
+            log_label=log_label,
+            sandbox_container=sandbox_container,
+        )
 
     try:
         stdout, stderr = await asyncio.wait_for(
@@ -575,6 +691,9 @@ async def _invoke_once(
         )
     except asyncio.TimeoutError as exc:
         await _kill_process_tree(proc)
+        # Killing the docker-run CLIENT leaves the CONTAINER running — ``--rm`` only reaps a clean exit — so
+        # a timed-out sandbox has to be removed explicitly or it leaks (and keeps writing to the project).
+        await _reap_sandbox(sandbox_container)
         # Fix 1: a real TIMEOUT returns no envelope — persist a marker log so the wall-clock exhaustion is
         # diagnosable (and so Fix 3 can reference the path), then raise the DISTINCT timeout type.
         log_path = _write_turn_log(
@@ -586,6 +705,26 @@ async def _invoke_once(
         err = ClaudeAgentTimeout(f"claude invocation timed out after {timeout}s")
         err.log_path = log_path
         raise err from exc
+    except asyncio.CancelledError:
+        # Only for a sandboxed turn: a cancelled dispatch must not leave a container running against the
+        # project. The in-process path is left byte-identical (it does not clean up on cancel today, and
+        # changing that is not this task's business).
+        if sandbox_container is not None:
+            await _kill_process_tree(proc)
+            await _reap_sandbox(sandbox_container)
+        raise
+    except Exception:  # noqa: BLE001 — cleanup, then re-raise unchanged
+        # ANY OTHER unexpected error between launch and the process finishing (an OSError out of
+        # ``communicate``, a decode blowing up) must NOT leave the container running: ``--rm`` reaps a CLEAN
+        # exit only, and this container holds WRITE access to the project, so a leaked one keeps writing
+        # after the turn is over from the backend's point of view. :mod:`consult_sandbox` already paid for
+        # this lesson (``test_unexpected_error_mid_run_reaps_container``); the copy that did not carry it
+        # over is the copy that would leak. Timeout/Cancelled are handled above and a clean exit never
+        # enters here, so there is no double reap.
+        if sandbox_container is not None:
+            await _kill_process_tree(proc)
+            await _reap_sandbox(sandbox_container)
+        raise
 
     stderr_text = stderr.decode("utf-8", errors="replace").strip()
     # WS-D (CR-NS-036): --output-format json → parse the envelope for the result text + usage.
@@ -600,7 +739,7 @@ async def _invoke_once(
             stdout_tail=raw,
             stderr=stderr_text,
         )
-        err = ClaudeAgentError(f"claude exited with code {proc.returncode}: {stderr_text[:500]}")
+        err = _turn_failure(proc.returncode, stderr_text, sandbox_container)
         err.log_path = log_path
         raise err
 
@@ -653,8 +792,39 @@ async def _kill_process_tree(proc) -> None:
         pass  # the OS will reap it; never hang the dispatch on cleanup
 
 
+async def _reap_sandbox(container_name: Optional[str]) -> None:
+    """``docker rm -f`` a sandbox container left running by a timeout/cancel. No-op for in-process turns."""
+    if container_name is None:
+        return
+    from backend.services import build_sandbox  # local import — cycle (see :func:`_invoke_once`)
+
+    await build_sandbox.reap_container(container_name)
+
+
+def _turn_failure(returncode: Optional[int], stderr_text: str, container_name: Optional[str]) -> ClaudeAgentError:
+    """Classify a non-zero exit: did the SANDBOX fail to start, or did ``claude`` fail inside a healthy one?
+
+    The distinction is what the operator is told. "claude exited with code 125" for a missing image sends
+    somebody hunting through agent logs; :class:`build_sandbox.BuildSandboxUnavailable` names the unmet
+    precondition and the two ways out. For an in-process turn nothing changes — the same
+    :class:`ClaudeAgentError`, with the same message, as before.
+    """
+    if container_name is not None:
+        from backend.services import build_sandbox  # local import — cycle (see :func:`_invoke_once`)
+
+        if build_sandbox.looks_unavailable(stderr_text):
+            return build_sandbox.unavailable(stderr_text[:500])
+    return ClaudeAgentError(f"claude exited with code {returncode}: {stderr_text[:500]}")
+
+
 async def _invoke_streaming(
-    proc, *, timeout: int, on_event: EventCallback, log_dir: Optional[Path] = None, log_label: Optional[str] = None
+    proc,
+    *,
+    timeout: int,
+    on_event: EventCallback,
+    log_dir: Optional[Path] = None,
+    log_label: Optional[str] = None,
+    sandbox_container: Optional[str] = None,
 ) -> tuple[str, Optional["UsageMetadata"], Optional[dict]]:
     """Read ``--output-format stream-json`` NDJSON, emit events, return ``(text, usage, structured_output)``.
 
@@ -697,6 +867,9 @@ async def _invoke_streaming(
         result_text, result_usage, result_structured = await asyncio.wait_for(_consume(), timeout=timeout)
     except asyncio.TimeoutError as exc:
         await _kill_process_tree(proc)
+        # A killed docker-run client leaves the CONTAINER alive (``--rm`` only reaps a clean exit) — remove
+        # it, or a timed-out sandbox keeps running against the project. No-op for an in-process turn.
+        await _reap_sandbox(sandbox_container)
         log_path = _write_turn_log(
             log_dir,
             log_label,
@@ -707,6 +880,23 @@ async def _invoke_streaming(
         err = ClaudeAgentTimeout(f"claude invocation timed out after {timeout}s")
         err.log_path = log_path
         raise err from exc
+    except asyncio.CancelledError:
+        # Sandboxed turns only — see the matching handler in :func:`_invoke_once`.
+        if sandbox_container is not None:
+            await _kill_process_tree(proc)
+            await _reap_sandbox(sandbox_container)
+        raise
+    except Exception:  # noqa: BLE001 — cleanup, then re-raise unchanged
+        # THE PRODUCTION PATH. Every live Príprava/Návrh dispatch streams (``invoke_agent`` always passes
+        # ``on_event``), and the realistic mid-run failure is right here: ``async for raw in proc.stdout``
+        # raises ``ValueError``/``LimitOverrunError`` when one NDJSON event exceeds
+        # :data:`_STREAM_LINE_LIMIT` — the very case CR-NS-018 raised that limit for — and that is neither a
+        # Timeout nor a Cancel. Without this the docker-run client dies with the coroutine and the CONTAINER
+        # keeps running with write access to the project.
+        if sandbox_container is not None:
+            await _kill_process_tree(proc)
+            await _reap_sandbox(sandbox_container)
+        raise
 
     await proc.wait()
     if proc.returncode != 0:
@@ -721,7 +911,7 @@ async def _invoke_streaming(
             stderr=stderr_text,
             events_tail="\n".join(event_tail),
         )
-        err = ClaudeAgentError(f"claude exited with code {proc.returncode}: {stderr_text[:500]}")
+        err = _turn_failure(proc.returncode, stderr_text, sandbox_container)
         err.log_path = log_path
         raise err
     if result_text is None:

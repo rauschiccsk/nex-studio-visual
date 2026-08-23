@@ -61,9 +61,25 @@ class Settings(BaseSettings):
     # inside an ephemeral ``docker run --rm`` sibling of THIS backend image so the project is
     # KERNEL-enforced ``:ro``. ``consult_sandbox_image`` is that image tag — a dedicated knob
     # (env ``CONSULT_SANDBOX_IMAGE``) rather than overloading ``app_version`` (a semver, not an image
-    # tag). Default = the current v3 backend image. The on/off kill-switch is the ``CONSULT_SANDBOX``
-    # env (default on), read at turn time in :func:`backend.services.consult_sandbox.sandbox_enabled`.
-    consult_sandbox_image: str = "nex-studio-visual-backend:v3.0.0"
+    # tag). The on/off kill-switch is the ``CONSULT_SANDBOX`` env (default on), read at turn time in
+    # :func:`backend.services.consult_sandbox.sandbox_enabled`.
+    #
+    # EMPTY on purpose, like ``build_sandbox_image`` below. The literal default this used to carry
+    # (``nex-studio-visual-backend:v3.0.0``) names a tag that does not exist on this host — the oldest
+    # present is v4.0.85 — so every Konzultácia raised ``SidecarUnavailable`` and degraded to the in-process
+    # turn, i.e. the kernel read-only guarantee was in effect on none of them.
+    # :func:`backend.services.consult_sandbox.sidecar_image` now derives the running version's tag instead,
+    # which is the tag the deploy script actually built. ``CONSULT_SANDBOX_IMAGE`` still overrides.
+    consult_sandbox_image: str = ""
+
+    # Build sandbox (ICCINT-16 STEP 1) — the image the Príprava/Návrh build turns run inside, a sibling of
+    # THIS backend image (it needs the same git/gh/node tooling and the same mounted ``claude`` binary).
+    # EMPTY on purpose: :func:`backend.services.build_sandbox.sandbox_image` then derives
+    # ``nex-studio-visual-backend:v<app_version>``, i.e. the tag the deploy script actually built for the
+    # running version. A literal default is what broke ``consult_sandbox_image`` — it names a tag that does
+    # not exist on this host, so every Konzultácia silently lost its guarantee. Set BUILD_SANDBOX_IMAGE to
+    # pin something else. The on/off switch is the ``BUILD_SANDBOX`` env (default on), read at turn time.
+    build_sandbox_image: str = ""
 
     # Backstop timeout (seconds) for a single headless ``claude -p`` invocation
     # driven by the F-007 orchestrator (CR-NS-018 fix-round). Since agent
