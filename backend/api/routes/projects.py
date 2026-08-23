@@ -162,8 +162,9 @@ def _validate_ports(db: Session, payload: ProjectCreate | ProjectUpdate, *, proj
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail=(
                         f"Port {port_value} ({_FIELD_SK.get(field_name, field_name)}) patrí do "
-                        f"rezervovaného bloku, ktorý má pridelený {verdict.holder}. "
-                        f"Vyber port z bloku tohto projektu."
+                        f"bloku {verdict.holder}, ktorý je pridelený inému systému"
+                        + (f" — {verdict.owner}." if verdict.owner else ".")
+                        + " Vyber port z bloku tohto projektu."
                     ),
                 )
             raise HTTPException(

@@ -320,6 +320,11 @@ class PortAvailability:
     #: Who holds the port — a project name, a container name, or a reserved
     #: range rendered as ``"10110-10159"``. ``None`` when free or unknown.
     holder: str | None = None
+    #: The NAME of whoever holds a reserved range (``"nex-payables"``), from the KB registry.
+    #: ``None`` when the port is free, taken by something we can see for ourselves, or the registry
+    #: never named an owner. A refusal must lead with this: the range numbers do not tell the manager
+    #: who he would be colliding with.
+    owner: str | None = None
     source: PortSource | None = None
     #: Human-readable explanation, always set for ``taken`` and ``unknown``.
     reason: str | None = None
@@ -456,14 +461,20 @@ def describe_port_availability(
     reserved_range = reserved.holder_of(port)
     if reserved_range is not None:
         start, end = reserved_range
+        owner = reserved.owner_of(port)
         return PortAvailability(
             port=port,
             state=TAKEN,
             holder=f"{start}-{end}",
+            owner=owner,
             source="reserved",
             reason=(
-                f"Port {port} falls inside reserved range {start}-{end}, which is set aside "
-                f"for a stack managed outside NEX Studio."
+                f"Port {port} falls inside reserved range {start}-{end}"
+                + (
+                    f", allocated to {owner}."
+                    if owner
+                    else ", which is set aside for a stack managed outside NEX Studio."
+                )
             ),
             warnings=warnings,
         )
@@ -643,6 +654,15 @@ class ReservedRangesStatus:
     ranges: tuple[tuple[int, int], ...] = ()
     #: Entries that could not be parsed, verbatim, so they can be shown back.
     malformed: tuple[str, ...] = ()
+    #: Owner per range, keyed by ``(start, end)`` — the NAME from the KB registry.
+    #:
+    #: The registry has always carried ``vlastník`` and the parser has always read it, but only to
+    #: label a malformed entry: the ranges came back as bare numbers and the name was dropped on the
+    #: way. So a refusal could say WHICH block a port fell into and never WHOSE it was — "patrí do
+    #: rezervovaného bloku 10220-10229" instead of "…ktorý má pridelený nex-payables". The Director hit
+    #: exactly that while accepting ICCINT-6, and the whole point of reading one shared registry
+    #: (ICCINT-2) is that the answer can name the neighbour. Knowing and not saying is the defect.
+    owners: tuple[tuple[tuple[int, int], str], ...] = ()
 
     @property
     def ports(self) -> set[int]:
@@ -657,6 +677,15 @@ class ReservedRangesStatus:
         for start, end in self.ranges:
             if start <= port <= end:
                 return (start, end)
+        return None
+
+    def owner_of(self, port: int) -> str | None:
+        """Name of whoever holds the reserved range containing *port* — ``None`` if not reserved or
+        the registry never said. The name is what a refusal must show; the numbers mean nothing to a
+        manager who is trying to pick a different port."""
+        for (start, end), owner in self.owners:
+            if start <= port <= end and owner and owner != "?":
+                return owner
         return None
 
     @property
@@ -696,7 +725,9 @@ _reserved_warning_logged: set[str] = set()
 PORT_REGISTRY_FILE = Path("/home/icc/knowledge/infrastructure/port-registry.yaml")
 
 
-def _ranges_from_registry_file() -> tuple[tuple[tuple[int, int], ...], tuple[str, ...], bool]:
+def _ranges_from_registry_file() -> tuple[
+    tuple[tuple[int, int], ...], tuple[str, ...], bool, tuple[tuple[tuple[int, int], str], ...]
+]:
     """Read reserved ranges from the KB registry. Returns ``(ranges, malformed, found)``.
 
     Only entries the cockpit CANNOT see for itself are returned — every ``bloky`` entry
@@ -710,14 +741,14 @@ def _ranges_from_registry_file() -> tuple[tuple[tuple[int, int], ...], tuple[str
     guard, and a second guard here would be actively wrong.
     """
     if not PORT_REGISTRY_FILE.exists():
-        return (), (), False
+        return (), (), False, ()
     try:
         doc = yaml.safe_load(PORT_REGISTRY_FILE.read_text(encoding="utf-8")) or {}
     except (OSError, yaml.YAMLError) as exc:
         # Loud: a registry we cannot read is a guard the operator believes is protecting
         # ranges that are in fact wide open. Never downgrade this to "no reservations".
         logger.warning("Port registry %s could not be read: %s", PORT_REGISTRY_FILE, exc)
-        return (), (), False
+        return (), (), False, ()
 
     entries: list[tuple[str, str]] = []
     for block in doc.get("bloky") or []:
@@ -728,6 +759,7 @@ def _ranges_from_registry_file() -> tuple[tuple[tuple[int, int], ...], tuple[str
             entries.append((str(block.get("rozsah", "")), str(block.get("vlastník", "?"))))
 
     ranges: list[tuple[int, int]] = []
+    owners: list[tuple[tuple[int, int], str]] = []
     malformed: list[str] = []
     for spec, owner in entries:
         start_str, sep, end_str = spec.partition("-")
@@ -743,7 +775,8 @@ def _ranges_from_registry_file() -> tuple[tuple[tuple[int, int], ...], tuple[str
             malformed.append(f"{owner}: {spec}")
             continue
         ranges.append((start, end))
-    return tuple(ranges), tuple(malformed), True
+        owners.append(((start, end), owner))
+    return tuple(ranges), tuple(malformed), True, tuple(owners)
 
 
 def reserved_ranges_status(db: Session) -> ReservedRangesStatus:
@@ -760,7 +793,7 @@ def reserved_ranges_status(db: Session) -> ReservedRangesStatus:
     the block suggester as before — so a reserved port can no longer be
     handed out by :func:`suggest_next_port` and then rejected at create time.
     """
-    file_ranges, file_malformed, found = _ranges_from_registry_file()
+    file_ranges, file_malformed, found, file_owners = _ranges_from_registry_file()
     if found and (file_ranges or file_malformed):
         if file_malformed:
             logger.warning(
@@ -768,7 +801,7 @@ def reserved_ranges_status(db: Session) -> ReservedRangesStatus:
                 PORT_REGISTRY_FILE,
                 ", ".join(repr(entry) for entry in file_malformed),
             )
-        return ReservedRangesStatus(configured=True, ranges=file_ranges, malformed=file_malformed)
+        return ReservedRangesStatus(configured=True, ranges=file_ranges, malformed=file_malformed, owners=file_owners)
 
     if found and "empty-file" not in _reserved_warning_logged:
         _reserved_warning_logged.add("empty-file")

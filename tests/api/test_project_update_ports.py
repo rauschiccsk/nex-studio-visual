@@ -83,7 +83,13 @@ def _project(db_session, owner, *, base: int) -> Project:
 
 
 def test_update_rejects_a_reserved_port(client, db_session, owner, monkeypatch) -> None:
-    monkeypatch.setattr(port_registry, "_ranges_from_registry_file", lambda: (((10110, 10159),), (), True))
+    # The fourth element is the owner per range — a refusal must be able to NAME the neighbour
+    # (ICCINT-2), not just quote the numbers.
+    monkeypatch.setattr(
+        port_registry,
+        "_ranges_from_registry_file",
+        lambda: (((10110, 10159),), (), True, (((10110, 10159), "NEX Automat"),)),
+    )
     project = _project(db_session, owner, base=10300)
     resp = client.patch(
         f"/api/v1/projects/{project.id}",

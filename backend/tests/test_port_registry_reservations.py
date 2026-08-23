@@ -39,7 +39,7 @@ def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 def test_external_blocks_are_reserved(registry) -> None:
     registry("bloky:\n  - rozsah: 10110-10159\n    vlastník: NEX Automat\n    druh: externý\n")
-    ranges, malformed, found = port_registry._ranges_from_registry_file()
+    ranges, malformed, found, owners = port_registry._ranges_from_registry_file()
     assert found is True
     assert malformed == ()
     assert ranges == ((10110, 10159),)
@@ -63,7 +63,7 @@ def test_cockpit_owned_blocks_are_NOT_reserved(registry) -> None:
         "    vlastník: NEX Automat\n"
         "    druh: externý\n"
     )
-    ranges, _, _ = port_registry._ranges_from_registry_file()
+    ranges, _, _, _ = port_registry._ranges_from_registry_file()
     ports = {p for start, end in ranges for p in range(start, end + 1)}
     assert 10120 in ports, "NEX Automat's block must be protected"
     assert 10190 not in ports, "our own project's block must stay allocatable to itself"
@@ -71,7 +71,7 @@ def test_cockpit_owned_blocks_are_NOT_reserved(registry) -> None:
 
 def test_out_of_range_blocks_are_reserved_too(registry) -> None:
     registry("bloky: []\nmimo_rozsahu:\n  - rozsah: 9100-9299\n    vlastník: interné aplikácie ICC\n")
-    ranges, _, _ = port_registry._ranges_from_registry_file()
+    ranges, _, _, _ = port_registry._ranges_from_registry_file()
     assert ranges == ((9100, 9299),)
 
 
@@ -90,7 +90,7 @@ def test_malformed_entry_is_reported_not_skipped(registry) -> None:
         "    vlastník: naopak\n"
         "    druh: externý\n"
     )
-    ranges, malformed, _ = port_registry._ranges_from_registry_file()
+    ranges, malformed, _, _ = port_registry._ranges_from_registry_file()
     assert ranges == ((10110, 10159),)
     assert len(malformed) == 2
     assert any("preklep" in entry for entry in malformed)
@@ -100,13 +100,13 @@ def test_malformed_entry_is_reported_not_skipped(registry) -> None:
 def test_missing_file_reports_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """No file means fall back to the setting — never "no reservations"."""
     monkeypatch.setattr(port_registry, "PORT_REGISTRY_FILE", tmp_path / "absent.yaml")
-    assert port_registry._ranges_from_registry_file() == ((), (), False)
+    assert port_registry._ranges_from_registry_file() == ((), (), False, ())
 
 
 def test_unreadable_file_reports_not_found(registry) -> None:
     """Broken YAML must not read as "nothing is reserved"."""
     registry("bloky: [ this is not: valid: yaml\n")
-    _, _, found = port_registry._ranges_from_registry_file()
+    _, _, found, _ = port_registry._ranges_from_registry_file()
     assert found is False
 
 
@@ -123,7 +123,7 @@ def test_live_registry_protects_the_block_that_was_handed_out(
     if not live.exists():  # pragma: no cover — KB not mounted (CI without the KB volume)
         pytest.skip("KB registry not mounted in this environment")
     monkeypatch.setattr(port_registry, "PORT_REGISTRY_FILE", live)
-    ranges, malformed, found = port_registry._ranges_from_registry_file()
+    ranges, malformed, found, owners = port_registry._ranges_from_registry_file()
     assert found is True
     assert malformed == (), f"live registry has malformed entries: {malformed}"
     ports = {p for start, end in ranges for p in range(start, end + 1)}
@@ -255,3 +255,34 @@ def test_project_without_ports_records_nothing_and_warns_about_nothing(
     )
     assert warning is None
     assert writable_registry.read_text(encoding="utf-8") == before
+
+
+def test_a_refusal_names_the_neighbour_not_just_the_range(registry) -> None:
+    """A refusal has to say WHOSE block it is (ICCINT-2, corrected 23.08.2026).
+
+    The registry has always carried ``vlastník`` and the parser has always read it — but only to label a
+    malformed entry. The ranges came back as bare numbers, so a refusal could say WHICH block a port fell
+    into and never WHOSE it was: *"patrí do rezervovaného bloku 10220-10229"*. The Director hit exactly that
+    while accepting ICCINT-6, and range numbers tell a manager nothing about who he would collide with.
+
+    Reading ONE shared registry is only worth something if the answer can name the neighbour — and the name
+    is also the proof that the answer came FROM the registry rather than from a hardcoded list.
+    """
+    registry(
+        "bloky:\n"
+        "  - rozsah: 10110-10159\n"
+        "    vlastník: NEX Automat\n"
+        "    druh: externý\n"
+        "  - rozsah: 10220-10229\n"
+        "    vlastník: nex-payables\n"
+        "    druh: externý\n"
+    )
+    _, _, _, owners = port_registry._ranges_from_registry_file()
+    assert owners == (((10110, 10159), "NEX Automat"), ((10220, 10229), "nex-payables"))
+
+    status = port_registry.ReservedRangesStatus(configured=True, ranges=tuple(r for r, _ in owners), owners=owners)
+    # Two DIFFERENT names from two different blocks: one could be a constant, two cannot.
+    assert status.owner_of(10225) == "nex-payables"
+    assert status.owner_of(10115) == "NEX Automat"
+    # A port in no reserved block has no owner — and must not invent one.
+    assert status.owner_of(10195) is None
