@@ -224,7 +224,7 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
           )}
           {showFree && (
             <textarea
-              spellCheck={false}
+              spellCheck={true}
               lang="sk"
               value={freeText}
               onChange={(e) => setFreeText(e.target.value)}
@@ -236,7 +236,7 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
 
           <input
             lang="sk"
-            spellCheck={false}
+            spellCheck={true}
             value={note}
             onChange={(e) => setNote(e.target.value)}
             placeholder="Pokyn pre AI partnera (nepovinné) — napíš, čo má spraviť"

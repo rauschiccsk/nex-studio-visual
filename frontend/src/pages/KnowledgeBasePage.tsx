@@ -610,7 +610,7 @@ export default function KnowledgeBasePage() {
                 </label>
                 <textarea
                   lang="sk"
-                  spellCheck={false}
+                  spellCheck={true}
                   value={newContent}
                   onChange={(e) => setNewContent(e.target.value)}
                   placeholder="# Názov dokumentu&#10;&#10;Text dokumentu..."

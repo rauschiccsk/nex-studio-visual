@@ -187,7 +187,8 @@ export default function ProjectSettingsSection({ project, onSaved, canEdit }: Pr
             Popis
           </label>
           <textarea
-            spellCheck={false}
+            lang="sk"
+            spellCheck={true}
             id="proj-desc"
             rows={2}
             className={INPUT_CLS}

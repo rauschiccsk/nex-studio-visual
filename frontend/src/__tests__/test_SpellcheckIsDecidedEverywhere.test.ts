@@ -1,17 +1,23 @@
 /**
- * One rule for the whole cockpit: no red squiggles under Slovak (ICCINT-11).
+ * Every text surface in the cockpit DECIDES about spellcheck. None of them leaves it to chance (ICCINT-11).
  *
- * The UI is written in Slovak and browsers do not ship a Slovak dictionary by default, so the
- * spellchecker underlines every correct word. The squiggles carry no information — they are noise over
- * text that is right — and the Director hit them writing to the AI Agent on 22.08.2026.
+ * The first version of this rule switched spellcheck OFF everywhere, on the theory that the browser has no
+ * Slovak dictionary so every squiggle is noise. The Director disproved it while accepting the work: he typed
+ * a MISSPELLED word and it was not flagged either — we had thrown the feature away, not fixed it. The real
+ * cause was on his machine: Chrome DOES know Slovak, but in `chrome://settings/languages` the Slovak
+ * dictionary was off and English (US) was on, so Slovak prose was being checked against an ENGLISH
+ * dictionary. That is why every correct word was underlined.
  *
- * Before this, 20 of 55 text surfaces had it switched off and the rest did not: the same product
- * behaved differently depending on which screen you were on, which is worse than either choice made
- * consistently.
+ * So the rule is by KIND OF FIELD, which is still one rule, applied uniformly:
+ *   - you write SENTENCES there (a description, a message to the agent, a document body, a comment)
+ *     → spellcheck ON, ``lang="sk"``, and the browser needs its Slovak dictionary enabled;
+ *   - it holds an IDENTIFIER (a slug, a port, a version, a filename, a price, a secret, a search box)
+ *     → spellcheck OFF: a dictionary has nothing to say about it and would flag every value.
  *
- * This scans the source rather than rendering, because the point is COVERAGE — a rule that holds on
- * the screens somebody remembered to test is not a rule. A new text box without ``spellCheck={false}``
- * turns this red on the commit that adds it.
+ * This scans the source rather than rendering, because the point is COVERAGE — a rule that holds on the
+ * screens somebody remembered to test is not a rule. What it pins is that the decision was MADE: a new text
+ * box with no ``spellCheck`` prop at all turns this red on the commit that adds it, and whoever adds it has
+ * to say which kind of field it is.
  */
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
@@ -71,7 +77,7 @@ function tsxFiles(dir: string): string[] {
 }
 
 describe("spellcheck", () => {
-  it("is switched off on every text surface in the cockpit", () => {
+  it("is decided explicitly on every text surface in the cockpit", () => {
     const files = tsxFiles(SRC);
 
     expect(files.length).toBeGreaterThan(20); // the glob itself must not silently match nothing
@@ -80,7 +86,8 @@ describe("spellcheck", () => {
     for (const file of files) {
       const source = readFileSync(file, "utf8");
       for (const tag of openingTags(source)) {
-        if (tag.includes("spellCheck")) continue;
+        // Either value is a legitimate answer; NOT ANSWERING is not.
+        if (tag.includes("spellCheck={true}") || tag.includes("spellCheck={false}")) continue;
         const type = /type="([a-z]+)"/.exec(tag)?.[1];
         if (type && NON_TEXT_TYPES.has(type)) continue;
         const line = source.slice(0, source.indexOf(tag)).split("\n").length;
@@ -88,8 +95,9 @@ describe("spellcheck", () => {
       }
     }
 
-    expect(offenders, `text surfaces without spellCheck={false}:\n${offenders.join("\n")}`).toEqual(
-      [],
-    );
+    expect(
+      offenders,
+      `text surfaces that never decided about spellcheck:\n${offenders.join("\n")}`,
+    ).toEqual([]);
   });
 });

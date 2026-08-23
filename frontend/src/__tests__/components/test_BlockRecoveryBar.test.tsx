@@ -51,11 +51,14 @@ describe("BlockRecoveryBar", () => {
     expect(box.tagName).toBe("TEXTAREA");
   });
 
-  it("does not underline Slovak", () => {
+  it("is spellchecked as Slovak — it is prose, not an identifier", () => {
     renderBar();
-    // The browser has no Slovak dictionary, so every Slovak word would be flagged. The red squiggles
-    // carry no information here — they are pure noise over correct text.
-    expect(screen.getByPlaceholderText(/Tvoja odpoveď/)).toHaveAttribute("spellcheck", "false");
+    // An answer to the AI Agent is sentences, so a dictionary has something useful to say. It is marked
+    // lang="sk" so the browser reaches for the SLOVAK dictionary; checking Slovak against English was
+    // what underlined every correct word in the first place.
+    const box = screen.getByPlaceholderText(/Tvoja odpoveď/);
+    expect(box).toHaveAttribute("spellcheck", "true");
+    expect(box).toHaveAttribute("lang", "sk");
   });
 
   it("Enter sends", async () => {

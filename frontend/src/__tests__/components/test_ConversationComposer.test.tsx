@@ -34,12 +34,17 @@ describe("ConversationComposer — framework_issue lock (Director obs #6)", () =
     expect(screen.getByRole("textbox")).not.toBeDisabled();
   });
 
-  // obs #4 (batch-2): the composer disables native spellcheck so Slovak (and English) words are not underlined
-  // in this Slovak-primary internal tool — `lang="sk"` alone doesn't suppress underlines without a browser SK
-  // dictionary, so spellCheck={false} is the guarantee (matching SlovakTextarea's choice).
-  it("renders the textarea with spellcheck disabled (obs #4)", () => {
+  // SUPERSEDED obs #4 (ICCINT-11, 23.08.2026). That observation reasoned that `lang="sk"` cannot suppress
+  // underlines "without a browser SK dictionary", and switched spellcheck OFF. The premise was wrong: Chrome
+  // ships a Slovak dictionary, it was simply not enabled in chrome://settings/languages while English (US)
+  // was — so Slovak prose was checked against an ENGLISH dictionary, which is why every correct word was
+  // flagged. Switching it off removed the squiggles AND the feature: a genuine typo went unflagged too.
+  // A message to the AI Agent is prose, so it is checked, and `lang="sk"` names the dictionary to use.
+  it("spellchecks the textarea as Slovak — it is prose, not an identifier", () => {
     render(<ConversationComposer onRelay={noopRelay} />);
-    expect(screen.getByRole("textbox")).toHaveAttribute("spellcheck", "false");
+    const box = screen.getByRole("textbox");
+    expect(box).toHaveAttribute("spellcheck", "true");
+    expect(box).toHaveAttribute("lang", "sk");
   });
 
   // nex-studio-visual crash-test 2026-07-13: when a recovery bar above owns the input (blockedAbove), the

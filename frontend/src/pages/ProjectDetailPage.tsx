@@ -624,7 +624,7 @@ export default function ProjectDetailPage() {
             </label>
             <textarea
               lang="sk"
-              spellCheck={false}
+              spellCheck={true}
               id="fastfix-directive"
               autoFocus
               value={fastFixDirective}

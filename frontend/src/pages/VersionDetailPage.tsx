@@ -247,7 +247,7 @@ export default function VersionDetailPage() {
               ) : (
                 <textarea
                   lang="sk"
-                  spellCheck={false}
+                  spellCheck={true}
                   value={zadanie}
                   onChange={(e) => { setZadanie(e.target.value); setZadanieSaved(false); }}
                   rows={14}

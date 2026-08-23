@@ -105,7 +105,7 @@ export default function SchvalitBar({ board, versionId, onBoard }: Props) {
           <>
             <input
               lang="sk"
-              spellCheck={false}
+              spellCheck={true}
               type="text"
               value={comment}
               onChange={(e) => setComment(e.target.value)}

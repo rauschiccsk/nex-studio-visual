@@ -305,7 +305,7 @@ export default function BacklogPage() {
         <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] p-4 mb-4 space-y-3">
           <input
             lang="sk"
-            spellCheck={false}
+            spellCheck={true}
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
             placeholder="Názov požiadavky"
@@ -313,7 +313,7 @@ export default function BacklogPage() {
           />
           <textarea
             lang="sk"
-            spellCheck={false}
+            spellCheck={true}
             value={newDesc}
             onChange={(e) => setNewDesc(e.target.value)}
             placeholder="Popis (voliteľný)"

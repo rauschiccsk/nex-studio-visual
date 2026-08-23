@@ -429,7 +429,8 @@ export default function NewVersionPage() {
                   Názov <span className="text-[var(--color-text-muted)] font-normal text-xs">(voliteľné)</span>
                 </label>
                 <input
-                  spellCheck={false}
+                  lang="sk"
+                  spellCheck={true}
                   type="text"
                   placeholder="napr. platobný modul"
                   value={name}
@@ -463,7 +464,7 @@ export default function NewVersionPage() {
               </label>
               <textarea
                 lang="sk"
-                spellCheck={false}
+                spellCheck={true}
                 rows={8}
                 placeholder="Opíš, čo má verzia priniesť. Napr.: Pridať platobný modul cez Tatra banku. Zákazník potrebuje automatické párovanie platieb s faktúrami a emailové notifikácie. Cieľ: funkčné platby pre pilotného zákazníka do konca mája. (AI Agent zadanie systematizuje a v Príprave sa doptá na nejasnosti.)"
                 value={zadanie}

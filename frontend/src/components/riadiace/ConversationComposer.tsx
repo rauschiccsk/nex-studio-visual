@@ -122,7 +122,7 @@ export function ConversationComposer({ onRelay, disabled, frameworkBlocked, bloc
       <div className="flex items-end gap-2">
         <textarea
           lang="sk"
-          spellCheck={false}
+          spellCheck={true}
           ref={growRef}
           value={text}
           onChange={(e) => setText(e.target.value)}

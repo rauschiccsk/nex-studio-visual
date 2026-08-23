@@ -423,7 +423,7 @@ export default function NewProjectPage() {
             <Field label="Popis">
               <textarea
                 lang="sk"
-                spellCheck={false}
+                spellCheck={true}
                 rows={2}
                 placeholder="Krátky popis projektu…"
                 value={description}
