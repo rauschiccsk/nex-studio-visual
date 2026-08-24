@@ -76,6 +76,16 @@ echo "==> beží:       ${RUNNING}"
 echo "==> verzia:     v${CURRENT}  →  v${VERSION}"
 echo "==> nasadzujem: ${TARGET}"
 
+# The version being deployed MUST ship a release note (ICCINT-28). For a generated app NEX Studio writes
+# this file itself from the version's epics; it does not build ITSELF that way, so its own note is written
+# by hand — and until now nothing here wrote it or asked for it, so a deploy without one passed in silence.
+# That is exactly what the v4.0.96 note complained about, and it recurred within a DAY of being written:
+# the Aktualizácie tab sat at v4.0.96 while the app ran v4.1.3, seven releases with nothing said about them.
+# Checked BEFORE the --dry-run exit on purpose — a dry-run that passes where the real deploy refuses is a
+# trap, and the whole point is to find out now rather than after the images are built.
+NOTE="$(git rev-parse --show-toplevel)/docs/specs/versions/v${VERSION}/RELEASE_NOTES.md"
+[[ -s "$NOTE" ]] || die "v${VERSION} nemá poznámku k vydaniu. Napíš ju do ${NOTE} — jednou-dvoma vetami po slovensky, čo z toho má ten, kto appku používa (nie čo sa zmenilo v kóde). Bez nej sa v Aktualizáciách toto vydanie nikdy neobjaví."
+
 if [[ "$DRY_RUN" == "1" ]]; then
   echo "==> --dry-run: nič sa nestavia ani nemení."
   exit 0
