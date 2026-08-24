@@ -20,6 +20,7 @@ import pytest
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.services import system_setting as system_setting_service
+from backend.services.create_project_postscaffold import provision_v2_agent_charters
 from backend.services.template_bootstrap import (
     GitPushVerificationError,
     TemplateBootstrapError,
@@ -511,8 +512,34 @@ def test_real_founding_actually_completes_not_just_its_plan(db_session, tmp_path
 
     # The scaffold exists and carries what the engine needs downstream.
     assert (target / "CLAUDE.md").is_file()
-    assert (target / ".claude" / "agents").is_dir()
     assert (target / ".git").is_dir()
+
+    # ICCINT-19: the charters are NOT init.sh's job any more, and this used to assert they were.
+    # The script wrote them for three roles — designer / implementer / auditor — that were retired on
+    # 23.08.2026, and on the supported path every one of those files was thrown away moments later:
+    # ``create_project_postscaffold`` deletes the v1 dirs and writes ``{ai-agent, auditor}`` from the
+    # engine's own live templates. Two copies of the rules, one of them dead, is how a project ends up
+    # being founded with instructions nobody maintains. The scaffold now leaves the directory alone and
+    # the provisioning step (asserted below) creates it.
+    assert not (target / ".claude" / "agents" / "designer").exists(), "bootstrap revived a retired role"
+    assert not (target / ".claude" / "agents" / "implementer").exists(), "bootstrap revived a retired role"
+
+    # What the scaffold IS responsible for, for the two live roles.
+    assert (target / ".nex-ai-agent-state.md").is_file()
+    assert (target / ".nex-auditor-state.md").is_file()
+    assert (target / "docs" / "session-logs" / "ai-agent").is_dir()
+    assert (target / "docs" / "session-logs" / "auditor").is_dir()
+    # …and the new state file is IGNORED by git. The template's .gitignore listed the two retired names
+    # and not this one, so the file the scaffold now writes would have been committed on the first add.
+    assert ".nex-ai-agent-state.md" in (target / ".gitignore").read_text(encoding="utf-8")
+
+    # The founding path as a WHOLE still produces a working project: provisioning creates the charter
+    # directory the engine fail-closes without, for exactly the two live roles.
+    provision_v2_agent_charters(target, project.slug, project.name, adopted=False)
+    assert sorted(p.name for p in (target / ".claude" / "agents").iterdir()) == ["ai-agent", "auditor"]
+    for role in ("ai-agent", "auditor"):
+        assert (target / ".claude" / "agents" / role / "CLAUDE.md").is_file()
+        assert (target / ".claude" / "agents" / role / "settings.json").is_file()
 
     # The pinned pair AGREES — the specific break this test exists for.
     lock = (target / "frontend" / "package-lock.json").read_text(encoding="utf-8")
