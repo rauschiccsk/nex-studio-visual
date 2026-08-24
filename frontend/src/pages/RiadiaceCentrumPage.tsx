@@ -32,6 +32,7 @@ import SchvalitBar from "@/components/riadiace/SchvalitBar";
 import DecisionCardsBar from "@/components/riadiace/DecisionCardsBar";
 import BlockRecoveryBar from "@/components/riadiace/BlockRecoveryBar";
 import NahlasitZnovaBar from "@/components/riadiace/NahlasitZnovaBar";
+import ZopakovatKonzultaciuBar from "@/components/riadiace/ZopakovatKonzultaciuBar";
 import PokracovatPoOpraveBar from "@/components/riadiace/PokracovatPoOpraveBar";
 import DedoProposalBar from "@/components/riadiace/DedoProposalBar";
 import ReverifyBar from "@/components/riadiace/ReverifyBar";
@@ -206,6 +207,9 @@ export default function RiadiaceCentrumPage() {
           that raised a change_request (konzultacia-mode.md Part 3). */}
       <div className="col-start-1 row-start-3 min-w-0">
         <DecisionCardsBar board={board} versionId={versionId} onBoard={setBoard} />
+        {/* ICCINT-25: right under the cards, because it is the same surface failing — when the cards could
+            not be built, this is how you ask for them again instead of being left with the raw findings. */}
+        <ZopakovatKonzultaciuBar board={board} versionId={versionId} onBoard={setBoard} />
         <BlockRecoveryBar board={board} versionId={versionId} onBoard={setBoard} />
         <NahlasitZnovaBar board={board} versionId={versionId} onBoard={setBoard} />
         {/* ICCINT-13: the same story's next beat — NahlasitZnovaBar says "our technical team is on it";

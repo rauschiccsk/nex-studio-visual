@@ -517,6 +517,12 @@ def test_apply_action_is_sole_mutator_grep_guard():
             # block since Director observation #6, but it was never registered here, so ``apply_action`` raised
             # "Unknown action" — the one button on a locked screen could only error. NOT advancing.
             "nahlasit_znova",
+            # ICCINT-25: + "zopakovat_konzultaciu" ("Skúsiť konzultáciu znova" — ask for the Decision Cards
+            # again after the ONE turn meant to build them never came back). Registered here for the same
+            # reason as nahlasit_znova above: determine_available_actions OFFERS it, so apply_action must be
+            # able to EXECUTE it or the button could only error. NOT advancing — it arms one consultation
+            # turn and the phase stays exactly where it was.
+            "zopakovat_konzultaciu",
             "zostav_plan",
             "spustit_stavbu",
             "spustit_vizual",

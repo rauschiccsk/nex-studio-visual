@@ -509,6 +509,13 @@ _ACTIONS = frozenset(
         # screen raise "Unknown action" (a dead end with no way out). Re-sends the recorded escalation and
         # records a fresh "re-reported" notification. NOT advancing (nothing about the phase changes).
         "nahlasit_znova",
+        # ICCINT-25: "Skúsiť konzultáciu znova" — the way back when the ONE turn that was to build the Decision
+        # Cards never came back (the model briefly unreachable, an unparseable answer). The engine falls open to
+        # a plain stop with the findings listed, which is right; what was missing is any way to ask again, so a
+        # passing outage permanently downgraded HOW the Manažér decides. Re-arms that same turn from the recorded
+        # findings. The board post-filters it to a settled build whose latest retryable fallback has no
+        # consultation after it (:func:`consultation_retry_pending`); NOT offered on a dispute or the cap.
+        "zopakovat_konzultaciu",
         # STEP 3 (step3-plan-design.md MD-1=A): "Zostaviť plán" — in a conversation build, AFTER the
         # Špecifikácia is approved, compose the task plan (EPIC→FEAT→TASK) from the frozen Špecifikácia.
         # Honest-by-construction like ``approve_spec`` (NOT advancing — it stays in the conversation register,
@@ -650,6 +657,12 @@ def determine_available_actions(state: PipelineState) -> set[str]:
         # parse failure — the audit's Theme 1). Only the settled ``awaiting_manazer`` path offers the advance body.
         actions.add("answer")
         return actions
+
+    # ICCINT-25: "Skúsiť konzultáciu znova" — offered UNCONDITIONALLY here (state-only, like the build-launch
+    # verbs below). Whether the cards are actually worth asking for again is a DB question
+    # (:func:`consultation_retry_pending`), so it is the board route's POST-FILTER; ``apply_action`` enforces
+    # the same rule authoritatively. Settled-state only: while a turn runs there is nothing to retry.
+    actions.add("zopakovat_konzultaciu")
 
     # Settled (awaiting_manazer): the phase-advance schvaľovacie body.
     if stage == "priprava":
@@ -1613,6 +1626,7 @@ async def _consult_fallback(
     findings: Optional[list[str]] = None,
     agent_response: Optional[str] = None,
     next_action: Optional[str] = None,
+    retry_source: Optional[str] = None,
 ) -> PipelineState:
     """CR-V2-041 fail-open: when a consultation can't be produced (parse failure / non-consultation output /
     re-consult cap), fall back to a plain ``awaiting_manazer`` stop (today's behaviour) so a flaky turn can
@@ -1629,6 +1643,14 @@ async def _consult_fallback(
         base_payload = {**base_payload, "auditor_findings": list(findings)}
     if agent_response:
         base_payload = {**base_payload, "agent_response": agent_response}
+    # ICCINT-25: mark the fallbacks worth ASKING AGAIN for. Only the ones where the turn did not come back
+    # (unreachable model, unparseable answer) — the cards were never written, so a second attempt is a real
+    # chance at them. NOT a dispute (the agent answered, and it answered that the findings are wrong; asking
+    # again would just re-ask a question already answered) and NOT the re-consult cap (that bound exists to
+    # stop exactly this kind of looping). ``retry_source`` carries the consultation SOURCE so the retry
+    # rebuilds the same brief instead of guessing at one.
+    if retry_source:
+        base_payload = {**base_payload, "consult_retry": True, "consult_source": retry_source}
     msg = _record_message(
         db,
         version_id=state.version_id,
@@ -1724,17 +1746,23 @@ async def _settle_for_consultation(
             )
         # A genuine parse failure / empty consultation block → fail-open, but still list the findings for
         # context so the stop is never content-less.
-        content = "Konzultáciu sa nepodarilo pripraviť — posúď návrh klasicky (Schváliť / Uprav)."
+        content = (
+            "Konzultáciu sa nepodarilo pripraviť — odpoveď neprišla. Skús to znova "
+            "(**Skúsiť konzultáciu znova**), alebo posúď návrh klasicky (Schváliť / Uprav)."
+        )
         if findings_md:
             content += f"\n\n**Nálezy previerky:**\n\n{findings_md}"
         return await _consult_fallback(
             db,
             state,
             note=content,
-            next_action="Konzultáciu sa nepodarilo pripraviť — posúď návrh klasicky (Schváliť / Uprav).",
+            next_action="Konzultáciu sa nepodarilo pripraviť — skús to znova, alebo posúď návrh klasicky.",
             on_message=on_message,
             failure=result if isinstance(result, ParseFailure) else None,
             findings=findings or None,
+            # ICCINT-25: this is the retryable one — the turn did not come back, so the cards were never
+            # written. A brief outage must not permanently take the Decision Cards away.
+            retry_source=source,
         )
     n = len(result.consultation.decisions)
     state.status = "blocked"
@@ -2913,6 +2941,45 @@ def _latest_consultation(db: Session, version_id: uuid.UUID) -> Optional[tuple[d
     payload, seq = row
     c = payload.get("consultation") if isinstance(payload, dict) else None
     return (c, seq) if isinstance(c, dict) and c.get("decisions") else None
+
+
+def consultation_retry_pending(db: Session, version_id: uuid.UUID) -> Optional[tuple[str, list[str]]]:
+    """ICCINT-25: ``(source, findings)`` when the Decision Cards are worth asking for AGAIN, else ``None``.
+
+    True when the LATEST retryable consultation fallback (``payload.consult_retry`` — written only where the
+    turn never came back, never for a dispute or the re-consult cap) has NO successful ``consultation``
+    message after it. That ordering is the whole test: once cards exist, the failure is history; while they
+    do not, the findings are still sitting there unanswered and a second attempt is worth a button.
+
+    Deliberately NOT capped. ``AUDITOR_LOOP_MAX`` bounds consultations that SUCCEED, which is a loop the
+    engine drives; this is a button a person presses after being told the answer did not arrive, and it
+    matches the unbounded "Skús znova" the cockpit already offers on every other failed turn."""
+    row = db.execute(
+        select(PipelineMessage.payload, PipelineMessage.seq)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.payload["consult_retry"].astext == "true",
+        )
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).first()
+    if row is None:
+        return None
+    payload, seq = row
+    newer_consultation = db.execute(
+        select(func.max(PipelineMessage.seq)).where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.kind == "consultation",
+            PipelineMessage.seq > seq,
+        )
+    ).scalar()
+    if newer_consultation is not None:
+        return None
+    source = (payload or {}).get("consult_source")
+    findings = (payload or {}).get("auditor_findings") or []
+    if not isinstance(source, str) or not source:
+        return None
+    return source, [str(f) for f in findings]
 
 
 def _consultation_answers(db: Session, version_id: uuid.UUID, after_seq: int) -> dict[str, dict[str, Any]]:
@@ -5674,6 +5741,36 @@ async def run_dispatch(
     actor = state.current_actor
     if STAGE_ACTOR.get(stage) is None:  # terminal (``done``) — nothing to run.
         return state
+
+    # ICCINT-25: the Manažér asked for the Decision Cards AGAIN after the turn that was to build them never
+    # came back. Consumed and CLEARED before any routing, so the flag can never outlive one turn — and taken
+    # BEFORE the stage rounds on purpose: this is one consultation turn, not a re-run of the phase (re-running
+    # Návrh would rewrite the design document and re-run the review to answer a question already asked).
+    if state.retry_consultation:
+        state.retry_consultation = False
+        pending = consultation_retry_pending(db, version_id)
+        if pending is None:
+            # The window closed between the click and the dispatch (cards arrived some other way). Settle back
+            # honestly rather than spending a turn re-asking something that has since been answered.
+            state.status = "awaiting_manazer"
+            state.next_action = "Rozhodnutia sú už pripravené — posúď ich."
+            db.flush()
+            return state
+        source, findings = pending
+        return await _settle_for_consultation(
+            db,
+            state,
+            source=source,
+            verdict=PipelineStatusBlock(
+                stage=stage,
+                kind="verdict",
+                summary="Zopakovanie konzultácie.",
+                findings=findings,
+                awaiting="manazer",
+            ),
+            on_event=on_event,
+            on_message=on_message,
+        )
 
     # Návrh round (CR-V2-011): one coherent design doc + the folded EPIC→FEAT→TASK task plan. Owns its own
     # multi-turn lifecycle (design-doc turn → fold the plan via incremental passes → SHARED dial-settle), so
@@ -10269,6 +10366,32 @@ async def apply_action(
             content="Chybu sme znova nahlásili nášmu technickému tímu.",
             payload={"phase": state.current_stage, "framework_issue": True, "dedo_message": dedo_message},
         )
+        db.flush()
+        return state
+
+    if action == "zopakovat_konzultaciu":
+        # ICCINT-25: ask for the Decision Cards AGAIN after the turn that was to build them did not come back.
+        # Arms ONE turn — the same consultation, from the SAME recorded findings — and lets the ordinary
+        # dispatch path run it (never inline: this is an agent turn, and an HTTP action must not sit on one).
+        if state.status != "awaiting_manazer":
+            raise OrchestratorError("Konzultáciu možno zopakovať len na zastavenej stavbe.")
+        pending = consultation_retry_pending(db, version_id)
+        if pending is None:
+            raise OrchestratorError("Nie je čo zopakovať — konzultácia buď nezlyhala, alebo už prebehla.")
+        _record_message(
+            db,
+            version_id=version_id,
+            stage=state.current_stage,
+            author="manazer",
+            recipient=state.current_actor,
+            kind="return",
+            content="Skús konzultáciu pripraviť znova.",
+            payload={"phase": state.current_stage, "consult_retry_requested": True},
+        )
+        state.status = "agent_working"
+        state.block_reason = None
+        state.retry_consultation = True
+        state.next_action = "Pripravujem rozhodnutia znova…"
         db.flush()
         return state
 

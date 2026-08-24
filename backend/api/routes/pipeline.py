@@ -171,6 +171,16 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         )
     ):
         available_actions = [a for a in available_actions if a != "spustit_vizual"]
+    # ICCINT-25: POST-FILTER ``zopakovat_konzultaciu`` — ``determine_available_actions`` offers it at every
+    # settled state (it is state-only); drop it unless the Decision Cards are actually worth asking for again,
+    # which is a message-history question. ``apply_action`` enforces the same rule authoritatively; this hides
+    # the dead button rather than letting the Manažér press one that will refuse.
+    if (
+        state is not None
+        and "zopakovat_konzultaciu" in available_actions
+        and orchestrator.consultation_retry_pending(db, version_id) is None
+    ):
+        available_actions = [a for a in available_actions if a != "zopakovat_konzultaciu"]
     # STEP 5 (step5-kontrola-design.md K-1): POST-FILTER ``skontrolovat`` (mirror of the spustit_stavbu filter
     # above) — the state-only ``determine_available_actions`` offers it unconditionally at ``priprava``; drop it
     # here unless this is a conversation build whose Špecifikácia is approved, whose Programovanie has COMPLETED,

@@ -224,6 +224,19 @@ class PipelineState(Base, UUIDMixin, TimestampMixin):
     #: history lives in the ``author='dedo'`` message the unblock writes.
     resume_after_framework_fix = Column(Boolean, nullable=False, server_default="false")
 
+    #: ICCINT-25 — "build the Decision Cards again", after the ONE turn that was meant to build them did not
+    #: come back (the model briefly unreachable, an unparseable answer). The engine's fail-open is right, but
+    #: it used to be a ONE-WAY door: a transient failure permanently downgraded the Manažér from deciding one
+    #: question at a time to reading a wall of findings under two buttons.
+    #:
+    #: A COLUMN for the same reason as the flag above —
+    #: :func:`~backend.services.orchestrator.determine_available_actions`
+    #: is state-only by design. Unlike that flag this one is set TOGETHER with ``agent_working`` (it arms the
+    #: very turn it describes), so a status listener would clear it before the dispatch could read it. It is
+    #: consumed and cleared by :func:`~backend.services.orchestrator.run_dispatch` instead, before any routing,
+    #: so it can never outlive one turn.
+    retry_consultation = Column(Boolean, nullable=False, server_default="false")
+
     __table_args__ = (
         UniqueConstraint("version_id", name="uq_pipeline_state_version_id"),
         CheckConstraint(
