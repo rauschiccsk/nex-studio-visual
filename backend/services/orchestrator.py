@@ -1362,9 +1362,14 @@ def _navrh_directive(db: Session, version_id: uuid.UUID) -> str:
 
 
 def _vizual_directive(
-    db: Session, version_id: uuid.UUID, manager_request: str, mockup_rel: Optional[str] = None
+    db: Session, version_id: uuid.UUID, manager_request: Optional[str], mockup_rel: Optional[str] = None
 ) -> str:
     """The Vizuál phase brief (CR-1, nex-studio-visual; spec §3.B) — the AI's VISUAL-CONSULTATION turn.
+
+    ``manager_request=None`` is the FIRST DRAFT (ICCINT-27): the Manažér has asked for nothing yet, so the
+    brief is to draw the app's first screens straight from the approved Špecifikácia + Návrh. Only reachable
+    with ``mockup_rel is None`` (a mockup on disk means a draft already exists), so the mockup branch below
+    keeps requiring a request.
 
     A sibling of :func:`_priprava_directive` / :func:`_kontrola_directive`: the per-turn orchestrator
     injection for the "Manažér asks for a change → AI edits the LIVE app" HMR loop (spec §1). It instructs
@@ -1381,6 +1386,8 @@ def _vizual_directive(
     if mockup_rel is not None:
         # MOCKUP mode (Director 2026-07-17): the preview IS the self-contained clickable mockup (no backend, no
         # login) — apply the Manažér's change DIRECTLY to that HTML file, keeping it self-contained.
+        if manager_request is None:  # pragma: no cover — _run_vizual_round only drafts when there is no mockup
+            raise ValueError("Vizuál mockup mode needs a Manažér request; a first draft has no mockup yet.")
         return (
             "Fáza VIZUÁLNA KONZULTÁCIA — dolaďuješ ŽIVÝ náhľad appky spolu s Manažérom. Náhľad je "
             f"**samostatný klikací mockup** `{mockup_rel}` (self-contained HTML, bez reálneho backendu a bez "
@@ -1394,6 +1401,16 @@ def _vizual_directive(
             "opýtaj sa PRÁVE JEDNU vec a ZASTAV; inak kolo UZAVRI `kind=done`.\n"
             "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
         )
+    # ICCINT-27: the FIRST turn of the stage has no Manažér request to apply — it draws the app's first screens
+    # from the approved documents. Everything else in the brief (frontend-only, nex-shared kit, the preview
+    # harness, no commit) is IDENTICAL, so only this line differs.
+    task_line = (
+        "4. Toto je PRVÝ NÁVRH vizuálu — Manažér zatiaľ o nič nepožiadal. Postav prvú verziu obrazoviek podľa "
+        "Špecifikácie a Návrhu: hlavné obrazovky, ich rozloženie a navigáciu medzi nimi, s reprezentatívnymi "
+        "dátami. Drž sa Návrhu — nevymýšľaj obrazovky ani polia, ktoré v ňom nie sú.\n"
+        if manager_request is None
+        else f"4. Manažér žiada TÚTO zmenu: «{manager_request}». Aplikuj PRESNE ju — nič navyše, nič menej.\n"
+    )
     return (
         "Fáza VIZUÁLNA KONZULTÁCIA — staviaš a dolaďuješ ŽIVÝ vizuál appky spolu s Manažérom. Pracuješ "
         "VÝHRADNE vo FRONTENDE (adresár `frontend/`): reálne obrazovky, rozloženie a navigácia, vizuál-first "
@@ -1408,8 +1425,8 @@ def _vizual_directive(
         "`GET /api/v1/session` (alebo ekvivalent) vráti reprezentatívneho používateľa (nech `ProtectedRoute` "
         "prejde) a dátové endpointy vráť reprezentatívnymi fixtures. Vo `main.tsx` pod `VITE_PREVIEW` naštartuj "
         "MSW pred renderom. Bez toho ukáže náhľad len mŕtvu login obrazovku.\n"
-        f"4. Manažér žiada TÚTO zmenu: «{manager_request}». Aplikuj PRESNE ju — nič navyše, nič menej.\n"
-        "5. Zmenu iba ZAPÍŠ do FE zdrojov — NEcommituj (živý náhľad ju cez HMR premietne < 1 s aj bez commitu). "
+        + task_line
+        + "5. Výsledok iba ZAPÍŠ do FE zdrojov — NEcommituj (živý náhľad ho cez HMR premietne < 1 s aj bez commitu). "
         "Počas Vizuálu môže byť takýchto drobných úprav veľa; všetky sa spoločne uložia JEDNÝM commitom až keď "
         "Manažér Vizuál schváli. Ži teda len v pracovnom strome, žiadny `git commit`.\n"
         "NEROB backendovú logiku ani dátové modely — to je Programovanie. Ak je požiadavka naozaj "
@@ -8852,6 +8869,32 @@ def _vizual_url_recorded(db: Session, version_id: uuid.UUID) -> bool:
     return seq is not None
 
 
+def _vizual_draft_attempted(db: Session, version_id: uuid.UUID) -> bool:
+    """True iff the AI Agent has ALREADY taken a Vizuál turn for this version (ICCINT-27).
+
+    Distinguishes the FIRST entry into the stage — where nothing of the Manažér's app has been drawn yet and
+    the preview would be the bare founding scaffold — from every later entry, where screens exist and the
+    Manažér is walking them. Found by the Director 2026-08-24 on nex-productcatalogs: approving the Návrh put
+    the build straight into ``vizual`` ∧ ``awaiting_manazer`` with "Prezri si vizuál a keď sedí, schváľ", 77 ms
+    after the click and with no agent turn at all. What he opened was the archetype's own ``LoginPage`` behind
+    ``ProtectedRoute`` — the "dead login screen" :func:`_vizual_mockup_rel` already warns about — and the only
+    way to get a screen built was to type a change-request into a box nothing said was required.
+
+    Probes for any prior ``vizual`` ∧ ``ai_agent`` message, mirroring :func:`_vizual_url_recorded`. A FAILED
+    first draft (parse exhaustion / a question) counts as attempted on purpose: the build settles blocked or
+    awaiting with a next_action that names the recovery, and ``uprav`` re-enters through the ordinary
+    change-request path — re-running the unasked-for draft under the Manažér instead would ignore what he
+    just said."""
+    seq = db.execute(
+        select(func.max(PipelineMessage.seq)).where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.stage == "vizual",
+            PipelineMessage.author == AI_AGENT_ROLE,
+        )
+    ).scalar()
+    return seq is not None
+
+
 def latest_vizual_url(db: Session, version_id: uuid.UUID) -> Optional[str]:
     """The live-preview URL to embed in the cockpit Vizuál iframe, or None (CR-1, cockpit Vizuál surface).
 
@@ -8952,12 +8995,18 @@ async def _run_vizual_round(
          Wrapped in try/except so a sandbox failure NEVER crashes the pipeline: it settles ``blocked`` /
          ``system_error`` with a plain-Slovak note instead.
       3. Record ONE ``system → manazer`` preview-URL notification — but only on FIRST entry
-         (:func:`_vizual_url_recorded` is False), so the change-request loop does not re-spam the URL.
-      4a. ``directive`` is None (a FRESH entry into the stage): settle ``awaiting_manazer`` — the Manažér
+         (:func:`_vizual_url_recorded` is False), so the change-request loop does not re-spam the URL. On a
+         first draft (4a′) it is held back until the draft EXISTS, so the link never promises an empty app.
+      4a. ``directive`` is None and a draft already exists: settle ``awaiting_manazer`` — the Manažér
           reviews the vizual and either asks for a change (relayed back as the next turn's ``directive``) or
           advances with ``schvalit`` (the ``vizual → programovanie`` phase gate; dial-independent).
           EXCEPT when a Dedo answer is still ``pending`` (ICCINT-12/13): a turn was armed to CARRY it, and
           settling here would swallow it — see the guard at 4a for why that was a dead end.
+      4a′. ``directive`` is None and NOTHING has been drawn yet (no mockup, no prior AI Agent Vizuál turn —
+          :func:`_vizual_draft_attempted`): DISPATCH the FIRST DRAFT from the approved Špecifikácia + Návrh
+          (ICCINT-27) before handing the stage over, then announce the preview and invite refinement. Settling
+          here instead is what let a build report "Vizuál je pripravený" 77 ms after the Návrh was approved,
+          over the founding scaffold's own login screen.
       4b. ``directive`` is set (a Manažér CHANGE-REQUEST): DISPATCH the AI Agent full-auto
           (:func:`invoke_agent_with_parse_retry`, :func:`_vizual_directive`) to apply the change to the FE +
           commit. On the parsed result, settle the way :func:`run_conversation_turn` does — a ``ParseFailure``
@@ -9012,7 +9061,9 @@ async def _run_vizual_round(
     # Announce the preview URL ONCE — on the first entry into the stage (no prior vizual_url note on record).
     # The change-request loop re-enters this round every turn (spin_up is idempotent), so re-recording the URL
     # each time would spam the board; guard it on the durable-message probe instead.
-    if not _vizual_url_recorded(db, version_id):
+    async def _announce_preview() -> None:
+        if _vizual_url_recorded(db, version_id):
+            return
         ready_msg = _record_message(
             db,
             version_id=version_id,
@@ -9037,14 +9088,29 @@ async def _run_vizual_round(
     if directive is None and dedo_message.pending_messages(db, version_id):
         directive = FRAMEWORK_RESUME_DIRECTIVE
 
-    # FRESH entry (no change-request): hand the Manažér the live preview to WALK + approve (sub-task 3 behaviour).
-    if directive is None:
+    # ICCINT-27: on the FIRST entry there is nothing to walk. The founding scaffold is not the Manažér's app,
+    # and a preview of it is exactly the "dead login screen" :func:`_vizual_mockup_rel` warns about. Draw the
+    # first draft from the approved Špecifikácia + Návrh BEFORE handing the stage over — waiting for a
+    # change-request first would mean the Manažér has to know that a box nothing points at is the only way to
+    # get a screen built. A version that already has a mockup, or whose agent has already taken a Vizuál turn,
+    # is past this and keeps the walk+approve settle unchanged.
+    first_draft = directive is None and mockup_rel is None and not _vizual_draft_attempted(db, version_id)
+
+    # Anything but a first draft has screens to look at, so the URL is useful right now. On a first draft the
+    # announcement WAITS until the draft exists — saying "Vizuál je pripravený — otvor si ho" over an empty
+    # scaffold is the untruth this ticket is about.
+    if not first_draft:
+        await _announce_preview()
+
+    # FRESH entry with a draft already on disk: hand the Manažér the live preview to WALK + approve.
+    if directive is None and not first_draft:
         state.status = "awaiting_manazer"
         state.next_action = "Prezri si vizuál a keď sedí, schváľ (Hotovo/Schváliť)."
         db.flush()
         return state
 
-    # A Manažér CHANGE-REQUEST → DISPATCH the AI full-auto to apply it to the live FE (allowed_tools=None → it
+    # A Manažér CHANGE-REQUEST — or the FIRST DRAFT above, which passes ``directive=None`` through to
+    # :func:`_vizual_directive` — → DISPATCH the AI full-auto to apply it to the live FE (allowed_tools=None → it
     # edits /opt/projects/<slug>/frontend, HMR reflects it, commits). Mirrors _dispatch_build_turn's use of the
     # SHARED invoke-with-parse-retry chokepoint (recipient=manazer, on_event/on_message threaded).
     result = await invoke_agent_with_parse_retry(
@@ -9091,7 +9157,12 @@ async def _run_vizual_round(
     # The AI applied the change (edited the FE + committed; HMR reflected it) → hand the turn BACK to the
     # Manažér. NEVER advance the stage here — only a ``schvalit`` action moves vizual → programovanie.
     state.status = "awaiting_manazer"
-    state.next_action = "Zmena je vo vizuáli — pozri sa; napíš ďalšiu úpravu, alebo schváľ."
+    if first_draft:
+        # Only NOW is there something behind the link, so this is where the URL gets announced (ICCINT-27).
+        await _announce_preview()
+        state.next_action = "Prvý návrh vizuálu je hotový — pozri sa; napíš, čo zmeniť, alebo schváľ."
+    else:
+        state.next_action = "Zmena je vo vizuáli — pozri sa; napíš ďalšiu úpravu, alebo schváľ."
     db.flush()
     return state
 
