@@ -528,7 +528,9 @@ async def _invoke_once(
             per-turn logging and return contract are untouched, because only the transport and the
             permission-mode FLAG change. ``programovanie`` additionally gets a throwaway PostgreSQL on a
             per-build network and its ``DATABASE_URL`` (:mod:`build_db`) INSTEAD of the docker socket it
-            used to need. Every other phase — Vizuál and Verifikácia — and an unknown/``None`` phase runs
+            used to need. ``vizual`` joined in ICCINT-20 with nothing extra: its preview container is the
+            ENGINE's (``vizual_sandbox.spin_up``), bind-mounting the same host directory, so the agent's
+            turn is file editing and HMR carries it. Verifikácia — and an unknown/``None`` phase — runs
             the in-process subprocess exactly as before. The FILESYSTEM is what is isolated;
             :data:`build_sandbox.NETWORK_RESIDUAL` states what is not.
 

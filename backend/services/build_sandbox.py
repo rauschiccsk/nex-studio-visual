@@ -97,8 +97,9 @@ decision was *"pripoj znalostnú bázu read-only"*, and BOTH halves of "read" ar
      the per-build network a Programovanie turn joins alike — measured on this host from both.
   3. **§3(3) deliberate writes into the shared KB + reindex** — DELIBERATELY still unavailable: read-only is
      what was decided. The agent must not discover this by having a write fail mid-build, so the charter
-     §3 says outright that in every SANDBOXED phase — Príprava, Návrh and, since STEP 2, Programovanie —
-     the shared KB is read-only and a contribution waits for a later one. A rule the agent cannot see is a
+     §3 says outright that in every SANDBOXED phase — Príprava, Návrh, Vizuál (ICCINT-20) and, since
+     STEP 2, Programovanie — the shared KB is read-only and a contribution waits for a later one. Verifikácia
+     is the one phase left outside. A rule the agent cannot see is a
      trap, not a rule, which is why widening :data:`SANDBOXED_PHASES` means editing the charter in the same
      change.
 
@@ -135,14 +136,28 @@ _SANDBOX_LABEL = "build sandbox"
 #: The phases whose build turns run in here. Príprava and Návrh produce DOCUMENTS (the Zadanie/Špecifikácia
 #: dialogue, the design doc, the task plan) — nothing that needs the host — which is why they moved first
 #: (STEP 1). **Programovanie** joined them in STEP 2: it needs a real PostgreSQL, and the engine now hands
-#: it one (:mod:`build_db`) instead of handing it a docker socket. Vizuál and Verifikácia are deliberately
-#: NOT here — they build and run the whole app through ``docker compose``, which is what the socket is for.
+#: it one (:mod:`build_db`) instead of handing it a docker socket.
+#:
+#: **Vizuál** joined in ICCINT-20, and it cost nothing — the premise that kept it out was simply wrong. The
+#: phase does run the whole frontend, but the ENGINE runs it: :func:`vizual_sandbox.spin_up` starts the
+#: ``vizual-<slug>`` dev-server container, idempotently, bind-mounting the very same host directory the
+#: sandbox writes to, so an edit made inside here reaches the preview through HMR like any other. The agent's
+#: own turn is file editing, and its brief says so three times over ("REÁLNY backend teraz NErobíš", "NEROB
+#: backendovú logiku ani dátové modely", "Zmenu iba ZAPÍŠ do FE zdrojov"). Nothing in it ever needed a docker
+#: socket; the phase was excluded because the phase LOOKS like it runs containers.
+#:
+#: **Verifikácia** is deliberately still out, and that is a decision rather than an oversight. The independent
+#: Auditor is READ + RUN-ONLY and is told to check the app "oproti bežiacej appke, nie oproti slovu AI Agenta"
+#: — being able to boot the thing it is judging is the entire point of the phase (§2.5 behavioural release
+#: verification). The engine's own smoke leg (:func:`orchestrator._run_release_smoke`) covers the scripted
+#: part, but taking the socket away would leave the last independent check unable to look for itself. It is
+#: also the phase that carries the LEAST accident risk of the five: the Auditor never writes and never commits.
 #:
 #: The routing keys on THIS value, i.e. on the phase the engine is already in, so nothing has to be
 #: remembered or configured per dispatch: a phase cannot be forgotten the way a per-call ``sandbox=True``
 #: flag can. Adding a phase here is never only a code change — see the charter obligation in the KB section
 #: of this module's docstring, and :data:`build_db.DATABASE_PHASES` for what a phase is GIVEN once it is in.
-SANDBOXED_PHASES: tuple[str, ...] = ("priprava", "navrh", "programovanie")
+SANDBOXED_PHASES: tuple[str, ...] = ("priprava", "navrh", "vizual", "programovanie")
 
 #: ``HOME`` inside the sandbox — an EPHEMERAL tmpfs, not a bind. Set explicitly because the container runs
 #: under a NUMERIC uid with no ``/etc/passwd`` entry, so ``HOME`` would otherwise be unset or inherited from

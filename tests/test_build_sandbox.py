@@ -795,16 +795,22 @@ def test_good_slug_source_resolves_strictly_under_the_projects_root() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("stage", ["priprava", "navrh", "programovanie"])
-async def test_the_three_sandboxed_phases_run_in_the_sandbox(monkeypatch, stage) -> None:
+@pytest.mark.parametrize("stage", ["priprava", "navrh", "vizual", "programovanie"])
+async def test_the_sandboxed_phases_run_in_the_sandbox(monkeypatch, stage) -> None:
     assert (await _turn_argv(monkeypatch, stage=stage))[0] == "docker"
 
 
-@pytest.mark.parametrize("stage", ["vizual", "verifikacia", "hotovo", None, "", "unknown"])
+@pytest.mark.parametrize("stage", ["verifikacia", "hotovo", None, "", "unknown"])
 async def test_every_other_phase_still_runs_as_a_subprocess(monkeypatch, stage) -> None:
-    """STEP 2 moves three phases of five. Vizuál and Verifikácia stay OUT and that is not an oversight:
-    they build and run the whole app through ``docker compose``, which is what the socket is for, and no
-    engine-supplied database replaces that. An unknown/absent phase also keeps today's behaviour."""
+    """Four phases of five are in. **Verifikácia** stays OUT and that is a decision, not an oversight: the
+    independent Auditor is READ + RUN-ONLY and is told to check the app "oproti bežiacej appke, nie oproti
+    slovu AI Agenta" — being able to boot the thing it judges IS the phase (§2.5). It is also the phase
+    carrying the least accident risk of the five, because the Auditor never writes and never commits.
+
+    **Vizuál** used to be listed here for a reason that turned out to be false (ICCINT-20): the phase does
+    run the whole frontend, but the ENGINE runs it — ``vizual_sandbox.spin_up`` owns that container and
+    bind-mounts the same host directory the sandbox writes to, so the agent's turn is file editing and HMR
+    carries it. An unknown/absent phase also keeps today's behaviour."""
     assert (await _turn_argv(monkeypatch, stage=stage))[0] == "claude"
 
 
@@ -816,12 +822,33 @@ async def test_a_consult_turn_never_takes_the_build_sandbox(monkeypatch) -> None
 
 
 def test_phase_gate_is_the_single_source_of_the_routing() -> None:
-    assert build_sandbox.SANDBOXED_PHASES == ("priprava", "navrh", "programovanie")
+    assert build_sandbox.SANDBOXED_PHASES == ("priprava", "navrh", "vizual", "programovanie")
     assert build_sandbox.phase_uses_sandbox("priprava") is True
     assert build_sandbox.phase_uses_sandbox("NAVRH") is True  # normalised, not case-fragile
+    assert build_sandbox.phase_uses_sandbox("vizual") is True
     assert build_sandbox.phase_uses_sandbox("programovanie") is True
-    for other in ("vizual", "verifikacia", None, "", 7):
+    for other in ("verifikacia", None, "", 7):
         assert build_sandbox.phase_uses_sandbox(other) is False
+
+
+def test_the_charter_tells_the_agent_which_phases_have_docker() -> None:
+    """A rule the agent cannot see is a trap, not a rule (this module's docstring, §3(3)).
+
+    ``SANDBOXED_PHASES`` decides what the agent's turn CAN do; the charter is the only place the agent
+    learns it. When the two drift, the agent finds out by having something fail mid-build and — worse —
+    may escalate a working engine as broken. ICCINT-20 is exactly that risk: before it, the charter told
+    the agent in as many words that "Postaviť a spustiť CELÚ appku patrí do Vizuálu a Verifikácie — tie
+    fázy Docker majú", which the code change makes false for Vizuál on the same day.
+
+    Checked mechanically against the TEMPLATE (the source every new project's charter is written from),
+    because the obligation is the kind of thing that gets remembered once and forgotten twice."""
+    charter = (Path(__file__).resolve().parents[1] / "templates" / "ai-agent-charter.md").read_text(encoding="utf-8")
+    # Verifikácia is the one phase with Docker, and the charter must not promise it anywhere else.
+    assert "patrí do Verifikácie" in charter
+    assert "patrí do Vizuálu a Verifikácie" not in charter, "the charter still promises Vizuál a docker socket"
+    # Every sandboxed phase is named where the isolation is explained.
+    assert "Príprava, Návrh a Vizuál" in charter
+    assert "Vo Vizuáli Docker tiež nepotrebuješ a nemáš" in charter
 
 
 def test_no_orchestrator_dispatch_may_omit_its_phase() -> None:

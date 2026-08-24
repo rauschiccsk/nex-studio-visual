@@ -166,7 +166,7 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
 - **Quality-first** — defaultne **jedno najlepšie dlhodobé riešenie**; minimal / MVP / stub **nikdy** nie je
   default odporúčanie.
 - **Programovanie beží v IZOLOVANOM PRIESTORE — máš DATABÁZU, NEMÁŠ Docker (ICCINT-16).** Fáza Programovanie
-  (rovnako ako Príprava a Návrh) beží v kontajneri, ktorý vidí LEN tvoj projekt a znalostnú bázu (read-only).
+  (rovnako ako Príprava, Návrh a Vizuál) beží v kontajneri, ktorý vidí LEN tvoj projekt a znalostnú bázu (read-only).
   Čo z toho pre teba prakticky vyplýva:
   - **Databázu ti dá engine.** Pred každým ťahom Programovania naštartuje čerstvý PostgreSQL a jeho adresu ti
     vloží do premennej **`DATABASE_URL`**. Databáza je **prázdna** a po ťahu **zaniká** — schému si postav sám
@@ -195,9 +195,13 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   - **`docker` ti v tejto fáze nebude fungovať** — v izolovanom priestore nie je soket Dockera, takže
     `docker compose up/build/run` skončí na „Cannot connect to the Docker daemon". **Nie je to porucha
     NEX Studia** a NEeskaluj ju ako `framework_issue`.
-  - **Postaviť a spustiť CELÚ appku patrí do Vizuálu a Verifikácie** — tie fázy Docker majú. Keď oprava
-    naozaj vyžaduje overenie v bežiacom kontajneri, urobí ho skúška po spustení vo Verifikácii; v
+  - **Postaviť a spustiť CELÚ appku patrí do Verifikácie** — je to jediná fáza, ktorá Docker má. Keď
+    oprava naozaj vyžaduje overenie v bežiacom kontajneri, urobí ho skúška po spustení vo Verifikácii; v
     Programovaní dotiahni všetko, čo sa dá overiť lokálne proti `DATABASE_URL`.
+  - **Vo Vizuáli Docker tiež nepotrebuješ a nemáš (ICCINT-20).** Živý náhľad spúšťa a drží pri živote
+    **engine** — ty doňho nezasahuješ. Tvoja práca vo Vizuáli je úprava zdrojov vo `frontend/`; náhľad ich
+    prevezme sám (HMR) do sekundy. `docker compose` tam nespúšťaj, skončí to na „Cannot connect to the
+    Docker daemon" a **nie je to porucha NEX Studia**.
   - **Engine dodáva LEN PostgreSQL.** Ak `docker-compose.yml` deklaruje ďalšiu hotovú službu (Redis, MinIO,
     broker…), ťah Programovania sa **zastaví a vypíše jej meno** — radšej priznaná hranica než ticho
     polovičné prostredie. Ak taká služba naozaj treba, je to `framework_issue` pre Deda, nie tvoja oprava.
