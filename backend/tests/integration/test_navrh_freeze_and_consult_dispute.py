@@ -150,8 +150,16 @@ async def test_dispute_surfaces_both_findings_and_agent_response(db_session, mon
         .limit(1)
     ).scalar_one()
 
-    # BOTH sides are surfaced in the content: the dispute framing, every finding, and the agent's response.
-    assert "rozporuje" in note.content
+    # BOTH sides are surfaced in the content: the framing, every finding, and the agent's response.
+    #
+    # ICCINT-26 changed the framing and this assertion with it. It used to require the word "rozporuje" and
+    # the claim that the agent "posúdil ich ako už vyriešené" — an INTERPRETATION of an answer nobody had
+    # read, asserted as fact about what the agent thought. On 24.08.2026 it was flatly wrong: the agent had
+    # written "Neopravil som zatiaľ nič — predkladám päť rozhodnutí" and the app told the Director the
+    # opposite. What Fix B is FOR — the Manažér seeing both sides instead of a context-less stop — is what is
+    # pinned here now; the motive is left to him to read out of the agent's own words.
+    assert "Agent namiesto rozhodovacích kariet odpovedal takto" in note.content
+    assert "rozporuje" not in note.content
     assert "zastaraná" in note.content
     # Rendered as MARKDOWN: the findings are a proper "- " bulleted list under a bold heading, so
     # ConversationThread's SpecMarkdown shows a readable list — NOT one collapsed wall of text.
@@ -161,8 +169,9 @@ async def test_dispute_surfaces_both_findings_and_agent_response(db_session, mon
     # …and structured in the payload for the UI.
     assert note.payload["auditor_findings"] == findings
     assert "zastaraná" in note.payload["agent_response"]
-    # The state prompt stays short (the detail lives in the message content).
-    assert "Spor previerka" in state.next_action
+    # The state prompt stays short (the detail lives in the message content). It no longer calls this a
+    # "Spor" either — that was the same assertion of a motive, one line shorter.
+    assert "posúď oba pohľady" in state.next_action
 
 
 # ── Auditor over-strictness + loop fix — calibrated, dispute-aware re-review ───

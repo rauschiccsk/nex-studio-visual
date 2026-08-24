@@ -1691,7 +1691,7 @@ async def _settle_for_consultation(
     consult_count = db.execute(
         select(func.count())
         .select_from(PipelineMessage)
-        .where(PipelineMessage.version_id == state.version_id, PipelineMessage.kind == "consultation")
+        .where(PipelineMessage.version_id == state.version_id, _carries_decision_queue())
     ).scalar_one()
     if consult_count >= AUDITOR_LOOP_MAX:
         return await _consult_fallback(
@@ -1716,20 +1716,36 @@ async def _settle_for_consultation(
         recipient="manazer",
         on_message=on_message,
     )
-    if isinstance(result, ParseFailure) or result.kind != "consultation" or result.consultation is None:
+    # ICCINT-26: the queue is used WHENEVER THERE IS ONE — the declared ``kind`` is not the test. Found by
+    # Dedo 24.08.2026 on nex-productcatalogs: the agent returned ``kind='question'`` carrying a complete
+    # ``consultation`` (five decisions, options, recommendations, rationale). The old condition keyed on the
+    # kind, so those cards were thrown away and the Manažér was told the agent "rozporuje" the findings — while
+    # the agent's own message said the opposite: "Neopravil som zatiaľ nič — predkladám päť rozhodnutí." The
+    # app was telling him something untrue about what the agent had said, and hiding the very thing meant to
+    # make the decision easy. Validation of the queue is keyed the same way (``pipeline_status``), so a queue
+    # used here is a queue that was checked.
+    usable_consultation = (
+        None
+        if isinstance(result, ParseFailure) or result.consultation is None or not result.consultation.decisions
+        else result.consultation
+    )
+    if usable_consultation is None:
         # MARKDOWN (rendered by ConversationThread's SpecMarkdown): a proper ``- `` list with a blank line
         # before it, so the findings render as a readable bulleted list — NOT one collapsed wall of text
         # (Director 2026-07-17: the first cut used ``•`` + single newlines, which markdown glued into one blob).
         findings_md = "\n".join(f"- {f}" for f in findings)
-        # Fix B (Director 2026-07-17): the AI Agent DISPUTED the findings — it returned a normal block (e.g.
-        # gate_report, judging them stale/already-resolved) instead of decision cards. Surface BOTH sides so
-        # the Manažér decides with full context (the stale-audit → "nevidím konkrétne riešenie" dead-end).
-        if not isinstance(result, ParseFailure) and result.kind != "consultation":
+        # Fix B (Director 2026-07-17): the AI Agent answered with a normal block instead of decision cards.
+        # Surface BOTH sides so the Manažér decides with full context (the stale-audit → "nevidím konkrétne
+        # riešenie" dead-end). ICCINT-26 rewrote the wording: it used to assert that the agent "rozporuje"
+        # the findings and "posúdil ich ako už vyriešené" — an INTERPRETATION of an answer nobody had read,
+        # and demonstrably wrong the day it was found. State the fact (it answered this instead of cards),
+        # show the answer, and let the Manažér draw the conclusion.
+        if not isinstance(result, ParseFailure):
             agent_response = (result.summary or "").strip()
             content = (
-                f"**Nezávislá previerka označila {len(findings)} bod(ov), ale agent ich rozporuje** — "
-                "neurobil rozhodovacie karty, posúdil ich ako už vyriešené. Porovnaj oba pohľady "
-                "s aktuálnymi dokumentmi a rozhodni (**Schváliť** / **Uprav**)."
+                f"**Nezávislá previerka označila {len(findings)} bod(ov). Agent namiesto rozhodovacích "
+                "kariet odpovedal takto** — porovnaj oba pohľady s aktuálnymi dokumentmi a rozhodni "
+                "(**Schváliť** / **Uprav**)."
             )
             if findings_md:
                 content += f"\n\n**Nálezy previerky:**\n\n{findings_md}"
@@ -1739,7 +1755,9 @@ async def _settle_for_consultation(
                 db,
                 state,
                 note=content,
-                next_action=f"Spor previerka↔agent ({len(findings)} bod.) — posúď oba pohľady (Schváliť / Uprav).",
+                next_action=(
+                    f"Previerka ({len(findings)} bod.) a odpoveď agenta — posúď oba pohľady (Schváliť / Uprav)."
+                ),
                 on_message=on_message,
                 findings=findings or None,
                 agent_response=agent_response or None,
@@ -1764,7 +1782,7 @@ async def _settle_for_consultation(
             # written. A brief outage must not permanently take the Decision Cards away.
             retry_source=source,
         )
-    n = len(result.consultation.decisions)
+    n = len(usable_consultation.decisions)
     state.status = "blocked"
     state.block_reason = "decision_needed"
     word = "rozhodnutie" if n == 1 else ("rozhodnutia" if 2 <= n <= 4 else "rozhodnutí")
@@ -2921,6 +2939,18 @@ def _write_task_plan(
     return None
 
 
+def _carries_decision_queue():
+    """SQL predicate: this message CARRIES a decision queue — whatever the block called itself (ICCINT-26).
+
+    Every lookup here used to filter on ``kind == 'consultation'``, which is the block's own label rather
+    than its content. The agent does attach a complete queue to a ``question`` block, and on 24.08.2026 it
+    did: five decisions with options and recommendations, recorded under ``kind='question'`` and therefore
+    invisible to all three of these queries — the cap counted it as never having happened, ``decide`` could
+    not find it, and the retry probe thought no cards had ever arrived. Keyed on the queue itself, all three
+    agree with what is actually on record."""
+    return PipelineMessage.payload["consultation"]["decisions"].isnot(None)
+
+
 def _latest_consultation(db: Session, version_id: uuid.UUID) -> Optional[tuple[dict[str, Any], int]]:
     """CR-V2-041: the ``consultation`` payload (id / intro / source / decisions[]) + its message ``seq`` of
     the LATEST kind=consultation message, or ``None``. The decision queue + the recorded ``decide`` answers
@@ -2932,7 +2962,7 @@ def _latest_consultation(db: Session, version_id: uuid.UUID) -> Optional[tuple[d
     ``consultation.id`` being unique (verify-round blocker fix)."""
     row = db.execute(
         select(PipelineMessage.payload, PipelineMessage.seq)
-        .where(PipelineMessage.version_id == version_id, PipelineMessage.kind == "consultation")
+        .where(PipelineMessage.version_id == version_id, _carries_decision_queue())
         .order_by(PipelineMessage.seq.desc())
         .limit(1)
     ).first()
@@ -2969,7 +2999,7 @@ def consultation_retry_pending(db: Session, version_id: uuid.UUID) -> Optional[t
     newer_consultation = db.execute(
         select(func.max(PipelineMessage.seq)).where(
             PipelineMessage.version_id == version_id,
-            PipelineMessage.kind == "consultation",
+            _carries_decision_queue(),
             PipelineMessage.seq > seq,
         )
     ).scalar()

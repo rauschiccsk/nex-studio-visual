@@ -44,13 +44,17 @@ interface Consultation {
   decisions: ConsultDecision[];
 }
 
-// The latest kind=consultation message — the ACTUAL blocking message (criterion 4) — plus its `seq`, so answers
-// can be SEQ-scoped below (mirrors backend `_latest_consultation`). "Latest" = the highest seq, not the array-
-// last element, so the ordering of `recent_messages` can't pick a stale consultation.
+// The latest message CARRYING a decision queue — the ACTUAL blocking message (criterion 4) — plus its `seq`,
+// so answers can be SEQ-scoped below (mirrors backend `_latest_consultation`). "Latest" = the highest seq, not
+// the array-last element, so the ordering of `recent_messages` can't pick a stale consultation.
+//
+// ICCINT-26: keyed on the QUEUE, not on `kind`. The agent does attach a complete queue to a `question` block —
+// on 24.08.2026 it attached five decisions that way — and a card queue that the backend now acts on must be a
+// card queue this screen can show. Filtering on the label would leave the cards on record and off the screen.
 function latestConsultation(messages: PipelineMessage[]): { consultation: Consultation; seq: number } | null {
   let best: { consultation: Consultation; seq: number } | null = null;
   for (const m of messages) {
-    if (!m || m.kind !== "consultation") continue;
+    if (!m) continue;
     const c = (m.payload as { consultation?: Consultation } | null)?.consultation;
     if (c && Array.isArray(c.decisions) && c.decisions.length > 0 && (best === null || m.seq > best.seq)) {
       best = { consultation: c, seq: m.seq };

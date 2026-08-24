@@ -506,9 +506,15 @@ def _validate_block(data: dict) -> ParseResult:
     # one recommended option (so the card pre-highlights a default). decisions≥1 / options≥2 are enforced by
     # the models; this adds the presence + "exactly one recommended" cross-field check. (consultation is NOT
     # in _QUESTION_KINDS, so the question-required rule above never fires for it — it carries no 'question'.)
-    if block.kind == "consultation":
-        if block.consultation is None or not block.consultation.decisions:
-            return ParseFailure("kind='consultation' requires a non-empty 'consultation.decisions'")
+    if block.kind == "consultation" and (block.consultation is None or not block.consultation.decisions):
+        return ParseFailure("kind='consultation' requires a non-empty 'consultation.decisions'")
+    # ICCINT-26: check the queue WHEREVER IT APPEARS, not only where the block announced itself as one.
+    # The agent does sometimes attach a perfectly good decision queue to a ``question`` block — it asked a
+    # question AND offered the ways to answer it — and the orchestrator now uses that queue rather than
+    # throwing it away. A queue that is used must be a queue that was checked; keying the check on the
+    # declared ``kind`` would let cards reach the Manažér with no recommended option to pre-highlight, or
+    # two.
+    if block.consultation is not None:
         for d in block.consultation.decisions:
             n_rec = sum(1 for o in d.options if o.recommended)
             if n_rec != 1:
