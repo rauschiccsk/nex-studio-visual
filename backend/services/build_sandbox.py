@@ -159,6 +159,11 @@ _SANDBOX_LABEL = "build sandbox"
 #: of this module's docstring, and :data:`build_db.DATABASE_PHASES` for what a phase is GIVEN once it is in.
 SANDBOXED_PHASES: tuple[str, ...] = ("priprava", "navrh", "vizual", "programovanie")
 
+#: Every phase a build turn can run in — the denominator behind "N of M phases are isolated". Here so the
+#: readiness line can DERIVE that count instead of carrying a hand-written one, which is what let it announce
+#: "three phases of five" throughout the release that made it four.
+ALL_BUILD_PHASES: tuple[str, ...] = ("priprava", "navrh", "vizual", "programovanie", "verifikacia")
+
 #: ``HOME`` inside the sandbox — an EPHEMERAL tmpfs, not a bind. Set explicitly because the container runs
 #: under a NUMERIC uid with no ``/etc/passwd`` entry, so ``HOME`` would otherwise be unset or inherited from
 #: the backend (``/root``, which the unprivileged user cannot write).
@@ -1040,10 +1045,15 @@ def log_startup_readiness() -> SandboxStatus:
     status = preflight()
     if status.ready:
         logger.info(
-            "Build sandbox READY (image=%s) — %s turns run OS-isolated; every other phase still runs "
-            "in-process with the host mounts (ICCINT-16 STEP 2 — three phases of five). %s",
+            # The count is DERIVED, never spelled out. It read "three phases of five" for the whole of the
+            # deploy that made it four — in the same sentence that listed all four by name (ICCINT-20). A
+            # hand-written number beside a generated list is a lie waiting for the next change.
+            "Build sandbox READY (image=%s) — %s turns run OS-isolated (%d of %d phases); every other phase "
+            "still runs in-process with the host mounts. %s",
             status.image,
             "/".join(SANDBOXED_PHASES),
+            len(SANDBOXED_PHASES),
+            len(ALL_BUILD_PHASES),
             NETWORK_RESIDUAL,
         )
     elif not status.enabled:

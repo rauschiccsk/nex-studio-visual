@@ -1486,3 +1486,45 @@ def test_the_two_transports_of_a_consult_turn_cannot_drift_apart(monkeypatch) ->
     }
     assert handed_over <= sidecar, f"the consult sidecar cannot accept {handed_over - sidecar}"
     assert handed_over <= in_process
+
+
+def test_the_readiness_line_counts_instead_of_claiming(monkeypatch) -> None:
+    """The startup disclosure must DERIVE how many phases are isolated (ICCINT-20).
+
+    It announced "three phases of five" for the whole of the release that made it four — in the same
+    sentence that listed all four by name. That line is the one statement anybody reads to learn what is
+    isolated, so a hand-written number beside a generated list is exactly the wrong thing to put there.
+
+    Asserted on the RENDERED message, not on the source: what matters is what the operator reads.
+    """
+    monkeypatch.setattr(
+        build_sandbox,
+        "preflight",
+        lambda: build_sandbox.SandboxStatus(enabled=True, ready=True, image="img:v1"),
+    )
+    # Capture by attaching a handler to the module's own logger. ``caplog`` depends on propagation to the
+    # root, which this project's logging config does not grant — and a capture that silently yields nothing
+    # would make every assertion below pass against an empty string.
+    captured: list[str] = []
+
+    class _Grab(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            captured.append(record.getMessage())
+
+    mod_logger = logging.getLogger("backend.services.build_sandbox")
+    handler = _Grab()
+    mod_logger.addHandler(handler)
+    try:
+        build_sandbox.log_startup_readiness()
+    finally:
+        mod_logger.removeHandler(handler)
+    line = "\n".join(captured)
+    assert line, "the readiness line was never emitted — the assertions below would be vacuous"
+
+    assert "three phases of five" not in line
+    assert "4 of 5 phases" in line
+    # Every isolated phase is named, and the one left out is not claimed to be in.
+    for phase in build_sandbox.SANDBOXED_PHASES:
+        assert phase in line
+    assert set(build_sandbox.SANDBOXED_PHASES) < set(build_sandbox.ALL_BUILD_PHASES)
+    assert "verifikacia" not in build_sandbox.SANDBOXED_PHASES
