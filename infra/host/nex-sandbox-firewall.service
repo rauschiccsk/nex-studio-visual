@@ -1,0 +1,8 @@
+[Unit]
+Description=Fence the NEX Studio build sandbox off from this host's services (ICCINT-21)
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/nex-sandbox-firewall.sh

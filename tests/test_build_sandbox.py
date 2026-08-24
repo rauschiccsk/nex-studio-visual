@@ -1150,8 +1150,11 @@ async def test_a_database_buys_a_network_and_not_one_extra_path(monkeypatch) -> 
     programovanie, _ = _scan(await _turn_argv(monkeypatch, stage="programovanie", slug="acme"))
     assert _mount_identity(programovanie) == _expected_mounts("acme")
     assert _mount_identity(programovanie) == _mount_identity(priprava)
-    # The difference between the two phases is exactly: one network and one variable.
-    assert _values(priprava, "--network") == []
+    # ICCINT-21: EVERY sandboxed turn now joins a network of its own, inside the fenced range — so the
+    # difference between the two phases is exactly one VARIABLE, not a network. Príprava used to have none
+    # at all, which meant docker's default bridge: shared with CI runners and other stacks' containers, and
+    # therefore impossible to fence as a whole. A turn with no network of its own cannot be fenced.
+    assert len(_values(priprava, "--network")) == 1
     assert len(_values(programovanie, "--network")) == 1
 
 
@@ -1431,15 +1434,27 @@ def test_the_network_residual_is_published_not_implied() -> None:
     this test pins the CATEGORY and the databases by name; naming three ports again turns it red.
 
     ``--network none`` is not an option — it cuts the Claude MAX endpoint too and the turn hangs until its
-    timeout, measured. The fix is a DOCKER-USER firewall rule on the host, which is infrastructure.
+    timeout, measured.
+
+    ICCINT-21 closed the hole, and this test moved with it rather than being deleted: what has to stay
+    readable is now what the fence LEAVES open, plus the one guarantee the engine still cannot give. Two
+    things in particular must never quietly disappear from the sentence — that the internet stays open (it
+    is the reason the fence cannot simply be "no network"), and that the engine does NOT verify the fence at
+    runtime, because it cannot read the host's firewall from inside a container. A protection nobody can
+    check from here has to say so.
     """
     payload = build_sandbox.preflight().as_dict()
     assert "network_residual" in payload
     residual = payload["network_residual"].lower()
-    for expected in ("published on 0.0.0.0", "not a short list", "postgresql", "not implemented"):
+    # What is fenced, and the two-chain reason it takes two rules.
+    for expected in ("fenced", "input", "docker-user", "address-translated"):
         assert expected in residual, f"{expected!r} missing from the published network residual"
-    # The honest half in the sandbox's favour is stated too: other stacks' own networks are NOT reachable.
-    assert "private networks are not reachable" in residual
+    # What stays open ON PURPOSE — silence here would read as "everything is blocked", which is false.
+    for expected in ("internet", "9130", "9132", "own network"):
+        assert expected in residual, f"{expected!r} missing from the published network residual"
+    # The limit the engine cannot escape, stated rather than implied.
+    assert "does not verify the fence at runtime" in residual
+    assert "re-applied by a host timer" in residual
 
 
 def test_reading_the_knowledge_base_works_BOTH_ways_or_neither(monkeypatch) -> None:

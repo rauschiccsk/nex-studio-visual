@@ -1,0 +1,11 @@
+[Unit]
+Description=Re-assert the build-sandbox fence — docker rewrites its chains on every daemon restart
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=60s
+AccuracySec=5s
+Unit=nex-sandbox-firewall.service
+
+[Install]
+WantedBy=timers.target

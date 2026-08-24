@@ -77,6 +77,7 @@ backend startup. A label with no sweeper behind it is an alibi, not a cleanup st
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import re
@@ -538,6 +539,68 @@ def plan_database(*, slug: str, host_project_dir: str, token: str) -> BuildDatab
 # --------------------------------------------------------------------------------------------------------
 
 
+#: The address range every sandbox network is allocated from (ICCINT-21). It exists so ONE static firewall
+#: rule on the host can fence EVERY build turn, forever, without the engine ever touching iptables: the host
+#: side matches on this source range, so a network created here is fenced the moment it exists and nothing
+#: has to be added or removed per build.
+#:
+#: Measured 24.08.2026 from a container on such a network, with the fence in place: the Studio API, SSH and
+#: this host's PostgreSQL instances all time out; the search index, the local model, the build's OWN network
+#: and the open internet all answer. Without it — the state before ICCINT-21 — every one of them answered.
+SANDBOX_SUBNET_POOL = "10.77.0.0/16"
+_POOL_SIZE = 256
+
+
+def subnet_candidates(token: str) -> list[str]:
+    """Every /24 in :data:`SANDBOX_SUBNET_POOL`, ordered so two concurrent builds start at different places.
+
+    Docker allocates a subnet itself when none is given, and it would allocate OUTSIDE the fenced range —
+    which is why the subnet is chosen here rather than left to it. The order is derived from the turn token
+    so the first attempt almost never collides; a collision is not an error, it just costs one more attempt
+    (``docker network create`` refuses an overlap, and :func:`create_fenced_network` walks on).
+    """
+    start = int(hashlib.sha256(token.encode()).hexdigest()[:8], 16) % _POOL_SIZE
+    return [f"10.77.{(start + i) % _POOL_SIZE}.0/24" for i in range(_POOL_SIZE)]
+
+
+async def create_fenced_network(name: str, owner: str, token: str) -> str:
+    """Create ``name`` inside the fenced range and return the subnet it got.
+
+    Raises:
+        BuildDatabaseUnavailable: the whole pool is taken (256 concurrent builds, or leaked networks — the
+            warning in :func:`release` names the sweep) or docker refused for another reason.
+    """
+    last = ""
+    for subnet in subnet_candidates(token):
+        code, detail = await _docker(
+            "docker", "network", "create", "--subnet", subnet, "--label", f"{OWNER_LABEL}={owner}", name
+        )
+        if code == 0:
+            return subnet
+        last = detail
+        low = detail.lower()
+        if "overlap" not in low and "pool" not in low:
+            break
+    raise BuildDatabaseUnavailable(f"{_LABEL}: could not create fenced network {name} ({last[:300]})")
+
+
+async def remove_network(name: str) -> None:
+    """Remove a fenced network, retrying while docker detaches endpoints. Idempotent, never raises."""
+    for attempt in range(_NETWORK_RM_ATTEMPTS):
+        code, detail = await _docker("docker", "network", "rm", name, timeout=30)
+        if code == 0 or "not found" in detail.lower() or "no such network" in detail.lower():
+            return
+        await asyncio.sleep(_NETWORK_RM_BACKOFF * (attempt + 1))
+    logger.warning(
+        "%s: network %s could not be removed after %d attempts — a leaked network holds a subnet from the "
+        "fenced pool; sweep with: docker network ls --filter label=%s",
+        _LABEL,
+        name,
+        _NETWORK_RM_ATTEMPTS,
+        OWNER_LABEL,
+    )
+
+
 def network_create_argv(plan: BuildDatabase) -> list[str]:
     """``docker network create`` for the per-build network — no options that widen it.
 
@@ -683,9 +746,8 @@ async def start(plan: BuildDatabase) -> BuildDatabase:
             container or the readiness probe failed.
     """
     _assert_runnable(plan)
-    code, detail = await _docker(*network_create_argv(plan))
-    if code != 0:
-        raise BuildDatabaseUnavailable(f"{_LABEL}: could not create network {plan.network} ({detail[:300]})")
+    # ICCINT-21: inside the fenced range, so the host rule covers this build without knowing it exists.
+    await create_fenced_network(plan.network, plan.slug, plan.network)
     try:
         code, detail = await _docker(*container_run_argv(plan))
         if code != 0:

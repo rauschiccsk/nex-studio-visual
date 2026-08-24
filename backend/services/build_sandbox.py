@@ -333,16 +333,22 @@ _DEFAULT_IMAGE_REPO = "nex-studio-visual-backend"
 #: project and its own login" is true of the FILESYSTEM only, and this constant is logged once per process
 #: so nobody has to infer that from silence.
 NETWORK_RESIDUAL = (
-    "build sandbox network is NOT isolated: outbound internet is REQUIRED (the Claude MAX endpoint; "
-    "--network none was measured to kill the turn), so the docker bridge gateway to the host stays "
-    "reachable — and through it EVERYTHING PUBLISHED ON 0.0.0.0 ON THIS HOST, not a short list. Measured "
-    "here that is six PostgreSQL instances (including this Studio's own production database), Vaultwarden, "
-    "the NEX Manager API, Prometheus, Alertmanager, Grafana, the Studio API (9217), the v3 API (9207) and "
-    "Traefik (80/443). The sandbox is given no credentials for any of them, and other stacks' private "
-    "networks are NOT reachable (docker inter-network isolation, measured) — but the host's published "
-    "surface is. Identical on the default bridge (Príprava/Návrh) and on the per-build network "
-    "(Programovanie). The FILESYSTEM isolation is unaffected; restricting this needs a DOCKER-USER firewall "
-    "rule on the host and is NOT implemented (ICCINT-16 STEP 2)."
+    "build sandbox network is FENCED (ICCINT-21) but not silent: outbound internet stays open because the "
+    "turn cannot work without it (the Claude MAX endpoint; --network none was measured to kill the turn). "
+    "Every sandboxed turn now joins its OWN docker network inside a reserved range, and a host firewall "
+    "fences that range: this host's own services (ssh, mail, the rest) are dropped in INPUT, and the "
+    "services docker PUBLISHES (the Studio API, Grafana, Prometheus, the PostgreSQL instances, Traefik) are "
+    "dropped in DOCKER-USER — two chains, because a published port is address-translated and only the "
+    "second chain ever sees it. Open on purpose: the open internet, the build's OWN network (its throwaway "
+    "PostgreSQL) and two host services the turn legitimately uses, the search index (9130) and the local "
+    "model (9132), matched on the port the sandbox ASKED for since publishing rewrites it. Measured here on "
+    "24.08.2026 from a container on such a network: the Studio API, ssh and the host PostgreSQL time out; "
+    "Qdrant and Ollama answer 200; api.anthropic.com answers; the build's own database answers. "
+    "WHAT IS STILL NOT GUARANTEED FROM IN HERE: the engine does NOT verify the fence at runtime — it cannot "
+    "read the host's firewall from inside a container. The rule is re-applied by a host timer every minute "
+    "(nex-sandbox-firewall.timer), because docker rewrites its chains on every daemon restart and a "
+    "protection that vanishes quietly is worse than none. Verify with: docker run --rm --network <a "
+    "sandbox network> … and try a blocked port."
 )
 _network_residual_logged = False
 
@@ -770,6 +776,7 @@ def build_run_argv(
     container_name: str,
     claude_argv: list[str],
     database: Optional["build_db.BuildDatabase"] = None,
+    network: Optional[str] = None,
 ) -> list[str]:
     """Compose the EXACT ``docker run`` argv for a sandboxed build turn. The mount list IS the guarantee.
 
@@ -844,7 +851,11 @@ def build_run_argv(
         # user-defined bridge keeps outbound internet (the Claude MAX endpoint, npm/pip, gh) and keeps the
         # Qdrant/Ollama gateway reachable — both measured on this host. Príprava/Návrh pass no database and
         # stay on the default bridge, byte-identical to STEP 1.
-        *(["--network", database.network] if database is not None else []),
+        # ICCINT-21: EVERY sandboxed turn joins a network inside the fenced range — the one the database
+        # lives on when there is a database, its own otherwise. Before this, the three phases without a
+        # database sat on docker's DEFAULT bridge, which also carries CI runners and other stacks' web
+        # containers and therefore cannot be fenced as a whole.
+        *(["--network", network] if network else []),
         # Nothing in a document-writing turn needs a capability, and no setuid binary may hand one back.
         "--cap-drop=ALL",
         "--security-opt",

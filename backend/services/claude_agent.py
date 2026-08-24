@@ -631,6 +631,7 @@ async def _invoke_once(
 
     sandbox_container: Optional[str] = None
     turn_database = None
+    turn_network: Optional[str] = None
     # THE ``try`` OPENS BEFORE THE DATABASE IS CREATED, and that placement is the whole point. It used to
     # open after ``build_run_argv``, i.e. the composing of the argv sat BETWEEN ``build_db.start`` and the
     # only ``finally`` that reaps it — and ``build_run_argv`` declares ``Raises: BuildSandboxUnavailable``
@@ -655,15 +656,24 @@ async def _invoke_once(
             # supply, and that refusal must happen before anything is created), then started, then wired
             # into the argv. Every phase that is NOT Programovanie plans ``None`` and this is a no-op.
             turn_database = build_sandbox.plan_turn_database(project_slug=project_slug, stage=stage, token=token)
-            if turn_database is not None:
-                from backend.services import build_db  # local import — cycle (see above)
+            from backend.services import build_db  # local import — cycle (see above)
 
+            if turn_database is not None:
                 await build_db.start(turn_database)
+                turn_network = turn_database.network
+            else:
+                # ICCINT-21: a turn WITHOUT a database still needs a fenced network of its own. These three
+                # phases used to sit on docker's default bridge, which cannot be fenced as a whole — it also
+                # carries CI runners and other stacks' containers. Created here and reaped in the same
+                # ``finally`` as the database, for the same reason: every way out must clean up.
+                turn_network = build_db.network_name(project_slug, token)
+                await build_db.create_fenced_network(turn_network, project_slug, turn_network)
             args = build_sandbox.build_run_argv(
                 project_slug=project_slug,
                 container_name=sandbox_container,
                 claude_argv=args,
                 database=turn_database,
+                network=turn_network,
             )
 
         return await _run_turn(
@@ -687,6 +697,10 @@ async def _invoke_once(
             from backend.services import build_db  # local import — cycle (see above)
 
             await build_db.release(turn_database)
+        elif turn_network is not None:
+            from backend.services import build_db  # local import — cycle (see above)
+
+            await build_db.remove_network(turn_network)
 
 
 async def _run_turn(
