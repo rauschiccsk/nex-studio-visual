@@ -503,10 +503,26 @@ class TestTheOneButton:
         self, db_session, monkeypatch
     ):
         """The control for the backstop: ``spustit_vizual`` on a build with no Dedo message owed must NOT
-        dispatch — the fresh entry exists to hand the Manažér a preview to walk."""
+        dispatch — the fresh entry exists to hand the Manažér a preview to walk.
+
+        The build here has ALREADY been drawn (a prior AI Agent Vizuál turn). That used to be irrelevant and
+        is now the premise: since ICCINT-27 a fresh entry with NOTHING drawn dispatches the first draft
+        instead of handing over an empty scaffold, so "nothing pending ⇒ nobody is called" is a statement
+        about a build that has screens to walk. What this still pins is the thing it was written for — that
+        the dispatch in the sibling test is caused by the OWED ANSWER and by nothing else."""
         version, _ = _make_version(db_session)
         state = _seed_blocked(db_session, version.id, current_stage="vizual", status="agent_working")
         state.block_reason = None
+        orchestrator._record_message(
+            db_session,
+            version_id=version.id,
+            stage="vizual",
+            author=orchestrator.AI_AGENT_ROLE,
+            recipient="manazer",
+            kind="gate_report",
+            content="Obrazovky sú postavené.",
+            payload={},
+        )
         db_session.flush()
         prompts = _fake_cli(monkeypatch)
         _stub_sandbox(monkeypatch)

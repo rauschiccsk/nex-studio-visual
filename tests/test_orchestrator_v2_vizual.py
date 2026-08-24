@@ -4,10 +4,11 @@ Exercised against the real v4-branch DB (the stage CHECKs include ``'vizual'``):
 
 * **Boundary walk** — a ``new_version`` build advances ``navrh → vizual → programovanie``, STOPPING for a
   ``schvalit`` at EACH phase boundary (mandatory gate even at ``plná`` autonómia; spec §3.A/§3.E).
-* **``_run_vizual_round`` (MINIMAL)** — spins the isolated live-preview sandbox up, records ONE
-  ``system → manazer`` preview-URL notification, and settles ``awaiting_manazer``. NO AI-Agent turn here
-  (the "AI applies the change" HMR loop is a later CR-1 sub-task). ``vizual_sandbox.spin_up`` is
-  monkeypatched — the test NEVER spawns real docker.
+* **``_run_vizual_round``** — spins the isolated live-preview sandbox up, records ONE
+  ``system → manazer`` preview-URL notification, and settles ``awaiting_manazer``. A fresh entry runs no
+  AI-Agent turn ONCE the screens exist; on the FIRST entry, with nothing drawn, it dispatches the first
+  draft (ICCINT-27) — ``_seed_drawn`` states which of the two a test is about.
+  ``vizual_sandbox.spin_up`` is monkeypatched — the test NEVER spawns real docker.
 
 ``invoke_agent_with_parse_retry`` is monkeypatched (no live ``claude`` CLI); the unit drives
 ``run_dispatch`` / ``apply_action`` directly, the same entry points the background runner + the API call.
@@ -133,12 +134,34 @@ def _patch_spin_up(monkeypatch, calls=None):
     monkeypatch.setattr(vizual_sandbox, "spin_up", _fake)
 
 
+def _seed_drawn(db_session, version_id):
+    """Record a prior AI Agent Vizuál turn — this build already HAS screens (ICCINT-27).
+
+    Since ICCINT-27 a fresh entry with NOTHING drawn dispatches the first draft instead of handing the
+    Manažér the founding scaffold behind its own login screen. The tests below are about the plumbing AROUND
+    the round — the sandbox, the URL notification, the board verbs, the boundary walk — and every one of them
+    assumes the settle-and-hand-over path, which is what a build with screens does. State that premise here
+    instead of leaning on emptiness, which no longer means what it used to."""
+    orchestrator._record_message(
+        db_session,
+        version_id=version_id,
+        stage="vizual",
+        author=orchestrator.AI_AGENT_ROLE,
+        recipient="manazer",
+        kind="gate_report",
+        content="Obrazovky sú postavené.",
+        payload={},
+    )
+    db_session.flush()
+
+
 # ── The MINIMAL Vizuál round ─────────────────────────────────────────────────
 
 
 async def test_vizual_round_spins_up_and_awaits_manazer(db_session, monkeypatch):
     version, project = _make_version(db_session)
     _seed_state(db_session, version.id, stage="vizual", actor="ai_agent")
+    _seed_drawn(db_session, version.id)
     calls: dict[str, str] = {}
     _patch_spin_up(monkeypatch, calls)
 
@@ -202,10 +225,14 @@ async def test_vizual_directive_dispatches_ai_and_awaits_manazer(db_session, mon
     assert settled.status == "awaiting_manazer"
 
 
-async def test_vizual_no_directive_does_not_dispatch_ai(db_session, monkeypatch):
-    # A FRESH entry (directive None) must NOT run the AI turn — it only spins the preview up + settles.
+async def test_vizual_fresh_entry_does_not_dispatch_once_the_screens_exist(db_session, monkeypatch):
+    # A FRESH entry (directive None) on a build that ALREADY has screens must NOT run the AI turn — it only
+    # spins the preview up + settles, so the Manažér walks what is there instead of having it redrawn under
+    # him. (Before ICCINT-27 this held for EVERY fresh entry, including one where nothing had been drawn —
+    # which is how a build came to announce "Vizuál je pripravený" over an empty scaffold.)
     version, _ = _make_version(db_session)
     state = _seed_state(db_session, version.id, stage="vizual", actor="ai_agent")
+    _seed_drawn(db_session, version.id)
     _patch_spin_up(monkeypatch)
     calls = _stub_invoke_capture(monkeypatch, lambda s: _gate_report(s))
 
@@ -214,6 +241,25 @@ async def test_vizual_no_directive_does_not_dispatch_ai(db_session, monkeypatch)
     assert calls == []  # no AI turn dispatched
     assert settled.status == "awaiting_manazer"
     # The preview-URL notification was recorded (the sub-task-3 entry behaviour).
+    notes = [m for m in _msgs(db_session, version.id) if m.payload and m.payload.get("vizual_url")]
+    assert len(notes) == 1
+
+
+async def test_vizual_first_entry_draws_before_handing_over(db_session, monkeypatch):
+    # The other half of the same contract (ICCINT-27): with NOTHING drawn yet, the fresh entry dispatches the
+    # FIRST DRAFT from the approved documents — and the preview URL is not announced until it exists.
+    version, _ = _make_version(db_session)
+    state = _seed_state(db_session, version.id, stage="vizual", actor="ai_agent")
+    _patch_spin_up(monkeypatch)
+    calls = _stub_invoke_capture(monkeypatch, lambda s: _gate_report(s))
+
+    settled = await orchestrator._run_vizual_round(db_session, state)
+
+    assert len(calls) == 1, "the first entry into Vizuál drew nothing"
+    assert calls[0]["role"] == "ai_agent" and calls[0]["stage"] == "vizual"
+    assert "PRVÝ NÁVRH" in calls[0]["prompt"]
+    assert settled.status == "awaiting_manazer"
+    assert "Prvý návrh" in settled.next_action
     notes = [m for m in _msgs(db_session, version.id) if m.payload and m.payload.get("vizual_url")]
     assert len(notes) == 1
 
@@ -303,6 +349,7 @@ async def test_board_surfaces_vizual_url_after_round(db_session, monkeypatch):
     # before the round runs, present (== the announced URL) after the fresh-entry round records it.
     version, project = _make_version(db_session)
     _seed_state(db_session, version.id, stage="vizual", actor="ai_agent")
+    _seed_drawn(db_session, version.id)
     _patch_spin_up(monkeypatch)
 
     # No vizual preview recorded yet → the board carries no URL (None, honest-by-construction).
@@ -495,6 +542,7 @@ async def test_board_offers_vizual_alongside_stavbu_then_hides_at_vizual(db_sess
 
     # Enter Vizuál and settle the round → spustit_vizual SELF-HIDES; spustit_stavbu STAYS (proceed-to-build path).
     _patch_spin_up(monkeypatch)
+    _seed_drawn(db_session, version.id)
     await orchestrator.apply_action(db_session, version_id=version.id, action="spustit_vizual")
     settled = await orchestrator.run_dispatch(db_session, version.id)
     assert settled.current_stage == "vizual" and settled.status == "awaiting_manazer"
@@ -522,6 +570,7 @@ async def test_runner_routes_conversation_vizual_to_run_dispatch(db_session, mon
 async def test_spustit_stavbu_from_vizual_advances_to_programovanie(db_session, monkeypatch):
     version, _ = _seed_ready_conv_build(db_session)
     _patch_spin_up(monkeypatch)
+    _seed_drawn(db_session, version.id)
 
     st = await orchestrator.apply_action(db_session, version_id=version.id, action="spustit_vizual")
     assert st.current_stage == "vizual"
