@@ -4997,6 +4997,13 @@ def _rewrite_smoke_database_url(value: str) -> str:
     """Rewrite the ``DATABASE_URL`` host + password to the compose ``db`` service, PRESERVING the scheme (incl.
     any ``+driver``), user, port, and dbname — the exact contract of ``ci_render_dotenv._rewrite_database_url``
     so the smoke DB URL matches what the online migrate path exercises."""
+    # ICCINT-37: an EMPTY value stays empty. ``.env.example`` may legitimately carry ``DATABASE_URL=`` as a
+    # placeholder — a project whose compose composes the URL itself has nothing to put there — and rewriting
+    # that produced ``//ci@db``: a nonsense address then injected into EVERY service as an ``env_file``. Today
+    # it is masked wherever the compose sets ``environment:`` explicitly (that wins), so it would surface only
+    # on some later project, as a boot failure whose cause points nowhere near here.
+    if not value.strip():
+        return value
     parts = urlsplit(value)
     username = parts.username or ""
     port = f":{parts.port}" if parts.port is not None else ""
@@ -5221,6 +5228,54 @@ class _SmokeStack:
     @property
     def up_ok(self) -> bool:
         return self.up_rc == 0
+
+
+#: How much of a failed service's own log the boot failure carries. Enough to hold a Python traceback's
+#: last frames (where the cause is), short enough that the Manažér's screen stays readable.
+_SMOKE_LOG_TAIL = 2500
+
+
+async def _smoke_failure_logs(base: list[str]) -> str:
+    """The logs of the containers that EXITED NON-ZERO, appended to a boot failure (ICCINT-37).
+
+    Without this, a boot failure said only ``container …-migrate-1 exited (1)`` — the fact, never the reason.
+    On 29.–30.08.2026 that cost a day on nex-productcatalogs: Dedo read the reason off his OWN differently
+    configured reproduction and blamed a missing ``DATABASE_URL``; the AI Agent, handed the same reasonless
+    brief, guessed a healthcheck race and fixed that instead. The actual cause sat in the migrate container's
+    log the whole time — ``value too long for type character varying(32)``, a 33-character alembic revision
+    id — and neither of them ever saw it. Two people, two wrong diagnoses, from one withheld log.
+
+    Best-effort by construction: any failure to collect returns ``""`` and the caller keeps the compose
+    output it already had. A diagnostic must never be able to break the thing it is diagnosing."""
+    code, out = await _compose_smoke_step(base + ["ps", "-a", "--format", "json"], 30)
+    if code != 0 or not out.strip():
+        return ""
+    failed: list[str] = []
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        # ``docker compose ps --format json`` emits one object per line (older builds emit a single array).
+        rows = row if isinstance(row, list) else [row]
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            if r.get("ExitCode"):  # non-zero exit — 0 and None are both "did not fail"
+                name = r.get("Service") or r.get("Name")
+                if name:
+                    failed.append(str(name))
+    if not failed:
+        return ""
+    chunks: list[str] = []
+    for service in failed[:3]:  # three is already more than anyone reads; the first is nearly always the cause
+        rc, log = await _compose_smoke_step(base + ["logs", "--no-color", "--tail", "200", service], 30)
+        if rc == 0 and log.strip():
+            chunks.append(f"\n\n--- {service} ---\n{log.strip()[-_SMOKE_LOG_TAIL:]}")
+    return "".join(chunks)
 
 
 @contextlib.asynccontextmanager
@@ -5669,7 +5724,10 @@ async def _run_release_smoke(
         return (False, "compose has a backend web app but no frontend service"), None
     async with _boot_smoke_stack(project_slug, compose, roles) as stack:
         if not stack.up_ok:
-            return (False, f"up exit {stack.up_rc}: {stack.up_detail.strip()[-400:]}"), None
+            # ICCINT-37: the compose output says WHICH container died; its own log says WHY. Both, or the
+            # reader is left guessing — and two of them did.
+            why = await _smoke_failure_logs(stack.base)
+            return (False, f"up exit {stack.up_rc}: {stack.up_detail.strip()[-400:]}{why}"), None
         boot_ok, boot_detail = await _run_app_starts_smoke(stack)
         if not boot_ok:
             return (boot_ok, boot_detail), None
