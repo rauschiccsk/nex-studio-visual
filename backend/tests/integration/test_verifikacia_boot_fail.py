@@ -524,19 +524,22 @@ def test_ensure_verifikacia_fix_task_idempotent(db_session) -> None:
     )
 
     def _fix_epics():
-        # ICCINT-35: the SECOND round is titled "… (2. kolo)", so the lookup matches the PREFIX. Three rows
-        # all called "Oprava po Verifikácii" said nothing about which round they belonged to, and the code
-        # comment above records what that cost once (nex-shopify 2026-07-20: three identical tasks, the same
-        # fix done 3x). Matching on the exact title here would hide exactly the repetition it exists to see.
         return (
             db_session.execute(
                 select(Epic)
-                .where(
-                    Epic.version_id == version_id,
-                    Epic.title.like(f"{orchestrator._VERIFIKACIA_FIX_TITLE}%"),
-                )
+                .where(Epic.version_id == version_id, Epic.title == orchestrator._VERIFIKACIA_FIX_EPIC_TITLE)
                 .order_by(Epic.number.asc())
             )
+            .scalars()
+            .all()
+        )
+
+    def _rounds():
+        epics = _fix_epics()
+        if not epics:
+            return []
+        return (
+            db_session.execute(select(Feat).where(Feat.epic_id == epics[0].id).order_by(Feat.number.asc()))
             .scalars()
             .all()
         )
@@ -544,25 +547,31 @@ def test_ensure_verifikacia_fix_task_idempotent(db_session) -> None:
     orchestrator._ensure_verifikacia_fix_task(db_session, version_id)
     orchestrator._ensure_verifikacia_fix_task(db_session, version_id)  # 2nd trigger — must NOT stack a duplicate
     assert len(_fix_epics()) == 1
+    assert len(_rounds()) == 1
 
-    # Close the open fix task → a later trigger legitimately gets its OWN epic (honest per-round record).
-    t = db_session.execute(
+    # Close the open fix task → a later trigger is a NEW ROUND. ICCINT-39: a round is a FEAT inside the one
+    # fix epic, not an epic of its own. Each round used to create a whole epic carrying a single task, and
+    # once ICCINT-35 numbered them the shape became visible: by the fifth round half the plan would be
+    # single-task epics. The per-round record the Director asked for is kept — it just lives one level down.
+    t_open = db_session.execute(
         select(Task)
         .join(Feat, Feat.id == Task.feat_id)
         .join(Epic, Epic.id == Feat.epic_id)
-        .where(Epic.version_id == version_id, Epic.title == orchestrator._VERIFIKACIA_FIX_TITLE)
+        .where(Epic.version_id == version_id, Epic.title == orchestrator._VERIFIKACIA_FIX_EPIC_TITLE)
     ).scalar_one()
-    t.status = "done"
+    t_open.status = "done"
     db_session.flush()
     orchestrator._ensure_verifikacia_fix_task(db_session, version_id)
-    epics = _fix_epics()
-    assert len(epics) == 2
-    # …and the rounds are TELLABLE APART, which is the point of a per-round record.
-    assert epics[0].title == orchestrator._VERIFIKACIA_FIX_TITLE
-    assert "2. kolo" in epics[1].title
+
+    assert len(_fix_epics()) == 1, "a second round grew a second epic — the plan sprawls sideways again"
+    rounds = _rounds()
+    assert len(rounds) == 2
+    # The rounds are TELLABLE APART, which is the point of a per-round record.
+    assert "1. kolo" in rounds[0].title and "2. kolo" in rounds[1].title
     # Every fix row carries the plain sentence the rest of the plan has — the Manažér must not meet
     # "(bez ľudského vysvetlenia)" on the one row that says something broke.
-    assert epics[0].plain_description and epics[1].plain_description
+    assert _fix_epics()[0].plain_description
+    assert all(r.plain_description for r in rounds)
 
 
 def test_fix_consultation_escalates_when_loop_not_converging(db_session) -> None:

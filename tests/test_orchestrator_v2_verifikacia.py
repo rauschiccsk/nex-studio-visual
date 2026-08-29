@@ -685,7 +685,14 @@ async def test_red_acceptance_floors_auditor_pass_to_fail(db_session, monkeypatc
     # the override is a readable fix scope for the re-run brief (fix loop is not left without a brief)
     assert orchestrator._latest_verifikacia_fix_scope(db_session, version.id) is not None
     fix_tasks = [t for t in _tasks(db_session, version.id) if t.id not in {dt.id for dt in done_tasks}]
-    assert len(fix_tasks) == 1 and fix_tasks[0].status == "todo"
+    # ICCINT-39: ONE task per finding, so an engine override that lists two findings materialises two. Before
+    # this they were glued into a single task and the plan could not say which half was done. The count is
+    # asserted against the findings themselves rather than pinned to a literal — the point is the mapping.
+    findings = [f for f in verdicts[-1].payload["findings"] if str(f).strip()]
+    assert len(fix_tasks) == len(findings)
+    assert all(t.status == "todo" for t in fix_tasks)
+    # …and they all hang under ONE round of ONE fix epic, not one epic apiece.
+    assert len({t.feat_id for t in fix_tasks}) == 1
 
 
 async def test_red_boot_settles_honest_boot_fail_ahead_of_auditor(db_session, monkeypatch):

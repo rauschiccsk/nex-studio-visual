@@ -8100,9 +8100,21 @@ def _reset_done_tasks_for_regate(db: Session, version_id: uuid.UUID) -> None:
 #: fix↔re-verify rounds (so a multi-round loop never accumulates fix tasks). Visible in the task plan (honest).
 #: Title (a plain LABEL, never a lookup key) of the per-round targeted Verifikácia-FAIL fix Epic/Feat/Task.
 _VERIFIKACIA_FIX_TITLE = "Oprava po Verifikácii"
+#: ICCINT-39: ONE epic holds every post-Verifikácia round. Each round used to get its own epic, and once
+#: ICCINT-35 gave them distinct numbers the shape became visible: this version's eight real epics carry 2–5
+#: feats apiece, while the fix epics carried ONE feat and ONE task each. By the fifth round half the plan
+#: would be single-task epics and the map of the work stops being a map. The rounds live INSIDE now — one
+#: feat per verification round — so the plan grows downward, not sideways.
+_VERIFIKACIA_FIX_EPIC_TITLE = "Opravy po Verifikácii"
 
 
-def _ensure_verifikacia_fix_task(db: Session, version_id: uuid.UUID) -> None:
+def _ensure_verifikacia_fix_task(
+    db: Session,
+    version_id: uuid.UUID,
+    *,
+    scope: Optional[str] = None,
+    findings: Optional[list[str]] = None,
+) -> None:
     """B (Director 2026-06-30): materialize a fresh TARGETED fix Task for a Verifikácia FAIL so ONLY the fix
     re-runs — the already-done plan tasks STAY done (replaces the whole-build :func:`_reset_done_tasks_for_regate`,
     the overnight-token-burn cause). The Auditor's findings ARE the fix brief: set as the task description AND
@@ -8120,16 +8132,18 @@ def _ensure_verifikacia_fix_task(db: Session, version_id: uuid.UUID) -> None:
     version = db.get(Version, version_id)
     if version is None:
         return
-    scope = _latest_verifikacia_fix_scope(db, version_id) or "Oprav blokujúce zlyhanie z koncovej Verifikácie."
+    scope = scope or _latest_verifikacia_fix_scope(db, version_id) or "Oprav blokujúce zlyhanie z koncovej Verifikácie."
+    if findings is None:
+        findings = _latest_verifikacia_findings(db, version_id)
     existing = db.execute(
         select(Task)
         .join(Feat, Feat.id == Task.feat_id)
         .join(Epic, Epic.id == Feat.epic_id)
         .where(
             Epic.version_id == version_id,
-            Epic.title == _VERIFIKACIA_FIX_TITLE,
-            Feat.title == _VERIFIKACIA_FIX_TITLE,
-            Task.title == _VERIFIKACIA_FIX_TITLE,
+            Epic.title == _VERIFIKACIA_FIX_EPIC_TITLE,
+            Feat.title.like(f"{_VERIFIKACIA_FIX_TITLE}%"),
+            Task.title.like(f"{_VERIFIKACIA_FIX_TITLE}%"),
             Task.status.in_(("todo", "in_progress")),
         )
         .order_by(Epic.number.desc())
@@ -8149,29 +8163,46 @@ def _ensure_verifikacia_fix_task(db: Session, version_id: uuid.UUID) -> None:
     # human explanation was the line saying something had broken, which is where he needs one most. The
     # sentence comes from the Auditor's own finding (the first line of ``scope``), never from a template.
     plain = _fix_plain_description(scope)
-    epic = epic_service.create(
-        db,
-        EpicCreate(
-            project_id=version.project_id,
-            version_id=version_id,
-            title=_fix_title(db, version_id),
-            plain_description=plain,
-        ),
-    )
+    # ONE epic for every round (ICCINT-39) — found, or created the first time.
+    epic = db.execute(
+        select(Epic).where(Epic.version_id == version_id, Epic.title == _VERIFIKACIA_FIX_EPIC_TITLE).limit(1)
+    ).scalar_one_or_none()
+    if epic is None:
+        epic = epic_service.create(
+            db,
+            EpicCreate(
+                project_id=version.project_id,
+                version_id=version_id,
+                title=_VERIFIKACIA_FIX_EPIC_TITLE,
+                plain_description="Opravy toho, čo previerka pred vydaním našla — jedno kolo za každý nález.",
+            ),
+        )
+    # One FEAT per verification round; the number belongs here, not on the epic.
+    rounds = db.execute(select(func.count()).select_from(Feat).where(Feat.epic_id == epic.id)).scalar_one()
     feat = feat_service.create(
         db,
-        FeatCreate(epic_id=epic.id, title=_VERIFIKACIA_FIX_TITLE, description=scope, plain_description=plain),
-    )
-    task_service.create(
-        db,
-        TaskCreate(
-            feat_id=feat.id,
-            title=_VERIFIKACIA_FIX_TITLE,
+        FeatCreate(
+            epic_id=epic.id,
+            title=f"{_VERIFIKACIA_FIX_TITLE} — {rounds + 1}. kolo",
             description=scope,
-            task_type="backend",
             plain_description=plain,
         ),
     )
+    # ICCINT-39: one TASK per FINDING. Three findings used to become one task with a glued-together brief, so
+    # the plan could not say which of them was done — the rest of the plan has never worked that way. An
+    # operator's own instruction is one scope and stays one task.
+    items = findings or [scope]
+    for i, item in enumerate(items, start=1):
+        task_service.create(
+            db,
+            TaskCreate(
+                feat_id=feat.id,
+                title=f"{_VERIFIKACIA_FIX_TITLE} {rounds + 1}.{i}" if len(items) > 1 else _VERIFIKACIA_FIX_TITLE,
+                description=item,
+                task_type="backend",
+                plain_description=_fix_plain_description(item),
+            ),
+        )
     db.flush()
 
 
@@ -8338,19 +8369,36 @@ def _fix_plain_description(scope: str) -> str:
     return "Verifikácia našla blokujúcu chybu — AI Agent ju opravuje a Auditor to potom znova preverí."
 
 
-def _fix_title(db: Session, version_id: uuid.UUID) -> str:
-    """The fix epic's title, numbered when it is not the first (ICCINT-35).
+def _latest_verifikacia_findings(db: Session, version_id: uuid.UUID) -> Optional[list[str]]:
+    """The Auditor's findings from the LATEST Verifikácia FAIL, one per fix task (ICCINT-39) — or ``None``.
 
-    Three rows called "Oprava po Verifikácii" — epic, feat and task — say nothing, and a SECOND round of
-    fixes used to add three more with the identical name. The code comment above records what that cost once
-    (nex-shopify 2026-07-20: three identical tasks, the same fix done 3x). Counting the rounds makes the plan
-    readable and the repetition visible."""
-    rounds = db.execute(
-        select(func.count())
-        .select_from(Epic)
-        .where(Epic.version_id == version_id, Epic.title.like(f"{_VERIFIKACIA_FIX_TITLE}%"))
-    ).scalar_one()
-    return _VERIFIKACIA_FIX_TITLE if not rounds else f"{_VERIFIKACIA_FIX_TITLE} ({rounds + 1}. kolo)"
+    ``None`` on purpose in two cases, and both mean "one task, not many": there is no FAIL verdict on record,
+    or the newest verifikacia message is the operator's own ``return`` (he is steering the fix himself, and
+    his instruction is ONE scope). Mirrors the precedence :func:`_latest_verifikacia_fix_scope` already uses,
+    so the brief and the task count can never disagree about who is talking."""
+    latest = db.execute(
+        select(PipelineMessage)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.stage == "verifikacia",
+            PipelineMessage.kind.in_(("verdict", "return")),
+        )
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if latest is None or latest.kind != "verdict":
+        return None
+    payload = latest.payload or {}
+    if payload.get("verdict") != "FAIL":
+        return None
+    # A ``proposed_fix`` is a NARROWED scope — somebody (the Auditor, or the critic that vetted it) already
+    # decided what the one targeted change is. Splitting THAT back into per-finding tasks would throw the
+    # narrowing away and hand the agent the raw findings again. Caught by an existing test the moment the
+    # split was added, which is exactly what that test is for: one corrected scope stays ONE task.
+    if str(payload.get("proposed_fix") or "").strip():
+        return None
+    findings = [str(f).strip() for f in (payload.get("findings") or []) if str(f).strip()]
+    return findings or None
 
 
 def _latest_verifikacia_fix_scope(db: Session, version_id: uuid.UUID) -> Optional[str]:
@@ -10348,6 +10396,14 @@ async def apply_action(
         # (the same open-findings gate that now blocks completion). Reset failed→todo before the loop resumes.
         if state.current_stage == "programovanie":
             _reset_failed_tasks_to_todo(db, version_id)
+            # ICCINT-38: …and when there is NOTHING left to run, make the instruction into work. The build
+            # loop asks ``get_next_todo_task`` and settles right back when it answers None, so the message
+            # was recorded ``delivered`` and read by nobody — the Manažér's only lever, spent in silence.
+            # Found 30.08.2026 on nex-productcatalogs: the agent had closed the last task believing the boot
+            # was fixed, it was not, and from that state "Uprav" could not reach him at all. The fix reuses
+            # the machinery that already exists for a Verifikácia FAIL; his comment IS the brief.
+            if task_service.get_next_todo_task(db, version_id) is None:
+                _ensure_verifikacia_fix_task(db, version_id, scope=str(comment), findings=[str(comment)])
         # A paused Programovanie loop steered by ``uprav`` resumes from the pause (re-dispatch the loop).
         recipient = state.current_actor
         _record_message(

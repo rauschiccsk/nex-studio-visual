@@ -323,3 +323,85 @@ async def test_nothing_here_touches_a_finished_plan(db_session) -> None:
     db_session.refresh(epic)
     assert feat.status == "done" and epic.status == "done"
     assert db_session.execute(select(Task).where(Task.feat_id == feat.id)).scalar_one().status == "done"
+
+
+# ── ICCINT-38/39: an instruction with nowhere to land, and a plan that stays a map ──
+
+
+@pytest.mark.asyncio
+async def test_an_instruction_with_no_open_task_becomes_work(db_session) -> None:
+    """The Manažér's only lever must not be spent in silence (ICCINT-38).
+
+    Found 30.08.2026: the agent closed the last task believing it had fixed the boot, it had not, and from
+    that state ``uprav`` reached nobody. The message was recorded ``delivered``, the build loop asked for the
+    next todo task, got None, and settled straight back — so the one thing he could do did nothing, quietly.
+    """
+    version, state = _seed(db_session, stage="programovanie")
+    state.status = "awaiting_manazer"
+    epic = Epic(project_id=version.project_id, version_id=version.id, number=1, title="E", status="done")
+    db_session.add(epic)
+    db_session.flush()
+    feat = Feat(epic_id=epic.id, number=1, title="F", status="done")
+    db_session.add(feat)
+    db_session.flush()
+    db_session.add(Task(feat_id=feat.id, number=1, title="T", status="done", task_type="backend"))
+    db_session.flush()
+    assert task_service.get_next_todo_task(db_session, version.id) is None  # nothing left to run
+
+    await orchestrator.apply_action(
+        db_session, version_id=version.id, action="uprav", payload={"comment": "Migrácie padajú na 0022."}
+    )
+
+    todo = task_service.get_next_todo_task(db_session, version.id)
+    assert todo is not None, "the instruction was accepted and reached nobody"
+    assert "0022" in (todo.description or ""), "the task must carry HIS words, not a template"
+    assert state.status == "agent_working"
+
+
+def test_every_round_lives_in_one_fix_epic(db_session) -> None:
+    """ICCINT-39 — the plan grows downward, not sideways."""
+    version, _state = _seed(db_session, stage="verifikacia")
+    for round_no in range(3):
+        orchestrator._ensure_verifikacia_fix_task(
+            db_session, version.id, scope=f"nález {round_no}", findings=[f"nález {round_no}"]
+        )
+        open_task = db_session.execute(
+            select(Task)
+            .join(Feat, Feat.id == Task.feat_id)
+            .join(Epic, Epic.id == Feat.epic_id)
+            .where(Epic.version_id == version.id, Task.status == "todo")
+        ).scalar_one()
+        open_task.status = "done"
+        db_session.flush()
+
+    epics = (
+        db_session.execute(
+            select(Epic).where(Epic.version_id == version.id, Epic.title == orchestrator._VERIFIKACIA_FIX_EPIC_TITLE)
+        )
+        .scalars()
+        .all()
+    )
+    assert len(epics) == 1, "three rounds grew three epics — the plan sprawls"
+    feats = db_session.execute(select(Feat).where(Feat.epic_id == epics[0].id)).scalars().all()
+    assert len(feats) == 3, "the rounds must still be tellable apart"
+
+
+def test_three_findings_become_three_tasks_in_one_round(db_session) -> None:
+    """The half that matters more: the plan must be able to say WHICH of the findings is done."""
+    version, _state = _seed(db_session, stage="verifikacia")
+    orchestrator._ensure_verifikacia_fix_task(
+        db_session, version.id, scope="tri veci", findings=["migrácie padajú", "chýba index", "zlá sadzba"]
+    )
+    tasks = (
+        db_session.execute(
+            select(Task)
+            .join(Feat, Feat.id == Task.feat_id)
+            .join(Epic, Epic.id == Feat.epic_id)
+            .where(Epic.version_id == version.id)
+        )
+        .scalars()
+        .all()
+    )
+    assert len(tasks) == 3
+    assert len({t.feat_id for t in tasks}) == 1  # one round, three tasks
+    assert {t.description for t in tasks} == {"migrácie padajú", "chýba index", "zlá sadzba"}
