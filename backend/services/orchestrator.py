@@ -5030,6 +5030,14 @@ def _render_smoke_env(env_example: Path, dst: Path) -> bool:
     seen_postgres_password = False
     for raw in raw_lines:
         stripped = raw.strip()
+        # ICCINT-40: an EMPTY value in .env.example means "fill this in", NOT "set it to the empty string" —
+        # and to a container those are worlds apart: unset falls back to the app's own default, empty string
+        # is parsed. ``CORS_ALLOW_ORIGINS=`` copied verbatim killed the migrate container with
+        # ``SettingsError: error parsing value for field "cors_allow_origins"`` — the THIRD wrong-looking
+        # cause in one build, and the first one we actually got to SEE (the log capture landed the same day).
+        # Comments and blank lines still pass through untouched; only ``KEY=`` with nothing after it is dropped.
+        if "=" in stripped and not stripped.startswith("#") and not stripped.split("=", 1)[1].strip():
+            continue
         if stripped.startswith("DATABASE_URL="):
             key, _, val = raw.partition("=")
             out.append(f"{key}={_rewrite_smoke_database_url(val)}")
@@ -8232,8 +8240,21 @@ def _ensure_verifikacia_fix_task(
     # sentence comes from the Auditor's own finding (the first line of ``scope``), never from a template.
     plain = _fix_plain_description(scope)
     # ONE epic for every round (ICCINT-39) — found, or created the first time.
+    # Reuse ANY fix epic this version already carries — the current name OR a legacy per-round one. Matching
+    # only the current title created a THIRD epic beside two older ones (Director, 30.08.2026: "takto
+    # zašpiníme plán úloh, ktorý sa stane neprehľadným, a toto potom už nevieme odstrániť"). Newest first, so
+    # rounds keep accumulating in the most recent epic rather than reopening the oldest.
     epic = db.execute(
-        select(Epic).where(Epic.version_id == version_id, Epic.title == _VERIFIKACIA_FIX_EPIC_TITLE).limit(1)
+        select(Epic)
+        .where(
+            Epic.version_id == version_id,
+            or_(
+                Epic.title == _VERIFIKACIA_FIX_EPIC_TITLE,
+                Epic.title.like(f"{_VERIFIKACIA_FIX_TITLE}%"),
+            ),
+        )
+        .order_by(Epic.number.desc())
+        .limit(1)
     ).scalar_one_or_none()
     if epic is None:
         epic = epic_service.create(

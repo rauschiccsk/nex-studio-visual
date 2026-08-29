@@ -456,3 +456,46 @@ def test_a_build_already_mid_flight_is_not_given_a_second_fix_task(db_session) -
     assert len(open_tasks) == 1, "a second open fix task was stacked — the agent would fix the same thing twice"
     # The existing one was REFRESHED with the new brief, not left carrying a stale scope.
     assert open_tasks[0].description == "nový rozsah"
+
+
+def test_a_legacy_fix_epic_is_reused_not_joined_by_a_third(db_session) -> None:
+    """No new fix epic beside the old ones (ICCINT-40).
+
+    ICCINT-39 gave the rounds ONE epic, but the find-or-create matched only the NEW title — so on a build
+    that already carried two legacy per-round epics it created a THIRD beside them. The Director saw it on
+    nex-productcatalogs and put it plainly: *"takto zašpiníme plán úloh, ktorý sa stane neprehľadným, a toto
+    potom už nevieme odstrániť."* A cleanup nobody can do afterwards is a defect, not an untidiness.
+    """
+    version, _state = _seed(db_session, stage="verifikacia")
+    for n, title in (
+        (9, orchestrator._VERIFIKACIA_FIX_TITLE),
+        (10, f"{orchestrator._VERIFIKACIA_FIX_TITLE} (2. kolo)"),
+    ):
+        legacy = Epic(project_id=version.project_id, version_id=version.id, number=n, title=title, status="done")
+        db_session.add(legacy)
+        db_session.flush()
+        lf = Feat(epic_id=legacy.id, number=1, title=orchestrator._VERIFIKACIA_FIX_TITLE, status="done")
+        db_session.add(lf)
+        db_session.flush()
+        db_session.add(
+            Task(feat_id=lf.id, number=1, title=orchestrator._VERIFIKACIA_FIX_TITLE, status="done", task_type="backend")
+        )
+    db_session.flush()
+
+    orchestrator._ensure_verifikacia_fix_task(db_session, version.id, scope="tretí nález", findings=["tretí nález"])
+
+    fix_epics = (
+        db_session.execute(
+            select(Epic).where(
+                Epic.version_id == version.id,
+                Epic.title.like("%prav%po Verifikácii%"),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(fix_epics) == 2, "a third fix epic appeared beside the two legacy ones"
+    # The new round joined the NEWEST existing epic rather than reopening the oldest.
+    newest = max(fix_epics, key=lambda e: e.number)
+    feats = db_session.execute(select(Feat).where(Feat.epic_id == newest.id)).scalars().all()
+    assert len(feats) == 2, "the round did not land in the epic that was already there"

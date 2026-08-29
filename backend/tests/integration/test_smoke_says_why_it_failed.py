@@ -94,3 +94,39 @@ def test_a_real_database_url_is_still_pointed_at_the_compose_db() -> None:
     """The control — the rewrite that MUST keep happening, scheme and driver intact."""
     out = orchestrator._rewrite_smoke_database_url("postgresql+asyncpg://catalogs:CHANGE_ME@localhost/catalogs")
     assert out == "postgresql+asyncpg://catalogs:ci@db/catalogs"
+
+
+def test_an_empty_placeholder_never_reaches_the_container(tmp_path) -> None:
+    """``KEY=`` in .env.example means "fill this in", not "set it to the empty string" (ICCINT-40).
+
+    To a container those are worlds apart: unset falls back to the app's own default, empty string gets
+    PARSED. ``CORS_ALLOW_ORIGINS=`` copied verbatim killed the migrate container with
+    ``SettingsError: error parsing value for field "cors_allow_origins"`` — the third wrong-looking cause in
+    one build, and the first one anybody actually SAW, because the log capture landed the same day.
+    """
+    example = tmp_path / ".env.example"
+    example.write_text(
+        "\n".join(
+            [
+                "# komentár zostáva",
+                "CORS_ALLOW_ORIGINS=",
+                "DATABASE_URL=",
+                "APP_NAME=catalogs",
+                "",
+                "LOG_LEVEL=   ",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    dst = tmp_path / "smoke.env"
+    assert orchestrator._render_smoke_env(example, dst)
+    rendered = dst.read_text(encoding="utf-8")
+
+    assert "CORS_ALLOW_ORIGINS" not in rendered
+    assert "DATABASE_URL" not in rendered
+    assert "LOG_LEVEL" not in rendered, "whitespace-only is empty too"
+    # …while everything that HAS a value is untouched, and comments survive.
+    assert "APP_NAME=catalogs" in rendered
+    assert "# komentár zostáva" in rendered
+    # POSTGRES_PASSWORD is APPENDED even when the example omitted it — the compose fail-fast guard needs it.
+    assert "POSTGRES_PASSWORD=" in rendered and rendered.strip().endswith("ci")
