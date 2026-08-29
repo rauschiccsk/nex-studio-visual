@@ -4450,7 +4450,7 @@ export interface components {
          */
         PipelineStateRead: {
             /** Block Reason */
-            block_reason?: ("agent_question" | "decision_needed" | "agent_error" | "system_error" | "parse_exhaustion" | "framework_issue") | null;
+            block_reason?: ("agent_question" | "decision_needed" | "agent_error" | "system_error" | "parse_exhaustion" | "framework_issue" | "check_failed") | null;
             /**
              * Created At
              * Format: date-time

@@ -13,7 +13,9 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-const { postPipelineActionApi } = vi.hoisted(() => ({ postPipelineActionApi: vi.fn() }));
+const { postPipelineActionApi } = vi.hoisted(() => ({
+  postPipelineActionApi: vi.fn(),
+}));
 vi.mock("@/services/api/pipeline", async (orig) => ({
   ...(await orig<Record<string, unknown>>()),
   postPipelineActionApi,
@@ -35,7 +37,9 @@ function board(blockReason: string): PipelineBoard {
 
 function renderBar(reason = "agent_question") {
   const onBoard = vi.fn();
-  render(<BlockRecoveryBar board={board(reason)} versionId="v1" onBoard={onBoard} />);
+  render(
+    <BlockRecoveryBar board={board(reason)} versionId="v1" onBoard={onBoard} />,
+  );
   return { onBoard };
 }
 
@@ -85,17 +89,77 @@ describe("BlockRecoveryBar", () => {
 
   it("says which key does what, so nobody has to discover it by losing a paragraph", () => {
     renderBar();
-    expect(screen.getByPlaceholderText(/Enter odošle, Shift\+Enter nový riadok/)).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText(/Enter odošle, Shift\+Enter nový riadok/),
+    ).toBeInTheDocument();
   });
 
   it("an empty question answer is not sendable, an empty error steer is", () => {
     const { unmount } = render(
-      <BlockRecoveryBar board={board("agent_question")} versionId="v1" onBoard={vi.fn()} />,
+      <BlockRecoveryBar
+        board={board("agent_question")}
+        versionId="v1"
+        onBoard={vi.fn()}
+      />,
     );
     expect(screen.getByRole("button", { name: /Odpovedať/ })).toBeDisabled();
     unmount();
 
-    render(<BlockRecoveryBar board={board("agent_error")} versionId="v1" onBoard={vi.fn()} />);
+    render(
+      <BlockRecoveryBar
+        board={board("agent_error")}
+        versionId="v1"
+        onBoard={vi.fn()}
+      />,
+    );
     expect(screen.getByRole("button", { name: /Skús znova/ })).toBeEnabled();
+  });
+
+  // ── ICCINT-43: a failed CHECK is not a failed agent ────────────────────────
+  //
+  // 29.08.2026: the end-of-Programovanie boot re-check settled `agent_error`, this bar rendered
+  // "Niečo zlyhalo — Agent zlyhal", and the Director reported it as an agent failure. The agent's fix had
+  // worked; the app booted. The sentence was the only thing that was broken.
+
+  it("a failed check never says anything failed, and never names the agent", () => {
+    render(
+      <BlockRecoveryBar
+        board={board("check_failed")}
+        versionId="v1"
+        onBoard={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Kontrola neprešla")).toBeInTheDocument();
+    expect(screen.queryByText(/Niečo zlyhalo/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Agent zlyhal/)).not.toBeInTheDocument();
+  });
+
+  it("a failed check still shows the engine's own account of what it measured", () => {
+    const b = board("check_failed");
+    b.state!.next_action =
+      "Kontrola po oprave neprešla — zlyhal kontajner test. Stavba hotová nie je.";
+    render(<BlockRecoveryBar board={b} versionId="v1" onBoard={vi.fn()} />);
+
+    expect(screen.getByText(/zlyhal kontajner test/)).toBeInTheDocument();
+  });
+
+  it("an empty steer on a failed check sends a brief that points at the measurement, not at chance", async () => {
+    render(
+      <BlockRecoveryBar
+        board={board("check_failed")}
+        versionId="v1"
+        onBoard={vi.fn()}
+      />,
+    );
+    const button = screen.getByRole("button", { name: /Skús znova/ });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+
+    await waitFor(() => expect(postPipelineActionApi).toHaveBeenCalled());
+    const req = postPipelineActionApi.mock.calls[0]![1];
+    expect(req.action).toBe("uprav");
+    // "Skús to prosím znova." would send the agent back to redo the identical build.
+    expect(req.payload.comment).toMatch(/zisti príčinu z výpisu/);
   });
 });

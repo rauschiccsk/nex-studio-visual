@@ -24,13 +24,17 @@ import { FolderOpen, Lock } from "lucide-react";
 
 import { useActiveContextStore } from "@/store/activeContextStore";
 import { usePipelineWs } from "@/hooks/usePipelineWs";
-import { relayPipelineMessageApi, postPipelineActionApi } from "@/services/api/pipeline";
+import {
+  relayPipelineMessageApi,
+  postPipelineActionApi,
+} from "@/services/api/pipeline";
 import ConversationThread from "@/components/riadiace/ConversationThread";
 import ConversationComposer from "@/components/riadiace/ConversationComposer";
 import SpecApprovalBar from "@/components/riadiace/SpecApprovalBar";
 import SchvalitBar from "@/components/riadiace/SchvalitBar";
 import DecisionCardsBar from "@/components/riadiace/DecisionCardsBar";
 import BlockRecoveryBar from "@/components/riadiace/BlockRecoveryBar";
+import { blockRecoveryOwnsInput } from "@/components/riadiace/blockRecovery";
 import NahlasitZnovaBar from "@/components/riadiace/NahlasitZnovaBar";
 import ZopakovatKonzultaciuBar from "@/components/riadiace/ZopakovatKonzultaciuBar";
 import PokracovatPoOpraveBar from "@/components/riadiace/PokracovatPoOpraveBar";
@@ -51,7 +55,15 @@ export default function RiadiaceCentrumPage() {
 
   // The event-rendered transcript + live activity, streamed over the EXISTING pipeline WS (INVARIANT: no new
   // WS client — live streaming already reaches the FE over this hook).
-  const { board, activity, reconnecting, error, accessDenied, versionGone, setBoard } = usePipelineWs(versionId);
+  const {
+    board,
+    activity,
+    reconnecting,
+    error,
+    accessDenied,
+    versionGone,
+    setBoard,
+  } = usePipelineWs(versionId);
 
   async function handleSend(text: string): Promise<{ deferred: boolean }> {
     if (!versionId) throw new Error("Najprv vyber verziu (pin v Projektoch).");
@@ -82,10 +94,13 @@ export default function RiadiaceCentrumPage() {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 bg-[var(--color-canvas)] p-6 text-center">
         <FolderOpen className="h-10 w-10 text-[var(--color-text-muted)]" />
-        <h2 className="text-sm font-semibold text-[var(--color-text-secondary)]">Nemáš vybraný projekt</h2>
+        <h2 className="text-sm font-semibold text-[var(--color-text-secondary)]">
+          Nemáš vybraný projekt
+        </h2>
         <p className="max-w-md text-xs text-[var(--color-text-muted)]">
-          Riadiace centrum beží nad konkrétnym projektom. Otvor <span className="font-mono">Projekty</span> a
-          pripni projekt (a verziu).
+          Riadiace centrum beží nad konkrétnym projektom. Otvor{" "}
+          <span className="font-mono">Projekty</span> a pripni projekt (a
+          verziu).
         </p>
         <button
           onClick={() => navigate("/projects")}
@@ -102,8 +117,10 @@ export default function RiadiaceCentrumPage() {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 bg-[var(--color-canvas)] p-6 text-center">
         <p className="max-w-md text-xs text-[var(--color-text-muted)]">
-          Vyber verziu projektu <span className="font-medium">{selectedProject.name}</span> (pin v Projektoch)
-          — Riadiace centrum pracuje a komunikuje nad konkrétnou verziou.
+          Vyber verziu projektu{" "}
+          <span className="font-medium">{selectedProject.name}</span> (pin v
+          Projektoch) — Riadiace centrum pracuje a komunikuje nad konkrétnou
+          verziou.
         </p>
         <button
           onClick={() => navigate("/projects")}
@@ -127,10 +144,11 @@ export default function RiadiaceCentrumPage() {
           Nemáš prístup k tomuto projektu
         </h2>
         <p className="max-w-md text-xs text-[var(--color-text-muted)]">
-          Projekt <span className="font-medium">{selectedProject.name}</span> patrí niekomu inému, preto ti
-          jeho Riadiace centrum nevieme otvoriť — nezobrazuje sa žiadny priebeh ani rozhovor. Riadiť ho môže
-          jeho vlastník alebo Manažér; popros o to niekoho z nich, alebo si v Projektoch pripni vlastný
-          projekt.
+          Projekt <span className="font-medium">{selectedProject.name}</span>{" "}
+          patrí niekomu inému, preto ti jeho Riadiace centrum nevieme otvoriť —
+          nezobrazuje sa žiadny priebeh ani rozhovor. Riadiť ho môže jeho
+          vlastník alebo Manažér; popros o to niekoho z nich, alebo si v
+          Projektoch pripni vlastný projekt.
         </p>
         <button
           onClick={() => navigate("/projects")}
@@ -148,10 +166,12 @@ export default function RiadiaceCentrumPage() {
     // the socket simply reconnected once a second, forever, behind a board that never filled.
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 bg-[var(--color-canvas)] p-6 text-center">
-        <h2 className="text-sm font-semibold text-[var(--color-text-secondary)]">Táto verzia už neexistuje</h2>
+        <h2 className="text-sm font-semibold text-[var(--color-text-secondary)]">
+          Táto verzia už neexistuje
+        </h2>
         <p className="max-w-md text-xs text-[var(--color-text-muted)]">
-          Verzia, ktorú máš pripnutú, bola medzitým zmazaná, takže jej Riadiace centrum sa nedá otvoriť.
-          Vyber si v projekte inú verziu.
+          Verzia, ktorú máš pripnutú, bola medzitým zmazaná, takže jej Riadiace
+          centrum sa nedá otvoriť. Vyber si v projekte inú verziu.
         </p>
         <button
           onClick={() => navigate("/projects")}
@@ -167,16 +187,14 @@ export default function RiadiaceCentrumPage() {
   // A framework_issue block (a NEX-Studio bug) locks the composer — the Manažér cannot chat their way out of it;
   // NahlasitZnovaBar carries the one concrete move + the "technical team is on it" explanation.
   const frameworkBlocked =
-    board?.state?.status === "blocked" && board?.state?.block_reason === "framework_issue";
+    board?.state?.status === "blocked" &&
+    board?.state?.block_reason === "framework_issue";
   // Category I: when a BlockRecoveryBar (a blocked QUESTION / ERROR) owns the input above, de-emphasise the
   // always-open composer so there is ONE obvious input. Mirrors BlockRecoveryBar's own render gate (question +
   // the three error reasons); framework_issue / decision_needed have their own dedicated bars, excluded here.
-  const blockRecoveryActive =
-    board?.state?.status === "blocked" &&
-    (board?.state?.block_reason === "agent_question" ||
-      board?.state?.block_reason === "agent_error" ||
-      board?.state?.block_reason === "system_error" ||
-      board?.state?.block_reason === "parse_exhaustion");
+  // ICCINT-43: ASK the bar which blocks it owns instead of hand-copying its list — the copy drifted the
+  // moment a new reason was added, leaving the composer competing with a bar that had already claimed it.
+  const blockRecoveryActive = blockRecoveryOwnsInput(board?.state);
 
   return (
     <div className="grid h-full grid-cols-[minmax(0,1fr)_320px] grid-rows-[auto_minmax(0,1fr)_auto_auto] bg-[var(--color-canvas)]">
@@ -195,7 +213,11 @@ export default function RiadiaceCentrumPage() {
           error={error}
           verifiedProvenance={board?.verified_provenance}
         />
-        <ConversationThread messages={board?.recent_messages ?? []} activity={activity} working={!!working} />
+        <ConversationThread
+          messages={board?.recent_messages ?? []}
+          activity={activity}
+          working={!!working}
+        />
       </div>
 
       {/* Approval / change-request moment — sits between the thread and the relay send box. All bars are
@@ -206,23 +228,55 @@ export default function RiadiaceCentrumPage() {
           green drifted past HEAD (overit_znovu — CR-V2-057); ChangeRequestBar on a read-only consult answer
           that raised a change_request (konzultacia-mode.md Part 3). */}
       <div className="col-start-1 row-start-3 min-w-0">
-        <DecisionCardsBar board={board} versionId={versionId} onBoard={setBoard} />
+        <DecisionCardsBar
+          board={board}
+          versionId={versionId}
+          onBoard={setBoard}
+        />
         {/* ICCINT-25: right under the cards, because it is the same surface failing — when the cards could
             not be built, this is how you ask for them again instead of being left with the raw findings. */}
-        <ZopakovatKonzultaciuBar board={board} versionId={versionId} onBoard={setBoard} />
-        <BlockRecoveryBar board={board} versionId={versionId} onBoard={setBoard} />
-        <NahlasitZnovaBar board={board} versionId={versionId} onBoard={setBoard} />
+        <ZopakovatKonzultaciuBar
+          board={board}
+          versionId={versionId}
+          onBoard={setBoard}
+        />
+        <BlockRecoveryBar
+          board={board}
+          versionId={versionId}
+          onBoard={setBoard}
+        />
+        <NahlasitZnovaBar
+          board={board}
+          versionId={versionId}
+          onBoard={setBoard}
+        />
         {/* ICCINT-13: the same story's next beat — NahlasitZnovaBar says "our technical team is on it";
             once they have fixed it and released the build, this is the ONE button that carries it on.
             The two are mutually exclusive by construction (blocked vs. settled-after-fix). */}
-        <PokracovatPoOpraveBar board={board} versionId={versionId} onBoard={setBoard} />
+        <PokracovatPoOpraveBar
+          board={board}
+          versionId={versionId}
+          onBoard={setBoard}
+        />
         {/* ICCINT-24: a finding our technical team left for the Manažér — editable, and sent to the agent
             only by his click, through the ordinary verb it names. Renders only when one is open. */}
-        <DedoProposalBar board={board} versionId={versionId} onBoard={setBoard} />
-        <SpecApprovalBar board={board} versionId={versionId} onBoard={setBoard} />
+        <DedoProposalBar
+          board={board}
+          versionId={versionId}
+          onBoard={setBoard}
+        />
+        <SpecApprovalBar
+          board={board}
+          versionId={versionId}
+          onBoard={setBoard}
+        />
         <SchvalitBar board={board} versionId={versionId} onBoard={setBoard} />
         <ReverifyBar board={board} versionId={versionId} onBoard={setBoard} />
-        <ReverifyNoFixBar board={board} versionId={versionId} onBoard={setBoard} />
+        <ReverifyNoFixBar
+          board={board}
+          versionId={versionId}
+          onBoard={setBoard}
+        />
         <ChangeRequestBar board={board} versionId={versionId} />
       </div>
 

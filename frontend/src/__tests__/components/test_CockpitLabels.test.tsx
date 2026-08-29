@@ -32,12 +32,21 @@ describe("cockpit block_reason phrases", () => {
       "system_error",
       "parse_exhaustion",
       "framework_issue",
+      // ICCINT-43: + "check_failed" — a check the ENGINE ran came back negative. Its phrase is the only one
+      // here that names nobody, which is exactly why it could not keep borrowing "Agent zlyhal".
+      "check_failed",
     ];
     for (const r of reasons) expect(BLOCK_REASON_LABELS[r]).toBeTruthy();
     expect(BLOCK_REASON_LABELS.agent_question).toBe("Agent sa pýta");
     expect(BLOCK_REASON_LABELS.agent_error).toBe("Agent zlyhal");
-    expect(BLOCK_REASON_LABELS.framework_issue).toBe("NEX Studio má chybu — rieši ju náš technický tím");
-    expect(new Set(Object.values(BLOCK_REASON_LABELS)).size).toBe(reasons.length);
+    expect(BLOCK_REASON_LABELS.check_failed).toBe("Kontrola neprešla");
+    expect(BLOCK_REASON_LABELS.check_failed).not.toMatch(/zlyhal/);
+    expect(BLOCK_REASON_LABELS.framework_issue).toBe(
+      "NEX Studio má chybu — rieši ju náš technický tím",
+    );
+    expect(new Set(Object.values(BLOCK_REASON_LABELS)).size).toBe(
+      reasons.length,
+    );
   });
 });
 
@@ -46,7 +55,14 @@ describe("cockpit block_reason phrases", () => {
 describe("v2 vocabulary collapse", () => {
   it("PHASE_LABELS are exactly the five build phases + the terminal Hotovo", () => {
     // CR-1 (nex-studio-visual): the Vizuál live-preview phase sits between Návrh and Programovanie.
-    const phases: BuildPhase[] = ["priprava", "navrh", "vizual", "programovanie", "verifikacia", "done"];
+    const phases: BuildPhase[] = [
+      "priprava",
+      "navrh",
+      "vizual",
+      "programovanie",
+      "verifikacia",
+      "done",
+    ];
     expect(Object.keys(PHASE_LABELS).sort()).toEqual([...phases].sort());
     expect(PHASE_LABELS.priprava).toBe("Príprava");
     expect(PHASE_LABELS.navrh).toBe("Návrh");
@@ -57,7 +73,14 @@ describe("v2 vocabulary collapse", () => {
   });
 
   it("PHASE_ORDER is the horizontal bar order and PHASE_CODES covers every phase", () => {
-    expect(PHASE_ORDER).toEqual(["priprava", "navrh", "vizual", "programovanie", "verifikacia", "done"]);
+    expect(PHASE_ORDER).toEqual([
+      "priprava",
+      "navrh",
+      "vizual",
+      "programovanie",
+      "verifikacia",
+      "done",
+    ]);
     for (const p of PHASE_ORDER) expect(PHASE_CODES[p]).toBeTruthy();
   });
 
@@ -74,7 +97,13 @@ describe("v2 vocabulary collapse", () => {
   it("V2_ROLE_LABELS are exactly {AI Agent, Auditor, Manažér, system, Dedo} — no v1 roles", () => {
     // ICCINT-12 adds `dedo` (our technical team, answering a framework_issue escalation) — a message
     // participant, never an actor.
-    const roles: V2Participant[] = ["ai_agent", "auditor", "manazer", "system", "dedo"];
+    const roles: V2Participant[] = [
+      "ai_agent",
+      "auditor",
+      "manazer",
+      "system",
+      "dedo",
+    ];
     expect(Object.keys(V2_ROLE_LABELS).sort()).toEqual([...roles].sort());
     expect(V2_ROLE_LABELS.ai_agent).toBe("AI Agent");
     expect(V2_ROLE_LABELS.auditor).toBe("Audítor");

@@ -6,7 +6,11 @@
 // literals). Director feedback: internal codes + English roles aren't
 // understandable, especially for Directors who don't know the ICC methodology.
 
-import type { BlockReason, PipelineParticipant, PipelineStage } from "../../services/api/pipeline";
+import type {
+  BlockReason,
+  PipelineParticipant,
+  PipelineStage,
+} from "../../services/api/pipeline";
 
 // ── v2.0.0 vocabulary (CR-V2-019 / CR-V2-021) ─────────────────────────────────
 // The v2 build pipeline is visible as FOUR phases (design §2.1) — the display now
@@ -24,7 +28,8 @@ import type { BlockReason, PipelineParticipant, PipelineStage } from "../../serv
 
 // The v2 build phase machine value (mirrors design §2.1; `done` is the terminal phase). CR-1
 // (nex-studio-visual) inserts `vizual` (the live-preview phase) between `navrh` and `programovanie`.
-export type BuildPhase = "priprava" | "navrh" | "vizual" | "programovanie" | "verifikacia" | "done";
+export type BuildPhase =
+  "priprava" | "navrh" | "vizual" | "programovanie" | "verifikacia" | "done";
 
 // Slovak human-facing label per v2 build phase — the 4-phase Vývoj board chips + the
 // AI Agent tab strip. Collapses the v1 11-stage STAGE_LABELS to the four real phases.
@@ -39,7 +44,14 @@ export const PHASE_LABELS: Record<BuildPhase, string> = {
 
 // Canonical v2 phase order — the horizontal phase bar (Príprava › Návrh › Vizuál › Programovanie
 // › Verifikácia › Hotovo). Replaces the v1 STAGE_ORDER for v2 surfaces.
-export const PHASE_ORDER: BuildPhase[] = ["priprava", "navrh", "vizual", "programovanie", "verifikacia", "done"];
+export const PHASE_ORDER: BuildPhase[] = [
+  "priprava",
+  "navrh",
+  "vizual",
+  "programovanie",
+  "verifikacia",
+  "done",
+];
 
 // Raw machine code per phase — usable as a hover tooltip alongside the label.
 export const PHASE_CODES: Record<BuildPhase, string> = {
@@ -59,7 +71,8 @@ export const PHASE_CODES: Record<BuildPhase, string> = {
 // ICCINT-12 adds `dedo` — the NEX Studio technical team, who answers an agent's
 // `framework_issue` escalation (a bug in NEX Studio itself, which the Manažér cannot fix).
 // A message author/recipient only: Dedo is never `current_actor`, never on turn.
-export type V2Participant = "ai_agent" | "auditor" | "manazer" | "system" | "dedo";
+export type V2Participant =
+  "ai_agent" | "auditor" | "manazer" | "system" | "dedo";
 
 // Slovak label per v2 participant — the 3-role vocabulary. Replaces the v1 7-role
 // ROLE_LABELS for v2 surfaces (who's-up status, the AI Agent header, message bubbles).
@@ -78,7 +91,10 @@ export const V2_ROLE_LABELS: Record<V2Participant, string> = {
 // the "Schváliť → spustí sa ďalšia fáza (…)" consequence line on the v2 board.
 export function nextPhaseLabel(phase: BuildPhase): string {
   const idx = PHASE_ORDER.indexOf(phase);
-  const next = idx >= 0 ? PHASE_ORDER[Math.min(idx + 1, PHASE_ORDER.length - 1)] : undefined;
+  const next =
+    idx >= 0
+      ? PHASE_ORDER[Math.min(idx + 1, PHASE_ORDER.length - 1)]
+      : undefined;
   return next ? PHASE_LABELS[next] : PHASE_LABELS[phase];
 }
 
@@ -118,6 +134,10 @@ export const BLOCK_REASON_LABELS: Record<BlockReason, string> = {
   agent_error: "Agent zlyhal",
   system_error: "Systémová chyba",
   parse_exhaustion: "Chyba spracovania výstupu",
+  // ICCINT-43: a check the ENGINE ran came back negative. Nobody failed — the work simply is not finished.
+  // Every other label here names a culprit, which is why this needed its own: on 29.08.2026 the boot re-check
+  // borrowed `agent_error` and the screen read "Niečo zlyhalo — Agent zlyhal" over an agent whose fix worked.
+  check_failed: "Kontrola neprešla",
   // A framework_issue means the bug is in NEX Studio itself (not the project) — our technical team resolves it.
   // Plain Slovak, no internal "Dedo"/"framework" jargon (a non-expert Manažér doesn't know who "Dedo" is). The
   // Manažér's one concrete move is "Nahlásiť znova" (NahlasitZnovaBar); it reads as a system/blocked red state.
@@ -200,11 +220,14 @@ export const TONE_TEXT: Record<StatusTone, string> = {
 // CR-NS-067c: light-readable + dark-identical (`text-X-700 dark:text-X-200`); the -200
 // banner text was near-white and unreadable on the pale tint in light mode.
 export const TONE_BANNER: Record<StatusTone, string> = {
-  green: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200",
+  green:
+    "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200",
   blue: "border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-200",
-  amber: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-200",
+  amber:
+    "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-200",
   red: "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-200",
-  neutral: "border-[var(--color-border-default)] bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)]",
+  neutral:
+    "border-[var(--color-border-default)] bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)]",
 };
 
 // CR-2 (v0.7.3): the HIGH-CONTRAST sticky decision CTA banner — used (instead of the low-key TONE_BANNER) only
@@ -230,10 +253,21 @@ export const FLOW_LABELS: Record<string, string> = {
 // surface is an AMBER "overenie sa nedá potvrdiť", never a green "overená". The confirmed-green provenances
 // (`sha_match` / `hotovo_match` / `released`) stay green; the drift ones (`sha_drift` / `hotovo_drift`) already
 // read as a stale-PASS warning via ReverifyBar.
-export const VERIFICATION_UNCONFIRMED_PROVENANCES = ["unbound", "repo_unreadable", "hotovo_unbound"] as const;
+export const VERIFICATION_UNCONFIRMED_PROVENANCES = [
+  "unbound",
+  "repo_unreadable",
+  "hotovo_unbound",
+] as const;
 
-export function verificationUnconfirmed(provenance: string | null | undefined): boolean {
-  return provenance != null && (VERIFICATION_UNCONFIRMED_PROVENANCES as readonly string[]).includes(provenance);
+export function verificationUnconfirmed(
+  provenance: string | null | undefined,
+): boolean {
+  return (
+    provenance != null &&
+    (VERIFICATION_UNCONFIRMED_PROVENANCES as readonly string[]).includes(
+      provenance,
+    )
+  );
 }
 
 // v4.0.56 — the DRIFT sibling, deliberately NOT folded into `verificationUnconfirmed`: "unconfirmed" means we
@@ -243,10 +277,18 @@ export function verificationUnconfirmed(provenance: string | null | undefined): 
 // thread, while the status strip and the Plán úloh card kept reading a confident green "pripravené na
 // nasadenie" with a button into the paused deploy screen. Three signals, two of them wrong (Director report,
 // 2026-07-26). Whatever reads `verificationUnconfirmed` for an honest surface must read this too.
-export const VERIFICATION_DRIFTED_PROVENANCES = ["sha_drift", "hotovo_drift"] as const;
+export const VERIFICATION_DRIFTED_PROVENANCES = [
+  "sha_drift",
+  "hotovo_drift",
+] as const;
 
-export function verificationDrifted(provenance: string | null | undefined): boolean {
-  return provenance != null && (VERIFICATION_DRIFTED_PROVENANCES as readonly string[]).includes(provenance);
+export function verificationDrifted(
+  provenance: string | null | undefined,
+): boolean {
+  return (
+    provenance != null &&
+    (VERIFICATION_DRIFTED_PROVENANCES as readonly string[]).includes(provenance)
+  );
 }
 
 // NOTE (CR-V2-021): the v1 ``STAGE_ORDER`` / ``FAST_FIX_STAGE_ORDER`` / ``stageOrderForFlow`` /

@@ -5238,6 +5238,10 @@ class _SmokeStack:
         return self.up_rc == 0
 
 
+#: Prefix of a boot-leg failure caused by a container that EXITED NON-ZERO. Parsed back by
+#: :func:`_recheck_headline` to name the container in the Manažér's sentence, so the two never drift.
+_SMOKE_CONTAINER_FAILED = "kontajner zlyhal: "
+
 #: How much of a failed service's own log the boot failure carries. Enough to hold a Python traceback's
 #: last frames (where the cause is), short enough that the Manažér's screen stays readable.
 _SMOKE_LOG_TAIL = 2500
@@ -5729,17 +5733,65 @@ def _smoke_compose_target(
     return compose, roles, None
 
 
+async def _smoke_container_states(base: list[str]) -> dict[str, int]:
+    """``service -> exit code`` for every container of the stack, or ``{}`` when it cannot be read.
+
+    The measured truth about what the compose actually did, as opposed to ``up``'s opinion about it."""
+    code, out = await _compose_smoke_step(base + ["ps", "-a", "--format", "json"], 30)
+    if code != 0 or not out.strip():
+        return {}
+    states: dict[str, int] = {}
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        for r in row if isinstance(row, list) else [row]:
+            if not isinstance(r, dict):
+                continue
+            name = r.get("Service") or r.get("Name")
+            if not name:
+                continue
+            try:
+                states[str(name)] = int(r.get("ExitCode") or 0)
+            except (TypeError, ValueError):
+                states[str(name)] = 0
+    return states
+
+
 async def _boot_leg(stack: _SmokeStack) -> tuple[bool, str]:
     """Did the app come up and answer? ONE instrument, two callers (ICCINT-42).
 
     Verifikácia (:func:`_run_release_smoke`) and the end-of-Programovanie re-check
     (:func:`_app_starts_after_fix`) must never drift on what "it starts" means — the whole value of the
-    re-check is that it is the SAME measurement that produced the finding."""
-    if not stack.up_ok:
+    re-check is that it is the SAME measurement that produced the finding.
+
+    **The verdict comes from the containers, not from ``up``'s exit code (ICCINT-43).** ``docker compose up
+    --wait`` returns non-zero the moment ANY container exits — including a one-shot ``migrate`` that finished
+    perfectly with 0. Measured 29.08.2026 on nex-productcatalogs: the app was up, the db healthy, the
+    migrations green, and ``up`` still failed with ``container …-migrate-1 exited (0)``. So the boot check
+    reported a dead app over a working one, and — because nothing had a non-zero exit at that instant —
+    :func:`_smoke_failure_logs` correctly found nothing to quote, leaving the screen with a failure and no
+    reason. Every project NEX Studio generates carries a one-shot migrate service, so this was a false FAIL
+    waiting on all of them; it stayed hidden only while the real failures happened to coincide with it.
+
+    A container that exited NON-ZERO is a real failure and is named, with its log. Otherwise the app probe
+    decides — it asks the app itself, which is the question this leg exists to answer. A one-shot container
+    still running when we look is not judged (the acceptance leg is where suite depth belongs)."""
+    states = await _smoke_container_states(stack.base)
+    failed = sorted(service for service, code in states.items() if code)
+    if failed:
         # ICCINT-37: the compose output says WHICH container died; its own log says WHY. Both, or the
         # reader is left guessing — and two of them did.
         why = await _smoke_failure_logs(stack.base)
-        return False, f"up exit {stack.up_rc}: {stack.up_detail.strip()[-400:]}{why}"
+        named = ", ".join(f"{s} (exit {states[s]})" for s in failed)
+        return False, f"{_SMOKE_CONTAINER_FAILED}{named}{why}"
+    if not stack.up_ok and not states:
+        # Could not look at all — keep the compose output rather than invent a verdict.
+        return False, f"up exit {stack.up_rc}: {stack.up_detail.strip()[-400:]}"
     return await _run_app_starts_smoke(stack)
 
 
@@ -8362,6 +8414,24 @@ def _reopen_verifikacia_fix_round(db: Session, version_id: uuid.UUID) -> int:
     return len(tasks)
 
 
+def _recheck_headline(detail: str) -> str:
+    """One plain clause naming what the re-check actually measured (ICCINT-43).
+
+    Deliberately claims NOTHING it did not measure. When a container exited non-zero the app probe never ran,
+    so this says which container died and stops — it does not get to say the app booted, nor that it didn't.
+    The first version of this sentence asserted "appka sa stále nespustí" in every case, and the very first
+    run it met had a healthy app and a failed test container."""
+    text = (detail or "").strip()
+    if text.startswith(_SMOKE_CONTAINER_FAILED):
+        first_line = text[len(_SMOKE_CONTAINER_FAILED) :].split("\n", 1)[0]
+        services = ", ".join(part.split(" (exit")[0].strip() for part in first_line.split(", ") if part.strip())
+        if services:
+            return f"zlyhal kontajner {services}"
+    if text.startswith("up exit "):
+        return "spustenie neprešlo"
+    return "appka sa nespustila"
+
+
 async def _settle_fix_boot_recheck(
     db: Session,
     state: PipelineState,
@@ -8406,6 +8476,9 @@ async def _settle_fix_boot_recheck(
         db.flush()
         return False
     reopened = _reopen_verifikacia_fix_round(db, state.version_id)
+    # ICCINT-43: say WHAT was measured, never a category. The first version of this sentence read "appka sa
+    # stále nespustí" whatever came back — and the run it met had a perfectly healthy app whose test
+    # container had failed. A sentence that is right by luck is not right.
     msg = _record_message(
         db,
         version_id=state.version_id,
@@ -8414,7 +8487,7 @@ async def _settle_fix_boot_recheck(
         recipient="manazer",
         kind="notification",
         content=(
-            "Kontrola po oprave — appka sa stále nespustí, takže oprava hotová nie je. "
+            f"Kontrola po oprave neprešla — {_recheck_headline(detail)}, takže oprava hotová nie je. "
             "Vrátil som ju medzi otvorené úlohy, aby plán nehlásil hotovo. "
             "Dôvod je nižšie v technickom detaile — napíš agentovi, čo s tým (Uprav), a spustím stavbu znova."
         ),
@@ -8430,10 +8503,12 @@ async def _settle_fix_boot_recheck(
         await on_message(msg)
     # The same honest shape a dropped task already settles into a few lines up in the build loop: blocked,
     # NOT ``programming_complete``, no phase advance — nothing downstream may read a green completion.
+    # ``check_failed``, NOT ``agent_error``: the cockpit turns the reason into a sentence, and this one must
+    # not read "Agent zlyhal" over an agent whose fix worked (ICCINT-43).
     state.status = "blocked"
-    state.block_reason = "agent_error"
+    state.block_reason = "check_failed"
     state.next_action = (
-        "Appka sa po oprave stále nespustí — stavba hotová nie je. "
+        f"Kontrola po oprave neprešla — {_recheck_headline(detail)}. Stavba hotová nie je. "
         "Napíš, čo treba opraviť (Uprav), a spustím stavbu znova."
     )
     db.flush()

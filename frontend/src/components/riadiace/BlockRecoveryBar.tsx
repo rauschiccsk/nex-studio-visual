@@ -21,13 +21,20 @@ import { CircleAlert, MessageCircle, RotateCw } from "lucide-react";
 import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { useDraft, draftKey } from "@/hooks/useDraft";
 
-import { postPipelineActionApi, type PipelineBoard, type BlockReason } from "@/services/api/pipeline";
+import {
+  postPipelineActionApi,
+  type PipelineBoard,
+} from "@/services/api/pipeline";
 import { BLOCK_REASON_LABELS } from "@/components/cockpit/labels";
+import {
+  blockRecoveryOwnsInput,
+  isCheckReason,
+  isErrorReason,
+  DEFAULT_CHECK_FIX,
+  DEFAULT_RETRY,
+} from "@/components/riadiace/blockRecovery";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
-
-const ERROR_REASONS: BlockReason[] = ["agent_error", "system_error", "parse_exhaustion"];
-const DEFAULT_RETRY = "Skús to prosím znova.";
 
 interface Props {
   board: PipelineBoard | null;
@@ -38,7 +45,12 @@ interface Props {
 
 export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
   // ICCINT-30: an answer to the agent survives a trip to Dokumenty; cleared only on a successful send.
-  const { text, setText, clear: clearDraft, restored } = useDraft(draftKey("odpoved", versionId));
+  const {
+    text,
+    setText,
+    clear: clearDraft,
+    restored,
+  } = useDraft(draftKey("odpoved", versionId));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<HumanError | null>(null);
   // Called BEFORE the honest-by-construction early return below — a hook after a conditional return
@@ -48,15 +60,19 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
   const state = board?.state ?? null;
   const reason = state?.block_reason ?? null;
   const isQuestion = reason === "agent_question";
-  const isError = !!reason && ERROR_REASONS.includes(reason);
+  const isError = isErrorReason(reason);
+  const isCheck = isCheckReason(reason);
 
   // Honest-by-construction gate: only a block the Manažér can resolve by clicking here.
-  if (!state || state.status !== "blocked" || !(isQuestion || isError)) return null;
+  if (!state || !blockRecoveryOwnsInput(state)) return null;
 
-  const headline = (reason && BLOCK_REASON_LABELS[reason]) || "Niečo si vyžaduje tvoju pozornosť";
+  const headline =
+    (reason && BLOCK_REASON_LABELS[reason]) ||
+    "Niečo si vyžaduje tvoju pozornosť";
   const guidance = (state.next_action || "").trim();
   // A question's answer is required; an error's steer is optional (a canned retry brief covers the empty case).
-  const canSubmit = !submitting && (isError || text.trim().length > 0);
+  const canSubmit =
+    !submitting && (isError || isCheck || text.trim().length > 0);
 
   async function submit() {
     if (!canSubmit) return;
@@ -66,7 +82,12 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
       const trimmed = text.trim();
       const req = isQuestion
         ? { action: "answer" as const, payload: { text: trimmed } }
-        : { action: "uprav" as const, payload: { comment: trimmed || DEFAULT_RETRY } };
+        : {
+            action: "uprav" as const,
+            payload: {
+              comment: trimmed || (isCheck ? DEFAULT_CHECK_FIX : DEFAULT_RETRY),
+            },
+          };
       const nextBoard = await postPipelineActionApi(versionId, req);
       onBoard(nextBoard);
       clearDraft();
@@ -84,14 +105,19 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
         className={`flex items-center gap-2 border-l-4 px-4 py-2.5 text-sm font-semibold ${
           isError
             ? "border-l-[var(--color-status-error)] bg-[var(--color-state-error-bg)] text-[var(--color-state-error-fg)]"
-            : "border-l-[var(--color-accent-primary)] bg-[var(--color-accent-primary)]/10 text-[var(--color-accent-primary)]"
+            : isCheck
+              ? "border-l-[var(--color-state-warning-fg)] bg-[var(--color-state-warning-bg)] text-[var(--color-state-warning-fg)]"
+              : "border-l-[var(--color-accent-primary)] bg-[var(--color-accent-primary)]/10 text-[var(--color-accent-primary)]"
         }`}
       >
-        {isError ? (
+        {isError || isCheck ? (
           <CircleAlert className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
         ) : (
           <MessageCircle className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
         )}
+        {/* ICCINT-43: "Niečo zlyhalo — " belongs ONLY to a real error. A negative check result is not a
+            failure of anybody, and prefixing it that way is how the Director came to report a working agent
+            as broken. The check's own headline stands alone; `next_action` below says what was measured. */}
         <span>{isError ? `Niečo zlyhalo — ${headline}` : headline}</span>
       </div>
 
@@ -100,7 +126,9 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
             QUESTION it repeats the whole question — which already renders as the "Otázka — na rade si ty"
             card in the thread right above — so it is SUPPRESSED here (nex-studio-visual crash-test
             2026-07-13: the triple-rendered question read as clutter). */}
-        {!isQuestion && guidance && <p className="text-xs text-[var(--color-text-muted)]">{guidance}</p>}
+        {!isQuestion && guidance && (
+          <p className="text-xs text-[var(--color-text-muted)]">{guidance}</p>
+        )}
 
         {restored && (
           // ICCINT-30: text that appears by itself must be recognisable as HIS earlier draft — not as
@@ -140,8 +168,19 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
             disabled={!canSubmit}
             className="flex shrink-0 items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {isError && <RotateCw className={`h-3.5 w-3.5 ${submitting ? "animate-spin" : ""}`} aria-hidden="true" />}
-            {submitting ? (isQuestion ? "Odosielam…" : "Skúšam…") : isQuestion ? "Odpovedať" : "Skús znova"}
+            {isError && (
+              <RotateCw
+                className={`h-3.5 w-3.5 ${submitting ? "animate-spin" : ""}`}
+                aria-hidden="true"
+              />
+            )}
+            {submitting
+              ? isQuestion
+                ? "Odosielam…"
+                : "Skúšam…"
+              : isQuestion
+                ? "Odpovedať"
+                : "Skús znova"}
           </button>
         </div>
 

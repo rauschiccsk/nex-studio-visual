@@ -18,6 +18,7 @@ points it back at the fix before a human is asked to approve one.
 from __future__ import annotations
 
 import contextlib
+import json
 import uuid as _uuid
 
 import pytest
@@ -42,9 +43,10 @@ BOOT_FAIL_BRIEF = (
     "Spusti appku tak ako engine (`docker compose up`), zreprodukuj zlyhanú skúšku po spustení a oprav jej "
     "príčinu, potom over znova."
 )
-# What the clean clone actually said on 29.08.2026, once ICCINT-37 made the log visible at all.
+# What the clean clone actually said on 29.08.2026, once ICCINT-37 made the log visible at all — in the
+# shape ICCINT-43 gave it, naming the container that died rather than quoting compose's opinion of the run.
 REAL_REASON = (
-    "up exit 1: container backend-1 exited (1)\n"
+    "kontajner zlyhal: backend (exit 1)\n"
     '--- backend ---\nRuntimeError: Form data requires "python-multipart" to be installed.'
 )
 
@@ -169,8 +171,10 @@ async def test_a_fix_that_did_not_fix_it_never_reaches_the_manazer_as_done(db_se
 
     # NOT awaiting_manazer with a green plan — the whole point.
     assert state.status == "blocked", "the Manažér was still asked to approve a build that does not start"
-    assert state.block_reason == "agent_error"
-    assert "nespustí" in state.next_action
+    # ICCINT-43: `check_failed`, never `agent_error` — the cockpit turns the reason into a sentence, and
+    # "Agent zlyhal" over a working agent is how this very fix first went wrong.
+    assert state.block_reason == "check_failed"
+    assert "zlyhal kontajner backend" in state.next_action, "the sentence did not say what was measured"
 
     # The plan must stop reading 100 % / Hotovo, or the screen tells the same untruth by another route.
     fix_tasks = _tasks_of(db_session, version.id)
@@ -182,7 +186,9 @@ async def test_a_fix_that_did_not_fix_it_never_reaches_the_manazer_as_done(db_se
     said = [m for m in messages if (m.payload or {}).get("fix_boot_recheck")]
     assert said, "the re-check happened silently — the Manažér has no way to know why he is blocked"
     assert "python-multipart" in (said[-1].payload or {}).get("technical_detail", "")
-    assert "nespustí" in said[-1].content
+    assert "zlyhal kontajner backend" in said[-1].content
+    # ICCINT-43: the message may not assert the app is down — the app probe never ran, a container did.
+    assert "nespustí" not in said[-1].content
 
 
 @pytest.mark.asyncio
@@ -285,15 +291,21 @@ async def test_the_recheck_measures_with_the_same_instrument_as_verifikacia(db_s
 
     monkeypatch.setattr(orchestrator, "_boot_smoke_stack", _dead_stack)
 
-    async def _logs(base):
-        return '\n--- backend ---\nRuntimeError: Form data requires "python-multipart" to be installed.'
+    # Stand in for the docker CLI itself rather than for our own helper — that way this exercises the REAL
+    # ``ps``-then-``logs`` path both callers share, instead of trusting a stub of the very thing under test.
+    async def _docker(cmd, timeout):
+        if "ps" in cmd:
+            return 0, json.dumps({"Service": "backend", "State": "exited", "ExitCode": 1})
+        if "logs" in cmd:
+            return 0, 'RuntimeError: Form data requires "python-multipart" to be installed.'
+        return 0, ""
 
-    monkeypatch.setattr(orchestrator, "_smoke_failure_logs", _logs)
+    monkeypatch.setattr(orchestrator, "_compose_smoke_step", _docker)
 
     ok, detail = await orchestrator._app_starts_after_fix(slug)
 
     assert ok is False
-    assert "up exit 1" in detail
+    assert "backend (exit 1)" in detail, "the failing container was not named"
     assert "python-multipart" in detail, "the re-check dropped the reason ICCINT-37 exists to carry"
 
 

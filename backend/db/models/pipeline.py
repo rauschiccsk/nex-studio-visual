@@ -89,6 +89,12 @@ STATUS_VALUES = ("agent_working", "awaiting_manazer", "blocked", "paused", "done
 # message for Dedo (delivered via the Dedo escalation channel inbox + a Telegram ping) and offers the Manažér
 # the ONE move he has — ``nahlasit_znova`` (re-send the report). Only DEDO clears the block, from the host
 # (``backend.services.dedo_unblock`` — ICCINT-13); the build then waits on the Manažér's "Pokračovať".
+# ICCINT-43: ``check_failed`` — a CHECK the engine ran itself came back negative. Nobody failed: not the
+# agent (``agent_error``), not the engine (``system_error``). The work is simply not finished, and the
+# measurement says so. It earns its own value because the FE renders these reasons as a sentence to the
+# Manažér, and the sentence for the other reasons NAMES A CULPRIT. On 29.08.2026 the end-of-Programovanie
+# boot re-check borrowed ``agent_error`` and the screen read "Agent zlyhal" over an agent whose fix had
+# worked — the exact class of untruth ICCINT-42 had been written to remove.
 BLOCK_REASON_VALUES = (
     "agent_question",
     "decision_needed",
@@ -96,6 +102,7 @@ BLOCK_REASON_VALUES = (
     "system_error",
     "parse_exhaustion",
     "framework_issue",
+    "check_failed",
 )
 MESSAGE_KIND_VALUES = (
     "kickoff",
