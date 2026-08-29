@@ -524,9 +524,18 @@ def test_ensure_verifikacia_fix_task_idempotent(db_session) -> None:
     )
 
     def _fix_epics():
+        # ICCINT-35: the SECOND round is titled "… (2. kolo)", so the lookup matches the PREFIX. Three rows
+        # all called "Oprava po Verifikácii" said nothing about which round they belonged to, and the code
+        # comment above records what that cost once (nex-shopify 2026-07-20: three identical tasks, the same
+        # fix done 3x). Matching on the exact title here would hide exactly the repetition it exists to see.
         return (
             db_session.execute(
-                select(Epic).where(Epic.version_id == version_id, Epic.title == orchestrator._VERIFIKACIA_FIX_TITLE)
+                select(Epic)
+                .where(
+                    Epic.version_id == version_id,
+                    Epic.title.like(f"{orchestrator._VERIFIKACIA_FIX_TITLE}%"),
+                )
+                .order_by(Epic.number.asc())
             )
             .scalars()
             .all()
@@ -546,7 +555,14 @@ def test_ensure_verifikacia_fix_task_idempotent(db_session) -> None:
     t.status = "done"
     db_session.flush()
     orchestrator._ensure_verifikacia_fix_task(db_session, version_id)
-    assert len(_fix_epics()) == 2
+    epics = _fix_epics()
+    assert len(epics) == 2
+    # …and the rounds are TELLABLE APART, which is the point of a per-round record.
+    assert epics[0].title == orchestrator._VERIFIKACIA_FIX_TITLE
+    assert "2. kolo" in epics[1].title
+    # Every fix row carries the plain sentence the rest of the plan has — the Manažér must not meet
+    # "(bez ľudského vysvetlenia)" on the one row that says something broke.
+    assert epics[0].plain_description and epics[1].plain_description
 
 
 def test_fix_consultation_escalates_when_loop_not_converging(db_session) -> None:

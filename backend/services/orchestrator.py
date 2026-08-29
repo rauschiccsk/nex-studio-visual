@@ -3061,6 +3061,21 @@ def dispatch_directive(
         if lc is None:
             return None
         c, c_seq = lc
+        # ICCINT-36: a Verifikácia FIX card is NOT a document consultation, and rebuilding its directive here
+        # was throwing the fix away. ``apply_action`` has already routed it: it recorded the concrete brief —
+        # the Auditor's finding plus "spusti appku ako engine a zreprodukuj zlyhanie" — as the
+        # ``manazer→ai_agent`` verifikacia ``return`` that :func:`_latest_verifikacia_fix_scope` reads back,
+        # and asked for this dispatch. Recomputing from the card's option LABEL replaced all of that with
+        # "Manažér rozhodol: … → Nechaj to opraviť. Teraz PREPRACUJ Špecifikáciu/Návrh", so the agent got no
+        # finding AND an instruction to rewrite an APPROVED document. Found 29.08.2026 on nex-productcatalogs:
+        # the agent refused ("Špecifikácia je schválený dokument… by znamenalo vymyslieť si zmeny") and asked
+        # for the finding. A less careful turn would have rewritten the Špecifikácia off a card label.
+        if c.get("source") in ("verifikacia_fix", "verifikacia_fail"):
+            return _latest_verifikacia_fix_scope(db, version_id) or (
+                "Oprav blokujúce zlyhanie z koncovej Verifikácie: spusti appku tak ako engine "
+                "(`docker compose up`), zreprodukuj zlyhanú skúšku po spustení a oprav jej príčinu. "
+                "Špecifikáciu ani Návrh NEPREPISUJ — toto je oprava aplikácie."
+            )
         answers = _consultation_answers(db, version_id, c_seq)
         lines = [
             f"- {d.get('question', '')} → {a.get('label')}" + (f" (poznámka: {a['note']})" if a.get("note") else "")
@@ -3965,7 +3980,17 @@ def verify_mechanical(slug: str, block: PipelineStatusBlock, baseline_sha: Optio
         if not _commit_exists(project_root, commit):
             return f"commit {commit!r} not found in {slug}"
     for rel in block.deliverables:
-        if not (project_root / rel).exists():
+        # ICCINT-32: this is a DETERMINISTIC check whose contract is to return a reason — so it must survive
+        # anything the agent put in the list. On 28.08.2026 an agent wrote "path — description" entries; the
+        # last component came to 347 bytes, ``Path.exists()`` raised ENAMETOOLONG (pathlib ignores only
+        # ENOENT/ENOTDIR/EBADF/ELOOP) and the whole dispatch died as a "Systémová chyba" AFTER the task's work
+        # was already committed. The Manažér was then offered "Skús znova", which could not help: same input,
+        # same crash. A malformed entry is a FAILED VERIFY the agent can fix, never an engine crash.
+        try:
+            found = (project_root / rel).exists()
+        except (OSError, ValueError) as exc:
+            return f"deliverable {rel[:80]!r}… is not a usable path ({exc.__class__.__name__}) — list PATHS only"
+        if not found:
             return f"deliverable {rel!r} missing on disk"
     if baseline_sha is not None:
         # Audit P2 (2026-07-12): a per-task build MUST land at least one commit — an EMPTY ``commits[]`` with a
@@ -8118,12 +8143,34 @@ def _ensure_verifikacia_fix_task(db: Session, version_id: uuid.UUID) -> None:
             feat.description = scope
         db.flush()
         return
+    # ICCINT-35: give the Manažér the same plain sentence every OTHER row in his plan has. Eight of this
+    # version's nine epics were written by the AI Agent and every one carried a ``plain_description``; the
+    # ninth is this one, written by the engine, and it carried none — so the only line in the plan with no
+    # human explanation was the line saying something had broken, which is where he needs one most. The
+    # sentence comes from the Auditor's own finding (the first line of ``scope``), never from a template.
+    plain = _fix_plain_description(scope)
     epic = epic_service.create(
-        db, EpicCreate(project_id=version.project_id, version_id=version_id, title=_VERIFIKACIA_FIX_TITLE)
+        db,
+        EpicCreate(
+            project_id=version.project_id,
+            version_id=version_id,
+            title=_fix_title(db, version_id),
+            plain_description=plain,
+        ),
     )
-    feat = feat_service.create(db, FeatCreate(epic_id=epic.id, title=_VERIFIKACIA_FIX_TITLE, description=scope))
+    feat = feat_service.create(
+        db,
+        FeatCreate(epic_id=epic.id, title=_VERIFIKACIA_FIX_TITLE, description=scope, plain_description=plain),
+    )
     task_service.create(
-        db, TaskCreate(feat_id=feat.id, title=_VERIFIKACIA_FIX_TITLE, description=scope, task_type="backend")
+        db,
+        TaskCreate(
+            feat_id=feat.id,
+            title=_VERIFIKACIA_FIX_TITLE,
+            description=scope,
+            task_type="backend",
+            plain_description=plain,
+        ),
     )
     db.flush()
 
@@ -8270,6 +8317,40 @@ def current_build_task(db: Session, version_id: uuid.UUID) -> Optional[Task]:
 # referrer was the v1 ``_board()`` regate proposal — dropped here. The v2 source of a fix scope is the
 # Auditor's own Verifikácia verdict (:func:`_latest_verifikacia_fix_scope`).
 # ---------------------------------------------------------------------------
+
+
+def _fix_plain_description(scope: str) -> str:
+    """One plain-Slovak line for the Verifikácia fix rows in the Plán úloh (ICCINT-35).
+
+    Derived from the Auditor's own finding rather than a fixed phrase: the first non-empty, non-heading line
+    of the fix scope is what actually went wrong, which is exactly what the Manažér needs on that row. Falls
+    back to a generic sentence when the scope carries no usable line — a generic sentence still beats the
+    "(bez ľudského vysvetlenia)" placeholder that started this."""
+    for raw in (scope or "").splitlines():
+        # Skip HEADINGS: the scope opens with "## Verifikácia FAIL — oprav podľa nálezov Auditora", which is
+        # the name of the situation, not what went wrong. The Manažér already knows a check failed; the row
+        # has to tell him WHAT failed. (Caught by this fix's own test — the first cut quoted the heading.)
+        if raw.lstrip().startswith("#"):
+            continue
+        line = raw.strip().lstrip("-• ").strip()
+        if line and not line.startswith("`") and len(line) > 12:
+            return f"Verifikácia našla chybu: {line[:180]}"
+    return "Verifikácia našla blokujúcu chybu — AI Agent ju opravuje a Auditor to potom znova preverí."
+
+
+def _fix_title(db: Session, version_id: uuid.UUID) -> str:
+    """The fix epic's title, numbered when it is not the first (ICCINT-35).
+
+    Three rows called "Oprava po Verifikácii" — epic, feat and task — say nothing, and a SECOND round of
+    fixes used to add three more with the identical name. The code comment above records what that cost once
+    (nex-shopify 2026-07-20: three identical tasks, the same fix done 3x). Counting the rounds makes the plan
+    readable and the repetition visible."""
+    rounds = db.execute(
+        select(func.count())
+        .select_from(Epic)
+        .where(Epic.version_id == version_id, Epic.title.like(f"{_VERIFIKACIA_FIX_TITLE}%"))
+    ).scalar_one()
+    return _VERIFIKACIA_FIX_TITLE if not rounds else f"{_VERIFIKACIA_FIX_TITLE} ({rounds + 1}. kolo)"
 
 
 def _latest_verifikacia_fix_scope(db: Session, version_id: uuid.UUID) -> Optional[str]:
@@ -9532,6 +9613,12 @@ async def _run_build_round(
             return state
         task.status = "in_progress"
         db.flush()
+        # ICCINT-31: roll the START up to the feat and the epic too. The rules in ``task.py`` were already
+        # right ("any task in_progress → in_progress"), but nothing CALLED them here — the rollup ran only
+        # when a task settled done or failed. So while work was actually running, the plan showed "Čaká" over
+        # it and "Naplánované" over that: the one place the Manažér watches to see what is happening told him
+        # nothing was. Found by the Director 28.08.2026 (feat 3.3: four tasks done, one running, still "Čaká").
+        task_service.recompute_feat_status(db, task.feat_id)
         # Live current-task breadcrumb (CR-NS-025): the task is in_progress NOW, but the AI Agent's first
         # gate_report can be a long turn away — and TaskPlanPanel only refetches when messages.length changes.
         # Record + broadcast ONE task-start notification so the panel refetches immediately. Placed after the

@@ -355,7 +355,10 @@ def recompute_feat_status(db: Session, feat_id: UUID) -> None:
     if feat.status != new_status:
         feat.status = new_status
         db.flush()
-        recompute_epic_status(db, feat.epic_id)
+    # ICCINT-31: recompute the epic ALWAYS, not only when this feat's own status changed. The epic derives
+    # from ALL its feats, so a sibling can make it stale while this one stands still — and the propagation
+    # sat inside the ``if`` above, which is a rollup that silently skips the case it exists for.
+    recompute_epic_status(db, feat.epic_id)
 
 
 def recompute_epic_status(db: Session, epic_id: UUID) -> None:
