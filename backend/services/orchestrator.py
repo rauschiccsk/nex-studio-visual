@@ -5708,6 +5708,54 @@ async def _run_aktualizacie_gate(stack: "_SmokeStack", proj_root: Path, version_
     return await _probe_release_notes(stack.base, stack.roles["backend"], port, version_label)
 
 
+def _smoke_compose_target(
+    project_slug: str,
+) -> tuple[Path, dict[str, Optional[str]], Optional[tuple[bool, str]]]:
+    """The compose a boot check boots, plus the pre-checks that settle BEFORE anything is built.
+
+    Returns ``(compose, roles, verdict)``; a non-``None`` ``verdict`` means the caller settles on it and never
+    opens a stack. No ``docker-compose.yml`` is a graceful SKIP (a boot check needs a compose to boot — legit
+    non-web project). A backend web app with NO frontend service is a structural FAIL (icc-deploy §5.6 #1 —
+    the nex-asistent "no FE emitted" bug; no point building a broken compose)."""
+    compose = claude_agent.PROJECTS_ROOT / project_slug / "docker-compose.yml"
+    if not compose.is_file():
+        logger.info("smoke SKIPPED (slug=%s) — no docker-compose.yml", project_slug)
+        return compose, {}, (True, "SKIPPED — no docker-compose.yml")
+    services = (yaml.safe_load(compose.read_text()) or {}).get("services") or {}
+    roles = uat_provisioner.identify_service_roles(services)
+    if roles["backend"] is not None and roles["frontend"] is None:
+        logger.warning("smoke FAIL (slug=%s) — backend web app has no frontend service", project_slug)
+        return compose, roles, (False, "compose has a backend web app but no frontend service")
+    return compose, roles, None
+
+
+async def _boot_leg(stack: _SmokeStack) -> tuple[bool, str]:
+    """Did the app come up and answer? ONE instrument, two callers (ICCINT-42).
+
+    Verifikácia (:func:`_run_release_smoke`) and the end-of-Programovanie re-check
+    (:func:`_app_starts_after_fix`) must never drift on what "it starts" means — the whole value of the
+    re-check is that it is the SAME measurement that produced the finding."""
+    if not stack.up_ok:
+        # ICCINT-37: the compose output says WHICH container died; its own log says WHY. Both, or the
+        # reader is left guessing — and two of them did.
+        why = await _smoke_failure_logs(stack.base)
+        return False, f"up exit {stack.up_rc}: {stack.up_detail.strip()[-400:]}{why}"
+    return await _run_app_starts_smoke(stack)
+
+
+async def _app_starts_after_fix(project_slug: str) -> tuple[bool, str]:
+    """Boot the app exactly the way the engine does, and report whether it comes up (ICCINT-42).
+
+    The boot leg alone — no Aktualizácie gate, no acceptance suite: those are release questions and cost a
+    multiple of this. Ephemeral ``-p <slug>-smoke`` compose up/down against internal fixtures, never a
+    customer instance. Never raises."""
+    compose, roles, verdict = _smoke_compose_target(project_slug)
+    if verdict is not None:
+        return verdict
+    async with _boot_smoke_stack(project_slug, compose, roles) as stack:
+        return await _boot_leg(stack)
+
+
 async def _run_release_smoke(
     project_slug: str, version_label: str, coverage_req: tuple[int, int]
 ) -> tuple[tuple[bool, str], Optional[tuple[bool, str, bool]]]:
@@ -5715,28 +5763,15 @@ async def _run_release_smoke(
     ``((boot_ok, boot_detail), acceptance)`` where ``acceptance`` is ``(ok, detail, skipped)`` — or ``None``
     when the boot leg failed/short-circuited so acceptance never ran (the caller settles on the boot FAIL).
 
-    Graceful SKIP when the project has no ``docker-compose.yml`` (a boot check needs a compose to boot): both
-    legs SKIP (legit non-web). A backend web app with NO frontend service short-circuits to a structural FAIL
-    BEFORE any build (icc-deploy §5.6 #1 — the nex-asistent "no FE emitted" bug; no point building a broken
-    compose). Never raises."""
+    Graceful SKIP when the project has no ``docker-compose.yml``: both legs SKIP. A structural pre-check FAIL
+    settles on the boot leg alone (:func:`_smoke_compose_target`). Never raises."""
     root = claude_agent.PROJECTS_ROOT / project_slug
-    compose = root / "docker-compose.yml"
-    if not compose.is_file():
-        logger.info("smoke SKIPPED (slug=%s, version=%s) — no docker-compose.yml", project_slug, version_label)
-        skip = "SKIPPED — no docker-compose.yml"
-        return (True, skip), (True, skip, True)
-    services = (yaml.safe_load(compose.read_text()) or {}).get("services") or {}
-    roles = uat_provisioner.identify_service_roles(services)
-    if roles["backend"] is not None and roles["frontend"] is None:
-        logger.warning("smoke FAIL (slug=%s) — backend web app has no frontend service", project_slug)
-        return (False, "compose has a backend web app but no frontend service"), None
+    compose, roles, verdict = _smoke_compose_target(project_slug)
+    if verdict is not None:
+        pre_ok, pre_detail = verdict
+        return verdict, (True, pre_detail, True) if pre_ok else None
     async with _boot_smoke_stack(project_slug, compose, roles) as stack:
-        if not stack.up_ok:
-            # ICCINT-37: the compose output says WHICH container died; its own log says WHY. Both, or the
-            # reader is left guessing — and two of them did.
-            why = await _smoke_failure_logs(stack.base)
-            return (False, f"up exit {stack.up_rc}: {stack.up_detail.strip()[-400:]}{why}"), None
-        boot_ok, boot_detail = await _run_app_starts_smoke(stack)
+        boot_ok, boot_detail = await _boot_leg(stack)
         if not boot_ok:
             return (boot_ok, boot_detail), None
         # obs-2 Part B Part 2 (per-app-changelog-part2-gate.md): the per-app Aktualizácie changelog is a
@@ -8295,6 +8330,116 @@ def _ensure_verifikacia_fix_task(
     db.flush()
 
 
+def _reopen_verifikacia_fix_round(db: Session, version_id: uuid.UUID) -> int:
+    """Put the just-closed fix round back among the open tasks and report how many moved (ICCINT-42).
+
+    A fix whose app still does not start is not done, and the plan must not say otherwise: the round's tasks
+    go back to ``todo``, which walks the rollup back through the feat to the epic — so the rail stops reading
+    "Hotovo / 100 %" over a build that cannot boot. Only the NEWEST fix feat is touched; earlier rounds were
+    settled against their own findings and are none of this round's business."""
+    feat = db.execute(
+        select(Feat)
+        .join(Epic, Epic.id == Feat.epic_id)
+        .where(
+            Epic.version_id == version_id,
+            or_(
+                Epic.title == _VERIFIKACIA_FIX_EPIC_TITLE,
+                Epic.title.like(f"{_VERIFIKACIA_FIX_TITLE}%"),
+            ),
+            Feat.title.like(f"{_VERIFIKACIA_FIX_TITLE}%"),
+        )
+        .order_by(Epic.number.desc(), Feat.number.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if feat is None:
+        return 0
+    tasks = list(db.execute(select(Task).where(Task.feat_id == feat.id, Task.status == "done")).scalars().all())
+    for task in tasks:
+        task.status = "todo"
+    if tasks:
+        db.flush()
+        task_service.recompute_feat_status(db, feat.id)  # propagates to the epic
+    return len(tasks)
+
+
+async def _settle_fix_boot_recheck(
+    db: Session,
+    state: PipelineState,
+    *,
+    on_message: Optional[MessageCallback] = None,
+) -> bool:
+    """Re-measure what the fix round was born from, BEFORE the Manažér is asked to bless it (ICCINT-42).
+
+    Returns ``True`` when the build was settled ``blocked`` — the caller must return at once — and ``False``
+    when Programovanie may settle ``awaiting_manazer`` as before.
+
+    29.08.2026, nex-productcatalogs: the Manažér's screen read 125/125 úloh, 100 %, nine green epics,
+    "Úloha #9.3.1 — hotovo (1 pokus)", and recommended *Prejsť na overenie* — over a backend that died on
+    boot with ``python-multipart`` missing. Nothing lied on purpose. The fix task closed because
+    :func:`verify_mechanical` passed, and all that proves is that commits exist and the promised files are on
+    disk; whether the app RUNS was never asked. The task's own brief ended "…potom over znova" and nobody
+    checked that it had been. Director: *"Ak by som ťa nespýtal, z tejto obrazovky ja môžem posúdiť, že
+    všetko je v poriadku."*
+
+    So the engine points its own instrument back at the fix. The `SYSTÉM` line the Manažér reads now means a
+    measurement, not a relayed claim."""
+    slug = _project_slug_for_version(db, state.version_id)
+    ok, detail = await _app_starts_after_fix(slug)
+    if ok:
+        msg = _record_message(
+            db,
+            version_id=state.version_id,
+            stage="programovanie",
+            author="system",
+            recipient="manazer",
+            kind="notification",
+            content="Kontrola po oprave — appka sa spustila. Overil engine tou istou skúškou, ktorá ju zhodila.",
+            payload={
+                "phase": "programovanie",
+                "fix_boot_recheck": True,
+                "smoke": {"pass": True, "detail": detail},
+                "technical_detail": detail,
+            },
+        )
+        if on_message is not None:
+            await on_message(msg)
+        db.flush()
+        return False
+    reopened = _reopen_verifikacia_fix_round(db, state.version_id)
+    msg = _record_message(
+        db,
+        version_id=state.version_id,
+        stage="programovanie",
+        author="system",
+        recipient="manazer",
+        kind="notification",
+        content=(
+            "Kontrola po oprave — appka sa stále nespustí, takže oprava hotová nie je. "
+            "Vrátil som ju medzi otvorené úlohy, aby plán nehlásil hotovo. "
+            "Dôvod je nižšie v technickom detaile — napíš agentovi, čo s tým (Uprav), a spustím stavbu znova."
+        ),
+        payload={
+            "phase": "programovanie",
+            "fix_boot_recheck": True,
+            "smoke": {"pass": False, "detail": detail},
+            "technical_detail": detail,
+            "reopened_tasks": reopened,
+        },
+    )
+    if on_message is not None:
+        await on_message(msg)
+    # The same honest shape a dropped task already settles into a few lines up in the build loop: blocked,
+    # NOT ``programming_complete``, no phase advance — nothing downstream may read a green completion.
+    state.status = "blocked"
+    state.block_reason = "agent_error"
+    state.next_action = (
+        "Appka sa po oprave stále nespustí — stavba hotová nie je. "
+        "Napíš, čo treba opraviť (Uprav), a spustím stavbu znova."
+    )
+    db.flush()
+    return True
+
+
 async def _route_manazer_fix_to_ai_agent(
     db: Session,
     state: PipelineState,
@@ -9726,6 +9871,16 @@ async def _run_build_round(
             if _settle_phase_boundary(db, state):
                 return state  # agent_working at Verifikácia — the auto-chain loop continues the build
             if state.status != "done":
+                # ICCINT-42: this round exists because the engine MEASURED that the app would not start — so
+                # measure again before asking a human to approve it. Deliberately only on the path that STOPS
+                # for the Manažér: an auto-continue hands straight to Verifikácia, which boots it there and
+                # then, and nobody is shown a false 100 % in between. ``state.is_regate`` cannot be the signal
+                # — the build round CONSUMES it on entry — so read the durable fact from the DB instead: a
+                # Verifikácia FAIL verdict (or a Manažér fix directive) is the most recent verifikacia
+                # message, which is exactly what put this round here.
+                if _latest_verifikacia_fix_scope(db, version_id) is not None:
+                    if await _settle_fix_boot_recheck(db, state, on_message=on_message):
+                        return state
                 state.status = "awaiting_manazer"
                 state.next_action = "Manažér: posúdiť výsledok Programovania (Schváliť / Uprav)."
                 db.flush()
