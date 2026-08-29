@@ -19,6 +19,7 @@ import { useState } from "react";
 import { CircleAlert, MessageCircle, RotateCw } from "lucide-react";
 
 import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
+import { useDraft, draftKey } from "@/hooks/useDraft";
 
 import { postPipelineActionApi, type PipelineBoard, type BlockReason } from "@/services/api/pipeline";
 import { BLOCK_REASON_LABELS } from "@/components/cockpit/labels";
@@ -36,7 +37,8 @@ interface Props {
 }
 
 export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
-  const [text, setText] = useState("");
+  // ICCINT-30: an answer to the agent survives a trip to Dokumenty; cleared only on a successful send.
+  const { text, setText, clear: clearDraft, restored } = useDraft(draftKey("odpoved", versionId));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<HumanError | null>(null);
   // Called BEFORE the honest-by-construction early return below — a hook after a conditional return
@@ -67,7 +69,7 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
         : { action: "uprav" as const, payload: { comment: trimmed || DEFAULT_RETRY } };
       const nextBoard = await postPipelineActionApi(versionId, req);
       onBoard(nextBoard);
-      setText("");
+      clearDraft();
     } catch (err: unknown) {
       setError(humanizeApiError(err, "Akcia zlyhala"));
     } finally {
@@ -100,6 +102,13 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
             2026-07-13: the triple-rendered question read as clutter). */}
         {!isQuestion && guidance && <p className="text-xs text-[var(--color-text-muted)]">{guidance}</p>}
 
+        {restored && (
+          // ICCINT-30: text that appears by itself must be recognisable as HIS earlier draft — not as
+          // something someone else wrote into his box while he was away.
+          <p className="text-[11px] text-[var(--color-text-muted)]">
+            Obnovený rozpísaný text — pokračuj, alebo ho prepíš.
+          </p>
+        )}
         <div className="flex items-center gap-2">
           <textarea
             lang="sk"

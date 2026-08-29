@@ -179,7 +179,11 @@ async def _streaming_turn_argv(monkeypatch, *, stage: str, slug: str = "acme", *
 # ---------------------------------------------------------------------------
 
 #: Docker options the sandbox is allowed to pass with NO value.
-_BOOLEAN_OPTS = frozenset({"--rm", "--cap-drop=ALL"})
+#: ICCINT-34 added ``--no-healthcheck``: the sandbox runs on the backend's image and inherited its liveness
+#: probe, which cannot pass here (the working dir is the customer's project, not NEX Studio), so every build
+#: container reported "unhealthy" for its whole life. Listed here deliberately — this set exists so an option
+#: nobody reviewed shows up as a failing test, and it did exactly that.
+_BOOLEAN_OPTS = frozenset({"--rm", "--cap-drop=ALL", "--no-healthcheck"})
 #: Docker options the sandbox is allowed to pass WITH exactly one value.
 _VALUED_OPTS = frozenset({"--name", "--user", "--security-opt", "--mount", "-e", "-w", "--entrypoint", "--network"})
 

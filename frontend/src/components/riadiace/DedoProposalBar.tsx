@@ -30,6 +30,7 @@
 // the server refuses (409) instead of substituting; this bar then pulls the fresh board and says why, so he
 // is never left deciding about something that is no longer on the desk.
 
+import { useDraft, draftKey } from "@/hooks/useDraft";
 import { useEffect, useState } from "react";
 import { Lightbulb, Send, X } from "lucide-react";
 
@@ -83,7 +84,11 @@ export default function DedoProposalBar({ board, versionId, onBoard }: Props) {
   const proposal = board?.dedo_proposal ?? null;
   const proposalId = proposal?.message_id ?? null;
 
-  const [text, setText] = useState(proposal?.content ?? "");
+  // ICCINT-30: his EDITS to the proposal survive leaving the screen. Without this he could return to the
+  // untouched original and send a version he had already decided against, believing it was his.
+  const draft = useDraft(draftKey(`navrh.${proposal?.message_id ?? "none"}`, versionId));
+  const text = draft.text || (proposal?.content ?? "");
+  const setText = draft.setText;
   const [busy, setBusy] = useState<"send" | "reject" | null>(null);
   const [error, setError] = useState<HumanError | null>(null);
   // What the server said when it refused BECAUSE the finding had changed under him (409). Kept apart from
@@ -101,7 +106,7 @@ export default function DedoProposalBar({ board, versionId, onBoard }: Props) {
   // wipe what he has typed. A genuinely NEW finding is a different id and does replace the box.
   useEffect(() => {
     if (proposalId) {
-      setText(proposal?.content ?? "");
+      draft.clear();
       setError(null);
     }
   }, [proposalId]); // eslint-disable-line react-hooks/exhaustive-deps

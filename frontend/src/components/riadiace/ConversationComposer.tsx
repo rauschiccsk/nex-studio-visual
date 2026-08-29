@@ -12,6 +12,7 @@ import { useState, type FormEvent, type KeyboardEvent } from "react";
 import { Loader2, Send } from "lucide-react";
 
 import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
+import { useDraft, draftKey } from "@/hooks/useDraft";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 
 const ENGINE_BUSY_HINT = "AI Agent práve pracuje — správa sa pošle, keď dokončí.";
@@ -38,10 +39,13 @@ interface Props {
   /** At the Vizuál gate this composer IS the change-request channel (typed → the AI applies live, HMR), so
    *  the placeholder names that explicitly ("Napíš požiadavku na zmenu vizuálu…"). Director 2026-07-13. */
   atVizual?: boolean;
+  /** ICCINT-30: scopes the saved draft to THIS build, so two half-written messages never mix. */
+  versionId?: string | null;
 }
 
-export function ConversationComposer({ onRelay, disabled, frameworkBlocked, blockedAbove, atVizual }: Props) {
-  const [text, setText] = useState("");
+export function ConversationComposer({ onRelay, disabled, frameworkBlocked, blockedAbove, atVizual, versionId }: Props) {
+  // ICCINT-30: the box the Director lost a message from. Persisted per build, cleared on a real send.
+  const { text, setText, clear: clearDraft, restored } = useDraft(draftKey("rozhovor", versionId));
   const [sending, setSending] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
   const [error, setError] = useState<HumanError | null>(null);
@@ -62,7 +66,7 @@ export function ConversationComposer({ onRelay, disabled, frameworkBlocked, bloc
     setHint(null);
     try {
       const { deferred } = await onRelay(trimmed);
-      setText("");
+      clearDraft();
       // `deferred` ⇒ a turn was in flight; the message is queued and lands at the next boundary.
       setHint(deferred ? ENGINE_BUSY_HINT : null);
     } catch (e: unknown) {
@@ -120,6 +124,13 @@ export function ConversationComposer({ onRelay, disabled, frameworkBlocked, bloc
         </div>
       )}
       <div className="flex items-end gap-2">
+        {restored && (
+          // ICCINT-30: text that appears by itself must be recognisable as HIS earlier draft — not as
+          // something someone else wrote into his box while he was away.
+          <p className="text-[11px] text-[var(--color-text-muted)]">
+            Obnovený rozpísaný text — pokračuj, alebo ho prepíš.
+          </p>
+        )}
         <textarea
           lang="sk"
           spellCheck={true}

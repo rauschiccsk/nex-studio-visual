@@ -856,6 +856,14 @@ def build_run_argv(
         # database sat on docker's DEFAULT bridge, which also carries CI runners and other stacks' web
         # containers and therefore cannot be fenced as a whole.
         *(["--network", network] if network else []),
+        # ICCINT-34: the sandbox runs on THIS backend's image (it needs the same git / gh / node tooling), and
+        # an image carries its HEALTHCHECK with it. That check runs ``backend.scripts.healthcheck``, which does
+        # not exist here — the working dir is the customer's project — so every build container spent its whole
+        # life reporting "unhealthy" every few seconds. Nothing acted on it, but ``docker ps`` during a build
+        # told anyone looking that the build was sick, and a future "unhealthy container" alert would have
+        # fired on every turn. A liveness probe belongs to a long-running service, not to a one-shot turn that
+        # dies with its work.
+        "--no-healthcheck",
         # Nothing in a document-writing turn needs a capability, and no setuid binary may hand one back.
         "--cap-drop=ALL",
         "--security-opt",

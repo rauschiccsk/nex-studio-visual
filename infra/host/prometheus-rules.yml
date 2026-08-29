@@ -1,0 +1,94 @@
+groups:
+  - name: node_alerts
+    rules:
+      - alert: HighCpuUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is above 80% for 5 minutes (current: {{ $value | printf \"%.1f\" }}%)"
+
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage is above 85% (current: {{ $value | printf \"%.1f\" }}%)"
+
+      - alert: DiskSpaceLow
+        expr: (1 - (node_filesystem_avail_bytes{fstype!="tmpfs"} / node_filesystem_size_bytes{fstype!="tmpfs"})) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low disk space on {{ $labels.instance }}"
+          description: "Disk usage is above 85% on {{ $labels.mountpoint }} (current: {{ $value | printf \"%.1f\" }}%)"
+
+      - alert: DiskSpaceCritical
+        expr: (1 - (node_filesystem_avail_bytes{fstype!="tmpfs"} / node_filesystem_size_bytes{fstype!="tmpfs"})) * 100 > 95
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical disk space on {{ $labels.instance }}"
+          description: "Disk usage is above 95% on {{ $labels.mountpoint }}"
+
+  - name: container_alerts
+    rules:
+      - alert: ContainerRestarting
+        expr: increase(container_start_time_seconds{name=~"nex-.*"}[5m]) > 1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container {{ $labels.name }} is restarting"
+          description: "Container {{ $labels.name }} has restarted multiple times"
+
+      - alert: ContainerHighCpu
+        # ICCINT-33: this measures CORES, so "* 100 > 80" meant "more than 0.8 of ONE core" — on an 80-core
+        # host that is ~1% of the machine, and it fired on every build turn while the monitoring agent itself
+        # sat at 489% (five cores) behind an exclusion. An alert that always fires teaches you to ignore
+        # alerts. Now: a share of the WHOLE host, and build containers are out — their CPU use is their job,
+        # they are short-lived, and what is worth watching there is how long a turn takes, not how hard it works.
+        expr: >-
+          rate(container_cpu_usage_seconds_total{name=~"nex-.*", name!~"nex-ollama|nex-cadvisor|nex-build-.*"}[5m])
+          / on() group_left() count(count(node_cpu_seconds_total) by (cpu)) * 100 > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU in container {{ $labels.name }}"
+          description: "Container {{ $labels.name }} CPU usage is above 80%"
+
+      - alert: ContainerHighMemory
+        expr: (container_memory_usage_bytes{name=~"nex-.*"} / container_spec_memory_limit_bytes{name=~"nex-.*"} * 100 > 85) and container_spec_memory_limit_bytes{name=~"nex-.*"} > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory in container {{ $labels.name }}"
+          description: "Container {{ $labels.name }} memory usage is above 85%"
+
+  - name: postgres_alerts
+    rules:
+      - alert: PostgresDown
+        expr: pg_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL is down"
+          description: "PostgreSQL database is not responding"
+
+      - alert: PostgresTooManyConnections
+        expr: pg_stat_activity_count > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PostgreSQL too many connections"
+          description: "PostgreSQL has {{ $value }} active connections"

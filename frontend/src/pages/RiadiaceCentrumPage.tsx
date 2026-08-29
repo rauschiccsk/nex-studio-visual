@@ -229,6 +229,7 @@ export default function RiadiaceCentrumPage() {
       {/* Bottom — the relay send box. */}
       <div className="col-start-1 row-start-4 min-w-0">
         <ConversationComposer
+          versionId={versionId}
           onRelay={handleSend}
           disabled={!versionId}
           frameworkBlocked={frameworkBlocked}

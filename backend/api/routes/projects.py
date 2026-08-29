@@ -32,12 +32,14 @@ from uuid import UUID
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.api.dependencies import get_knowledge_base_writer, get_rag_indexer
 from backend.core import authz
 from backend.core.security import get_current_user, require_shu_or_above
 from backend.db.models.foundation import User
+from backend.db.models.projects import Project
 from backend.db.session import get_db
 from backend.rag.indexer import RAGIndexer
 from backend.schemas.pagination import PaginatedResponse
@@ -187,7 +189,15 @@ def _validate_ports(db: Session, payload: ProjectCreate | ProjectUpdate, *, proj
     # (+0 BE, +1 FE, +2 DB) so contiguous blocks remain coherent and
     # `suggest_next_port_block` can find the next free 10-port block
     # deterministically.
+    # ICCINT-23: the EFFECTIVE backend port — the one being saved, or the one already stored when this update
+    # does not touch it. Reading only ``payload.backend_port`` made the whole block below conditional on
+    # WHICH FIELDS the request happened to carry: change the frontend port alone and every check here,
+    # alignment and layout both, was skipped. That is how frontend 10193 saved next to backend 10190 during
+    # the ICCINT-6 acceptance walk. A rule that applies only when you also send an unrelated field is not a
+    # rule; it is a coincidence.
     bp = payload.backend_port
+    if bp is None and project_id is not None:
+        bp = db.execute(select(Project.backend_port).where(Project.id == project_id)).scalar_one_or_none()
     if bp is not None and bp >= 10100:
         # Read the CONFIGURED block size rather than a hardcoded 10. ``port_block_size`` is a live,
         # editable setting that ``port_registry.suggest_next_port_block`` honours — so with any value
@@ -196,7 +206,7 @@ def _validate_ports(db: Session, payload: ProjectCreate | ProjectUpdate, *, proj
         block_size = system_setting_service.get_int(db, "port_block_size")
         if block_size < 1:  # a nonsensical setting must not disable the check
             block_size = 10
-        if bp % block_size != 0:
+        if payload.backend_port is not None and bp % block_size != 0:
             first = 10100 - (10100 % block_size)
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -212,13 +222,16 @@ def _validate_ports(db: Session, payload: ProjectCreate | ProjectUpdate, *, proj
         ]
         for field_name, value, offset in layout:
             if value is not None and value != bp + offset:
+                # ICCINT-23: in Slovak, and naming the ports rather than the columns. Since ICCINT-22 the
+                # cockpit shows the backend's OWN sentence to the Manažér, so an English message about a
+                # "column" being "NULL" is now something he reads and cannot act on.
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail=(
-                        f"{field_name} {value} does not match D-020 layout — "
-                        f"expected backend_port + {offset} = {bp + offset} "
-                        f"(got {value}). Either use the expected slot or "
-                        f"leave the column NULL."
+                        f"{_FIELD_SK.get(field_name, field_name)} má port {value}, ale v bloku tohto projektu "
+                        f"mu patrí {bp + offset} (backend {bp} + {offset}). Tak sú bloky rozdelené (D-020): "
+                        f"backend na začiatku, frontend +1, databáza +2 — aby sa dalo od portu spoľahlivo "
+                        f"odvodiť, komu patrí."
                     ),
                 )
 
