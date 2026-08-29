@@ -8141,7 +8141,17 @@ def _ensure_verifikacia_fix_task(
         .join(Epic, Epic.id == Feat.epic_id)
         .where(
             Epic.version_id == version_id,
-            Epic.title == _VERIFIKACIA_FIX_EPIC_TITLE,
+            # The epic is EITHER the one epic (ICCINT-39) or a LEGACY per-round one from before it. That
+            # tolerance is not cosmetic: a build already mid-flight when this shipped carries an OPEN fix
+            # task under the old title, and a lookup that only knew the new name would not find it — it
+            # would stack a second open task and the agent would do the same fix twice. That is precisely
+            # the failure this idempotency guard exists to prevent (nex-shopify 2026-07-20, three identical
+            # tasks), and the rename would have re-introduced it. Caught on the live nex-productcatalogs
+            # build minutes after deploying v4.2.3, before the Manažér pressed the card.
+            or_(
+                Epic.title == _VERIFIKACIA_FIX_EPIC_TITLE,
+                Epic.title.like(f"{_VERIFIKACIA_FIX_TITLE}%"),
+            ),
             Feat.title.like(f"{_VERIFIKACIA_FIX_TITLE}%"),
             Task.title.like(f"{_VERIFIKACIA_FIX_TITLE}%"),
             Task.status.in_(("todo", "in_progress")),

@@ -405,3 +405,54 @@ def test_three_findings_become_three_tasks_in_one_round(db_session) -> None:
     assert len(tasks) == 3
     assert len({t.feat_id for t in tasks}) == 1  # one round, three tasks
     assert {t.description for t in tasks} == {"migrácie padajú", "chýba index", "zlá sadzba"}
+
+
+def test_a_build_already_mid_flight_is_not_given_a_second_fix_task(db_session) -> None:
+    """The migration hazard ICCINT-39 created and nearly shipped.
+
+    A build that was ALREADY running when the one-epic shape landed carries an open fix task under the OLD
+    per-round epic title. A lookup that only knew the new name would not find it, would stack a second open
+    task, and the agent would do the same fix twice — exactly the failure the idempotency guard exists to
+    prevent (nex-shopify 2026-07-20: three identical tasks, one fix done 3x). Caught on the live
+    nex-productcatalogs build minutes after v4.2.3 went out, before the Manažér pressed the card.
+    """
+    version, _state = _seed(db_session, stage="verifikacia")
+    legacy = Epic(
+        project_id=version.project_id,
+        version_id=version.id,
+        number=9,
+        title=f"{orchestrator._VERIFIKACIA_FIX_TITLE} (2. kolo)",  # the OLD shape
+        status="planned",
+    )
+    db_session.add(legacy)
+    db_session.flush()
+    lf = Feat(epic_id=legacy.id, number=1, title=orchestrator._VERIFIKACIA_FIX_TITLE, status="todo")
+    db_session.add(lf)
+    db_session.flush()
+    db_session.add(
+        Task(
+            feat_id=lf.id,
+            number=1,
+            title=orchestrator._VERIFIKACIA_FIX_TITLE,
+            status="todo",
+            task_type="backend",
+            description="starý rozsah",
+        )
+    )
+    db_session.flush()
+
+    orchestrator._ensure_verifikacia_fix_task(db_session, version.id, scope="nový rozsah", findings=["nový rozsah"])
+
+    open_tasks = (
+        db_session.execute(
+            select(Task)
+            .join(Feat, Feat.id == Task.feat_id)
+            .join(Epic, Epic.id == Feat.epic_id)
+            .where(Epic.version_id == version.id, Task.status.in_(("todo", "in_progress")))
+        )
+        .scalars()
+        .all()
+    )
+    assert len(open_tasks) == 1, "a second open fix task was stacked — the agent would fix the same thing twice"
+    # The existing one was REFRESHED with the new brief, not left carrying a stale scope.
+    assert open_tasks[0].description == "nový rozsah"
