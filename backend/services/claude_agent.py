@@ -18,7 +18,7 @@ from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from backend.config.settings import settings
@@ -42,6 +42,15 @@ _TRANSIENT_BACKOFF: tuple[int, ...] = (2, 8, 20)
 #: — hence generous and env-tunable via ``CLAUDE_INVOKE_TIMEOUT``. The
 #: orchestrator passes a per-stage ``timeout`` that overrides this default.
 CLAUDE_INVOKE_TIMEOUT = settings.claude_invoke_timeout
+
+#: ICCINT-47: the per-stage budget is now the SILENCE budget — how long the agent may produce nothing before
+#: the turn is judged stuck. A working agent streams events continuously, so a big-but-honest task is no
+#: longer cut off for being big; only a hung one is. The hard ceiling below is the runaway guard that used to
+#: be the only limit.
+#: The multiplier is deliberately generous: it exists so a turn cannot run forever, NOT to size the work.
+TURN_CEILING_MULTIPLIER = 6
+#: How often the silence watchdog wakes. Short enough to be responsive, long enough to cost nothing.
+_SILENCE_POLL_SECONDS = 5
 
 #: StreamReader line-buffer limit for stream-json mode (bytes). One NDJSON event
 #: can be a whole spec file on a single line, so the 64 KB default is far too
@@ -931,12 +940,19 @@ async def _invoke_streaming(
     """
     event_tail: deque[str] = deque(maxlen=_LOG_EVENT_TAIL)
 
+    # ICCINT-47: the turn's clock measures SILENCE, not size. Every line the agent emits is proof it is still
+    # working; ``_watch_for_silence`` below reads this.
+    loop = asyncio.get_running_loop()
+    last_activity = loop.time()
+
     async def _consume() -> tuple[Optional[str], Optional[UsageMetadata], Optional[dict]]:
+        nonlocal last_activity
         result_text: Optional[str] = None
         result_usage: Optional[UsageMetadata] = None
         result_structured: Optional[dict] = None
         assert proc.stdout is not None
         async for raw in proc.stdout:
+            last_activity = loop.time()
             line = raw.decode("utf-8", errors="replace").strip()
             if not line:
                 continue
@@ -955,21 +971,65 @@ async def _invoke_streaming(
                 result_structured = _structured_from(evt)
         return result_text, result_usage, result_structured
 
+    async def _watch_for_silence(task: "asyncio.Task[Any]", idle_limit: float, ceiling: float) -> Optional[str]:
+        """Cancel *task* when the agent goes SILENT for *idle_limit*, or when *ceiling* is reached.
+
+        ICCINT-47. Before this, one ``wait_for`` capped the WHOLE turn — 40 minutes for Programovanie,
+        whether the task was a one-line fix or thirty spec-derived acceptance assertions. A big-but-honest
+        task could not finish, so the work got sharded to fit the tool: Dedo split one deliverable into four
+        batches and the Manažér paid for it in four clicks and four waits. Director, 31.08.2026: *"Ak sa testy
+        nezmestia, potom to netreba rozbíjať, ale zvýšiť časový limit. Toto pre mňa nie je dlhodobé a nie je
+        akceptovateľné riešenie."*
+
+        A turn should end when the work is DONE or STUCK — not when a clock runs out. A stuck agent stops
+        emitting; a working one does not. So the budget is spent on silence, and the ceiling stays only as a
+        runaway guard. Returns the reason, or ``None`` if the task finished on its own."""
+        started = loop.time()
+        while not task.done():
+            await asyncio.sleep(min(_SILENCE_POLL_SECONDS, idle_limit))
+            if task.done():
+                return None
+            now = loop.time()
+            if now - last_activity >= idle_limit:
+                task.cancel()
+                return f"agent mlčal {int(now - last_activity)}s (limit {int(idle_limit)}s)"
+            if now - started >= ceiling:
+                task.cancel()
+                return f"prekročený tvrdý strop ťahu ({int(ceiling)}s)"
+        return None
+
+    idle_limit = float(timeout)
+    ceiling = max(idle_limit, idle_limit * TURN_CEILING_MULTIPLIER)
+    consume_task: "asyncio.Task[Any]" = asyncio.ensure_future(_consume())
+    watchdog = asyncio.ensure_future(_watch_for_silence(consume_task, idle_limit, ceiling))
     try:
-        result_text, result_usage, result_structured = await asyncio.wait_for(_consume(), timeout=timeout)
+        try:
+            result_text, result_usage, result_structured = await consume_task
+        except asyncio.CancelledError:
+            # Cancelled BY the watchdog (silence / ceiling) → the turn timed out. A cancellation from anywhere
+            # else re-raises below, unchanged.
+            reason = watchdog.result() if watchdog.done() else None
+            if reason is None:
+                raise
+            raise asyncio.TimeoutError(reason) from None
+        finally:
+            watchdog.cancel()
     except asyncio.TimeoutError as exc:
         await _kill_process_tree(proc)
         # A killed docker-run client leaves the CONTAINER alive (``--rm`` only reaps a clean exit) — remove
         # it, or a timed-out sandbox keeps running against the project. No-op for an in-process turn.
         await _reap_sandbox(sandbox_container)
+        # ICCINT-47: WHY the turn ended — silence or the runaway ceiling. "Timed out after 40 min" says only
+        # that a clock ran; the two have different answers (steer the agent vs. look at what it is stuck on).
+        why = str(exc) or f"vypršalo po {timeout}s"
         log_path = _write_turn_log(
             log_dir,
             log_label,
             outcome="timeout",
-            detail=f"claude invocation timed out after {timeout}s (stream did not complete)",
+            detail=f"claude invocation timed out: {why} (stream did not complete)",
             events_tail="\n".join(event_tail),
         )
-        err = ClaudeAgentTimeout(f"claude invocation timed out after {timeout}s")
+        err = ClaudeAgentTimeout(f"claude invocation timed out: {why}")
         err.log_path = log_path
         raise err from exc
     except asyncio.CancelledError:
