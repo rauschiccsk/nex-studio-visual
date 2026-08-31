@@ -598,3 +598,99 @@ async def test_second_version_gate_resolved_by_pre_smoke_note(tmp_path, monkeypa
     (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("second", "v1.0.0", (1, 0))
     assert boot_ok is True and boot_detail == "app booted + responds"
     assert acceptance is not None and acceptance[0] is True
+
+
+# ===========================================================================
+# ICCINT-46 — the gate must not block an app that HAS the tab
+# ===========================================================================
+#
+# 31.08.2026, nex-productcatalogs. The Manažér approved Programovanie (4420 tests green from a clean clone)
+# and Verifikácia refused the build with "chýba navigácia na /updates v menu (sidebar)". It was there —
+# `Sidebar.tsx:88`, alongside eleven sibling entries, all built through one local helper:
+#
+#     {item("✨", "Aktualizácie", "/updates")}
+#
+# The target is the third ARGUMENT of a call, so no `to=` / `href=` / `navigate(` alternative could ever see
+# it. The detector had already been broadened once for the same reason (nex-payables, 2026-07-10) and would
+# have needed a third broadening for the next project with its own helper. Guessing FORMS does not converge.
+#
+# A gate that blocks a correct app is worse than the drop it guards against: the build stops and the agent is
+# sent hunting a bug that does not exist. So the check now keys on the TARGET — a quoted path ending in
+# `…/updates`, however it is passed — with the route declaration itself excluded, which is the one thing that
+# must never double as a nav entry.
+
+
+def _sidebar(proj: Path, line: str) -> None:
+    src = proj / "frontend" / "src"
+    (src / "components" / "layout").mkdir(parents=True, exist_ok=True)
+    (src / "components" / "layout" / "Sidebar.tsx").write_text(line + "\n", encoding="utf-8")
+
+
+def test_2b_nav_built_by_a_local_helper_passes(tmp_path) -> None:
+    """THE defect. Every entry in this sidebar is one helper call; the path is an argument."""
+    proj = tmp_path / "app"
+    proj.mkdir()
+    _seed_frontend(proj, nav=False)
+    _sidebar(proj, '{item("✨", "Aktualizácie", "/updates")}')
+
+    assert orchestrator._check_aktualizacie_frontend(proj) is None, (
+        "a compliant app was blocked again — the target was passed in a shape the detector did not enumerate"
+    )
+
+
+def test_2b_the_shapes_that_already_worked_keep_working(tmp_path) -> None:
+    """The regression guard: broadening must never cost what was already covered."""
+    for shape in (
+        '<Link to="/updates">Aktualizácie</Link>',
+        '<a href="/updates">Aktualizácie</a>',
+        '<NavItem onClick={() => navigate("/updates")} />',
+        'const nav = [{ to: "/admin/updates", label: "Updates" }];',
+        '<Link to={"/updates"}>x</Link>',
+    ):
+        proj = tmp_path / f"app{abs(hash(shape))}"
+        proj.mkdir()
+        _seed_frontend(proj, nav=False)
+        _sidebar(proj, shape)
+        assert orchestrator._check_aktualizacie_frontend(proj) is None, shape
+
+
+def test_2b_a_route_still_cannot_stand_in_for_the_menu(tmp_path) -> None:
+    """The guard that must survive: a page reachable by URL but absent from the menu is still a drop —
+    otherwise the router entry would paper over a sidebar nobody can click."""
+    proj = tmp_path / "app"
+    proj.mkdir()
+    _seed_frontend(proj, nav=False)
+    for route_only in ('<Route path="/updates" element={<U />} />', 'const r = { path: "/updates" };'):
+        _sidebar(proj, route_only)
+        msg = orchestrator._check_aktualizacie_frontend(proj)
+        assert msg is not None and "menu" in msg, route_only
+
+
+def test_2b_a_missing_menu_entry_still_blocks(tmp_path) -> None:
+    """The whole point of the gate. Loosening the shape must not loosen the verdict."""
+    proj = tmp_path / "app"
+    proj.mkdir()
+    _seed_frontend(proj, nav=False)
+    _sidebar(proj, '<NavItem label="Domov" to="/home" />')
+    msg = orchestrator._check_aktualizacie_frontend(proj)
+    assert msg is not None and "menu" in msg
+
+
+def test_2b_neither_a_look_alike_path_nor_a_bare_word_is_a_menu_entry(tmp_path) -> None:
+    """`/updates-log` is a different page; "Naposledy aktualizované" is a label, not a destination."""
+    proj = tmp_path / "app"
+    proj.mkdir()
+    _seed_frontend(proj, nav=False)
+    for near_miss in ('<Link to="/updates-log">Log</Link>', "<span>Naposledy aktualizované</span>"):
+        _sidebar(proj, near_miss)
+        msg = orchestrator._check_aktualizacie_frontend(proj)
+        assert msg is not None and "menu" in msg, near_miss
+
+
+def test_2b_a_commented_out_menu_entry_is_not_a_menu_entry(tmp_path) -> None:
+    proj = tmp_path / "app"
+    proj.mkdir()
+    _seed_frontend(proj, nav=False)
+    _sidebar(proj, '// {item("✨", "Aktualizácie", "/updates")}')
+    msg = orchestrator._check_aktualizacie_frontend(proj)
+    assert msg is not None and "menu" in msg

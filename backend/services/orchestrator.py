@@ -5529,7 +5529,23 @@ _UPDATES_PAGE_IMPORT_RE = re.compile(r"""\bfrom\s+["'][^"'\n]*updates[^"'\n]*["'
 #: false-PASS and an English "Updates"/"Changelog" label can't false-FAIL. The trailing lookahead ``["'/]`` keeps
 #: a distinct route like ``/updates-log`` from matching, and a bare route ``path="updates"`` (no to/href/navigate)
 #: is still not a nav target.
-_UPDATES_NAV_RE = re.compile(r"""(?:navigate\(|\b(?:to|href)\s*[=:]\s*)\{?\s*["'](?:[^"'\n]*/)?updates(?=["'/])""")
+#: ICCINT-46: the form-guessing above does not converge. It was broadened once for nex-payables (2026-07-10)
+#: and false-FAILED again on nex-productcatalogs (31.08.2026), whose sidebar builds EVERY entry through a
+#: local helper — ``{item("✨", "Aktualizácie", "/updates")}``. The target is the third ARGUMENT of a call, so
+#: no amount of ``to=``/``href=``/``navigate(`` alternatives will ever see it, and the next project with its
+#: own helper would need a third broadening. A gate that blocks a correct app is worse than the drop it
+#: guards against: the build stops and the agent is sent hunting a bug that is not there.
+#:
+#: So stop matching FORMS and match the TARGET: a quoted path ending in ``…/updates`` — however it is passed.
+#: The one thing that must still not satisfy this is the ROUTE declaration itself (``path="/updates"``), or a
+#: page's self-route would paper over a dropped sidebar entry; :func:`_has_updates_nav` excludes exactly that.
+#: Everything the old regex protected is kept: the leading ``/`` means a bare ``path="updates"`` is not a nav
+#: target, the ``["'/]`` lookahead keeps ``/updates-log`` out, keying on the PATH (not the accent-stem) keeps
+#: "Naposledy aktualizované" from false-PASSing and an English "Updates" label from false-FAILing, and
+#: comments are stripped before any of this runs.
+_UPDATES_NAV_TARGET_RE = re.compile(r"""["'][^"'\n]*/updates(?=["'/])""")
+#: The route declaration immediately before a target — ``path="/updates"``, ``path: "/updates"``, ``path={"…"``.
+_UPDATES_PATH_PROP_RE = re.compile(r"""\bpath\s*[=:]\s*\{?\s*$""")
 
 
 def _strip_ts_comments(text: str) -> str:
@@ -5540,7 +5556,23 @@ def _strip_ts_comments(text: str) -> str:
     return re.sub(r"(?m)//.*$", "", text)
 
 
-def _fe_src_matches(fe_src: Path, pattern: re.Pattern[str], *, exclude: "frozenset[Path]" = frozenset()) -> bool:
+def _has_updates_nav(body: str) -> bool:
+    """True iff *body* navigates somewhere ending in ``/updates`` — regardless of how the target is passed
+    (ICCINT-46). A ``path=`` declaration directly before the string is the ROUTE, not a nav entry, and is
+    skipped: the route is checked separately, and letting it double as the nav would hide a dropped menu item.
+    """
+    for match in _UPDATES_NAV_TARGET_RE.finditer(body):
+        if not _UPDATES_PATH_PROP_RE.search(body[max(0, match.start() - 40) : match.start()]):
+            return True
+    return False
+
+
+def _fe_src_matches(
+    fe_src: Path,
+    pattern: "re.Pattern[str] | Callable[[str], bool]",
+    *,
+    exclude: "frozenset[Path]" = frozenset(),
+) -> bool:
     """True iff any ``frontend/src`` TypeScript/TSX source (comments stripped) matches *pattern*. Best-effort
     per file — an unreadable file is skipped, never fatal. The router + sidebar are somewhere under this tree;
     grepping the whole tree keeps the check robust to the generated app's exact file names. *exclude* skips the
@@ -5553,7 +5585,8 @@ def _fe_src_matches(fe_src: Path, pattern: re.Pattern[str], *, exclude: "frozens
                 body = _strip_ts_comments(f.read_text(encoding="utf-8", errors="replace"))
             except OSError:
                 continue
-            if pattern.search(body):
+            # A plain pattern, or a predicate when the question is more than one regex can answer (ICCINT-46).
+            if pattern(body) if callable(pattern) else pattern.search(body):
                 return True
     return False
 
@@ -5584,7 +5617,7 @@ def _check_aktualizacie_frontend(proj_root: Path) -> Optional[str]:
         return "chýba stránka Aktualizácie (napr. frontend/src/pages/UpdatesPage.tsx)"
     if not _fe_src_matches(fe_src, _UPDATES_ROUTE_RE, exclude=page_files):
         return "chýba /updates route v routeri"
-    if not _fe_src_matches(fe_src, _UPDATES_NAV_RE, exclude=page_files):
+    if not _fe_src_matches(fe_src, _has_updates_nav, exclude=page_files):
         return "chýba navigácia na /updates v menu (sidebar)"
     return None
 
