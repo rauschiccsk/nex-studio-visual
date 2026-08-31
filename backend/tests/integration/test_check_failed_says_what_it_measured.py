@@ -97,7 +97,9 @@ async def test_a_one_shot_container_that_finished_is_not_a_failed_boot(monkeypat
 
     assert ok is True, "a finished migrate container was still being read as a dead app"
     assert probed, "the app was never asked whether it was up — the compose exit code decided for it"
-    assert "200" in detail
+    # ICCINT-44 replaced the probe's own words with a report of what was measured.
+    assert orchestrator._APP_RESPONDS in detail.lower()
+    assert "migrate" in detail, "the finished one-shot container went unmentioned"
 
 
 @pytest.mark.asyncio

@@ -5358,7 +5358,7 @@ async def _run_app_starts_smoke(stack: _SmokeStack) -> tuple[bool, str]:
         fe_ready, fe_last = await _await_http_ready(base, roles["backend"], fe_port, host=fe_role, path="/")
         if not fe_ready:
             return False, (f"frontend '{fe_role}' not serving within {ACCEPTANCE_SMOKE_READY_TIMEOUT}s: {fe_last}")
-    return True, "app booted + responds"
+    return True, _APP_RESPONDS
 
 
 # gate-g-hardening GAP 1 (B) + CR-V2-051 risk floor: ``release_smoke_test.sh`` MUST print three sentinels —
@@ -5766,10 +5766,12 @@ def _smoke_compose_target(
     return compose, roles, None
 
 
-async def _smoke_container_states(base: list[str]) -> dict[str, int]:
-    """``service -> exit code`` for every container of the stack, or ``{}`` when it cannot be read.
+async def _smoke_container_states(base: list[str]) -> dict[str, tuple[str, int]]:
+    """``service -> (state, exit code)`` for every container of the stack, or ``{}`` when it cannot be read.
 
-    The measured truth about what the compose actually did, as opposed to ``up``'s opinion about it."""
+    The measured truth about what the compose actually did, as opposed to ``up``'s opinion about it. The STATE
+    rides along because "still running when we looked" is something the Manažér has to be TOLD (ICCINT-44),
+    not only something the engine silently declines to judge."""
     code, out = await _compose_smoke_step(base + ["ps", "-a", "--format", "json"], 30)
     if code != 0 or not out.strip():
         return {}
@@ -5788,11 +5790,44 @@ async def _smoke_container_states(base: list[str]) -> dict[str, int]:
             name = r.get("Service") or r.get("Name")
             if not name:
                 continue
+            state = str(r.get("State") or "")
             try:
-                states[str(name)] = int(r.get("ExitCode") or 0)
+                states[str(name)] = (state, int(r.get("ExitCode") or 0))
             except (TypeError, ValueError):
-                states[str(name)] = 0
+                states[str(name)] = (state, 0)
     return states
+
+
+#: What the boot probe itself established: the app came up and answered. The rest of the sentence is built
+#: from the measured container states (:func:`_boot_pass_detail`).
+_APP_RESPONDS = "appka nabehla a odpovedá"
+
+
+def _boot_pass_detail(stack: _SmokeStack, states: dict[str, tuple[str, int]]) -> str:
+    """What a PASSING boot check actually saw, in the Manažér's language (ICCINT-44).
+
+    The probe used to return the constant ``"app booted + responds"`` — the same eleven characters every round,
+    in English, on an otherwise Slovak screen. Everything measured was thrown away, including the one fact that
+    mattered on 31.08.2026: the ``test`` container was STILL RUNNING when we looked, and later turned out never
+    to finish at all. "Kontrola prešla" reads as "testy prešli"; the Director had no way to tell the two apart.
+
+    So the sentence now names the services that answered, the one-shots that finished cleanly, and — the point
+    of this — the containers still running, whose result this check does NOT judge. When there is nothing extra
+    to report it stays exactly as short as it was: no noise where there is no news."""
+    known = {role for role in stack.roles.values() if role}
+    answered = [svc for svc in (stack.roles.get("backend"), stack.roles.get("frontend")) if svc]
+    finished = sorted(s for s, (st, code) in states.items() if st == "exited" and not code)
+    # A long-running service is expected to be up; anything ELSE still running is a one-shot mid-flight.
+    unfinished = sorted(s for s, (st, _c) in states.items() if st == "running" and s not in known)
+
+    parts = [_APP_RESPONDS.capitalize() + "."]
+    if answered:
+        parts.append(f"Odpovedali: {', '.join(answered)}.")
+    if finished:
+        parts.append(f"Dobehli čisto: {', '.join(finished)}.")
+    if unfinished:
+        parts.append(f"V tom čase ešte bežali: {', '.join(unfinished)} — ich výsledok táto kontrola neposudzuje.")
+    return " ".join(parts)
 
 
 async def _boot_leg(stack: _SmokeStack) -> tuple[bool, str]:
@@ -5815,17 +5850,20 @@ async def _boot_leg(stack: _SmokeStack) -> tuple[bool, str]:
     decides — it asks the app itself, which is the question this leg exists to answer. A one-shot container
     still running when we look is not judged (the acceptance leg is where suite depth belongs)."""
     states = await _smoke_container_states(stack.base)
-    failed = sorted(service for service, code in states.items() if code)
+    failed = sorted(service for service, (_state, code) in states.items() if code)
     if failed:
         # ICCINT-37: the compose output says WHICH container died; its own log says WHY. Both, or the
         # reader is left guessing — and two of them did.
         why = await _smoke_failure_logs(stack.base)
-        named = ", ".join(f"{s} (exit {states[s]})" for s in failed)
+        named = ", ".join(f"{s} (exit {states[s][1]})" for s in failed)
         return False, f"{_SMOKE_CONTAINER_FAILED}{named}{why}"
     if not stack.up_ok and not states:
         # Could not look at all — keep the compose output rather than invent a verdict.
         return False, f"up exit {stack.up_rc}: {stack.up_detail.strip()[-400:]}"
-    return await _run_app_starts_smoke(stack)
+    ok, detail = await _run_app_starts_smoke(stack)
+    # ICCINT-44: on the way through, say what was MEASURED — the constant below told the Manažér the same
+    # sentence every round and hid that the test container was still running.
+    return (True, _boot_pass_detail(stack, states)) if ok else (ok, detail)
 
 
 async def _app_starts_after_fix(project_slug: str) -> tuple[bool, str]:
@@ -9506,24 +9544,49 @@ async def _record_task_summary(
 _SELF_CHECK_RETRIES = 5
 
 
-def _envelope_loss_next_action(kind: str, timeout_seconds: int, log_path: Optional[str]) -> str:
+def _saved_work_phrase(commit_count: Optional[int]) -> str:
+    """What became of the turn's work — from the COUNT, never from a template (ICCINT-45).
+
+    Both sentences below used to end "hotové zmeny sú zapísané, môžeš pokračovať" whatever had happened.
+    29.08.2026, nex-productcatalogs: a 40-minute turn ended with nothing committed, the transcript said
+    "žiadna zmena nezistená" — and the ``next_action`` right under it, which is what the Manažér reads as his
+    instruction, told him his work was safe. Two sentences on one screen, contradicting each other, and the
+    reassuring one was the lie.
+
+    The engine already knew: :func:`_audit_lost_work` counts commits since the dispatch baseline and writes
+    exactly this distinction. It was simply not asked. ``None`` means the audit could not run — say so rather
+    than guess in either direction."""
+    if commit_count is None:
+        return "nevieme, či sa niečo stihlo zapísať — over 'git log' a pokračuj v stavbe."
+    if commit_count >= 1:
+        return f"môžu byť zapísané zmeny ({commit_count} commitov) — over 'git log' a pokračuj v stavbe."
+    return (
+        "nezapísala sa žiadna zmena, takže rozpracovaná práca je preč a ďalší ťah začína od predošlého "
+        "stavu. Môžeš pokračovať."
+    )
+
+
+def _envelope_loss_next_action(
+    kind: str, timeout_seconds: int, log_path: Optional[str], commit_count: Optional[int] = None
+) -> str:
     """Plain-language build-round settle message routed by the envelope-loss TYPE
     (build-robustness-crash-handling.md Fix 3). A REAL timeout and a CRASH must NOT share the misleading
     "Vypršal čas agenta" string:
 
-      * ``timeout`` — the turn burned its whole wall-clock budget; the work committed so far is safe and the
-        manager resumes the build.
+      * ``timeout`` — the turn burned its whole wall-clock budget.
       * ``crash`` — the agent lost its connection / crashed (NOT a timeout); ONE auto-retry (Fix 2) already
         ran and failed again; the diagnostic log path (Fix 1) is cited so the operator/Dedo can read the
         cause.
+
+    Neither may assert what became of the work — that comes from :func:`_saved_work_phrase` (ICCINT-45).
     """
+    saved = _saved_work_phrase(commit_count)
     if kind == "timeout":
         minutes = max(1, round(timeout_seconds / 60))
-        return f"Agent vyčerpal časový limit ({minutes} min) — hotové zmeny sú zapísané, môžeš pokračovať v stavbe."
+        return f"Agent vyčerpal časový limit ({minutes} min) — {saved}"
     log_note = f" (log: {log_path})" if log_path else ""
     return (
-        "Agent stratil spojenie / spadol (nie časový limit) — skúsil som to raz znova, opäť zlyhalo. "
-        f"Hotové zmeny sú zapísané, môžeš pokračovať.{log_note}"
+        f"Agent stratil spojenie / spadol (nie časový limit) — skúsil som to raz znova, opäť zlyhalo. {saved}{log_note}"
     )
 
 
@@ -10208,8 +10271,13 @@ async def _run_build_round(
                     # back to the audit's own next_action for a legacy envelope-loss with no kind stamped.
                     kind = result.envelope_loss_kind
                     if kind in ("timeout", "crash"):
+                        # ICCINT-45: hand it the COUNT the audit already measured — the sentence the
+                        # Manažér reads as his instruction must not contradict the one above it.
                         state.next_action = _envelope_loss_next_action(
-                            kind, _timeout_for("programovanie"), result.log_path
+                            kind,
+                            _timeout_for("programovanie"),
+                            result.log_path,
+                            result.lost_work.get("detected_commit_count"),
                         )
                     else:
                         state.next_action = result.lost_work["next_action"]

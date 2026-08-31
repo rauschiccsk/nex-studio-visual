@@ -484,7 +484,7 @@ async def test_integration_compliant_app_passes(tmp_path, monkeypatch) -> None:
 
     (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("green", "v1.0.0", (1, 0))
 
-    assert boot_ok is True and boot_detail == "app booted + responds"
+    assert boot_ok is True and orchestrator._APP_RESPONDS in boot_detail.lower()
     assert acceptance is not None and acceptance[0] is True  # acceptance ran → the gate let it through
 
 
@@ -596,7 +596,7 @@ async def test_second_version_gate_resolved_by_pre_smoke_note(tmp_path, monkeypa
     (versions_dir / "v1.0.0").mkdir()
     (versions_dir / "v1.0.0" / "RELEASE_NOTES.md").write_text("## v1.0.0\n\n- Druhé vydanie.\n", encoding="utf-8")
     (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("second", "v1.0.0", (1, 0))
-    assert boot_ok is True and boot_detail == "app booted + responds"
+    assert boot_ok is True and orchestrator._APP_RESPONDS in boot_detail.lower()
     assert acceptance is not None and acceptance[0] is True
 
 

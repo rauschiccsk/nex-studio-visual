@@ -259,7 +259,9 @@ async def test_driver_pass_runs_acceptance_no_pytest(monkeypatch, tmp_path) -> N
 
     (boot_ok, boot_detail), acceptance = await orchestrator._run_release_smoke("green", "v1.0.0", (1, 0))
 
-    assert (boot_ok, boot_detail) == (True, "app booted + responds")
+    # ICCINT-44: the detail now REPORTS what was measured instead of a constant; the probe verdict is the
+    # invariant, its wording is not.
+    assert boot_ok is True and orchestrator._APP_RESPONDS in boot_detail.lower()
     # CR-V2-051: no declaration → (0,0) floor; PASS detail now carries the feature/negative breakdown.
     assert acceptance == (
         True,
@@ -417,14 +419,14 @@ async def test_driver_renders_env_file_when_live_env_incomplete(monkeypatch, tmp
 
 @pytest.mark.asyncio
 async def test_boot_leg_pass_on_ready(monkeypatch, tmp_path) -> None:
-    """The boot leg returns ``(True, "app booted + responds")`` when BE + FE both answer."""
+    """The boot leg passes when BE + FE both answer, and SAYS what it saw (ICCINT-44)."""
     rec = _StepRecorder({"ready": (0, "status 200"), "ready_fe": (0, "status 404")})
     monkeypatch.setattr(orchestrator, "_compose_smoke_step", rec)
     stack = _mk_stack(tmp_path)
 
     ok, detail = await orchestrator._run_app_starts_smoke(stack)
 
-    assert (ok, detail) == (True, "app booted + responds")
+    assert ok is True and orchestrator._APP_RESPONDS in detail.lower()
     assert rec.count("python") == 2, "BE self-probe + FE cross-probe, each ready on the first poll"
     assert not rec.ran("up") and not rec.ran("down"), "the boot leg never owns up/down (the CM does)"
 
