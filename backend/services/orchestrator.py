@@ -7482,10 +7482,72 @@ def _latest_verifikacia_manager_lead(db: Session, version_id: uuid.UUID) -> Opti
 _VERIFIKACIA_STUCK_STREAK = 3
 
 
+#: Bits of a failure detail that differ between two runs of the SAME cause — timestamps, container/image ids,
+#: durations. Blanked before two causes are compared, so a redelivered identical failure still matches itself.
+_VOLATILE_DETAIL_RE = re.compile(r"\b(?:\d{4}-\d\d-\d\d[t ][\d:.]+|[0-9a-f]{8,}|\d+(?:\.\d+)?m?s)\b", re.IGNORECASE)
+
+
+def _failure_signature(payload: object) -> str:
+    """A fingerprint of WHAT failed, for deciding whether two rounds hit the same wall (ICCINT-41).
+
+    Built from the verdict's ``technical_detail`` — the concrete reason ICCINT-37 started carrying and
+    ICCINT-43 taught to name the failing container. Volatile bits are blanked so the same cause twice reads as
+    the same cause; everything else is kept, because ``HTTP 404`` and ``HTTP 500`` are NOT the same wall.
+    An empty signature (no detail on record) never equals another — unknown is not proof of sameness."""
+    if not isinstance(payload, dict):
+        return ""
+    detail = str(payload.get("technical_detail") or "").strip()
+    if not detail:
+        return ""
+    return re.sub(r"\s+", " ", _VOLATILE_DETAIL_RE.sub("#", detail.lower())).strip()[:400]
+
+
+def _cause_changed_since_previous_fail(db: Session, version_id: uuid.UUID) -> bool:
+    """True iff this FAIL hit a DIFFERENT wall than the FAIL before it (ICCINT-41).
+
+    Drives the one line the repeated headline hides. Deliberately conservative: a first FAIL, a missing detail
+    on either side, or an unchanged cause all answer False — the card only claims a change it can point at."""
+    rows = (
+        db.execute(
+            select(PipelineMessage.payload)
+            .where(
+                PipelineMessage.version_id == version_id,
+                PipelineMessage.stage == "verifikacia",
+                PipelineMessage.kind == "verdict",
+            )
+            .order_by(PipelineMessage.seq.desc())
+            .limit(2)
+        )
+        .scalars()
+        .all()
+    )
+    if len(rows) < 2 or not all(isinstance(p, dict) and p.get("verdict") == "FAIL" for p in rows):
+        return False
+    newest, previous = _failure_signature(rows[0]), _failure_signature(rows[1])
+    return bool(newest) and bool(previous) and newest != previous
+
+
 def _verifikacia_fail_streak(db: Session, version_id: uuid.UUID) -> int:
-    """v4.0.16: how many Verifikácia verdicts IN A ROW have been FAIL (newest-first, until the first non-FAIL /
-    PASS breaks the run). A high streak = the fix loop is NOT converging; the card escalates to a human instead
-    of looping the non-expert forever. Text-agnostic (counts FAILs, not finding wording) → robust."""
+    """How many Verifikácia verdicts in a row failed **on the same cause** (newest-first).
+
+    v4.0.16 counted FAILs and called itself "text-agnostic (counts FAILs, not finding wording) → robust". The
+    count was robust; the SENTENCE built on it was not. The card turns this number into
+    *"to isté zlyhanie sa opakuje"* and then recommends stopping the build — a claim about SAMENESS that a
+    plain tally cannot support.
+
+    31.08.2026, nex-productcatalogs: two consecutive FAILs, two different walls — a missing ``/updates`` nav
+    entry (NEX Studio's own bug, fixed in v4.2.9) and then ``/api/v1/release-notes`` returning 404 (a real gap
+    in the project). The first had just been SOLVED, so the loop had moved forward — and the card advised
+    handing the build to a developer. The Director followed the screen and wrote *"Nepochopil som čo treba
+    robiť"*. The same pattern had already been filed once (ICCINT-41, three causes under one headline).
+
+    So the streak now compares CAUSES (:func:`_failure_signature`): a DIFFERENT wall breaks the run exactly as
+    a PASS does, because hitting a new wall is progress, not repetition.
+
+    A verdict with no detail on record does NOT break it. That is deliberate: before ICCINT-37 nothing carried
+    a reason, and treating "unknown" as "different" would quietly retire the loop breaker that v4.0.16 exists
+    to be — the non-expert looped ten times on nex-shopify. Unknown keeps counting; what it must not do is
+    licence the CLAIM of sameness, and that is :func:`_verifikacia_same_cause_confirmed`'s job."""
     rows = (
         db.execute(
             select(PipelineMessage.payload)
@@ -7499,13 +7561,48 @@ def _verifikacia_fail_streak(db: Session, version_id: uuid.UUID) -> int:
         .scalars()
         .all()
     )
-    streak = 0
+    streak, signature = 0, None
     for p in rows:
-        if isinstance(p, dict) and p.get("verdict") == "FAIL":
-            streak += 1
-        else:
+        if not (isinstance(p, dict) and p.get("verdict") == "FAIL"):
             break
+        current = _failure_signature(p)
+        if current and signature and current != signature:
+            break  # a different wall — the run of "this same thing again" ends here
+        signature = signature or current
+        streak += 1
     return streak
+
+
+def _verifikacia_same_cause_confirmed(db: Session, version_id: uuid.UUID) -> bool:
+    """True only when two consecutive FAILs were MEASURED to hit the same wall (ICCINT-41).
+
+    Separate from :func:`_verifikacia_fail_streak` on purpose. The streak may include rounds whose reason was
+    never recorded — it has to, or the loop breaker would vanish on older builds. But the card's sentence
+    *"to isté zlyhanie sa opakuje"* is a claim about sameness, and a claim needs evidence, not a tally."""
+    rows = (
+        db.execute(
+            select(PipelineMessage.payload)
+            .where(
+                PipelineMessage.version_id == version_id,
+                PipelineMessage.stage == "verifikacia",
+                PipelineMessage.kind == "verdict",
+            )
+            .order_by(PipelineMessage.seq.desc())
+        )
+        .scalars()
+        .all()
+    )
+    seen: Optional[str] = None
+    for p in rows:
+        if not (isinstance(p, dict) and p.get("verdict") == "FAIL"):
+            return False
+        current = _failure_signature(p)
+        if not current:
+            continue
+        if seen is not None:
+            return current == seen
+        seen = current
+    return False
 
 
 def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineState) -> ConsultationBlock:
@@ -7528,6 +7625,10 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
     # v4.0.16: non-converging loop breaker — when the SAME blocker keeps recurring, stop RECOMMENDING another
     # fix and recommend handing it to a developer instead (honest escalation, not an endless non-expert loop).
     stuck = _verifikacia_fail_streak(db, version_id) >= _VERIFIKACIA_STUCK_STREAK
+    # ICCINT-41: "to isté zlyhanie" is a claim about SAMENESS. Say it only when it was measured;
+    # otherwise say what is certainly true — that several rounds in a row did not get through.
+    same_cause = stuck and _verifikacia_same_cause_confirmed(db, version_id)
+    repeat_phrase = "to isté zlyhanie sa opakuje" if same_cause else "niekoľko kôl po sebe neprešlo"
 
     # v4.0.11: LEAD with the PLAIN manager summary (the verdict's ``content``), NOT the technical fix scope.
     # The scope (file paths / codes / repro / line numbers) rides the card's collapsible "Technický detail"
@@ -7537,6 +7638,15 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
         "Koncové overenie našlo blokujúcu chybu — treba tvoje rozhodnutie."
     )
     explanation_parts = [lead]
+    # ICCINT-41: the manager-facing headline is a CATEGORY ("Aplikácia sa nespustila", "kontrola Aktualizácie
+    # zlyhala") and reads identically round after round, so a build that moved forward looks like one that
+    # stood still. Say what CHANGED — the one fact the repeated headline hides. Only when it really changed:
+    # a first FAIL, or an unchanged wall, gets no such line and the card stays as short as it was.
+    if _cause_changed_since_previous_fail(db, version_id):
+        explanation_parts.append(
+            "Oproti minulému kolu je to INÁ príčina — tá predošlá je vyriešená. Slučka sa teda pohla dopredu, "
+            "hoci nadpis znie podobne."
+        )
     if critique:
         crit_verdict = critique.get("verdict")
         crit_why = str(critique.get("why") or "").strip()
@@ -7594,7 +7704,7 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
                 id="fix_it",
                 label=("Skúsiť opraviť ešte raz" if stuck else "Nechaj to opraviť"),
                 detail=(
-                    "Pravdepodobne nepomôže — to isté zlyhanie sa opakuje a automatická oprava nekonverguje. "
+                    f"Pravdepodobne nepomôže — {repeat_phrase} a automatická oprava nekonverguje. "
                     "Ak to chceš aj tak skúsiť, AI Agent opraví podľa nálezov Auditora."
                     if stuck
                     else "Jedným klikom — AI Agent opraví podľa nálezov Auditora a Auditor to znova preverí. "
@@ -7652,7 +7762,7 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
     return ConsultationBlock(
         id=f"verifikacia-fix-{version_id}-{state.iteration}",
         intro=(
-            "⚠️ Automatická oprava sa NEDARÍ — to isté zlyhanie sa opakuje. Treba tvoje rozhodnutie."
+            f"⚠️ Automatická oprava sa NEDARÍ — {repeat_phrase}. Treba tvoje rozhodnutie."
             if stuck
             else "Verifikácia našla chybu — potrebné je tvoje rozhodnutie."
         ),

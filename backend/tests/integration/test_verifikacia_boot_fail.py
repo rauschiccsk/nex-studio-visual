@@ -645,3 +645,119 @@ def test_charters_document_nexmanager_token_launch_contract() -> None:
     for text in (agent, auditor):
         assert "/api/v1/launch?lt=" in text  # the launch-landing endpoint contract
         assert "auth_mode=token" in text  # scoped to token-launch apps
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  ICCINT-41 — "to isté zlyhanie" must be measured, not counted
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# 31.08.2026, nex-productcatalogs. Two Verifikácia FAILs in a row, two DIFFERENT walls:
+#
+#   1. "chýba navigácia na /updates v menu (sidebar)"  ← NEX Studio's own bug, fixed in v4.2.9
+#   2. "/api/v1/release-notes vrátil HTTP 404"         ← a real gap in the project
+#
+# The first had just been SOLVED — the loop had moved forward. The card counted two FAILs, announced "to isté
+# zlyhanie sa opakuje" and recommended handing the build to a developer. The Director followed the screen and
+# wrote: "Nepochopil som čo treba robiť."
+#
+# The tally was right; the SENTENCE built on it was not. A claim about sameness needs evidence, and the reason
+# has been on record since ICCINT-37.
+
+
+def _fail(db, version_id, detail: str | None) -> None:
+    orchestrator._record_message(
+        db,
+        version_id=version_id,
+        stage="verifikacia",
+        author="auditor",
+        recipient="manazer",
+        kind="verdict",
+        content="Verifikácia zlyhala.",
+        payload={
+            "verdict": "FAIL",
+            "findings": ["x"],
+            "proposed_fix": "y",
+            "phase": "verifikacia",
+            **({"technical_detail": detail} if detail is not None else {}),
+        },
+    )
+
+
+def test_a_new_wall_is_progress_not_repetition(db_session) -> None:
+    """THE defect. Three FAILs, but the newest hit a different wall — that is a step forward, and the card
+    must not tell the Manažér to stop."""
+    state = _seed_state_at_verifikacia(db_session)
+    version_id = state.version_id
+    _fail(db_session, version_id, "Aktualizácie chýba vo frontende: chýba navigácia na /updates v menu")
+    _fail(db_session, version_id, "Aktualizácie chýba vo frontende: chýba navigácia na /updates v menu")
+    _fail(db_session, version_id, "Aktualizácie chýba: /api/v1/release-notes vrátil HTTP 404 (očakávané 200)")
+
+    assert orchestrator._verifikacia_fail_streak(db_session, version_id) == 1, "a new wall did not break the run"
+    card = orchestrator._build_fix_consultation(db_session, version_id, state)
+    dec = card.decisions[0]
+    assert [o.id for o in dec.options if o.recommended] != ["hold"], (
+        "the card told the Manažér to stop a build that had just moved forward"
+    )
+    assert "NEDARÍ" not in card.intro
+
+
+def test_a_changed_cause_is_said_out_loud(db_session) -> None:
+    """The headline is a CATEGORY and reads the same every round; the one fact it hides is that the wall
+    changed. Two different failures produced the same "kontrola Aktualizácie zlyhala" lead."""
+    state = _seed_state_at_verifikacia(db_session)
+    version_id = state.version_id
+    _fail(db_session, version_id, "chýba navigácia na /updates v menu (sidebar)")
+    _fail(db_session, version_id, "/api/v1/release-notes vrátil HTTP 404 (očakávané 200)")
+
+    dec = orchestrator._build_fix_consultation(db_session, version_id, state).decisions[0]
+    assert "INÁ príčina" in dec.explanation, "nothing on the card said the wall had changed"
+
+
+def test_the_same_wall_twice_says_nothing_extra(db_session) -> None:
+    """The control: no noise when there is nothing to report. An unchanged cause must not grow the card."""
+    state = _seed_state_at_verifikacia(db_session)
+    version_id = state.version_id
+    _fail(db_session, version_id, "/api/v1/release-notes vrátil HTTP 404")
+    _fail(db_session, version_id, "/api/v1/release-notes vrátil HTTP 404")
+
+    dec = orchestrator._build_fix_consultation(db_session, version_id, state).decisions[0]
+    assert "INÁ príčina" not in dec.explanation
+
+
+def test_the_same_wall_three_times_still_escalates(db_session) -> None:
+    """The loop breaker must survive: genuinely repeating on ONE cause is exactly when a human is needed."""
+    state = _seed_state_at_verifikacia(db_session)
+    version_id = state.version_id
+    for _ in range(orchestrator._VERIFIKACIA_STUCK_STREAK):
+        _fail(db_session, version_id, "kontajner zlyhal: backend (exit 1) — ImportError")
+
+    card = orchestrator._build_fix_consultation(db_session, version_id, state)
+    assert [o.id for o in card.decisions[0].options if o.recommended] == ["hold"]
+    # …and NOW the strong claim is earned, because it was measured.
+    assert "to isté zlyhanie sa opakuje" in card.intro
+
+
+def test_without_a_recorded_reason_the_breaker_still_fires_but_claims_less(db_session) -> None:
+    """Older builds carry no ``technical_detail`` (pre-ICCINT-37). Unknown must not retire the loop breaker —
+    the non-expert was looped ten times on nex-shopify — but it must not licence the claim either."""
+    state = _seed_state_at_verifikacia(db_session)
+    version_id = state.version_id
+    for _ in range(orchestrator._VERIFIKACIA_STUCK_STREAK):
+        _fail(db_session, version_id, None)
+
+    card = orchestrator._build_fix_consultation(db_session, version_id, state)
+    assert [o.id for o in card.decisions[0].options if o.recommended] == ["hold"], "the loop breaker vanished"
+    assert "to isté zlyhanie sa opakuje" not in card.intro, "claimed sameness it never measured"
+    assert "niekoľko kôl po sebe neprešlo" in card.intro
+
+
+def test_the_same_wall_with_different_timestamps_is_still_the_same_wall(db_session) -> None:
+    """Two runs of one cause differ in timestamps and container ids. If those counted as different walls, the
+    breaker would never fire again."""
+    state = _seed_state_at_verifikacia(db_session)
+    version_id = state.version_id
+    for stamp, cid in (("2026-08-31T10:00:00", "a1b2c3d4e5f6"), ("2026-08-31T18:22:41", "f9e8d7c6b5a4")):
+        _fail(db_session, version_id, f"kontajner zlyhal: backend (exit 1) {stamp} {cid} 1.5s")
+
+    assert orchestrator._verifikacia_fail_streak(db_session, version_id) == 2
+    assert orchestrator._verifikacia_same_cause_confirmed(db_session, version_id) is True
