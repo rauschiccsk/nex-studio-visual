@@ -1092,6 +1092,89 @@ def _get_state(db: Session, version_id: uuid.UUID) -> Optional[PipelineState]:
     return db.execute(select(PipelineState).where(PipelineState.version_id == version_id)).scalar_one_or_none()
 
 
+#: Machine markup that has no business in a sentence written for the Manažér. An agent that mixes its
+#: structured-output syntax into the human ``summary`` field must not have it rendered verbatim on his screen.
+_MACHINE_MARKUP_RE = re.compile(r"</summary>|<parameter\s+name\s*=|<function_calls>|<invoke\s+name\s*=", re.IGNORECASE)
+
+
+def _human_text(content: str) -> str:
+    """The human half of a message, with machine markup cut away (ICCINT-48).
+
+    01.09.2026, the Verifikácia PASS verdict — the most important sentence of the whole build, the one the
+    Manažér reads when deciding to close the version — arrived on screen like this:
+
+        …peniaze počíta na cent a vzhľad zostal taký, aký si schválil.</summary>
+        <parameter name="findings">["NEBLOKUJÚCE — čistička citlivých údajov…
+
+    The Auditor had put its structured-output syntax inside the JSON ``summary`` field, and the engine stored
+    what it was handed. Nothing was lost — ``payload`` carried the parsed ``findings`` correctly — and nothing
+    was untrue. It was simply unreadable, and it looked like a malfunction.
+
+    Cut at the first machine marker and keep what precedes it. Everything after is already in ``payload``, so
+    this drops no information the screen has any other way of showing. Text with no marker is untouched."""
+    if not content:
+        return content
+    match = _MACHINE_MARKUP_RE.search(content)
+    if match is None:
+        return content
+    cleaned = content[: match.start()].rstrip()
+    # Never hand back an empty bubble: markup at position 0 means the whole field was machine text.
+    return cleaned or content
+
+
+def _verdict_message(
+    db: Session,
+    *,
+    version_id: uuid.UUID,
+    content: str,
+    payload: dict[str, Any],
+) -> PipelineMessage:
+    """The Auditor's verdict as ONE message on the Manažér's screen (ICCINT-49).
+
+    The Verifikácia turn already produced a message: the generic status-block writer records every parsed
+    agent block, and an Auditor verdict block lands there as ``kind='verdict'`` carrying the rich
+    ``payload['report']`` the cockpit renders. Then this path recorded a SECOND one with the same
+    ``summary`` text and the decision fields (``verdict``, ``verified_sha``). Both are addressed to the
+    Manažér and the thread filters on nothing, so he read the same paragraph twice — measured 01.09.2026 on
+    nex-productcatalogs (messages 1471 and 1472, identical 1206-character text).
+
+    On a PASS that is noise. On a FAIL it is worse: two identical red paragraphs read as two separate
+    problems, exactly when the Manažér is deciding what to do about one.
+
+    So enrich the message that already exists rather than adding another — the report and the decision fields
+    end up on the SAME bubble. When no such message is on record (an engine-built verdict with no agent turn
+    behind it — the runtime-floor override), insert as before; the fields must never be lost to a merge that
+    found nothing."""
+    existing = db.execute(
+        select(PipelineMessage)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.stage == "verifikacia",
+            PipelineMessage.author == "auditor",
+            PipelineMessage.kind == "verdict",
+            PipelineMessage.content == _human_text(content),
+        )
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    # Only merge into a block that has NOT already been given a verdict — a second Verifikácia round must
+    # never overwrite the previous round's recorded outcome.
+    if existing is not None and not (isinstance(existing.payload, dict) and existing.payload.get("verdict")):
+        existing.payload = {**(existing.payload or {}), **payload}
+        db.flush()
+        return existing
+    return _record_message(
+        db,
+        version_id=version_id,
+        stage="verifikacia",
+        author="auditor",
+        recipient="manazer",
+        kind="verdict",
+        content=content,
+        payload=payload,
+    )
+
+
 def _record_message(
     db: Session,
     *,
@@ -1110,7 +1193,7 @@ def _record_message(
         author=author,
         recipient=recipient,
         kind=kind,
-        content=content,
+        content=_human_text(content),
         status=status,
         payload=payload,
     )
@@ -8331,13 +8414,9 @@ async def _run_verifikacia_round(
         # Publish both artifacts — a release-notes commit and a verified tag that live only in this
         # container's checkout are not a release (audit finding).
         _push_release_artifacts(claude_agent.PROJECTS_ROOT / slug, version_label)
-    verdict_msg = _record_message(
+    verdict_msg = _verdict_message(
         db,
         version_id=version_id,
-        stage="verifikacia",
-        author="auditor",
-        recipient="manazer",
-        kind="verdict",
         content=review.summary or f"Verifikácia {verdict_str}.",
         payload={
             "verdict": verdict_str,
