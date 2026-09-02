@@ -1569,7 +1569,68 @@ def _prior_auditor_review_context(db: Session, version_id: uuid.UUID) -> Optiona
     return findings, (agent_latest or "").strip()
 
 
-def _auditor_upfront_directive(db: Session, version_id: uuid.UUID) -> str:
+#: ICCINT-29: what the Vizuál write-back turn must answer with when a screen the Manažér approved CONTRADICTS
+#: something already written in the Špecifikácia. The agent never resolves it — a contradiction means two
+#: decisions were taken at two different times, and which one holds is a question of INTENT, not of code.
+_VIZUAL_CONFLICT_MARKER = "ROZPOR"
+#: ``consultation.source`` for a Vizuál/dokumentácia contradiction — the Manažér answers it with real Decision
+#: Cards, exactly like an Auditor finding. Reusing that path (rather than a bespoke block) is what makes the
+#: card actually RENDER: ``DecisionCardsBar`` draws nothing without a ``consultation.decisions[]`` queue, so a
+#: hand-rolled ``decision_needed`` message would have blocked the build behind a bar with nothing to click.
+_VIZUAL_CONFLICT_SOURCE = "vizual_conflict"
+
+
+def _vizual_writeback_directive(db: Session, version_id: uuid.UUID) -> str:
+    """Fold what was agreed in Vizuál back into the Špecifikácia and the Návrh (ICCINT-29).
+
+    Director, 25.08.2026, looking at the nex-productcatalogs Vizuál: *"Vizuál je vynikajúci nástroj aj na to,
+    aby sme do systému doplnili všetko, čo sme počas návrhu zabudli… Ako to bude so špecifikáciou?"* It was
+    not — approving a Vizuál squashed the screens into one commit and wrote NOTHING into the documents, so a
+    build ended with two truths that could disagree: what the documents say, and what the approved screens do.
+
+    Three things broke because of it. The release check is derived from the Špecifikácia, so whatever lived
+    only in the screens was never checked — the newest and least thought-through additions were the least
+    verified, which is backwards. The next version reads the Špecifikácia as the only truth, so those
+    additions would be re-designed differently or silently dropped. And the task plan was built from "the warm
+    session", i.e. a conversation that shortens and is gone — a plan standing on memory that is neither
+    durable nor auditable.
+
+    This turn runs at the approval seam, BEFORE the squash commit, so the documents land in the SAME commit as
+    the screens: one truth, one signature.
+
+    **It may not decide anything.** Filling a silence is fold-in; a genuine conflict is the Manažér's to
+    settle (Director, 02.09.2026), and comes back as a card carrying BOTH sides."""
+    version = db.get(Version, version_id)
+    version_number = version.version_number if version is not None else "0.1.0"
+    spec_rel = _priprava_spec_rel(version_number)
+    design_rel = _navrh_design_doc_rel(version_number)
+    return (
+        "Manažér práve SCHVÁLIL vizuál. Než sa zapečatí, premietni dohodnuté z fázy Vizuál späť do "
+        "dokumentácie — aby dokumenty a schválené obrazovky hovorili to isté.\n\n"
+        "PREČÍTAJ:\n"
+        f"  1. `{spec_rel}` — Špecifikácia\n"
+        f"  2. `{design_rel}` — Návrh\n"
+        "  3. celý rozhovor fázy Vizuál (máš ho v tejto session) a živý stav `frontend/`\n\n"
+        "ČO UROB:\n"
+        "• Každú vec, na ktorej ste sa vo Vizuáli dohodli a v dokumentoch nie je, **doplň** — do Špecifikácie "
+        "to, čo appka má robiť, do Návrhu to, ako je to riešené. Píš rovnakým jazykom a štruktúrou ako zvyšok "
+        "dokumentu; nezakladaj vlastné kapitoly na konci.\n"
+        "• Nepíš históriu rozhovoru ani zoznam zmien. Dokument má znieť tak, ako keby to tak bolo od začiatku "
+        "— to je jeho účel: **z neho sa stavia a podľa neho sa overuje.**\n"
+        "• Na obrazovky nesiahaj. Vizuál je schválený; ty upravuješ IBA dokumenty.\n\n"
+        f"⚠️ KEĎ NARAZÍŠ NA ROZPOR — Špecifikácia hovorí X a schválená obrazovka robí nie-X — **NEROZHODUJ**. "
+        f"Zapíš do `summary` slovo `{_VIZUAL_CONFLICT_MARKER}` a do `findings` každý rozpor ako JEDNU položku "
+        "v tvare:\n"
+        "  `<čoho sa týka> — Špecifikácia: <čo hovorí ona> | Obrazovka: <čo robí ona>`\n"
+        "Obe strany doslova, aby sa Manažér vedel rozhodnúť z faktov, nie z nálepky. Rozpor znamená, že sa "
+        "v dvoch časoch rozhodlo dvakrát inak — či si Manažér názor zmenil, alebo obrazovkou prekĺzla chyba, "
+        "nemáš ako vedieť. Dokumenty vtedy nechaj tak, ako sú.\n\n"
+        "Mlčanie Špecifikácie NIE JE rozpor — to je medzera a tú doplň ticho.\n\n"
+        "Do `deliverables` daj cesty dokumentov, ktoré si zmenil. NECOMMITUJ — commit spraví engine."
+    )
+
+
+def _auditor_upfront_directive(db: Session, version_id: uuid.UUID, *, narrowed_to: Optional[str] = None) -> str:
     """The Auditor's UPFRONT spec/design review brief (CR-V2-013; AUD-1(a), AUD-5, NAVRH-4, AUTON-5).
 
     DESIGN-BEARING (flagged for the Manažér): this prompt DEFINES the independent Auditor's upfront-review
@@ -1631,6 +1692,22 @@ def _auditor_upfront_directive(db: Session, version_id: uuid.UUID) -> str:
             "ho, ak je v aktuálnych dokumentoch naozaj vyriešený. PONECHAJ len tie, čo sú STÁLE naozaj "
             "chýbajúce/nesprávne — a cituj presné miesto. Neopakuj identický nález bez nového overenia."
         )
+    # ICCINT-29: after a Vizuál write-back the documents CHANGED, and §2.5 makes the upfront review mandatory
+    # whenever they do. Reviewing the whole Špecifikácia a second time would pay for what was already judged;
+    # what needs judging is the ADDITION — which is also the newest and least thought-through part, so it is
+    # exactly what this review exists for. The diff is mechanically available (one commit), so the scope is
+    # handed over rather than re-derived.
+    narrowing = (
+        (
+            "\n\n⚠️ ZÚŽENÁ PREVIERKA. Špecifikáciu a Návrh si už raz posudzoval a to posúdenie platí. Teraz "
+            "posudzuj IBA to, čo do nich pribudlo po schválení vizuálu — text nižšie. Zvyšok dokumentov čítaj "
+            "len ako kontext, aby si vedel, či prírastok sedí s tým, čo už platí.\n"
+            "Nálezy hlás LEN k prírastku. Neopakuj nálezy k častiam, ktoré sa nezmenili.\n\n"
+            f"PRÍRASTOK:\n{narrowed_to}"
+        )
+        if narrowed_to
+        else ""
+    )
     return (
         "UPFRONT PREVIERKA (nezávislý Auditor, po fáze Návrh, pred začatím programovania).\n"
         f"1. NAČÍTAJ schválenú Špecifikáciu (`{spec_rel}`) + návrhový dokument (`{design_rel}`) + Zadanie a "
@@ -1657,7 +1734,9 @@ def _auditor_upfront_directive(db: Session, version_id: uuid.UUID) -> str:
         "BEZ ciest k súborom, názvov premenných/endpointov, kódov, čísel riadkov, počtov testov a žargónu. VŠETOK "
         "technický rozbor daj do `technical_detail` — Manažérovi sa zobrazí ZBALENÝ v „Technický detail“, takže "
         "sa nič nestratí a manažérsky text ostane čistý. (`proposed_fix` = rozsah pre AI Agenta, smie byť technický.)\n"
-        "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)." + reverify_block
+        "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
+        + reverify_block
+        + narrowing
     )
 
 
@@ -1678,9 +1757,18 @@ def _consultation_directive(
         if proposed_fix
         else ""
     )
+    # The lead sentence states where the points CAME FROM, and it has to be true. Telling the Manažér that a
+    # Vizuál contradiction "sa našla pri nezávislej previerke" would be the ICCINT-26 mistake again: the app
+    # asserting something about its own history that nobody checked, in the one message he decides from.
+    lead = (
+        "Pri porovnaní schválených obrazoviek s dokumentáciou sa našli ROZPORY. Každý z nich sú DVE tvoje "
+        "rozhodnutia z rôznych chvíľ a platiť môže len jedno — rozhodni, ktoré:"
+        if source == _VIZUAL_CONFLICT_SOURCE
+        else "Pri nezávislej previerke sa našli tieto body, ktoré treba ROZHODNÚŤ pred pokračovaním:"
+    )
     return (
         "KONZULTÁCIA S MANAŽÉROM. Manažér je NEŠPECIALISTA — píš ĽUDSKOU rečou, bez technického žargónu.\n"
-        "Pri nezávislej previerke sa našli tieto body, ktoré treba ROZHODNÚŤ pred pokračovaním:\n"
+        f"{lead}\n"
         f"{findings_block}{fix_block}\n\n"
         "NEOPRAVUJ zatiaľ NIČ. Vráť JEDEN `kind=consultation` blok:\n"
         "- `consultation.intro`: 1-2 vety po ľudsky — čo a prečo treba rozhodnúť.\n"
@@ -4340,9 +4428,20 @@ def _commit_vizual_changes(project_root: Path) -> None:
     ``git add -A`` never stages it (:mod:`vizual_sandbox`)."""
     if not (project_root / ".git").is_dir():
         return  # dry-run / no checkout — nothing to commit
-    if not _git_ok(project_root, ["add", "-A", "--", "frontend"]):
+    # ICCINT-29: the write-back turn just updated specification.md / design.md, and those documents describe
+    # exactly these screens. Staging only ``frontend`` would sign the screens and leave the documents for some
+    # later commit — two signatures for one decision, which is the split this ticket exists to close.
+    #
+    # Only pathspecs that EXIST are passed. ``git add`` fails the whole call on one unmatched pathspec, so
+    # naming ``docs`` in a project that has none would stage nothing and silently kill the squash itself —
+    # the screens would stop being committed at all. Caught by the existing squash test.
+    paths = [name for name in ("frontend", "docs") if (project_root / name).is_dir()]
+    if not paths or not _git_ok(project_root, ["add", "-A", "--", *paths]):
         return
-    _git_ok(project_root, ["commit", "-m", "feat(vizual): manažérom schválené vizuálne úpravy"])
+    _git_ok(
+        project_root,
+        ["commit", "-m", "feat(vizual): manažérom schválené vizuálne úpravy + premietnutie do dokumentácie"],
+    )
 
 
 def _commit_navrh_deliverables(project_root: Path) -> None:
@@ -7283,12 +7382,151 @@ async def _fold_task_plan_into_navrh(
     )
 
 
+def _docs_changed_in_head(project_root: Path) -> str:
+    """The documentation part of the newest commit, as text (ICCINT-29).
+
+    This is what the narrowed upfront review judges. It exists because the write-back and the screens land in
+    ONE commit, so "what the Vizuál added to the documents" is mechanically available rather than something
+    the Auditor has to work out for itself. Empty string when there is nothing (no checkout, nothing folded,
+    an unreadable repo) — the caller then skips the review instead of asking about nothing."""
+    if not (project_root / ".git").exists():
+        return ""
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(project_root), "diff", "HEAD~1", "HEAD", "--", "docs"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if done.returncode != 0:
+        return ""
+    # Bounded: a whole rewritten Špecifikácia would otherwise be pasted into the prompt. The cap is generous
+    # enough for a Vizuál round's worth of additions and small enough not to drown the review.
+    return done.stdout.strip()[:12000]
+
+
+async def _settle_vizual_conflict(
+    db: Session,
+    state: PipelineState,
+    conflicts: list[str],
+    *,
+    on_event: Optional[claude_agent.EventCallback] = None,
+    on_message: Optional[MessageCallback] = None,
+) -> PipelineState:
+    """Stop the Vizuál approval on a contradiction and put it in front of the Manažér as Decision Cards
+    (ICCINT-29).
+
+    The build stays AT Vizuál. Nothing is committed, ``vizual_approved_sha`` is not written, and the screens
+    remain exactly as he left them — settling a contradiction silently in either direction would bury a
+    disagreement he never saw.
+
+    A contradiction is *the* decision the agent may not take: the two sides are two decisions the Manažér
+    himself made at different times, and only he knows which still holds. So it goes down the SAME road as an
+    Auditor finding — :func:`_settle_for_consultation` — which turns each conflict into a card with options,
+    a recommendation and a rationale, and which already carries the fail-open fallback and the re-consult cap.
+
+    Reusing it is not just tidiness. ``DecisionCardsBar`` renders nothing without a ``consultation.decisions[]``
+    queue, so a hand-written ``decision_needed`` message would have stopped the build behind a bar with
+    nothing to click — the build blocked, the label saying "Treba tvoje rozhodnutie", and no way to give one."""
+    return await _settle_for_consultation(
+        db,
+        state,
+        source=_VIZUAL_CONFLICT_SOURCE,
+        # Both sides VERBATIM, never a category. A card that names the kind of problem instead of the problem
+        # itself walks the Manažér into the wrong answer — measured twice (ICCINT-41, ICCINT-43), and both
+        # times it had to be fixed afterwards.
+        verdict=PipelineStatusBlock(
+            stage="vizual",
+            kind="gate_report",
+            summary="Schválené obrazovky si v niečom odporujú so Špecifikáciou alebo Návrhom.",
+            awaiting="manazer",
+            findings=list(conflicts),
+        ),
+        on_event=on_event,
+        on_message=on_message,
+    )
+
+
+async def _writeback_vizual_to_docs(
+    db: Session,
+    state: PipelineState,
+    *,
+    on_event: Optional[claude_agent.EventCallback] = None,
+    on_message: Optional[MessageCallback] = None,
+) -> Optional[list[str]]:
+    """Run the write-back turn at the Vizuál approval seam (ICCINT-29).
+
+    Returns the conflicts the agent refused to resolve (approval must STOP and ask the Manažér), an empty list
+    when the documents were folded cleanly, or ``None`` when the turn could not run at all.
+
+    **A failed write-back must never block the approval.** The Manažér has walked and approved the screens;
+    refusing to let him past because an engine-side turn hiccuped would trade a missing document for a stuck
+    cockpit. A missing document he can SEE is the lesser harm — so a failure is reported and the approval
+    continues. A CONFLICT is different: that is not a failure, it is a question only he can answer."""
+    version_id = state.version_id
+    try:
+        result = await invoke_agent_with_parse_retry(
+            db,
+            version_id=version_id,
+            role=AI_AGENT_ROLE,
+            stage="vizual",
+            prompt=_vizual_writeback_directive(db, version_id),
+            on_event=on_event,
+            recipient="manazer",
+            on_message=on_message,
+        )
+    except Exception as exc:  # noqa: BLE001 — see the docstring: never sink the approval
+        logger.exception("vizual write-back turn failed for version %s", version_id)
+        await _report_writeback_failure(db, version_id, str(exc)[:400], on_message)
+        return None
+    if isinstance(result, ParseFailure):
+        # Same outcome as a crash from where the Manažér stands — the documents did not get written. It must
+        # read the same way too; a silent return here is the escape hatch that fails without saying so.
+        logger.warning("vizual write-back produced no parseable block for version %s", version_id)
+        await _report_writeback_failure(db, version_id, "agent neodpovedal v očakávanom tvare", on_message)
+        return None
+    # The agent was told to answer with ONE word when it found a contradiction; anything else means it folded.
+    if _VIZUAL_CONFLICT_MARKER not in (result.summary or "").upper():
+        return []
+    return [one for one in (result.findings or []) if str(one).strip()] or ["(rozpor bez popisu)"]
+
+
+async def _report_writeback_failure(
+    db: Session,
+    version_id: uuid.UUID,
+    detail: str,
+    on_message: Optional[MessageCallback],
+) -> None:
+    """Tell the Manažér the documents did not get written — for EVERY way the turn can fail."""
+    note = _record_message(
+        db,
+        version_id=version_id,
+        stage="vizual",
+        author="system",
+        recipient="manazer",
+        kind="notification",
+        content=(
+            "Premietnutie vizuálu do dokumentácie sa nepodarilo — schválenie pokračuje, ale "
+            "Špecifikácia a Návrh nemusia zodpovedať schváleným obrazovkám. Daj agentovi pokyn "
+            "premietnuť to, alebo ma zavolaj."
+        ),
+        payload={"phase": "vizual", "vizual_writeback": "failed", "technical_detail": detail},
+    )
+    if on_message is not None:
+        await on_message(note)
+    db.flush()
+
+
 async def _run_auditor_upfront_review(
     db: Session,
     state: PipelineState,
     *,
     on_event: Optional[claude_agent.EventCallback] = None,
     on_message: Optional[MessageCallback] = None,
+    narrowed_to: Optional[str] = None,
 ) -> Optional[PipelineStatusBlock]:
     """The Auditor's UPFRONT spec/design review (CR-V2-013; AUD-1(a), AUD-5, NAVRH-4, AUTON-5) — replaces
     the Gate-E Customer function. Runs ONCE inside :func:`_run_navrh_round` after the design doc + task plan
@@ -7319,7 +7557,7 @@ async def _run_auditor_upfront_review(
         version_id=state.version_id,
         role=AUDITOR_ROLE,
         stage="navrh",
-        prompt=_auditor_upfront_directive(db, state.version_id),
+        prompt=_auditor_upfront_directive(db, state.version_id, narrowed_to=narrowed_to),
         on_event=on_event,
         recipient="manazer",  # the Auditor's findings are for the Manažér at the post-Návrh stop
         on_message=on_message,
@@ -10955,8 +11193,27 @@ async def apply_action(
         # HMR reflects it live), so squash the whole visual session into ONE commit now, at approval, before
         # advancing vizual → programovanie. Best-effort; a no-op when nothing changed.
         if state.current_stage == "vizual":
+            # ICCINT-29: fold what was agreed in Vizuál back into the documents BEFORE the squash, so the
+            # Špecifikácia, the Návrh and the screens land in ONE commit under ONE signature. Until now
+            # nothing was written back and a build ended with two truths that could disagree — and the
+            # release check, which reads the Špecifikácia, never saw the newest additions at all.
+            # ``apply_action`` carries no live callbacks; the turn's messages are recorded either way
+            # and reach the cockpit on the next board read.
+            _conflicts = await _writeback_vizual_to_docs(db, state)
+            if _conflicts:
+                # Not a failure — a question. A contradiction means two decisions were taken at two different
+                # times; which one holds is intent, and intent is the Manažér's (Director, 02.09.2026). The
+                # approval does NOT go through: settling it silently either way would bury the disagreement.
+                return await _settle_vizual_conflict(db, state, _conflicts)
             _vizual_root = claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id)
             _commit_vizual_changes(_vizual_root)
+            # ICCINT-29 / §2.5: the documents just changed, so the upfront review is due again — NARROWED to
+            # what was added. Reviewing the whole Špecifikácia a second time would pay for what was already
+            # judged; the addition is the part nobody has judged yet, and it is also the newest and least
+            # thought-through, which is precisely what this review is for.
+            _added = _docs_changed_in_head(_vizual_root)
+            if _added:
+                await _run_auditor_upfront_review(db, state, narrowed_to=_added)
             # v4.0.23: record the approved-Vizuál commit as the binding contract — Programovanie
             # preserves it (wire data, don't redesign) + the Auditor verifies the delivered FE
             # still matches it. Best-effort: no SHA (dry-run / unreadable repo) → leave NULL.

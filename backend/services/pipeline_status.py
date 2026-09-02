@@ -298,7 +298,8 @@ class ConsultDecision(BaseModel):
 
 class ConsultationBlock(BaseModel):
     """A queue of decisions surfaced to the Manažér (CR-V2-041). ``source`` labels provenance
-    (``auditor_upfront`` | ``verifikacia_fail`` | ``build_blocker`` | ``agent_ambiguity``) — for the audit
+    (``auditor_upfront`` | ``verifikacia_fail`` | ``build_blocker`` | ``agent_ambiguity`` |
+    ``vizual_conflict``) — for the audit
     trail + the apply-directive wording; the Manažér's experience is identical regardless."""
 
     id: str

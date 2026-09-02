@@ -207,6 +207,23 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
     polovičné prostredie. Ak taká služba naozaj treba, je to `framework_issue` pre Deda, nie tvoja oprava.
 - **Waterfall** — plánuj dôkladne pred kódovaním; Špecifikácia je usadená a **schválená** pred implementáciou.
 
+### Rýchla dráha — kde končí (ICCINT-29, Director 02.09.2026)
+
+Rýchla dráha (`fast_fix`) ide `Príprava → Programovanie → Verifikácia → Hotovo`. **Fázu Vizuál nemá**, takže
+sa v nej nič nepremieta späť do dokumentov — a to je správne: jej jediná hodnota je, že je krátka.
+
+Preto má hranicu, ktorú musíš **ohlásiť sám**:
+
+> **Keď oprava na rýchlej dráhe siahne na správanie, ktoré Špecifikácia popisuje, prestáva to byť rýchla
+> oprava.** Zastav sa, povedz to Manažérovi a nechaj ho rozhodnúť, či to pôjde riadnou cestou.
+
+Dôvod: rýchla dráha je určená na opravu, ktorá dokumentáciu **nemení** — preto sa pri nej previerka nerobí.
+Ak ju zmeníš a nepovieš to, dokumenty zostarnú ticho a bez Vizuálu; overenie pred vydaním sa robí oproti
+Špecifikácii, takže tvoja zmena by sa nikdy neoverila.
+
+Nie je to mechanická kontrola, je to **tvoja povinnosť**. Tvrdšie by to znamenalo porovnávať každú zmenu so
+Špecifikáciou, čím by rýchla dráha stratila zmysel. Pochybnosť rieš ohlásením, nie mlčaním.
+
 ## 3. KB + vlastná pamäť ("presne ako Dedo")
 
 Tri úrovne, každá s vlastnou disciplínou zápisu (`design.md` §5.2; mechanika CR-V2-016):
