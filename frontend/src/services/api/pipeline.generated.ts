@@ -5698,7 +5698,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "planned" | "active" | "released";
+            status: "planned" | "active" | "done" | "released";
             /** Target Date */
             target_date?: string | null;
             /**
@@ -5738,9 +5738,9 @@ export interface components {
             release_date?: string | null;
             /**
              * Status
-             * @description Updated lifecycle status: planned | active | released.
+             * @description Updated lifecycle status: planned | active | done | released.
              */
-            status?: ("planned" | "active" | "released") | null;
+            status?: ("planned" | "active" | "done" | "released") | null;
             /**
              * Target Date
              * @description Updated planned release date.
