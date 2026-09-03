@@ -92,6 +92,53 @@ _CHARTER_SEP = "\n\n---\n\n"
 _V1_AGENT_DIRS = ("designer", "implementer", "customer")
 
 
+def refresh_v2_agent_charters(project_root: Path, slug: str) -> int:
+    """Prepíš rolové charty zo šablóny NEX Studia. Vracia počet obnovených rolí (ICCINT-51).
+
+    Chartu píše :func:`provision_v2_agent_charters` RAZ, pri založení projektu, a engine ju pri každom
+    spustení agenta číta z tej kópie (``claude_agent._load_charter``). Šablóna má od 23.08.2026 jediného
+    vlastníka, ale kópie sa už neobnovujú — takže každé zlepšenie pravidiel sa mlčky zastaví pred
+    existujúcimi projektmi. 02.09.2026 sa to prejavilo naplno: nové pravidlo pre rýchlu dráhu sa
+    nedostalo ani do jedného.
+
+    ÚZKY zásah, zámerne. Nevolá sa celé zakladanie — to prepisuje aj koreňové ``CLAUDE.md``, nastavenia,
+    značku dôvery a upratuje adresáre v1. Zastarávajú len rolové charty, tak sa obnovujú len tie.
+
+    **Volajúci MUSÍ preskočiť prevzaté projekty.** Stráž nie je tu: ``provision_v2_agent_charters``
+    prepisuje rolové charty bez ohľadu na ``adopted`` (ten príznak riadi len upratovanie v1), takže
+    prevzatému projektu by obnova prepísala jeho vlastné pravidlá — a tie sú podľa CLAUDE.md §1 jeho.
+
+    Best-effort: chýbajúci projekt, chýbajúca šablóna ani zlyhaný zápis nesmú zhodiť stavbu. Agent by
+    v najhoršom prípade bežal podľa starších pravidiel, čo je presne dnešný stav — nie zhoršenie.
+    """
+    claude_dir = project_root / ".claude"
+    if not project_root.is_dir() or not claude_dir.is_dir():
+        return 0
+    base_tpl = NEX_STUDIO_TEMPLATES / _AGENT_SHARED_BASE
+    if not base_tpl.is_file():
+        logger.warning("charter refresh SKIPPED for slug=%s — shared base template missing", slug)
+        return 0
+    base_text = base_tpl.read_text(encoding="utf-8").rstrip()
+
+    refreshed = 0
+    for role_slug, (charter_tpl_name, _settings_tpl_name) in _V2_AGENTS.items():
+        charter_tpl = NEX_STUDIO_TEMPLATES / charter_tpl_name
+        role_charter = claude_dir / "agents" / role_slug / "CLAUDE.md"
+        if not charter_tpl.is_file() or not role_charter.parent.is_dir():
+            continue
+        wanted = base_text + _CHARTER_SEP + charter_tpl.read_text(encoding="utf-8")
+        try:
+            if role_charter.is_file() and role_charter.read_text(encoding="utf-8") == wanted:
+                continue  # už sedí — nezapisujeme, nech sa nemení čas úpravy zbytočne
+            role_charter.write_text(wanted, encoding="utf-8")
+            refreshed += 1
+        except OSError as exc:
+            logger.warning("charter refresh failed for slug=%s role=%s: %s", slug, role_slug, exc)
+    if refreshed:
+        logger.info("charter refresh: slug=%s roles=%d obnovené zo šablóny", slug, refreshed)
+    return refreshed
+
+
 def provision_v2_agent_charters(project_root: Path, slug: str, project_name: str, *, adopted: bool) -> None:
     """Write the v2 two-agent ``Pravidlá agenta`` charters into the freshly-scaffolded project and
     normalise it to v2 shape. HARD requirement (raises :class:`ProvisioningError` on failure).

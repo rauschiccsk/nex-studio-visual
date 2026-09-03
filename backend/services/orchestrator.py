@@ -52,7 +52,15 @@ from backend.db.models.versions import Version
 from backend.schemas.epic import EpicCreate
 from backend.schemas.feat import FeatCreate
 from backend.schemas.task import TaskCreate
-from backend.services import claude_agent, dedo_escalation, dedo_message, failure_framing, fast_fix, uat_provisioner
+from backend.services import (
+    claude_agent,
+    create_project_postscaffold,
+    dedo_escalation,
+    dedo_message,
+    failure_framing,
+    fast_fix,
+    uat_provisioner,
+)
 from backend.services import epic as epic_service
 from backend.services import feat as feat_service
 from backend.services import system_setting as system_setting_service
@@ -10842,6 +10850,13 @@ async def apply_action(
         # dovtedy volalo jedine pri ručnej úprave epiky, čo priebeh nikdy nerobí, takže rozbehnutá
         # stavba vyzerala rovnako ako nezačatá.
         version_service.auto_activate(db, version_id)
+        # ICCINT-51: obnov agentovi pravidlá zo šablóny, kým sa nezačalo pracovať. Charta sa dovtedy
+        # písala RAZ pri založení projektu a už nikdy — každé zlepšenie pravidiel sa teda mlčky
+        # zastavilo pred existujúcimi stavbami. Prevzatý projekt sa PRESKAKUJE: jeho pravidlá sú jeho
+        # (CLAUDE.md §1) a obnova ich píše bez pýtania — stráž je tu, nie vo volanej funkcii.
+        _proj = db.get(Project, db.get(Version, version_id).project_id)
+        if _proj is not None and not _proj.adopted:
+            create_project_postscaffold.refresh_v2_agent_charters(claude_agent.PROJECTS_ROOT / _proj.slug, _proj.slug)
         db.flush()
         _record_message(
             db,

@@ -44,6 +44,11 @@ class Project(Base, UUIDMixin, TimestampMixin):
     db_port = Column(Integer, nullable=True)
     repo_url = Column(String(255), nullable=True)
     source_path = Column(Text, nullable=True)
+    # ICCINT-51: prevzatý projekt (``--adopt``) si podľa CLAUDE.md §1 drží VLASTNÉ pravidlá — do jeho
+    # charty sa nesiaha. Hodnota sa dovtedy počítala pri zakladaní (``adopted=not scaffolded_here``),
+    # použila raz a zabudla, takže engine pri spúšťaní agenta nemal ako tie dva prípady rozlíšiť.
+    # Bez toho sa charta nedá bezpečne obnovovať: obnova by prevzatému projektu prepísala jeho vlastné.
+    adopted = Column(Boolean, nullable=False, server_default="false")
     kb_path = Column(Text, nullable=True)
     # UAT deploy mapping (F-009, CR-NS-098). Maps this project to its
     # ``/opt/uat/<uat_slug>`` deploy (e.g. ``nex-ledger`` → ``"ledger"``,

@@ -923,6 +923,11 @@ def create_project(
             provision_v2_agent_charters,
         )
 
+        # ICCINT-51: zapíš to, čo tu vieme, nech to vie aj engine. Prevzatý projekt si drží vlastné
+        # pravidlá (CLAUDE.md §1) a jeho charta sa NESMIE obnovovať zo šablóny; dovtedy sa táto
+        # hodnota vypočítala, použila raz a zabudla, takže pri spúšťaní agenta už nebola k dispozícii.
+        project.adopted = not scaffolded_here
+        db.flush()
         try:
             provision_v2_agent_charters(
                 PROJECTS_ROOT / project.slug, project.slug, project.name, adopted=not scaffolded_here
