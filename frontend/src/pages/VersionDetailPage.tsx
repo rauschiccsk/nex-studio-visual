@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { versionStatusCls, versionStatusLabel } from "@/components/cockpit/labels";
 import { useNavigate, useParams } from "react-router-dom";
 import { listProjectsApi } from "@/services/api/projects";
 import { getVersion, writeZadanie, readZadanie } from "@/services/api/versions";
@@ -10,18 +11,6 @@ import type { Version } from "@/types/version";
 import { useActiveContextSync } from "@/hooks/useActiveContextSync";
 
 // ─── Status helpers ───────────────────────────────────────────────────────────
-
-function versionStatusCls(status: string) {
-  if (status === "active") return "bg-[var(--color-state-warning-bg)] border border-[var(--color-state-warning-bg)] text-[var(--color-state-warning-fg)]";
-  if (status === "released") return "bg-[var(--color-state-success-bg)] border border-[var(--color-state-success-bg)] text-[var(--color-state-success-fg)]";
-  return "bg-[var(--color-surface-active)] border border-[var(--color-border-strong)] text-[var(--color-text-secondary)]";
-}
-
-function versionStatusLabel(status: string) {
-  if (status === "active") return "Prebieha";
-  if (status === "released") return "Vydané";
-  return "Plánované";
-}
 
 // The one reason string for both controls closed by an unreadable Zadanie (tooltip on Uložiť and Spustiť).
 const ZADANIE_UNKNOWN_REASON =

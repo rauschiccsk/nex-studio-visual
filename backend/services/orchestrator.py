@@ -57,6 +57,7 @@ from backend.services import epic as epic_service
 from backend.services import feat as feat_service
 from backend.services import system_setting as system_setting_service
 from backend.services import task as task_service
+from backend.services import version as version_service
 from backend.services.claude_agent import ClaudeAgentError, ClaudeAgentTimeout, invoke_claude
 from backend.services.pipeline_metrics import aggregate_pipeline_usage
 from backend.services.pipeline_status import (
@@ -6851,6 +6852,10 @@ def _apply_hotovo_signoff(
     state.current_actor = "ai_agent"
     state.status = "done"
     state.next_action = "Verzia je hotová — nasadenie (UAT/PROD) je samostatný krok."
+    # ICCINT-50: zaznamenaj dokončenie AJ na verzii. Bez toho zostávala postavená a schválená
+    # verzia v stave ``planned`` a na obrazovke sa nedala odlíšiť od nezačatej — Manažérovi sa
+    # nad ňou ponúkal panel „Zadanie" s návodom, ako ju spustiť.
+    version_service.mark_done(db, version_id)
     db.flush()
 
 
@@ -10833,6 +10838,10 @@ async def apply_action(
             mode=mode,
         )
         db.add(state)
+        # ICCINT-50: stavba sa začala — verzia prestáva byť „naplánovaná". ``auto_activate`` sa
+        # dovtedy volalo jedine pri ručnej úprave epiky, čo priebeh nikdy nerobí, takže rozbehnutá
+        # stavba vyzerala rovnako ako nezačatá.
+        version_service.auto_activate(db, version_id)
         db.flush()
         _record_message(
             db,

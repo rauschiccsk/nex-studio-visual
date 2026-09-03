@@ -294,3 +294,37 @@ export function verificationDrifted(
 // NOTE (CR-V2-021): the v1 ``STAGE_ORDER`` / ``FAST_FIX_STAGE_ORDER`` / ``stageOrderForFlow`` /
 // ``REGATE_TARGETS`` / ``nextStageLabel`` (the 11-stage waterfall order + gate_g re-gate targets) are
 // REMOVED — the v2 Vývoj board uses the 4-phase :data:`PHASE_ORDER` + :func:`nextPhaseLabel` instead.
+
+// ─── Stav VERZIE ──────────────────────────────────────────────────────────────
+//
+// ICCINT-50 (03.09.2026): jedno miesto pre obe stránky, ktoré stav verzie zobrazujú
+// (ProjectDetailPage, VersionDetailPage). Dovtedy mala každá vlastnú kópiu tých istých
+// dvoch funkcií — a tak vzniká, že sa oprava spraví na jednej a druhá zostane pozadu.
+//
+// ``done`` pribudlo preto, že postavená a schválená verzia niesla ``planned`` a na obrazovke
+// sa nedala odlíšiť od nezačatej. Ponechať ju ``active`` až do nasadenia by ju zase nedalo
+// odlíšiť od tej, ktorá sa práve stavia.
+export const VERSION_STATUS_LABELS: Record<string, string> = {
+  planned: "Plánované",
+  active: "Prebieha",
+  done: "Hotové",
+  released: "Vydané",
+};
+
+/** Popis stavu verzie. Neznámy stav sa NEVYDÁVA za „Plánované" — vypíše sa, ako prišiel.
+ *  Prepadové „Plánované" je presne ten druh tichej lži, kvôli ktorej vznikol ICCINT-50. */
+export function versionStatusLabel(status: string): string {
+  return VERSION_STATUS_LABELS[status] ?? status;
+}
+
+/** Farebné ladenie štítku. ``done`` má vlastný odtieň — hotové a vydané sú dva rôzne stavy
+ *  a nemajú vyzerať rovnako; nasadenie je samostatný krok, ktorý ešte neprebehol. */
+export function versionStatusCls(status: string): string {
+  if (status === "active")
+    return "bg-[var(--color-state-warning-bg)] border border-[var(--color-state-warning-bg)] text-[var(--color-state-warning-fg)]";
+  if (status === "done")
+    return "bg-[var(--color-state-info-bg)] border border-[var(--color-state-info-bg)] text-[var(--color-state-info-fg)]";
+  if (status === "released")
+    return "bg-[var(--color-state-success-bg)] border border-[var(--color-state-success-bg)] text-[var(--color-state-success-fg)]";
+  return "bg-[var(--color-surface-active)] border border-[var(--color-border-strong)] text-[var(--color-text-secondary)]";
+}

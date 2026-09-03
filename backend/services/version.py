@@ -511,6 +511,27 @@ def delete(db: Session, version_id: UUID) -> None:
     db.flush()
 
 
+def mark_done(db: Session, version_id: UUID) -> Version:
+    """Zaznamenaj, že sa stavba dokončila: ``planned`` / ``active`` → ``done`` (ICCINT-50).
+
+    Volá sa z priebehu vo chvíli, keď Manažér podpíše Hotovo. Dovtedy neexistoval prechod, ktorý by
+    dokončenie zaznamenal — ``auto_activate`` sa spúšťalo jedine pri ručnej úprave epiky, čo priebeh
+    nikdy nerobí, takže postavené a schválené verzie zostávali ``planned`` a na obrazovke sa nedali
+    odlíšiť od nezačatých. Manažérovi sa nad hotovou verziou ponúkal návod, ako ju spustiť.
+
+    ``released`` sa NEPREPISUJE. Stavy idú len dopredu (DESIGN.md §4.0 Rule 3) a nasadená verzia je
+    ďalej než dokončená; opačný krok by z vydaného produktu spravil rozrobený.
+
+    Nespúšťa výnimku, keď verzia neexistuje v očakávanom stave — dokončenie stavby je pre Manažéra
+    hotová vec a nesmie ho zhodiť evidenčný detail.
+    """
+    version = get_by_id(db, version_id)
+    if version.status in ("planned", "active"):
+        version.status = "done"
+        db.flush()
+    return version
+
+
 def auto_activate(db: Session, version_id: UUID) -> Version:
     """Auto-transition a ``planned`` version to ``active``.
 

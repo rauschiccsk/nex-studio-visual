@@ -6,7 +6,7 @@ default values match the SQLAlchemy model exactly so that
 ``VersionRead.model_validate(version_orm_instance)`` round-trips cleanly.
 
 Status values correspond to the ``ck_versions_status`` CHECK constraint
-on the ``versions`` table (``planned | active | released``).  The ORM
+on the ``versions`` table (``planned | active | done | released``).  The ORM
 column is a ``String`` type guarded by a DB-level CHECK rather than a
 Python Enum, so ``Literal`` is the narrowest faithful representation —
 consistent with the approach used in :mod:`backend.schemas.bug`,
@@ -30,9 +30,13 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 # Mirrors the CHECK constraint
-# ``status IN ('planned', 'active', 'released')``
+# ``status IN ('planned', 'active', 'done', 'released')``
 # on the ``versions`` table.
-VersionStatus = Literal["planned", "active", "released"]
+#
+# ``done`` (ICCINT-50, 03.09.2026): postavená, overená a Manažérom schválená verzia, ktorá ešte nebola
+# nasadená. Bez neho hotová verzia niesla ``planned`` a na obrazovke sa nedala odlíšiť od nezačatej.
+# Ponechať ju ``active`` až do nasadenia by ju zase nedalo odlíšiť od tej, ktorá sa práve stavia.
+VersionStatus = Literal["planned", "active", "done", "released"]
 
 
 class VersionCreate(BaseModel):
@@ -93,7 +97,7 @@ class VersionUpdate(BaseModel):
     )
     status: Optional[VersionStatus] = Field(
         default=None,
-        description="Updated lifecycle status: planned | active | released.",
+        description="Updated lifecycle status: planned | active | done | released.",
     )
     description: Optional[str] = Field(
         default=None,

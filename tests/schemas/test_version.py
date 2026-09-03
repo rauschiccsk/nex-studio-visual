@@ -33,8 +33,13 @@ class TestVersionStatus:
     """The ``VersionStatus`` alias mirrors the DB CHECK constraint."""
 
     def test_allowed_values(self) -> None:
-        """Literal exposes exactly the three DB-allowed values."""
-        assert set(get_args(VersionStatus)) == {"planned", "active", "released"}
+        """Literal exposes exactly the four DB-allowed values.
+
+        ``done`` pribudlo 03.09.2026 (ICCINT-50): postavená, overená a Manažérom schválená verzia,
+        ktorá ešte nebola nasadená. Bez neho niesla ``planned`` a na obrazovke sa nedala odlíšiť
+        od nezačatej.
+        """
+        assert set(get_args(VersionStatus)) == {"planned", "active", "done", "released"}
 
 
 # ---------------------------------------------------------------------------

@@ -48,7 +48,7 @@ class Version(Base, UUIDMixin, TimestampMixin):
             name="uq_versions_project_id_version_number",
         ),
         CheckConstraint(
-            "status IN ('planned', 'active', 'released')",
+            "status IN ('planned', 'active', 'done', 'released')",
             name="ck_versions_status",
         ),
     )

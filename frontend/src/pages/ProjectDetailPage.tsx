@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { versionStatusCls, versionStatusLabel } from "@/components/cockpit/labels";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { AlertTriangle, Loader2, Trash2, Zap } from "lucide-react";
 import { deleteProjectApi, getProjectApi, listProjectsApi } from "@/services/api/projects";
@@ -54,18 +55,6 @@ export function PipelineBar({ version }: { version: Version }) {
 
 // ─── Version card ─────────────────────────────────────────────────────────────
 
-function versionStatusCls(status: string) {
-  if (status === "active") return "bg-[var(--color-state-warning-bg)] border border-[var(--color-state-warning-bg)] text-[var(--color-state-warning-fg)]";
-  if (status === "released") return "bg-[var(--color-state-success-bg)] border border-[var(--color-state-success-bg)] text-[var(--color-state-success-fg)]";
-  return "bg-[var(--color-surface-hover)] border border-[var(--color-border-strong)] text-[var(--color-text-secondary)]";
-}
-
-function versionStatusLabel(status: string) {
-  if (status === "active") return "Prebieha";
-  if (status === "released") return "Vydané";
-  return "Plánované";
-}
-
 function VersionCard({ version, onOpen }: { version: Version; onOpen: () => void }) {
   const dateStr = new Date(version.created_at).toLocaleDateString("sk-SK", {
     day: "numeric", month: "numeric", year: "numeric",
@@ -97,8 +86,11 @@ function VersionCard({ version, onOpen }: { version: Version; onOpen: () => void
         <PipelineBar version={version} />
         <div className="flex items-center justify-between text-xs text-[var(--color-text-muted)]">
           <span>{version.bug_count} chýb · {version.epics_done}/{version.epic_count} celkov hotových</span>
-          {/* Audit Theme 5: a never-started (planned) version says "Začať", not "Pokračovať" (nothing to continue). */}
-          <span className="text-primary-400 font-medium">{version.status === "planned" ? "Začať →" : "Pokračovať →"}</span>
+          {/* Audit Theme 5: a never-started (planned) version says "Začať", not "Pokračovať" (nothing to continue).
+              ICCINT-50: a finished one says neither — there is nothing to start and nothing to continue. */}
+          <span className="text-primary-400 font-medium">
+            {version.status === "planned" ? "Začať →" : version.status === "active" ? "Pokračovať →" : "Otvoriť →"}
+          </span>
         </div>
       </div>
     </div>
