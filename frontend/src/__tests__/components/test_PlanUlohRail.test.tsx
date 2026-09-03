@@ -414,15 +414,22 @@ describe("PlanUlohRail — Programovanie build controls (STEP 4)", () => {
   });
 
   it("shows the amber paused note above 'Pokračovať v stavbe' when status is paused, and NOT otherwise", async () => {
+    // ICCINT-52: tento test pôvodne pripínal text „Stavba pozastavená (token-limit)" — teda dôvod,
+    // ktorý si pruh VYMÝŠĽAL. Stavba sa pozastaví tromi spôsobmi a token-limit je len jeden z nich,
+    // takže test strážil, aby appka v dvoch prípadoch z troch klamala. Pripína sa teraz to, čo naozaj
+    // platí: pruh sa pri ``paused`` zobrazí a nesie dôvod ZO STAVBY.
     const { rerender } = render(
       <PlanUlohRail
         versionId="v1"
         messages={[]}
-        board={mkBoard({ available_actions: ["pokracovat"], state: mkState({ status: "paused" }) })}
+        board={mkBoard({
+          available_actions: ["pokracovat"],
+          state: mkState({ status: "paused", next_action: "Pozastavené Manažérom — pokračuj cez 'Pokračovať'." }),
+        })}
         onBoard={() => {}}
       />,
     );
-    expect(await screen.findByText(/Stavba pozastavená \(token-limit\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/Pozastavené Manažérom/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Pokračovať v stavbe/ })).toBeInTheDocument();
 
     // pokracovat still offered but not paused (mid-loop resume affordance) → no amber note.
@@ -434,7 +441,7 @@ describe("PlanUlohRail — Programovanie build controls (STEP 4)", () => {
         onBoard={() => {}}
       />,
     );
-    await waitFor(() => expect(screen.queryByText(/Stavba pozastavená/)).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText(/Pozastavené Manažérom/)).not.toBeInTheDocument());
     expect(screen.getByRole("button", { name: /Pokračovať v stavbe/ })).toBeInTheDocument();
   });
 
@@ -1143,4 +1150,66 @@ describe("PlanUlohRail — done nodes survive a remount, not re-collapsed (obs #
       expect(saved).toContain("f2");
     });
   });
+
+  // ─── ICCINT-52: pozastavená stavba nesmie vymýšľať dôvod ────────────────────────────────────────
+  //
+  // Pruh mal natvrdo napísané „(token-limit)" a podmienku len ``status === "paused"``. Lenže stavba sa
+  // pozastaví TROMI spôsobmi a systém ku každému drží pravdivý dôvod v ``next_action``. V dvoch prípadoch
+  // z troch teda obrazovka klamala. Director na to narazil 03.09.2026 naživo: poslal agentovi opravu,
+  // stavba čakala na jeho potvrdenie, a on ohlásil poruchu — lebo mu appka povedala, že došli tokeny.
+
+  it("pri čakajúcej oprave NEHOVORÍ o token-limite", async () => {
+    vi.mocked(getTaskPlan).mockResolvedValue(PLAN);
+    render(
+      <PlanUlohRail
+        versionId="v1"
+        messages={[]}
+        board={mkBoard({
+          state: mkState({
+            status: "paused",
+            next_action: "Oprava podľa tvojho pokynu je pripravená — 'Pokračovať' ju spustí.",
+          }),
+          available_actions: ["pokracovat"],
+        })}
+        onBoard={() => {}}
+      />,
+    );
+    expect(await screen.findByText(/Oprava podľa tvojho pokynu je pripravená/)).toBeInTheDocument();
+    expect(screen.queryByText(/token-limit/i)).not.toBeInTheDocument();
+  });
+
+  it("pri skutočnom token-limite povie aj konkrétny strop", async () => {
+    vi.mocked(getTaskPlan).mockResolvedValue(PLAN);
+    render(
+      <PlanUlohRail
+        versionId="v1"
+        messages={[]}
+        board={mkBoard({
+          state: mkState({
+            status: "paused",
+            next_action: "Pozastavené — build prekročil token-limit (12 mil.). Skontroluj stav a pokračuj cez \"Pokračovať\".",
+          }),
+          available_actions: ["pokracovat"],
+        })}
+        onBoard={() => {}}
+      />,
+    );
+    // Natvrdo napísaný text strop nikdy nemenoval — pravdivý ho nesie.
+    expect(await screen.findByText(/token-limit \(12 mil\.\)/)).toBeInTheDocument();
+  });
+
+  it("bez dôvodu radšej mlčí, než by si ho vymyslel", async () => {
+    vi.mocked(getTaskPlan).mockResolvedValue(PLAN);
+    render(
+      <PlanUlohRail
+        versionId="v1"
+        messages={[]}
+        board={mkBoard({ state: mkState({ status: "paused", next_action: "" }), available_actions: ["pokracovat"] })}
+        onBoard={() => {}}
+      />,
+    );
+    expect(await screen.findByText(/Stavba je pozastavená/)).toBeInTheDocument();
+    expect(screen.queryByText(/token-limit/i)).not.toBeInTheDocument();
+  });
+
 });
