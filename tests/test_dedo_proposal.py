@@ -838,3 +838,136 @@ class TestAProposalCanStartAFastFix:
             json={"project_id": str(version.project_id), "directive": "Skús to spustiť sám."},
         )
         assert started.status_code in (401, 403), started.text
+
+
+# ── 6. ICCINT-56: the fifth verb — answering a DECISION CARD without typing ────
+
+
+def _card(db_session, version_id, *, keys=("verifikacia_fail_next",), stage="verifikacia"):
+    """The engine's own decision card: a message CARRYING a decision queue (ICCINT-26 — keyed on the queue,
+    not on the block's label), which is what ``_latest_consultation`` reads back."""
+    msg = PipelineMessage(
+        version_id=version_id,
+        stage=stage,
+        author="system",
+        recipient="manazer",
+        kind="consultation",
+        content="Ako chceš pokračovať?",
+        payload={
+            "phase": stage,
+            "consultation": {
+                "id": str(uuid.uuid4()),
+                "source": "verifikacia_fail",
+                "decisions": [
+                    {
+                        "key": k,
+                        "question": "Auditor nevie verziu dostať cez Verifikáciu. Ako chceš pokračovať?",
+                        "options": [
+                            {"id": "guide_fix", "label": "Usmerniť opravu pre AI Agenta"},
+                            {"id": "hold", "label": "Podržať"},
+                        ],
+                    }
+                    for k in keys
+                ],
+            },
+        },
+    )
+    db_session.add(msg)
+    db_session.flush()
+    return msg
+
+
+class TestTheDecisionCardIsReachableWithoutTheKeyboard:
+    """A build blocked on a decision card offers the Manažér NOTHING but the card — no ``uprav``, no
+    ``answer``. And once the automated loop has failed its rounds the engine withdraws the one-click option
+    ON PURPOSE, so the card's free-text box is the only way forward. That made the keyboard mandatory in
+    exactly the situation the proposal door exists to remove (nex-productcatalogs 0.1.1, 04.09.2026)."""
+
+    def test_the_open_cards_key_is_pinned_onto_the_proposal(self, db_session):
+        _user, version, _state = _build(db_session, current_stage="verifikacia", status="blocked")
+        _card(db_session, version.id)
+
+        proposal = _propose(db_session, version.id, action="decide")
+
+        assert proposal.payload["decision_key"] == "verifikacia_fail_next"
+
+    def test_a_decide_proposal_with_no_card_open_is_refused(self, db_session):
+        """Nothing to answer → refuse at the WRITE. A proposal that could never be sent is not a proposal."""
+        _user, version, _state = _build(db_session, current_stage="verifikacia", status="blocked")
+
+        # match= is load-bearing: without the verb registered, the writer raises "Unknown proposed action"
+        # and a bare pytest.raises would go GREEN against unfixed code — a test proving nothing.
+        with pytest.raises(dedo_message.DedoMessageError, match="open decision"):
+            _propose(db_session, version.id, action="decide")
+
+    def test_several_open_decisions_are_refused_rather_than_guessed(self, db_session):
+        """Dedo's text belongs to ONE question. With a queue of them, picking would be a guess."""
+        _user, version, _state = _build(db_session, current_stage="verifikacia", status="blocked")
+        _card(db_session, version.id, keys=("a", "b"))
+
+        with pytest.raises(dedo_message.DedoMessageError, match="open decision"):  # see the note above
+            _propose(db_session, version.id, action="decide")
+
+    def test_the_button_is_offered_for_the_verb(self, db_session):
+        """The writer only accepts verbs the Manažér has a button for — ``decide`` is now one of them."""
+        assert "decide" in dedo_message.PROPOSAL_ACTIONS
+
+    def test_the_click_delivers_HIS_text_as_the_fix_brief(self, client, db_session, no_dispatch):
+        """The point of the whole ticket: one click, no typing, and the AI Agent gets the Manažér's words.
+
+        Before this the card's brief fell back to the OPTION LABEL when the box was left empty — the agent's
+        entire instruction became the literal string "Usmerniť opravu pre AI Agenta", which tells it nothing.
+        The box is marked "nepovinné" and is in practice mandatory; this is what removes the keyboard from it.
+        """
+        user, version, _state = _build(
+            db_session,
+            current_stage="verifikacia",
+            current_actor="auditor",
+            status="blocked",
+            block_reason="decision_needed",
+            mode=None,
+        )
+        _card(db_session, version.id)
+        proposal = _propose(db_session, version.id, action="decide")
+        steer = "Obe príčiny sú odstránené v NEX Studiu — spusti ešte jedno kolo a nič iné nemeň."
+
+        res = _send(client, user, version.id, proposal, text=steer)
+
+        assert res.status_code == 200, res.text
+        to_agent = [
+            m
+            for m in db_session.execute(
+                select(PipelineMessage).where(
+                    PipelineMessage.version_id == version.id, PipelineMessage.author == "manazer"
+                )
+            ).scalars()
+            if steer in (m.content or "")
+        ]
+        assert to_agent, "Manažérov text sa k agentovi nedostal"
+        db_session.refresh(proposal)
+        assert proposal.status == "archived"
+
+    def test_a_card_that_moved_on_refuses_instead_of_answering_the_wrong_question(
+        self, client, db_session, no_dispatch
+    ):
+        """Between Dedo measuring and the Manažér clicking the engine may have asked something ELSE. Answering
+        THAT with text written for the previous question is worse than refusing — same reason the VERB is read
+        off the proposal row (audit 2026-08-23, finding 1)."""
+        user, version, _state = _build(
+            db_session,
+            current_stage="verifikacia",
+            current_actor="auditor",
+            status="blocked",
+            block_reason="decision_needed",
+            mode=None,
+        )
+        _card(db_session, version.id)
+        proposal = _propose(db_session, version.id, action="decide")
+        _card(db_session, version.id, keys=("uplne_ina_otazka",))  # the engine moved on
+        db_session.commit()
+
+        res = _send(client, user, version.id, proposal, text="text k pôvodnej otázke")
+
+        assert res.status_code == 409, res.text
+        db_session.refresh(proposal)
+        assert proposal.status == "proposed", "odmietnutý návrh musí zostať na stole"

@@ -121,7 +121,7 @@ PROPOSAL_MARKER = "dedo_proposal"
 #: sa preto zavesí na NAJNOVŠIU verziu projektu (tam, kam sa Manažér pozerá) a jeho odoslanie nespustí
 #: ``apply_action``, ale štart rýchlej opravy — pod účtom Manažéra, presne ako keby formulár vyplnil sám.
 #: Bez neho by Dedo musel Directorovi dávať blok na skopírovanie, a to pri KAŽDEJ rýchlej oprave.
-PROPOSAL_ACTIONS = ("uprav", "answer", "ask", "fast_fix")
+PROPOSAL_ACTIONS = ("uprav", "answer", "ask", "fast_fix", "decide")
 
 #: Why a proposal was archived without the Manažér deciding on it: Dedo wrote a NEWER one. Kept distinct
 #: from ``sent`` / ``rejected`` so the log never claims he handled something he never saw.
@@ -274,6 +274,31 @@ def record_dedo_proposal(
     if state is None:
         raise DedoMessageError(f"No pipeline started for version {version_id} — there is no agent to write to")
 
+    # ICCINT-56: ``decide`` is the fifth verb and the only one aimed at a DECISION CARD rather than at the
+    # agent. A card blocked on ``decision_needed`` offers the Manažér nothing but the card — no ``uprav``, no
+    # ``answer`` — so before this the only way to steer a stalled build was to TYPE the brief into the card's
+    # free-text box. That is the one thing the proposal door exists to remove (nex-productcatalogs 0.1.1,
+    # 04.09.2026: after five failed rounds the engine withdraws the one-click option ON PURPOSE, leaving the
+    # keyboard as the only way forward).
+    #
+    # The key is resolved and PINNED here, at proposal time, for the same reason the verb is
+    # (audit 2026-08-23, finding 1): the send path must run against the card the Manažér actually read, never
+    # against whatever is open at click time.
+    extra = dict(payload_extra or {})
+    if proposed_action == "decide":
+        from backend.services.orchestrator import _latest_consultation  # local import: see record_dedo_message
+
+        lc = _latest_consultation(db, version_id)
+        decisions = (lc[0].get("decisions") or []) if lc is not None else []
+        if len(decisions) != 1:
+            # Honest-by-construction: with no card there is nothing to answer, and with several open decisions
+            # Dedo would be GUESSING which one his text belongs to. Refuse rather than pick.
+            raise DedoMessageError(
+                "A 'decide' proposal needs exactly ONE open decision on this build — "
+                f"found {len(decisions)}. Nothing was proposed."
+            )
+        extra["decision_key"] = decisions[0].get("key")
+
     from backend.services.orchestrator import _record_message  # local import: see record_dedo_message
 
     # ONE open proposal per build (see the docstring): whatever was still waiting is now stale, so it is
@@ -294,7 +319,7 @@ def record_dedo_proposal(
             "phase": state.current_stage,
             PROPOSAL_MARKER: True,
             "proposed_action": proposed_action,
-            **(payload_extra or {}),
+            **extra,
         },
     )
     logger.info(

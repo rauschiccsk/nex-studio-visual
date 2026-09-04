@@ -3391,15 +3391,17 @@ export interface components {
          *
          *     The extra field over :class:`DedoMessageCreate` is the whole point: a proposal carries the ACTION it
          *     should be sent with, because the Manažér must not be asked to pick a verb out of the engine's
-         *     vocabulary. It is one of the three he already uses (``uprav`` / ``answer`` / ``ask``); the send goes
-         *     through that action with all of its guards, so there is no second way into the agent's prompt.
+         *     vocabulary. It is one the cockpit already offers him — ``uprav`` / ``answer`` / ``ask`` continue the build
+         *     in front of him, ``fast_fix`` starts a patch version (ICCINT-54), ``decide`` answers an open decision card
+         *     (ICCINT-56); the send goes through that action with all of its guards, so there is no second way into the
+         *     agent's prompt.
          */
         DedoProposalCreate: {
             /** Content */
             content: string;
             /**
              * Proposed Action
-             * @description uprav | answer | ask | fast_fix
+             * @description uprav | answer | ask | fast_fix | decide
              */
             proposed_action: string;
         };

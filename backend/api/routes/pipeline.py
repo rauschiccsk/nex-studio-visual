@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import HTMLResponse
@@ -663,9 +663,32 @@ async def send_dedo_proposal(
         )
         return _board(db, version_id)
 
-    # The payload key each verb reads (orchestrator.apply_action): ``uprav`` takes a comment, the other two
-    # take text. One mapping, in one place — the FE never composes engine payloads.
-    action_payload = {"comment": text} if action == "uprav" else {"text": text}
+    # ICCINT-56: ``decide`` answers a DECISION CARD, so it carries the card's key alongside the text. The key
+    # was PINNED onto the proposal when Dedo wrote it; re-check it against the card that is open NOW and refuse
+    # if they differ, for the same reason the verb is read off the proposal row (audit 2026-08-23, finding 1):
+    # between Dedo measuring and the Manažér clicking, the engine may have moved to a different question, and
+    # answering THAT one with text written for the previous one is worse than refusing.
+    #
+    # No option_id is sent. ``apply_action`` accepts free text alone, and the fix brief prefers ``free_text``
+    # over the option label — which is exactly the card's own "Iná odpoveď (napíš vlastnú)" path, reached
+    # without the Manažér typing it.
+    if action == "decide":
+        pinned = str((proposal.payload or {}).get("decision_key") or "")
+        lc = orchestrator._latest_consultation(db, version_id)
+        open_keys = {d.get("key") for d in (lc[0].get("decisions") or [])} if lc is not None else set()
+        if not pinned or pinned not in open_keys:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Rozhodnutie, ku ktorému bol návrh napísaný, už na tejto stavbe otvorené nie je — "
+                    "návrh sa neodoslal. Nechaj si pripraviť nový k aktuálnej otázke."
+                ),
+            )
+        action_payload: dict[str, Any] = {"decision_key": pinned, "free_text": text}
+    else:
+        # The payload key each verb reads (orchestrator.apply_action): ``uprav`` takes a comment, the other two
+        # take text. One mapping, in one place — the FE never composes engine payloads.
+        action_payload = {"comment": text} if action == "uprav" else {"text": text}
 
     def _mark_sent(_state: PipelineState) -> None:
         sent = db.execute(

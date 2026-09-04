@@ -74,6 +74,15 @@ const ACTION_COPY: Record<string, { button: string; effect: string }> = {
       "Vznikne nová záplatová verzia a rovno sa na nej rozbehne rýchla oprava s týmto zadaním — " +
       "krátkou cestou bez Vizuálu. Nasadenie sa nespustí; to zostáva samostatným krokom.",
   },
+  // ICCINT-56: jediné sloveso mierené na KARTU ROZHODNUTIA, nie na agenta priamo. Keď je stavba zaseknutá
+  // na karte, kokpit iné slovesá neponúka — a po piatich neúspešných kolách engine zámerne odoberá aj
+  // jednoklikovú voľbu, takže klávesnica ostávala jedinou cestou vpred. Toto je tá cesta bez písania.
+  decide: {
+    button: "Odpovedať na kartu rozhodnutia",
+    effect:
+      "Text sa odošle ako tvoja vlastná odpoveď na otvorenú otázku — AI Agent ju dostane ako cielenú " +
+      "opravu a Auditor ju znova overí. Karta sa tým vyrieši.",
+  },
 };
 
 const FALLBACK_COPY = {
