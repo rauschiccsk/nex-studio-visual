@@ -48,7 +48,19 @@ _CODE_RE = re.compile(r"\b(?:CR|EPIC|FEAT|TASK|BUG)-[A-Za-z0-9]+(?:-[A-Za-z0-9]+
 #: "- Oprava po Verifikácii" bullet per round → the bundled-notes test fails → another round → another Epic →
 #: worse (a structural loop that blocked EVERY Verifikácia). A test pins this equal to the orchestrator marker
 #: so the two can never silently diverge.
-VERIFIKACIA_FIX_EPIC_TITLE = "Oprava po Verifikácii"
+#: Title of the internal post-Verifikácia fix Epic — :func:`orchestrator._ensure_verifikacia_fix_task`
+#: creates it under exactly this name and imports the constant FROM HERE. Defined in this module because it
+#: is a leaf (models only) and the orchestrator already depends on it: ONE definition, imported by the
+#: creator, so creator and skip can never disagree again.
+#:
+#: ICCINT-53 — they DID disagree, and it cost six release rounds. ICCINT-39 renamed the epic to the plural
+#: "Opravy po Verifikácii" (one epic now holds every round); this skip kept the singular "Oprava po
+#: Verifikácii", which is the TASK title defined six lines away in the orchestrator. The skip therefore never
+#: matched, and the internal fix-loop epic landed in the CUSTOMER changelog once per round. nex-productcatalogs
+#: blocked its own release on it six rounds running and the AI Agent could not fix it: NEX Studio OWNS the
+#: note and regenerated the churn back after every hand edit. A skip keyed on a duplicated string is a skip
+#: that silently stops working — hence the behavioural test that drives the real creation path.
+VERIFIKACIA_FIX_EPIC_TITLE = "Opravy po Verifikácii"
 
 
 def _strip_codes(text: str) -> str:

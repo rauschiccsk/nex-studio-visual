@@ -116,6 +116,11 @@ def create_patch_version(db: Session, *, project_id: UUID, user_id: UUID) -> Ver
     )
 
 
+#: Title of the machine-created fast-fix Epic/Feat. ONE definition, imported by every consumer —
+#: ICCINT-53 was caused by exactly this string kind existing twice and drifting apart.
+FAST_FIX_EPIC_TITLE = "Rýchla oprava"
+
+
 def kickoff_directive(db: Session, version_id: UUID) -> Optional[str]:
     """The Manažér directive carried in the version's kickoff message payload (set by the orchestrator
     ``start`` for a ``fast_fix`` flow), or ``None``.
@@ -185,11 +190,11 @@ def ensure_build_task(db: Session, version_id: UUID) -> Task:
     directive = kickoff_directive(db, version_id)
     epic = epic_service.create(
         db,
-        EpicCreate(project_id=version.project_id, version_id=version_id, title="Rýchla oprava"),
+        EpicCreate(project_id=version.project_id, version_id=version_id, title=FAST_FIX_EPIC_TITLE),
     )
     feat = feat_service.create(
         db,
-        FeatCreate(epic_id=epic.id, title="Rýchla oprava", description=directive or ""),
+        FeatCreate(epic_id=epic.id, title=FAST_FIX_EPIC_TITLE, description=directive or ""),
     )
     return task_service.create(
         db,

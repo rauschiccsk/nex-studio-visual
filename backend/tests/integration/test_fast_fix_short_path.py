@@ -470,3 +470,132 @@ def test_fast_fix_stage_order_stops_at_done_no_deploy() -> None:
     # in the lane's phase path — so the lane can never auto-advance INTO a deploy.
     assert "deploy" in orchestrator.ALWAYS_STOP_BOUNDARIES
     assert "deploy" not in orchestrator.DIAL_GOVERNED_BOUNDARIES
+
+
+# ---------------------------------------------------------------------------
+# 5. ICCINT-53: the customer's sentence lives in the DATA, not in a file we overwrite
+# ---------------------------------------------------------------------------
+
+
+def _fix_epic(db, project, version):
+    from backend.db.models.tasks import Epic
+
+    epic = Epic(
+        project_id=project.id,
+        version_id=version.id,
+        number=1,
+        title=fast_fix.FAST_FIX_EPIC_TITLE,
+        status="done",
+    )
+    db.add(epic)
+    db.flush()
+    return epic
+
+
+def _block_with_note(db, version_id, note):
+    msg = PipelineMessage(
+        version_id=version_id,
+        stage="programovanie",
+        author="ai_agent",
+        recipient="manazer",
+        kind="gate_report",
+        content="hotovo",
+        payload={"phase": "programovanie", "customer_note": note},
+    )
+    db.add(msg)
+    db.flush()
+    return msg
+
+
+def test_customer_note_reaches_the_changelog(db_session, tmp_path) -> None:
+    """The agent's sentence must render as the changelog bullet — and survive REGENERATION.
+
+    Before ICCINT-53 the agent wrote its prose into RELEASE_NOTES.md and NEX Studio, which owns that file,
+    regenerated it away — six rounds running on nex-productcatalogs, with the fallback printing the machine
+    Epic title instead ("Rýchla oprava — Rýchla oprava"). Held in ``plain_description`` it cannot be lost:
+    the assertion below renders TWICE and demands the same text both times.
+    """
+    from backend.services import orchestrator, release_note_writer
+
+    creator = _seed_user(db_session)
+    project = _seed_project(db_session, creator=creator)
+    version = Version(project_id=project.id, version_number="0.1.1", status="active", name="Rýchla oprava")
+    db_session.add(version)
+    db_session.flush()
+    db_session.add(
+        PipelineState(
+            version_id=version.id,
+            flow_type="fast_fix",
+            current_stage="verifikacia",
+            current_actor="auditor",
+            status="agent_working",
+        )
+    )
+    _fix_epic(db_session, project, version)
+    note = "Appku otvoríte jedným kliknutím z NEX Managera — bez zadávania mena a hesla."
+    _block_with_note(db_session, version.id, note)
+
+    orchestrator._apply_customer_note_to_fix_epic(db_session, version.id)
+    body = release_note_writer.write_release_note(db_session, version.id, tmp_path).read_text(encoding="utf-8")
+
+    assert f"- {note}" in body
+    assert "- Rýchla oprava" not in body, "zákazník stále číta strojový názov epiky"
+
+    # Regenerate: the whole point is that this cannot be overwritten any more.
+    orchestrator._apply_customer_note_to_fix_epic(db_session, version.id)
+    again = release_note_writer.write_release_note(db_session, version.id, tmp_path).read_text(encoding="utf-8")
+    assert again == body
+
+
+def test_customer_note_never_overwrites_a_plan_authored_description(db_session) -> None:
+    """A ``plain_description`` the agent's own task plan wrote is HIS text — never clobbered."""
+    from backend.services import orchestrator
+
+    creator = _seed_user(db_session)
+    project = _seed_project(db_session, creator=creator)
+    version = Version(project_id=project.id, version_number="0.2.0", status="active")
+    db_session.add(version)
+    db_session.flush()
+    db_session.add(
+        PipelineState(
+            version_id=version.id,
+            flow_type="fast_fix",
+            current_stage="programovanie",
+            current_actor="ai_agent",
+            status="agent_working",
+        )
+    )
+    epic = _fix_epic(db_session, project, version)
+    epic.plain_description = "Text z plánu úloh."
+    db_session.flush()
+    _block_with_note(db_session, version.id, "Neskorší text, ktorý nesmie prepísať ten z plánu.")
+
+    orchestrator._apply_customer_note_to_fix_epic(db_session, version.id)
+
+    assert epic.plain_description == "Text z plánu úloh."
+
+
+def test_fast_fix_build_brief_asks_for_the_customer_sentence(db_session) -> None:
+    """Nobody can supply what nobody asked for — the fast-fix build brief must request ``customer_note``."""
+    from backend.db.models.tasks import Feat, Task
+    from backend.services import orchestrator
+
+    creator = _seed_user(db_session)
+    project = _seed_project(db_session, creator=creator)
+    version = Version(project_id=project.id, version_number="0.3.0", status="active")
+    db_session.add(version)
+    db_session.flush()
+    epic = _fix_epic(db_session, project, version)
+    feat = Feat(epic_id=epic.id, number=1, title=fast_fix.FAST_FIX_EPIC_TITLE, status="done")
+    db_session.add(feat)
+    db_session.flush()
+    task = Task(feat_id=feat.id, number=1, title="Oprav vstup", description="…", task_type="backend", status="todo")
+    db_session.add(task)
+    db_session.flush()
+
+    brief = orchestrator._directive_for_build_task(task, None, [], flow_type="fast_fix")
+    assert "customer_note" in brief
+    assert "RELEASE_NOTES.md" in brief  # ...and says explicitly not to write there
+
+    plain = orchestrator._directive_for_build_task(task, None, [], flow_type="new_version")
+    assert "customer_note" not in plain  # a normal build carries it in the task plan instead

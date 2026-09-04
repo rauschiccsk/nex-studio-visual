@@ -23,6 +23,8 @@ from __future__ import annotations
 import subprocess
 import uuid
 
+from sqlalchemy import select
+
 from backend.db.models.bugs import Bug
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
@@ -133,23 +135,52 @@ def test_fix_loop_epics_excluded_from_notes(db_session, tmp_path):
     are dropped no matter how many rounds ran."""
     _creator, project, version = _seed(db_session, version_number="1.1.0", name="Platby SLSP")
     _add_epic(db_session, project, version, 8, "Bankový adaptér SLSP", "Napojenie na banku SLSP.")
-    _fix = release_note_writer.VERIFIKACIA_FIX_EPIC_TITLE
+    # ICCINT-53: seed from the CREATOR's constant, never the writer's. Seeding from the writer's own
+    # value made this test self-fulfilling — it asserted the skip skips what the skip is keyed on,
+    # which is true even when the orchestrator creates something else entirely. It did.
+    from backend.services import orchestrator
+
+    _fix = orchestrator._VERIFIKACIA_FIX_EPIC_TITLE
     _add_epic(db_session, project, version, 14, _fix, _fix)
     _add_epic(db_session, project, version, 15, _fix, _fix)
 
     body = release_note_writer.write_release_note(db_session, version.id, tmp_path).read_text(encoding="utf-8")
 
     assert "- Napojenie na banku SLSP." in body  # the real feature stays
-    assert "Oprava po Verifikácii" not in body  # ZERO fix-loop bullets → no drift, no matter how many rounds
+    assert _fix not in body  # ZERO fix-loop bullets → no drift, no matter how many rounds
 
 
-def test_fix_epic_marker_in_sync_with_orchestrator():
-    """The exclusion is keyed on the exact fix-Epic title, defined in BOTH orchestrator (where the Epics are
-    created) and release_note_writer (where they are filtered). Pin the two equal so a rename can never
-    silently re-open the drift."""
+def test_fix_epic_the_orchestrator_really_creates_is_excluded(db_session, tmp_path):
+    """ICCINT-53: drive the REAL creation path and assert the changelog drops what it made.
+
+    This replaces a string-equality pin that guarded the WRONG PAIR: it compared the writer's *Epic* constant
+    to ``orchestrator._VERIFIKACIA_FIX_TITLE`` — the *Task* title, singular, declared six lines from the Epic
+    one. The pin stayed green for the whole time the skip was broken, which is worse than having no pin: it
+    reported that a drift-guard was in place. ICCINT-39 had renamed the Epic to the plural form and the skip
+    never followed, so the internal fix epic reached six customer changelogs and blocked nex-productcatalogs'
+    release six rounds running.
+
+    Keyed on behaviour, not on a string: it holds even if someone re-declares the constant a third time.
+    """
     from backend.services import orchestrator
 
-    assert release_note_writer.VERIFIKACIA_FIX_EPIC_TITLE == orchestrator._VERIFIKACIA_FIX_TITLE
+    _creator, project, version = _seed(db_session, version_number="2.0.0", name="Platby SLSP")
+    _add_epic(db_session, project, version, 1, "Bankový adaptér SLSP", "Napojenie na banku SLSP.")
+
+    orchestrator._ensure_verifikacia_fix_task(db_session, version.id, scope="Oprav zlyhanie", findings=["x"])
+    db_session.flush()
+
+    epics = list(db_session.execute(select(Epic).where(Epic.version_id == version.id)).scalars())
+    assert len(epics) > 1, "creation path made no fix epic — the test would pass vacuously"
+
+    body = release_note_writer.write_release_note(db_session, version.id, tmp_path).read_text(encoding="utf-8")
+    bullets = [line for line in body.splitlines() if line.startswith("- ")]
+
+    # Assert on the WHOLE bullet list, not on the epic's title: a bullet renders from ``plain_description``
+    # and falls back to the title only when that is blank. A title-only assertion passes while the churn sits
+    # in the note under its prose — which is exactly how the shipped bug read ("Opravy toho, čo previerka pred
+    # vydaním našla…"). The real feature is the ONLY thing the customer may see.
+    assert bullets == ["- Napojenie na banku SLSP."], f"do textu pre zákazníka sa dostalo navyše: {bullets}"
 
 
 def test_epic_title_fallback_when_plain_description_null(db_session, tmp_path):

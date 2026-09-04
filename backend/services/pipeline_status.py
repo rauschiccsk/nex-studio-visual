@@ -377,6 +377,13 @@ class PipelineStatusBlock(BaseModel):
     #: PASS/FAIL of the Auditor's review. ``None`` on a non-verdict block. ``False`` (or absent on a
     #: verdict turn) is treated as FAIL by the verifier (fail-closed — nothing passes without an
     #: explicit ``verdict=true``).
+    #: ICCINT-53: ONE plain sentence saying what the CUSTOMER now has, written by the AI Agent when it closes
+    #: a fast-fix. It lands in the fix Epic's ``plain_description``, which is what the changelog renders.
+    #: Needed because a fast-fix Epic is machine-created ("Rýchla oprava") and has no plan step to fill that
+    #: field, so the Aktualizácie tab read "Rýchla oprava — Rýchla oprava". The agent used to write real prose
+    #: straight into RELEASE_NOTES.md and NEX Studio, which OWNS that file, regenerated it away every round —
+    #: six rounds running on nex-productcatalogs. In the DATA it survives every regeneration.
+    customer_note: Optional[str] = None
     verdict: Optional[bool] = None
     #: Structured findings for the Manažér's review view (alongside ``summary``) — the holes /
     #: ambiguities / contradictions (upfront) or behavioural / security / contract failures (end check).

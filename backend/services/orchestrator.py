@@ -59,6 +59,7 @@ from backend.services import (
     dedo_message,
     failure_framing,
     fast_fix,
+    release_note_writer,
     uat_provisioner,
 )
 from backend.services import epic as epic_service
@@ -3726,6 +3727,9 @@ async def invoke_agent(
             # mode="json" so any UUID in the plan serializes to a str for JSONB.
             "plan": parsed.plan.model_dump(mode="json") if parsed.plan is not None else None,
             "cross_cutting_rules": parsed.cross_cutting_rules,
+            # ICCINT-53: the customer sentence, recorded so the release-note seam can read it back
+            # AFTER a restart (never from this in-memory parse).
+            "customer_note": parsed.customer_note,
             # CR-V2-052: the release-coverage declaration (flagship features + safety properties) carried on a
             # Návrh gate_report — persisted so _declared_release_coverage reads it to risk-floor the oracle.
             "flagship_features": parsed.flagship_features,
@@ -4411,6 +4415,47 @@ def _push_release_artifacts(project_root: Path, version_number: str) -> bool:
     return True
 
 
+def _apply_customer_note_to_fix_epic(db: Session, version_id: uuid.UUID) -> None:
+    """ICCINT-53: move the AI Agent's one customer sentence into the fast-fix Epic's ``plain_description``.
+
+    The changelog renders ``plain_description`` and falls back to the Epic TITLE when it is blank. A normal
+    build fills that field from the agent's task plan, which is why ordinary releases read well. A fast fix has
+    no plan step — its Epic is machine-created (``fast_fix.FAST_FIX_EPIC_TITLE``) — so the customer's
+    Aktualizácie tab read "Rýchla oprava — Rýchla oprava". The agent wrote real prose straight into
+    RELEASE_NOTES.md instead, and NEX Studio, which OWNS that file, regenerated it away every round: six rounds
+    running on nex-productcatalogs, with the AI Agent unable to fix a thing. Held in the DATA, the sentence
+    survives every regeneration.
+
+    Restart-safe: the sentence is read back from the RECORDED block payload, never from an in-memory parse.
+    Only fills a BLANK ``plain_description`` — a plan-authored one is the agent's own and is never overwritten.
+    Best-effort and silent: a missing note must never sink a sign-off.
+    """
+    state = _get_state(db, version_id)
+    if state is None or state.flow_type != "fast_fix":
+        return
+    note = db.execute(
+        select(PipelineMessage.payload)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.payload["customer_note"].astext != "",
+        )
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    text = str((note or {}).get("customer_note") or "").strip()
+    if not text:
+        return
+    epic = (
+        db.execute(select(Epic).where(Epic.version_id == version_id, Epic.title == fast_fix.FAST_FIX_EPIC_TITLE))
+        .scalars()
+        .first()
+    )
+    if epic is None or (epic.plain_description or "").strip():
+        return
+    epic.plain_description = text
+    db.flush()
+
+
 def _commit_release_note(db: Session, version_id: uuid.UUID, project_root: Path, version_number: str) -> None:
     """Part 1 (per-app-changelog-standard.md §1): NEX Studio OWNS the user-facing ``RELEASE_NOTES.md`` —
     (re)generate it from the completing version's Epics + commit it INTO the app repo. BEST-EFFORT, NEVER
@@ -4425,6 +4470,7 @@ def _commit_release_note(db: Session, version_id: uuid.UUID, project_root: Path,
     from backend.services import release_note_writer
 
     try:
+        _apply_customer_note_to_fix_epic(db, version_id)  # ICCINT-53 — before the note is rendered
         path = release_note_writer.write_release_note(db, version_id, project_root)
     except Exception:  # noqa: BLE001 — best-effort artifact; a generator failure must not sink the sign-off
         return
@@ -4513,6 +4559,7 @@ def _write_release_note_to_disk(db: Session, version_id: uuid.UUID, project_root
     from backend.services import release_note_writer
 
     try:
+        _apply_customer_note_to_fix_epic(db, version_id)  # ICCINT-53 — before the note is rendered
         release_note_writer.write_release_note(db, version_id, project_root)
     except Exception:  # noqa: BLE001 — a served artifact, never a release gate; a hiccup must not sink the smoke
         logger.warning("pre-smoke release-note write failed (version_id=%s)", version_id, exc_info=True)
@@ -8788,7 +8835,9 @@ _VERIFIKACIA_FIX_TITLE = "Oprava po Verifikácii"
 #: feats apiece, while the fix epics carried ONE feat and ONE task each. By the fifth round half the plan
 #: would be single-task epics and the map of the work stops being a map. The rounds live INSIDE now — one
 #: feat per verification round — so the plan grows downward, not sideways.
-_VERIFIKACIA_FIX_EPIC_TITLE = "Opravy po Verifikácii"
+#: ICCINT-53: imported, NOT re-declared — a second copy of this string is what put the internal fix epic
+#: into six customer changelogs. The creator and the changelog skip now read the same constant.
+_VERIFIKACIA_FIX_EPIC_TITLE = release_note_writer.VERIFIKACIA_FIX_EPIC_TITLE
 
 
 def _ensure_verifikacia_fix_task(
@@ -9791,6 +9840,17 @@ def _directive_for_build_task(
             "NESPOCHYBŇUJ ho z názorových / sémantických dôvodov (napr. „Firmy je správne, naozaj to chceš "
             "premenovať?“). ZASTAV (kind=blocked) IBA ak je to technicky nemožné, alebo naozaj nevieš "
             "identifikovať ČO zmeniť — NIE preto, že s pokynom nesúhlasíš."
+        )
+        parts.append(
+            # ICCINT-53: the changelog sentence must come from the agent, because a fast-fix Epic is
+            # machine-created and has no plan step to carry it. Asked for HERE (not at Verifikácia) because
+            # this is the turn that knows what actually changed.
+            "DO STAVOVÉHO BLOKU PRIDAJ `customer_note`: JEDNU vetu po slovensky o tom, čo zákazník TERAZ MÁ — "
+            "čítať ju bude laik na karte Aktualizácie. Píš v prítomnom/minulom čase o hotovej veci, NIE o "
+            "našom postupe („Appku otvoríte jedným kliknutím z NEX Managera“ — NIE „Opravili sme token“, NIE "
+            "„Rýchla oprava“). Žiadne interné kódy, názvy súborov ani počty kôl opráv. NEZAPISUJ text do "
+            "RELEASE_NOTES.md — ten súbor vlastní a generuje NEX Studio a tvoju úpravu prepíše; táto veta je "
+            "jediná cesta, ako sa tvoj text do vydania dostane."
         )
     else:
         parts.append(
