@@ -1385,18 +1385,34 @@ def _priprava_directive(db: Session, version_id: uuid.UUID, *, flow_type: str = 
          begin until the Manažér approves the Špecifikácia.
     """
     if flow_type == "fast_fix":
-        # The lightweight fast-fix Príprava: the directive (in this warm session's kickoff) IS the whole
-        # brief — read only what's needed to fix it, do NOT run the heavy spec dialogue, do NOT write a
-        # Špecifikácia, do NOT block on clarification. Close immediately so the lane reaches Programovanie.
+        # The lightweight fast-fix Príprava: the Manažér's directive IS the whole brief — read only what's
+        # needed to fix it, do NOT run the heavy spec dialogue, do NOT write a Špecifikácia, do NOT block on
+        # clarification. Close immediately so the lane reaches Programovanie.
+        #
+        # ICCINT-55: the directive is CARRIED here verbatim (tail of this prompt). The retired wording pointed
+        # the agent "VYŠŠIE v tomto vlákne" — at the cockpit's PipelineMessage thread, which the agent's own
+        # process cannot see; on a new version its session is fresh besides, so there was nothing above at all.
+        # The agent then correctly reported having no brief and the lane stalled on its very first live use.
+        # ONE reader for the directive (``fast_fix.kickoff_directive``) — the same row that becomes the
+        # build Task's brief, so the Príprava brief and the Task can never drift apart.
+        directive_text = fast_fix.kickoff_directive(db, version_id)
+        if not directive_text:
+            # Honest-by-construction: never point at a brief that is not there — ask for it.
+            return (
+                "RÝCHLA OPRAVA (fast-fix lane): smernica Manažéra sa NENAŠLA, takže zadanie opravy nepoznáš. "
+                "NIČ nemeň a spýtaj sa naň (`kind=question`).\n"
+                "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
+            )
         return (
-            "RÝCHLA OPRAVA (fast-fix lane) — Príprava je ĽAHKÁ: pokyn Manažéra (smernica) je VYŠŠIE v tomto "
-            "vlákne a JE celé tvoje zadanie. Neraď heavy dialóg špecifikácie a NEZAPISUJ Špecifikáciu.\n"
+            "RÝCHLA OPRAVA (fast-fix lane) — Príprava je ĽAHKÁ: smernica Manažéra je NIŽŠIE, na konci tohto "
+            "pokynu, a JE celé tvoje zadanie. Neraď heavy dialóg špecifikácie a NEZAPISUJ Špecifikáciu.\n"
             "1. Prečítaj IBA toľko kódu/kontextu, koľko treba na pochopenie opravy.\n"
             "2. NEVytváraj Špecifikáciu ani návrhový dokument — smernica je brief; engine ťa AUTOMATICKY "
             "posunie do Programovania (žiadne schválenie medzitým).\n"
             "3. ZASTAV (`kind=question`) IBA ak je oprava naozaj nejednoznačná alebo technicky nemožná — NIE "
             "preto, že by si chcel doplniť proces. Inak UZAVRI toto kolo `kind=done`.\n"
-            "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
+            "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3).\n\n"
+            "--- SMERNICA MANAŽÉRA (toto je celé tvoje zadanie) ---\n" + directive_text
         )
     version_number = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
     zadanie_rel = f"{_version_spec_rel(version_number)}/customer-requirements.md"
@@ -2384,12 +2400,15 @@ def _task_plan_feat_directive(feat_title: str) -> str:
     )
 
 
-# (CR-V2-028: the v1 ``_prepend_fast_fix_directive`` helper is RETIRED. It prepended the Director directive
-# onto the Coordinator's FRESH-session kickoff brief — but in v2 the fast-fix directive rides in as the
-# kickoff message CONTENT (``apply_action`` ``start`` sets ``kickoff_content = directive`` for ``fast_fix``),
-# so it is already in the AI Agent's warm Príprava session; there is no separate Coordinator kickoff turn to
-# prepend onto. The lightweight fast-fix Príprava brief — :func:`_priprava_directive` ``flow_type='fast_fix'``
-# — points the AI Agent at that in-session directive directly.)
+# (CR-V2-028: the v1 ``_prepend_fast_fix_directive`` helper is RETIRED — there is no separate Coordinator
+# kickoff turn to prepend onto. ``apply_action`` ``start`` records the directive as the kickoff message
+# (``kickoff_content = directive`` for ``fast_fix``), and :func:`_priprava_directive` ``flow_type='fast_fix'``
+# reads it back out of that row via :func:`fast_fix.kickoff_directive` and CARRIES it in the brief.
+#
+# ICCINT-55 — the assumption this note used to state was FALSE: recording the directive as a PipelineMessage
+# does NOT put it "in the AI Agent's warm session". That table is the cockpit's Manažér↔agent thread; the
+# agent is a separate process and reads only the prompt string it is handed. Prepending is therefore still
+# required — the v1 helper is gone, but its job is not.)
 
 
 def _augment_brief_with_backlog(db: Session, version_id: uuid.UUID, stage: str, prompt: str) -> str:

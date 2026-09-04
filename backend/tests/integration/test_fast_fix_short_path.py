@@ -272,12 +272,31 @@ async def test_run_dispatch_fast_fix_priprava_auto_advances_without_spec(db_sess
 # ---------------------------------------------------------------------------
 
 
+def _record_kickoff(db, version_id, directive: str) -> PipelineMessage:
+    """The kickoff row ``apply_action('start')`` writes for a fast-fix (stage/author/kind + payload.directive)."""
+    msg = PipelineMessage(
+        version_id=version_id,
+        stage="priprava",
+        author="manazer",
+        recipient="ai_agent",
+        kind="kickoff",
+        content=directive,
+        payload={"flow_type": "fast_fix", "phase": "priprava", "directive": directive},
+    )
+    db.add(msg)
+    db.flush()
+    return msg
+
+
 def test_priprava_directive_is_lightweight_for_fast_fix(db_session) -> None:
     creator = _seed_user(db_session)
     project = _seed_project(db_session, creator=creator)
     version = Version(project_id=project.id, version_number="v3.0.0", status="active")
     db_session.add(version)
     db_session.flush()
+    # A real fast-fix ALWAYS has the Manažér's kickoff directive recorded (apply_action 'start'); without it
+    # there is no brief to be lightweight ABOUT, so seed it — otherwise this asserts an unreachable state.
+    _record_kickoff(db_session, version.id, "Oprav zaokrúhlenie DPH na položkách")
 
     ff = orchestrator._priprava_directive(db_session, version.id, flow_type="fast_fix")
     assert "RÝCHLA OPRAVA" in ff and "ĽAHKÁ" in ff
@@ -286,6 +305,51 @@ def test_priprava_directive_is_lightweight_for_fast_fix(db_session) -> None:
     full = orchestrator._priprava_directive(db_session, version.id, flow_type="new_version")
     # CR-V2-032: the full path is the step-by-step interactive dialogue (one question at a time).
     assert "Špecifikáci" in full and "PO JEDNEJ" in full
+
+
+@pytest.mark.asyncio
+async def test_fast_fix_priprava_brief_carries_the_manager_directive(db_session) -> None:
+    """ICCINT-55: the fast-fix Príprava brief must CARRY the Manažér's directive, not point at it.
+
+    The AI Agent runs as its own process and never reads the ``PipelineMessage`` table — that table is the
+    cockpit's Manažér↔agent thread. The retired brief told the agent the directive was "VYŠŠIE v tomto vlákne";
+    on a new patch version its session is fresh besides, so there was nothing above at all. The agent reported
+    having no brief and the lane stalled on its first live use (nex-productcatalogs 0.1.1, 03.09.2026).
+
+    This drives the REAL wiring: ``apply_action('start')`` records the kickoff, the brief must read it back.
+    """
+    creator = _seed_user(db_session)
+    project = _seed_project(db_session, creator=creator)
+    _seed_base_version(db_session, project, "v1.0.0")
+    patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id)
+    directive = "Appka sa nedá otvoriť z NEX Managera — spúšťací token sa neoveruje lokálne."
+    await orchestrator.apply_action(
+        db_session,
+        version_id=patch.id,
+        action="start",
+        payload={"flow_type": "fast_fix", "directive": directive},
+    )
+
+    brief = orchestrator._priprava_directive(db_session, patch.id, flow_type="fast_fix")
+
+    assert directive in brief, "smernica Manažéra sa k agentovi nedostala"
+    assert "VYŠŠIE v tomto vlákne" not in brief, "brief ukazuje na vlákno, ktoré agent nevidí"
+    # ...and it reads the SAME row the build Task's brief reads — one source, no drift.
+    assert fast_fix.kickoff_directive(db_session, patch.id) == directive
+
+
+def test_fast_fix_priprava_brief_asks_when_the_directive_is_missing(db_session) -> None:
+    """No kickoff directive → the brief must ASK for it, never fabricate or imply one (honest-by-construction)."""
+    creator = _seed_user(db_session)
+    project = _seed_project(db_session, creator=creator)
+    version = Version(project_id=project.id, version_number="v4.0.0", status="active")
+    db_session.add(version)
+    db_session.flush()
+
+    brief = orchestrator._priprava_directive(db_session, version.id, flow_type="fast_fix")
+
+    assert "NENAŠLA" in brief and "kind=question" in brief
+    assert "NIŽŠIE" not in brief, "sľubuje smernicu, ktorá tam nie je"
 
 
 def test_verifikacia_directive_is_light_for_fast_fix(db_session) -> None:
