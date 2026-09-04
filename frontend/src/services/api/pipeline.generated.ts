@@ -3399,7 +3399,7 @@ export interface components {
             content: string;
             /**
              * Proposed Action
-             * @description uprav | answer | ask
+             * @description uprav | answer | ask | fast_fix
              */
             proposed_action: string;
         };

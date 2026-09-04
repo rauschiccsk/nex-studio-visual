@@ -615,6 +615,54 @@ async def send_dedo_proposal(
     text = body.text.strip()
     if not text:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Text návrhu je prázdny.")
+
+    # ICCINT-54: ``fast_fix`` je jediné sloveso, ktoré NEPOKRAČUJE v tejto stavbe — zakladá NOVÚ záplatovú
+    # verziu. Rýchla oprava totiž verziu vytvára až odoslaním formulára, takže dovtedy niet stavby, do ktorej
+    # by Dedo text podal; návrh sa preto zavesí na najnovšiu verziu a odtiaľ sa spustí nová.
+    #
+    # Hranica sa nemení: verzia aj priebeh vznikajú pod účtom Manažéra (``current_user``), presne ako keby
+    # formulár vyplnil sám. Dedo naďalej stavbu spustiť NEVIE — jeho dvere taký endpoint nemajú.
+    if action == "fast_fix":
+        project_id = db.execute(select(Version.project_id).where(Version.id == version_id)).scalar_one()
+        authz.assert_project_id_access(db, current_user, project_id)
+        try:
+            new_version = fast_fix_service.create_patch_version(db, project_id=project_id, user_id=current_user.id)
+            new_state = await orchestrator.apply_action(
+                db,
+                version_id=new_version.id,
+                action="start",
+                payload={"flow_type": "fast_fix", "directive": text},
+            )
+        except OrchestratorError as exc:
+            db.rollback()
+            raise _map_orch_error(exc) from exc
+        except ValueError as exc:
+            db.rollback()
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        # Archivované v TEJ ISTEJ transakcii ako štart — návrh sa nemôže označiť za odoslaný, ak sa oprava
+        # nerozbehla, ani sa nedá odoslať dvakrát.
+        dedo_message_service.resolve_proposal(
+            db, proposal, resolution="sent", sent_text=text, sent_action=action, sent_message_id=None
+        )
+        db.commit()
+        db.refresh(new_state)
+        # Rovnaký chvost ako pri ``start_fast_fix`` — bez naplánovaného ťahu by oprava VZNIKLA a nikdy sa
+        # nerozbehla. Chytil to test; prvá verzia tejto vetvy končila commitom a stavba by bola ostala stáť.
+        await registry.broadcast(
+            new_version.id,
+            {"type": "state_changed", "state": PipelineStateRead.model_validate(new_state).model_dump(mode="json")},
+        )
+        if new_state.status == "agent_working":
+            pipeline_runner.schedule_dispatch(new_version.id, None)
+        logger.info(
+            "Dedo proposal %s started fast-fix %s by %s (from version %s)",
+            proposal.id,
+            new_version.id,
+            current_user.id,
+            version_id,
+        )
+        return _board(db, version_id)
+
     # The payload key each verb reads (orchestrator.apply_action): ``uprav`` takes a comment, the other two
     # take text. One mapping, in one place — the FE never composes engine payloads.
     action_payload = {"comment": text} if action == "uprav" else {"text": text}

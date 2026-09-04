@@ -770,3 +770,71 @@ class TestAHandledProposalIsGoneForGood:
         user, version, _state = _build(db_session)
         resp = _reject(client, user, version.id, uuid.uuid4())
         assert resp.status_code == 404
+
+
+class TestAProposalCanStartAFastFix:
+    """ICCINT-54 — štvrté sloveso: návrh, ktorý nepokračuje v tejto stavbe, ale zakladá novú.
+
+    Rýchla oprava vytvára verziu až odoslaním formulára, takže dovtedy niet stavby, do ktorej by Dedo
+    text podal. Bez tohto slovesa by mu musel dať blok na skopírovanie — a to pri KAŽDEJ rýchlej oprave,
+    nie raz. Návrh sa preto zavesí na najnovšiu verziu a odtiaľ sa spustí nová.
+    """
+
+    def test_the_send_creates_a_patch_version_and_starts_the_lane_with_dedos_text(
+        self, client, db_session, no_dispatch
+    ) -> None:
+        user, version, _state = _build(db_session, version_number="0.1.0")
+        proposal = _propose(db_session, version.id, content="Oprav vstupnú bránu.", action="fast_fix")
+
+        response = _send(client, user, version.id, proposal, text="Oprav vstupnú bránu.")
+        assert response.status_code == 200, response.text
+
+        # NOVÁ verzia, nie pokračovanie tej starej.
+        versions = db_session.execute(select(Version).where(Version.project_id == version.project_id)).scalars().all()
+        numbers = sorted(v.version_number for v in versions)
+        assert numbers == ["0.1.0", "0.1.1"], numbers
+
+        # A beží na nej rýchla dráha s Dedovým textom ako ZADANÍM — nie ako správou.
+        new_version = next(v for v in versions if v.version_number == "0.1.1")
+        new_state = db_session.execute(
+            select(PipelineState).where(PipelineState.version_id == new_version.id)
+        ).scalar_one()
+        assert new_state.flow_type == "fast_fix"
+        assert any(vid == new_version.id for vid, _d in no_dispatch), "rýchla dráha sa nerozbehla"
+
+    def test_the_old_build_is_left_alone(self, client, db_session, no_dispatch) -> None:
+        """Stará stavba je hotová vec — návrh na nej nesmie nič pohnúť."""
+        user, version, state = _build(db_session, version_number="0.1.0", current_stage="done", status="done")
+        proposal = _propose(db_session, version.id, content="Oprav bránu.", action="fast_fix")
+        before = (state.current_stage, state.status)
+
+        assert _send(client, user, version.id, proposal, text="Oprav bránu.").status_code == 200
+
+        db_session.refresh(state)
+        assert (state.current_stage, state.status) == before
+
+    def test_the_proposal_is_archived_so_it_cannot_start_a_second_one(self, client, db_session, no_dispatch) -> None:
+        """Archivácia je v tej istej transakcii ako štart — nedá sa odoslať dvakrát a nedá sa označiť
+        za odoslaný návrh, ktorý sa nerozbehol."""
+        user, version, _state = _build(db_session, version_number="0.1.0")
+        proposal = _propose(db_session, version.id, content="Oprav bránu.", action="fast_fix")
+
+        assert _send(client, user, version.id, proposal, text="Oprav bránu.").status_code == 200
+        second = _send(client, user, version.id, proposal, text="Oprav bránu.")
+        assert second.status_code == 409, second.text
+
+        versions = db_session.execute(select(Version).where(Version.project_id == version.project_id)).scalars().all()
+        assert len(versions) == 2, "druhé odoslanie založilo ďalšiu verziu"
+
+    def test_dedo_still_cannot_start_a_build_himself(self, client, dedo_token, db_session) -> None:
+        """TOTO je hranica, na ktorej všetko stojí. Dedove dvere taký endpoint NEMAJÚ — a nesmú ho dostať
+        ani omylom. Podanie návrhu je jediné, čo vie; spustenie zostáva na kliknutí Manažéra."""
+        _user, version, _state = _build(db_session, version_number="0.1.0")
+        db_session.commit()
+
+        started = client.post(
+            "/api/v1/pipeline/fast-fix",
+            headers=_dedo_auth(),
+            json={"project_id": str(version.project_id), "directive": "Skús to spustiť sám."},
+        )
+        assert started.status_code in (401, 403), started.text

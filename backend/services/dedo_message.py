@@ -116,7 +116,12 @@ PROPOSAL_MARKER = "dedo_proposal"
 #: and no delivery path of its own: the proposal is sent by the very action the Manažér would have clicked
 #: himself, so every guard that action has (a non-empty comment, ``answer`` only on a blocked build, the
 #: framework-block gate, the single-flight dispatch guard) applies unchanged.
-PROPOSAL_ACTIONS = ("uprav", "answer", "ask")
+#: ``fast_fix`` (ICCINT-54) je štvrté sloveso a jediné, ktoré NEPREDPOKLADÁ bežiacu stavbu: rýchla oprava
+#: verziu vytvára až odoslaním formulára, takže dovtedy niet stavby, do ktorej by sa text dal podať. Návrh
+#: sa preto zavesí na NAJNOVŠIU verziu projektu (tam, kam sa Manažér pozerá) a jeho odoslanie nespustí
+#: ``apply_action``, ale štart rýchlej opravy — pod účtom Manažéra, presne ako keby formulár vyplnil sám.
+#: Bez neho by Dedo musel Directorovi dávať blok na skopírovanie, a to pri KAŽDEJ rýchlej oprave.
+PROPOSAL_ACTIONS = ("uprav", "answer", "ask", "fast_fix")
 
 #: Why a proposal was archived without the Manažér deciding on it: Dedo wrote a NEWER one. Kept distinct
 #: from ``sent`` / ``rejected`` so the log never claims he handled something he never saw.

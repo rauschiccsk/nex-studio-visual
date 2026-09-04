@@ -66,7 +66,7 @@ class DedoProposalCreate(BaseModel):
     content: str = Field(min_length=1)
     #: Validated against :data:`~backend.services.dedo_message.PROPOSAL_ACTIONS` in the service (409), so
     #: the allowed set lives in ONE place next to the writer instead of being restated as a Literal here.
-    proposed_action: str = Field(min_length=1, description="uprav | answer | ask")
+    proposed_action: str = Field(min_length=1, description="uprav | answer | ask | fast_fix")
 
 
 class DedoUnblockRequest(BaseModel):

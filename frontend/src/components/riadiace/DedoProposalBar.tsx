@@ -66,6 +66,14 @@ const ACTION_COPY: Record<string, { button: string; effect: string }> = {
     button: "Spýtať sa agenta",
     effect: "Text sa odošle AI Agentovi ako otázka a on na ňu v ďalšom ťahu odpovie.",
   },
+  // ICCINT-54: jediné sloveso, ktoré nepokračuje v TEJTO stavbe, ale zakladá novú záplatovú verziu.
+  // Text to hovorí nahlas — Manažér musí vedieť, že klikom nevzniká správa, ale nová stavba.
+  fast_fix: {
+    button: "Spustiť rýchlu opravu",
+    effect:
+      "Vznikne nová záplatová verzia a rovno sa na nej rozbehne rýchla oprava s týmto zadaním — " +
+      "krátkou cestou bez Vizuálu. Nasadenie sa nespustí; to zostáva samostatným krokom.",
+  },
 };
 
 const FALLBACK_COPY = {
