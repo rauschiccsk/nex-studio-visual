@@ -599,3 +599,114 @@ def test_fast_fix_build_brief_asks_for_the_customer_sentence(db_session) -> None
 
     plain = orchestrator._directive_for_build_task(task, None, [], flow_type="new_version")
     assert "customer_note" not in plain  # a normal build carries it in the task plan instead
+
+
+# ---------------------------------------------------------------------------
+# 6. ICCINT-57: the lane must be VERIFIABLE — it has no Návrh to declare from
+# ---------------------------------------------------------------------------
+
+
+def _fast_fix_build(db, *, flow_type="fast_fix", stage="verifikacia"):
+    creator = _seed_user(db)
+    project = _seed_project(db, creator=creator)
+    version = Version(project_id=project.id, version_number="9.9.9", status="active")
+    db.add(version)
+    db.flush()
+    db.add(
+        PipelineState(
+            version_id=version.id,
+            flow_type=flow_type,
+            current_stage=stage,
+            current_actor="auditor",
+            status="agent_working",
+        )
+    )
+    db.flush()
+    return project, version
+
+
+def _priprava_declaration(db, version_id, features):
+    """The fast lane's Príprava close, carrying the release-coverage declaration."""
+    msg = PipelineMessage(
+        version_id=version_id,
+        stage="priprava",
+        author="ai_agent",
+        recipient="manazer",
+        kind="gate_report",
+        content="Príprava uzavretá.",
+        payload={"phase": "priprava", "plan": None, "flagship_features": features},
+    )
+    db.add(msg)
+    db.flush()
+    return msg
+
+
+def test_fast_fix_floor_comes_from_priprava_not_from_a_navrh_it_never_runs(db_session) -> None:
+    """The deadlock this ticket is about.
+
+    The oracle floor was read ONLY from the design close, which is found by the ``plan`` payload a design
+    carries. A fast fix materializes no plan and has no Návrh phase at all, so the floor was always ``(0, 0)``
+    — and ``_evaluate_release_coverage`` refuses ``(0, 0)`` outright. Every fast fix that reached Verifikácia
+    therefore failed forever, whatever the code did: nex-productcatalogs 0.1.1 burned 16 rounds and 22 hours on
+    16 identical failures while the Auditor reported "Bez nálezu".
+    """
+    from backend.services import orchestrator
+
+    _project, version = _fast_fix_build(db_session)
+    _priprava_declaration(db_session, version.id, ["Katalóg sa otvorí z Managera bez prihlasovania"])
+
+    assert orchestrator._declared_release_coverage(db_session, version.id) == (1, 0)
+
+
+def test_a_declared_fast_fix_can_actually_pass_the_release_gate(db_session) -> None:
+    """End of the dead end: with the declaration in place the gate is satisfiable by a real acceptance run."""
+    from backend.services import orchestrator
+
+    _project, version = _fast_fix_build(db_session)
+    _priprava_declaration(db_session, version.id, ["Katalóg sa otvorí z Managera bez prihlasovania"])
+    req = orchestrator._declared_release_coverage(db_session, version.id)
+
+    ok, detail = orchestrator._evaluate_release_coverage(total=3, feature=1, negative=0, coverage_req=req)
+
+    assert ok, detail
+
+
+def test_an_undeclared_fast_fix_is_still_refused(db_session) -> None:
+    """The floor is MOVED, not lowered. A fast fix that declares nothing stays unverifiable — otherwise this
+    fix would have quietly turned the release gate off for the whole lane."""
+    from backend.services import orchestrator
+
+    _project, version = _fast_fix_build(db_session)  # no Príprava declaration
+
+    req = orchestrator._declared_release_coverage(db_session, version.id)
+    ok, detail = orchestrator._evaluate_release_coverage(total=3, feature=1, negative=0, coverage_req=req)
+
+    assert req == (0, 0)
+    assert not ok and "missing declaration" in detail
+
+
+def test_a_new_version_still_reads_its_declaration_from_the_design(db_session) -> None:
+    """The ordinary lane is untouched — a Príprava block must NOT become a back door around the design close."""
+    from backend.services import orchestrator
+
+    _project, version = _fast_fix_build(db_session, flow_type="new_version")
+    _priprava_declaration(db_session, version.id, ["toto sa nesmie počítať"])
+
+    assert orchestrator._declared_release_coverage(db_session, version.id) == (0, 0)
+
+
+def test_the_fast_fix_priprava_brief_asks_for_the_declaration(db_session) -> None:
+    """Nobody can declare what nobody asked for — and the ask must name the APP, not our own tooling: on the
+    stalled build the agent's unprompted declaration read "Živý náhľad appky…", a NEX Studio feature."""
+    from backend.services import orchestrator
+
+    creator = _seed_user(db_session)
+    project = _seed_project(db_session, creator=creator)
+    _seed_base_version(db_session, project, "v1.0.0")
+    patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id)
+    _record_kickoff(db_session, patch.id, "Oprav vstup z Managera")
+
+    brief = orchestrator._priprava_directive(db_session, patch.id, flow_type="fast_fix")
+
+    assert "flagship_features" in brief
+    assert "NEX Studiu" in brief  # says explicitly not to declare our own tooling

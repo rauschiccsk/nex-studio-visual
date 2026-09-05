@@ -1412,6 +1412,13 @@ def _priprava_directive(db: Session, version_id: uuid.UUID, *, flow_type: str = 
             "posunie do Programovania (žiadne schválenie medzitým).\n"
             "3. ZASTAV (`kind=question`) IBA ak je oprava naozaj nejednoznačná alebo technicky nemožná — NIE "
             "preto, že by si chcel doplniť proces. Inak UZAVRI toto kolo `kind=done`.\n"
+            # ICCINT-57: the release floor. Asked HERE — the phase this lane has, and BEFORE the fix is built,
+            # so the claim cannot be written to match whatever got built.
+            "4. DO STAVOVÉHO BLOKU PRIDAJ `flagship_features` (aspoň jednu položku): čo MÁ BYŤ po tejto "
+            "oprave preukázateľné na BEŽIACEJ aplikácii — teda čo si človek reálne vyskúša a uvidí, že to "
+            "funguje. Odvoď to zo smernice nižšie. Píš o TEJTO aplikácii a jej správaní, NIE o našich "
+            "nástrojoch, procese ani o NEX Studiu. Bez tejto deklarácie sa vydanie nedá overiť a Verifikácia "
+            "ho neprepustí.\n"
             "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3).\n\n"
             "--- SMERNICA MANAŽÉRA (toto je celé tvoje zadanie) ---\n" + directive_text
         )
@@ -6196,13 +6203,64 @@ def _latest_navrh_gate_report_payload(db: Session, version_id: uuid.UUID) -> dic
     return {}
 
 
+def _fast_fix_declaration_payload(db: Session, version_id: uuid.UUID) -> dict[str, Any]:
+    """ICCINT-57 — the fast lane's release-coverage declaration, carried on its Príprava gate_report.
+
+    :func:`_latest_navrh_gate_report_payload` finds the declaration by the ``plan`` payload only a design close
+    carries. A fast fix materializes NO task plan (``fast_fix.ensure_build_task`` makes one Task directly), so
+    that lookup returns ``{}`` for every fast fix — and the oracle floor became ``(0, 0)``, which
+    :func:`_evaluate_release_coverage` refuses outright ("nothing to demonstrate → not verifiable"). The lane
+    could therefore NEVER pass Verifikácia, whatever the code did: nex-productcatalogs 0.1.1 ran 16 rounds and
+    16 identical failures over 22 hours, while the Auditor kept reporting "Bez nálezu" and the fix loop kept
+    manufacturing filler work because a FAIL always creates another fix task.
+
+    The declaration is asked for in PRÍPRAVA — the phase this lane actually has, and BEFORE the fix is built,
+    the same order Návrh uses. Declaring afterwards would let the claim be written to match whatever got built.
+
+    Deliberately NOT scavenged from the Programovanie gate_reports: they do carry ``flagship_features``, but on
+    the stalled build that field held "Živý náhľad appky, nad ktorým Manažér schvaľuje vzhľad" — a NEX Studio
+    feature, echoed from the agent's own context and unrelated to the project. A floor built on that would look
+    enforced while guarding nothing.
+    """
+    msgs = (
+        db.execute(
+            select(PipelineMessage)
+            .where(
+                PipelineMessage.version_id == version_id,
+                PipelineMessage.stage == "priprava",
+                PipelineMessage.author == "ai_agent",
+                PipelineMessage.kind == "gate_report",
+            )
+            .order_by(PipelineMessage.seq.desc())
+        )
+        .scalars()
+        .all()
+    )
+    for msg in msgs:
+        if msg.payload and msg.payload.get("flagship_features"):
+            return msg.payload
+    return {}
+
+
+def _release_declaration_payload(db: Session, version_id: uuid.UUID) -> dict[str, Any]:
+    """The release-coverage declaration for THIS build, read from the phase its flow actually has (ICCINT-57).
+
+    ``new_version`` declares it with the design (Návrh); ``fast_fix`` has no Návrh at all
+    (``FAST_FIX_STAGE_ORDER = priprava → programovanie → verifikacia → done``) and declares it in Príprava.
+    One reader, so the oracle floor and the Auditor's brief can never disagree about what was declared."""
+    state = _get_state(db, version_id)
+    if state is not None and state.flow_type == "fast_fix":
+        return _fast_fix_declaration_payload(db, version_id)
+    return _latest_navrh_gate_report_payload(db, version_id)
+
+
 def _declared_release_coverage(db: Session, version_id: uuid.UUID) -> tuple[int, int]:
     """CR-V2-051 — the ``(n_flagship_features, n_safety_properties)`` the Návrh design DECLARED
     (:func:`_run_navrh_round` records ``flagship_features`` + ``safety_properties`` on the navrh gate_report —
     CR-V2-052). This is the risk floor the release-acceptance oracle enforces: ≥1 FEATURE assertion per
     flagship feature, ≥1 NEGATIVE assertion per safety property. Defensive: returns ``(0, 0)`` when no design
     is on record or the payload predates the declaration (graceful degradation to the anti-empty floor)."""
-    payload = _latest_navrh_gate_report_payload(db, version_id)
+    payload = _release_declaration_payload(db, version_id)
     features = payload.get("flagship_features")
     safety = payload.get("safety_properties")
     n_features = len(features) if isinstance(features, list) else 0
@@ -6215,7 +6273,7 @@ def _release_coverage_brief(db: Session, version_id: uuid.UUID) -> str:
     Auditor's END brief, so the adversarial negative-test mandate names the EXACT risky ops to run and
     reject. Empty string when nothing was declared (the directive already tells the Auditor to challenge a
     missing declaration)."""
-    payload = _latest_navrh_gate_report_payload(db, version_id)
+    payload = _release_declaration_payload(db, version_id)
     features = payload.get("flagship_features") or []
     safety = payload.get("safety_properties") or []
     if not features and not safety:
