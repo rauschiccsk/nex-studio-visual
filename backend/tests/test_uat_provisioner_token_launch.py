@@ -40,7 +40,7 @@ def _write_manager_env(dir_: Path) -> Path:
     return p
 
 
-def _render(source_env, *, manager_env_path=None, preserved=None):
+def _render(source_env, *, manager_env_path=None, preserved=None, **kw):
     return generate_uat_env(
         slug="andros-shopify",
         project="nex-shopify",
@@ -54,6 +54,7 @@ def _render(source_env, *, manager_env_path=None, preserved=None):
         shared_db_password="pw",
         preserved_secrets=preserved,
         manager_env_path=manager_env_path,
+        **kw,
     )
 
 
@@ -253,3 +254,72 @@ def test_both_paths_share_one_definition_of_placeholder():
     import inspect
 
     assert "is_template_placeholder" in inspect.getsource(orchestrator._render_smoke_env)
+
+
+# ── ICCINT-59: the other two halves of the pairing ──
+
+
+def test_the_manager_address_comes_from_the_backend_service_not_the_last_port_in_the_file(tmp_path):
+    """A line scan looked simpler and was WRONG: it took the last Traefik port label in the compose, which
+    belongs to the frontend, and produced ``…-backend:80``. Parsed per service, the backend's own port wins."""
+    (tmp_path / "docker-compose.yml").write_text(
+        "services:\n"
+        "  backend:\n"
+        "    container_name: uat-andros-manager-backend\n"
+        "    labels:\n"
+        "      - traefik.http.services.api.loadbalancer.server.port=8000\n"
+        "  frontend:\n"
+        "    container_name: uat-andros-manager-frontend\n"
+        "    labels:\n"
+        "      - traefik.http.services.web.loadbalancer.server.port=80\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".env").write_text("LAUNCH_SIGNING_KEY=k\n", encoding="utf-8")
+
+    from backend.services.uat_provisioner import read_paired_manager_base_url
+
+    assert read_paired_manager_base_url(tmp_path / ".env") == "http://uat-andros-manager-backend:8000"
+
+
+def test_a_manager_with_no_provisioning_token_warns_instead_of_sinking_the_deploy(tmp_path):
+    """The app is installed either way; only the tile is missing. A deploy that dies because the Manager was
+    not ready would throw away work that is otherwise fine — and the warning must say what to do about it."""
+    (tmp_path / ".env").write_text("LAUNCH_SIGNING_KEY=k\n", encoding="utf-8")
+
+    from backend.services.uat_provisioner import ensure_module_registered
+
+    key, warning = ensure_module_registered(
+        tmp_path / ".env",
+        "http://manager:8000",
+        slug="nex-productcatalogs",
+        display_name="NEX Productcatalogs",
+        app_url="https://uat-andros-productcatalogs.isnex.eu",
+    )
+
+    assert key is None
+    assert warning and "PROVISIONING_TOKEN" in warning
+
+
+def test_the_pairing_values_reach_the_app_env():
+    """Without these the app comes up refusing every sign-in: no address means it cannot ask who the visitor
+    is, and no key of its own means the Manager would refuse to tell it."""
+    rendered = _render(
+        {"NEX_MANAGER_BASE_URL": "", "NEX_MANAGER_API_KEY": ""},
+        manager_base_url="http://uat-andros-manager-backend:8000",
+        manager_api_key="minted-by-the-manager",
+    )
+
+    assert "NEX_MANAGER_BASE_URL=http://uat-andros-manager-backend:8000" in rendered
+    assert "NEX_MANAGER_API_KEY=minted-by-the-manager" in rendered
+
+
+def test_a_redeploy_keeps_the_key_it_already_has():
+    """The Manager mints the key ONCE. On a redeploy nothing is minted, so the preserved value is the only
+    right answer — a synthetic would look configured and fail every identity check."""
+    rendered = _render(
+        {"NEX_MANAGER_API_KEY": ""},
+        manager_api_key=None,
+        preserved={"NEX_MANAGER_API_KEY": "the-one-from-first-deploy"},
+    )
+
+    assert "NEX_MANAGER_API_KEY=the-one-from-first-deploy" in rendered

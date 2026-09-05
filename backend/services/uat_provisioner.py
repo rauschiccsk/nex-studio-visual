@@ -59,6 +59,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+import httpx
 import jinja2
 import yaml
 
@@ -105,6 +106,11 @@ SECRET_SUFFIXES = ("_password", "_secret", "_key", "_token")
 # it EMPTY. That is a missing PAIRING, not a failed deploy (the app is built, started and serving), and it is
 # reported as a WARNING naming the gap + the remedy — never as a failure (Director decision 2026-07-28).
 LAUNCH_KEY_ENV = "MANAGER_LAUNCH_SIGNING_KEY"
+#: ICCINT-59: the other two halves of the pairing. The launch key alone only lets the app VERIFY a token; to
+#: finish a sign-in it must ask the Manager who that is — which needs the Manager's address and the app's own
+#: key. Both were left blank by the template, so a deployed token-launch app came up refusing every sign-in.
+MANAGER_BASE_URL_ENV = "NEX_MANAGER_BASE_URL"
+MANAGER_API_KEY_ENV = "NEX_MANAGER_API_KEY"
 
 # The ONE env var that is a HUMAN's login (the initial admin password), not a machine secret. The manager must
 # KNOW it to use the deployed app, so a per-customer deploy sets it to the customer secret (which the manager
@@ -453,6 +459,118 @@ def read_paired_manager_launch(manager_env_path: Path) -> tuple[Optional[str], O
     return (mgr.get("LAUNCH_SIGNING_KEY") or None, mgr.get("DEPLOY_SLUG") or None)
 
 
+def _module_display_name(project_slug: str) -> str:
+    """A readable tile name from the project slug (``nex-productcatalogs`` → ``NEX Productcatalogs``).
+
+    Deliberately simple and predictable rather than clever: the Manager lets the operator rename the tile, and
+    a wrong-but-confident guess would be harder to notice than a plain one.
+    """
+    parts = [p for p in project_slug.split("-") if p]
+    return " ".join(p.upper() if p == "nex" else p.capitalize() for p in parts) or project_slug
+
+
+def read_paired_manager_base_url(manager_env_path: Path) -> Optional[str]:
+    """The paired Manager's address on the PRIVATE network, from its own compose (ICCINT-59).
+
+    A token-launch app must ask the Manager who is signed in; with no address it refuses sign-in outright
+    ("an unreachable Manager is a fault, never a quiet pass"). The address is read from the Manager Deploy's
+    compose beside the ``.env`` we already read the launch key from — its backend ``container_name`` and that
+    SAME service's Traefik port — rather than assembled from the naming convention, so a Manager deployed under
+    a different name still resolves.
+
+    Both stacks sit on the shared proxy network, so the container name IS reachable; this deliberately does NOT
+    use the public URL — the call is internal and has no business leaving the host.
+
+    Parsed as YAML, per service. A line scan looked simpler and was wrong: it took the LAST port label in the
+    file, which belongs to the frontend, and produced ``http://…-backend:80``.
+
+    ``None`` when no Manager compose is there (the app then keeps whatever it had; token-launch stays off).
+    """
+    compose = manager_env_path.parent / "docker-compose.yml"
+    try:
+        data = yaml.safe_load(compose.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    for svc in (data.get("services") or {}).values():
+        if not isinstance(svc, dict):
+            continue
+        name = str(svc.get("container_name") or "")
+        if not name.endswith("-backend"):
+            continue
+        port = "8000"
+        labels = svc.get("labels") or []
+        label_texts = labels if isinstance(labels, list) else [f"{k}={v}" for k, v in labels.items()]
+        for label in label_texts:
+            text = str(label)
+            if "loadbalancer.server.port=" in text:
+                candidate = text.rsplit("=", 1)[1].strip()
+                if candidate.isdigit():
+                    port = candidate
+        return f"http://{name}:{port}"
+    return None
+
+
+def ensure_module_registered(
+    manager_env_path: Path,
+    manager_base_url: str,
+    *,
+    slug: str,
+    display_name: str,
+    app_url: str,
+) -> tuple[Optional[str], Optional[str]]:
+    """Tell the paired Manager this app exists, so it can be opened from it (ICCINT-59).
+
+    Returns ``(identity_key, warning)``. The key is returned by the Manager ONCE, at creation, and becomes the
+    app's ``NEX_MANAGER_API_KEY``; on a redeploy the module already exists, so the key is ``None`` and the
+    caller keeps the preserved one.
+
+    Why this exists: a module can only call the Manager once it HAS a key, and it only gets one by being
+    registered — and registration used to require a logged-in admin. So an app deployed automatically came up
+    with the launch key wired in, no entry in the Manager, and no tile to open it from: running but unreachable
+    (nex-productcatalogs UAT, 05.09.2026). The Manager now accepts the deployer's OWN key for module
+    provisioning, so nobody has to impersonate a person.
+
+    BEST-EFFORT BY DESIGN: every failure returns a warning instead of raising. A Manager that is down, or was
+    never given a provisioning token, must not sink a deploy that is otherwise fine — the app is still
+    installed and the Manager can be told later. The warning names what to do rather than only what broke.
+
+    The provisioning token is read from the Manager's own ``.env`` and never logged, never returned.
+    """
+    token = _parse_env_file(manager_env_path).get("PROVISIONING_TOKEN") or ""
+    if not token:
+        return None, (
+            f"Modul '{slug}' sa v párovom NEX Manageri nezaregistroval: Manager nemá nastavený "
+            "PROVISIONING_TOKEN. Appka je nasadená, ale nedá sa z Managera otvoriť, kým sa modul nezaregistruje."
+        )
+    headers = {"X-Provisioning-Token": token}
+    api = f"{manager_base_url.rstrip('/')}/api/v1/modules"
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            existing = client.get(api, headers=headers)
+            existing.raise_for_status()
+            for module in existing.json():
+                if module.get("slug") == slug:
+                    if module.get("base_url") != app_url.rstrip("/"):
+                        client.patch(
+                            f"{api}/{module['id']}", headers=headers, json={"base_url": app_url}
+                        ).raise_for_status()
+                    return None, None
+            created = client.post(
+                api,
+                headers=headers,
+                json={"slug": slug, "display_name": display_name, "base_url": app_url, "sort_order": 100},
+            )
+            created.raise_for_status()
+            return created.json().get("identity_key") or None, None
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        return None, (
+            f"Modul '{slug}' sa v párovom NEX Manageri nepodarilo zaregistrovať ({type(exc).__name__}). "
+            "Appka je nasadená; z Managera sa dá otvoriť až po registrácii."
+        )
+
+
 def detect_sqlalchemy_pg_drivers(project_path: Path) -> Optional[set[str]]:
     """The SQLAlchemy sync postgres driver tokens the source project DECLARES as dependencies (H1, CR-1).
 
@@ -563,6 +681,8 @@ def generate_uat_env(
     preserved_secrets: Optional[dict[str, str]] = None,
     admin_password: Optional[str] = None,
     manager_env_path: Optional[Path] = None,
+    manager_base_url: Optional[str] = None,
+    manager_api_key: Optional[str] = None,
 ) -> str:
     """Render the UAT ``.env`` content (detected DB creds + synthetic backend secrets).
 
@@ -625,6 +745,17 @@ def generate_uat_env(
             continue
         if key_str == "MANAGER_DEPLOY_SLUG":
             rendered[key_str] = mgr_deploy_slug or ""
+            continue
+        if key_str == MANAGER_BASE_URL_ENV:
+            # The Manager's PRIVATE address (container name on the shared network) — the app refuses sign-in
+            # outright without it, so a blank here is a dead app, not a soft default.
+            rendered[key_str] = manager_base_url or preserved_secrets.get(key_str) or ""
+            continue
+        if key_str == MANAGER_API_KEY_ENV:
+            # Minted by the Manager at registration and shown ONCE. On a redeploy the module already exists, so
+            # nothing is minted and the preserved value is the right one — never a synthetic, which would make
+            # every identity check fail while looking configured.
+            rendered[key_str] = manager_api_key or preserved_secrets.get(key_str) or ""
             continue
         if _is_var_expansion(value):
             # v4.0.18: honour a ``${VAR:-default}`` default on a NON-secret var — it IS the app's intended value
@@ -1340,6 +1471,28 @@ def provision_uat(
         manager_env_path = (prod_root if environment == "prod" else uat_root) / customer_slug / "nex-manager" / ".env"
 
     env_example = _parse_env_file(project_path / ".env.example")
+
+    # ICCINT-59: finish the pairing. Wiring the launch key alone left the app able to VERIFY a token but unable
+    # to finish a sign-in: it must ask the Manager who the visitor is, which needs the Manager's address and a
+    # key of its own — and the Manager needed to be told the app exists at all. Done BEFORE the env is rendered
+    # because the key the Manager mints is shown once and has to be written into that env.
+    #
+    # Best-effort: a Manager that is down or has no provisioning token yields a warning, never a failed deploy.
+    manager_base_url: Optional[str] = None
+    manager_api_key: Optional[str] = None
+    registration_warning: Optional[str] = None
+    if manager_env_path is not None and LAUNCH_KEY_ENV in env_example:
+        manager_base_url = read_paired_manager_base_url(manager_env_path)
+        if manager_base_url:
+            _nb, app_host = _instance_naming(environment, uat_slug, customer_slug, app)
+            manager_api_key, registration_warning = ensure_module_registered(
+                manager_env_path,
+                manager_base_url,
+                slug=project_slug,
+                display_name=_module_display_name(project_slug),
+                app_url=f"https://{app_host}",
+            )
+
     env_content = generate_uat_env(
         slug=uat_slug,
         project=project_slug,
@@ -1354,6 +1507,8 @@ def provision_uat(
         preserved_secrets=preserved_secrets,
         admin_password=admin_password,
         manager_env_path=manager_env_path,
+        manager_base_url=manager_base_url,
+        manager_api_key=manager_api_key,
     )
 
     # H1 (CR-1): driver↔URL self-validation BEFORE any file is written — fail LOUD at provision time for
@@ -1361,6 +1516,8 @@ def provision_uat(
     # leaving NOTHING on disk; WARN for every ambiguous case. The source DATABASE_URL must be fixed, not the
     # render — so the message says SOURCE FIX REQUIRED.
     warnings: list[str] = []
+    if registration_warning:
+        warnings.append(registration_warning)
     declared_drivers = detect_sqlalchemy_pg_drivers(project_path)
     fail_msgs, warn_msgs = validate_rendered_db_drivers(env_content, declared_drivers, project_slug=project_slug)
     if fail_msgs:
