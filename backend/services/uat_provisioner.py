@@ -403,6 +403,26 @@ def _var_expansion_default(value: str) -> Optional[str]:
     return None  # ``${VAR}`` / ``${VAR:?err}`` — no default to honour
 
 
+def is_template_placeholder(value: object) -> bool:
+    """True when an env-TEMPLATE value means "fill this in", NOT "set it to the empty string".
+
+    To a container those are worlds apart: an UNSET variable falls back to the app's own default, an empty
+    string is PARSED. ``CORS_ALLOW_ORIGINS=`` copied verbatim kills the app before it starts — pydantic-settings
+    JSON-decodes a complex-typed field straight from the environment, AHEAD of any validator the app declares,
+    so an empty string is not "no origins", it is ``SettingsError: error parsing value for field
+    "cors_allow_origins"`` and the process never comes up.
+
+    ICCINT-40 fixed this for the release smoke; ICCINT-58 for UAT provisioning — and the second only had to
+    exist because the first fixed the INSTANCE, not the cause. Both callers now share THIS definition, so a
+    third consumer of an ``.env.example`` cannot quietly miss it.
+
+    Only a value that is genuinely blank counts. A value the provisioner deliberately renders empty (the
+    token-launch key when no paired Manager exists — "launch off, the route cleanly rejects") is NOT a
+    placeholder: it never reaches this test, it has its own branch.
+    """
+    return isinstance(value, str) and not value.strip()
+
+
 def _parse_env_file(path: Path) -> dict[str, str]:
     """Parse a ``key=value`` env file into a dict (blank/``#`` lines ignored; no quote stripping,
     no ``${VAR}`` expansion). Empty dict when the file is absent."""
@@ -628,6 +648,11 @@ def generate_uat_env(
             rendered[key_str] = admin_password
         elif key_str.lower().endswith(SECRET_SUFFIXES):
             rendered[key_str] = preserved_secrets.get(key_str) or _synthetic_secret(key_str)
+        elif is_template_placeholder(value):
+            # ICCINT-58: a placeholder from ``.env.example`` — leave it UNSET so the app's own default applies.
+            # Writing it as an empty string is what killed the migrate container on the first UAT deploy of
+            # nex-productcatalogs 0.1.2 (05.09.2026). Deliberate empties never get here (own branches above).
+            continue
         else:
             rendered[key_str] = str(value)
 

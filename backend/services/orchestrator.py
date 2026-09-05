@@ -5300,7 +5300,15 @@ def _render_smoke_env(env_example: Path, dst: Path) -> bool:
         # ``SettingsError: error parsing value for field "cors_allow_origins"`` — the THIRD wrong-looking
         # cause in one build, and the first one we actually got to SEE (the log capture landed the same day).
         # Comments and blank lines still pass through untouched; only ``KEY=`` with nothing after it is dropped.
-        if "=" in stripped and not stripped.startswith("#") and not stripped.split("=", 1)[1].strip():
+        #
+        # ICCINT-58: the test itself now lives in ONE place (uat_provisioner.is_template_placeholder) because
+        # UAT provisioning needed the very same rule and did not have it — that fix was an instance, not a
+        # cause, and the second UAT deploy died on the identical error four weeks later.
+        if (
+            "=" in stripped
+            and not stripped.startswith("#")
+            and uat_provisioner.is_template_placeholder(stripped.split("=", 1)[1])
+        ):
             continue
         if stripped.startswith("DATABASE_URL="):
             key, _, val = raw.partition("=")

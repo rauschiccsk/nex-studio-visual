@@ -206,3 +206,50 @@ def test_first_deploy_to_a_paired_customer_warns_about_nothing(tmp_path: Path) -
 
     assert result.warnings == []
     assert "MANAGER_LAUNCH_SIGNING_KEY=manager-shared-launch-key-FAKE" in result.env_path.read_text(encoding="utf-8")
+
+
+# ── ICCINT-58: a placeholder from .env.example must NOT be written as an empty string ──
+
+
+def test_a_template_placeholder_is_left_unset_not_written_empty():
+    """The first UAT deploy of nex-productcatalogs 0.1.2 (05.09.2026) died on exactly this.
+
+    ``CORS_ALLOW_ORIGINS=`` in ``.env.example`` means "fill this in". Written into the UAT ``.env`` as an empty
+    string it is PARSED, and pydantic-settings JSON-decodes a complex-typed field straight from the environment,
+    ahead of the app's own validators: ``SettingsError: error parsing value for field "cors_allow_origins"``.
+    The migrate container exited 1, the backend never started, and the deploy reported only "service backend is
+    not running". Unset, the app's own default applies and it boots.
+    """
+    rendered = _render({"CORS_ALLOW_ORIGINS": "", "APP_NAME": "katalog"})
+
+    assert "CORS_ALLOW_ORIGINS" not in rendered, "prázdna hodnota zo šablóny sa zapísala do .env"
+    assert "APP_NAME=katalog" in rendered  # a real value is untouched
+
+
+def test_the_token_launch_key_is_still_wired_from_an_empty_template_entry(tmp_path):
+    """The placeholder rule must NOT reach the token-launch key (AND-42).
+
+    ``MANAGER_LAUNCH_SIGNING_KEY`` is empty in the template on purpose: its PRESENCE is the flag that this app
+    is launched from the paired NEX Manager, and the provisioner fills it from that Manager. A blanket
+    drop-every-empty would have silently un-wired one-click launch — the very thing 0.1.2 exists to deliver.
+    """
+    manager_env = tmp_path / ".env"
+    manager_env.write_text("LAUNCH_SIGNING_KEY=k-from-manager\nDEPLOY_SLUG=andros\n", encoding="utf-8")
+
+    rendered = _render({"MANAGER_LAUNCH_SIGNING_KEY": ""}, manager_env_path=manager_env)
+
+    assert "MANAGER_LAUNCH_SIGNING_KEY=k-from-manager" in rendered
+
+
+def test_both_paths_share_one_definition_of_placeholder():
+    """ICCINT-40 fixed the smoke renderer and left UAT provisioning broken; four weeks later UAT died on the
+    identical error. The test is on the shared predicate, so a third consumer inherits the rule."""
+    from backend.services import orchestrator, uat_provisioner
+
+    assert uat_provisioner.is_template_placeholder("")
+    assert uat_provisioner.is_template_placeholder("   ")
+    assert not uat_provisioner.is_template_placeholder("https://x.sk")
+    # the smoke renderer must be USING it, not carrying its own copy
+    import inspect
+
+    assert "is_template_placeholder" in inspect.getsource(orchestrator._render_smoke_env)
