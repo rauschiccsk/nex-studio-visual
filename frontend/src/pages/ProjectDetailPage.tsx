@@ -3,9 +3,9 @@ import { versionStatusCls, versionStatusLabel } from "@/components/cockpit/label
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { AlertTriangle, Loader2, Trash2, Zap } from "lucide-react";
 import { deleteProjectApi, getProjectApi, listProjectsApi } from "@/services/api/projects";
-import { getVersion, listVersions } from "@/services/api/versions";
+import { listVersions } from "@/services/api/versions";
 import { startFastFixApi } from "@/services/api/pipeline";
-import { useActiveContextStore } from "@/store/activeContextStore";
+import { useOpenVersionCockpit } from "@/hooks/useOpenVersionCockpit";
 import { useAuthStore } from "@/store/authStore";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
@@ -110,8 +110,7 @@ export default function ProjectDetailPage() {
 
   // Fast-Fix Lane entry (F-009 §4 CR-B, CR-NS-095): one prompt → POST /pipeline/fast-fix → the backend
   // auto-creates the next PATCH version + starts the short `fast_fix` pipeline → open its cockpit board.
-  const setSelectedProject = useActiveContextStore((s) => s.setSelectedProject);
-  const setSelectedVersion = useActiveContextStore((s) => s.setSelectedVersion);
+  const openVersionCockpit = useOpenVersionCockpit();
   const [fastFixOpen, setFastFixOpen] = useState(false);
   const [fastFixDirective, setFastFixDirective] = useState("");
   const [fastFixSubmitting, setFastFixSubmitting] = useState(false);
@@ -146,15 +145,9 @@ export default function ProjectDetailPage() {
     setFastFixError(null);
     try {
       const res = await startFastFixApi(project.id, directive);
-      // The response carries only the new version_id — fetch the version to learn its (auto-bumped)
-      // number for the pinned context the cockpit board reads.
-      const version = await getVersion(res.version_id);
-      // Pin project FIRST (setSelectedProject clears the version slot), then the new patch version, so
-      // the cockpit opens with full context on it.
-      setSelectedProject({ slug: project.slug, name: project.name });
-      setSelectedVersion({ versionId: version.id, versionNumber: version.version_number });
-      // CR-V2-019 (OQ-7): the build board route is /vyvoj (renamed from /cockpit).
-      navigate("/vyvoj");
+      // ICCINT-62: shared with the Dedo proposal bar, the OTHER entry into this same lane — it omitted this
+      // step and the build started with the Manažér left on the previous version. One helper, both entries.
+      await openVersionCockpit(res.version_id, { slug: project.slug, name: project.name });
     } catch (e: unknown) {
       setFastFixError(humanizeApiError(e, "Spustenie rýchlej opravy zlyhalo"));
       setFastFixSubmitting(false);

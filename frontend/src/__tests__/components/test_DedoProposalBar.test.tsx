@@ -31,6 +31,13 @@ vi.mock("@/services/api/pipeline", () => ({
   getPipelineBoardApi: vi.fn(),
 }));
 
+// ICCINT-62: starting a fast fix creates a NEW version, so the bar must move the cockpit onto it. Mocked so
+// the test asserts the bar ASKS for that — the hook itself is covered by the pages that use it.
+const openVersionCockpit = vi.fn();
+vi.mock("@/hooks/useOpenVersionCockpit", () => ({
+  useOpenVersionCockpit: () => openVersionCockpit,
+}));
+
 const FINDING =
   "Úloha #4 nemá test na zápornú cenu, hoci špecifikácia ho žiada v §3.2. Doplň ho a spusti overenie znova.";
 
@@ -211,5 +218,37 @@ describe("DedoProposalBar — a finding from the technical team, one click away"
     rerender(<DedoProposalBar board={board()} versionId="v-1" onBoard={vi.fn()} />);
 
     expect(screen.getByRole("textbox")).toHaveValue("rozpísané…");
+  });
+});
+
+describe("ICCINT-62 — a fast fix moves the cockpit onto the build it started", () => {
+  beforeEach(() => {
+    vi.mocked(sendDedoProposalApi).mockReset();
+    openVersionCockpit.mockReset();
+  });
+
+  it("opens the NEW version after starting a fast fix", async () => {
+    vi.mocked(sendDedoProposalApi).mockResolvedValue({
+      state: { status: "agent_working", version_id: "v-new" },
+      dedo_proposal: null,
+    } as unknown as PipelineBoard);
+
+    render(<DedoProposalBar board={board({ action: "fast_fix" })} versionId="v-old" onBoard={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /rýchlu opravu/i }));
+
+    await waitFor(() => expect(openVersionCockpit).toHaveBeenCalledWith("v-new"));
+  });
+
+  it("stays put for the verbs that continue THIS build", async () => {
+    vi.mocked(sendDedoProposalApi).mockResolvedValue({
+      state: { status: "agent_working", version_id: "v-old" },
+      dedo_proposal: null,
+    } as unknown as PipelineBoard);
+
+    render(<DedoProposalBar board={board({ action: "uprav" })} versionId="v-old" onBoard={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /vrátiť agentovi/i }));
+
+    await waitFor(() => expect(sendDedoProposalApi).toHaveBeenCalled());
+    expect(openVersionCockpit).not.toHaveBeenCalled();
   });
 });

@@ -661,7 +661,11 @@ async def send_dedo_proposal(
             current_user.id,
             version_id,
         )
-        return _board(db, version_id)
+        # ICCINT-62: the board of the build that was just STARTED, not of the one he was looking at. ``fast_fix``
+        # is the only verb here that creates a new version; returning the old board made the cockpit sit on the
+        # previous one, so the bar vanished and nothing seemed to happen — twice in one evening (05.09.2026).
+        # The native "Rýchla oprava" button always opened the new build's board; this is the same answer.
+        return _board(db, new_version.id)
 
     # ICCINT-56: ``decide`` answers a DECISION CARD, so it carries the card's key alongside the text. The key
     # was PINNED onto the proposal when Dedo wrote it; re-check it against the card that is open NOW and refuse

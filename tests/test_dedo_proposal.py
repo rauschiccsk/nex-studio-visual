@@ -802,6 +802,28 @@ class TestAProposalCanStartAFastFix:
         assert new_state.flow_type == "fast_fix"
         assert any(vid == new_version.id for vid, _d in no_dispatch), "rýchla dráha sa nerozbehla"
 
+    def test_the_answer_describes_the_build_that_was_started(self, client, db_session, no_dispatch) -> None:
+        """ICCINT-62: the response must be the NEW build's board, not the one he was looking at.
+
+        ``fast_fix`` is the only verb here that creates a version; every other one continues the open build. The
+        cockpit pins whatever this returns, so answering with the OLD board left the Manažér standing on the
+        previous version: the bar vanished, nothing appeared to happen, and the agent was already working. He
+        reported it as a failure twice in one evening (05.09.2026).
+        """
+        user, version, _state = _build(db_session, version_number="0.1.0")
+        proposal = _propose(db_session, version.id, content="Oprav vstupnú bránu.", action="fast_fix")
+
+        response = _send(client, user, version.id, proposal, text="Oprav vstupnú bránu.")
+
+        assert response.status_code == 200, response.text
+        new_version = db_session.execute(
+            select(Version).where(Version.project_id == version.project_id, Version.version_number == "0.1.1")
+        ).scalar_one()
+        returned = response.json().get("state") or {}
+        assert returned.get("version_id") == str(new_version.id), (
+            "odpoveď popisuje starú stavbu — kokpit zostane stáť na nej"
+        )
+
     def test_the_old_build_is_left_alone(self, client, db_session, no_dispatch) -> None:
         """Stará stavba je hotová vec — návrh na nej nesmie nič pohnúť."""
         user, version, state = _build(db_session, version_number="0.1.0", current_stage="done", status="done")

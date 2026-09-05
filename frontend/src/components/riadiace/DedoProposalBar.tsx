@@ -34,6 +34,7 @@ import { useDraft, draftKey } from "@/hooks/useDraft";
 import { useEffect, useState } from "react";
 import { Lightbulb, Send, X } from "lucide-react";
 
+import { useOpenVersionCockpit } from "@/hooks/useOpenVersionCockpit";
 import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 
 import {
@@ -98,6 +99,7 @@ interface Props {
 }
 
 export default function DedoProposalBar({ board, versionId, onBoard }: Props) {
+  const openVersionCockpit = useOpenVersionCockpit();
   const proposal = board?.dedo_proposal ?? null;
   const proposalId = proposal?.message_id ?? null;
 
@@ -167,7 +169,15 @@ export default function DedoProposalBar({ board, versionId, onBoard }: Props) {
     setStaleNotice(null);
     setBusy("send");
     try {
-      onBoard(await sendDedoProposalApi(versionId, decidingAbout, text.trim()));
+      const next = await sendDedoProposalApi(versionId, decidingAbout, text.trim());
+      onBoard(next);
+      // ICCINT-62: `fast_fix` is the one verb that STARTS A NEW VERSION rather than continuing this one, so
+      // the response describes a different build. Without this the bar vanished and the Manažér kept staring
+      // at the old version, certain nothing had happened — while the agent was already working.
+      const started = next.state?.version_id;
+      if (proposal?.proposed_action === "fast_fix" && started && started !== versionId) {
+        await openVersionCockpit(started);
+      }
     } catch (err: unknown) {
       await handleFailure(err, "Odoslanie návrhu zlyhalo");
     } finally {
