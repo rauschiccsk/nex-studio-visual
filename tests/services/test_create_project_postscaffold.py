@@ -471,3 +471,42 @@ def test_post_scaffold_never_raises_on_step_failure(tmp_path: Path, caplog: pyte
             enable_branch_protection=False,
         )
     assert "project still created" in caplog.text.lower()
+
+
+# ─── ICCINT-65: the seeded CI helper must not write placeholders as empty strings ───
+
+
+def test_the_seeded_ci_helper_leaves_an_unfilled_variable_unset(tmp_path: Path) -> None:
+    """Runs the REAL template on a sample ``.env.example`` — every new project inherits this file.
+
+    An empty value in the template means "fill this in", not "set it to the empty string", and to a container
+    those are worlds apart: an unset variable falls back to the app's own default, an empty string is PARSED.
+    ``CORS_ALLOW_ORIGINS=`` copied verbatim killed nex-productcatalogs' CI before its first test
+    (``SettingsError: error parsing value for field "cors_allow_origins"``) — pydantic-settings JSON-decodes a
+    complex-typed field straight from the environment, ahead of the app's own validators.
+
+    Third time this rule had to be written: the release smoke had it (ICCINT-40), UAT provisioning needed it
+    too (ICCINT-58), and the template — which every project inherits — still did not.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("ci_render_dotenv", Path("templates/ci_render_dotenv.py").resolve())
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    src = tmp_path / ".env.example"
+    src.write_text(
+        "APP_NAME=katalog\nCORS_ALLOW_ORIGINS=\n# poznamka\n\nDATABASE_URL=postgresql://x@h/y\n",
+        encoding="utf-8",
+    )
+    dst = tmp_path / ".env"
+
+    module.render(src, dst)
+
+    rendered = dst.read_text(encoding="utf-8")
+    assert "CORS_ALLOW_ORIGINS" not in rendered, "nevyplnená premenná sa zapísala ako prázdny reťazec"
+    assert "APP_NAME=katalog" in rendered  # a real value is untouched
+    assert "# poznamka" in rendered  # comments pass through
+    # the three keys the helper rewrites on purpose are NOT affected by the skip
+    assert "DATABASE_URL=" in rendered and "POSTGRES_PASSWORD=" in rendered
