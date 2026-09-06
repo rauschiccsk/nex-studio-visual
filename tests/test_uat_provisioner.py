@@ -352,7 +352,12 @@ def test_env_secrets_synthetic_and_var_placeholder(tmp_path):
     import base64
 
     assert len(base64.b64decode(env["JWT_SECRET_KEY"], validate=True)) == 32
-    assert env["LLM_API_TOKEN"] == "__UAT_SYNTHETIC__"
+    # ICCINT-67: tajomstvo už NEDOSTÁVA známu zástupnú hodnotu — tá je konštanta v našom kóde a appka,
+    # ktorej pravidlo je „prázdne = zamknuté", ju číta ako odomknuté. Na verejnom UAT to 06.09.2026
+    # pustilo dnu kohokoľvek. Zmysel testu zostáva (default sa nesmie dostať von, medzera je označená),
+    # mení sa forma: skutočná náhodná hodnota nesie ten istý odkaz a neotvára nič.
+    assert env["LLM_API_TOKEN"] != "__UAT_SYNTHETIC__"
+    assert len(env["LLM_API_TOKEN"]) >= 32
     assert env["PLAIN_SETTING"] == "keepme"
 
 
@@ -371,7 +376,10 @@ def test_env_honours_var_default_for_nonsecret(tmp_path):
     assert env["GENESIS_SOURCE"] == "mock"  # the compose default is honoured (was __UAT_SYNTHETIC__ → app crash)
     assert env["SHOPIFY_SOURCE"] == "fake"
     assert env["BARE_UNKNOWN"] == "__UAT_SYNTHETIC__"  # no default → genuine unknown → synthetic
-    assert env["API_TOKEN"] == "__UAT_SYNTHETIC__"  # a SECRET keeps synthetic even WITH a default (never leak)
+    # A SECRET never carries its compose default into UAT — that part is unchanged and is what this line
+    # guards. Only the FORM of "nobody supplied this" changed: a real random value instead of the constant.
+    assert "should-not-leak" not in env["API_TOKEN"]
+    assert env["API_TOKEN"] != "__UAT_SYNTHETIC__"
 
 
 def test_env_never_contains_var_expansion_for_secrets(tmp_path):

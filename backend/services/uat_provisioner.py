@@ -683,6 +683,7 @@ def generate_uat_env(
     manager_env_path: Optional[Path] = None,
     manager_base_url: Optional[str] = None,
     manager_api_key: Optional[str] = None,
+    synthesised_secrets: Optional[list[str]] = None,
 ) -> str:
     """Render the UAT ``.env`` content (detected DB creds + synthetic backend secrets).
 
@@ -759,12 +760,27 @@ def generate_uat_env(
             continue
         if _is_var_expansion(value):
             # v4.0.18: honour a ``${VAR:-default}`` default on a NON-secret var — it IS the app's intended value
-            # (e.g. GENESIS_SOURCE:-mock / SHOPIFY_SOURCE:-fake). Blindly writing __UAT_SYNTHETIC__ crashed apps
+            # (e.g. GENESIS_SOURCE:-mock / SHOPIFY_SOURCE:-fake). Blindly writing the placeholder crashed apps
             # that VALIDATE the value (nex-shopify UAT 2026-07-20: genesis_source ∈ {mock,http} rejected it, the
-            # backend exited 1). Secrets + a bare ${VAR}/${VAR:?err} (no default) stay synthetic — a value the
-            # manager could never discover otherwise, so a placeholder they replace is correct.
+            # backend exited 1).
+            #
+            # ICCINT-67 — A SECRET NEVER GETS THE PLACEHOLDER. It used to, on the reasoning that the operator
+            # must replace a value they could not otherwise discover. But the placeholder is a CONSTANT written
+            # in this file, and an app that treats "empty means locked" treats "filled" as unlocked: on
+            # 06.09.2026 the public UAT of nex-productcatalogs let anyone in as ANY user with
+            # ``?token=__UAT_SYNTHETIC__`` — verified live, 303 + a session cookie. A filled-in placeholder in a
+            # security variable is worse than an empty one.
+            #
+            # A real random value is the safe form of the same intent: it opens nothing, and where the secret
+            # must match an external system it fails CLOSED until the operator replaces it. Which keys those are
+            # is reported to the Manažér (``synthesised_secrets``) instead of being hidden behind a constant.
             default = _var_expansion_default(value)
-            if default is not None and not key_str.lower().endswith(SECRET_SUFFIXES):
+            if key_str.lower().endswith(SECRET_SUFFIXES):
+                kept = preserved_secrets.get(key_str)
+                rendered[key_str] = kept or _synthetic_secret(key_str)
+                if not kept and synthesised_secrets is not None:
+                    synthesised_secrets.append(key_str)
+            elif default is not None:
                 rendered[key_str] = default
             else:
                 rendered[key_str] = USER_SECRET_PLACEHOLDER
@@ -778,7 +794,10 @@ def generate_uat_env(
             # redeploy re-aligns it. Never logged (§4).
             rendered[key_str] = admin_password
         elif key_str.lower().endswith(SECRET_SUFFIXES):
-            rendered[key_str] = preserved_secrets.get(key_str) or _synthetic_secret(key_str)
+            kept = preserved_secrets.get(key_str)
+            rendered[key_str] = kept or _synthetic_secret(key_str)
+            if not kept and synthesised_secrets is not None:
+                synthesised_secrets.append(key_str)
         elif is_template_placeholder(value):
             # ICCINT-58: a placeholder from ``.env.example`` — leave it UNSET so the app's own default applies.
             # Writing it as an empty string is what killed the migrate container on the first UAT deploy of
@@ -1493,6 +1512,7 @@ def provision_uat(
                 app_url=f"https://{app_host}",
             )
 
+    synthesised_secrets: list[str] = []
     env_content = generate_uat_env(
         slug=uat_slug,
         project=project_slug,
@@ -1509,6 +1529,7 @@ def provision_uat(
         manager_env_path=manager_env_path,
         manager_base_url=manager_base_url,
         manager_api_key=manager_api_key,
+        synthesised_secrets=synthesised_secrets,
     )
 
     # H1 (CR-1): driver↔URL self-validation BEFORE any file is written — fail LOUD at provision time for
@@ -1518,6 +1539,16 @@ def provision_uat(
     warnings: list[str] = []
     if registration_warning:
         warnings.append(registration_warning)
+    if synthesised_secrets:
+        # ICCINT-67: say WHICH secrets nobody supplied. They hold real random values, so nothing is open —
+        # but a secret that must match an external system (webhook, paired service) will fail until it is
+        # replaced, and failing without knowing why costs a day. Values are never named, only the keys.
+        warnings.append(
+            "Tieto tajomstvá nikto nedodal, tak dostali náhodné hodnoty: "
+            + ", ".join(sorted(synthesised_secrets))
+            + ". Appka je bezpečná (nič nie je otvorené), ale ak sa niektoré z nich musí zhodovať s iným "
+            "systémom, treba ho nahradiť."
+        )
     declared_drivers = detect_sqlalchemy_pg_drivers(project_path)
     fail_msgs, warn_msgs = validate_rendered_db_drivers(env_content, declared_drivers, project_slug=project_slug)
     if fail_msgs:

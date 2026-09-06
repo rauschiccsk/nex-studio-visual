@@ -323,3 +323,63 @@ def test_a_redeploy_keeps_the_key_it_already_has():
     )
 
     assert "NEX_MANAGER_API_KEY=the-one-from-first-deploy" in rendered
+
+
+# ── ICCINT-67: a secret NEVER gets the known placeholder ──
+
+
+def test_a_secret_never_receives_the_known_placeholder():
+    """The hole, verified live on 06.09.2026: the public UAT of nex-productcatalogs let ANYONE in as ANY user
+    with ``?token=__UAT_SYNTHETIC__`` — 303 and a session cookie.
+
+    The placeholder is a CONSTANT in this file. An app whose rule is "empty means locked" reads a filled-in
+    value as unlocked, so a placeholder in a security variable does not mark a gap — it opens a door. A random
+    value carries the same "nobody supplied this" meaning and opens nothing.
+    """
+    rendered = _render({"LAUNCH_TOKEN": "${LAUNCH_TOKEN}", "MANAGER_IDENTITY_KEY": "${IDENT}"})
+
+    assert "__UAT_SYNTHETIC__" not in rendered, "tajomstvo dostalo známu zástupnú hodnotu"
+    for key in ("LAUNCH_TOKEN", "MANAGER_IDENTITY_KEY"):
+        value = next(row.split("=", 1)[1] for row in rendered.splitlines() if row.startswith(f"{key}="))
+        assert len(value) >= 32, f"{key} nedostal poriadnu náhodnú hodnotu"
+
+
+def test_a_redeploy_keeps_the_secret_it_already_has():
+    """A rotation nobody asked for breaks a working pairing — the preserved value wins."""
+    rendered = _render(
+        {"LAUNCH_TOKEN": "${LAUNCH_TOKEN}"},
+        preserved={"LAUNCH_TOKEN": "the-one-from-first-deploy"},
+    )
+
+    assert "LAUNCH_TOKEN=the-one-from-first-deploy" in rendered
+
+
+def test_a_non_secret_placeholder_still_marks_the_gap():
+    """The placeholder keeps its job where it is harmless: a NON-secret the operator must fill in. It opens
+    nothing, and an app that validates the value fails loudly instead of running on a wrong one."""
+    rendered = _render({"GENESIS_ENDPOINT": "${GENESIS_ENDPOINT}"})
+
+    assert "GENESIS_ENDPOINT=__UAT_SYNTHETIC__" in rendered
+
+
+def test_the_operator_is_told_which_secrets_were_invented():
+    """Nothing is open, but a secret that must match an external system fails until it is replaced — and
+    failing without knowing which key costs a day."""
+    from backend.services.uat_provisioner import generate_uat_env
+
+    invented: list[str] = []
+    generate_uat_env(
+        slug="andros-demo",
+        project="nex-demo",
+        version="v0.1.0",
+        services={},
+        be_service=None,
+        db_service=None,
+        source_env_example={"LAUNCH_TOKEN": "${LAUNCH_TOKEN}"},
+        db_user="app",
+        db_name="app",
+        shared_db_password="pw",
+        synthesised_secrets=invented,
+    )
+
+    assert invented == ["LAUNCH_TOKEN"]

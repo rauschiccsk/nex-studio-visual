@@ -222,7 +222,10 @@ def test_deploy_writes_synthetic_env_file(monkeypatch, tmp_path):
     assert "POSTGRES_USER=appuser" in content
     assert "POSTGRES_DB=appdb" in content
     assert "SECRET_KEY=change-me" not in content  # synthetic, not the source value
-    assert "CLAUDE_CODE_OAUTH_TOKEN=__UAT_SYNTHETIC__" in content  # ${VAR} placeholder
+    # ICCINT-67: a ``*_TOKEN`` is a SECRET, so it gets a real random value — never the known constant, which
+    # an app reading "filled means unlocked" would treat as a valid credential.
+    assert "CLAUDE_CODE_OAUTH_TOKEN=__UAT_SYNTHETIC__" not in content
+    assert "CLAUDE_CODE_OAUTH_TOKEN=" in content
     assert oct(env_file.stat().st_mode)[-3:] == "600"
 
 
