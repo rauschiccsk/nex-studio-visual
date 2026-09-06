@@ -319,6 +319,40 @@ class _FakeCompleted:
         self.stderr = stderr
 
 
+def test_provision_ci_runner_shares_the_workdir_at_the_same_path(monkeypatch) -> None:
+    """ICCINT-66: the checkout must live at the SAME path in the runner and on the host.
+
+    CI runs inside the runner container but drives docker through the HOST socket, so a compose bind mount
+    like ``./deployment/db`` is resolved by the host daemon. With the work dir only inside the container, the
+    host has no such path — and Docker does not complain: it silently creates an EMPTY directory and mounts
+    that. The database then starts with an empty ``/docker-entrypoint-initdb.d``, its init script never runs,
+    and CI fails with "database does not exist" about a file that is plainly in the repository.
+    nex-productcatalogs lost a day to it; the give-away was a root-owned empty ``deployment/db`` on the host.
+
+    Both sides of the volume must therefore be the same string, and the runner must be told to use it.
+    """
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_secretTOKEN")
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    calls: list[tuple[list[str], dict]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        if len(cmd) > 1 and cmd[1] == "ps":
+            return _FakeCompleted(returncode=0, stdout="")
+        return _FakeCompleted(returncode=0, stdout="newcontainerid\n")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    _provision_ci_runner("nex-demo", "https://github.com/rauschiccsk/nex-demo")
+
+    run_cmd, _ = calls[-1]
+    # Napísané doslova, nie cez konštantu: test má padnúť na SPRÁVANÍ aj proti zostave, ktorá tú konštantu
+    # ešte nemá — a zároveň je tá cesta dohodou s hostiteľom, takže jej zmena MÁ zhodiť test.
+    workdir = "/opt/ci-work/nex-demo"
+    assert f"RUNNER_WORKDIR={workdir}" in run_cmd, "runner nevie, kde má pracovať"
+    assert f"{workdir}:{workdir}" in run_cmd, "hostiteľ a kontajner nemajú rovnakú cestu"
+
+
 def test_provision_ci_runner_runs_container_with_correct_label(monkeypatch) -> None:
     """Happy path: no existing container → a ``docker run -d`` for the right repo/label, with the PAT passed
     via the child ENV (name-only ``-e ACCESS_TOKEN``) and NEVER on argv (ps/log leak guard)."""

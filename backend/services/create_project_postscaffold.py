@@ -45,6 +45,9 @@ BRANCH_PROTECTION_TIMEOUT = 30
 # runner as a Docker container via the mounted docker.sock. See :func:`_provision_ci_runner` for the full why.
 # Image tag pinned to the SAME runner version as the host systemd runners (2.335.1).
 CI_RUNNER_IMAGE = "myoung34/github-runner:2.335.1"
+#: Where a container runner keeps its checkout — the SAME path in the container and on the host (ICCINT-66).
+#: Anything the CI mounts out of the repository depends on those two agreeing.
+CI_RUNNER_WORKDIR_ROOT = "/opt/ci-work"
 CI_RUNNER_PROVISION_TIMEOUT = 300  # a cold `docker run` may pull the runner image first
 CI_RUNNER_TEARDOWN_TIMEOUT = 60
 
@@ -849,8 +852,24 @@ def _provision_ci_runner(slug: str, repo_url: str | None, *, github_org: str | N
             f"LABELS={label}",
             "-e",
             "DISABLE_AUTO_UPDATE=true",
+            # ICCINT-66: the work dir must be the SAME PATH inside the runner and on the host.
+            #
+            # CI runs inside this container but executes docker through the HOST's socket, so a compose bind
+            # mount like ``./deployment/db`` is resolved by the host daemon — against a path the host does not
+            # have. Docker does not fail on a missing bind source: it SILENTLY CREATES AN EMPTY DIRECTORY and
+            # mounts that. The container then gets an empty ``/docker-entrypoint-initdb.d``, its init script
+            # never runs, and the only symptom is a test failure that makes no sense ("database does not
+            # exist") in a repository where the file is plainly present. nex-productcatalogs chased that for a
+            # day; the give-away was a root-owned empty ``deployment/db`` on the host, stamped with the CI run.
+            #
+            # Identical paths on both sides make the host resolve the REAL checkout. Under ``/opt`` because
+            # that is where ICC keeps its things — the image's default ``/_work`` would litter the host root.
+            "-e",
+            f"RUNNER_WORKDIR={CI_RUNNER_WORKDIR_ROOT}/{slug}",
             "-v",
             "/var/run/docker.sock:/var/run/docker.sock",
+            "-v",
+            f"{CI_RUNNER_WORKDIR_ROOT}/{slug}:{CI_RUNNER_WORKDIR_ROOT}/{slug}",
             CI_RUNNER_IMAGE,
         ],
         capture_output=True,
