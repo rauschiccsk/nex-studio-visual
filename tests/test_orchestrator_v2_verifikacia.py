@@ -22,6 +22,7 @@ The Verifikácia round (``_run_verifikacia_round``) is the v2 form of v1 gate_g:
 ``invoke_agent_with_parse_retry`` and ``_run_release_smoke`` are monkeypatched (no live ``claude`` / docker).
 """
 
+import json
 import uuid
 
 import pytest
@@ -1473,3 +1474,81 @@ def test_verifikacia_directive_covers_fake_boundary_antipatterns(db_session):
     assert "--no-verify" in brief and "hook" in brief
     assert "ADVERSARIÁLNY BYPASS" in brief  # must test the bypass, not only the compliant negative path
     assert "FALOŠN" in brief  # a bypassable boundary is FALSE → FAIL
+
+
+# ── ICCINT-64: the project's own CI is the second floor under a PASS ──────────
+
+
+def _fake_ci(monkeypatch, *, status="completed", conclusion="success", rows=None):
+    """Fake the ONE subprocess seam the CI floor uses — never `git`/`gh` themselves."""
+    payload = rows if rows is not None else [{"status": status, "conclusion": conclusion, "databaseId": 42}]
+
+    async def fake_step(cmd, timeout):
+        if "config" in cmd:
+            return 0, "https://github.com/rauschiccsk/nex-demo.git\n"
+        return 0, json.dumps(payload)
+
+    monkeypatch.setattr(orchestrator, "_run_publish_step", fake_step)
+
+
+async def _pass_verdict(db_session, monkeypatch):
+    version, project = _make_version(db_session, project_dial="po_kazdej_faze")
+    state = _seed_verifikacia(db_session, version.id, iteration=0)
+    state.status = "awaiting_manazer"
+    db_session.flush()
+    _seed_done_tasks(db_session, version, project, ["T1"])
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "deadbeefcafe")
+    await orchestrator.apply_action(db_session, version_id=version.id, action="verdict", payload={"verdict": "PASS"})
+    verdicts = [m for m in _msgs(db_session, version.id) if m.kind == "verdict"]
+    return verdicts[-1]
+
+
+@pytest.mark.asyncio
+async def test_a_red_ci_floors_a_pass(db_session, monkeypatch):
+    """The gap ICCINT-64 is about: nex-productcatalogs ran four days with red CI while the engine passed TWO
+    versions as verified and one went to UAT. NEX Studio HAD this check in v1 and lost it when v2 moved deploy
+    out of the pipeline — the function stayed in the file, called by nobody, so the code looked guarded."""
+    _fake_ci(monkeypatch, conclusion="failure")
+
+    last = await _pass_verdict(db_session, monkeypatch)
+
+    assert last.content == "FAIL", "červené CI musí zraziť PASS"
+    assert last.payload.get("engine_override") == "ci_red"
+    assert "42" in str(last.payload.get("ci")), "Manažér musí vidieť, ktorý beh padol"
+
+
+@pytest.mark.asyncio
+async def test_a_green_ci_lets_the_pass_through(db_session, monkeypatch):
+    _fake_ci(monkeypatch, conclusion="success")
+
+    last = await _pass_verdict(db_session, monkeypatch)
+
+    assert last.content == "PASS"
+    assert last.payload.get("engine_override") is None
+
+
+@pytest.mark.asyncio
+async def test_an_undeterminable_ci_never_blocks(db_session, monkeypatch):
+    """A run that has not registered yet is not evidence that the code is broken. A gate that stops on
+    ignorance is one people learn to route around — only a COMPLETED, non-successful run is a red."""
+    _fake_ci(monkeypatch, rows=[])
+
+    last = await _pass_verdict(db_session, monkeypatch)
+
+    assert last.content == "PASS"
+    assert last.payload.get("engine_override") is None
+
+
+@pytest.mark.asyncio
+async def test_a_ci_still_running_never_blocks(db_session, monkeypatch):
+    _fake_ci(monkeypatch, status="in_progress", conclusion=None)
+
+    last = await _pass_verdict(db_session, monkeypatch)
+
+    assert last.content == "PASS"
+
+
+def test_the_remote_url_is_read_in_both_shapes():
+    assert orchestrator._repo_full_from_remote("https://github.com/rauschiccsk/nex-demo.git") == "rauschiccsk/nex-demo"
+    assert orchestrator._repo_full_from_remote("git@github.com:rauschiccsk/nex-demo.git") == "rauschiccsk/nex-demo"
+    assert orchestrator._repo_full_from_remote("https://gitlab.com/x/y.git") is None

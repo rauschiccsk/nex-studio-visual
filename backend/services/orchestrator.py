@@ -5048,17 +5048,12 @@ async def _verify_uat_serves(
     return True, "OK"
 
 
-# Engine-owned GitHub release publish (v0.8.0 CR-1). ``RELEASE_PUBLISH_TIMEOUT`` bounds the CI WATCH —
-# ``≈ STAGE_TIMEOUT["release"]`` (900s); a slower CI is NOT a false block (the push already succeeded →
-# "still running"). ``RELEASE_PUBLISH_STEP_TIMEOUT`` is the per-subprocess backstop for the quick
-# git/gh steps (setup-git / push / rev-parse / run list); ``RELEASE_PUBLISH_PUSH_RETRIES`` mirrors the
-# template_bootstrap push retry (354-377). The run REGISTERS a few seconds after the push (≈ a CI
-# trigger lag) — poll ``gh run list`` for the pushed HEAD up to ATTEMPTS×INTERVAL before watching.
-RELEASE_PUBLISH_TIMEOUT = 900
+# Per-subprocess backstop for the quick git/gh steps (remote lookup, ``gh run list``) that
+# :func:`_ci_status_for_head` runs through :func:`_run_publish_step`.
+#
+# ICCINT-64: the WATCH/RETRY/RESOLVE constants beside it are gone with the v1 publish they served — nothing
+# watches a run any more; the CI floor ASKS for the current state and treats "still running" as unknown.
 RELEASE_PUBLISH_STEP_TIMEOUT = 180
-RELEASE_PUBLISH_PUSH_RETRIES = 1
-RELEASE_PUBLISH_RUN_RESOLVE_ATTEMPTS = 6
-RELEASE_PUBLISH_RUN_RESOLVE_INTERVAL = 5  # seconds between run-resolve polls (≈30s budget for CI to register)
 
 
 async def _run_publish_step(cmd: list[str], timeout: int) -> tuple[int, str]:
@@ -5111,70 +5106,78 @@ async def _resolve_pushed_ci_run(repo_full_name: str, head_sha: str) -> Optional
     return None
 
 
-async def _run_release_publish(project_slug: str, repo_full_name: str) -> tuple[bool, str]:
-    """Engine-owned GitHub publish of a finalized release (v0.8.0 CR-1): push the project's local
-    commits to GitHub and verify CI, using the backend's EXISTING ``GH_TOKEN`` + ``gh auth setup-git``
-    credential helper — the SAME path create-project uses (no new credential; nothing token-valued is
-    read/logged/returned).
+def _repo_full_from_remote(url: str) -> Optional[str]:
+    """``owner/repo`` from a git remote URL (https or ssh), else ``None``."""
+    text = url.strip().removesuffix(".git")
+    for sep in ("github.com/", "github.com:"):
+        if sep in text:
+            part = text.split(sep, 1)[1].strip("/")
+            return part if part.count("/") == 1 else None
+    return None
 
-    Returns ``(ok, detail)`` and NEVER raises (modelled on :func:`_run_uat_deploy`): a spawn failure /
-    timeout becomes a settled outcome, never a hang. Steps:
 
-    1. ``gh auth setup-git`` — idempotent; wires the HTTPS credential helper (template_bootstrap pattern,
-       339-348). A non-zero exit is NON-fatal — the push below surfaces the real credential error.
-    2. ``git push origin main`` in ``/opt/projects/<slug>`` with a retry on a transient failure (mirror
-       template_bootstrap 354-377). Push failure after retries → ``(False, "git push failed: <err>")``.
-    3. Verify CI for the pushed HEAD: resolve the run whose ``headSha`` is the pushed HEAD (poll
-       ``gh run list``, since the run registers a few seconds after the push), then ``gh run watch
-       <id> --exit-status`` bounded by :data:`RELEASE_PUBLISH_TIMEOUT`. CI green → ``(True, "published +
-       CI green (<id>)")``; CI red → ``(False, "CI failed (<id>): <tail>")``; can't determine / watch
-       times out → ``(True, "pushed; CI still running (<id>) — monitor")`` (the push SUCCEEDED — do NOT
-       false-block on a slow/undeterminable CI)."""
-    project_root = claude_agent.PROJECTS_ROOT / project_slug
+async def _ci_status_for_head(project_root: Path) -> tuple[str, str]:
+    """CI verdict for the commit the Auditor is about to bless — ``("green"|"red"|"unknown", detail)``.
 
-    # 1. Wire creds — idempotent; non-zero is non-fatal (the push surfaces any real credential error).
-    await _run_publish_step(["gh", "auth", "setup-git"], RELEASE_PUBLISH_STEP_TIMEOUT)
+    ICCINT-64: NEX Studio HAD this check and lost it. ``_run_release_publish`` (v1) pushed and watched CI
+    before a release; v2 moved deploy out of the pipeline and that function was orphaned — defined, never
+    called. Nobody noticed the capability was gone until nex-productcatalogs ran four days with red CI while
+    the engine passed TWO versions as verified and one went to UAT.
 
-    # 2. Push (with one retry on a transient failure) — mirror template_bootstrap 354-377.
-    push_cmd = ["git", "-C", str(project_root), "push", "origin", "main"]
-    last_err = ""
-    for _attempt in range(RELEASE_PUBLISH_PUSH_RETRIES + 1):
-        rc, out = await _run_publish_step(push_cmd, RELEASE_PUBLISH_STEP_TIMEOUT)
-        if rc == 0:
-            break
-        last_err = out.strip()[-400:]
-    else:
-        return False, f"git push failed: {last_err}"
-
-    # 3. Verify CI for the pushed HEAD. Resolve the local HEAD, then poll for ITS run (registration lag).
-    rc, out = await _run_publish_step(
-        ["git", "-C", str(project_root), "rev-parse", "HEAD"], RELEASE_PUBLISH_STEP_TIMEOUT
+    ``unknown`` NEVER blocks. A run that has not registered yet, a CI still in flight, an unreachable GitHub —
+    none of those are evidence that the code is broken, and a gate that stops on ignorance is a gate people
+    learn to route around. Only a COMPLETED, non-successful run is a red.
+    """
+    head = _repo_head(project_root)
+    if not head:
+        return "unknown", "HEAD projektu sa nepodarilo zistiť"
+    rc, remote = await _run_publish_step(
+        ["git", "-C", str(project_root), "config", "--get", "remote.origin.url"], RELEASE_PUBLISH_STEP_TIMEOUT
     )
-    head_sha = out.strip() if rc == 0 else ""
-    if not head_sha:
-        return True, "pushed; CI still running (HEAD nezistený) — monitor"
-
-    run_id: Optional[str] = None
-    for attempt in range(RELEASE_PUBLISH_RUN_RESOLVE_ATTEMPTS):
-        run_id = await _resolve_pushed_ci_run(repo_full_name, head_sha)
-        if run_id is not None:
-            break
-        if attempt < RELEASE_PUBLISH_RUN_RESOLVE_ATTEMPTS - 1:
-            await asyncio.sleep(RELEASE_PUBLISH_RUN_RESOLVE_INTERVAL)
-    if run_id is None:
-        return True, "pushed; CI still running (run zatiaľ nezaregistrovaný) — monitor"
-
+    repo = _repo_full_from_remote(remote) if rc == 0 else None
+    if not repo:
+        return "unknown", "projekt nemá čitateľný vzdialený repozitár"
     rc, out = await _run_publish_step(
-        ["gh", "run", "watch", run_id, "--exit-status", "-R", repo_full_name], RELEASE_PUBLISH_TIMEOUT
+        [
+            "gh",
+            "run",
+            "list",
+            "-R",
+            repo,
+            "--commit",
+            head,
+            "--limit",
+            "1",
+            "--json",
+            "status,conclusion,databaseId",
+        ],
+        RELEASE_PUBLISH_STEP_TIMEOUT,
     )
-    if rc == 0:
-        return True, f"published + CI green ({run_id})"
-    if rc in (124, 127):  # our watch timed out / could not spawn — push already succeeded; never false-block CI.
-        return True, f"pushed; CI still running ({run_id}) — monitor"
-    return False, f"CI failed ({run_id}): {out.strip()[-300:]}"
+    if rc != 0:
+        return "unknown", f"stav CI sa nepodarilo zistiť ({out.strip()[:100]})"
+    try:
+        rows = json.loads(out)
+    except ValueError:
+        return "unknown", "odpoveď o behoch CI sa nedá prečítať"
+    if not rows:
+        return "unknown", f"pre commit {head[:7]} zatiaľ žiadny beh CI neexistuje"
+    row = rows[0]
+    run_id = row.get("databaseId")
+    if row.get("status") != "completed":
+        return "unknown", f"CI ešte beží (beh {run_id})"
+    if row.get("conclusion") == "success":
+        return "green", f"CI zelené (beh {run_id})"
+    return "red", f"CI zlyhalo (beh {run_id}, {row.get('conclusion')})"
 
 
-# App-starts acceptance smoke (v0.7.5 CR-1) — the deterministic HARD gate behind full-flow ``gate_g``.
+# ICCINT-64: the v1 ``_run_release_publish`` (push → resolve the CI run → ``gh run watch`` → block on red)
+# is REMOVED. It was in-pipeline behaviour of the v1 ``release`` stage; v2 moved deploy out of the build
+# and left the function orphaned — defined, imported by nothing, called by nobody. Reading it, the engine
+# looked like it guarded CI. It did not, and for four days nex-productcatalogs shipped red: two versions
+# passed as verified and one went to UAT. The live check is :func:`_ci_status_for_head`, wired into the
+# Verifikácia verdict beside the runtime floor. Dead code that describes a capability is worse than none.
+
+
 ACCEPTANCE_SMOKE_TIMEOUT = 900  # matches UAT_DEPLOY_TIMEOUT — covers ``up --build`` + the acceptance suite.
 # gate-g-hardening GAP 1 (A1): bounds the host-run ``release_smoke_test.sh`` against the already-booted
 # isolated stack — a SEPARATE budget from the build/boot above (the script's own assertions, no rebuild).
@@ -11776,7 +11779,15 @@ async def apply_action(
         # kind=verdict message the fix-loop reads (:func:`_latest_verifikacia_fix_scope`) can never say PASS while
         # the settle takes the FAIL branch.
         floor_red = _latest_runtime_floor_red(db, version_id)
-        effective_verdict = "FAIL" if (verdict == "PASS" and floor_red) else verdict
+        # ICCINT-64: the SECOND floor — the project's own CI. Checked only on a PASS (a FAIL needs no second
+        # reason) and only ``red`` blocks; ``unknown`` passes through, see :func:`_ci_status_for_head`.
+        ci_state, ci_detail = ("unknown", "")
+        if verdict == "PASS":
+            ci_state, ci_detail = await _ci_status_for_head(
+                claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id)
+            )
+        ci_red = ci_state == "red"
+        effective_verdict = "FAIL" if (verdict == "PASS" and (floor_red or ci_red)) else verdict
         # CR-V2-056 (layer-1): bind a manual PASS to the verified commit + tag it (same as the autonomous path).
         verified_sha: Optional[str] = None
         if effective_verdict == "PASS":
@@ -11794,11 +11805,15 @@ async def apply_action(
         verdict_payload: dict[str, Any] = {"verdict": effective_verdict, "phase": "verifikacia"}
         if verified_sha:
             verdict_payload["verified_sha"] = verified_sha
+        if ci_detail:
+            verdict_payload["ci"] = ci_detail
         if effective_verdict != verdict:
-            verdict_payload["engine_override"] = "runtime_floor_red"
-            verdict_payload["findings"] = [
-                "ENGINE OVERRIDE (CR-V2-050): a red release smoke/acceptance floored the Manažér's PASS to FAIL."
-            ]
+            verdict_payload["engine_override"] = "ci_red" if ci_red and not floor_red else "runtime_floor_red"
+            verdict_payload["findings"] = (
+                [f"ENGINE OVERRIDE (ICCINT-64): {ci_detail} — verzia sa nedá vyhlásiť za overenú, kým je CI červené."]
+                if ci_red and not floor_red
+                else ["ENGINE OVERRIDE (CR-V2-050): a red release smoke/acceptance floored the Manažér's PASS to FAIL."]
+            )
         _record_message(
             db,
             version_id=version_id,
