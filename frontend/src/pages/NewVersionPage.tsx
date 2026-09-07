@@ -77,6 +77,9 @@ export default function NewVersionPage() {
   // ICCINT-71: čo už na disku je. Kým to Manažér nevidí, nemá sa ako rozhodnúť — a presne tak sa
   // 07.09.2026 stratila celá zákaznícka špecifikácia.
   const [existingZadanie, setExistingZadanie] = useState<string | null>(null);
+  // ICCINT-71 (druhé kolo): verzia vzniká pred zápisom Zadania. Keď zápis odmietneme, verzia už existuje —
+  // bez tejto pamäte by druhý pokus padol na „verzia už existuje" a formulár by sa zasekol.
+  const [createdVersion, setCreatedVersion] = useState<Version | null>(null);
   const [saving, setSaving] = useState(false);
   const [starting, setStarting] = useState(false);
 
@@ -265,13 +268,17 @@ export default function NewVersionPage() {
     setFormError(null);
     setSaving(true);
     try {
-      const v = await createVersion(project.id, {
+      // ICCINT-71 (druhé kolo): verzia sa zakladá PRED zápisom Zadania, takže keď zápis odmietneme, verzia
+      // už existuje — a ďalší pokus by padol na „verzia už existuje". Zmerané na 0.2.0 07.09.2026: formulár
+      // sa zasekol. Keď je založená, druhý pokus ju len použije.
+      const v = createdVersion ?? (await createVersion(project.id, {
         version_number: versionNumber.trim(),
         name: name.trim() || undefined,
         // The version's free-text intent mirrors the Zadanie so the version list shows a summary.
         description: zadanie.trim() || undefined,
         target_date: targetDate || undefined,
-      });
+      }));
+      setCreatedVersion(v);
       // Persist the brief to the spec tree the Príprava phase reads — ONLY when non-empty. A blank Zadanie
       // writes NO customer-requirements.md (STEP 2): the directive's "read it IF EXISTS" stays a clean
       // present/absent test, never present-but-empty.
@@ -516,9 +523,9 @@ export default function NewVersionPage() {
                 skutočná náprava je, že to isté pole mu ukáže obsah a nechá ho rozhodnúť sa. */}
             {existingZadanie && (
               <div className="rounded-lg border border-[var(--color-border)] p-3 space-y-2">
-                <p className="text-sm">
-                  Toto zadanie už pre verziu existuje ({existingZadanie.split("\n").length} riadkov):
-                </p>
+                {/* ⚠️ Žiadne vlastné počítanie riadkov. Panel ukazoval 72, hláška nad ním 71 — to isté číslo
+                    z dvoch miest. Počet povie engine v hláške; tu je samotný text. */}
+                <p className="text-sm">Toto zadanie už pre verziu existuje:</p>
                 <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs bg-[var(--color-surface-2)] p-2 rounded">
                   {existingZadanie}
                 </pre>

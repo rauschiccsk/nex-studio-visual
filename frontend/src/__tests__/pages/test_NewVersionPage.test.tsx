@@ -235,3 +235,46 @@ describe("NewVersionPage — nex-shared upgrade tells the truth about committed"
     expect(screen.getByRole("button", { name: /povýšiť na v0\.19\.0/i })).toBeEnabled();
   });
 });
+
+describe("NewVersionPage — existujúce zadanie sa neprepíše ticho (ICCINT-71)", () => {
+  it("ukáže, čo v súbore je, namiesto všeobecnej hlášky o zlyhaní", async () => {
+    createVersionMock.mockResolvedValue({ id: "v-1", version_number: "0.2.0" });
+    writeZadanieMock.mockRejectedValue(
+      new ApiError(409, "conflict", {
+        detail: {
+          message: "Pre túto verziu už zadanie existuje (71 riadkov).",
+          existing: "# Zákaznícka špecifikácia\n\nSedemdesiat riadkov práce.",
+        },
+      }),
+    );
+
+    await renderPage();
+    await userEvent.type(await screen.findByPlaceholderText(/Opíš, čo má verzia priniesť/i), "Jedna veta.");
+    await userEvent.click(screen.getByRole("button", { name: /uložiť zadanie/i }));
+
+    // Obsah, nie veta o obsahu. Manažér stratil 71 riadkov práve preto, že videl prázdne pole.
+    expect(await screen.findByText(/Sedemdesiat riadkov práce/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /prevziať toto zadanie do poľa/i })).toBeInTheDocument();
+  });
+
+  it("druhý pokus verziu nezakladá znova — inak sa formulár zasekne", async () => {
+    createVersionMock.mockResolvedValue({ id: "v-1", version_number: "0.2.0" });
+    writeZadanieMock.mockRejectedValue(
+      new ApiError(409, "conflict", {
+        detail: { message: "Už existuje.", existing: "# Obsah\n" },
+      }),
+    );
+
+    await renderPage();
+    await userEvent.type(await screen.findByPlaceholderText(/Opíš, čo má verzia priniesť/i), "Jedna veta.");
+    await userEvent.click(screen.getByRole("button", { name: /uložiť zadanie/i }));
+    await screen.findByRole("button", { name: /prevziať toto zadanie do poľa/i });
+
+    // Verzia vzniká PRED zápisom Zadania. Bez pamäte by druhý pokus padol na „verzia už existuje"
+    // a Manažér by sa z formulára nedostal — zmerané na 0.2.0 dňa 07.09.2026.
+    await userEvent.click(screen.getByRole("button", { name: /uložiť zadanie/i }));
+
+    await waitFor(() => expect(writeZadanieMock).toHaveBeenCalledTimes(2));
+    expect(createVersionMock).toHaveBeenCalledTimes(1);
+  });
+});
