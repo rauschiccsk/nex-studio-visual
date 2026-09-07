@@ -545,3 +545,20 @@ def _deterministic_host_port_probe(monkeypatch, host_ports):
     port_registry.invalidate_host_port_cache()
     yield
     port_registry.invalidate_host_port_cache()
+
+
+@pytest.fixture(autouse=True)
+def _no_real_ci_questions(monkeypatch):
+    """ICCINT-70: the Verifikácia CI floor now WAITS for the run it just pushed — it retries for up to two
+    minutes, then up to twenty more for the run to finish.
+
+    That is right in production and poison in a test suite: any test whose fixture happens to name a slug
+    that exists on disk would start asking the real GitHub, on a real network, in a loop. Measured the hard
+    way — the suite hung until it was killed.
+
+    So by DEFAULT the suite says "this project has no checks", which short-circuits the floor before it can
+    ask anything. Tests that mean to exercise the floor say otherwise themselves (``_fake_ci``).
+    """
+    from backend.services import orchestrator
+
+    monkeypatch.setattr(orchestrator, "_project_has_ci", lambda root: False)

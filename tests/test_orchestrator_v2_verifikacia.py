@@ -24,6 +24,7 @@ The Verifikácia round (``_run_verifikacia_round``) is the v2 form of v1 gate_g:
 
 import json
 import uuid
+from pathlib import Path
 
 import pytest
 from sqlalchemy import select
@@ -1482,6 +1483,9 @@ def test_verifikacia_directive_covers_fake_boundary_antipatterns(db_session):
 def _fake_ci(monkeypatch, *, status="completed", conclusion="success", rows=None):
     """Fake the ONE subprocess seam the CI floor uses — never `git`/`gh` themselves."""
     payload = rows if rows is not None else [{"status": status, "conclusion": conclusion, "databaseId": 42}]
+    # ICCINT-70: the floor short-circuits on a project with no workflows, and these fixtures have no repo on
+    # disk. Say the project HAS checks, so what is under test stays the verdict logic.
+    monkeypatch.setattr(orchestrator, "_project_has_ci", lambda root: True)
 
     async def fake_step(cmd, timeout):
         if "config" in cmd:
@@ -1501,6 +1505,96 @@ async def _pass_verdict(db_session, monkeypatch):
     await orchestrator.apply_action(db_session, version_id=version.id, action="verdict", payload={"verdict": "PASS"})
     verdicts = [m for m in _msgs(db_session, version.id) if m.kind == "verdict"]
     return verdicts[-1]
+
+
+# ── ICCINT-70: the floor must WAIT for the run it just caused ────────────────
+
+
+def _no_ci_waiting(monkeypatch):
+    """Collapse the wait so the tests measure the LOGIC, not the clock."""
+    monkeypatch.setattr(orchestrator, "CI_RUN_APPEAR_INTERVAL", 0)
+    monkeypatch.setattr(orchestrator, "CI_RUN_FINISH_INTERVAL", 0)
+
+
+def _ci_answers(monkeypatch, answers, *, has_ci=True):
+    """Fake GitHub answering DIFFERENTLY each time it is asked — the whole point of ICCINT-70 is what
+    happens between the first answer and the last. ``answers`` is a list of row-lists."""
+    monkeypatch.setattr(orchestrator, "_project_has_ci", lambda root: has_ci)
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "deadbeefcafe")
+    asked = []
+
+    async def fake_step(cmd, timeout):
+        if "config" in cmd:
+            return 0, "https://github.com/rauschiccsk/nex-demo.git\n"
+        asked.append(1)
+        return 0, json.dumps(answers[min(len(asked) - 1, len(answers) - 1)])
+
+    monkeypatch.setattr(orchestrator, "_run_publish_step", fake_step)
+    return asked
+
+
+@pytest.mark.asyncio
+async def test_it_waits_for_a_run_that_has_not_registered_yet(monkeypatch):
+    """The 12-millisecond bug, measured on 07.09.2026: the engine pushed at 03:09:29,960 and asked GitHub at
+    03:09:29,972. The run appeared at 03:09:30 and FAILED ten minutes later — while the version had already
+    passed as verified. Asking once cannot be right when we caused the push ourselves."""
+    _no_ci_waiting(monkeypatch)
+    asked = _ci_answers(
+        monkeypatch,
+        [[], [], [{"status": "completed", "conclusion": "failure", "databaseId": 42}]],
+    )
+
+    state, detail = await orchestrator._ci_status_for_head(Path("/tmp/x"))
+
+    assert state == "red", "beh, ktorý sa objavil o chvíľu neskôr, musí verziu zraziť"
+    assert "42" in detail
+    assert len(asked) >= 3, "engine sa musí spýtať znova, nie sa uspokojiť s prvým 'zatiaľ nič'"
+
+
+@pytest.mark.asyncio
+async def test_it_waits_for_a_run_that_is_still_in_flight(monkeypatch):
+    """A queued run is not evidence of health. 0.1.7's run was still queued when the engine looked."""
+    _no_ci_waiting(monkeypatch)
+    _ci_answers(
+        monkeypatch,
+        [
+            [{"status": "queued", "conclusion": None, "databaseId": 42}],
+            [{"status": "in_progress", "conclusion": None, "databaseId": 42}],
+            [{"status": "completed", "conclusion": "failure", "databaseId": 42}],
+        ],
+    )
+
+    state, detail = await orchestrator._ci_status_for_head(Path("/tmp/x"))
+
+    assert state == "red", "rozbehnutý beh sa musí dočkať konca, nie prejsť ako neznámy"
+    assert "42" in detail
+
+
+@pytest.mark.asyncio
+async def test_a_project_without_workflows_is_not_waited_on(monkeypatch):
+    """No workflow means nothing to wait FOR. Two minutes of delay on every verdict of a CI-less project
+    would be pure cost, and the answer would still be the same ``unknown``."""
+    _no_ci_waiting(monkeypatch)
+    asked = _ci_answers(monkeypatch, [[]], has_ci=False)
+
+    state, detail = await orchestrator._ci_status_for_head(Path("/tmp/x"))
+
+    assert state == "unknown"
+    assert "nemá nastavené kontroly" in detail
+    assert asked == [], "GitHubu sa netreba pýtať na projekt, ktorý kontroly nemá"
+
+
+@pytest.mark.asyncio
+async def test_giving_up_on_a_run_that_never_appears_says_so_plainly(monkeypatch):
+    """Genuine ignorance still passes — a gate that stops on ignorance gets routed around — but the record
+    must say WHICH ignorance, so it can never be mistaken for 'the checks were green'."""
+    _no_ci_waiting(monkeypatch)
+    _ci_answers(monkeypatch, [[]])
+
+    state, detail = await orchestrator._ci_status_for_head(Path("/tmp/x"))
+
+    assert state == "unknown"
+    assert "neobjavil" in detail, "musí byť poznať, že sme čakali a nedočkali sa"
 
 
 @pytest.mark.asyncio
@@ -1614,8 +1708,12 @@ async def test_a_green_ci_lets_the_pass_through(db_session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_an_undeterminable_ci_never_blocks(db_session, monkeypatch):
-    """A run that has not registered yet is not evidence that the code is broken. A gate that stops on
-    ignorance is one people learn to route around — only a COMPLETED, non-successful run is a red."""
+    """Genuine ignorance still passes: a gate that stops on ignorance is one people learn to route around.
+
+    ⚠️ ICCINT-70 changed what counts as ignorance. This test used to pass on the FIRST "no run yet" — which
+    is what let a red 0.1.7 through, because right after our own push there is never a run yet. Now it only
+    passes after the engine has waited the run out and STILL has nothing."""
+    _no_ci_waiting(monkeypatch)
     _fake_ci(monkeypatch, rows=[])
 
     last = await _pass_verdict(db_session, monkeypatch)
@@ -1625,12 +1723,20 @@ async def test_an_undeterminable_ci_never_blocks(db_session, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_ci_still_running_never_blocks(db_session, monkeypatch):
+async def test_a_ci_that_never_finishes_passes_but_says_so(db_session, monkeypatch):
+    """A run still going after the whole budget passes — we cannot stall a build for ever — but the record
+    must say that, so nobody can read it as "the checks were green"."""
+    _no_ci_waiting(monkeypatch)
     _fake_ci(monkeypatch, status="in_progress", conclusion=None)
 
     last = await _pass_verdict(db_session, monkeypatch)
 
     assert last.content == "PASS"
+    notes = [m for m in _msgs(db_session, last.version_id) if m.kind == "notification" and "ci" in (m.payload or {})]
+    assert notes, "o kontrolách musí ostať zápis aj vtedy, keď sa výsledku nedočkáme"
+    assert "ešte bežalo" in str(notes[-1].payload["ci"]), (
+        "zápis musí povedať, že sa čakalo a nedočkalo — nie mlčať ako pri zelenom"
+    )
 
 
 def test_the_remote_url_is_read_in_both_shapes():

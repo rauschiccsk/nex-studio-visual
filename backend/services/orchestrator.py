@@ -5116,7 +5116,31 @@ def _repo_full_from_remote(url: str) -> Optional[str]:
     return None
 
 
-async def _ci_status_for_head(project_root: Path) -> tuple[str, str]:
+#: ICCINT-70: how long to wait for GitHub to REGISTER a run for the commit we just pushed. The first cut of
+#: the CI floor asked once, immediately — measured at 12 ms after its own push on 07.09.2026 — so the answer
+#: was always "no run yet", which ``unknown`` waves through. A gate that asks before the answer can exist is
+#: not a gate. Two minutes is generous: GitHub normally registers within a second or two.
+CI_RUN_APPEAR_TIMEOUT = 120
+CI_RUN_APPEAR_INTERVAL = 10
+#: And how long to then wait for that run to FINISH. A run in flight is not evidence of health either — the
+#: 0.1.7 run that let a red version through was still queued when the engine looked, and failed 10 minutes
+#: later. Real CI here takes 5-10 minutes; 20 leaves room without stalling a build for good.
+CI_RUN_FINISH_TIMEOUT = 1200
+CI_RUN_FINISH_INTERVAL = 30
+
+
+def _project_has_ci(project_root: Path) -> bool:
+    """Whether this project has any workflow at all. Without one there is nothing to wait FOR, and waiting
+    two minutes on every verdict of a CI-less project would be pure delay."""
+    workflows = project_root / ".github" / "workflows"
+    if not workflows.is_dir():
+        return False
+    return any(workflows.glob("*.yml")) or any(workflows.glob("*.yaml"))
+
+
+async def _ci_status_for_head(
+    project_root: Path, *, on_wait: Optional[Callable[[str], Awaitable[None]]] = None
+) -> tuple[str, str]:
     """CI verdict for the commit the Auditor is about to bless — ``("green"|"red"|"unknown", detail)``.
 
     ICCINT-64: NEX Studio HAD this check and lost it. ``_run_release_publish`` (v1) pushed and watched CI
@@ -5137,34 +5161,75 @@ async def _ci_status_for_head(project_root: Path) -> tuple[str, str]:
     repo = _repo_full_from_remote(remote) if rc == 0 else None
     if not repo:
         return "unknown", "projekt nemá čitateľný vzdialený repozitár"
-    rc, out = await _run_publish_step(
-        [
-            "gh",
-            "run",
-            "list",
-            "-R",
-            repo,
-            "--commit",
-            head,
-            "--limit",
-            "1",
-            "--json",
-            "status,conclusion,databaseId",
-        ],
-        RELEASE_PUBLISH_STEP_TIMEOUT,
-    )
-    if rc != 0:
-        return "unknown", f"stav CI sa nepodarilo zistiť ({out.strip()[:100]})"
-    try:
-        rows = json.loads(out)
-    except ValueError:
-        return "unknown", "odpoveď o behoch CI sa nedá prečítať"
-    if not rows:
-        return "unknown", f"pre commit {head[:7]} zatiaľ žiadny beh CI neexistuje"
-    row = rows[0]
+    if not _project_has_ci(project_root):
+        return "unknown", "projekt nemá nastavené kontroly"
+
+    async def _look() -> tuple[Optional[dict], Optional[str]]:
+        """One question to GitHub → (row, failure_reason). Both None means "asked fine, no run yet"."""
+        rc, out = await _run_publish_step(
+            [
+                "gh",
+                "run",
+                "list",
+                "-R",
+                repo,
+                "--commit",
+                head,
+                "--limit",
+                "1",
+                "--json",
+                "status,conclusion,databaseId",
+            ],
+            RELEASE_PUBLISH_STEP_TIMEOUT,
+        )
+        if rc != 0:
+            return None, f"stav CI sa nepodarilo zistiť ({out.strip()[:100]})"
+        try:
+            rows = json.loads(out)
+        except ValueError:
+            return None, "odpoveď o behoch CI sa nedá prečítať"
+        return (rows[0] if rows else None), None
+
+    # ICCINT-70, first wait: for the run to EXIST. We just pushed this commit ourselves, so a missing run is
+    # not evidence about the code — it is GitHub not having caught up. Asking once (the v4.13.0 behaviour)
+    # made the whole floor decorative.
+    # Bounded by a COUNT of tries, not by summing the interval: with a zero interval (as tests set it, to
+    # measure the logic rather than the clock) an interval-summing loop never reaches its own ceiling — it
+    # spins for ever. Mine did, on the first run.
+    tries_left = max(1, CI_RUN_APPEAR_TIMEOUT // max(CI_RUN_APPEAR_INTERVAL, 1))
+    row: Optional[dict] = None
+    while True:
+        row, failure = await _look()
+        if failure:
+            return "unknown", failure
+        tries_left -= 1
+        if row is not None or tries_left <= 0:
+            break
+        await asyncio.sleep(CI_RUN_APPEAR_INTERVAL)
+    if row is None:
+        return "unknown", f"pre commit {head[:7]} sa beh CI neobjavil ani po {CI_RUN_APPEAR_TIMEOUT} s"
+
+    # Second wait: for it to FINISH. A queued or running job says nothing about whether the code is sound.
+    tries_left = max(1, CI_RUN_FINISH_TIMEOUT // max(CI_RUN_FINISH_INTERVAL, 1))
+    announced = False
+    while row.get("status") != "completed" and tries_left > 0:
+        if on_wait is not None and not announced:
+            await on_wait(f"beh {row.get('databaseId')}")
+            announced = True
+        await asyncio.sleep(CI_RUN_FINISH_INTERVAL)
+        tries_left -= 1
+        row, failure = await _look()
+        if failure:
+            return "unknown", failure
+        if row is None:  # vanished mid-flight (re-run, deleted) — nothing left to judge
+            return "unknown", f"beh CI pre commit {head[:7]} medzičasom zmizol"
+
     run_id = row.get("databaseId")
     if row.get("status") != "completed":
-        return "unknown", f"CI ešte beží (beh {run_id})"
+        return (
+            "unknown",
+            f"CI po {CI_RUN_FINISH_TIMEOUT // 60} min ešte bežalo (beh {run_id}) — verzia prešla bez jeho výsledku",
+        )
     if row.get("conclusion") == "success":
         return "green", f"CI zelené (beh {run_id})"
     return "red", f"CI zlyhalo (beh {run_id}, {row.get('conclusion')})"
@@ -8339,8 +8404,26 @@ async def _settle_verifikacia_verdict(
     # evidence at all. One check at the shared settle, so no path can miss it and a fourth caller inherits it.
     ci_red = False
     if verdict == "PASS" and not runtime_floor_red:
+
+        async def _announce_ci_wait(which: str) -> None:
+            # ICCINT-70: the wait can run into minutes. Without this the build looks frozen at the last step
+            # and the Manažér has no way to tell "checking" from "stuck" — the honest-status rule.
+            waiting = _record_message(
+                db,
+                version_id=version_id,
+                stage="verifikacia",
+                author="system",
+                recipient="manazer",
+                kind="notification",
+                content=f"Čaká sa na kontroly projektu ({which}) — verzia sa vyhlási až podľa ich výsledku.",
+                payload={"phase": "verifikacia", "ci_waiting": True},
+            )
+            if on_message is not None:
+                await on_message(waiting)
+
         ci_state, ci_detail = await _ci_status_for_head(
-            claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id)
+            claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id),
+            on_wait=_announce_ci_wait,
         )
         ci_red = ci_state == "red"
         if ci_red:
