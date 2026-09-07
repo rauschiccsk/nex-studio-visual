@@ -1518,6 +1518,91 @@ async def test_a_red_ci_floors_a_pass(db_session, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_red_ci_floors_the_AUTONOMOUS_pass_too(db_session, monkeypatch):
+    """The half-fix ICCINT-64 shipped as v4.13.0: the CI floor sat in ``apply_action`` — the MANUAL verdict —
+    and the AUTONOMOUS round, which is how most versions actually pass, walked straight past it. 0.1.6 of
+    nex-productcatalogs passed on 07.09.2026 with a verdict carrying no CI evidence at all. This drives the
+    shared choke point the way the autonomous round does: the PASS is ALREADY recorded, then the settle runs."""
+    _fake_ci(monkeypatch, conclusion="failure")
+    # WITHOUT this the floor never even asks GitHub: _ci_status_for_head bails at an unresolvable HEAD and
+    # returns ``unknown``, which by design never blocks — the test would then pass without testing anything.
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "deadbeefcafe")
+    version, project = _make_version(db_session, project_dial="plna")
+    state = _seed_verifikacia(db_session, version.id, iteration=0)
+    _seed_done_tasks(db_session, version, project, ["T1"])
+    orchestrator._record_message(
+        db_session,
+        version_id=version.id,
+        stage="verifikacia",
+        author="auditor",
+        recipient="manazer",
+        kind="verdict",
+        content="PASS",
+        payload={"verdict": "PASS", "phase": "verifikacia"},
+    )
+
+    settled = await orchestrator._settle_verifikacia_verdict(db_session, state, verdict="PASS")
+
+    assert settled.status != "awaiting_manazer", "červené CI nesmie pustiť ani autonómny PASS na podpis"
+    last = [m for m in _msgs(db_session, version.id) if m.kind == "verdict"][-1]
+    assert last.payload.get("engine_override") == "ci_red"
+    assert "42" in str(last.payload.get("ci")), "Manažér musí vidieť, ktorý beh padol"
+    # The floor must land in the VERDICT, not just the state: the Hotovo gate reads the latest verdict payload,
+    # so a PASS left standing would sign the version off however hard the settle blocks the state.
+    assert orchestrator._verifikacia_passed(db_session, version.id) is False
+
+
+@pytest.mark.asyncio
+async def test_a_red_ci_stops_the_fast_fix_auto_sign_off(db_session, monkeypatch):
+    """End-to-end down the path 0.1.6 actually took: fast_fix + plná dial, where a PASS auto-signs off to
+    Hotovo with nobody watching and no Manažér ever sees the verdict. Red CI must end that run somewhere OTHER
+    than Hotovo. (Measured: this one is held by the recorded override verdict — the sign-off gate reads the
+    latest verdict — not by the round's branch. It is here because the auto-sign-off lane is the one where a
+    silent Hotovo is actually reachable, so it needs its own guard rather than an argument about why it holds.)"""
+    _fake_ci(monkeypatch, conclusion="failure")
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "deadbeefcafe")
+    version, _ = _make_version(db_session, project_dial="plna")
+    _seed_verifikacia(db_session, version.id, flow_type="fast_fix")
+    _stub_auditor(monkeypatch, _verdict_pass())
+    _stub_smoke(monkeypatch)
+    _ban_deploy_calls(monkeypatch)
+
+    state = await orchestrator.run_dispatch(db_session, version.id)
+
+    assert state.current_stage != "done" and state.status != "done", "červené CI nesmie skončiť tichým Hotovo"
+    assert orchestrator._verifikacia_passed(db_session, version.id) is False, "brána na Hotovo musí ostať zavretá"
+
+
+@pytest.mark.asyncio
+async def test_a_green_ci_lets_the_AUTONOMOUS_pass_through(db_session, monkeypatch):
+    _fake_ci(monkeypatch, conclusion="success")
+    # WITHOUT this the floor never even asks GitHub: _ci_status_for_head bails at an unresolvable HEAD and
+    # returns ``unknown``, which by design never blocks — the test would then pass without testing anything.
+    monkeypatch.setattr(orchestrator, "_repo_head", lambda root: "deadbeefcafe")
+    version, project = _make_version(db_session, project_dial="plna")
+    state = _seed_verifikacia(db_session, version.id, iteration=0)
+    _seed_done_tasks(db_session, version, project, ["T1"])
+    orchestrator._record_message(
+        db_session,
+        version_id=version.id,
+        stage="verifikacia",
+        author="auditor",
+        recipient="manazer",
+        kind="verdict",
+        content="PASS",
+        payload={"verdict": "PASS", "phase": "verifikacia"},
+    )
+
+    settled = await orchestrator._settle_verifikacia_verdict(db_session, state, verdict="PASS")
+
+    assert settled.status == "awaiting_manazer"
+    assert orchestrator._verifikacia_passed(db_session, version.id) is True
+    notes = [m for m in _msgs(db_session, version.id) if m.kind == "notification" and "ci" in (m.payload or {})]
+    assert notes, "zelené CI sa musí zapísať ako dôkaz — 0.1.6 nemala v protokole ani stopu po kontrole"
+    assert "42" in str(notes[-1].payload["ci"]), "dôkaz musí menovať KTORÝ beh bol zelený, nie len že sa čosi zisťovalo"
+
+
+@pytest.mark.asyncio
 async def test_a_green_ci_lets_the_pass_through(db_session, monkeypatch):
     _fake_ci(monkeypatch, conclusion="success")
 

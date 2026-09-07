@@ -8333,7 +8333,55 @@ async def _settle_verifikacia_verdict(
     # CR-V2-050: even on a PASS string, a red runtime floor (boot/acceptance) coerces to the FAIL path — the
     # mechanically-computed evidence is authoritative; a self-reported PASS can never cross a red floor. Guards
     # BOTH the autonomous caller and the manual apply_action verdict override.
+    # ICCINT-64 (druhé kolo): the CI floor lives HERE, not in the caller. It was first wired into
+    # ``apply_action`` only — the MANUAL verdict — and the autonomous round, which is how most versions
+    # actually pass, walked straight past it: 0.1.6 passed on 07.09.2026 with its verdict carrying no CI
+    # evidence at all. One check at the shared settle, so no path can miss it and a fourth caller inherits it.
+    ci_red = False
     if verdict == "PASS" and not runtime_floor_red:
+        ci_state, ci_detail = await _ci_status_for_head(
+            claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id)
+        )
+        ci_red = ci_state == "red"
+        if ci_red:
+            # The caller has ALREADY recorded the PASS, so flooring it needs its OWN verdict message — not just
+            # a note. :func:`_verifikacia_passed` reads the payload of the LATEST verdict, so a PASS left
+            # standing would still sign off to Hotovo however hard this function blocks the state here.
+            floored = _record_message(
+                db,
+                version_id=version_id,
+                stage="verifikacia",
+                author="auditor",
+                recipient="manazer",
+                kind="verdict",
+                content="FAIL",
+                payload={
+                    "phase": "verifikacia",
+                    "verdict": "FAIL",
+                    "engine_override": "ci_red",
+                    "ci": ci_detail,
+                    "findings": [
+                        f"ENGINE OVERRIDE (ICCINT-64): {ci_detail} — verzia sa nedá vyhlásiť za overenú, "
+                        "kým sú kontroly projektu červené."
+                    ],
+                },
+            )
+            if on_message is not None:
+                await on_message(floored)
+        elif ci_detail:
+            # Green (or a run still going) — record WHAT was checked. The 0.1.6 verdict carried no CI evidence
+            # at all, which is why nobody could tell the check had never run.
+            _record_message(
+                db,
+                version_id=version_id,
+                stage="verifikacia",
+                author="system",
+                recipient="manazer",
+                kind="notification",
+                content=f"Kontroly projektu: {ci_detail}",
+                payload={"phase": "verifikacia", "ci": ci_detail, "ci_red": False},
+            )
+    if verdict == "PASS" and not runtime_floor_red and not ci_red:
         state.status = "awaiting_manazer"
         state.next_action = "Verifikácia PASS — schváľ na Hotovo (nasadenie je samostatná akcia per zákazník)."
         db.flush()
@@ -8839,8 +8887,13 @@ async def _run_verifikacia_round(
     settled = await _settle_verifikacia_verdict(
         db, state, verdict=verdict_str, runtime_floor_red=runtime_floor_red, on_message=on_message
     )
-    if verdict_str == "FAIL":
-        return settled  # the fix loop re-entered Programovanie (or escalated) — already settled
+    # Read the SETTLE's outcome, not the Auditor's string: a PASS can be floored inside (a red runtime floor
+    # or, ICCINT-64, red CI), and only a true PASS leaves the state awaiting_manazer. Belt-and-braces, measured
+    # as such: a floored PASS is stopped BELOW as well, because _settle_phase_boundary gates the auto-sign-off
+    # on the recorded verdict and the settle records its own FAIL. This keeps the two from having to agree —
+    # the next person to touch the sign-off gate does not silently become the only thing holding the floor.
+    if settled.status != "awaiting_manazer":
+        return settled  # FAIL / floored PASS — the fix loop re-entered Programovanie (or escalated)
     # PASS → the dial governs the end sign-off. _settle_verifikacia_verdict put it awaiting_manazer; now apply
     # the SHARED dial-settle: a non-stopping level auto-signs-off to Hotovo (gated by the no-silent-done
     # invariant — the PASS verdict is now on record), else it stays awaiting_manazer for the Manažér.
@@ -11779,15 +11832,9 @@ async def apply_action(
         # kind=verdict message the fix-loop reads (:func:`_latest_verifikacia_fix_scope`) can never say PASS while
         # the settle takes the FAIL branch.
         floor_red = _latest_runtime_floor_red(db, version_id)
-        # ICCINT-64: the SECOND floor — the project's own CI. Checked only on a PASS (a FAIL needs no second
-        # reason) and only ``red`` blocks; ``unknown`` passes through, see :func:`_ci_status_for_head`.
-        ci_state, ci_detail = ("unknown", "")
-        if verdict == "PASS":
-            ci_state, ci_detail = await _ci_status_for_head(
-                claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id)
-            )
-        ci_red = ci_state == "red"
-        effective_verdict = "FAIL" if (verdict == "PASS" and (floor_red or ci_red)) else verdict
+        # ICCINT-64: the CI floor is NOT computed here any more — :func:`_settle_verifikacia_verdict` owns it,
+        # so the autonomous round is guarded by the same check instead of only this manual path.
+        effective_verdict = "FAIL" if (verdict == "PASS" and floor_red) else verdict
         # CR-V2-056 (layer-1): bind a manual PASS to the verified commit + tag it (same as the autonomous path).
         verified_sha: Optional[str] = None
         if effective_verdict == "PASS":
@@ -11805,15 +11852,11 @@ async def apply_action(
         verdict_payload: dict[str, Any] = {"verdict": effective_verdict, "phase": "verifikacia"}
         if verified_sha:
             verdict_payload["verified_sha"] = verified_sha
-        if ci_detail:
-            verdict_payload["ci"] = ci_detail
         if effective_verdict != verdict:
-            verdict_payload["engine_override"] = "ci_red" if ci_red and not floor_red else "runtime_floor_red"
-            verdict_payload["findings"] = (
-                [f"ENGINE OVERRIDE (ICCINT-64): {ci_detail} — verzia sa nedá vyhlásiť za overenú, kým je CI červené."]
-                if ci_red and not floor_red
-                else ["ENGINE OVERRIDE (CR-V2-050): a red release smoke/acceptance floored the Manažér's PASS to FAIL."]
-            )
+            verdict_payload["engine_override"] = "runtime_floor_red"
+            verdict_payload["findings"] = [
+                "ENGINE OVERRIDE (CR-V2-050): a red release smoke/acceptance floored the Manažér's PASS to FAIL."
+            ]
         _record_message(
             db,
             version_id=version_id,
