@@ -325,6 +325,11 @@ async def test_pass_fast_fix_auto_signs_off_to_hotovo(db_session, monkeypatch):
     assert state.current_stage == "done" and state.status == "done"
     assert "Nasadenie je samostatná akcia" in state.next_action
     assert orchestrator._verifikacia_passed(db_session, version.id) is True
+    # ICCINT-50: the finish must land on the VERSION too, not only on the pipeline row. This lane signs off
+    # with nobody watching, so it was the one that kept leaving versions ``active`` — seven of them on
+    # nex-productcatalogs, each showing in the overview as if it had never been built.
+    db_session.refresh(version)
+    assert version.status == "done", "rýchla oprava dobehla, ale verzia sa tvári ako nezačatá"
 
 
 async def test_pass_under_stopping_dial_awaits_manazer_sign_off(db_session, monkeypatch):

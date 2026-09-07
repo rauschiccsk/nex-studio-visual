@@ -15,8 +15,6 @@ from __future__ import annotations
 
 import uuid as _uuid
 
-import pytest
-
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
@@ -93,13 +91,26 @@ def test_the_schema_admits_done() -> None:
     assert "done" in get_args(VersionStatus)
 
 
-@pytest.mark.parametrize("start", ["planned", "active"])
-def test_the_pipeline_marks_the_version_done_at_signoff(start: str) -> None:
-    """Podpis Hotovo musí siahnuť aj na verziu — inak sa dokončenie nikde nezaznamená."""
+def test_both_endings_record_the_finish() -> None:
+    """⚠️ Táto stráž kedysi pozerala len na RUČNÝ podpis — a presne preto nič nechytila.
+
+    Stavba má DVA konce: Manažér podpíše Hotovo, alebo si rýchla oprava na plnej automatike podpíše sama.
+    ICCINT-50 sa opravil len v tom prvom, takže každá rýchla oprava skončila s verziou v stave ``active``.
+    Do 07.09.2026 ich tak na nex-productcatalogs viselo sedem — v prehľade vyzerali ako nezačaté.
+
+    Stará podoba tvrdila „zdrojový text ručného podpisu spomína mark_done“, čo bola pravda po celý čas, kým
+    sedem verzií viselo. Preto sa dnes žiada, aby OBA konce išli cez jedno hrdlo a to hrdlo verziu dotklo.
+    Behaviorálny dôkaz (rýchla oprava naozaj dobehne a verzia je ``done``) je v
+    ``tests/test_orchestrator_v2_verifikacia.py``.
+    """
     import inspect
 
     from backend.services import orchestrator
 
-    src = inspect.getsource(orchestrator._apply_hotovo_signoff)
-    assert "version_service.mark_done" in src, "koniec stavby verziu nedotýka"
-    del start
+    assert "version_service.mark_done" in inspect.getsource(orchestrator._settle_build_done), (
+        "spoločné hrdlo konca stavby verziu nedotýka"
+    )
+    for ending in (orchestrator._apply_hotovo_signoff, orchestrator._settle_phase_boundary):
+        assert "_settle_build_done" in inspect.getsource(ending), (
+            f"{ending.__name__} končí stavbu mimo spoločného hrdla — presne tak vznikol pôvodný nález"
+        )

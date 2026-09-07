@@ -7056,15 +7056,7 @@ def _apply_hotovo_signoff(
         content=content,
         payload=signoff_payload,
     )
-    state.current_stage = "done"
-    state.current_actor = "ai_agent"
-    state.status = "done"
-    state.next_action = "Verzia je hotová — nasadenie (UAT/PROD) je samostatný krok."
-    # ICCINT-50: zaznamenaj dokončenie AJ na verzii. Bez toho zostávala postavená a schválená
-    # verzia v stave ``planned`` a na obrazovke sa nedala odlíšiť od nezačatej — Manažérovi sa
-    # nad ňou ponúkal panel „Zadanie" s návodom, ako ju spustiť.
-    version_service.mark_done(db, version_id)
-    db.flush()
+    _settle_build_done(db, state, "Verzia je hotová — nasadenie (UAT/PROD) je samostatný krok.")
 
 
 async def _run_conversation_kontrola_round(
@@ -9805,6 +9797,26 @@ def auditor_effort_for_level(level: str) -> str:
     return _AUDITOR_EFFORT_FOR_LEVEL[lvl]
 
 
+def _settle_build_done(db: Session, state: PipelineState, next_action: str) -> None:
+    """The build reached Hotovo — settle the pipeline AND record it on the version (ICCINT-50).
+
+    ⚠️ There are TWO endings and they must not drift: the Manažér's explicit sign-off
+    (:func:`_apply_hotovo_signoff`) and the fast-fix auto-sign-off at a non-stopping dial
+    (:func:`_settle_phase_boundary`). ICCINT-50 was first fixed in the manual one only, so every fast fix
+    finished with its version still ``active`` — seven of them on nex-productcatalogs by 07.09.2026, each
+    showing in the overview as if it had never been built. The guard meant to prevent exactly this only
+    asserted that the manual function's SOURCE mentions ``mark_done``; it could not see the other ending.
+
+    So both endings go through here, and a third one inherits it instead of having to remember it.
+    """
+    state.current_stage = "done"
+    state.current_actor = "ai_agent"  # terminal — no agent on turn; kept a valid ACTOR value
+    state.status = "done"
+    state.next_action = next_action
+    version_service.mark_done(db, state.version_id)
+    db.flush()
+
+
 def _settle_phase_boundary(db: Session, state: PipelineState) -> bool:
     """Apply the Miera autonómie dial at a SETTLED phase boundary (Milestone-C SHARED dial-settle wiring;
     CR-V2-010, owned here + inherited by CR-V2-011/012). The agent for ``state.current_stage`` produced
@@ -9869,10 +9881,7 @@ def _settle_phase_boundary(db: Session, state: PipelineState) -> bool:
     state.current_stage = _next_stage(stage, state.flow_type)
     if state.current_stage == "done":
         # Verifikácia auto-sign-off at a non-stopping dial level → Hotovo (terminal; deploy is OUT, D6).
-        state.current_actor = "ai_agent"  # terminal — no agent on turn; kept a valid ACTOR value
-        state.status = "done"
-        state.next_action = "Pipeline dokončená (Hotovo). Nasadenie je samostatná akcia per zákazník."
-        db.flush()
+        _settle_build_done(db, state, "Pipeline dokončená (Hotovo). Nasadenie je samostatná akcia per zákazník.")
         return False  # terminal — nothing left to auto-chain (status is 'done', not 'agent_working')
     _begin_dispatch(db, state)  # agent_working at the next phase → the runner's auto-chain runs it
     return True
