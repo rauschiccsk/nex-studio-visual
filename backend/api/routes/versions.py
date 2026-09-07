@@ -379,6 +379,10 @@ def get_task_plan(
 class _ZadanieWrite(BaseModel):
     """Request body for ``PUT /versions/{version_id}/zadanie``."""
 
+    #: ICCINT-71: writing over a DIFFERENT Zadanie that is already on disk is a decision, never a side
+    #: effect of saving a form. The cockpit sets this only after showing the Manažér what is there.
+    replace_existing: bool = False
+
     content: str
 
 
@@ -407,11 +411,30 @@ def write_zadanie(
     write only their OWN project's Zadanie; ri/ha may write any.
 
     * **404** — the version (or its project) does not exist.
+    * **409** — a DIFFERENT Zadanie is already on disk (ICCINT-71); the answer carries it so the cockpit
+      can show it. Re-send with ``replace_existing`` once the Manažér has decided.
     """
     authz.assert_version_access(db, current_user, version_id)
     try:
-        rel = version_service.write_zadanie(db, version_id, payload.content)
+        rel = version_service.write_zadanie(db, version_id, payload.content, replace_existing=payload.replace_existing)
         db.commit()
+    except version_service.ZadanieWouldBeOverwritten as clash:
+        # ICCINT-71: 409 with the existing text IN the answer, not a description of it. The Manažér saw an
+        # empty field over a file with 71 lines and lost a whole zákaznícka špecifikácia; the cure is that
+        # he sees what is there before he decides, so the cockpit can offer it instead of guessing.
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": (
+                    f"Pre túto verziu už zadanie existuje ({len(clash.existing.splitlines())} riadkov, "
+                    f"{clash.rel_path}). Neprepísal som ho. Pozri, čo v ňom je, a rozhodni sa: doplniť, "
+                    "alebo nahradiť."
+                ),
+                "existing": clash.existing,
+                "relative_path": clash.rel_path,
+            },
+        ) from clash
     except ValueError as exc:
         db.rollback()
         raise _map_value_error(exc) from exc

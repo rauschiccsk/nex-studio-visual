@@ -15,6 +15,7 @@ import { DirtyTreeGuard } from "@/components/riadiace/DirtyTreeGuard";
 import { listVersions, createVersion, writeZadanie } from "@/services/api/versions";
 import { postPipelineActionApi } from "@/services/api/pipeline";
 import { useActiveContextStore } from "@/store/activeContextStore";
+import { ApiError } from "@/services/api";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
 import type { ProjectRead } from "@/types";
@@ -73,6 +74,9 @@ export default function NewVersionPage() {
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<HumanError | null>(null);
+  // ICCINT-71: čo už na disku je. Kým to Manažér nevidí, nemá sa ako rozhodnúť — a presne tak sa
+  // 07.09.2026 stratila celá zákaznícka špecifikácia.
+  const [existingZadanie, setExistingZadanie] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [starting, setStarting] = useState(false);
 
@@ -274,7 +278,24 @@ export default function NewVersionPage() {
       if (zadanie.trim()) await writeZadanie(v.id, zadanie.trim());
       setSavedVersion(v);
     } catch (err: unknown) {
-      setFormError(humanizeApiError(err, "Uloženie Zadania zlyhalo"));
+      // ICCINT-71: „zadanie už existuje" NIE je chyba na zahodenie do všeobecnej hlášky. 07.09.2026 tento
+      // formulár ticho zapísal jednu vetu cez 71-riadkovú zákaznícku špecifikáciu — Manažér videl prázdne
+      // pole a nemal ako vedieť. Engine to teraz odmietne (409) a vráti, čo tam je; ukážeme mu to a nechá
+      // rozhodnúť sa jeho. Hádať za neho je presne to, čo tú prácu zmazalo.
+      const clash =
+        err instanceof ApiError && err.status === 409
+          ? ((err.data as { detail?: { existing?: string; message?: string } })?.detail)
+          : undefined;
+      if (clash?.existing) {
+        setExistingZadanie(clash.existing);
+        setFormError({
+          message:
+            clash.message ??
+            "Pre túto verziu už zadanie existuje. Neprepísal som ho — pozri, čo v ňom je, a rozhodni sa.",
+        });
+      } else {
+        setFormError(humanizeApiError(err, "Uloženie Zadania zlyhalo"));
+      }
     } finally {
       setSaving(false);
     }
@@ -490,6 +511,37 @@ export default function NewVersionPage() {
               error={formError}
               className="rounded-lg bg-[var(--color-state-error-bg)] border border-[var(--color-state-error-bg)] p-3"
             />
+            {/* ICCINT-71: čo už na disku je — VIDITEĽNE, nie ako veta o tom, že tam čosi je. Manažér
+                stratil 71-riadkovú špecifikáciu preto, že formulár mu ukázal prázdne pole; jediná
+                skutočná náprava je, že to isté pole mu ukáže obsah a nechá ho rozhodnúť sa. */}
+            {existingZadanie && (
+              <div className="rounded-lg border border-[var(--color-border)] p-3 space-y-2">
+                <p className="text-sm">
+                  Toto zadanie už pre verziu existuje ({existingZadanie.split("\n").length} riadkov):
+                </p>
+                <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs bg-[var(--color-surface-2)] p-2 rounded">
+                  {existingZadanie}
+                </pre>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className="text-sm underline"
+                    onClick={() => {
+                      setZadanie(existingZadanie);
+                      setExistingZadanie(null);
+                      setFormError(null);
+                    }}
+                  >
+                    Prevziať toto zadanie do poľa
+                  </button>
+                  <span className="text-xs opacity-70">
+                    Potom ho môžeš doplniť a uložiť — nič sa nestratí.
+                  </span>
+                </div>
+              </div>
+            )}
+
+
 
             {/* Saved confirmation — shown after step 1 succeeds. */}
             {savedVersion && (

@@ -275,7 +275,21 @@ def create(
     return version
 
 
-def write_zadanie(db: Session, version_id: UUID, content: str) -> str:
+class ZadanieWouldBeOverwritten(Exception):
+    """Saving this Zadanie would destroy a different Zadanie that is already on disk (ICCINT-71).
+
+    Carries the existing text so the caller can PUT IT IN FRONT OF THE MANAŽÉR rather than describe it.
+    Seeing what is there is the whole point: the accident this prevents happened because the form showed
+    an empty field over a file with seventy-one lines in it.
+    """
+
+    def __init__(self, rel_path: str, existing: str) -> None:
+        self.rel_path = rel_path
+        self.existing = existing
+        super().__init__(f"Zadanie already exists at {rel_path} ({len(existing.splitlines())} lines)")
+
+
+def write_zadanie(db: Session, version_id: UUID, content: str, *, replace_existing: bool = False) -> str:
     """Persist a version's free-text **Zadanie** to ``customer-requirements.md`` (CR-V2-024).
 
     The New-Version flow (design §4.3) lets the Manažér enter the brief as free text and saves it
@@ -285,9 +299,19 @@ def write_zadanie(db: Session, version_id: UUID, content: str) -> str:
     ``_version_spec_rel`` convention (``docs/specs/versions/v{version_number}``) — the two must
     never diverge or the AI Agent reads an empty Zadanie.
 
-    Unlike the edit-only ``project_specs`` browser write, this is a deliberate CREATE-or-overwrite:
-    the version's spec directory does not exist yet at this point in the flow, so parent directories
-    are created.
+    Parent directories are created — at this point in the flow the version's spec directory usually does
+    not exist yet.
+
+    ⚠️ **It does not ALWAYS not exist, and assuming so destroyed real work** (ICCINT-71). On 07.09.2026 a
+    zákaznícka špecifikácia written straight into the repo (71 lines: the nightly-fetch decision, the
+    "a failed download keeps the last good file" safeguard, the ban on the price list entering project
+    history, the note that the link is a secret) was replaced by a one-sentence Zadanie typed on the
+    New-Version form. ``1 insertion(+), 71 deletions(-)``. The AI Agent then got 51 characters as its whole
+    brief instead of 3 380, and the Manažér had no way to know: the form showed him an empty field.
+
+    So the assumption is now CHECKED. Writing over existing, different content requires
+    ``replace_existing=True`` — an explicit decision by whoever calls, never a side effect of saving a form.
+    :class:`ZadanieWouldBeOverwritten` carries what is there, so the caller can show it instead of guessing.
 
     Returns the repo-relative path that was written (e.g.
     ``docs/specs/versions/v0.1.0/customer-requirements.md``).
@@ -315,6 +339,12 @@ def write_zadanie(db: Session, version_id: UUID, content: str) -> str:
         abs_path.relative_to(project_root)
     except ValueError as exc:
         raise ValueError("Resolved Zadanie path escapes the project root") from exc
+
+    if not replace_existing and abs_path.is_file():
+        existing = abs_path.read_text(encoding="utf-8")
+        # Identical content is not an overwrite — re-saving the same text must stay a no-op, not an error.
+        if existing.strip() and existing.strip() != content.strip():
+            raise ZadanieWouldBeOverwritten(rel_path, existing)
 
     abs_path.parent.mkdir(parents=True, exist_ok=True)
     abs_path.write_text(content, encoding="utf-8")

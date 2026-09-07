@@ -2491,6 +2491,8 @@ export interface paths {
          *     write only their OWN project's Zadanie; ri/ha may write any.
          *
          *     * **404** — the version (or its project) does not exist.
+         *     * **409** — a DIFFERENT Zadanie is already on disk (ICCINT-71); the answer carries it so the cockpit
+         *       can show it. Re-send with ``replace_existing`` once the Manažér has decided.
          */
         put: operations["write_zadanie_api_v1_versions__version_id__zadanie_put"];
         post?: never;
@@ -5806,6 +5808,11 @@ export interface components {
         _ZadanieWrite: {
             /** Content */
             content: string;
+            /**
+             * Replace Existing
+             * @default false
+             */
+            replace_existing: boolean;
         };
         /**
          * _ZadanieWriteResponse
