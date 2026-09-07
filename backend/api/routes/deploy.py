@@ -109,7 +109,8 @@ def uat_launch(
     """Mint a short-lived UAT test launch URL so the Manažér can open a deployed token-launch app
     LOGGED-IN directly from the UAT tab (v4.0.30). Token-launch (``auth_mode='token'``) apps only — a
     password app uses the plain 'Otvoriť aplikáciu' link. The launch key is used server-side only, never
-    returned; the token's ``sub`` is a UAT test identity (no impersonation). UAT-only convenience."""
+    returned; the token's ``sub`` is the OPERATOR WHO CLICKED (ICCINT-61 — it used to be a made-up
+    "uat-test", which no Manager could resolve, so the launch could never succeed). UAT-only convenience."""
     authz.assert_customer_access(db, _current_user, customer_id)
     customer = db.execute(select(Customer).where(Customer.id == customer_id)).scalar_one_or_none()
     if customer is None:
@@ -123,8 +124,22 @@ def uat_launch(
     uat_url = deploy_service._instance_url(customer, "uat", project)
     # The deploy .env lives under the CANONICAL customer dir slug (lowercased subdomain-or-slug), the same
     # key the provisioner used — NOT the raw customer.slug (may be mixed-case, e.g. ANDROS → dir andros).
+    # ICCINT-61: the ticket is that this used to mint for "uat-test" — a name no Manager has ever heard of,
+    # so the launch died inside the app every single time. It is minted for the person who CLICKED; that is
+    # authentication, not impersonation (impersonation would be minting for somebody else).
+    dir_slug = deploy_service._customer_dir_slug(customer)
+    known = uat_launch_service.manager_knows_operator(dir_slug, project.slug, _current_user.username)
+    if known is False:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"NEX Manager tejto aplikácie nepozná meno „{_current_user.username}“. "
+                "Priraď si v ňom prístup (Používatelia), alebo appku otvor z NEX Managera pod menom, "
+                "ktoré tam máš."
+            ),
+        )
     launch_url = uat_launch_service.build_uat_launch_url(
-        deploy_service._customer_dir_slug(customer), project.slug, uat_url
+        dir_slug, project.slug, uat_url, subject=_current_user.username
     )
     if not launch_url:
         raise HTTPException(

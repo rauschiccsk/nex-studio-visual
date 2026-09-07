@@ -480,7 +480,12 @@ def uat_launch_wired(customer: Customer, project: Project) -> bool:
 
     return (
         uat_launch.build_uat_launch_url(
-            _customer_dir_slug(customer), project.slug, _instance_url(customer, "uat", project)
+            _customer_dir_slug(customer),
+            project.slug,
+            _instance_url(customer, "uat", project),
+            # This ticket is minted and thrown away — the question is only "could it be signed at all".
+            # It is never sent anywhere, so the subject names what it is rather than pretending to be a person.
+            subject="deploy-self-check",
         )
         is not None
     )
