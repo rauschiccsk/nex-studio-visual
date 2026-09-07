@@ -1892,10 +1892,25 @@ async def _settle_for_consultation(
     proposed_fix = verdict.proposed_fix if verdict is not None else None
 
     # Re-consult cap (mirror AUDITOR_LOOP_MAX): bound verdict→consult→re-verdict so it can't loop forever.
+    #
+    # ⚠️ Counted PER SOURCE, and that is the whole point. It used to count every consultation in the version,
+    # whatever it was about — so one exhausted problem spent the budget of every problem that came after it.
+    # Measured 07.09.2026 on nex-productcatalogs v0.2.0: the upfront review at Návrh used all five, and the
+    # Vizuál approval then DEADLOCKED. Approving needs either no contradiction or a consultation about it; the
+    # consultation could never be shown, so :func:`_consult_fallback` settled ``awaiting_manazer`` at the SAME
+    # stage. Every further click re-ran the same turn and landed in the same place. The Manažér was told
+    # "Posúď návrh klasicky (Schváliť / Uprav)" — and Schváliť was the button that could not work.
+    #
+    # A cap is meant to stop ONE argument going in circles, never to spend the right to be consulted about
+    # something else.
     consult_count = db.execute(
         select(func.count())
         .select_from(PipelineMessage)
-        .where(PipelineMessage.version_id == state.version_id, _carries_decision_queue())
+        .where(
+            PipelineMessage.version_id == state.version_id,
+            _carries_decision_queue(),
+            PipelineMessage.payload["consultation"]["source"].astext == source,
+        )
     ).scalar_one()
     if consult_count >= AUDITOR_LOOP_MAX:
         return await _consult_fallback(

@@ -17,6 +17,7 @@ the findings (asking again would re-ask an answered question) and NOT past the r
 
 from __future__ import annotations
 
+import contextlib
 import uuid as _uuid
 
 import pytest
@@ -153,7 +154,8 @@ async def test_the_re_consult_cap_is_not_offered_a_retry(db_session, monkeypatch
             recipient="manazer",
             kind="consultation",
             content=f"kolo {i}",
-            payload={"consultation": {"id": f"c{i}", "decisions": [{"key": "k"}]}},
+            # Skutočný tvar nesie aj zdroj — strop sa odteraz počíta per zdroj problému.
+            payload={"consultation": {"id": f"c{i}", "source": "auditor_upfront", "decisions": [{"key": "k"}]}},
         )
     db_session.flush()
 
@@ -167,6 +169,48 @@ async def test_the_re_consult_cap_is_not_offered_a_retry(db_session, monkeypatch
 
     assert settled.status == "awaiting_manazer"
     assert orchestrator.consultation_retry_pending(db_session, version.id) is None
+
+
+@pytest.mark.asyncio
+async def test_one_exhausted_problem_does_not_spend_another_problems_budget(db_session, monkeypatch) -> None:
+    """Slepá ulička zmeraná 07.09.2026 na nex-productcatalogs v0.2.0.
+
+    Predbežná previerka pri Návrhu minula všetkých päť konzultácií. Potom Manažér schválil Vizuál — a schválenie
+    potrebuje buď žiadny rozpor, alebo konzultáciu o ňom. Konzultácia sa už ukázať nedala, takže sa stavba
+    usadila `awaiting_manazer` na TEJ ISTEJ fáze. Každý ďalší klik zopakoval ten istý ťah a skončil rovnako.
+    Manažérovi sa pritom písalo „Posúď návrh klasicky (Schváliť / Uprav)“ — a Schváliť bolo práve to tlačidlo,
+    ktoré nemohlo fungovať.
+
+    Strop má zastaviť JEDNU dokola sa točiacu rozpravu, nie minúť právo byť opýtaný na niečo iné.
+    """
+    version, state = _seed(db_session)
+    for i in range(orchestrator.AUDITOR_LOOP_MAX):
+        orchestrator._record_message(
+            db_session,
+            version_id=version.id,
+            stage="navrh",
+            author=orchestrator.AI_AGENT_ROLE,
+            recipient="manazer",
+            kind="consultation",
+            content=f"previerka {i}",
+            payload={"consultation": {"id": f"u{i}", "source": "auditor_upfront", "decisions": [{"key": "k"}]}},
+        )
+    db_session.flush()
+
+    dispatched: list[str] = []
+
+    async def _spy(*args, **kwargs):
+        dispatched.append(kwargs.get("stage", "?"))
+        raise RuntimeError("stačí nám, že sa vôbec dispatchlo")
+
+    monkeypatch.setattr(orchestrator, "invoke_agent_with_parse_retry", _spy)
+
+    with contextlib.suppress(Exception):
+        await orchestrator._settle_for_consultation(
+            db_session, state, source=orchestrator._VIZUAL_CONFLICT_SOURCE, verdict=_verdict()
+        )
+
+    assert dispatched, "rozpor vo Vizuáli sa nesmie zastaviť o strop, ktorý minula previerka Návrhu"
 
 
 def test_cards_that_arrive_later_close_the_window(db_session) -> None:
