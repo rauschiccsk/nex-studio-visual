@@ -150,16 +150,32 @@ async def test_an_unreadable_answer_is_reported_like_a_crash(db_session, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_a_conflict_without_a_description_still_stops_the_build(db_session, monkeypatch) -> None:
-    """The agent said ROZPOR but listed nothing. Treating that as clean would let the very case the word
-    was invented for slip through."""
-    _version, state = _seed(db_session)
+async def test_a_conflict_nobody_named_is_reported_not_invented(db_session, monkeypatch) -> None:
+    """⚠️ Toto tvrdenie hovorilo presný opak a bola to chyba — pin na zablokovanie (ICCINT-76).
+
+    Znelo: „agent povedal ROZPOR a nič nevymenoval, zastaviť stavbu“. Znie to opatrne. V skutočnosti tým
+    vznikol vymyslený rozpor `["(rozpor bez popisu)"]`, o ktorom sa nedalo rozhodnúť: schválenie Vizuálu vždy
+    odbočilo do vetvy s rozporom a ťah, ktorý z neho mal spraviť rozhodovacie karty, správne odmietol vymýšľať
+    si obsah. Stavba sa usadila späť na Vizuáli a každý ďalší klik to zopakoval.
+
+    Zmerané 07.09.2026 na nex-productcatalogs v0.2.0: štyri kolá, tri hodiny, žiadna cesta vpred. Manažér
+    nemal čo rozhodnúť, lebo nebolo čo.
+
+    Značka bez obsahu je odpoveď v ZLOM TVARE, nie rozpor — patrí k `ParseFailure` vyššie a zaobchádza sa s ňou
+    rovnako: povedať to nahlas a schválenie pustiť. Zastavovať sa na nej nedá pomôcť.
+    """
+    version, state = _seed(db_session)
 
     async def _bare(*a, **k):
         return _block(orchestrator._VIZUAL_CONFLICT_MARKER, [])
 
     monkeypatch.setattr(orchestrator, "invoke_agent_with_parse_retry", _bare)
-    assert await orchestrator._writeback_vizual_to_docs(db_session, state) != []
+
+    assert await orchestrator._writeback_vizual_to_docs(db_session, state) is None, (
+        "vymyslený rozpor zablokuje schválenie navždy — nedá sa o ňom rozhodnúť"
+    )
+    povedane = " ".join(m.content or "" for m in _messages(db_session, version.id))
+    assert "nevymenoval" in povedane, "musí to zaznieť Manažérovi, nie zmiznúť do ticha"
 
 
 def _messages(db, version_id):

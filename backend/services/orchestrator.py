@@ -7711,7 +7711,38 @@ async def _writeback_vizual_to_docs(
     # The agent was told to answer with ONE word when it found a contradiction; anything else means it folded.
     if _VIZUAL_CONFLICT_MARKER not in (result.summary or "").upper():
         return []
-    return [one for one in (result.findings or []) if str(one).strip()] or ["(rozpor bez popisu)"]
+    named = [one for one in (result.findings or []) if str(one).strip()]
+    if not named:
+        # ICCINT-76: the marker said "contradiction", the list named none. This used to become
+        # ``["(rozpor bez popisu)"]`` — an invented conflict, so the approval always took the conflict branch,
+        # and the consultation turn then refused (rightly) to make Decision Cards out of nothing. The build
+        # settled back at Vizuál and every further click repeated it. Measured 07.09.2026 on
+        # nex-productcatalogs v0.2.0: four rounds, three hours, no way forward.
+        #
+        # A marker with nothing behind it is an answer in the WRONG SHAPE, not a contradiction — the same
+        # class as a ParseFailure above, and it gets the same treatment: say so out loud and let the approval
+        # through. Blocking on it cannot help, because there is nothing anyone could decide.
+        logger.warning("vizual write-back claimed a conflict but named none, version %s", version_id)
+        # NOT _report_writeback_failure: that one says the documents did not get written, and here they DID —
+        # only the conflict claim was empty. A message that describes the wrong failure sends the Manažér
+        # looking in the wrong place, which is the whole reason this evening cost three hours.
+        note = _record_message(
+            db,
+            version_id=version_id,
+            stage="vizual",
+            author="system",
+            recipient="manazer",
+            kind="notification",
+            content=(
+                "Dokumenty sú premietnuté, ale agent označil rozpor a žiadny nevymenoval. Rozhodnúť sa o ňom "
+                "nedá, tak schválenie pokračuje — prezri si Špecifikáciu a Návrh, či sedia s obrazovkami."
+            ),
+            payload={"phase": "vizual", "vizual_conflict": "unnamed"},
+        )
+        if on_message is not None:
+            await on_message(note)
+        return None
+    return named
 
 
 async def _report_writeback_failure(
