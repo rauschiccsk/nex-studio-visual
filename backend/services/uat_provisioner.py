@@ -293,6 +293,67 @@ def has_alembic_migrate_service(services: dict[str, Any]) -> bool:
     return False
 
 
+#: Compose profile the test sidecar is parked under in a CUSTOMER stack. A service with a profile is NOT
+#: started by a plain ``docker compose up`` — it needs ``--profile ci`` — so the sidecar stays in the file
+#: (the rendered compose remains a faithful copy, and anyone who wants it can ask for it) while a deploy
+#: ignores it.
+TEST_RUNNER_PROFILE = "ci"
+#: What a test runner asks for. Detection is by CONTENT, not by the service being called "test" — the same
+#: rule :func:`has_alembic_migrate_service` follows, and for the same reason: names are the app author's
+#: business, behaviour is ours.
+TEST_DATABASE_ENV_KEY = "TEST_DATABASE_URL"
+
+
+def _env_keys(svc: dict[str, Any]) -> set[str]:
+    """A compose ``environment`` block is either a mapping or a ``KEY=value`` list. Read both."""
+    env = svc.get("environment")
+    if isinstance(env, dict):
+        return {str(k) for k in env}
+    if isinstance(env, list):
+        return {str(item).split("=", 1)[0] for item in env}
+    return set()
+
+
+def is_test_runner_service(name: str, svc: dict[str, Any], roles: dict[str, Optional[str]]) -> bool:
+    """Is this service the project's TEST RUNNER rather than a part of the app? (ICCINT-60)
+
+    It exists so CI can run the suite against a real Postgres, and the deploy copied it into the customer's
+    stack along with everything else. There it has no test database (``TEST_DATABASE_URL`` renders empty and
+    is correctly skipped, ICCINT-58), so it fails on every deploy — 727 errors on nex-productcatalogs 0.1.2 —
+    noise that looks exactly like the app being broken and hides a real failure standing next to it.
+
+    Giving it a database was the other way out, and it is worse: a second database per customer nobody ever
+    reads, plus the suite re-run on every deploy, proving nothing that CI did not already prove on that very
+    commit. A customer's stack should hold the app, not the toolchain that built it.
+
+    The signal is that the service ASKS FOR a test database — it says what it is. Guarded three ways so an
+    over-eager rule can never ship a customer a stack with a piece missing:
+
+      * a service recognised as frontend / backend / db is never excluded, whatever it declares;
+      * neither is the migrate service (its command runs ``alembic upgrade``, and the stack waits on it);
+      * neither is anything another service ``depends_on`` — skipping it would hang the deploy.
+    """
+    if name in (roles.get("frontend"), roles.get("backend"), roles.get("db")):
+        return False
+    command = svc.get("command")
+    text = " ".join(str(c) for c in command) if isinstance(command, list) else str(command or "")
+    if "alembic" in text and "upgrade" in text:
+        return False
+    return TEST_DATABASE_ENV_KEY in _env_keys(svc)
+
+
+def _depended_on_by_others(name: str, src_services: dict[str, Any]) -> bool:
+    """Does any OTHER service wait for this one? Then it is load-bearing, whatever it declares."""
+    for other, svc in src_services.items():
+        if other == name or not isinstance(svc, dict):
+            continue
+        deps = svc.get("depends_on")
+        names = deps if isinstance(deps, (list, dict)) else []
+        if name in names:
+            return True
+    return False
+
+
 def _container_port(port_entry: Any) -> Optional[int]:
     """Container-side port from a compose ``ports`` entry (short ``H:C`` / ``IP:H:C`` /
     ``C/tcp`` or long-form ``{target: C}``); ``None`` on parse failure."""
@@ -1211,6 +1272,10 @@ def build_uat_compose(
         svc = copy.deepcopy(src_svc) if isinstance(src_svc, dict) else {}
 
         svc["container_name"] = f"{name_base}-{name}"
+        # ICCINT-60: park the test runner behind a profile so a plain ``up`` does not start it in a customer
+        # stack. Kept in the file rather than deleted — the rendered compose stays a faithful copy.
+        if is_test_runner_service(name, svc, roles) and not _depended_on_by_others(name, src_services):
+            svc["profiles"] = [TEST_RUNNER_PROFILE]
         # One-shot services (e.g. migrate ``alembic upgrade head``) are marked ``restart: "no"``
         # in the source and are depended on via ``service_completed_successfully``. Forcing PROD's
         # ``unless-stopped`` on them makes docker restart them after exit 0 → the dependency never
