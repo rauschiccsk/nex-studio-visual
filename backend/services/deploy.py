@@ -67,6 +67,7 @@ from sqlalchemy.orm import Session
 from backend.core import authz
 from backend.db.models.customers import Customer
 from backend.db.models.deploy import DeployEvent
+from backend.db.models.foundation import User
 from backend.db.models.pipeline import PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
@@ -491,6 +492,34 @@ def uat_launch_wired(customer: Customer, project: Project) -> bool:
     )
 
 
+def _uat_door_warning(db: Session, customer: Customer, project: Project, actor_id: Optional[UUID]) -> Optional[str]:
+    """The plain-Slovak warning when a freshly deployed app cannot actually be entered — or ``None``.
+
+    ICCINT-69. The ticket is minted for the person who ran the deploy (ICCINT-61: a ticket in a made-up name
+    is one no Manager can resolve, so it would fail for the wrong reason and the warning would mislead). No
+    actor, no probe — better silent than crying wolf about a door nobody tried.
+    """
+    from backend.services import uat_launch
+
+    if actor_id is None:
+        return None
+    operator = db.execute(select(User.username).where(User.id == actor_id)).scalar_one_or_none()
+    if not operator:
+        return None
+    opens, detail = uat_launch.uat_door_opens(
+        _customer_dir_slug(customer),
+        project.slug,
+        _instance_url(customer, "uat", project),
+        subject=operator,
+    )
+    if opens is not False:
+        return None  # entered, or could not tell — ignorance never raises an alarm
+    return (
+        f"Nasadenie prebehlo, ale do appky sa nedá vojsť: {detail}. "
+        "Appka beží — pokazený je vstup, takže ju zatiaľ neodovzdávaj používateľom."
+    )
+
+
 def accepted_versions(db: Session, customer_id: UUID) -> list[str]:
     """The version_numbers a customer has a recorded UAT acceptance for (§3.5).
 
@@ -894,11 +923,22 @@ async def deploy(
     # a dead end manufactured by the report, not by the app. So: SUCCESS, carrying a warning that names the
     # missing pairing and the remedy. Same string the provisioner emits for the same gap, so if it already
     # reported it (real deploy) this collapses into one line instead of saying it twice.
-    if ok and environment == "uat" and project.auth_mode == "token" and not uat_launch_wired(customer, project):
-        warning = uat_provisioner.launch_pairing_warning(_customer_dir_slug(customer))
-        if warning not in warnings:
-            warnings.append(warning)
-            detail = f"{detail} | {warning}"
+    if ok and environment == "uat" and project.auth_mode == "token":
+        if not uat_launch_wired(customer, project):
+            warning = uat_provisioner.launch_pairing_warning(_customer_dir_slug(customer))
+            if warning not in warnings:
+                warnings.append(warning)
+                detail = f"{detail} | {warning}"
+        else:
+            # ICCINT-69: signing a ticket only proves we HAVE a key. This opens the door with it and follows
+            # through to the session — the step where a contract mismatch with the neighbour actually shows.
+            # Reported, never fatal: the app IS deployed and running; what is broken is the way in. A hard
+            # failure here once turned a customer's PROD into a dead end (see the note above), and a manager
+            # who cannot deploy is worse off than one who deploys and is told exactly which link is broken.
+            door_warning = _uat_door_warning(db, customer, project, actor_id)
+            if door_warning and door_warning not in warnings:
+                warnings.append(door_warning)
+                detail = f"{detail} | {door_warning}"
 
     # Graduation (§3.6): on a SUCCESSFUL first PROD deploy, promote the BUILT version to v1.0.0 IN
     # PLACE + mark it released — never spin up a new empty v1.0.0 shell beside it (which would strand

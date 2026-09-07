@@ -168,3 +168,117 @@ def test_the_made_up_name_cannot_come_back() -> None:
     assert "subject=_current_user.username" in route, (
         "vstupenka sa už nerazí na meno toho, kto klikol — takú Manager nevie priradiť k nikomu"
     )
+
+
+# ── ICCINT-69: the deploy opens the door itself instead of asking ────────────
+
+
+class _Reply:
+    def __init__(self, status_code: int, cookies=None):
+        self.status_code = status_code
+        self.cookies = cookies if cookies is not None else {}
+
+
+def _door(monkeypatch, tmp_path, *, launch: _Reply, session: _Reply | None = None):
+    """The deployed app answering the two requests the probe makes."""
+    key = "test-launch-signing-key-0123456789"
+    monkeypatch.setattr(uat_provisioner, "UAT_ROOT", tmp_path)
+    _write_env(
+        tmp_path / "acme" / "demo-app",
+        MANAGER_LAUNCH_SIGNING_KEY=key,
+        MANAGER_MODULE_SLUG="demo-app",
+        MANAGER_DEPLOY_SLUG="uat-acme",
+    )
+    seen: list[str] = []
+
+    class _Client:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def get(self, url, cookies=None):
+            seen.append(url)
+            if "/api/v1/launch" in url:
+                return launch
+            assert session is not None, "sonda sa nemala dostať až po sedenie"
+            return session
+
+    monkeypatch.setattr(uat_launch.httpx, "Client", _Client)
+    return seen
+
+
+def test_the_door_that_accepts_the_ticket_and_dies_right_after_is_caught(tmp_path, monkeypatch) -> None:
+    """THE case this exists for, and the exact shape of this week's five-day failure: the app returned a
+    clean 303 from the launch and the session died on the very next request, because it introduced itself to
+    its Manager in a shape the Manager does not accept. A probe that stopped at the redirect would have
+    called that app healthy — as everything else did, for five days."""
+    _door(monkeypatch, tmp_path, launch=_Reply(303, {"session": "x"}), session=_Reply(401))
+
+    opens, detail = uat_launch.uat_door_opens("acme", "demo-app", "https://uat-acme-app.isnex.eu", subject="zoltan")
+
+    assert opens is False
+    assert "sedenie hneď nato skončilo" in detail
+
+
+def test_a_working_door_is_followed_all_the_way_through(tmp_path, monkeypatch) -> None:
+    seen = _door(monkeypatch, tmp_path, launch=_Reply(303, {"session": "x"}), session=_Reply(200))
+
+    opens, _ = uat_launch.uat_door_opens("acme", "demo-app", "https://uat-acme-app.isnex.eu", subject="zoltan")
+
+    assert opens is True
+    assert any("/api/v1/launch" in u for u in seen) and any("/api/v1/session" in u for u in seen), (
+        "vstup sa musí dopovedať až po sedenie, nie skončiť na presmerovaní"
+    )
+
+
+def test_a_refused_ticket_is_caught_too(tmp_path, monkeypatch) -> None:
+    _door(monkeypatch, tmp_path, launch=_Reply(401))
+
+    opens, detail = uat_launch.uat_door_opens("acme", "demo-app", "https://uat-acme-app.isnex.eu", subject="zoltan")
+
+    assert opens is False
+    assert "odmietla" in detail
+
+
+def test_an_app_without_a_session_endpoint_is_not_accused(tmp_path, monkeypatch) -> None:
+    """Not every app answers on that path. Not being able to finish the sentence is not evidence the door is
+    shut — and an alarm that cries on ignorance is one people learn to ignore."""
+    _door(monkeypatch, tmp_path, launch=_Reply(303, {"session": "x"}), session=_Reply(404))
+
+    opens, _ = uat_launch.uat_door_opens("acme", "demo-app", "https://uat-acme-app.isnex.eu", subject="zoltan")
+
+    assert opens is None
+
+
+def test_an_unreachable_app_is_not_accused(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(uat_provisioner, "UAT_ROOT", tmp_path)
+    _write_env(
+        tmp_path / "acme" / "demo-app",
+        MANAGER_LAUNCH_SIGNING_KEY="test-launch-signing-key-0123456789",
+        MANAGER_MODULE_SLUG="demo-app",
+        MANAGER_DEPLOY_SLUG="uat-acme",
+    )
+
+    class _Boom:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def get(self, url, cookies=None):
+            raise uat_launch.httpx.ConnectError("nedostupná")
+
+    monkeypatch.setattr(uat_launch.httpx, "Client", _Boom)
+
+    opens, _ = uat_launch.uat_door_opens("acme", "demo-app", "https://uat-acme-app.isnex.eu", subject="zoltan")
+
+    assert opens is None

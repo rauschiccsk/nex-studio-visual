@@ -480,3 +480,58 @@ class TestWarningsChannel:
         assert result.warnings == ["chýba spárovaný NEX Manager"]
         assert "chýba spárovaný NEX Manager" in detail
         assert url == "https://uat-andros-shopify.isnex.eu"
+
+
+# ── ICCINT-69: the deploy REPORTS a door it could not open ───────────────────
+
+
+class _AnyProject:
+    slug = "demo-app"
+
+
+def test_a_shut_door_is_reported_in_plain_words(monkeypatch) -> None:
+    """The warning a manager reads after a deploy. It has to name the broken link, because the alternative —
+    what actually happened — is that the app's own "Prihlásenie skončilo" sends people looking three systems
+    away from the fault, for days.
+
+    Reported, never fatal: the app IS deployed and running. A hard failure here once turned a customer's PROD
+    into a dead end, which is why this is a sentence and not an exception.
+    """
+    from backend.services import deploy as deploy_service
+    from backend.services import uat_launch
+
+    monkeypatch.setattr(
+        uat_launch,
+        "uat_door_opens",
+        lambda *a, **k: (False, "appka vstupenku prijala, ale sedenie hneď nato skončilo (stav 401)"),
+    )
+    monkeypatch.setattr(deploy_service, "_customer_dir_slug", lambda customer: "acme")
+    monkeypatch.setattr(deploy_service, "_instance_url", lambda *a, **k: "https://uat-acme-app.isnex.eu")
+
+    class _Db:
+        def execute(self, *a, **k):
+            class _R:
+                def scalar_one_or_none(self_inner):
+                    return "zoltan"
+
+            return _R()
+
+    warning = deploy_service._uat_door_warning(_Db(), object(), _AnyProject(), _uuid.uuid4())
+
+    assert warning is not None
+    assert "nedá vojsť" in warning
+    assert "neodovzdávaj používateľom" in warning, "manažér musí vedieť, čo NEROBIŤ, kým to nie je opravené"
+
+
+def test_a_deploy_nobody_owns_is_not_probed(monkeypatch) -> None:
+    """No actor means no ticket that any Manager could resolve (ICCINT-61) — the probe would fail for the
+    wrong reason and the warning would point at the wrong thing. Silence beats a misleading alarm."""
+    from backend.services import deploy as deploy_service
+    from backend.services import uat_launch
+
+    def _must_not_ask(*a, **k):
+        raise AssertionError("bez človeka niet za koho raziť vstupenku")
+
+    monkeypatch.setattr(uat_launch, "uat_door_opens", _must_not_ask)
+
+    assert deploy_service._uat_door_warning(object(), object(), _AnyProject(), None) is None

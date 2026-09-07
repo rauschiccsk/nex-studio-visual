@@ -112,3 +112,53 @@ def build_uat_launch_url(customer_slug: str, project_slug: str, uat_url: str, *,
         algorithm="HS256",
     )
     return f"{uat_url.rstrip('/')}/api/v1/launch?lt={token}"
+
+
+#: The app's session endpoint — the same convention the launch path follows. Named separately because it is
+#: the step that MATTERS: this week's failure returned a clean 303 from the launch and died right after it.
+_SESSION_PATH = "/api/v1/session"
+#: The probe runs inside a deploy, so it may not hang on it.
+_DOOR_TIMEOUT_SECONDS = 10
+
+
+def uat_door_opens(customer_slug: str, project_slug: str, uat_url: str, *, subject: str) -> tuple[Optional[bool], str]:
+    """Does a real launch ticket actually get somebody INTO the deployed app? ``None`` = could not tell.
+
+    ICCINT-69. NEX Studio already checks that a token app DECLARES its launch settings (the July gate, after
+    an app deployed "successfully" and failed hours later at the click). nex-productcatalogs declared
+    everything correctly and still could not be opened for five days: it introduced itself to its NEX Manager
+    with one header where two are required, and then read a field the Manager does not send. Declaration was
+    right, the contract was not.
+
+    So this does not ASK the app whether it thinks the door works — it opens the door. Mint a real ticket,
+    present it, and follow through to the session. ⚠️ The follow-through is the whole point: the failure this
+    is built from returned a clean ``303`` from the launch and only died on the NEXT request, so a probe that
+    stopped at the redirect would have called that broken app healthy.
+
+    ``None`` never warns (the rule the CI floor and the identity pre-check follow): not being able to tell is
+    not evidence that the door is shut, and an alarm that cries on ignorance is one people learn to ignore.
+    """
+    launch_url = build_uat_launch_url(customer_slug, project_slug, uat_url, subject=subject)
+    if not launch_url:
+        return None, "vstupenka sa nedá vyraziť (appka nemá spárovaný NEX Manager)"
+    try:
+        with httpx.Client(follow_redirects=False, timeout=_DOOR_TIMEOUT_SECONDS) as client:
+            opened = client.get(launch_url)
+            if opened.status_code >= 400:
+                return False, f"appka vstupenku odmietla (stav {opened.status_code})"
+            if not opened.cookies:
+                return None, "appka po vstupe nevrátila sedenie, takže sa nedá pokračovať"
+            session = client.get(f"{uat_url.rstrip('/')}{_SESSION_PATH}", cookies=opened.cookies)
+    except httpx.HTTPError as unreachable:
+        return None, f"nasadená appka sa nedá osloviť ({type(unreachable).__name__})"
+
+    if session.status_code == httpx.codes.NOT_FOUND:
+        return None, f"appka nemá {_SESSION_PATH}, takže sa vstup nedá dopovedať"
+    if session.status_code == httpx.codes.OK:
+        return True, "vstup jedným kliknutím overený až po prihlásené sedenie"
+    # THE case this exists for: the ticket was accepted and the session died right after — which is what a
+    # contract mismatch with the neighbour looks like from outside.
+    return False, (
+        f"appka vstupenku prijala, ale sedenie hneď nato skončilo (stav {session.status_code}) — "
+        "appka sa so svojím NEX Managerom nezhodne na tvare, hoci nastavenia má správne"
+    )
