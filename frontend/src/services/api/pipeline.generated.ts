@@ -528,7 +528,8 @@ export interface paths {
          * @description Mint a short-lived UAT test launch URL so the Manažér can open a deployed token-launch app
          *     LOGGED-IN directly from the UAT tab (v4.0.30). Token-launch (``auth_mode='token'``) apps only — a
          *     password app uses the plain 'Otvoriť aplikáciu' link. The launch key is used server-side only, never
-         *     returned; the token's ``sub`` is a UAT test identity (no impersonation). UAT-only convenience.
+         *     returned; the token's ``sub`` is the OPERATOR WHO CLICKED (ICCINT-61 — it used to be a made-up
+         *     "uat-test", which no Manager could resolve, so the launch could never succeed). UAT-only convenience.
          */
         post: operations["uat_launch_api_v1_customers__customer_id__uat_launch_post"];
         delete?: never;
