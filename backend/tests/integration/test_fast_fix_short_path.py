@@ -710,3 +710,34 @@ def test_the_fast_fix_priprava_brief_asks_for_the_declaration(db_session) -> Non
 
     assert "flagship_features" in brief
     assert "NEX Studiu" in brief  # says explicitly not to declare our own tooling
+
+
+# ---------------------------------------------------------------------------
+# 7. ICCINT-63: the Plán úloh must say what is being worked on
+# ---------------------------------------------------------------------------
+
+
+def test_the_task_plan_carries_the_managers_own_words(db_session) -> None:
+    """All three rows of a fast fix showed "(bez ľudského vysvetlenia)" while the Manažér's directive sat one
+    field away (nex-productcatalogs 0.1.6, 07.09.2026).
+
+    The panel renders ``plain_description``; the AI Agent fills it for everything IT plans, and the
+    Verifikácia fix rounds got it in ICCINT-35 — the fast fix, whose Epic/Feat/Task are machine-created, was
+    the one lane left. The text is HIS directive, never something invented: the Plán úloh is the only place he
+    sees what is running, and a fast fix is exactly where knowing that quickly matters.
+    """
+    from backend.db.models.tasks import Epic, Feat
+
+    creator = _seed_user(db_session)
+    project = _seed_project(db_session, creator=creator)
+    _seed_base_version(db_session, project, "v1.0.0")
+    patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id)
+    directive = "Vstup tokenom cez NEX Manager zlyhá — appka posiela inú hlavičku, než Manager čaká."
+    _record_kickoff(db_session, patch.id, directive)
+
+    task = fast_fix.ensure_build_task(db_session, patch.id)
+
+    feat = db_session.get(Feat, task.feat_id)
+    epic = db_session.get(Epic, feat.epic_id)
+    for row, label in ((epic, "epika"), (feat, "funkcia"), (task, "úloha")):
+        assert (row.plain_description or "").strip() == directive, f"{label} nemá ľudský popis"

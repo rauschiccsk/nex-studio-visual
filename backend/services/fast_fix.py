@@ -188,13 +188,28 @@ def ensure_build_task(db: Session, version_id: UUID) -> Task:
         return existing
 
     directive = kickoff_directive(db, version_id)
+    # ICCINT-63: the Plán úloh renders ``plain_description``, and machine-created work items never set it — so
+    # a fast fix showed "(bez ľudského vysvetlenia)" on all three rows while the Manažér's own words sat one
+    # field away. The explanation here is HIS directive, not something invented: the panel is the only place he
+    # sees what is being worked on, and a fast fix is precisely the lane where knowing that fast matters.
+    human = (directive or "").strip() or None
     epic = epic_service.create(
         db,
-        EpicCreate(project_id=version.project_id, version_id=version_id, title=FAST_FIX_EPIC_TITLE),
+        EpicCreate(
+            project_id=version.project_id,
+            version_id=version_id,
+            title=FAST_FIX_EPIC_TITLE,
+            plain_description=human,
+        ),
     )
     feat = feat_service.create(
         db,
-        FeatCreate(epic_id=epic.id, title=FAST_FIX_EPIC_TITLE, description=directive or ""),
+        FeatCreate(
+            epic_id=epic.id,
+            title=FAST_FIX_EPIC_TITLE,
+            description=directive or "",
+            plain_description=human,
+        ),
     )
     return task_service.create(
         db,
@@ -202,6 +217,7 @@ def ensure_build_task(db: Session, version_id: UUID) -> Task:
             feat_id=feat.id,
             title=_title_from_directive(directive),
             description=directive or "",
+            plain_description=human,
             task_type="backend",
         ),
     )
