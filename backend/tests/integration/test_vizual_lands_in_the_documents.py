@@ -151,7 +151,7 @@ async def test_an_unreadable_answer_is_reported_like_a_crash(db_session, monkeyp
 
 @pytest.mark.asyncio
 async def test_a_conflict_nobody_named_is_reported_not_invented(db_session, monkeypatch) -> None:
-    """⚠️ Toto tvrdenie hovorilo presný opak a bola to chyba — pin na zablokovanie (ICCINT-76).
+    """⚠️ Toto tvrdenie hovorilo presný opak a bola to chyba — pin na zablokovanie (ICCINT-79).
 
     Znelo: „agent povedal ROZPOR a nič nevymenoval, zastaviť stavbu“. Znie to opatrne. V skutočnosti tým
     vznikol vymyslený rozpor `["(rozpor bez popisu)"]`, o ktorom sa nedalo rozhodnúť: schválenie Vizuálu vždy

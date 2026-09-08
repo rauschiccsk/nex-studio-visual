@@ -7823,7 +7823,7 @@ async def _writeback_vizual_to_docs(
         return []
     named = [one for one in (result.findings or []) if str(one).strip()]
     if not named:
-        # ICCINT-76: the marker said "contradiction", the list named none. This used to become
+        # ICCINT-79: the marker said "contradiction", the list named none. This used to become
         # ``["(rozpor bez popisu)"]`` — an invented conflict, so the approval always took the conflict branch,
         # and the consultation turn then refused (rightly) to make Decision Cards out of nothing. The build
         # settled back at Vizuál and every further click repeated it. Measured 07.09.2026 on
