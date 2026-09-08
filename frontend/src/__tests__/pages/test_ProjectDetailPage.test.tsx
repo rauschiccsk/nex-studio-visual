@@ -297,3 +297,89 @@ describe("ProjectDetailPage — the delete dialog names everything it destroys (
     expect(navigateMock).not.toHaveBeenCalled();
   });
 });
+
+// ─── Zverenie projektu (ICCINT-78 / 80 / 81) ──────────────────────────────────
+//
+// ⚠️ Panel zverenia bol do 08.09.2026 na obrazovke bez jedinej stráže — atrapy nižšie existovali len
+// preto, aby sa stránka vôbec vykreslila. To je presne ten stav, v ktorom sa zmena „vyzerá hotovo“
+// a nikto nevie, že prestala fungovať.
+
+describe("ProjectDetailPage — zverenie projektu", () => {
+  const tibor = {
+    id: "u-tibi",
+    username: "tibi",
+    first_name: "Tibor",
+    last_name: "Rausch",
+    email: "t@example.test",
+    role: "shu",
+    is_active: true,
+  };
+
+  beforeEach(() => {
+    listUsersApiMock.mockResolvedValue({ items: [tibor], total: 1 });
+    getProjectApiMock.mockResolvedValue({ ...project, created_by: "u-tibi" });
+    listProjectsApiMock.mockResolvedValue({
+      items: [{ ...project, created_by: "u-tibi" }],
+      total: 1,
+      skip: 0,
+      limit: 100,
+    });
+  });
+
+  it("ponúka ľudí menom a priezviskom, nie prihlasovacím menom", async () => {
+    // Director 08.09.2026: manažér vyberá človeka, nie účet. `tibi` si nemá v hlave prekladať na Tibora.
+    const ProjectDetailPage = await importPage();
+    render(<ProjectDetailPage />);
+
+    const volba = await screen.findByRole("option", { name: "Tibor Rausch" });
+    expect(volba).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "tibi" })).not.toBeInTheDocument();
+  });
+
+  it("povie, komu projekt patrí teraz", async () => {
+    // Panel dovtedy ponúkal, KOMU projekt zveriť, ale nepovedal, komu už patrí — a to je prvá otázka,
+    // ktorú si pri ňom človek položí.
+    const ProjectDetailPage = await importPage();
+    render(<ProjectDetailPage />);
+
+    // Čaká sa na dopočítaný riadok, nie na jeho prvé vykreslenie: kým sa ľudia nenačítajú, stojí tam
+    // trojbodka a stráž by prešla na polovičnom stave.
+    await waitFor(() => expect(screen.getByText(/projekt patrí:/i)).toHaveTextContent("Tibor Rausch"));
+  });
+
+  it("keď upozornenia nemajú kam ísť, povie to nahlas a zo stránky neodíde", async () => {
+    // ⚠️ Jadro ICCINT-80. Zodpovednosť sa presunie vždy; upozornenia len ak má nový manažér zapísaný
+    // Telegram. Mlčanie by tu znamenalo, že hlásenia o projekte chodia ďalej starému manažérovi a
+    // nikto sa to nedozvie — a odchod zo stránky by tú správu zmietol skôr, než by ju stihol prečítať.
+    reassignProjectApiMock.mockResolvedValue({
+      project: { ...project, created_by: "u-tibi" },
+      notifications_follow_manager: false,
+      notifications_blocked_reason: "tibi nemá zapísaný Telegram",
+    });
+    const ProjectDetailPage = await importPage();
+    render(<ProjectDetailPage />);
+
+    await screen.findByRole("option", { name: "Tibor Rausch" });
+    await userEvent.selectOptions(screen.getByRole("combobox"), "u-tibi");
+    await userEvent.click(screen.getByRole("button", { name: /zveriť projekt/i }));
+
+    expect(await screen.findByText(/nemá zapísaný telegram/i)).toBeInTheDocument();
+    expect(navigateMock).not.toHaveBeenCalled();
+  });
+
+  it("keď upozornenia prejdú, povie aj to — ticho by sa nedalo odlíšiť od nefunkčného tlačidla", async () => {
+    reassignProjectApiMock.mockResolvedValue({
+      project: { ...project, created_by: "u-tibi" },
+      notifications_follow_manager: true,
+      notifications_blocked_reason: null,
+    });
+    const ProjectDetailPage = await importPage();
+    render(<ProjectDetailPage />);
+
+    await screen.findByRole("option", { name: "Tibor Rausch" });
+    await userEvent.selectOptions(screen.getByRole("combobox"), "u-tibi");
+    await userEvent.click(screen.getByRole("button", { name: /zveriť projekt/i }));
+
+    expect(await screen.findByText(/odteraz chodia novému manažérovi/i)).toBeInTheDocument();
+  });
+});

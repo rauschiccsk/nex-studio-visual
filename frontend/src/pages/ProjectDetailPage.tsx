@@ -8,6 +8,7 @@ import {
   listProjectsApi,
   projectAssignmentsApi,
   reassignProjectApi,
+  type HandoverResult,
   type ProjectAssignmentRead,
 } from "@/services/api/projects";
 import { listUsersApi } from "@/services/api/users";
@@ -18,9 +19,10 @@ import { useAuthStore } from "@/store/authStore";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
 import ProjectSettingsSection from "@/components/project/ProjectSettingsSection";
-import type { ProjectRead } from "@/types";
+import type { ProjectRead, UserRead } from "@/types";
 import type { Version } from "@/types/version";
 import { mayOperateProject } from "@/services/permissions";
+import { personName } from "@/utils/person";
 
 interface JustCreatedState {
   justCreated?: boolean;
@@ -140,28 +142,42 @@ export default function ProjectDetailPage() {
   const [handoverNote, setHandoverNote] = useState("");
   const [handoverBusy, setHandoverBusy] = useState(false);
   const [handoverError, setHandoverError] = useState<HumanError | null>(null);
-  const [people, setPeople] = useState<{ id: string; username: string }[]>([]);
+  const [people, setPeople] = useState<UserRead[]>([]);
   const [history, setHistory] = useState<ProjectAssignmentRead[]>([]);
+  // Čo posledné zverenie urobilo s upozorneniami (ICCINT-80). Nesmie zmiznúť skôr, než si to admin
+  // prečíta — preto po zverení zo stránky NEODCHÁDZAME.
+  const [handoverDone, setHandoverDone] = useState<HandoverResult | null>(null);
 
   useEffect(() => {
     if (!project) return;
     projectAssignmentsApi(project.id).then(setHistory).catch(() => setHistory([]));
     if (!isAdmin) return;
     listUsersApi({ is_active: true, limit: 100 })
-      .then((page) => setPeople(page.items.map((u) => ({ id: u.id, username: u.username }))))
+      .then((page) => setPeople(page.items))
       .catch(() => setPeople([]));
   }, [project, isAdmin]);
+
+  // Kto za projekt zodpovedá TERAZ. Bez toho panel ponúkal, komu projekt zveriť, ale nepovedal,
+  // komu už patrí — a to je prvá otázka, ktorú si pri ňom človek položí (ICCINT-81).
+  const responsible = people.find((p) => p.id === project?.created_by) ?? null;
 
   const handleHandover = async () => {
     if (!project || !handoverTo || handoverBusy) return;
     setHandoverBusy(true);
     setHandoverError(null);
     try {
-      await reassignProjectApi(project.id, handoverTo, handoverNote);
-      // Projekt už nie je môj — ostať na jeho stránke by znamenalo pozerať sa na cudzie.
-      navigate("/projects");
+      const result = await reassignProjectApi(project.id, handoverTo, handoverNote);
+      // Zostávame na stránke. Zveriť projekt smie JEDINE admin a ten vidí všetky projekty — takže
+      // sa mu tu nič nezavrelo. Odchod preč by navyše zmietol správu o tom, že upozornenia sa
+      // nepohli (ICCINT-80) skôr, než by si ju stihol prečítať.
+      setProject(result.project);
+      setHandoverDone(result);
+      setHandoverTo("");
+      setHandoverNote("");
+      projectAssignmentsApi(project.id).then(setHistory).catch(() => undefined);
     } catch (e: unknown) {
       setHandoverError(humanizeApiError(e, "Zverenie projektu zlyhalo"));
+    } finally {
       setHandoverBusy(false);
     }
   };
@@ -507,9 +523,14 @@ export default function ProjectDetailPage() {
       {isAdmin && (
         <div className="mt-8 rounded-xl border border-[var(--color-border)] p-5">
           <h2 className="text-xs font-semibold uppercase tracking-widest mb-1">Zodpovedný manažér</h2>
+          <p className="text-sm mb-1">
+            Projekt patrí:{" "}
+            <span className="font-medium">{responsible ? personName(responsible) : "…"}</span>
+          </p>
           <p className="text-xs text-[var(--color-text-muted)] mb-3">
-            Projekt vidí len ten, komu patrí. Po zverení zmizne z tvojej plochy a objaví sa u neho — so
-            všetkými možnosťami, aké si mal ty. Hodí sa aj na zastupovanie, keď je niekto preč.
+            Projekt vidí len ten, komu patrí. Po zverení zmizne z jeho plochy a objaví sa u nového — so
+            všetkými možnosťami. Hodí sa aj na zastupovanie, keď je niekto preč. Spolu so zodpovednosťou
+            idú aj upozornenia z Telegramu, ak ich má nový manažér kam dostať.
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <select
@@ -521,7 +542,7 @@ export default function ProjectDetailPage() {
               <option value="">Vyber pracovníka…</option>
               {people.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.username}
+                  {personName(p)}
                 </option>
               ))}
             </select>
@@ -544,6 +565,24 @@ export default function ProjectDetailPage() {
             </button>
           </div>
           <ErrorNote error={handoverError} className="mt-3" />
+          {/* Čo sa naozaj stalo — vrátane toho, čo sa nestalo (ICCINT-80). Upozornenia bez adresáta
+              nie sú chyba zverenia, ale mlčať o nich by znamenalo, že hlásenia o projekte prestanú
+              chodiť tomu, kto zaň zodpovedá, a nikto sa to nedozvie. */}
+          {handoverDone && (
+            <p
+              className={`mt-3 text-xs ${
+                handoverDone.notifications_follow_manager
+                  ? "text-[var(--color-text-secondary)]"
+                  : "text-[var(--color-status-warning)]"
+              }`}
+            >
+              {handoverDone.notifications_follow_manager
+                ? "Zverené. Upozornenia z Telegramu odteraz chodia novému manažérovi."
+                : `Zverené — ale upozornenia z Telegramu chodia ďalej pôvodnému manažérovi, lebo ${
+                    handoverDone.notifications_blocked_reason ?? "nový manažér nemá kam"
+                  }. Doplň mu Telegram v Nastaveniach a zver projekt znova.`}
+            </p>
+          )}
         </div>
       )}
 
@@ -555,8 +594,8 @@ export default function ProjectDetailPage() {
           <ul className="space-y-1 text-xs text-[var(--color-text-secondary)]">
             {history.map((h, idx) => (
               <li key={idx}>
-                {new Date(h.created_at).toLocaleDateString("sk-SK")} — {h.from_username ?? "založený"} →{" "}
-                <span className="font-medium">{h.to_username}</span> (zveril {h.assigned_by_username})
+                {new Date(h.created_at).toLocaleDateString("sk-SK")} — {h.from_person ?? "založený"} →{" "}
+                <span className="font-medium">{h.to_person}</span> (zveril {h.assigned_by_person})
                 {h.note ? ` · ${h.note}` : ""}
               </li>
             ))}

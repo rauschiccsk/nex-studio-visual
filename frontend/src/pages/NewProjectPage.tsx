@@ -9,6 +9,7 @@ import { useAuthStore } from "@/store/authStore";
 import type { ProjectAuthMode, ProjectType } from "@/types";
 import type { UserRead } from "@/types/user";
 import { isAdminAccount } from "@/services/permissions";
+import { personName } from "@/utils/person";
 
 // ─── Slug helper ─────────────────────────────────────────────────────────────
 
@@ -92,9 +93,7 @@ export default function NewProjectPage() {
   // recipient; everyone else's project notifies themselves. NOTE this has nothing to do with who OWNS
   // the project — that is always the person creating it and is not selectable.
   const canPickOwner = isAdminAccount(user);
-  const ownerSelfDisplay = user
-    ? [user.first_name, user.last_name].filter(Boolean).join(" ") || user.username
-    : "";
+  const ownerSelfDisplay = personName(user);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [portsNote, setPortsNote] = useState<string>("");
@@ -491,7 +490,7 @@ export default function NewProjectPage() {
                       silently rewrote the empty choice to the creator. The form offered a state the
                       system does not have. */}
                   {users.map((u) => {
-                    const display = [u.first_name, u.last_name].filter(Boolean).join(" ") || u.username;
+                    const display = personName(u);
                     return (
                       <option key={u.id} value={u.id}>
                         {display} ({u.username})

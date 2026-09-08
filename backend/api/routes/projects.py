@@ -74,7 +74,9 @@ from backend.services.template_bootstrap import (
     push_and_verify,
     resolve_github_org,
     rollback_partial_state,
+    sync_notify_chat_id,
 )
+from backend.services.user import person_label
 
 logger = logging.getLogger(__name__)
 
@@ -1287,23 +1289,41 @@ class _ReassignRequest(BaseModel):
     note: str | None = None
 
 
-class _AssignmentRead(BaseModel):
-    """Jeden riadok histórie presunov."""
+class _HandoverResult(BaseModel):
+    """Čo sa zverením stalo — vrátane toho, čo sa NEstalo (ICCINT-80).
 
-    from_username: str | None
-    to_username: str
-    assigned_by_username: str
+    Zodpovednosť a upozornenia sú dva rôzne údaje. Keď nový manažér nemá zapísaný Telegram,
+    zodpovednosť sa presunie a upozornenia zostanú starému — a kokpit to musí povedať nahlas,
+    lebo ticho by tu znamenalo, že sa hlásenia stratia bez toho, aby si to niekto všimol.
+    """
+
+    project: ProjectRead
+    notifications_follow_manager: bool
+    notifications_blocked_reason: str | None = None
+
+
+class _AssignmentRead(BaseModel):
+    """Jeden riadok histórie presunov.
+
+    Ľudia sa uvádzajú **menom a priezviskom**, nie prihlasovacím menom (ICCINT-81): manažér zveruje
+    projekt človeku, nie účtu, a nemá si v hlave prekladať ``tibi`` na Tibora. Kde meno v konte nie je
+    vyplnené, ostáva prihlasovacie meno — radšej ono než prázdno.
+    """
+
+    from_person: str | None
+    to_person: str
+    assigned_by_person: str
     note: str | None
     created_at: datetime
 
 
-@router.post("/{project_id}/reassign", response_model=ProjectRead)
+@router.post("/{project_id}/reassign", response_model=_HandoverResult)
 def reassign_project(
     project_id: UUID,
     payload: _ReassignRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> ProjectRead:
+) -> _HandoverResult:
     """Zver projekt inému pracovníkovi — **jedine admin** (ICCINT-78).
 
     Pracovné kontá vidia len svoje projekty a túto možnosť nemajú vôbec. Nie je to úroveň práv navyše;
@@ -1322,7 +1342,7 @@ def reassign_project(
             detail="Presúvať projekty smie iba admin.",
         )
     try:
-        project = project_service.reassign(
+        handover = project_service.reassign(
             db,
             project_id,
             to_user_id=payload.to_user_id,
@@ -1333,8 +1353,26 @@ def reassign_project(
     except ValueError as exc:
         db.rollback()
         raise _map_value_error(exc) from exc
+    project = handover.project
     db.refresh(project)
-    return ProjectRead.model_validate(project)
+
+    # Druhá polovica presunu upozornení: zápis na disku, z ktorého číta hook samotného agenta
+    # (ICCINT-80). Až PO commite a best-effort — zlyhanie zápisu nesmie zrušiť zverenie, ktoré
+    # už v databáze platí. Rovnaký vzor ako upratanie priečinka pri mazaní projektu vyššie.
+    if handover.notifications_follow_manager:
+        new_owner = db.get(User, payload.to_user_id)
+        chat_id = (new_owner.telegram_chat_id or "").strip() if new_owner else ""
+        if chat_id:
+            try:
+                sync_notify_chat_id(project, chat_id)
+            except OSError as exc:
+                logger.warning("Notify recipient sync failed for %r: %s", project.slug, exc)
+
+    return _HandoverResult(
+        project=ProjectRead.model_validate(project),
+        notifications_follow_manager=handover.notifications_follow_manager,
+        notifications_blocked_reason=handover.notifications_blocked_reason,
+    )
 
 
 @router.get("/{project_id}/assignments", response_model=list[_AssignmentRead])
@@ -1350,12 +1388,17 @@ def read_project_assignments(
         raise _map_value_error(ValueError(f"Project {project_id} not found"))
     authz.authorize_project(current_user, project)
 
-    names = dict(db.execute(select(User.id, User.username)).all())
+    names = {
+        uid: person_label(first, last, username)
+        for uid, first, last, username in db.execute(
+            select(User.id, User.first_name, User.last_name, User.username)
+        ).all()
+    }
     return [
         _AssignmentRead(
-            from_username=names.get(row.from_user_id) if row.from_user_id else None,
-            to_username=names.get(row.to_user_id, "?"),
-            assigned_by_username=names.get(row.assigned_by, "?"),
+            from_person=names.get(row.from_user_id) if row.from_user_id else None,
+            to_person=names.get(row.to_user_id, "?"),
+            assigned_by_person=names.get(row.assigned_by, "?"),
             note=row.note,
             created_at=row.created_at,
         )

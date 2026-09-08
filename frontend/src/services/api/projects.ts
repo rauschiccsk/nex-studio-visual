@@ -140,13 +140,31 @@ export function suggestPortBlockApi(): Promise<PortBlockSuggestion> {
   return api.get<PortBlockSuggestion>("/projects/ports/suggest-block");
 }
 
-/** Jeden riadok histórie presunov projektu (ICCINT-78). */
+/**
+ * Jeden riadok histórie presunov projektu (ICCINT-78).
+ *
+ * Ľudia prichádzajú zo servera už ako **Meno Priezvisko** (ICCINT-81) — nie prihlasovacie meno.
+ * Skladá to backend, aby sa v histórii a v ponuke nečítal ten istý človek dvakrát inak.
+ */
 export interface ProjectAssignmentRead {
-  from_username: string | null;
-  to_username: string;
-  assigned_by_username: string;
+  from_person: string | null;
+  to_person: string;
+  assigned_by_person: string;
   note: string | null;
   created_at: string;
+}
+
+/**
+ * Čo sa zverením stalo — vrátane toho, čo sa NEstalo (ICCINT-80).
+ *
+ * Zodpovednosť a upozornenia sú dva rôzne údaje. Keď nový manažér nemá zapísaný Telegram,
+ * zodpovednosť sa presunie a upozornenia zostanú starému. Obrazovka to musí povedať nahlas —
+ * ticho by tu znamenalo, že hlásenia chodia nesprávnemu človeku a nikto o tom nevie.
+ */
+export interface HandoverResult {
+  project: ProjectRead;
+  notifications_follow_manager: boolean;
+  notifications_blocked_reason: string | null;
 }
 
 /**
@@ -160,8 +178,8 @@ export function reassignProjectApi(
   projectId: string,
   toUserId: string,
   note?: string,
-): Promise<ProjectRead> {
-  return api.post<ProjectRead>(`/projects/${projectId}/reassign`, {
+): Promise<HandoverResult> {
+  return api.post<HandoverResult>(`/projects/${projectId}/reassign`, {
     to_user_id: toUserId,
     note: note || null,
   });

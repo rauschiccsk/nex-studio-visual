@@ -519,3 +519,40 @@ def rollback_partial_state(
             )
 
     logger.info("K-002 rollback complete (target=%s, repo=%s)", target, repo_full_name)
+
+
+def sync_notify_chat_id(project: Project, chat_id: str) -> bool:
+    """Prepíš adresáta agentových hlásení v ``.env`` projektu. Vráti, či sa naozaj zmenil.
+
+    **Prečo to musí existovať.** Adresát upozornení žije na DVOCH miestach, nie na jednom:
+
+    * ``projects.owner_id`` v databáze — odtiaľ ho berie kokpit pre svoje vlastné šťuchnutie
+      (``pipeline_runner._notify_chat_ids``);
+    * ``TELEGRAM_NOTIFY_CHAT_ID`` v ``.env`` projektu na disku — odtiaľ ho berie hook, ktorým si
+      hlási sám agent (``scripts/notify_telegram.sh``). Zapisuje ho sem ``init.sh`` pri zakladaní
+      (:func:`invoke_init_script`, ``--notify-chat-id``).
+
+    Presunúť pri zverení len ten prvý znamená opraviť polovicu: projekt by patril novému manažérovi,
+    kokpit by šťuchal jeho, ale agent by svoje hlásenia posielal ďalej starému. Zmerané 08.09.2026 —
+    zápis na disku má 4 z 9 projektov, čiže to nie je teoretická cesta (ICCINT-80).
+
+    Zapisuje sa iba do súboru, ktorý UŽ existuje a UŽ ten kľúč má: projektu, ktorý o upozornenia
+    nikdy nestál, ich zverenie nemá začať posielať. ``.env`` je mimo gitu, takže zmena nerobí šum
+    v histórii. Chyba pri zápise sa hlási volajúcemu — nikdy neruší už zapísané zverenie.
+    """
+    if not project.source_path:
+        return False
+    env_file = Path(project.source_path) / ".env"
+    try:
+        text = env_file.read_text(encoding="utf-8")
+    except OSError:
+        return False
+
+    pattern = re.compile(r"^TELEGRAM_NOTIFY_CHAT_ID=.*$", re.MULTILINE)
+    if not pattern.search(text):
+        return False
+    updated = pattern.sub(f"TELEGRAM_NOTIFY_CHAT_ID={chat_id}", text)
+    if updated == text:
+        return False
+    env_file.write_text(updated, encoding="utf-8")
+    return True

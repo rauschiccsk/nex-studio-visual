@@ -395,3 +395,17 @@ def change_password(
     _bump_token_version(db, user_id)
 
     return user
+
+
+def person_label(first_name: str | None, last_name: str | None, username: str) -> str:
+    """Ako sa človek volá — meno a priezvisko, inak prihlasovacie meno (ICCINT-81).
+
+    Manažér pracuje s ľuďmi, nie s účtami: v ponuke „komu zveriť projekt“ ani v histórii presunov
+    nemá čítať ``tibi`` a v hlave si to prekladať na Tibora. Director to zadal 08.09.2026 hneď po
+    prvom zverení projektu.
+
+    Prihlasovacie meno je záložná možnosť, nie chyba — konto ``admin`` priezvisko vyplnené nemá
+    a niektoré strojové kontá ho mať nikdy nebudú. Prázdny riadok by bol horší než ``admin``.
+    """
+    full = " ".join(part.strip() for part in (first_name, last_name) if part and part.strip())
+    return full or username

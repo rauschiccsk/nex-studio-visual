@@ -6,6 +6,7 @@ import { useActiveContextStore } from "@/store/activeContextStore";
 import { usePresenceStore } from "@/store/usePresenceStore";
 import { usePipelineWs } from "@/hooks/usePipelineWs";
 import type { UserRole } from "@/types/user";
+import { personName } from "@/utils/person";
 
 // UserCard subtitle (CR-NS-093): derive the "<Title> · <Code>" label from the
 // logged-in user's role. Studio provisions all three roles (ri/ha/shu) — titles
@@ -96,11 +97,7 @@ export default function Sidebar() {
 
   // CR-NS-089: show the logged-in user's full name (first + last), falling back
   // to username → email. Initials derive from the same resolved source.
-  const displaySource =
-    [user?.first_name, user?.last_name].filter(Boolean).join(" ") ||
-    user?.username ||
-    user?.email ||
-    "";
+  const displaySource = personName(user) || user?.email || "";
   const displayName = displaySource || "—";
   const initials = displaySource ? displaySource.slice(0, 1).toUpperCase() : "?";
 

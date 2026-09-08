@@ -5811,26 +5811,45 @@ export interface components {
         /**
          * _AssignmentRead
          * @description Jeden riadok histórie presunov.
+         *
+         *     Ľudia sa uvádzajú **menom a priezviskom**, nie prihlasovacím menom (ICCINT-81): manažér zveruje
+         *     projekt človeku, nie účtu, a nemá si v hlave prekladať ``tibi`` na Tibora. Kde meno v konte nie je
+         *     vyplnené, ostáva prihlasovacie meno — radšej ono než prázdno.
          */
         _AssignmentRead: {
-            /** Assigned By Username */
-            assigned_by_username: string;
+            /** Assigned By Person */
+            assigned_by_person: string;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
-            /** From Username */
-            from_username: string | null;
+            /** From Person */
+            from_person: string | null;
             /** Note */
             note: string | null;
-            /** To Username */
-            to_username: string;
+            /** To Person */
+            to_person: string;
         };
         /** _GitCommitRequest */
         _GitCommitRequest: {
             /** Message */
             message?: string | null;
+        };
+        /**
+         * _HandoverResult
+         * @description Čo sa zverením stalo — vrátane toho, čo sa NEstalo (ICCINT-80).
+         *
+         *     Zodpovednosť a upozornenia sú dva rôzne údaje. Keď nový manažér nemá zapísaný Telegram,
+         *     zodpovednosť sa presunie a upozornenia zostanú starému — a kokpit to musí povedať nahlas,
+         *     lebo ticho by tu znamenalo, že sa hlásenia stratia bez toho, aby si to niekto všimol.
+         */
+        _HandoverResult: {
+            /** Notifications Blocked Reason */
+            notifications_blocked_reason?: string | null;
+            /** Notifications Follow Manager */
+            notifications_follow_manager: boolean;
+            project: components["schemas"]["ProjectRead"];
         };
         /** _NexsharedUpgradeRequest */
         _NexsharedUpgradeRequest: {
@@ -8589,7 +8608,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProjectRead"];
+                    "application/json": components["schemas"]["_HandoverResult"];
                 };
             };
             /** @description Validation Error */

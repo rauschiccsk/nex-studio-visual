@@ -47,7 +47,7 @@ Design notes (per DESIGN.md §1.3 / §2.2 and :mod:`backend.db.models.projects`)
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import NamedTuple, Optional
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -341,6 +341,22 @@ def delete(db: Session, project_id: UUID) -> None:
     db.flush()
 
 
+class Handover(NamedTuple):
+    """Čo sa pri zverení naozaj stalo.
+
+    Zodpovednosť a upozornenia sú v systéme DVA rôzne údaje: ``created_by`` (za projekt zodpovedá)
+    a ``owner_id`` (chodia mu hlásenia). Zverenie musí presunúť oboje — inak nový manažér projekt
+    vlastní, ale cinká to starému (ICCINT-80). Presunúť sa však dá len tomu, kto má kam: bez
+    zapísaného Telegramu by sa z „chodia nesprávnemu človeku“ stalo „nechodia nikomu“, čo je horšie,
+    lebo je to tichšie. Preto sa vracia aj to, či sa upozornenia pohli — kokpit to musí povedať
+    nahlas pri samotnom zverení, nie mlčať.
+    """
+
+    project: Project
+    notifications_follow_manager: bool
+    notifications_blocked_reason: str | None
+
+
 def reassign(
     db: Session,
     project_id: UUID,
@@ -348,7 +364,7 @@ def reassign(
     to_user_id: UUID,
     assigned_by: UUID,
     note: str | None = None,
-) -> Project:
+) -> Handover:
     """Zver projekt inému pracovníkovi a zapíš, kto komu čo zveril (ICCINT-78).
 
     Vlastníctvo je ``Project.created_by`` (``backend/core/authz.py``) — mení sa práve ono. Volajúci MUSÍ
@@ -358,8 +374,11 @@ def reassign(
     zastúpiť. 08.09.2026 to zrušil — zdieľané heslo zmaže stopu, kto čo urobil, a pravidlo „nič nezvratné
     bez Directora“ sa opiera práve o podpis konta. Presun projektu je náhrada, ktorá stopu zachová (D-028).
 
-    Presun na toho istého vlastníka je **nečinnosť, nie chyba**: história by sa inak plnila riadkami,
-    v ktorých sa nič nestalo, a stráž, ktorá otravuje pri neškodnom kroku, sa naučí obchádzať.
+    Presun na toho istého vlastníka **nepridá riadok do histórie** — plnila by sa záznamami, v ktorých
+    sa nič nestalo, a stráž, ktorá otravuje pri neškodnom kroku, sa naučí obchádzať. Adresáta upozornení
+    však dorovná aj vtedy: presne to je cesta, ktorou sa opraví projekt zverený človeku, ktorý Telegram
+    ešte zapísaný nemal. Bez toho by rada „doplň mu Telegram a zver projekt znova“ nefungovala — druhé
+    zverenie by sa zastavilo hneď na prvom riadku (ICCINT-80).
     """
     project = db.execute(select(Project).where(Project.id == project_id)).scalar_one_or_none()
     if project is None:
@@ -373,21 +392,35 @@ def reassign(
         raise ValueError(f"User {new_owner.username} is not active")
 
     previous_owner_id = project.created_by
-    if previous_owner_id == to_user_id:
-        return project
-
-    db.add(
-        ProjectAssignment(
-            project_id=project.id,
-            from_user_id=previous_owner_id,
-            to_user_id=to_user_id,
-            assigned_by=assigned_by,
-            note=(note or None),
+    if previous_owner_id != to_user_id:
+        db.add(
+            ProjectAssignment(
+                project_id=project.id,
+                from_user_id=previous_owner_id,
+                to_user_id=to_user_id,
+                assigned_by=assigned_by,
+                note=(note or None),
+            )
         )
-    )
-    project.created_by = to_user_id
+        project.created_by = to_user_id
+
+    # Upozornenia idú s manažérom — ale len ak má kam (ICCINT-80). ``owner_id`` je adresát hlásení
+    # z Telegramu (CR-NS-012); nastavuje sa pri zakladaní na tvorcu a inou cestou sa meniť nedá, takže
+    # tu niet čo prepísať, čo by bol niekým zámerne nastavený iný cieľ.
+    blocked: str | None = None
+    if (new_owner.telegram_chat_id or "").strip():
+        project.owner_id = to_user_id
+        follow = True
+    else:
+        follow = False
+        blocked = f"{new_owner.username} nemá zapísaný Telegram"
+
     db.flush()
-    return project
+    return Handover(
+        project=project,
+        notifications_follow_manager=follow,
+        notifications_blocked_reason=blocked,
+    )
 
 
 def assignment_history(db: Session, project_id: UUID) -> list[ProjectAssignment]:
