@@ -98,8 +98,9 @@ def test_both_endings_record_the_finish() -> None:
     ICCINT-50 sa opravil len v tom prvom, takže každá rýchla oprava skončila s verziou v stave ``active``.
     Do 07.09.2026 ich tak na nex-productcatalogs viselo sedem — v prehľade vyzerali ako nezačaté.
 
-    Stará podoba tvrdila „zdrojový text ručného podpisu spomína mark_done“, čo bola pravda po celý čas, kým
-    sedem verzií viselo. Preto sa dnes žiada, aby OBA konce išli cez jedno hrdlo a to hrdlo verziu dotklo.
+    Stará podoba tvrdila „zdrojový text ručného podpisu spomína mark_done“, čo bola pravda po celý čas,
+    kým sedem verzií viselo. Druhá podoba kontrolovala dva konce z troch — a ten tretí nechal v0.2.0
+    visieť rovnako. Preto sa dnes žiada, aby VŠETKY konce išli cez jedno hrdlo a to hrdlo verziu dotklo.
     Behaviorálny dôkaz (rýchla oprava naozaj dobehne a verzia je ``done``) je v
     ``tests/test_orchestrator_v2_verifikacia.py``.
     """
@@ -110,7 +111,14 @@ def test_both_endings_record_the_finish() -> None:
     assert "version_service.mark_done" in inspect.getsource(orchestrator._settle_build_done), (
         "spoločné hrdlo konca stavby verziu nedotýka"
     )
-    for ending in (orchestrator._apply_hotovo_signoff, orchestrator._settle_phase_boundary):
+    # ⚠️ TRI konce, nie dva. Prvé kolo tejto opravy kontrolovalo iba prvé dva a tretí — ručné „Schváliť“
+    # na konci Verifikácie — nastavoval stav priamo. Zmerané 08.09.2026 na v0.2.0: priebeh `done/done`,
+    # evidencia `active`. Preto sa tu žiada KAŽDÁ funkcia, ktorá stavbu končí.
+    for ending in (
+        orchestrator._apply_hotovo_signoff,
+        orchestrator._settle_phase_boundary,
+        orchestrator.apply_action,
+    ):
         assert "_settle_build_done" in inspect.getsource(ending), (
             f"{ending.__name__} končí stavbu mimo spoločného hrdla — presne tak vznikol pôvodný nález"
         )

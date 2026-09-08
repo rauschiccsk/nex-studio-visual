@@ -11598,10 +11598,12 @@ async def apply_action(
         state.current_stage = _next_stage(state.current_stage, state.flow_type)
         db.flush()
         if state.current_stage == "done":
-            state.current_actor = "ai_agent"  # terminal — no agent on turn; kept a valid ACTOR value
-            state.status = "done"
-            state.next_action = "Pipeline dokončená (Hotovo). Nasadenie je samostatná akcia per zákazník."
-            db.flush()
+            # ICCINT-50 (druhé kolo): TRETÍ koniec stavby. Prvé kolo opravilo ručný podpis Hotovo a
+            # automatický podpis rýchlej opravy — a tento, ručné „Schváliť“ na konci Verifikácie, nastavoval
+            # stav priamo a verzie sa nedotkol. Zmerané 08.09.2026 na nex-productcatalogs v0.2.0: priebeh
+            # `done/done`, evidencia `active`. Tá istá choroba tretíkrát za dva dni, tentoraz v mojej vlastnej
+            # oprave — dôvod, prečo hrdlo existuje, je presne toto.
+            _settle_build_done(db, state, "Pipeline dokončená (Hotovo). Nasadenie je samostatná akcia per zákazník.")
         else:
             _begin_dispatch(db, state)
         return state
