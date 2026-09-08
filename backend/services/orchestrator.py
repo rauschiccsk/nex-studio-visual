@@ -5180,6 +5180,10 @@ def _repo_full_from_remote(url: str) -> Optional[str]:
 #: prácu — má zabrániť tomu, aby ťah čakal donekonečna a v kokpite naveky svietilo „pracuje sa“.
 VIZUAL_SPINUP_CAP = 900
 
+#: Strop pre odosielanie vydania do vzdialeného repozitára vo vlákne (ICCINT-82). Sedí na
+#: ``_GIT_PUSH_TIMEOUT`` (60 s) plus rezerva na to, kým sa vlákno vôbec dostane na rad.
+GIT_PUSH_CAP = 90
+
 CI_RUN_APPEAR_TIMEOUT = 120
 CI_RUN_APPEAR_INTERVAL = 10
 #: And how long to then wait for that run to FINISH. A run in flight is not evidence of health either — the
@@ -7142,7 +7146,7 @@ async def _run_conversation_plan_round(
     return state
 
 
-def _apply_hotovo_signoff(
+async def _apply_hotovo_signoff(
     db: Session,
     version_id: uuid.UUID,
     state: PipelineState,
@@ -7167,7 +7171,10 @@ def _apply_hotovo_signoff(
         _git_tag_version(proj_root, _vnum, hotovo_sha)
         # Publish both artifacts — a release-notes commit and a verified tag that live only in this
         # container's checkout are not a release (audit finding).
-        _push_release_artifacts(proj_root, _vnum)
+        # ICCINT-82: TRETIE miesto, kde sa odosiela vydanie — a jediné, ktoré prehľadávanie async funkcií
+        # NENAŠLO, lebo táto funkcia bola obyčajná a volali ju až async funkcie nad ňou. Preto je odteraz
+        # async: databáza zostáva na hlavnej slučke a do vlákna ide len to čakanie na cudzí stroj.
+        await run_blocking(_push_release_artifacts, proj_root, _vnum, cap=GIT_PUSH_CAP)
     signoff_payload: dict[str, Any] = {"phase": "priprava", "hotovo": True}
     if hotovo_sha:
         signoff_payload["hotovo_sha"] = hotovo_sha
@@ -7369,7 +7376,7 @@ async def _run_conversation_kontrola_round(
         # commit in ONE click (Director 2026-07-12: auto re-sign). Same runtime-floor gate as the manual Hotovo
         # (K-3 — the objective boot+acceptance floor, not the partner's advisory PEVNÉ/VRATKÉ prose). A RED floor
         # NEVER auto-signs — it recorded the floor-red note above and settles re-opened below so the manager fixes.
-        _apply_hotovo_signoff(
+        await _apply_hotovo_signoff(
             db,
             version_id,
             state,
@@ -9091,7 +9098,12 @@ async def _run_verifikacia_round(
         _git_tag_version(claude_agent.PROJECTS_ROOT / slug, version_label, verified_sha)
         # Publish both artifacts — a release-notes commit and a verified tag that live only in this
         # container's checkout are not a release (audit finding).
-        _push_release_artifacts(claude_agent.PROJECTS_ROOT / slug, version_label)
+        # ICCINT-82: JEDINÉ z gitových volaní tu, ktoré siaha na sieť — odosiela do vzdialeného
+        # repozitára, a preto má strop 60 s namiesto pätnástich. Presne to je ten druh čakania,
+        # ktorý 07.09.2026 zhasol celý kokpit (ICCINT-74): pokazená sieť, a server minútu neodbaví
+        # nikoho. Ide teda do vlákna. Nemá `db` — je to čistá práca so súbormi a sieťou, takže sa
+        # sedenie s databázou do cudzieho vlákna nedostane.
+        await run_blocking(_push_release_artifacts, claude_agent.PROJECTS_ROOT / slug, version_label, cap=GIT_PUSH_CAP)
     verdict_msg = _verdict_message(
         db,
         version_id=version_id,
@@ -11648,7 +11660,7 @@ async def apply_action(
         # Shared with the drifted-version auto re-anchor (audit #8) via ``_apply_hotovo_signoff``: the recorded
         # marker is kind='notification' at stage='priprava' (INVISIBLE to ``_verifikacia_passed``); no
         # ``_begin_dispatch`` — a pure terminal signature, the partner never self-signs.
-        _apply_hotovo_signoff(db, version_id, state)
+        await _apply_hotovo_signoff(db, version_id, state)
         return state
 
     if action == "schvalit":
@@ -12123,7 +12135,12 @@ async def apply_action(
                 _git_tag_version(_proj_root, _vnum, verified_sha)
                 # Publish both artifacts — a release-notes commit and a verified tag that live only in this
                 # container's checkout are not a release (audit finding).
-                _push_release_artifacts(_proj_root, _vnum)
+                # ICCINT-82: JEDINÉ z gitových volaní tu, ktoré siaha na sieť — odosiela do vzdialeného
+                # repozitára, a preto má strop 60 s namiesto pätnástich. Presne to je ten druh čakania,
+                # ktorý 07.09.2026 zhasol celý kokpit (ICCINT-74): pokazená sieť, a server minútu neodbaví
+                # nikoho. Ide teda do vlákna. Nemá `db` — je to čistá práca so súbormi a sieťou, takže sa
+                # sedenie s databázou do cudzieho vlákna nedostane.
+                await run_blocking(_push_release_artifacts, _proj_root, _vnum, cap=GIT_PUSH_CAP)
         verdict_payload: dict[str, Any] = {"verdict": effective_verdict, "phase": "verifikacia"}
         if verified_sha:
             verdict_payload["verified_sha"] = verified_sha

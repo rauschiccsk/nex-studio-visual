@@ -13,6 +13,7 @@ import logging
 import os
 import shutil
 import subprocess
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -576,7 +577,10 @@ def _run_smoke_test(target: Path, slug: str, *, full: bool) -> str | None:
                 if health.returncode == 0:
                     logger.info("K-004 full smoke /health endpoint OK (slug=%s, port=%d)", slug, backend_port)
                     break
-                subprocess.run(["sleep", "5"], check=False)
+                # ICCINT-82: bolo to `subprocess.run(["sleep", "5"])` — jediné volanie procesu v celom
+                # backende BEZ stropu. Rozbehnúť kvôli päťsekundovej pauze celý cudzí program je aj tak
+                # zbytočné; a keby sa ten program zasekol, čakalo by sa naveky, lebo ho nič neutne.
+                time.sleep(5)
             else:
                 logger.warning(
                     "K-004 full smoke /health endpoint not reachable in 30s (slug=%s, url=%s)",

@@ -195,3 +195,70 @@ async def test_work_that_never_ends_gives_the_loop_back() -> None:
     """
     with pytest.raises(BlockingWorkTimedOut):
         await run_blocking(time.sleep, 5, cap=0.05)
+
+
+# ─── Čakanie na sieť a stropy (ICCINT-82) ─────────────────────────────────────
+#
+# Pokračovanie ICCINT-74 na gitové príkazy v samotnom orchestrátore. Zmerané 08.09.2026, čo tie príkazy
+# reálne stoja na najväčšom repozitári (nex-productcatalogs, päť meraní):
+#
+#   rev-parse HEAD        2,0 – 4,5 ms
+#   status --porcelain    8,4 – 15,2 ms
+#   rev-list --count     16,7 – 24,0 ms
+#   show --name-only      2,6 – 6,4 ms
+#
+# Milisekundy, nie minúty — a každý z nich má strop 15 s. Sú to teda čakania miestne a ohraničené.
+# JEDINÉ, ktoré siaha za hranicu tohto stroja, je odosielanie vydania do vzdialeného repozitára
+# (strop 60 s). Práve to je ten druh čakania, ktorý kokpit vie zhasnúť — pokazená sieť a server minútu
+# neodbaví nikoho — a preto ide do vlákna.
+
+
+def test_nothing_that_waits_for_another_machine_runs_on_the_main_loop() -> None:
+    """⚠️ Sieť je iná trieda čakania než disk.
+
+    Miestny gitový príkaz beží milisekundy a má strop 15 s. Odosielanie do vzdialeného repozitára závisí
+    od cudzieho stroja: keď je sieť pokazená, čaká sa až do stropu 60 s — a to je presne tá minúta, počas
+    ktorej server neodbaví nikoho, vrátane vlastnej kontroly zdravia.
+    """
+    import inspect
+
+    from backend.services import orchestrator
+
+    src = inspect.getsource(orchestrator)
+    bare = [
+        line.strip()
+        for line in src.splitlines()
+        if "_push_release_artifacts(" in line and "def " not in line and "run_blocking" not in line
+    ]
+    assert bare == [], "odosielanie vydania beží na hlavnej slučke:\n  " + "\n  ".join(bare)
+
+
+def test_every_process_we_start_has_a_cap() -> None:
+    """⚠️ Strop je to jediné, čo delí „pomalé“ od „naveky“.
+
+    Našlo to jedno konkrétne miesto: pauza medzi pokusmi o kontrolu zdravia pri zakladaní projektu bola
+    napísaná ako ``subprocess.run(["sleep", "5"])`` — jediné volanie procesu v celom backende bez stropu.
+    Rozbehnúť kvôli päťsekundovej pauze cudzí program je aj tak zbytočné.
+    """
+    bez_stropu: list[str] = []
+    for path in sorted(BACKEND.rglob("*.py")):
+        if "tests" in path.parts:
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:  # pragma: no cover
+            continue
+        for call in ast.walk(tree):
+            if not isinstance(call, ast.Call):
+                continue
+            func = call.func
+            full = (
+                f"{func.value.id}.{func.attr}"
+                if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
+                else None
+            )
+            if full in {"subprocess.run", "subprocess.check_output", "subprocess.call"} and not any(
+                kw.arg == "timeout" for kw in call.keywords
+            ):
+                bez_stropu.append(f"{path.relative_to(BACKEND.parent)}:{call.lineno}")
+    assert bez_stropu == [], "spustený proces bez stropu môže čakať naveky:\n  " + "\n  ".join(bez_stropu)
