@@ -122,3 +122,21 @@ def test_only_the_admin_may_move_a_project() -> None:
     src = inspect.getsource(routes.reassign_project)
     assert "authz.is_admin(current_user)" in src, "presun nekontroluje, či volá admin"
     assert "HTTP_403_FORBIDDEN" in src
+
+
+def test_the_endpoints_are_mounted_where_the_cockpit_calls_them() -> None:
+    """⚠️ Toto chýbalo a stálo to jedno nasadenie navyše.
+
+    Trasy boli napísané ako ``/projects/{id}/reassign``, lenže router UŽ MÁ predponu ``/projects`` —
+    v appke tak vznikla cesta ``/api/v1/projects/projects/{id}/reassign``. Kokpit volal správnu adresu
+    a dostával 404 s textom „Not Found“ od FastAPI, teda ani nie našu hlášku.
+
+    Prečo to nechytila žiadna z piatich stráží: skúšali funkciu a jej zdrojový text, nie **pripojenú
+    adresu**. Ani brána zhody kontraktu to nechytí — generovaný klient sa robí z tej istej (zlej) mapy
+    trás, takže si obe strany zle rozumejú zhodne.
+    """
+    from backend.main import app
+
+    paths = {getattr(route, "path", "") for route in app.routes}
+    assert "/api/v1/projects/{project_id}/reassign" in paths
+    assert "/api/v1/projects/{project_id}/assignments" in paths

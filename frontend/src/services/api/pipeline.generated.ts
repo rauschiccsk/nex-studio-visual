@@ -1408,57 +1408,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/projects/{project_id}/assignments": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Read Project Assignments
-         * @description Komu projekt patril predtým. Bez toho sa nedá rozoznať trvalé odovzdanie od týždňovej výpožičky,
-         *     kým bol niekto preč.
-         */
-        get: operations["read_project_assignments_api_v1_projects_projects__project_id__assignments_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/projects/{project_id}/reassign": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Reassign Project
-         * @description Zver projekt inému pracovníkovi — **jedine admin** (ICCINT-78).
-         *
-         *     Pracovné kontá vidia len svoje projekty a túto možnosť nemajú vôbec. Nie je to úroveň práv navyše;
-         *     je to jediné miesto, kde sa o vlastníctve rozhoduje. Director 08.09.2026: *„admin bude mať možnosť
-         *     vidieť všetky a jediný bude mať možnosť presunúť projekt inému pracovníkovi.“*
-         *
-         *     Presun je zároveň náhrada za zdieľané prihlasovacie údaje: keď je niekto neprítomný, projekt sa zverí
-         *     zastupujúcemu, ktorý pracuje **pod sebou** — takže v zázname ostane pravda o tom, kto čo urobil (D-028).
-         *
-         *     * **403** — volajúci nie je admin.
-         *     * **404** — projekt alebo cieľový používateľ neexistuje.
-         */
-        post: operations["reassign_project_api_v1_projects_projects__project_id__reassign_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/projects/{project_id}": {
         parameters: {
             query?: never;
@@ -1525,6 +1474,27 @@ export interface paths {
          *     the payload are left unchanged.
          */
         patch: operations["update_project_api_v1_projects__project_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/assignments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Project Assignments
+         * @description Komu projekt patril predtým. Bez toho sa nedá rozoznať trvalé odovzdanie od týždňovej výpožičky,
+         *     kým bol niekto preč.
+         */
+        get: operations["read_project_assignments_api_v1_projects__project_id__assignments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/projects/{project_id}/git-commit": {
@@ -1630,6 +1600,36 @@ export interface paths {
          *     the chosen nex-shared. The Manažér decides per version; nothing happens without this call.
          */
         post: operations["upgrade_nexshared_api_v1_projects__project_id__nexshared_upgrade_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/reassign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reassign Project
+         * @description Zver projekt inému pracovníkovi — **jedine admin** (ICCINT-78).
+         *
+         *     Pracovné kontá vidia len svoje projekty a túto možnosť nemajú vôbec. Nie je to úroveň práv navyše;
+         *     je to jediné miesto, kde sa o vlastníctve rozhoduje. Director 08.09.2026: *„admin bude mať možnosť
+         *     vidieť všetky a jediný bude mať možnosť presunúť projekt inému pracovníkovi.“*
+         *
+         *     Presun je zároveň náhrada za zdieľané prihlasovacie údaje: keď je niekto neprítomný, projekt sa zverí
+         *     zastupujúcemu, ktorý pracuje **pod sebou** — takže v zázname ostane pravda o tom, kto čo urobil (D-028).
+         *
+         *     * **403** — volajúci nie je admin.
+         *     * **404** — projekt alebo cieľový používateľ neexistuje.
+         */
+        post: operations["reassign_project_api_v1_projects__project_id__reassign_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8266,72 +8266,6 @@ export interface operations {
             };
         };
     };
-    read_project_assignments_api_v1_projects_projects__project_id__assignments_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                project_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["_AssignmentRead"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    reassign_project_api_v1_projects_projects__project_id__reassign_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                project_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["_ReassignRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProjectRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_project_api_v1_projects__project_id__get: {
         parameters: {
             query?: never;
@@ -8417,6 +8351,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_project_assignments_api_v1_projects__project_id__assignments_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["_AssignmentRead"][];
                 };
             };
             /** @description Validation Error */
@@ -8590,6 +8555,41 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reassign_project_api_v1_projects__project_id__reassign_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_ReassignRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectRead"];
                 };
             };
             /** @description Validation Error */

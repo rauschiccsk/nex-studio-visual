@@ -1297,7 +1297,7 @@ class _AssignmentRead(BaseModel):
     created_at: datetime
 
 
-@router.post("/projects/{project_id}/reassign", response_model=ProjectRead)
+@router.post("/{project_id}/reassign", response_model=ProjectRead)
 def reassign_project(
     project_id: UUID,
     payload: _ReassignRequest,
@@ -1337,7 +1337,7 @@ def reassign_project(
     return ProjectRead.model_validate(project)
 
 
-@router.get("/projects/{project_id}/assignments", response_model=list[_AssignmentRead])
+@router.get("/{project_id}/assignments", response_model=list[_AssignmentRead])
 def read_project_assignments(
     project_id: UUID,
     db: Session = Depends(get_db),
