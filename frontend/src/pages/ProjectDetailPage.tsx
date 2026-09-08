@@ -2,7 +2,15 @@ import { useEffect, useState } from "react";
 import { versionStatusCls, versionStatusLabel } from "@/components/cockpit/labels";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { AlertTriangle, Loader2, Trash2, Zap } from "lucide-react";
-import { deleteProjectApi, getProjectApi, listProjectsApi } from "@/services/api/projects";
+import {
+  deleteProjectApi,
+  getProjectApi,
+  listProjectsApi,
+  projectAssignmentsApi,
+  reassignProjectApi,
+  type ProjectAssignmentRead,
+} from "@/services/api/projects";
+import { listUsersApi } from "@/services/api/users";
 import { listVersions } from "@/services/api/versions";
 import { startFastFixApi } from "@/services/api/pipeline";
 import { useOpenVersionCockpit } from "@/hooks/useOpenVersionCockpit";
@@ -124,6 +132,39 @@ export default function ProjectDetailPage() {
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<HumanError | null>(null);
+
+  // ICCINT-78: zveriť projekt inému pracovníkovi smie JEDINE admin. Bežné konto tú možnosť ani nevidí —
+  // a keby ju aj zavolalo, backend ho odmietne (403). Dve vrstvy, lebo skrytie samo o sebe nie je zákaz.
+  const isAdmin = user?.username === "admin";
+  const [handoverTo, setHandoverTo] = useState("");
+  const [handoverNote, setHandoverNote] = useState("");
+  const [handoverBusy, setHandoverBusy] = useState(false);
+  const [handoverError, setHandoverError] = useState<HumanError | null>(null);
+  const [people, setPeople] = useState<{ id: string; username: string }[]>([]);
+  const [history, setHistory] = useState<ProjectAssignmentRead[]>([]);
+
+  useEffect(() => {
+    if (!project) return;
+    projectAssignmentsApi(project.id).then(setHistory).catch(() => setHistory([]));
+    if (!isAdmin) return;
+    listUsersApi({ is_active: true, limit: 100 })
+      .then((page) => setPeople(page.items.map((u) => ({ id: u.id, username: u.username }))))
+      .catch(() => setPeople([]));
+  }, [project, isAdmin]);
+
+  const handleHandover = async () => {
+    if (!project || !handoverTo || handoverBusy) return;
+    setHandoverBusy(true);
+    setHandoverError(null);
+    try {
+      await reassignProjectApi(project.id, handoverTo, handoverNote);
+      // Projekt už nie je môj — ostať na jeho stránke by znamenalo pozerať sa na cudzie.
+      navigate("/projects");
+    } catch (e: unknown) {
+      setHandoverError(humanizeApiError(e, "Zverenie projektu zlyhalo"));
+      setHandoverBusy(false);
+    }
+  };
 
   const handleDelete = async () => {
     if (!project || deleteConfirmText !== "ZMAZAŤ" || deleting) return;
@@ -457,6 +498,72 @@ export default function ProjectDetailPage() {
           </>
         )}
       </div>
+      {/* ICCINT-78: zveriť projekt inému pracovníkovi. Vidí to JEDINE admin — pracovné kontá o tej
+          možnosti ani nevedia, a keby ju zavolali, backend ich odmietne. Nie je to úroveň práv navyše;
+          je to jediné miesto, kde sa o vlastníctve rozhoduje.
+
+          Náhrada za zdieľané heslá: keď je niekto neprítomný, projekt sa zverí zastupujúcemu, ktorý
+          pracuje POD SEBOU — takže v zázname ostane pravda o tom, kto čo urobil (D-028). */}
+      {isAdmin && (
+        <div className="mt-8 rounded-xl border border-[var(--color-border)] p-5">
+          <h2 className="text-xs font-semibold uppercase tracking-widest mb-1">Zodpovedný manažér</h2>
+          <p className="text-xs text-[var(--color-text-muted)] mb-3">
+            Projekt vidí len ten, komu patrí. Po zverení zmizne z tvojej plochy a objaví sa u neho — so
+            všetkými možnosťami, aké si mal ty. Hodí sa aj na zastupovanie, keď je niekto preč.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={handoverTo}
+              onChange={(e) => setHandoverTo(e.target.value)}
+              disabled={handoverBusy}
+              className="rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-3 py-1.5 text-xs"
+            >
+              <option value="">Vyber pracovníka…</option>
+              {people.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.username}
+                </option>
+              ))}
+            </select>
+            <input
+              value={handoverNote}
+              onChange={(e) => setHandoverNote(e.target.value)}
+              disabled={handoverBusy}
+              lang="sk"
+              spellCheck={true}
+              placeholder="Poznámka (napr. „Nazar je do piatku preč“)"
+              className="min-w-64 flex-1 rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-3 py-1.5 text-xs"
+            />
+            <button
+              type="button"
+              onClick={handleHandover}
+              disabled={!handoverTo || handoverBusy}
+              className="rounded-lg bg-primary-600 px-4 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {handoverBusy ? "Zverujem…" : "Zveriť projekt"}
+            </button>
+          </div>
+          <ErrorNote error={handoverError} className="mt-3" />
+        </div>
+      )}
+
+      {/* Komu projekt patril predtým — vidí každý, kto projekt vidí. Bez toho sa nedá rozoznať trvalé
+          odovzdanie od týždňovej výpožičky, kým bol niekto preč. */}
+      {history.length > 0 && (
+        <div className="mt-4 rounded-xl border border-[var(--color-border)] p-5">
+          <h2 className="text-xs font-semibold uppercase tracking-widest mb-2">Komu patril predtým</h2>
+          <ul className="space-y-1 text-xs text-[var(--color-text-secondary)]">
+            {history.map((h, idx) => (
+              <li key={idx}>
+                {new Date(h.created_at).toLocaleDateString("sk-SK")} — {h.from_username ?? "založený"} →{" "}
+                <span className="font-medium">{h.to_username}</span> (zveril {h.assigned_by_username})
+                {h.note ? ` · ${h.note}` : ""}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
 
       {/* Danger zone — guarded project deletion (CR-V2-027): admin-only + only before any PROD deploy
           (disabled-over-hidden with a tooltip explaining why); type-DELETE confirm in the modal. */}

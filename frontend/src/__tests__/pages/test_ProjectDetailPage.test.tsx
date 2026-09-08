@@ -22,6 +22,9 @@ const {
   listProjectsApiMock,
   getProjectApiMock,
   deleteProjectApiMock,
+  reassignProjectApiMock,
+  projectAssignmentsApiMock,
+  listUsersApiMock,
   listVersionsMock,
   getVersionMock,
   startFastFixApiMock,
@@ -33,6 +36,9 @@ const {
   listProjectsApiMock: vi.fn(),
   getProjectApiMock: vi.fn(),
   deleteProjectApiMock: vi.fn(),
+  reassignProjectApiMock: vi.fn(),
+  projectAssignmentsApiMock: vi.fn(),
+  listUsersApiMock: vi.fn(),
   listVersionsMock: vi.fn(),
   getVersionMock: vi.fn(),
   startFastFixApiMock: vi.fn(),
@@ -55,7 +61,12 @@ vi.mock("@/services/api/projects", () => ({
   listProjectsApi: listProjectsApiMock,
   getProjectApi: getProjectApiMock,
   deleteProjectApi: deleteProjectApiMock,
+  // ICCINT-78: stránka si pýta históriu presunov pri každom otvorení. Bez tejto atrapy sa efekt zosype
+  // a spadne celé vykreslenie — nie kvôli tomu, čo test meria.
+  reassignProjectApi: reassignProjectApiMock,
+  projectAssignmentsApi: projectAssignmentsApiMock,
 }));
+vi.mock("@/services/api/users", () => ({ listUsersApi: listUsersApiMock }));
 vi.mock("@/services/api/versions", () => ({ listVersions: listVersionsMock, getVersion: getVersionMock }));
 vi.mock("@/services/api/pipeline", () => ({ startFastFixApi: startFastFixApiMock }));
 vi.mock("@/store/activeContextStore", () => ({
@@ -111,6 +122,8 @@ const baseVersion: Version = {
 const patchVersion: Version = { ...baseVersion, id: "v2", version_number: "v0.6.1", name: "Rýchla oprava", status: "planned" };
 
 beforeEach(() => {
+  projectAssignmentsApiMock.mockResolvedValue([]);
+  listUsersApiMock.mockResolvedValue({ items: [], total: 0 });
   vi.clearAllMocks();
   listProjectsApiMock.mockResolvedValue({ items: [project], total: 1, skip: 0, limit: 100 });
   getProjectApiMock.mockResolvedValue(project);

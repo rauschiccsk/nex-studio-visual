@@ -11,6 +11,7 @@ from backend.db.models.external_cost import ExternalCost
 from backend.db.models.foundation import User, UserAgentSettings, UserSession
 from backend.db.models.orchestrator import OrchestratorSession
 from backend.db.models.pipeline import PipelineMessage, PipelineState
+from backend.db.models.project_assignments import ProjectAssignment
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.versions import Version
@@ -30,6 +31,7 @@ __all__ = [
     "PipelineMessage",
     "PipelineState",
     "Project",
+    "ProjectAssignment",
     "Epic",
     "Feat",
     "Task",

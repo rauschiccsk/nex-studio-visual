@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from uuid import UUID
@@ -1277,3 +1278,86 @@ def delete_project(
             logger.warning("GitHub API unreachable during delete of %r: %s", repo_url, exc)
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+class _ReassignRequest(BaseModel):
+    """Komu sa projekt zveruje (ICCINT-78)."""
+
+    to_user_id: UUID
+    note: str | None = None
+
+
+class _AssignmentRead(BaseModel):
+    """Jeden riadok histórie presunov."""
+
+    from_username: str | None
+    to_username: str
+    assigned_by_username: str
+    note: str | None
+    created_at: datetime
+
+
+@router.post("/projects/{project_id}/reassign", response_model=ProjectRead)
+def reassign_project(
+    project_id: UUID,
+    payload: _ReassignRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ProjectRead:
+    """Zver projekt inému pracovníkovi — **jedine admin** (ICCINT-78).
+
+    Pracovné kontá vidia len svoje projekty a túto možnosť nemajú vôbec. Nie je to úroveň práv navyše;
+    je to jediné miesto, kde sa o vlastníctve rozhoduje. Director 08.09.2026: *„admin bude mať možnosť
+    vidieť všetky a jediný bude mať možnosť presunúť projekt inému pracovníkovi.“*
+
+    Presun je zároveň náhrada za zdieľané prihlasovacie údaje: keď je niekto neprítomný, projekt sa zverí
+    zastupujúcemu, ktorý pracuje **pod sebou** — takže v zázname ostane pravda o tom, kto čo urobil (D-028).
+
+    * **403** — volajúci nie je admin.
+    * **404** — projekt alebo cieľový používateľ neexistuje.
+    """
+    if not authz.is_admin(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Presúvať projekty smie iba admin.",
+        )
+    try:
+        project = project_service.reassign(
+            db,
+            project_id,
+            to_user_id=payload.to_user_id,
+            assigned_by=current_user.id,
+            note=payload.note,
+        )
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        raise _map_value_error(exc) from exc
+    db.refresh(project)
+    return ProjectRead.model_validate(project)
+
+
+@router.get("/projects/{project_id}/assignments", response_model=list[_AssignmentRead])
+def read_project_assignments(
+    project_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[_AssignmentRead]:
+    """Komu projekt patril predtým. Bez toho sa nedá rozoznať trvalé odovzdanie od týždňovej výpožičky,
+    kým bol niekto preč."""
+    project = db.execute(select(Project).where(Project.id == project_id)).scalar_one_or_none()
+    if project is None:
+        raise _map_value_error(ValueError(f"Project {project_id} not found"))
+    authz.authorize_project(current_user, project)
+
+    names = dict(db.execute(select(User.id, User.username)).all())
+    return [
+        _AssignmentRead(
+            from_username=names.get(row.from_user_id) if row.from_user_id else None,
+            to_username=names.get(row.to_user_id, "?"),
+            assigned_by_username=names.get(row.assigned_by, "?"),
+            note=row.note,
+            created_at=row.created_at,
+        )
+        for row in project_service.assignment_history(db, project_id)
+    ]

@@ -53,6 +53,8 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from backend.db.models.foundation import User
+from backend.db.models.project_assignments import ProjectAssignment
 from backend.db.models.projects import Project
 from backend.schemas.project import (
     ProjectCreate,
@@ -337,3 +339,66 @@ def delete(db: Session, project_id: UUID) -> None:
     project = get_by_id(db, project_id)
     db.delete(project)
     db.flush()
+
+
+def reassign(
+    db: Session,
+    project_id: UUID,
+    *,
+    to_user_id: UUID,
+    assigned_by: UUID,
+    note: str | None = None,
+) -> Project:
+    """Zver projekt inému pracovníkovi a zapíš, kto komu čo zveril (ICCINT-78).
+
+    Vlastníctvo je ``Project.created_by`` (``backend/core/authz.py``) — mení sa práve ono. Volajúci MUSÍ
+    byť admin; kontrolu robí trasa, nie táto funkcia (rovnaký vzor ako zvyšok služby).
+
+    Prečo to vôbec existuje: Director s Tiborom si dovtedy vymieňali prihlasovacie údaje, aby sa vedeli
+    zastúpiť. 08.09.2026 to zrušil — zdieľané heslo zmaže stopu, kto čo urobil, a pravidlo „nič nezvratné
+    bez Directora“ sa opiera práve o podpis konta. Presun projektu je náhrada, ktorá stopu zachová (D-028).
+
+    Presun na toho istého vlastníka je **nečinnosť, nie chyba**: história by sa inak plnila riadkami,
+    v ktorých sa nič nestalo, a stráž, ktorá otravuje pri neškodnom kroku, sa naučí obchádzať.
+    """
+    project = db.execute(select(Project).where(Project.id == project_id)).scalar_one_or_none()
+    if project is None:
+        raise ValueError(f"Project {project_id} not found")
+
+    new_owner = db.execute(select(User).where(User.id == to_user_id)).scalar_one_or_none()
+    if new_owner is None:
+        raise ValueError(f"User {to_user_id} not found")
+    if not new_owner.is_active:
+        # Projekt bez činného gazdu je projekt, ktorý nikto nevidí a za ktorý nikto nezodpovedá.
+        raise ValueError(f"User {new_owner.username} is not active")
+
+    previous_owner_id = project.created_by
+    if previous_owner_id == to_user_id:
+        return project
+
+    db.add(
+        ProjectAssignment(
+            project_id=project.id,
+            from_user_id=previous_owner_id,
+            to_user_id=to_user_id,
+            assigned_by=assigned_by,
+            note=(note or None),
+        )
+    )
+    project.created_by = to_user_id
+    db.flush()
+    return project
+
+
+def assignment_history(db: Session, project_id: UUID) -> list[ProjectAssignment]:
+    """Presuny projektu, od najnovšieho. Bez toho sa nedá povedať, či bol presun natrvalo, alebo len
+    na týždeň, kým bol niekto preč."""
+    return list(
+        db.execute(
+            select(ProjectAssignment)
+            .where(ProjectAssignment.project_id == project_id)
+            .order_by(ProjectAssignment.created_at.desc())
+        )
+        .scalars()
+        .all()
+    )

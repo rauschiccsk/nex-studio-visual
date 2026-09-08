@@ -139,3 +139,35 @@ export interface PortBlockSuggestion {
 export function suggestPortBlockApi(): Promise<PortBlockSuggestion> {
   return api.get<PortBlockSuggestion>("/projects/ports/suggest-block");
 }
+
+/** Jeden riadok histórie presunov projektu (ICCINT-78). */
+export interface ProjectAssignmentRead {
+  from_username: string | null;
+  to_username: string;
+  assigned_by_username: string;
+  note: string | null;
+  created_at: string;
+}
+
+/**
+ * Zver projekt inému pracovníkovi — jedine admin (ICCINT-78).
+ *
+ * Nie je to pohodlie: nahrádza zdieľané prihlasovacie údaje. Keď je niekto neprítomný, projekt sa zverí
+ * zastupujúcemu, ktorý pracuje POD SEBOU — takže v zázname ostane pravda o tom, kto čo urobil (D-028).
+ * Bežné konto dostane 403; kontrolu robí backend, obrazovka tú možnosť ani nezobrazí.
+ */
+export function reassignProjectApi(
+  projectId: string,
+  toUserId: string,
+  note?: string,
+): Promise<ProjectRead> {
+  return api.post<ProjectRead>(`/projects/${projectId}/reassign`, {
+    to_user_id: toUserId,
+    note: note || null,
+  });
+}
+
+/** Komu projekt patril predtým — bez toho sa nedá rozoznať trvalé odovzdanie od týždňovej výpožičky. */
+export function projectAssignmentsApi(projectId: string): Promise<ProjectAssignmentRead[]> {
+  return api.get<ProjectAssignmentRead[]>(`/projects/${projectId}/assignments`);
+}
