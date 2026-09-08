@@ -305,6 +305,11 @@ class ConsultationBlock(BaseModel):
     id: str
     intro: str = ""
     source: str = "auditor_upfront"
+    #: ICCINT-72: koľké kolo konzultácie o TEJ ISTEJ veci to je a koľko ich môže prísť. Dopĺňa ich engine
+    #: po prijatí kariet (agent o kolách nič nevie), aby Manažér pri kartách videl, či je to prvé kolo
+    #: z piatich, alebo posledné. Voliteľné — staršie záznamy ich nemajú.
+    round: Optional[int] = None
+    round_max: Optional[int] = None
     decisions: list[ConsultDecision] = Field(min_length=1)
 
     @model_validator(mode="after")

@@ -42,6 +42,16 @@ interface Consultation {
   id: string;
   intro?: string;
   decisions: ConsultDecision[];
+  /**
+   * ICCINT-72: koľké kolo konzultácie o tej istej veci to je a koľko ich môže prísť.
+   *
+   * „Rozhodnutie 3 z 5“ nižšie hovorí o rozhodnutiach v TOMTO kole — ľahko sa to zamení za kolá a znie
+   * to ako koniec, hoci koniec to nie je. Na v0.2.0 prešiel Manažér piatimi kolami za dva a pol hodiny
+   * (23 rozhodnutí) bez toho, aby vedel, že päť je strop; číslo sa objavilo až pri eskalácii, teda keď
+   * už bolo po všetkom. Staršie záznamy tie údaje nemajú — vtedy sa riadok neukáže.
+   */
+  round?: number | null;
+  round_max?: number | null;
 }
 
 // The latest message CARRYING a decision queue — the ACTUAL blocking message (criterion 4) — plus its `seq`,
@@ -142,6 +152,16 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
       </div>
 
       <div className="max-w-3xl px-4 py-3">
+        {/* ICCINT-72: koľké kolo, a koľko ich ešte môže prísť. Bez toho Manažér nevie, či je na začiatku,
+            alebo pred posledným kolom — a či sa vôbec oplatí čakať ďalšie. */}
+        {typeof consultation.round === "number" && typeof consultation.round_max === "number" && (
+          <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">
+            Kolo konzultácie {consultation.round} z {consultation.round_max}
+            {consultation.round >= consultation.round_max
+              ? " — posledné. Ďalšie kolo nebude, potom rozhoduješ sám."
+              : ""}
+          </p>
+        )}
         {consultation.intro && (
           <p className="mb-2 text-xs text-[var(--color-text-muted)]">{consultation.intro}</p>
         )}

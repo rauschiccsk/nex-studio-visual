@@ -1875,6 +1875,24 @@ async def _consult_fallback(
     return state
 
 
+def _consult_rounds_used(db: Session, version_id: uuid.UUID, source: str) -> int:
+    """Koľko konzultácií o TEJ ISTEJ veci už prebehlo (ICCINT-72).
+
+    Jedno miesto, ktoré vie odpovedať na otázku „koľké kolo to je“ — používa ho aj strop, aj vety, ktoré
+    to hovoria Manažérovi. Dve nezávislé počítania toho istého by sa raz rozišli a on by čítal číslo,
+    ktoré neplatí.
+    """
+    return db.execute(
+        select(func.count())
+        .select_from(PipelineMessage)
+        .where(
+            PipelineMessage.version_id == version_id,
+            _carries_decision_queue(),
+            PipelineMessage.payload["consultation"]["source"].astext == source,
+        )
+    ).scalar_one()
+
+
 async def _settle_for_consultation(
     db: Session,
     state: PipelineState,
@@ -1904,15 +1922,7 @@ async def _settle_for_consultation(
     #
     # A cap is meant to stop ONE argument going in circles, never to spend the right to be consulted about
     # something else.
-    consult_count = db.execute(
-        select(func.count())
-        .select_from(PipelineMessage)
-        .where(
-            PipelineMessage.version_id == state.version_id,
-            _carries_decision_queue(),
-            PipelineMessage.payload["consultation"]["source"].astext == source,
-        )
-    ).scalar_one()
+    consult_count = _consult_rounds_used(db, state.version_id, source)
     if consult_count >= AUDITOR_LOOP_MAX:
         return await _consult_fallback(
             db,
@@ -2006,7 +2016,31 @@ async def _settle_for_consultation(
     state.status = "blocked"
     state.block_reason = "decision_needed"
     word = "rozhodnutie" if n == 1 else ("rozhodnutia" if 2 <= n <= 4 else "rozhodnutí")
-    state.next_action = f"Manažér: rozhodni 1/{n} ({n} {word}, konzultácia)."
+    kolo = consult_count + 1
+    state.next_action = f"Manažér: rozhodni 1/{n} ({n} {word}, konzultácia — kolo {kolo} z {AUDITOR_LOOP_MAX})."
+
+    # ICCINT-72: dopíš číslo kola k samotným kartám. Manažér pri nich sedí — na v0.2.0 päť kôl za dva a pol
+    # hodiny a 23 rozhodnutí — a dovtedy nemal ako vedieť, či je to prvé kolo z piatich, alebo posledné.
+    # „Rozhodnutie 3 z 5“ na karte hovorí o rozhodnutiach v TOMTO kole, nie o kolách; ľahko sa to zamení
+    # a znie to ako koniec, hoci to koniec nie je.
+    #
+    # Zapisuje sa do správy, ktorú práve vytvoril ten istý ťah, v tej istej transakcii — nie je to prepis
+    # histórie, ale dokončenie záznamu, kým je otvorený. Číslo pochádza z toho istého počítadla ako strop
+    # (:func:`_consult_rounds_used`), takže sa s ním nemôže rozísť.
+    cards = db.execute(
+        select(PipelineMessage)
+        .where(PipelineMessage.version_id == state.version_id, _carries_decision_queue())
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if cards is not None and isinstance(cards.payload, dict):
+        payload = dict(cards.payload)
+        consultation = dict(payload.get("consultation") or {})
+        consultation["round"] = kolo
+        consultation["round_max"] = AUDITOR_LOOP_MAX
+        payload["consultation"] = consultation
+        cards.payload = payload
+
     db.flush()
     return state
 
@@ -7920,6 +7954,7 @@ async def _run_auditor_upfront_review(
         return None  # PASS → the dial governs the post-Návrh stop normally
     # AUD-4: a spec/design hole escalates to the Manažér — record the escalation note (system→manazer) so the
     # board / Telegram surfaces it; the caller (CR-V2-041) turns the verdict into an interactive consultation.
+    _kolo = _consult_rounds_used(db, state.version_id, "auditor_upfront") + 1
     note = _record_message(
         db,
         version_id=state.version_id,
@@ -7928,10 +7963,22 @@ async def _run_auditor_upfront_review(
         recipient="manazer",
         kind="notification",
         content=(
+            # ICCINT-72: povedz KOĽKÉ kolo sa spúšťa a koľko ich môže prísť. Dovtedy kolá 1 až 4 ohlásili
+            # len „spúšťa sa konzultácia“ a číslo sa objavilo až pri eskalácii — teda keď už bolo po všetkom.
             "Auditor našiel medzeru v Špecifikácii/Návrhu (upfront previerka) — spúšťa sa konzultácia "
-            "s Manažérom (rozhodnutia po jednom)."
+            f"s Manažérom, kolo {_kolo} z {AUDITOR_LOOP_MAX} (rozhodnutia po jednom)."
+            if _kolo <= AUDITOR_LOOP_MAX
+            else (
+                "Auditor našiel medzeru v Špecifikácii/Návrhu (upfront previerka), ale konzultácia sa už "
+                f"zopakovala {AUDITOR_LOOP_MAX}× — ďalšie kolo nebude, posúď návrh sám."
+            )
         ),
-        payload={"phase": "navrh", "upfront_review_hole": True},
+        payload={
+            "phase": "navrh",
+            "upfront_review_hole": True,
+            "consult_round": _kolo,
+            "consult_round_max": AUDITOR_LOOP_MAX,
+        },
     )
     if on_message is not None:
         await on_message(note)
