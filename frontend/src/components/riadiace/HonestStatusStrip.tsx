@@ -6,9 +6,11 @@
 // INVARIANT (honest, derived, never guessed): the text is derived purely from the live pipeline status. A
 // paused / token-stopped run reads "Pozastavené", NOT "working".
 
+import { useEffect, useState } from "react";
 import { Eye, Loader2 } from "lucide-react";
 
 import type { PipelineState } from "../../services/api/pipeline";
+import { elapsedSince } from "../../utils/elapsed";
 import {
   BLOCK_REASON_LABELS,
   PHASE_LABELS,
@@ -24,6 +26,7 @@ import type { BuildPhase, StatusTone } from "../cockpit/labels";
 // answerable in READ-ONLY advisory mode. The strip shows this so the Manažér knows typing now = advice, not
 // a build. No mode toggle — the version's terminal state IS the mode.
 const CONSULT_INDICATOR = "Konzultácia — poradím, nič nezmením";
+
 
 // Honest status text (salvaged verbatim from the retired AI Agent tab's headerStatus, design §4.4.1):
 // Voľný / Pracuje na <projekt> v<ver> — fáza X / Čaká na súhlas / Pozastavené.
@@ -108,12 +111,30 @@ export function HonestStatusStrip({
       : statusText(state, projectName, versionNumber);
   const tone: StatusTone = unconfirmed || drifted ? "amber" : statusTone(state);
   const working = state?.status === "agent_working";
+  // Hodiny, ktoré tikajú len počas práce. Bez nich by „pracuje sa 2 min“ zamrzlo na dvoch minútach a
+  // Manažér by z toho čítal opak toho, čo to má povedať.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!working) return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(id);
+  }, [working]);
   // Konzultácia (Part 3): a terminal version (current_stage === 'done') is in read-only advisory mode.
   const consultMode = !!state && state.current_stage === "done";
   // Audit Theme 1: surface the engine's ready-made "čo ďalej" guidance (state.next_action) — previously
   // rendered NOWHERE. Shown for the settled awaiting_manazer wait (blocked states carry it in their own bar:
   // BlockRecoveryBar / Decision Cards / the Dedo banner), so it never double-renders.
-  const guidance = state?.status === "awaiting_manazer" ? (state.next_action || "").trim() : "";
+  // ICCINT-75: ukazuj tú vetu aj POČAS práce, nielen keď sa čaká na súhlas. Dovtedy vedel Manažér počas
+  // ťahu iba to, v ktorej fáze je — nie čo sa práve robí. Na hranici fázy to znamenalo tri minúty ticha
+  // a vetu „nič sa nedeje, nefunguje to“, hoci agent celý čas pracoval.
+  const guidance =
+    state?.status === "awaiting_manazer" || state?.status === "agent_working"
+      ? (state.next_action || "").trim()
+      : "";
+  // …a odkedy. „Pracuje sa“ bez toho, odkedy, je polovičná odpoveď: inak sa nedá rozoznať ťah spustený
+  // pred pol minútou od ťahu, ktorý visí tretiu hodinu.
+  const since = working ? elapsedSince(state?.working_since ?? null, now) : "";
 
   return (
     <div className="flex flex-shrink-0 flex-col border-b border-[var(--color-border-default)] bg-[var(--color-surface)]">
@@ -126,9 +147,10 @@ export function HonestStatusStrip({
         </span>
       </div>
 
-      {guidance && (
+      {(guidance || since) && (
         <div className="flex items-start gap-1.5 border-t border-[var(--color-border-default)] px-4 py-1.5 text-[11px] text-[var(--color-text-muted)]">
           <span className="truncate">{guidance}</span>
+          {since && <span className="flex-shrink-0 whitespace-nowrap">· {since}</span>}
         </div>
       )}
 

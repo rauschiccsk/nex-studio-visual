@@ -58,6 +58,12 @@ class PipelineStateRead(BaseModel):
     #: (``PokracovatPoOpraveBar``) with the right words — "we fixed it, press Pokračovať" — rather than the
     #: generic build-resume rung, which is about a PAUSED build and would be a lie here.
     resume_after_framework_fix: bool = False
+    #: ICCINT-75: odkedy sa na tomto ťahu pracuje (``None``, keď sa nepracuje).
+    #:
+    #: „Pracuje sa“ bez toho, odkedy, je polovičná odpoveď. Manažér potrebuje rozoznať ťah spustený pred
+    #: pol minútou od ťahu, ktorý visí tretiu hodinu — inak ticho pri práci a ticho pri poruche vyzerajú
+    #: rovnako a on nemá ako rozhodnúť, či počkať, alebo volať pomoc.
+    working_since: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 

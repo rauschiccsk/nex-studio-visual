@@ -321,8 +321,17 @@ async def test_new_version_walks_navrh_vizual_programovanie_stopping_each_bounda
     assert state.current_stage == "vizual"
     assert state.status == "awaiting_manazer"
 
-    # Schváliť Vizuál → advance to Programovanie (the build round is armed: agent_working).
+    # Schváliť Vizuál → ICCINT-75: the click no longer CARRIES the sign-off. It marks the build as working
+    # and returns at once; the minutes-long part (fold the agreed changes back into the documents + the
+    # narrowed Auditor review) runs in the background turn, exactly like every other turn. Until then the
+    # phase deliberately STAYS at Vizuál — whether the phase closes at all depends on what that work finds.
     state = await orchestrator.apply_action(db_session, version_id=version.id, action="schvalit")
+    assert state.current_stage == "vizual", "the phase must not move before the fold-back has run"
+    assert state.status == "agent_working", "otherwise the screen keeps reading 'čaká na súhlas' (ICCINT-75)"
+    assert state.pending_vizual_signoff is True
+
+    # The background turn completes the sign-off → advance to Programovanie (the build round is armed).
+    state = await orchestrator.run_dispatch(db_session, version.id)
     assert state.current_stage == "programovanie"
     assert state.status == "agent_working"
 

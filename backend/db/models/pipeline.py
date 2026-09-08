@@ -244,6 +244,24 @@ class PipelineState(Base, UUIDMixin, TimestampMixin):
     #: so it can never outlive one turn.
     retry_consultation = Column(Boolean, nullable=False, server_default="false")
 
+    #: Manažér schválil Vizuál a dokončenie toho schválenia beží na pozadí (ICCINT-75).
+    #:
+    #: Skladanie dohodnutého späť do dokumentov a Auditorova previerka toho, čo pribudlo, trvajú minúty.
+    #: Kým bežali vnútri kliknutia, nezapísalo sa nič a obrazovka celý čas čítala „čaká na súhlas“ —
+    #: Manažér videl ticho a nevedel, či sa pracuje, alebo je rozbité. Kliknutie preto iba zapíše tento
+    #: príznak a vráti sa; prácu urobí ten istý mechanizmus na pozadí ako pri každom inom ťahu.
+    #:
+    #: Spotrebuje sa a zmaže hneď na začiatku ťahu — rovnaký vzor ako ``retry_consultation`` (ICCINT-25),
+    #: aby nemohol prežiť do ďalšieho kola.
+    pending_vizual_signoff = Column(Boolean, nullable=False, server_default="false")
+
+    #: Odkedy sa na tomto ťahu pracuje (ICCINT-75). ``NULL``, keď sa nepracuje.
+    #:
+    #: „Pracuje sa“ bez toho, odkedy, je polovičná odpoveď — Manažér potrebuje rozoznať ťah spustený pred
+    #: pol minútou od ťahu, ktorý visí tretiu hodinu. Nastavuje sa v ``_begin_dispatch`` a zhasína spolu
+    #: s ``dispatch_in_flight``, keď sa priebeh usadí.
+    working_since = Column(TIMESTAMP(timezone=True), nullable=True)
+
     __table_args__ = (
         UniqueConstraint("version_id", name="uq_pipeline_state_version_id"),
         CheckConstraint(
@@ -390,6 +408,7 @@ def _clear_dispatch_on_settle(target, value, oldvalue, initiator):
         return
     target.dispatch_in_flight = False
     target.dispatch_baseline_sha = None
+    target.working_since = None  # ICCINT-75: „pracuje sa od…“ nesmie prežiť usadenie
 
 
 @event.listens_for(PipelineState.status, "set")

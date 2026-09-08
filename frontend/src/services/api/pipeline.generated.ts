@@ -4560,6 +4560,8 @@ export interface components {
              * Format: uuid
              */
             version_id: string;
+            /** Working Since */
+            working_since?: string | null;
         };
         /**
          * PortBlockSuggestResponse

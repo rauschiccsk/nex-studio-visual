@@ -4741,6 +4741,11 @@ def _begin_dispatch(db: Session, state: PipelineState) -> None:
         state.dispatch_baseline_sha = _repo_head(project_root)
     state.dispatch_in_flight = True
     state.current_actor = actor
+    # ICCINT-75: odkedy sa pracuje. Nastavuje sa PRED zápisom stavu — poslucháč na usadenie ho zhasína,
+    # a „agent_working“ usadenie nie je, takže sa tu nezmaže. Bežiaci ťah si čas ponechá (opakovaný vstup
+    # do tej istej práce nie je nový začiatok).
+    if state.working_since is None or state.status != "agent_working":
+        state.working_since = datetime.now(timezone.utc)
     state.status = "agent_working"
     state.next_action = f"Agent '{actor}' pracuje na fáze '{stage}'."
     db.flush()
@@ -6396,6 +6401,60 @@ def _release_coverage_brief(db: Session, version_id: uuid.UUID) -> str:
 # PASS verdict THERE — the board no longer needs a separate gate_g PASS-button predicate.
 
 
+async def _complete_vizual_signoff(
+    db: Session,
+    state: PipelineState,
+    *,
+    on_event: Optional[claude_agent.EventCallback] = None,
+    on_message: Optional[MessageCallback] = None,
+) -> PipelineState:
+    """Dokonči schválenie Vizuálu — na pozadí, nie počas kliknutia (ICCINT-75).
+
+    Presne tá práca, ktorá dovtedy bežala vnútri ``apply_action``: dohodnuté sa zloží späť do dokumentov,
+    zmeny sa uzavrú jedným zápisom, Auditor prezrie to, čo pribudlo, a zapíše sa schválený commit ako
+    záväzná predloha pre Programovanie. Trvá to minúty — a kým to bežalo v kliknutí, v evidencii sa
+    nezmenilo nič, takže obrazovka celý ten čas čítala „čaká na súhlas“.
+
+    Fáza sa posunie AŽ TU a len ak niet rozporu: rozpor nie je porucha, ale otázka na Manažéra, a schválenie
+    vtedy zámerne neprejde — usadiť ho ticho ktorýmkoľvek smerom by ten nesúhlas pochovalo.
+    """
+    version_id = state.version_id
+
+    # ICCINT-29: zlož dohodnuté späť do dokumentov PRED uzavretím zmien, aby Špecifikácia, Návrh aj
+    # obrazovky skončili v jednom zápise pod jedným podpisom. Dovtedy sa nespísalo nič a stavba končila
+    # s dvoma pravdami, ktoré si mohli protirečiť — a kontrola pred vydaním, ktorá číta Špecifikáciu,
+    # to najnovšie nevidela vôbec.
+    conflicts = await _writeback_vizual_to_docs(db, state)
+    if conflicts:
+        # Nie porucha — otázka. Protirečenie znamená dve rozhodnutia z dvoch rôznych chvíľ; ktoré platí,
+        # je zámer, a zámer patrí Manažérovi (Director, 02.09.2026).
+        return await _settle_vizual_conflict(db, state, conflicts)
+
+    vizual_root = claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id)
+    _commit_vizual_changes(vizual_root)
+
+    # ICCINT-29 / §2.5: dokumenty sa práve zmenili, takže predbežná previerka je znovu na rade — ZÚŽENÁ na
+    # to, čo pribudlo. Prezerať celú Špecifikáciu druhýkrát by platilo za už posúdené; prídavok je tá časť,
+    # ktorú ešte nikto neposúdil, a zároveň najnovšia a najmenej premyslená — presne pre ňu previerka je.
+    added = _docs_changed_in_head(vizual_root)
+    if added:
+        await _run_auditor_upfront_review(db, state, narrowed_to=added)
+
+    # v4.0.23: zapíš schválený commit Vizuálu ako záväznú predlohu — Programovanie ju zachováva (napojiť
+    # dáta, nie prekresliť) a Auditor overuje, že dodané obrazovky jej stále zodpovedajú. Best-effort:
+    # bez SHA (nečitateľný repozitár) sa nechá prázdne.
+    approved_sha = _repo_head(vizual_root)
+    if approved_sha:
+        approved_version = db.get(Version, version_id)
+        if approved_version is not None:
+            approved_version.vizual_approved_sha = approved_sha
+
+    state.current_stage = _next_stage("vizual", state.flow_type)
+    db.flush()
+    _begin_dispatch(db, state)  # agent_working na Programovaní → reťaz behu ho spustí
+    return state
+
+
 async def run_dispatch(
     db: Session,
     version_id: uuid.UUID,
@@ -6462,6 +6521,17 @@ async def run_dispatch(
             on_event=on_event,
             on_message=on_message,
         )
+
+    # ICCINT-75: Manažér schválil Vizuál a dokončenie toho schválenia patrí sem, na pozadie. Spotrebúva
+    # sa a maže PRED akýmkoľvek smerovaním — rovnako ako ``retry_consultation`` vyššie — aby príznak
+    # nemohol prežiť do ďalšieho kola a schválenie sa nespracovalo dvakrát.
+    if state.pending_vizual_signoff:
+        state.pending_vizual_signoff = False
+        # Zapíš to ZHASNUTIE hneď, ešte pred prácou. Keby ťah po ceste spadol, príznak by inak prežil
+        # a schválenie by sa spracovalo druhýkrát — skladanie do dokumentov by bežalo nad už zloženými
+        # dokumentmi. Spotrebovať sa má raz, nech sa stane čokoľvek.
+        db.flush()
+        return await _complete_vizual_signoff(db, state, on_event=on_event, on_message=on_message)
 
     # Návrh round (CR-V2-011): one coherent design doc + the folded EPIC→FEAT→TASK task plan. Owns its own
     # multi-turn lifecycle (design-doc turn → fold the plan via incremental passes → SHARED dial-settle), so
@@ -11578,35 +11648,31 @@ async def apply_action(
         # HMR reflects it live), so squash the whole visual session into ONE commit now, at approval, before
         # advancing vizual → programovanie. Best-effort; a no-op when nothing changed.
         if state.current_stage == "vizual":
-            # ICCINT-29: fold what was agreed in Vizuál back into the documents BEFORE the squash, so the
-            # Špecifikácia, the Návrh and the screens land in ONE commit under ONE signature. Until now
-            # nothing was written back and a build ended with two truths that could disagree — and the
-            # release check, which reads the Špecifikácia, never saw the newest additions at all.
-            # ``apply_action`` carries no live callbacks; the turn's messages are recorded either way
-            # and reach the cockpit on the next board read.
-            _conflicts = await _writeback_vizual_to_docs(db, state)
-            if _conflicts:
-                # Not a failure — a question. A contradiction means two decisions were taken at two different
-                # times; which one holds is intent, and intent is the Manažér's (Director, 02.09.2026). The
-                # approval does NOT go through: settling it silently either way would bury the disagreement.
-                return await _settle_vizual_conflict(db, state, _conflicts)
-            _vizual_root = claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id)
-            _commit_vizual_changes(_vizual_root)
-            # ICCINT-29 / §2.5: the documents just changed, so the upfront review is due again — NARROWED to
-            # what was added. Reviewing the whole Špecifikácia a second time would pay for what was already
-            # judged; the addition is the part nobody has judged yet, and it is also the newest and least
-            # thought-through, which is precisely what this review is for.
-            _added = _docs_changed_in_head(_vizual_root)
-            if _added:
-                await _run_auditor_upfront_review(db, state, narrowed_to=_added)
-            # v4.0.23: record the approved-Vizuál commit as the binding contract — Programovanie
-            # preserves it (wire data, don't redesign) + the Auditor verifies the delivered FE
-            # still matches it. Best-effort: no SHA (dry-run / unreadable repo) → leave NULL.
-            _approved_sha = _repo_head(_vizual_root)
-            if _approved_sha:
-                _approved_version = db.get(Version, version_id)
-                if _approved_version is not None:
-                    _approved_version.vizual_approved_sha = _approved_sha
+            # ICCINT-75: dokončenie schválenia Vizuálu je MINÚTOVÁ práca (skladanie dohodnutého späť do
+            # dokumentov + Auditorova previerka toho, čo pribudlo). Kým bežala tu — vnútri kliknutia —
+            # nezapísalo sa nič, kým neskončila: v evidencii stálo ``vizual/awaiting_manazer`` a obrazovka
+            # čítala „čaká na súhlas“. Manažér videl ticho a povedal „nič sa nedeje, nefunguje to“.
+            #
+            # Odteraz sa tu iba zapíše, ŽE sa schválenie spracúva, a stav sa prepne na „pracuje sa“.
+            # Samotnú prácu urobí :func:`_complete_vizual_signoff` na pozadí — ten istý mechanizmus,
+            # ktorým prechádza každý iný ťah. Fáza sa tu zámerne NEPOSÚVA: či sa Vizuál naozaj uzavrie,
+            # alebo sa vráti Manažérovi s rozporom, sa rozhodne až v tej práci.
+            _record_message(
+                db,
+                version_id=version_id,
+                stage="vizual",
+                author="manazer",
+                recipient=state.current_actor,
+                kind="approval",
+                content=payload.get("comment", "Schválené."),
+                payload={"phase": "vizual"},
+            )
+            state.pending_vizual_signoff = True
+            state.next_action = "Schválenie Vizuálu sa spracúva — skladám dohodnuté do dokumentov."
+            _begin_dispatch(db, state)
+            state.next_action = "Schválenie Vizuálu sa spracúva — skladám dohodnuté do dokumentov."
+            db.flush()
+            return state
         _record_message(
             db,
             version_id=version_id,
