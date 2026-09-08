@@ -42,6 +42,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.core.agent_env import agent_env
+from backend.core.offload import BlockingWorkTimedOut, run_blocking
 from backend.db.models.backlog import BacklogItem
 from backend.db.models.foundation import User, UserAgentSettings
 from backend.db.models.orchestrator import OrchestratorSession
@@ -5135,6 +5136,11 @@ def _repo_full_from_remote(url: str) -> Optional[str]:
 #: the CI floor asked once, immediately — measured at 12 ms after its own push on 07.09.2026 — so the answer
 #: was always "no run yet", which ``unknown`` waves through. A gate that asks before the answer can exist is
 #: not a gate. Two minutes is generous: GitHub normally registers within a second or two.
+#: Strop pre rozbehnutie živého náhľadu vo vlákne (ICCINT-74). Sedí na tom, čo tá práca reálne robí:
+#: ``npm install`` má vlastný strop 600 s a dva dockerové príkazy po 60 s. Nemá prerušovať poctivú
+#: prácu — má zabrániť tomu, aby ťah čakal donekonečna a v kokpite naveky svietilo „pracuje sa“.
+VIZUAL_SPINUP_CAP = 900
+
 CI_RUN_APPEAR_TIMEOUT = 120
 CI_RUN_APPEAR_INTERVAL = 10
 #: And how long to then wait for that run to FINISH. A run in flight is not evidence of health either — the
@@ -10475,13 +10481,29 @@ async def _run_vizual_round(
         from backend.services import vizual_sandbox
 
         try:
-            url = vizual_sandbox.spin_up(slug)
+            # ICCINT-74: vo VLÁKNE, nie na hlavnej slučke. ``spin_up`` je obyčajná funkcia, ktorá spúšťa
+            # ``npm install`` (strop 600 s) a dva dockerové príkazy (po 60 s). Zavolaná odtiaľto priamo
+            # držala celý server 07.09.2026 tak dlho, že Manažér nenačítal v kokpite vôbec nič — bez
+            # jedinej chyby v protokole, len s hromadou zaseknutých kontrol zdravia.
+            url = await run_blocking(vizual_sandbox.spin_up, slug, cap=VIZUAL_SPINUP_CAP)
         except Exception as exc:  # noqa: BLE001 — a sandbox failure must NEVER crash the pipeline; settle honestly.
-            logger.exception("vizual sandbox spin_up failed for %s", slug)
+            # Vypršanie stropu NIE JE to isté ako zlyhanie (ICCINT-74): práca vo vlákne beží ďalej a náhľad
+            # sa ešte môže rozbehnúť. Manažérovi sa to preto hovorí inak — inak by sa ponáhľal spúšťať niečo,
+            # čo už beží, a rozbehol by druhý ťah popri prvom.
+            timed_out = isinstance(exc, BlockingWorkTimedOut)
+            logger.exception("vizual sandbox spin_up %s for %s", "timed out" if timed_out else "failed", slug)
             state.status = "blocked"
             state.block_reason = "system_error"  # R4 (D1): an engine-side step (the live preview) failed
+            hlaska = (
+                f"Živý náhľad sa nerozbehol do {VIZUAL_SPINUP_CAP // 60} minút. Príprava možno ešte beží — "
+                "daj jej chvíľu a skús Uprav; ak sa neobjaví ani potom, počkaj na technický tím."
+                if timed_out
+                else "Živý náhľad sa nepodarilo spustiť. Skús to znova alebo počkaj na technický tím."
+            )
             state.next_action = (
-                "Živý náhľad sa nepodarilo spustiť — skús to znova (Uprav) alebo počkaj na technický tím."
+                f"Živý náhľad sa nerozbehol do {VIZUAL_SPINUP_CAP // 60} minút — daj mu chvíľu a skús Uprav."
+                if timed_out
+                else "Živý náhľad sa nepodarilo spustiť — skús to znova (Uprav) alebo počkaj na technický tím."
             )
             err_msg = _record_message(
                 db,
@@ -10490,8 +10512,8 @@ async def _run_vizual_round(
                 author="system",
                 recipient="manazer",
                 kind="notification",
-                content="Živý náhľad projektu sa nepodarilo spustiť. Skús to znova alebo počkaj na technický tím.",
-                payload={"phase": "vizual", "vizual_error": str(exc)},
+                content=hlaska,
+                payload={"phase": "vizual", "vizual_error": str(exc), "vizual_timed_out": timed_out},
             )
             if on_message is not None:
                 await on_message(err_msg)

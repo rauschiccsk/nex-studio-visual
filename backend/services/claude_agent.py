@@ -24,6 +24,7 @@ from uuid import UUID
 from backend.config.settings import settings
 from backend.constants.paths import TERMINAL_LOG_DIR as DURABLE_TERMINAL_LOG_DIR
 from backend.core.agent_env import agent_env
+from backend.core.offload import run_blocking
 
 logger = logging.getLogger(__name__)
 
@@ -587,7 +588,11 @@ async def _invoke_once(
                 # counted + published on ``GET /health`` (consult_sandbox.degraded_turns) and logged at ERROR
                 # with the failing precondition. The audited deployment degraded on EVERY consult — the
                 # configured image did not exist — and nothing outside the log file ever said so.
-                consult_sandbox.record_degradation(str(exc))
+                # ICCINT-74: aj toto ide do vlákna — ``record_degradation`` sa cez ``preflight()``
+                # pýta dockerovho démona. Sú to sekundy, nie minúty, ale pravidlo neznie „veľké volania
+                # do vlákna“; znie „z async funkcie sa priamo nečaká na proces“. Výnimka pre malé
+                # volanie je presne to miesto, kde raz jedno z nich prestane byť malé.
+                await run_blocking(consult_sandbox.record_degradation, str(exc), cap=15)
         else:
             logger.info(
                 "CONSULT_SANDBOX disabled — running the consult turn in-process (tool-profile read-only, "
