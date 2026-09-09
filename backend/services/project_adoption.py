@@ -1,0 +1,194 @@
+"""Prevzatie existujúceho projektu — prečítaj, čo je na disku (ICCINT-85).
+
+**Prečo to vzniklo.** Prevzatie sa dovtedy robilo formulárom pre *zakladanie*: manažér musel vedieť
+a ručne prepísať porty, adresu repozitára, typ aj spôsob prihlasovania. Keď sa v niečom pomýlil,
+evidencia začala tvrdiť niečo iné, než je na disku — a projekt beží podľa disku, nie podľa evidencie.
+Pritom to všetko na disku UŽ JE. Formulár sa pýtal na odpovede, ktoré si vie sám prečítať.
+
+Director 09.09.2026: *„zadám len názov projektu — napríklad nex-manager — a všetko ostatné urobí
+systém.“*
+
+**Zásada, ktorá tento modul drží pohromade:** čo je na disku, to sa prečíta; čo sa prečítať nedá,
+to sa vypíše ako nedopovedané a opýta sa naň; **nič sa nevymýšľa**. Uhádnutý spôsob prihlasovania by
+bol horší než prázdne políčko — vyzeral by ako zistený údaj.
+
+**Prečo sa neháda podľa mena služby ani podľa portu samotného.** Zmerané 09.09.2026 na štyroch
+skutočných projektoch: nex-manager má služby ``backend`` / ``frontend`` / ``db`` a vnútorné porty
+8000 / 80 / 5432; nex-studio má tie isté mená, ale vnútorné porty 9176 / 9177; nex-payables volá
+frontend ``web`` a väzbu píše ako ``"127.0.0.1:10220:8000"`` s poznámkou za ňou. Ani meno, ani port
+samo osebe teda nestačí — berie sa meno, a keď nepomôže, vnútorný port.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+import subprocess
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Optional
+
+import yaml
+
+logger = logging.getLogger(__name__)
+
+#: Mená služieb, pod ktorými naše projekty vedú tri role. ``web`` je tam kvôli nex-payables.
+_SERVICE_ROLES = {
+    "backend": "backend",
+    "api": "backend",
+    "frontend": "frontend",
+    "web": "frontend",
+    "db": "db",
+    "database": "db",
+    "postgres": "db",
+}
+
+#: Vnútorné porty, podľa ktorých sa rola dá rozoznať, keď meno služby nepomohlo.
+_PORT_ROLES = {5432: "db", 8000: "backend", 8080: "backend", 80: "frontend", 443: "frontend"}
+
+
+@dataclass
+class Discovered:
+    """Čo sa o projekte dalo prečítať z disku — a čo nie.
+
+    ``unresolved`` je rovnako dôležité ako zvyšok: je to zoznam otázok, ktoré musí dostať manažér,
+    lebo na ne disk odpoveď nemá. ``notes`` hovorí, ODKIAĽ sa čo vzalo, aby sa dalo pred potvrdením
+    skontrolovať — prevzatie je zápis do evidencie, ktorý má sedieť s realitou.
+    """
+
+    slug: str
+    source_path: str
+    name: Optional[str] = None
+    description: Optional[str] = None
+    repo_url: Optional[str] = None
+    backend_port: Optional[int] = None
+    frontend_port: Optional[int] = None
+    db_port: Optional[int] = None
+    unresolved: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
+def _name_from_charter(root: Path) -> tuple[Optional[str], Optional[str]]:
+    """Názov projektu z prvého nadpisu v ``CLAUDE.md``.
+
+    **Nie z ``package.json``** — zmerané 09.09.2026: nex-manager aj nex-payables tam majú doslova
+    ``"name": "frontend"``. Charta je jediné miesto, kde projekt nesie svoje ľudské meno.
+
+    Chvost typu „— Univerzálny CLAUDE.md“ sa odreže: je to názov dokumentu, nie projektu.
+    """
+    charter = root / "CLAUDE.md"
+    try:
+        text = charter.read_text(encoding="utf-8")
+    except OSError:
+        return None, None
+    for line in text.splitlines():
+        if line.startswith("# "):
+            nadpis = line[2:].strip()
+            nazov = re.split(r"\s+[—–-]\s+", nadpis, maxsplit=1)[0].strip()
+            return (nazov or None), f"názov z prvého nadpisu v CLAUDE.md ({nadpis!r})"
+    return None, None
+
+
+def _repo_from_git(root: Path) -> tuple[Optional[str], Optional[str]]:
+    """Adresa repozitára z nastavenia gitu. Neexistujúci alebo nenastavený git nie je chyba —
+    projekt bez vzdialeného repozitára je legitímny, len sa naň potom treba opýtať."""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None, None
+    url = (proc.stdout or "").strip()
+    if proc.returncode != 0 or not url:
+        return None, None
+    return url, "adresa repozitára z nastavenia gitu"
+
+
+def _host_port(binding: object) -> Optional[tuple[int, int]]:
+    """Rozober jednu väzbu portu na (port na stroji, port v kontajneri).
+
+    Znesie všetky tvary, ktoré sa v našich projektoch naozaj vyskytujú: ``"10211:80"``,
+    ``"127.0.0.1:10220:8000"`` aj poznámku za nimi. Tvar, ktorému nerozumie, sa preskočí —
+    lepšie žiadny údaj než vymyslený.
+    """
+    if isinstance(binding, dict):  # dlhý zápis: {published: 10211, target: 80}
+        try:
+            return int(binding["published"]), int(binding["target"])
+        except (KeyError, TypeError, ValueError):
+            return None
+    text = str(binding).split("#", 1)[0].strip().strip('"').strip("'")
+    parts = text.split(":")
+    if len(parts) < 2:
+        return None
+    try:
+        return int(parts[-2]), int(parts[-1].split("/")[0])
+    except ValueError:
+        return None
+
+
+def _ports_from_compose(root: Path) -> tuple[dict[str, int], list[str]]:
+    """Porty z ``docker-compose.yml`` podľa mena služby, a keď to nepomôže, podľa vnútorného portu."""
+    compose = root / "docker-compose.yml"
+    if not compose.is_file():
+        return {}, []
+    try:
+        data = yaml.safe_load(compose.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        logger.warning("compose sa nedá prečítať pre %s: %s", root, exc)
+        return {}, []
+    services = data.get("services")
+    if not isinstance(services, dict):
+        return {}, []
+
+    najdene: dict[str, int] = {}
+    notes: list[str] = []
+    for meno, telo in services.items():
+        if not isinstance(telo, dict):
+            continue
+        for binding in telo.get("ports") or []:
+            rozobrate = _host_port(binding)
+            if rozobrate is None:
+                continue
+            na_stroji, v_kontajneri = rozobrate
+            rola = _SERVICE_ROLES.get(str(meno).lower()) or _PORT_ROLES.get(v_kontajneri)
+            if rola and rola not in najdene:
+                najdene[rola] = na_stroji
+                notes.append(f"{rola}: port {na_stroji} zo služby „{meno}“ v docker-compose.yml")
+    return najdene, notes
+
+
+def discover(root: Path, slug: str) -> Discovered:
+    """Prečítaj z disku všetko, čo sa o projekte prečítať dá."""
+    found = Discovered(slug=slug, source_path=str(root))
+
+    nazov, poznamka = _name_from_charter(root)
+    if nazov:
+        found.name = nazov
+        found.notes.append(poznamka or "")
+    else:
+        found.unresolved.append("názov projektu — v priečinku nie je CLAUDE.md s nadpisom")
+
+    repo, poznamka = _repo_from_git(root)
+    if repo:
+        found.repo_url = repo
+        found.notes.append(poznamka or "")
+    else:
+        found.unresolved.append("adresa repozitára — git tu nemá nastavený „origin“")
+
+    porty, poznamky = _ports_from_compose(root)
+    found.backend_port = porty.get("backend")
+    found.frontend_port = porty.get("frontend")
+    found.db_port = porty.get("db")
+    found.notes.extend(poznamky)
+    for rola, popis in (("backend", "backendu"), ("frontend", "frontendu"), ("db", "databázy")):
+        if rola not in porty:
+            found.unresolved.append(f"port {popis} — v docker-compose.yml sa nenašiel")
+
+    # Spôsob prihlasovania sa z disku spoľahlivo prečítať NEDÁ a hádať sa nesmie: uhádnutá hodnota
+    # by vyzerala ako zistený údaj. Nech ju manažér vidí a potvrdí.
+    found.unresolved.append("spôsob prihlasovania — z disku sa nedá zistiť, potvrď ho")
+    return found

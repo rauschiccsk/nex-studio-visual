@@ -63,7 +63,7 @@ from backend.services import github_validation as github_validation_service
 from backend.services import nexshared as nexshared_service
 from backend.services import port_registry as port_registry_service
 from backend.services import project as project_service
-from backend.services import project_memory, uat_provisioner
+from backend.services import project_adoption, project_memory, uat_provisioner
 from backend.services import system_setting as system_setting_service
 from backend.services import version as version_service
 from backend.services.knowledge_base_writer import KnowledgeBaseWriter
@@ -598,6 +598,94 @@ def suggest_port_block(
         block_size=system_setting_service.get_int(db, "port_block_size"),
         warnings=port_registry_service.reserved_ranges_status(db).warnings,
     )
+
+
+class _AdoptableCandidate(BaseModel):
+    """Priečinok na disku, ktorý ešte nie je projektom v kokpite."""
+
+    slug: str
+    source_path: str
+    name: Optional[str] = None
+
+
+class _AdoptionPreview(BaseModel):
+    """Čo sa o projekte dalo prečítať z disku — a na čo sa treba opýtať (ICCINT-85).
+
+    ``unresolved`` nie je chybový zoznam; je to zoznam otázok, na ktoré disk odpoveď nemá. ``notes``
+    hovorí, odkiaľ sa čo vzalo — prevzatie je zápis do evidencie, ktorý má sedieť s realitou, takže
+    manažér to musí vidieť PRED potvrdením, nie sa to dozvedieť potom.
+    """
+
+    slug: str
+    source_path: str
+    name: Optional[str] = None
+    description: Optional[str] = None
+    repo_url: Optional[str] = None
+    backend_port: Optional[int] = None
+    frontend_port: Optional[int] = None
+    db_port: Optional[int] = None
+    unresolved: list[str] = []
+    notes: list[str] = []
+
+
+@router.get("/adoptable", response_model=list[_AdoptableCandidate])
+def list_adoptable_projects(
+    current_user: User = Depends(require_shu_or_above),
+    db: Session = Depends(get_db),
+) -> list[_AdoptableCandidate]:
+    """Priečinky, ktoré na disku sú, ale kokpit ich nepozná (ICCINT-85).
+
+    Manažér tak nemusí názov písať naspamäť ani ho trafiť na písmeno — vyberá zo zoznamu toho, čo
+    naozaj existuje. Preskakujú sa prázdne priečinky (tie nie sú čím prevziať) a všetko, čo už
+    projektom je.
+    """
+    from backend.services.claude_agent import PROJECTS_ROOT
+
+    known = set(db.execute(select(Project.slug)).scalars())
+    out: list[_AdoptableCandidate] = []
+    try:
+        entries = sorted(PROJECTS_ROOT.iterdir())
+    except OSError:
+        return out
+    for entry in entries:
+        if not entry.is_dir() or entry.name.startswith(".") or entry.name in known:
+            continue
+        try:
+            if not any(entry.iterdir()):
+                continue
+        except OSError:
+            continue
+        name, _ = project_adoption._name_from_charter(entry)
+        out.append(_AdoptableCandidate(slug=entry.name, source_path=str(entry), name=name))
+    return out
+
+
+@router.get("/adoptable/{slug}", response_model=_AdoptionPreview)
+def preview_adoption(
+    slug: str,
+    current_user: User = Depends(require_shu_or_above),
+    db: Session = Depends(get_db),
+) -> _AdoptionPreview:
+    """Prečítaj z disku všetko, čo sa o projekte prečítať dá — a povedz, čo sa prečítať nedalo.
+
+    Nič sa tu nezakladá. Je to len prehliadka pred potvrdením: uhádnutý údaj by vyzeral ako zistený,
+    a evidencia, ktorá tvrdí niečo iné než disk, je horšia než prázdne políčko.
+    """
+    from backend.services.claude_agent import PROJECTS_ROOT
+
+    root = PROJECTS_ROOT / slug
+    if not root.is_dir():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Priečinok '{slug}' na disku nie je — prevziať sa dá len to, čo existuje.",
+        )
+    if db.execute(select(Project.id).where(Project.slug == slug)).scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Projekt '{slug}' už v NEX Studiu je — prevziať sa dá len ten, ktorý v ňom ešte nie je.",
+        )
+    found = project_adoption.discover(root, slug)
+    return _AdoptionPreview(**vars(found))
 
 
 @router.get("/{project_id}", response_model=ProjectRead)

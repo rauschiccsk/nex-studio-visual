@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Pin, PinOff } from "lucide-react";
+import { HardDriveDownload, Pin, PinOff } from "lucide-react";
 import { listProjectsApi } from "@/services/api/projects";
 import { listVersions } from "@/services/api/versions";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
+import AdoptProjectDialog from "@/components/project/AdoptProjectDialog";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -114,6 +115,7 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<ProjectRead[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [adoptOpen, setAdoptOpen] = useState(false);
   const selectedProject = useActiveContextStore((s) => s.selectedProject);
   const setSelectedProject = useActiveContextStore((s) => s.setSelectedProject);
   const setSelectedVersion = useActiveContextStore((s) => s.setSelectedVersion);
@@ -158,6 +160,17 @@ export default function ProjectsPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-lg font-bold text-[var(--color-text-primary)]">Projekty</h1>
+        <div className="flex items-center gap-2">
+        {/* ICCINT-85: prevzatie existujúceho projektu je INÁ úloha než zakladanie nového, a preto má
+            vlastné tlačidlo. Robiť ho formulárom pre zakladanie znamenalo ručne prepisovať porty,
+            repozitár a typ — a keď sa manažér pomýlil, evidencia začala tvrdiť niečo iné než disk. */}
+        <button
+          onClick={() => setAdoptOpen(true)}
+          className="flex items-center gap-1.5 border border-[var(--color-border-strong)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] text-sm font-medium px-3 py-1.5 rounded-lg transition-colors"
+        >
+          <HardDriveDownload className="w-4 h-4" aria-hidden="true" />
+          Prevziať existujúci
+        </button>
         <button
           onClick={() => navigate("/projects/new")}
           className="flex items-center gap-1.5 bg-primary-600 hover:bg-primary-500 text-white text-sm font-medium px-3 py-1.5 rounded-lg transition-colors"
@@ -167,7 +180,17 @@ export default function ProjectsPage() {
           </svg>
           Nový projekt
         </button>
+        </div>
       </div>
+
+      <AdoptProjectDialog
+        open={adoptOpen}
+        onClose={() => setAdoptOpen(false)}
+        onAdopted={(slug) => {
+          setAdoptOpen(false);
+          navigate(`/projects/${slug}`);
+        }}
+      />
 
       {/* States */}
       {loading && (

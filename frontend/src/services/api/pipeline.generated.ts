@@ -1331,6 +1331,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/adoptable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Adoptable Projects
+         * @description Priečinky, ktoré na disku sú, ale kokpit ich nepozná (ICCINT-85).
+         *
+         *     Manažér tak nemusí názov písať naspamäť ani ho trafiť na písmeno — vyberá zo zoznamu toho, čo
+         *     naozaj existuje. Preskakujú sa prázdne priečinky (tie nie sú čím prevziať) a všetko, čo už
+         *     projektom je.
+         */
+        get: operations["list_adoptable_projects_api_v1_projects_adoptable_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/adoptable/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview Adoption
+         * @description Prečítaj z disku všetko, čo sa o projekte prečítať dá — a povedz, čo sa prečítať nedalo.
+         *
+         *     Nič sa tu nezakladá. Je to len prehliadka pred potvrdením: uhádnutý údaj by vyzeral ako zistený,
+         *     a evidencia, ktorá tvrdí niečo iné než disk, je horšia než prázdne políčko.
+         */
+        get: operations["preview_adoption_api_v1_projects_adoptable__slug__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/ports/check": {
         parameters: {
             query?: never;
@@ -5811,6 +5858,54 @@ export interface components {
             version_number?: string | null;
         };
         /**
+         * _AdoptableCandidate
+         * @description Priečinok na disku, ktorý ešte nie je projektom v kokpite.
+         */
+        _AdoptableCandidate: {
+            /** Name */
+            name?: string | null;
+            /** Slug */
+            slug: string;
+            /** Source Path */
+            source_path: string;
+        };
+        /**
+         * _AdoptionPreview
+         * @description Čo sa o projekte dalo prečítať z disku — a na čo sa treba opýtať (ICCINT-85).
+         *
+         *     ``unresolved`` nie je chybový zoznam; je to zoznam otázok, na ktoré disk odpoveď nemá. ``notes``
+         *     hovorí, odkiaľ sa čo vzalo — prevzatie je zápis do evidencie, ktorý má sedieť s realitou, takže
+         *     manažér to musí vidieť PRED potvrdením, nie sa to dozvedieť potom.
+         */
+        _AdoptionPreview: {
+            /** Backend Port */
+            backend_port?: number | null;
+            /** Db Port */
+            db_port?: number | null;
+            /** Description */
+            description?: string | null;
+            /** Frontend Port */
+            frontend_port?: number | null;
+            /** Name */
+            name?: string | null;
+            /**
+             * Notes
+             * @default []
+             */
+            notes: string[];
+            /** Repo Url */
+            repo_url?: string | null;
+            /** Slug */
+            slug: string;
+            /** Source Path */
+            source_path: string;
+            /**
+             * Unresolved
+             * @default []
+             */
+            unresolved: string[];
+        };
+        /**
          * _AssignmentRead
          * @description Jeden riadok histórie presunov.
          *
@@ -8197,6 +8292,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GitHubRepoNotFoundError"];
+                };
+            };
+        };
+    };
+    list_adoptable_projects_api_v1_projects_adoptable_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["_AdoptableCandidate"][];
+                };
+            };
+        };
+    };
+    preview_adoption_api_v1_projects_adoptable__slug__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["_AdoptionPreview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

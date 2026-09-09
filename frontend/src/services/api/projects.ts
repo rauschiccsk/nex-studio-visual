@@ -185,6 +185,43 @@ export function reassignProjectApi(
   });
 }
 
+/** Priečinok na disku, ktorý ešte nie je projektom v kokpite (ICCINT-85). */
+export interface AdoptableCandidate {
+  slug: string;
+  source_path: string;
+  name: string | null;
+}
+
+/**
+ * Čo sa o projekte dalo prečítať z disku — a na čo sa treba opýtať (ICCINT-85).
+ *
+ * `unresolved` nie je zoznam chýb; sú to otázky, na ktoré disk odpoveď nemá. `notes` hovorí, odkiaľ
+ * sa čo vzalo — prevzatie je zápis do evidencie, ktorý má sedieť s realitou, takže to musí byť vidieť
+ * PRED potvrdením, nie sa to dozvedieť potom.
+ */
+export interface AdoptionPreview {
+  slug: string;
+  source_path: string;
+  name: string | null;
+  description: string | null;
+  repo_url: string | null;
+  backend_port: number | null;
+  frontend_port: number | null;
+  db_port: number | null;
+  unresolved: string[];
+  notes: string[];
+}
+
+/** Priečinky, ktoré na disku sú, ale kokpit ich nepozná. */
+export function listAdoptableApi(): Promise<AdoptableCandidate[]> {
+  return api.get<AdoptableCandidate[]>("/projects/adoptable");
+}
+
+/** Prečítaj z disku všetko, čo sa o projekte prečítať dá. Nič nezakladá — je to prehliadka. */
+export function previewAdoptionApi(slug: string): Promise<AdoptionPreview> {
+  return api.get<AdoptionPreview>(`/projects/adoptable/${slug}`);
+}
+
 /** Komu projekt patril predtým — bez toho sa nedá rozoznať trvalé odovzdanie od týždňovej výpožičky. */
 export function projectAssignmentsApi(projectId: string): Promise<ProjectAssignmentRead[]> {
   return api.get<ProjectAssignmentRead[]>(`/projects/${projectId}/assignments`);
