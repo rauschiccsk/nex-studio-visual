@@ -705,3 +705,85 @@ def test_disabled_bootstrap_still_registers_an_existing_brownfield_workspace(db_
     result = invoke_init_script(db_session, project)
     assert result.target == str(existing)
     assert result.init_script == ""
+
+
+# ─── Šablóna nesmie rodiť appky so starým zväzkom a bez značky (ICCINT-83) ────
+#
+# Rovnaký princíp ako pri stráži nad init.sh vyššie: číta sa SKUTOČNÁ šablóna na disku, nie kópia.
+# Kópia by odplávala presne tak, ako odplával predpoklad. Mimo ANDROSu sa preskočí s uvedeným dôvodom.
+
+SKELETON = Path("/home/icc/knowledge/templates/claude-project/frontend-skeleton")
+
+
+def _skeleton_file(name: str) -> str:
+    path = SKELETON / name
+    if not path.is_file():
+        pytest.skip(f"šablóna nie je na tomto stroji ({path}) — nekontrolované")
+    return path.read_text(encoding="utf-8")
+
+
+def test_the_template_never_lets_the_browser_keep_the_html_shell() -> None:
+    """⚠️ Toto je rana, po ktorej sa po nasadení ukazuje stará verzia a pomáha až inkognito.
+
+    Úvodná stránka je jediný súbor bez odtlačku obsahu v názve — a práve ona hovorí, ktorý zväzok sa
+    má načítať. Keď si ju prehliadač odloží, appka ďalej beží na starom zväzku a používateľ sa jej nemá
+    ako zbaviť. Zmerané 08.09.2026: NEX Studio tie hlavičky dávno má, šablóna nemala žiadne — a NEX
+    Manager, ktorý z nej vzišiel, posielal iba ETag.
+    """
+    conf = _skeleton_file("nginx.conf")
+    assert "location = /index.html" in conf, "šablóna nechráni úvodnú stránku pred odložením v prehliadači"
+    assert "no-store" in conf
+
+
+def test_the_template_does_not_freeze_the_app_mark_for_a_year() -> None:
+    """⚠️ Diera, ktorú som si sám vyrobil a chytilo ju až meranie.
+
+    Ročné pravidlo pre statické súbory je správne pre zväzok, lebo ten má v názve odtlačok obsahu.
+    Manifest a ikona odtlačok NEMAJÚ — pravidlo ich pochytilo tiež a zmenená značka appky by sa
+    k ľuďom rok nedostala. Musia mať vlastné pravidlo, a to PRED tým ročným.
+    """
+    conf = _skeleton_file("nginx.conf")
+    assert "location = /manifest.webmanifest" in conf
+    assert "location = /icon.svg" in conf
+    # Poradie rozhoduje: nginx berie presnú zhodu pred regulárnym výrazom, ale keby sa raz pravidlá
+    # prepísali na regulárne výrazy, vyhralo by prvé — nech teda aj v súbore stoja skôr.
+    assert conf.index("location = /manifest.webmanifest") < conf.index("expires 1y"), (
+        "manifest stojí až za ročným pravidlom"
+    )
+    assert "application/manifest+json" in conf, "nginx príponu .webmanifest sám nepozná a podá ju ako binárku"
+
+
+def test_a_new_project_is_born_installable() -> None:
+    """Appka sa má dať pripnúť na plochu a otvárať vo vlastnom okne. Keby to šablóna nemala, dopĺňalo
+    by sa to do každého nového projektu zvlášť — navždy."""
+    html = _skeleton_file("index.html.tmpl")
+    assert 'rel="manifest"' in html
+    assert "/icon.svg" in html
+    assert 'name="theme-color"' in html
+
+
+def test_the_manifest_is_real_json_once_the_project_name_is_filled_in() -> None:
+    """Šablóna sa dosádza obyčajným nahradením textu, takže rozbitý manifest by sa ukázal až v appke —
+    a tichým spôsobom: prehliadač ho zahodí a inštalácia sa jednoducho neponúkne."""
+    import json as _json
+
+    raw = _skeleton_file("public/manifest.webmanifest.tmpl")
+    filled = (
+        raw.replace("{{PROJECT_NAME}}", "NEX Manager")
+        .replace("{{PROJECT_DESCRIPTION}}", "Centrálne prihlásenie")
+        .replace("{{PROJECT_INITIALS}}", "NM")
+    )
+    data = _json.loads(filled)  # spadne, keď šablóna prestane byť platný JSON
+    assert data["name"] == "NEX Manager"
+    assert data["display"] == "standalone", "bez toho sa appka otvorí ako ďalšia záložka, nie vo vlastnom okne"
+    assert data["start_url"] == "/"
+    assert data["icons"], "manifest bez ikony sa nedá nainštalovať"
+    assert {i["purpose"] for i in data["icons"]} >= {"any", "maskable"}, "bez maskable si systémy ikonu orežú po svojom"
+
+
+def test_the_app_mark_carries_the_project_initials() -> None:
+    """Ikona na ploche má vyzerať ako appka, do ktorej vedie — tie isté iniciály, aké appka nosí
+    v hlavičke. Zástupný obrázok, ktorý nikto nevymení, je horší než žiadny."""
+    svg = _skeleton_file("public/icon.svg.tmpl")
+    assert "{{PROJECT_INITIALS}}" in svg
+    assert "<svg" in svg and "</svg>" in svg
