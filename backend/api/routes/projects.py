@@ -988,8 +988,36 @@ def create_project(
         # this one reading.
         scaffolded_here = not _workspace_holds_foreign_files(project.source_path)
 
+        # ICCINT-85: PREVZATIE — priečinok už obsahuje projekt, takže sa doň nescaffolduje.
+        #
+        # Príznak ``adopted`` v systéme bol už predtým a chartre ho rešpektovali, ale zakladanie napriek
+        # nemu spúšťalo ``init.sh`` vždy. Ten sa pri prevzatí zastavil na vlastnej poistke:
+        # „ERROR: /opt/projects/nex-manager/CLAUDE.md already exists (use --force to overwrite)“ —
+        # zmerané 09.09.2026 pri treťom pokuse o prevzatie NEX Managera. Prevzatie cez kokpit teda
+        # nikdy nemohlo prejsť.
+        #
+        # Vynecháva sa TROJE, a každé z iného dôvodu:
+        #   * scaffold — do hotového projektu niet čo rozbaliť a jeho poistka to správne odmieta;
+        #   * odoslanie do repozitára — repozitár existuje a je odoslaný, tu by sme len tlačili
+        #     miestny stav do cudzej histórie;
+        #   * kroky po scaffolde (CI, ochrana vetvy, skúšobné spustenie) — bežiacemu projektu by
+        #     prepisovali nastavenia, ktoré si niekto nastavil sám, a skúšobné spustenie robí
+        #     ``docker compose down -v``, čo by živému projektu zmazalo databázu.
+        #
+        # Chartre agenta sa dopĺňajú aj tak (nižšie, s ``adopted=True``) — bez nich by sa v projekte
+        # nedal spustiť agent, a to je práve to, kvôli čomu sa preberá.
+        adopting = bool(project.source_path) and not scaffolded_here
+        if adopting:
+            logger.info(
+                "Prevzatie projektu slug=%s — priečinok %s už obsahuje projekt, takže sa nescaffolduje, "
+                "neodosiela do repozitára ani nenastavuje CI; dopĺňajú sa iba pravidlá agenta",
+                project.slug,
+                project.source_path,
+            )
+
         try:
-            invoke_init_script(db, project)
+            if not adopting:
+                invoke_init_script(db, project)
         except TemplateBootstrapError as exc:
             db.rollback()
             # init.sh runs under `set -euo pipefail` and writes CLAUDE.md well before it finishes, so
@@ -1050,7 +1078,10 @@ def create_project(
         # matches Stage 5+6 pattern). Rollback v partial-push-failure:
         # local .git deleted; GitHub repo zostáva (manual cleanup by Director).
         stage4_should_run = (
-            payload.repo_url and project.source_path and Path(project.source_path).joinpath(".git").is_dir()
+            not adopting  # ICCINT-85: prevzatý projekt je v repozitári už dávno — netlačíme doň nič
+            and payload.repo_url
+            and project.source_path
+            and Path(project.source_path).joinpath(".git").is_dir()
         )
         if stage4_should_run:
             from backend.services.template_bootstrap import _repo_from_url
@@ -1094,16 +1125,25 @@ def create_project(
             run_post_scaffold_steps,
         )
 
-        setup_warnings = run_post_scaffold_steps(
-            target=project.source_path or "",
-            slug=project.slug,
-            repo_url=payload.repo_url,
-            project_type=project.type,
-            auth_mode=project.auth_mode,
-            enable_cicd=payload.enable_cicd,
-            full_smoke=payload.full_smoke,
-            enable_branch_protection=payload.enable_branch_protection,
-            github_org=github_org,
+        # ICCINT-85: pri prevzatí sa kroky po scaffolde nespúšťajú (viď dôvod vyššie), ale mlčať sa
+        # o tom nesmie — Manažér musí vedieť, že prevzatý projekt si CI a ochranu vetvy drží vlastnú.
+        setup_warnings = (
+            [
+                "Projekt bol prevzatý, takže sa doň nezasahovalo: nenastavovalo sa CI, ochrana vetvy "
+                "ani skúšobné spustenie. Ak si ich projekt už má, platia ďalej."
+            ]
+            if adopting
+            else run_post_scaffold_steps(
+                target=project.source_path or "",
+                slug=project.slug,
+                repo_url=payload.repo_url,
+                project_type=project.type,
+                auth_mode=project.auth_mode,
+                enable_cicd=payload.enable_cicd,
+                full_smoke=payload.full_smoke,
+                enable_branch_protection=payload.enable_branch_protection,
+                github_org=github_org,
+            )
         )
 
         # Align the freshly scaffolded (root-owned) workspace with the 1000:1000 convention so the

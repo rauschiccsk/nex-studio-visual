@@ -277,3 +277,53 @@ def test_the_real_projects_hand_over_a_shape_the_create_accepts() -> None:
         assert repo.count("/") == 1, f"{slug}: {repo!r} — zakladanie čaká 'owner/repo'"
         owner, name = repo.split("/")
         assert owner and name
+
+
+# ── Do prevzatého projektu sa nescaffolduje (ICCINT-85) ───────────────────────
+#
+# ⚠️ Zmerané 09.09.2026 pri TREŤOM pokuse o prevzatie NEX Managera:
+#   „Filesystem bootstrap failed: ERROR: /opt/projects/nex-manager/CLAUDE.md already exists“
+#
+# Príznak ``adopted`` v systéme bol už predtým a chartre ho rešpektovali — ale zakladanie napriek nemu
+# spúšťalo ``init.sh`` VŽDY. Prevzatie cez kokpit teda nikdy nemohlo prejsť; existovala len jeho polovica.
+
+
+def test_nothing_is_unpacked_into_a_project_that_is_already_there() -> None:
+    """⚠️ Jadro: hotový projekt sa nescaffolduje. Jeho vlastná poistka to správne odmietala."""
+    import inspect
+
+    from backend.api.routes import projects as routes
+
+    src = inspect.getsource(routes.create_project)
+    assert "if not adopting:\n                invoke_init_script" in src, (
+        "scaffold sa pri prevzatí spúšťa — init.sh sa zastaví na existujúcom CLAUDE.md"
+    )
+
+
+def test_an_adopted_project_is_not_pushed_over() -> None:
+    """Repozitár prevzatého projektu existuje a je odoslaný. Odosielať doň miestny stav by znamenalo
+    tlačiť do cudzej histórie niečo, o čo nikto nežiadal."""
+    import inspect
+
+    from backend.api.routes import projects as routes
+
+    src = inspect.getsource(routes.create_project)
+    assert "not adopting  #" in src.split("stage4_should_run")[1][:200], (
+        "odoslanie do repozitára sa pri prevzatí nevynecháva"
+    )
+
+
+def test_an_adopted_project_keeps_its_own_ci_and_is_told_so() -> None:
+    """⚠️ Toto je viac než upratovanie: skúšobné spustenie po scaffolde robí ``docker compose down -v``,
+    čo by ŽIVÉMU projektu zmazalo databázu. A vynechanie sa nesmie zamlčať — Manažér musí vedieť, že
+    prevzatý projekt si CI a ochranu vetvy drží vlastnú.
+    """
+    import inspect
+
+    from backend.api.routes import projects as routes
+
+    src = inspect.getsource(routes.create_project)
+    assert "if adopting\n            else run_post_scaffold_steps(" in src, (
+        "kroky po scaffolde sa pri prevzatí spúšťajú"
+    )
+    assert "Projekt bol prevzatý" in src, "vynechanie sa Manažérovi nehovorí"

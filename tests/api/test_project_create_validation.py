@@ -444,3 +444,79 @@ class TestCreateRespectsHostPorts:
         resp = router_client.post("/api/v1/projects", json=payload)
         assert resp.status_code == 503
         assert db_session.query(Project).filter(Project.slug == payload["slug"]).first() is None
+
+
+class TestAdoptingAnExistingProject:
+    """Do priečinka, ktorý už projekt obsahuje, sa nescaffolduje (ICCINT-85).
+
+    ⚠️ Zmerané 09.09.2026 pri treťom pokuse o prevzatie NEX Managera:
+    „Filesystem bootstrap failed: ERROR: /opt/projects/nex-manager/CLAUDE.md already exists“.
+    Príznak ``adopted`` v systéme bol už predtým a chartre ho rešpektovali, ale zakladanie napriek
+    nemu spúšťalo ``init.sh`` VŽDY — prevzatie cez kokpit teda nikdy nemohlo prejsť.
+    """
+
+    @staticmethod
+    def _spy(monkeypatch, tmp_path):
+        """Zaznamenaj, ktoré kroky zakladania sa spustili, a žiadny z nich naozaj nevykonaj."""
+        volane: list[str] = []
+        monkeypatch.setattr(
+            "backend.api.routes.projects.invoke_init_script",
+            lambda db, project: volane.append("scaffold"),
+        )
+        monkeypatch.setattr(
+            "backend.services.create_project_postscaffold.provision_v2_agent_charters",
+            lambda *a, **k: volane.append("chartre"),
+        )
+        monkeypatch.setattr(
+            "backend.services.create_project_postscaffold.run_post_scaffold_steps",
+            lambda **k: (volane.append("po-scaffolde"), [])[1],
+        )
+        monkeypatch.setattr("backend.services.project_memory.seed_memory", lambda *a, **k: None)
+        monkeypatch.setattr("backend.api.routes.projects.push_and_verify", lambda **k: None)
+        return volane
+
+    def test_an_existing_folder_is_not_scaffolded_over(self, router_client, creator, monkeypatch, tmp_path):
+        """Jadro: priečinok s obsahom = prevzatie, a do prevzatého projektu sa nerozbaľuje šablóna."""
+        volane = self._spy(monkeypatch, tmp_path)
+        existing = tmp_path / "prevzaty"
+        existing.mkdir()
+        (existing / "CLAUDE.md").write_text("# Prevzatý projekt\n", encoding="utf-8")
+
+        resp = router_client.post(
+            "/api/v1/projects",
+            json=_payload(creator.id, slug="prevzaty", source_path=str(existing)),
+        )
+
+        assert resp.status_code == 201, resp.text
+        assert "scaffold" not in volane, "do hotového projektu sa rozbalila šablóna"
+        assert "po-scaffolde" not in volane, "bežiacemu projektu sa prepisovalo CI a spúšťala skúška"
+
+    def test_the_project_is_recorded_as_adopted(self, router_client, creator, monkeypatch, tmp_path, db_session):
+        """Bez tohto príznaku by sa charta prevzatého projektu obnovovala zo šablóny (ICCINT-51)."""
+        self._spy(monkeypatch, tmp_path)
+        existing = tmp_path / "prevzaty2"
+        existing.mkdir()
+        (existing / "CLAUDE.md").write_text("# Prevzatý\n", encoding="utf-8")
+
+        resp = router_client.post(
+            "/api/v1/projects",
+            json=_payload(creator.id, slug="prevzaty2", source_path=str(existing)),
+        )
+
+        assert resp.status_code == 201, resp.text
+        row = db_session.query(Project).filter(Project.slug == "prevzaty2").one()
+        assert row.adopted is True
+
+    def test_a_greenfield_project_is_still_scaffolded(self, router_client, creator, monkeypatch, tmp_path):
+        """⚠️ Druhá strana: vynechanie sa nesmie prelievať na bežné zakladanie — nový projekt bez
+        scaffoldu by vznikol prázdny a agent by sa v ňom nemal čoho chytiť."""
+        volane = self._spy(monkeypatch, tmp_path)
+        fresh = tmp_path / "novy"  # priečinok NEEXISTUJE — to je tvar bežného zakladania
+
+        resp = router_client.post(
+            "/api/v1/projects",
+            json=_payload(creator.id, slug="novy", source_path=str(fresh)),
+        )
+
+        assert resp.status_code == 201, resp.text
+        assert "scaffold" in volane, "nový projekt sa nescaffoldoval — vznikol by prázdny"
