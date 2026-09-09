@@ -146,7 +146,11 @@ def _validate_ports(db: Session, payload: ProjectCreate | ProjectUpdate, *, proj
         # reservations AND the host's own published-port map. The table alone
         # used to decide this, which is why a port a neighbouring container had
         # been publishing for twelve days could be handed out again.
-        verdict = port_registry_service.describe_port_availability(db, port_value, project_id)
+        # ICCINT-86: povedz evidencii, KTO sa pýta. Vyhradený blok smie použiť ten, komu je vyhradený —
+        # dovtedy to bolo naopak a nex-manager nesmel do bloku, ktorý má v evidencii napísaný na seba.
+        # Berie sa názov aj skratka: vlastníci sú v evidencii voľný text a nie sú jednotní.
+        identities = tuple(one for one in (getattr(payload, "slug", None), getattr(payload, "name", None)) if one)
+        verdict = port_registry_service.describe_port_availability(db, port_value, project_id, for_project=identities)
 
         # Fail CLOSED. "Could not verify" is not "free": creating a project on
         # an unverified port is how a live customer deployment loses its port.

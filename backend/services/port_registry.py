@@ -354,10 +354,31 @@ def _project_holding_port(db: Session, port: int, project_id: str | None) -> str
     return row[0] if row is not None else None
 
 
+def _same_holder(owner: str | None, identities: tuple[str, ...]) -> bool:
+    """Je vlastník vyhradeného bloku ten istý projekt, ktorý sa pýta? (ICCINT-86)
+
+    Vlastníci sú v evidencii voľný text a nie sú jednotní — zmerané 09.09.2026: ``nex-manager``,
+    ``nex-payables``, ale aj ``NEX Inbox``, ``NEX Automat``, ``icc-website (isnex.ai)``. Porovnávať sa
+    preto musí zhovievavo: bez medzier, pomlčiek a veľkých písmen, a proti NÁZVU aj skratke projektu
+    (``NEX Manager`` aj ``nex-manager`` dávajú ``nexmanager``).
+
+    Zhovievavosť tu je namieste: pomýliť sa smerom „je to ten istý projekt“ znamená pustiť projekt do
+    bloku, ktorý mu evidencia vyhradila. Pomýliť sa opačne znamená, že projekt nesmie použiť vlastný
+    blok — a to je stav, ktorý úplne zastavil zakladanie aj prevzatie.
+    """
+    if not owner:
+        return False
+    ocistene = lambda text: re.sub(r"[^a-z0-9]", "", text.lower())  # noqa: E731 — jednorazová pomôcka
+    cielovy = ocistene(owner)
+    return any(cielovy and cielovy == ocistene(one) for one in identities if one)
+
+
 def describe_port_availability(
     db: Session,
     port: int,
     project_id: str | None = None,
+    *,
+    for_project: tuple[str, ...] = (),
 ) -> PortAvailability:
     """Resolve *port* against the ``projects`` table, the reservations AND the host.
 
@@ -462,6 +483,21 @@ def describe_port_availability(
     if reserved_range is not None:
         start, end = reserved_range
         owner = reserved.owner_of(port)
+        # ICCINT-86: vyhradený blok smie použiť ten, komu je vyhradený. Dovtedy to bolo naopak —
+        # kontrola dostala len číslo portu a identifikátor UPRAVOVANÉHO projektu (pri zakladaní žiadny),
+        # takže nemala ako vedieť, kto sa pýta, a odmietla aj vlastníka bloku. Zmerané 09.09.2026 pri
+        # prvom prevzatí NEX Managera: „patrí do bloku 10210–10219, ktorý je pridelený inému systému —
+        # nex-manager“, pričom zakladaný projekt BOL nex-manager.
+        if _same_holder(owner, for_project):
+            return PortAvailability(
+                port=port,
+                state=FREE,
+                reason=(
+                    f"Port {port} patrí do bloku {start}-{end}, ktorý je v evidencii vyhradený práve "
+                    f"tomuto projektu ({owner}) — je teda jeho, nie cudzí."
+                ),
+                warnings=warnings,
+            )
         return PortAvailability(
             port=port,
             state=TAKEN,

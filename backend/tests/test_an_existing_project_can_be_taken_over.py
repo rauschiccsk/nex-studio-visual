@@ -164,3 +164,76 @@ def test_it_reads_the_real_projects_on_this_machine(slug: str) -> None:
     assert found.name, f"{slug}: názov sa nepodarilo prečítať"
     assert found.backend_port and found.frontend_port and found.db_port, f"{slug}: porty sa nenašli"
     assert found.repo_url, f"{slug}: repozitár sa nenašiel"
+
+
+# ── Vyhradený blok patrí tomu, komu je vyhradený (ICCINT-86) ──────────────────
+#
+# Zmerané 09.09.2026 pri PRVOM prevzatí NEX Managera: kokpit z disku správne prečítal porty
+# 10210/10211/10212 a potom odmietol projekt založiť — „patrí do bloku 10210–10219, ktorý je pridelený
+# inému systému — nex-manager“. Ten „iný systém“ bol ten istý projekt. Kontrola dostávala len číslo
+# portu a identifikátor UPRAVOVANÉHO projektu (pri zakladaní žiadny), takže nemala ako vedieť, kto sa
+# pýta. Netýkalo sa to len prevzatia — rovnako by dopadlo bežné založenie nex-payables.
+
+
+def test_a_project_may_use_the_block_reserved_for_it(db_session, monkeypatch) -> None:
+    """⚠️ Jadro ICCINT-86 — bez toho sa nex-manager nedá založiť ani prevziať.
+
+    Pýta sa priamo evidencie, nie pomocnej funkcie vedľa nej: prvá verzia tejto stráže skúšala len
+    porovnanie mien, takže keď som pri skúške vypol tú vetvu, ktorá naozaj padala, stráž zostala
+    ZELENÁ. Merať treba verdikt, ktorý dostane zakladanie projektu.
+    """
+    from backend.services import port_registry as pr
+
+    monkeypatch.setattr(pr, "get_host_taken_ports", lambda: {})
+    monkeypatch.setattr(pr, "_bind_probe_says_taken", lambda port: False)
+    monkeypatch.setattr(
+        pr,
+        "reserved_ranges_status",
+        lambda db: pr.ReservedRangesStatus(
+            configured=True,
+            ranges=((10210, 10219),),
+            owners=(((10210, 10219), "nex-manager"),),
+        ),
+    )
+
+    verdict = pr.describe_port_availability(db_session, 10210, None, for_project=("nex-manager", "NEX Manager"))
+    assert verdict.state == pr.FREE, "projekt nesmie byť odmietnutý z bloku, ktorý má napísaný na seba"
+
+    cudzi = pr.describe_port_availability(db_session, 10210, None, for_project=("nex-payables",))
+    assert cudzi.state == pr.TAKEN, "cudzí projekt sa do vyhradeného bloku dostať NESMIE"
+    assert cudzi.source == "reserved"
+
+
+def test_the_owner_is_matched_by_name_as_well_as_by_slug() -> None:
+    """Vlastníci sú v evidencii voľný text a nie sú jednotní — zmerané: ``nex-manager``,
+    ``nex-payables``, ale aj ``NEX Inbox``, ``NEX Automat``. Porovnanie musí zniesť oboje."""
+    from backend.services.port_registry import _same_holder
+
+    assert _same_holder("NEX Inbox", ("nex-inbox", "NEX Inbox")) is True
+    assert _same_holder("NEX Automat", ("nex-automat", "NEX Automat")) is True
+
+
+def test_a_block_reserved_for_somebody_else_stays_shut() -> None:
+    """⚠️ Zhovievavosť porovnania nesmie zájsť tak ďaleko, že pustí cudzí projekt do cudzieho bloku.
+
+    To by bola horšia chyba než tá, ktorú opravujeme: dvaja by si sadli na tie isté porty a prišlo by
+    sa na to až tým, že jednému prestane appka bežať.
+    """
+    from backend.services.port_registry import _same_holder
+
+    assert _same_holder("nex-manager", ("nex-payables", "NEX Payables")) is False
+    assert _same_holder("icc-website (isnex.ai)", ("nex-manager", "NEX Manager")) is False
+    assert _same_holder(None, ("nex-manager",)) is False
+    assert _same_holder("nex-manager", ()) is False
+
+
+def test_the_create_route_says_who_is_asking() -> None:
+    """Stráž proti tichému návratu: keby trasa prestala identitu odovzdávať, služba by zase nemala ako
+    vedieť, kto sa pýta — a zlyhalo by to až pri zakladaní, nie tu."""
+    import inspect
+
+    from backend.api.routes import projects as routes
+
+    src = inspect.getsource(routes._validate_ports)
+    assert "for_project=" in src, "trasa neodovzdáva evidencii, kto sa pýta"
+    assert "slug" in src and "name" in src, "identita sa musí skladať z názvu aj skratky"
