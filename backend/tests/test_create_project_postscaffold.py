@@ -161,6 +161,58 @@ def test_adoption_rerun_keeps_the_original_not_our_copy(tmp_path: Path) -> None:
     assert (tmp_path / "CLAUDE.md.pre-nex-studio").read_text(encoding="utf-8") == "# the original\n"
 
 
+def test_adoption_keeps_the_role_rules_it_overwrites(tmp_path: Path) -> None:
+    """⚠️ Jadro ICCINT-87: pravidlá rolí sa prepisujú — ale nesmú zmiznúť bez stopy.
+
+    Koreňová charta zálohu dostávala, rolové pravidlá nie. Nebolo to rozhodnutie, len to, že poistka
+    bola napísaná pri jednom zápise z troch. Zmerané 09.09.2026 pri prevzatí NEX Managera:
+    ``.claude/agents/auditor/CLAUDE.md`` sa zmenšil zo 707 na 211 riadkov a začínal slovami „Auditor
+    Agent — NEX Manager", takže bol projektu vlastný. Nič sa nestratilo IBA preto, že súbor bol v gite;
+    pri neverzovanom projekte by zmizol bez stopy.
+
+    Prepísanie samo je správne a zostáva — staré pravidlá popisujú zrušený trojagentný svet.
+    """
+    _make_v1_scaffold(tmp_path)
+    agents = tmp_path / ".claude" / "agents"
+    (agents / "auditor" / "CLAUDE.md").write_text("# Auditor Agent — NEX Manager\n707 riadkov\n", encoding="utf-8")
+    (agents / "auditor" / "settings.json").write_text('{"vlastne": true}\n', encoding="utf-8")
+
+    provision_v2_agent_charters(tmp_path, "demo", "Demo Project", adopted=True)
+
+    zaloha = agents / "auditor" / "CLAUDE.md.pre-nex-studio"
+    assert zaloha.read_text(encoding="utf-8") == "# Auditor Agent — NEX Manager\n707 riadkov\n", (
+        "vlastné pravidlá audítora sa prepísali bez zálohy — pri neverzovanom projekte nenávratne"
+    )
+    assert (agents / "auditor" / "settings.json.pre-nex-studio").read_text(encoding="utf-8") == '{"vlastne": true}\n'
+    # A projekt je aj tak znormalizovaný na v2 — o to pri prevzatí ide.
+    assert "Pravidlá agenta — Auditor" in (agents / "auditor" / "CLAUDE.md").read_text(encoding="utf-8")
+
+
+def test_a_new_project_gets_no_backups_because_there_is_nothing_to_keep(tmp_path: Path) -> None:
+    """Nový projekt zálohy nedostáva — sú to súbory, ktoré pred chvíľou napísal ``init.sh``.
+
+    Bez tohto tvrdenia by poistka mohla zálohovať vždy a priečinok každého nového projektu by
+    obsahoval kópie vlastných šablón.
+    """
+    _make_v1_scaffold(tmp_path)
+
+    provision_v2_agent_charters(tmp_path, "demo", "Demo Project", adopted=False)
+
+    assert not list(tmp_path.rglob("*.pre-nex-studio")), "nový projekt zálohy vlastných šablón nepotrebuje"
+
+
+def test_adoption_rerun_keeps_the_original_role_rules_too(tmp_path: Path) -> None:
+    """Opakované prevzatie nesmie zálohu prepísať našou vlastnou kópiou — ani pri rolových pravidlách."""
+    _make_v1_scaffold(tmp_path)
+    agents = tmp_path / ".claude" / "agents"
+    (agents / "auditor" / "CLAUDE.md").write_text("# pôvodné pravidlá\n", encoding="utf-8")
+
+    provision_v2_agent_charters(tmp_path, "demo", "Demo Project", adopted=True)
+    provision_v2_agent_charters(tmp_path, "demo", "Demo Project", adopted=True)
+
+    assert (agents / "auditor" / "CLAUDE.md.pre-nex-studio").read_text(encoding="utf-8") == "# pôvodné pravidlá\n"
+
+
 # ─── provision_v2_agent_charters — edge cases ──────────────────────────────────
 
 

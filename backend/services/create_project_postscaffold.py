@@ -200,6 +200,15 @@ def provision_v2_agent_charters(project_root: Path, slug: str, project_name: str
         role_dir = claude_dir / "agents" / role_slug
         try:
             role_dir.mkdir(parents=True, exist_ok=True)
+            # ICCINT-87: v prevzatom projekte sú tieto súbory Manažérove — písané skôr, než kokpit ten
+            # priečinok prvý raz uvidel. Prepísať ich je správne (staré pravidlá popisujú zrušený
+            # trojagentný svet a agent by podľa nich pracoval inak, než kokpit riadi), ale zahodiť ich
+            # bez stopy nie. Koreňová charta zálohu dostávala, rolové pravidlá nie — a to bola jediná
+            # nekonzistentnosť. Zmerané 09.09.2026 pri prevzatí NEX Managera: auditorova charta sa
+            # zmenšila zo 707 na 211 riadkov. Vtedy sa nič nestratilo len preto, že súbor bol v gite.
+            if adopted:
+                _preserve_before_overwrite(role_dir / "CLAUDE.md", slug=slug)
+                _preserve_before_overwrite(role_dir / "settings.json", slug=slug)
             (role_dir / "CLAUDE.md").write_text(
                 base_text + _CHARTER_SEP + charter_tpl.read_text(encoding="utf-8"),
                 encoding="utf-8",
@@ -227,15 +236,8 @@ def provision_v2_agent_charters(project_root: Path, slug: str, project_name: str
     universal_text = universal_tpl.read_text(encoding="utf-8").replace("{{PROJECT_NAME}}", project_name)
     existing_charter = project_root / "CLAUDE.md"
     try:
-        if adopted and existing_charter.is_file():
-            preserved = project_root / "CLAUDE.md.pre-nex-studio"
-            if not preserved.exists():  # a re-run must not overwrite the ORIGINAL with our own copy
-                shutil.copy2(existing_charter, preserved)
-                logger.warning(
-                    "Adopted project slug=%s already had a CLAUDE.md — kept it as %s before writing the v2 charter",
-                    slug,
-                    preserved.name,
-                )
+        if adopted:
+            _preserve_before_overwrite(existing_charter, slug=slug)
         existing_charter.write_text(universal_text, encoding="utf-8")
     except OSError as exc:
         raise ProvisioningError(
@@ -268,6 +270,39 @@ def provision_v2_agent_charters(project_root: Path, slug: str, project_name: str
     _mark_project_trusted(project_root)
 
     logger.info("v2 agent charters provisioned + project normalised to v2 shape (slug=%s)", slug)
+
+
+def _preserve_before_overwrite(path: Path, *, slug: str) -> None:
+    """Odlož Manažérov súbor bokom, kým ho prepíšeme charterom kokpitu (ICCINT-87).
+
+    Platí LEN pre prevzatý projekt: v ňom sú ``CLAUDE.md`` aj pravidlá v ``.claude/agents/`` písané
+    predtým, než kokpit ten priečinok prvý raz uvidel. Prepísať ich je správne — staré pravidlá
+    popisujú zrušený trojagentný svet a agent by podľa nich pracoval inak, než kokpit riadi — ale
+    zahodiť ich bez stopy nie.
+
+    ⚠️ **Jedna funkcia pre všetky tri súbory zámerne.** Koreňová charta zálohu dostávala a rolové
+    pravidlá nie; nebolo to rozhodnutie, len to, že poistka bola napísaná pri jednom zápise z troch.
+    Kým je na jednom mieste, štvrtý zápis ju buď použije, alebo ju stráž nájde chýbať.
+
+    Zmerané 09.09.2026 pri prevzatí NEX Managera: ``.claude/agents/auditor/CLAUDE.md`` sa zmenšil zo
+    707 na 211 riadkov a začínal slovami „Auditor Agent — NEX Manager", takže bol projektu vlastný.
+    Nič sa nestratilo iba preto, že súbor bol v gite. Pri neverzovanom projekte by zmizol bez stopy.
+
+    Opakované prevzatie zálohu NEPREPÍŠE — inak by druhý beh uložil vedľa seba našu vlastnú kópiu
+    a originál by zmizol. Neexistujúci súbor je bežný prípad, nie chyba.
+    """
+    if not path.is_file():
+        return
+    preserved = path.with_name(path.name + ".pre-nex-studio")
+    if preserved.exists():
+        return
+    shutil.copy2(path, preserved)
+    logger.warning(
+        "Adopted project slug=%s already had %s — kept it as %s before writing the v2 charter",
+        slug,
+        path.name,
+        preserved.name,
+    )
 
 
 def _mark_project_trusted(project_root: Path) -> None:
