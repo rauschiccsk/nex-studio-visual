@@ -1169,6 +1169,11 @@ def create_project(
         # init.sh + charter provisioning + post-scaffold wrote. Best-effort (never aborts the create).
         _chown_workspace(project.source_path)
 
+        # ICCINT-88: zapíš to k projektu, nie len do odpovede. Dialóg zakladania po úspechu odchádza
+        # na stránku projektu, takže odpoveď zanikne skôr, než ju stihne niekto prečítať — a správa,
+        # ktorú nikto neprečíta, je to isté ako ticho. Zmerané 09.09.2026 pri prevzatí NEX Managera.
+        project.setup_warnings = setup_warnings
+
         db.commit()
 
         # Record the block in the ONE registry (ICCINT-2). Runs after the commit so we never
@@ -1186,7 +1191,11 @@ def create_project(
             db_port=project.db_port,
         )
         if block_warning:
+            # Zápis do evidencie portov beží ZÁMERNE až po commite (aby sme netvrdili blok pre
+            # založenie, ktoré sa vrátilo späť) — takže jeho výsledok potrebuje vlastný zápis.
             setup_warnings = [*setup_warnings, block_warning]
+            project.setup_warnings = setup_warnings
+            db.commit()
     except ValueError as exc:
         db.rollback()
         raise _map_value_error(exc) from exc
@@ -1197,11 +1206,11 @@ def create_project(
             detail=f"Failed to create project filesystem state: {exc}",
         ) from exc
     db.refresh(project)
-    result = ProjectRead.model_validate(project)
     # What did NOT finish. The steps are best-effort by design and the project is genuinely created,
     # but "the Manager can finish manually" only works if he is told there is something to finish.
-    result.setup_warnings = setup_warnings
-    return result
+    # Číta sa z projektu, nie z premennej vedľa — inak by odpoveď hovorila niečo iné než to, čo si
+    # o sebe projekt pamätá, a stránka projektu by ukazovala tretiu verziu pravdy (ICCINT-88).
+    return ProjectRead.model_validate(project)
 
 
 @router.patch("/{project_id}", response_model=ProjectRead)

@@ -279,7 +279,11 @@ export default function ProjectDetailPage() {
         // A green tick over an unfinished setup is the cockpit lying about its own work. When a founding
         // step failed the project genuinely EXISTS — so this is a warning, not an error — but it says
         // plainly what is missing and does not disappear on its own.
-        const unfinished = justCreated.setupWarnings ?? [];
+        // ICCINT-88: číta sa z PROJEKTU, nie z toho, čo si stránka priniesla v ceste. Zoznam sa teraz
+        // pri projekte drží, takže je to jeden zdroj pravdy — a keď sem Manažér príde inokedy, panel
+        // nižšie mu povie to isté. Predtým to žilo len v odpovedi na založenie a pri prevzatí zaniklo
+        // skôr, než sa dalo prečítať (zmerané 09.09.2026 pri prevzatí NEX Managera).
+        const unfinished = project.setup_warnings ?? justCreated.setupWarnings ?? [];
         const ok = unfinished.length === 0;
         return (
         <div
@@ -426,6 +430,23 @@ export default function ProjectDetailPage() {
           )}
         </div>
       </div>
+
+      {/* ICCINT-88: čo sa pri zakladaní zámerne nespravilo alebo nedokončilo — ZÁZNAM, nie upozornenie
+          na odkliknutie. Platí, kým to niekto ručne nedorobí, takže sa neschováva a nemizne sám.
+          Nad hlavičkou ho ukazuje uvítací pruh, takže tu len vtedy, keď ten pruh nie je — inak by tá
+          istá veta stála na obrazovke dvakrát. */}
+      {!justCreated && (project.setup_warnings?.length ?? 0) > 0 && (
+        <div className="mb-6 rounded-lg border border-[var(--color-state-warning-bg)] bg-[var(--color-state-warning-bg)] px-4 py-3">
+          <div className="text-sm font-medium text-[var(--color-state-warning-fg)]">
+            Čo sa pri zakladaní nedokončilo
+          </div>
+          <ul className="mt-1 list-disc pl-5 text-[12px] space-y-0.5 text-[var(--color-state-warning-fg)]">
+            {project.setup_warnings.map((w) => (
+              <li key={w}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Nastavenia projektu (ICCINT-7) — the only in-product way to correct a value typed at
           creation. Before this, a wrong port could be repaired only in the database. */}

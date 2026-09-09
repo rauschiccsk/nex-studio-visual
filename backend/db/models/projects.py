@@ -10,7 +10,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
 from backend.db.models.base import Base, TimestampMixin, UUIDMixin
@@ -49,6 +49,14 @@ class Project(Base, UUIDMixin, TimestampMixin):
     # použila raz a zabudla, takže engine pri spúšťaní agenta nemal ako tie dva prípady rozlíšiť.
     # Bez toho sa charta nedá bezpečne obnovovať: obnova by prevzatému projektu prepísala jeho vlastné.
     adopted = Column(Boolean, nullable=False, server_default="false")
+    # ICCINT-88: čo sa pri zakladaní zámerne NEurobilo (CI, ochrana vetvy, skúšobné spustenie) alebo
+    # sa nepodarilo. Vetu o tom kokpit zostavoval už predtým, ale žila len v odpovedi na založenie —
+    # a dialóg po úspechu odchádza na stránku projektu, takže zanikla skôr, než ju stihol niekto
+    # prečítať. Správa, ktorú nikto neprečíta, je to isté ako ticho, a práve tomu má brániť.
+    #
+    # Nie je to upozornenie na odkliknutie, ale ZÁZNAM o tom, ako projekt vznikol — platí, kým ho
+    # niekto ručne nedorobí. Preto sa drží pri projekte a nie v protokole správ.
+    setup_warnings = Column(JSONB, nullable=False, server_default="[]")
     kb_path = Column(Text, nullable=True)
     # UAT deploy mapping (F-009, CR-NS-098). Maps this project to its
     # ``/opt/uat/<uat_slug>`` deploy (e.g. ``nex-ledger`` → ``"ledger"``,

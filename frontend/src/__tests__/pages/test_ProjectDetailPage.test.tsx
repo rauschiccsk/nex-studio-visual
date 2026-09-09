@@ -383,3 +383,33 @@ describe("ProjectDetailPage — zverenie projektu", () => {
     expect(await screen.findByText(/odteraz chodia novému manažérovi/i)).toBeInTheDocument();
   });
 });
+
+/**
+ * ICCINT-88 — čo sa pri zakladaní nedokončilo, musí byť vidieť aj neskôr.
+ *
+ * Vetu o vynechaných krokoch kokpit zostavoval už predtým, ale žila len v odpovedi na založenie a
+ * dialóg prevzatia po úspechu odchádza sem, na stránku projektu — takže ju nikto nestihol prečítať.
+ * Správa, ktorú nikto neprečíta, je to isté ako ticho, a práve tomu má brániť.
+ */
+describe("ProjectDetailPage — záznam o nedokončenom zakladaní", () => {
+  const veta =
+    "Projekt bol prevzatý, takže sa doň nezasahovalo: nenastavovalo sa CI, ochrana vetvy ani skúšobné spustenie.";
+
+  it("ukáže, čo sa pri zakladaní nedokončilo, aj pri obyčajnom otvorení stránky", async () => {
+    getProjectApiMock.mockResolvedValue({ ...project, setup_warnings: [veta] });
+
+    const ProjectDetailPage = await importPage();
+    render(<ProjectDetailPage />);
+
+    expect(await screen.findByText(/Čo sa pri zakladaní nedokončilo/i)).toBeInTheDocument();
+    expect(screen.getByText(veta)).toBeInTheDocument();
+  });
+
+  it("mlčí o projekte, kde všetko prebehlo", async () => {
+    const ProjectDetailPage = await importPage();
+    render(<ProjectDetailPage />);
+    await screen.findByText(project.name);
+
+    expect(screen.queryByText(/Čo sa pri zakladaní nedokončilo/i)).not.toBeInTheDocument();
+  });
+});
