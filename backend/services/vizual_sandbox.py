@@ -312,8 +312,18 @@ def build_run_argv(*, slug: str, frontend_host_path: Path) -> list[str]:
         # preview entry (MSW mock /session + representative-data handlers) activates → the live FE renders
         # in the sandbox WITHOUT a backend/login. This is what makes the FAITHFUL live-FE Vizuál possible
         # (replacing the decoupled self-contained mockup): the Manažér approves the REAL nex-shared screens.
+        #
+        # ⚠️ HODNOTA JE ``true``, A NIE ``1`` — ICCINT-93. Dovtedy sa posielala ``1`` a nikde nebolo
+        # napísané, akú hodnotu má appka očakávať, takže si to každý projekt tipol. Štyri projekty tipli
+        # pravdivostnú kontrolu a fungovalo im to; NEX Manager tipol ``=== "true"`` a náhľad sa mu vôbec
+        # nezapol. Zmerané 09.09.2026 — a Manažér z toho videl PRIHLASOVACIU STENU a hlásil „nepoznám
+        # prihlasovacie údaje“, teda niečo úplne iné, než čo bolo príčinou.
+        #
+        # ``true`` vyhovie OBOM zvyklostiam naraz: je pravdivé aj sa rovná slovu ``"true"``. Neexistuje
+        # rozumná kontrola, ktorá by prešla pri ``1`` a zlyhala pri ``true``. Odstraňuje to celú triedu
+        # chyby namiesto toho, aby sa na správnu hodnotu spoliehalo.
         "-e",
-        "VITE_PREVIEW=1",
+        "VITE_PREVIEW=true",
         # A writable HOME for numeric --user (node user's /home/node is 1000-owned, but be explicit).
         "-e",
         "HOME=/tmp",

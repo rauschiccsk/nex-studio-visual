@@ -16,6 +16,12 @@ from backend.services.vizual_sandbox import build_run_argv
 def test_sandbox_run_argv_enables_preview_mode() -> None:
     argv = build_run_argv(slug="demo", frontend_host_path=Path("/tmp/demo/frontend"))
     # Vite exposes VITE_-prefixed env to import.meta.env → the FE preview entry activates.
-    assert "VITE_PREVIEW=1" in argv
+    #
+    # ICCINT-93: hodnota sa tu už nepíše natvrdo. Bola to ``1`` a práve tá skrytá dohoda spôsobila, že
+    # appka, ktorá príznak porovnávala so slovom „true“, náhľad vôbec nezapla — a Manažér dostal
+    # prihlasovaciu stenu. Táto skúška stráži, že príznak IDE (ako riadny ``-e``); to, AKÚ hodnotu má
+    # mať a že ju appky prijmú, stráži ``test_the_preview_switch_cannot_be_guessed_wrong.py``.
+    flag = next((a for a in argv if isinstance(a, str) and a.startswith("VITE_PREVIEW=")), None)
+    assert flag, "pieskovisko appke vôbec nepovie, že ide o náhľad"
     # Passed as a real ``-e`` docker env option (immediately preceded by ``-e``).
-    assert argv[argv.index("VITE_PREVIEW=1") - 1] == "-e"
+    assert argv[argv.index(flag) - 1] == "-e"
