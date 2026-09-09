@@ -1551,7 +1551,10 @@ def _vizual_directive(
         "konzistentnému vzhľadu naprieč appkami. Staviaš REÁLNE obrazovky, nie kresbu: to, čo Manažér "
         "schváli, sa presne toto aj postaví vo fáze Programovanie.\n"
         "3. PREVIEW HARNESS (povinné, inak živý náhľad nefunguje): náhľad beží BEZ backendu a appka je za "
-        "prihlásením (`ProtectedRoute`). Nastav MSW mock aktívny LEN pod `import.meta.env.VITE_PREVIEW` — "
+        "prihlásením (`ProtectedRoute`). Nastav MSW mock aktívny LEN pod `import.meta.env.VITE_PREVIEW`, a to "
+        'porovnaním s CELÝM zoznamom zapínacích hodnôt (`"1"`, `"true"`, `"yes"`, `"on"`) — nie s '
+        'jediným slovom a NIE pravdivostne (`"false"` je v JS pravdivé, takže by náhľad zaplo vypnutie). '
+        "Hodnoty nijako neuprav (žiadny `.toLowerCase()`) — inak sa náhľad dostane do ostrého zostavenia. "
         "`GET /api/v1/session` (alebo ekvivalent) vráti reprezentatívneho používateľa (nech `ProtectedRoute` "
         "prejde) a dátové endpointy vráť reprezentatívnymi fixtures. Vo `main.tsx` pod `VITE_PREVIEW` naštartuj "
         "MSW pred renderom. Bez toho ukáže náhľad len mŕtvu login obrazovku.\n"

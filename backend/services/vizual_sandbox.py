@@ -60,6 +60,25 @@ PROJECTS_ROOT = Path("/opt/projects")
 #: The port Vite listens on INSIDE the sandbox (Traefik load-balances to it over ``nex-proxy-net``).
 VITE_INTERNAL_PORT = 5173
 
+#: Hodnoty, ktorými sa živý náhľad ZAPÍNA — a nič iné (ICCINT-93, ICCINT-95). Appka porovnáva
+#: ``import.meta.env.VITE_PREVIEW`` s celým týmto zoznamom; šablóna nového projektu to má tak
+#: napísané a stráž to kontroluje proti skutočným appkám na disku.
+#:
+#: ⚠️ Dva protichodné omyly, oba už zmerané:
+#: - porovnanie s JEDINÝM slovom sa minie s hodnotou a náhľad sa vôbec nezapne — NEX Manager mal
+#:   ``=== "true"``, kým sa posielala ``1``, a Manažér z toho videl prihlasovaciu stenu (ICCINT-93);
+#: - PRAVDIVOSTNÁ kontrola má opačnú chybu: v JavaScripte je pravdivý aj reťazec ``"false"``, takže
+#:   ``VITE_PREVIEW=false`` by náhľad ZAPLO (ICCINT-95). Zvyk vypínať slovom „false“ je pritom živý —
+#:   ``VITE_LAUNCH_LIVE=false`` sa tak naozaj používa.
+#:
+#: Zoznam rieši oba naraz: vymenované hodnoty zapínajú, čokoľvek iné (``false``, ``0``, ``off``,
+#: prázdno) nezapína.
+PREVIEW_ON = ("1", "true", "yes", "on")
+
+#: Čo pieskovisko appke naozaj pošle. Musí byť z ``PREVIEW_ON``; ``true`` je z nich to jediné, ktoré
+#: vyhovie aj starším appkám s pravdivostnou kontrolou, aj tým s porovnaním so slovom.
+PREVIEW_FLAG_VALUE = "true"
+
 #: The dev-server base image (the PoC image). node:20's ``node`` user is uid/gid 1000 — the same as the
 #: host ``andros`` who owns the project files — so ``--user 1000:1000`` writes Vite's caches/temp files
 #: as the owning user (never root), keeping the bind-mounted ``frontend/`` clean of root-owned artefacts.
@@ -322,8 +341,11 @@ def build_run_argv(*, slug: str, frontend_host_path: Path) -> list[str]:
         # ``true`` vyhovie OBOM zvyklostiam naraz: je pravdivé aj sa rovná slovu ``"true"``. Neexistuje
         # rozumná kontrola, ktorá by prešla pri ``1`` a zlyhala pri ``true``. Odstraňuje to celú triedu
         # chyby namiesto toho, aby sa na správnu hodnotu spoliehalo.
+        #
+        # Hodnota sa skladá z ``PREVIEW_ON`` (nižšie) — appky porovnávajú s tým istým zoznamom, takže
+        # dohoda medzi pieskoviskom a appkou stojí na jednom mieste, nie na dvoch kópiách.
         "-e",
-        "VITE_PREVIEW=true",
+        f"VITE_PREVIEW={PREVIEW_FLAG_VALUE}",
         # A writable HOME for numeric --user (node user's /home/node is 1000-owned, but be explicit).
         "-e",
         "HOME=/tmp",
