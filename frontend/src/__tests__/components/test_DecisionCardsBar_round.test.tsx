@@ -67,3 +67,28 @@ describe("DecisionCardsBar — kolo konzultácie", () => {
     expect(screen.getByText(/košík, alebo objednávka/i)).toBeInTheDocument();
   });
 });
+
+/**
+ * Kolá opráv po Verifikácii strop NEMAJÚ (ICCINT-97).
+ *
+ * ``AUDITOR_LOOP_MAX`` ohraničuje samočinnú slučku agent↔Auditor; keď na kartu odpovie človek,
+ * počítadlo sa nuluje. Napísať na takú kartu „z piatich“ by bola lož — ale mlčať o čísle znamená, že
+ * Manažér prejde šesť kôl a nedozvie sa to (zmerané 09.09.2026 na NEX Manager 1.1.0).
+ */
+describe("DecisionCardsBar — kolá opráv bez stropu", () => {
+  it("povie číslo kola aj bez stropu", () => {
+    render(bar({ id: "f1", source: "verifikacia_fix", decisions, round: 6 }));
+    expect(screen.getByText(/kolo opráv 6/i)).toBeInTheDocument();
+  });
+
+  it("nevymyslí si strop, ktorý neplatí", () => {
+    render(bar({ id: "f1", source: "verifikacia_fix", decisions, round: 6 }));
+    expect(screen.queryByText(/z 5/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/posledné/i)).not.toBeInTheDocument();
+  });
+
+  it("bez čísla kola nepovie nič — staršie záznamy ho nemajú", () => {
+    render(bar({ id: "f1", source: "verifikacia_fix", decisions }));
+    expect(screen.queryByText(/kolo opráv/i)).not.toBeInTheDocument();
+  });
+});

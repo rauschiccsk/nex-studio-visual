@@ -441,6 +441,18 @@ STAGE_ACTOR: dict[str, str] = {
 # budgets (R-AUTOCHAIN, finalized CR-V2-014): :func:`auto_chain_limit` adds ``2 * AUDITOR_LOOP_MAX`` so a
 # legit 5-round Auditor loop never mis-trips the backstop. Driven by :func:`_settle_verifikacia_verdict`.
 AUDITOR_LOOP_MAX = 5
+
+#: Od ktorého kola opráv po Verifikácii sa Manažérovi NAHLAS povie, koľké kolo to je (ICCINT-97).
+#:
+#: ⚠️ Nie je to strop a zámerne. ``AUDITOR_LOOP_MAX`` ohraničuje SAMOČINNÚ slučku agent↔Auditor, teda
+#: prípad, keď sa tí dvaja točia dokola bez dozoru; keď na kartu odpovie človek, počítadlo sa nuluje
+#: (:func:`_route_manazer_fix_to_ai_agent`) a to je správne — človek riadi, nie stroj beží naprázdno.
+#:
+#: Diera bola inde: keď riadil človek, kolá sa nikde NEUKAZOVALI. Zmerané 09.09.2026 na NEX Manager
+#: 1.1.0 — šesť kôl a v kokpite nikde nestálo, koľké to je. Kolá pritom nie sú zadarmo: každé stojí
+#: beh agenta aj beh Auditora. Preto sa od tretieho kola povie, koľko ich už bolo, a Manažér sa vie
+#: rozhodnúť, či pokračovať, alebo zasiahnuť inak.
+_FIX_ROUNDS_SAY_ALOUD = 3
 # (The v1 per-task ``_AUTO_FIX_RETRIES`` is RETIRED — CR-V2-012 replaced the per-task-audited build loop with
 # the AI-Agent self-checking loop, whose own bound is :data:`_SELF_CHECK_RETRIES` defined beside it.)
 # gate_g FAIL scope-escalation cap (CR-NS-056 §F1.5) — kept for the deferred-RED gate_g/Verifikácia
@@ -8364,6 +8376,9 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
     the builder SELF-ASSERTS exactly one ``recommended`` option (§2)."""
     critique = _latest_fix_critique(db, version_id)
     positive = bool(critique) and critique.get("verdict") in ("accept", "narrow")
+    # ICCINT-97: koľké kolo opráv po Verifikácii to je. Rovnaké počítadlo ako pri predbežnej previerke
+    # (:func:`_consult_rounds_used`), aby sa dve počítania toho istého nemohli rozísť.
+    kolo = _consult_rounds_used(db, version_id, "verifikacia_fix") + 1
     scope = _latest_verifikacia_fix_scope(db, version_id) or "Auditor našiel blokujúce zlyhanie vo Verifikácii."
     # v4.0.16: non-converging loop breaker — when the SAME blocker keeps recurring, stop RECOMMENDING another
     # fix and recommend handing it to a developer instead (honest escalation, not an endless non-expert loop).
@@ -8412,6 +8427,15 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
             "Navrhnutá oprava nebola nezávisle preverená (kritik nebol dostupný alebo išlo o mechanické "
             "engine-červené zlyhanie). Môžeš ju napriek tomu nechať opraviť — AI Agent opraví podľa nálezov "
             "Auditora a Auditor to znova preverí; nič nemusíš písať."
+        )
+    # ICCINT-97: povedz, koľké kolo to je. Manažér pri tých kartách sedí a odpovedá — bez čísla nemá ako
+    # vedieť, že je v šiestom kole, a kolá nie sú zadarmo (každé stojí beh agenta aj beh Auditora).
+    # Nie je to strop: rozhodnutie pokračovať zostáva jeho, len ho robí s vedomím, koľko toho už bolo.
+    if kolo >= _FIX_ROUNDS_SAY_ALOUD and not stuck:
+        explanation_parts.append(
+            f"Toto je {kolo}. kolo opráv po Verifikácii. Kým na tieto karty odpovedáš ty, kolá sa nepočítajú "
+            "do žiadneho stropu a môžu prísť ďalšie — ale každé stojí jeden beh AI Agenta a jeden beh "
+            "Auditora. Ak sa to ani teraz netrafí, zváž radšej 'Zastaviť a odovzdať vývojárovi'."
         )
     if stuck:
         explanation_parts.append(
@@ -8504,6 +8528,9 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
         )
     return ConsultationBlock(
         id=f"verifikacia-fix-{version_id}-{state.iteration}",
+        # ICCINT-97: ``round`` bez ``round_max`` — kolá riadené človekom strop nemajú a tvrdiť opak by bola
+        # lož. Kokpit to vykreslí ako „Kolo opráv N“, teda bez „z piatich“.
+        round=kolo,
         intro=(
             f"⚠️ Automatická oprava sa NEDARÍ — {repeat_phrase}. Treba tvoje rozhodnutie."
             if stuck

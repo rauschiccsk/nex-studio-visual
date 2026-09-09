@@ -162,6 +162,15 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
               : ""}
           </p>
         )}
+        {/* ICCINT-97: kolá opráv po Verifikácii strop NEMAJÚ — kým na karty odpovedá človek, počítadlo
+            samočinnej slučky sa nuluje, a to je správne. Ukazuje sa preto číslo bez „z piatich“:
+            napísať tam strop, ktorý neplatí, by bola lož. Bez čísla prešiel Manažér 09.09.2026 šesť
+            kôl a nikde sa to nedozvedel. */}
+        {typeof consultation.round === "number" && typeof consultation.round_max !== "number" && (
+          <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">
+            Kolo opráv {consultation.round} — kým odpovedáš ty, ďalšie kolá prísť môžu.
+          </p>
+        )}
         {consultation.intro && (
           <p className="mb-2 text-xs text-[var(--color-text-muted)]">{consultation.intro}</p>
         )}
