@@ -89,6 +89,25 @@ def _name_from_charter(root: Path) -> tuple[Optional[str], Optional[str]]:
     return None, None
 
 
+def _owner_repo(url: str) -> Optional[str]:
+    """Z adresy gitu vytiahni tvar ``vlastník/repozitár``, aký si kokpit ukladá.
+
+    ⚠️ Toto stálo jedno nasadenie navyše. Prvá verzia prevzatia vracala adresu tak, ako ju vypísal git
+    (``https://github.com/rauschiccsk/nex-manager.git``), lenže zakladanie projektu čaká ``owner/repo``
+    — tak to má aj v popise poľa a tak to majú uložené všetky tri existujúce projekty. Prevzatie preto
+    skončilo na ``Invalid repository format`` a Manažér videl len holé „Unprocessable Entity“.
+
+    Znesie oba tvary, ktoré git v našich projektoch vypisuje — ``https://host/owner/repo.git`` aj
+    ``git@host:owner/repo.git``. Tvar, ktorému nerozumie, vráti ``None``: prázdne pole a otázka sú
+    lepšie než adresa v tvare, ktorý zakladanie odmietne.
+    """
+    text = url.strip().removesuffix(".git")
+    m = re.search(r"[:/]([^/:]+)/([^/]+)$", text)
+    if not m:
+        return None
+    return f"{m.group(1)}/{m.group(2)}"
+
+
 def _repo_from_git(root: Path) -> tuple[Optional[str], Optional[str]]:
     """Adresa repozitára z nastavenia gitu. Neexistujúci alebo nenastavený git nie je chyba —
     projekt bez vzdialeného repozitára je legitímny, len sa naň potom treba opýtať."""
@@ -105,7 +124,10 @@ def _repo_from_git(root: Path) -> tuple[Optional[str], Optional[str]]:
     url = (proc.stdout or "").strip()
     if proc.returncode != 0 or not url:
         return None, None
-    return url, "adresa repozitára z nastavenia gitu"
+    repo = _owner_repo(url)
+    if repo is None:
+        return None, None
+    return repo, f"repozitár z nastavenia gitu ({url})"
 
 
 def _host_port(binding: object) -> Optional[tuple[int, int]]:

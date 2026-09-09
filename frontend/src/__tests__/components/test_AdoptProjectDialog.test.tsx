@@ -116,3 +116,33 @@ describe("AdoptProjectDialog", () => {
     expect(await screen.findByText(/nie je nič, čo by sa dalo prevziať/i)).toBeInTheDocument();
   });
 });
+
+// ── Hláška, z ktorej sa dá niečo vyčítať (ICCINT-85) ─────────────────────────
+//
+// ⚠️ 09.09.2026 videl Manažér pri prevzatí NEX Managera len „Prevzatie projektu zlyhalo —
+// Unprocessable Entity“ a prázdny technický detail. Server pritom napísal presnú vetu
+// („Invalid repository format …“) — bola vnútri zloženej odpovede a cestou sa stratila.
+
+import { humanizeApiError } from "@/services/apiError";
+import { ApiError } from "nex-shared";
+
+describe("humanizeApiError — veta zvnútra zloženej odpovede", () => {
+  it("ukáže vetu servera, nie názov stavu", () => {
+    const err = new ApiError(422, "Unprocessable Entity", {
+      detail: { detail: "Invalid repository format 'https://…'. Expected 'owner/repo'.", repo_url: "x" },
+    });
+    expect(humanizeApiError(err, "Prevzatie projektu zlyhalo").message).toContain("Expected 'owner/repo'");
+  });
+
+  it("obyčajnú textovú odpoveď nechá tak, ako bola", () => {
+    const err = new ApiError(409, "Port 10210 je už pridelený.", { detail: "Port 10210 je už pridelený." });
+    expect(humanizeApiError(err, "Zlyhalo").message).toContain("Port 10210 je už pridelený.");
+  });
+
+  it("keď server nepovedal nič, ostáva zrozumiteľná náhrada — nie „[object Object]“", () => {
+    const err = new ApiError(500, "[object Object]", { detail: { neco: 1 } });
+    const out = humanizeApiError(err, "Zlyhalo");
+    expect(out.message).not.toContain("[object Object]");
+    expect(out.message.length).toBeGreaterThan("Zlyhalo".length);
+  });
+});

@@ -46,7 +46,25 @@ export function humanizeApiError(err: unknown, phrase: string): HumanError {
   if (err instanceof ApiError) {
     // The lib parses the FastAPI {detail}; a non-string/object detail can render as "[object Object]" — never
     // show that. Keep a clean raw detail only when it's a meaningful string.
-    const raw = typeof err.message === "string" && err.message && err.message !== "[object Object]" ? err.message : "";
+    // ICCINT-85: keď je odpoveď servera ZLOŽENÁ (objekt s vlastnou vetou vnútri), `message` skončí ako
+    // „Unprocessable Entity“ — teda samotný názov stavu, z ktorého sa nedá nič vyčítať. Presne to sa
+    // stalo 09.09.2026 pri prevzatí NEX Managera: server napísal „Invalid repository format …“, Manažér
+    // videl „Prevzatie projektu zlyhalo — Unprocessable Entity“ a prázdny technický detail.
+    //
+    // Veta vnútri objektu je stále veta. Vytiahne sa a použije; keď tam nie je, ostáva pôvodné správanie.
+    const structured =
+      err.data && typeof err.data === "object" && !Array.isArray(err.data)
+        ? (err.data as { detail?: unknown }).detail
+        : undefined;
+    const inner =
+      typeof structured === "string"
+        ? structured
+        : structured && typeof structured === "object" && typeof (structured as { detail?: unknown }).detail === "string"
+          ? ((structured as { detail: string }).detail)
+          : "";
+    const plain =
+      typeof err.message === "string" && err.message && err.message !== "[object Object]" ? err.message : "";
+    const raw = inner || plain;
     // SHOW the backend's own sentence when there is one (ICCINT-22). The first version of this helper
     // replaced it ALWAYS with `reasonFor(status)` and filed the truth under a collapsible — so a refusal
     // that knew exactly what was wrong ("Port 10225 patrí do rezervovaného bloku, ktorý má pridelený

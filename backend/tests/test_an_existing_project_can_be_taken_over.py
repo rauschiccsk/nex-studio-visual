@@ -237,3 +237,43 @@ def test_the_create_route_says_who_is_asking() -> None:
     src = inspect.getsource(routes._validate_ports)
     assert "for_project=" in src, "trasa neodovzdáva evidencii, kto sa pýta"
     assert "slug" in src and "name" in src, "identita sa musí skladať z názvu aj skratky"
+
+
+# ── Adresa repozitára v tvare, ktorý zakladanie prijme ────────────────────────
+#
+# ⚠️ Stálo to jedno nasadenie navyše. Prvá verzia prevzatia vracala adresu tak, ako ju vypísal git —
+# ``https://github.com/rauschiccsk/nex-manager.git`` — lenže zakladanie čaká ``owner/repo``. Tak to má
+# aj v popise poľa a tak to majú uložené všetky tri existujúce projekty. Prevzatie skončilo na
+# „Invalid repository format“ a Manažér videl len holé „Unprocessable Entity“.
+
+
+def test_the_repository_is_handed_over_in_the_shape_the_create_accepts() -> None:
+    from backend.services.project_adoption import _owner_repo
+
+    assert _owner_repo("https://github.com/rauschiccsk/nex-manager.git") == "rauschiccsk/nex-manager"
+    assert _owner_repo("git@github.com:rauschiccsk/nex-payables.git") == "rauschiccsk/nex-payables"
+    assert _owner_repo("https://github.com/rauschiccsk/nex-studio") == "rauschiccsk/nex-studio"
+
+
+def test_an_address_it_does_not_understand_is_left_empty_not_mangled() -> None:
+    """Prázdne pole a otázka sú lepšie než adresa v tvare, ktorý zakladanie odmietne — presne to sa
+    stalo a nedalo sa z toho nič vyčítať."""
+    from backend.services.project_adoption import _owner_repo
+
+    assert _owner_repo("nezmysel") is None
+    assert _owner_repo("") is None
+
+
+def test_the_real_projects_hand_over_a_shape_the_create_accepts() -> None:
+    """Skúška proti SKUTOČNÝM projektom aj proti skutočnej kontrole zakladania — vymyslený vzor by
+    potvrdil len moju predstavu o tvare, a práve tá predstava bola nesprávna."""
+    for slug in ("nex-manager", "nex-payables", "nex-studio", "nex-studio-visual"):
+        root = Path("/opt/projects") / slug
+        if not (root / ".git").exists():
+            pytest.skip(f"{slug} nie je na tomto stroji — nekontrolované")
+        repo = discover(root, slug).repo_url
+        assert repo, f"{slug}: adresa repozitára sa nenašla"
+        # Presne tá podmienka, na ktorej zakladanie projektu padlo (github_validation.py).
+        assert repo.count("/") == 1, f"{slug}: {repo!r} — zakladanie čaká 'owner/repo'"
+        owner, name = repo.split("/")
+        assert owner and name
