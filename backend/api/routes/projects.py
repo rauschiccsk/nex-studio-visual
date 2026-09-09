@@ -628,6 +628,9 @@ class _AdoptionPreview(BaseModel):
     backend_port: Optional[int] = None
     frontend_port: Optional[int] = None
     db_port: Optional[int] = None
+    #: ICCINT-89: posledná verzia, ktorú o sebe projekt hovorí. Kokpit ju ukáže PRED prevzatím, aby
+    #: Manažér vedel, na čo nadväzuje — prevzatému projektu sa totiž žiadna verzia nezakladá.
+    latest_version: Optional[str] = None
     unresolved: list[str] = []
     notes: list[str] = []
 
@@ -957,6 +960,13 @@ def create_project(
 
     try:
         project = project_service.create(db, payload)
+        # Vzorkuje sa TU, ešte pred čímkoľvek, čo by do priečinka zapísalo: raz init.sh prebehne, jeho
+        # vlastný výstup sa nedá odlíšiť od súborov, ktoré tam priniesol Manažér. Čítanie je jedno a
+        # kľúčuje sa ním všetko nižšie — upratovanie, scaffold aj to, či sa vymýšľa prvá verzia.
+        # (Presunuté sem z miesta tesne pred scaffoldom, aby o prevzatí vedelo aj zakladanie verzie —
+        # ICCINT-89.)
+        scaffolded_here = not _workspace_holds_foreign_files(project.source_path)
+        adopting = bool(project.source_path) and not scaffolded_here
         # CR-V2-016: STATUS.md/HISTORY.md DB-driven seeding is RETIRED — the AI Agent's
         # own per-project ``MEMORY.md`` is the single source of truth (R-DOUBLEWRITE).
         # The memory is seeded AFTER the workspace exists (Stage 3, ``invoke_init_script``),
@@ -965,12 +975,25 @@ def create_project(
         # Main CLAUDE.md §2: žiadna zmena dokumentu v docs/specs/ bez priradenia
         # ku konkrétnej verzii. Designer's Step 0 VERSION binding finds this
         # version to begin work; status defaults to 'planned' via DB server_default.
-        version_service.create(
-            db,
-            project.id,
-            VersionCreate(version_number="0.1.0", name="Initial prototype"),
-            user_id=payload.created_by,
-        )
+        # ICCINT-89: prevzatému projektu sa verzia NEVYMÝŠĽA.
+        #
+        # Novému projektu sa prvá verzia 0.1.0 založiť musí — bez nej sa v ňom nedá začať a §2 charty
+        # hovorí, že žiadna zmena dokumentu neexistuje bez verzie. Pri PREVZATÍ je to však výmysel:
+        # projekt svoju históriu má. Zmerané 09.09.2026 na NEX Managerovi — appka bežala ako 1.0.99
+        # a v docs/specs/versions/ mala v0.1.0 aj v1.0.0, kým kokpit ukazoval jedinú „plánovanú“ 0.1.0.
+        #
+        # ⚠️ A nebolo to len nepekné číslo: priečinok docs/specs/versions/v0.1.0/ tam UŽ EXISTOVAL
+        # a mal vlastný obsah. Keby sa tá vymyslená verzia rozbehla, písalo by sa do cudzích dokumentov.
+        #
+        # Prvú verziu si teda pri prevzatí založí Manažér sám — a to číslo, ktoré na disku naozaj je,
+        # vidí v prehliadke pred prevzatím (``project_adoption.discover``).
+        if not adopting:
+            version_service.create(
+                db,
+                project.id,
+                VersionCreate(version_number="0.1.0", name="Initial prototype"),
+                user_id=payload.created_by,
+            )
         # CR-R2-1 (#1a): set uat_slug at creation so a deployable app carries its UAT target from the
         # start (early visibility — the completion guard + UAT board no longer wait for the Phase-3 lazy
         # derive at first release). Idempotent (set_uat_slug flushes; the route's db.commit() persists it).
@@ -983,10 +1006,6 @@ def create_project(
         # Stage 3 — filesystem bootstrap via icc-claude-template/init.sh.
         # Runs BEFORE db.commit() so a bootstrap failure rolls back the
         # DB row cleanly. Disabled when template_init_script_path is empty.
-        # Sampled HERE, the last instant the answer is knowable: once init.sh has run, its own output
-        # is indistinguishable from files the Manager brought. Everything below keys its cleanup off
-        # this one reading.
-        scaffolded_here = not _workspace_holds_foreign_files(project.source_path)
 
         # ICCINT-85: PREVZATIE — priečinok už obsahuje projekt, takže sa doň nescaffolduje.
         #
@@ -1006,7 +1025,6 @@ def create_project(
         #
         # Chartre agenta sa dopĺňajú aj tak (nižšie, s ``adopted=True``) — bez nich by sa v projekte
         # nedal spustiť agent, a to je práve to, kvôli čomu sa preberá.
-        adopting = bool(project.source_path) and not scaffolded_here
         if adopting:
             logger.info(
                 "Prevzatie projektu slug=%s — priečinok %s už obsahuje projekt, takže sa nescaffolduje, "

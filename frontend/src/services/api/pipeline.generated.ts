@@ -5886,6 +5886,8 @@ export interface components {
             description?: string | null;
             /** Frontend Port */
             frontend_port?: number | null;
+            /** Latest Version */
+            latest_version?: string | null;
             /** Name */
             name?: string | null;
             /**

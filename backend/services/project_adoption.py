@@ -47,6 +47,42 @@ _SERVICE_ROLES = {
 _PORT_ROLES = {5432: "db", 8000: "backend", 8080: "backend", 80: "frontend", 443: "frontend"}
 
 
+def _latest_version_on_disk(root: Path) -> tuple[Optional[str], Optional[str]]:
+    """Posledná verzia, ktorú o sebe projekt hovorí — z priečinkov ``docs/specs/versions/vX.Y.Z`` (ICCINT-89).
+
+    **Prečo to treba vedieť.** Zakladanie projektu vyrába novej verzii záznam „0.1.0 — Initial prototype“.
+    Pri PREVZATÍ je to výmysel: projekt svoju históriu má. Zmerané 09.09.2026 na NEX Managerovi — appka
+    bežala ako 1.0.99 a v ``docs/specs/versions/`` mala ``v0.1.0`` aj ``v1.0.0`` s poznámkami k vydaniu,
+    zatiaľ čo kokpit ukazoval jedinú „plánovanú“ 0.1.0 a ponúkal „Pridať verziu 0.2.0“.
+
+    ⚠️ **A nebolo to len nepekné číslo.** Priečinok ``docs/specs/versions/v0.1.0/`` v tom projekte UŽ
+    EXISTOVAL a mal vlastný obsah. Keby sa tá vymyslená verzia rozbehla, písalo by sa do cudzích
+    dokumentov.
+
+    Berú sa iba priečinky s číslom v tvare ``vX.Y.Z`` a vracia sa najvyššie. Keď sa nenájde nič, vráti sa
+    ``None`` — a vtedy sa nič nevymýšľa, len sa to povie.
+    """
+    versions_dir = root / "docs" / "specs" / "versions"
+    if not versions_dir.is_dir():
+        return None, None
+    found: list[tuple[tuple[int, int, int], str]] = []
+    try:
+        entries = list(versions_dir.iterdir())
+    except OSError:
+        return None, None
+    for entry in entries:
+        if not entry.is_dir():
+            continue
+        m = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", entry.name)
+        if m:
+            found.append(((int(m.group(1)), int(m.group(2)), int(m.group(3))), entry.name[1:]))
+    if not found:
+        return None, None
+    found.sort()
+    latest = found[-1][1]
+    return latest, f"posledná verzia {latest} z priečinkov v docs/specs/versions/"
+
+
 @dataclass
 class Discovered:
     """Čo sa o projekte dalo prečítať z disku — a čo nie.
@@ -64,6 +100,9 @@ class Discovered:
     backend_port: Optional[int] = None
     frontend_port: Optional[int] = None
     db_port: Optional[int] = None
+    #: Posledná verzia, ktorú o sebe projekt hovorí (ICCINT-89). ``None``, keď sa nedá zistiť — vtedy sa
+    #: nevymýšľa žiadna.
+    latest_version: Optional[str] = None
     unresolved: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
@@ -209,6 +248,13 @@ def discover(root: Path, slug: str) -> Discovered:
     for rola, popis in (("backend", "backendu"), ("frontend", "frontendu"), ("db", "databázy")):
         if rola not in porty:
             found.unresolved.append(f"port {popis} — v docker-compose.yml sa nenašiel")
+
+    verzia, poznamka = _latest_version_on_disk(root)
+    if verzia:
+        found.latest_version = verzia
+        found.notes.append(poznamka or "")
+    else:
+        found.unresolved.append("posledná verzia — v docs/specs/versions/ sa nenašla; prvú si založíš sám")
 
     # Spôsob prihlasovania sa z disku spoľahlivo prečítať NEDÁ a hádať sa nesmie: uhádnutá hodnota
     # by vyzerala ako zistený údaj. Nech ju manažér vidí a potvrdí.

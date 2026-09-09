@@ -208,6 +208,14 @@ export interface AdoptionPreview {
   backend_port: number | null;
   frontend_port: number | null;
   db_port: number | null;
+  /**
+   * ICCINT-89: posledná verzia, ktorú o sebe projekt hovorí (z `docs/specs/versions/`).
+   *
+   * Prevzatému projektu sa žiadna verzia nezakladá — vymyslená „0.1.0“ by prepisovala priečinok,
+   * ktorý v projekte často UŽ JE a má vlastný obsah. Manažér preto musí pred prevzatím vidieť, na čo
+   * nadväzuje, a prvú verziu si založí sám.
+   */
+  latest_version: string | null;
   unresolved: string[];
   notes: string[];
 }

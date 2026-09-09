@@ -159,6 +159,16 @@ export default function AdoptProjectDialog({ open, onClose, onAdopted }: Props) 
                 <dd className="break-all">{preview.repo_url ?? "—"}</dd>
               </div>
               <div className="flex gap-2">
+                <dt className="w-28 shrink-0 text-[var(--color-text-muted)]">Posledná verzia</dt>
+                <dd>
+                  {preview.latest_version ?? "—"}
+                  <span className="text-[var(--color-text-muted)]">
+                    {" "}
+                    — prvú verziu si po prevzatí založíš sám
+                  </span>
+                </dd>
+              </div>
+              <div className="flex gap-2">
                 <dt className="w-28 shrink-0 text-[var(--color-text-muted)]">Porty</dt>
                 <dd>
                   {preview.backend_port ?? "—"} / {preview.frontend_port ?? "—"} / {preview.db_port ?? "—"}

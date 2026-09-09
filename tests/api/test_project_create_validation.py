@@ -507,6 +507,50 @@ class TestAdoptingAnExistingProject:
         row = db_session.query(Project).filter(Project.slug == "prevzaty2").one()
         assert row.adopted is True
 
+    def test_an_adopted_project_gets_no_invented_version(
+        self, router_client, creator, monkeypatch, tmp_path, db_session
+    ):
+        """⚠️ Jadro ICCINT-89 — a nie je to kozmetika.
+
+        Priečinok ``docs/specs/versions/v0.1.0/`` v prevzatom projekte často UŽ EXISTUJE a má vlastný
+        obsah. Keby sa tá vymyslená verzia rozbehla, písalo by sa do cudzích dokumentov.
+        """
+        from backend.db.models.versions import Version
+
+        self._spy(monkeypatch, tmp_path)
+        existing = tmp_path / "prevzaty3"
+        existing.mkdir()
+        (existing / "CLAUDE.md").write_text("# Prevzatý\n", encoding="utf-8")
+
+        resp = router_client.post(
+            "/api/v1/projects",
+            json=_payload(creator.id, slug="prevzaty3", source_path=str(existing)),
+        )
+
+        assert resp.status_code == 201, resp.text
+        row = db_session.query(Project).filter(Project.slug == "prevzaty3").one()
+        versions = db_session.query(Version).filter(Version.project_id == row.id).all()
+        assert versions == [], "prevzatému projektu sa vymyslela verzia"
+
+    def test_a_greenfield_project_still_gets_its_first_version(
+        self, router_client, creator, monkeypatch, tmp_path, db_session
+    ):
+        """Druhá strana: novému projektu sa prvá verzia založiť MUSÍ — bez nej sa v ňom nedá začať."""
+        from backend.db.models.versions import Version
+
+        self._spy(monkeypatch, tmp_path)
+        fresh = tmp_path / "novy2"
+
+        resp = router_client.post(
+            "/api/v1/projects",
+            json=_payload(creator.id, slug="novy2", source_path=str(fresh)),
+        )
+
+        assert resp.status_code == 201, resp.text
+        row = db_session.query(Project).filter(Project.slug == "novy2").one()
+        versions = db_session.query(Version).filter(Version.project_id == row.id).all()
+        assert [v.version_number for v in versions] == ["0.1.0"]
+
     def test_a_greenfield_project_is_still_scaffolded(self, router_client, creator, monkeypatch, tmp_path):
         """⚠️ Druhá strana: vynechanie sa nesmie prelievať na bežné zakladanie — nový projekt bez
         scaffoldu by vznikol prázdny a agent by sa v ňom nemal čoho chytiť."""

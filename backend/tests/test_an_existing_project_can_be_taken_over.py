@@ -327,3 +327,65 @@ def test_an_adopted_project_keeps_its_own_ci_and_is_told_so() -> None:
         "kroky po scaffolde sa pri prevzatí spúšťajú"
     )
     assert "Projekt bol prevzatý" in src, "vynechanie sa Manažérovi nehovorí"
+
+
+# ── Prevzatému projektu sa verzia nevymýšľa (ICCINT-89) ──────────────────────
+#
+# ⚠️ Zmerané 09.09.2026 na NEX Managerovi hneď po prevzatí: appka bežala ako 1.0.99 a v
+# docs/specs/versions/ mala v0.1.0 aj v1.0.0 s poznámkami k vydaniu — kokpit ukazoval jedinú
+# „plánovanú“ 0.1.0 a ponúkal „Pridať verziu 0.2.0“.
+#
+# A nebolo to len nepekné číslo: priečinok docs/specs/versions/v0.1.0/ v tom projekte UŽ EXISTOVAL
+# a mal vlastný obsah. Keby sa tá vymyslená verzia rozbehla, písalo by sa do cudzích dokumentov.
+
+
+def test_the_version_the_project_says_about_itself_is_read(tmp_path) -> None:
+    """Číta sa z priečinkov, ktoré si projekt sám vedie — nie z čísla, ktoré mu niekto pridelí."""
+    root = _project(tmp_path, "s-historiou", charter="# S históriou\n")
+    for v in ("v0.1.0", "v0.9.3", "v1.0.0"):
+        (root / "docs" / "specs" / "versions" / v).mkdir(parents=True)
+
+    assert discover(root, "s-historiou").latest_version == "1.0.0"
+
+
+def test_versions_are_compared_as_numbers_not_as_text(tmp_path) -> None:
+    """⚠️ Podľa abecedy je „0.9.0“ väčšie než „0.10.0“ — a prevzatý projekt by tak nadviazal na staršiu
+    verziu, než v skutočnosti má."""
+    root = _project(tmp_path, "cisla", charter="# Čísla\n")
+    for v in ("v0.9.0", "v0.10.0"):
+        (root / "docs" / "specs" / "versions" / v).mkdir(parents=True)
+
+    assert discover(root, "cisla").latest_version == "0.10.0"
+
+
+def test_a_project_without_version_folders_says_so_instead_of_inventing(tmp_path) -> None:
+    root = _project(tmp_path, "bez-historie", charter="# Bez\n")
+    found = discover(root, "bez-historie")
+
+    assert found.latest_version is None
+    assert any("posledná verzia" in u for u in found.unresolved)
+
+
+def test_a_folder_that_is_not_a_version_number_is_ignored(tmp_path) -> None:
+    """V tom priečinku býva aj `release-dates.json` a podobné veci — nie sú to verzie."""
+    root = _project(tmp_path, "zmes", charter="# Zmes\n")
+    (root / "docs" / "specs" / "versions" / "v1.0.0").mkdir(parents=True)
+    (root / "docs" / "specs" / "versions" / "koncepty").mkdir()
+
+    assert discover(root, "zmes").latest_version == "1.0.0"
+
+
+def test_the_real_projects_report_a_version_that_matches_their_own_folders() -> None:
+    """Skúška proti SKUTOČNÝM projektom — vymyslený vzor by potvrdil len moju predstavu o tom, ako tie
+    priečinky vyzerajú."""
+    import re as _re
+
+    for slug in ("nex-manager", "nex-studio"):
+        root = Path("/opt/projects") / slug
+        versions = root / "docs" / "specs" / "versions"
+        if not versions.is_dir():
+            pytest.skip(f"{slug} nie je na tomto stroji — nekontrolované")
+        found = discover(root, slug).latest_version
+        assert found, f"{slug}: verzia sa nenašla, hoci priečinky má"
+        assert (versions / f"v{found}").is_dir(), f"{slug}: {found} neexistuje ako priečinok"
+        assert _re.fullmatch(r"\d+\.\d+\.\d+", found)
