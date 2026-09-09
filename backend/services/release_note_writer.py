@@ -27,6 +27,7 @@ truth for every NOT-yet-released version and overwrites any stale placeholder.
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 
@@ -36,6 +37,8 @@ from sqlalchemy.orm import Session
 from backend.db.models.bugs import Bug
 from backend.db.models.tasks import Epic
 from backend.db.models.versions import Version
+
+logger = logging.getLogger(__name__)
 
 #: Internal work-item codes that must NEVER surface in a user-facing note. Matches
 #: e.g. ``CR-NS-001``, ``EPIC-3``, ``BUG-12``, ``FEAT-4``, ``TASK-7``. Applied only
@@ -151,16 +154,58 @@ def render_release_note(db: Session, version: Version) -> str:
         lines.append("### Opravené")
         lines.extend(f"- {b}" for b in fixed)
 
+    # Podpis na konci: podľa neho sa pri ďalšom behu pozná, že text je náš a smie sa prepísať.
+    lines.append("")
+    lines.append(GENERATED_MARKER)
     return "\n".join(lines) + "\n"
+
+
+#: Podpis, ktorým sa generovaná poznámka priznáva (ICCINT-96). Bez neho sa nedá odlíšiť text, ktorý
+#: sme vyrobili my, od textu, ktorý niekto napísal — a práve to rozlíšenie rozhoduje, či sa smie prepísať.
+GENERATED_MARKER = (
+    "<!-- Túto poznámku vygenerovalo NEX Studio z evidencie úloh. "
+    "Keď ju prepíšeš vlastným textom, NEX Studio ju už nebude prepisovať. -->"
+)
+
+
+def _is_ours(existing: str, freshly_rendered: str) -> bool:
+    """Je text na disku náš (generovaný), alebo ho niekto napísal?
+
+    Tri prípady, ktoré považujeme za náš:
+
+    * nesie náš podpis — jednoznačné;
+    * je zhodný s tým, čo by generátor napísal teraz — teda sme ho napísali my, len ešte bez podpisu
+      (poznámky spred tejto zmeny);
+    * je prázdny alebo je to zárodok zo šablóny — nie je čo chrániť.
+
+    Všetko ostatné je **cudzí text a nesiaha sa naň**. Keď si nie sme istí, radšej nezapíšeme:
+    prepísať cudziu prácu je nenapraviteľné, nezapísať našu je len nepohodlie, o ktorom sa navyše
+    povie nahlas.
+    """
+    text = existing.strip()
+    if not text:
+        return True
+    if GENERATED_MARKER in existing:
+        return True
+    return text == freshly_rendered.replace(GENERATED_MARKER, "").strip()
 
 
 def write_release_note(db: Session, version_id, proj_root: Path) -> Path | None:
     """(Re)generate + write the note for *version_id* under *proj_root*.
 
-    Returns the written path, or ``None`` when nothing was written — either the
-    version does not exist, or it is already ``released`` (immutable historical
-    record: NEVER regenerated). Creates the version dir (``mkdir -p``) and
-    overwrites any stale placeholder for a not-yet-released version.
+    Returns the written path, or ``None`` when nothing was written — the version does not exist, it is
+    already ``released`` (immutable historical record: NEVER regenerated), **or the note on disk was
+    written by somebody else** (ICCINT-96).
+
+    ⚠️ **Prečo generátor ustupuje.** Zmerané 09.09.2026 na NEX Manager 1.1.0: agent napísal zákaznícku
+    poznámku (2129 znakov), Manažér schválil fázu — a NEX Studio ju v tej istej sekunde prepísalo svojím
+    zoznamom z evidencie (631 znakov) a nechalo v pracovnom strome nezapísanú. Nezávislá previerka to
+    našla ako rozrobenú prácu a stavbu **dvakrát** zablokovala; agent to poslušne vrátil a pri ďalšej
+    bráne sa to prepísalo znova. Agent bojoval s kokpitom a vyhrať nemohol.
+
+    Director 09.09.2026: *„generátor má ustúpiť, keď si projekt poznámky napísal sám.“* Generovaný
+    zoznam je záchranná sieť pre projekt, ktorý si poznámky nepíše — nie pán nad textom, ktorý niekto
+    napísal naschvál.
     """
     version = db.get(Version, version_id)
     if version is None:
@@ -171,5 +216,20 @@ def write_release_note(db: Session, version_id, proj_root: Path) -> Path | None:
     notes_dir = version_notes_dir(proj_root, version.version_number)
     notes_dir.mkdir(parents=True, exist_ok=True)
     path = notes_dir / "RELEASE_NOTES.md"
-    path.write_text(render_release_note(db, version), encoding="utf-8")
+    rendered = render_release_note(db, version)
+
+    if path.is_file():
+        try:
+            existing = path.read_text(encoding="utf-8")
+        except OSError:
+            existing = ""
+        if not _is_ours(existing, rendered):
+            # Ticho by tu bolo vlastnou pascou: nikto by nevedel, prečo sa poznámka neaktualizovala.
+            logger.info(
+                "RELEASE_NOTES.md pre %s si projekt napísal sám — negenerujem ho a nechávam tak (ICCINT-96)",
+                version.version_number,
+            )
+            return None
+
+    path.write_text(rendered, encoding="utf-8")
     return path
