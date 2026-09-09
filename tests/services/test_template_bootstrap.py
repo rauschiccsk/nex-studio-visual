@@ -787,3 +787,49 @@ def test_the_app_mark_carries_the_project_initials() -> None:
     svg = _skeleton_file("public/icon.svg.tmpl")
     assert "{{PROJECT_INITIALS}}" in svg
     assert "<svg" in svg and "</svg>" in svg
+
+
+def test_a_new_project_can_show_a_live_preview_out_of_the_box() -> None:
+    """⚠️ Fáza Vizuál je to, po čom je celý produkt pomenovaný — a šablóna jej nedávala nič (ICCINT-94).
+
+    Nový projekt si musel vetvu pre živý náhľad vymyslieť sám. Zmerané 09.09.2026: nex-productcatalogs
+    si ju napísal správne a náhľad mu fungoval, NEX Manager nesprávne — a Manažér dostal prihlasovaciu
+    obrazovku a hlásil „nepoznám prihlasovacie údaje“, teda niečo úplne iné, než čo bolo príčinou.
+    """
+    main = _skeleton_file("src/main.tsx")
+    assert "VITE_PREVIEW" in main, "šablóna nedáva novému projektu vetvu pre živý náhľad"
+    assert "./preview/browser" in main
+    _skeleton_file("src/preview/browser.ts")
+    _skeleton_file("src/preview/handlers.ts")
+
+
+def test_the_preview_starts_before_the_first_render() -> None:
+    """⚠️ Poradie je celá pointa. Keby sa predstierané odpovede spustili až po vykreslení, prvé volania
+    odídu na neexistujúci backend a náhľad skončí na prihlasovacej obrazovke (ICCINT-27)."""
+    main = _skeleton_file("src/main.tsx")
+    assert "startPreview().then(render)" in main, (
+        "náhľad sa nespúšťa PRED vykreslením — appka stihne poslať volania do prázdna"
+    )
+
+
+def test_the_template_checks_the_preview_flag_the_way_the_sandbox_sends_it() -> None:
+    """⚠️ Prísna podmienka sa už raz s hodnotou minula (ICCINT-93). Šablóna nesmie tú chybu rozsievať
+    do každého nového projektu."""
+    import re as _re
+
+    main = _skeleton_file("src/main.tsx")
+    assert _re.search(r"if \(import\.meta\.env\.VITE_PREVIEW\)", main), (
+        "podmienka nie je pravdivostná — porovnanie so slovom sa už raz minulo s hodnotou"
+    )
+    assert not _re.search(r'VITE_PREVIEW\s*(?:===|!==)\s*"', main)
+
+
+def test_the_template_brings_the_library_the_preview_needs() -> None:
+    """Vetva pre náhľad bez knižnice, ktorá tie odpovede robí, je len rozbité zostavenie — a prejaví sa
+    až vo Vizuáli, teda najneskôr, ako sa dá."""
+    import json as _json
+
+    pkg = _json.loads(_skeleton_file("package.json"))
+    assert "msw" in pkg.get("devDependencies", {}), "šablóna nemá knižnicu pre predstierané odpovede"
+    lock = _skeleton_file("package-lock.json")
+    assert '"node_modules/msw"' in lock, "zámok závislostí o tej knižnici nevie — `npm ci` ju nenainštaluje"
