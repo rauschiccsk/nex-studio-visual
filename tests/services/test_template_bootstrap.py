@@ -813,15 +813,29 @@ def test_the_preview_starts_before_the_first_render() -> None:
 
 
 def test_the_template_checks_the_preview_flag_the_way_the_sandbox_sends_it() -> None:
-    """⚠️ Prísna podmienka sa už raz s hodnotou minula (ICCINT-93). Šablóna nesmie tú chybu rozsievať
-    do každého nového projektu."""
+    """⚠️ Šablóna nesmie rozsievať do každého nového projektu podmienku, ktorá sa mýli.
+
+    Mýliť sa dá na obe strany a obe sa už stali:
+    - porovnanie s JEDINÝM slovom sa minie s hodnotou a náhľad sa vôbec nezapne (ICCINT-93);
+    - PRAVDIVOSTNÁ kontrola prijme aj reťazec ``"false"``, takže vypnutie by náhľad ZAPLO (ICCINT-95).
+
+    ⚠️ Zoznam sa sem NEPÍŠE ručne — číta sa z ``vizual_sandbox.PREVIEW_ON``, teda z toho istého miesta,
+    z ktorého ho číta stráž v ``backend/tests``. Dva ručné opisy toho istého pravidla sa raz rozídu a
+    presne to sa 09.09.2026 stalo: táto stráž vynucovala pravdivostnú kontrolu, kým vedľa nej vznikala
+    oprava, ktorá ju ruší — a CI spadlo na rozpore dvoch tvrdení o tej istej veci.
+    """
     import re as _re
 
+    from backend.services.vizual_sandbox import PREVIEW_ON
+
     main = _skeleton_file("src/main.tsx")
-    assert _re.search(r"if \(import\.meta\.env\.VITE_PREVIEW\)", main), (
-        "podmienka nie je pravdivostná — porovnanie so slovom sa už raz minulo s hodnotou"
+    prijima = _re.findall(r'(?:VITE_PREVIEW|previewFlag)\s*===\s*"([^"]*)"', main)
+
+    assert prijima, "podmienka je pravdivostná — prijme aj „false“ a vypnutie by náhľad zaplo (ICCINT-95)"
+    assert sorted(prijima) == sorted(PREVIEW_ON), (
+        f"šablóna prijíma {prijima}, dohodnutý zoznam je {PREVIEW_ON} — nový projekt by mal inú "
+        "predstavu než pieskovisko"
     )
-    assert not _re.search(r'VITE_PREVIEW\s*(?:===|!==)\s*"', main)
 
 
 def test_the_template_brings_the_library_the_preview_needs() -> None:
