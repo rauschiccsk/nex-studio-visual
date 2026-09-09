@@ -6,6 +6,7 @@
  *   - ``GET    /projects/{projectId}/versions``        → listVersions
  *   - ``POST   /projects/{projectId}/versions``        → createVersion
  *   - ``GET    /versions/{id}``                        → getVersion
+ *   - ``GET    /projects/{projectId}/zadanie-na-disku`` → peekZadanieOnDisk
  *   - ``PATCH  /versions/{id}``                        → updateVersion
  *   - ``POST   /versions/{id}/release``                → releaseVersion
  */
@@ -58,6 +59,24 @@ export function writeZadanie(
  */
 export function readZadanie(versionId: string): Promise<{ content: string }> {
   return api.get<{ content: string }>(`/versions/${versionId}/zadanie`);
+}
+
+/**
+ * Čo pre toto číslo verzie na disku UŽ leží — ešte pred jej založením (ICCINT-90).
+ *
+ * `readZadanie` sa pýta cez `versionId`, takže odpovie až vtedy, keď verzia existuje. Pri zakladaní
+ * verzie ešte žiadne `versionId` niet — a práve vtedy sa Manažér potrebuje dozvedieť, že v priečinku
+ * pripravené Zadanie je. Bez toho ho prehliadne a napíše vlastné vedľa neho.
+ *
+ * `content` je `""`, keď súbor neexistuje — bežný prípad, nie chyba.
+ */
+export function peekZadanieOnDisk(
+  projectId: string,
+  versionNumber: string,
+): Promise<{ content: string; relative_path: string }> {
+  return api.get<{ content: string; relative_path: string }>(
+    `/projects/${projectId}/zadanie-na-disku?version_number=${encodeURIComponent(versionNumber)}`,
+  );
 }
 
 /** Partially update a version's mutable fields. */

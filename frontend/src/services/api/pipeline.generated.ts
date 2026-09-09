@@ -1729,6 +1729,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/zadanie-na-disku": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Peek Zadanie
+         * @description Čo pre toto číslo verzie na disku už leží — ešte PRED jej založením (ICCINT-90).
+         *
+         *     ``GET /versions/{id}/zadanie`` odpovie až vtedy, keď verzia existuje. Kým ju Manažér len zakladá,
+         *     nemá ako tušiť, že v priečinku pripravené Zadanie je — dozvie sa to až pri zrážke, po tom, čo
+         *     napíše vlastný text. Táto cesta mu to povie hneď.
+         *
+         *     ``content`` je ``""``, keď súbor neexistuje — to nie je chyba, je to bežný prípad.
+         *
+         *     **422** — číslo verzie nemá tvar ``1.2.3``. **404** — projekt neexistuje.
+         */
+        get: operations["peek_zadanie_api_v1_projects__project_id__zadanie_na_disku_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{slug}/customers": {
         parameters: {
             query?: never;
@@ -5995,6 +6023,16 @@ export interface components {
             launch_url: string;
         };
         /**
+         * _ZadaniePeekResponse
+         * @description Odpoveď na ``GET /projects/{project_id}/zadanie-na-disku``.
+         */
+        _ZadaniePeekResponse: {
+            /** Content */
+            content: string;
+            /** Relative Path */
+            relative_path: string;
+        };
+        /**
          * _ZadanieReadResponse
          * @description Response for ``GET /versions/{version_id}/zadanie``.
          */
@@ -8825,6 +8863,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VersionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    peek_zadanie_api_v1_projects__project_id__zadanie_na_disku_get: {
+        parameters: {
+            query: {
+                version_number: string;
+            };
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["_ZadaniePeekResponse"];
                 };
             };
             /** @description Validation Error */

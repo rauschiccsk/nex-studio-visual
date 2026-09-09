@@ -12,14 +12,20 @@ import {
 } from "@/services/api/projects";
 import { NexsharedUpgradePrompt } from "@/components/riadiace/NexsharedUpgradePrompt";
 import { DirtyTreeGuard } from "@/components/riadiace/DirtyTreeGuard";
-import { listVersions, createVersion, writeZadanie } from "@/services/api/versions";
+import {
+  listVersions,
+  createVersion,
+  writeZadanie,
+  updateVersion,
+  peekZadanieOnDisk,
+} from "@/services/api/versions";
 import { postPipelineActionApi } from "@/services/api/pipeline";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import { ApiError } from "@/services/api";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
 import type { ProjectRead } from "@/types";
-import type { Version } from "@/types/version";
+import type { Version, VersionUpdate } from "@/types/version";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -76,7 +82,11 @@ export default function NewVersionPage() {
   const [formError, setFormError] = useState<HumanError | null>(null);
   // ICCINT-71: čo už na disku je. Kým to Manažér nevidí, nemá sa ako rozhodnúť — a presne tak sa
   // 07.09.2026 stratila celá zákaznícka špecifikácia.
-  const [existingZadanie, setExistingZadanie] = useState<string | null>(null);
+  //
+  // ``origin`` hovorí, odkiaľ o ňom vieme: „clash" = narazili sme naň až pri ukladaní (ICCINT-71),
+  // „peek" = videli sme ho ešte pred založením verzie (ICCINT-90). Ten rozdiel Manažér musí vidieť —
+  // pri zrážke sa niečo NEuložilo, pri nahliadnutí sa nestalo nič a len sa mu to ukazuje.
+  const [existingZadanie, setExistingZadanie] = useState<{ text: string; origin: "clash" | "peek" } | null>(null);
   // ICCINT-71 (druhé kolo): verzia vzniká pred zápisom Zadania. Keď zápis odmietneme, verzia už existuje —
   // bez tejto pamäte by druhý pokus padol na „verzia už existuje" a formulár by sa zasekol.
   const [createdVersion, setCreatedVersion] = useState<Version | null>(null);
@@ -133,6 +143,40 @@ export default function NewVersionPage() {
   }, [slug]);
 
   useEffect(() => { verRef.current?.focus(); }, []);
+
+  // ICCINT-90: keď pre toto číslo verzie na disku UŽ pripravené Zadanie je, povedz to HNEĎ — nie až
+  // keď naň Manažér narazí pri ukladaní. Poistka proti prepísaniu (ICCINT-71) je správna a zostáva,
+  // ale ozve sa až po tom, čo napíše vlastný text; dovtedy nemá ako tušiť, že tam niečo je, a to
+  // pripravené prehliadne. Zmerané 09.09.2026 pri zakladaní NEX Manager 1.1.0.
+  //
+  // Iba UKAZUJE — do poľa nikdy nesiahne. Prevziať ho je rozhodnutie Manažéra, jedným kliknutím.
+  useEffect(() => {
+    const cislo = versionNumber.trim();
+    if (!project || createdVersion || !/^\d+\.\d+\.\d+$/.test(cislo)) return;
+    let cancelled = false;
+    // Číslo sa píše po znakoch — bez odkladu by odišiel dotaz na každý stlačený kláves.
+    const t = setTimeout(() => {
+      peekZadanieOnDisk(project.id, cislo)
+        .then((res) => {
+          if (cancelled) return;
+          if (res.content.trim()) {
+            setExistingZadanie({ text: res.content, origin: "peek" });
+          } else {
+            // Číslo sa zmenilo na také, pre ktoré na disku nič nie je — starý panel musí zmiznúť,
+            // inak ukazuje Zadanie patriace inej verzii. Zrážky sa nedotýkame: tá hovorí o tom, čo sa
+            // práve NEuložilo, a musí zostať na obrazovke.
+            setExistingZadanie((prev) => (prev?.origin === "peek" ? null : prev));
+          }
+        })
+        .catch(() => {
+          // Nahliadnutie je pomoc navyše, nie brána. Keď zlyhá, formulár funguje ako dosiaľ a poistka
+          // proti prepísaniu (ICCINT-71) stále stráži — takže sa nič nestratí, len sa to Manažér
+          // dozvie neskôr. Vlastnou hláškou by sme mu do cesty postavili chybu, ktorá ho nebrzdí.
+        });
+    }, 400);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [project, versionNumber, createdVersion]);
+
 
   const lastVersion = prevVersions.length > 0
     ? [...prevVersions].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
@@ -271,13 +315,29 @@ export default function NewVersionPage() {
       // ICCINT-71 (druhé kolo): verzia sa zakladá PRED zápisom Zadania, takže keď zápis odmietneme, verzia
       // už existuje — a ďalší pokus by padol na „verzia už existuje". Zmerané na 0.2.0 07.09.2026: formulár
       // sa zasekol. Keď je založená, druhý pokus ju len použije.
-      const v = createdVersion ?? (await createVersion(project.id, {
-        version_number: versionNumber.trim(),
-        name: name.trim() || undefined,
-        // The version's free-text intent mirrors the Zadanie so the version list shows a summary.
-        description: zadanie.trim() || undefined,
-        target_date: targetDate || undefined,
-      }));
+      //
+      // ⚠️ ICCINT-91: „len ju použiť" znamenalo aj ZAHODIŤ všetko, čo Manažér medzitým v hlavičke prepísal.
+      // Polia Číslo verzie, Názov a Cieľový dátum zostávajú po neúspechu zapisovateľné, ale ich obsah sa
+      // už neposielal. Zmerané 09.09.2026 na NEX Manager 1.1.0: Director po prvom neúspechu prepísal názov
+      // na „Inštalovateľná aplikácia PWA", uložil — a v evidencii zostal pôvodný. Nikde sa to nepovedalo.
+      // Pole, ktoré sa dá písať a nič nerobí, je horšie než pole zamknuté.
+      let v: Version;
+      if (createdVersion) {
+        const zmeny: VersionUpdate = {};
+        if (versionNumber.trim() !== createdVersion.version_number) zmeny.version_number = versionNumber.trim();
+        if (name.trim() !== (createdVersion.name ?? "")) zmeny.name = name.trim();
+        if ((targetDate || "") !== (createdVersion.target_date ?? "")) zmeny.target_date = targetDate;
+        if (zadanie.trim() !== (createdVersion.description ?? "")) zmeny.description = zadanie.trim();
+        v = Object.keys(zmeny).length > 0 ? await updateVersion(createdVersion.id, zmeny) : createdVersion;
+      } else {
+        v = await createVersion(project.id, {
+          version_number: versionNumber.trim(),
+          name: name.trim() || undefined,
+          // The version's free-text intent mirrors the Zadanie so the version list shows a summary.
+          description: zadanie.trim() || undefined,
+          target_date: targetDate || undefined,
+        });
+      }
       setCreatedVersion(v);
       // Persist the brief to the spec tree the Príprava phase reads — ONLY when non-empty. A blank Zadanie
       // writes NO customer-requirements.md (STEP 2): the directive's "read it IF EXISTS" stays a clean
@@ -294,7 +354,7 @@ export default function NewVersionPage() {
           ? ((err.data as { detail?: { existing?: string; message?: string } })?.detail)
           : undefined;
       if (clash?.existing) {
-        setExistingZadanie(clash.existing);
+        setExistingZadanie({ text: clash.existing, origin: "clash" });
         setFormError({
           message:
             clash.message ??
@@ -525,16 +585,20 @@ export default function NewVersionPage() {
               <div className="rounded-lg border border-[var(--color-border)] p-3 space-y-2">
                 {/* ⚠️ Žiadne vlastné počítanie riadkov. Panel ukazoval 72, hláška nad ním 71 — to isté číslo
                     z dvoch miest. Počet povie engine v hláške; tu je samotný text. */}
-                <p className="text-sm">Toto zadanie už pre verziu existuje:</p>
+                <p className="text-sm">
+                  {existingZadanie.origin === "peek"
+                    ? `Pre verziu ${versionNumber.trim()} už na disku pripravené zadanie leží:`
+                    : "Toto zadanie už pre verziu existuje:"}
+                </p>
                 <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs bg-[var(--color-surface-2)] p-2 rounded">
-                  {existingZadanie}
+                  {existingZadanie.text}
                 </pre>
                 <div className="flex gap-2">
                   <button
                     type="button"
                     className="text-sm underline"
                     onClick={() => {
-                      setZadanie(existingZadanie);
+                      setZadanie(existingZadanie.text);
                       setExistingZadanie(null);
                       setFormError(null);
                     }}
@@ -542,7 +606,9 @@ export default function NewVersionPage() {
                     Prevziať toto zadanie do poľa
                   </button>
                   <span className="text-xs opacity-70">
-                    Potom ho môžeš doplniť a uložiť — nič sa nestratí.
+                    {existingZadanie.origin === "peek"
+                      ? "Alebo ho nechaj tak a napíš vlastné — prepísať sa ti ho nepodarí omylom."
+                      : "Potom ho môžeš doplniť a uložiť — nič sa nestratí."}
                   </span>
                 </div>
               </div>

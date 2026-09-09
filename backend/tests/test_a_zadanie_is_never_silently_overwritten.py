@@ -92,3 +92,64 @@ def test_an_empty_file_is_not_something_to_protect(db_session, tmp_path, monkeyp
     version_service.write_zadanie(db_session, version.id, "Prvé zadanie.")
 
     assert (cesta / "customer-requirements.md").read_text(encoding="utf-8") == "Prvé zadanie."
+
+
+def test_it_says_what_is_on_disk_before_the_version_even_exists(db_session, tmp_path, monkeypatch) -> None:
+    """⚠️ Jadro ICCINT-90: pripravené Zadanie musí byť vidieť UŽ pri zakladaní verzie.
+
+    Poistka vyššie je správna, ale ozve sa až po zrážke — teda po tom, čo Manažér napíše vlastný text
+    a klikne Uložiť. Dovtedy nemá ako tušiť, že v priečinku niečo leží, takže to pripravené prehliadne
+    a píše vedľa neho. Zmerané 09.09.2026 pri zakladaní NEX Manager 1.1.0.
+
+    Nahliadnutie sa pýta cez ``project_id`` + číslo verzie práve preto, že vtedy ešte žiadne
+    ``version_id`` neexistuje — to je celý rozdiel oproti :func:`read_zadanie`.
+    """
+    version = _seed(db_session, tmp_path, monkeypatch, slug="nahliadne")
+    cesta = tmp_path / "nahliadne" / "docs" / "specs" / "versions" / "v1.1.0"
+    cesta.mkdir(parents=True)
+    cesta.joinpath("customer-requirements.md").write_text("Pripravené vopred.\n", encoding="utf-8")
+
+    obsah, rel = version_service.peek_zadanie(db_session, version.project_id, "1.1.0")
+
+    assert obsah == "Pripravené vopred.\n", "nahliadnutie nevrátilo to, čo na disku naozaj leží"
+    assert rel == "docs/specs/versions/v1.1.0/customer-requirements.md"
+
+
+def test_nothing_on_disk_is_an_ordinary_answer_not_an_error(db_session, tmp_path, monkeypatch) -> None:
+    """Prázdny priečinok je bežný prípad — väčšina verzií sa zakladá do prázdna."""
+    version = _seed(db_session, tmp_path, monkeypatch, slug="prazdno")
+
+    obsah, _ = version_service.peek_zadanie(db_session, version.project_id, "9.9.9")
+
+    assert obsah == "", "nahliadnutie do prázdneho priečinka sa musí správať pokojne, nie ako chyba"
+
+
+def test_the_peek_reads_exactly_the_file_the_writer_writes(db_session, tmp_path, monkeypatch) -> None:
+    """⚠️ Tri miesta, jedna cesta — inak by nahliadnutie ukazovalo iný súbor, než sa zapisuje.
+
+    Zápis, čítanie aj nahliadnutie si cestu predtým počítali každý sám a pri každom stál komentár
+    „tieto sa nikdy nesmú rozísť". Komentár rozchod nezastaví. Toto tvrdenie áno: zapíše sa Zadanie
+    a hneď sa naň nahliadne — keby si cesty rozišli, vráti sa prázdno.
+    """
+    version = _seed(db_session, tmp_path, monkeypatch, slug="jedna-cesta")
+
+    zapisana = version_service.write_zadanie(db_session, version.id, "Text zapísaný službou.")
+    obsah, nahliadnuta = version_service.peek_zadanie(db_session, version.project_id, "0.2.0")
+
+    assert nahliadnuta == zapisana, "zápis a nahliadnutie sa rozišli v ceste k tomu istému súboru"
+    assert obsah == "Text zapísaný službou."
+    assert version_service.read_zadanie(db_session, version.id) == obsah, "a čítanie sa rozišlo tiež"
+
+
+def test_a_version_number_cannot_climb_out_of_the_project(db_session, tmp_path, monkeypatch) -> None:
+    """Číslo verzie je súčasťou názvu priečinka a chodí zvonku — cesta z projektu utiecť nesmie.
+
+    Prvá obrana je tvarová kontrola v smerovači (číslo musí vyzerať ako ``1.2.3``); toto je tá druhá,
+    v službe. Vstup je zvolený tak, aby zo stromu projektu naozaj vyliezol — ``v`` na začiatku názvu
+    priečinka prvý krok nahor pohltí, takže naivnejšie ``../..`` by z projektu ani nevyšlo a tvrdenie
+    by nič nemeralo.
+    """
+    version = _seed(db_session, tmp_path, monkeypatch, slug="neutecie")
+
+    with pytest.raises(ValueError, match="escapes the project root"):
+        version_service.peek_zadanie(db_session, version.project_id, "./../../../../../etc")

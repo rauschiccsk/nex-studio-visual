@@ -275,6 +275,29 @@ def create(
     return version
 
 
+def _zadanie_paths(slug: str, version_number: str) -> tuple[str, Path]:
+    """Kde Zadanie danej verzie leží — JEDINÉ miesto, kde sa tá cesta počíta.
+
+    Zapisovanie, čítanie aj nahliadnutie pred založením verzie si ju predtým počítali každý sám a pri
+    každom stál komentár „tieto dve sa nikdy nesmú rozísť“. Komentár rozchod nezastaví; spoločná funkcia
+    áno. Zhoduje sa s ``orchestrator._version_spec_rel`` — keby sa rozišli, agent by čítal prázdne Zadanie.
+
+    Vracia dvojicu (cesta v repozitári, absolútna cesta). Absolútna cesta je overená, že zo stromu
+    projektu neuteká — číslo verzie chodí zvonku a je súčasťou názvu priečinka.
+
+    Raises:
+        ValueError: vypočítaná cesta by opustila priečinok projektu.
+    """
+    rel_path = f"docs/specs/versions/v{version_number}/customer-requirements.md"
+    abs_path = (_PROJECTS_ROOT / slug / rel_path).resolve()
+    project_root = (_PROJECTS_ROOT / slug).resolve()
+    try:
+        abs_path.relative_to(project_root)
+    except ValueError as exc:
+        raise ValueError("Resolved Zadanie path escapes the project root") from exc
+    return rel_path, abs_path
+
+
 class ZadanieWouldBeOverwritten(Exception):
     """Saving this Zadanie would destroy a different Zadanie that is already on disk (ICCINT-71).
 
@@ -328,17 +351,7 @@ def write_zadanie(db: Session, version_id: UUID, content: str, *, replace_existi
         raise ValueError(f"Version {version_id} not found")
     version_number, slug = row
 
-    # Mirrors orchestrator._version_spec_rel / _priprava_directive: the Zadanie lives at
-    # docs/specs/versions/v<version_number>/customer-requirements.md.
-    rel_path = f"docs/specs/versions/v{version_number}/customer-requirements.md"
-    abs_path = (_PROJECTS_ROOT / slug / rel_path).resolve()
-
-    # Defense in depth: the resolved path must stay within the project workspace.
-    project_root = (_PROJECTS_ROOT / slug).resolve()
-    try:
-        abs_path.relative_to(project_root)
-    except ValueError as exc:
-        raise ValueError("Resolved Zadanie path escapes the project root") from exc
+    rel_path, abs_path = _zadanie_paths(slug, version_number)
 
     if not replace_existing and abs_path.is_file():
         existing = abs_path.read_text(encoding="utf-8")
@@ -371,14 +384,32 @@ def read_zadanie(db: Session, version_id: UUID) -> str:
     if row is None:
         raise ValueError(f"Version {version_id} not found")
     version_number, slug = row
-    rel_path = f"docs/specs/versions/v{version_number}/customer-requirements.md"
-    abs_path = (_PROJECTS_ROOT / slug / rel_path).resolve()
-    project_root = (_PROJECTS_ROOT / slug).resolve()
-    try:
-        abs_path.relative_to(project_root)
-    except ValueError as exc:
-        raise ValueError("Resolved Zadanie path escapes the project root") from exc
+    _, abs_path = _zadanie_paths(slug, version_number)
     return abs_path.read_text(encoding="utf-8") if abs_path.is_file() else ""
+
+
+def peek_zadanie(db: Session, project_id: UUID, version_number: str) -> tuple[str, str]:
+    """Čo pre TOTO číslo verzie na disku už je — ešte pred jej založením (ICCINT-90).
+
+    :func:`read_zadanie` sa pýta cez ``version_id``, takže odpovie až vtedy, keď verzia existuje. Kým
+    Manažér verziu len zakladá, žiadne ``version_id`` niet — a práve vtedy sa potrebuje dozvedieť, že
+    v priečinku už pripravené Zadanie leží.
+
+    ⚠️ **Prečo to nestačí zistiť pri zrážke.** Poistka proti prepísaniu (ICCINT-71) je správna, ale
+    ozve sa až po tom, čo Manažér napíše vlastný text a klikne Uložiť. Dovtedy nemá ako tušiť, že tam
+    niečo je — takže pripravené Zadanie prehliadne a píše vedľa neho. Zmerané 09.09.2026 pri zakladaní
+    NEX Manager 1.1.0.
+
+    Vracia dvojicu (obsah, cesta v repozitári); obsah je ``""``, keď súbor neexistuje.
+
+    Raises:
+        ValueError: projekt neexistuje (smerovač to premení na HTTP 404).
+    """
+    slug = db.execute(select(Project.slug).where(Project.id == project_id)).scalar_one_or_none()
+    if slug is None:
+        raise ValueError(f"Project {project_id} not found")
+    rel_path, abs_path = _zadanie_paths(slug, version_number)
+    return (abs_path.read_text(encoding="utf-8") if abs_path.is_file() else ""), rel_path
 
 
 def update(db: Session, version_id: UUID, data: VersionUpdate) -> Version:

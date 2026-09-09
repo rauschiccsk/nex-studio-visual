@@ -76,6 +76,11 @@ router = APIRouter(tags=["Versions"])
 # while still surfacing structured IDs in the 422 response.
 _BLOCKING_IDS_RE = re.compile(r"\[([^\]]*)\]")
 
+#: Číslo verzie je súčasťou názvu priečinka na disku. Tvar sa preto overuje TU, na vstupe — nie až
+#: v službe, kde by z neho bola len záhadná cesta. (Únik zo stromu projektu blokuje aj
+#: ``version._zadanie_paths``; toto je prvá z tých dvoch obrán, nie jediná.)
+_SEMVER_RE = re.compile(r"\d+\.\d+\.\d+")
+
 
 def _map_value_error(exc: ValueError) -> HTTPException:
     """Translate a service-layer ``ValueError`` into an HTTP exception.
@@ -467,6 +472,43 @@ def read_zadanie(
     except ValueError as exc:
         raise _map_value_error(exc) from exc
     return _ZadanieReadResponse(content=content)
+
+
+class _ZadaniePeekResponse(BaseModel):
+    """Odpoveď na ``GET /projects/{project_id}/zadanie-na-disku``."""
+
+    content: str
+    relative_path: str
+
+
+@router.get("/projects/{project_id}/zadanie-na-disku", response_model=_ZadaniePeekResponse)
+def peek_zadanie(
+    project_id: UUID,
+    version_number: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> _ZadaniePeekResponse:
+    """Čo pre toto číslo verzie na disku už leží — ešte PRED jej založením (ICCINT-90).
+
+    ``GET /versions/{id}/zadanie`` odpovie až vtedy, keď verzia existuje. Kým ju Manažér len zakladá,
+    nemá ako tušiť, že v priečinku pripravené Zadanie je — dozvie sa to až pri zrážke, po tom, čo
+    napíše vlastný text. Táto cesta mu to povie hneď.
+
+    ``content`` je ``""``, keď súbor neexistuje — to nie je chyba, je to bežný prípad.
+
+    **422** — číslo verzie nemá tvar ``1.2.3``. **404** — projekt neexistuje.
+    """
+    authz.assert_project_id_access(db, current_user, project_id)
+    if not _SEMVER_RE.fullmatch(version_number):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Číslo verzie musí byť v tvare 1.2.3.",
+        )
+    try:
+        content, rel = version_service.peek_zadanie(db, project_id, version_number)
+    except ValueError as exc:
+        raise _map_value_error(exc) from exc
+    return _ZadaniePeekResponse(content=content, relative_path=rel)
 
 
 @router.post("/versions/{version_id}/reset-tasks", status_code=status.HTTP_200_OK)

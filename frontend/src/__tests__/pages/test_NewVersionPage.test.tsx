@@ -30,6 +30,8 @@ const {
   listVersionsMock,
   createVersionMock,
   writeZadanieMock,
+  updateVersionMock,
+  peekZadanieOnDiskMock,
   postPipelineActionApiMock,
 } = vi.hoisted(() => ({
   navigateMock: vi.fn(),
@@ -42,6 +44,8 @@ const {
   listVersionsMock: vi.fn(),
   createVersionMock: vi.fn(),
   writeZadanieMock: vi.fn(),
+  updateVersionMock: vi.fn(),
+  peekZadanieOnDiskMock: vi.fn(),
   postPipelineActionApiMock: vi.fn(),
 }));
 
@@ -62,6 +66,8 @@ vi.mock("@/services/api/versions", () => ({
   listVersions: listVersionsMock,
   createVersion: createVersionMock,
   writeZadanie: writeZadanieMock,
+  updateVersion: updateVersionMock,
+  peekZadanieOnDisk: peekZadanieOnDiskMock,
 }));
 vi.mock("@/services/api/pipeline", () => ({ postPipelineActionApi: postPipelineActionApiMock }));
 vi.mock("@/store/activeContextStore", () => ({
@@ -106,6 +112,20 @@ const dirtyTree: GitStatus = {
 };
 const cleanTree: GitStatus = { clean: true, dirty_count: 0, files: [], truncated: false };
 
+/** Verzia tak, ako ju engine naozaj vracia — mock, ktorý je chudobnejší, meria sám seba. */
+const version = {
+  id: "v1",
+  project_id: "p1",
+  version_number: "0.1.0", // to isté číslo, aké formulár pri prázdnom zozname navrhne
+  name: null as string | null,
+  status: "planned" as const,
+  description: null,
+  target_date: null,
+  release_date: null,
+  created_at: "2026-09-09T00:00:00Z",
+  updated_at: "2026-09-09T00:00:00Z",
+};
+
 const behindNexshared: NexsharedStatus = {
   current: "0.18.0",
   latest: "0.19.0",
@@ -122,6 +142,8 @@ beforeEach(() => {
   getGitStatusApiMock.mockResolvedValue(cleanTree);
   commitGitApiMock.mockResolvedValue({ ok: true });
   discardGitApiMock.mockResolvedValue({ ok: true });
+  // Nahliadnutie na disk je súčasťou zakladania — predvolene tam nič nie je (bežný prípad).
+  peekZadanieOnDiskMock.mockResolvedValue({ content: "", relative_path: "" });
 });
 
 async function renderPage() {
@@ -238,7 +260,11 @@ describe("NewVersionPage — nex-shared upgrade tells the truth about committed"
 
 describe("NewVersionPage — existujúce zadanie sa neprepíše ticho (ICCINT-71)", () => {
   it("ukáže, čo v súbore je, namiesto všeobecnej hlášky o zlyhaní", async () => {
-    createVersionMock.mockResolvedValue({ id: "v-1", version_number: "0.2.0" });
+    // Mock musí vrátiť to, čo engine naozaj vracia — inak formulár nemá s čím porovnať
+    // prepísanú hlavičku (ICCINT-91) a test meria tvar mocku, nie správanie stránky.
+    // ⚠️ Mock musí vrátiť to, čo do zakladania naozaj išlo. Keby vrátil hlavičku, akú formulár nikdy
+    // neposlal, druhý pokus by ju „opravoval" a test by meral tvar mocku, nie správanie stránky.
+    createVersionMock.mockResolvedValue({ ...version, id: "v-1", description: "Jedna veta." });
     writeZadanieMock.mockRejectedValue(
       new ApiError(409, "conflict", {
         detail: {
@@ -258,7 +284,11 @@ describe("NewVersionPage — existujúce zadanie sa neprepíše ticho (ICCINT-71
   });
 
   it("druhý pokus verziu nezakladá znova — inak sa formulár zasekne", async () => {
-    createVersionMock.mockResolvedValue({ id: "v-1", version_number: "0.2.0" });
+    // Mock musí vrátiť to, čo engine naozaj vracia — inak formulár nemá s čím porovnať
+    // prepísanú hlavičku (ICCINT-91) a test meria tvar mocku, nie správanie stránky.
+    // ⚠️ Mock musí vrátiť to, čo do zakladania naozaj išlo. Keby vrátil hlavičku, akú formulár nikdy
+    // neposlal, druhý pokus by ju „opravoval" a test by meral tvar mocku, nie správanie stránky.
+    createVersionMock.mockResolvedValue({ ...version, id: "v-1", description: "Jedna veta." });
     writeZadanieMock.mockRejectedValue(
       new ApiError(409, "conflict", {
         detail: { message: "Už existuje.", existing: "# Obsah\n" },
@@ -276,5 +306,90 @@ describe("NewVersionPage — existujúce zadanie sa neprepíše ticho (ICCINT-71
 
     await waitFor(() => expect(writeZadanieMock).toHaveBeenCalledTimes(2));
     expect(createVersionMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * ICCINT-90 / ICCINT-91 — zakladanie verzie nesmie nič zatajiť ani ticho zahodiť.
+ *
+ * Oba nálezy pochádzajú z jedného sedenia (NEX Manager 1.1.0, 09.09.2026) a oba majú tú istú povahu:
+ * obrazovka sa tvárila, že je všetko v poriadku, hoci nebolo. Raz mlčala o zadaní, ktoré už na disku
+ * ležalo; druhýkrát prijala text do polí, ktoré sa už nikam neposielali.
+ */
+describe("NewVersionPage — pripravené zadanie a úpravy hlavičky", () => {
+  it("ukáže pripravené zadanie UŽ pri zakladaní, nie až po zrážke (ICCINT-90)", async () => {
+    peekZadanieOnDiskMock.mockResolvedValue({
+      content: "Sedem strán rozmyslenej práce.",
+      relative_path: "docs/specs/versions/v0.1.0/customer-requirements.md",
+    });
+
+    await renderPage();
+
+    expect(await screen.findByText(/už na disku pripravené zadanie leží/i)).toBeInTheDocument();
+    expect(screen.getByText("Sedem strán rozmyslenej práce.")).toBeInTheDocument();
+    // ⚠️ Iba ukazuje. Keby si do poľa siahlo samo, prepísalo by rozpísaný text Manažéra.
+    expect(screen.getByPlaceholderText(/Opíš, čo má verzia priniesť/i)).toHaveValue("");
+    // A nič sa nezakladalo — nahliadnutie je otázka, nie zásah.
+    expect(createVersionMock).not.toHaveBeenCalled();
+  });
+
+  it("nezakričí o zadaní, keď na disku pre toto číslo verzie nič nie je", async () => {
+    await renderPage();
+    await waitFor(() => expect(peekZadanieOnDiskMock).toHaveBeenCalled());
+
+    expect(screen.queryByText(/pripravené zadanie leží/i)).not.toBeInTheDocument();
+  });
+
+  it("po prvom neúspechu uloží prepísaný názov, nie ten pôvodný (ICCINT-91)", async () => {
+    createVersionMock.mockResolvedValue({ ...version, name: "Inštalovateľná appka", description: "Moje zadanie." });
+    // Prvé uloženie odmietne poistka proti prepísaniu — verzia však už vznikla.
+    writeZadanieMock.mockRejectedValueOnce(
+      new ApiError(409, "conflict", {
+        detail: { existing: "Text na disku.", message: "Pre túto verziu už zadanie existuje." },
+      }),
+    );
+    updateVersionMock.mockImplementation((_id: string, data: Record<string, unknown>) =>
+      Promise.resolve({ ...version, ...data }),
+    );
+    writeZadanieMock.mockResolvedValue({ relative_path: "x", status: "saved" });
+
+    await renderPage();
+    await userEvent.type(await screen.findByPlaceholderText(/napr. platobný modul/i), "Inštalovateľná appka");
+    await userEvent.type(screen.getByPlaceholderText(/Opíš, čo má verzia priniesť/i), "Moje zadanie.");
+    await userEvent.click(screen.getByRole("button", { name: /uložiť zadanie/i }));
+    expect(await screen.findByRole("button", { name: /prevziať toto zadanie do poľa/i })).toBeInTheDocument();
+
+    // Director prepíše názov a uloží znova — presne to, čo sa 09.09.2026 ticho stratilo.
+    const nazov = screen.getByPlaceholderText(/napr. platobný modul/i);
+    await userEvent.clear(nazov);
+    await userEvent.type(nazov, "Inštalovateľná aplikácia PWA");
+    await userEvent.click(screen.getByRole("button", { name: /uložiť zadanie/i }));
+
+    await waitFor(() => expect(updateVersionMock).toHaveBeenCalled());
+    expect(updateVersionMock).toHaveBeenCalledWith("v1", expect.objectContaining({ name: "Inštalovateľná aplikácia PWA" }));
+    // A verzia sa nezakladá druhýkrát — na to je pamäť z ICCINT-71.
+    expect(createVersionMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("nezaťažuje engine úpravou, keď sa v hlavičke nič nezmenilo", async () => {
+    // Verzia sa vracia presne s tým, čo do nej pri zakladaní išlo — takže druhý pokus nemá čo meniť.
+    createVersionMock.mockResolvedValue({ ...version, description: "Moje zadanie." });
+    writeZadanieMock.mockRejectedValueOnce(
+      new ApiError(409, "conflict", {
+        detail: { existing: "Text na disku.", message: "Pre túto verziu už zadanie existuje." },
+      }),
+    );
+    writeZadanieMock.mockResolvedValue({ relative_path: "x", status: "saved" });
+
+    await renderPage();
+    await userEvent.type(await screen.findByPlaceholderText(/Opíš, čo má verzia priniesť/i), "Moje zadanie.");
+    await userEvent.click(screen.getByRole("button", { name: /uložiť zadanie/i }));
+    expect(await screen.findByRole("button", { name: /prevziať toto zadanie do poľa/i })).toBeInTheDocument();
+
+    // Druhý pokus bez jediného doteku do hlavičky.
+    await userEvent.click(screen.getByRole("button", { name: /uložiť zadanie/i }));
+
+    await waitFor(() => expect(writeZadanieMock).toHaveBeenCalledTimes(2));
+    expect(updateVersionMock).not.toHaveBeenCalled();
   });
 });
