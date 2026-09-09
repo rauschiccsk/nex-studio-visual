@@ -84,12 +84,13 @@ def _uat_env_path(customer_slug: str, project_slug: str) -> Path:
     return uat_provisioner.UAT_ROOT / customer_slug / project_slug / ".env"
 
 
-def build_uat_launch_url(customer_slug: str, project_slug: str, uat_url: str, *, subject: str) -> Optional[str]:
-    """Return ``<uat_url>/api/v1/launch?lt=<token>`` for a token-launch app's UAT deploy, or ``None`` when
-    the deploy has no launch key/slugs wired (not token-launch, or no paired NEX Manager). The signing key
-    is used ONLY to sign — never returned, never logged."""
-    if not uat_url:
-        return None
+def _mint_launch_token(customer_slug: str, project_slug: str, *, subject: str) -> Optional[str]:
+    """Vyraz jednorazovú vstupenku do appky, alebo ``None``, keď nie je čím (ICCINT-92).
+
+    Oddelené od skladania adresy, lebo tú istú vstupenku treba vedieť podať DVOMA spôsobmi: v adrese
+    (starý tvar) aj v tele požiadavky (nový). Podpisový kľúč sa používa LEN na podpis — nikdy sa
+    nevracia ani nezapisuje do protokolu.
+    """
     env = uat_provisioner._parse_env_file(_uat_env_path(customer_slug, project_slug))
     key = env.get("MANAGER_LAUNCH_SIGNING_KEY")
     module_slug = env.get("MANAGER_MODULE_SLUG")
@@ -97,7 +98,7 @@ def build_uat_launch_url(customer_slug: str, project_slug: str, uat_url: str, *,
     if not (key and module_slug and deploy_slug):
         return None
     now = datetime.now(timezone.utc)
-    token = jwt.encode(
+    return jwt.encode(
         {
             "iss": "nex-manager",
             "aud": module_slug,
@@ -111,6 +112,17 @@ def build_uat_launch_url(customer_slug: str, project_slug: str, uat_url: str, *,
         key,
         algorithm="HS256",
     )
+
+
+def build_uat_launch_url(customer_slug: str, project_slug: str, uat_url: str, *, subject: str) -> Optional[str]:
+    """Return ``<uat_url>/api/v1/launch?lt=<token>`` for a token-launch app's UAT deploy, or ``None`` when
+    the deploy has no launch key/slugs wired (not token-launch, or no paired NEX Manager). The signing key
+    is used ONLY to sign — never returned, never logged."""
+    if not uat_url:
+        return None
+    token = _mint_launch_token(customer_slug, project_slug, subject=subject)
+    if token is None:
+        return None
     return f"{uat_url.rstrip('/')}/api/v1/launch?lt={token}"
 
 
@@ -138,14 +150,29 @@ def uat_door_opens(customer_slug: str, project_slug: str, uat_url: str, *, subje
     ``None`` never warns (the rule the CI floor and the identity pre-check follow): not being able to tell is
     not evidence that the door is shut, and an alarm that cries on ignorance is one people learn to ignore.
     """
-    launch_url = build_uat_launch_url(customer_slug, project_slug, uat_url, subject=subject)
-    if not launch_url:
+    token = _mint_launch_token(customer_slug, project_slug, subject=subject)
+    if not token:
         return None, "vstupenka sa nedá vyraziť (appka nemá spárovaný NEX Manager)"
+    launch_endpoint = f"{uat_url.rstrip('/')}/api/v1/launch"
+
+    # ICCINT-92: skús NAJPRV ten tvar, ktorý NEX Manager reálne používa — vstupenku v tele požiadavky.
+    #
+    # Dovtedy sa skúšal iba starý tvar (vstupenka v adrese). Appky majú prijímať oba, takže by kontrola
+    # svietila nazeleno aj vtedy, keby ten skutočne používaný tvar nefungoval — a to je horšie než
+    # červená: zelená stráž, ktorá neskúša tú cestu, po ktorej sa naozaj chodí. Preto sa starý tvar
+    # skúša len ako NÁHRADA, keď appka o novom nevie, a odpoveď potom povie, ktorým tvarom sa otvorilo.
+    used_legacy = False
     try:
         with httpx.Client(follow_redirects=False, timeout=_DOOR_TIMEOUT_SECONDS) as client:
-            opened = client.get(launch_url)
+            opened = client.post(launch_endpoint, data={"lt": token})
+            # 404/405 = „o tomto tvare neviem“, nie „vstupenku odmietam“. Čokoľvek iné je skutočné
+            # odmietnutie a náhrada by ho len zakryla.
+            if opened.status_code in (httpx.codes.NOT_FOUND, httpx.codes.METHOD_NOT_ALLOWED):
+                used_legacy = True
+                opened = client.get(f"{launch_endpoint}?lt={token}")
             if opened.status_code >= 400:
-                return False, f"appka vstupenku odmietla (stav {opened.status_code})"
+                shape = "starým tvarom (v adrese)" if used_legacy else "novým tvarom (v tele)"
+                return False, f"appka vstupenku odmietla {shape} (stav {opened.status_code})"
             if not opened.cookies:
                 return None, "appka po vstupe nevrátila sedenie, takže sa nedá pokračovať"
             session = client.get(f"{uat_url.rstrip('/')}{_SESSION_PATH}", cookies=opened.cookies)
@@ -155,6 +182,13 @@ def uat_door_opens(customer_slug: str, project_slug: str, uat_url: str, *, subje
     if session.status_code == httpx.codes.NOT_FOUND:
         return None, f"appka nemá {_SESSION_PATH}, takže sa vstup nedá dopovedať"
     if session.status_code == httpx.codes.OK:
+        if used_legacy:
+            # Otvorilo sa, ale iba náhradným tvarom. Nie je to porucha — appka funguje — ale NEX Manager
+            # po tejto ceste nechodí, takže overené je niečo iné než to, čo sa reálne používa. Povedať to.
+            return True, (
+                "vstup overený až po prihlásené sedenie, ale iba STARÝM tvarom (vstupenka v adrese) — "
+                "appka ešte nepozná tvar s vstupenkou v tele, ktorý NEX Manager používa"
+            )
         return True, "vstup jedným kliknutím overený až po prihlásené sedenie"
     # THE case this exists for: the ticket was accepted and the session died right after — which is what a
     # contract mismatch with the neighbour looks like from outside.

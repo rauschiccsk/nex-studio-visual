@@ -201,6 +201,13 @@ def _door(monkeypatch, tmp_path, *, launch: _Reply, session: _Reply | None = Non
         def __exit__(self, *exc):
             return False
 
+        def post(self, url, data=None, **kwargs):
+            # ICCINT-92: sonda odteraz skúša najprv tvar so vstupenkou v TELE. Tieto skúšky sú o tom,
+            # čo sa deje PO otvorení dverí (prežije sedenie?), nie o tvare — tak nech atrapa odpovie
+            # rovnako ako predtým na adresu. Tvar samotný strážia skúšky nižšie.
+            seen.append(url)
+            return launch
+
         def get(self, url, cookies=None):
             seen.append(url)
             if "/api/v1/launch" in url:
@@ -274,6 +281,9 @@ def test_an_unreachable_app_is_not_accused(tmp_path, monkeypatch) -> None:
         def __exit__(self, *exc):
             return False
 
+        def post(self, url, data=None, **kwargs):
+            raise uat_launch.httpx.ConnectError("nedostupná")
+
         def get(self, url, cookies=None):
             raise uat_launch.httpx.ConnectError("nedostupná")
 
@@ -282,3 +292,103 @@ def test_an_unreachable_app_is_not_accused(tmp_path, monkeypatch) -> None:
     opens, _ = uat_launch.uat_door_opens("acme", "demo-app", "https://uat-acme-app.isnex.eu", subject="zoltan")
 
     assert opens is None
+
+
+# ── Kontrola dverí skúša ten tvar, ktorý sa reálne používa (ICCINT-92) ────────
+#
+# NEX Manager 1.1.0 prestáva posielať vstupenku v adrese a posiela ju v tele požiadavky — lístok
+# v adrese totiž končí aj v histórii prehliadača a v záložkách. Appky majú prechodne prijímať oba tvary.
+#
+# ⚠️ Tu je tá zákernosť: keby kontrola ďalej skúšala IBA starý tvar, svietila by nazeleno aj vtedy, keby
+# ten skutočne používaný tvar nefungoval. Zelená stráž, ktorá neskúša cestu, po ktorej sa naozaj chodí,
+# je horšia než červená — presne to našla nezávislá previerka Návrhu NEX Manager 1.1.0.
+
+
+class _ShapeRecorder:
+    """Zapamätá si, čo kontrola poslala, a odpovie podľa zadaného predpisu."""
+
+    def __init__(self, post_status: int, get_status: int = 200, session_status: int = 200):
+        self.post_status = post_status
+        self.get_status = get_status
+        self.session_status = session_status
+        self.calls: list[tuple[str, str]] = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def post(self, url, data=None, **kw):
+        self.calls.append(("POST", url))
+        assert data == {"lt": _TOKEN}, "vstupenka sa neposlala v tele požiadavky"
+        return _Answer(self.post_status)
+
+    def get(self, url, **kw):
+        self.calls.append(("GET", url))
+        if url.endswith("/api/v1/session"):
+            return _Answer(self.session_status)
+        return _Answer(self.get_status)
+
+
+class _Answer:
+    def __init__(self, status_code: int):
+        self.status_code = status_code
+        self.cookies = {"session": "x"} if status_code < 400 else {}
+
+
+_TOKEN = "razena-vstupenka"
+
+
+def _shape_probe(monkeypatch, client: "_ShapeRecorder") -> None:
+    monkeypatch.setattr(uat_launch, "_mint_launch_token", lambda *a, **k: _TOKEN)
+    monkeypatch.setattr(uat_launch.httpx, "Client", lambda **kw: client)
+
+
+def test_the_door_is_tried_with_the_shape_the_manager_actually_uses(monkeypatch) -> None:
+    """⚠️ Jadro ICCINT-92: prvý pokus musí ísť novým tvarom, nie starým."""
+    client = _ShapeRecorder(post_status=200)
+    _shape_probe(monkeypatch, client)
+
+    opens, detail = uat_launch.uat_door_opens("zak", "app", "https://uat.test", subject="kto")
+
+    assert opens is True
+    assert client.calls[0][0] == "POST", "kontrola skúsila najprv starý tvar"
+    assert "STARÝM" not in detail
+
+
+def test_an_app_that_does_not_know_the_new_shape_still_opens_but_says_so(monkeypatch) -> None:
+    """Náhrada je v poriadku — appka funguje. Ale zamlčať sa nesmie: overené je niečo iné než to,
+    čo NEX Manager reálne používa, a to má Manažér vedieť."""
+    client = _ShapeRecorder(post_status=405)
+    _shape_probe(monkeypatch, client)
+
+    opens, detail = uat_launch.uat_door_opens("zak", "app", "https://uat.test", subject="kto")
+
+    assert opens is True
+    assert [c[0] for c in client.calls[:2]] == ["POST", "GET"], "náhradný tvar sa neskúsil"
+    assert "STARÝM" in detail, "zelená sa tvári, že sa overil používaný tvar"
+
+
+def test_a_real_refusal_is_not_papered_over_by_the_fallback(monkeypatch) -> None:
+    """⚠️ Náhrada platí len pre „o tomto tvare neviem“ (404/405). Keď appka vstupenku ODMIETNE, je to
+    porucha — a druhý pokus iným tvarom by ju len zakryl."""
+    client = _ShapeRecorder(post_status=401)
+    _shape_probe(monkeypatch, client)
+
+    opens, detail = uat_launch.uat_door_opens("zak", "app", "https://uat.test", subject="kto")
+
+    assert opens is False
+    assert [c[0] for c in client.calls] == ["POST"], "po odmietnutí sa skúšalo znova iným tvarom"
+    assert "novým tvarom" in detail
+
+
+def test_the_session_follow_through_still_decides(monkeypatch) -> None:
+    """Poistka pôvodnej kontroly zostáva: prijatá vstupenka nestačí, sedenie musí prežiť."""
+    client = _ShapeRecorder(post_status=200, session_status=401)
+    _shape_probe(monkeypatch, client)
+
+    opens, detail = uat_launch.uat_door_opens("zak", "app", "https://uat.test", subject="kto")
+
+    assert opens is False
+    assert "sedenie hneď nato skončilo" in detail
