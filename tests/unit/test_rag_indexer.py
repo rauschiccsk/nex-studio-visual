@@ -90,3 +90,35 @@ def test_chunk_markdown_overlap_zero_keeps_chunks_pristine():
     chunks = _idx()._chunk_markdown(content, max_chars=700, overlap=0)
     assert len(chunks) == 2
     assert chunks[1].lstrip().startswith("## B")
+
+
+# --- označenie dokumentu v korpuse (ICCINT-98) --------------------------------
+#
+# Podľa neho sa dokument v korpuse hľadá, maže a zaraďuje do kategórie. Kým sa mazanie a zápis
+# opierali o dve rôzne odvodenia toho istého, preindexovanie nezmazalo nič a pribudla druhá kópia.
+
+
+def test_a_document_is_named_the_same_however_the_caller_spells_its_path():
+    """⚠️ Jadro nálezu: absolútna cesta na disku a cesta v rámci bázy sú TEN ISTÝ dokument."""
+    v_baze = "projects/nex-studio-visual/NAVOD.md"
+    na_disku = "/home/icc/knowledge/projects/nex-studio-visual/NAVOD.md"
+
+    assert RAGIndexer._document_id(na_disku) == RAGIndexer._document_id(v_baze) == v_baze
+
+
+def test_the_category_survives_an_absolute_path():
+    """Zmerané 09.09.2026: z absolútnej cesty vyšla kategória ``home`` namiesto ``projects`` —
+    a filtrovanie podľa kategórie taký dokument nenájde."""
+    id_dokumentu = RAGIndexer._document_id("/home/icc/knowledge/projects/x/Y.md")
+
+    assert RAGIndexer._extract_category(id_dokumentu) == "projects"
+
+
+def test_a_path_outside_the_knowledge_base_is_left_alone():
+    """Cesta, ktorá pod bázou neleží, sa neskracuje — inak by sa z nej stalo označenie, ktoré klame."""
+    assert RAGIndexer._document_id("/opt/projects/nex-inbox/README.md") == "opt/projects/nex-inbox/README.md"
+
+
+def test_a_leading_slash_does_not_make_a_second_document():
+    """``/icc/DECISIONS.md`` a ``icc/DECISIONS.md`` musia byť jeden dokument, nie dva."""
+    assert RAGIndexer._document_id("/icc/DECISIONS.md") == RAGIndexer._document_id("icc/DECISIONS.md")

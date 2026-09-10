@@ -137,15 +137,25 @@ class RAGIndexer:
 
         return chunks
 
-    async def index_document(self, file_path: str, tenant: str, content: Optional[str] = None) -> dict:
-        """Read MD, chunk, embed, upsert to Qdrant. Returns stats."""
+    async def index_document(
+        self,
+        file_path: str,
+        tenant: str,
+        content: Optional[str] = None,
+        source_file: Optional[str] = None,
+    ) -> dict:
+        """Read MD, chunk, embed, upsert to Qdrant. Returns stats.
+
+        ``source_file`` je OZNAČENIE dokumentu v korpuse — to, podľa čoho sa jeho staré kúsky mažú
+        a podľa čoho sa určuje kategória. Keď sa neuvedie, odvodí sa z ``file_path``
+        (:meth:`_document_id`). Volajúci ho uvedie vtedy, keď sa cesta na disku a označenie
+        v korpuse líšia — presne to robí :meth:`reindex_document` (ICCINT-98)."""
         # Read file if content not provided
         if content is None:
             with open(file_path, "r", encoding="utf-8") as f:
                 content = f.read()
 
-        # Derive source_file (relative path used as document ID in payloads)
-        source_file = file_path.replace("\\", "/")
+        source_file = self._document_id(file_path if source_file is None else source_file)
         filename = source_file.split("/")[-1]
         category = self._extract_category(source_file)
 
@@ -301,9 +311,33 @@ class RAGIndexer:
         content: Optional[str] = None,
     ) -> dict:
         """Delete old chunks + index new. For update operations."""
-        deleted = await self.delete_document(source_file, tenant)
+        deleted = await self.delete_document(self._document_id(source_file), tenant)
         logger.info(f"Reindex: deleted {deleted} old chunks for {source_file}")
-        return await self.index_document(file_path, tenant, content=content)
+        # ⚠️ ``source_file`` sa MUSÍ odovzdať ďalej. Kým sa neodovzdával, mazalo sa podľa neho, ale
+        # zapisovalo sa podľa označenia odvodeného z ``file_path`` — a keď sa tie dve líšili, nezmazalo
+        # sa nič a vznikla druhá kópia toho istého dokumentu. Parameter, ktorý funkcia prijme a
+        # nepoužije, je horší než žiadny: sľubuje niečo, čo nerobí (ICCINT-98).
+        return await self.index_document(file_path, tenant, content=content, source_file=source_file)
+
+    @staticmethod
+    def _document_id(path: str) -> str:
+        """Označenie dokumentu v korpuse — cesta V RÁMCI Znalostnej bázy, nie na disku (ICCINT-98).
+
+        Podľa neho sa dokument v korpuse hľadá, maže a zaraďuje do kategórie. Musí byť pre ten istý
+        dokument vždy rovnaké, nech ho volajúci pomenuje absolútnou cestou alebo cestou v rámci bázy —
+        inak sa mazanie a zápis minú a v korpuse ostanú dve kópie.
+
+        ⚠️ Zmerané 09.09.2026: volanie s absolútnou cestou zapísalo dokument s označením
+        ``/home/icc/knowledge/projects/…`` a kategóriou ``home``, kým zvyšných 3 720 bodov v kolekcii
+        používa tvar ``projects/…``. Mazanie ohlásilo „no points found“ — presne ten rozchod.
+        Kategória sa určuje z prvej zložky, takže z absolútnej cesty vyšlo ``home``: filtrovanie podľa
+        kategórie taký dokument nenájde.
+        """
+        normalised = path.replace("\\", "/")
+        root = settings.knowledge_base_path.replace("\\", "/").rstrip("/")
+        if root and normalised.startswith(root + "/"):
+            normalised = normalised[len(root) + 1 :]
+        return normalised.strip("/")
 
     @staticmethod
     def _extract_category(source_file: str) -> str:
