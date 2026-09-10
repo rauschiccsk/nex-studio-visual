@@ -22,7 +22,7 @@ from typing import Any
 
 import pytest
 
-from backend.rag.indexer import RAGIndexer
+from backend.rag.indexer import DocumentMustNotBeIndexed, RAGIndexer
 
 V_BAZE = "projects/nex-studio-visual/NAVOD.md"
 NA_DISKU = "/home/icc/knowledge/projects/nex-studio-visual/NAVOD.md"
@@ -119,3 +119,66 @@ async def test_reindexing_twice_does_not_leave_two_copies(indexer_a_qdrant) -> N
 
     assert qdrant.deleted_by, "druhý beh nič nezmazal — v korpuse by ostali dve kópie"
     assert set(qdrant.deleted_by) == {V_BAZE}
+
+
+# --- prístupové údaje sa do korpusu nedostanú (ICCINT-99) ---------------------
+
+
+@pytest.mark.asyncio
+async def test_a_credentials_document_is_refused_before_anything_is_written(indexer_a_qdrant) -> None:
+    """⚠️ Obrana patrí na vstup, nie až na výstup.
+
+    Vyhľadávanie aj čítanie dokumentu kategóriu ``credentials`` bežným kontám skrývajú — lenže to je
+    clona pred niečím, čo v korpuse UŽ leží, a leží tam ticho: v prehliadači súborov ten dokument nikto
+    nevidí. Zmerané 10.09.2026: dva kúsky ``credentials/CREDENTIALS.md`` boli v kolekcii ``icc``, hoci
+    priečinok na disku už dávno neexistuje. Kópia prežila zmazanie originálu.
+    """
+    idx, qdrant = indexer_a_qdrant
+
+    with pytest.raises(DocumentMustNotBeIndexed):
+        await idx.index_document(file_path="credentials/CREDENTIALS.md", tenant="icc", content="# čokoľvek\n")
+
+    assert qdrant.upserted == [], "do korpusu sa aj tak niečo zapísalo"
+    assert qdrant.deleted_by == [], "dokument sa ani nemá začať spracúvať"
+
+
+@pytest.mark.asyncio
+async def test_the_absolute_path_does_not_smuggle_it_in(indexer_a_qdrant) -> None:
+    """Iný tvar tej istej cesty nesmie zábranu obísť — preto sa kontroluje až odvodené označenie."""
+    idx, qdrant = indexer_a_qdrant
+
+    with pytest.raises(DocumentMustNotBeIndexed):
+        await idx.index_document(
+            file_path="/home/icc/knowledge/credentials/CREDENTIALS.md", tenant="icc", content="# čokoľvek\n"
+        )
+
+    assert qdrant.upserted == []
+
+
+@pytest.mark.asyncio
+async def test_an_ordinary_document_still_goes_in(indexer_a_qdrant) -> None:
+    """Zábrana sa smie týkať iba tých kategórií — inak by sa Znalostná báza prestala indexovať celá.
+
+    Bez tohto tvrdenia by stráže vyššie prešli aj vtedy, keby indexovanie odmietalo všetko.
+    """
+    idx, qdrant = indexer_a_qdrant
+
+    await idx.index_document(file_path="projects/x/README.md", tenant="icc", content="# A\n\nB.\n")
+
+    assert qdrant.upserted, "bežný dokument sa nezaindexoval"
+
+
+def test_what_is_hidden_from_reading_is_also_never_indexed() -> None:
+    """Dve rozhodnutia o tej istej kategórii sa nesmú rozísť tým nebezpečným smerom.
+
+    Keby niekto pridal kategóriu medzi skryté pri čítaní a zabudol na indexovanie, jej obsah by sa do
+    prehľadávateľného úložiska ďalej zapisoval — a clona pri čítaní by len zakrývala, že tam je.
+    """
+    from backend.api.routes.knowledge import _RESTRICTED_CATEGORIES
+    from backend.rag.indexer import NEVER_INDEX_CATEGORIES
+
+    zabudnute = {c.lower() for c in _RESTRICTED_CATEGORIES} - {c.lower() for c in NEVER_INDEX_CATEGORIES}
+    assert not zabudnute, (
+        f"kategórie {sorted(zabudnute)} sa pri čítaní skrývajú, ale do indexu sa zapisujú — "
+        "clona pri čítaní nie je obrana, keď obsah v úložisku už leží"
+    )

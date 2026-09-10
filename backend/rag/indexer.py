@@ -36,6 +36,35 @@ from backend.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+#: Kategórie, ktoré sa do korpusu NESMÚ dostať vôbec (ICCINT-99).
+#:
+#: ⚠️ Filtrovanie až pri čítaní je obrana na nesprávnom konci. Vyhľadávanie aj čítanie dokumentu
+#: kategóriu ``credentials`` bežným kontám skrývajú, ale to je clona pred niečím, čo v korpuse už
+#: leží — a leží tam ticho: v prehliadači súborov ten dokument nikto nevidí, takže nikoho nenapadne,
+#: že ešte niekde je. Zmerané 10.09.2026: dva kúsky ``credentials/CREDENTIALS.md`` boli v kolekcii
+#: ``icc``, hoci priečinok ``/home/icc/knowledge/credentials/`` na disku už dávno neexistuje.
+#:
+#: Zápis sa preto odmieta hneď. Hlavná charta §4 zakazuje ten priečinok čo i len čítať; zaindexovať
+#: jeho obsah do prehľadávateľného úložiska je to isté o stupeň horšie, lebo kópia prežije aj zmazanie
+#: originálu.
+NEVER_INDEX_CATEGORIES: frozenset[str] = frozenset({"credentials"})
+
+
+class DocumentMustNotBeIndexed(Exception):
+    """Dokument patrí do kategórie, ktorá sa do korpusu nesmie dostať (ICCINT-99).
+
+    Nesie označenie dokumentu, nikdy nie jeho obsah — výnimka putuje do logu a do odpovede.
+    """
+
+    def __init__(self, source_file: str, category: str) -> None:
+        self.source_file = source_file
+        self.category = category
+        super().__init__(
+            f"Dokument '{source_file}' patrí do kategórie '{category}', ktorá sa do vyhľadávacieho "
+            "indexu nesmie dostať — prístupové údaje v prehľadávateľnom úložisku prežijú aj zmazanie "
+            "pôvodného súboru."
+        )
+
 
 class RAGIndexer:
     """Index documents into Qdrant: chunk -> embed -> upsert."""
@@ -158,6 +187,11 @@ class RAGIndexer:
         source_file = self._document_id(file_path if source_file is None else source_file)
         filename = source_file.split("/")[-1]
         category = self._extract_category(source_file)
+
+        # ICCINT-99: odmietni skôr, než sa čokoľvek zapíše. Zámerne až TU, po odvodení označenia —
+        # kontrola nad surovou cestou by sa dala obísť iným tvarom tej istej cesty.
+        if category.lower() in NEVER_INDEX_CATEGORIES:
+            raise DocumentMustNotBeIndexed(source_file, category)
 
         # Delete existing chunks for this document (upsert semantics)
         await self.delete_document(source_file=source_file, tenant=tenant)
