@@ -112,8 +112,10 @@ def test_prod_compose_name_and_container_image_names(tmp_path):
     assert data["services"]["backend"]["container_name"] == "andros-payables-backend"
     assert data["services"]["frontend"]["container_name"] == "andros-payables-frontend"
     assert data["services"]["db"]["container_name"] == "andros-payables-db"
-    assert data["services"]["backend"]["image"] == "andros-payables-backend:latest"
-    assert data["services"]["frontend"]["image"] == "andros-payables-frontend:latest"
+    # ICCINT-103: pripnuté na nasadenú verziu, nie ``latest``. V PROD je to podstatnejšie než v UAT:
+    # reštart zákazníckej inštalácie musí priniesť presne to, čo sa nasadilo.
+    assert data["services"]["backend"]["image"] == "andros-payables-backend:v0.0.0-dev"
+    assert data["services"]["frontend"]["image"] == "andros-payables-frontend:v0.0.0-dev"
     # No ``uat-`` prefix anywhere in the names.
     for svc in data["services"].values():
         assert not svc["container_name"].startswith("uat-")

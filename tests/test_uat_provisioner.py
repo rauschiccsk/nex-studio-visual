@@ -275,7 +275,10 @@ def test_provision_renames_containers_and_built_images(tmp_path):
     data = yaml.safe_load(res.compose_path.read_text())
     assert data["name"] == "uat-asistent"
     assert data["services"]["backend"]["container_name"] == "uat-asistent-backend"
-    assert data["services"]["backend"]["image"] == "uat-asistent-backend:latest"
+    # ICCINT-103: obraz nesie ČÍSLO NASADENEJ VERZIE, nie ``latest`` — pri ``latest`` by po ďalšom
+    # zostavení tá istá inštalácia po reštarte nabehla na iný kód. ``v0.0.0-dev`` je predvolená
+    # verzia ``provision_uat``, ktorú táto skúška nemení.
+    assert data["services"]["backend"]["image"] == "uat-asistent-backend:v0.0.0-dev"
     assert data["services"]["qdrant"]["container_name"] == "uat-asistent-qdrant"
     # Pull-through image preserved (qdrant not rebuilt).
     assert data["services"]["qdrant"]["image"] == "qdrant/qdrant:v1.13.6"
