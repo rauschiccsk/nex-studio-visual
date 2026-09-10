@@ -53,6 +53,7 @@ prefix="/api/v1")``.
 from __future__ import annotations
 
 import re
+from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -472,6 +473,37 @@ def read_zadanie(
     except ValueError as exc:
         raise _map_value_error(exc) from exc
     return _ZadanieReadResponse(content=content)
+
+
+class _VersionSettingsResponse(BaseModel):
+    """Odpoveď na ``GET /versions/{version_id}/nastavenia`` (ICCINT-100)."""
+
+    #: Veta, prečo sa číslo verzie už nedá meniť — alebo ``None``, keď sa ešte smie.
+    version_number_lock_reason: Optional[str] = None
+
+
+@router.get("/versions/{version_id}/nastavenia", response_model=_VersionSettingsResponse)
+def version_settings(
+    version_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> _VersionSettingsResponse:
+    """Čo sa na verzii ešte dá meniť (ICCINT-100).
+
+    Číslo verzie nesie priečinok s dokumentmi, takže sa smie meniť len dovtedy, kým podľa neho nič
+    nevzniklo. Obrazovka sa spýta sem, aby vedela pole buď povoliť, alebo ho **zamknúť s dôvodom** —
+    zamknuté pole bez vysvetlenia je to isté ako pole, ktoré ticho nefunguje.
+
+    Zámok sám vynucuje engine v ``PATCH`` (:func:`version_service.update`); toto je len to, čo o ňom
+    obrazovka potrebuje vedieť dopredu, nie obrana.
+    """
+    authz.assert_version_access(db, current_user, version_id)
+    try:
+        return _VersionSettingsResponse(
+            version_number_lock_reason=version_service.version_number_lock_reason(db, version_id)
+        )
+    except ValueError as exc:
+        raise _map_value_error(exc) from exc
 
 
 class _ZadaniePeekResponse(BaseModel):

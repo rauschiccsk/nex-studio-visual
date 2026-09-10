@@ -43,10 +43,17 @@ vi.mock("react-router-dom", async (importOriginal) => {
 });
 
 vi.mock("@/services/api/projects", () => ({ listProjectsApi: listProjectsApiMock }));
+// ⚠️ Dotazy na Zadanie mieria na jeho ZÁSTUPNÝ TEXT, nie na „ten textbox“. Od ICCINT-100 stojí na
+// stránke aj panel Nastavenia verzie s vlastnými poľami, takže „jediný textbox“ prestal stránku
+// určovať — a test, ktorý sa oň opiera, meria rozloženie stránky namiesto správania Zadania.
 vi.mock("@/services/api/versions", () => ({
   getVersion: getVersionMock,
   readZadanie: readZadanieMock,
   writeZadanie: writeZadanieMock,
+  // ICCINT-100: stránka odteraz nesie aj panel Nastavenia verzie. Atrapa modulu musí vrátiť VŠETKO,
+  // čo stránka volá — inak sa nemeria stránka, ale chýbajúci export.
+  getVersionSettings: vi.fn(() => Promise.resolve({ version_number_lock_reason: null })),
+  updateVersion: vi.fn(),
 }));
 vi.mock("@/services/api/pipeline", () => ({ postPipelineActionApi: postPipelineActionApiMock }));
 vi.mock("@/store/activeContextStore", () => ({
@@ -91,7 +98,7 @@ describe("VersionDetailPage — an unreadable Zadanie is its own state", () => {
 
     await waitFor(() => expect(screen.getByText(/Zadanie sa nepodarilo načítať/)).toBeInTheDocument());
     // No editor at all — a disabled empty box would still read as "nothing written yet".
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/Opíš, čo má aplikácia robiť/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Uložiť Zadanie/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: /Spustiť tvorbu špecifikácie/ })).toBeDisabled();
     // …and the intro that invites "leave it empty and start" is gone, not merely contradicted below it.
@@ -121,7 +128,9 @@ describe("VersionDetailPage — an unreadable Zadanie is its own state", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /Skúsiť znova/ }));
 
-    await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue("Skutočné zadanie na disku."));
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText(/Opíš, čo má aplikácia robiť/i)).toHaveValue("Skutočné zadanie na disku."),
+    );
     expect(screen.queryByText(/Zadanie sa nepodarilo načítať/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Uložiť Zadanie/ })).toBeEnabled();
   });
@@ -131,7 +140,7 @@ describe("VersionDetailPage — an unreadable Zadanie is its own state", () => {
 
     render(<VersionDetailPage />);
 
-    const textarea = await screen.findByRole("textbox");
+    const textarea = await screen.findByPlaceholderText(/Opíš, čo má aplikácia robiť/i);
     expect(textarea).toHaveValue("");
     expect(screen.queryByText(/Zadanie sa nepodarilo načítať/)).not.toBeInTheDocument();
     // Empty is a legitimate brief — Spustiť stays open, only Uložiť waits for text.

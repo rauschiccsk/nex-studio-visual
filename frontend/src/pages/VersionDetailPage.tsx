@@ -9,6 +9,9 @@ import ErrorNote from "@/components/common/ErrorNote";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
 import { useActiveContextSync } from "@/hooks/useActiveContextSync";
+import { useAuthStore } from "@/store/authStore";
+import { mayOperateProject } from "@/services/permissions";
+import VersionSettingsSection from "@/components/version/VersionSettingsSection";
 
 // ─── Status helpers ───────────────────────────────────────────────────────────
 
@@ -24,6 +27,7 @@ export default function VersionDetailPage() {
 
   const [project, setProject] = useState<ProjectRead | null>(null);
   const [version, setVersion] = useState<Version | null>(null);
+  const user = useAuthStore((s) => s.user);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -294,6 +298,15 @@ export default function VersionDetailPage() {
               </button>
             </div>
           )}
+
+          {/* ICCINT-100: jediná cesta v produkte, ako opraviť názov, číslo alebo dátum zadaný pri
+              zakladaní. Dovtedy sa hodnota, ktorú si človek raz pomýlil, nedala opraviť inak než
+              zásahom do databázy — presne tá diera, ktorú pre projekty zavrel ICCINT-7. */}
+          <VersionSettingsSection
+            version={version}
+            canEdit={mayOperateProject(user, project.created_by)}
+            onSaved={setVersion}
+          />
         </div>
       </div>
     </div>

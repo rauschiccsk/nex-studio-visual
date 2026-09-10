@@ -2478,6 +2478,33 @@ export interface paths {
         patch: operations["update_version_api_v1_versions__version_id__patch"];
         trace?: never;
     };
+    "/api/v1/versions/{version_id}/nastavenia": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Version Settings
+         * @description Čo sa na verzii ešte dá meniť (ICCINT-100).
+         *
+         *     Číslo verzie nesie priečinok s dokumentmi, takže sa smie meniť len dovtedy, kým podľa neho nič
+         *     nevzniklo. Obrazovka sa spýta sem, aby vedela pole buď povoliť, alebo ho **zamknúť s dôvodom** —
+         *     zamknuté pole bez vysvetlenia je to isté ako pole, ktoré ticho nefunguje.
+         *
+         *     Zámok sám vynucuje engine v ``PATCH`` (:func:`version_service.update`); toto je len to, čo o ňom
+         *     obrazovka potrebuje vedieť dopredu, nie obrana.
+         */
+        get: operations["version_settings_api_v1_versions__version_id__nastavenia_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/versions/{version_id}/release": {
         parameters: {
             query?: never;
@@ -6021,6 +6048,14 @@ export interface components {
         _UatLaunchResponse: {
             /** Launch Url */
             launch_url: string;
+        };
+        /**
+         * _VersionSettingsResponse
+         * @description Odpoveď na ``GET /versions/{version_id}/nastavenia`` (ICCINT-100).
+         */
+        _VersionSettingsResponse: {
+            /** Version Number Lock Reason */
+            version_number_lock_reason?: string | null;
         };
         /**
          * _ZadaniePeekResponse
@@ -10169,6 +10204,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VersionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    version_settings_api_v1_versions__version_id__nastavenia_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["_VersionSettingsResponse"];
                 };
             };
             /** @description Validation Error */

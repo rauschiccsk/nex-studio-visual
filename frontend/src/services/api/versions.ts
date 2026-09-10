@@ -7,6 +7,7 @@
  *   - ``POST   /projects/{projectId}/versions``        → createVersion
  *   - ``GET    /versions/{id}``                        → getVersion
  *   - ``GET    /projects/{projectId}/zadanie-na-disku`` → peekZadanieOnDisk
+ *   - ``GET    /versions/{id}/nastavenia``             → getVersionSettings
  *   - ``PATCH  /versions/{id}``                        → updateVersion
  *   - ``POST   /versions/{id}/release``                → releaseVersion
  */
@@ -77,6 +78,22 @@ export function peekZadanieOnDisk(
   return api.get<{ content: string; relative_path: string }>(
     `/projects/${projectId}/zadanie-na-disku?version_number=${encodeURIComponent(versionNumber)}`,
   );
+}
+
+/**
+ * Čo sa na verzii ešte dá meniť (ICCINT-100).
+ *
+ * Číslo verzie nesie priečinok s dokumentmi (`docs/specs/versions/v<číslo>/`), takže sa smie meniť
+ * len dovtedy, kým podľa neho nič nevzniklo. Panel Nastavenia verzie sa pýta sem, aby vedel pole buď
+ * povoliť, alebo ho **zamknúť s dôvodom** — zamknuté pole bez vysvetlenia je to isté ako pole, ktoré
+ * ticho nefunguje.
+ *
+ * Zámok sám vynucuje engine v `PATCH`; toto je len to, čo o ňom obrazovka potrebuje vedieť dopredu.
+ */
+export function getVersionSettings(
+  id: string,
+): Promise<{ version_number_lock_reason: string | null }> {
+  return api.get<{ version_number_lock_reason: string | null }>(`/versions/${id}/nastavenia`);
 }
 
 /** Partially update a version's mutable fields. */

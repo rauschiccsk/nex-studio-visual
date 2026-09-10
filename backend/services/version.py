@@ -412,6 +412,47 @@ def peek_zadanie(db: Session, project_id: UUID, version_number: str) -> tuple[st
     return (abs_path.read_text(encoding="utf-8") if abs_path.is_file() else ""), rel_path
 
 
+def version_number_lock_reason(db: Session, version_id: UUID) -> Optional[str]:
+    """Prečo sa číslo verzie už NESMIE meniť — alebo ``None``, keď sa ešte smie (ICCINT-100).
+
+    Číslo verzie nie je iba popiska: podľa neho sa počíta priečinok s dokumentmi
+    (``docs/specs/versions/v<číslo>/``, viď :func:`_zadanie_paths`). Premenovanie verzie, ktorá už
+    svoje dokumenty má, by kokpit odviedlo na prázdny priečinok a hotová práca by ostala ležať pod
+    starým číslom — bez jediného slova o tom.
+
+    Zamyká sa preto z dvoch dôvodov a každý sa dá zmerať:
+
+    * **dokumenty už existujú** — priečinok verzie je na disku;
+    * **stavba už beží** — verzia má záznam v linke, takže na to číslo sa odvoláva bežiaci agent.
+
+    ⚠️ Vracia sa VETA, nie ``True``. Zamknuté pole bez dôvodu je to isté ako pole, ktoré ticho
+    nefunguje — a práve tomu má tento zámok brániť.
+    """
+    from backend.db.models.pipeline import PipelineState
+
+    row = db.execute(
+        select(Version.version_number, Project.slug)
+        .join(Project, Project.id == Version.project_id)
+        .where(Version.id == version_id)
+    ).first()
+    if row is None:
+        raise ValueError(f"Version {version_id} not found")
+    version_number, slug = row
+
+    _, abs_path = _zadanie_paths(slug, version_number)
+    if abs_path.parent.is_dir():
+        return (
+            f"Číslo verzie sa už nedá zmeniť — podľa neho sa volá priečinok s dokumentmi "
+            f"(docs/specs/versions/v{version_number}/) a ten už existuje. Premenovaním by hotová "
+            "práca ostala ležať pod starým číslom."
+        )
+
+    zaznam = db.execute(select(PipelineState.id).where(PipelineState.version_id == version_id)).first()
+    if zaznam is not None:
+        return "Číslo verzie sa už nedá zmeniť — stavba tejto verzie sa začala a agent sa na to číslo odvoláva."
+    return None
+
+
 def update(db: Session, version_id: UUID, data: VersionUpdate) -> Version:
     """Partially update a version.
 
@@ -462,6 +503,12 @@ def update(db: Session, version_id: UUID, data: VersionUpdate) -> Version:
 
     new_version_number = update_data.get("version_number")
     if new_version_number is not None and new_version_number != version.version_number:
+        # ICCINT-100: číslo verzie nesie priečinok s dokumentmi — premenovať sa smie len dovtedy,
+        # kým podľa neho nič nevzniklo. Kontrola je TU, v službe, nie iba na obrazovke: pole zamknuté
+        # v prehliadači nie je pravidlo, len nábytok.
+        dovod = version_number_lock_reason(db, version_id)
+        if dovod is not None:
+            raise ValueError(dovod)
         existing = _get_by_project_and_version_number(db, version.project_id, new_version_number)
         if existing is not None and existing.id != version.id:
             raise ValueError(
