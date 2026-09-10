@@ -26,11 +26,11 @@ repozitármi sa overuje proti nim samým, nie proti kópii vedľa.
 from __future__ import annotations
 
 import pathlib
-import re
 
 import pytest
 
 from backend.services import vizual_sandbox
+from backend.testing import preview_accepted_values
 
 #: Hodnoty, ktoré náhľad zapnúť NESMÚ. ``false`` je jadro ICCINT-95, zvyšok je ten istý zvyk.
 OFF_VALUES = ("false", "0", "off", "no", "")
@@ -44,7 +44,10 @@ FRONTENDS = pathlib.Path("/opt/projects")
 #:
 #: ⚠️ Tieto štyri sa NEOPRAVUJÚ odtiaľto — zmeny cudzích projektov idú cez kokpit (rozhodnutie
 #: Directora). Sem patrí len to, že sa o tom vie a že sa to nedá ticho zabudnúť.
-APPS_STILL_ON_TRUTHINESS = ("nex-manager", "nex-productcatalogs", "nex-shopify", "nex-websites")
+#: NEX Manager z tohto zoznamu vypadol 10.09.2026 — pri stavbe 1.2.0 rozhodovanie vytiahol do
+#: pomocníka so zoznamom hodnôt (ICCINT-107). Západka to ohlásila sama: kým sa zoznam neskrátil,
+#: stráž bola červená. Presne na to je.
+APPS_STILL_ON_TRUTHINESS = ("nex-productcatalogs", "nex-shopify", "nex-websites")
 
 
 def _flag_value() -> str:
@@ -56,14 +59,10 @@ def _flag_value() -> str:
     raise AssertionError("pieskovisko appke vôbec nepovie, že ide o náhľad")
 
 
-def _accepted_values(text: str) -> tuple[str, ...] | None:
-    """Hodnoty, ktoré podmienka v ``main.tsx`` prijme.
-
-    Vráti ``None``, ak appka kontroluje PRAVDIVOSTNE — vtedy prijme čokoľvek neprázdne vrátane
-    ``"false"``, a práve to je nález ICCINT-95.
-    """
-    literals = re.findall(r'(?:VITE_PREVIEW|previewFlag)\s*===\s*"([^"]*)"', text)
-    return tuple(literals) if literals else None
+#: Čítanie je v ``backend.testing`` — používajú ho obe stráže nad príznakom náhľadu (v tomto
+#: strome aj v ``tests/services``). Kým si ho každá písala sama, rozišli sa a jedna spadla na
+#: šablóne, ktorá bola v poriadku (ICCINT-108).
+_accepted_values = preview_accepted_values
 
 
 def test_the_sandbox_sends_a_value_from_the_agreed_list() -> None:
@@ -96,7 +95,7 @@ def test_the_template_compares_against_the_whole_list_not_a_single_word_nor_trut
     if not main.is_file():
         pytest.skip(f"šablóna nie je na tomto stroji ({main}) — nekontrolované")
 
-    prijima = _accepted_values(main.read_text(encoding="utf-8"))
+    prijima = _accepted_values(main.read_text(encoding="utf-8"), src_dir=main.parent)
 
     assert prijima is not None, (
         "šablóna kontroluje príznak náhľadu PRAVDIVOSTNE — tým prijme aj reťazec „false“ a vypnutie "
@@ -151,7 +150,7 @@ def test_the_real_apps_accept_what_the_sandbox_sends(slug: str) -> None:
         pytest.skip(f"{slug} živý náhľad nepoužíva")
 
     posiela = _flag_value()
-    prijima = _accepted_values(text)
+    prijima = _accepted_values(text, src_dir=main.parent)
     if prijima is None:
         return  # pravdivostná kontrola prijme čokoľvek neprázdne; jej vlastný nález drží stráž nižšie
 
@@ -172,10 +171,66 @@ def test_the_apps_still_on_truthiness_are_a_known_and_shrinking_list() -> None:
         main = FRONTENDS / slug / "frontend" / "src" / "main.tsx"
         if not main.is_file():
             pytest.skip(f"{slug} nie je na tomto stroji — západku nemožno poctivo zmerať")
-        if _accepted_values(main.read_text(encoding="utf-8")) is None:
+        if _accepted_values(main.read_text(encoding="utf-8"), src_dir=main.parent) is None:
             truthiness.append(slug)
 
     assert tuple(truthiness) == APPS_STILL_ON_TRUTHINESS, (
         f"appky s pravdivostnou kontrolou sú {tuple(truthiness)}, evidencia hovorí "
         f"{APPS_STILL_ON_TRUTHINESS} — priprav zoznam do súladu (a ak sa skrátil, je to dobrá správa)"
     )
+
+
+def test_the_guard_recognises_a_check_moved_into_a_helper(tmp_path) -> None:
+    """⚠️ Jadro ICCINT-108: stráž musí vidieť aj rozhodovanie o súbor vedľa.
+
+    Kým hľadala porovnania len v ``main.tsx``, appka, ktorá si ich vytiahla do pomocníka, jej
+    pripadala ako pravdivostná — a hlásila dlh, ktorý už neexistoval. Slepé miesto na bezpečnú
+    stranu je stále slepé miesto: západka nad zvyškom hospodárstva bola tým nepravdivá.
+    """
+    src = tmp_path / "src"
+    (src / "preview").mkdir(parents=True)
+    (src / "preview" / "isPreview.ts").write_text(
+        'const ENABLING_VALUES = ["1", "true", "yes", "on"];\n'
+        "export function isPreviewEnabled(v = import.meta.env.VITE_PREVIEW) {\n"
+        "  return typeof v === 'string' && ENABLING_VALUES.includes(v);\n}\n",
+        encoding="utf-8",
+    )
+    main = src / "main.tsx"
+    main.write_text(
+        'import { isPreviewEnabled } from "./preview/isPreview";\n'
+        "if (import.meta.env.VITE_PREVIEW && isPreviewEnabled()) { start(); } else { render(); }\n",
+        encoding="utf-8",
+    )
+
+    prijima = _accepted_values(main.read_text(encoding="utf-8"), src_dir=main.parent)
+
+    assert prijima is not None, "stráž nevidí rozhodovanie presunuté do pomocníka"
+    assert sorted(prijima) == sorted(vizual_sandbox.PREVIEW_ON)
+
+
+def test_a_truthiness_check_is_still_recognised_as_one(tmp_path) -> None:
+    """A naopak: keď rozhodovanie naozaj chýba, stráž to nesmie prehliadnuť.
+
+    Bez tohto tvrdenia by stačilo, aby ``_accepted_values`` vracalo čokoľvek, a celá západka aj
+    kontrola šablóny by prestali platiť.
+    """
+    src = tmp_path / "src"
+    src.mkdir(parents=True)
+    main = src / "main.tsx"
+    main.write_text("if (import.meta.env.VITE_PREVIEW) { start(); } else { render(); }\n", encoding="utf-8")
+
+    assert _accepted_values(main.read_text(encoding="utf-8"), src_dir=main.parent) is None
+
+
+def test_a_missing_helper_is_not_mistaken_for_a_list(tmp_path) -> None:
+    """Keď sa pomocník dovezie, ale súbor neexistuje, stráž nesmie tvrdiť, že zoznam našla."""
+    src = tmp_path / "src"
+    src.mkdir(parents=True)
+    main = src / "main.tsx"
+    main.write_text(
+        'import { isPreviewEnabled } from "./preview/isPreview";\n'
+        "if (import.meta.env.VITE_PREVIEW && isPreviewEnabled()) { start(); }\n",
+        encoding="utf-8",
+    )
+
+    assert _accepted_values(main.read_text(encoding="utf-8"), src_dir=main.parent) is None

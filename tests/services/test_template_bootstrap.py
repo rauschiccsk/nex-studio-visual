@@ -824,12 +824,13 @@ def test_the_template_checks_the_preview_flag_the_way_the_sandbox_sends_it() -> 
     presne to sa 09.09.2026 stalo: táto stráž vynucovala pravdivostnú kontrolu, kým vedľa nej vznikala
     oprava, ktorá ju ruší — a CI spadlo na rozpore dvoch tvrdení o tej istej veci.
     """
-    import re as _re
-
     from backend.services.vizual_sandbox import PREVIEW_ON
+    from backend.testing import preview_accepted_values
 
     main = _skeleton_file("src/main.tsx")
-    prijima = _re.findall(r'(?:VITE_PREVIEW|previewFlag)\s*===\s*"([^"]*)"', main)
+    # ⚠️ Čítanie je spoločné s druhou strážou (ICCINT-108). Kým si ho každá písala sama, rozišli sa:
+    # jedna sa naučila sledovať pomocníka, druhá nie — a spadla na šablóne, ktorá bola v poriadku.
+    prijima = preview_accepted_values(main, src_dir=SKELETON / "src") or ()
 
     assert prijima, "podmienka je pravdivostná — prijme aj „false“ a vypnutie by náhľad zaplo (ICCINT-95)"
     assert sorted(prijima) == sorted(PREVIEW_ON), (
