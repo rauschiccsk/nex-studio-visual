@@ -29,7 +29,7 @@ const version: Version = {
   version_number: "1.1.0",
   name: "Inštalovateľná appka",
   status: "done",
-  description: null,
+  description: "Inštalovateľná appka PWA",
   target_date: null,
   release_date: null,
   created_at: "2026-09-09T00:00:00Z",
@@ -122,6 +122,34 @@ describe("Nastavenia verzie", () => {
 
     expect(await screen.findByText(/nepodarilo uložiť/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /uložiť/i })).toBeInTheDocument();
+  });
+
+  it("⚠️ popis sa dá opraviť tiež — vzniká z Zadania a po premenovaní zostával starý (ICCINT-101)", async () => {
+    await renderPanel();
+    await userEvent.click(await screen.findByRole("button", { name: /upraviť/i }));
+
+    const popis = screen.getByLabelText(/^popis$/i);
+    await userEvent.clear(popis);
+    await userEvent.type(popis, "Inštalovateľná aplikácia PWA");
+    await userEvent.click(screen.getByRole("button", { name: /uložiť/i }));
+
+    await waitFor(() => expect(updateVersionMock).toHaveBeenCalled());
+    expect(updateVersionMock).toHaveBeenCalledWith("v1", { description: "Inštalovateľná aplikácia PWA" });
+  });
+
+  it("zámok čísla verzie sa popisu netýka", async () => {
+    getVersionSettingsMock.mockResolvedValue({ version_number_lock_reason: ZAMKNUTE });
+    await renderPanel();
+    await userEvent.click(await screen.findByRole("button", { name: /upraviť/i }));
+
+    expect(screen.getByLabelText(/^popis$/i)).toBeEnabled();
+  });
+
+  it("povie, čo popis vlastne je — inak si ho ľahko pomýliť so Zadaním", async () => {
+    await renderPanel();
+
+    expect(screen.getByText(/súhrn v zozname verzií/i)).toBeInTheDocument();
+    expect(screen.getByText(/samotné Zadanie sa tým nemení/i)).toBeInTheDocument();
   });
 
   it("kto projekt neriadi, upravovať nemôže — a dozvie sa prečo", async () => {

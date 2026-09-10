@@ -10,6 +10,9 @@
  * Je to tá istá diera, ktorú pre PROJEKTY zavrel ICCINT-7. Hodnota, ktorú sa človek pomýli raz a
  * nesie ju navždy, je diera v samostatnosti kokpitu — bez zásahu do databázy sa opraviť nedala.
  *
+ * Panel nesie Číslo verzie, Názov, Cieľový dátum a Popis (ICCINT-101 — popis vzniká pri zakladaní ako
+ * kópia Zadania, takže po premenovaní verzie zostával so starým znením).
+ *
  * ⚠️ **Číslo verzie nie je iba popiska.** Podľa neho sa volá priečinok s dokumentmi
  * (`docs/specs/versions/v<číslo>/`), takže sa smie meniť len dovtedy, kým podľa neho nič nevzniklo.
  * Keď sa už nesmie, pole je **zamknuté a povie prečo** — nie ticho nefunkčné, čo je presne tá chyba,
@@ -40,6 +43,7 @@ interface FormState {
   version_number: string;
   name: string;
   target_date: string;
+  description: string;
 }
 
 function toForm(v: Version): FormState {
@@ -47,6 +51,7 @@ function toForm(v: Version): FormState {
     version_number: v.version_number,
     name: v.name ?? "",
     target_date: v.target_date ?? "",
+    description: v.description ?? "",
   };
 }
 
@@ -56,6 +61,7 @@ function diff(v: Version, f: FormState): VersionUpdate {
   if (f.version_number.trim() !== v.version_number) out.version_number = f.version_number.trim();
   if (f.name.trim() !== (v.name ?? "")) out.name = f.name.trim();
   if ((f.target_date || "") !== (v.target_date ?? "")) out.target_date = f.target_date;
+  if (f.description.trim() !== (v.description ?? "")) out.description = f.description.trim();
   return out;
 }
 
@@ -180,6 +186,30 @@ export default function VersionSettingsSection({ version, canEdit, onSaved }: Pr
             disabled={!editing || saving}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
           />
+        </div>
+
+        {/* ICCINT-101: popis vzniká pri zakladaní ako kópia Zadania a odvtedy sa nemal ako opraviť.
+            Director premenoval verziu a popis zostal so starým názvom. Zámok čísla verzie sa ho
+            netýka — na priečinok s dokumentmi popis neviaže nič. */}
+        <div className="col-span-2">
+          <label className={LABEL_CLS} htmlFor="ver-description">
+            Popis
+          </label>
+          <textarea
+            id="ver-description"
+            lang="sk"
+            spellCheck={true}
+            rows={3}
+            className={`${INPUT_CLS} resize-y leading-relaxed`}
+            placeholder="Krátky súhrn, čo verzia prináša"
+            value={editing ? form.description : (version.description ?? "")}
+            disabled={!editing || saving}
+            onChange={(e) => setForm({ ...form, description: e.target.value })}
+          />
+          <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+            Ukazuje sa ako súhrn v zozname verzií. Pri zakladaní sa doň prevezme Zadanie; samotné
+            Zadanie sa tým nemení — to má vlastný editor vyššie.
+          </p>
         </div>
       </div>
 
