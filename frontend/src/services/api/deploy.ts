@@ -58,3 +58,38 @@ export function deployCustomer(customerId: string, data: DeployRequest): Promise
 export function acceptCustomerUat(customerId: string, data: AcceptRequest): Promise<DeployEventRead> {
   return api.post<DeployEventRead>(`/customers/${customerId}/accept`, data);
 }
+
+/** Čo by prevzatie ručne písanej inštalácie urobilo — VOPRED, bez zmeny (ICCINT-102). */
+export interface AdoptionPreview {
+  instance_dir: string;
+  exists: boolean;
+  already_ours: boolean;
+  /** Dvojice (súbor, pod akým menom sa odloží). */
+  set_aside: [string, string][];
+  untouched: string[];
+  running_containers: string[];
+  /** Text, ktorý musí Manažér odpísať, aby sa prevzatie vykonalo. */
+  confirmation_phrase: string;
+}
+
+export function getAdoptionPreview(
+  customerId: string,
+  environment: string,
+): Promise<AdoptionPreview> {
+  return api.get<AdoptionPreview>(
+    `/customers/${customerId}/adoption-preview?environment=${encodeURIComponent(environment)}`,
+  );
+}
+
+/**
+ * Prevziať ručne písanú inštaláciu pod správu NEX Studia a nasadiť do nej verziu (ICCINT-102).
+ *
+ * ⚠️ Toto NIE JE „Nasadiť“. Je to samostatné rozhodnutie: ručné súbory sa odložia ako
+ * `.pre-nex-studio`, zapíše sa záznam kto/kedy/čo, a `confirm` musí byť odpísaná fráza z náhľadu.
+ */
+export function adoptInstance(
+  customerId: string,
+  data: { version_number: string; environment: string; confirm: string },
+): Promise<DeployResult> {
+  return api.post<DeployResult>(`/customers/${customerId}/adopt`, data);
+}

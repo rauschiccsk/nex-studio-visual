@@ -30,6 +30,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.core import authz
+from backend.core.offload import run_blocking
 from backend.core.security import get_current_user, require_shu_or_above
 from backend.db.models.customers import Customer
 from backend.db.models.deploy import DeployEvent
@@ -44,6 +45,7 @@ from backend.schemas.deploy import (
     DeployResult,
 )
 from backend.services import deploy as deploy_service
+from backend.services import instance_adoption
 from backend.services import uat_launch as uat_launch_service
 
 router = APIRouter(tags=["Deploy"])
@@ -210,6 +212,133 @@ async def deploy_customer(
             environment=payload.environment,
             actor_id=current_user.id,
             force_fresh=payload.force_fresh,
+        )
+        event, url, bumped_to = outcome
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        raise _map_value_error(exc) from exc
+    db.refresh(event)
+    return DeployResult(
+        ok=event.status == "ok",
+        event=DeployEventRead.model_validate(event),
+        url=url,
+        bumped_to=bumped_to,
+        warnings=list(outcome.warnings),
+    )
+
+
+class _AdoptionPreviewResponse(BaseModel):
+    """Čo by prevzatie inštalácie urobilo — VOPRED (ICCINT-102)."""
+
+    instance_dir: str
+    exists: bool
+    already_ours: bool
+    #: Dvojice (súbor, pod akým menom sa odloží).
+    set_aside: list[tuple[str, str]]
+    untouched: list[str]
+    running_containers: list[str]
+    #: Text, ktorý musí Manažér odpísať, aby sa prevzatie vykonalo.
+    confirmation_phrase: str
+
+
+@router.get("/customers/{customer_id}/adoption-preview", response_model=_AdoptionPreviewResponse)
+def adoption_preview(
+    customer_id: UUID,
+    environment: str = "uat",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> _AdoptionPreviewResponse:
+    """Čo by prevzatie ručne písanej inštalácie urobilo — bez toho, aby sa čokoľvek zmenilo (ICCINT-102).
+
+    Manažér sa má rozhodovať z faktov: ktorý priečinok to je, čo sa odloží, čo sa nedotkne a **čo z toho
+    priečinka práve beží**. Terminálový ``--dry-run`` to isté ukazoval len tomu, kto vie napísať príkaz.
+    """
+    customer = db.get(Customer, customer_id)
+    if customer is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Zákazník neexistuje.")
+    authz.assert_customer_access(db, current_user, customer_id)
+    project = db.get(Project, customer.project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projekt zákazníka neexistuje.")
+
+    instance_dir = instance_adoption.instance_dir_for(
+        environment=environment,
+        customer_slug=deploy_service._customer_dir_slug(customer),
+        full_project_slug=project.slug,
+    )
+    return _AdoptionPreviewResponse(**instance_adoption.preview(instance_dir)._asdict())
+
+
+class _AdoptRequest(BaseModel):
+    """Potvrdenie prevzatia — nie klik, ale odpísaná fráza (ICCINT-102)."""
+
+    version_number: str
+    environment: str = "uat"
+    #: Musí sa zhodovať s ``confirmation_phrase`` z náhľadu.
+    confirm: str
+
+
+@router.post("/customers/{customer_id}/adopt", response_model=DeployResult)
+async def adopt_instance(
+    customer_id: UUID,
+    payload: _AdoptRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_shu_or_above),
+) -> DeployResult:
+    """Prevziať ručne písanú inštaláciu pod správu NEX Studia a nasadiť do nej verziu (ICCINT-102).
+
+    ⚠️ **Toto NIE JE „Nasadiť“.** Je to samostatné rozhodnutie s vlastným potvrdením: ručné súbory sa
+    odložia ako ``.pre-nex-studio`` (dôkaz zostáva, krok je vratný), zapíše sa záznam kto/kedy/čo, a až
+    potom sa do priečinka zapisuje. Tlačidlo „Nasadiť“ takú možnosť nemá a nedostane ju — poistka nad
+    ``deploy.py`` (``allow_overwrite`` sa v nej nesmie vyskytnúť) platí bez zmeny.
+
+    **Jedno volanie = jedna inštalácia.** Hromadné prevzatie Director 28.07.2026 zamietol po troch
+    nezávislých previerkach a to platí ďalej.
+
+    **409** — odpísaná fráza nesedí, alebo je priečinok už náš (potom niet čo preberať; použi „Nasadiť“).
+    """
+    customer = db.get(Customer, customer_id)
+    if customer is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Zákazník neexistuje.")
+    authz.assert_customer_access(db, current_user, customer_id)
+    project = db.get(Project, customer.project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projekt zákazníka neexistuje.")
+
+    instance_dir = instance_adoption.instance_dir_for(
+        environment=payload.environment,
+        customer_slug=deploy_service._customer_dir_slug(customer),
+        full_project_slug=project.slug,
+    )
+    # ICCINT-74: náhľad sa pýta Dockera, čo z toho priečinka beží — to je čakanie na proces a na hlavnú
+    # slučku nepatrí. Strop je krátky zámerne: je to doplnkový údaj, nie brána.
+    nahlad = await run_blocking(instance_adoption.preview, instance_dir, cap=30)
+    if nahlad.already_ours:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Priečinok „{nahlad.instance_dir}“ NEX Studio už spravuje — preberať niet čo. Použi bežné Nasadiť."
+            ),
+        )
+    if payload.confirm.strip() != nahlad.confirmation_phrase:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Potvrdenie nesedí. Na prevzatie treba odpísať „{nahlad.confirmation_phrase}“ — "
+                "je to poistka proti prevzatiu nesprávnej inštalácie, nie formalita."
+            ),
+        )
+
+    try:
+        outcome = await deploy_service.deploy(
+            db,
+            customer_id,
+            version_number=payload.version_number,
+            environment=payload.environment,
+            actor_id=current_user.id,
+            force_fresh=False,  # prevzatie NIKDY nerotuje tajomstvá — databáza v tom priečinku beží
+            deploy_runner=instance_adoption.adopting_deploy_runner,
         )
         event, url, bumped_to = outcome
         db.commit()

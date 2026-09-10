@@ -38,6 +38,7 @@ SHELLING_MODULES = {
     "consult_sandbox",
     "create_project_postscaffold",
     "git_state",
+    "instance_adoption",
     "nexshared",
     "notify",
     "orchestrator",

@@ -12,6 +12,7 @@ import {
 
 import { acceptCustomerUat, deployCustomer, getDeployMatrix, uatLaunch } from "@/services/api/deploy";
 import { ApiError } from "@/services/api";
+import AdoptInstanceDialog from "@/components/deploy/AdoptInstanceDialog";
 import { humanizeApiError } from "@/services/apiError";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import type { DeployEnvironment, DeployMatrix, DeployMatrixRow, DeployResult } from "@/types/deploy";
@@ -87,6 +88,8 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  // ICCINT-102: riadok, pre ktorý je otvorený dialóg prevzatia inštalácie (null = zavretý).
+  const [adopting, setAdopting] = useState<DeployMatrixRow | null>(null);
   // Per-customer chosen version in the Nasadiť dropdown (keyed by customer_id).
   const [picked, setPicked] = useState<Record<string, string>>({});
   // The customer_id currently mid-action (deploy/accept) → disables its row.
@@ -476,6 +479,19 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                             Posledný pokus zlyhal
                           </span>
                         )}
+                        {/* ICCINT-102: keď nasadenie narazí na ručne písanú inštaláciu, cesta ďalej
+                            musí byť TU, nie v termináli. Dialóg si sám zistí, či je vôbec čo preberať —
+                            netipuje sa to z textu chybovej hlášky. */}
+                        {lastAttemptFailed && (
+                          <button
+                            type="button"
+                            onClick={() => setAdopting(row)}
+                            className="rounded-full border border-[var(--color-border-strong)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] transition-colors"
+                            title="Ak v cieľovom priečinku leží ručne písané nasadenie, tu ho prevezmeš pod správu NEX Studia — s náhľadom, čo sa odloží."
+                          >
+                            Prevziať inštaláciu…
+                          </button>
+                        )}
                       </div>
                       {liveUrl && renderLaunchOrOpen(row.customer_id, liveUrl)}
                     </td>
@@ -598,6 +614,19 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
             </tbody>
           </table>
         </div>
+      )}
+
+      {/* ICCINT-102: prevzatie ručne písanej inštalácie — samostatné rozhodnutie s náhľadom
+          a odpísaným potvrdením. NIE je to prepínač pri „Nasadiť“. */}
+      {adopting && (
+        <AdoptInstanceDialog
+          customerId={adopting.customer_id}
+          customerName={adopting.customer_name}
+          environment={environment}
+          versionNumber={pickedVersion(adopting) ?? ""}
+          onClose={() => setAdopting(null)}
+          onAdopted={(sprava) => { setRowMsg(adopting.customer_id, sprava); void load(); }}
+        />
       )}
     </div>
   );

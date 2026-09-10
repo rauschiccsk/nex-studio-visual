@@ -465,6 +465,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/customers/{customer_id}/adopt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Adopt Instance
+         * @description Prevziať ručne písanú inštaláciu pod správu NEX Studia a nasadiť do nej verziu (ICCINT-102).
+         *
+         *     ⚠️ **Toto NIE JE „Nasadiť“.** Je to samostatné rozhodnutie s vlastným potvrdením: ručné súbory sa
+         *     odložia ako ``.pre-nex-studio`` (dôkaz zostáva, krok je vratný), zapíše sa záznam kto/kedy/čo, a až
+         *     potom sa do priečinka zapisuje. Tlačidlo „Nasadiť“ takú možnosť nemá a nedostane ju — poistka nad
+         *     ``deploy.py`` (``allow_overwrite`` sa v nej nesmie vyskytnúť) platí bez zmeny.
+         *
+         *     **Jedno volanie = jedna inštalácia.** Hromadné prevzatie Director 28.07.2026 zamietol po troch
+         *     nezávislých previerkach a to platí ďalej.
+         *
+         *     **409** — odpísaná fráza nesedí, alebo je priečinok už náš (potom niet čo preberať; použi „Nasadiť“).
+         */
+        post: operations["adopt_instance_api_v1_customers__customer_id__adopt_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/customers/{customer_id}/adoption-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Adoption Preview
+         * @description Čo by prevzatie ručne písanej inštalácie urobilo — bez toho, aby sa čokoľvek zmenilo (ICCINT-102).
+         *
+         *     Manažér sa má rozhodovať z faktov: ktorý priečinok to je, čo sa odloží, čo sa nedotkne a **čo z toho
+         *     priečinka práve beží**. Terminálový ``--dry-run`` to isté ukazoval len tomu, kto vie napísať príkaz.
+         */
+        get: operations["adoption_preview_api_v1_customers__customer_id__adoption_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/customers/{customer_id}/deploy": {
         parameters: {
             query?: never;
@@ -5913,6 +5966,21 @@ export interface components {
             version_number?: string | null;
         };
         /**
+         * _AdoptRequest
+         * @description Potvrdenie prevzatia — nie klik, ale odpísaná fráza (ICCINT-102).
+         */
+        _AdoptRequest: {
+            /** Confirm */
+            confirm: string;
+            /**
+             * Environment
+             * @default uat
+             */
+            environment: string;
+            /** Version Number */
+            version_number: string;
+        };
+        /**
          * _AdoptableCandidate
          * @description Priečinok na disku, ktorý ešte nie je projektom v kokpite.
          */
@@ -5961,6 +6029,29 @@ export interface components {
              * @default []
              */
             unresolved: string[];
+        };
+        /**
+         * _AdoptionPreviewResponse
+         * @description Čo by prevzatie inštalácie urobilo — VOPRED (ICCINT-102).
+         */
+        _AdoptionPreviewResponse: {
+            /** Already Ours */
+            already_ours: boolean;
+            /** Confirmation Phrase */
+            confirmation_phrase: string;
+            /** Exists */
+            exists: boolean;
+            /** Instance Dir */
+            instance_dir: string;
+            /** Running Containers */
+            running_containers: string[];
+            /** Set Aside */
+            set_aside: [
+                string,
+                string
+            ][];
+            /** Untouched */
+            untouched: string[];
         };
         /**
          * _AssignmentRead
@@ -7036,6 +7127,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeployEventRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    adopt_instance_api_v1_customers__customer_id__adopt_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                customer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_AdoptRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeployResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    adoption_preview_api_v1_customers__customer_id__adoption_preview_get: {
+        parameters: {
+            query?: {
+                environment?: string;
+            };
+            header?: never;
+            path: {
+                customer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["_AdoptionPreviewResponse"];
                 };
             };
             /** @description Validation Error */
