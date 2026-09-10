@@ -36,6 +36,15 @@ _TRANSIENT_RE = re.compile(r"(529|overloaded|429|rate.?limit)", re.IGNORECASE)
 #: Backoff (seconds) slept BEFORE each retry on a transient error → up to
 #: len()+1 = 4 bounded attempts. Bounded so a persistent overload terminates the
 #: dispatch (settled blocked upstream) instead of an un-backed-off hammer loop.
+#: Stratená niť rozhovoru (ICCINT-110). ``claude --resume <id>`` skončí kódom 1 a touto vetou, keď
+#: sedenie s tým označením neexistuje — typicky preto, že ho zobral reštart kontajnera.
+#:
+#: ⚠️ Nie je to prechodná chyba a opakovanie toho istého volania nepomôže: sedenie sa už nikdy
+#: neobjaví. Správna odpoveď je **začať čerstvé**, nie zomrieť — chýbajúca história rozhovoru nie je
+#: dôvod zablokovať vydanie. Zmerané 10.09.2026 na NEX Manager 1.2.0: Verifikácia uviazla dvakrát,
+#: Audítor spadol do sekundy a Manažérovi sa to ohlásilo ako „verdikt sa nepodarilo spracovať“.
+_SESSION_GONE_RE = re.compile(r"No conversation found with session ID", re.IGNORECASE)
+
 _TRANSIENT_BACKOFF: tuple[int, ...] = (2, 8, 20)
 
 #: Default timeout per ``claude --print`` invocation (seconds). Agent dispatch
@@ -297,6 +306,7 @@ def build_claude_argv(
     allowed_tools: Optional[list[str]] = None,
     settings_path: Optional[Path] = None,
     permission_mode: Optional[str] = None,
+    force_new_session: bool = False,
 ) -> list[str]:
     """Compose the ``claude -p`` argv shared by the in-process turn AND the OS-isolated consult sidecar.
 
@@ -360,6 +370,10 @@ def build_claude_argv(
     args += ["--setting-sources", _SETTING_SOURCES, _STRICT_MCP_CONFIG]
     if charter_text is not None:
         args += ["--session-id", str(claude_session_id), "--append-system-prompt", charter_text]
+    elif force_new_session:
+        # ICCINT-110: nadviazať sa nie je na čo — sedenie zobral reštart. Založ ho pod tým istým
+        # označením a pokračuj; prompt ťahu je sebestačný, kým história rozhovoru je preč.
+        args += ["--session-id", str(claude_session_id)]
     else:
         args += ["--resume", str(claude_session_id)]
     if model:
@@ -443,6 +457,9 @@ async def invoke_claude(
     :func:`_invoke_once` for the args/return contract.
     """
     attempts = len(_TRANSIENT_BACKOFF) + 1
+    # ICCINT-110: keď sedenie zmizne, skúsi sa RAZ znova s čerstvým. Nie je to prechodná chyba, takže
+    # do backoffu nepatrí — a opakovať to donekonečna netreba, buď sa založí, alebo je zle inde.
+    zacni_nacisto = False
     for attempt in range(attempts):
         try:
             return await _invoke_once(
@@ -461,8 +478,19 @@ async def invoke_claude(
                 stage=stage,
                 log_dir=log_dir,
                 log_label=log_label,
+                force_new_session=zacni_nacisto,
             )
         except ClaudeAgentError as exc:
+            if not zacni_nacisto and _SESSION_GONE_RE.search(str(exc)):
+                # ⚠️ NAHLAS. Agent stráca históriu rozhovoru — prompt ťahu je sebestačný, ale nikto sa
+                # nesmie dozvedieť až z výsledku, že pokračoval bez pamäte.
+                logger.warning(
+                    "claude session %s je preč (typicky ju zobral reštart kontajnera) — zakladám čerstvé "
+                    "sedenie a ťah opakujem. História rozhovoru sa stratila; prompt ťahu ju nahrádza.",
+                    claude_session_id,
+                )
+                zacni_nacisto = True
+                continue
             if attempt < len(_TRANSIENT_BACKOFF) and _TRANSIENT_RE.search(str(exc)):
                 delay = _TRANSIENT_BACKOFF[attempt]
                 logger.warning(
@@ -495,6 +523,7 @@ async def _invoke_once(
     stage: Optional[str] = None,
     log_dir: Optional[Path] = None,
     log_label: Optional[str] = None,
+    force_new_session: bool = False,
 ) -> tuple[str, Optional["UsageMetadata"], Optional[dict]]:
     """One ``claude -p`` subprocess invocation (no retry — see :func:`invoke_claude`).
 
@@ -631,6 +660,7 @@ async def _invoke_once(
     # subsequent turn passes None and the argv builder emits ``--resume`` instead.
     charter_text = _load_charter(charter_path) if charter_path is not None else None
     args = build_claude_argv(
+        force_new_session=force_new_session,
         streaming=on_event is not None,
         claude_session_id=claude_session_id,
         prompt=prompt,

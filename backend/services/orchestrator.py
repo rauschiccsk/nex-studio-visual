@@ -679,6 +679,17 @@ def determine_available_actions(state: PipelineState) -> set[str]:
         # past an unresolved error/question is a footgun (e.g. "Schváliť špecifikáciu" appearing right after a
         # parse failure — the audit's Theme 1). Only the settled ``awaiting_manazer`` path offers the advance body.
         actions.add("answer")
+        # ICCINT-109: keď zlyhal SÁM overovací beh (Audítor nevrátil verdikt — spadol, vypršal čas,
+        # nedala sa prečítať odpoveď), ponúkni „Znova overiť bez opravy“.
+        #
+        # ⚠️ Engine to vedel celý čas — ``apply_action`` má pre tento prípad vetvu ``_verif_stall`` — ale
+        # kokpit tú akciu NEPONÚKAL, takže sa k nej nedalo dostať. Manažérovi zostalo iba „Uprav“, čo
+        # pošle opravného agenta hľadať chybu, ktorá neexistuje. Zmerané 10.09.2026 na NEX Manager 1.2.0:
+        # agent spustil celú previerku, našiel ju zelenú a musel sa spýtať „čo mám opraviť?“ — minul sa
+        # beh agenta a stavba uviazla o úroveň nižšie. Hláška pritom radila „over znova“, teda tlačidlo,
+        # ktoré na obrazovke nebolo.
+        if stage == "verifikacia" and state.block_reason in VERIF_STALL_BLOCK_REASONS:
+            actions.add("overit_bez_opravy")
         return actions
 
     # ICCINT-25: "Skúsiť konzultáciu znova" — offered UNCONDITIONALLY here (state-only, like the build-launch
@@ -9094,7 +9105,9 @@ async def _run_verifikacia_round(
             kind="notification",
             content=(
                 "Verdikt Auditora vo Verifikácii sa nepodarilo spracovať ani po opakovaných pokusoch — "
-                "Verifikácia je blokovaná (release gate, fail-closed). Usmerni (Uprav) alebo over znova."
+                "Verifikácia je blokovaná (release gate, fail-closed). Aplikácia sama môže byť v poriadku — "
+                "zlyhal overovací beh, nie appka. Klikni „Znova spustiť overenie“; ak by to malo "
+                "zmysel, usmerni opravu cez „Uprav“."
             ),
             payload=_failure_metrics_payload(review) or None,
         )
@@ -9102,7 +9115,10 @@ async def _run_verifikacia_round(
             await on_message(msg)
         state.status = "blocked"
         state.block_reason = "agent_error"  # R4 (D1): the release verdict turn produced no parseable output
-        state.next_action = "Blokované — Auditor nevrátil platný verdikt Verifikácie. Usmerni (Uprav) alebo over znova."
+        state.next_action = (
+            "Blokované — Auditor nevrátil verdikt Verifikácie (spadol alebo mu vypršal čas). "
+            "Klikni „Znova spustiť overenie“."
+        )
         db.flush()
         return state
 

@@ -55,8 +55,14 @@ def test_blocked_question_offers_answer_and_retry() -> None:
 
 
 def test_parse_exhaustion_at_verifikacia_no_verdict() -> None:
+    # ICCINT-109: k trom pôvodným akciám pribudlo „Znova spustiť overenie“ (``overit_bez_opravy``).
+    # Keď zlyhá SÁM overovací beh, appka môže byť v poriadku a jediná rozumná odpoveď je zopakovať
+    # ten beh. Dovtedy tu zostávalo len „Uprav“, čo pošle opravného agenta hľadať chybu, ktorá
+    # neexistuje — zmerané 10.09.2026 na NEX Manager 1.2.0.
+    #
+    # ⚠️ ``verdict`` sa naďalej NEPONÚKA: verdikt patrí Audítorovi, nie Manažérovi, a to sa nemení.
     actions = orchestrator.determine_available_actions(_state("verifikacia", "blocked", "parse_exhaustion"))
-    assert actions == {"ask", "uprav", "answer"}
+    assert actions == {"ask", "uprav", "answer", "overit_bez_opravy"}
     assert "verdict" not in actions
 
 
