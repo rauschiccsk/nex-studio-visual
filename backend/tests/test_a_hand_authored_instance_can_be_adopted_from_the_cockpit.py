@@ -177,3 +177,95 @@ def test_one_call_adopts_exactly_one_instance() -> None:
 def test_both_hand_written_files_are_covered(meno: str) -> None:
     """``.env`` je ten súbor, ktorého ručne nastavené hodnoty (SMTP, párovaný kľúč) nie sú nikde inde."""
     assert meno in instance_adoption.HAND_AUTHORED_FILES
+
+
+# ── vykonávateľ sa naozaj SPUSTÍ ──────────────────────────────────────────────
+#
+# ⚠️ Tu bola diera v mojich vlastných strážach. Overil som čisté funkcie aj dialóg, ale
+# ``adopting_deploy_runner`` som nikdy nespustil — a v ňom stálo ``result.url``, ktoré na
+# ``ProvisionResult`` neexistuje. Zistilo sa to až v ostrej prevádzke a najhorším možným spôsobom:
+# priečinok sa PREVZAL, kontajnery nabehli, ale volanie skončilo chybou 500 — takže Manažér videl
+# „Prevzatie zlyhalo“, v evidencii nebolo nič, a na disku bolo hotovo.
+#
+# Stráž preto vykonávateľa spustí celý, s atrapami provisionera aj nasadenia.
+
+
+class _FakeProvisionResult:
+    """To, čo provisioner naozaj vracia — a hlavne to, čo NEvracia (``url`` na ňom nie je)."""
+
+    def __init__(self) -> None:
+        self.fe_service = "frontend"
+        self.warnings = ["skúšobné upozornenie"]
+
+
+@pytest.mark.asyncio
+async def test_the_runner_survives_a_real_call_and_builds_the_url_itself(tmp_path, monkeypatch) -> None:
+    """⚠️ Jadro: vykonávateľ musí prebehnúť CELÝ. Prvé znenie padlo na ``result.url``."""
+    from backend.services import instance_adoption as ia
+
+    d = _rucna_instalacia(tmp_path)
+    monkeypatch.setattr(ia, "instance_dir_for", lambda **_: d)
+    monkeypatch.setattr(ia.uat_provisioner, "provision_uat", lambda *a, **k: _FakeProvisionResult())
+    monkeypatch.setattr(ia.uat_provisioner, "derive_uat_slug", lambda _: "manager")
+
+    async def _fake_uat_deploy(*a, **k):
+        return True, "OK"
+
+    from backend.services import orchestrator
+
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _fake_uat_deploy)
+
+    ok, detail, url = await ia.adopting_deploy_runner(
+        project_slug="nex-manager", uat_slug="mager-uat", version_number="1.1.0", force_fresh=False
+    )
+
+    assert ok is True
+    assert url and url.startswith("https://"), f"vykonávateľ nezložil adresu: {url!r}"
+    assert "mager-manager" in url, f"adresa nemieri na inštaláciu zákazníka: {url}"
+
+
+@pytest.mark.asyncio
+async def test_the_runner_reports_what_it_set_aside(tmp_path, monkeypatch) -> None:
+    """Manažér sa musí dozvedieť, že jeho ručná práca leží vedľa — inak ju nikdy nenájde."""
+    from backend.services import instance_adoption as ia
+    from backend.services import orchestrator
+
+    d = _rucna_instalacia(tmp_path)
+    monkeypatch.setattr(ia, "instance_dir_for", lambda **_: d)
+    monkeypatch.setattr(ia.uat_provisioner, "provision_uat", lambda *a, **k: _FakeProvisionResult())
+    monkeypatch.setattr(ia.uat_provisioner, "derive_uat_slug", lambda _: "manager")
+
+    async def _fake_uat_deploy(*a, **k):
+        return True, "OK"
+
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _fake_uat_deploy)
+
+    _ok, detail, _url = await ia.adopting_deploy_runner(
+        project_slug="nex-manager", uat_slug="mager-uat", version_number="1.1.0", force_fresh=False
+    )
+
+    assert "docker-compose.yml.pre-nex-studio" in detail
+    assert ".env.pre-nex-studio" in detail
+    assert "skúšobné upozornenie" in detail, "upozornenia provisionera sa cestou stratili"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_provision_does_not_pretend_to_have_adopted(tmp_path, monkeypatch) -> None:
+    """Keď render zlyhá, vykonávateľ to povie — a nevymyslí si adresu bežiacej appky."""
+    from backend.services import instance_adoption as ia
+
+    d = _rucna_instalacia(tmp_path)
+    monkeypatch.setattr(ia, "instance_dir_for", lambda **_: d)
+
+    def _padne(*_a, **_k):
+        raise ValueError("nedá sa")
+
+    monkeypatch.setattr(ia.uat_provisioner, "provision_uat", _padne)
+    monkeypatch.setattr(ia.uat_provisioner, "derive_uat_slug", lambda _: "manager")
+
+    ok, detail, url = await ia.adopting_deploy_runner(
+        project_slug="nex-manager", uat_slug="mager-uat", version_number="1.1.0", force_fresh=False
+    )
+
+    assert ok is False and url is None
+    assert "nedá sa" in detail

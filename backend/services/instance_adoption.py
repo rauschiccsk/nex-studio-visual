@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import NamedTuple, Optional
 
 from backend.services import uat_provisioner
-from backend.services.deploy import RunnerResult, _prod_url
+from backend.services.deploy import RunnerResult, _prod_url, _url_for_instance_slug
 
 #: Prípona, pod ktorou sa ručná práca odkladá. Rovnaká ako pri prevzatí projektu (ICCINT-87), aby sa
 #: „čo je toto za súbor“ nemuselo lúštiť dvakrát.
@@ -236,8 +236,15 @@ async def adopting_deploy_runner(
             full_project_slug=project_slug,
             version_number=version_number,
         )
-        url = result.url
+        # ⚠️ ``ProvisionResult`` žiadne ``url`` nemá — skladá sa z názvu inštalácie, presne ako
+        # v ``deploy._default_deploy_runner``. Prvé znenie tu malo ``result.url`` a padlo to až
+        # v ostrej prevádzke, po tom, čo sa priečinok už prevzal: 500 na obrazovke, nič v evidencii,
+        # ale na disku hotovo. Preto sa URL berie z toho istého pomocníka ako pri bežnom nasadení.
+        url = _url_for_instance_slug(f"{customer_slug}-{app}") if result.fe_service else None
 
+    warnings = list(result.warnings)
     if odlozene:
         detail = f"{detail} Ručné súbory odložené: {', '.join(odlozene)}."
-    return RunnerResult(ok, detail, url, list(result.warnings))
+    if warnings:
+        detail = f"{detail} | warnings: {'; '.join(warnings)}"
+    return RunnerResult(ok, detail, url, warnings)
