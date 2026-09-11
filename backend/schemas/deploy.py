@@ -142,6 +142,21 @@ class DeployMatrixRow(BaseModel):
         default=False,
         description="True when the customer's newest PROD deploy attempt FAILED — same honest flag as UAT (#5).",
     )
+    uat_last_deploy_at: Optional[datetime] = Field(
+        default=None,
+        description="When the newest SUCCESSFUL UAT deploy happened (None = never). ICCINT-117: the green "
+        "confirmation used to live only in the browser's memory, so the first refresh erased it — a status "
+        "that does not survive F5 is not a status.",
+    )
+    uat_last_deploy_detail: Optional[str] = Field(
+        default=None,
+        description="What that deploy reported — including any warnings (they are appended to the event's "
+        "detail). Non-secret by construction (§4).",
+    )
+    prod_last_deploy_at: Optional[datetime] = Field(
+        default=None, description="Same, for PROD (None = never deployed there)."
+    )
+    prod_last_deploy_detail: Optional[str] = Field(default=None, description="Same, for PROD.")
     accepted_versions: list[str] = Field(
         default_factory=list,
         description="Versions accepted-for-PROD for this customer — the only versions whose PROD Nasadiť is open.",

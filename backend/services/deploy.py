@@ -259,6 +259,31 @@ def last_deploy_attempt_failed(db: Session, customer_id: UUID, environment: str)
     return latest_status == "failed"
 
 
+def last_successful_deploy(db: Session, customer_id: UUID, environment: str) -> Optional[DeployEvent]:
+    """The customer's newest SUCCESSFUL deploy event to ``environment`` — or ``None`` (never deployed).
+
+    ICCINT-117. Zelené „✓ Nasadené“ aj upozornenia žili iba v premennej v pamäti prehliadača (odpoveď
+    na klik), takže F5 ich zmazal a obrazovka vyzerala ako pred nasadením. Pritom ``deploy_events`` je
+    append-only audit a warnings sa doň UŽ ukladajú (pripájajú sa do ``detail``) — len ich nikto nečítal
+    späť. **Stav, ktorý platí len do prvého refreshu, nie je stav.**
+
+    Viaže sa na ÚSPEŠNÉ nasadenie, rovnako ako :func:`current_version`: keby čas posunul aj zlyhaný
+    pokus, obrazovka by tvrdila, že posledné dobré nasadenie je novšie, než v skutočnosti je. Zlyhanie
+    má vlastný, oddelený kanál — :func:`last_deploy_attempt_failed`.
+    """
+    return db.execute(
+        select(DeployEvent)
+        .where(
+            DeployEvent.customer_id == customer_id,
+            DeployEvent.environment == environment,
+            DeployEvent.event_type == "deploy",
+            DeployEvent.status == "ok",
+        )
+        .order_by(DeployEvent.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
 def project_had_prod_deploy(db: Session, project_id: UUID) -> bool:
     """True iff ANY customer of the project has ever had a successful PROD deploy (§3.6).
 
@@ -574,6 +599,8 @@ def build_matrix(db: Session, project: Project, user: Optional[object] = None) -
     for customer in customers:
         uat_version = current_version(db, customer.id, "uat")
         prod_version = current_version(db, customer.id, "prod")
+        uat_last = last_successful_deploy(db, customer.id, "uat")
+        prod_last = last_successful_deploy(db, customer.id, "prod")
         rows.append(
             {
                 "customer_id": customer.id,
@@ -586,6 +613,13 @@ def build_matrix(db: Session, project: Project, user: Optional[object] = None) -
                 # surface it alongside the last-good version so the manager sees the upgrade didn't land.
                 "uat_last_attempt_failed": last_deploy_attempt_failed(db, customer.id, "uat"),
                 "prod_last_attempt_failed": last_deploy_attempt_failed(db, customer.id, "prod"),
+                # ICCINT-117: KEDY sa naposledy úspešne nasadilo a ČO to ohlásilo. Bez toho obrazovka
+                # držala potvrdenie iba v pamäti prehliadača a prvý F5 ho zmazal — stav, ktorý neprežije
+                # refresh, nie je stav. Údaje ležia v append-only audite; doteraz sa len nečítali späť.
+                "uat_last_deploy_at": uat_last.created_at if uat_last else None,
+                "uat_last_deploy_detail": uat_last.detail if uat_last else None,
+                "prod_last_deploy_at": prod_last.created_at if prod_last else None,
+                "prod_last_deploy_detail": prod_last.detail if prod_last else None,
                 "accepted_versions": accepted_versions(db, customer.id),
                 # Each tab links to its live instance only once it has a deploy there (§3.5 "link to the URL");
                 # None hides the link. Audit Theme 4: PROD now carries its own link, mirroring UAT.

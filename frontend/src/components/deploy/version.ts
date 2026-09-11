@@ -9,3 +9,23 @@
  * show the same version two different ways.
  */
 export const fmtVer = (v: string | null | undefined): string => (v ?? "").replace(/^v/i, "");
+
+/**
+ * Kedy sa nasadilo — v ľudskej podobe, v čase čitateľa (ICCINT-117).
+ *
+ * Server posiela ISO 8601 v UTC; Manažér číta miestny čas. Formátuje sa cez `sk-SK`, nech to vyzerá
+ * ako dátum a nie ako strojový zápis. Neplatný alebo chýbajúci vstup vráti prázdny reťazec — nikdy
+ * „Invalid Date“ na obrazovke.
+ */
+export const fmtDeployTime = (iso: string | null | undefined): string => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString("sk-SK", {
+    day: "numeric",
+    month: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};

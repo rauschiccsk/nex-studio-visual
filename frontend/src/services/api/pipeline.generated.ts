@@ -3867,6 +3867,16 @@ export interface components {
              */
             prod_last_attempt_failed: boolean;
             /**
+             * Prod Last Deploy At
+             * @description Same, for PROD (None = never deployed there).
+             */
+            prod_last_deploy_at?: string | null;
+            /**
+             * Prod Last Deploy Detail
+             * @description Same, for PROD.
+             */
+            prod_last_deploy_detail?: string | null;
+            /**
              * Prod Url
              * @description Link to the customer's live PROD instance (the PROD tab link); None until a PROD deploy.
              */
@@ -3884,6 +3894,16 @@ export interface components {
              * @default false
              */
             uat_last_attempt_failed: boolean;
+            /**
+             * Uat Last Deploy At
+             * @description When the newest SUCCESSFUL UAT deploy happened (None = never). ICCINT-117: the green confirmation used to live only in the browser's memory, so the first refresh erased it — a status that does not survive F5 is not a status.
+             */
+            uat_last_deploy_at?: string | null;
+            /**
+             * Uat Last Deploy Detail
+             * @description What that deploy reported — including any warnings (they are appended to the event's detail). Non-secret by construction (§4).
+             */
+            uat_last_deploy_detail?: string | null;
             /**
              * Uat Url
              * @description Link to the customer's live UAT instance (the UAT tab link, §3.5); None until a UAT deploy.

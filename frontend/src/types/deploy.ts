@@ -64,6 +64,15 @@ export interface DeployMatrixRow {
   uat_last_attempt_failed: boolean;
   /** True when the customer's NEWEST PROD deploy attempt failed — same honest flag as UAT (audit #5). */
   prod_last_attempt_failed: boolean;
+  /** Kedy sa naposledy ÚSPEŠNE nasadilo na UAT (null = nikdy). ICCINT-117: zelené potvrdenie žilo iba
+   *  v pamäti prehliadača, takže prvý F5 ho zmazal — stav, ktorý neprežije refresh, nie je stav. */
+  uat_last_deploy_at: string | null;
+  /** Čo to nasadenie ohlásilo, vrátane upozornení (tie sa do záznamu pripájajú). Bez tajomstiev (§4). */
+  uat_last_deploy_detail: string | null;
+  /** To isté pre PROD (null = nikdy tam nenasadené). */
+  prod_last_deploy_at: string | null;
+  /** To isté pre PROD. */
+  prod_last_deploy_detail: string | null;
   /**
    * Versions accepted-for-PROD for this customer — the ONLY versions whose PROD
    * Nasadiť is open (the never-bypassed acceptance gate, §3.5).

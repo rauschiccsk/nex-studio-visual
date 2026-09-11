@@ -976,3 +976,80 @@ class TestDeployabilityCause:
         assert _can_deploy_prod(manager) is False
         assert _can_deploy_prod(medior) is False
         assert deploy_service.build_matrix(db_session, project)["can_deploy_prod"] is False
+
+
+# ---------------------------------------------------------------------------
+# ICCINT-117 — stav, ktorý platí len do prvého F5, nie je stav
+# ---------------------------------------------------------------------------
+
+
+class TestDeployStatusSurvivesRefresh:
+    """Director 11.09.2026, po nasadení NEX Managera 1.2.1 na MÁGERSTAV UAT:
+    „po F5 informácie o nasadení zmizli a systém ponúka nasadiť tú istú verziu znovu.“
+
+    Zelené „✓ Nasadené“ aj upozornenia žili iba v premennej v pamäti prehliadača (odpoveď na klik).
+    Pritom ``deploy_events`` je append-only audit a warnings sa doň UŽ ukladajú (pripájajú sa do
+    ``detail``) — len ich nikto nečítal späť. Riadok tabuľky preto musí niesť KEDY sa naposledy
+    úspešne nasadilo a ČO sa pri tom povedalo, aby to obrazovka nemusela držať v hlave.
+    """
+
+    def test_row_carries_when_the_last_successful_deploy_happened(self, client, db_session, fake_deploy_runner):
+        user = _current_user(db_session)
+        project = _seed_project(db_session, creator=user)
+        _seed_verified_version(db_session, project, "v0.1.0")
+        customer = _seed_customer(db_session, project, "andros")
+
+        client.post(
+            f"/api/v1/customers/{customer.id}/deploy",
+            json={"version_number": "v0.1.0", "environment": "uat"},
+        )
+
+        row = client.get(f"/api/v1/projects/{project.slug}/deploy-matrix").json()["rows"][0]
+        assert row["uat_version"] == "v0.1.0"
+        assert row.get("uat_last_deploy_at"), "riadok nevie, KEDY sa nasadilo — po F5 to nemá odkiaľ vziať"
+        # Druhé prostredie sa nikdy nenasadilo → nesmie si nič vymyslieť.
+        assert row.get("prod_last_deploy_at") is None, "PROD sa nenasadil, a predsa hlási čas"
+
+    def test_row_carries_what_the_deploy_reported(self, client, db_session, fake_deploy_runner):
+        """Upozornenia („nasadilo sa, ale niečo nebolo ideálne“) povedala appka raz a už nikdy."""
+        user = _current_user(db_session)
+        project = _seed_project(db_session, creator=user)
+        _seed_verified_version(db_session, project, "v0.1.0")
+        customer = _seed_customer(db_session, project, "andros")
+
+        client.post(
+            f"/api/v1/customers/{customer.id}/deploy",
+            json={"version_number": "v0.1.0", "environment": "uat"},
+        )
+
+        row = client.get(f"/api/v1/projects/{project.slug}/deploy-matrix").json()["rows"][0]
+        assert "uat_last_deploy_detail" in row, "to, čo nasadenie ohlásilo, sa po F5 nedá prečítať"
+        assert row["uat_last_deploy_detail"], "detail je prázdny — nie je čo zobraziť"
+
+    def test_a_failed_attempt_does_not_backdate_the_last_good_deploy(
+        self, client, db_session, prod_failing_deploy_runner
+    ):
+        """Čas sa viaže na ÚSPEŠNÉ nasadenie. Keby ho posunul zlyhaný pokus, obrazovka by tvrdila,
+        že posledné dobré nasadenie je novšie, než v skutočnosti je — a to je horšie než mlčať."""
+        user = _current_user(db_session)
+        project = _seed_project(db_session, creator=user)
+        _seed_verified_version(db_session, project, "v0.1.0")
+        customer = _seed_customer(db_session, project, "andros")
+
+        client.post(
+            f"/api/v1/customers/{customer.id}/deploy",
+            json={"version_number": "v0.1.0", "environment": "uat"},
+        )
+        po_uspechu = client.get(f"/api/v1/projects/{project.slug}/deploy-matrix").json()["rows"][0]
+
+        # PROD zlyhá — UAT sa to nesmie dotknúť vôbec.
+        client.post(f"/api/v1/customers/{customer.id}/accept", json={"version_number": "v0.1.0"})
+        prod = client.post(
+            f"/api/v1/customers/{customer.id}/deploy",
+            json={"version_number": "v0.1.0", "environment": "prod"},
+        )
+        assert prod.json()["ok"] is False
+
+        po_zlyhani = client.get(f"/api/v1/projects/{project.slug}/deploy-matrix").json()["rows"][0]
+        assert po_zlyhani["uat_last_deploy_at"] == po_uspechu["uat_last_deploy_at"]
+        assert po_zlyhani["prod_last_deploy_at"] is None, "zlyhaný pokus sa vydáva za nasadenie"

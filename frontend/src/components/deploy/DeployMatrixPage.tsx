@@ -17,7 +17,7 @@ import { humanizeApiError } from "@/services/apiError";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import type { DeployEnvironment, DeployMatrix, DeployMatrixRow, DeployResult } from "@/types/deploy";
 import DeployBlockNotice from "./DeployBlockNotice";
-import { fmtVer } from "./version";
+import { fmtDeployTime, fmtVer } from "./version";
 
 /**
  * Shared version × customer matrix page for the UAT and PROD tabs (CR-V2-027,
@@ -446,6 +446,21 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                 const lastAttemptFailed =
                   environment === "uat" ? row.uat_last_attempt_failed : row.prod_last_attempt_failed;
                 const result = rowResult[row.customer_id];
+                // ICCINT-117 — čo o nasadení vie SERVER, nie prehliadač. Potvrdenie z kliku (`result`)
+                // žije v pamäti a prvý F5 ho zmaže; toto prežije, lebo je to append-only audit.
+                const lastDeployAt =
+                  environment === "uat" ? row.uat_last_deploy_at : row.prod_last_deploy_at;
+                const lastDeployDetail =
+                  environment === "uat" ? row.uat_last_deploy_detail : row.prod_last_deploy_detail;
+                // Upozornenia sa do `detail` pripájajú za „ | “. Prvý diel je holé „OK“ — nie je čo čítať.
+                const lastDeployWarnings = (lastDeployDetail ?? "")
+                  .split(" | ")
+                  .slice(1)
+                  .filter((w) => w.trim() !== "");
+                // Vybraná verzia je UŽ nasadená → nie je to ďalší krok, je to opakovanie. Neskrývame
+                // ani nevypíname (prestavba po zásahu je legitímna) — len to pomenujeme, aby obrazovka
+                // prestala vyzerať, že o nasadení nevie.
+                const redeploy = !!chosen && !!current && chosen === current;
                 const accepted =
                   environment === "uat" && !!row.uat_version && row.accepted_versions.includes(row.uat_version);
                 return (
@@ -493,6 +508,19 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                           </button>
                         )}
                       </div>
+                      {/* ICCINT-117: KEDY sa to stalo — zo servera, takže to prežije refresh. Potvrdenie
+                          z kliku („✓ Nasadené“) zostáva ako okamžitá odozva, ale už nie je JEDINÉ miesto,
+                          kde sa dá zistiť, že nasadenie prebehlo. */}
+                      {lastDeployAt && (
+                        <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+                          nasadené {fmtDeployTime(lastDeployAt)}
+                        </div>
+                      )}
+                      {lastDeployWarnings.map((w, idx) => (
+                        <div key={idx} className="mt-0.5 text-[11px] text-amber-600 dark:text-amber-400">
+                          ⚠ {w}
+                        </div>
+                      ))}
                       {liveUrl && renderLaunchOrOpen(row.customer_id, liveUrl)}
                     </td>
 
@@ -585,8 +613,19 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                         <button
                           onClick={() => handleDeploy(row)}
                           disabled={isBusy || verified.length === 0 || blocked !== null}
-                          title={blocked?.title ?? `Nasadiť verziu ${fmtVer(chosen)} do ${labels.title}`}
-                          className="flex items-center gap-1.5 rounded-lg bg-primary-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-primary-500 disabled:opacity-40"
+                          title={
+                            blocked?.title ??
+                            (redeploy
+                              ? `Verzia ${fmtVer(chosen)} už na ${labels.title} beží — toto ju postaví a nasadí znova.`
+                              : `Nasadiť verziu ${fmtVer(chosen)} do ${labels.title}`)
+                          }
+                          /* ICCINT-117: opakované nasadenie stráca plnú farbu. Neskrýva sa ani nevypína —
+                             prestavba po zásahu je legitímna — len prestane vyzerať ako ďalší krok. */
+                          className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium disabled:opacity-40 ${
+                            redeploy
+                              ? "border border-[var(--color-border-default)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+                              : "bg-primary-600 text-white hover:bg-primary-500"
+                          }`}
                         >
                           {isBusy ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -595,7 +634,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                           ) : (
                             <UploadCloud className="h-3.5 w-3.5" />
                           )}
-                          Nasadiť
+                          {redeploy ? "Nasadiť znova" : "Nasadiť"}
                         </button>
                       </div>
                       {/* v4.0.54: this line used to be PROD-only and hardcoded to the acceptance gate — so on
