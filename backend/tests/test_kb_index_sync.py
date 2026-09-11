@@ -116,3 +116,44 @@ def test_an_unreachable_index_raises_instead_of_reading_as_clean(monkeypatch):
 
     with pytest.raises(kb.KbIndexUnavailable):
         kb.scan_index()
+
+
+# --- INCIDENT 11.09.2026: dorovnanie vymazalo ostrý index ---------------------------------------
+#
+# O 07:42 som na hostiteľovi pustil testy. ``backend/tests/conftest.py`` robí ``with TestClient(app)``,
+# čo spustí SKUTOČNÝ životný cyklus appky — a v ňom moju novú slučku. ``tests/conftest.py:447`` pritom
+# prepína ``settings.knowledge_base_path`` na dočasný priečinok. Slučka sa teda pozrela na prázdny
+# strom, usúdila, že všetkých ~150 dokumentov v indexe je osirelých, a zmazala ich z OSTRÉHO Qdrantu:
+# 3718 bodov → 293.
+#
+# Nič sa nestratilo natrvalo (zdrojom pravdy je disk, index sa prestaval), ale chyba nebola v testoch.
+# Chyba bola v návrhu: zásadu „neviem sa nevydáva za v poriadku" som uplatnil na ČÍTANIE stavu a nie
+# na MAZANIE. Prázdna alebo neúplná strana disku nesmie nikdy oprávniť vyprázdnenie korpusu — ani
+# v testoch, ani keby sa Znalostná báza raz nepripojila v ostrej prevádzke.
+
+
+def test_an_empty_disk_never_authorises_deleting_the_corpus():
+    """Presne ten incident: disk prázdny, index plný. Odpoveď nesmie byť „zmaž všetko"."""
+    index = {f"icc/{i}.md": _cas() for i in range(150)}
+    assert not kb.deletion_is_safe(kb.compare({}, index)), "prázdny disk dostal povolenie vyprázdniť index"
+
+
+def test_a_disk_that_lost_most_of_the_corpus_is_treated_as_broken_not_as_intent():
+    """Aj čiastočne zlá cesta je zlá cesta. Že by niekto naozaj zmazal 80 % Znalostnej bázy medzi
+    dvoma prechodmi, je neporovnateľne menej pravdepodobné než zle pripojený priečinok."""
+    index = {f"icc/{i}.md": _cas() for i in range(100)}
+    disk = {f"icc/{i}.md": _cas().timestamp() for i in range(20)}
+    assert not kb.deletion_is_safe(kb.compare(disk, index))
+
+
+def test_a_handful_of_genuinely_deleted_documents_is_still_cleaned_up():
+    """Druhý smer — bez neho by stačilo mazanie vypnúť a skúšky vyššie by prešli. Osirelé dokumenty
+    sa MUSIA odstraňovať: odpoveď z dokumentu, ktorý už neexistuje, je najzavádzajúcejšia zo všetkých."""
+    index = {f"icc/{i}.md": _cas() for i in range(100)}
+    disk = {f"icc/{i}.md": _cas().timestamp() for i in range(97)}
+    assert kb.deletion_is_safe(kb.compare(disk, index)), "bežné upratovanie sa zablokovalo"
+
+
+def test_an_empty_index_is_safe_to_touch():
+    """Prázdny index nie je čo chrániť — a keby sa bral ako podozrivý, prvé naplnenie by sa zablokovalo."""
+    assert kb.deletion_is_safe(kb.compare({"icc/A.md": _cas().timestamp()}, {}))

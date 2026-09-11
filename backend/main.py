@@ -2,6 +2,7 @@ import asyncio
 import logging
 import sys
 from contextlib import asynccontextmanager
+from typing import Optional
 
 from alembic import command
 from alembic.config import Config
@@ -226,10 +227,16 @@ async def lifespan(app: FastAPI):
         _orchestrator_session_retention_loop(),
         name="orchestrator-session-retention",
     )
-    kb_index_task = asyncio.create_task(
-        _kb_index_sync_loop(),
-        name="kb-index-sync",
-    )
+    # Slučka sa NESPÚŠŤA v testoch: ``TestClient(app)`` prechádza skutočným životným cyklom, takže by
+    # siahala na ostrý Qdrant s cestou ku Znalostnej báze prepnutou na dočasný priečinok — presne tak
+    # vznikol incident 11.09.2026. Druhá, dôležitejšia poistka je v samotnej službe
+    # (``deletion_is_safe``): tá chráni aj ostrú prevádzku, keby sa KB raz nepripojila.
+    kb_index_task: Optional[asyncio.Task] = None
+    if settings.kb_index_sync_enabled:
+        kb_index_task = asyncio.create_task(
+            _kb_index_sync_loop(),
+            name="kb-index-sync",
+        )
 
     try:
         yield
@@ -237,8 +244,11 @@ async def lifespan(app: FastAPI):
         idle_task.cancel()
         retention_task.cancel()
         orch_session_retention_task.cancel()
-        kb_index_task.cancel()
+        if kb_index_task is not None:
+            kb_index_task.cancel()
         for t in (idle_task, retention_task, orch_session_retention_task, kb_index_task):
+            if t is None:
+                continue
             try:
                 await t
             except (asyncio.CancelledError, Exception):

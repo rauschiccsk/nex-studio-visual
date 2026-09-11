@@ -122,6 +122,10 @@ class Settings(BaseSettings):
 
     # Knowledge Base path (mounted read-only from host)
     knowledge_base_path: str = "/home/icc/knowledge"
+    #: Beží slučka, ktorá dorovnáva RAG index so Znalostnou bázou? (ICCINT-111)
+    #: V testoch sa vypína: ``TestClient(app)`` spúšťa SKUTOČNÝ životný cyklus appky, takže by slučka
+    #: siahala na ostrý Qdrant — presne to spôsobilo incident 11.09.2026.
+    kb_index_sync_enabled: bool = True
 
     # Maximum size in bytes the ``GET /kb-documents/{id}/content``
     # endpoint will return. Larger files are rejected with HTTP 422 to

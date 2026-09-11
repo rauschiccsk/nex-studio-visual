@@ -109,6 +109,41 @@ def compare(disk: Mapping[str, float], indexed: Mapping[str, datetime]) -> KbInd
     )
 
 
+#: Koľko dokumentov smie jeden prechod NAJVIAC odstrániť ako osirelé — ako podiel toho, čo index
+#: obsahuje. Nad týmto podielom sa mazanie NEVYKONÁ a nález sa nahlási.
+MAX_ORPHAN_SHARE = 0.20
+
+#: …a pod týmto počtom sa podiel neuplatňuje, aby sa bežné upratovanie v malom korpuse nezablokovalo.
+ORPHAN_FLOOR = 10
+
+
+def deletion_is_safe(porovnanie: KbIndexComparison) -> bool:
+    """Smie sa toto porovnanie použiť na MAZANIE osirelých dokumentov?
+
+    ⚠️ **Incident 11.09.2026 — táto poistka vznikla z reálnej škody.** Testy na hostiteľovi spustili
+    cez ``TestClient(app)`` skutočný životný cyklus appky a s ním túto slučku, kým
+    ``tests/conftest.py`` mal ``knowledge_base_path`` prepnutý na dočasný priečinok. Slučka videla
+    prázdny strom, vyhodnotila všetkých ~150 dokumentov ako osirelých a zmazala ich z OSTRÉHO
+    indexu: 3718 bodov → 293. Obnoviť sa to dalo (zdrojom pravdy je disk), ale chyba nebola v testoch
+    — bola v návrhu.
+
+    Zásada „**neviem sa nevydáva za v poriadku**" bola v tomto module od začiatku, lenže platila len
+    pre ČÍTANIE stavu. Mazanie ju nemalo. Teraz má: **prázdna alebo výrazne neúplná strana disku nie
+    je pokyn na vyprázdnenie korpusu, je to príznak, že je zle strana disku.** Že by niekto naozaj
+    zmazal pätinu Znalostnej bázy medzi dvoma prechodmi, je neporovnateľne menej pravdepodobné než
+    zle pripojený priečinok — a keď sa raz stane, dorovná sa to v ďalšom prechode po tom, čo si
+    človek nález prečíta.
+
+    Doindexovanie chýbajúcich a zastaraných týmto obmedzené NIE JE: pridať dokument navyše je
+    napraviteľné, zmazať ho nie.
+    """
+    if porovnanie.indexed == 0:
+        return True  # prázdny index nie je čo chrániť — inak by sa zablokovalo prvé naplnenie
+    if len(porovnanie.orphaned) <= ORPHAN_FLOOR:
+        return True
+    return len(porovnanie.orphaned) <= porovnanie.indexed * MAX_ORPHAN_SHARE
+
+
 def _indexovatelny(oznacenie: str) -> bool:
     """Patrí tento dokument do korpusu vôbec?
 
@@ -197,11 +232,22 @@ async def sync_once(
     indexer = RAGIndexer()
 
     zmazane = 0
-    for oznacenie in rozdiel.orphaned:
-        try:
-            zmazane += await indexer.delete_document(source_file=oznacenie, tenant=tenant)
-        except Exception:
-            logger.exception("KB sync: nepodarilo sa odstrániť osirelý dokument %s", oznacenie)
+    if rozdiel.orphaned and not deletion_is_safe(rozdiel):
+        # Nahlásiť NAHLAS a nemazať: toto je takmer vždy zle pripojená Znalostná báza, nie zmazané
+        # dokumenty. Ticho by tu bolo najhoršie — rozdiel zostane v čísle, ktoré kokpit ukazuje.
+        logger.error(
+            "KB sync: NEMAŽEM. %d z %d zaindexovaných dokumentov vyzerá osirelo, na disku ich je %d — "
+            "to je príznak zle pripojenej Znalostnej bázy, nie pokyn na vyprázdnenie indexu (incident 11.09.2026).",
+            len(rozdiel.orphaned),
+            rozdiel.indexed,
+            rozdiel.on_disk,
+        )
+    else:
+        for oznacenie in rozdiel.orphaned:
+            try:
+                zmazane += await indexer.delete_document(source_file=oznacenie, tenant=tenant)
+            except Exception:
+                logger.exception("KB sync: nepodarilo sa odstrániť osirelý dokument %s", oznacenie)
 
     zaindexovane, zlyhane = 0, 0
     for oznacenie in (*rozdiel.missing, *rozdiel.stale)[:limit]:
