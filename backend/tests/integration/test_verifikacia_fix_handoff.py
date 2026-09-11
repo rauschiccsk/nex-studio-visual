@@ -499,3 +499,96 @@ def test_a_legacy_fix_epic_is_reused_not_joined_by_a_third(db_session) -> None:
     newest = max(fix_epics, key=lambda e: e.number)
     feats = db_session.execute(select(Feat).where(Feat.epic_id == newest.id)).scalars().all()
     assert len(feats) == 2, "the round did not land in the epic that was already there"
+
+
+# --- ICCINT-115 -------------------------------------------------------------------------------------
+# Audítorovo hlásenie nie je zoznam chýb a nesmie sa naň rozpadnúť.
+#
+# NEX Manager 1.2.1, 10.09.2026: sedem kôl Verifikácie na jednej drobnej oprave. Verdikt `seq=2500`
+# niesol SEDEM „nálezov“ — jeden súvislý odsek o JEDNOM probléme, ktorého prvá veta bola POCHVALA
+# a posledná znela „Všetko ostatné je v poriadku“. Engine z každej spravil opravnú úlohu, takže agent
+# dostal zadanie „oprav: AI Agent svoju prácu spravil správne“.
+#
+# Že ide o rozpor dvoch zmlúv nad jedným poľom, dokazujú PASS verdikty tej istej stavby: niesli 10, 11
+# a 11 „nálezov“. PASS s jedenástimi nálezmi nie sú konkrétne zlyhania — je to hlásenie. Smernica to
+# Audítorovi dokonca dovoľuje („do `findings` daj prípadné neblokujúce poznámky“).
+#
+# Preto: čo napísal AUDÍTOR, je jedno zadanie. Rozpad na úlohu-za-nález zostáva pre volajúceho, ktorý
+# zoznam zostavil SÁM a vie, že sú to naozaj samostatné chyby (viď
+# ``test_three_findings_become_three_tasks_in_one_round``).
+
+AUDITOROVO_HLASENIE = [
+    "AI Agent svoju prácu spravil správne — prepísaná poznámka k vydaniu je commitnutá.",
+    "Text sa však do appky nedostal: dve minúty po commite sa súbor vrátil na starý polotovar.",
+    "Appka číta ten súbor z disku — overil som na bežiacej appke, že veta je tam znova.",
+    "Podľa záznamu o behu nastal prepis v čase, keď nepracoval žiadny agent.",
+    "V súbore je pritom napísané, že ručne prepísaný text sa už prepisovať nebude.",
+    "Automatické stráže to nezachytia — kontrolujú len dátum a to, či text nie je prázdny.",
+    "Všetko ostatné je v poriadku: oprava appky, dokumentácia, dátum vydania aj bezpečnosť.",
+]
+
+
+def _seed_auditor_fail(db, version_id, findings: list[str], *, proposed_fix: str = "") -> None:
+    """Audítorov FAIL verdikt tak, ako ho zapisuje ``_verdict_message`` — vrátane prázdneho
+    ``proposed_fix``, lebo práve vtedy sa dnes spúšťa rozpad."""
+    payload: dict = {"verdict": "FAIL", "findings": findings, "phase": "verifikacia"}
+    if proposed_fix:
+        payload["proposed_fix"] = proposed_fix
+    orchestrator._record_message(
+        db,
+        version_id=version_id,
+        stage="verifikacia",
+        author="auditor",
+        recipient="manazer",
+        kind="verdict",
+        content="Verifikácia FAIL.",
+        payload=payload,
+    )
+    db.flush()
+
+
+def test_auditor_report_becomes_one_task_not_one_per_sentence(db_session) -> None:
+    """Sedem viet jedného hlásenia je JEDNO zadanie — nie sedem opráv."""
+    version, _state = _seed(db_session, stage="verifikacia")
+    _seed_auditor_fail(db_session, version.id, AUDITOROVO_HLASENIE)
+
+    orchestrator._ensure_verifikacia_fix_task(db_session, version.id)
+
+    tasks = (
+        db_session.execute(
+            select(Task)
+            .join(Feat, Feat.id == Task.feat_id)
+            .join(Epic, Epic.id == Feat.epic_id)
+            .where(Epic.version_id == version.id)
+        )
+        .scalars()
+        .all()
+    )
+    assert len(tasks) == 1, f"hlásenie sa rozpadlo na {len(tasks)} opráv — agent dostane pochvalu ako zadanie"
+
+    # Nestačí spočítať úlohy: zadanie musí skutočný problém OBSAHOVAŤ, inak by prešlo aj prázdne.
+    brief = tasks[0].description or ""
+    assert "vrátil na starý polotovar" in brief, "jedna úloha vznikla, ale bez samotného problému"
+    assert "Automatické stráže to nezachytia" in brief, "zo zadania vypadli ďalšie vety hlásenia"
+
+
+def test_no_fix_task_is_ever_titled_with_praise(db_session) -> None:
+    """Priamo to, čo Manažér videl: úloha, ktorej popisom je pochvala."""
+    version, _state = _seed(db_session, stage="verifikacia")
+    _seed_auditor_fail(db_session, version.id, AUDITOROVO_HLASENIE)
+
+    orchestrator._ensure_verifikacia_fix_task(db_session, version.id)
+
+    popisy = [
+        (t.description or "")
+        for t in db_session.execute(
+            select(Task)
+            .join(Feat, Feat.id == Task.feat_id)
+            .join(Epic, Epic.id == Feat.epic_id)
+            .where(Epic.version_id == version.id)
+        )
+        .scalars()
+        .all()
+    ]
+    for pochvala in (AUDITOROVO_HLASENIE[0], AUDITOROVO_HLASENIE[-1]):
+        assert pochvala not in popisy, f"pochvala sa stala samostatnou opravnou úlohou: {pochvala!r}"

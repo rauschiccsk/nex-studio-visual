@@ -9289,8 +9289,12 @@ def _ensure_verifikacia_fix_task(
     if version is None:
         return
     scope = scope or _latest_verifikacia_fix_scope(db, version_id) or "Oprav blokujúce zlyhanie z koncovej Verifikácie."
-    if findings is None:
-        findings = _latest_verifikacia_findings(db, version_id)
+    # ICCINT-115: ``findings`` sa NEDOPĹŇA z Audítorovho verdiktu. To pole nie je zoznam chýb — smernica
+    # Audítorovi výslovne dovoľuje písať doň aj neblokujúce poznámky, a on doň píše celé hlásenie: NEX
+    # Manager 1.2.1 mal v PASS verdiktoch 10, 11 a 11 „nálezov“. Keď taký odsek prišiel s FAIL a bez
+    # ``proposed_fix``, rozpadol sa na úlohu-za-vetu — sedem kôl Verifikácie, v ktorých agent dostal ako
+    # zadanie na opravu Audítorovu POCHVALU („AI Agent svoju prácu spravil správne“).
+    # Rozpad zostáva pre volajúceho, ktorý zoznam zostavil SÁM a vie, že sú to samostatné chyby.
     existing = db.execute(
         select(Task)
         .join(Feat, Feat.id == Task.feat_id)
@@ -9367,9 +9371,11 @@ def _ensure_verifikacia_fix_task(
             plain_description=plain,
         ),
     )
-    # ICCINT-39: one TASK per FINDING. Three findings used to become one task with a glued-together brief, so
-    # the plan could not say which of them was done — the rest of the plan has never worked that way. An
-    # operator's own instruction is one scope and stays one task.
+    # ICCINT-39: one TASK per FINDING — three separate defects must be tellable apart in the plan. ICCINT-115
+    # narrowed WHOSE list may be split: only a list the CALLER composed and vouches for. The Auditor's own
+    # ``findings`` are a report, not a defect list, and no longer arrive here (see above) — so the automatic
+    # path lands on ``[scope]``: ONE task whose brief is the whole finding list as bullets, assembled by
+    # :func:`_latest_verifikacia_fix_scope`. Nothing is lost from the brief; only the fan-out is gone.
     items = findings or [scope]
     for i, item in enumerate(items, start=1):
         task_service.create(
@@ -9679,38 +9685,6 @@ def _fix_plain_description(scope: str) -> str:
         if line and not line.startswith("`") and len(line) > 12:
             return f"Verifikácia našla chybu: {line[:180]}"
     return "Verifikácia našla blokujúcu chybu — AI Agent ju opravuje a Auditor to potom znova preverí."
-
-
-def _latest_verifikacia_findings(db: Session, version_id: uuid.UUID) -> Optional[list[str]]:
-    """The Auditor's findings from the LATEST Verifikácia FAIL, one per fix task (ICCINT-39) — or ``None``.
-
-    ``None`` on purpose in two cases, and both mean "one task, not many": there is no FAIL verdict on record,
-    or the newest verifikacia message is the operator's own ``return`` (he is steering the fix himself, and
-    his instruction is ONE scope). Mirrors the precedence :func:`_latest_verifikacia_fix_scope` already uses,
-    so the brief and the task count can never disagree about who is talking."""
-    latest = db.execute(
-        select(PipelineMessage)
-        .where(
-            PipelineMessage.version_id == version_id,
-            PipelineMessage.stage == "verifikacia",
-            PipelineMessage.kind.in_(("verdict", "return")),
-        )
-        .order_by(PipelineMessage.seq.desc())
-        .limit(1)
-    ).scalar_one_or_none()
-    if latest is None or latest.kind != "verdict":
-        return None
-    payload = latest.payload or {}
-    if payload.get("verdict") != "FAIL":
-        return None
-    # A ``proposed_fix`` is a NARROWED scope — somebody (the Auditor, or the critic that vetted it) already
-    # decided what the one targeted change is. Splitting THAT back into per-finding tasks would throw the
-    # narrowing away and hand the agent the raw findings again. Caught by an existing test the moment the
-    # split was added, which is exactly what that test is for: one corrected scope stays ONE task.
-    if str(payload.get("proposed_fix") or "").strip():
-        return None
-    findings = [str(f).strip() for f in (payload.get("findings") or []) if str(f).strip()]
-    return findings or None
 
 
 def _latest_verifikacia_fix_scope(db: Session, version_id: uuid.UUID) -> Optional[str]:

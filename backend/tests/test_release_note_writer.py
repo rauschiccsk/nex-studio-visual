@@ -332,3 +332,67 @@ def test_graduation_idempotent_when_number_unchanged(db_session, tmp_path):
 
     assert version.version_number == "v1.0.0"
     assert version.status == "released"
+
+
+# --- ICCINT-116 -------------------------------------------------------------------------------------
+# Stráž z ICCINT-96 sa dá poraziť jej VLASTNÝM pokynom.
+#
+# NEX Manager 1.2.1, 10.09.2026: agent napísal ľudskú poznámku k vydaniu a commitol ju. Dve minúty po
+# commite sa súbor na disku vrátil na strojový polotovar — do písmena ten istý text, ktorý Audítor
+# predtým zamietol. Appka číta ten súbor z disku, takže používateľ videl polotovar. Agent opravoval,
+# kokpit prepisoval späť, Audítor videl starý text a vrátil to — sedem kôl.
+#
+# Prečo: ``_is_ours`` sa pýtala len na PRÍTOMNOSŤ podpisu. Podpis je HTML komentár na poslednom riadku
+# a hovorí „keď ju prepíšeš vlastným textom, NEX Studio ju už nebude prepisovať“. Agent presne to
+# spravil — text prepísal, podpis nechal (v hotovom dokumente je neviditeľný a vyzerá ako pätička).
+# Zmerané: 29 riadkov ľudského textu a podpis na riadku 29.
+#
+# Kód teda nežiadal „prepíš text“, ale „vymaž môj podpis“ — a to ten pokyn nikde nepovedal.
+# Kto sa ním riadil, stráž tým porazil.
+
+
+def test_human_text_survives_even_with_our_marker_left_in(db_session, tmp_path):
+    """Presne to, čo sa stalo naživo: telo prepísané, podpis ponechaný."""
+    _creator, project, version = _seed(db_session)
+    _add_epic(db_session, project, version, 1, "Epika", "Nová funkcia.")
+    path = release_note_writer.write_release_note(db_session, version.id, tmp_path)
+    assert path is not None
+    polotovar = path.read_text(encoding="utf-8")
+    assert release_note_writer.GENERATED_MARKER in polotovar, "podpis sa nezapísal — skúška by nič nemerala"
+
+    # Človek (alebo agent) prepíše TELO a podpis na konci nechá — najprirodzenejšia vec na svete.
+    ludsky = "# v0.1.0 — NEX\n\nTlačidlo po inštalácii zmizne.\n\n" + release_note_writer.GENERATED_MARKER + "\n"
+    path.write_text(ludsky, encoding="utf-8")
+
+    assert release_note_writer.write_release_note(db_session, version.id, tmp_path) is None, (
+        "NEX Studio prepísalo ľudský text, lebo v ňom zostal jeho vlastný podpis"
+    )
+    assert path.read_text(encoding="utf-8") == ludsky, "text na disku sa zmenil — polotovar je späť"
+
+
+def test_our_own_untouched_note_is_still_regenerated(db_session, tmp_path):
+    """Druhý smer — bez neho by stačilo generátor vypnúť a skúška vyššie by prešla."""
+    _creator, project, version = _seed(db_session)
+    _add_epic(db_session, project, version, 1, "Epika", "Prvá veta.")
+    path = release_note_writer.write_release_note(db_session, version.id, tmp_path)
+    assert path is not None
+
+    # Nič sa nedotklo súboru; pribudla ďalšia epika → generátor má poznámku obnoviť.
+    _add_epic(db_session, project, version, 2, "Druhá", "Druhá veta.")
+    assert release_note_writer.write_release_note(db_session, version.id, tmp_path) is not None, (
+        "generátor ustúpil vlastnému nedotknutému textu — poznámky by odteraz zamrzli"
+    )
+    assert "Druhá veta." in path.read_text(encoding="utf-8")
+
+
+def test_marker_does_not_promise_what_the_code_does_not_do(db_session, tmp_path):
+    """Pokyn v podpise musí sedieť so správaním — inak navádza obeť, aby stráž obišla."""
+    _creator, project, version = _seed(db_session)
+    _add_epic(db_session, project, version, 1, "Epika", "Veta.")
+    telo = release_note_writer.write_release_note(db_session, version.id, tmp_path).read_text(encoding="utf-8")
+
+    # Buď podpis o mazaní NEHOVORÍ nič (lebo ho netreba mazať), alebo to povie NAHLAS.
+    # Nesmie sľubovať „prepíš text a nechám ťa“, ak v skutočnosti žiada vymazať sám seba.
+    assert "prepíš" not in telo.lower() or "vymaž" in telo.lower() or "odtlač" in telo.lower(), (
+        "podpis sľubuje niečo iné, než kód robí"
+    )

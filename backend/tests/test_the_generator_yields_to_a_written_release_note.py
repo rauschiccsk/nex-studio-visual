@@ -73,18 +73,52 @@ def test_our_own_generated_note_is_still_refreshed(db_session, tmp_path) -> None
     assert druhe is not None, "vlastnú generovanú poznámku prestal generátor obnovovať"
 
 
+def _bez_podpisu(db_session, version) -> str:
+    """Telo generovanej poznámky bez akéhokoľvek podpisového riadka."""
+    cele = release_note_writer.render_release_note(db_session, version)
+    return release_note_writer._strip_marker(cele).strip() + "\n"
+
+
 def test_a_generated_note_from_before_this_change_is_recognised(db_session, tmp_path) -> None:
-    """Poznámky spred tejto zmeny podpis nemajú. Nesmú sa tváriť ako cudzí text, inak by generátor
+    """Poznámky spred ICCINT-96 podpis nemajú. Nesmú sa tváriť ako cudzí text, inak by generátor
     stíchol tam, kde stíchnuť nemá."""
     version, _ = _version(db_session)
     notes = release_note_writer.version_notes_dir(tmp_path, "1.1.0")
     notes.mkdir(parents=True, exist_ok=True)
-    bez_podpisu = release_note_writer.render_release_note(db_session, version).replace(
-        release_note_writer.GENERATED_MARKER, ""
-    )
-    (notes / "RELEASE_NOTES.md").write_text(bez_podpisu, encoding="utf-8")
+    (notes / "RELEASE_NOTES.md").write_text(_bez_podpisu(db_session, version), encoding="utf-8")
 
     assert release_note_writer.write_release_note(db_session, version.id, tmp_path) is not None
+
+
+def test_a_note_with_the_old_signature_is_still_recognised(db_session, tmp_path) -> None:
+    """ICCINT-116 zaviedol odtlačok, ale po diskoch projektov ležia poznámky so STARÝM podpisom.
+    Nedotknutá taká poznámka je stále naša — inak by v tých projektoch generátor navždy stíchol."""
+    version, _ = _version(db_session)
+    notes = release_note_writer.version_notes_dir(tmp_path, "1.1.0")
+    notes.mkdir(parents=True, exist_ok=True)
+    stara = _bez_podpisu(db_session, version) + "\n" + release_note_writer.LEGACY_GENERATED_MARKER + "\n"
+    (notes / "RELEASE_NOTES.md").write_text(stara, encoding="utf-8")
+
+    assert release_note_writer.write_release_note(db_session, version.id, tmp_path) is not None, (
+        "poznámka so starým podpisom sa prestala rozoznávať — generátor v tých projektoch stíchne"
+    )
+
+
+def test_an_edited_note_with_the_old_signature_is_left_alone(db_session, tmp_path) -> None:
+    """Druhý smer tej istej migrácie — a práve ten dnes zlyhával: telo prepísané, starý podpis
+    ponechaný. Vtedy sa naň siahnuť NESMIE."""
+    version, _ = _version(db_session)
+    notes = release_note_writer.version_notes_dir(tmp_path, "1.1.0")
+    notes.mkdir(parents=True, exist_ok=True)
+    upravena = (
+        "# Vlastný text\n\nTlačidlo po inštalácii zmizne.\n\n" + release_note_writer.LEGACY_GENERATED_MARKER + "\n"
+    )
+    (notes / "RELEASE_NOTES.md").write_text(upravena, encoding="utf-8")
+
+    assert release_note_writer.write_release_note(db_session, version.id, tmp_path) is None, (
+        "prepísaný text so starým podpisom sa prepísal — to je presne ICCINT-116"
+    )
+    assert (notes / "RELEASE_NOTES.md").read_text(encoding="utf-8") == upravena
 
 
 def test_an_empty_file_is_not_treated_as_somebody_s_work(db_session, tmp_path) -> None:

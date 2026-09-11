@@ -27,6 +27,7 @@ truth for every NOT-yet-released version and overwrites any stale placeholder.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 from pathlib import Path
@@ -154,18 +155,52 @@ def render_release_note(db: Session, version: Version) -> str:
         lines.append("### Opravené")
         lines.extend(f"- {b}" for b in fixed)
 
-    # Podpis na konci: podľa neho sa pri ďalšom behu pozná, že text je náš a smie sa prepísať.
+    # Podpis na konci nesie ODTLAČOK tela (ICCINT-116): pri ďalšom behu sa podľa neho pozná nielen to,
+    # že text je náš, ale aj to, že sa ho odvtedy nikto nedotkol. Holá značka to rozlíšiť nevedela.
+    telo = "\n".join(lines)
     lines.append("")
-    lines.append(GENERATED_MARKER)
+    lines.append(_marker_for(telo))
     return "\n".join(lines) + "\n"
 
 
 #: Podpis, ktorým sa generovaná poznámka priznáva (ICCINT-96). Bez neho sa nedá odlíšiť text, ktorý
 #: sme vyrobili my, od textu, ktorý niekto napísal — a práve to rozlíšenie rozhoduje, či sa smie prepísať.
-GENERATED_MARKER = (
+GENERATED_MARKER = "<!-- Túto poznámku vygenerovalo NEX Studio z evidencie úloh."
+
+#: Starý podpis bez odtlačku (do ICCINT-116). Poznámky s ním ležia po diskoch projektov a musia sa
+#: naďalej rozoznať — inak by v nich generátor navždy stíchol.
+LEGACY_GENERATED_MARKER = (
     "<!-- Túto poznámku vygenerovalo NEX Studio z evidencie úloh. "
     "Keď ju prepíšeš vlastným textom, NEX Studio ju už nebude prepisovať. -->"
 )
+
+#: Odtlačok TELA poznámky, zapísaný do podpisu (ICCINT-116). Podľa neho sa pozná text, ktorý sme
+#: napísali my A NIKTO SA HO ODVTEDY NEDOTKOL — na rozdiel od holej značky, ktorú stačilo nechať stáť.
+_FINGERPRINT_RE = re.compile(r"Odtlačok tela: ([0-9a-f]{12})\.")
+
+
+def _strip_marker(text: str) -> str:
+    """Text bez podpisového riadka — telo, o ktorom odtlačok hovorí."""
+    return "\n".join(line for line in text.splitlines() if GENERATED_MARKER not in line)
+
+
+def _fingerprint(text: str) -> str:
+    return hashlib.sha256(_strip_marker(text).strip().encode("utf-8")).hexdigest()[:12]
+
+
+def _marker_for(body: str) -> str:
+    """Podpis vrátane odtlačku tela.
+
+    ⚠️ **Text podpisu nesmie sľubovať niečo iné, než kód robí** (ICCINT-116). Starý znel „keď ju
+    prepíšeš vlastným textom, NEX Studio ju už nebude prepisovať“ — lenže kód sa pýtal len na
+    PRÍTOMNOSŤ značky, takže v skutočnosti žiadal „vymaž môj podpis“. Kto sa riadil tou vetou,
+    stráž tým porazil. Odteraz je pravdivá: siahnuť do textu STAČÍ.
+    """
+    return (
+        f"{GENERATED_MARKER} Odtlačok tela: {_fingerprint(body)}. "
+        "Keď do textu siahneš, odtlačok prestane sedieť a NEX Studio ho už neprepíše — "
+        "podpis mazať netreba. -->"
+    )
 
 
 def _is_ours(existing: str, freshly_rendered: str) -> bool:
@@ -185,9 +220,15 @@ def _is_ours(existing: str, freshly_rendered: str) -> bool:
     text = existing.strip()
     if not text:
         return True
-    if GENERATED_MARKER in existing:
-        return True
-    return text == freshly_rendered.replace(GENERATED_MARKER, "").strip()
+    odtlacok = _FINGERPRINT_RE.search(existing)
+    if odtlacok:
+        # Podpis s odtlačkom: náš je len text, ktorého telo sa zhoduje s tým, čo sme podpísali.
+        # Ponechaný podpis nad prepísaným telom teda UŽ NESTAČÍ — presne to porazilo ICCINT-96.
+        return odtlacok.group(1) == _fingerprint(existing)
+    # Starý podpis bez odtlačku, alebo žiadny: platí pôvodné pravidlo — náš je ten, čo sa do písmena
+    # zhoduje s tým, čo by generátor napísal teraz. Bezpečné v oboch smeroch: nedotknutú starú
+    # poznámku obnoví, do upravenej nesiahne.
+    return _strip_marker(existing).strip() == _strip_marker(freshly_rendered).strip()
 
 
 def write_release_note(db: Session, version_id, proj_root: Path) -> Path | None:

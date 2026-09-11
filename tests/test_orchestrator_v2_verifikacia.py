@@ -692,11 +692,15 @@ async def test_red_acceptance_floors_auditor_pass_to_fail(db_session, monkeypatc
     # the override is a readable fix scope for the re-run brief (fix loop is not left without a brief)
     assert orchestrator._latest_verifikacia_fix_scope(db_session, version.id) is not None
     fix_tasks = [t for t in _tasks(db_session, version.id) if t.id not in {dt.id for dt in done_tasks}]
-    # ICCINT-39: ONE task per finding, so an engine override that lists two findings materialises two. Before
-    # this they were glued into a single task and the plan could not say which half was done. The count is
-    # asserted against the findings themselves rather than pinned to a literal — the point is the mapping.
-    findings = [f for f in verdicts[-1].payload["findings"] if str(f).strip()]
-    assert len(fix_tasks) == len(findings)
+    # ICCINT-115: the Auditor's ``findings`` are a REPORT, not a defect list, so they no longer fan out into
+    # one task apiece. This very test showed why: its two "findings" were the engine's override sentence and
+    # the Auditor's ``"vyzerá to dobre"`` — so the old assertion demanded that a COMPLIMENT materialise as a
+    # fix task. (Live: NEX Manager 1.2.1 turned a seven-sentence report into seven rounds.) One FAIL → ONE
+    # task, and the brief must still carry the override reason — otherwise the agent is sent to fix a
+    # verdict it cannot see the cause of.
+    assert len(fix_tasks) == 1, "Audítorovo hlásenie sa opäť rozpadlo na úlohu za vetu"
+    assert "ENGINE OVERRIDE" in (fix_tasks[0].description or ""), "zo zadania vypadol dôvod prebitia verdiktu"
+    assert (fix_tasks[0].description or "").strip() != "vyzerá to dobre", "pochvala sa stala zadaním opravy"
     assert all(t.status == "todo" for t in fix_tasks)
     # …and they all hang under ONE round of ONE fix epic, not one epic apiece.
     assert len({t.feat_id for t in fix_tasks}) == 1
