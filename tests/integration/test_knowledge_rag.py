@@ -497,3 +497,50 @@ class TestRagRouterReportsOutages:
         resp = client.get("/api/v1/rag/search", params={"query": "x"})
         assert resp.status_code == 503
         assert "hunter2" not in resp.text
+
+
+# ---------------------------------------------------------------------------
+# ICCINT-111 — sedí index so Znalostnou bázou, a kedy to NEVIEME
+# ---------------------------------------------------------------------------
+
+
+class TestKbIndexStatusEndpoint:
+    """Údaj o rozchode musí byť dostupný z kokpitu — a nesmie klamať, keď sa nedá zistiť.
+
+    Zmerané 10.09.2026: z 205 súborov nesedelo 113 a NIKDE to nebolo vidieť. Oprava, ktorá by ten
+    rozchod dorovnávala potichu a pri poruche hlásila nulu, by pôvodnú chybu len prelakovala.
+    """
+
+    def test_status_reports_the_difference(self, db_session, monkeypatch):
+        from backend.services import kb_index_sync as kb
+
+        monkeypatch.setattr(kb, "scan_disk", lambda root=None: {"icc/A.md": 1.0, "icc/B.md": 1.0})
+        monkeypatch.setattr(kb, "scan_index", lambda tenant=kb.TENANT: {})
+
+        client = _build_client(db_session, _make_user(db_session, "ri"))
+        resp = client.get("/api/v1/rag/index-status")
+
+        assert resp.status_code == 200, resp.text
+        telo = resp.json()
+        assert telo["on_disk"] == 2
+        assert telo["indexed"] == 0
+        assert telo["missing"] == 2
+        assert telo["out_of_sync"] == 2
+        # Číslo bez mien je len číslo — musí byť vidieť, o KTORÉ dokumenty ide.
+        assert "icc/A.md" in telo["sample"]
+
+    def test_an_unreachable_index_answers_503_not_a_calm_zero(self, db_session, monkeypatch):
+        """Najdôležitejšia z nich. Nula rozdielov z nedostupného zdroja vyzerá presne ako poriadok."""
+        from backend.services import kb_index_sync as kb
+
+        def _mrtvy(tenant=kb.TENANT):
+            raise kb.KbIndexUnavailable("RAG index nie je dostupný: spojenie odmietnuté")
+
+        monkeypatch.setattr(kb, "scan_disk", lambda root=None: {"icc/A.md": 1.0})
+        monkeypatch.setattr(kb, "scan_index", _mrtvy)
+
+        client = _build_client(db_session, _make_user(db_session, "ri"))
+        resp = client.get("/api/v1/rag/index-status")
+
+        assert resp.status_code == 503, f"nedostupný index odpovedal {resp.status_code} — a to sa číta ako poriadok"
+        assert "nie je dostupn" in resp.json()["detail"]

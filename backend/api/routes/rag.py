@@ -35,6 +35,8 @@ from backend.db.models.foundation import User
 from backend.db.session import get_db
 from backend.rag import reader
 from backend.rag.reader import RagUnavailableError
+from backend.schemas.rag import KbIndexStatusRead
+from backend.services import kb_index_sync
 from backend.utils.kb_access import (
     filter_kb_documents,
     get_allowed_kb_categories,
@@ -166,6 +168,30 @@ async def get_stats(user: User = Depends(get_current_user)):
         return reader.get_stats()
     except RagUnavailableError as exc:
         raise _unavailable(exc) from exc
+
+
+@router.get("/index-status", response_model=KbIndexStatusRead)
+async def get_index_status(user: User = Depends(get_current_user)) -> KbIndexStatusRead:
+    """Sedí RAG index so Znalostnou bázou? (ICCINT-111)
+
+    Odpoveď sa POČÍTA naživo z disku a z indexu — nič sa neukladá, takže sa údaj nemôže rozísť
+    s tým, čo v indexe naozaj je. Keď je niektorá strana nedostupná, vráti sa **503**, nie nula
+    rozdielov: zelený údaj nad korpusom, o ktorom nevieme nič, by bol horší než pôvodná chyba.
+    """
+    try:
+        porovnanie = kb_index_sync.status()
+    except kb_index_sync.KbIndexUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return KbIndexStatusRead(
+        on_disk=porovnanie.on_disk,
+        indexed=porovnanie.indexed,
+        out_of_sync=porovnanie.out_of_sync,
+        missing=len(porovnanie.missing),
+        stale=len(porovnanie.stale),
+        orphaned=len(porovnanie.orphaned),
+        last_indexed_at=porovnanie.last_indexed_at,
+        sample=list((*porovnanie.missing, *porovnanie.stale, *porovnanie.orphaned))[:10],
+    )
 
 
 @router.get("/categories")

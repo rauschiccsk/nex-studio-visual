@@ -40,6 +40,7 @@ from backend.services import agent_terminal as agent_terminal_service
 from backend.services import build_db as build_db_service
 from backend.services import build_sandbox as build_sandbox_service
 from backend.services import consult_sandbox as consult_sandbox_service
+from backend.services import kb_index_sync as kb_index_sync_service
 from backend.services import orchestrator as orchestrator_service
 
 # Route application loggers at INFO to stderr so ``docker logs`` surfaces
@@ -136,6 +137,32 @@ async def _orchestrator_session_retention_loop() -> None:
             logger.exception("orchestrator session retention loop iteration failed")
 
 
+async def _kb_index_sync_loop() -> None:
+    """Úloha na pozadí: dorovnáva RAG index so Znalostnou bázou (ICCINT-111).
+
+    Dovtedy indexer nespúšťalo NIČ — žiadny časovač, cron ani sledovač — a povinnosť „po zápise do KB
+    reindexuj" bola nesplniteľná, lebo príkaz nebol uvedený nikde (hlavný ``CLAUDE.md`` §13 posielal
+    na rolu, rola späť na §13). Zmerané 10.09.2026: z 205 súborov nesedelo 113.
+
+    Prvý prechod ide hneď po štarte, nie až o štvrťhodinu: po reštarte je toto jediné miesto, kde sa
+    rozdiel dá zistiť, a čakať s ním by znamenalo pätnásť minút odpovedí zo starého sveta.
+
+    Zlyhanie jedného prechodu sa zapíše a pokračuje sa — rozdiel zostane v čísle, ktoré kokpit
+    ukazuje, takže sa nemá ako stratiť potichu.
+    """
+    while True:
+        try:
+            await kb_index_sync_service.sync_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("KB index sync loop iteration failed")
+        try:
+            await asyncio.sleep(kb_index_sync_service.KB_SYNC_INTERVAL_SECONDS)
+        except asyncio.CancelledError:
+            raise
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan: migrations + agent terminal startup hooks.
@@ -199,6 +226,10 @@ async def lifespan(app: FastAPI):
         _orchestrator_session_retention_loop(),
         name="orchestrator-session-retention",
     )
+    kb_index_task = asyncio.create_task(
+        _kb_index_sync_loop(),
+        name="kb-index-sync",
+    )
 
     try:
         yield
@@ -206,7 +237,8 @@ async def lifespan(app: FastAPI):
         idle_task.cancel()
         retention_task.cancel()
         orch_session_retention_task.cancel()
-        for t in (idle_task, retention_task, orch_session_retention_task):
+        kb_index_task.cancel()
+        for t in (idle_task, retention_task, orch_session_retention_task, kb_index_task):
             try:
                 await t
             except (asyncio.CancelledError, Exception):

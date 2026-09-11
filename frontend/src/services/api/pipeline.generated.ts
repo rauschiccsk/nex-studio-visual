@@ -1994,6 +1994,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/rag/index-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Index Status
+         * @description Sedí RAG index so Znalostnou bázou? (ICCINT-111)
+         *
+         *     Odpoveď sa POČÍTA naživo z disku a z indexu — nič sa neukladá, takže sa údaj nemôže rozísť
+         *     s tým, čo v indexe naozaj je. Keď je niektorá strana nedostupná, vráti sa **503**, nie nula
+         *     rozdielov: zelený údaj nad korpusom, o ktorom nevieme nič, by bol horší než pôvodná chyba.
+         */
+        get: operations["get_index_status_api_v1_rag_index_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/rag/list": {
         parameters: {
             query?: never;
@@ -4383,6 +4407,56 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * KbIndexStatusRead
+         * @description Sedí RAG index so Znalostnou bázou?
+         *
+         *     Čísla sa POČÍTAJU naživo z disku a z indexu — nič sa neukladá, takže sa údaj nemôže rozísť s tým,
+         *     čo v indexe naozaj je. Keď je niektorá strana nedostupná, endpoint vráti 503 a NIE tento model:
+         *     nula rozdielov z nedostupného zdroja vyzerá presne ako poriadok a bola by horšia než chyba samotná.
+         */
+        KbIndexStatusRead: {
+            /**
+             * Indexed
+             * @description Koľko dokumentov pozná index.
+             */
+            indexed: number;
+            /**
+             * Last Indexed At
+             * @description Najnovší zápis do indexu naprieč korpusom (None = index je prázdny).
+             */
+            last_indexed_at?: string | null;
+            /**
+             * Missing
+             * @description Na disku sú, v indexe nie.
+             */
+            missing: number;
+            /**
+             * On Disk
+             * @description Koľko dokumentov Znalostnej bázy leží na disku (bez tajomstiev).
+             */
+            on_disk: number;
+            /**
+             * Orphaned
+             * @description V indexe zostali, hoci na disku už nie sú.
+             */
+            orphaned: number;
+            /**
+             * Out Of Sync
+             * @description Súčet nezhôd — chýbajúce + zastarané + osirelé. Nula = sedí.
+             */
+            out_of_sync: number;
+            /**
+             * Sample
+             * @description Prvých pár nesediacich dokumentov — aby číslo nebolo len číslo. Cesty v rámci Znalostnej bázy, nikdy nie tajomstvá (tie sa do porovnania vôbec nedostanú).
+             */
+            sample?: string[];
+            /**
+             * Stale
+             * @description V indexe sú, ale staršie než ich podoba na disku.
+             */
+            stale: number;
         };
         /**
          * LoginRequest
@@ -9476,6 +9550,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_index_status_api_v1_rag_index_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KbIndexStatusRead"];
                 };
             };
         };

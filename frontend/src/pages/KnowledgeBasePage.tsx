@@ -23,6 +23,8 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
+
+import { KbIndexStatusLine } from "@/components/kb/KbIndexStatusLine";
 import {
   Search,
   FileText,
@@ -373,6 +375,7 @@ export default function KnowledgeBasePage() {
             <Database size={12} />
             <span>{documents.length} dokumentov</span>
           </div>
+          <KbIndexStatusLine />
         </div>
 
         {/* Toolbar — Search + Hľadať + Refresh + Strom/Všetky toggle + Nový */}

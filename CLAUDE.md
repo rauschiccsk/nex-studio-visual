@@ -450,13 +450,32 @@ Trigger: Zoltán povie "koniec", "end session", "ukonči session".
 
 Konkrétne **per-agent write rules** (čo smie ktorá rola zapisovať kde) sú v `.claude/agents/<role>/CLAUDE.md`.
 
-### RAG reindexácia (povinná)
+### RAG indexácia — robí ju NEX Studio, nie ty (ICCINT-111)
 
-CC je **povinný indexovať každú zmenu v KB**.
+**Zapíš do `/home/icc/knowledge/**` a pokračuj. Index sa dorovná sám**, do štvrťhodiny, slučkou
+v kokpite (`backend/services/kb_index_sync.py`). Prvý prechod ide hneď po štarte backendu.
 
-Po každom Write/Edit do `/home/icc/knowledge/**` musím spustiť reindex tak, aby RAG (Qdrant + Ollama embeddings) odrážal aktuálny stav KB pred koncom úlohy. Žiadne "reindexnem to neskôr" — drift medzi KB filesystem a RAG vector store je neakceptovateľný.
+Ako to overíš, keď to potrebuješ vedieť naisto:
 
-Konkrétny mechanizmus reindexu (skript, API call, hook) je v `.claude/agents/<role>/CLAUDE.md` pre rolu, ktorá KB zapisuje. Princíp je univerzálny: **žiadna KB zmena bez následného reindexu v rovnakej session**.
+```bash
+curl -s http://127.0.0.1:9217/api/v1/rag/index-status   # out_of_sync: 0 = sedí
+```
+
+V kokpite je ten istý údaj v hlavičke **Dokumentácie** jednou vetou: *vyhľadávanie sedí* /
+*nesedí: N dokumentov* / *nedá sa zistiť*. Tretia možnosť je zámerná — keď je index nedostupný,
+nesmie sa to tváriť ako poriadok.
+
+⚠️ **Čo tu stálo predtým a prečo to bola chyba.** Táto sekcia nariaďovala „po každom zápise spusti
+reindex" a dodávala, že *konkrétny mechanizmus je v `.claude/agents/<role>/CLAUDE.md`*. Rola
+odpovedala „RAG reindex (per §13 hlavného)". **Príkaz nebol uvedený nikde** — povinnosť sa nedala
+ani nájsť, nieto splniť. Zmerané 10.09.2026: z 205 súborov Znalostnej bázy **113 nesedelo**;
+`icc/STRUCTURE.md` (povinné čítanie pri štarte) v indexe nebolo vôbec a špecifikácia NEX Inboxu
+bola 63 dní pozadu. Nebola to nedbalosť — bol to kruhový odkaz.
+
+**Ponaučenie nad rámec RAG-u:** povinnosť, ktorú vykonáva človek podľa predpisu, drží len dovtedy,
+kým si ten predpis niekto prečíta a pochopí. Povinnosť, ktorú vykonáva stroj a ktorej stav je
+vidieť, drží stále. Keď sa niečo „musí robiť po každej zmene", je to zvyčajne znak, že to nemá
+robiť človek.
 
 ---
 
