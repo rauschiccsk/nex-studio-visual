@@ -173,6 +173,16 @@ export default function AdoptProjectDialog({ open, onClose, onAdopted }: Props) 
                 <dd>
                   {preview.backend_port ?? "—"} / {preview.frontend_port ?? "—"} / {preview.db_port ?? "—"}
                   <span className="text-[var(--color-text-muted)]"> (backend / frontend / databáza)</span>
+                  {/* ICCINT-120: keď sa pridelil blok, musí byť vidieť AJ to, na čom projekt beží dnes.
+                      Inak by Manažér uvidel čísla, ktoré nikde nevidel, a nevedel by prečo. */}
+                  {preview.found_backend_port !== null &&
+                    preview.found_backend_port !== preview.backend_port && (
+                      <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
+                        dnes beží na {preview.found_backend_port ?? "—"} / {preview.found_frontend_port ?? "—"}{" "}
+                        / {preview.found_db_port ?? "—"} — blok vyššie je pridelený podľa nášho štandardu
+                        a na bežiacu aplikáciu nemá vplyv
+                      </div>
+                    )}
                 </dd>
               </div>
             </dl>

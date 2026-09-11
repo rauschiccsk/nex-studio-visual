@@ -6101,6 +6101,12 @@ export interface components {
             db_port?: number | null;
             /** Description */
             description?: string | null;
+            /** Found Backend Port */
+            found_backend_port?: number | null;
+            /** Found Db Port */
+            found_db_port?: number | null;
+            /** Found Frontend Port */
+            found_frontend_port?: number | null;
             /** Frontend Port */
             frontend_port?: number | null;
             /** Latest Version */

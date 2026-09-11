@@ -205,9 +205,18 @@ export interface AdoptionPreview {
   name: string | null;
   description: string | null;
   repo_url: string | null;
+  /** Porty, ktoré sa pri prevzatí ZAPÍŠU — pridelený blok podľa štandardu D-020 (ICCINT-120). */
   backend_port: number | null;
   frontend_port: number | null;
   db_port: number | null;
+  /**
+   * Čo projekt používa DNES — informatívne. Prevzatie prideľuje podľa štandardu, nepreberá staré
+   * čísla: tie polia nie sú záznam o tom, na čom appka počúva, ale položky v evidencii pridelených
+   * portov. Bežiacej appky sa to nedotkne. Zahodený údaj sa ale nesmie zahodiť potichu.
+   */
+  found_backend_port: number | null;
+  found_frontend_port: number | null;
+  found_db_port: number | null;
   /**
    * ICCINT-89: posledná verzia, ktorú o sebe projekt hovorí (z `docs/specs/versions/`).
    *

@@ -631,6 +631,12 @@ class _AdoptionPreview(BaseModel):
     #: ICCINT-89: posledná verzia, ktorú o sebe projekt hovorí. Kokpit ju ukáže PRED prevzatím, aby
     #: Manažér vedel, na čo nadväzuje — prevzatému projektu sa totiž žiadna verzia nezakladá.
     latest_version: Optional[str] = None
+    #: ICCINT-120: čo projekt POUŽÍVA dnes — informatívne. Do evidencie sa zapíše to, čo je vyššie
+    #: v ``backend_port``/``frontend_port``/``db_port``: pridelený blok podľa štandardu D-020.
+    #: Zahodený údaj sa nesmie zahodiť potichu, preto sa vracia aj pôvodný.
+    found_backend_port: Optional[int] = None
+    found_frontend_port: Optional[int] = None
+    found_db_port: Optional[int] = None
     unresolved: list[str] = []
     notes: list[str] = []
 
@@ -667,6 +673,53 @@ def list_adoptable_projects(
     return out
 
 
+def _ports_for_adoption(db: Session, found: project_adoption.Discovered) -> dict:
+    """Aké porty sa pri prevzatí ZAPÍŠU do evidencie (ICCINT-120).
+
+    ⚠️ **Prevzatie neprepisuje evidenciu tým, čo našlo na disku — prideľuje podľa štandardu.** Staré
+    projekty vznikli, keď systém prideľovania portov ešte nebol; ich čísla (NEX Inbox: 8000/5173/5433)
+    D-020 nespĺňajú, a kokpit ich preto odmietal — prevzatie sa vôbec nedalo dokončiť.
+
+    Director 11.09.2026: *„Prevziať aplikáciu do NEX Studio Visual znamená zaviesť aj ustanovené
+    pravidlá. Starý projekt nemá rozbiť.“*
+
+    Tie polia totiž nie sú záznam o tom, na čom appka počúva — sú to položky v **evidencii pridelených
+    portov**. Zapísať do nej staré čísla by neznamenalo zaznamenať skutočnosť, ale zaviesť trvalú
+    výnimku; evidencia s výnimkami prestane byť evidenciou.
+
+    **Bežiacej appky sa to nedotkne** — overené po celej ceste: generované nasadenie si vnútorné porty
+    číta z compose samotného projektu (``uat_provisioner.detect_internal_port``), tieto polia sa
+    používajú IBA na zápis do evidencie (``port_registry.record_allocation``), a ``loopback_base_port``
+    nikto pri nasadzovaní neodovzdáva.
+
+    Projekt, ktorý štandard už spĺňa, si svoje porty PONECHÁ — zbytočné prečíslovanie by evidenciu
+    rozišlo s realitou tam, kde sedela.
+    """
+    block_size = system_setting_service.get_int(db, "port_block_size") or 10
+    range_min = system_setting_service.get_int(db, "port_range_min")
+    be, fe, dbp = found.backend_port, found.frontend_port, found.db_port
+
+    uz_standardny = be is not None and be >= range_min and be % block_size == 0 and fe == be + 1 and dbp == be + 2
+    if uz_standardny:
+        return {"found_backend_port": be, "found_frontend_port": fe, "found_db_port": dbp}
+
+    base = port_registry_service.suggest_next_port_block(db)
+    poznamka = (
+        f"porty: projekt dnes používa {be or '?'} / {fe or '?'} / {dbp or '?'}; pri prevzatí dostane "
+        f"blok {base} / {base + 1} / {base + 2} podľa nášho štandardu (D-020). "
+        "Na bežiacu aplikáciu to nemá vplyv — je to zápis do evidencie, appka počúva ďalej na svojom."
+    )
+    return {
+        "backend_port": base,
+        "frontend_port": base + 1,
+        "db_port": base + 2,
+        "found_backend_port": be,
+        "found_frontend_port": fe,
+        "found_db_port": dbp,
+        "notes": [*found.notes, poznamka],
+    }
+
+
 @router.get("/adoptable/{slug}", response_model=_AdoptionPreview)
 def preview_adoption(
     slug: str,
@@ -692,7 +745,8 @@ def preview_adoption(
             detail=f"Projekt '{slug}' už v NEX Studiu je — prevziať sa dá len ten, ktorý v ňom ešte nie je.",
         )
     found = project_adoption.discover(root, slug)
-    return _AdoptionPreview(**vars(found))
+    data = vars(found) | _ports_for_adoption(db, found)
+    return _AdoptionPreview(**data)
 
 
 @router.get("/{project_id}", response_model=ProjectRead)

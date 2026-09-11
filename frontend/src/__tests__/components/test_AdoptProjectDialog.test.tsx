@@ -38,6 +38,9 @@ const nahlad = {
   backend_port: 10210,
   frontend_port: 10211,
   db_port: 10212,
+  found_backend_port: 10210,
+  found_frontend_port: 10211,
+  found_db_port: 10212,
   unresolved: ["spôsob prihlasovania — z disku sa nedá zistiť, potvrď ho"],
   notes: ["názov z prvého nadpisu v CLAUDE.md"],
 };
@@ -144,5 +147,50 @@ describe("humanizeApiError — veta zvnútra zloženej odpovede", () => {
     const out = humanizeApiError(err, "Zlyhalo");
     expect(out.message).not.toContain("[object Object]");
     expect(out.message.length).toBeGreaterThan("Zlyhalo".length);
+  });
+});
+
+
+// ── ICCINT-120: pridelený blok sa nesmie objaviť bez vysvetlenia ──────────────
+//
+// Director 11.09.2026: prevzatie NEX Inboxu padlo na tom, že dialóg posielal porty z disku
+// (8000/5173/5433), ktoré nespĺňajú štandard D-020. Odteraz sa prideľuje blok — ale Manažér by inak
+// uvidel čísla, ktoré nikde nevidel, a nevedel by prečo. Zahodený údaj sa nesmie zahodiť potichu.
+
+describe("ICCINT-120 — pridelený blok je vysvetlený", () => {
+  it("keď sa porty menia, ukáže AJ to, na čom projekt beží dnes", async () => {
+    previewAdoptionApiMock.mockResolvedValue({
+      ...nahlad,
+      slug: "nex-inbox",
+      name: "NEX Inbox",
+      backend_port: 10200,
+      frontend_port: 10201,
+      db_port: 10202,
+      found_backend_port: 8000,
+      found_frontend_port: 5173,
+      found_db_port: 5433,
+    });
+
+    listAdoptableApiMock.mockResolvedValue([
+      { slug: "nex-inbox", source_path: "/opt/projects/nex-inbox", name: "NEX Inbox" },
+    ]);
+    render(dialog());
+    await screen.findByRole("option", { name: /nex-inbox/ });
+    await userEvent.selectOptions(screen.getByLabelText(/priečinok/i), "nex-inbox");
+
+    // Blok, ktorý sa zapíše…
+    expect(await screen.findByText(/10200/)).toBeInTheDocument();
+    // …aj to, čo projekt používa dnes — inak je to zmena, ktorú nikto neohlásil.
+    expect(await screen.findByText(/8000/)).toBeInTheDocument();
+    expect(screen.getByText(/nemá vplyv/i)).toBeInTheDocument();
+  });
+
+  it("keď sa porty NEMENIA, nepletie do toho vetu navyše", async () => {
+    render(dialog());
+    await screen.findByRole("option", { name: /nex-manager/ });
+    await userEvent.selectOptions(screen.getByLabelText(/priečinok/i), "nex-manager");
+
+    await screen.findByText(/10210/);
+    expect(screen.queryByText(/dnes beží na/i)).toBeNull();
   });
 });

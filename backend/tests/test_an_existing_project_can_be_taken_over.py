@@ -389,3 +389,91 @@ def test_the_real_projects_report_a_version_that_matches_their_own_folders() -> 
         assert found, f"{slug}: verzia sa nenašla, hoci priečinky má"
         assert (versions / f"v{found}").is_dir(), f"{slug}: {found} neexistuje ako priečinok"
         assert _re.fullmatch(r"\d+\.\d+\.\d+", found)
+
+
+# ── ICCINT-120: prevzatie prideľuje porty podľa štandardu, nepreberá staré ────
+#
+# Director 11.09.2026, po prvom pokuse prevziať NEX Inbox:
+#   „Prevzatie projektu zlyhalo — Port 8000 (backend_port) is outside the allowed range (10100–14999).“
+#
+# Dialóg posielal porty prečítané z disku (8000/5173/5433). Tie nespĺňajú D-020 (bloky po desiatich,
+# backend na začiatku bloku, frontend +1, databáza +2), takže ich kokpit odmietol — a prevzatie padlo.
+#
+# ⚠️ Najprv som navrhoval, aby kokpit staré porty PRIJAL a kontroly pri preberaní vynechal. Director to
+# zamietol a mal pravdu: tie polia nie sú záznam o tom, na čom appka počúva — sú to položky v EVIDENCII
+# pridelených portov. Zapísať do nej 8000/5173/5433 by neznamenalo zaznamenať skutočnosť, ale zaviesť
+# trvalú výnimku. Evidencia s výnimkami prestane byť evidenciou.
+#
+# Director: „Prevziať aplikáciu do NEX Studio Visual znamená zaviesť aj ustanovené pravidlá.
+#            Starý projekt nemá rozbiť.“
+#
+# Že sa starý projekt nerozbije, je overené: generované nasadenie si vnútorné porty číta z compose
+# samotného projektu (`detect_internal_port`), polia sa používajú IBA na zápis do evidencie, a
+# `loopback_base_port` nikto pri nasadzovaní neodovzdáva. Pridelenie bloku je čistý zápis do evidencie.
+
+NEXINBOX_COMPOSE = """services:
+  backend:
+    ports: ["8000:8000"]
+  frontend:
+    ports: ["5173:5173"]
+  postgres:
+    ports: ["5433:5432"]
+"""
+
+
+def test_the_preview_offers_a_standard_block_not_the_ports_from_disk(client, db_session, tmp_path, monkeypatch):
+    """Jadro opravy: náhľad ponúkne blok podľa štandardu, nie to, čo našiel na disku."""
+    from backend.services import claude_agent
+
+    _project(tmp_path, "nex-inbox", compose=NEXINBOX_COMPOSE, charter="# NEX Inbox\n")
+    monkeypatch.setattr(claude_agent, "PROJECTS_ROOT", tmp_path)
+
+    telo = client.get("/api/v1/projects/adoptable/nex-inbox").json()
+
+    # To, čo sa ZAPÍŠE, musí spĺňať D-020: začiatok bloku, +1, +2.
+    assert telo["backend_port"] >= 10100, "prevzatie by opäť poslalo port mimo rozsahu"
+    assert telo["backend_port"] % 10 == 0, "backend musí byť na začiatku bloku"
+    assert telo["frontend_port"] == telo["backend_port"] + 1
+    assert telo["db_port"] == telo["backend_port"] + 2
+
+
+def test_the_preview_still_says_what_the_project_runs_on_today(client, db_session, tmp_path, monkeypatch):
+    """Zahodený údaj sa nesmie zahodiť POTICHU — manažér musí vidieť aj to, čo na disku naozaj je."""
+    from backend.services import claude_agent
+
+    _project(tmp_path, "nex-inbox", compose=NEXINBOX_COMPOSE, charter="# NEX Inbox\n")
+    monkeypatch.setattr(claude_agent, "PROJECTS_ROOT", tmp_path)
+
+    telo = client.get("/api/v1/projects/adoptable/nex-inbox").json()
+
+    assert telo["found_backend_port"] == 8000, "čo projekt dnes používa, sa stratilo"
+    assert telo["found_frontend_port"] == 5173
+    assert telo["found_db_port"] == 5433
+    # …a musí to byť POVEDANÉ, nie len dostupné v odpovedi.
+    povedane = " ".join(telo["notes"]).lower()
+    assert "8000" in povedane and str(telo["backend_port"]) in povedane, (
+        "výmena portov sa nikde nevysvetľuje — manažér ju uvidí až ako zmenu, ktorú nečakal"
+    )
+
+
+def test_a_project_already_on_standard_ports_keeps_them(client, db_session, tmp_path, monkeypatch):
+    """PROTISTRÁŽ. Keď projekt už štandard spĺňa, nemá dostávať nový blok — inak by prevzatie
+    zbytočne prečíslovalo aj to, čo bolo v poriadku, a evidencia by sa rozišla s realitou."""
+    from backend.services import claude_agent
+
+    compose = """services:
+  backend:
+    ports: ["10310:8000"]
+  frontend:
+    ports: ["10311:80"]
+  postgres:
+    ports: ["10312:5432"]
+"""
+    _project(tmp_path, "uz-standardny", compose=compose, charter="# Už štandardný\n")
+    monkeypatch.setattr(claude_agent, "PROJECTS_ROOT", tmp_path)
+
+    telo = client.get("/api/v1/projects/adoptable/uz-standardny").json()
+
+    assert telo["backend_port"] == 10310, "projekt spĺňajúci štandard dostal zbytočne nový blok"
+    assert telo["frontend_port"] == 10311
+    assert telo["db_port"] == 10312
