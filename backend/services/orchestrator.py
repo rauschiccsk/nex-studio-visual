@@ -10226,6 +10226,31 @@ def _task_full_number(db: Session, task: Task) -> str:
     return f"{epic_n}.{feat_n}.{task.number}"
 
 
+#: Ako sa u nás pracuje — platí v KAŽDOM ťahu Programovania, v oboch dráhach (ICCINT-114).
+#:
+#: ⚠️ **Prečo je to konštanta a nie vec zadania.** NEX Manager 1.2.1, 10.09.2026: rýchla oprava dvoch
+#: viet trvala SEDEM kôl. Keď sa pre ňu písalo zadanie, väčšina z neho neboli požiadavky, ale práve
+#: tieto tri vety — a uplatnili sa len preto, že ich Dedo ručne napísal do textového poľa. Prierezové
+#: pravidlá pritom prichádzajú z Návrhu (``skeleton.cross_cutting_rules``), ktorý rýchla dráha nemá,
+#: takže tam nebolo VÔBEC nič.
+#:
+#: Skúška Tibor/Nazar: keby rýchlu opravu spúšťal niekto z nich, tieto vety nenapíše — nevie, že má.
+#: Kvalita by potom závisela od toho, KTO stlačil tlačidlo. Manažér má povedať ČO sa má opraviť;
+#: AKO sa pri tom pracuje je vec priebehu a musí platiť rovnako, nech text napísal ktokoľvek.
+QUALITY_RULES = (
+    "AKO SA U NÁS PRACUJE (platí vždy, aj keď to v zadaní nie je napísané):\n"
+    "1. SKÚŠKY SA PREPISUJÚ, NEPRISPÔSOBUJÚ. Keď existujúca skúška vynucuje staré správanie, ktoré "
+    "táto úloha mení, PREPÍŠ ju tak, aby vynucovala to nové — a v commite povedz, prečo tvrdila opak. "
+    "NIKDY neupravuj skúšku len preto, aby prešla; taká zmena zakryje presne to, čo mala stráž chytiť.\n"
+    "2. KAŽDÚ NOVÚ STRÁŽ OVER NAJPRV ČERVENÚ. Spusti ju proti NEOPRAVENÉMU kódu a presvedč sa, že "
+    "padne — a padne na TO, čo stráži, nie na preklep v prípravku. Zelená stráž, ktorá nemôže "
+    "sčervenať, je horšia než žiadna: tvrdí, že poistka drží.\n"
+    "3. DOKUMENTÁCIA, KTORÁ PO OPRAVE PRESTANE PLATIŤ, SA OPRAVÍ V TEJ ISTEJ ZMENE. Veta v Návrhu, "
+    "v Špecifikácii alebo v hlavičke súboru, ktorá tvrdí opak toho, čo kód odteraz robí, nie je "
+    "drobnosť — je to návod, podľa ktorého niekto opravu časom vráti späť."
+)
+
+
 def _directive_for_build_task(
     task: Task,
     cross_cutting_rules: Optional[str],
@@ -10254,7 +10279,9 @@ def _directive_for_build_task(
             "RÝCHLA OPRAVA (fast-fix lane): pokyn Manažéra vyššie je AUTORITATÍVNY — VYKONAJ ho priamo. "
             "NESPOCHYBŇUJ ho z názorových / sémantických dôvodov (napr. „Firmy je správne, naozaj to chceš "
             "premenovať?“). ZASTAV (kind=blocked) IBA ak je to technicky nemožné, alebo naozaj nevieš "
-            "identifikovať ČO zmeniť — NIE preto, že s pokynom nesúhlasíš."
+            "identifikovať ČO zmeniť — NIE preto, že s pokynom nesúhlasíš. "
+            "Keď pokyn odkazuje na SÚBOR v repozitári (napr. zadanie v `docs/specs/versions/`), "
+            "OTVOR ho a drž sa ho — rýchla dráha nemá kam inam uložiť zadanie dlhšie než veta."
         )
         parts.append(
             # ICCINT-53: the changelog sentence must come from the agent, because a fast-fix Epic is
@@ -10286,6 +10313,10 @@ def _directive_for_build_task(
         "Commitni zmeny a ukonči <<<PIPELINE_STATUS>>> blokom s commits[] + deliverables[] "
         "(F-007-orchestration-cockpit.md §5.3)."
     )
+    # ICCINT-114: NEPODMIENENE a v oboch dráhach. Prierezové pravidlá vyššie prichádzajú z Návrhu, ktorý
+    # rýchla dráha nemá — bez tohto by na nej nebolo žiadne. A pravidlá, ktoré platia len keď si na ne
+    # Manažér spomenie, nie sú pravidlá.
+    parts.append(QUALITY_RULES)
     parts.append(
         "SÚHRN PRE MANAŽÉRA (`summary`): píš ĽUDSKOU rečou po slovensky — čo v appke pribudlo / čo teraz "
         "funguje z pohľadu POUŽÍVATEĽA, v 1–2 vetách. Manažér je NEŠPECIALISTA. ŽIADNE cesty k súborom, "

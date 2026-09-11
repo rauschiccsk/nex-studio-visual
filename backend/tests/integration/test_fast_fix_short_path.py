@@ -741,3 +741,72 @@ def test_the_task_plan_carries_the_managers_own_words(db_session) -> None:
     epic = db_session.get(Epic, feat.epic_id)
     for row, label in ((epic, "epika"), (feat, "funkcia"), (task, "úloha")):
         assert (row.plain_description or "").strip() == directive, f"{label} nemá ľudský popis"
+
+
+# ---------------------------------------------------------------------------
+# ICCINT-114: naše pravidlá kvality nesmú závisieť od toho, kto stlačil tlačidlo
+# ---------------------------------------------------------------------------
+#
+# NEX Manager 1.2.1, 10.09.2026: rýchla oprava dvoch viet trvala sedem kôl. Keď som pre ňu písal
+# zadanie, väčšina z neho neboli POŽIADAVKY, ale STRÁŽNE POKYNY — „skúšky sa prepíšu, neprispôsobia",
+# „každú novú stráž over najprv červenú", „vety v dokumentácii, ktoré prestanú platiť, prepíš".
+#
+# To nie sú vlastnosti tej opravy. Sú to naše stále pravidlá. A na rýchlej dráhe sa uplatnili LEN
+# preto, že som ich ručne napísal do textového poľa. Prierezové pravidlá pritom prichádzajú z Návrhu
+# (`skeleton.cross_cutting_rules`), ktorý rýchla dráha nemá — takže tam nebolo VÔBEC nič.
+#
+# Skúška Tibor/Nazar: keby rýchlu opravu spúšťal niekto z nich, tie vety nenapíšu — nevedia, že majú.
+# Ich oprava by bežala bez nich a kvalita by závisela od toho, kto ju spustil. To je presne tá diera,
+# ktorú má NEX Studio zatvárať, nie vyrábať.
+
+
+def _minimal_task(db):
+    creator = _seed_user(db)
+    project = _seed_project(db, creator=creator)
+    version = Version(project_id=project.id, version_number="9.9.8", status="active")
+    db.add(version)
+    db.flush()
+    epic = Epic(project_id=project.id, version_id=version.id, number=1, title="E", status="planned")
+    db.add(epic)
+    db.flush()
+    feat = Feat(epic_id=epic.id, number=1, title="F", status="todo")
+    db.add(feat)
+    db.flush()
+    task = Task(feat_id=feat.id, number=1, title="Oprav preklep", task_type="frontend", status="todo")
+    db.add(task)
+    db.flush()
+    return task
+
+
+def test_quality_rules_reach_both_lanes_without_anyone_typing_them(db_session):
+    """Pravidlá musia byť v ťahu vždy — nie vtedy, keď na ne Manažér nezabudne."""
+    task = _minimal_task(db_session)
+
+    for flow in ("fast_fix", "new_version"):
+        brief = orchestrator._directive_for_build_task(task, None, [], flow_type=flow)
+        assert orchestrator.QUALITY_RULES in brief, f"dráha '{flow}' beží bez našich pravidiel kvality"
+
+
+def test_the_rules_name_the_three_things_that_cost_us_the_seven_rounds(db_session):
+    """Nestačí, že je tam nejaký text — musí hovoriť práve tie tri veci.
+
+    Bez tohto tvrdenia by skúška vyššie prešla aj nad prázdnym reťazcom alebo nad ľubovoľnou
+    pripísanou vetou, čo je presne ten tvar stráže, ktorá nemôže sčervenať.
+    """
+    pravidla = orchestrator.QUALITY_RULES.lower()
+
+    assert "prepíš" in pravidla and "neprispôsob" in pravidla, "chýba: skúšky sa prepisujú, neprispôsobujú"
+    assert "červen" in pravidla, "chýba: každú novú stráž over najprv ČERVENÚ"
+    assert "dokument" in pravidla, "chýba: dokumentácia, ktorá prestane platiť, sa opraví"
+
+
+def test_the_rules_do_not_replace_the_managers_own_instruction(db_session):
+    """Pravidlá sa PRIDÁVAJÚ, nenahrádzajú. Pokyn Manažéra zostáva autoritatívny."""
+    task = _minimal_task(db_session)
+    task.description = "Po inštalácii nesmie appka ponúkať inštaláciu."
+    db_session.flush()
+
+    brief = orchestrator._directive_for_build_task(task, None, [], flow_type="fast_fix")
+
+    assert "Po inštalácii nesmie appka ponúkať inštaláciu." in brief
+    assert "AUTORITATÍVNY" in brief
