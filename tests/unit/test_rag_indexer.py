@@ -122,3 +122,72 @@ def test_a_path_outside_the_knowledge_base_is_left_alone():
 def test_a_leading_slash_does_not_make_a_second_document():
     """``/icc/DECISIONS.md`` a ``icc/DECISIONS.md`` musia byť jeden dokument, nie dva."""
     assert RAGIndexer._document_id("/icc/DECISIONS.md") == RAGIndexer._document_id("icc/DECISIONS.md")
+
+
+# --- ICCINT-119: „max_chars" musí byť STROP, nie odporúčanie ----------------
+#
+# Zmerané 11.09.2026 pri obnove indexu: dobehla na 198 z 205 dokumentov a zastavila sa. Sedem
+# súborov zlyhávalo pri KAŽDOM prechode s `500` z `/api/embeddings` — medzi nimi špecifikácia
+# NEX Inboxu. Ollama pritom fungovala aj na triviálnom vstupe, aj na prvej tisícke znakov toho
+# istého súboru.
+#
+# Príčina: `_chunk_markdown` delí po nadpisoch a potom po odsekoch, ale JEDEN ODSEK dlhší než strop
+# sa už nedelil — prijal sa celý. Na `projects/nex-automat/STATUS.md` vznikol kus so 6218 znakmi pri
+# nastavenom strope 1000. Toľko model neprijme.
+#
+# Nebolo to zdržanie: dokument s jedným dlhým odsekom (hustý zoznam bez prázdnych riadkov, veľká
+# tabuľka) sa nezaindexoval NIKDY. Trvalá diera vo vyhľadávaní, ktorá sa sama nikdy nezacelí.
+
+MAX = 1000
+OVERLAP = 200
+
+
+def _bez_prazdneho_riadka(znakov: int) -> str:
+    """Jeden odsek zadanej dĺžky — presne ten tvar, ktorý delič nerozdelil."""
+    slovo = "slovo "
+    return ("# Nadpis\n\n" + slovo * (znakov // len(slovo)))[: znakov + 11]
+
+
+def test_no_chunk_ever_exceeds_the_limit_even_in_one_long_paragraph():
+    """To, čo incident spôsobilo: strop sa musí dodržať aj bez jediného prázdneho riadka."""
+    chunks = _idx()._chunk_markdown(_bez_prazdneho_riadka(6218), max_chars=MAX, overlap=0)
+
+    assert chunks, "dlhý odsek sa stratil — nič sa nezaindexuje"
+    najvacsi = max(len(c) for c in chunks)
+    assert najvacsi <= MAX, f"kus má {najvacsi} znakov pri strope {MAX} — model ho odmietne"
+
+
+def test_the_limit_holds_with_overlap_too():
+    """Prekrytie pripisuje text NAVYŠE. Strop teda musí platiť aj po ňom, inak sa chyba vráti tade."""
+    chunks = _idx()._chunk_markdown(_bez_prazdneho_riadka(6218), max_chars=MAX, overlap=OVERLAP)
+
+    najvacsi = max(len(c) for c in chunks)
+    assert najvacsi <= MAX + OVERLAP, f"kus má {najvacsi} znakov aj s prekrytím ({MAX}+{OVERLAP})"
+
+
+def test_a_single_unbroken_word_longer_than_the_limit_is_still_split():
+    """Hraničný prípad: keď sa nedá rezať na medzere (base64, dlhá adresa), musí sa rezať aj tak.
+    Inak by poistka platila len pre text s medzerami a tá výnimka by chybu vrátila."""
+    chunks = _idx()._chunk_markdown("# N\n\n" + "x" * 5000, max_chars=MAX, overlap=0)
+
+    assert chunks
+    assert max(len(c) for c in chunks) <= MAX
+
+
+def test_words_are_not_torn_in_half_when_there_is_a_place_to_cut():
+    """Druhá strana: rezať sa má na hranici slova, kým to ide — inak sa vyhľadávanie zhorší."""
+    chunks = _idx()._chunk_markdown(_bez_prazdneho_riadka(4000), max_chars=MAX, overlap=0)
+
+    # Žiadny kus nesmie začínať ani končiť uprostred slova „slovo".
+    for c in chunks:
+        assert not c.startswith("lovo"), f"kus začína rozťatým slovom: {c[:20]!r}"
+
+
+def test_an_ordinary_document_is_not_shredded_into_crumbs():
+    """PROTISTRÁŽ. Bez nej by sa oprava dala spraviť tak, že sa všetko poseká na kusy po 100 znakov —
+    strop by sedel a vyhľadávanie by stratilo súvislosti. Bežný text má využiť priestor, ktorý má."""
+    text = "\n\n".join(f"## Sekcia {i}\n\nVeta o niečom. " * 10 for i in range(6))
+    chunks = _idx()._chunk_markdown(text, max_chars=MAX, overlap=0)
+
+    priemer = sum(len(c) for c in chunks) / len(chunks)
+    assert priemer > MAX * 0.4, f"priemerný kus má {priemer:.0f} znakov — text sa rozdrobil"

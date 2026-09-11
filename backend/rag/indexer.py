@@ -93,6 +93,37 @@ class RAGIndexer:
             response.raise_for_status()
             return response.json()["embedding"]
 
+    @staticmethod
+    def _hard_split(text: str, max_chars: int) -> list[str]:
+        """Rozreže text, ktorý napriek deleniu po nadpisoch a odsekoch stále prekračuje strop.
+
+        ⚠️ **ICCINT-119 — ``max_chars`` bol dovtedy ODPORÚČANIE, nie strop.** Delenie sa zastavilo pri
+        odsekoch: odsek dlhší než strop sa prijal celý. Zmerané 11.09.2026 na
+        ``projects/nex-automat/STATUS.md``: kus so **6218 znakmi** pri nastavenom strope 1000. Toľko
+        model neprijme a vráti ``500`` — takže dokument s jedným dlhým odsekom (hustý zoznam bez
+        prázdnych riadkov, veľká tabuľka) sa **nezaindexoval nikdy**. Obnova indexu na tom uviazla na
+        198 z 205 dokumentov, medzi nimi špecifikácia NEX Inboxu.
+
+        Reže sa na poslednej medzere pred stropom, aby sa netrhali slová. Keď v celom úseku medzera
+        nie je (base64, dlhá adresa), reže sa natvrdo — poistka, ktorá platí len pre text s medzerami,
+        by tú istú chybu vrátila zadnými dverami.
+        """
+        if len(text) <= max_chars:
+            return [text]
+        kusy: list[str] = []
+        zvysok = text
+        while len(zvysok) > max_chars:
+            rez = zvysok.rfind(" ", 0, max_chars + 1)
+            if rez <= 0:
+                rez = zvysok.rfind("\n", 0, max_chars + 1)
+            if rez <= 0:
+                rez = max_chars  # niet kde rezať — radšej rozťaté slovo než nezaindexovaný dokument
+            kusy.append(zvysok[:rez].strip())
+            zvysok = zvysok[rez:].strip()
+        if zvysok:
+            kusy.append(zvysok)
+        return [k for k in kusy if k]
+
     def _chunk_markdown(
         self,
         content: str,
@@ -149,6 +180,12 @@ class RAGIndexer:
 
         if current:
             chunks.append(current)
+
+        # ICCINT-119: JEDNO miesto, kde sa strop naozaj vynúti. Vetvy vyššie delia podľa ŠTRUKTÚRY
+        # (nadpisy, odseky) a tá sa strope prispôsobiť nemusí — dlhý odsek nemá kde puknúť. Preto sa
+        # tu ešte raz prejde všetko, čo z delenia vyšlo, a to, čo strop prekračuje, sa rozreže.
+        # Až po tomto kroku je ``max_chars`` naozaj strop, nie odporúčanie.
+        chunks = [kus for c in chunks for kus in RAGIndexer._hard_split(c, max_chars)]
 
         # Apply overlap: prepend tail of previous chunk to next
         if overlap > 0 and len(chunks) > 1:
