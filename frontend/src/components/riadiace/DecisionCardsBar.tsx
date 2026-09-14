@@ -32,12 +32,56 @@ interface ConsultDecision {
   key: string;
   question: string;
   explanation?: string;
+  /**
+   * ICCINT-122/123 — odkiaľ otázka prišla. Karta ukázala otázku a možnosti, ale nie to, PREČO
+   * vznikla. Manažér nevie rozlíšiť, či je to dôsledok jeho vlastného rozhodnutia, alebo nález, čo
+   * tam ležal od začiatku; vidí len, že otázok pribudlo — a to si prirodzene vysvetlí ako rozpad.
+   * Chýba na starých kartách; vtedy sa žiadna veta nevymýšľa.
+   */
+  origin?: "objav" | "dosledok" | "odklad";
+  /** Pri `dosledok`: čoho je to dôsledok. */
+  origin_of?: string;
   /** v4.0.11: the jargon backing `explanation`, shown collapsed behind a "Technický detail" disclosure. */
   technical_detail?: string;
   options: ConsultOption[];
   rationale?: string;
   allow_free_text?: boolean;
 }
+/**
+ * Veta o pôvode rozhodnutia (ICCINT-123). `null` pre staré karty bez toho údaja — vymyslená veta by
+ * bola horšia než žiadna, lebo by tvrdila niečo o pôvode, ktorý nepoznáme.
+ */
+function povodVeta(d: ConsultDecision): string | null {
+  switch (d.origin) {
+    case "objav":
+      return "Nález, ktorý tu bol vždy — nevznikol z tvojho rozhodnutia.";
+    case "dosledok":
+      return d.origin_of
+        ? `Vyplýva z tvojho rozhodnutia o: ${d.origin_of}.`
+        : "Vyplýva z niektorého tvojho skoršieho rozhodnutia.";
+    case "odklad":
+      return "Toto sme vedome odložili — teraz je na rade.";
+    default:
+      return null;
+  }
+}
+
+/**
+ * Koľko UŽ UZAVRETÝCH rozhodnutí by sa zmenou tohto rozhodnutia znovu otvorilo (ICCINT-123).
+ *
+ * Počíta sa z `origin="dosledok"` + `origin_of`: každé neskoršie rozhodnutie, ktoré z tohto vyplýva,
+ * by sa muselo rozhodnúť nanovo. Manažér to má vedieť PRI voľbe, nie až po nej.
+ *
+ * ⚠️⚠️ AKO ÚDAJ, NIKDY AKO ODPORÚČANIE. Toto je najdôležitejšia veta celého tiketu. Pri NEX Inbox
+ * v1.5.0 boli DVE miesta, kde bola drahšia cesta správna — zmena skladania textu namiesto obchádzky
+ * a široký rozsah pri početných kontrolách. Keby sa z tohto čísla stal tlak na lacnejšiu voľbu,
+ * vyrobí polovičné opravy, teda presne to, čo tá verzia opravovala. Číslo sa preto len ZOBRAZUJE:
+ * nemení poradie možností ani značku „odporúčané“.
+ */
+function znovuOtvara(decisions: ConsultDecision[], key: string): number {
+  return decisions.filter((d) => d.origin === "dosledok" && d.origin_of === key).length;
+}
+
 interface Consultation {
   id: string;
   intro?: string;
@@ -194,6 +238,12 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
             Rozhodnutie {idx + 1} z {total}
           </div>
           <div className="text-sm font-medium text-[var(--color-text-primary)]">{current.question}</div>
+          {/* ICCINT-123: jedna veta o pôvode. Nemení to POČET otázok — mení to, čo si o tom počte
+              Manažér myslí. Pri NEX Inbox v1.5.0 vyzeralo štvrté kolo najhoršie a bol to čistý objav:
+              nevyvolalo ho žiadne jeho rozhodnutie, a z karty to nijako nevyplývalo. */}
+          {povodVeta(current) && (
+            <p className="mt-1 text-[11px] italic text-[var(--color-text-muted)]">{povodVeta(current)}</p>
+          )}
           {current.explanation && (
             <p className="mt-1 whitespace-pre-line text-xs text-[var(--color-text-secondary)]">
               {current.explanation}
@@ -236,6 +286,16 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
                 </button>
               ))}
             </div>
+          )}
+
+          {/* ICCINT-123: cena voľby PRI voľbe, nie po nej. Údaj, nie odporúčanie — poradím ani
+              značkou „odporúčané“ nehýbe. */}
+          {znovuOtvara(consultation.decisions, current.key) > 0 && (
+            <p className="mt-2 text-[11px] text-[var(--color-text-muted)]">
+              {`Zmena tejto voľby znovu otvára ${znovuOtvara(consultation.decisions, current.key)} ${
+                znovuOtvara(consultation.decisions, current.key) === 1 ? "uzavreté rozhodnutie" : "uzavreté rozhodnutia"
+              }.`}
+            </p>
           )}
 
           {current.rationale && (
