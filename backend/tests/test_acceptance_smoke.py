@@ -895,3 +895,30 @@ def test_a_later_report_cannot_quietly_shorten_the_list(monkeypatch) -> None:
     # K2 was dropped by the later report — it must NOT disappear; it simply has no binding.
     assert orchestrator._declared_safety_assertions(None, None) == {"a-neprejde"}
     assert orchestrator._unbound_safety_keys(None, None) == {"K2"}
+
+
+# ─── ICCINT-127d: a binding must reach a declaration written BEFORE keys existed ─────────────────────
+#
+# The forbidden operation: the plan close predates keys, so its entries are identified by name only;
+# the binding report adds a key AND keeps the name, and matches neither — the gate reports every
+# invariant unguarded even though all of them are bound. Seen live on NEX Inbox v1.5.0: 14 declared,
+# 14 bound with SP-01..SP-14 and the original wording, 0 matched.
+
+
+def test_binding_with_a_new_key_reaches_a_keyless_declaration(monkeypatch) -> None:
+    plan = {"plan": [{"id": "T1"}], "safety_properties": [{"name": "Faktúra bez XML", "risky_op": "x"}]}
+    later = {"safety_properties": [{"key": "SP-01", "name": "Faktúra bez XML", "assertion": "a-neprejde"}]}
+    monkeypatch.setattr(orchestrator, "_release_declaration_payload", lambda db, vid: plan)
+    monkeypatch.setattr(orchestrator, "_gate_report_payloads_newest_first", lambda db, vid: [later, plan])
+    assert orchestrator._declared_safety_assertions(None, None) == {"a-neprejde"}
+    assert orchestrator._unbound_safety_keys(None, None) == set()
+
+
+def test_a_binding_for_an_undeclared_invariant_is_still_refused(monkeypatch) -> None:
+    """Widening the match must not let a later report smuggle in an invariant nobody declared."""
+    plan = {"plan": [{"id": "T1"}], "safety_properties": [{"name": "A", "risky_op": "x"}]}
+    later = {"safety_properties": [{"key": "SP-99", "name": "Cudzia poistka", "assertion": "cudzia"}]}
+    monkeypatch.setattr(orchestrator, "_release_declaration_payload", lambda db, vid: plan)
+    monkeypatch.setattr(orchestrator, "_gate_report_payloads_newest_first", lambda db, vid: [later, plan])
+    assert orchestrator._declared_safety_assertions(None, None) == set()
+    assert orchestrator._unbound_safety_keys(None, None) == {"A"}

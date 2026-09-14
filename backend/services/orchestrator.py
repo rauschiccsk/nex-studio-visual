@@ -6533,23 +6533,53 @@ def _declared_safety_identities(db: Session, version_id: uuid.UUID) -> set[str]:
     return {i for sp in declared if isinstance(sp, dict) and (i := _safety_identity(sp))}
 
 
+def _declared_safety_aliases(db: Session, version_id: uuid.UUID) -> dict[str, str]:
+    """``{alias: identity}`` — every way a binding may name a DECLARED safety property.
+
+    ICCINT-127d: a declaration written before keys existed is identified by its sentence; the report that
+    binds it adds a key AND keeps the sentence. Matching on one alone matched nothing — seen live: 14
+    declared, 14 bound, 0 matched. Both the key and the name of a DECLARED entry are accepted, so the two
+    sides meet during the transition. The aliases come only from the declared list, so a later report still
+    cannot smuggle in an invariant nobody declared."""
+    declared = _release_declaration_payload(db, version_id).get("safety_properties")
+    if not isinstance(declared, list):
+        return {}
+    aliases: dict[str, str] = {}
+    for sp in declared:
+        if not isinstance(sp, dict):
+            continue
+        ident = _safety_identity(sp)
+        if not ident:
+            continue
+        for alias in (str(sp.get("key") or "").strip(), str(sp.get("name") or "").strip()):
+            if alias:
+                aliases.setdefault(alias, ident)
+    return aliases
+
+
 def _safety_bindings(db: Session, version_id: uuid.UUID) -> dict[str, str]:
     """``{identity: assertion}`` for every declared safety property some gate_report has bound.
 
     ICCINT-127b — the DECLARATION (which invariants exist) belongs to the plan close; the BINDING (which
     assertion proves each) is chosen later, when the assertion is written. Newest binding wins."""
-    declared_ids = _declared_safety_identities(db, version_id)
-    if not declared_ids:
+    aliases = _declared_safety_aliases(db, version_id)
+    if not aliases:
         return {}
     bindings: dict[str, str] = {}
     for payload in _gate_report_payloads_newest_first(db, version_id):
         for sp in payload.get("safety_properties") or []:
             if not isinstance(sp, dict):
                 continue
-            ident = _safety_identity(sp)
             assertion = str(sp.get("assertion") or "").strip()
-            if ident in declared_ids and assertion and ident not in bindings:
-                bindings[ident] = assertion
+            if not assertion:
+                continue
+            # A binding reaches a declared invariant by its key OR its sentence — whichever the declaration
+            # used. Unknown on both counts ⇒ undeclared ⇒ ignored, never silently accepted.
+            for alias in (str(sp.get("key") or "").strip(), str(sp.get("name") or "").strip()):
+                ident = aliases.get(alias)
+                if ident and ident not in bindings:
+                    bindings[ident] = assertion
+                    break
     return bindings
 
 
