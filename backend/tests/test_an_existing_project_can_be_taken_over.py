@@ -329,6 +329,60 @@ def test_an_adopted_project_keeps_its_own_ci_and_is_told_so() -> None:
     assert "Projekt bol prevzatý" in src, "vynechanie sa Manažérovi nehovorí"
 
 
+def test_the_adoption_notice_names_the_one_file_it_overwrites() -> None:
+    """ICCINT-121. Hlásenie po prevzatí vymenúvalo ŠTYRI veci, ktoré sa nespravili — a zamlčalo tú
+    jednu, ktorá sa spravila: koreňová ``CLAUDE.md`` sa prepisuje (``provision_v2_agent_charters``,
+    pôvodná ide bokom ako ``.pre-nex-studio``).
+
+    Zamlčať vykonaný krok uprostred zoznamu vynechaných je horšie než nepovedať nič: Manažér z takej
+    vety odchádza s presvedčením, že sa projektu nikto nedotkol — a vlastné pravidlá, ktoré si do
+    charty napísal, mu odvtedy neplatia bez toho, aby to vedel.
+    """
+    import inspect
+
+    from backend.api.routes import projects as routes
+
+    src = inspect.getsource(routes.create_project)
+    assert "CLAUDE.md.pre-nex-studio" in src, (
+        "hlásenie nemenuje, kam sa pôvodná charta odložila — bez toho sa nedá nájsť"
+    )
+    assert "Prepísala sa charta" in src, "prepis charty sa Manažérovi nehovorí"
+
+
+def test_no_surface_claims_the_adoption_overwrites_nothing() -> None:
+    """Tá istá nepravda žila na štyroch miestach naraz — v dialógu, v hlásení a v dvoch chartách.
+    Opraviť jedno miesto a nechať ostatné znamená, že Manažér nájde obe verzie a uverí tej pohodlnej.
+
+    Stráž je nad ZNENÍM, lebo presne znenie bolo to nepravdivé; správanie kódu je a bolo správne.
+    """
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[2]
+    lhali = []
+    for rel in (
+        "frontend/src/components/project/AdoptProjectDialog.tsx",
+        "CLAUDE.md",
+    ):
+        text = (repo / rel).read_text(encoding="utf-8")
+        if "nič sa v projekte" in text and "neprepíše" in text:
+            lhali.append(f"{rel}: tvrdí, že sa nič neprepíše")
+        if "si vlastné chartre drží" in text and "Predtým tu stálo" not in text:
+            lhali.append(f"{rel}: tvrdí, že sa chartre prevzatého projektu nemenia")
+    assert not lhali, "; ".join(lhali)
+
+
+def test_the_adopt_dialog_names_the_charter_before_the_manager_confirms() -> None:
+    """Túto vetu Manažér číta PRED potvrdením a rozhoduje sa podľa nej — z troch nepravdivých viet
+    bola táto najzávažnejšia. Nestačí, že nepravdu už netvrdí; musí povedať, čo sa stane."""
+    from pathlib import Path
+
+    dialog = (Path(__file__).resolve().parents[2] / "frontend/src/components/project/AdoptProjectDialog.tsx").read_text(
+        encoding="utf-8"
+    )
+    assert "CLAUDE.md.pre-nex-studio" in dialog, "dialóg nepovie, kam sa pôvodná charta odloží"
+    assert "prepíše sa jediný súbor" in dialog, "dialóg nepovie, že sa charta prepisuje"
+
+
 # ── Prevzatému projektu sa verzia nevymýšľa (ICCINT-89) ──────────────────────
 #
 # ⚠️ Zmerané 09.09.2026 na NEX Managerovi hneď po prevzatí: appka bežala ako 1.0.99 a v

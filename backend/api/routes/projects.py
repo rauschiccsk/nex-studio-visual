@@ -1199,10 +1199,18 @@ def create_project(
 
         # ICCINT-85: pri prevzatí sa kroky po scaffolde nespúšťajú (viď dôvod vyššie), ale mlčať sa
         # o tom nesmie — Manažér musí vedieť, že prevzatý projekt si CI a ochranu vetvy drží vlastnú.
+        # ICCINT-121: a MUSÍ sa povedať aj to jediné, čo sa naozaj zmenilo. Veta dovtedy menovala
+        # štyri veci, ktoré sa NESPRAVILI, a zamlčala tú jednu, ktorá sa spravila — koreňová charta
+        # sa prepisuje (``provision_v2_agent_charters``, pôvodná ide bokom ako ``.pre-nex-studio``).
+        # Vymenovať vynechané kroky a zatajiť vykonaný je horšie než nepovedať nič: Manažér z toho
+        # odchádza s presvedčením, že sa projektu nikto nedotkol.
         setup_warnings = (
             [
                 "Projekt bol prevzatý, takže sa doň nezasahovalo: nenastavovalo sa CI, ochrana vetvy "
-                "ani skúšobné spustenie. Ak si ich projekt už má, platia ďalej."
+                "ani skúšobné spustenie. Ak si ich projekt už má, platia ďalej.",
+                "Prepísala sa charta CLAUDE.md — pôvodná je vedľa nej ako CLAUDE.md.pre-nex-studio. "
+                "Vlastné pravidlá z nej treba do novej charty preniesť, inak pre tento projekt "
+                "prestanú platiť.",
             ]
             if adopting
             else run_post_scaffold_steps(

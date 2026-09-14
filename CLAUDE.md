@@ -28,7 +28,9 @@ nie ako samostatne spúšťaná session. Kokpit to už vynucuje: `agent_terminal
 *(Historická poznámka: Designer ani Auditor ako wrapper-session nebežali ani raz, Implementer naposledy
 2. 6. 2026. Zrušené 23.08.2026 — dokument dovtedy popisoval zostavu, ktorá nefungovala.)*
 
-**Výnimka:** prevzatý projekt (`--adopt`) si vlastné chartre drží — tam sa nesiaha.
+**Prevzatý projekt (`--adopt`):** rolové chartre (`.claude/agents/<role>/CLAUDE.md`) sa zapíšu vždy — bez nich by sa agent nedal spustiť. **Koreňový `CLAUDE.md` sa PREPÍŠE** a pôvodný sa odloží vedľa ako `CLAUDE.md.pre-nex-studio`; nič sa nestratí, ale ani nezostane platné.
+Vlastné pravidlá prevzatého projektu sa preto musia do novej charty **preniesť ručne** — urobí to Dedo hneď po prevzatí.
+*(Predtým tu stálo „si vlastné chartre drží — tam sa nesiaha“. Kód do nej siahal od začiatku, zámerne a s dobrým dôvodom; nepravdivé bolo pravidlo, nie správanie. ICCINT-121.)*
 
 ### Princíp fungovania
 

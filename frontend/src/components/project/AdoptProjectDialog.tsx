@@ -110,8 +110,10 @@ export default function AdoptProjectDialog({ open, onClose, onAdopted }: Props) 
           <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">Prevziať existujúci projekt</h2>
         </div>
         <p className="mb-4 text-xs text-[var(--color-text-muted)]">
-          Vyber priečinok, ktorý na disku už je. Ostatné si NEX Studio prečíta samo — nič sa v projekte
-          neprepíše, ostane si vlastné pravidlá aj históriu.
+          Vyber priečinok, ktorý na disku už je. Ostatné si NEX Studio prečíta samo. História, zdrojový
+          kód ani nastavenia projektu sa nemenia — <strong>prepíše sa jediný súbor: charta{" "}
+          <code>CLAUDE.md</code></strong>, a tá pôvodná sa odloží vedľa ako{" "}
+          <code>CLAUDE.md.pre-nex-studio</code>. Vlastné pravidlá z nej treba do novej charty preniesť.
         </p>
 
         <label className="mb-1 block text-xs text-[var(--color-text-muted)]" htmlFor="adopt-slug">
