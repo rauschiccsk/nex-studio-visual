@@ -6487,6 +6487,30 @@ def _declared_release_coverage(db: Session, version_id: uuid.UUID) -> tuple[int,
     return n_features, n_safety
 
 
+def _gate_report_payloads_newest_first(db: Session, version_id: uuid.UUID) -> list[dict[str, Any]]:
+    """Every AI-Agent gate_report payload of this build, newest first.
+
+    ICCINT-127b: the DECLARATION (which invariants exist) belongs to the plan gate_report and must not
+    move. The BINDING (which assertion proves each one) is chosen later, when the assertion is actually
+    written — a different gate_report. Reading only the plan report made every binding invisible.
+    """
+    msgs = (
+        db.execute(
+            select(PipelineMessage)
+            .where(
+                PipelineMessage.version_id == version_id,
+                PipelineMessage.stage.in_(("navrh", "programovanie")),
+                PipelineMessage.author == "ai_agent",
+                PipelineMessage.kind == "gate_report",
+            )
+            .order_by(PipelineMessage.seq.desc())
+        )
+        .scalars()
+        .all()
+    )
+    return [m.payload for m in msgs if isinstance(m.payload, dict)]
+
+
 def _declared_safety_assertions(db: Session, version_id: uuid.UUID) -> set[str]:
     """ICCINT-127 — the assertion NAMES the Návrh design bound to its safety properties.
 
@@ -6494,11 +6518,27 @@ def _declared_safety_assertions(db: Session, version_id: uuid.UUID) -> set[str]:
     WHICH invariant each one guards, so any assertions at all satisfied it. These names close that: the
     acceptance must have run the very test the design named for each invariant. Empty set ⇒ a pre-ICCINT-127
     design with no bindings ⇒ the caller degrades to the count floor (backward compatible)."""
-    payload = _release_declaration_payload(db, version_id)
-    safety = payload.get("safety_properties")
-    if not isinstance(safety, list):
+    declared = _release_declaration_payload(db, version_id).get("safety_properties")
+    if not isinstance(declared, list):
         return set()
-    return {name for sp in safety if isinstance(sp, dict) and (name := str(sp.get("assertion") or "").strip())}
+    # The DECLARED invariant names — the list the plan gate_report fixed. A later report may ATTACH an
+    # assertion to one of these; it may never add, rename or drop one, or a build could shrink its own
+    # declaration to escape the coverage it already promised.
+    declared_names = {str(sp.get("name") or "").strip() for sp in declared if isinstance(sp, dict) and sp.get("name")}
+    if not declared_names:
+        return set()
+    bindings: dict[str, str] = {}
+    # Newest first, and the newest binding for a given invariant wins: re-running a fix rewrites the
+    # assertion name, and the freshest gate_report is the one that matches the assertions on disk.
+    for payload in _gate_report_payloads_newest_first(db, version_id):
+        for sp in payload.get("safety_properties") or []:
+            if not isinstance(sp, dict):
+                continue
+            meno = str(sp.get("name") or "").strip()
+            assertion = str(sp.get("assertion") or "").strip()
+            if meno in declared_names and assertion and meno not in bindings:
+                bindings[meno] = assertion
+    return set(bindings.values())
 
 
 def _release_coverage_brief(db: Session, version_id: uuid.UUID) -> str:

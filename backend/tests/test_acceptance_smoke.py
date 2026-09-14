@@ -30,6 +30,7 @@ import types
 import urllib.error
 import urllib.request
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -822,3 +823,38 @@ def test_without_declared_bindings_the_count_floor_still_applies() -> None:
         ran_assertions=set(),
     )
     assert ok is False  # negative(1) < declared safety(2)
+
+
+# ─── ICCINT-127b: the binding is written LATER than the declaration, and must still be read ──────────
+#
+# The forbidden operation, stated as the invariant's own risky_op: the gate reads a declaration whose
+# safety properties carry no assertion names — and therefore degrades to the count floor — although a
+# NEWER gate_report has since bound every one of them. That is exactly what happened on NEX Inbox
+# v1.5.0: the agent bound all 14, the gate read the plan report (0 bindings), counted 15 >= 14 and
+# passed. The fix must not let the invariant LIST move — only the bindings attach to it.
+
+
+def _msg(seq: int, payload: dict) -> SimpleNamespace:
+    return SimpleNamespace(seq=seq, payload=payload, stage="programovanie", author="ai_agent", kind="gate_report")
+
+
+def test_bindings_from_a_newer_report_are_read(monkeypatch) -> None:
+    """A binding written after the plan close still reaches the gate."""
+    plan = {"plan": [{"id": "T1"}], "safety_properties": [{"name": "A", "risky_op": "x"}]}
+    later = {"safety_properties": [{"name": "A", "risky_op": "x", "assertion": "a-neprejde"}]}
+    monkeypatch.setattr(orchestrator, "_release_declaration_payload", lambda db, vid: plan)
+    monkeypatch.setattr(orchestrator, "_gate_report_payloads_newest_first", lambda db, vid: [later, plan])
+    assert orchestrator._declared_safety_assertions(None, None) == {"a-neprejde"}
+
+
+def test_a_later_report_cannot_drop_a_declared_invariant(monkeypatch) -> None:
+    """Bindings attach to the DECLARED list; a later report must not shrink it to escape coverage."""
+    plan = {
+        "plan": [{"id": "T1"}],
+        "safety_properties": [{"name": "A", "risky_op": "x"}, {"name": "B", "risky_op": "y"}],
+    }
+    later = {"safety_properties": [{"name": "A", "risky_op": "x", "assertion": "a-neprejde"}]}
+    monkeypatch.setattr(orchestrator, "_release_declaration_payload", lambda db, vid: plan)
+    monkeypatch.setattr(orchestrator, "_gate_report_payloads_newest_first", lambda db, vid: [later, plan])
+    # B stays declared and unbound — the count floor still guards it; A's binding is honoured.
+    assert orchestrator._declared_safety_assertions(None, None) == {"a-neprejde"}
