@@ -858,3 +858,40 @@ def test_a_later_report_cannot_drop_a_declared_invariant(monkeypatch) -> None:
     monkeypatch.setattr(orchestrator, "_gate_report_payloads_newest_first", lambda db, vid: [later, plan])
     # B stays declared and unbound — the count floor still guards it; A's binding is honoured.
     assert orchestrator._declared_safety_assertions(None, None) == {"a-neprejde"}
+
+
+# ─── ICCINT-127c: a safety property needs a STABLE key — a human sentence is not an identity ─────────
+#
+# The forbidden operation: a later gate_report rewrites the invariant NAMES (a build rephrases its own
+# list every run) and the bindings silently stop matching — or worse, match a SHORTENED list, so a
+# build escapes coverage it already promised. NEX Inbox v1.5.0 did exactly this: 14 declared, 14
+# re-declared under different wording, 3 of the original invariants quietly gone.
+
+
+def test_binding_matches_on_key_not_on_wording(monkeypatch) -> None:
+    """The name is for humans and may be rewritten; the key is the identity and must carry the binding."""
+    plan = {
+        "plan": [{"id": "T1"}],
+        "safety_properties": [{"key": "K1", "name": "Faktúra bez XML sa nesmie označiť", "risky_op": "x"}],
+    }
+    later = {"safety_properties": [{"key": "K1", "name": "bez XML neprejde", "assertion": "a-neprejde"}]}
+    monkeypatch.setattr(orchestrator, "_release_declaration_payload", lambda db, vid: plan)
+    monkeypatch.setattr(orchestrator, "_gate_report_payloads_newest_first", lambda db, vid: [later, plan])
+    assert orchestrator._declared_safety_assertions(None, None) == {"a-neprejde"}
+
+
+def test_a_later_report_cannot_quietly_shorten_the_list(monkeypatch) -> None:
+    """A key the design declared and a later report omits stays unbound — it cannot vanish."""
+    plan = {
+        "plan": [{"id": "T1"}],
+        "safety_properties": [
+            {"key": "K1", "name": "A", "risky_op": "x"},
+            {"key": "K2", "name": "B", "risky_op": "y"},
+        ],
+    }
+    later = {"safety_properties": [{"key": "K1", "name": "A inak", "assertion": "a-neprejde"}]}
+    monkeypatch.setattr(orchestrator, "_release_declaration_payload", lambda db, vid: plan)
+    monkeypatch.setattr(orchestrator, "_gate_report_payloads_newest_first", lambda db, vid: [later, plan])
+    # K2 was dropped by the later report — it must NOT disappear; it simply has no binding.
+    assert orchestrator._declared_safety_assertions(None, None) == {"a-neprejde"}
+    assert orchestrator._unbound_safety_keys(None, None) == {"K2"}

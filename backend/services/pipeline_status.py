@@ -151,6 +151,10 @@ class SafetyProperty(BaseModel):
     #: ICCINT-127 — name of the rejection assertion proving ``risky_op`` is refused. A count says how many
     #: guards exist; only a name says WHICH invariant each guards. Empty = pre-ICCINT-127 report.
     assertion: str = Field(default="", max_length=200)
+    #: ICCINT-127c — the STABLE identity. ``name`` is a human sentence and gets rephrased between runs; a
+    #: binding matched on the sentence silently stops matching, and a re-worded list can quietly lose
+    #: entries. The key survives rephrasing. Empty ⇒ falls back to ``name`` (pre-key declarations).
+    key: str = Field(default="", max_length=80)
 
 
 # ── (v0.7.3) incremental task_plan generation — narrowed per-pass schemas (CR-1) ──

@@ -2404,7 +2404,7 @@ _SKELETON_EXAMPLE = (
     '"flagship_features":["Export faktúry do Peppol XML","Automatické párovanie dodávateľa"],'
     '"safety_properties":[{"name":"Scoping na firmu (žiadny cross-tenant read)",'
     '"risky_op":"GET /api/faktury inej firmy vráti dáta",'
-    '"assertion":"cudzia-firma-nedostane-data"}]}\n'
+    '"assertion":"cudzia-firma-nedostane-data","key":"SP-1"}]}\n'
     "<<<END_TASK_PLAN_JSON>>>"
 )
 _FEAT_TASKS_EXAMPLE = (
@@ -2441,7 +2441,7 @@ def _task_plan_skeleton_directive(director_note: Optional[str] = None) -> str:
         # flagship feature needs a FEATURE assertion, every safety property a NEGATIVE assertion at Verifikácia.
         "Navrch objektu aj pole `flagship_features` (zoznam textov, ≥1): kľúčové funkcie, ktoré MUSÍ vydanie "
         "PREUKÁZATEĽNE robiť — release oracle vyžaduje ≥1 pozitívnu (FEATURE) akceptačnú skúšku na každú. "
-        "A pole `safety_properties` (zoznam objektov {`name`,`risky_op`,`assertion`}): "
+        "A pole `safety_properties` (zoznam objektov {`key`,`name`,`risky_op`,`assertion`}): "
         "bezpečnostné invarianty, ktoré appka "
         "MUSÍ VYNÚTIŤ — `risky_op` je konkrétna ZAKÁZANÁ operácia, ktorú oracle vyžaduje otestovať NEGATÍVNE "
         '(musí byť ODMIETNUTÁ; zelený „funguje to" test bezpečnostný invariant nikdy nedokáže). Vymenuj ich '
@@ -2456,6 +2456,9 @@ def _task_plan_skeleton_directive(director_note: Optional[str] = None) -> str:
         "A červený dôkaz má presný terč — každú novú stráž over ČERVENÚ proti TEJ operácii, "
         "ktorú invariant menuje vo svojom `risky_op`, nie proti hocijakej poruche. Stráž červená "
         "proti niečomu inému prejde a nedokáže nič.\n"
+        "`key` je STÁLA totožnosť poistky (napr. `SP-1`) a raz pridelený sa UŽ NIKDY nemení. "
+        "Znenie v `name` prepisuj koľko chceš — je pre človeka; väzba sa páruje na kľúč. A z "
+        "deklarácie NIKDY nevypusti kľúč, ktorý už raz bol: zoznam sa smie dopĺňať, nie skracovať.\n"
         # CR-V2-036: the skeleton pass decides the FEAT COUNT, so the coarse-granularity rule MUST live here
         # (not only in the per-feat task pass — too late). Without it the agent over-decomposed (46 feats >
         # the hard cap) and the engine rejected the plan.
@@ -6511,34 +6514,56 @@ def _gate_report_payloads_newest_first(db: Session, version_id: uuid.UUID) -> li
     return [m.payload for m in msgs if isinstance(m.payload, dict)]
 
 
-def _declared_safety_assertions(db: Session, version_id: uuid.UUID) -> set[str]:
-    """ICCINT-127 — the assertion NAMES the Návrh design bound to its safety properties.
+def _safety_identity(sp: dict[str, Any]) -> str:
+    """The stable identity of one declared safety property: its ``key``, else its ``name``.
 
-    The count floor (:func:`_declared_release_coverage`) asks HOW MANY rejection tests ran; it cannot ask
-    WHICH invariant each one guards, so any assertions at all satisfied it. These names close that: the
-    acceptance must have run the very test the design named for each invariant. Empty set ⇒ a pre-ICCINT-127
-    design with no bindings ⇒ the caller degrades to the count floor (backward compatible)."""
+    ICCINT-127c — a human sentence is not an identity. NEX Inbox v1.5.0 re-declared all 14 invariants under
+    shorter wording while binding them, so matching on the sentence found nothing — and three of the original
+    invariants had quietly gone missing from the rewritten list. A key survives rephrasing; ``name`` stays the
+    fallback so declarations written before keys existed keep working."""
+    return str(sp.get("key") or sp.get("name") or "").strip()
+
+
+def _declared_safety_identities(db: Session, version_id: uuid.UUID) -> set[str]:
+    """The identities the PLAN gate_report fixed. A later report may ATTACH an assertion to one of these; it
+    may never add or drop one, or a build could shrink its own declaration to escape promised coverage."""
     declared = _release_declaration_payload(db, version_id).get("safety_properties")
     if not isinstance(declared, list):
         return set()
-    # The DECLARED invariant names — the list the plan gate_report fixed. A later report may ATTACH an
-    # assertion to one of these; it may never add, rename or drop one, or a build could shrink its own
-    # declaration to escape the coverage it already promised.
-    declared_names = {str(sp.get("name") or "").strip() for sp in declared if isinstance(sp, dict) and sp.get("name")}
-    if not declared_names:
-        return set()
+    return {i for sp in declared if isinstance(sp, dict) and (i := _safety_identity(sp))}
+
+
+def _safety_bindings(db: Session, version_id: uuid.UUID) -> dict[str, str]:
+    """``{identity: assertion}`` for every declared safety property some gate_report has bound.
+
+    ICCINT-127b — the DECLARATION (which invariants exist) belongs to the plan close; the BINDING (which
+    assertion proves each) is chosen later, when the assertion is written. Newest binding wins."""
+    declared_ids = _declared_safety_identities(db, version_id)
+    if not declared_ids:
+        return {}
     bindings: dict[str, str] = {}
-    # Newest first, and the newest binding for a given invariant wins: re-running a fix rewrites the
-    # assertion name, and the freshest gate_report is the one that matches the assertions on disk.
     for payload in _gate_report_payloads_newest_first(db, version_id):
         for sp in payload.get("safety_properties") or []:
             if not isinstance(sp, dict):
                 continue
-            meno = str(sp.get("name") or "").strip()
+            ident = _safety_identity(sp)
             assertion = str(sp.get("assertion") or "").strip()
-            if meno in declared_names and assertion and meno not in bindings:
-                bindings[meno] = assertion
-    return set(bindings.values())
+            if ident in declared_ids and assertion and ident not in bindings:
+                bindings[ident] = assertion
+    return bindings
+
+
+def _unbound_safety_keys(db: Session, version_id: uuid.UUID) -> set[str]:
+    """Declared safety properties with NO assertion bound — named, so the gate can say WHICH is unguarded."""
+    return _declared_safety_identities(db, version_id) - set(_safety_bindings(db, version_id))
+
+
+def _declared_safety_assertions(db: Session, version_id: uuid.UUID) -> set[str]:
+    """ICCINT-127 — the assertion names bound to this build's declared safety properties.
+
+    A count says how many guards exist; only a name says WHICH invariant each one guards. Empty set ⇒ a
+    declaration with no bindings ⇒ the caller degrades to the count floor (backward compatible)."""
+    return set(_safety_bindings(db, version_id).values())
 
 
 def _release_coverage_brief(db: Session, version_id: uuid.UUID) -> str:
