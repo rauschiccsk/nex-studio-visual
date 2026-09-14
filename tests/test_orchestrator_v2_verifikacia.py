@@ -1232,6 +1232,180 @@ def test_card_builder_reject_surfaces_why_and_hides_accept(db_session):
     assert "--no-verify" in consult.decisions[0].explanation  # the critic's reason is on the card
 
 
+# ── ICCINT-131: karta po engine override ──────────────────────────────────────────────────────────────
+#
+# Zmerané 14.09.2026 na NEX Inbox v1.5.0, 9. kolo opráv. Porovnanie ôsmej a deviatej karty, doslova
+# z evidencie:
+#
+#   8. kolo   „Appka je v poriadku — chyba je v jednej novej skúške. Nedozvie sa, kam sa má pozrieť…“
+#   9. kolo   „FAIL“
+#
+# Deviate zlyhanie neprišlo od Audítora, ale od enginu (červené zostavenie projektu). Vtedy niet
+# Audítorovej vety, ktorou by sa dala karta začať, a ``_latest_verifikacia_manager_lead`` vzala
+# ``content`` verdiktu — ktorý je v tomto prípade doslova reťazec „FAIL“.
+#
+# Dôvod pritom BOL ZNÁMY a stál v technickom detaile tej istej karty. Do časti pre Manažéra sa
+# nedostal — a tri ponúkané možnosti boli všetky nesprávne, lebo príčina nebola v kóde.
+
+
+def _rec_engine_override_verdict(db, version_id, *, ci_detail="CI zlyhalo (postup CI, beh 34882715876, failure)"):
+    """Zlyhanie, ktoré NEohlásil Auditor, ale engine — presne ako ho zapisuje ICCINT-64."""
+    orchestrator._record_message(
+        db,
+        version_id=version_id,
+        stage="verifikacia",
+        author="auditor",
+        recipient="manazer",
+        kind="verdict",
+        content="FAIL",
+        payload={
+            "phase": "verifikacia",
+            "verdict": "FAIL",
+            "engine_override": "ci_red",
+            "ci": ci_detail,
+            "findings": [
+                f"ENGINE OVERRIDE (ICCINT-64): {ci_detail} — verzia sa nedá vyhlásiť za overenú, "
+                "kým sú kontroly projektu červené."
+            ],
+        },
+    )
+    db.flush()
+
+
+def test_a_card_never_opens_with_a_verdict_token(db_session):
+    """„FAIL“ nie je veta pre človeka. Karta ňou začínala vždy, keď zlyhanie ohlásil engine a nie
+    Auditor — teda práve vtedy, keď Manažér najviac potrebuje vedieť, čo sa deje."""
+    version, _ = _make_version(db_session, project_dial="plna")
+    state = _seed_verifikacia(db_session, version.id, iteration=1)
+    _rec_engine_override_verdict(db_session, version.id)
+
+    consult = orchestrator._build_fix_consultation(db_session, version.id, state)
+    explanation = consult.decisions[0].explanation
+
+    prve_slovo = explanation.strip().split("\n", 1)[0].strip()
+    assert prve_slovo.upper() not in ("FAIL", "PASS"), f"karta začína znakom verdiktu: {prve_slovo!r}"
+
+
+def test_an_engine_override_card_says_the_cause_is_outside_the_code(db_session):
+    """Príčina bola známa — stála v technickom detaile. Manažér ju v časti pre seba nevidel, a tak
+    si vybral z troch možností, z ktorých ani jedna nemohla pomôcť."""
+    version, _ = _make_version(db_session, project_dial="plna")
+    state = _seed_verifikacia(db_session, version.id, iteration=1)
+    _rec_engine_override_verdict(db_session, version.id)
+
+    consult = orchestrator._build_fix_consultation(db_session, version.id, state)
+    explanation = consult.decisions[0].explanation
+
+    assert "zostavenie" in explanation.lower(), f"karta nepovie, že ide o zostavenie: {explanation[:200]}"
+    assert "34882715876" in explanation, "karta nemenuje beh, v ktorom sa to dá pozrieť"
+    assert "nie je v kóde" in explanation.lower() or "mimo kódu" in explanation.lower(), (
+        f"karta nepovie, že príčina leží mimo kódu: {explanation[:300]}"
+    )
+
+
+def test_an_engine_override_card_offers_the_action_that_fits_its_cause(db_session):
+    """R16 z NEX Inboxu: akcia sa ponúka tam, kde môže uspieť. Pri červenom zostavení je „nechaj to
+    opraviť“ nesprávny nástroj — v kóde niet čo opravovať. Správna akcia existuje
+    (``overit_bez_opravy``), len bola v pruhu, ktorý Manažér nemá dôvod hľadať."""
+    version, _ = _make_version(db_session, project_dial="plna")
+    state = _seed_verifikacia(db_session, version.id, iteration=1)
+    _rec_engine_override_verdict(db_session, version.id)
+
+    consult = orchestrator._build_fix_consultation(db_session, version.id, state)
+    options = consult.decisions[0].options
+    opt_ids = {o.id for o in options}
+
+    assert "overit_bez_opravy" in opt_ids, f"chýba akcia, ktorá na túto príčinu sedí: {sorted(opt_ids)}"
+    assert _one_recommended(consult)[0].id == "overit_bez_opravy", (
+        "pri červenom zostavení je opakované overenie tá správna cesta, nie ďalšie kolo opráv"
+    )
+    assert len([o for o in options if o.recommended]) == 1
+
+
+def test_a_bare_fail_verdict_without_an_engine_override_still_gets_a_sentence(db_session):
+    """Prípad, ktorý stráž na znak verdiktu naozaj chráni — a ktorý mi prvá verzia skúšok minula.
+
+    Pri engine override kartu aj tak vedie vlastná veta o zostavení, takže tá stráž tam nie je vidieť.
+    Holý „FAIL“ však vie prísť aj od Auditora, ktorý plain zhrnutie nenapísal — a vtedy je jediné,
+    čo medzi Manažérom a slovom „FAIL“ stojí, práve ona. Zmerané mutáciou: bez tejto skúšky stráž
+    prešla aj vypnutá.
+    """
+    version, _ = _make_version(db_session, project_dial="plna")
+    state = _seed_verifikacia(db_session, version.id, iteration=1)
+    _rec_fail_verdict(db_session, version.id)  # pomocník zapisuje content="FAIL", ako to robí engine
+
+    consult = orchestrator._build_fix_consultation(db_session, version.id, state)
+    prve = consult.decisions[0].explanation.strip().split("\n", 1)[0].strip()
+
+    assert prve.upper() != "FAIL", "karta začína holým znakom verdiktu aj bez engine override"
+    assert len(prve.split()) >= 4, f"úvod karty nie je veta: {prve!r}"
+
+
+def test_an_ordinary_auditor_fail_is_untouched(db_session):
+    """Poistka, aby sa z opravy jednej vetvy nestala zmena všetkých. Bežné zlyhanie od Auditora má
+    ponuku aj odporúčanie ako dovtedy — opakované overenie tam nemá čo robiť, kód JE pokazený."""
+    version, _ = _make_version(db_session, project_dial="plna")
+    state = _seed_verifikacia(db_session, version.id, iteration=1)
+    _rec_fail_verdict(db_session, version.id, proposed_fix="Oprav zaokrúhľovanie.", findings=["DPH sedí zle"])
+
+    consult = orchestrator._build_fix_consultation(db_session, version.id, state)
+    opt_ids = {o.id for o in consult.decisions[0].options}
+
+    assert "overit_bez_opravy" not in opt_ids
+    assert _one_recommended(consult)[0].id == "fix_it"
+
+
+@pytest.mark.asyncio
+async def test_choosing_the_reverify_option_actually_reverifies(db_session, monkeypatch):
+    """Voľba na karte musí robiť to, čo sľubuje. Bez vlastnej vetvy by prepadla do „usmerniť“ a
+    poslala by AI Agentovi text „Znova over bez opravy“ ako POKYN NA OPRAVU — teda presne to kolo,
+    ktorému sa mala vyhnúť. A karta by pritom vyzerala, že funguje."""
+    version, _ = _make_version(db_session, project_dial="plna")
+    state = _seed_verifikacia(db_session, version.id, iteration=1)
+    _rec_engine_override_verdict(db_session, version.id)
+    state.current_stage = "programovanie"
+    state.status = "blocked"
+    state.block_reason = "decision_needed"
+    db_session.flush()
+
+    poslane = {}
+
+    async def _nikdy_k_agentovi(db, st, *, comment, auto_dispatch=False):
+        poslane["comment"] = comment
+        return st
+
+    monkeypatch.setattr(orchestrator, "_route_manazer_fix_to_ai_agent", _nikdy_k_agentovi)
+    monkeypatch.setattr(orchestrator, "_begin_dispatch", lambda db, st: None)
+
+    consult = orchestrator._build_fix_consultation(db_session, version.id, state)
+    orchestrator._record_message(
+        db_session,
+        version_id=version.id,
+        stage="programovanie",
+        author="ai_agent",
+        recipient="manazer",
+        kind="consultation",
+        content=consult.intro,
+        payload={"consultation": consult.model_dump(mode="json"), "phase": "verifikacia"},
+    )
+    db_session.flush()
+
+    novy = await orchestrator.apply_action(
+        db_session,
+        version_id=version.id,
+        action="decide",
+        payload={
+            "decision_key": "verifikacia_fix_next",
+            "option_id": "overit_bez_opravy",
+            "label": "Znova over bez opravy",
+        },
+    )
+
+    assert not poslane, f"voľba skončila u AI Agenta ako pokyn na opravu: {poslane}"
+    assert novy.current_stage == "verifikacia", "overenie sa nespustilo"
+    assert novy.is_regate is True
+
+
 # ── §9 corrected_scope precedence in the fix brief ────────────────────────────────────────────────────
 
 

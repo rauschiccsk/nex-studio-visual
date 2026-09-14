@@ -8495,7 +8495,47 @@ def _latest_verifikacia_manager_lead(db: Session, version_id: uuid.UUID) -> Opti
     ).scalar_one_or_none()
     if row is None:
         return None
-    return (row.content or "").strip() or None
+    lead = (row.content or "").strip()
+    # ICCINT-131: „FAIL“ nie je veta pre človeka. Verdikt, ktorý neohlásil Auditor ale engine, nesie
+    # ako ``content`` holý znak verdiktu — a karta ním potom ZAČÍNALA. Zmerané 14.09.2026 na NEX
+    # Inbox v1.5.0, 9. kolo: ôsma karta začínala vetou „Appka je v poriadku — chyba je v jednej novej
+    # skúške…“, deviata slovom „FAIL“. Radšej nič než token: volajúci má vlastnú zrozumiteľnú vetu.
+    if lead.upper() in _VERDICT_TOKENS:
+        return None
+    return lead or None
+
+
+#: Znaky verdiktu, ktoré sa nikdy nesmú dostať na kartu ako úvodná veta (ICCINT-131).
+_VERDICT_TOKENS = frozenset({"FAIL", "PASS", "FAIL.", "PASS."})
+
+
+def _engine_override_reason(db: Session, version_id: uuid.UUID) -> Optional[str]:
+    """Prečo posledné zlyhanie Verifikácie ohlásil ENGINE a nie Auditor — rečou, alebo ``None``.
+
+    ICCINT-131. Rozhoduje sa podľa ``payload["engine_override"]``, nie podľa hľadania reťazca v texte:
+    engine ten príznak zapisuje sám (ICCINT-64) a je to jediný údaj, ktorý sa nedá pokaziť
+    preformulovaním hlásenia.
+    """
+    row = db.execute(
+        select(PipelineMessage)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.stage == "verifikacia",
+            PipelineMessage.kind == "verdict",
+        )
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if row is None or (row.payload or {}).get("engine_override") != "ci_red":
+        return None
+    ci = str((row.payload or {}).get("ci") or "").strip()
+    return (
+        "Chyba nie je v kóde — appku sa nepodarilo zostaviť. "
+        + (f"Posledné zostavenie projektu zlyhalo: {ci}. " if ci else "Posledné zostavenie projektu zlyhalo. ")
+        + "Kým je zostavenie červené, verzia sa nedá vyhlásiť za overenú. "
+        "Keď sa príčina odstránila inde (v projekte, mimo tejto slučky), stačí overenie zopakovať — "
+        "opravovať tu niet čo."
+    )
 
 
 #: v4.0.16: after this many CONSECUTIVE Verifikácia FAIL verdicts (since the last PASS) the automated fix loop
@@ -8660,8 +8700,13 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
     # The scope (file paths / codes / repro / line numbers) rides the card's collapsible "Technický detail"
     # below AND is still the AI Agent's fix brief — so the non-expert never faces a jargon wall, yet nothing
     # is lost. Falls back to a generic plain sentence when no verdict summary is on record.
-    lead = _latest_verifikacia_manager_lead(db, version_id) or (
-        "Koncové overenie našlo blokujúcu chybu — treba tvoje rozhodnutie."
+    # ICCINT-131: keď zlyhanie ohlásil ENGINE a nie Auditor, dôvod je známy presne — a dovtedy sa do
+    # časti pre Manažéra nedostal. Stál v technickom detaile, kam sa nikto nepozerá, kým netuší, že má.
+    override_reason = _engine_override_reason(db, version_id)
+    lead = (
+        override_reason
+        or _latest_verifikacia_manager_lead(db, version_id)
+        or "Koncové overenie našlo blokujúcu chybu — treba tvoje rozhodnutie."
     )
     explanation_parts = [lead]
     # ICCINT-41: the manager-facing headline is a CATEGORY ("Aplikácia sa nespustila", "kontrola Aktualizácie
@@ -8745,7 +8790,26 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
                     else "Jedným klikom — AI Agent opraví podľa nálezov Auditora a Auditor to znova preverí. "
                     "Nemusíš nič písať."
                 ),
-                recommended=not stuck,  # v4.0.16: stop recommending another fix once the loop is non-convergent
+                # v4.0.16: stop recommending another fix once the loop is non-convergent.
+                # ICCINT-131: a pri engine override už vôbec — v kóde niet čo opravovať.
+                recommended=not stuck and not override_reason,
+            )
+        )
+    if override_reason:
+        # ICCINT-131 — R16 z NEX Inboxu: akcia sa ponúka tam, kde môže uspieť. Pri červenom zostavení
+        # je „nechaj to opraviť“ nesprávny nástroj — v kóde niet čo opravovať, a kolo AI Agenta aj
+        # Auditora by sa minulo nadarmo. Správna akcia existovala (v4.0.10/v4.0.49), len žila
+        # v samostatnom pruhu, ktorý Manažér nemá dôvod hľadať: 14.09.2026 som mu ju musel ukázať
+        # prstom, hoci karta pred ním niesla presnú príčinu v skrytom detaile.
+        options.append(
+            ConsultOption(
+                id="overit_bez_opravy",
+                label="Znova over bez opravy",
+                detail=(
+                    "Zostavenie sa medzitým mohlo opraviť inde. Overenie sa zopakuje nad aktuálnym "
+                    "stavom — nespustí sa žiadna oprava a nemíňa sa kolo."
+                ),
+                recommended=True,
             )
         )
     options.append(
@@ -8768,7 +8832,10 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
                 else "Build ostane blokovaný, kým nerozhodneš; kartu môžeš vyriešiť neskôr (spustiť opravu alebo "
                 "usmerniť)."
             ),
-            recommended=stuck,  # v4.0.16: the recommended action once the automated loop is non-convergent
+            # v4.0.16: the recommended action once the automated loop is non-convergent.
+            # ICCINT-131: engine override má prednosť — opakované overenie je lacnejšie aj správnejšie
+            # než odovzdať vývojárovi niečo, čo sa možno už opravilo.
+            recommended=stuck and not override_reason,
         )
     )
     # §2 by construction: EXACTLY ONE recommended option. Not stuck → the one-click FORWARD action (positive →
@@ -12395,6 +12462,19 @@ async def apply_action(
             if opt == "accept_fix" and not ans.get("free_text") and not ans.get("note"):
                 # resume the already-materialized (and critic-vetted) fix task — the settle set stage=
                 # programovanie / actor=ai_agent and bumped the counter; _begin_dispatch just flips to working.
+                _begin_dispatch(db, state)
+                return state
+            if opt == "overit_bez_opravy" and not ans.get("free_text") and not ans.get("note"):
+                # ICCINT-131: voľba z karty musí robiť to, čo sľubuje. Bez tejto vetvy by prepadla
+                # nižšie do ``guide`` a poslala by AI Agentovi text „Znova over bez opravy“ ako pokyn
+                # na opravu — teda presne to kolo, ktorému sa mala vyhnúť. Tichá chyba: karta by
+                # vyzerala, že funguje.
+                state.current_stage = "verifikacia"
+                state.is_regate = True
+                state.iteration += 1
+                state.block_reason = None
+                state.dispatch_baseline_sha = None
+                db.flush()
                 _begin_dispatch(db, state)
                 return state
             if opt == "fix_it" and not ans.get("free_text") and not ans.get("note"):
