@@ -2403,7 +2403,8 @@ _SKELETON_EXAMPLE = (
     '"cross_cutting_rules":"Spoločná transakčná hranica; immutable audit; scoping na firmu.",'
     '"flagship_features":["Export faktúry do Peppol XML","Automatické párovanie dodávateľa"],'
     '"safety_properties":[{"name":"Scoping na firmu (žiadny cross-tenant read)",'
-    '"risky_op":"GET /api/faktury inej firmy vráti dáta"}]}\n'
+    '"risky_op":"GET /api/faktury inej firmy vráti dáta",'
+    '"assertion":"cudzia-firma-nedostane-data"}]}\n'
     "<<<END_TASK_PLAN_JSON>>>"
 )
 _FEAT_TASKS_EXAMPLE = (
@@ -2440,11 +2441,21 @@ def _task_plan_skeleton_directive(director_note: Optional[str] = None) -> str:
         # flagship feature needs a FEATURE assertion, every safety property a NEGATIVE assertion at Verifikácia.
         "Navrch objektu aj pole `flagship_features` (zoznam textov, ≥1): kľúčové funkcie, ktoré MUSÍ vydanie "
         "PREUKÁZATEĽNE robiť — release oracle vyžaduje ≥1 pozitívnu (FEATURE) akceptačnú skúšku na každú. "
-        "A pole `safety_properties` (zoznam objektov {`name`,`risky_op`}): bezpečnostné invarianty, ktoré appka "
+        "A pole `safety_properties` (zoznam objektov {`name`,`risky_op`,`assertion`}): "
+        "bezpečnostné invarianty, ktoré appka "
         "MUSÍ VYNÚTIŤ — `risky_op` je konkrétna ZAKÁZANÁ operácia, ktorú oracle vyžaduje otestovať NEGATÍVNE "
         '(musí byť ODMIETNUTÁ; zelený „funguje to" test bezpečnostný invariant nikdy nedokáže). Vymenuj ich '
         "POCTIVO (autentifikácia, autorizácia/scoping, injection, nebezpečné príkazy, …); prázdny zoznam iba ak "
         "appka naozaj nemá žiadny bezpečnostný invariant — Auditor prázdnu deklaráciu spochybní.\n"
+        # ICCINT-127 — the binding + the sharpened red proof. Counting rejection tests was
+        # satisfiable by any tests at all; a NAME says WHICH invariant each one guards.
+        "`assertion` je MENO odmietacej skúšky, ktorá dokazuje, že `risky_op` sa ODMIETNE — to isté "
+        "meno, aké skúška vypíše ako `ASSERTION_RAN=<meno>`. Brána vydania kontroluje MENOVITÚ "
+        "VÄZBU, nie počet skúšok: invariant bez svojej spustenej skúšky je FAIL, aj keby skúšok "
+        "bežali desiatky.\n"
+        "A červený dôkaz má presný terč — každú novú stráž over ČERVENÚ proti TEJ operácii, "
+        "ktorú invariant menuje vo svojom `risky_op`, nie proti hocijakej poruche. Stráž červená "
+        "proti niečomu inému prejde a nedokáže nič.\n"
         # CR-V2-036: the skeleton pass decides the FEAT COUNT, so the coarse-granularity rule MUST live here
         # (not only in the per-feat task pass — too late). Without it the agent over-decomposed (46 feats >
         # the hard cap) and the engine rejected the plan.
@@ -5799,6 +5810,9 @@ async def _run_app_starts_smoke(stack: _SmokeStack) -> tuple[bool, str]:
 _ASSERTIONS_RUN_RE = re.compile(r"\bASSERTIONS_RUN=(\d+)")
 _FEATURE_ASSERTIONS_RUN_RE = re.compile(r"\bFEATURE_ASSERTIONS_RUN=(\d+)")
 _NEGATIVE_ASSERTIONS_RUN_RE = re.compile(r"\bNEGATIVE_ASSERTIONS_RUN=(\d+)")
+# ICCINT-127: the acceptance script names each assertion it ran (``ASSERTION_RAN=<name>``), so the gate can
+# check WHICH declared invariants are covered instead of merely how many tests exist.
+_ASSERTION_RAN_RE = re.compile(r"\bASSERTION_RAN=([A-Za-z0-9_.:-]{1,200})")
 
 
 def _parse_last_sentinel(output: str, pattern: re.Pattern[str]) -> Optional[int]:
@@ -5818,7 +5832,13 @@ def _parse_assertions_run(output: str) -> Optional[int]:
 
 
 def _evaluate_release_coverage(
-    *, total: Optional[int], feature: int, negative: int, coverage_req: tuple[int, int]
+    *,
+    total: Optional[int],
+    feature: int,
+    negative: int,
+    coverage_req: tuple[int, int],
+    declared_assertions: Optional[set[str]] = None,
+    ran_assertions: Optional[set[str]] = None,
 ) -> tuple[bool, str]:
     """CR-V2-051 — the spec-derived, risk-floored acceptance verdict from the parsed sentinel counts + the
     DECLARED coverage requirement ``(n_flagship_features, n_safety_properties)`` from the Návrh design. Pure
@@ -5842,6 +5862,26 @@ def _evaluate_release_coverage(
         return False, (
             f"missing behavioural coverage: the design declared {n_features} flagship feature(s) but the "
             f"acceptance ran {feature} FEATURE assertion(s) — every flagship feature needs one"
+        )
+    # ICCINT-127 — the NAMED binding, checked before the count. Counting was satisfiable by any assertions
+    # at all: NEX Inbox v1.5.0 shipped 15 honest rejection tests, met the count, and still left 2 of 14
+    # declared invariants unguarded. A count says how many guards exist; only a name says WHICH invariant
+    # each one guards. Where the design binds its safety properties to assertion names, that binding IS the
+    # floor and the count becomes redundant.
+    declared = declared_assertions or set()
+    ran = ran_assertions or set()
+    if declared:
+        unguarded = sorted(declared - ran)
+        if unguarded:
+            return False, (
+                f"unguarded safety property/ies: the design bound {len(declared)} invariant(s) to a named "
+                f"rejection test, but {len(unguarded)} of them never ran — "
+                f"{', '.join(unguarded)}. The risky op each one forbids is undemonstrated; a green gate here "
+                f"would certify coverage that does not exist."
+            )
+        return True, (
+            f"release acceptance PASS — {total} assertions ({feature} feature / {negative} negative); all "
+            f"{len(declared)} declared safety property/ies covered by their named rejection test"
         )
     if negative < n_safety:
         return False, (
@@ -5880,7 +5920,10 @@ async def _run_acceptance_script(script: Path, env: dict[str, str]) -> tuple[int
 
 
 async def _run_release_acceptance(
-    stack: _SmokeStack, project_slug: str, coverage_req: tuple[int, int]
+    stack: _SmokeStack,
+    project_slug: str,
+    coverage_req: tuple[int, int],
+    declared_assertions: Optional[set[str]] = None,
 ) -> tuple[bool, str, bool]:
     """Release-acceptance leg (gate-g-hardening GAP 1 A1; CR-V2-051 risk floor): run the project's black-box
     host-executable ``release_smoke_test.sh`` against the ALREADY-BOOTED isolated *stack* (NOT pytest in the
@@ -5924,7 +5967,14 @@ async def _run_release_acceptance(
     total = _parse_assertions_run(out)
     feature = _parse_last_sentinel(out, _FEATURE_ASSERTIONS_RUN_RE) or 0
     negative = _parse_last_sentinel(out, _NEGATIVE_ASSERTIONS_RUN_RE) or 0
-    ok, detail = _evaluate_release_coverage(total=total, feature=feature, negative=negative, coverage_req=coverage_req)
+    ok, detail = _evaluate_release_coverage(
+        total=total,
+        feature=feature,
+        negative=negative,
+        coverage_req=coverage_req,
+        declared_assertions=declared_assertions,
+        ran_assertions=set(_ASSERTION_RAN_RE.findall(out)),
+    )
     return ok, detail, False
 
 
@@ -6310,7 +6360,10 @@ async def _app_starts_after_fix(project_slug: str) -> tuple[bool, str]:
 
 
 async def _run_release_smoke(
-    project_slug: str, version_label: str, coverage_req: tuple[int, int]
+    project_slug: str,
+    version_label: str,
+    coverage_req: tuple[int, int],
+    declared_assertions: Optional[set[str]] = None,
 ) -> tuple[tuple[bool, str], Optional[tuple[bool, str, bool]]]:
     """gate-g-hardening GAP 1: the boot leg + the release-acceptance leg in ONE up/down cycle (A2). Returns
     ``((boot_ok, boot_detail), acceptance)`` where ``acceptance`` is ``(ok, detail, skipped)`` — or ``None``
@@ -6334,7 +6387,7 @@ async def _run_release_smoke(
         akt_ok, akt_detail = await _run_aktualizacie_gate(stack, root, version_label)
         if not akt_ok:
             return (False, akt_detail), None
-        acceptance = await _run_release_acceptance(stack, project_slug, coverage_req)
+        acceptance = await _run_release_acceptance(stack, project_slug, coverage_req, declared_assertions)
         return (boot_ok, boot_detail), acceptance
 
 
@@ -6432,6 +6485,20 @@ def _declared_release_coverage(db: Session, version_id: uuid.UUID) -> tuple[int,
     n_features = len(features) if isinstance(features, list) else 0
     n_safety = len(safety) if isinstance(safety, list) else 0
     return n_features, n_safety
+
+
+def _declared_safety_assertions(db: Session, version_id: uuid.UUID) -> set[str]:
+    """ICCINT-127 — the assertion NAMES the Návrh design bound to its safety properties.
+
+    The count floor (:func:`_declared_release_coverage`) asks HOW MANY rejection tests ran; it cannot ask
+    WHICH invariant each one guards, so any assertions at all satisfied it. These names close that: the
+    acceptance must have run the very test the design named for each invariant. Empty set ⇒ a pre-ICCINT-127
+    design with no bindings ⇒ the caller degrades to the count floor (backward compatible)."""
+    payload = _release_declaration_payload(db, version_id)
+    safety = payload.get("safety_properties")
+    if not isinstance(safety, list):
+        return set()
+    return {name for sp in safety if isinstance(sp, dict) and (name := str(sp.get("assertion") or "").strip())}
 
 
 def _release_coverage_brief(db: Session, version_id: uuid.UUID) -> str:
@@ -7274,11 +7341,16 @@ async def _run_conversation_kontrola_round(
     # navrh gate_report — so the acceptance degrades to the anti-empty floor (ASSERTIONS_RUN>0); per-feature/
     # negative coverage is NOT enforced in the conversation flow (K-5, honestly stated, tightened later).
     coverage_req = _declared_release_coverage(db, version_id)
+    # ICCINT-127: the assertion NAMES bound to those safety properties — a count cannot say WHICH
+    # invariant a rejection test guards, a name can. Empty ⇒ pre-binding design ⇒ count floor.
+    declared_assertions = _declared_safety_assertions(db, version_id)
     # obs-2 Part B Part 2: bake the completing version's REAL note onto disk BEFORE the smoke so the 2a gate
     # asserts a served note (not a placeholder / a 2nd-version list missing its own note). PASS-time commit
     # (:func:`_commit_release_note`) is unchanged — this is an idempotent pre-write.
     _write_release_note_to_disk(db, version_id, claude_agent.PROJECTS_ROOT / slug)
-    (smoke_ok, smoke_detail), acceptance = await _run_release_smoke(slug, version_label, coverage_req)
+    (smoke_ok, smoke_detail), acceptance = await _run_release_smoke(
+        slug, version_label, coverage_req, declared_assertions
+    )
     smoke_msg = _record_message(
         db,
         version_id=version_id,
@@ -8956,11 +9028,16 @@ async def _run_verifikacia_round(
     # CR-V2-051: the acceptance is risk-floored against the Návrh design's DECLARED flagship features + safety
     # properties — ≥1 FEATURE assertion each, ≥1 NEGATIVE assertion each; missing coverage is a FAIL.
     coverage_req = _declared_release_coverage(db, version_id)
+    # ICCINT-127: the assertion NAMES bound to those safety properties — a count cannot say WHICH
+    # invariant a rejection test guards, a name can. Empty ⇒ pre-binding design ⇒ count floor.
+    declared_assertions = _declared_safety_assertions(db, version_id)
     # obs-2 Part B Part 2: bake the completing version's REAL note onto disk BEFORE the smoke so the 2a gate
     # asserts a served note (not a placeholder / a 2nd-version list missing its own note). PASS-time commit
     # (:func:`_commit_release_note`) is unchanged — this is an idempotent pre-write.
     _write_release_note_to_disk(db, version_id, claude_agent.PROJECTS_ROOT / slug)
-    (smoke_ok, smoke_detail), acceptance = await _run_release_smoke(slug, version_label, coverage_req)
+    (smoke_ok, smoke_detail), acceptance = await _run_release_smoke(
+        slug, version_label, coverage_req, declared_assertions
+    )
     # v4.0.14 (Director 2026-07-20): the BUILD-FACT for the Auditor. _run_release_smoke runs `docker compose up
     # --build`, which rebuilds the app image from the CURRENT working tree (HEAD) — a code change invalidates the
     # COPY layer; a no-op is a cache-hit on the SAME HEAD. So the acceptance ALWAYS runs the current code. Handing

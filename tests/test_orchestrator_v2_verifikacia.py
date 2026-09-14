@@ -177,7 +177,7 @@ def _stub_smoke(monkeypatch, *, boot_ok=True, acc=(True, "release acceptance PAS
     (acceptance is None when boot failed). Captures the (slug, version) it was called with."""
     seen = {}
 
-    async def _fake(project_slug, version_label, coverage_req=(0, 0)):
+    async def _fake(project_slug, version_label, coverage_req=(0, 0), *_a, **_k):
         seen["slug"] = project_slug
         seen["version"] = version_label
         seen["coverage_req"] = coverage_req
@@ -925,7 +925,7 @@ async def test_verifikacia_writes_release_note_to_disk_before_smoke(db_session, 
 
     monkeypatch.setattr(release_note_writer, "write_release_note", _spy_write)
 
-    async def _fake_smoke(slug, version_label, coverage_req=(0, 0)):
+    async def _fake_smoke(slug, version_label, coverage_req=(0, 0), *_a, **_k):
         order.append("smoke")
         return (True, "app booted + responds"), (True, "acc ok", False)
 

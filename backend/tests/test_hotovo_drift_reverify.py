@@ -106,7 +106,7 @@ async def test_green_reverify_auto_reanchors_hotovo(db_session, monkeypatch) -> 
     _record_check_marker(db_session, version.id, auto_hotovo=True)
     _stub_git(monkeypatch)
 
-    async def _green_smoke(_slug, _label, _coverage):
+    async def _green_smoke(_slug, _label, _coverage, *_a, **_k):
         return (True, "boot ok"), (True, "acceptance ok", False)
 
     async def _partner(*_a, **_kw):
@@ -133,7 +133,7 @@ async def test_red_reverify_does_not_sign_stays_reopened(db_session, monkeypatch
     _record_check_marker(db_session, version.id, auto_hotovo=True)
     _stub_git(monkeypatch)
 
-    async def _red_smoke(_slug, _label, _coverage):
+    async def _red_smoke(_slug, _label, _coverage, *_a, **_k):
         return (False, "boot FAIL: app did not boot"), None
 
     async def _partner(*_a, **_kw):
@@ -158,7 +158,7 @@ async def test_normal_skontrolovat_green_is_unchanged(db_session, monkeypatch) -
     _record_check_marker(db_session, version.id, auto_hotovo=False)
     _stub_git(monkeypatch)
 
-    async def _green_smoke(_slug, _label, _coverage):
+    async def _green_smoke(_slug, _label, _coverage, *_a, **_k):
         return (True, "boot ok"), (True, "acceptance ok", False)
 
     async def _partner(*_a, **_kw):

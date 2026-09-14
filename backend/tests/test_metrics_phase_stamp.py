@@ -242,7 +242,7 @@ async def test_kontrola_round_stamps_verifikacia(db_session, monkeypatch) -> Non
     state = _seed_state(db_session, version)
     _mock_claude(monkeypatch, _status_block(stage="priprava"))
 
-    async def _fake_smoke(_slug, _label, _coverage):
+    async def _fake_smoke(_slug, _label, _coverage, *_a, **_k):
         return (True, "boot ok"), (True, "acceptance ok", False)
 
     monkeypatch.setattr(orchestrator, "_run_release_smoke", _fake_smoke)
@@ -363,7 +363,7 @@ async def test_kontrola_round_parse_exhaustion_stamps_verifikacia(db_session, mo
     version = _seed_version(db_session, project)
     state = _seed_state(db_session, version)
 
-    async def _fake_smoke(_slug, _label, _coverage):
+    async def _fake_smoke(_slug, _label, _coverage, *_a, **_k):
         return (True, "boot ok"), (True, "acceptance ok", False)
 
     async def _fake_retry(*_a, **_kw):

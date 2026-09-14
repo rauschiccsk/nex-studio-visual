@@ -148,6 +148,9 @@ class SafetyProperty(BaseModel):
 
     name: str = Field(min_length=1, max_length=300)
     risky_op: str = Field(min_length=1, max_length=300)
+    #: ICCINT-127 — name of the rejection assertion proving ``risky_op`` is refused. A count says how many
+    #: guards exist; only a name says WHICH invariant each guards. Empty = pre-ICCINT-127 report.
+    assertion: str = Field(default="", max_length=200)
 
 
 # ── (v0.7.3) incremental task_plan generation — narrowed per-pass schemas (CR-1) ──

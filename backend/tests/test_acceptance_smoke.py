@@ -773,3 +773,52 @@ def test_fast_fix_stage_order_reaches_verifikacia_no_v1_gate_g() -> None:
     assert "gate_g" not in orchestrator.STAGE_ORDER, "v1 gate_g is replaced by the 4-phase Verifikácia"
     assert "verifikacia" in orchestrator.FAST_FIX_STAGE_ORDER and orchestrator.FAST_FIX_STAGE_ORDER[-1] == "done"
     assert "verifikacia" in orchestrator.STAGE_ORDER and orchestrator.STAGE_ORDER[-1] == "done"
+
+
+# ─── ICCINT-127: the floor must check WHICH safety properties are covered, not how many ──────────────
+#
+# The forbidden operation this guards (stated as the invariant's own risky_op): a release passes the
+# acceptance gate while a DECLARED safety property has no assertion that actually ran. Counting was
+# satisfiable by any assertions at all — NEX Inbox v1.5.0 shipped 15 honest rejection tests, met the
+# count, and still left 2 of 14 declared invariants unguarded. The red proof below runs that exact
+# operation, not a generic failure.
+
+
+def test_declared_safety_property_without_its_assertion_fails_the_gate() -> None:
+    """The named binding is the floor: a declared invariant whose assertion never ran is a FAIL."""
+    ok, detail = orchestrator._evaluate_release_coverage(
+        total=20,
+        feature=3,
+        negative=15,  # the COUNT is satisfied — this is the exact hole ICCINT-127 closes
+        coverage_req=(3, 2),
+        declared_assertions={"nezaregistrovany-dodavatel-neprejde", "dodavatel-len-z-odosielatela"},
+        ran_assertions={"nezaregistrovany-dodavatel-neprejde"},
+    )
+    assert ok is False
+    # It must NAME the uncovered invariant — "too few assertions" is what let this through.
+    assert "dodavatel-len-z-odosielatela" in detail
+
+
+def test_declared_assertion_that_ran_passes() -> None:
+    ok, detail = orchestrator._evaluate_release_coverage(
+        total=20,
+        feature=3,
+        negative=2,
+        coverage_req=(3, 2),
+        declared_assertions={"a", "b"},
+        ran_assertions={"a", "b", "c"},
+    )
+    assert ok is True, detail
+
+
+def test_without_declared_bindings_the_count_floor_still_applies() -> None:
+    """Backward compatibility: a project that declares no bindings keeps the old count floor."""
+    ok, _ = orchestrator._evaluate_release_coverage(
+        total=5,
+        feature=3,
+        negative=1,
+        coverage_req=(3, 2),
+        declared_assertions=set(),
+        ran_assertions=set(),
+    )
+    assert ok is False  # negative(1) < declared safety(2)

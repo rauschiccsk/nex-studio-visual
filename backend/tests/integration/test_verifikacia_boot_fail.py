@@ -70,7 +70,7 @@ async def test_boot_fail_settles_honest_fail_verdict_ahead_of_auditor(db_session
     version_id = state.version_id
 
     # The release smoke reports a boot-FAIL (compose interpolation error) → acceptance never ran (None).
-    async def _boot_fail_smoke(slug, version_label, coverage_req=(0, 0)):
+    async def _boot_fail_smoke(slug, version_label, coverage_req=(0, 0), *_a, **_k):
         return (False, _BOOT_FAIL_DETAIL), None
 
     monkeypatch.setattr(orchestrator, "_run_release_smoke", _boot_fail_smoke)
@@ -136,7 +136,7 @@ async def test_boot_fail_at_loop_max_escalates_not_blocked_on_parse(db_session, 
     state = _seed_state_at_verifikacia(db_session, flow_type="new_version", iteration=orchestrator.AUDITOR_LOOP_MAX)
     version_id = state.version_id
 
-    async def _boot_fail_smoke(slug, version_label, coverage_req=(0, 0)):
+    async def _boot_fail_smoke(slug, version_label, coverage_req=(0, 0), *_a, **_k):
         return (False, _BOOT_FAIL_DETAIL), None
 
     monkeypatch.setattr(orchestrator, "_run_release_smoke", _boot_fail_smoke)
@@ -481,7 +481,7 @@ async def test_verifikacia_brief_carries_build_fact(db_session, monkeypatch) -> 
     current HEAD commit) so the Auditor can't MIS-attribute a failure to a "stale build" (nex-shopify 2026-07-20)."""
     state = _seed_state_at_verifikacia(db_session)
 
-    async def _smoke(slug, version_label, coverage_req=(0, 0)):
+    async def _smoke(slug, version_label, coverage_req=(0, 0), *_a, **_k):
         return (True, "boot ok"), (False, "flake: MissingGreenlet on first query", False)
 
     monkeypatch.setattr(orchestrator, "_run_release_smoke", _smoke)

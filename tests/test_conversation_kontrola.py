@@ -180,7 +180,7 @@ def _stub_smoke(monkeypatch, *, boot_ok=True, boot_detail="ok", acceptance=(True
     """Stub ``_run_release_smoke`` — return a scripted ((boot_ok, detail), acceptance) WITHOUT docker.
     A red boot passes ``acceptance=None`` (acceptance never ran), mirroring the real driver."""
 
-    async def _fake(project_slug, version_label, coverage_req=(0, 0)):
+    async def _fake(project_slug, version_label, coverage_req=(0, 0), *_a, **_k):
         return (boot_ok, boot_detail), acceptance
 
     monkeypatch.setattr(orchestrator, "_run_release_smoke", _fake)
