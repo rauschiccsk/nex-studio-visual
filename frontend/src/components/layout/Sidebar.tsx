@@ -5,6 +5,8 @@ import { useAuthStore } from "@/store/authStore";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import { usePresenceStore } from "@/store/usePresenceStore";
 import { usePipelineWs } from "@/hooks/usePipelineWs";
+import { useBackendVersion } from "@/hooks/useBackendVersion";
+import { verziaDoPanela } from "@/lib/verziaDoPanela";
 import type { UserRole } from "@/types/user";
 import { personName } from "@/utils/person";
 
@@ -101,12 +103,19 @@ export default function Sidebar() {
   const displayName = displaySource || "—";
   const initials = displaySource ? displaySource.slice(0, 1).toUpperCase() : "?";
 
+  const verziaChrbtice = useBackendVersion();
   const hasProject = Boolean(selectedProject);
   const projectsFallback = "/projects";
 
   // ─── Logo slot (shared Brand — E1 chrome unification, CR-NS-067) ───────────
+  // ICCINT-128: číslo vedie CHRBTICA. `VITE_APP_VERSION` je verzia obrazoviek a panel ju dovtedy
+  // vydával za verziu celej appky — 14.09.2026 o štyri vydania vedľa. Pri zhode sa nič nemení.
   const logo = (
-    <Brand initials="NSV" name="NEX Studio Visual" version={`v${import.meta.env.VITE_APP_VERSION || "dev"}`} />
+    <Brand
+      initials="NSV"
+      name="NEX Studio Visual"
+      version={verziaDoPanela(verziaChrbtice, import.meta.env.VITE_APP_VERSION)}
+    />
   );
 
   // ─── Footer slot ─────────────────────────────────────────────────────────

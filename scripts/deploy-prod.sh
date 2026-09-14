@@ -131,3 +131,17 @@ docker compose -f "$COMPOSE" up -d --force-recreate --wait "${SERVICES[@]}"
 
 echo "==> nasadené v${VERSION}"
 docker ps --filter "label=com.docker.compose.project=${PROJECT}" --format '    {{.Names}}  {{.Image}}  {{.Status}}'
+
+# ── Rozišli sa polovice? ────────────────────────────────────────────────────────────────────────────
+# ICCINT-128. Nasadenie jednej polovice je legitímne a pri zmenách bez obrazoviek aj odporúčané —
+# nechá bežiacu stavbu na pokoji. Lenže druhá polovica potom nesie staré číslo a NIKDE to nebolo
+# vidieť: 14.09.2026 panel hlásil v4.38.0, kým chrbtica bežala v4.38.4. Nech to vie aj ten, kto
+# nasadzuje, nie len ten, kto sa neskôr pozerá na obrazovku.
+BE_TAG="$(grep -oP "image: ${BACKEND_IMAGE}:v\K[0-9.]+" "$COMPOSE" | head -1)"
+FE_TAG="$(grep -oP "image: ${FRONTEND_IMAGE}:v\K[0-9.]+" "$COMPOSE" | head -1)"
+if [[ -n "$BE_TAG" && -n "$FE_TAG" && "$BE_TAG" != "$FE_TAG" ]]; then
+  echo
+  echo "⚠️  POLOVICE SA LÍŠIA:  chrbtica v${BE_TAG}  ·  obrazovky v${FE_TAG}"
+  echo "    Panel v kokpite to odteraz ukáže obom číslami, takže nikto nenahlási nesprávne vydanie."
+  echo "    Ak to tak nemá zostať:  scripts/deploy-prod.sh --version ${BE_TAG} frontend"
+fi
