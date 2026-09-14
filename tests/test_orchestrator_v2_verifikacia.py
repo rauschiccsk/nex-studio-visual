@@ -1606,6 +1606,118 @@ async def test_giving_up_on_a_run_that_never_appears_says_so_plainly(monkeypatch
     assert "neobjavil" in detail, "musí byť poznať, že sme čakali a nedočkali sa"
 
 
+# ── ICCINT-129: ONE commit, SEVERAL workflows — the gate must read them all ──
+#
+# Measured on nex-inbox 14.09.2026. Every commit there triggers two workflows, ``CI`` and
+# ``Release smoke gate``. The gate asked GitHub with ``--limit 1``, got whichever run had registered
+# last, and judged the commit on that one alone:
+#
+#   5fb85a6   CI=failure   smoke=success   → picked smoke   → "CI zelené" → version declared DONE
+#   06e5d0d   CI=failure   smoke=success   → picked CI      → "CI zlyhalo" → correctly blocked
+#
+# Same code, two commits apart, opposite outcome. A coin toss decided whether a red build shipped.
+# One of the failing tests was guarding a badge that had silently vanished from the error queue —
+# the gate looked straight past it.
+
+
+def _run(workflow, conclusion, run_id, *, status="completed"):
+    return {"status": status, "conclusion": conclusion, "databaseId": run_id, "workflowName": workflow}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "order",
+    [
+        pytest.param(("smoke_first"), id="green-run-listed-first"),
+        pytest.param(("red_first"), id="red-run-listed-first"),
+    ],
+)
+async def test_a_red_workflow_beside_a_green_one_is_red_in_either_order(monkeypatch, order):
+    """BOTH orderings, because the bug WAS the ordering. GitHub does not promise which run comes back
+    first, so a gate that judges by position is right only by luck — and on 5fb85a6 the luck ran out."""
+    _no_ci_waiting(monkeypatch)
+    red = _run("CI", "failure", 34869173177)
+    green = _run("Release smoke gate", "success", 34869175048)
+    rows = [green, red] if order == "smoke_first" else [red, green]
+    _ci_answers(monkeypatch, [rows])
+
+    state, detail = await orchestrator._ci_status_for_head(Path("/tmp/x"))
+
+    assert state == "red", "zlyhaný postup nesmie prejsť len preto, že ho GitHub vymenoval druhý"
+    assert "34869173177" in detail, "hlásenie musí menovať beh, ktorý zlyhal"
+    # NIE `"CI" in detail` — to slovo je v hlásení („CI zlyhalo…“) aj bez mena postupu, takže by
+    # taká stráž nikdy nespadla. Zmerané: mutácia, ktorá meno postupu z hlásenia odstránila, ju prešla.
+    assert "postup CI" in detail, "a POSTUP — inak sa cudzí postup vydáva za 'CI', ako 14.09.2026"
+
+
+@pytest.mark.asyncio
+async def test_a_finished_failure_does_not_wait_for_a_sibling_still_running(monkeypatch):
+    """A completed failure is already the answer. Waiting for the other workflow would only delay a
+    verdict that cannot change — and on a slow workflow it would time out into ``unknown``, which
+    does NOT block. A red that decays into a pass is worse than no gate."""
+    _no_ci_waiting(monkeypatch)
+    _ci_answers(
+        monkeypatch,
+        [[_run("CI", "failure", 11), _run("Release smoke gate", None, 12, status="in_progress")]],
+    )
+
+    state, detail = await orchestrator._ci_status_for_head(Path("/tmp/x"))
+
+    assert state == "red"
+    assert "11" in detail
+
+
+@pytest.mark.asyncio
+async def test_a_skipped_workflow_beside_a_success_is_still_green(monkeypatch):
+    """Guard against a regression THIS fix could introduce. While only one run was read, a
+    ``skipped`` run was mostly invisible; reading them all makes it visible — and 'anything that is
+    not success is red' would turn a workflow whose jobs were all skipped by their own conditions
+    into a false alarm. A skipped run is not evidence of breakage."""
+    _no_ci_waiting(monkeypatch)
+    _ci_answers(
+        monkeypatch,
+        [[_run("CI", "success", 21), _run("Deploy", "skipped", 22)]],
+    )
+
+    state, detail = await orchestrator._ci_status_for_head(Path("/tmp/x"))
+
+    assert state == "green", f"preskočený postup nie je zlyhanie — {detail}"
+
+
+@pytest.mark.asyncio
+async def test_it_waits_for_every_workflow_to_finish_not_just_the_first(monkeypatch):
+    """The second workflow is the one that fails here. If the gate stops waiting as soon as the run it
+    happens to read first is complete, the failure lands after the verdict — which is exactly how a
+    green gate and a red repository coexisted for three days."""
+    _no_ci_waiting(monkeypatch)
+    _ci_answers(
+        monkeypatch,
+        [
+            [_run("CI", "success", 31), _run("Release smoke gate", None, 32, status="queued")],
+            [_run("CI", "success", 31), _run("Release smoke gate", None, 32, status="in_progress")],
+            [_run("CI", "success", 31), _run("Release smoke gate", "failure", 32)],
+        ],
+    )
+
+    state, detail = await orchestrator._ci_status_for_head(Path("/tmp/x"))
+
+    assert state == "red", "rozbehnutý druhý postup sa musí dočkať konca"
+    assert "32" in detail
+
+
+@pytest.mark.asyncio
+async def test_a_run_without_a_workflow_name_still_reports_its_number(monkeypatch):
+    """``workflowName`` is a field we ask for, not one we control. If GitHub ever omits it the gate
+    must still name the run — a verdict nobody can trace back to a build is not a verdict."""
+    _no_ci_waiting(monkeypatch)
+    _ci_answers(monkeypatch, [[{"status": "completed", "conclusion": "failure", "databaseId": 77}]])
+
+    state, detail = await orchestrator._ci_status_for_head(Path("/tmp/x"))
+
+    assert state == "red"
+    assert "77" in detail
+
+
 @pytest.mark.asyncio
 async def test_a_red_ci_floors_a_pass(db_session, monkeypatch):
     """The gap ICCINT-64 is about: nex-productcatalogs ran four days with red CI while the engine passed TWO

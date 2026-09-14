@@ -5232,6 +5232,40 @@ CI_RUN_APPEAR_INTERVAL = 10
 CI_RUN_FINISH_TIMEOUT = 1200
 CI_RUN_FINISH_INTERVAL = 30
 
+#: How many runs to read for ONE commit (ICCINT-129). A commit triggers one run per workflow — nex-inbox
+#: has two, most repos have one to three. The cap is not a judgement about how many matter; it only keeps
+#: the output of a machine we do not control bounded. Reading exactly one was the bug.
+CI_RUNS_PER_COMMIT_LIMIT = 20
+
+#: Conclusions that count as "this run said the code is fine". ``skipped`` belongs here: a workflow whose
+#: jobs were all skipped by their own conditions reported nothing WRONG, and while only one run was read it
+#: was mostly invisible. Reading every run makes it visible — and "anything that is not success is red"
+#: would turn it into a false alarm the moment a repo gains a conditional workflow.
+CI_CONCLUSIONS_OK = frozenset({"success", "skipped", "neutral"})
+
+#: Conclusions that mean the run FAILED. Deliberately not "everything else": ``cancelled`` and ``stale``
+#: say nothing about the code, and a gate that floors a version on somebody pressing Cancel is a gate
+#: people learn to route around — the same reasoning that keeps ``unknown`` non-blocking.
+CI_CONCLUSIONS_RED = frozenset({"failure", "timed_out", "startup_failure", "action_required"})
+
+
+def _name_run(row: dict) -> str:
+    """How a run is named in a verdict a human reads. The workflow name matters as much as the number:
+    on 14.09.2026 the gate reported "CI zelené (beh 34869175048)" about a run of a DIFFERENT workflow,
+    so the one word the Manažér relied on was the one word that was wrong."""
+    run_id = row.get("databaseId")
+    workflow = str(row.get("workflowName") or "").strip()
+    return f"postup {workflow}, beh {run_id}" if workflow else f"beh {run_id}"
+
+
+def _first_failed_run(rows: list[dict]) -> Optional[dict]:
+    """The first COMPLETED run that failed — position in the list carries no meaning, so any of them is
+    the answer. ``None`` when nothing has failed (yet)."""
+    for row in rows:
+        if row.get("status") == "completed" and row.get("conclusion") in CI_CONCLUSIONS_RED:
+            return row
+    return None
+
 
 def _project_has_ci(project_root: Path) -> bool:
     """Whether this project has any workflow at all. Without one there is nothing to wait FOR, and waiting
@@ -5268,8 +5302,14 @@ async def _ci_status_for_head(
     if not _project_has_ci(project_root):
         return "unknown", "projekt nemá nastavené kontroly"
 
-    async def _look() -> tuple[Optional[dict], Optional[str]]:
-        """One question to GitHub → (row, failure_reason). Both None means "asked fine, no run yet"."""
+    async def _look() -> tuple[Optional[list[dict]], Optional[str]]:
+        """One question to GitHub → (rows, failure_reason). ``[]`` means "asked fine, no run yet".
+
+        ICCINT-129: ALL runs for the commit, not one. ``--limit 1`` returned whichever workflow had
+        registered last and the gate judged the commit on that alone — so on a repo with two workflows
+        the verdict was a coin toss. ``--limit`` stays (unbounded output from a machine we do not
+        control is its own hazard), just far above any real per-commit run count.
+        """
         rc, out = await _run_publish_step(
             [
                 "gh",
@@ -5280,9 +5320,9 @@ async def _ci_status_for_head(
                 "--commit",
                 head,
                 "--limit",
-                "1",
+                str(CI_RUNS_PER_COMMIT_LIMIT),
                 "--json",
-                "status,conclusion,databaseId",
+                "status,conclusion,databaseId,workflowName",
             ],
             RELEASE_PUBLISH_STEP_TIMEOUT,
         )
@@ -5292,7 +5332,7 @@ async def _ci_status_for_head(
             rows = json.loads(out)
         except ValueError:
             return None, "odpoveď o behoch CI sa nedá prečítať"
-        return (rows[0] if rows else None), None
+        return (rows if isinstance(rows, list) else []), None
 
     # ICCINT-70, first wait: for the run to EXIST. We just pushed this commit ourselves, so a missing run is
     # not evidence about the code — it is GitHub not having caught up. Asking once (the v4.13.0 behaviour)
@@ -5301,42 +5341,60 @@ async def _ci_status_for_head(
     # measure the logic rather than the clock) an interval-summing loop never reaches its own ceiling — it
     # spins for ever. Mine did, on the first run.
     tries_left = max(1, CI_RUN_APPEAR_TIMEOUT // max(CI_RUN_APPEAR_INTERVAL, 1))
-    row: Optional[dict] = None
+    rows: list[dict] = []
     while True:
-        row, failure = await _look()
+        looked, failure = await _look()
         if failure:
             return "unknown", failure
+        rows = looked or []
         tries_left -= 1
-        if row is not None or tries_left <= 0:
+        if rows or tries_left <= 0:
             break
         await asyncio.sleep(CI_RUN_APPEAR_INTERVAL)
-    if row is None:
+    if not rows:
         return "unknown", f"pre commit {head[:7]} sa beh CI neobjavil ani po {CI_RUN_APPEAR_TIMEOUT} s"
 
-    # Second wait: for it to FINISH. A queued or running job says nothing about whether the code is sound.
+    # Second wait: for them to FINISH. A queued or running job says nothing about whether the code is
+    # sound — but a run that has ALREADY failed is the answer, and waiting for its siblings could only
+    # let a red decay into the ``unknown`` that does not block.
     tries_left = max(1, CI_RUN_FINISH_TIMEOUT // max(CI_RUN_FINISH_INTERVAL, 1))
     announced = False
-    while row.get("status") != "completed" and tries_left > 0:
+    while True:
+        red = _first_failed_run(rows)
+        if red is not None:
+            return "red", f"CI zlyhalo ({_name_run(red)}, {red.get('conclusion')})"
+        pending = [r for r in rows if r.get("status") != "completed"]
+        if not pending or tries_left <= 0:
+            break
         if on_wait is not None and not announced:
-            await on_wait(f"beh {row.get('databaseId')}")
+            await on_wait(", ".join(_name_run(r) for r in pending))
             announced = True
         await asyncio.sleep(CI_RUN_FINISH_INTERVAL)
         tries_left -= 1
-        row, failure = await _look()
+        looked, failure = await _look()
         if failure:
             return "unknown", failure
-        if row is None:  # vanished mid-flight (re-run, deleted) — nothing left to judge
+        if not looked:  # vanished mid-flight (re-run, deleted) — nothing left to judge
             return "unknown", f"beh CI pre commit {head[:7]} medzičasom zmizol"
+        rows = looked
 
-    run_id = row.get("databaseId")
-    if row.get("status") != "completed":
+    pending = [r for r in rows if r.get("status") != "completed"]
+    if pending:
         return (
             "unknown",
-            f"CI po {CI_RUN_FINISH_TIMEOUT // 60} min ešte bežalo (beh {run_id}) — verzia prešla bez jeho výsledku",
+            f"CI po {CI_RUN_FINISH_TIMEOUT // 60} min ešte bežalo ({', '.join(_name_run(r) for r in pending)})"
+            " — verzia prešla bez jeho výsledku",
         )
-    if row.get("conclusion") == "success":
-        return "green", f"CI zelené (beh {run_id})"
-    return "red", f"CI zlyhalo (beh {run_id}, {row.get('conclusion')})"
+    passed = [r for r in rows if r.get("conclusion") in CI_CONCLUSIONS_OK]
+    if not passed:
+        # Every run ended without saying anything about the code — cancelled, stale. Not evidence of
+        # health, and not evidence of breakage either. ``unknown`` never blocks, but it must SAY so.
+        return (
+            "unknown",
+            f"žiadny beh CI pre commit {head[:7]} nedal výsledok "
+            f"({', '.join(f'{_name_run(r)}: {r.get("conclusion")}' for r in rows)})",
+        )
+    return "green", f"CI zelené ({', '.join(_name_run(r) for r in passed)})"
 
 
 # ICCINT-64: the v1 ``_run_release_publish`` (push → resolve the CI run → ``gh run watch`` → block on red)
