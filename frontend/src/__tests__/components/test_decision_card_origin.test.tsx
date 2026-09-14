@@ -166,3 +166,26 @@ describe("Rozhodovacia karta — cena voľby (ICCINT-123)", () => {
     expect(prve!.textContent).toMatch(/odporúčané/i);
   });
 });
+
+// ── ICCINT-124: riadok so smerom nad kartami ─────────────────────────────────
+
+describe("Nad kartami je vidieť SMER (ICCINT-124)", () => {
+  beforeEach(() => vi.mocked(postPipelineActionApi).mockReset());
+
+  it("⚠️ ukáže, koľko sa uzavrelo a ako klesali blokujúce", () => {
+    const b = boardWith({});
+    (b as unknown as { recent_messages: unknown[] }).recent_messages.push(
+      { id: "v1", seq: 1, kind: "verdict", payload: { findings: [{ text: "a", blocking: true }, { text: "b", blocking: true }] } },
+      { id: "a1", seq: 2, kind: "answer", payload: { consultation_decision: { key: "x" } } },
+      { id: "v2", seq: 3, kind: "verdict", payload: { findings: [{ text: "c", blocking: false }] } },
+    );
+    render(<DecisionCardsBar board={b} versionId="v1" onBoard={vi.fn()} />);
+    expect(screen.getByText(/Uzavretých 1/)).toBeInTheDocument();
+    expect(screen.getByText(/blokujúcich 2 → 0/)).toBeInTheDocument();
+  });
+
+  it("keď ešte niet čo ukázať, riadok tam nie je", () => {
+    render(<DecisionCardsBar board={boardWith({})} versionId="v1" onBoard={vi.fn()} />);
+    expect(screen.queryByText(/Uzavretých/)).not.toBeInTheDocument();
+  });
+});

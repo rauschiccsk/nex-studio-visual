@@ -19,6 +19,7 @@ import { useMemo, useState } from "react";
 import { CircleAlert, Lightbulb } from "lucide-react";
 
 import { postPipelineActionApi, type PipelineBoard, type PipelineMessage } from "@/services/api/pipeline";
+import { smerDoRiadku, smerKonzultacie } from "@/lib/smerKonzultacie";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
 
@@ -159,6 +160,11 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
   if (!consultation) return null; // decide offered but the block message isn't in the recent tail — nothing to render
   const total = consultation.decisions.length;
   const idx = consultation.decisions.findIndex((d) => !(d.key in answered));
+  // ICCINT-124 — smer sa počíta zo záznamu, nie z počítadla: uzavreté rozhodnutia a to, ako v
+  // jednotlivých kolách klesali (alebo stúpali) blokujúce nálezy.
+  const smerRiadok = smerDoRiadku(
+    smerKonzultacie(board?.recent_messages ?? [], consultation.decisions.length - Object.keys(answered).length),
+  );
   const current = idx >= 0 ? consultation.decisions[idx] : null;
   if (!current) return null; // all decided → the apply is dispatching; the card disappears
 
@@ -198,6 +204,16 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
       <div className="max-w-3xl px-4 py-3">
         {/* ICCINT-72: koľké kolo, a koľko ich ešte môže prísť. Bez toho Manažér nevie, či je na začiatku,
             alebo pred posledným kolom — a či sa vôbec oplatí čakať ďalšie. */}
+        {/* ICCINT-124: SMER, nie stav. „rozhodni 1 zo 4 (kolo 4 z 5)“ hovorí, koľko zostáva;
+            nehovorí, či je to lepšie než pred kolom. Pri NEX Inbox v1.5.0 išli blokujúce 5 → 1 → 0
+            → 1 → 0 a dvanásť nálezov sa uzavrelo — ten obraz sa musel skladať ručne z databázy.
+            ⚠️ Riadok NEHODNOTÍ, vypisuje: rad 0 → 2 → 5 sa nedá prečítať ako pokrok. */}
+        {smerRiadok && (
+          <div className="px-4 pb-1 pt-2 text-[11px] tabular-nums text-[var(--color-text-secondary)]">
+            {smerRiadok}
+          </div>
+        )}
+
         {typeof consultation.round === "number" && typeof consultation.round_max === "number" && (
           <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">
             Kolo konzultácie {consultation.round} z {consultation.round_max}
