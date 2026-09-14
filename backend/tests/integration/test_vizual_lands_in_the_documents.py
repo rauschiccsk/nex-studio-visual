@@ -253,7 +253,8 @@ async def test_the_conflict_takes_the_same_road_as_an_auditor_finding(db_session
 
     async def _spy(_db, _state, *, source, verdict=None, **_kw):
         seen["source"] = source
-        seen["findings"] = list(verdict.findings) if verdict else []
+        # ICCINT-122: nález je odteraz údaj (text + blocking) — porovnáva sa jeho text.
+        seen["findings"] = [str(f) for f in verdict.findings] if verdict else []
         return _state
 
     monkeypatch.setattr(orchestrator, "_settle_for_consultation", _spy)

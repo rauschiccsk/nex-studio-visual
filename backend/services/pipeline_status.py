@@ -35,7 +35,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from backend.schemas.task import TaskPriority, TaskType
 
@@ -277,6 +277,46 @@ FIX_CRITIQUE_JSON_SCHEMA = FixCritique.model_json_schema()
 # "Dedo on the screen"). See docs/architecture/interactive-consultation-design.md.
 
 
+#: ICCINT-122 — odkiaľ rozhodnutie prišlo. Tri hodnoty, každá znamená pre Manažéra niečo iné, a
+#: práve ten rozdiel dnes chýba: vidí len, že otázok pribudlo, a prirodzene si to vysvetlí ako rozpad.
+#:
+#:   ``objav``     niečo bolo pokazené odjakživa a teraz sa našlo → ZISK, nerozbilo sa nič
+#:   ``dosledok``  rozhodnutie A rozbilo už hotové B → oprávnene: niečo sme nedomysleli
+#:   ``odklad``    vedome odložené, teraz dozrelo → plán, ktorý beží podľa dohody
+#:
+#: Štvrtá hodnota by tie tri vety zneplatnila, preto sa neprijme.
+CONSULT_ORIGINS = ("objav", "dosledok", "odklad")
+
+#: Marker, ktorým sa neblokujúci nález poznával, kým to nebol údaj. Používa sa UŽ LEN pri čítaní
+#: starých záznamov: v databáze ležia stovky nálezov ako holé vety a toto je jediné, čo o ich
+#: závažnosti vieme. Nové nálezy ho nesmú potrebovať — z textu sa nedá spočítať nič a pri
+#: preformulovaní alebo preklade zmizne.
+_LEGACY_NON_BLOCKING_MARKER = "neblokujúce"
+
+
+class Finding(BaseModel):
+    """Jeden nález Audítora — a či BLOKUJE.
+
+    ICCINT-122. Bez pravdivostnej hodnoty sa nedá vykresliť priebeh, ktorý Manažér potrebuje vidieť:
+    blokujúcich 5 → 1 → 0 → 1 → 0 znamená „ide to k lepšiemu", kým „4 otvorené otázky" znamená
+    „rozpadá sa to" — a pritom je to ten istý stav. Vypĺňa ten, kto to vie (Agent pri stavbe kariet,
+    Audítor pri verdikte); zo strany kokpitu sa to odvodiť nedá.
+    """
+
+    text: str
+    blocking: bool = True
+
+    def __str__(self) -> str:  # výpisy a f-reťazce musia ďalej fungovať
+        return self.text
+
+
+def _finding_from_any(value: Any) -> Any:
+    """Prijmi nález ako vetu (staré záznamy) aj ako údaj (nové). Viď :data:`_LEGACY_NON_BLOCKING_MARKER`."""
+    if isinstance(value, str):
+        return {"text": value, "blocking": _LEGACY_NON_BLOCKING_MARKER not in value.casefold()}
+    return value
+
+
 class ConsultOption(BaseModel):
     """One choice for a decision. ``recommended`` marks the AI Agent's single recommended pick."""
 
@@ -297,6 +337,12 @@ class ConsultDecision(BaseModel):
     options: list[ConsultOption] = Field(min_length=2)
     rationale: str = ""
     allow_free_text: bool = False
+    #: ICCINT-122 — odkiaľ táto otázka prišla (:data:`CONSULT_ORIGINS`). ``None`` len pri starých
+    #: záznamoch; nové karty ho musia niesť, inak sa veta na karte nedá napísať.
+    origin: Optional[Literal["objav", "dosledok", "odklad"]] = None
+    #: Pri ``origin="dosledok"``: kľúč rozhodnutia, ktorého je to dôsledok. Z toho ICCINT-124 počíta,
+    #: koľko uzavretých rozhodnutí tá voľba znovu otvára.
+    origin_of: str = ""
     #: v4.0.11: the jargon (paths / codes / repro / line numbers) that backs ``explanation`` — surfaced
     #: collapsed behind the card's "Technický detail" disclosure so ``explanation`` stays plain for a
     #: non-expert. Empty ⇒ the card shows no disclosure.
@@ -399,7 +445,33 @@ class PipelineStatusBlock(BaseModel):
     verdict: Optional[bool] = None
     #: Structured findings for the Manažér's review view (alongside ``summary``) — the holes /
     #: ambiguities / contradictions (upfront) or behavioural / security / contract failures (end check).
-    findings: list[str] = Field(default_factory=list)
+    #:
+    #: ICCINT-122: každý nález nesie ``blocking``. Prijíma sa aj holá veta — v databáze ležia stovky
+    #: starých záznamov v tom tvare a tie sa musia dať načítať; pri nich sa závažnosť odvodí z markera
+    #: v texte, lebo nič iné o nich nevieme. Pre NOVÉ nálezy to nestačí a nemá stačiť.
+    findings: list[Finding] = Field(default_factory=list)
+
+    @field_validator("findings", mode="before")
+    @classmethod
+    def _accept_plain_sentences(cls, value: Any) -> Any:
+        if isinstance(value, list):
+            return [_finding_from_any(v) for v in value]
+        return value
+
+    def findings_as_data(self) -> list[dict[str, Any]]:
+        """Nálezy v tvare, ktorý znesie zápis do databázy (JSONB).
+
+        ICCINT-122: odkedy je nález údaj a nie veta, nesmie sa do JSONB posielať model — SQLAlchemy
+        ho neserializuje a zápis padne. Toto je JEDINÉ miesto, kde sa to prevádza, aby sa to
+        nemuselo pamätať na každom volajúcom.
+        """
+        return [f.model_dump() for f in self.findings]
+
+    @property
+    def blocking_count(self) -> int:
+        """Koľko nálezov blokuje. Toto je to jediné číslo, z ktorého sa dá poskladať smer 5 → 1 → 0."""
+        return sum(1 for f in self.findings if f.blocking)
+
     #: The Auditor's proposed fix scope TEXT when the verdict is FAIL — the targeted scope the AI Agent
     #: re-runs in the bounded fix↔re-verify loop (CR-V2-014). Never an edit by the Auditor itself
     #: (independence); ``None`` on a PASS verdict.

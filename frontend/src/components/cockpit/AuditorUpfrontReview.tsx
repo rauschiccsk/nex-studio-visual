@@ -15,11 +15,30 @@ import remarkGfm from "remark-gfm";
 import type { PipelineMessage } from "../../services/api/pipeline";
 import { WARNING_CHROME } from "../common/WarningActionBar";
 
+/** ICCINT-122: nález nesie aj to, či BLOKUJE — z toho sa skladá smer „blokujúcich 5 → 1 → 0". */
+export interface NalezView {
+  text: string;
+  blocking: boolean;
+}
+
 interface UpfrontVerdict {
-  findings: string[];
+  findings: NalezView[];
   proposed_fix?: string;
   /** Insertion order of the verdict message — so a later fail-open note can supersede a stale verdict. */
   seq: number;
+}
+
+/**
+ * Nález zo záznamu — nech tam leží v akomkoľvek tvare (ICCINT-122).
+ *
+ * Od ICCINT-122 je nález ÚDAJ (`{text, blocking}`), aby sa dalo spočítať, koľko z nich blokuje —
+ * z vety sa to spočítať nedá a pri preformulovaní marker zmizne. V databáze však ležia stovky
+ * starších záznamov ako holé vety a tie sa musia zobraziť ďalej, nie ako `[object Object]`.
+ */
+function citajNalez(f: unknown): NalezView {
+  if (typeof f === "string") return { text: f, blocking: !f.toLowerCase().includes("neblokujúce") };
+  const o = (f ?? {}) as Record<string, unknown>;
+  return { text: String(o.text ?? ""), blocking: o.blocking !== false };
 }
 
 // The latest upfront-review Auditor verdict (newest first). ``upfront_review`` marks the Návrh-phase
@@ -31,7 +50,7 @@ function latestUpfrontVerdict(messages: PipelineMessage[]): UpfrontVerdict | nul
     const p = (m.payload as Record<string, unknown> | null) ?? {};
     if (!p.upfront_review) continue;
     return {
-      findings: Array.isArray(p.findings) ? (p.findings as string[]) : [],
+      findings: Array.isArray(p.findings) ? p.findings.map(citajNalez) : [],
       proposed_fix: typeof p.proposed_fix === "string" ? p.proposed_fix : undefined,
       seq: m.seq,
     };
@@ -122,7 +141,12 @@ export function AuditorUpfrontReview({ messages }: { messages: PipelineMessage[]
       {hasFindings && (
         <ul className="mt-2 max-h-48 list-disc space-y-1 overflow-y-auto pl-5 text-xs text-[var(--color-text-secondary)]">
           {verdict.findings.map((f, i) => (
-            <li key={i}>{f}</li>
+            <li key={i}>
+              {f.text}
+              {!f.blocking && (
+                <span className="ml-1 text-[var(--color-text-muted)]">(neblokujúce)</span>
+              )}
+            </li>
           ))}
         </ul>
       )}

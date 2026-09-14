@@ -167,7 +167,9 @@ async def test_dispute_surfaces_both_findings_and_agent_response(db_session, mon
     assert "\n- [BLOKUJÚCE] Rozpoznanie platby" in note.content
     assert "\n- [BLOKUJÚCE] Token z NEX Managera" in note.content
     # …and structured in the payload for the UI.
-    assert note.payload["auditor_findings"] == findings
+    # ICCINT-122: v zázname leží nález ako údaj (text + blocking), nie ako holá veta — z toho sa
+    # dá spočítať smer „blokujúcich 5 → 1 → 0", čo z vety nešlo.
+    assert [f["text"] for f in note.payload["auditor_findings"]] == findings
     assert "zastaraná" in note.payload["agent_response"]
     # The state prompt stays short (the detail lives in the message content). It no longer calls this a
     # "Spor" either — that was the same assertion of a motive, one line shorter.

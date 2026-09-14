@@ -1811,7 +1811,7 @@ def _consultation_directive(
     The AI Agent and the Auditor run in SEPARATE ``claude`` sessions, so the Auditor's findings are passed
     in VERBATIM here (the AI Agent cannot read the Auditor's thread)."""
     del db, version_id  # signature parity with the other directive builders; findings are passed in directly
-    findings_block = "\n".join(f"  - {f}" for f in findings) or "  (žiadne explicitné body)"
+    findings_block = "\n".join(f"  - {_finding_text(f)}" for f in findings) or "  (žiadne explicitné body)"
     fix_block = (
         f"\nNavrhovaný rozsah opravy (od Auditora, len ako kontext, NEvykonávaj ho): {proposed_fix}"
         if proposed_fix
@@ -1871,7 +1871,9 @@ async def _consult_fallback(
         "phase": state.current_stage
     }
     if findings:
-        base_payload = {**base_payload, "auditor_findings": list(findings)}
+        # ICCINT-122: nález je odteraz údaj, nie veta — do JSONB musí ísť ako údaj, inak zápis padne
+        # na neserializovateľnom modeli. Prechod robíme TU, na hranici zápisu, nie u každého volajúceho.
+        base_payload = {**base_payload, "auditor_findings": [_finding_as_data(f) for f in findings]}
     if agent_response:
         base_payload = {**base_payload, "agent_response": agent_response}
     # ICCINT-25: mark the fallbacks worth ASKING AGAIN for. Only the ones where the turn did not come back
@@ -1989,7 +1991,7 @@ async def _settle_for_consultation(
         # MARKDOWN (rendered by ConversationThread's SpecMarkdown): a proper ``- `` list with a blank line
         # before it, so the findings render as a readable bulleted list — NOT one collapsed wall of text
         # (Director 2026-07-17: the first cut used ``•`` + single newlines, which markdown glued into one blob).
-        findings_md = "\n".join(f"- {f}" for f in findings)
+        findings_md = "\n".join(f"- {_finding_text(f)}" for f in findings)
         # Fix B (Director 2026-07-17): the AI Agent answered with a normal block instead of decision cards.
         # Surface BOTH sides so the Manažér decides with full context (the stale-audit → "nevidím konkrétne
         # riešenie" dead-end). ICCINT-26 rewrote the wording: it used to assert that the agent "rozporuje"
@@ -2348,7 +2350,9 @@ def _fix_critique_directive(db: Session, version_id: uuid.UUID, *, verdict_msg: 
     payload = verdict_msg.payload or {}
     proposed_fix = str(payload.get("proposed_fix") or "").strip() or "(Auditor nedodal explicitný proposed_fix.)"
     findings = payload.get("findings") or []
-    findings_block = "\n".join(f"   - {f}" for f in findings) if findings else "   (bez vymenovaných nálezov)"
+    findings_block = (
+        "\n".join(f"   - {_finding_text(f)}" for f in findings) if findings else "   (bez vymenovaných nálezov)"
+    )
     return (
         "PREVERENIE NAVRHNUTEJ OPRAVY (nezávislý kritik — REFUTUJ LIEK, nie build).\n"
         "1. Auditor (nálezca) našiel vo Verifikácii zlyhanie a NAVRHOL opravu. TVOJA JEDINÁ úloha je "
@@ -3306,7 +3310,7 @@ def consultation_retry_pending(db: Session, version_id: uuid.UUID) -> Optional[t
     findings = (payload or {}).get("auditor_findings") or []
     if not isinstance(source, str) or not source:
         return None
-    return source, [str(f) for f in findings]
+    return source, [_finding_text(f) for f in findings]
 
 
 def _consultation_answers(db: Session, version_id: uuid.UUID, after_seq: int) -> dict[str, dict[str, Any]]:
@@ -3807,7 +3811,7 @@ async def invoke_agent(
             "topic": getattr(parsed, "topic", None),
             "topic_done": getattr(parsed, "topic_done", None),
             "coverage_complete": getattr(parsed, "coverage_complete", None),
-            "findings": parsed.findings,
+            "findings": parsed.findings_as_data(),
             "gap_found": getattr(parsed, "gap_found", None),
             "proposed_fix": parsed.proposed_fix,
             # CR-V2-041: the consultation decision queue (kind=consultation) — the FE DecisionCardStack reads
@@ -5274,6 +5278,32 @@ def _project_has_ci(project_root: Path) -> bool:
     if not workflows.is_dir():
         return False
     return any(workflows.glob("*.yml")) or any(workflows.glob("*.yaml"))
+
+
+def _finding_text(f: Any) -> str:
+    """Veta z nálezu, nech leží v zázname v akomkoľvek tvare (ICCINT-122).
+
+    Doplnok k :func:`_finding_as_data` pre opačný smer. Bez neho by sa Manažérovi po opakovaní
+    konzultácie zobrazilo ``{'text': 'Prázdna sada…', 'blocking': True}`` namiesto vety — surový údaj
+    na mieste, kde má stáť reč.
+    """
+    if isinstance(f, dict):
+        return str(f.get("text", ""))
+    return str(f)
+
+
+def _finding_as_data(f: Any) -> dict[str, Any]:
+    """Nález v tvare, ktorý znesie JSONB — nech príde ako model, ako slovník alebo ako stará veta.
+
+    ICCINT-122. Prijíma všetky tri tvary zámerne: v databáze ležia staré záznamy ako holé vety, nové
+    prichádzajú ako modely, a medzitým prechádzajú cez vrstvy, kde sú už slovníky. Jedno miesto, kde
+    sa to zjednotí, je lacnejšie než pamätať si to na každom volajúcom.
+    """
+    if isinstance(f, str):
+        return {"text": f, "blocking": "neblokujúce" not in f.casefold()}
+    if isinstance(f, dict):
+        return {"text": str(f.get("text", "")), "blocking": bool(f.get("blocking", True))}
+    return {"text": str(f), "blocking": bool(getattr(f, "blocking", True))}
 
 
 async def _ci_status_for_head(
@@ -8079,7 +8109,9 @@ async def _writeback_vizual_to_docs(
     # The agent was told to answer with ONE word when it found a contradiction; anything else means it folded.
     if _VIZUAL_CONFLICT_MARKER not in (result.summary or "").upper():
         return []
-    named = [one for one in (result.findings or []) if str(one).strip()]
+    # ICCINT-122: ``findings`` je odteraz údaj, ale rozpor z Vizuálu ide ďalej ako VETA — je to
+    # text do rozhodovacej karty, nie nález Audítora so závažnosťou. Prechod je tu, jednorazovo.
+    named = [str(one) for one in (result.findings or []) if str(one).strip()]
     if not named:
         # ICCINT-79: the marker said "contradiction", the list named none. This used to become
         # ``["(rozpor bez popisu)"]`` — an invented conflict, so the approval always took the conflict branch,
@@ -9388,12 +9420,17 @@ async def _run_verifikacia_round(
             "verdict": verdict_str,
             "findings": (
                 [
-                    *review.findings,
-                    "ENGINE OVERRIDE (CR-V2-050): a red release smoke/acceptance floored the verdict to FAIL "
-                    "regardless of the Auditor's PASS.",
+                    *review.findings_as_data(),
+                    {
+                        "text": (
+                            "ENGINE OVERRIDE (CR-V2-050): a red release smoke/acceptance floored the verdict "
+                            "to FAIL regardless of the Auditor's PASS."
+                        ),
+                        "blocking": True,
+                    },
                 ]
                 if (llm_pass and runtime_floor_red)
-                else review.findings
+                else review.findings_as_data()
             ),
             "proposed_fix": review.proposed_fix,
             "phase": "verifikacia",
@@ -9979,7 +10016,7 @@ def _latest_verifikacia_fix_scope(db: Session, version_id: uuid.UUID) -> Optiona
     if proposed_fix:
         parts.append(str(proposed_fix).strip())
     if findings:
-        parts.append("\n".join(f"- {f}" for f in findings))
+        parts.append("\n".join(f"- {_finding_text(f)}" for f in findings))
     if not parts:
         return None
     heading = (

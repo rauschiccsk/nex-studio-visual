@@ -217,7 +217,9 @@ def test_auditor_fail_verdict_carries_findings_and_fix_scope():
     )
     assert isinstance(res, PipelineStatusBlock)
     assert res.verdict is False
-    assert res.findings == ["DPH rounding accumulates per line, not on the cumulative total"]
+    # ICCINT-122: nález je odteraz ÚDAJ (text + blocking), nie holá veta.
+    assert [f.text for f in res.findings] == ["DPH rounding accumulates per line, not on the cumulative total"]
+    assert res.findings[0].blocking is True, "bez markera v texte je nález blokujúci"
     assert res.proposed_fix.startswith("Round on the cumulative total")
 
 
@@ -240,7 +242,7 @@ def test_auditor_upfront_review_findings_after_navrh():
         )
     )
     assert isinstance(res, PipelineStatusBlock)
-    assert res.findings == ["password reset flow undefined", "no rate-limit on login"]
+    assert [f.text for f in res.findings] == ["password reset flow undefined", "no rate-limit on login"]
 
 
 # ── task_plan plan parse↔write parity (CR-NS-020 / CR-NS-022 §1; v2: folds into Návrh) ──

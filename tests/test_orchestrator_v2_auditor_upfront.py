@@ -167,7 +167,7 @@ def _stub_turns(monkeypatch, *, design_block, audit_block, consult_block=None):
                     content=audit_block.summary,
                     payload={
                         "verdict": "PASS" if audit_block.verdict else "FAIL",
-                        "findings": audit_block.findings,
+                        "findings": audit_block.findings_as_data(),  # ICCINT-122 — do JSONB ide údaj
                         "proposed_fix": audit_block.proposed_fix,
                         "phase": "navrh",
                         **(_kw.get("extra_payload") or {}),

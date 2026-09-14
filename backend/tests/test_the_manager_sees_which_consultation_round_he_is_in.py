@@ -262,3 +262,88 @@ def test_the_first_two_rounds_stay_short(db_session) -> None:
     assert "kolo opráv" not in (karta.decisions[0].explanation or ""), (
         "cena kola sa pripomína už v prvom kole — tam ešte niet čo zvažovať"
     )
+
+
+# ── ICCINT-122: pôvod rozhodnutia a blokujúce ako ÚDAJ ───────────────────────
+#
+# Základ pre ICCINT-123 (karta povie, prečo otázka vznikla) a ICCINT-124 (nad kartami SMER).
+# Bez týchto dvoch údajov sa nedá zobraziť ani jedno z nich.
+#
+# Skutočný priebeh NEX Inboxu v1.5.0, ktorý sa dnes nedá vykresliť, lebo tie údaje nikde nie sú:
+#
+#   kolo 1   blokujúce 5   menšie 1
+#   kolo 2   blokujúce 1   menšie 4
+#   kolo 3   blokujúce 0   menšie 1   → prechádza
+#   kolo 4   blokujúce 1   menšie 1   ← vyzeralo ako rozpad, bol to čistý objav
+#   kolo 5   blokujúce 0   menšie 1   → prechádza
+#
+# Blokujúcich 5 → 1 → 0 → 1 → 0. Tento obraz musel Dedo poskladať ručne z databázy.
+
+
+def test_a_decision_carries_where_it_came_from():
+    """Manažér nevie rozlíšiť, či je otázka dôsledkom jeho vlastného rozhodnutia, alebo nálezom, čo
+    tam ležal od začiatku. Vidí len, že otázok pribudlo — a to si prirodzene vysvetlí ako rozpad."""
+    from backend.services.pipeline_status import ConsultDecision
+
+    d = ConsultDecision(
+        key="k",
+        question="Ako ďalej?",
+        options=[{"id": "a", "label": "A"}, {"id": "b", "label": "B"}],
+        origin="dosledok",
+        origin_of="rozhodnutie_o_rozsahu",
+    )
+
+    assert d.origin == "dosledok"
+    assert d.origin_of == "rozhodnutie_o_rozsahu", (
+        "pri dôsledku treba vedieť, ČOHO je to dôsledok — z toho ICCINT-124 počíta, koľko "
+        "uzavretých rozhodnutí tá voľba znovu otvára"
+    )
+
+
+def test_an_unknown_origin_is_refused_rather_than_stored():
+    """Tri hodnoty vyšli z rozboru skutočného priebehu a každá znamená pre Manažéra niečo iné:
+    objav = zisk (nerozbilo sa nič, len to prestalo byť neviditeľné), dosledok = niečo sme
+    nedomysleli, odklad = plán, ktorý beží podľa dohody. Štvrtá hodnota by tie tri vety zneplatnila."""
+    import pytest
+    from pydantic import ValidationError
+
+    from backend.services.pipeline_status import ConsultDecision
+
+    with pytest.raises(ValidationError):
+        ConsultDecision(
+            key="k",
+            question="Ako ďalej?",
+            options=[{"id": "a", "label": "A"}, {"id": "b", "label": "B"}],
+            origin="lebo",
+        )
+
+
+def test_a_finding_says_whether_it_blocks_without_relying_on_a_word_in_the_sentence():
+    """Dnes sa neblokujúci nález pozná tak, že si autor do vety napíše „(neblokujúce)". Z toho sa
+    nedá spočítať nič a pri preformulovaní to zmizne."""
+    from backend.services.pipeline_status import Finding
+
+    f = Finding(text="Export nevracia DIČ", blocking=True)
+    assert f.blocking is True
+    assert str(f) == "Export nevracia DIČ", "nález sa musí dať vypísať ako veta, inak sa rozbijú výpisy"
+
+
+def test_a_legacy_string_finding_still_loads_and_reads_its_own_marker():
+    """V databáze ležia stovky starých nálezov ako holé vety. Musia sa dať načítať — a to jediné,
+    čo o ich závažnosti vieme, je práve ten marker v texte. Pre NOVÉ nálezy to nestačí; pre staré
+    je to jediné, čo existuje."""
+    from backend.services.pipeline_status import PipelineStatusBlock
+
+    v = PipelineStatusBlock(
+        stage="verifikacia",
+        kind="verdict",
+        summary="Dve veci.",
+        progress=100,
+        awaiting="none",
+        findings=["Export nevracia DIČ", "Preklep v hlavičke (neblokujúce)"],
+    )
+
+    assert [f.text for f in v.findings] == ["Export nevracia DIČ", "Preklep v hlavičke (neblokujúce)"]
+    assert v.findings[0].blocking is True
+    assert v.findings[1].blocking is False, "starý marker v texte je jediné, čo o starom náleze vieme"
+    assert v.blocking_count == 1

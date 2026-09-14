@@ -496,7 +496,7 @@ async def test_credential_leak_is_flagged_as_fail(db_session, monkeypatch):
     assert state.current_stage != "done", "a §4 credential leak must not reach Hotovo"
     verdicts = [m for m in _msgs(db_session, version.id) if m.kind == "verdict"]
     assert verdicts[-1].payload["verdict"] == "FAIL"
-    assert any("§4" in f for f in verdicts[-1].payload["findings"])
+    assert any("§4" in f["text"] for f in verdicts[-1].payload["findings"])
     assert orchestrator._verifikacia_passed(db_session, version.id) is False
 
 
@@ -685,7 +685,7 @@ async def test_red_acceptance_floors_auditor_pass_to_fail(db_session, monkeypatc
     verdicts = [m for m in _msgs(db_session, version.id) if m.kind == "verdict"]
     assert verdicts[-1].payload["verdict"] == "FAIL"
     assert verdicts[-1].payload.get("engine_override") == "runtime_floor_red"
-    assert any("ENGINE OVERRIDE" in f for f in verdicts[-1].payload["findings"])
+    assert any("ENGINE OVERRIDE" in f["text"] for f in verdicts[-1].payload["findings"])
     # did NOT reach Hotovo — looped the targeted fix back to Programovanie (paused for the Manažér on new_version)
     assert state.current_stage == "programovanie" and state.iteration == 1
     assert orchestrator._verifikacia_passed(db_session, version.id) is False
