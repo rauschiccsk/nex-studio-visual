@@ -32,7 +32,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 from urllib.parse import urlsplit, urlunsplit
 
 import yaml
@@ -1384,6 +1384,81 @@ def _navrh_design_doc_rel(version_number: str) -> str:
     return f"{_version_spec_rel(version_number)}/design.md"
 
 
+class IccStandard(NamedTuple):
+    """Jeden povinný celoICC štandard — pomenovaný tak, aby sa dal PREČÍTAŤ pred stavbou (ICCINT-125).
+
+    Dovtedy žila karta Aktualizácie iba ako sonda v bráne vydania. Požiadavka, ktorú nemožno prečítať
+    skôr, než zlyhá, sa do zadania nedostane — nie zo zlej vôle, ale preto, že ju niet odkiaľ vziať.
+    """
+
+    key: str
+    #: Ako sa štandard volá v reči Manažéra.
+    name: str
+    #: Veta, ktorá sa doplní do rozsahu verzie, keď projekt ten štandard ešte nemá.
+    scope_sentence: str
+    #: Čo chýba, alebo ``None``, keď je štandard splnený. Dostane koreň projektu.
+    check: "Callable[[Path], Optional[str]]"
+
+
+def _check_aktualizacie_standard(proj_root: Path) -> Optional[str]:
+    """Karta *Aktualizácie* — len pre plnú web appku. Čistá služba bez obrazoviek nemá kam ju dať a
+    vymáhať ju od nej by bola tá istá chyba naopak: požiadavka, ktorú nemožno splniť."""
+    if not (Path(proj_root) / "frontend" / "src").is_dir():
+        return None
+    return _check_aktualizacie_frontend(Path(proj_root))
+
+
+#: Povinné celoICC štandardy, ktoré MUSIA byť v rozsahu verzie od Prípravy — nie objavené pri vydaní.
+#:
+#: ICCINT-125. Brána vydania zostáva ako POSLEDNÁ POISTKA a nezoslabuje sa: sonda funguje správne a
+#: 14.09.2026 chytila skutočnú medzeru. Chyba bola, že chytila až ona — vo fáze, kde sa už nestavia,
+#: takže agent musel dostavovať obrazovku mimo schváleného Vizuálu a Audítor to (správne) označil za
+#: nález. Oba výroky boli pravdivé naraz, lebo požiadavka vstúpila do stavby cez padnutú bránu.
+ICC_STANDARDS: tuple[IccStandard, ...] = (
+    IccStandard(
+        key="aktualizacie",
+        name="Aktualizácie (zoznam noviniek)",
+        scope_sentence=(
+            "Karta „Aktualizácie“ — celoICC štandard: každá appka má obrazovku so zoznamom noviniek "
+            "(stránka + cesta /updates + položka v menu) a chrbticu, ktorá vydáva GET "
+            "/api/v1/release-notes s práve vydávanou verziou. Tento projekt ju ešte nemá, takže je to "
+            "RIADNA POLOŽKA tejto verzie: patrí do Špecifikácie, do Návrhu aj do Vizuálu ako každá iná "
+            "obrazovka. Brána vydania ju na konci overí — ale to je posledná poistka, nie zadanie."
+        ),
+        check=_check_aktualizacie_standard,
+    ),
+)
+
+
+def missing_icc_standards(proj_root: Path) -> list[IccStandard]:
+    """Ktoré povinné štandardy projekt ešte nemá. Prázdny zoznam = netreba nič dopĺňať.
+
+    Best-effort per štandard: kontrola, ktorá spadne, sa berie ako „neviem“ a štandard sa NEPRIDÁ —
+    vymyslená položka v rozsahu verzie by bola horšia než chýbajúca, lebo by poslala agenta stavať
+    niečo, čo tam už môže byť.
+    """
+    chybajuce = []
+    for standard in ICC_STANDARDS:
+        try:
+            if standard.check(Path(proj_root)) is not None:
+                chybajuce.append(standard)
+        except OSError:
+            logger.warning("ICC standard check failed for %s at %s", standard.key, proj_root)
+    return chybajuce
+
+
+def _icc_standards_scope_block(project_slug: str) -> str:
+    """Odsek do zadania Prípravy, keď projektu chýba povinný štandard. Prázdny reťazec, keď netreba."""
+    chybajuce = missing_icc_standards(claude_agent.PROJECTS_ROOT / project_slug)
+    if not chybajuce:
+        return ""
+    vety = "\n".join(f"  - {s.scope_sentence}" for s in chybajuce)
+    return (
+        "\n\nPOVINNÉ CELOICC ŠTANDARDY, KTORÉ TOMUTO PROJEKTU CHÝBAJÚ — zahrň ich do rozsahu tejto "
+        "verzie a napíš ich do Špecifikácie ako riadne položky (nie ako poznámku):\n" + vety + "\n"
+    )
+
+
 def _priprava_directive(db: Session, version_id: uuid.UUID, *, flow_type: str = "new_version") -> str:
     """The Príprava phase brief (CR-V2-010; PREP-1..PREP-4, RULES-3 read-first/ask-until-understood).
 
@@ -1447,6 +1522,9 @@ def _priprava_directive(db: Session, version_id: uuid.UUID, *, flow_type: str = 
             "--- SMERNICA MANAŽÉRA (toto je celé tvoje zadanie) ---\n" + directive_text
         )
     version_number = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
+    project_slug = db.execute(
+        select(Project.slug).join(Version, Version.project_id == Project.id).where(Version.id == version_id)
+    ).scalar_one()
     zadanie_rel = f"{_version_spec_rel(version_number)}/customer-requirements.md"
     spec_rel = _priprava_spec_rel(version_number)
     return (
@@ -1467,6 +1545,11 @@ def _priprava_directive(db: Session, version_id: uuid.UUID, *, flow_type: str = 
         "Schválenie Špecifikácie Manažérom (`Schváliť špecifikáciu`) je VŽDY povinné a nezávislé od Miery "
         "autonómie — Návrh sa nezačne, kým ju Manažér neschváli.\n"
         "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
+        # ICCINT-125: povinné celoICC štandardy vstupujú do stavby ZADANÍM, nie padnutou bránou. Bez
+        # tohto odseku ich Príprava nezahrnie, Vizuál nemá odkiaľ vziať obrazovku, Návrh napíše opak
+        # a brána vydania ich vymáha vo fáze, kde sa už nestavia — presne ako 14.09.2026 na NEX
+        # Inbox v1.5.0, kde to stálo tri kolá brány, dostavbu vo Verifikácii a nález Audítora.
+        + _icc_standards_scope_block(project_slug)
     )
 
 
