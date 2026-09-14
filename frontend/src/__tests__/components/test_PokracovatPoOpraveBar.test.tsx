@@ -149,3 +149,65 @@ describe("PokracovatPoOpraveBar — one button after a NEX Studio fix", () => {
     expect(screen.getByRole("button", { name: /Pokračovať/ })).toBeEnabled();
   });
 });
+
+// ── ICCINT-126: druhá cesta k tomu istému stavu — čakanie po usmernenej oprave ────────────────────
+//
+// Director 14.09.2026 na NEX Inbox v1.5.0: „Spravil som všetko podľa tvojho pokynu a nezbadal som,
+// že tlačidlo nad plánom úloh zmenilo text.“ Stavba stála a nikto nevedel prečo.
+//
+// Tri stavy vyžadujú kliknutie Manažéra. decision_needed a framework_issue majú vlastný pruh cez
+// celú šírku. paused mal štítok v prúžku, poznámku v lište a ZMENENÝ TEXT NA TLAČIDLE — teda presne
+// to, čo oko prehliadne, lebo tlačidlo tam bolo aj predtým.
+
+function pausedBoard(pauseReason: string | null): PipelineBoard {
+  return {
+    state: {
+      current_stage: "programovanie",
+      status: "paused",
+      pause_reason: pauseReason,
+      resume_after_framework_fix: false,
+    },
+    recent_messages: [],
+    available_actions: ["pokracovat"],
+  } as unknown as PipelineBoard;
+}
+
+describe("PokracovatPoOpraveBar — čakanie po usmernenej oprave (ICCINT-126)", () => {
+  beforeEach(() => {
+    vi.mocked(postPipelineActionApi).mockReset();
+    vi.mocked(postPipelineActionApi).mockResolvedValue(NEXT_BOARD);
+  });
+
+  it("⚠️ pri pripravenej oprave sa pruh UKÁŽE — nie len zmenený text na tlačidle", () => {
+    render(<PokracovatPoOpraveBar board={pausedBoard("fix_ready")} versionId="v-1" onBoard={vi.fn()} />);
+    expect(screen.getByText(/Stavba čaká na teba/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Pokračovať/ })).toBeInTheDocument();
+  });
+
+  it("povie, že sa oprava nespustila ZÁMERNE — inak to vyzerá ako porucha", () => {
+    render(<PokracovatPoOpraveBar board={pausedBoard("fix_ready")} versionId="v-1" onBoard={vi.fn()} />);
+    expect(screen.getByText(/nespustila sama/)).toBeInTheDocument();
+  });
+
+  it("pri prekročenom strope sa NEUKÁŽE — to je prekážka, nie výzva", () => {
+    const { container } = render(
+      <PokracovatPoOpraveBar board={pausedBoard("token_limit")} versionId="v-1" onBoard={vi.fn()} />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("keď si pozastavenie vyžiadal Manažér sám, NEUKÁŽE sa — to vie", () => {
+    const { container } = render(
+      <PokracovatPoOpraveBar board={pausedBoard("manazer")} versionId="v-1" onBoard={vi.fn()} />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("jedno kliknutie naozaj spustí opravu", async () => {
+    const onBoard = vi.fn();
+    render(<PokracovatPoOpraveBar board={pausedBoard("fix_ready")} versionId="v-9" onBoard={onBoard} />);
+    fireEvent.click(screen.getByRole("button", { name: /Pokračovať/ }));
+    await waitFor(() => expect(postPipelineActionApi).toHaveBeenCalledWith("v-9", { action: "pokracovat" }));
+    expect(onBoard).toHaveBeenCalledWith(NEXT_BOARD);
+  });
+});

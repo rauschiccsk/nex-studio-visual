@@ -486,7 +486,13 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
   // Yield the rung to it: two buttons firing the same verb, one of them labelled "Pokračovať v stavbe" for a
   // build that may never have reached the build phase, is exactly the near-duplicate this avoids.
   const releasedAfterFix = !!board?.state?.resume_after_framework_fix;
-  const canResume = !!board?.available_actions?.includes("pokracovat") && !releasedAfterFix;
+  // ICCINT-126: to isté platí pre druhú cestu k tomu istému pruhu — opravu pripravenú podľa pokynu
+  // Manažéra. Dovtedy bola jediným viditeľným signálom práve táto priečka so zmeneným textom, a
+  // Director ju 14.09.2026 prehliadol. Pruh v hlavnom stĺpci ju odteraz nahrádza a povie aj prečo;
+  // nechať tu druhé tlačidlo na to isté sloveso by vrátilo presne tú nenápadnosť.
+  const fixReadyPause = board?.state?.status === "paused" && board?.state?.pause_reason === "fix_ready";
+  const canResume =
+    !!board?.available_actions?.includes("pokracovat") && !releasedAfterFix && !fixReadyPause;
   // A running Programovanie loop offers `pause` (BE determine_available_actions → {"pause"}); the rung below
   // fires the same postPipelineActionApi(action:'pause'). Mutually exclusive with `pokracovat` by construction.
   const canPause = !!board?.available_actions?.includes("pause");

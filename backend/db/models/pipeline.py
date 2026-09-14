@@ -198,6 +198,13 @@ class PipelineState(Base, UUIDMixin, TimestampMixin):
     #: + action-bar derive question-vs-error from this, falling back to the heuristic only for NULL (legacy)
     #: rows. Nullable; NULL whenever ``status != 'blocked'``.
     block_reason = Column(String(20), nullable=True)
+    #: ICCINT-126 — PREČO je stavba pozastavená. ``paused`` znamenalo tri rôzne veci naraz a všetky
+    #: vyzerali rovnako: oprava podľa pokynu Manažéra čaká na jeho potvrdenie (VÝZVA), stavba
+    #: prekročila strop spracovania (PREKÁŽKA), alebo ju Manažér sám pozastavil (to VIE). Prvé si
+    #: žiada rovnako nápadný pruh ako ``decision_needed``; ostatné nie. Bez tohto stĺpca sa to dá
+    #: rozlíšiť len hádaním z textu ``next_action`` — a text sa preformuluje.
+    #: Nullable; NULL vždy, keď ``status != 'paused'`` (rovnaká disciplína ako pri ``block_reason``).
+    pause_reason = Column(String(32), nullable=True)
     #: Per-build Miera autonómie override (v2.0.0, CR-V2-008 / AUTON-6). The TOP layer of the
     #: dial resolution order (per-build → per-project → global): a non-NULL value here overrides
     #: both the per-project (``projects.miera_autonomie``) and the global default for THIS build;
@@ -425,6 +432,19 @@ def _clear_block_reason_on_unblock(target, value, oldvalue, initiator):
     if value == oldvalue or value == "blocked":
         return
     target.block_reason = None
+
+
+@event.listens_for(PipelineState.status, "set")
+def _clear_pause_reason_on_resume(target, value, oldvalue, initiator):
+    """Clear :attr:`PipelineState.pause_reason` the moment the status LEAVES ``paused`` (ICCINT-126).
+
+    Tá istá disciplína ako pri ``block_reason`` a z toho istého dôvodu: zastaraný dôvod je horší než
+    žiadny — pruh „stavba čaká na tvoje potvrdenie" nad stavbou, ktorá už beží, je presne ten druh
+    nepravdy, ktorý sa Manažér naučí ignorovať, a potom prehliadne aj ten pravdivý.
+    """
+    if value == oldvalue or value == "paused":
+        return
+    target.pause_reason = None
 
 
 @event.listens_for(PipelineState.status, "set")

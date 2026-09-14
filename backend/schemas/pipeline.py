@@ -48,6 +48,11 @@ class PipelineStateRead(BaseModel):
     #: R4 (D1): why the pipeline is ``blocked`` (authoritative; replaces the FE ``isErrorBlock`` heuristic).
     #: ``None`` whenever ``status != 'blocked'`` (and on legacy blocked rows pre-067 → FE heuristic fallback).
     block_reason: Optional[BlockReason] = None
+    #: ICCINT-126: prečo je stavba ``paused``. ``fix_ready`` je VÝZVA (oprava podľa pokynu Manažéra je
+    #: pripravená a čaká na jedno kliknutie) — kokpit na ňu vykreslí rovnako nápadný pruh ako na
+    #: ``decision_needed``. ``token_limit`` je prekážka, ``manazer`` si pozastavenie vyžiadal sám.
+    #: ``None`` vždy, keď ``status != 'paused'`` (a na starých riadkoch).
+    pause_reason: Optional[str] = None
     #: STEP 5 (step5-kontrola-design.md MAJOR): the build register — ``'conversation'`` for a spine build,
     #: ``None`` for the legacy phase automaton. ADDITIVE (``mode`` already exists on the ``PipelineState``
     #: model — CR spine STEP 1): the FE PhaseBar branches its phase strip on ``board.state.mode`` and could

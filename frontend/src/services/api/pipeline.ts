@@ -56,6 +56,10 @@ export interface PipelineState {
   // R4 (D1): why the pipeline is `blocked` — authoritative; the banner + action bar derive question-vs-error
   // from this. `null`/absent (legacy rows, or not blocked) → the FE falls back to the `isErrorBlock` heuristic.
   block_reason?: BlockReason | null;
+  // ICCINT-126: prečo je stavba `paused`. `fix_ready` je VÝZVA — oprava podľa pokynu Manažéra je
+  // pripravená a čaká na jedno kliknutie; kokpit na ňu vykreslí rovnako nápadný pruh ako na
+  // `decision_needed`. `token_limit` je prekážka, `manazer` si pozastavenie vyžiadal sám.
+  pause_reason?: string | null;
   // STEP 5 (Kontrola, step5-kontrola-design.md MAJOR): the build register — `'conversation'` for a spine
   // build, `null`/absent for the legacy phase automaton. Mirrors backend PipelineStateRead.mode (added in the
   // same STEP). The PhaseBar branches its phase strip on this — a spine build stays on current_stage='priprava'

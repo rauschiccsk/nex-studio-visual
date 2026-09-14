@@ -5280,6 +5280,13 @@ def _project_has_ci(project_root: Path) -> bool:
     return any(workflows.glob("*.yml")) or any(workflows.glob("*.yaml"))
 
 
+#: ICCINT-126 — prečo stavba stojí. ``fix_ready`` je VÝZVA (pripravené, čaká sa na jedno kliknutie)
+#: a dostane rovnako nápadný pruh ako ``decision_needed``; ``token_limit`` je PREKÁŽKA; ``manazer``
+#: Manažér sám stlačil, takže to vie. Bez tohto rozlíšenia vyzerali všetky tri rovnako — a ten stav,
+#: ktorý rovnako potrebuje ľudské kliknutie, bol z troch zobrazený najmenej nápadne.
+PAUSE_REASONS = ("fix_ready", "token_limit", "manazer")
+
+
 def _finding_text(f: Any) -> str:
     """Veta z nálezu, nech leží v zázname v akomkoľvek tvare (ICCINT-122).
 
@@ -9904,6 +9911,9 @@ async def _route_manazer_fix_to_ai_agent(
         _begin_dispatch(db, state)
     else:
         state.status = "paused"  # mandatory phase gate — Manažér confirms the re-run via 'Pokračovať'
+        # ICCINT-126: povedz PREČO. Toto je výzva („je to pripravené, potvrď"), nie prekážka — a
+        # dovtedy sa od prekročeného stropu nedala odlíšiť ničím okrem textu, ktorý sa preformuluje.
+        state.pause_reason = "fix_ready"
         state.next_action = "Oprava podľa tvojho pokynu je pripravená — 'Pokračovať' ju spustí."
         db.flush()
     return state
@@ -11275,6 +11285,7 @@ async def _run_build_round(
             tokens_spent = spent.input_tokens + spent.output_tokens
             if tokens_spent >= limit_millions * 1_000_000:
                 state.status = "paused"
+                state.pause_reason = "token_limit"  # ICCINT-126: prekážka, nie výzva
                 state.next_action = (
                     f"Pozastavené — build prekročil token-limit ({limit_millions} mil.). "
                     "Skontroluj stav a pokračuj cez „Pokračovať“."
@@ -12622,6 +12633,7 @@ async def apply_action(
     # agent_working also stops the action route from re-dispatching (the no-op-pause bug that spawned a 2nd
     # loop). Resume via ``pokracovat``.
     state.status = "paused"
+    state.pause_reason = "manazer"  # ICCINT-126: toto Manažér vie, sám to stlačil
     state.next_action = "Pozastavené Manažérom — pokračuj cez 'Pokračovať'."
     db.flush()
     return state

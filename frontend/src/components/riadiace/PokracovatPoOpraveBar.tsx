@@ -48,7 +48,17 @@ export default function PokracovatPoOpraveBar({ board, versionId, onBoard }: Pro
   // Honest-by-construction gate. BOTH conditions: the flag alone could survive a board the backend has since
   // moved on from, and `pokracovat` alone is also the ordinary paused-build resume (which the rail owns).
   const offered = !!board?.available_actions?.includes("pokracovat");
-  if (!offered || !board?.state?.resume_after_framework_fix) return null;
+  // ICCINT-126 — druhý dôvod, prečo tento pruh patrí na obrazovku. Manažér na rozhodovacej karte zvolil
+  // „Usmerniť opravu“ a napísal pokyn; oprava je pripravená a čaká na jedno kliknutie. Dovtedy to bolo
+  // vidieť len na ZMENENOM TEXTE TLAČIDLA nad plánom úloh — teda presne na tom, čo oko prehliadne, lebo
+  // tlačidlo tam bolo aj predtým. Director 14.09.2026: „Spravil som všetko podľa tvojho pokynu a
+  // nezbadal som, že tlačidlo zmenilo text.“ Stavba stála a nikto nevedel prečo.
+  //
+  // Raz sme už usúdili, že tlačidlo v bočnej lište na oznámenie „čakám na teba“ nestačí, a postavili
+  // naň tento pruh (ICCINT-13). Tu je ten istý záver, len pre druhú cestu k tomu istému stavu.
+  const poOprave = !!board?.state?.resume_after_framework_fix;
+  const poPokyne = board?.state?.status === "paused" && board?.state?.pause_reason === "fix_ready";
+  if (!offered || (!poOprave && !poPokyne)) return null;
 
   async function submit() {
     setError(null);
@@ -68,13 +78,18 @@ export default function PokracovatPoOpraveBar({ board, versionId, onBoard }: Pro
       {/* Plain-Slovak headline — the repair, not the machinery. Green: the red block above is resolved. */}
       <div className="flex items-center gap-2 border-l-4 border-l-[var(--color-status-success)] bg-[var(--color-state-success-bg)] px-4 py-2.5 text-sm font-semibold text-[var(--color-state-success-fg)]">
         <Wrench className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
-        <span>Chybu v NEX Studiu sme opravili — stavba môže pokračovať</span>
+        <span>
+          {poOprave
+            ? "Chybu v NEX Studiu sme opravili — stavba môže pokračovať"
+            : "Stavba čaká na teba — oprava podľa tvojho pokynu je pripravená"}
+        </span>
       </div>
 
       <div className="flex flex-col gap-2 px-4 py-3">
         <p className="text-xs text-[var(--color-text-muted)]">
-          Náš technický tím opravil chybu, na ktorej sa stavba zastavila. Keď stlačíš „Pokračovať“, AI Agent
-          nadviaže tam, kde prestal — nič sa nezačína odznova.
+          {poOprave
+            ? "Náš technický tím opravil chybu, na ktorej sa stavba zastavila. Keď stlačíš „Pokračovať“, AI Agent nadviaže tam, kde prestal — nič sa nezačína odznova."
+            : "Tvoj pokyn je zapísaný a oprava pripravená. Zámerne sa nespustila sama — máš možnosť si pokyn ešte pozrieť. Kým nestlačíš „Pokračovať“, stavba stojí."}
         </p>
         {note && (
           <p className="rounded border border-[var(--color-border-default)] bg-[var(--color-surface-hover)] px-2 py-1 text-xs text-[var(--color-text-secondary)]">

@@ -4789,6 +4789,8 @@ export interface components {
             mode?: string | null;
             /** Next Action */
             next_action: string;
+            /** Pause Reason */
+            pause_reason?: string | null;
             /**
              * Resume After Framework Fix
              * @default false
@@ -6137,6 +6139,12 @@ export interface components {
         _AdoptionPreviewResponse: {
             /** Already Ours */
             already_ours: boolean;
+            /** Blocking */
+            blocking: string[];
+            /** Can Adopt */
+            can_adopt: boolean;
+            /** Carried Over */
+            carried_over: string[];
             /** Confirmation Phrase */
             confirmation_phrase: string;
             /** Exists */
