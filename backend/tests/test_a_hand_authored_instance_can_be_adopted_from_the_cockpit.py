@@ -269,3 +269,234 @@ async def test_a_failed_provision_does_not_pretend_to_have_adopted(tmp_path, mon
 
     assert ok is False and url is None
     assert "nedá sa" in detail
+
+
+# ── ICCINT-130: prevzatie nesmie stratiť to, čo vie LEN tá bežiaca inštalácia ──
+#
+# Zmerané 14.09.2026 na UAT MÁGERSTAVU. Ručne písaný compose niesol riadok, ktorý generátor nemá
+# odkiaľ vziať — projektový docker-compose.yml o ňom nevie a v evidencii zákazníkov naň nie je stĺpec:
+#
+#     /mnt/mager-edocs-inbox-uat:/var/lib/inbox/genesis-out     ← priečinok, kam Genesis ukladá faktúry
+#     subnet: 192.168.48.0/24                                   ← Dockeru došli automatické siete
+#     mail.isnex.eu:192.168.55.250                              ← poštový hostiteľ
+#
+# Prevzatie by prešlo, ohlásilo úspech a appka by prestala vidieť faktúry. Ticho. Trinásť ručne
+# písaných inštalácií na ANDROSe nie je nedbalosť — je to zoznam miest, kde skutočnosť nesadla do
+# predstavy kokpitu.
+
+_RUCNY_COMPOSE = """\
+# NEX Inbox v1.4.0 — UAT pre MÁGERSTAV
+name: uat-mager-inbox
+
+networks:
+  inbox-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.48.0/24
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+  backend:
+    image: nex-inbox-backend:v1.4.0
+    extra_hosts:
+      - "mail.isnex.eu:192.168.55.250"
+    volumes:
+      - ./originals:/var/lib/inbox/originals
+      - /mnt/mager-edocs-inbox-uat:/var/lib/inbox/genesis-out
+  frontend:
+    image: nex-inbox-frontend:v1.4.0
+
+volumes:
+  postgres-data:
+"""
+
+
+def _magerstav_instalacia(tmp_path):
+    """Ručne písaná inštalácia, presne v tvare toho, čo 14.09.2026 bežalo pre MÁGERSTAV."""
+    d = tmp_path / "mager" / "nex-inbox"
+    d.mkdir(parents=True)
+    (d / "docker-compose.yml").write_text(_RUCNY_COMPOSE, encoding="utf-8")
+    (d / ".env").write_text("POSTGRES_PASSWORD=x\n", encoding="utf-8")
+    return d
+
+
+def test_the_facts_only_the_live_instance_knows_are_read_off_it(tmp_path):
+    """Čítať ich z bežiaceho súboru je jediný spôsob, ktorý sa nemôže rozísť so skutočnosťou — a
+    nevyžaduje, aby ich niekto opisoval do formulára. Laik pripojenie priečinka neodpíše."""
+    from backend.services import uat_provisioner
+
+    fakty = uat_provisioner.read_instance_facts(_magerstav_instalacia(tmp_path))
+
+    assert "/mnt/mager-edocs-inbox-uat:/var/lib/inbox/genesis-out" in fakty.host_mounts.get("backend", []), (
+        "pripojenie hostiteľského priečinka sa nenašlo — presne to by sa pri prevzatí stratilo"
+    )
+    assert "mail.isnex.eu:192.168.55.250" in fakty.extra_hosts
+    assert fakty.network_subnets.get("inbox-net") == "192.168.48.0/24"
+    assert "./originals:/var/lib/inbox/originals" not in fakty.host_mounts.get("backend", []), (
+        "zväzok relatívny k priečinku inštalácie generátor vie sám — nie je to zákaznícky údaj"
+    )
+    assert "postgres-data:/var/lib/postgresql/data" not in fakty.host_mounts.get("postgres", []), (
+        "pomenovaný zväzok nie je pripojenie hostiteľského priečinka"
+    )
+
+
+def test_the_preview_says_what_would_be_LOST_not_which_files_move(tmp_path):
+    """Náhľad hovoril, ktoré SÚBORY sa odložia bokom. To nie je údaj, na základe ktorého sa dá
+    rozhodnúť — Manažér potrebuje vedieť, čo v novom súbore NEBUDE. Pri takom náhľade by sa chyba
+    zo 14.09.2026 nedala kliknúť."""
+    from backend.services import instance_adoption
+
+    nahlad = instance_adoption.preview(_magerstav_instalacia(tmp_path))
+
+    prenesie = " ".join(nahlad.carried_over)
+    assert "/mnt/mager-edocs-inbox-uat" in prenesie, f"náhľad nemenuje pripojenie: {nahlad.carried_over}"
+    assert "192.168.48.0/24" in prenesie, f"náhľad nemenuje podsieť: {nahlad.carried_over}"
+    assert "mail.isnex.eu" in prenesie, f"náhľad nemenuje poštového hostiteľa: {nahlad.carried_over}"
+
+
+def test_adoption_is_refused_when_something_would_be_lost(tmp_path):
+    """Tá istá zásada, ktorá práve prešla do NEX Inboxu ako R16: akcia sa neponúkne tam, kde nemôže
+    uspieť. Úspešne vyzerajúce prevzatie, po ktorom appka oslepne, je horšie než odmietnutie."""
+    from backend.services import instance_adoption
+
+    d = _magerstav_instalacia(tmp_path)
+    (d / "docker-compose.yml").write_text(
+        _RUCNY_COMPOSE.replace("  backend:", "  backend:\n    cap_add:\n      - NET_ADMIN\n"), encoding="utf-8"
+    )
+
+    nahlad = instance_adoption.preview(d)
+
+    assert nahlad.blocking, "nepreneseľná vlastnosť sa musí ohlásiť, nie stratiť"
+    assert not nahlad.can_adopt, "prevzatie sa nesmie ponúknuť, keď by niečo zmazalo"
+    assert any("cap_add" in v for v in nahlad.blocking), nahlad.blocking
+
+
+def test_a_plain_instance_with_nothing_special_is_still_adoptable(tmp_path):
+    """Poistka proti tomu, aby sa z opravy stala nová prekážka. Inštalácia bez zákazníckych
+    zvláštností sa prevziať dá — inak by sa trinásť priečinkov zmenilo na trinásť slepých ulíc."""
+    from backend.services import instance_adoption
+
+    d = tmp_path / "icc" / "nex-demo"
+    d.mkdir(parents=True)
+    (d / "docker-compose.yml").write_text(
+        "name: uat-icc-demo\nservices:\n  backend:\n    image: demo:v1\n", encoding="utf-8"
+    )
+    (d / ".env").write_text("X=1\n", encoding="utf-8")
+
+    nahlad = instance_adoption.preview(d)
+
+    assert nahlad.can_adopt, nahlad.blocking
+    assert nahlad.blocking == []
+
+
+def test_the_render_actually_carries_the_facts_the_preview_promised(tmp_path):
+    """Náhľad sľubuje, že sa tie údaje prenesú. Ak by ich vykreslenie nenieslo, sľub by bol horší než
+    mlčanie — Manažér by potvrdil prevzatie práve preto, že mu obrazovka povedala, že sa nič nestratí.
+
+    Toto je tá polovica opravy, na ktorej záleží. Zvyšok je len o tom, aby to bolo vidieť.
+    """
+    from backend.services import uat_provisioner
+
+    fakty = uat_provisioner.read_instance_facts(_magerstav_instalacia(tmp_path))
+    # Sieť sa v zdroji volá INAK než v ručnej inštalácii — presne ako v skutočnosti: nex-inbox
+    # deklaruje `inbox-dev-net`, MÁGERSTAV má `inbox-net`. Párovanie podľa mena by tu podsieť
+    # stratilo, a strata podsiete na ANDROSe znamená, že sa sieť vôbec nepridelí.
+    zdroj = {
+        "services": {
+            "postgres": {"image": "postgres:16-alpine"},
+            "backend": {"image": "demo-be", "volumes": ["./originals:/var/lib/inbox/originals"]},
+            "frontend": {"image": "demo-fe"},
+        },
+        "networks": {"inbox-dev-net": None},
+    }
+
+    compose = uat_provisioner.build_uat_compose(
+        slug="mager-inbox",
+        project="nex-inbox",
+        project_path=tmp_path,
+        source=zdroj,
+        roles={"backend": "backend", "frontend": "frontend", "db": "postgres"},
+        db_user="u",
+        db_name="d",
+        environment="uat",
+        customer_slug="mager",
+        app="nex-inbox",
+        preserved_facts=fakty,
+    )
+
+    be_volumes = [str(v) for v in compose["services"]["backend"].get("volumes", [])]
+    assert "/mnt/mager-edocs-inbox-uat:/var/lib/inbox/genesis-out" in be_volumes, (
+        f"pripojenie na Genesis sa vo vykreslenom súbore stratilo — {be_volumes}"
+    )
+    assert "./originals:/var/lib/inbox/originals" in be_volumes, "pôvodné zväzky sa nesmú zahodiť"
+
+    be_hosts = [str(h) for h in compose["services"]["backend"].get("extra_hosts", [])]
+    assert "mail.isnex.eu:192.168.55.250" in be_hosts
+
+    siete = compose.get("networks") or {}
+    podsiete = [
+        e.get("subnet")
+        for net in siete.values()
+        if isinstance(net, dict)
+        for e in ((net.get("ipam") or {}).get("config") or [])
+        if isinstance(e, dict)
+    ]
+    assert "192.168.48.0/24" in podsiete, (
+        f"ručne pridelená podsieť sa stratila — Dockeru došli automatické siete, preto tam bola: {siete}"
+    )
+
+
+def test_the_render_without_facts_is_unchanged(tmp_path):
+    """Poistka, že sa z prenášania nestane nová vetva pre KAŽDÉ nasadenie. Bez zákazníckych údajov
+    musí vykreslenie vyzerať presne ako dovtedy — inak by oprava jednej inštalácie menila všetky."""
+    from backend.services import uat_provisioner
+
+    zdroj = {"services": {"backend": {"image": "demo-be"}, "frontend": {"image": "demo-fe"}}}
+    spolocne = dict(
+        slug="icc-demo",
+        project="nex-demo",
+        project_path=tmp_path,
+        source=zdroj,
+        roles={"backend": "backend", "frontend": "frontend", "db": None},
+        db_user="u",
+        db_name="d",
+        environment="uat",
+        customer_slug="icc",
+        app="nex-demo",
+    )
+
+    bez = uat_provisioner.build_uat_compose(**spolocne)
+    s_prazdnymi = uat_provisioner.build_uat_compose(
+        **spolocne, preserved_facts=uat_provisioner.InstanceFacts({}, [], {}, {})
+    )
+
+    assert bez == s_prazdnymi, "prázdne fakty nesmú vykreslenie zmeniť ani o písmeno"
+
+
+def test_an_ambiguous_subnet_stops_loudly_instead_of_being_guessed(tmp_path):
+    """Keď sa nedá určiť, ktorej sieti podsieť patrí, hádať sa nesmie. Zlé priradenie vyzerá ako
+    úspešné nasadenie a prejaví sa až tým, že sa stack nerozbehne — a to sa číta ako „deploy sa
+    pokazil", nie ako „prevzatie zahodilo riadok"."""
+    import pytest
+
+    from backend.services import uat_provisioner
+
+    fakty = uat_provisioner.InstanceFacts({}, [], {"a": "10.1.0.0/24", "b": "10.2.0.0/24"}, {})
+    with pytest.raises(ValueError, match="nedá sa jednoznačne určiť"):
+        uat_provisioner.build_uat_compose(
+            slug="icc-demo",
+            project="nex-demo",
+            project_path=tmp_path,
+            source={"services": {"backend": {"image": "x"}}, "networks": {"n1": None, "n2": None}},
+            roles={"backend": "backend", "frontend": None, "db": None},
+            db_user="u",
+            db_name="d",
+            environment="uat",
+            customer_slug="icc",
+            app="nex-demo",
+            preserved_facts=fakty,
+        )

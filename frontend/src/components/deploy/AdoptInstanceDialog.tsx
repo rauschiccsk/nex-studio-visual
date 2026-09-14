@@ -136,7 +136,40 @@ export default function AdoptInstanceDialog({
               </div>
             </div>
 
+            {preview.blocking.length > 0 && (
+              /* ICCINT-130 — keď by prevzatie niečo zmazalo, povie sa to PRED potvrdením a tlačidlo
+                 sa neponúkne. Dovtedy náhľad hovoril len to, ktoré SÚBORY sa presunú — a to nie je
+                 údaj, na základe ktorého sa dá rozhodnúť. */
+              <div className="mt-4 rounded-lg border border-[var(--color-state-error-border)] bg-[var(--color-state-error-bg)] p-3">
+                <p className="text-xs font-semibold text-[var(--color-state-error-fg)]">
+                  Prevzatie by z tejto inštalácie niečo zmazalo — preto sa neponúka
+                </p>
+                <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-[var(--color-state-error-fg)]">
+                  {preview.blocking.map((v) => (
+                    <li key={v}>{v}</li>
+                  ))}
+                </ul>
+                <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
+                  Nič sa nezmenilo. Tieto vlastnosti treba najprv doplniť do generátora.
+                </p>
+              </div>
+            )}
+
             <dl className="mt-4 space-y-2 text-xs">
+              {preview.carried_over.length > 0 && (
+                <div>
+                  <dt className="font-medium text-[var(--color-text-secondary)]">
+                    Prenesie sa (vie to len táto inštalácia):
+                  </dt>
+                  <dd className="mt-0.5 text-[var(--color-text-muted)]">
+                    <ul className="list-disc space-y-0.5 pl-4">
+                      {preview.carried_over.map((v) => (
+                        <li key={v}>{v}</li>
+                      ))}
+                    </ul>
+                  </dd>
+                </div>
+              )}
               <div>
                 <dt className="font-medium text-[var(--color-text-secondary)]">Odloží sa bokom (nezmaže):</dt>
                 <dd className="mt-0.5 font-mono text-[var(--color-text-muted)]">
@@ -193,8 +226,14 @@ export default function AdoptInstanceDialog({
             <button
               type="button"
               onClick={adopt}
-              disabled={busy || !potvrdene}
-              title={potvrdene ? undefined : `Najprv odpíš „${preview.confirmation_phrase}“.`}
+              disabled={busy || !potvrdene || !preview.can_adopt}
+              title={
+                !preview.can_adopt
+                  ? "Prevzatie by z tejto inštalácie niečo zmazalo — dôvod je vyššie."
+                  : potvrdene
+                    ? undefined
+                    : `Najprv odpíš „${preview.confirmation_phrase}“.`
+              }
               className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               {busy ? "Preberám…" : `Prevziať a nasadiť ${versionNumber}`}

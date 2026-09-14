@@ -238,8 +238,15 @@ class _AdoptionPreviewResponse(BaseModel):
     set_aside: list[tuple[str, str]]
     untouched: list[str]
     running_containers: list[str]
+    #: ICCINT-130 — zákaznícke údaje, ktoré prevzatie prenesie do vygenerovaného súboru. Vety pre
+    #: človeka: Manažér sa rozhoduje podľa toho, čo prečíta, nie podľa zoznamu presúvaných súborov.
+    carried_over: list[str]
+    #: Čo by sa prevzatím STRATILO. Neprázdne = prevzatie sa neponúkne.
+    blocking: list[str]
     #: Text, ktorý musí Manažér odpísať, aby sa prevzatie vykonalo.
     confirmation_phrase: str
+    #: Smie sa prevzatie vôbec ponúknuť (R16: akcia sa neponúka tam, kde nemôže uspieť).
+    can_adopt: bool
 
 
 @router.get("/customers/{customer_id}/adoption-preview", response_model=_AdoptionPreviewResponse)
@@ -319,6 +326,20 @@ async def adopt_instance(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
                 f"Priečinok „{nahlad.instance_dir}“ NEX Studio už spravuje — preberať niet čo. Použi bežné Nasadiť."
+            ),
+        )
+    # ICCINT-130 — a odmietni, keď by prevzatie niečo zmazalo. Poistka je tu, na serveri, nie len v
+    # tom, že sa tlačidlo nezobrazí: obrazovka sa dá obísť, táto brána nie. Zmerané 14.09.2026 na UAT
+    # MÁGERSTAVU — prevzatie by prešlo a appka by prestala vidieť faktúry, ticho.
+    if nahlad.blocking:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Prevzatie by z tejto inštalácie niečo zmazalo, preto sa nevykonalo:\n"
+                + "\n".join(f"  · {v}" for v in nahlad.blocking)
+                + "\n\nNič sa nezmenilo. Tieto vlastnosti treba najprv doplniť do generátora — "
+                "prevzatie, ktoré ohlási úspech a appku pritom oberie o vlastnosť, je horšie než "
+                "odmietnutie."
             ),
         )
     if payload.confirm.strip() != nahlad.confirmation_phrase:

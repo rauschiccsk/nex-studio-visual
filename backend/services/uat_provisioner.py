@@ -57,7 +57,7 @@ import subprocess
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 import httpx
 import jinja2
@@ -1045,6 +1045,132 @@ def parse_compose_extra_hosts(uat_dir: Path, be_service: str = "backend") -> lis
 
 
 # ---------------------------------------------------------------------------
+# Instance facts — what ONLY the live instance knows (ICCINT-130)
+# ---------------------------------------------------------------------------
+#
+# The generator renders an instance from the SOURCE project's compose. A real customer deployment
+# carries more than that: a host directory the customer's other software writes into, a subnet picked
+# by hand because Docker ran out of automatic ones, a mail host resolved by IP. None of it is in the
+# source project, and the ``customers`` table has no column for any of it.
+#
+# Measured 14.09.2026 on MÁGERSTAV's UAT. Adoption would have rendered over a compose carrying
+# ``/mnt/mager-edocs-inbox-uat:/var/lib/inbox/genesis-out`` — the folder Genesis drops invoices into —
+# and the app would have gone blind. Not loudly. The button would have said "done".
+#
+# These facts are read OFF the instance, never typed into a form: a file that is running is the only
+# record that cannot drift from reality, and no manager should be asked to retype a mount path.
+# ``extra_hosts`` was already preserved this way (:func:`parse_compose_extra_hosts`) — this generalises
+# that one case into the rule.
+
+#: Keys a service may carry that this provisioner knows how to reproduce. Anything else on a service is
+#: a fact we would silently drop, so adoption REFUSES rather than render a quieter instance. The list is
+#: deliberately generous about what WE emit and strict about the rest: a new key appearing in somebody's
+#: hand-written compose must stop the adoption, not slip through because nobody thought about it.
+REPRODUCIBLE_SERVICE_KEYS = frozenset(
+    {
+        "image",
+        "build",
+        "container_name",
+        "restart",
+        "environment",
+        "env_file",
+        "depends_on",
+        "networks",
+        "healthcheck",
+        "labels",
+        "command",
+        "entrypoint",
+        "ports",
+        "volumes",
+        "extra_hosts",
+        "user",
+        "working_dir",
+        "stop_grace_period",
+        "profiles",
+        "init",
+        "tty",
+        "stdin_open",
+    }
+)
+
+
+class InstanceFacts(NamedTuple):
+    """What a live instance knows and the source project does not."""
+
+    #: service → host bind mounts (``/host/path:/container/path[:mode]``). Only ABSOLUTE host paths:
+    #: a ``./relative`` volume is relative to the instance directory, which the generator lays out
+    #: itself, and a named volume is not a host path at all.
+    host_mounts: dict[str, list[str]]
+    #: ``host:ip`` entries across all services (the generator already preserved these for the backend).
+    extra_hosts: list[str]
+    #: network name → explicit subnet, where one was pinned by hand.
+    network_subnets: dict[str, str]
+    #: service → keys this provisioner cannot reproduce. Non-empty means adoption must refuse.
+    unreproducible: dict[str, list[str]]
+
+
+def _is_host_bind(volume: Any) -> bool:
+    """A bind mount of an ABSOLUTE host path — the only volume shape that carries customer knowledge."""
+    if isinstance(volume, dict):  # long syntax
+        return volume.get("type") == "bind" and str(volume.get("source", "")).startswith("/")
+    return isinstance(volume, str) and volume.startswith("/")
+
+
+def _volume_text(volume: Any) -> str:
+    if isinstance(volume, dict):
+        parts = [str(volume.get("source", "")), str(volume.get("target", ""))]
+        if volume.get("read_only"):
+            parts.append("ro")
+        return ":".join(p for p in parts if p)
+    return str(volume)
+
+
+def read_instance_facts(instance_dir: Path) -> InstanceFacts:
+    """Read :class:`InstanceFacts` off whatever compose is at ``instance_dir``.
+
+    Tolerant by design: an unreadable or absent file yields empty facts rather than raising. The
+    caller (preview / adoption) decides what emptiness means — here it only means "nothing to carry".
+    """
+    compose_path = instance_dir / "docker-compose.yml"
+    try:
+        data = yaml.safe_load(compose_path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return InstanceFacts({}, [], {}, {})
+    if not isinstance(data, dict):
+        return InstanceFacts({}, [], {}, {})
+
+    mounts: dict[str, list[str]] = {}
+    hosts: list[str] = []
+    unreproducible: dict[str, list[str]] = {}
+    for name, svc in (data.get("services") or {}).items():
+        if not isinstance(svc, dict):
+            continue
+        binds = [_volume_text(v) for v in (svc.get("volumes") or []) if _is_host_bind(v)]
+        if binds:
+            mounts[str(name)] = binds
+        raw_hosts = svc.get("extra_hosts") or []
+        if isinstance(raw_hosts, dict):
+            hosts.extend(f"{k}:{v}" for k, v in raw_hosts.items())
+        elif isinstance(raw_hosts, list):
+            hosts.extend(str(h) for h in raw_hosts)
+        unknown = sorted(k for k in svc if k not in REPRODUCIBLE_SERVICE_KEYS)
+        if unknown:
+            unreproducible[str(name)] = unknown
+
+    subnets: dict[str, str] = {}
+    for net_name, net in (data.get("networks") or {}).items():
+        if not isinstance(net, dict):
+            continue
+        for entry in (net.get("ipam") or {}).get("config") or []:
+            if isinstance(entry, dict) and entry.get("subnet"):
+                subnets[str(net_name)] = str(entry["subnet"])
+
+    seen: set[str] = set()
+    hosts = [h for h in hosts if not (h in seen or seen.add(h))]
+    return InstanceFacts(mounts, hosts, subnets, unreproducible)
+
+
+# ---------------------------------------------------------------------------
 # Overwrite guard — never rewrite a deployment this provisioner did not generate
 # ---------------------------------------------------------------------------
 
@@ -1095,23 +1221,26 @@ def hand_authored_refusal(instance_dir: Path, found: str) -> str:
     (nothing), and WHAT to do next. Names the directory + the file that proved it foreign; carries no
     file CONTENT, so no secret can leak into the deploy detail (§4).
     """
-    # Only a directory DIRECTLY under UAT_ROOT is named by its own slug. A customer instance lives at
-    # ``/opt/customers/<customer>/<app>``, where the directory name is the APP, not the slug the CLI
-    # takes — printing it would hand the operator a command that fails, or worse, names a different
-    # instance. Where we cannot know it, say so instead of guessing.
-    slug_hint = instance_dir.name if instance_dir.parent == UAT_ROOT else "<skratka-inštalácie>"
+    # ICCINT-130 — táto veta dovtedy posielala do terminálu na príkaz, ktorý mieri INAM. Skript počíta
+    # cestu ``/opt/uat/<slug>``, kým kokpit pracuje s ``/opt/uat/<zákazník>/<appka>``; overené nasucho
+    # 14.09.2026: ``uat-deploy.py mager --project nex-inbox --adopt --dry-run`` ohlásil
+    # ``/opt/uat/mager/docker-compose.yml`` a doménu ``uat-mager.isnex.eu``. Kto by to poslúchol,
+    # vyrobil by DRUHÉ, paralelné nasadenie a to pôvodné by nechal bežať.
+    #
+    # A je to zastarané aj inak: prevzatie má od ICCINT-102 vlastné tlačidlo v kokpite, s náhľadom,
+    # odložením ručnej práce bokom a záznamom. Terminál po sebe nenechá v evidencii nič.
     return (
         f"Priečinok „{instance_dir}“ už obsahuje nasadenie, ktoré NEX Studio nevygenerovalo "
         f"(súbor {found} nemá hlavičku generovanú provisionerom) — takto vyzerajú ručne písané, "
         "spravidla živé zákaznícke nasadenia. Nechal som ho nedotknuté: neprepísal som ani "
         "docker-compose.yml, ani .env, a nič som nespustil.\n\n"
-        "Skontroluj, či ide o správneho zákazníka a projekt. Ak sa toto nasadenie má naozaj prepísať, "
-        "dá sa to urobiť VÝSLOVNE z terminálu:\n"
-        f"    python scripts/uat-deploy.py {slug_hint} --adopt --dry-run   # najprv ukáž, čo by sa prepísalo\n"
-        f"    python scripts/uat-deploy.py {slug_hint} --adopt\n\n"
-        "Pozor: prepis do priečinka zapíše hlavičku, a práve tá rozhoduje o tom, či sem NEX Studio smie "
-        "písať. Od tej chvíle je tento priečinok bez tejto ochrany — aj pri budúcich nasadeniach z kokpitu. "
-        "Samo sa to nikdy nestane; tlačidlo „Nasadiť“ v kokpite túto možnosť nemá."
+        "Skontroluj, či ide o správneho zákazníka a projekt. Ak sa toto nasadenie má naozaj dostať pod "
+        "správu NEX Studia, slúži na to tlačidlo „Prevziať inštaláciu“ na tej istej obrazovke: ukáže "
+        "VOPRED, čo sa prenesie a čo by sa stratilo, ručné súbory odloží bokom ako .pre-nex-studio a "
+        "zapíše, kto a kedy to urobil.\n\n"
+        "Pozor: prevzatím sa do priečinka zapíše hlavička, a práve tá rozhoduje o tom, či sem NEX Studio "
+        "smie písať. Od tej chvíle je tento priečinok bez tejto ochrany — aj pri budúcich nasadeniach. "
+        "Samo sa to nikdy nestane; tlačidlo „Nasadiť“ túto možnosť nemá."
     )
 
 
@@ -1285,6 +1414,7 @@ def build_uat_compose(
     customer_slug: Optional[str] = None,
     app: Optional[str] = None,
     version: Optional[str] = None,
+    preserved_facts: Optional["InstanceFacts"] = None,
 ) -> dict[str, Any]:
     """Build the final compose **dict** from the parsed source compose (CR-1), environment-aware.
 
@@ -1355,6 +1485,13 @@ def build_uat_compose(
                 svc["environment"] = {"POSTGRES_PASSWORD": "${POSTGRES_PASSWORD}"}
 
         # Carry over extra backend hosts grown by a live instance (redeploy preservation).
+        # ICCINT-130: ``preserved_facts`` carries the same entries read off the instance, so a caller
+        # that passes the facts does not ALSO have to pass this older list. Union of both, because
+        # ``provision_uat`` still fills the older one and neither is authoritative over the other.
+        if preserved_facts and preserved_facts.extra_hosts:
+            extra_backend_hosts = list(extra_backend_hosts or []) + [
+                h for h in preserved_facts.extra_hosts if h not in (extra_backend_hosts or [])
+            ]
         if name == be_name and extra_backend_hosts:
             existing = svc.get("extra_hosts")
             merged = (
@@ -1371,6 +1508,18 @@ def build_uat_compose(
                 if extra_host not in merged:
                     merged.append(extra_host)
             svc["extra_hosts"] = merged
+
+        # ICCINT-130 — carry the host bind mounts this instance grew. The source project cannot know
+        # them: ``/mnt/mager-edocs-inbox-uat`` is the folder the customer's OTHER software writes
+        # invoices into, and nothing in ``/opt/projects/nex-inbox`` mentions it. Rendering without it
+        # produced an instance that came up healthy and saw no invoices.
+        if preserved_facts and name in preserved_facts.host_mounts:
+            zvazky = list(svc.get("volumes") or [])
+            existujuce = {_volume_text(v) for v in zvazky}
+            for mount in preserved_facts.host_mounts[name]:
+                if mount not in existujuce:
+                    zvazky.append(mount)
+            svc["volumes"] = zvazky
 
         services[name] = svc
 
@@ -1421,6 +1570,45 @@ def build_uat_compose(
         net.pop("name", None)
         networks[net_name] = net or None
     networks[PROXY_NETWORK] = {"external": True}
+
+    # ICCINT-130 — a subnet somebody pinned by hand stays pinned. On ANDROS the Docker default
+    # address pool is exhausted (32 networks), so ``192.168.48.0/24`` in MÁGERSTAV's UAT is not a
+    # preference — it is the reason the stack comes up at all. Rendering it away would leave the
+    # instance failing to allocate a network, which reads as "the deploy broke" and not as
+    # "the adoption dropped a line". Only networks the render actually declares: the shared
+    # ``nex-proxy-net`` is external and its addressing is not ours to pin.
+    if preserved_facts and preserved_facts.network_subnets:
+        # Párovať podľa MENA nestačí a bolo by to ticho nesprávne: zdrojový nex-inbox deklaruje
+        # ``inbox-dev-net``, ručná inštalácia MÁGERSTAVU ``inbox-net``. Dôvod na pridelenie podsiete
+        # pritom nie je vlastnosťou mena — je to vlastnosť HOSTITEĽA (na ANDROSe je zásoba
+        # automatických sietí vyčerpaná). Preto: zhoda mena vyhráva; inak, keď je jedna podsieť a
+        # jedna vnútorná sieť, priradí sa — to je jednoznačné. Čokoľvek nejednoznačné sa NEHÁDA.
+        vnutorne = [n for n in networks if n != PROXY_NETWORK]
+        zostavajuce = dict(preserved_facts.network_subnets)
+        priradenie: dict[str, str] = {}
+        for net_name in list(zostavajuce):
+            if net_name in vnutorne:
+                priradenie[net_name] = zostavajuce.pop(net_name)
+        if zostavajuce:
+            volne = [n for n in vnutorne if n not in priradenie]
+            if len(zostavajuce) == 1 and len(volne) == 1:
+                priradenie[volne[0]] = next(iter(zostavajuce.values()))
+            elif volne:
+                raise ValueError(
+                    "inštalácia má ručne pridelené podsiete "
+                    f"({', '.join(sorted(zostavajuce.values()))}), ale nedá sa jednoznačne určiť, "
+                    f"ktorej sieti patria (vo vykreslení sú: {', '.join(sorted(volne))}). "
+                    "Hádať sa to nesmie — sieť bez adresy sa na tomto hostiteli nerozbehne."
+                )
+        for net_name, subnet in priradenie.items():
+            net = networks[net_name] if isinstance(networks.get(net_name), dict) else {}
+            ipam = net.get("ipam") if isinstance(net.get("ipam"), dict) else {}
+            config = list(ipam.get("config") or [])
+            if not any(isinstance(e, dict) and e.get("subnet") for e in config):
+                config.append({"subnet": subnet})
+            ipam["config"] = config
+            net["ipam"] = ipam
+            networks[net_name] = net
 
     # Volumes: keep source volume keys (project name namespaces unnamed ones); strip explicit names.
     volumes: dict[str, Any] = {}
@@ -1572,6 +1760,11 @@ def provision_uat(
     is_redeploy = (uat_dir / ".env").is_file() and not rotate_secrets
     preserved_secrets = load_existing_env_secrets(uat_dir) if is_redeploy else {}
     extra_backend_hosts = parse_compose_extra_hosts(uat_dir, roles["backend"] or "backend") if is_redeploy else []
+    # ICCINT-130 — a čo ešte vie LEN táto inštalácia: pripojenia hostiteľských priečinkov a ručne
+    # pridelené podsiete. Číta sa to z toho, čo tam práve je — aj z ručne písaného súboru, keď ide o
+    # prevzatie. Tá istá podmienka ako pri tajomstvách a hostiteľoch: existujúca inštalácia sa
+    # neprekresľuje chudobnejšia, než bola.
+    preserved_facts = read_instance_facts(uat_dir) if (uat_dir / "docker-compose.yml").is_file() else None
 
     db_creds = detect_db_credentials(src_services, roles["db"], project_slug)
     db_user, db_name = db_creds["POSTGRES_USER"], db_creds["POSTGRES_DB"]
@@ -1591,6 +1784,7 @@ def provision_uat(
         db_name=db_name,
         loopback_base_port=loopback_base_port,
         extra_backend_hosts=extra_backend_hosts,
+        preserved_facts=preserved_facts,
         environment=environment,
         customer_slug=customer_slug,
         app=app,

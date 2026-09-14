@@ -58,10 +58,18 @@ class AdoptionPreview(NamedTuple):
     untouched: list[str]
     #: Čo z toho priečinka práve beží — najsilnejší dôkaz, že to nie je opustený zvyšok.
     running_containers: list[str]
+    #: ICCINT-130 — čo vie LEN táto inštalácia a prevzatie to prenesie do vygenerovaného súboru.
+    #: Vety pre človeka, nie štruktúra: Manažér sa rozhoduje podľa toho, čo prečíta.
+    carried_over: list[str]
+    #: Čo by sa prevzatím STRATILO. Neprázdne = prevzatie sa neponúkne.
+    blocking: list[str]
     #: Text, ktorý musí Manažér odpísať, aby sa prevzatie vykonalo. Zámerne ``<zákazník>/<projekt>``,
     #: nie holý názov priečinka: samotné „nex-manager“ je rovnaké pre troch zákazníkov, takže odpísať
     #: sa dá bez pozerania sa na to, ktorého inštalácia to je.
     confirmation_phrase: str
+    #: Smie sa prevzatie vôbec ponúknuť. Zásada R16 z NEX Inboxu: akcia sa neponúka tam, kde nemôže
+    #: uspieť. Úspešne vyzerajúce prevzatie, po ktorom appka oslepne, je horšie než odmietnutie.
+    can_adopt: bool
 
 
 def instance_dir_for(*, environment: str, customer_slug: str, full_project_slug: str) -> Path:
@@ -111,6 +119,38 @@ def _running_containers(instance_dir: Path) -> list[str]:
     return sorted(mena)
 
 
+def _facts_in_words(fakty: uat_provisioner.InstanceFacts) -> list[str]:
+    """Zákaznícke údaje ako VETY. ICCINT-130.
+
+    Náhľad dovtedy hovoril, ktoré SÚBORY sa odložia bokom — a to nie je údaj, na základe ktorého sa
+    dá rozhodnúť. Manažér potrebuje vedieť, čo v novom súbore nebude, a potrebuje to v reči, ktorej
+    rozumie bez toho, aby otváral compose.
+    """
+    vety: list[str] = []
+    for sluzba, pripojenia in sorted(fakty.host_mounts.items()):
+        for p in pripojenia:
+            zdroj = p.split(":")[0]
+            vety.append(f"pripojenie priečinka {zdroj} (služba {sluzba}) — {p}")
+    for h in fakty.extra_hosts:
+        vety.append(f"pevne určený hostiteľ {h}")
+    for siet, podsiet in sorted(fakty.network_subnets.items()):
+        vety.append(f"ručne pridelená podsieť {podsiet} pre sieť {siet}")
+    return vety
+
+
+def _facts_that_cannot_survive(fakty: uat_provisioner.InstanceFacts) -> list[str]:
+    """Čo by sa prevzatím STRATILO — vlastnosti, ktoré provisioner nevie vykresliť.
+
+    Tá istá zásada, ktorá práve prešla do NEX Inboxu ako R16: akcia sa neponúka tam, kde nemôže
+    uspieť. Prevzatie, ktoré ohlási úspech a pritom appku oberie o vlastnosť, je horšie než
+    odmietnutie — pri odmietnutí sa aspoň vie, že sa treba pozrieť.
+    """
+    return [
+        f"služba {sluzba}: {', '.join(kluce)} — provisioner tieto vlastnosti nevykresľuje"
+        for sluzba, kluce in sorted(fakty.unreproducible.items())
+    ]
+
+
 def preview(instance_dir: Path) -> AdoptionPreview:
     """Čo by prevzatie urobilo — bez toho, aby sa čokoľvek zmenilo."""
     if not instance_dir.is_dir():
@@ -121,7 +161,10 @@ def preview(instance_dir: Path) -> AdoptionPreview:
             set_aside=[],
             untouched=[],
             running_containers=[],
+            carried_over=[],
+            blocking=[],
             confirmation_phrase=_fraza(instance_dir),
+            can_adopt=False,
         )
 
     compose = instance_dir / "docker-compose.yml"
@@ -134,6 +177,9 @@ def preview(instance_dir: Path) -> AdoptionPreview:
         elif not polozka.endswith(SET_ASIDE_SUFFIX):
             nedotkne.append(polozka)
 
+    fakty = uat_provisioner.read_instance_facts(instance_dir)
+    blokujuce = _facts_that_cannot_survive(fakty)
+
     return AdoptionPreview(
         instance_dir=str(instance_dir),
         exists=True,
@@ -141,7 +187,13 @@ def preview(instance_dir: Path) -> AdoptionPreview:
         set_aside=[] if already_ours else odlozi,
         untouched=nedotkne,
         running_containers=_running_containers(instance_dir),
+        carried_over=_facts_in_words(fakty),
+        blocking=blokujuce,
         confirmation_phrase=_fraza(instance_dir),
+        # Už-naša inštalácia sa nepreberá (niet čo), a inštalácia s nepreneseľnou vlastnosťou sa
+        # preberať NESMIE. Obe „nie" sú tu naraz zámerne: tlačidlo sa riadi jedným údajom, nie
+        # dvomi podmienkami roztrúsenými po rozhraní.
+        can_adopt=not already_ours and not blokujuce,
     )
 
 

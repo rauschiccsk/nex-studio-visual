@@ -34,7 +34,10 @@ const RUCNA = {
   ] as [string, string][],
   untouched: [],
   running_containers: ["uat-mager-manager-backend", "uat-mager-manager-db"],
+  carried_over: [],
+  blocking: [],
   confirmation_phrase: "mager/nex-manager",
+  can_adopt: true,
 };
 
 beforeEach(() => {
@@ -140,5 +143,60 @@ describe("Prevzatie inštalácie — keď niet čo preberať", () => {
 
     expect(await screen.findByText(/prevzatie zlyhalo/i)).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+// ── ICCINT-130: náhľad hovorí, čo sa STRATÍ — nie ktoré súbory sa presunú ────
+//
+// Zmerané 14.09.2026 na UAT MÁGERSTAVU. Ručne písaný compose niesol pripojenie priečinka, kam
+// Genesis ukladá faktúry. Generátor oň nevie: v projektovom docker-compose.yml nie je a v evidencii
+// zákazníkov naň nie je stĺpec. Prevzatie by prešlo, ohlásilo úspech — a appka by oslepla. Ticho.
+
+describe("Prevzatie inštalácie — čo sa prenesie a čo by sa stratilo (ICCINT-130)", () => {
+  it("vymenuje údaje, ktoré vie len tá bežiaca inštalácia", async () => {
+    getAdoptionPreviewMock.mockResolvedValue({
+      ...RUCNA,
+      carried_over: [
+        "pripojenie priečinka /mnt/mager-edocs-inbox-uat (služba backend) — /mnt/mager-edocs-inbox-uat:/var/lib/inbox/genesis-out",
+        "ručne pridelená podsieť 192.168.48.0/24 pre sieť inbox-net",
+      ],
+    });
+
+    await otvor();
+
+    expect(await screen.findByText(/Prenesie sa/)).toBeInTheDocument();
+    expect(screen.getByText(/\/mnt\/mager-edocs-inbox-uat/)).toBeInTheDocument();
+    expect(screen.getByText(/192\.168\.48\.0\/24/)).toBeInTheDocument();
+  });
+
+  it("⚠️ keď by sa niečo stratilo, tlačidlo prevzatia je vypnuté a dôvod je napísaný", async () => {
+    getAdoptionPreviewMock.mockResolvedValue({
+      ...RUCNA,
+      blocking: ["služba backend: cap_add — provisioner tieto vlastnosti nevykresľuje"],
+      can_adopt: false,
+    });
+
+    await otvor();
+
+    expect(await screen.findByText(/by z tejto inštalácie niečo zmazalo/)).toBeInTheDocument();
+    expect(screen.getByText(/cap_add/)).toBeInTheDocument();
+
+    // Odpíš správnu frázu — a tlačidlo MUSÍ zostať vypnuté. Potvrdenie je poistka proti nesprávnej
+    // inštalácii, nie povolenie stratiť vlastnosť.
+    await userEvent.type(screen.getByLabelText(/Na potvrdenie odpíš/), RUCNA.confirmation_phrase);
+    expect(screen.getByRole("button", { name: /Prevziať a nasadiť/ })).toBeDisabled();
+  });
+
+  it("bez zákazníckych zvláštností sa prevzatie ponúka ako doteraz", async () => {
+    getAdoptionPreviewMock.mockResolvedValue(RUCNA);
+
+    await otvor();
+
+    await userEvent.type(
+      await screen.findByLabelText(/Na potvrdenie odpíš/),
+      RUCNA.confirmation_phrase,
+    );
+    expect(screen.getByRole("button", { name: /Prevziať a nasadiť/ })).toBeEnabled();
+    expect(screen.queryByText(/by z tejto inštalácie niečo zmazalo/)).not.toBeInTheDocument();
   });
 });

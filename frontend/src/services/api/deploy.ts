@@ -68,8 +68,14 @@ export interface AdoptionPreview {
   set_aside: [string, string][];
   untouched: string[];
   running_containers: string[];
+  /** ICCINT-130 — zákaznícke údaje, ktoré sa do vygenerovaného súboru prenesú (vety pre človeka). */
+  carried_over: string[];
+  /** Čo by sa prevzatím STRATILO. Neprázdne = prevzatie sa neponúkne. */
+  blocking: string[];
   /** Text, ktorý musí Manažér odpísať, aby sa prevzatie vykonalo. */
   confirmation_phrase: string;
+  /** Smie sa prevzatie vôbec ponúknuť (R16: akcia sa neponúka tam, kde nemôže uspieť). */
+  can_adopt: boolean;
 }
 
 export function getAdoptionPreview(

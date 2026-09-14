@@ -176,10 +176,14 @@ def test_refusal_message_names_the_path_the_file_and_that_nothing_changed(tmp_pa
     assert str(tmp_path / "customers" / "mager" / "nex-inbox") in message  # WHICH path
     assert "docker-compose.yml" in message  # WHAT proved it foreign
     assert "neprepísal" in message and ".env" in message  # nothing was touched
-    # The way forward, named as something the operator can actually TYPE. This used to assert the
-    # message contained "allow_overwrite" — an internal keyword argument no operator can pass, so
-    # the refusal named an exit that did not exist from where they were standing.
-    assert "--adopt" in message and "uat-deploy.py" in message
+    # The way forward, named as something the operator can actually DO. Twice now this assertion has
+    # had to move because the exit it named was the wrong one: first "allow_overwrite", an internal
+    # keyword argument nobody can pass, then the terminal command — which ICCINT-130 measured going
+    # to a DIFFERENT directory than the cockpit uses (``/opt/uat/<slug>`` vs
+    # ``/opt/uat/<zákazník>/<appka>``), so following it would build a second, parallel deployment.
+    # The real exit has been a button since ICCINT-102.
+    assert "Prevziať inštaláciu" in message
+    assert "uat-deploy.py" not in message, "hláška posiela na príkaz, ktorý mieri do iného priečinka"
     # The refusal reports on the file, never FROM it — no line of the customer's compose/.env leaks.
     assert "the-customers-real-password" not in message
     assert "nex-inbox-backend:1.4.0" not in message
@@ -310,8 +314,9 @@ def test_refusal_tells_the_operator_how_to_proceed_deliberately(tmp_path, monkey
         P.assert_writable_instance_dir(instance)
     message = str(exc.value)
 
-    assert "uat-deploy.py inbox --adopt --dry-run" in message  # look before you leap
-    assert "uat-deploy.py inbox --adopt" in message
+    # ICCINT-130: už NIE príkaz do terminálu — ten mieri inam a v evidencii po ňom nezostane nič.
+    assert "Prevziať inštaláciu" in message
+    assert "čo by sa stratilo" in message, "východisko musí sľúbiť, že ukáže cenu VOPRED"
     # …and it says what adopting COSTS, because that is the part nobody would guess: the marker IS the
     # permission, so writing it removes this protection for good.
     assert "bez tejto ochrany" in message
@@ -331,8 +336,13 @@ def test_refusal_does_not_invent_a_slug_it_cannot_know(tmp_path, monkeypatch):
         P.assert_writable_instance_dir(customer_instance)
     message = str(exc.value)
 
-    assert "<skratka-inštalácie>" in message
-    assert "uat-deploy.py nex-inbox" not in message  # the app name is NOT the slug
+    # ICCINT-130: zástupný text zmizol spolu s príkazom, ktorý ho potreboval — hláška už nemenuje
+    # žiadnu skratku, lebo tlačidlo v kokpite vie, o ktorú inštaláciu ide, aj bez toho, aby ju niekto
+    # odpisoval. Pôvodný dôvod tejto skúšky VŠAK platí ďalej a preto sa tu drží obrátene: hláška si
+    # nesmie vymyslieť skratku z názvu priečinka.
+    assert "nex-inbox --adopt" not in message  # the app name is NOT the slug
+    assert "uat-deploy.py" not in message
+    assert "Prevziať inštaláciu" in message
 
 
 def test_cockpit_deploy_button_never_passes_the_override():
