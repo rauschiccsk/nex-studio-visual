@@ -336,8 +336,12 @@ def test_the_facts_only_the_live_instance_knows_are_read_off_it(tmp_path):
     )
     assert "mail.isnex.eu:192.168.55.250" in fakty.extra_hosts
     assert fakty.network_subnets.get("inbox-net") == "192.168.48.0/24"
-    assert "./originals:/var/lib/inbox/originals" not in fakty.host_mounts.get("backend", []), (
-        "zväzok relatívny k priečinku inštalácie generátor vie sám — nie je to zákaznícky údaj"
+    # OBRÁTENÉ 15.09.2026. Pôvodne tu stálo, že relatívny zväzok „generátor vie sám". Zmerané na
+    # skutočnej inštalácii MÁGERSTAVU: zdrojový projekt mountuje ./claude-config, kým bežiaca
+    # inštalácia ./originals a ./exports — priečinky s originálmi faktúr a exportovaným XML.
+    # Vykreslenie zo zdroja by ich zahodilo a obsah by sa stratil pri každom ďalšom nasadení.
+    assert "./originals:/var/lib/inbox/originals" in fakty.host_mounts.get("backend", []), (
+        "priečinok inštalácie sa musí prenášať — zdroj o ňom nevie"
     )
     assert "postgres-data:/var/lib/postgresql/data" not in fakty.host_mounts.get("postgres", []), (
         "pomenovaný zväzok nie je pripojenie hostiteľského priečinka"
@@ -500,3 +504,43 @@ def test_an_ambiguous_subnet_stops_loudly_instead_of_being_guessed(tmp_path):
             app="nex-demo",
             preserved_facts=fakty,
         )
+
+
+def test_the_instances_own_data_directories_are_carried_too(tmp_path):
+    """Diera vo vlastnej oprave, nájdená 15.09.2026 pri prvom ostrom použití na UAT MAGERSTAVU.
+
+    ICCINT-130 niesol len ABSOLUTNE pripojenia s odovodnenim, ze zvazok relativny k priecinku
+    instalacie generator vie sam. Pri tejto instalacii to NEPLATI: zdrojovy projekt ma
+    ``./claude-config``, kym beziaca instalacia ma ``./originals`` a ``./exports`` — teda priecinky,
+    kam appka uklada originaly faktur a vyexportovane XML.
+
+    Vykreslenie by ich zahodilo, cesty v kontajneri by zostali bez pripojenia na disk a obsah by sa
+    stratil pri kazdom dalsom nasadeni. Nie hlucne — ticho.
+
+    Pomer rizik rozhoduje jednoznacne: niest navyse jeden prazdny priecinok stoji nic, stratit
+    faktury stoji zakaznika.
+    """
+    from backend.services import uat_provisioner
+
+    d = tmp_path / "mager" / "nex-inbox"
+    d.mkdir(parents=True)
+    (d / "docker-compose.yml").write_text(
+        "name: uat-mager-inbox\n"
+        "services:\n"
+        "  backend:\n"
+        "    image: x\n"
+        "    volumes:\n"
+        "      - ./originals:/var/lib/inbox/originals\n"
+        "      - ./exports:/var/lib/inbox/exports\n"
+        "      - /mnt/mager-edocs-inbox-uat:/var/lib/inbox/genesis-out\n"
+        "      - pg-data:/var/lib/postgresql/data\n",
+        encoding="utf-8",
+    )
+
+    fakty = uat_provisioner.read_instance_facts(d)
+    be = fakty.host_mounts.get("backend", [])
+
+    assert "./originals:/var/lib/inbox/originals" in be, f"priecinok s originalmi by sa stratil — {be}"
+    assert "./exports:/var/lib/inbox/exports" in be
+    assert "/mnt/mager-edocs-inbox-uat:/var/lib/inbox/genesis-out" in be
+    assert not any("pg-data" in v for v in be), "pomenovany zvazok NIE JE pripojenie priecinka — Docker ho spravuje sam"

@@ -1110,10 +1110,25 @@ class InstanceFacts(NamedTuple):
 
 
 def _is_host_bind(volume: Any) -> bool:
-    """A bind mount of an ABSOLUTE host path — the only volume shape that carries customer knowledge."""
+    """A bind mount — absolute OR instance-relative. Named volumes are NOT binds.
+
+    ICCINT-130 first took only ABSOLUTE paths, on the reasoning that a ``./relative`` volume is
+    relative to the instance directory and the generator lays that out itself. Measured 15.09.2026 on
+    MÁGERSTAV's UAT: **that reasoning is wrong.** The source project mounts ``./claude-config``; the
+    live instance mounts ``./originals`` and ``./exports`` — the directories the app writes invoice
+    originals and exported XML into. A render from the source alone drops both, the container paths
+    lose their disk, and the content goes on every recreate. Not loudly. Quietly.
+
+    The asymmetry decides it: carrying one extra empty directory costs nothing; losing a customer's
+    invoices costs the customer. A named volume (``pg-data:/var/lib/...``) is still not a bind —
+    Docker manages it and the render declares it separately.
+    """
     if isinstance(volume, dict):  # long syntax
-        return volume.get("type") == "bind" and str(volume.get("source", "")).startswith("/")
-    return isinstance(volume, str) and volume.startswith("/")
+        return volume.get("type") == "bind" and bool(str(volume.get("source", "")).strip())
+    if not isinstance(volume, str):
+        return False
+    zdroj = volume.split(":", 1)[0]
+    return zdroj.startswith("/") or zdroj.startswith("./") or zdroj.startswith("../")
 
 
 def _volume_text(volume: Any) -> str:
