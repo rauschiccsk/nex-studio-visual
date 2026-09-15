@@ -20,12 +20,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import re
 import shutil
 import subprocess
 import tempfile
+import unicodedata
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
@@ -6019,6 +6021,7 @@ def _evaluate_release_coverage(
     negative: int,
     coverage_req: tuple[int, int],
     declared_assertions: Optional[set[str]] = None,
+    unmatched_note: str = "",
     ran_assertions: Optional[set[str]] = None,
 ) -> tuple[bool, str]:
     """CR-V2-051 — the spec-derived, risk-floored acceptance verdict from the parsed sentinel counts + the
@@ -6058,7 +6061,7 @@ def _evaluate_release_coverage(
                 f"unguarded safety property/ies: the design bound {len(declared)} invariant(s) to a named "
                 f"rejection test, but {len(unguarded)} of them never ran — "
                 f"{', '.join(unguarded)}. The risky op each one forbids is undemonstrated; a green gate here "
-                f"would certify coverage that does not exist."
+                f"would certify coverage that does not exist.{unmatched_note}"
             )
         return True, (
             f"release acceptance PASS — {total} assertions ({feature} feature / {negative} negative); all "
@@ -6105,6 +6108,7 @@ async def _run_release_acceptance(
     project_slug: str,
     coverage_req: tuple[int, int],
     declared_assertions: Optional[set[str]] = None,
+    unmatched_note: str = "",
 ) -> tuple[bool, str, bool]:
     """Release-acceptance leg (gate-g-hardening GAP 1 A1; CR-V2-051 risk floor): run the project's black-box
     host-executable ``release_smoke_test.sh`` against the ALREADY-BOOTED isolated *stack* (NOT pytest in the
@@ -6154,6 +6158,7 @@ async def _run_release_acceptance(
         negative=negative,
         coverage_req=coverage_req,
         declared_assertions=declared_assertions,
+        unmatched_note=unmatched_note,
         ran_assertions=set(_ASSERTION_RAN_RE.findall(out)),
     )
     return ok, detail, False
@@ -6545,6 +6550,7 @@ async def _run_release_smoke(
     version_label: str,
     coverage_req: tuple[int, int],
     declared_assertions: Optional[set[str]] = None,
+    unmatched_note: str = "",
 ) -> tuple[tuple[bool, str], Optional[tuple[bool, str, bool]]]:
     """gate-g-hardening GAP 1: the boot leg + the release-acceptance leg in ONE up/down cycle (A2). Returns
     ``((boot_ok, boot_detail), acceptance)`` where ``acceptance`` is ``(ok, detail, skipped)`` — or ``None``
@@ -6568,7 +6574,9 @@ async def _run_release_smoke(
         akt_ok, akt_detail = await _run_aktualizacie_gate(stack, root, version_label)
         if not akt_ok:
             return (False, akt_detail), None
-        acceptance = await _run_release_acceptance(stack, project_slug, coverage_req, declared_assertions)
+        acceptance = await _run_release_acceptance(
+            stack, project_slug, coverage_req, declared_assertions, unmatched_note
+        )
         return (boot_ok, boot_detail), acceptance
 
 
@@ -6692,6 +6700,21 @@ def _gate_report_payloads_newest_first(db: Session, version_id: uuid.UUID) -> li
     return [m.payload for m in msgs if isinstance(m.payload, dict)]
 
 
+def _mint_safety_key(name: str) -> str:
+    """ICCINT-135 — a stable handle for an invariant whose DECLARATION carries no key.
+
+    ICCINT-127c gave the binding side a key, but nothing mints one on the declaration side, so a keyless
+    declaration leaves the human sentence as the only way to match. NEX Inbox v1.5.1 hit exactly that: the
+    agent rephrased the sentence while correcting the assertion and every later binding matched nothing.
+    Derived, not stored, so it also covers builds already running. Readable half for the brief; the digest
+    keeps two similar sentences apart."""
+    holy = unicodedata.normalize("NFKD", name.strip().lower())
+    holy = "".join(c for c in holy if not unicodedata.combining(c))
+    slova = re.findall(r"[a-z0-9]+", holy)[:6]
+    odtlacok = hashlib.sha256(name.strip().encode("utf-8")).hexdigest()[:6]
+    return f"{'-'.join(slova)[:52] or 'sp'}-{odtlacok}"
+
+
 def _safety_identity(sp: dict[str, Any]) -> str:
     """The stable identity of one declared safety property: its ``key``, else its ``name``.
 
@@ -6729,7 +6752,11 @@ def _declared_safety_aliases(db: Session, version_id: uuid.UUID) -> dict[str, st
         ident = _safety_identity(sp)
         if not ident:
             continue
-        for alias in (str(sp.get("key") or "").strip(), str(sp.get("name") or "").strip()):
+        meno = str(sp.get("name") or "").strip()
+        # ICCINT-135: a declaration without a key gets a DERIVED one, so a binding has something to name
+        # that survives rephrasing. The brief prints it, so the agent has it to copy.
+        odvodeny = _mint_safety_key(meno) if not str(sp.get("key") or "").strip() and meno else ""
+        for alias in (str(sp.get("key") or "").strip(), meno, odvodeny):
             if alias:
                 aliases.setdefault(alias, ident)
     return aliases
@@ -6759,6 +6786,42 @@ def _safety_bindings(db: Session, version_id: uuid.UUID) -> dict[str, str]:
                     bindings[ident] = assertion
                     break
     return bindings
+
+
+def _unmatched_binding_note(db: Session, version_id: uuid.UUID) -> str:
+    """ICCINT-135 — what the NEWEST report tried to bind and could not attach to any declared invariant.
+
+    An unattachable binding used to be dropped without a word, so an OLDER binding kept driving the gate and
+    the failure text stayed identical however many times the agent corrected itself. NEX Inbox v1.5.1 spent
+    five rounds on that: both agents read the message, saw the assertion name from round one and went on
+    fixing a field that had been right for three rounds. Empty when everything lands — a note on a healthy
+    build would mislead just as badly."""
+    aliases = _declared_safety_aliases(db, version_id)
+    if not aliases:
+        return ""
+    najnovsie = next(
+        (p for p in _gate_report_payloads_newest_first(db, version_id) if p.get("safety_properties")), None
+    )
+    if not najnovsie:
+        return ""
+    stratene = []
+    for sp in najnovsie.get("safety_properties") or []:
+        if not isinstance(sp, dict):
+            continue
+        kluc, meno = str(sp.get("key") or "").strip(), str(sp.get("name") or "").strip()
+        if kluc not in aliases and meno not in aliases:
+            stratene.append(meno or kluc or "(bez mena)")
+    if not stratene:
+        return ""
+    ocakavane = "\n".join(f"     - {a}" for a in sorted(set(aliases)))
+    return (
+        f"\n\nPOZOR — {len(stratene)} naviazanie/a z posledného hlásenia sa NEPRIRADILO k žiadnemu "
+        f"deklarovanému invariantu, takže sa neuplatnilo a platí staršie naviazanie. Preto sa toto hlásenie "
+        f"nemení, nech opravuješ čokoľvek. Nepriradené: "
+        + ", ".join(f"'{x}'" for x in stratene)
+        + ".\n   Naviazanie musí v poli `key` alebo `name` niesť DOSLOVA jeden z týchto identifikátorov:\n"
+        + ocakavane
+    )
 
 
 def _unbound_safety_keys(db: Session, version_id: uuid.UUID) -> set[str]:
@@ -6793,9 +6856,17 @@ def _release_coverage_brief(db: Session, version_id: uuid.UUID) -> str:
             "   Bezpečnostné invarianty (každý potrebuje NEGATÍVNY test — zakázanú operáciu SÁM spusti, MUSÍ "
             "byť odmietnutá):\n"
         )
+        # ICCINT-135: the handle goes in the brief. ICCINT-127c gave the binding a key but never showed the
+        # agent WHICH key to use, so it invented one and matched nothing.
         for sp in safety:
             if isinstance(sp, dict):
-                lines.append(f"     - {sp.get('name', '?')} → over odmietnutie: {sp.get('risky_op', '?')}\n")
+                meno = str(sp.get("name") or "?")
+                kluc = str(sp.get("key") or "").strip() or _mint_safety_key(meno)
+                lines.append(f"     - [{kluc}] {meno} → over odmietnutie: {sp.get('risky_op', '?')}\n")
+        lines.append(
+            "   Identifikátor v hranatých zátvorkách PREPÍŠ DOSLOVA do poľa `key` pri naviazaní poistky. "
+            "Preformulovaná veta sa nepriradí a naviazanie sa neuplatní.\n"
+        )
     return "".join(lines)
 
 
@@ -7617,12 +7688,13 @@ async def _run_conversation_kontrola_round(
     # ICCINT-127: the assertion NAMES bound to those safety properties — a count cannot say WHICH
     # invariant a rejection test guards, a name can. Empty ⇒ pre-binding design ⇒ count floor.
     declared_assertions = _declared_safety_assertions(db, version_id)
+    unmatched_note = _unmatched_binding_note(db, version_id)
     # obs-2 Part B Part 2: bake the completing version's REAL note onto disk BEFORE the smoke so the 2a gate
     # asserts a served note (not a placeholder / a 2nd-version list missing its own note). PASS-time commit
     # (:func:`_commit_release_note`) is unchanged — this is an idempotent pre-write.
     _write_release_note_to_disk(db, version_id, claude_agent.PROJECTS_ROOT / slug)
     (smoke_ok, smoke_detail), acceptance = await _run_release_smoke(
-        slug, version_label, coverage_req, declared_assertions
+        slug, version_label, coverage_req, declared_assertions, unmatched_note
     )
     smoke_msg = _record_message(
         db,
@@ -9373,12 +9445,13 @@ async def _run_verifikacia_round(
     # ICCINT-127: the assertion NAMES bound to those safety properties — a count cannot say WHICH
     # invariant a rejection test guards, a name can. Empty ⇒ pre-binding design ⇒ count floor.
     declared_assertions = _declared_safety_assertions(db, version_id)
+    unmatched_note = _unmatched_binding_note(db, version_id)
     # obs-2 Part B Part 2: bake the completing version's REAL note onto disk BEFORE the smoke so the 2a gate
     # asserts a served note (not a placeholder / a 2nd-version list missing its own note). PASS-time commit
     # (:func:`_commit_release_note`) is unchanged — this is an idempotent pre-write.
     _write_release_note_to_disk(db, version_id, claude_agent.PROJECTS_ROOT / slug)
     (smoke_ok, smoke_detail), acceptance = await _run_release_smoke(
-        slug, version_label, coverage_req, declared_assertions
+        slug, version_label, coverage_req, declared_assertions, unmatched_note
     )
     # v4.0.14 (Director 2026-07-20): the BUILD-FACT for the Auditor. _run_release_smoke runs `docker compose up
     # --build`, which rebuilds the app image from the CURRENT working tree (HEAD) — a code change invalidates the

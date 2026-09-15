@@ -897,6 +897,90 @@ def test_a_later_report_cannot_quietly_shorten_the_list(monkeypatch) -> None:
     assert orchestrator._unbound_safety_keys(None, None) == {"K2"}
 
 
+# ─── ICCINT-135: a binding that matches NOTHING must say so — the loop that cannot break ─────────────
+#
+# The forbidden operation: a newer report's binding resolves to no declared invariant, is dropped without
+# a word, an OLDER binding keeps winning, and the gate therefore prints the SAME failure however many
+# times the agent corrects itself. NEX Inbox v1.5.1 burned five verification rounds on this: the
+# declaration carried key="" so only the exact Slovak sentence could match, the agent rephrased the
+# sentence while fixing the assertion, and the message kept naming the assertion text from round one.
+
+
+def test_an_unmatchable_binding_is_reported_not_swallowed(monkeypatch) -> None:
+    """The agent must be able to SEE that its binding attached to nothing. Silence here is what made the
+    failure text constant: correcting the assertion could never change a message driven by an older row."""
+    plan = {"plan": [{"id": "T1"}], "safety_properties": [{"name": "Pôvodná veta zo zadania", "risky_op": "x"}]}
+    stary = {"safety_properties": [{"name": "Pôvodná veta zo zadania", "assertion": "veta — test_a"}]}
+    novy = {"safety_properties": [{"key": "test_a", "name": "preformulovaná veta", "assertion": "test_a"}]}
+    monkeypatch.setattr(orchestrator, "_release_declaration_payload", lambda db, vid: plan)
+    monkeypatch.setattr(orchestrator, "_gate_report_payloads_newest_first", lambda db, vid: [novy, stary, plan])
+
+    poznamka = orchestrator._unmatched_binding_note(None, None)
+
+    assert "preformulovaná veta" in poznamka, "nepriradené naviazanie sa nikde nespomína"
+    assert "Pôvodná veta zo zadania" in poznamka, "chýba znenie, ktoré zadanie čaká"
+
+
+def test_nothing_is_reported_when_every_binding_lands(monkeypatch) -> None:
+    """Protiváha: keď sa všetko priradí, poznámka musí byť prázdna — inak by zavádzala pri zdravej stavbe."""
+    plan = {"plan": [{"id": "T1"}], "safety_properties": [{"key": "K1", "name": "A", "risky_op": "x"}]}
+    novy = {"safety_properties": [{"key": "K1", "name": "A inak", "assertion": "test_a"}]}
+    monkeypatch.setattr(orchestrator, "_release_declaration_payload", lambda db, vid: plan)
+    monkeypatch.setattr(orchestrator, "_gate_report_payloads_newest_first", lambda db, vid: [novy, plan])
+
+    assert orchestrator._unmatched_binding_note(None, None) == ""
+
+
+def test_a_keyless_declaration_still_gets_a_stable_handle(monkeypatch) -> None:
+    """Zadanie bez kľúča nesmie nechať párovanie visieť na doslovnom znení vety. Kokpit kľúč odvodí —
+    deterministicky, takže platí aj pre stavbu, ktorá už beží."""
+    plan = {"plan": [{"id": "T1"}], "safety_properties": [{"name": "Pôvodná veta zo zadania", "risky_op": "x"}]}
+    handle = orchestrator._mint_safety_key("Pôvodná veta zo zadania")
+    novy = {"safety_properties": [{"key": handle, "name": "úplne inak povedané", "assertion": "test_a"}]}
+    monkeypatch.setattr(orchestrator, "_release_declaration_payload", lambda db, vid: plan)
+    monkeypatch.setattr(orchestrator, "_gate_report_payloads_newest_first", lambda db, vid: [novy, plan])
+
+    assert orchestrator._declared_safety_assertions(None, None) == {"test_a"}
+    assert orchestrator._unbound_safety_keys(None, None) == set()
+
+
+def test_the_minted_handle_is_stable_and_distinguishes() -> None:
+    a = orchestrator._mint_safety_key("XML od iného programu sa nesmie vydávať za faktúru")
+    assert a == orchestrator._mint_safety_key("XML od iného programu sa nesmie vydávať za faktúru")
+    assert a != orchestrator._mint_safety_key("PDF príloha sa nesmie dostať do vetvy pre XML")
+    assert " " not in a and a == a.lower()
+
+
+def test_the_brief_shows_the_handle_the_agent_must_echo(monkeypatch) -> None:
+    """Kľúč, ktorý agent nevidí, je na nič — práve preto ICCINT-127c nezabralo."""
+    plan = {
+        "plan": [{"id": "T1"}],
+        "flagship_features": ["F"],
+        "safety_properties": [{"name": "Pôvodná veta zo zadania", "risky_op": "spusti zakázané"}],
+    }
+    monkeypatch.setattr(orchestrator, "_release_declaration_payload", lambda db, vid: plan)
+
+    brief = orchestrator._release_coverage_brief(None, None)
+
+    assert orchestrator._mint_safety_key("Pôvodná veta zo zadania") in brief
+
+
+def test_the_failure_names_the_unmatched_binding() -> None:
+    """Hlásenie musí ukázať, čo sa nepriradilo — inak agent opravuje meno testu, ktoré je v poriadku."""
+    ok, detail = orchestrator._evaluate_release_coverage(
+        total=5,
+        feature=1,
+        negative=1,
+        coverage_req=(1, 1),
+        declared_assertions={"stare-meno"},
+        ran_assertions={"test_a"},
+        unmatched_note="POZOR: naviazanie 'preformulovaná veta' sa nepriradilo.",
+    )
+
+    assert not ok
+    assert "preformulovaná veta" in detail
+
+
 # ─── ICCINT-127d: a binding must reach a declaration written BEFORE keys existed ─────────────────────
 #
 # The forbidden operation: the plan close predates keys, so its entries are identified by name only;
