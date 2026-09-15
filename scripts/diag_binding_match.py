@@ -6,7 +6,12 @@ platí staršie, a text zlyhania sa nezmení, nech agent opraví čokoľvek.
 Beží VNÚTRI kontajnera kokpitu a používa tie isté funkcie ako brána — nie ich napodobeninu
 v SQL, ktorá by potvrdila len predstavu autora.
 
-    docker exec -w /app -e PYTHONPATH=/app <backend> python scripts/diag_binding_match.py <slug> <verzia>
+Do obrazu sa zámerne nekopíruje (Dockerfile nesie len to, čo appka potrebuje na beh), takže sa
+najprv podstrčí dnu:
+
+    docker cp scripts/diag_binding_match.py nex-studio-visual-prod-backend-1:/tmp/d.py \\
+      && docker exec -w /app -e PYTHONPATH=/app nex-studio-visual-prod-backend-1 \\
+         python /tmp/d.py nex-inbox 1.5.1
 """
 
 from __future__ import annotations
