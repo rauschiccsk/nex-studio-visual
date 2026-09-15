@@ -57,7 +57,7 @@ import subprocess
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, NamedTuple, Optional
+from typing import Any, Callable, NamedTuple, Optional
 
 import httpx
 import jinja2
@@ -1225,14 +1225,93 @@ def _bumpni_znacku(image: str, project_slug: str, version: str) -> str:
     return image
 
 
-def render_version_bump(instance_dir: Path, *, version: str, project_slug: str = "nex-inbox") -> dict[str, Any]:
-    """Compose existujúcej inštalácie s povýšenými značkami obrazov. Nič iné sa nemení."""
+def render_version_bump(
+    instance_dir: Path,
+    *,
+    version: str,
+    project_slug: str = "nex-inbox",
+    source: Optional[dict[str, Any]] = None,
+    project_path: Optional[Path] = None,
+) -> dict[str, Any]:
+    """Compose existujúcej inštalácie s povýšenými značkami obrazov. Nič iné sa nemení.
+
+    ICCINT-137 — okrem jedného: keď je daný ``source``, prenesie sa k povýšenej značke aj ``build:``
+    zo zdrojového projektu. Bez neho je povýšená značka iba menom: ``up -d --build`` postaví len
+    službu, ktorá ``build:`` má, a prevzatá inštalácia ho nemá (obrazy sú ručne pripnuté). Compose
+    potom obraz iba hľadá — lokálne, inak v registri, ktorý nemáme. 15.09.2026 to zhodilo nasadenie
+    NEX Inboxu 1.5.1 a nechalo inštaláciu ukazovať na obraz, ktorý neexistuje.
+
+    Páruje sa podľa ÚLOHY, nie podľa mena: inštalácia volá tie isté služby ``postgres`` a
+    ``alembic-init``, zdroj ``db`` a ``migrate``. Vlastné ``build:`` inštalácie sa neprepisuje a
+    cudzí obraz (postgres) ho nikdy nedostane — ten sa neberie zo zdrojákov.
+    """
     data = yaml.safe_load((Path(instance_dir) / "docker-compose.yml").read_text(encoding="utf-8")) or {}
     novy = copy.deepcopy(data)
-    for svc in (novy.get("services") or {}).values():
+    sluzby = novy.get("services") or {}
+    for svc in sluzby.values():
         if isinstance(svc, dict) and isinstance(svc.get("image"), str):
             svc["image"] = _bumpni_znacku(svc["image"], project_slug, version)
+
+    if source is None or project_path is None:
+        return novy
+
+    # Kľúčom je MENO OBRAZU, nie meno služby. ``identify_service_roles`` pozná len backend/frontend/db,
+    # takže ``alembic-init`` by cezeň prepadol — a pritom práve on potrebuje ``nex-inbox-backend``,
+    # ktorý vo zdroji stavia služba ``backend``. Kto ten obraz stavia, hovorí jeho meno, nie to, ako sa
+    # služba, čo ho spúšťa, náhodou volá.
+    stavia: dict[str, Any] = {}
+    for zdroj_meno, zdroj_svc in ((source or {}).get("services") or {}).items():
+        if not isinstance(zdroj_svc, dict) or zdroj_svc.get("build") is None:
+            continue
+        zdroj_obraz = zdroj_svc.get("image")
+        repo = zdroj_obraz.split(":", 1)[0] if isinstance(zdroj_obraz, str) else f"{project_slug}-{zdroj_meno}"
+        stavia.setdefault(repo, zdroj_svc["build"])
+
+    for svc in sluzby.values():
+        if not isinstance(svc, dict) or svc.get("build") is not None:
+            continue
+        obraz = svc.get("image")
+        if not isinstance(obraz, str):
+            continue
+        build = stavia.get(obraz.split(":", 1)[0])
+        if build is None:
+            continue  # cudzí obraz (postgres) sa zo zdrojákov neberie
+        if isinstance(build, str):
+            svc["build"] = {"context": _abs_build_context(build, Path(project_path))}
+        else:
+            novy_build = copy.deepcopy(build)
+            novy_build["context"] = _abs_build_context(str(build.get("context", ".")), Path(project_path))
+            svc["build"] = novy_build
     return novy
+
+
+def unbuildable_images(
+    before: dict[str, Any], after: dict[str, Any], *, image_exists: Callable[[str], bool]
+) -> list[str]:
+    """Obrazy, ktorým nasadenie PREPÍSALO značku a nemajú sa odkiaľ vziať — ani postaviť, ani nájsť.
+
+    ICCINT-137 — bežiaca inštalácia sa nesmie ocitnúť v stave, z ktorého sa nevie reštartovať, kvôli
+    nasadeniu, ktoré aj tak zlyhá. Preto sa to zisťuje PRED zápisom.
+
+    Hlási sa ÚZKO, a to zámerne:
+
+    * služba s ``build:`` nikdy — tú si ``up --build`` postaví sám,
+    * **nedotknutý** obraz nikdy, ani keď na disku nie je. ``redis:7`` z verejného registra sa dá
+      stiahnuť a nasadenie s ním dosiaľ chodilo; zablokovať ho preto, že tu ešte nie je, by zastavilo
+      nasadenia, ktoré sú v poriadku. Prepísanú značku nesie obraz, ktorý je NÁŠ — a register naň
+      nemáme. Varovanie, ktoré chodí aj inokedy, sa prestane čítať.
+    """
+    stare = {meno: svc.get("image") for meno, svc in (before.get("services") or {}).items() if isinstance(svc, dict)}
+    chybaju = []
+    for meno, svc in (after.get("services") or {}).items():
+        if not isinstance(svc, dict) or svc.get("build") is not None:
+            continue
+        obraz = svc.get("image")
+        if not isinstance(obraz, str) or obraz == stare.get(meno):
+            continue  # nedotknutý obraz nie je naša vec
+        if not image_exists(obraz):
+            chybaju.append(f"{meno}={obraz}")
+    return chybaju
 
 
 def env_version_bump(instance_dir: Path, *, version: str, example: Optional[dict[str, str]] = None) -> dict[str, str]:
@@ -1292,6 +1371,23 @@ def services_missing_against_source(instance_dir: Path, source: dict[str, Any]) 
 # ---------------------------------------------------------------------------
 # Overwrite guard — never rewrite a deployment this provisioner did not generate
 # ---------------------------------------------------------------------------
+
+
+def _docker_image_exists(image: str) -> bool:
+    """Je ten obraz na tomto stroji? Register nemáme, takže „nie je" znamená „nedá sa nasadiť"."""
+    try:
+        return subprocess.run(["docker", "image", "inspect", image], capture_output=True, timeout=30).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+class UndeployableImageError(ValueError):
+    """Nasadenie by zapísalo compose menujúci obraz, ktorý nikto nepostaví a nikde nie je.
+
+    Vyvolané PRED akýmkoľvek zápisom — z rovnakého dôvodu ako :class:`HandAuthoredDeploymentError`
+    a rovnakým spôsobom: ``ValueError``, takže každé existujúce volajúce miesto to už vie spracovať
+    ako čisté odmietnutie.
+    """
 
 
 class HandAuthoredDeploymentError(ValueError):
@@ -2040,7 +2136,24 @@ def provision_uat(
                 f"Projekt má služby, ktoré inštalácia nemá: {', '.join(chyba)}. Nasadenie ich "
                 "nedoplní — inštalácia sa neprestavuje. Ak ich tam treba, doplň ich do inštalácie."
             )
-        compose_text = render_uat_compose(render_version_bump(uat_dir, version=version, project_slug=project_slug))
+        povysene = render_version_bump(
+            uat_dir,
+            version=version,
+            project_slug=project_slug,
+            source=source,
+            project_path=project_path,
+        )
+        # ICCINT-137 — zistiť PRED zápisom. Bežiaca inštalácia sa nesmie ocitnúť v stave, z ktorého
+        # sa nevie reštartovať, kvôli nasadeniu, ktoré aj tak zlyhá.
+        povodne = yaml.safe_load(compose_path.read_text(encoding="utf-8")) or {}
+        nepostavitelne = unbuildable_images(povodne, povysene, image_exists=_docker_image_exists)
+        if nepostavitelne:
+            raise UndeployableImageError(
+                "Nasadenie by zapísalo obrazy, ktoré sa nemajú odkiaľ vziať — ani postaviť, ani nájsť: "
+                + ", ".join(nepostavitelne)
+                + ". Inštalácia zostala nedotknutá."
+            )
+        compose_text = render_uat_compose(povysene)
         env_riadky = env_version_bump(uat_dir, version=version, example=env_example)
         env_content = "\n".join(f"{k}={v}" for k, v in env_riadky.items()) + "\n"
     else:
