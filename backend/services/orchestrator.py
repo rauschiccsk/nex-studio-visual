@@ -6054,6 +6054,16 @@ def _evaluate_release_coverage(
     # floor and the count becomes redundant.
     declared = declared_assertions or set()
     ran = ran_assertions or set()
+    if not declared and unmatched_note:
+        # ICCINT-135 — the worse half. When NO binding resolves, the required-name set is empty and the
+        # check used to fall through to plain counting, which passes: a release would ship with coverage
+        # nobody demonstrated and the gate would say nothing. NEX Inbox v1.5.1 missed this only because one
+        # stale binding happened to match. Bindings ATTEMPTED but none landed is a FAIL, never a fallback.
+        return False, (
+            "no safety binding resolved: the build named rejection tests for its invariants, but not one of "
+            "them attached to a declared invariant, so nothing is proven about the declared coverage."
+            f"{unmatched_note}"
+        )
     if declared:
         unguarded = sorted(declared - ran)
         if unguarded:

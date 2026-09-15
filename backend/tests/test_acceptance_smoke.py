@@ -965,6 +965,35 @@ def test_the_brief_shows_the_handle_the_agent_must_echo(monkeypatch) -> None:
     assert orchestrator._mint_safety_key("Pôvodná veta zo zadania") in brief
 
 
+def test_no_binding_matching_at_all_fails_instead_of_falling_back_to_counting() -> None:
+    """Horšia polovica tej istej chyby. Keď sa nepriradí ANI JEDNO naviazanie, množina vyžadovaných mien
+    zostane prázdna — a kontrola prepadne na obyčajné počítanie tvrdení, ktoré prejde. Vydanie by tak
+    odišlo s pokrytím, ktoré nikto nepreukázal, a brána by o tom nepovedala slovo. NEX Inbox 1.5.1 to
+    minulo len preto, že jedno staré naviazanie náhodou sedelo."""
+    ok, detail = orchestrator._evaluate_release_coverage(
+        total=5,
+        feature=1,
+        negative=1,
+        coverage_req=(1, 1),
+        declared_assertions=set(),
+        ran_assertions={"nieco-uplne-ine"},
+        unmatched_note="POZOR: nič sa nepriradilo.",
+    )
+
+    assert not ok, "brána prešla, hoci sa nepriradilo ani jedno naviazanie"
+    assert "nepriradilo" in detail
+
+
+def test_a_build_with_no_bindings_at_all_still_degrades_to_counting() -> None:
+    """Protiváha: stavba, ktorá naviazania vôbec nepíše (spred ICCINT-127), sa nesmie zablokovať —
+    tam niet čo priradiť a počítadlo je jediná brána, akú kedy mala."""
+    ok, _ = orchestrator._evaluate_release_coverage(
+        total=5, feature=1, negative=1, coverage_req=(1, 1), declared_assertions=set(), ran_assertions=set()
+    )
+
+    assert ok
+
+
 def test_the_failure_names_the_unmatched_binding() -> None:
     """Hlásenie musí ukázať, čo sa nepriradilo — inak agent opravuje meno testu, ktoré je v poriadku."""
     ok, detail = orchestrator._evaluate_release_coverage(
