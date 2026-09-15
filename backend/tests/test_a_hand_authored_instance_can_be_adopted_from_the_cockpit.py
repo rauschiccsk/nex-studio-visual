@@ -544,3 +544,90 @@ def test_the_instances_own_data_directories_are_carried_too(tmp_path):
     assert "./exports:/var/lib/inbox/exports" in be
     assert "/mnt/mager-edocs-inbox-uat:/var/lib/inbox/genesis-out" in be
     assert not any("pg-data" in v for v in be), "pomenovany zvazok NIE JE pripojenie priecinka — Docker ho spravuje sam"
+
+
+def test_the_live_network_name_is_kept_so_the_subnet_does_not_collide(tmp_path):
+    """Zlyhanie z ostrej prevadzky 15.09.2026, hned po prvom prevzati:
+
+        failed to create network uat-mager-inbox_inbox-dev-net:
+        invalid pool request: Pool overlaps with other one on this address space
+
+    ICCINT-130 prenieslo HODNOTU podsiete, ale nie MENO siete, na ktorej visi. Vykreslenie siet
+    zaroven premenuje (zdrojovy projekt ju vola ``inbox-dev-net``, instalacia ``inbox-net``), takze
+    vznikla poziadavka na NOVU siet s uz obsadenou adresou — a Docker ju spravne odmietol.
+
+    Meno siete je rovnaky zakaznicky udaj ako jej adresa. Premenovat ju pri prevzati nie je nicim
+    odovodnene: stara siet by osirela a nova by sa s nou bila o adresu.
+    """
+    from backend.services import uat_provisioner as P
+
+    d = tmp_path / "mager" / "nex-inbox"
+    d.mkdir(parents=True)
+    (d / "docker-compose.yml").write_text(
+        "name: uat-mager-inbox\n"
+        "networks:\n"
+        "  inbox-net:\n"
+        "    ipam:\n"
+        "      config:\n"
+        "        - subnet: 192.168.48.0/24\n"
+        "services:\n"
+        "  backend:\n"
+        "    image: x\n"
+        "    networks: [inbox-net]\n",
+        encoding="utf-8",
+    )
+    fakty = P.read_instance_facts(d)
+
+    novy = P.build_uat_compose(
+        slug="mager",
+        project="nex-inbox",
+        project_path=tmp_path,
+        source={
+            "services": {"backend": {"image": "y", "networks": ["inbox-dev-net"]}},
+            "networks": {"inbox-dev-net": None},
+        },
+        roles={"backend": "backend", "frontend": None, "db": None},
+        db_user="u",
+        db_name="d",
+        environment="uat",
+        customer_slug="mager",
+        app="inbox",
+        preserved_facts=fakty,
+    )
+
+    siete = [n for n in (novy.get("networks") or {}) if n != P.PROXY_NETWORK]
+    assert siete == ["inbox-net"], f"siet sa premenovala a bude sa bit o adresu: {siete}"
+
+    be = (novy.get("services") or {})["backend"]
+    assert "inbox-net" in (be.get("networks") or []), f"sluzba ukazuje na neexistujucu siet: {be.get('networks')}"
+    assert "inbox-dev-net" not in (be.get("networks") or [])
+
+    ipam = (novy["networks"]["inbox-net"] or {}).get("ipam") or {}
+    assert any(e.get("subnet") == "192.168.48.0/24" for e in (ipam.get("config") or [])), ipam
+
+
+def test_a_matching_network_name_is_left_alone(tmp_path):
+    """Poistka: ked sa mena zhoduju, nema sa co premenuvat a sprava zostava ako bola."""
+    from backend.services import uat_provisioner as P
+
+    d = tmp_path / "icc" / "demo"
+    d.mkdir(parents=True)
+    (d / "docker-compose.yml").write_text(
+        "name: uat-icc-demo\nnetworks:\n  demo-net:\n    ipam:\n      config:\n"
+        "        - subnet: 10.9.0.0/24\nservices:\n  backend:\n    image: x\n    networks: [demo-net]\n",
+        encoding="utf-8",
+    )
+    novy = P.build_uat_compose(
+        slug="icc",
+        project="demo",
+        project_path=tmp_path,
+        source={"services": {"backend": {"image": "y", "networks": ["demo-net"]}}, "networks": {"demo-net": None}},
+        roles={"backend": "backend", "frontend": None, "db": None},
+        db_user="u",
+        db_name="d",
+        environment="uat",
+        customer_slug="icc",
+        app="demo",
+        preserved_facts=P.read_instance_facts(d),
+    )
+    assert [n for n in novy["networks"] if n != P.PROXY_NETWORK] == ["demo-net"]

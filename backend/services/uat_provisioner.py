@@ -1615,6 +1615,7 @@ def build_uat_compose(
                     f"ktorej sieti patria (vo vykreslení sú: {', '.join(sorted(volne))}). "
                     "Hádať sa to nesmie — sieť bez adresy sa na tomto hostiteli nerozbehne."
                 )
+
         for net_name, subnet in priradenie.items():
             net = networks[net_name] if isinstance(networks.get(net_name), dict) else {}
             ipam = net.get("ipam") if isinstance(net.get("ipam"), dict) else {}
@@ -1624,6 +1625,27 @@ def build_uat_compose(
             ipam["config"] = config
             net["ipam"] = ipam
             networks[net_name] = net
+
+        # ICCINT-130, druhé kolo: prenes aj MENO siete, nie len jej adresu.
+        #
+        # Zlyhanie z ostrej prevádzky 15.09.2026, hneď po prvom prevzatí:
+        #     failed to create network uat-mager-inbox_inbox-dev-net:
+        #     invalid pool request: Pool overlaps with other one on this address space
+        #
+        # Vykreslenie sieť premenúva (zdrojový projekt ju volá ``inbox-dev-net``, inštalácia
+        # ``inbox-net``), takže vznikla požiadavka na NOVÚ sieť s už obsadenou adresou — a Docker ju
+        # správne odmietol. Meno siete je rovnaký zákaznícky údaj ako jej adresa; premenovať ju pri
+        # prevzatí nie je ničím odôvodnené (stará by osirela a nová by sa s ňou bila o adresu).
+        for rendered, subnet in list(priradenie.items()):
+            zive = next((n for n, s in preserved_facts.network_subnets.items() if s == subnet), None)
+            if not zive or zive == rendered or zive in networks:
+                continue
+            networks[zive] = networks.pop(rendered)
+            for svc in services.values():
+                if isinstance(svc.get("networks"), list):
+                    svc["networks"] = [zive if n == rendered else n for n in svc["networks"]]
+                elif isinstance(svc.get("networks"), dict) and rendered in svc["networks"]:
+                    svc["networks"][zive] = svc["networks"].pop(rendered)
 
     # Volumes: keep source volume keys (project name namespaces unnamed ones); strip explicit names.
     volumes: dict[str, Any] = {}
