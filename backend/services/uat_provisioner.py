@@ -1186,6 +1186,110 @@ def read_instance_facts(instance_dir: Path) -> InstanceFacts:
 
 
 # ---------------------------------------------------------------------------
+# Nasadenie verzie do EXISTUJÚCEJ inštalácie (ICCINT-133)
+# ---------------------------------------------------------------------------
+#
+# Nasadenie verzie mení VERZIU, nie stavbu inštalácie.
+#
+# Zistené 15.09.2026 pri prvom skutočnom nasadení NEX Inbox 1.5.0 na UAT MÁGERSTAVU. Nasadenie
+# prestavalo celú inštaláciu podľa vývojového projektu a zhodilo appku na sedem minút:
+#
+#     živá inštalácia:       postgres  alembic-init  inbox-net      nex_inbox_mager  mager
+#     čo vyrobilo nasadenie: db        migrate       inbox-dev-net  nex_inbox_dev    dev
+#
+# ICCINT-130 to riešil vymenúvaním údajov, ktoré treba preniesť. Za dva dni to boli ŠTYRI kolá a
+# každé našlo ďalší. Vymenúvanie nemá koniec, lebo zoznam toho, čím sa inštalácia líši od
+# vývojového projektu, nie je uzavretý.
+#
+# NÁŠ VLASTNÝ ŠTANDARD HOVORÍ SPRÁVNE. ``scripts/deploy-prod.sh``, ktorým nasadzujeme NEX Studio:
+#
+#     # ONLY the image tags. Routing, ports, volumes and env are hand-maintained on this file
+#     # and nothing here may touch them.
+#
+# Prvé nasadenie do prázdneho priečinka sa vykreslí zo zdrojového projektu, ako dosiaľ. Každé
+# ďalšie do existujúcej inštalácie zmení len značky obrazov a ``PROJECT_VERSION``.
+
+
+def _bumpni_znacku(image: str, project_slug: str, version: str) -> str:
+    """Nová značka pre obraz, ktorý patrí TOMUTO projektu. Cudzí obraz sa nedvíha.
+
+    ``postgres:16-alpine`` nie je náš obraz a povýšiť ho na verziu appky by znamenalo siahnuť na
+    databázu — teda presne to, čo sa pri nasadení verzie diať nemá.
+    """
+    if ":" not in image:
+        return image
+    meno, _, _stara = image.rpartition(":")
+    zaklad = project_slug.removeprefix("nex-")
+    if project_slug in meno or zaklad in meno:
+        return f"{meno}:v{version.lstrip('v')}"
+    return image
+
+
+def render_version_bump(instance_dir: Path, *, version: str, project_slug: str = "nex-inbox") -> dict[str, Any]:
+    """Compose existujúcej inštalácie s povýšenými značkami obrazov. Nič iné sa nemení."""
+    data = yaml.safe_load((Path(instance_dir) / "docker-compose.yml").read_text(encoding="utf-8")) or {}
+    novy = copy.deepcopy(data)
+    for svc in (novy.get("services") or {}).values():
+        if isinstance(svc, dict) and isinstance(svc.get("image"), str):
+            svc["image"] = _bumpni_znacku(svc["image"], project_slug, version)
+    return novy
+
+
+def env_version_bump(instance_dir: Path, *, version: str, example: Optional[dict[str, str]] = None) -> dict[str, str]:
+    """Prostredie inštalácie s novou verziou. Existujúce hodnoty sa NIKDY neprepisujú.
+
+    V prostredí žije totožnosť inštalácie — názov databázy, zákazník, tajomstvá. Práve tie sa
+    15.09.2026 prepísali vývojovými hodnotami (``nex_inbox_dev``, ``dev``). Nová premenná, ktorú
+    verzia priniesla, sa doplniť MÔŽE; prepísať existujúcu nesmie.
+    """
+    env = _parse_env_file(Path(instance_dir) / ".env")
+    for kluc, hodnota in (example or {}).items():
+        env.setdefault(kluc, hodnota)
+    env["PROJECT_VERSION"] = version.lstrip("v")
+    return env
+
+
+def services_missing_against_source(instance_dir: Path, source: dict[str, Any]) -> list[str]:
+    """Služby, ktoré projekt má a inštalácia nie — porovnané podľa ÚLOHY, nie podľa mena.
+
+    Známy dôsledok toho, že sa inštalácia neprestavuje: novú službu sama nedostane. Musí sa to
+    POVEDAŤ — nie potichu dorobiť prestavbou, lebo práve prestavba je to, čo ICCINT-133 ruší.
+
+    ⚠️ Porovnávať mená nestačí a bol by to falošný poplach. Zmerané 15.09.2026 na kópii skutočnej
+    inštalácie MÁGERSTAVU: hlásilo ``['db', 'migrate']``, hoci to sú tie isté služby, len sa tam
+    volajú ``postgres`` a ``alembic-init``. Takto by to varovalo pri KAŽDEJ prevzatej inštalácii —
+    a varovanie, ktoré chodí vždy, naučí človeka ignorovať aj to pravdivé.
+    """
+    try:
+        data = yaml.safe_load((Path(instance_dir) / "docker-compose.yml").read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return []
+    nase = data.get("services") or {}
+    zdrojove = (source or {}).get("services") or {}
+
+    # ``identify_service_roles`` vracia {úloha: meno_služby}, nie naopak — obrátiť si to je ľahké
+    # a výsledok vyzerá vierohodne, preto je tu otočenie napísané výslovne.
+    nase_ulohy = {uloha for uloha, meno in identify_service_roles(nase).items() if meno}
+    zdroj_meno_na_ulohu = {meno: uloha for uloha, meno in identify_service_roles(zdrojove).items() if meno}
+    mena_nase = set(nase)
+
+    # Migračná služba sa ako úloha nerozpoznáva, ale je to tá istá vec pod iným menom.
+    ma_migraciu = has_alembic_migrate_service(nase)
+
+    chyba = []
+    for meno, definicia in zdrojove.items():
+        if meno in mena_nase:
+            continue
+        uloha = zdroj_meno_na_ulohu.get(meno)
+        if uloha and uloha in nase_ulohy:
+            continue
+        if not uloha and ma_migraciu and has_alembic_migrate_service({meno: definicia}):
+            continue
+        chyba.append(meno)
+    return sorted(chyba)
+
+
+# ---------------------------------------------------------------------------
 # Overwrite guard — never rewrite a deployment this provisioner did not generate
 # ---------------------------------------------------------------------------
 
@@ -1912,9 +2016,38 @@ def provision_uat(
     (uat_dir / "logs").mkdir(exist_ok=True)
 
     compose_path = uat_dir / "docker-compose.yml"
-    compose_path.write_text(render_uat_compose(compose), encoding="utf-8")
-
     env_path = uat_dir / ".env"
+
+    # ICCINT-133 — do EXISTUJÚCEJ inštalácie sa nasadzuje VERZIA, nie stavba.
+    #
+    # Zistené 15.09.2026 na UAT MÁGERSTAVU: vykreslenie zo zdrojového projektu prepísalo inštalácii
+    # mená služieb (postgres→db, alembic-init→migrate), sieť, názov databázy (nex_inbox_mager→
+    # nex_inbox_dev) aj zákazníka (mager→dev), a zhodilo appku na sedem minút.
+    #
+    # Rovnaké pravidlo, aké má ``scripts/deploy-prod.sh`` pre naše vlastné vydania:
+    #     „ONLY the image tags. Routing, ports, volumes and env are hand-maintained."
+    #
+    # Prvé nasadenie do prázdneho priečinka sa vykreslí zo zdroja, ako dosiaľ.
+    # ``is_redeploy`` je False pri vynútenej obnove tajomstiev (``rotate_secrets``) — vtedy je zámerom
+    # postaviť inštaláciu nanovo, takže sa povýšenie verzie nepoužije. Chytila to existujúca stráž
+    # ``test_rotate_secrets_forces_fresh``, nie ja.
+    if is_redeploy and compose_path.is_file() and env_path.is_file():
+        chyba = services_missing_against_source(uat_dir, source)
+        if chyba:
+            # Známy dôsledok, povedaný nahlas: inštalácia sa neprestavuje, takže novú službu sama
+            # nedostane. Zamlčať to by znamenalo vrátiť sa k prestavbe zadnými dverami.
+            warnings.append(
+                f"Projekt má služby, ktoré inštalácia nemá: {', '.join(chyba)}. Nasadenie ich "
+                "nedoplní — inštalácia sa neprestavuje. Ak ich tam treba, doplň ich do inštalácie."
+            )
+        compose_text = render_uat_compose(render_version_bump(uat_dir, version=version, project_slug=project_slug))
+        env_riadky = env_version_bump(uat_dir, version=version, example=env_example)
+        env_content = "\n".join(f"{k}={v}" for k, v in env_riadky.items()) + "\n"
+    else:
+        compose_text = render_uat_compose(compose)
+
+    compose_path.write_text(compose_text, encoding="utf-8")
+
     env_path.write_text(env_content, encoding="utf-8")
     env_path.chmod(0o600)
 
