@@ -321,3 +321,23 @@ app.include_router(dedo_router, prefix="/api/v1/dedo")
 def health_check() -> dict:
     """Health check endpoint — delegates to the health module."""
     return _health_check_handler()
+
+
+@app.get("/api/v1/version")
+def running_version() -> dict:
+    """Verzia BEŽIACEHO backendu — jediná cesta, ktorou sa k nej dostane prehliadač (ICCINT-128).
+
+    **Prečo to nestačilo cez ``/health``.** Panel sa na verziu pýtal práve tam a nikdy ju nedostal:
+    ``/health`` si odchytáva nginx obrazoviek a odpovedá zaň sám (``{"service": "frontend"}``).
+    Panel teda spadol späť na číslo vpečené do obrazoviek a vydával ho za verziu celej aplikácie —
+    presne tá chyba, ktorú mal ICCINT-128 odstrániť. Zbadal to Director 24.09.2026: panel hlásil
+    v4.40.2, kým backend bežal na v4.40.7.
+
+    **Prečo pod ``/api/v1/``.** Táto predpona je presmerovaná na backend v OBOCH prostrediach —
+    nginx v prevádzke aj vite vo vývoji. Vlastná cesta mimo nej by vo vývoji ticho nefungovala, čo
+    je tá istá pasca ešte raz.
+
+    Bez prihlásenia zámerne: to isté číslo potrebuje aj prihlasovacia obrazovka. Nenesie nič, čo by
+    sa nedalo prečítať z bežiaceho obrazu.
+    """
+    return {"version": settings.app_version}

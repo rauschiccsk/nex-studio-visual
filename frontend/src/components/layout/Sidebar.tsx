@@ -108,7 +108,7 @@ export default function Sidebar() {
   const projectsFallback = "/projects";
 
   // ─── Logo slot (shared Brand — E1 chrome unification, CR-NS-067) ───────────
-  // ICCINT-128: číslo vedie CHRBTICA. `VITE_APP_VERSION` je verzia obrazoviek a panel ju dovtedy
+  // ICCINT-128: číslo vedie BACKEND. `VITE_APP_VERSION` je verzia frontendu a panel ju dovtedy
   // vydával za verziu celej appky — 14.09.2026 o štyri vydania vedľa. Pri zhode sa nič nemení.
   const logo = (
     <Brand

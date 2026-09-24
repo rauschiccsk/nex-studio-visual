@@ -2,11 +2,14 @@ import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { LoginForm, type LoginCreds } from "nex-shared";
 import { useAuthStore } from "@/store/authStore";
+import { useBackendVersion } from "@/hooks/useBackendVersion";
+import { verziaDoPanela } from "@/lib/verziaDoPanela";
 
 export default function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const verziaBackendu = useBackendVersion();
   const login = useAuthStore((s) => s.login);
   const token = useAuthStore((s) => s.token);
   const navigate = useNavigate();
@@ -60,8 +63,11 @@ export default function LoginPage() {
           />
         </div>
 
+        {/* ICCINT-128: to isté pravidlo ako v bočnom paneli. Prihlasovacia obrazovka dovtedy písala
+            číslo vpečené do frontendu ako verziu celej aplikácie — a práve na nej ho vidí každý,
+            kto ešte nie je vnútri. */}
         <p className="mt-4 text-center text-[11px] text-[var(--color-text-muted)]">
-          NEX Studio v{import.meta.env.VITE_APP_VERSION || "dev"} · ICC
+          NEX Studio {verziaDoPanela(verziaBackendu, import.meta.env.VITE_APP_VERSION)} · ICC
         </p>
       </div>
     </div>
