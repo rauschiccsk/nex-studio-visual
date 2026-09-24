@@ -400,7 +400,7 @@ async def test_verify_uat_serves_prod_probes_customer_app_container(monkeypatch,
 
     probes: list[list[str]] = []
 
-    async def _probe(cmd, timeout):
+    async def _probe(cmd, timeout, env=None):
         probes.append(cmd)
         return (0, "status 404") if ("python" in cmd and "localhost" in " ".join(cmd)) else (0, "status 200")
 

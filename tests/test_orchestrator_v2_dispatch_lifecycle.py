@@ -390,9 +390,13 @@ class _ProbeRecorder:
     def __init__(self, be: tuple[int, str], fe: tuple[int, str]) -> None:
         self._be, self._fe = be, fe
         self.calls: list[list[str]] = []
+        # ICCINT-151: kontrola po nasadení sa pýta CIEĽOVÉHO stroja — napodobenina to musí vedieť
+        # prijať, inak stráž padne na tvare volania namiesto na jeho význame.
+        self.envs: list[dict[str, str] | None] = []
 
-    async def __call__(self, cmd: list[str], timeout: int) -> tuple[int, str]:
+    async def __call__(self, cmd: list[str], timeout: int, env: dict[str, str] | None = None) -> tuple[int, str]:
         self.calls.append(cmd)
+        self.envs.append(env)
         if "python" in cmd:
             return self._be if "localhost" in " ".join(cmd) else self._fe
         return (0, "ok")
