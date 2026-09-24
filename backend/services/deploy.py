@@ -711,6 +711,9 @@ async def _default_deploy_runner(
             app=app,
             full_project_slug=project_slug,
             admin_password=admin_password,
+            # ICCINT-151 — predpis a nastavenia sa zapíšu aj na stroj, kde inštalácia beží. Pri
+            # testovacej inštalácii nikdy: tá býva vždy tu.
+            deploy_host=deploy_host if is_prod else None,
         )
 
     try:

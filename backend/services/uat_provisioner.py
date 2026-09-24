@@ -63,6 +63,8 @@ import httpx
 import jinja2
 import yaml
 
+from backend.services import remote_instance
+
 # Repo root = .../nex-studio (this file is backend/services/uat_provisioner.py).
 NEX_STUDIO_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATES_DIR = NEX_STUDIO_ROOT / "templates"
@@ -493,6 +495,31 @@ def is_template_placeholder(value: object) -> bool:
     placeholder: it never reaches this test, it has its own branch.
     """
     return isinstance(value, str) and not value.strip()
+
+
+def _parse_env_text(text: Optional[str]) -> dict[str, str]:
+    """To isté z TEXTU — nastavenia inštalácie nemusia ležať na tomto stroji (ICCINT-151)."""
+    out: dict[str, str] = {}
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        out[key.strip()] = value.strip()
+    return out
+
+
+def secrets_from_env_text(text: Optional[str]) -> dict[str, str]:
+    """Tajomstvá z textu nastavení — dvojča k :func:`load_existing_env_secrets` (ICCINT-151).
+
+    ⚠️ Pri nasadzovaní na cudzí stroj sa musia čítať Z CIEĽA. Miestna kópia môže niesť iné heslo a
+    prepísať ňou ostrú inštaláciu znamená odrezať zákazníka od jeho vlastnej databázy.
+    """
+    return {
+        key: value
+        for key, value in _parse_env_text(text).items()
+        if key.lower().endswith(SECRET_SUFFIXES) or key in {"DB_PASSWORD", "POSTGRES_PASSWORD"}
+    }
 
 
 def _parse_env_file(path: Path) -> dict[str, str]:
@@ -2212,6 +2239,7 @@ def provision_uat(
     prod_root: Path = PROD_ROOT,
     admin_password: Optional[str] = None,
     allow_overwrite: bool = False,
+    deploy_host: Optional[str] = None,
 ) -> ProvisionResult:
     """Render an instance's ``{docker-compose.yml,.env}`` + create dirs for ``project_slug``.
 
@@ -2277,8 +2305,28 @@ def provision_uat(
     # pridelené podsiete a pevne určení hostitelia. Číta sa to z toho, čo tam práve je — aj z ručne
     # písaného súboru, keď ide o prevzatie. Tá istá podmienka ako pri tajomstvách: existujúca
     # inštalácia sa neprekresľuje chudobnejšia, než bola.
-    existing_compose = uat_dir / "docker-compose.yml"
-    existing_compose_text = existing_compose.read_text(encoding="utf-8") if existing_compose.is_file() else None
+    if deploy_host:
+        # ICCINT-151 — inštalácia býva na cudzom stroji, takže jej terajší stav sa musí prečítať TAM.
+        # Keby sa čítal tu, prenieslo by sa heslo z miestnej kópie a ostrá databáza zákazníka by
+        # zostala za dverami, ku ktorým už nikto nemá kľúč.
+        remote_env_text, chyba = remote_instance.read_text(uat_dir, ".env", deploy_host=deploy_host)
+        if chyba:
+            raise ValueError(chyba)
+        existing_compose_text, chyba = remote_instance.read_text(uat_dir, "docker-compose.yml", deploy_host=deploy_host)
+        if chyba:
+            raise ValueError(chyba)
+        is_redeploy = remote_env_text is not None and not rotate_secrets
+        preserved_secrets = secrets_from_env_text(remote_env_text) if is_redeploy else {}
+        # Tá istá poistka ako na domácom priečinku, lenže na cieli: do ručne písanej inštalácie sa
+        # nezapisuje bez vedomého rozhodnutia. Kontrola vyššie posúdila len miestnu kópiu a o súbore
+        # na serveri zákazníka nevie nič.
+        if existing_compose_text and not allow_overwrite and not is_provisioner_generated_text(existing_compose_text):
+            raise HandAuthoredDeploymentError(
+                hand_authored_refusal(uat_dir, f"docker-compose.yml na stroji {deploy_host}")
+            )
+    else:
+        existing_compose = uat_dir / "docker-compose.yml"
+        existing_compose_text = existing_compose.read_text(encoding="utf-8") if existing_compose.is_file() else None
 
     db_creds = detect_db_credentials(src_services, roles["db"], project_slug)
     db_user, db_name = db_creds["POSTGRES_USER"], db_creds["POSTGRES_DB"]
@@ -2447,6 +2495,19 @@ def provision_uat(
 
     env_path.write_text(env_content, encoding="utf-8")
     env_path.chmod(0o600)
+
+    if deploy_host:
+        # ICCINT-151 — a to isté na stroj, kde inštalácia beží. Bez tohto kroku by predpis zostal len
+        # tu, poistka proti rozchodu by nasadenie odmietala navždy (a radila „najprv prevezmi", hoci
+        # prevzatie práve prebehlo), a súbor na cieli by starol pod rukami toho, kto tam raz bude
+        # niečo opravovať ručne.
+        chyba = remote_instance.write_files(
+            uat_dir,
+            {"docker-compose.yml": (compose_text, 0o664), ".env": (env_content, 0o600)},
+            deploy_host=deploy_host,
+        )
+        if chyba:
+            raise ValueError(chyba)
 
     _name_base, host = _instance_naming(environment, uat_slug, customer_slug, app)
     if roles["frontend"] is None:

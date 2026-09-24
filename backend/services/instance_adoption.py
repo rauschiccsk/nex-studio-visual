@@ -515,6 +515,7 @@ async def adopting_deploy_runner(
             full_project_slug=project_slug,
             admin_password=admin_password,
             allow_overwrite=True,
+            deploy_host=deploy_host if is_prod else None,
         )
 
     try:

@@ -44,6 +44,7 @@ SHELLING_MODULES = {
     "orchestrator",
     "port_registry",
     "project_adoption",
+    "remote_instance",
     "system_setting",
     "template_bootstrap",
     "uat_provisioner",
