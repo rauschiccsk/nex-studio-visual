@@ -102,3 +102,50 @@ def test_the_readiness_check_builds_its_environment_from_the_target():
 
     env = _verify_env_for_target("mager")
     assert env is not None and env["DOCKER_HOST"] == "ssh://mager"
+
+
+# -- Priečinky s dátami na cieli (ICCINT-151) ----------------------------------
+
+
+def test_the_target_directories_are_prepared_through_docker_not_a_shell():
+    """Kľúč kokpitu je na cieli obmedzený na ``docker system dial-stdio`` — shell ním získať NEJDE,
+    a to je zámer: v tom istom kontajneri bežia stavby projektov. Priečinky pre dáta zákazníka preto
+    nemôžu vzniknúť cez ``ssh mkdir``; musia vzniknúť cez Docker, ktorý je jediné, s čím ten kľúč vie
+    hovoriť.
+    """
+    from pathlib import Path
+
+    from backend.services.orchestrator import _remote_mkdir_cmd
+
+    cmd = _remote_mkdir_cmd(Path("/opt/customers/mager/nex-inbox"), ["originals", "exports"])
+
+    assert cmd[0] == "docker" and "run" in cmd and "--rm" in cmd
+    assert "ssh" not in cmd, "priečinky sa nesmú robiť cez shell — kľúč naň nemá právo"
+    spojene = " ".join(cmd)
+    assert "/opt/customers/mager/nex-inbox:/target" in spojene, "priečinok inštalácie sa nepripojil"
+    assert "originals" in spojene and "exports" in spojene
+
+
+def test_the_prepared_directories_belong_to_the_application_user():
+    """Priečinok vyrobený Dockerom patrí správcovi systému. Aplikácia doň potom nezapíše a chyba sa
+    prejaví až pri prvej faktúre — preto sa vlastník nastavuje hneď. Oba stroje majú toho istého
+    používateľa pod číslom 1000 (overené 24.09.2026)."""
+    from pathlib import Path
+
+    from backend.services.orchestrator import _remote_mkdir_cmd
+
+    spojene = " ".join(_remote_mkdir_cmd(Path("/opt/customers/mager/nex-inbox"), ["originals"]))
+
+    assert "chown" in spojene and "1000:1000" in spojene
+
+
+def test_nothing_outside_the_instance_directory_is_touched():
+    """Zákaznícke dáta iných inštalácií sú na tom istom stroji. Pripojiť sa smie VÝHRADNE priečinok
+    tejto inštalácie — nie ``/opt/customers`` a nie koreň."""
+    from pathlib import Path
+
+    from backend.services.orchestrator import _remote_mkdir_cmd
+
+    spojene = " ".join(_remote_mkdir_cmd(Path("/opt/customers/mager/nex-inbox"), ["originals"]))
+
+    assert " -v /:/" not in spojene and "/opt/customers:/" not in spojene

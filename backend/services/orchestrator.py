@@ -35,7 +35,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from time import perf_counter
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple, Optional, Sequence
 from urllib.parse import urlsplit, urlunsplit
 
 import yaml
@@ -4979,6 +4979,40 @@ def _docker_env_for_target(env: dict[str, str], deploy_host: Optional[str]) -> d
         return out
     out["DOCKER_HOST"] = f"ssh://{ciel}"
     return out
+
+
+#: Obraz, v ktorom sa na cieli vyrábajú priečinky. Malý a všade dostupný; nič z neho nebeží ďalej.
+_MKDIR_IMAGE = "alpine:3.20"
+
+
+def _remote_mkdir_cmd(instance_dir: "Path", subdirs: "Sequence[str]", *, uid: int = 1000, gid: int = 1000) -> list[str]:
+    """Príkaz, ktorým na CIELI vzniknú priečinky pre dáta zákazníka (ICCINT-151).
+
+    Prečo cez Docker a nie ``ssh mkdir``: kľúč kokpitu je na cieli obmedzený na
+    ``command="docker system dial-stdio"`` — shell ním získať nejde, a to je zámer, lebo v tom istom
+    kontajneri bežia stavby projektov. Docker je teda jediné, s čím ten kľúč vie hovoriť; priečinky
+    preto vyrobí kontajner, ktorý má pripojený priečinok inštalácie.
+
+    Pripája sa VÝHRADNE priečinok tejto inštalácie — nie ``/opt/customers`` a nie koreň. Na tom
+    stroji sú dáta iných zákazníkov a nasadenie jedného sa ich nemá ako dotknúť.
+
+    Vlastník sa nastavuje hneď: priečinok vyrobený Dockerom patrí správcovi systému a aplikácia by
+    doň nezapísala — chyba by sa prejavila až pri prvej faktúre. Oba naše stroje majú používateľa
+    pod číslom 1000 (overené 24.09.2026).
+    """
+    ciele = " ".join(f"/target/{d}" for d in subdirs)
+    skript = f"mkdir -p {ciele} && chown {uid}:{gid} {ciele}"
+    return [
+        "docker",
+        "run",
+        "--rm",
+        "-v",
+        f"{instance_dir}:/target",
+        _MKDIR_IMAGE,
+        "sh",
+        "-c",
+        skript,
+    ]
 
 
 def _verify_env_for_target(deploy_host: Optional[str]) -> Optional[dict[str, str]]:
