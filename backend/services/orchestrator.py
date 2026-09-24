@@ -23,6 +23,7 @@ import contextlib
 import hashlib
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -4980,6 +4981,18 @@ def _docker_env_for_target(env: dict[str, str], deploy_host: Optional[str]) -> d
     return out
 
 
+def _verify_env_for_target(deploy_host: Optional[str]) -> Optional[dict[str, str]]:
+    """Prostredie pre OVERENIE po nasadení — ``None``, keď sa nasadzuje sem (ICCINT-151).
+
+    Nasadenie a overenie sa musia pýtať toho istého stroja. Keby overenie siahlo na tunajší Docker,
+    kokpit by hlásil úspech podľa stroja, kde sa nič nenasadilo — to je horšie než neoverovať vôbec.
+    Vlastná funkcia preto, že práve toto miesto sa dá stratiť pri úprave a nikto si to nevšimne.
+    """
+    if not (deploy_host or "").strip():
+        return None
+    return _docker_env_for_target(dict(os.environ), deploy_host)
+
+
 async def _run_uat_deploy(
     project_slug: str,
     uat_slug: str,
@@ -5061,6 +5074,7 @@ async def _run_uat_deploy(
             customer_slug=customer_slug,
             app=app,
             full_project_slug=full_project_slug,
+            deploy_host=deploy_host,
         )
     return await _verify_uat_serves(project_slug, uat_slug)
 
@@ -5166,6 +5180,7 @@ async def _verify_uat_serves(
     customer_slug: Optional[str] = None,
     app: Optional[str] = None,
     full_project_slug: Optional[str] = None,
+    deploy_host: Optional[str] = None,
 ) -> tuple[bool, str]:
     """Post-``up`` readiness gate for a deploy (icc-deploy §5.6 #2): confirm the deployed app actually
     SERVES before :func:`_run_uat_deploy` reports success — every backend ``/api`` responds AND every
@@ -5201,9 +5216,12 @@ async def _verify_uat_serves(
         return True, "OK"
 
     base = ["docker", "compose", "-f", str(uat_compose)]
+    # ICCINT-151 — overenie sa musí pýtať TOHO ISTÉHO stroja, na ktorý sa nasadzovalo. Inak by
+    # kokpit hlásil úspech podľa stroja, kde sa nič nenasadilo — horšie než neoverovať vôbec.
+    env_ciela = _verify_env_for_target(deploy_host)
     # Backend: probe /api on localhost inside the backend container (any <500 = "responds").
     be_port = uat_provisioner.detect_internal_port(services[be_role], 8000)
-    be_ready, be_last = await _await_http_ready(base, be_role, be_port, host="localhost", path="/api")
+    be_ready, be_last = await _await_http_ready(base, be_role, be_port, host="localhost", path="/api", env=env_ciela)
     if not be_ready:
         return False, f"backend '{be_role}' /api not responding within {ACCEPTANCE_SMOKE_READY_TIMEOUT}s: {be_last}"
     # Frontend: probe / on the frontend nginx FROM the backend, addressing it by its unique UAT container
@@ -5218,7 +5236,7 @@ async def _verify_uat_serves(
             else f"uat-{uat_slug}"
         )
         fe_host = f"{name_base}-{fe_role}"
-        fe_ready, fe_last = await _await_http_ready(base, be_role, fe_port, host=fe_host, path="/")
+        fe_ready, fe_last = await _await_http_ready(base, be_role, fe_port, host=fe_host, path="/", env=env_ciela)
         if not fe_ready:
             return False, f"frontend '{fe_role}' not serving within {ACCEPTANCE_SMOKE_READY_TIMEOUT}s: {fe_last}"
         # The checks above prove the app serves IN-network; they do NOT prove the PUBLIC Traefik route works.
@@ -5558,7 +5576,7 @@ ACCEPTANCE_SMOKE_READY_TIMEOUT = 120  # bounded wait for the app to answer /heal
 ACCEPTANCE_SMOKE_READY_INTERVAL = 3  # seconds between readiness polls.
 
 
-async def _compose_smoke_step(cmd: list[str], timeout: int) -> tuple[int, str]:
+async def _compose_smoke_step(cmd: list[str], timeout: int, env: Optional[dict[str, str]] = None) -> tuple[int, str]:
     """Run ONE ``docker compose`` subprocess for the acceptance smoke; never raises.
 
     Returns ``(returncode, combined_output)``. Mirrors :func:`_run_uat_deploy`'s subprocess dance
@@ -5569,7 +5587,7 @@ async def _compose_smoke_step(cmd: list[str], timeout: int) -> tuple[int, str]:
     """
     try:
         proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=env
         )
     except OSError as exc:
         return 127, f"spawn failed: {exc}"
@@ -5753,6 +5771,7 @@ async def _await_http_ready(
     path: str = "/health",
     timeout: int = ACCEPTANCE_SMOKE_READY_TIMEOUT,
     interval: int = ACCEPTANCE_SMOKE_READY_INTERVAL,
+    env: Optional[dict[str, str]] = None,
 ) -> tuple[bool, str]:
     """Poll an in-container HTTP endpoint (run the stdlib probe inside ``exec_service`` via
     ``docker compose exec``) until the server RESPONDS (any status ``< 500``) or ``timeout`` elapses.
@@ -5767,7 +5786,7 @@ async def _await_http_ready(
     attempts = max(1, timeout // interval)
     last = "no response"
     for i in range(attempts):
-        rc, out = await _compose_smoke_step(cmd, 30)
+        rc, out = await _compose_smoke_step(cmd, 30, env=env)
         if rc == 0:
             return True, out.strip()[-200:] or "ready"
         last = out.strip()[-200:] or f"exit {rc}"

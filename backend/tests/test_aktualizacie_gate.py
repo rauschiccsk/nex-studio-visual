@@ -117,7 +117,7 @@ class _Recorder:
         self._release_notes = release_notes
         self.calls: list[list[str]] = []
 
-    async def __call__(self, cmd: list[str], timeout: int) -> tuple[int, str]:
+    async def __call__(self, cmd: list[str], timeout: int, env=None) -> tuple[int, str]:
         self.calls.append(cmd)
         joined = " ".join(cmd)
         if "release-notes" in joined:
@@ -140,7 +140,7 @@ class _SeqRecorder(_Recorder):
         self._outputs = list(outputs)
         self.rn_calls = 0
 
-    async def __call__(self, cmd: list[str], timeout: int) -> tuple[int, str]:
+    async def __call__(self, cmd: list[str], timeout: int, env=None) -> tuple[int, str]:
         self.calls.append(cmd)
         if "release-notes" in " ".join(cmd):
             out = self._outputs[min(self.rn_calls, len(self._outputs) - 1)]
@@ -578,7 +578,7 @@ async def test_second_version_gate_resolved_by_pre_smoke_note(tmp_path, monkeypa
         return _rn_probe_out(200, vs)
 
     class _DiskProbeRecorder(_Recorder):
-        async def __call__(self, cmd, timeout):
+        async def __call__(self, cmd, timeout, env=None):
             if "release-notes" in " ".join(cmd):
                 self.calls.append(cmd)
                 return (0, _served_from_disk())  # the endpoint serves whatever notes are baked on disk

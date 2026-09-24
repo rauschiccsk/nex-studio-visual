@@ -66,7 +66,7 @@ def _compose_double(monkeypatch, rows: list[dict], *, logs: str = "boom") -> lis
     """Stand in for the docker CLI: ``ps`` answers with `rows`, ``logs`` with `logs`."""
     calls: list[list[str]] = []
 
-    async def _step(cmd, timeout):
+    async def _step(cmd, timeout, env=None):
         calls.append(cmd)
         if "ps" in cmd:
             return 0, "\n".join(json.dumps(r) for r in rows)

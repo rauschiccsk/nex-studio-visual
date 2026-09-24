@@ -162,7 +162,7 @@ class _StepRecorder:
         self._results = results
         self.calls: list[list[str]] = []
 
-    async def __call__(self, cmd: list[str], timeout: int) -> tuple[int, str]:
+    async def __call__(self, cmd: list[str], timeout: int, env=None) -> tuple[int, str]:
         self.calls.append(cmd)
         if "python" in cmd:  # the readiness probe runs `exec -T <svc> python -c …`
             joined = " ".join(cmd)
@@ -369,7 +369,7 @@ class _EnvFileCapturingRecorder(_StepRecorder):
         self.env_file_path: str | None = None
         self.env_file_content: str | None = None
 
-    async def __call__(self, cmd: list[str], timeout: int) -> tuple[int, str]:
+    async def __call__(self, cmd: list[str], timeout: int, env=None) -> tuple[int, str]:
         if "up" in cmd and "--env-file" in cmd:
             path = Path(cmd[cmd.index("--env-file") + 1])
             self.env_file_path = str(path)

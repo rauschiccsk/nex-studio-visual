@@ -55,3 +55,50 @@ def test_the_original_environment_is_not_mutated():
     _docker_env_for_target(povodne, "mager")
 
     assert "DOCKER_HOST" not in povodne
+
+
+def test_the_readiness_check_asks_the_same_machine_it_deployed_to(monkeypatch):
+    """Nasadenie a overenie musia hovoriť s TÝM ISTÝM strojom.
+
+    Overenie „appka naozaj slúži" sa robí príkazom ``docker compose exec`` — teda cez Docker. Keby
+    nasadenie išlo na MAGER a overenie sa pýtalo tunajšieho Dockera, kokpit by hlásil úspech podľa
+    stroja, na ktorom sa nič nenasadilo. To je horšie než neoverovať vôbec.
+    """
+    import asyncio
+
+    from backend.services import orchestrator as O
+
+    videne: list[dict] = []
+
+    async def fake_step(cmd, timeout, env=None):  # noqa: ARG001
+        videne.append(env or {})
+        return 0, "HTTP 200"
+
+    monkeypatch.setattr(O, "_compose_smoke_step", fake_step)
+
+    asyncio.run(
+        O._await_http_ready(
+            ["docker", "compose", "-f", "/x/docker-compose.yml"],
+            "backend",
+            8000,
+            host="localhost",
+            path="/api",
+            env={"DOCKER_HOST": "ssh://mager"},
+        )
+    )
+
+    assert videne, "overenie nespustilo ani jeden príkaz"
+    assert videne[0].get("DOCKER_HOST") == "ssh://mager", "overenie sa pýtalo iného stroja, než na ktorý sa nasadzovalo"
+
+
+def test_the_readiness_check_builds_its_environment_from_the_target():
+    """Miesto, kde sa cieľ prekladá na prostredie pre overenie. Vlastná stráž preto, že pri úprave
+    sa práve tento riadok stratí najľahšie — a strata sa neprejaví inak než tichým overovaním
+    nesprávneho stroja."""
+    from backend.services.orchestrator import _verify_env_for_target
+
+    assert _verify_env_for_target(None) is None, "bez cieľa sa overuje tu — netreba nič stavať"
+    assert _verify_env_for_target("  ") is None, "prázdna hodnota nie je cieľ"
+
+    env = _verify_env_for_target("mager")
+    assert env is not None and env["DOCKER_HOST"] == "ssh://mager"

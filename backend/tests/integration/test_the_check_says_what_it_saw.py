@@ -95,7 +95,7 @@ def test_the_managers_screen_carries_no_english() -> None:
 async def test_the_reported_detail_is_the_measured_one_end_to_end(monkeypatch) -> None:
     """Through the real :func:`_boot_leg`, not the helper alone — the probe's own words must not leak back."""
 
-    async def _step(cmd, timeout):
+    async def _step(cmd, timeout, env=None):
         if "ps" in cmd:
             return 0, "\n".join(
                 json.dumps(r)
