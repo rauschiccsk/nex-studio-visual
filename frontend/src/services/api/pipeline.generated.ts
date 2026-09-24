@@ -2492,6 +2492,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/version": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Running Version
+         * @description Verzia BEŽIACEHO backendu — jediná cesta, ktorou sa k nej dostane prehliadač (ICCINT-128).
+         *
+         *     **Prečo to nestačilo cez ``/health``.** Panel sa na verziu pýtal práve tam a nikdy ju nedostal:
+         *     ``/health`` si odchytáva nginx obrazoviek a odpovedá zaň sám (``{"service": "frontend"}``).
+         *     Panel teda spadol späť na číslo vpečené do obrazoviek a vydával ho za verziu celej aplikácie —
+         *     presne tá chyba, ktorú mal ICCINT-128 odstrániť. Zbadal to Director 24.09.2026: panel hlásil
+         *     v4.40.2, kým backend bežal na v4.40.7.
+         *
+         *     **Prečo pod ``/api/v1/``.** Táto predpona je presmerovaná na backend v OBOCH prostrediach —
+         *     nginx v prevádzke aj vite vo vývoji. Vlastná cesta mimo nej by vo vývoji ticho nefungovala, čo
+         *     je tá istá pasca ešte raz.
+         *
+         *     Bez prihlásenia zámerne: to isté číslo potrebuje aj prihlasovacia obrazovka. Nenesie nič, čo by
+         *     sa nedalo prečítať z bežiaceho obrazu.
+         */
+        get: operations["running_version_api_v1_version_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/versions/{version_id}": {
         parameters: {
             query?: never;
@@ -10405,6 +10438,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    running_version_api_v1_version_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
         };
