@@ -1225,6 +1225,68 @@ def _bumpni_znacku(image: str, project_slug: str, version: str) -> str:
     return image
 
 
+def _env_mapa(svc: Any) -> dict[str, Any]:
+    """Prostredie služby ako mapa. Compose dovoľuje aj zoznam ``KLUC=hodnota`` — obe podoby sú platné
+    a inštalácie v poli majú jednu aj druhú, takže porovnávať sa musia v jednom tvare."""
+    prostredie = svc.get("environment") if isinstance(svc, dict) else None
+    if isinstance(prostredie, dict):
+        return dict(prostredie)
+    if isinstance(prostredie, list):
+        out: dict[str, Any] = {}
+        for polozka in prostredie:
+            if isinstance(polozka, str) and "=" in polozka:
+                k, _, v = polozka.partition("=")
+                out[k] = v
+        return out
+    return {}
+
+
+def _chybajuce_env(
+    instalacia: dict[str, Any], source: Optional[dict[str, Any]], z_env_suboru: Optional[set[str]] = None
+) -> dict[str, list[str]]:
+    """Premenné, ktoré ZDROJ deklaruje a inštalácia ich nemá — podľa ÚLOHY služby, nie podľa mena.
+
+    ICCINT-104: appka si do svojho compose napíše, čo nová verzia potrebuje (NEX Manager 1.2.2 takto
+    pýtal ``APP_VERSION``). Inštalácia sa pri opakovanom nasadení neprestavuje, takže novú premennú
+    sama nedostane — a chrbtica potom hlási verziu, ktorú nepozná. Doplniť CHÝBAJÚCU sa smie;
+    prepísať EXISTUJÚCU nikdy (september 2026: prestavba prepísala ostré hodnoty vývojovými).
+
+    ⚠️ Kľúč zo sprievodného ``.env`` NIE JE chýbajúci: služby ho dostávajú cez ``env_file``. Bez tejto
+    výnimky by porovnanie hlásilo ako chýbajúce takmer všetko, čo inštalácia bežne má — a varovanie,
+    ktoré chodí vždy, naučí človeka ignorovať aj to pravdivé."""
+    zdroj_sluzby = ((source or {}).get("services") or {}) if source else {}
+    inst_sluzby = instalacia.get("services") or {}
+    if not zdroj_sluzby or not inst_sluzby:
+        return {}
+    zdroj_role = identify_service_roles(zdroj_sluzby)
+    inst_role = identify_service_roles(inst_sluzby)
+    chyba: dict[str, list[str]] = {}
+    for rola, zdroj_meno in zdroj_role.items():
+        inst_meno = inst_role.get(rola)
+        if not zdroj_meno or not inst_meno:
+            continue
+        zdroj_env = _env_mapa(zdroj_sluzby.get(zdroj_meno) or {})
+        inst_env = _env_mapa(inst_sluzby.get(inst_meno) or {})
+        mimo = z_env_suboru or set()
+        nove = [k for k in zdroj_env if k not in inst_env and k not in mimo]
+        if nove:
+            chyba[inst_meno] = sorted(nove)
+    return chyba
+
+
+def env_keys_missing_against_source(instance_dir: Path, source: Optional[dict[str, Any]]) -> dict[str, list[str]]:
+    """Premenné, ktoré projekt deklaruje a nasadená inštalácia ich nemá. Prázdne = sedí to.
+
+    Dvojička k :func:`services_missing_against_source`. Tá hovorí o chýbajúcej SLUŽBE a nedopĺňa ju;
+    táto hovorí o chýbajúcej PREMENNEJ — a tú :func:`render_version_bump` doplní, lebo bez nej nová
+    verzia nefunguje, hoci nasadenie skončí zeleným „Nasadené" (ICCINT-104, 24.09.2026)."""
+    try:
+        data = yaml.safe_load((Path(instance_dir) / "docker-compose.yml").read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+    return _chybajuce_env(data, source, set(_parse_env_file(Path(instance_dir) / ".env")))
+
+
 def render_version_bump(
     instance_dir: Path,
     *,
@@ -1254,6 +1316,27 @@ def render_version_bump(
 
     if source is None or project_path is None:
         return novy
+
+    # ICCINT-104 — premennú, ktorú NOVÁ verzia deklaruje a inštalácia ju nemá, doplníme. Existujúcu
+    # hodnotu nikdy neprepisujeme: to je presne to, čo v septembri prepísalo ostré nastavenia
+    # vývojovými. Pridanie chýbajúceho kľúča a prepísanie existujúceho sú dve rôzne veci.
+    _z_env = set(_parse_env_file(Path(instance_dir) / ".env"))
+    for _inst_meno, _kluce in _chybajuce_env(novy, source, _z_env).items():
+        _zdroj_role = identify_service_roles((source or {}).get("services") or {})
+        _inst_role = identify_service_roles(sluzby)
+        _rola = next((r for r, m in _inst_role.items() if m == _inst_meno), None)
+        _zdroj_meno = _zdroj_role.get(_rola) if _rola else None
+        if not _zdroj_meno:
+            continue
+        _zdroj_env = _env_mapa(((source or {}).get("services") or {}).get(_zdroj_meno) or {})
+        _svc = sluzby.get(_inst_meno) or {}
+        _cielove = _svc.get("environment")
+        if isinstance(_cielove, list):
+            _svc["environment"] = {**_env_mapa(_svc), **{k: _zdroj_env[k] for k in _kluce}}
+        else:
+            _svc.setdefault("environment", {})
+            for _k in _kluce:
+                _svc["environment"].setdefault(_k, _zdroj_env[_k])
 
     # Kľúčom je MENO OBRAZU, nie meno služby. ``identify_service_roles`` pozná len backend/frontend/db,
     # takže ``alembic-init`` by cezeň prepadol — a pritom práve on potrebuje ``nex-inbox-backend``,
@@ -2135,6 +2218,15 @@ def provision_uat(
             warnings.append(
                 f"Projekt má služby, ktoré inštalácia nemá: {', '.join(chyba)}. Nasadenie ich "
                 "nedoplní — inštalácia sa neprestavuje. Ak ich tam treba, doplň ich do inštalácie."
+            )
+        doplnene = env_keys_missing_against_source(uat_dir, source)
+        if doplnene:
+            # ICCINT-104 — doplnenie sa NESMIE stať ticho. Chýbajúcu premennú dopĺňame (bez nej nová
+            # verzia nefunguje), ale nasadenie musí povedať KTORÚ — inak zelené „Nasadené" zakryje,
+            # že sa inštalácia zmenila.
+            warnings.append(
+                "Nová verzia potrebuje premenné, ktoré inštalácia nemala — doplnené: "
+                + "; ".join(f"{sluzba}: {', '.join(kluce)}" for sluzba, kluce in sorted(doplnene.items()))
             )
         povysene = render_version_bump(
             uat_dir,

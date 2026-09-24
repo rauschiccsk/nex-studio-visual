@@ -67,6 +67,65 @@ def _instalacia(tmp_path: Path) -> Path:
     return d
 
 
+# -- Premenna, ktoru NOVA VERZIA potrebuje, sa k instalacii dostane (ICCINT-104) -----
+
+
+ZDROJ_S_NOVOU_PREMENNOU = {
+    "services": {
+        "db": {"image": "postgres:16-alpine", "environment": {"POSTGRES_DB": "nex_inbox_dev"}},
+        "backend": {
+            "image": "nex-inbox-backend:v1.5.0",
+            "build": {"context": "./backend"},
+            "environment": {
+                "APP_VERSION": "${VITE_APP_VERSION:-1.0.0}",
+                "TENANT_SLUG": "dev",
+            },
+        },
+    }
+}
+
+
+def test_a_new_env_key_the_version_needs_reaches_the_instance(tmp_path):
+    """24.09.2026, ICCINT-104: NEX Manager 1.2.2 naucil chrbticu hlasit svoju verziu a projekt si
+    do svojho compose napisal, odkial ma to cislo dostat. Nasadena instalacia to cislo aj tak
+    nedostala — instalacia sa pri opakovanom nasadeni neprestavuje, takze NOVA premenna sa k nej
+    nema ako dostat. Chrbtica potom hlasi ``0.0.0-dev`` a zelene ``Nasadene`` to zakryje."""
+    d = _instalacia(tmp_path)
+
+    novy = P.render_version_bump(
+        d, version="1.5.0", project_slug="nex-inbox", source=ZDROJ_S_NOVOU_PREMENNOU, project_path=tmp_path
+    )
+
+    prostredie = novy["services"]["backend"].get("environment") or {}
+    assert "APP_VERSION" in prostredie, "premenna, ktoru nova verzia potrebuje, k instalacii nedosla"
+    assert prostredie["APP_VERSION"] == "${VITE_APP_VERSION:-1.0.0}"
+
+
+def test_an_existing_value_is_never_overwritten_by_the_source(tmp_path):
+    """Druhy smer — a je to septembrova lekcia: prestavba instalacie prepisala OSTRE hodnoty
+    vyvojovymi (``nex_inbox_dev``, ``dev``). Doplnit chybajucu premennu sa smie; prepisat
+    existujucu nikdy."""
+    d = _instalacia(tmp_path)
+
+    novy = P.render_version_bump(
+        d, version="1.5.0", project_slug="nex-inbox", source=ZDROJ_S_NOVOU_PREMENNOU, project_path=tmp_path
+    )
+
+    assert novy["services"]["postgres"]["environment"]["POSTGRES_DB"] == "nex_inbox_mager", (
+        "nasadenie prepisalo databazu instalacie hodnotou zo zdrojaku"
+    )
+
+
+def test_what_was_added_is_named(tmp_path):
+    """Doplnenie sa nesmie stat ticho. Kto to potom hlada, ma vidiet, CO pribudlo — rovnako, ako
+    sa dnes nahlas hovori o chybajucej sluzbe."""
+    d = _instalacia(tmp_path)
+
+    chyba = P.env_keys_missing_against_source(d, ZDROJ_S_NOVOU_PREMENNOU)
+
+    assert chyba == {"backend": ["APP_VERSION"]}, chyba
+
+
 # -- Stavba instalacie sa nasadenim NEMENI ------------------------------------
 
 
