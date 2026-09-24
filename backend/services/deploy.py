@@ -311,6 +311,19 @@ def _semver_sort_key(version_number: str) -> tuple[int, ...]:
     return tuple(int(p) if p.isdigit() else 0 for p in version_number.lstrip("vV").split("."))
 
 
+def _is_pre_release(version_number: str) -> bool:
+    """Je to ešte vývojové číslo, teda pod 1.0.0? (ICCINT-151)
+
+    Na tomto stojí povýšenie pri prvom ostrom nasadení: povýšiť na 1.0.0 má zmysel len tam, odkiaľ
+    sa povyšuje. Projekt, ktorý je už na 1.2.2, by sa tým OZNAČIL NIŽŠÍM číslom, než aký kód nesie —
+    a appka by potom tvrdila verziu, ktorou nie je.
+
+    Prázdne alebo nečitateľné číslo sa berie ako vývojové: to je pôvodné správanie a mení sa len
+    tam, kde je číslo jasne 1.0.0 alebo vyššie.
+    """
+    return _semver_sort_key(version_number)[0] < 1
+
+
 def list_verified_versions(db: Session, project_id: UUID) -> list[str]:
     """The project's VERIFIED version_numbers — deployable via Nasadiť (design §3.4).
 
@@ -881,12 +894,23 @@ async def deploy(
 
     # §3.6 versioning: the project's first PROD deploy bumps to v1.0.0. The bumped
     # version is what is provisioned + recorded so the audit row reflects PROD reality.
+    #
+    # ⚠️ Povýšenie platí LEN pre projekt, ktorý ešte na 1.0.0 nie je. Pravidlo si svoj vlastný
+    # predpoklad — „do ostrej prevádzky sa ide z vývojového 0.x" — dovtedy neoverovalo, takže by
+    # projekt na 1.2.2 označilo ako v1.0.0. Zmerané 24.09.2026 pred prvým ostrým nasadením
+    # MÁGERSTAV Managera: zákazníkovi by sa postavil kód 1.2.2 a aplikácia by sa hlásila ako 1.0.0.
+    # Do kokpitu sa NEX Manager dostal až po tom, čo už ostro bežal (nasadzoval sa rukami), takže
+    # kokpit o jeho ostrej histórii nevie a za prvé nasadenie považuje to svoje. Rovnako to čaká
+    # každý ďalší projekt, ktorý preberáme spätne (ICCINT-151).
     deployed_version = version_number
     bumped_to: Optional[str] = None
     first_prod = environment == "prod" and not project_had_prod_deploy(db, project.id)
+    # Cieľ povýšenia: 1.0.0 pre projekt, ktorý pod ním ešte je, inak jeho VLASTNÉ číslo. Označiť
+    # verziu za vydanú treba v oboch prípadoch — prečíslovať len v tom prvom.
+    graduation_target = FIRST_PROD_VERSION if _is_pre_release(version_number) else version_number
     if first_prod:
-        deployed_version = FIRST_PROD_VERSION
-        bumped_to = FIRST_PROD_VERSION
+        deployed_version = graduation_target
+        bumped_to = graduation_target
 
     # Per-customer UAT/PROD instance slug: customer subdomain (preferred) or slug,
     # namespaced by environment so a customer's UAT and PROD never collide.
@@ -996,7 +1020,7 @@ async def deploy(
     if first_prod and ok:
         from backend.services import claude_agent
 
-        _graduate_version_in_place(db, version, FIRST_PROD_VERSION, claude_agent.PROJECTS_ROOT / project.slug)
+        _graduate_version_in_place(db, version, graduation_target, claude_agent.PROJECTS_ROOT / project.slug)
 
     event = DeployEvent(
         customer_id=customer_id,

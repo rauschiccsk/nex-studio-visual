@@ -482,6 +482,61 @@ class TestGraduationGatedOnDeploySuccess:
         ]
         assert prod_events and prod_events[0].status == "failed"
 
+    def test_a_project_already_past_1_0_0_keeps_its_own_number(self, client, db_session, fake_deploy_runner):
+        """⚠️ Prvé ostré nasadenie NESMIE projekt označiť nižším číslom, než aký kód nesie (ICCINT-151).
+
+        Zmerané 24.09.2026 pred prvým ostrým nasadením MÁGERSTAV Managera: kokpit by ho označil ako
+        v1.0.0, hoci projekt je na 1.2.2. Zákazníkovi by sa postavil kód 1.2.2 a aplikácia by sa
+        hlásila ako 1.0.0 — presne to, čo sme v ten istý deň dvakrát opravovali.
+
+        Príčina: pravidlo „prvé ostré nasadenie povýši na 1.0.0" si svoj vlastný predpoklad — že sa
+        povyšuje z vývojového 0.x — neoverovalo. Do kokpitu sa NEX Manager dostal až po tom, čo už
+        ostro bežal, takže kokpit o jeho histórii nevie a za prvé nasadenie považuje to svoje.
+        Rovnako to čaká každý ďalší projekt, ktorý preberáme spätne.
+        """
+        user = _current_user(db_session)
+        project = _seed_project(db_session, creator=user)
+        version = _seed_verified_version(db_session, project, "1.2.2")
+        version_id = version.id
+        customer = _seed_customer(db_session, project, "mager")
+
+        client.post(f"/api/v1/customers/{customer.id}/deploy", json={"version_number": "1.2.2", "environment": "uat"})
+        client.post(f"/api/v1/customers/{customer.id}/accept", json={"version_number": "1.2.2"})
+        prve = client.post(
+            f"/api/v1/customers/{customer.id}/deploy",
+            json={"version_number": "1.2.2", "environment": "prod"},
+        )
+
+        assert prve.status_code == 200, prve.text
+        assert prve.json()["bumped_to"] == "1.2.2", "projekt dostal iné číslo, než aké nesie"
+        assert prve.json()["event"]["version_number"] == "1.2.2", "v evidencii by ostalo nesprávne číslo"
+
+        db_session.expire_all()
+        rows = db_session.execute(select(Version).where(Version.project_id == project.id)).scalars().all()
+        assert [r.version_number for r in rows] == ["1.2.2"], "verzia sa prečíslovala"
+        assert rows[0].id == version_id
+        assert rows[0].status == "released", "označiť za vydanú treba aj tak — mení sa len prečíslovanie"
+
+    def test_a_project_still_below_1_0_0_is_graduated_as_before(self, client, db_session, fake_deploy_runner):
+        """Poistka proti tomu, aby oprava zrušila pôvodné pravidlo. Z vývojového čísla sa povyšuje ďalej."""
+        user = _current_user(db_session)
+        project = _seed_project(db_session, creator=user)
+        _seed_verified_version(db_session, project, "v0.9.0")
+        customer = _seed_customer(db_session, project, "andros")
+
+        client.post(f"/api/v1/customers/{customer.id}/deploy", json={"version_number": "v0.9.0", "environment": "uat"})
+        client.post(f"/api/v1/customers/{customer.id}/accept", json={"version_number": "v0.9.0"})
+        prve = client.post(
+            f"/api/v1/customers/{customer.id}/deploy",
+            json={"version_number": "v0.9.0", "environment": "prod"},
+        )
+
+        assert prve.json()["bumped_to"] == "v1.0.0"
+
+        db_session.expire_all()
+        rows = db_session.execute(select(Version).where(Version.project_id == project.id)).scalars().all()
+        assert [r.version_number for r in rows] == ["v1.0.0"]
+
     def test_deploying_already_v1_0_0_version_is_idempotent(self, client, db_session, fake_deploy_runner):
         """Deploying a version ALREADY numbered v1.0.0 neither errors nor double-graduates (§3.6 idempotent).
 
