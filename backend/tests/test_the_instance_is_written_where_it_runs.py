@@ -256,3 +256,93 @@ def test_the_target_machine_is_named_in_the_docker_environment() -> None:
     assert remote_instance.docker_env("mager")["DOCKER_HOST"] == "ssh://mager"
     assert remote_instance.docker_env(None) is None
     assert remote_instance.docker_env("   ") is None
+
+
+# ── 5. prevzatie vykresľuje, nepovyšuje ───────────────────────────────────────
+
+
+def test_adoption_renders_from_the_project_instead_of_bumping_the_version(tmp_path, monkeypatch) -> None:
+    """⚠️ Zmerané na ostrom MÁGERSTAVE 24.09.2026. Prevzatie šlo cestou „do existujúcej inštalácie
+    nasadzuj VERZIU, nie stavbu" (ICCINT-133) a vzalo pripnuté obrazy `nexmanager-backend:1.0.0` bez
+    akéhokoľvek predpisu na stavbu — len prepísalo číslo na `v1.2.2`. Taký obraz nikto nepostaví ani
+    nikde neleží a stráž ICCINT-137 nasadenie zastavila.
+
+    Zmyslom prevzatia je vziať inštaláciu POD SPRÁVU, teda vykresliť ju zo zdrojového projektu;
+    náhľad predtým potvrdil, že sa nič nestratí. Povýšenie chráni inštaláciu, ktorú kokpit UŽ
+    spravuje — nie tú, ktorú práve preberá.
+    """
+    pripnute = "name: mager-manager\nservices:\n  backend:\n    image: nexmanager-backend:1.0.0\n"
+    ciel = _Ciel({"docker-compose.yml": pripnute, ".env": "POSTGRES_PASSWORD=x\n"})
+    monkeypatch.setattr(P, "remote_instance", ciel)
+
+    _provision(tmp_path, deploy_host="mager", allow_overwrite=True)
+
+    zapisany = ciel.zapisane["docker-compose.yml"][0]
+    assert "build:" in zapisany, "prevzatie len povýšilo verziu — obraz by sa nemal odkiaľ vziať"
+    assert "nexmanager-backend:1.0.0" not in zapisany
+
+
+def test_an_ordinary_redeploy_still_only_changes_the_version(tmp_path, monkeypatch) -> None:
+    """Poistka proti tomu, aby oprava zrušila pravidlo z ICCINT-133. Do inštalácie, ktorú kokpit už
+    spravuje, sa nasadzuje VERZIA, nie stavba — prestavba raz zhodila Inbox na sedem minút."""
+    nase = (
+        f"# {P.GENERATED_BY_MARKER}\nname: mager-manager\n"
+        "services:\n  backend:\n    image: mager-manager-backend:1.0.0\n"
+    )
+    ciel = _Ciel({"docker-compose.yml": nase, ".env": "POSTGRES_PASSWORD=x\n"})
+    monkeypatch.setattr(P, "remote_instance", ciel)
+    monkeypatch.setattr(P, "_docker_image_exists", lambda _o: True)
+
+    _provision(tmp_path, deploy_host="mager")
+
+    zapisany = ciel.zapisane["docker-compose.yml"][0]
+    assert "mager-manager-backend" in zapisany, "inštalácia sa prestavala podľa zdroja"
+
+
+def test_the_version_bump_reads_the_target_not_the_local_copy(tmp_path, monkeypatch) -> None:
+    """⚠️ Povýšenie verzie čítalo MIESTNU kópiu. Na MÁGERSTAVE to bola kópia zo 14.07., kým na cieli
+    ležal predpis z 23.09. — tá istá trieda chyby ako pri tajomstvách a faktoch, len na treťom mieste."""
+    na_cieli = (
+        f"# {P.GENERATED_BY_MARKER}\nname: mager-manager\n"
+        "services:\n  backend:\n    image: mager-manager-backend:1.0.0\n    container_name: zo-septembra\n"
+    )
+    ciel = _Ciel({"docker-compose.yml": na_cieli, ".env": "POSTGRES_PASSWORD=x\n"})
+    monkeypatch.setattr(P, "remote_instance", ciel)
+    monkeypatch.setattr(P, "_docker_image_exists", lambda _o: True)
+    miestny = tmp_path / "customers" / "mager" / "nex-manager"
+    miestny.mkdir(parents=True)
+    (miestny / "docker-compose.yml").write_text(
+        f"# {P.GENERATED_BY_MARKER}\nname: mager-manager\n"
+        "services:\n  backend:\n    image: mager-manager-backend:1.0.0\n    container_name: z-jula\n",
+        encoding="utf-8",
+    )
+    (miestny / ".env").write_text("POSTGRES_PASSWORD=x\n", encoding="utf-8")
+
+    _provision(tmp_path, deploy_host="mager")
+
+    zapisany = ciel.zapisane["docker-compose.yml"][0]
+    assert "zo-septembra" in zapisany, "povýšenie vychádzalo zo starej miestnej kópie"
+    assert "z-jula" not in zapisany
+
+
+def test_the_local_working_copy_of_the_settings_comes_from_the_target(tmp_path, monkeypatch) -> None:
+    """⚠️ Túto stráž si vypýtala mutácia, ktorá prešla nezachytená (24.09.2026).
+
+    Miestny `.env` nie je ozdoba: `docker compose` ho číta na TOMTO stroji, keď spúšťa inštaláciu na
+    cudzom. Keby zostal starý, kontajnery na cieli by dostali hodnoty z miestnej kópie — teda presne
+    ten rozchod, ktorý celý tento tiket rieši.
+    """
+    nase = f"# {P.GENERATED_BY_MARKER}\nname: mager-manager\nservices:\n  backend:\n    image: a:1\n"
+    ciel = _Ciel({"docker-compose.yml": nase, ".env": "POSTGRES_PASSWORD=x\nZNACKA=zo-septembra\n"})
+    monkeypatch.setattr(P, "remote_instance", ciel)
+    monkeypatch.setattr(P, "_docker_image_exists", lambda _o: True)
+    miestny = tmp_path / "customers" / "mager" / "nex-manager"
+    miestny.mkdir(parents=True)
+    (miestny / "docker-compose.yml").write_text(nase, encoding="utf-8")
+    (miestny / ".env").write_text("POSTGRES_PASSWORD=x\nZNACKA=z-jula\n", encoding="utf-8")
+
+    _provision(tmp_path, deploy_host="mager")
+
+    miestne_nastavenia = (miestny / ".env").read_text(encoding="utf-8")
+    assert "zo-septembra" in miestne_nastavenia, "miestna pracovná kópia zostala pri starých hodnotách"
+    assert "z-jula" not in miestne_nastavenia

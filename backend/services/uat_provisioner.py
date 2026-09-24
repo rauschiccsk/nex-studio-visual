@@ -2324,6 +2324,20 @@ def provision_uat(
             raise HandAuthoredDeploymentError(
                 hand_authored_refusal(uat_dir, f"docker-compose.yml na stroji {deploy_host}")
             )
+        # ⚠️ Zrkadlenie cieľa do miestneho priečinka (ICCINT-151, 24.09.2026). Miestny priečinok je
+        # pri cudzom stroji PRACOVNÁ KÓPIA, nie vlastná pamäť: `docker compose` ho potrebuje na
+        # tomto stroji (predpis aj `.env` číta klient), ale jeho obsah musí pochádzať z cieľa.
+        #
+        # Bez toho by povýšenie verzie, porovnanie služieb aj dopĺňanie premenných čítali starú
+        # miestnu kópiu. Na MÁGERSTAVE to bola kópia zo 14.07., kým na cieli ležal predpis
+        # z 23.09. — tá istá trieda chyby ako pri tajomstvách a faktoch, len na treťom mieste.
+        uat_dir.mkdir(parents=True, exist_ok=True)
+        if existing_compose_text is not None:
+            (uat_dir / "docker-compose.yml").write_text(existing_compose_text, encoding="utf-8")
+        if remote_env_text is not None:
+            miestny_env = uat_dir / ".env"
+            miestny_env.write_text(remote_env_text, encoding="utf-8")
+            miestny_env.chmod(0o600)
     else:
         existing_compose = uat_dir / "docker-compose.yml"
         existing_compose_text = existing_compose.read_text(encoding="utf-8") if existing_compose.is_file() else None
@@ -2450,7 +2464,14 @@ def provision_uat(
     # ``is_redeploy`` je False pri vynútenej obnove tajomstiev (``rotate_secrets``) — vtedy je zámerom
     # postaviť inštaláciu nanovo, takže sa povýšenie verzie nepoužije. Chytila to existujúca stráž
     # ``test_rotate_secrets_forces_fresh``, nie ja.
-    if is_redeploy and compose_path.is_file() and env_path.is_file():
+    #
+    # ⚠️ A rovnako sa nepoužije pri PREVZATÍ (``allow_overwrite``) — ICCINT-151, 24.09.2026. Prevzatie
+    # znamená „táto inštalácia odteraz patrí kokpitu", teda vykresliť ju zo zdrojového projektu; náhľad
+    # predtým potvrdil, že sa pritom nič nestratí. Povýšenie verzie chráni inštaláciu, ktorú kokpit UŽ
+    # spravuje — nie tú, ktorú práve preberá. Zmerané na ostrom MÁGERSTAVE: povýšenie vzalo pripnuté
+    # obrazy `nexmanager-backend:1.0.0` (bez predpisu na stavbu) a prepísalo číslo na `v1.2.2` — taký
+    # obraz nikto nepostaví ani nikde neleží, a stráž ICCINT-137 nasadenie správne zastavila.
+    if is_redeploy and not allow_overwrite and compose_path.is_file() and env_path.is_file():
         chyba = services_missing_against_source(uat_dir, source)
         if chyba:
             # Známy dôsledok, povedaný nahlas: inštalácia sa neprestavuje, takže novú službu sama
