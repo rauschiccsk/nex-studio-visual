@@ -149,3 +149,88 @@ def test_nothing_outside_the_instance_directory_is_touched():
     spojene = " ".join(_remote_mkdir_cmd(Path("/opt/customers/mager/nex-inbox"), ["originals"]))
 
     assert " -v /:/" not in spojene and "/opt/customers:/" not in spojene
+
+
+# -- Poistka: predpis kokpitu sa nesmie ticho prepísať cez ten na cieli (ICCINT-151) ---
+
+
+ZDE = """
+services:
+  backend:
+    image: nexmanager-backend:1.0.0
+    labels:
+      - traefik.http.routers.x.rule=Host(`mager.example`)
+"""
+
+TAM_ROVNAKY = """
+# iný komentár, iné medzery — obsah je ten istý
+services:
+  backend:
+    image: nexmanager-backend:1.0.0
+    labels:
+      - traefik.http.routers.x.rule=Host(`mager.example`)
+"""
+
+TAM_INY = """
+services:
+  backend:
+    image: nexmanager-backend:1.0.0
+    labels:
+      - traefik.docker.network=nex-ts-net
+      - traefik.http.routers.x.rule=Host(`mager.tail5c98e2.ts.net`)
+"""
+
+
+def test_the_same_definition_is_not_drift():
+    """Komentáre a medzery nie sú rozdiel. Poistka, ktorá kričí na preformátovanie, sa naučí
+    ignorovať — a potom prehliadne aj ten pravý rozdiel."""
+    from backend.services.orchestrator import _compose_drift
+
+    assert _compose_drift(ZDE, TAM_ROVNAKY) is None
+
+
+def test_a_different_definition_on_the_target_stops_the_deploy():
+    """24.09.2026: predpis MÁGERSTAVU na ANDROSe bol zo 14.07., na MAGERi z 23.09. a líšili sa
+    v päťdesiatich riadkoch — celé smerovanie cez Tailscale. Nasadenie by ho prepísalo júlovým
+    stavom a zákazník by sa k aplikácii nemusel dostať."""
+    from backend.services.orchestrator import _compose_drift
+
+    dovod = _compose_drift(ZDE, TAM_INY)
+
+    assert dovod is not None, "rozdiel v smerovaní prešiel ako zhoda"
+    assert "backend" in dovod, f"hláška nepovie, čoho sa rozdiel týka: {dovod}"
+
+
+def test_no_definition_on_the_target_is_not_drift():
+    """Prvé nasadenie na čistý stroj: na cieli ešte nič nie je, takže niet čo prepísať."""
+    from backend.services.orchestrator import _compose_drift
+
+    assert _compose_drift(ZDE, None) is None
+
+
+def test_an_unreadable_definition_on_the_target_stops_the_deploy():
+    """Keď sa NEDÁ porovnať, je to poplach — nie úspech. Inak by sa nasadilo práve vtedy, keď
+    o cieli nič nevieme."""
+    from backend.services.orchestrator import _compose_drift
+
+    assert _compose_drift(ZDE, "services: [toto nie je platné: ::") is not None
+
+
+def test_a_missing_file_on_the_target_is_told_apart_from_a_broken_read():
+    """Dva rôzne výsledky, ktoré vyzerajú rovnako — oba skončia nenulovo:
+
+    * na cieli predpis ešte NIE JE → prvé nasadenie, niet čo prepísať
+    * predpis sa nedal prečítať (Docker nedostupný, práva) → o cieli nevieme nič → zastaviť
+
+    Zliať ich do jedného by znamenalo nasadzovať práve vtedy, keď je cieľ v neznámom stave.
+    """
+    from backend.services.orchestrator import _remote_compose_text
+
+    chyba, text = _remote_compose_text(1, "cat: can't open '/target/docker-compose.yml': No such file or directory")
+    assert chyba is None and text is None, "chýbajúci predpis nie je porucha"
+
+    chyba, text = _remote_compose_text(125, "Cannot connect to the Docker daemon")
+    assert chyba is not None, "nečitateľný cieľ musí nasadenie zastaviť"
+
+    chyba, text = _remote_compose_text(0, "services:\n  backend: {}\n")
+    assert chyba is None and text is not None and "services" in text

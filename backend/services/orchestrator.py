@@ -4981,6 +4981,74 @@ def _docker_env_for_target(env: dict[str, str], deploy_host: Optional[str]) -> d
     return out
 
 
+def _remote_compose_cmd(instance_dir: "Path") -> list[str]:
+    """Príkaz, ktorým sa PREČÍTA predpis ležiaci na cieli. Cez Docker, lebo kľúč nedáva shell."""
+    return [
+        "docker",
+        "run",
+        "--rm",
+        "-v",
+        f"{instance_dir}:/target",
+        _MKDIR_IMAGE,
+        "cat",
+        "/target/docker-compose.yml",
+    ]
+
+
+def _remote_compose_text(rc: int, out: str) -> tuple[Optional[str], Optional[str]]:
+    """Výsledok čítania predpisu z cieľa → ``(chyba, text)``. Práve jedno z nich je ``None``.
+
+    Chýbajúci súbor a nečitateľný cieľ skončia oba nenulovo a vyzerajú rovnako. Prvé je prvé
+    nasadenie (niet čo prepísať), druhé znamená, že o cieli nevieme nič — a vtedy sa nesmie
+    nasadzovať. Zliať ich do jedného je presne ten tvar chyby, ktorý sa prejaví až v deň, keď
+    cieľ nie je dostupný (ICCINT-151).
+    """
+    if rc == 0:
+        return None, out
+    if "No such file" in out or "no such file" in out:
+        return None, None
+    return (f"predpis na cieli sa nedal prečítať: {out.strip()[:200]}", None)
+
+
+def _compose_drift(local_text: str, remote_text: Optional[str]) -> Optional[str]:
+    """``None`` = predpis kokpitu a predpis na cieli sú TÁ ISTÁ vec. Inak dôvod, prečo nie (ICCINT-151).
+
+    **Prečo to existuje.** 24.09.2026: predpis ostrej inštalácie MÁGERSTAVU ležal na ANDROSe zo 14.07.
+    a na MAGERi z 23.09.; líšili sa v päťdesiatich riadkoch — celé smerovanie cez Tailscale. Kokpit
+    číta predpis u seba a použije ho na cieli, takže nasadenie by septembrový stav prepísalo júlovým
+    a zákazník by sa k aplikácii nemusel dostať. Poistka preto porovná OBA a pri rozdiele nasadenie
+    zastaví; prevziať cudzí stav je rozhodnutie, nie vedľajší účinok nasadenia.
+
+    Porovnáva sa VÝZNAM, nie text: komentáre a medzery rozdiel nie sú. Poistka, ktorá kričí na
+    preformátovanie, sa naučí ignorovať a potom prehliadne aj ten pravý rozdiel.
+
+    Keď na cieli predpis ešte nie je (``None``), nie je čo prepísať — prvé nasadenie prejde. Keď sa
+    predpis na cieli NEDÁ prečítať, je to dôvod zastaviť: nasadzovať práve vtedy, keď o cieli nič
+    nevieme, je to najhoršie možné poradie.
+    """
+    if remote_text is None:
+        return None
+    try:
+        tu = yaml.safe_load(local_text) or {}
+        tam = yaml.safe_load(remote_text) or {}
+    except yaml.YAMLError as exc:
+        return f"predpis na cieli sa nedá prečítať ({exc.__class__.__name__}) — nasadenie zastavené"
+    if not isinstance(tam, dict):
+        return "predpis na cieli nie je platný compose — nasadenie zastavené"
+    if tu == tam:
+        return None
+    sluzby_tu = (tu.get("services") or {}) if isinstance(tu, dict) else {}
+    sluzby_tam = (tam.get("services") or {}) if isinstance(tam, dict) else {}
+    rozdielne = sorted({m for m in set(sluzby_tu) | set(sluzby_tam) if sluzby_tu.get(m) != sluzby_tam.get(m)})
+    if rozdielne:
+        return (
+            "predpis na cieli je iný než ten, ktorý drží kokpit — líšia sa služby: "
+            + ", ".join(rozdielne)
+            + ". Nasadenie by cieľ prepísalo; najprv jeho stav prevezmi."
+        )
+    return "predpis na cieli je iný než ten, ktorý drží kokpit (mimo služieb) — nasadenie zastavené"
+
+
 #: Obraz, v ktorom sa na cieli vyrábajú priečinky. Malý a všade dostupný; nič z neho nebeží ďalej.
 _MKDIR_IMAGE = "alpine:3.20"
 
@@ -5056,6 +5124,23 @@ async def _run_uat_deploy(
     compose = _uat_compose_path(
         uat_slug, environment=environment, customer_slug=customer_slug, full_project_slug=full_project_slug
     )
+    # ICCINT-151 — pri nasadzovaní na CUDZÍ stroj najprv over, že predpis, ktorý kokpit drží, je ten
+    # istý ako ten na cieli. Kokpit číta predpis u seba a použije ho tam; keď sa rozišli, nasadenie
+    # by cudzí stav prepísalo (24.09.2026: kópia zo 14.07. proti stavu z 23.09., 50 riadkov rozdielu
+    # v smerovaní). Prevziať cudzí stav je rozhodnutie, nie vedľajší účinok nasadenia.
+    if deploy_host:
+        env_ciela = _verify_env_for_target(deploy_host)
+        rc_r, out_r = await _compose_smoke_step(_remote_compose_cmd(compose.parent), 60, env=env_ciela)
+        chyba, text_ciela = _remote_compose_text(rc_r, out_r)
+        if chyba:
+            return False, chyba
+        try:
+            rozdiel = _compose_drift(compose.read_text(encoding="utf-8"), text_ciela)
+        except OSError as exc:
+            return False, f"predpis kokpitu sa nedá prečítať: {exc}"
+        if rozdiel:
+            return False, rozdiel
+
     cmd = ["docker", "compose", "-f", str(compose), "up", "-d", "--build", "--force-recreate"]
     # A GENERATED app shows its OWN semantic version (each change = a new version), NOT a build counter (Director
     # 2026-07-11: NEX Studio itself is regularly patched → a counter; the apps we build get their real version).
