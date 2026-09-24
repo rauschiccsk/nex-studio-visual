@@ -53,13 +53,16 @@ def fake_deploy_runner(monkeypatch):
     """
     calls: list[dict] = []
 
-    async def _runner(*, project_slug, uat_slug, version_number, force_fresh, admin_password=None):
+    async def _runner(*, project_slug, uat_slug, version_number, force_fresh, admin_password=None, deploy_host=None):
         calls.append(
             {
                 "project_slug": project_slug,
                 "uat_slug": uat_slug,
                 "version_number": version_number,
                 "force_fresh": force_fresh,
+                # ICCINT-151: na ktorý stroj to ide. Napodobenina, ktorá údaj zahodí, si nevšimne,
+                # keď ho služba prestane posielať.
+                "deploy_host": deploy_host,
             }
         )
         return True, "OK (faked)", f"https://uat-{uat_slug}.isnex.eu"
@@ -78,13 +81,16 @@ def prod_failing_deploy_runner(monkeypatch):
     """
     calls: list[dict] = []
 
-    async def _runner(*, project_slug, uat_slug, version_number, force_fresh, admin_password=None):
+    async def _runner(*, project_slug, uat_slug, version_number, force_fresh, admin_password=None, deploy_host=None):
         calls.append(
             {
                 "project_slug": project_slug,
                 "uat_slug": uat_slug,
                 "version_number": version_number,
                 "force_fresh": force_fresh,
+                # ICCINT-151: na ktorý stroj to ide. Napodobenina, ktorá údaj zahodí, si nevšimne,
+                # keď ho služba prestane posielať.
+                "deploy_host": deploy_host,
             }
         )
         if uat_slug.endswith("-prod"):

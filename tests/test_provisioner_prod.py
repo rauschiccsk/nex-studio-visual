@@ -259,8 +259,12 @@ def test_default_deploy_runner_prod_derives_layout(monkeypatch):
         captured["provision"] = {"project_slug": project_slug, "uat_slug": uat_slug, **kw}
         return _Result()
 
-    async def _fake_run_prod(project_slug, customer_slug, app, full_project_slug, version_number=None):
+    async def _fake_run_prod(
+        project_slug, customer_slug, app, full_project_slug, version_number=None, deploy_host=None
+    ):
         captured["prod_deploy"] = (project_slug, customer_slug, app, full_project_slug)
+        # ICCINT-151: napodobenina, ktorá cieľ zahodí, si nevšimne, keď ho služba prestane posielať.
+        captured["deploy_host"] = deploy_host
         return True, "OK"
 
     monkeypatch.setattr(uat_provisioner, "provision_uat", _fake_provision)

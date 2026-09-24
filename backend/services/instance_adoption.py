@@ -477,6 +477,7 @@ async def adopting_deploy_runner(
     version_number: str,
     force_fresh: bool,
     admin_password: Optional[str] = None,
+    deploy_host: Optional[str] = None,
 ) -> tuple[bool, str, Optional[str]]:
     """Vykonávateľ nasadenia, ktorý smie prepísať ručne písaný priečinok — a najprv ho odloží.
 
@@ -523,7 +524,7 @@ async def adopting_deploy_runner(
 
     if is_prod:
         ok, detail = await orchestrator._run_prod_deploy(
-            project_slug, customer_slug, app, project_slug, version_number=version_number
+            project_slug, customer_slug, app, project_slug, version_number=version_number, deploy_host=deploy_host
         )
         url = _prod_url(customer_slug, app) if result.fe_service else None
     else:

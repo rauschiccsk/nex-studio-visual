@@ -666,6 +666,7 @@ async def _default_deploy_runner(
     version_number: str,
     force_fresh: bool,
     admin_password: Optional[str] = None,
+    deploy_host: Optional[str] = None,
 ) -> tuple[bool, str, Optional[str]]:
     """Provision (preserve-by-default) then bring up a customer instance — environment-aware.
 
@@ -719,10 +720,14 @@ async def _default_deploy_runner(
 
     if is_prod:
         ok, detail = await orchestrator._run_prod_deploy(
-            project_slug, customer_slug, app, project_slug, version_number=version_number
+            project_slug, customer_slug, app, project_slug, version_number=version_number, deploy_host=deploy_host
         )
         url = _prod_url(customer_slug, app) if result.fe_service else None
     else:
+        # ⚠️ Testovacia inštalácia beží VŽDY na stroji kokpitu — ``deploy_host`` sa sem zámerne
+        # neposiela. Údaj pri zákazníkovi sa volá ``prod_host`` a týka sa ostrej prevádzky; keby ho
+        # prevzala aj testovacia, prvá skúška zákazníka by mu zasiahla do jeho vlastného servera
+        # (ICCINT-151).
         ok, detail = await orchestrator._run_uat_deploy(
             project_slug,
             uat_slug,
@@ -932,12 +937,18 @@ async def deploy(
         except (ValueError, OSError):
             admin_password = None
 
+    # ICCINT-151 — na ktorom stroji má ostrá prevádzka tohto zákazníka bežať. Prázdne = na tomto.
+    # Číta sa TU, lebo tu je zákazník; vykonávateľ dostane hotový údaj a nemusí sa pýtať databázy.
+    # Pri testovacej inštalácii je to vždy ``None``: tá beží na stroji kokpitu.
+    deploy_host = (customer.prod_host or None) if environment == "prod" else None
+
     outcome = await runner(
         project_slug=project.slug,
         uat_slug=instance_slug,
         version_number=deployed_version,
         force_fresh=force_fresh,
         admin_password=admin_password,
+        deploy_host=deploy_host,
     )
     ok, detail, url = outcome
     # The provisioner's non-fatal notes, if this runner carries any: the default runner returns a

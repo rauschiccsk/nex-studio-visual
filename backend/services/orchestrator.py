@@ -5208,13 +5208,22 @@ async def _run_uat_deploy(
 
 
 async def _run_prod_deploy(
-    project_slug: str, customer_slug: str, app: str, full_project_slug: str, version_number: Optional[str] = None
+    project_slug: str,
+    customer_slug: str,
+    app: str,
+    full_project_slug: str,
+    version_number: Optional[str] = None,
+    deploy_host: Optional[str] = None,
 ) -> tuple[bool, str]:
     """PROD sibling of :func:`_run_uat_deploy` — redeploy the customer's PROD compose (§2).
 
     Redeploys ``/opt/customers/<customer_slug>/<full_project_slug>/docker-compose.yml`` and
     serve-verifies via the ``<customer_slug>-<app>-<svc>`` container names. Thin wrapper over the
     env-aware :func:`_run_uat_deploy` so the subprocess dance + serve-verify gate are shared.
+
+    ``deploy_host`` je stroj, na ktorom ostrá prevádzka tohto zákazníka beží (prázdne = tento).
+    Bez neho sa celá cesta na iný server končila práve tu: ``_run_uat_deploy`` cieľ prijímať vedel,
+    ale nemal ho od koho dostať, takže ostré nasadenie bežalo na stroji kokpitu (ICCINT-151).
     """
     return await _run_uat_deploy(
         project_slug,
@@ -5224,6 +5233,7 @@ async def _run_prod_deploy(
         app=app,
         full_project_slug=full_project_slug,
         version_number=version_number,
+        deploy_host=deploy_host,
     )
 
 
