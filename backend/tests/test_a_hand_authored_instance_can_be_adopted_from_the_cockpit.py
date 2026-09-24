@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from backend.services import instance_adoption
+from backend.tests._adoption_render import render_request
 
 RUCNY_COMPOSE = """# NEX Manager v1.0.0 — UAT pre MÁGERSTAV (uat-mager-manager.isnex.eu)
 # Ručne písané, spravidla živé zákaznícke nasadenie.
@@ -50,7 +51,7 @@ def test_the_preview_says_what_will_be_set_aside_and_what_will_not(tmp_path) -> 
     d = _rucna_instalacia(tmp_path)
     (d / "poznamky.txt").write_text("moje poznámky\n", encoding="utf-8")
 
-    n = instance_adoption.preview(d)
+    n = instance_adoption.preview(d, render=render_request(tmp_path))
 
     assert n.exists and not n.already_ours
     assert sorted(n.set_aside) == [
@@ -64,7 +65,7 @@ def test_the_preview_asks_for_a_phrase_that_names_the_customer(tmp_path) -> None
     """Holé „nex-manager“ je rovnaké pre troch zákazníkov — odpísať sa dá bez pozretia, koho to je."""
     d = _rucna_instalacia(tmp_path)
 
-    assert instance_adoption.preview(d).confirmation_phrase == "mager/nex-manager"
+    assert instance_adoption.preview(d, render=render_request(tmp_path)).confirmation_phrase == "mager/nex-manager"
 
 
 def test_an_instance_we_already_manage_has_nothing_to_adopt(tmp_path) -> None:
@@ -75,7 +76,7 @@ def test_an_instance_we_already_manage_has_nothing_to_adopt(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    n = instance_adoption.preview(d)
+    n = instance_adoption.preview(d, render=render_request(tmp_path))
 
     assert n.already_ours
     assert n.set_aside == [], "nášmu vlastnému priečinku sa nemá čo odkladať"
@@ -83,7 +84,7 @@ def test_an_instance_we_already_manage_has_nothing_to_adopt(tmp_path) -> None:
 
 def test_a_missing_directory_is_an_ordinary_answer(tmp_path) -> None:
     """Prvé nasadenie k zákazníkovi je bežný prípad — nie chyba, ktorú treba hlásiť."""
-    n = instance_adoption.preview(tmp_path / "niet" / "nic")
+    n = instance_adoption.preview(tmp_path / "niet" / "nic", render=render_request(tmp_path))
 
     assert not n.exists and not n.already_ours and n.set_aside == []
 
@@ -354,7 +355,7 @@ def test_the_preview_says_what_would_be_LOST_not_which_files_move(tmp_path):
     zo 14.09.2026 nedala kliknúť."""
     from backend.services import instance_adoption
 
-    nahlad = instance_adoption.preview(_magerstav_instalacia(tmp_path))
+    nahlad = instance_adoption.preview(_magerstav_instalacia(tmp_path), render=render_request(tmp_path))
 
     prenesie = " ".join(nahlad.carried_over)
     assert "/mnt/mager-edocs-inbox-uat" in prenesie, f"náhľad nemenuje pripojenie: {nahlad.carried_over}"
@@ -372,7 +373,7 @@ def test_adoption_is_refused_when_something_would_be_lost(tmp_path):
         _RUCNY_COMPOSE.replace("  backend:", "  backend:\n    cap_add:\n      - NET_ADMIN\n"), encoding="utf-8"
     )
 
-    nahlad = instance_adoption.preview(d)
+    nahlad = instance_adoption.preview(d, render=render_request(tmp_path))
 
     assert nahlad.blocking, "nepreneseľná vlastnosť sa musí ohlásiť, nie stratiť"
     assert not nahlad.can_adopt, "prevzatie sa nesmie ponúknuť, keď by niečo zmazalo"
@@ -391,7 +392,7 @@ def test_a_plain_instance_with_nothing_special_is_still_adoptable(tmp_path):
     )
     (d / ".env").write_text("X=1\n", encoding="utf-8")
 
-    nahlad = instance_adoption.preview(d)
+    nahlad = instance_adoption.preview(d, render=render_request(tmp_path))
 
     assert nahlad.can_adopt, nahlad.blocking
     assert nahlad.blocking == []

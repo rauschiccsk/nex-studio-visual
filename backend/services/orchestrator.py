@@ -4982,13 +4982,19 @@ def _docker_env_for_target(env: dict[str, str], deploy_host: Optional[str]) -> d
 
 
 def _remote_compose_cmd(instance_dir: "Path") -> list[str]:
-    """Príkaz, ktorým sa PREČÍTA predpis ležiaci na cieli. Cez Docker, lebo kľúč nedáva shell."""
+    """Príkaz, ktorým sa PREČÍTA predpis ležiaci na cieli. Cez Docker, lebo kľúč nedáva shell.
+
+    ⚠️ ``--mount … readonly``, nie ``-v``. Krátky zápis ``-v`` pri neexistujúcej ceste priečinok na
+    cieli **vyrobí** — a kontrola, ktorá po sebe na cudzom stroji nechá stopu, už nie je kontrola.
+    Zmerané 24.09.2026 proti MAGERu: ``--mount`` namiesto toho zlyhá s „bind source path does not
+    exist“ a na cieli nevznikne nič (ICCINT-151).
+    """
     return [
         "docker",
         "run",
         "--rm",
-        "-v",
-        f"{instance_dir}:/target",
+        "--mount",
+        f"type=bind,source={instance_dir},target=/target,readonly",
         _MKDIR_IMAGE,
         "cat",
         "/target/docker-compose.yml",
@@ -5005,7 +5011,10 @@ def _remote_compose_text(rc: int, out: str) -> tuple[Optional[str], Optional[str
     """
     if rc == 0:
         return None, out
-    if "No such file" in out or "no such file" in out:
+    # Chýbať môže súbor (priečinok je, predpis v ňom nie) alebo celý priečinok (prvé nasadenie na
+    # tento cieľ). Docker to hlási dvomi rôznymi vetami; obe znamenajú to isté — na cieli niet čo
+    # prepísať. Druhú vetu hlási ``--mount``, ktorý priečinok radšej nevyrobí (ICCINT-151).
+    if "No such file" in out or "no such file" in out or "bind source path does not exist" in out:
         return None, None
     return (f"predpis na cieli sa nedal prečítať: {out.strip()[:200]}", None)
 

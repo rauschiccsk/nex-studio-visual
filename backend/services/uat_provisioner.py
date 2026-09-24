@@ -1030,9 +1030,18 @@ def parse_compose_extra_hosts(uat_dir: Path, be_service: str = "backend") -> lis
     compose_path = uat_dir / "docker-compose.yml"
     if not compose_path.is_file():
         return []
+    return extra_hosts_from_compose_text(compose_path.read_text(encoding="utf-8"), be_service)
+
+
+def extra_hosts_from_compose_text(text: Optional[str], be_service: str = "backend") -> list[str]:
+    """To isté z TEXTU predpisu — dvojča k :func:`facts_from_compose_text` (ICCINT-151)."""
+    if not text:
+        return []
     try:
-        data = yaml.safe_load(compose_path.read_text(encoding="utf-8")) or {}
+        data = yaml.safe_load(text) or {}
     except yaml.YAMLError:
+        return []
+    if not isinstance(data, dict):
         return []
     services = data.get("services") or {}
     svc = services.get(be_service) or services.get("backend") or {}
@@ -1148,8 +1157,23 @@ def read_instance_facts(instance_dir: Path) -> InstanceFacts:
     """
     compose_path = instance_dir / "docker-compose.yml"
     try:
-        data = yaml.safe_load(compose_path.read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError):
+        return facts_from_compose_text(compose_path.read_text(encoding="utf-8"))
+    except OSError:
+        return InstanceFacts({}, [], {}, {})
+
+
+def facts_from_compose_text(text: Optional[str]) -> InstanceFacts:
+    """To isté, ale z TEXTU predpisu — lebo inštalácia nemusí bývať na tomto stroji (ICCINT-151).
+
+    Priečinok ostrej inštalácie leží na cieľovom serveri; kokpit si jeho predpis prečíta cez Docker a
+    má ho ako text. Keby sa fakty dali čítať len z disku, náhľad by sa pozeral na miestnu kópiu —
+    presne to sa 24.09.2026 stalo pri MÁGERSTAVE: júlová kópia tu, septembrový predpis tam.
+    """
+    if not text:
+        return InstanceFacts({}, [], {}, {})
+    try:
+        data = yaml.safe_load(text) or {}
+    except yaml.YAMLError:
         return InstanceFacts({}, [], {}, {})
     if not isinstance(data, dict):
         return InstanceFacts({}, [], {}, {})
@@ -1507,6 +1531,16 @@ def is_provisioner_generated(compose_path: Path) -> bool:
     try:
         text = compose_path.read_text(encoding="utf-8", errors="replace")
     except OSError:
+        return False
+    return is_provisioner_generated_text(text)
+
+
+def is_provisioner_generated_text(text: Optional[str]) -> bool:
+    """To isté z TEXTU predpisu — inštalácia nemusí bývať na tomto stroji (ICCINT-151).
+
+    Prázdny text NIE JE náš: pôvod sa dokazuje, nepredpokladá.
+    """
+    if not text:
         return False
     return GENERATED_BY_MARKER in _leading_comment_block(text)
 
@@ -1971,6 +2005,58 @@ def render_uat_compose(compose: dict[str, Any]) -> str:
     return template.render(COMPOSE_NAME=compose["name"], COMPOSE_BODY=body)
 
 
+def build_compose_for_instance(
+    *,
+    project_path: Path,
+    slug: str,
+    project: str,
+    environment: str,
+    customer_slug: Optional[str] = None,
+    app: Optional[str] = None,
+    version: Optional[str] = None,
+    existing_compose_text: Optional[str] = None,
+    preserve_extra_hosts: bool = True,
+    loopback_base_port: Optional[int] = None,
+) -> dict[str, Any]:
+    """Predpis, ktorý by kokpit do tejto inštalácie zapísal — **bez toho, aby čokoľvek zapísal**.
+
+    **Prečo to je samostatná funkcia (ICCINT-151).** Náhľad prevzatia sa musí vedieť spýtať „čo by
+    si sem zapísal?“ skôr, než to niekto povolí. Dovtedy sa tá otázka dala položiť jedine tak, že
+    sa to naozaj zapísalo. Náhľad preto hádal z názvov vlastností — a 24.09.2026 pri MÁGERSTAVE
+    odpovedal „nič sa nestratí“, hoci by zmizlo celé smerovanie cez Tailscale.
+
+    ⚠️ **Jedny dvere.** Tú istú funkciu volá :func:`provision_uat` pri skutočnom zápise. Keby náhľad
+    skladal predpis po svojom, porovnával by sa s niečím, čo sa nikdy nezapíše, a poistka by strážila
+    výmysel. To je horšie než žiadna poistka: tvrdí, že drží.
+
+    Existujúci predpis vstupuje ako TEXT, nie ako cesta — inštalácia môže bývať na inom stroji.
+    """
+    source = load_source_compose(project_path)
+    src_services: dict[str, Any] = source["services"]
+    roles = identify_service_roles(src_services)
+    db_creds = detect_db_credentials(src_services, roles["db"], project)
+    return build_uat_compose(
+        version=version,
+        slug=slug,
+        project=project,
+        project_path=project_path,
+        source=source,
+        roles=roles,
+        db_user=db_creds["POSTGRES_USER"],
+        db_name=db_creds["POSTGRES_DB"],
+        loopback_base_port=loopback_base_port,
+        extra_backend_hosts=(
+            extra_hosts_from_compose_text(existing_compose_text, roles["backend"] or "backend")
+            if preserve_extra_hosts
+            else []
+        ),
+        preserved_facts=facts_from_compose_text(existing_compose_text) if existing_compose_text else None,
+        environment=environment,
+        customer_slug=customer_slug,
+        app=app,
+    )
+
+
 # ---------------------------------------------------------------------------
 # provision_uat (CR-2) — the importable entrypoint
 # ---------------------------------------------------------------------------
@@ -2079,12 +2165,12 @@ def provision_uat(
     # Redeploy preservation (per the live-instance contract).
     is_redeploy = (uat_dir / ".env").is_file() and not rotate_secrets
     preserved_secrets = load_existing_env_secrets(uat_dir) if is_redeploy else {}
-    extra_backend_hosts = parse_compose_extra_hosts(uat_dir, roles["backend"] or "backend") if is_redeploy else []
-    # ICCINT-130 — a čo ešte vie LEN táto inštalácia: pripojenia hostiteľských priečinkov a ručne
-    # pridelené podsiete. Číta sa to z toho, čo tam práve je — aj z ručne písaného súboru, keď ide o
-    # prevzatie. Tá istá podmienka ako pri tajomstvách a hostiteľoch: existujúca inštalácia sa
-    # neprekresľuje chudobnejšia, než bola.
-    preserved_facts = read_instance_facts(uat_dir) if (uat_dir / "docker-compose.yml").is_file() else None
+    # ICCINT-130 — a čo ešte vie LEN táto inštalácia: pripojenia hostiteľských priečinkov, ručne
+    # pridelené podsiete a pevne určení hostitelia. Číta sa to z toho, čo tam práve je — aj z ručne
+    # písaného súboru, keď ide o prevzatie. Tá istá podmienka ako pri tajomstvách: existujúca
+    # inštalácia sa neprekresľuje chudobnejšia, než bola.
+    existing_compose = uat_dir / "docker-compose.yml"
+    existing_compose_text = existing_compose.read_text(encoding="utf-8") if existing_compose.is_file() else None
 
     db_creds = detect_db_credentials(src_services, roles["db"], project_slug)
     db_user, db_name = db_creds["POSTGRES_USER"], db_creds["POSTGRES_DB"]
@@ -2093,21 +2179,19 @@ def provision_uat(
         preserved_secrets.get("POSTGRES_PASSWORD") or preserved_secrets.get("DB_PASSWORD") or secrets.token_hex(32)
     )
 
-    compose = build_uat_compose(
-        version=version,
+    # ⚠️ Tie isté dvere, akými sa náhľad prevzatia pýta „čo by si sem zapísal?“ (ICCINT-151). Keby
+    # mal zápis vlastnú cestu, poistka by porovnávala s niečím, čo sa nikdy nezapíše.
+    compose = build_compose_for_instance(
+        project_path=project_path,
         slug=uat_slug,
         project=project_slug,
-        project_path=project_path,
-        source=source,
-        roles=roles,
-        db_user=db_user,
-        db_name=db_name,
-        loopback_base_port=loopback_base_port,
-        extra_backend_hosts=extra_backend_hosts,
-        preserved_facts=preserved_facts,
         environment=environment,
         customer_slug=customer_slug,
         app=app,
+        version=version,
+        existing_compose_text=existing_compose_text,
+        preserve_extra_hosts=is_redeploy,
+        loopback_base_port=loopback_base_port,
     )
 
     # Paired NEX Manager Deploy — a sibling under the same customer root

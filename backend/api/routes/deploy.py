@@ -22,6 +22,8 @@ the deploy backend points into; ``detail`` is a non-secret summary only.
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -45,7 +47,7 @@ from backend.schemas.deploy import (
     DeployResult,
 )
 from backend.services import deploy as deploy_service
-from backend.services import instance_adoption
+from backend.services import instance_adoption, uat_provisioner
 from backend.services import uat_launch as uat_launch_service
 
 router = APIRouter(tags=["Deploy"])
@@ -249,6 +251,34 @@ class _AdoptionPreviewResponse(BaseModel):
     can_adopt: bool
 
 
+def _adoption_context(
+    customer: Customer, project: Project, environment: str
+) -> tuple[Path, instance_adoption.RenderRequest, Optional[str]]:
+    """Priečinok inštalácie, čím sa vykreslí jej nový predpis, a na ktorom stroji býva (ICCINT-151).
+
+    Jedno miesto pre obe cesty — náhľad aj samotné prevzatie. Keby si každá odvodzovala mená po
+    svojom, náhľad by ukazoval jednu inštaláciu a prevzatie by siahlo na druhú. Údaje sú tie isté,
+    s akými :func:`instance_adoption.adopting_deploy_runner` volá generátor.
+    """
+    customer_slug = deploy_service._customer_dir_slug(customer)
+    instance_dir = instance_adoption.instance_dir_for(
+        environment=environment,
+        customer_slug=customer_slug,
+        full_project_slug=project.slug,
+    )
+    render = instance_adoption.RenderRequest(
+        project_path=uat_provisioner.PROJECTS_ROOT / project.slug,
+        slug=f"{customer_slug}-{environment}",
+        project=project.slug,
+        environment=environment,
+        customer_slug=customer_slug,
+        app=uat_provisioner.derive_uat_slug(project.slug),
+    )
+    # Ostrá inštalácia môže bývať na inom stroji; testovacia býva vždy tu.
+    deploy_host = (customer.prod_host or None) if environment == "prod" else None
+    return instance_dir, render, deploy_host
+
+
 @router.get("/customers/{customer_id}/adoption-preview", response_model=_AdoptionPreviewResponse)
 def adoption_preview(
     customer_id: UUID,
@@ -269,12 +299,9 @@ def adoption_preview(
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projekt zákazníka neexistuje.")
 
-    instance_dir = instance_adoption.instance_dir_for(
-        environment=environment,
-        customer_slug=deploy_service._customer_dir_slug(customer),
-        full_project_slug=project.slug,
-    )
-    return _AdoptionPreviewResponse(**instance_adoption.preview(instance_dir)._asdict())
+    instance_dir, render, deploy_host = _adoption_context(customer, project, environment)
+    nahlad = instance_adoption.preview(instance_dir, render=render, deploy_host=deploy_host)
+    return _AdoptionPreviewResponse(**nahlad._asdict())
 
 
 class _AdoptRequest(BaseModel):
@@ -313,14 +340,17 @@ async def adopt_instance(
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projekt zákazníka neexistuje.")
 
-    instance_dir = instance_adoption.instance_dir_for(
-        environment=payload.environment,
-        customer_slug=deploy_service._customer_dir_slug(customer),
-        full_project_slug=project.slug,
-    )
+    instance_dir, render, deploy_host = _adoption_context(customer, project, payload.environment)
     # ICCINT-74: náhľad sa pýta Dockera, čo z toho priečinka beží — to je čakanie na proces a na hlavnú
-    # slučku nepatrí. Strop je krátky zámerne: je to doplnkový údaj, nie brána.
-    nahlad = await run_blocking(instance_adoption.preview, instance_dir, cap=30)
+    # slučku nepatrí. ICCINT-151: keď inštalácia býva na inom stroji, ide sa cez ssh, takže strop musí
+    # uniesť aj spojenie — nie je to už len doplnkový údaj, ale jediné miesto, kde sa cieľ prečíta.
+    nahlad = await run_blocking(
+        instance_adoption.preview,
+        instance_dir,
+        render=render,
+        deploy_host=deploy_host,
+        cap=180,
+    )
     if nahlad.already_ours:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
