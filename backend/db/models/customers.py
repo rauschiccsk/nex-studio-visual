@@ -53,6 +53,10 @@ class Customer(Base, UUIDMixin, TimestampMixin):
     # Customer's URL host label (e.g. ``andros`` → ``andros.example.com``).
     # Nullable: a customer may be registered before its subdomain is assigned.
     subdomain = Column(String(255), nullable=True)
+    # Kam sa nasadzuje OSTRÁ prevádzka tohto zákazníka (ICCINT-151). Prázdne = stroj, na ktorom
+    # beží kokpit. Inak meno cieľa, ktoré Docker otvorí ako ``ssh://<meno>`` — obraz sa postaví
+    # NA CIELI, takže register obrazov ani ich prenos netreba. Testovacia inštalácia ide vždy sem.
+    prod_host = Column(String(255), nullable=True)
     # Per-customer external systems (free-form structured config). Never holds
     # secret material — secrets go to the credentials store via credential_id.
     integrations = Column(JSONB, nullable=True)

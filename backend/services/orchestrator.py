@@ -4961,6 +4961,25 @@ def _uat_compose_exists(uat_slug: str) -> bool:
     return _uat_compose_path(uat_slug).is_file()
 
 
+def _docker_env_for_target(env: dict[str, str], deploy_host: Optional[str]) -> dict[str, str]:
+    """Prostredie pre ``docker compose`` — s cieľom na INOM stroji, keď zákazník taký má (ICCINT-151).
+
+    Ostrá prevádzka zákazníka môže bežať inde než kokpit (MÁGERSTAV má vlastný server). Docker to vie
+    sám cez ``DOCKER_HOST=ssh://<stroj>``: spojenie si otvorí, obraz postaví NA CIELI a kontajnery tam
+    aj spustí. Preto netreba register obrazov ani ich prenášať — a nasadzovanie má jedinú vetvu.
+    Dve vetvy by sa rozišli a tá zriedkavejšia by sa prestala skúšať.
+
+    Prázdny alebo nevyplnený cieľ znamená „tento stroj" — a NESMIE vyrobiť ``ssh://`` bez mena stroja:
+    taký príkaz nejde nikam a chyba sa hľadá ťažko. Vracia NOVÉ prostredie; pôvodné sa nemení.
+    """
+    out = dict(env)
+    ciel = (deploy_host or "").strip()
+    if not ciel:
+        return out
+    out["DOCKER_HOST"] = f"ssh://{ciel}"
+    return out
+
+
 async def _run_uat_deploy(
     project_slug: str,
     uat_slug: str,
@@ -4970,6 +4989,7 @@ async def _run_uat_deploy(
     app: Optional[str] = None,
     full_project_slug: Optional[str] = None,
     version_number: Optional[str] = None,
+    deploy_host: Optional[str] = None,
 ) -> tuple[bool, str]:
     """Plain redeploy of an instance's EXISTING compose (``docker compose -f … up -d --build --force-recreate``).
 
@@ -5001,7 +5021,7 @@ async def _run_uat_deploy(
     # Agent-controlled input again, less obviously: the compose file being brought up is one the AI Agent
     # wrote, and compose INTERPOLATES this environment into it (``${DEDO_API_TOKEN}`` in a generated
     # service block would hand the secret to the deployed app). Same withholding as every other spawn.
-    env = agent_env({"APP_VERSION": build_ver, "VITE_APP_VERSION": build_ver})
+    env = _docker_env_for_target(agent_env({"APP_VERSION": build_ver, "VITE_APP_VERSION": build_ver}), deploy_host)
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=env
