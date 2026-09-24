@@ -209,6 +209,9 @@ def test_the_payload_carries_the_permissions_and_the_owner() -> None:
         assert info.mode == 0o600
         assert (info.uid, info.gid) == (remote_instance.UID, remote_instance.GID)
         assert tar.extractfile(info).read() == b"TAJNE=1\n"
+        # Bez dátumu by súbor na cieli niesol 1.1.1970 a pri porovnávaní „čo je novšie" by vždy
+        # prehral — aj keď je z nich najčerstvejší. Zmerané na MAGERi 24.09.2026.
+        assert info.mtime > 1_700_000_000, "zapísaný súbor by na cieli mal dátum z roku 1970"
 
 
 def test_writing_may_create_the_folder_but_reading_never_may() -> None:

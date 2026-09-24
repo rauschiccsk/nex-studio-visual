@@ -21,6 +21,7 @@ import io
 import os
 import subprocess
 import tarfile
+import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Optional
@@ -99,6 +100,9 @@ def _tar_payload(files: Mapping[str, tuple[str, int]]) -> bytes:
             info.size = len(data)
             info.mode = prava
             info.uid, info.gid = UID, GID
+            # Bez tohto nesie súbor na cieli dátum 1.1.1970. Podľa dátumu si človek na serveri
+            # porovnáva, ktorý súbor je novší — a rok 1970 z neho spraví ten najstarší zo všetkých.
+            info.mtime = int(time.time())
             tar.addfile(info, io.BytesIO(data))
     return buf.getvalue()
 
