@@ -102,8 +102,11 @@ RUN install -m 0755 -d /etc/apt/keyrings \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable" \
         > /etc/apt/sources.list.d/docker.list \
     && apt-get update \
-    && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
+    && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin openssh-client \
     && rm -rf /var/lib/apt/lists/*
+# ICCINT-151 — `openssh-client` nie je pre prihlasovanie, ale pre Docker: nasadenie na druhý
+# stroj beží cez `DOCKER_HOST=ssh://…`, kde si Docker otvára spojenie sám. Kľúč, ktorý na to
+# dostane, je na cieli obmedzený na `docker system dial-stdio` — shell ním získať nejde.
 
 # Verify the CLIs the backend shells out to actually landed — a silent apt install
 # failure would otherwise surface only at runtime, as a FileNotFoundError in the
@@ -113,8 +116,9 @@ RUN install -m 0755 -d /etc/apt/keyrings \
 RUN docker_bin="$(command -v docker)" && test -x "$docker_bin" \
     && gh_bin="$(command -v gh)" && test -x "$gh_bin" \
     && git_bin="$(command -v git)" && test -x "$git_bin" \
+    && ssh_bin="$(command -v ssh)" && test -x "$ssh_bin" \
     && docker compose version \
-    && echo "Docker CLI at $docker_bin (+ compose plugin), GitHub CLI at $gh_bin, git at $git_bin"
+    && echo "Docker CLI at $docker_bin (+ compose plugin), GitHub CLI at $gh_bin, git at $git_bin, ssh at $ssh_bin"
 
 # Node.js — the AI Agent (claude) shells out to node/npm when it builds a generated app's frontend
 # (npm install / build), so the backend that hosts the agent needs a node runtime. The `claude` binary
