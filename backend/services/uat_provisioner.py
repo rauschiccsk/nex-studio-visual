@@ -1116,6 +1116,15 @@ class InstanceFacts(NamedTuple):
     network_subnets: dict[str, str]
     #: service → keys this provisioner cannot reproduce. Non-empty means adoption must refuse.
     unreproducible: dict[str, list[str]]
+    #: ICCINT-151 — service → VŠETKY jej labely tak, ako ich nesie bežiaca inštalácia. Smerovanie
+    #: je údaj, ktorý pozná len ona: MÁGERSTAV je dostupný pod dvomi menami, s dvomi vstupnými
+    #: bodmi a dvomi certifikátmi, a generátor vie napísať jediné meno na `isnex.eu` bez certifikátu.
+    service_labels: dict[str, list[str]] = {}
+    #: ICCINT-151 — service → siete, na ktorých inštalácia naozaj beží.
+    service_networks: dict[str, list[str]] = {}
+    #: ICCINT-151 — definície sietí zhora (``external: true``, ``driver``, podsiete). Bez nich by
+    #: sa mená sietí odvolávali na nič.
+    network_defs: dict[str, Any] = {}
 
 
 def _is_host_bind(volume: Any) -> bool:
@@ -1181,6 +1190,8 @@ def facts_from_compose_text(text: Optional[str]) -> InstanceFacts:
     mounts: dict[str, list[str]] = {}
     hosts: list[str] = []
     unreproducible: dict[str, list[str]] = {}
+    service_labels: dict[str, list[str]] = {}
+    service_networks: dict[str, list[str]] = {}
     for name, svc in (data.get("services") or {}).items():
         if not isinstance(svc, dict):
             continue
@@ -1195,6 +1206,15 @@ def facts_from_compose_text(text: Optional[str]) -> InstanceFacts:
         unknown = sorted(k for k in svc if k not in REPRODUCIBLE_SERVICE_KEYS)
         if unknown:
             unreproducible[str(name)] = unknown
+        # ICCINT-151 — labely a siete tak, ako ich nesie BEŽIACA inštalácia. Berú sa všetky labely,
+        # nie len tie so smerovaním: keď má inštalácia vlastné smerovanie, jej labely sú tá pravda
+        # celá, a vyberať z nich „tie naše" by znamenalo hádať, ktorý riadok kto napísal.
+        labely = _labels_as_list(svc.get("labels"))
+        if labely:
+            service_labels[str(name)] = labely
+        siete = _networks_as_list(svc.get("networks"))
+        if siete:
+            service_networks[str(name)] = siete
 
     subnets: dict[str, str] = {}
     for net_name, net in (data.get("networks") or {}).items():
@@ -1206,7 +1226,8 @@ def facts_from_compose_text(text: Optional[str]) -> InstanceFacts:
 
     seen: set[str] = set()
     hosts = [h for h in hosts if not (h in seen or seen.add(h))]
-    return InstanceFacts(mounts, hosts, subnets, unreproducible)
+    network_defs = {str(n): d for n, d in (data.get("networks") or {}).items()}
+    return InstanceFacts(mounts, hosts, subnets, unreproducible, service_labels, service_networks, network_defs)
 
 
 # ---------------------------------------------------------------------------
@@ -1687,6 +1708,55 @@ def _abs_build_context(context: str, project_path: Path) -> str:
     return os.path.normpath(str(project_path / relative))
 
 
+def _labels_as_list(raw: Any) -> list[str]:
+    """Labely služby ako ``kľúč=hodnota`` — compose ich pozná v dvoch tvaroch (ICCINT-151)."""
+    if isinstance(raw, dict):
+        return [f"{k}={v}" for k, v in raw.items()]
+    if isinstance(raw, list):
+        return [str(x) for x in raw]
+    return []
+
+
+def _networks_as_list(raw: Any) -> list[str]:
+    """Siete služby ako mená — tiež v dvoch tvaroch (ICCINT-151)."""
+    if isinstance(raw, dict):
+        return [str(k) for k in raw]
+    if isinstance(raw, list):
+        return [str(x) for x in raw]
+    return []
+
+
+def has_own_routing(facts: Optional["InstanceFacts"]) -> bool:
+    """Nesie si inštalácia vlastné smerovanie? (ICCINT-151)
+
+    Rozhoduje prítomnosť Traefik labelu na ktorejkoľvek službe. Keď áno, generátor svoje smerovanie
+    **nepridáva**: dve súbežné smerovania na tú istú službu si odporujú a to naše by navyše ukazovalo
+    na sieť ``nex-proxy-net``, ktorá na serveri zákazníka nemusí existovať — vtedy ``up`` spadne hneď
+    na štarte, ešte než sa niečo spustí.
+    """
+    if not facts or not facts.service_labels:
+        return False
+    return any(label.startswith("traefik.") for labely in facts.service_labels.values() for label in labely)
+
+
+def _prevezmi_smerovanie(services: dict[str, Any], facts: "InstanceFacts") -> None:
+    """Nasaď na služby siete a labely tak, ako ich nesie bežiaca inštalácia (ICCINT-151).
+
+    ⚠️ Siete sa preberajú pre VŠETKY služby, nie len pre tie smerované. Keby dostal vlastnú sieť len
+    frontend s backendom, databáza by zostala na ``default`` a appka by ju prestala vidieť — chyba,
+    ktorá sa prejaví až po nasadení a vyzerá ako rozbitá aplikácia, nie ako stratený riadok.
+    """
+    for meno, svc in services.items():
+        if not isinstance(svc, dict):
+            continue
+        siete = facts.service_networks.get(meno)
+        if siete:
+            svc["networks"] = list(siete)
+        labely = facts.service_labels.get(meno)
+        if labely:
+            svc["labels"] = list(labely)
+
+
 def _merge_labels(existing: Any, traefik: list[str]) -> list[str]:
     """Append Traefik labels to a service's existing labels (list or mapping form)."""
     out: list[str] = []
@@ -1855,19 +1925,26 @@ def build_uat_compose(
 
         services[name] = svc
 
-    # Traefik routing on FE + BE (join nex-proxy-net + exact labels).
-    if fe_name and fe_name in services:
-        fe_port = detect_internal_port(src_services[fe_name], 80)
-        _add_proxy_network(services[fe_name])
-        services[fe_name]["labels"] = _merge_labels(
-            services[fe_name].get("labels"), frontend_traefik_labels(name_base, fe_port, host)
-        )
-    if be_name and be_name in services:
-        be_port = detect_internal_port(src_services[be_name], 8000)
-        _add_proxy_network(services[be_name])
-        services[be_name]["labels"] = _merge_labels(
-            services[be_name].get("labels"), backend_traefik_labels(name_base, be_port, host)
-        )
+    # Traefik routing on FE + BE (join nex-proxy-net + exact labels) — POKIAĽ si inštalácia
+    # nenesie vlastné (ICCINT-151). MÁGERSTAV je dostupný pod dvomi menami, cez dva vstupné body a
+    # s dvomi certifikátmi; generátor vie jediné meno na ``isnex.eu`` bez certifikátu. Jeho
+    # smerovanie je preto údaj inštalácie, presne ako pripojené priečinky a ručne pridelené podsiete.
+    vlastne_smerovanie = has_own_routing(preserved_facts)
+    if vlastne_smerovanie:
+        _prevezmi_smerovanie(services, preserved_facts)
+    else:
+        if fe_name and fe_name in services:
+            fe_port = detect_internal_port(src_services[fe_name], 80)
+            _add_proxy_network(services[fe_name])
+            services[fe_name]["labels"] = _merge_labels(
+                services[fe_name].get("labels"), frontend_traefik_labels(name_base, fe_port, host)
+            )
+        if be_name and be_name in services:
+            be_port = detect_internal_port(src_services[be_name], 8000)
+            _add_proxy_network(services[be_name])
+            services[be_name]["labels"] = _merge_labels(
+                services[be_name].get("labels"), backend_traefik_labels(name_base, be_port, host)
+            )
 
     # Optional loopback debug ports (FE base / BE base+100 / DB base+200).
     if loopback_base_port is not None:
@@ -1888,20 +1965,28 @@ def build_uat_compose(
     # attach the UAT to a PROD network, risking DNS/container collisions + a cross-environment leak
     # (icc-deploy §5.3, ALL archetypes). Catch the misconfig here rather than silently stripping it.
     networks: dict[str, Any] = {}
-    for net_name, net_def in (source.get("networks") or {}).items():
-        net = copy.deepcopy(net_def) if isinstance(net_def, dict) else {}
-        if net.get("external"):
-            external_name = net.get("name") or net_name  # the real docker network name
-            if external_name != PROXY_NETWORK:
-                raise ValueError(
-                    f"external network {external_name!r} is not allowed in a UAT compose "
-                    f"(only {PROXY_NETWORK!r} may be external) — declare it as an internal "
-                    f"network or remove it before provisioning"
-                )
-            continue  # the canonical nex-proxy-net is added below; never duplicate the source's
-        net.pop("name", None)
-        networks[net_name] = net or None
-    networks[PROXY_NETWORK] = {"external": True}
+    if vlastne_smerovanie:
+        # ICCINT-151 — siete si inštalácia nesie so sebou: aj mená, aj definície (``external``,
+        # ``driver``, podsiete). ``nex-proxy-net`` sa tu ZÁMERNE nepridáva: na serveri zákazníka
+        # nemusí existovať a compose s vonkajšou sieťou, ktorá tam nie je, odmietne štart — takže
+        # by sa nenasadilo vôbec nič a vyzeralo by to na poruchu spojenia.
+        for net_name, net_def in (preserved_facts.network_defs or {}).items():
+            networks[net_name] = copy.deepcopy(net_def) if isinstance(net_def, dict) else None
+    else:
+        for net_name, net_def in (source.get("networks") or {}).items():
+            net = copy.deepcopy(net_def) if isinstance(net_def, dict) else {}
+            if net.get("external"):
+                external_name = net.get("name") or net_name  # the real docker network name
+                if external_name != PROXY_NETWORK:
+                    raise ValueError(
+                        f"external network {external_name!r} is not allowed in a UAT compose "
+                        f"(only {PROXY_NETWORK!r} may be external) — declare it as an internal "
+                        f"network or remove it before provisioning"
+                    )
+                continue  # the canonical nex-proxy-net is added below; never duplicate the source's
+            net.pop("name", None)
+            networks[net_name] = net or None
+        networks[PROXY_NETWORK] = {"external": True}
 
     # ICCINT-130 — a subnet somebody pinned by hand stays pinned. On ANDROS the Docker default
     # address pool is exhausted (32 networks), so ``192.168.48.0/24`` in MÁGERSTAV's UAT is not a
@@ -2002,7 +2087,30 @@ def render_uat_compose(compose: dict[str, Any]) -> str:
     env.filters["to_yaml"] = _yaml_block
     template = env.get_template("uat/docker-compose.yml.j2")
     body = {k: v for k, v in compose.items() if k != "name"}
-    return template.render(COMPOSE_NAME=compose["name"], COMPOSE_BODY=body)
+    # ICCINT-151 — hlavička musí hovoriť o TOMTO súbore. Keď si inštalácia nesie vlastné smerovanie,
+    # veta o `nex-proxy-net` a dvoch cestách je nepravdivá a číta ju človek na cudzom serveri.
+    return template.render(
+        COMPOSE_NAME=compose["name"],
+        COMPOSE_BODY=body,
+        VLASTNE_SMEROVANIE=_predpis_nesie_vlastne_smerovanie(compose),
+    )
+
+
+def _predpis_nesie_vlastne_smerovanie(compose: dict[str, Any]) -> bool:
+    """Má tento hotový predpis smerovanie, ktoré generátor nepísal? (ICCINT-151)
+
+    Číta sa z toho, čo sa naozaj ide zapísať — nie z toho, čo sme zamýšľali. Rozhoduje prítomnosť
+    Traefik labelu spolu s tým, že sa NEODVOLÁVA na náš ``nex-proxy-net``.
+    """
+    for svc in (compose.get("services") or {}).values():
+        if not isinstance(svc, dict):
+            continue
+        labely = _labels_as_list(svc.get("labels"))
+        if any(label.startswith("traefik.") for label in labely) and not any(
+            PROXY_NETWORK in label for label in labely
+        ):
+            return True
+    return False
 
 
 def build_compose_for_instance(

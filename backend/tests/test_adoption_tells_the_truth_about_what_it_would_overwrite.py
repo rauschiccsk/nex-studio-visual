@@ -156,14 +156,58 @@ def test_an_instance_that_matches_what_we_would_write_is_still_adoptable(tmp_pat
     assert n.can_adopt, f"prevzatie sa zamklo samo: {n.blocking}"
 
 
-def test_the_real_magerstav_description_is_refused(tmp_path) -> None:
-    """Celá cesta odznova — od predpisu v priečinku po odmietnutie na obrazovke."""
-    d = _instalacia(tmp_path, MAGERSTAV)
+def _magerstav_render(tmp_path):
+    """Vykreslenie PRE TÚTO inštaláciu. Keby ukazovalo na iného zákazníka, hlásilo by premenovanie
+    zostavy — a to by nebola strata smerovania, ale nesprávne položená otázka."""
+    return render_request(
+        tmp_path,
+        slug="mager-prod",
+        project="nex-manager",
+        environment="prod",
+        customer_slug="mager",
+        app="manager",
+    )
 
-    n = ia.preview(d, render=render_request(tmp_path))
+
+def test_a_description_carrying_something_we_cannot_write_is_refused(tmp_path) -> None:
+    """Celá cesta odznova — od predpisu v priečinku po odmietnutie na obrazovke.
+
+    Príkladom je služba, ktorú zdrojový projekt nemá: vykreslenie ju nemá z čoho postaviť, takže by
+    z inštalácie zmizla. Odmietnuť je jediná správna odpoveď — prevzatie, ktoré ohlási úspech a
+    pritom appku oberie o časť, je horšie než odmietnutie.
+    """
+    s_navyse = MAGERSTAV.replace(
+        "networks:\n  manager-net:",
+        "  worker:\n    image: fronta:1.0.0\nnetworks:\n  manager-net:",
+        1,
+    )
+    # ⚠️ Kotva musí byť sieť ZHORA (stĺpec 0). Prvé „networks:" v súbore patrí službe a podľa neho
+    #    by kontrola prešla aj vtedy, keby služba skončila medzi sieťami.
+    assert "  worker:\n" in s_navyse and s_navyse.index("  worker:") < s_navyse.index("\nnetworks:"), (
+        "služba navyše musí skončiť medzi službami, nie medzi sieťami"
+    )
+    d = _instalacia(tmp_path, s_navyse)
+
+    n = ia.preview(d, render=_magerstav_render(tmp_path))
 
     assert not n.can_adopt
-    assert any("nex-ts-net" in s for s in n.blocking)
+    assert any("worker" in s and "zmizla" in s for s in n.blocking), n.blocking
+
+
+def test_the_real_magerstav_description_is_adoptable_since_its_routing_is_carried(tmp_path) -> None:
+    """⚠️ OBRÁTENÉ 24.09.2026 (v4.40.10). Dovtedy tu stálo, že MÁGERSTAV sa prevziať NEDÁ — a bola to
+    pravda: generátor nevedel napísať jeho smerovanie (dve mená, dva vstupné body, dva certifikáty,
+    vlastná sieť), takže by oň inštalácia prišla.
+
+    Odvtedy sa smerovanie prenáša z bežiacej inštalácie, tak ako pripojené priečinky a ručne
+    pridelené podsiete. Niet čo stratiť, takže prevzatie sa smie ponúknuť. Keby toto sčervenalo,
+    znamená to, že prenos smerovania prestal fungovať — a MÁGERSTAV sa prevziať zase nedá.
+    """
+    d = _instalacia(tmp_path, MAGERSTAV)
+
+    n = ia.preview(d, render=_magerstav_render(tmp_path))
+
+    assert n.can_adopt, f"smerovanie sa prestalo prenášať: {n.blocking}"
 
 
 # ── 3. keď sa nevie, čo by sa zapísalo, neprepisuje sa ────────────────────────

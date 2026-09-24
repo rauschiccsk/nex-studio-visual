@@ -4,9 +4,16 @@
 # redis, workers, …) preserving their image/build, environment, volumes, healthchecks,
 # extra_hosts (e.g. Ollama host.docker.internal:host-gateway) and networks (incl. external nets).
 #
+{% if VLASTNE_SMEROVANIE -%}
+# Routing: this instance carries its OWN — names, entrypoints, certificates and the proxy network it
+# is published on were read off the running instance and kept as they were (ICCINT-151). The
+# generator does NOT add its own routing here: two routings on one service contradict each other,
+# and ours would point at a network this server may not have.
+{% else -%}
 # Routing is via Traefik (Phase-1 infra), NOT host ports: the frontend + backend services join the
 # external `nex-proxy-net` and carry the exact Traefik labels from the live ledger migration
 # (frontend = Host catch-all @ priority 10; backend = Host && PathPrefix(/api) @ priority 20).
+{% endif -%}
 #
 # The top-level `name: uat-<slug>` namespaces every unnamed network/volume with that project
 # prefix so the UAT cannot clobber the source project's running containers/volumes.
