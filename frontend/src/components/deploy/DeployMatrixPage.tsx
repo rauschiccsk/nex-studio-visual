@@ -496,13 +496,21 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                         )}
                         {/* ICCINT-102: keď nasadenie narazí na ručne písanú inštaláciu, cesta ďalej
                             musí byť TU, nie v termináli. Dialóg si sám zistí, či je vôbec čo preberať —
-                            netipuje sa to z textu chybovej hlášky. */}
-                        {lastAttemptFailed && (
+                            netipuje sa to z textu chybovej hlášky.
+
+                            ⚠️ ICCINT-151: podmienka bola `lastAttemptFailed` — teda cesta sa otvorila až
+                            po tom, čo si človek vyrobil červený záznam. 25.09.2026 to tak Director aj
+                            zažil: „Nasadil som, zlyhalo — tlačidlo na prevzatie sa objavilo." Keby to
+                            robil Tibor, musel by najprv pokaziť nasadenie, aby zistil, ako sa to robí
+                            správne. Ručne písaná inštalácia je PRÁVE TÁ, o ktorej kokpit nevie, čo v nej
+                            beží — a to je `!current`. Na riadku, ktorý už spravuje, tlačidlo nie je:
+                            tam niet čo preberať a bola by to pozvánka prepísať bežiacu inštaláciu. */}
+                        {(lastAttemptFailed || !current) && (
                           <button
                             type="button"
                             onClick={() => setAdopting(row)}
                             className="rounded-full border border-[var(--color-border-strong)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] transition-colors"
-                            title="Ak v cieľovom priečinku leží ručne písané nasadenie, tu ho prevezmeš pod správu NEX Studia — s náhľadom, čo sa odloží."
+                            title="Ak v cieľovom priečinku leží ručne písané nasadenie, tu ho prevezmeš pod správu NEX Studia — s náhľadom, čo sa odloží. Netreba na to čakať, kým niečo zlyhá."
                           >
                             Prevziať inštaláciu…
                           </button>
