@@ -4930,6 +4930,12 @@ UAT_ROOT: Path = Path("/opt/uat")
 # at ``/opt/customers/<customer-slug>/<full-project-slug>/`` (mirrors uat_provisioner.PROD_ROOT, §2).
 PROD_ROOT: Path = Path("/opt/customers")
 UAT_DEPLOY_TIMEOUT = 900
+# ICCINT-151 — nasadenie na CUDZÍ stroj trvá dlhšie a legitímne: zdrojový kód sa tam musí preniesť a
+# obraz sa stavia na hardvéri zákazníka. Zmerané 25.09.2026 — NEX Manager sa do 900 s zmestil, NEX
+# Inbox nie; kokpit stavbu vzdal a na MAGERi zostal predpis ukazujúci na verziu, ktorá nevznikla.
+# ⚠️ Toto nie je znižovanie latky: práca je naozaj väčšia, nie pomalšia. Aby dlhé čakanie nebolo
+# slepé, patrí k tomu viditeľný priebeh (ICCINT-153) — bez neho človek nerozozná prácu od zamrznutia.
+REMOTE_DEPLOY_TIMEOUT = 2700
 # Post-``up`` DB migration (v4.0.21): one ``alembic upgrade head`` in the backend container for
 # an alembic app that ships no migrate service. The retry absorbs the brief window where the
 # just-recreated backend container is not yet execable; a real migration error fails fast.
@@ -5170,10 +5176,11 @@ async def _run_uat_deploy(
     except OSError as exc:
         return False, f"deploy sa nepodarilo spustiť: {exc}"
     try:
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=UAT_DEPLOY_TIMEOUT)
+        limit = REMOTE_DEPLOY_TIMEOUT if (deploy_host or "").strip() else UAT_DEPLOY_TIMEOUT
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=limit)
     except asyncio.TimeoutError:
         proc.kill()
-        return False, f"deploy prekročil časový limit ({UAT_DEPLOY_TIMEOUT}s)"
+        return False, f"deploy prekročil časový limit ({limit}s)"
     if proc.returncode != 0:
         tail = (stdout or b"").decode("utf-8", "replace").strip()[-300:]
         return False, (f"exit {proc.returncode}: {tail}" if tail else f"exit {proc.returncode}")

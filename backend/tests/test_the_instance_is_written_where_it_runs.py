@@ -530,3 +530,99 @@ def test_the_service_and_volume_names_of_the_instance_are_never_rewritten(tmp_pa
 
     assert sorted(povysene["services"]) == ["alembic-init", "backend", "postgres"]
     assert list(povysene["volumes"]) == ["postgres-data"]
+
+
+# ── 7. po zlyhaní sa predpis na cieli vráti ───────────────────────────────────
+
+
+class _VysledokProvisioningu:
+    fe_service = "frontend"
+    warnings: list[str] = []
+    uat_dir = Path("/opt/customers/mager/nex-inbox")
+    previous_remote_files = {"docker-compose.yml": ("name: povodny\n", 0o664), ".env": ("TAJNE=1\n", 0o600)}
+
+
+def test_a_failed_deploy_puts_the_previous_description_back(monkeypatch) -> None:
+    """⚠️ Zmerané 25.09.2026 na ostrom NEX Inboxe. Nasadenie prekročilo časový limit, ale predpis na
+    MAGERi už ukazoval na 1.5.6, ktorej obrazy sa nepostavili. Kontajnery bežali ďalej na 1.5.5, takže
+    zákazník nič nespozoroval — pri najbližšom reštarte by však appka nenaštartovala vôbec."""
+    from backend.services import deploy as D
+
+    ciel = _Ciel()
+    monkeypatch.setattr("backend.services.remote_instance.write_files", ciel.write_files)
+
+    detail = D._vrat_predpis_po_zlyhani(False, "deploy prekročil časový limit", _VysledokProvisioningu(), "mager")
+
+    assert set(ciel.zapisane) == {"docker-compose.yml", ".env"}
+    assert ciel.zapisane["docker-compose.yml"][0] == "name: povodny\n"
+    assert "vrátený" in detail
+
+
+def test_a_successful_deploy_keeps_the_new_description(monkeypatch) -> None:
+    """Po úspechu je nový predpis ten správny — vracať ho by znamenalo zahodiť, čo sa práve nasadilo."""
+    from backend.services import deploy as D
+
+    ciel = _Ciel()
+    monkeypatch.setattr("backend.services.remote_instance.write_files", ciel.write_files)
+
+    D._vrat_predpis_po_zlyhani(True, "OK", _VysledokProvisioningu(), "mager")
+
+    assert ciel.zapisane == {}
+
+
+def test_a_local_instance_has_nothing_to_put_back(monkeypatch) -> None:
+    """Inštalácia na tomto stroji nemá na cieli čo vracať — a nič sa po sieti neposiela."""
+    from backend.services import deploy as D
+
+    ciel = _Ciel()
+    monkeypatch.setattr("backend.services.remote_instance.write_files", ciel.write_files)
+
+    D._vrat_predpis_po_zlyhani(False, "zlyhalo", _VysledokProvisioningu(), None)
+
+    assert ciel.zapisane == {}
+
+
+def test_a_failed_restore_is_said_out_loud(monkeypatch) -> None:
+    """⚠️ Vtedy na cieli zostal predpis, ktorý tam nepatrí — horší stav než samotné zlyhané nasadenie.
+    Zamlčať to znamená nechať mínu, o ktorej nikto nevie."""
+    from backend.services import deploy as D
+
+    monkeypatch.setattr("backend.services.remote_instance.write_files", lambda *a, **k: "cieľ neodpovedá")
+
+    detail = D._vrat_predpis_po_zlyhani(False, "zlyhalo", _VysledokProvisioningu(), "mager")
+
+    assert "NEPODARILO" in detail and "cieľ neodpovedá" in detail
+
+
+def test_the_timeout_is_longer_when_the_build_runs_on_another_machine() -> None:
+    """Prenos zdrojového kódu a stavba na hardvéri zákazníka trvajú dlhšie — a legitímne."""
+    from backend.services import orchestrator as O
+
+    assert O.REMOTE_DEPLOY_TIMEOUT > O.UAT_DEPLOY_TIMEOUT
+    zdroj = __import__("inspect").getsource(O._run_uat_deploy)
+    assert "REMOTE_DEPLOY_TIMEOUT if" in zdroj, "dlhší limit sa pri cudzom stroji nepoužije"
+
+
+def test_provisioning_remembers_what_it_overwrote_on_the_target(tmp_path, monkeypatch) -> None:
+    """⚠️ Túto stráž si vypýtala mutácia, ktorá prešla nezachytená (25.09.2026): stráže skúšali len
+    toho, kto predpis vracia, nie toho, kto si pôvodný stav zapamätá. Bez zapamätania niet čo vrátiť
+    a celá poistka je ozdoba."""
+    ciel = _Ciel({"docker-compose.yml": "name: povodny\n", ".env": "POSTGRES_PASSWORD=x\n"})
+    monkeypatch.setattr(P, "remote_instance", ciel)
+    monkeypatch.setattr(P, "_docker_image_exists", lambda _o: True)
+
+    vysledok = _provision(tmp_path, deploy_host="mager", allow_overwrite=True)
+
+    assert set(vysledok.previous_remote_files) == {"docker-compose.yml", ".env"}
+    assert vysledok.previous_remote_files["docker-compose.yml"][0] == "name: povodny\n"
+    assert vysledok.previous_remote_files[".env"][1] == 0o600, "záloha nastavení musí zostať zavretá"
+
+
+def test_a_local_instance_remembers_nothing_to_put_back(tmp_path, monkeypatch) -> None:
+    """Inštalácia na tomto stroji sa nikam nezapisuje, takže niet čo vracať."""
+    ciel = _Ciel()
+    monkeypatch.setattr(P, "remote_instance", ciel)
+
+    vysledok = _provision(tmp_path)
+
+    assert vysledok.previous_remote_files == {}

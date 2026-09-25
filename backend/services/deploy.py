@@ -672,6 +672,33 @@ def build_matrix(db: Session, project: Project, user: Optional[object] = None) -
 # ---------------------------------------------------------------------------
 
 
+def _vrat_predpis_po_zlyhani(ok: bool, detail: str, result, deploy_host: Optional[str]) -> str:
+    """Po NEÚSPEŠNOM nasadení vráť na cieľ predpis, ktorý tam bol predtým (ICCINT-151).
+
+    **Prečo.** 25.09.2026 na ostrom NEX Inboxe MÁGERSTAVU: nasadenie prekročilo časový limit, ale
+    predpis na MAGERi už ukazoval na verziu 1.5.6, ktorej obrazy sa nepostavili. Kontajnery bežali
+    ďalej na 1.5.5, takže zákazník nič nespozoroval — ale pri najbližšom reštarte by sa appka pokúsila
+    naštartovať z nového predpisu, obrazy by nenašla a **nenaštartovala by vôbec**. Nesúlad si všimol
+    človek pri kontrole; sám sa neohlásil.
+
+    ⚠️ Vracia sa len pri ZLYHANÍ. Po úspechu je nový predpis ten správny.
+
+    ⚠️ Zlyhanie vrátenia sa PRIPÍŠE do hlásenia, nie zamlčí: vtedy na cieli zostal predpis, ktorý tam
+    nepatrí, a to sa musí dozvedieť človek — je to horší stav než samotné zlyhané nasadenie.
+    """
+    if ok or not (deploy_host or "").strip():
+        return detail
+    predchadzajuce = getattr(result, "previous_remote_files", None)
+    if not predchadzajuce:
+        return detail
+    from backend.services import remote_instance
+
+    chyba = remote_instance.write_files(result.uat_dir, predchadzajuce, deploy_host=deploy_host)
+    if chyba:
+        return f"{detail} ⚠️ Predpis na cieli sa NEPODARILO vrátiť ({chyba}) — ukazuje na verziu, ktorá nevznikla."
+    return f"{detail} Predpis na cieli vrátený do stavu pred nasadením."
+
+
 async def _default_deploy_runner(
     *,
     project_slug: str,
@@ -738,6 +765,7 @@ async def _default_deploy_runner(
         ok, detail = await orchestrator._run_prod_deploy(
             project_slug, customer_slug, app, project_slug, version_number=version_number, deploy_host=deploy_host
         )
+        detail = _vrat_predpis_po_zlyhani(ok, detail, result, deploy_host)
         url = _prod_url(customer_slug, app) if result.fe_service else None
     else:
         # ⚠️ Testovacia inštalácia beží VŽDY na stroji kokpitu — ``deploy_host`` sa sem zámerne

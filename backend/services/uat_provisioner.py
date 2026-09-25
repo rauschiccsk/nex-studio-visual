@@ -2275,6 +2275,11 @@ class ProvisionResult:
     loopback_base_port: Optional[int]
     is_redeploy: bool
     warnings: list[str] = field(default_factory=list)
+    #: ICCINT-151 — čo bolo na CIELI pred zápisom, aby sa to dalo vrátiť, keď nasadenie zlyhá.
+    #: ``{meno: (obsah, práva)}``, prázdne pri inštalácii na tomto stroji.
+    #: ⚠️ Obsahuje aj `.env`, teda tajomstvá. Zostáva v procese: do hlásení, do evidencie ani do
+    #: odpovede sa nedostane — na to sú ``warnings``, ktoré tajomstvá nikdy nenesú.
+    previous_remote_files: dict[str, tuple[str, int]] = field(default_factory=dict)
 
 
 def provision_uat(
@@ -2359,6 +2364,7 @@ def provision_uat(
     # pridelené podsiete a pevne určení hostitelia. Číta sa to z toho, čo tam práve je — aj z ručne
     # písaného súboru, keď ide o prevzatie. Tá istá podmienka ako pri tajomstvách: existujúca
     # inštalácia sa neprekresľuje chudobnejšia, než bola.
+    predchadzajuce: dict[str, tuple[str, int]] = {}
     if deploy_host:
         # ICCINT-151 — inštalácia býva na cudzom stroji, takže jej terajší stav sa musí prečítať TAM.
         # Keby sa čítal tu, prenieslo by sa heslo z miestnej kópie a ostrá databáza zákazníka by
@@ -2579,6 +2585,13 @@ def provision_uat(
     env_path.chmod(0o600)
 
     if deploy_host:
+        # ICCINT-151 — čo tam bolo pred zápisom. Keď nasadenie zlyhá, vráti to volajúci: inak zostane
+        # na serveri zákazníka predpis ukazujúci na verziu, ktorá sa nepostavila, a pri najbližšom
+        # reštarte by appka nenaštartovala vôbec. Zmerané 25.09.2026 na ostrom NEX Inboxe.
+        if existing_compose_text is not None:
+            predchadzajuce["docker-compose.yml"] = (existing_compose_text, 0o664)
+        if remote_env_text is not None:
+            predchadzajuce[".env"] = (remote_env_text, 0o600)
         # ICCINT-151 — a to isté na stroj, kde inštalácia beží. Bez tohto kroku by predpis zostal len
         # tu, poistka proti rozchodu by nasadenie odmietala navždy (a radila „najprv prevezmi", hoci
         # prevzatie práve prebehlo), a súbor na cieli by starol pod rukami toho, kto tam raz bude
@@ -2601,6 +2614,7 @@ def provision_uat(
         warnings.append(f"no backend service detected in {project_slug}'s compose — no /api Traefik route")
 
     return ProvisionResult(
+        previous_remote_files=predchadzajuce,
         uat_slug=uat_slug,
         uat_dir=uat_dir,
         compose_path=compose_path,

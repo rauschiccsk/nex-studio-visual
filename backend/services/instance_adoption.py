@@ -37,7 +37,7 @@ from typing import Any, NamedTuple, Optional
 import yaml
 
 from backend.services import remote_instance, uat_provisioner
-from backend.services.deploy import RunnerResult, _prod_url, _url_for_instance_slug
+from backend.services.deploy import RunnerResult, _prod_url, _url_for_instance_slug, _vrat_predpis_po_zlyhani
 
 #: Prípona, pod ktorou sa ručná práca odkladá. Rovnaká ako pri prevzatí projektu (ICCINT-87), aby sa
 #: „čo je toto za súbor“ nemuselo lúštiť dvakrát.
@@ -582,6 +582,9 @@ async def adopting_deploy_runner(
         ok, detail = await orchestrator._run_prod_deploy(
             project_slug, customer_slug, app, project_slug, version_number=version_number, deploy_host=deploy_host
         )
+        # ICCINT-151 — pri zlyhaní vráť na cieľ predpis, ktorý tam bol. Prevzatie je tá cesta, kde na
+        # tom záleží najviac: prepisuje sa ním ručne písaná inštalácia zákazníka.
+        detail = _vrat_predpis_po_zlyhani(ok, detail, result, deploy_host)
         url = _prod_url(customer_slug, app) if result.fe_service else None
     else:
         ok, detail = await orchestrator._run_uat_deploy(
