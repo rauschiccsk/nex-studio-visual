@@ -1146,6 +1146,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pipeline/{version_id}/ci": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Ci Status
+         * @description Stav posledného zostavenia — aby ho Manažér videl PRIEBEŽNE, nie až na bráne (ICCINT-129).
+         *
+         *     ⚠️ **Vlastná cesta, nie pole v prehľade stavby.** Prehľad je dopyt do databázy a vracia sa
+         *     okamžite; toto sa pýta GitHubu. Zliať ich do jedného by znamenalo, že sa celá obrazovka
+         *     oneskorí o cudziu sieť. Takto sa prehľad vykreslí hneď a veta o zostavení pribudne, keď príde.
+         *
+         *     ⚠️ **Nikdy nečaká a nikdy nepadá.** Keď sa čokoľvek z reťaze nedá zistiť, vráti ``unknown``
+         *     s vetou, ktorá hovorí prečo — nevedomosť sa nesmie tváriť ako dobrá správa.
+         */
+        get: operations["get_ci_status_api_v1_pipeline__version_id__ci_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pipeline/{version_id}/debug-terminal": {
         parameters: {
             query?: never;
@@ -3417,6 +3444,24 @@ export interface components {
             version_id: string;
             /** Version Number */
             version_number: string;
+        };
+        /**
+         * CiStatusRead
+         * @description Čo hovorí CI o commite, na ktorom projekt stojí (ICCINT-129, druhá polovica).
+         *
+         *     Manažér sa o červenom zostavení dozvedel až na bráne Verifikácie — čiže vtedy, keď je verzia
+         *     „hotová" a prerába sa. Kto vidí červenú pri druhom commite, sa do toho stavu nedostane.
+         *
+         *     ⚠️ Verdikt vynáša :func:`backend.services.ci_status.verdikt` — to isté pravidlo, podľa ktorého
+         *     sa riadi brána. Dva kusy kódu, ktoré si samostatne vykladajú „čo je červená", sa raz rozídu.
+         */
+        CiStatusRead: {
+            /** Detail */
+            detail: string;
+            /** Sha */
+            sha?: string | null;
+            /** Stav */
+            stav: string;
         };
         /**
          * CostRowRead
@@ -8576,6 +8621,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChangeRequestCaptureResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ci_status_api_v1_pipeline__version_id__ci_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CiStatusRead"];
                 };
             };
             /** @description Validation Error */

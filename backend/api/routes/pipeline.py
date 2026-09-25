@@ -41,6 +41,7 @@ from backend.schemas.pipeline import (
     BoardTask,
     ChangeRequestCaptureRequest,
     ChangeRequestCaptureResponse,
+    CiStatusRead,
     DedoProposalRead,
     DedoProposalRejectRequest,
     DedoProposalSendRequest,
@@ -55,9 +56,9 @@ from backend.schemas.pipeline import (
 )
 from backend.services import agent_terminal as agent_terminal_service
 from backend.services import change_request as change_request_service
+from backend.services import ci_status, claude_agent, orchestrator, pipeline_runner
 from backend.services import dedo_message as dedo_message_service
 from backend.services import fast_fix as fast_fix_service
-from backend.services import orchestrator, pipeline_runner
 from backend.services.agent_terminal import AgentTerminalError, SessionConflictError
 from backend.services.orchestrator import OrchestratorError
 from backend.services.pipeline_ws import registry
@@ -415,6 +416,27 @@ async def start_fast_fix(
 
     logger.info("Fast-Fix started: version %s (project had %d versions before)", version_id, pre_count)
     return FastFixStartResponse(version_id=version_id, board=_board(db, version_id))
+
+
+@router.get("/{version_id}/ci", response_model=CiStatusRead)
+async def get_ci_status(
+    version_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_shu_or_above),
+) -> CiStatusRead:
+    """Stav posledného zostavenia — aby ho Manažér videl PRIEBEŽNE, nie až na bráne (ICCINT-129).
+
+    ⚠️ **Vlastná cesta, nie pole v prehľade stavby.** Prehľad je dopyt do databázy a vracia sa
+    okamžite; toto sa pýta GitHubu. Zliať ich do jedného by znamenalo, že sa celá obrazovka
+    oneskorí o cudziu sieť. Takto sa prehľad vykreslí hneď a veta o zostavení pribudne, keď príde.
+
+    ⚠️ **Nikdy nečaká a nikdy nepadá.** Keď sa čokoľvek z reťaze nedá zistiť, vráti ``unknown``
+    s vetou, ktorá hovorí prečo — nevedomosť sa nesmie tváriť ako dobrá správa.
+    """
+    authz.assert_version_access(db, current_user, version_id)
+    koren = claude_agent.PROJECTS_ROOT / orchestrator._project_slug_for_version(db, version_id)
+    v = await ci_status.snapshot(koren)
+    return CiStatusRead(stav=v.stav, detail=v.detail, sha=v.sha)
 
 
 @router.get("/{version_id}", response_model=PipelineBoardRead)

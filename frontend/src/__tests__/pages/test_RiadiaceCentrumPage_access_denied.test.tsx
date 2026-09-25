@@ -47,6 +47,9 @@ vi.mock("@/hooks/usePipelineWs", () => ({
 vi.mock("@/services/api/pipeline", () => ({
   relayPipelineMessageApi: vi.fn(),
   postPipelineActionApi: vi.fn(),
+  // ICCINT-129: stránka sa pýta na stav zostavenia. Atrapa, ktorá dopyt nepozná, nie je „o jeden
+  // menej" — volanie `undefined` vyhodí chybu SYNCHRÓNNE a zhodí celú obrazovku.
+  getCiStatusApi: vi.fn().mockResolvedValue({ stav: "unknown", detail: "—", sha: null }),
 }));
 
 // The composer stub marks the ordinary board: if it renders, the page took the normal path.

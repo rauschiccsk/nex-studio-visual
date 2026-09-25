@@ -43,6 +43,7 @@ import ReverifyBar from "@/components/riadiace/ReverifyBar";
 import ReverifyNoFixBar from "@/components/riadiace/ReverifyNoFixBar";
 import ChangeRequestBar from "@/components/riadiace/ChangeRequestBar";
 import PhaseBar from "@/components/riadiace/PhaseBar";
+import StavZostavenia from "@/components/riadiace/StavZostavenia";
 import HonestStatusStrip from "@/components/riadiace/HonestStatusStrip";
 import PlanUlohRail from "@/components/riadiace/PlanUlohRail";
 
@@ -201,6 +202,9 @@ export default function RiadiaceCentrumPage() {
       {/* Top — read-only phase bar (conversation column). */}
       <div className="col-start-1 row-start-1 min-w-0">
         <PhaseBar board={board ?? null} />
+        {/* ICCINT-129: stav posledného zostavenia patrí VEDĽA fáz, jednou vetou. Kto vidí červenú
+            pri druhom commite, nedostane sa do stavu, že prerába hotovú verziu. */}
+        <StavZostavenia versionId={versionId ?? null} />
       </div>
 
       {/* Centre — the SPINE: honest status pinned above the live conversation thread (the overflow region). */}

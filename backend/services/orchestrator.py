@@ -57,6 +57,7 @@ from backend.schemas.epic import EpicCreate
 from backend.schemas.feat import FeatCreate
 from backend.schemas.task import TaskCreate
 from backend.services import (
+    ci_status,
     claude_agent,
     create_project_postscaffold,
     dedo_escalation,
@@ -5570,36 +5571,20 @@ CI_RUN_FINISH_INTERVAL = 30
 #: How many runs to read for ONE commit (ICCINT-129). A commit triggers one run per workflow — nex-inbox
 #: has two, most repos have one to three. The cap is not a judgement about how many matter; it only keeps
 #: the output of a machine we do not control bounded. Reading exactly one was the bug.
-CI_RUNS_PER_COMMIT_LIMIT = 20
+CI_RUNS_PER_COMMIT_LIMIT = ci_status.CI_RUNS_PER_COMMIT_LIMIT
 
 #: Conclusions that count as "this run said the code is fine". ``skipped`` belongs here: a workflow whose
 #: jobs were all skipped by their own conditions reported nothing WRONG, and while only one run was read it
 #: was mostly invisible. Reading every run makes it visible — and "anything that is not success is red"
 #: would turn it into a false alarm the moment a repo gains a conditional workflow.
-CI_CONCLUSIONS_OK = frozenset({"success", "skipped", "neutral"})
+#: ICCINT-129: presťahované do :mod:`backend.services.ci_status`, aby brána aj obrazovka
+#: rozhodovali podľa TOHO ISTÉHO. Tu zostávajú len mená, aby sa nemuseli meniť volajúci.
+CI_CONCLUSIONS_OK = ci_status.CI_CONCLUSIONS_OK
 
 #: Conclusions that mean the run FAILED. Deliberately not "everything else": ``cancelled`` and ``stale``
 #: say nothing about the code, and a gate that floors a version on somebody pressing Cancel is a gate
 #: people learn to route around — the same reasoning that keeps ``unknown`` non-blocking.
 CI_CONCLUSIONS_RED = frozenset({"failure", "timed_out", "startup_failure", "action_required"})
-
-
-def _name_run(row: dict) -> str:
-    """How a run is named in a verdict a human reads. The workflow name matters as much as the number:
-    on 14.09.2026 the gate reported "CI zelené (beh 34869175048)" about a run of a DIFFERENT workflow,
-    so the one word the Manažér relied on was the one word that was wrong."""
-    run_id = row.get("databaseId")
-    workflow = str(row.get("workflowName") or "").strip()
-    return f"postup {workflow}, beh {run_id}" if workflow else f"beh {run_id}"
-
-
-def _first_failed_run(rows: list[dict]) -> Optional[dict]:
-    """The first COMPLETED run that failed — position in the list carries no meaning, so any of them is
-    the answer. ``None`` when nothing has failed (yet)."""
-    for row in rows:
-        if row.get("status") == "completed" and row.get("conclusion") in CI_CONCLUSIONS_RED:
-            return row
-    return None
 
 
 def _project_has_ci(project_root: Path) -> bool:
@@ -5679,19 +5664,7 @@ async def _ci_status_for_head(
         control is its own hazard), just far above any real per-commit run count.
         """
         rc, out = await _run_publish_step(
-            [
-                "gh",
-                "run",
-                "list",
-                "-R",
-                repo,
-                "--commit",
-                head,
-                "--limit",
-                str(CI_RUNS_PER_COMMIT_LIMIT),
-                "--json",
-                "status,conclusion,databaseId,workflowName",
-            ],
+            ci_status.prikaz_na_behy(repo, head),
             RELEASE_PUBLISH_STEP_TIMEOUT,
         )
         if rc != 0:
@@ -5728,14 +5701,14 @@ async def _ci_status_for_head(
     tries_left = max(1, CI_RUN_FINISH_TIMEOUT // max(CI_RUN_FINISH_INTERVAL, 1))
     announced = False
     while True:
-        red = _first_failed_run(rows)
-        if red is not None:
-            return "red", f"CI zlyhalo ({_name_run(red)}, {red.get('conclusion')})"
+        stav, detail = ci_status.verdikt(rows)
+        if stav == "red":
+            return stav, detail
         pending = [r for r in rows if r.get("status") != "completed"]
         if not pending or tries_left <= 0:
             break
         if on_wait is not None and not announced:
-            await on_wait(", ".join(_name_run(r) for r in pending))
+            await on_wait(", ".join(ci_status.pomenuj_beh(r) for r in pending))
             announced = True
         await asyncio.sleep(CI_RUN_FINISH_INTERVAL)
         tries_left -= 1
@@ -5746,23 +5719,17 @@ async def _ci_status_for_head(
             return "unknown", f"beh CI pre commit {head[:7]} medzičasom zmizol"
         rows = looked
 
+    # ICCINT-129: verdikt vynáša ci_status.verdikt — to isté pravidlo, podľa ktorého sa riadi
+    # obrazovka. Brána k nemu pridáva len to, čo je JEJ: že už čakala, a ako dlho.
+    stav, detail = ci_status.verdikt(rows)
     pending = [r for r in rows if r.get("status") != "completed"]
-    if pending:
+    if stav == "unknown" and pending:
         return (
             "unknown",
-            f"CI po {CI_RUN_FINISH_TIMEOUT // 60} min ešte bežalo ({', '.join(_name_run(r) for r in pending)})"
-            " — verzia prešla bez jeho výsledku",
+            f"CI po {CI_RUN_FINISH_TIMEOUT // 60} min ešte bežalo "
+            f"({', '.join(ci_status.pomenuj_beh(r) for r in pending)}) — verzia prešla bez jeho výsledku",
         )
-    passed = [r for r in rows if r.get("conclusion") in CI_CONCLUSIONS_OK]
-    if not passed:
-        # Every run ended without saying anything about the code — cancelled, stale. Not evidence of
-        # health, and not evidence of breakage either. ``unknown`` never blocks, but it must SAY so.
-        return (
-            "unknown",
-            f"žiadny beh CI pre commit {head[:7]} nedal výsledok "
-            f"({', '.join(f'{_name_run(r)}: {r.get("conclusion")}' for r in rows)})",
-        )
-    return "green", f"CI zelené ({', '.join(_name_run(r) for r in passed)})"
+    return stav, detail
 
 
 # ICCINT-64: the v1 ``_run_release_publish`` (push → resolve the CI run → ``gh run watch`` → block on red)

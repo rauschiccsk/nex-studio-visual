@@ -34,6 +34,7 @@ from backend.core.offload import BlockingWorkTimedOut, run_blocking
 SHELLING_MODULES = {
     "build_db",
     "build_sandbox",
+    "ci_status",
     "claude_agent",
     "consult_sandbox",
     "create_project_postscaffold",

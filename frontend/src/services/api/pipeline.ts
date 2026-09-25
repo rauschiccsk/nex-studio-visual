@@ -367,3 +367,23 @@ export type PipelineWsFrame =
   // keystrokes), so this is mainly the break-glass console's signal; surfaced here so a frame on the shared
   // socket is handled gracefully rather than silently dropped.
   | { type: "write_rejected"; reason: string };
+
+// ── Stav posledného zostavenia (ICCINT-129, druhá polovica) ──────────────────
+//
+// Manažér sa o červenom CI dozvedel až na bráne Verifikácie — čiže vtedy, keď je verzia „hotová"
+// a prerába sa. Kto vidí červenú pri druhom commite, sa do toho stavu nedostane.
+//
+// ⚠️ Vlastná cesta, nie pole v prehľade stavby: prehľad je dopyt do databázy a vracia sa okamžite,
+// toto sa pýta GitHubu. Zliať ich by znamenalo, že sa celá obrazovka oneskorí o cudziu sieť.
+
+export interface CiStatus {
+  /** `green` · `red` · `unknown`. Nevedomosť sa nesmie tváriť ako dobrá správa. */
+  stav: string;
+  /** Veta pre človeka — pri červenej menuje POSTUP aj číslo behu, nie len číslo. */
+  detail: string;
+  sha: string | null;
+}
+
+export function getCiStatusApi(versionId: string): Promise<CiStatus> {
+  return api.get<CiStatus>(`/pipeline/${versionId}/ci`);
+}

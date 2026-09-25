@@ -134,6 +134,24 @@ class AgentSession(BaseModel):
     status: Literal["idle", "active", "stale"]
 
 
+class CiStatusRead(BaseModel):
+    """Čo hovorí CI o commite, na ktorom projekt stojí (ICCINT-129, druhá polovica).
+
+    Manažér sa o červenom zostavení dozvedel až na bráne Verifikácie — čiže vtedy, keď je verzia
+    „hotová" a prerába sa. Kto vidí červenú pri druhom commite, sa do toho stavu nedostane.
+
+    ⚠️ Verdikt vynáša :func:`backend.services.ci_status.verdikt` — to isté pravidlo, podľa ktorého
+    sa riadi brána. Dva kusy kódu, ktoré si samostatne vykladajú „čo je červená", sa raz rozídu.
+    """
+
+    #: ``green`` · ``red`` · ``unknown``. Nevedomosť sa nesmie tváriť ako dobrá správa.
+    stav: str
+    #: Veta pre človeka — pri červenej menuje POSTUP aj číslo behu, nie len číslo.
+    detail: str
+    #: Commit, o ktorom to platí.
+    sha: Optional[str] = None
+
+
 class PipelineBoardRead(BaseModel):
     """Vývoj board snapshot: current 5-phase state + the most recent messages (CR-V2-021).
 
