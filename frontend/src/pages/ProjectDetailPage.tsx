@@ -5,6 +5,8 @@ import { AlertTriangle, Loader2, Trash2, Zap } from "lucide-react";
 import {
   deleteProjectApi,
   getProjectApi,
+  getProjectDedoProposalApi,
+  type DedoProjectProposal,
   listProjectsApi,
   projectAssignmentsApi,
   reassignProjectApi,
@@ -13,6 +15,7 @@ import {
 } from "@/services/api/projects";
 import { listUsersApi } from "@/services/api/users";
 import { listVersions } from "@/services/api/versions";
+import DedoBriefBar from "@/components/projects/DedoBriefBar";
 import { startFastFixApi } from "@/services/api/pipeline";
 import { useOpenVersionCockpit } from "@/hooks/useOpenVersionCockpit";
 import { useAuthStore } from "@/store/authStore";
@@ -121,6 +124,9 @@ export default function ProjectDetailPage() {
   // Fast-Fix Lane entry (F-009 §4 CR-B, CR-NS-095): one prompt → POST /pipeline/fast-fix → the backend
   // auto-creates the next PATCH version + starts the short `fast_fix` pipeline → open its cockpit board.
   const openVersionCockpit = useOpenVersionCockpit();
+  // Zadanie, ktoré Dedo pripravil pre prácu, ktorá sa ešte nezačala (ICCINT-152). `null` je bežný
+  // stav — väčšinu času nič nenavrhuje a stránka sa má tváriť presne tak, ako sa tvárila doteraz.
+  const [dedoProposal, setDedoProposal] = useState<DedoProjectProposal | null>(null);
   const [fastFixOpen, setFastFixOpen] = useState(false);
   const [fastFixDirective, setFastFixDirective] = useState("");
   const [fastFixSubmitting, setFastFixSubmitting] = useState(false);
@@ -243,6 +249,14 @@ export default function ProjectDetailPage() {
         return Promise.all([
           getProjectApi(found.id).then((detail) => { if (!cancelled) setProject(detail); }),
           listVersions(found.id).then((vs) => { if (!cancelled) setVersions(vs); }),
+          // Zlyhanie tohto dopytu nesmie zhodiť stránku: zadanie je pomoc navyše, nie podmienka
+          // toho, aby sa projekt dal otvoriť. ⚠️ Preto cez `Promise.resolve().then(...)` — `.catch`
+          // sám by zachytil len odmietnutý sľub, nie chybu vyhodenú SYNCHRÓNNE pri volaní. A presne
+          // tá zhodila 17 stráží tejto stránky, keď ich atrapa nový dopyt nepoznala (ICCINT-152).
+          Promise.resolve()
+            .then(() => getProjectDedoProposalApi(found.id))
+            .then((p) => { if (!cancelled) setDedoProposal(p); })
+            .catch(() => undefined),
         ]);
       })
       .catch(() => { if (!cancelled) setError("Nepodarilo sa načítať projekt."); })
@@ -755,6 +769,26 @@ export default function ProjectDetailPage() {
 
       {/* Fast-Fix Lane modal (F-009 §4 CR-B): the Director types the fix directive (the whole brief);
           submit auto-creates a PATCH version + starts the short `fast_fix` pipeline, then opens its board. */}
+      {/* Zadanie od Deda pre prácu, ktorá sa ešte nezačala (ICCINT-152). Panel sa nevykreslí, keď
+          žiadne nie je — stránka potom vyzerá presne tak, ako vyzerala doteraz. */}
+      {project && dedoProposal && (
+        <DedoBriefBar
+          projectId={project.id}
+          proposal={dedoProposal}
+          onProposal={setDedoProposal}
+          onVersion={async (versionId, started) => {
+            // Rýchla oprava BEŽÍ — Manažéra treba vziať k nej, inak by pozeral na stránku projektu
+            // presvedčený, že sa nič nestalo, kým agent už pracuje (tá istá chyba ako ICCINT-62).
+            if (started) {
+              await openVersionCockpit(versionId, { slug: project.slug, name: project.name });
+              return;
+            }
+            // Koncept nikam neberie — len sa objaví v zozname verzií, kde ho Manažér uvidí.
+            listVersions(project.id).then(setVersions).catch(() => undefined);
+          }}
+        />
+      )}
+
       {fastFixOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"

@@ -243,3 +243,52 @@ export function previewAdoptionApi(slug: string): Promise<AdoptionPreview> {
 export function projectAssignmentsApi(projectId: string): Promise<ProjectAssignmentRead[]> {
   return api.get<ProjectAssignmentRead[]>(`/projects/${projectId}/assignments`);
 }
+
+// ── Dedovo zadanie pre prácu, ktorá sa ešte nezačala (ICCINT-152) ─────────────
+//
+// Dedo návrh len položí; všetko, čo niečo zakladá, sa deje až kliknutím Manažéra — pod jeho účtom.
+
+export interface DedoProjectProposal {
+  id: string;
+  project_id: string;
+  content: string;
+  /** `fast_fix` založí opravnú verziu a spustí ju; `new_version` založí koncept a nespustí nič. */
+  proposed_action: string;
+  status: string;
+  created_at: string;
+}
+
+export interface DedoProjectProposalSent {
+  version_id: string;
+  /** `true` pri rýchlej oprave; pri novej verzii je to koncept a nič nebeží. */
+  started: boolean;
+}
+
+/** Zadanie, ktoré čaká na rozhodnutie — `null`, keď žiadne nie je. */
+export function getProjectDedoProposalApi(projectId: string): Promise<DedoProjectProposal | null> {
+  return api.get<DedoProjectProposal | null>(`/projects/${projectId}/dedo-proposal`);
+}
+
+/**
+ * Manažér zadanie schválil. `text` je to, čo má na obrazovke — aj s jeho úpravami.
+ *
+ * `proposalId` cestuje s klikom zámerne: server koná nad návrhom, ktorý mal pred očami, nie nad „tým,
+ * čo je otvorené teraz". Keby Dedo medzitým napísal novší, server odmietne (409) namiesto zámeny.
+ */
+export function sendProjectDedoProposalApi(
+  projectId: string,
+  proposalId: string,
+  text: string,
+): Promise<DedoProjectProposalSent> {
+  return api.post<DedoProjectProposalSent>(`/projects/${projectId}/dedo-proposal/send`, {
+    proposal_id: proposalId,
+    text,
+  });
+}
+
+/** Manažér zadanie zamietol. Nevzniká z neho nič. */
+export function rejectProjectDedoProposalApi(projectId: string, proposalId: string): Promise<{ status: string }> {
+  return api.post<{ status: string }>(`/projects/${projectId}/dedo-proposal/reject`, {
+    proposal_id: proposalId,
+  });
+}

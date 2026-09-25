@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DedoBuildRead(BaseModel):
@@ -69,6 +69,58 @@ class DedoProposalCreate(BaseModel):
     #: Validated against :data:`~backend.services.dedo_message.PROPOSAL_ACTIONS` in the service (409), so
     #: the allowed set lives in ONE place next to the writer instead of being restated as a Literal here.
     proposed_action: str = Field(min_length=1, description="uprav | answer | ask | fast_fix | decide")
+
+
+class DedoProjectProposalCreate(BaseModel):
+    """Zadanie, ktoré Dedo pripravil pre prácu, ktorá sa ešte NEZAČALA (ICCINT-152).
+
+    Dvojička k :class:`DedoProposalCreate`. Rozdiel je jediný a je to celý dôvod jej existencie: tamtá sa
+    pripína na bežiacu stavbu, táto na projekt — lebo keď stavba nebeží, niet sa na čo pripnúť, a práve
+    vtedy zadanie treba.
+    """
+
+    content: str = Field(min_length=1)
+    #: Overuje sa proti :data:`~backend.db.models.dedo_proposal.PROJECT_PROPOSAL_ACTIONS` v službe (409),
+    #: aby povolená množina žila na JEDNOM mieste vedľa zapisovateľa.
+    proposed_action: str = Field(min_length=1, description="fast_fix | new_version")
+
+
+class DedoProjectProposalRead(BaseModel):
+    """Otvorené zadanie tak, ako ho Manažér uvidí na stránke projektu."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    project_id: UUID
+    content: str
+    proposed_action: str
+    status: str
+    created_at: datetime
+
+
+class DedoProjectProposalSendRequest(BaseModel):
+    """Manažér posiela zadanie ďalej — text je TEN, ktorý mal na obrazovke, aj s jeho úpravami.
+
+    ``proposal_id`` nie je ozdoba: koná sa nad návrhom, ktorý mal pred očami, nie nad „tým, čo je
+    otvorené teraz". Inak by Dedov novší návrh podaný medzi zobrazením a kliknutím odišiel namiesto neho.
+    """
+
+    proposal_id: UUID
+    text: str = Field(min_length=1)
+
+
+class DedoProjectProposalRejectRequest(BaseModel):
+    """Manažér zadanie zamieta — menuje ten, ktorý videl, z rovnakého dôvodu."""
+
+    proposal_id: UUID
+
+
+class DedoProjectProposalSendResponse(BaseModel):
+    """Čo z kliknutia vzniklo. Verzia je jediná odpoveď, ktorá Manažéra zaujíma — vezme ho tam."""
+
+    version_id: UUID
+    #: ``True`` pri ``fast_fix``; pri ``new_version`` je verzia koncept a nič nebeží.
+    started: bool
 
 
 class DedoUnblockRequest(BaseModel):

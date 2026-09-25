@@ -61,15 +61,26 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.core.dedo_auth import require_dedo_identity
+from backend.db.models.dedo_proposal import DedoProjectProposal
 from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.db.session import get_db
-from backend.schemas.dedo import DedoBuildRead, DedoMessageCreate, DedoProposalCreate, DedoUnblockRequest
+from backend.schemas.dedo import (
+    DedoBuildRead,
+    DedoMessageCreate,
+    DedoProjectProposalCreate,
+    DedoProjectProposalRead,
+    DedoProposalCreate,
+    DedoUnblockRequest,
+)
 from backend.schemas.pipeline import PipelineMessageRead
 from backend.services import dedo_message as dedo_message_service
+from backend.services import dedo_project_proposal as dedo_project_proposal_service
 from backend.services import dedo_unblock as dedo_unblock_service
 from backend.services.dedo_message import DedoMessageError
+from backend.services.dedo_project_proposal import ProposalError as ProjectProposalError
+from backend.services.dedo_project_proposal import ProposalNotFound as ProjectProposalNotFound
 
 logger = logging.getLogger(__name__)
 
@@ -293,6 +304,48 @@ def propose_build_message(
     db.commit()
     logger.info("Dedo (API) proposed a message for version %s (message %s)", version_id, msg.id)
     return msg
+
+
+@router.post(
+    "/projects/{project_id}/proposals",
+    response_model=DedoProjectProposalRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def propose_project_brief(
+    project_id: uuid.UUID,
+    body: DedoProjectProposalCreate,
+    db: Session = Depends(get_db),
+) -> DedoProjectProposal:
+    """Zadanie pre prácu, ktorá sa ešte NEZAČALA (ICCINT-152) — siedme dvere.
+
+    Návrh vyššie sa pripína na bežiacu stavbu, takže sa otvorí až vtedy, keď už zadanie netreba.
+    25.09.2026 prestalo na MÁGERSTAVE fungovať spúšťanie NEX Inboxu z NEX Managera, Director požiadal
+    *„zapíš to zadanie do kokpitu ako návrh"* — a nešlo to. Text mu Dedo musel podať do ruky, aby ho pri
+    spúšťaní rýchlej opravy vložil. Presne tomu mali tie dvere zabrániť.
+
+    ⚠️ **Nerozširuje to, čo Dedo smie.** Rovnako ako návrh do stavby, ani tento nedoručuje NIČ: uloží sa
+    ``status='proposed'`` a čaká na Manažéra. Verziu zakladá až jeho klik, pod JEHO účtom, tou istou
+    cestou, akou by formulár *Rýchla oprava* vyplnil sám. Hranica z ICCINT-14 — Dedo nesmie sám
+    postrčiť prácu na zákazníkovom projekte — zostáva nedotknutá.
+
+    Odmieta neznámy projekt (404), neznáme sloveso a prázdny text (409).
+    """
+    try:
+        row = dedo_project_proposal_service.record(
+            db,
+            project_id=project_id,
+            content=body.content,
+            proposed_action=body.proposed_action,
+        )
+    except ProjectProposalNotFound as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProjectProposalError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    db.commit()
+    logger.info("Dedo (API) pripravil zadanie pre projekt %s (návrh %s)", project_id, row.id)
+    return row
 
 
 @router.post("/builds/{version_id}/unblock", response_model=DedoBuildRead)

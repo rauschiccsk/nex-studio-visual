@@ -6,6 +6,7 @@ from backend.db.models.base import Base, TimestampMixin, UUIDMixin
 from backend.db.models.bugs import Bug
 from backend.db.models.credentials import Credential
 from backend.db.models.customers import Customer
+from backend.db.models.dedo_proposal import DedoProjectProposal
 from backend.db.models.deploy import DeployEvent
 from backend.db.models.external_cost import ExternalCost
 from backend.db.models.foundation import User, UserAgentSettings, UserSession
@@ -26,6 +27,7 @@ __all__ = [
     "Credential",
     "Customer",
     "DeployEvent",
+    "DedoProjectProposal",
     "ExternalCost",
     "OrchestratorSession",
     "PipelineMessage",

@@ -39,11 +39,19 @@ from sqlalchemy.orm import Session
 from backend.api.dependencies import get_knowledge_base_writer, get_rag_indexer
 from backend.core import authz
 from backend.core.security import get_current_user, require_shu_or_above
+from backend.db.models.dedo_proposal import DedoProjectProposal
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.session import get_db
 from backend.rag.indexer import RAGIndexer
+from backend.schemas.dedo import (
+    DedoProjectProposalRead,
+    DedoProjectProposalRejectRequest,
+    DedoProjectProposalSendRequest,
+    DedoProjectProposalSendResponse,
+)
 from backend.schemas.pagination import PaginatedResponse
+from backend.schemas.pipeline import PipelineStateRead
 from backend.schemas.project import (
     GitHubRepoNotFoundError,
     PortBlockSuggestResponse,
@@ -57,16 +65,19 @@ from backend.schemas.project import (
     ProjectUpdate,
 )
 from backend.schemas.version import VersionCreate
+from backend.services import dedo_project_proposal as dedo_proposal_service
 from backend.services import deploy as deploy_service
+from backend.services import fast_fix as fast_fix_service
 from backend.services import git_state as git_state_service
 from backend.services import github_validation as github_validation_service
 from backend.services import nexshared as nexshared_service
+from backend.services import orchestrator, pipeline_runner, project_adoption, project_memory, uat_provisioner
 from backend.services import port_registry as port_registry_service
 from backend.services import project as project_service
-from backend.services import project_adoption, project_memory, uat_provisioner
 from backend.services import system_setting as system_setting_service
 from backend.services import version as version_service
 from backend.services.knowledge_base_writer import KnowledgeBaseWriter
+from backend.services.pipeline_ws import registry
 from backend.services.template_bootstrap import (
     GitPushVerificationError,
     TemplateBootstrapError,
@@ -1625,3 +1636,113 @@ def read_project_assignments(
         )
         for row in project_service.assignment_history(db, project_id)
     ]
+
+
+# ── Dedovo zadanie pre prácu, ktorá sa ešte nezačala (ICCINT-152) ─────────────
+#
+# Dedo návrh len POLOŽÍ (`POST /api/v1/dedo/projects/{id}/proposals`). Všetko, čo niečo zakladá alebo
+# spúšťa, je tu — pod účtom Manažéra, s jeho prístupom k projektu. Je to tá istá deliaca čiara ako pri
+# návrhu do bežiacej stavby: Dedo navrhuje, Manažér rozhoduje.
+
+
+@router.get("/{project_id}/dedo-proposal", response_model=DedoProjectProposalRead | None)
+def get_dedo_proposal(
+    project_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_shu_or_above),
+) -> DedoProjectProposal | None:
+    """Zadanie od Deda, ktoré čaká na rozhodnutie — alebo ``null``, keď žiadne nie je.
+
+    Prázdna odpoveď je správna odpoveď, nie chyba: väčšinu času Dedo nič nenavrhuje a stránka projektu
+    sa má tváriť presne tak, ako sa tvárila doteraz.
+    """
+    authz.assert_project_id_access(db, current_user, project_id)
+    return dedo_proposal_service.open_for_project(db, project_id)
+
+
+@router.post("/{project_id}/dedo-proposal/send", response_model=DedoProjectProposalSendResponse)
+async def send_dedo_proposal(
+    project_id: UUID,
+    payload: DedoProjectProposalSendRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_shu_or_above),
+) -> DedoProjectProposalSendResponse:
+    """Manažér zadanie schválil — TU vzniká verzia, pod jeho účtom.
+
+    ``fast_fix`` založí opravnú verziu a spustí ju presne tou cestou, akou ju spúšťa formulár *Rýchla
+    oprava*; ``new_version`` založí verziu ako koncept so zadaním v popise a **nespustí nič**.
+
+    ⚠️ Text sa berie z tela požiadavky, nie z návrhu: Manažér ho mohol upraviť a platí to, čo mal na
+    obrazovke. A koná sa nad návrhom, ktorý MENUJE — nie nad „tým, čo je otvorené teraz" (409, keď ho
+    Dedo medzitým nahradil).
+    """
+    authz.assert_project_id_access(db, current_user, project_id)
+    try:
+        proposal = dedo_proposal_service.for_decision(db, project_id, payload.proposal_id)
+    except dedo_proposal_service.ProposalNotFound as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except dedo_proposal_service.ProposalError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    verb = proposal.proposed_action
+    try:
+        if verb == "fast_fix":
+            version = fast_fix_service.create_patch_version(db, project_id=project_id, user_id=current_user.id)
+            state = await orchestrator.apply_action(
+                db,
+                version_id=version.id,
+                action="start",
+                payload={"flow_type": "fast_fix", "directive": payload.text},
+            )
+        else:
+            version = version_service.create(
+                db,
+                project_id,
+                VersionCreate(
+                    version_number=version_service.suggest_next_version_number(db, project_id),
+                    name="Nová verzia",
+                    description=payload.text,
+                ),
+                current_user.id,
+            )
+            state = None
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    dedo_proposal_service.mark_sent(db, proposal, user_id=current_user.id, version_id=version.id)
+    version_id = version.id
+    db.commit()
+
+    if state is not None:
+        db.refresh(state)
+        await registry.broadcast(
+            version_id,
+            {"type": "state_changed", "state": PipelineStateRead.model_validate(state).model_dump(mode="json")},
+        )
+        if state.status == "agent_working":
+            pipeline_runner.schedule_dispatch(version_id, None)
+
+    logger.info("Manažér poslal Dedovo zadanie (%s) — vznikla verzia %s", verb, version_id)
+    return DedoProjectProposalSendResponse(version_id=version_id, started=state is not None)
+
+
+@router.post("/{project_id}/dedo-proposal/reject", status_code=status.HTTP_200_OK)
+def reject_dedo_proposal(
+    project_id: UUID,
+    payload: DedoProjectProposalRejectRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_shu_or_above),
+) -> dict[str, str]:
+    """Manažér zadanie zamietol. Nevzniká z neho nič a Dedovi zmizne z ponuky."""
+    authz.assert_project_id_access(db, current_user, project_id)
+    try:
+        proposal = dedo_proposal_service.for_decision(db, project_id, payload.proposal_id)
+    except dedo_proposal_service.ProposalNotFound as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except dedo_proposal_service.ProposalError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    dedo_proposal_service.mark_rejected(db, proposal, user_id=current_user.id)
+    db.commit()
+    return {"status": "rejected"}

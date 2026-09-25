@@ -734,6 +734,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/dedo/projects/{project_id}/proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Propose Project Brief
+         * @description Zadanie pre prácu, ktorá sa ešte NEZAČALA (ICCINT-152) — siedme dvere.
+         *
+         *     Návrh vyššie sa pripína na bežiacu stavbu, takže sa otvorí až vtedy, keď už zadanie netreba.
+         *     25.09.2026 prestalo na MÁGERSTAVE fungovať spúšťanie NEX Inboxu z NEX Managera, Director požiadal
+         *     *„zapíš to zadanie do kokpitu ako návrh"* — a nešlo to. Text mu Dedo musel podať do ruky, aby ho pri
+         *     spúšťaní rýchlej opravy vložil. Presne tomu mali tie dvere zabrániť.
+         *
+         *     ⚠️ **Nerozširuje to, čo Dedo smie.** Rovnako ako návrh do stavby, ani tento nedoručuje NIČ: uloží sa
+         *     ``status='proposed'`` a čaká na Manažéra. Verziu zakladá až jeho klik, pod JEHO účtom, tou istou
+         *     cestou, akou by formulár *Rýchla oprava* vyplnil sám. Hranica z ICCINT-14 — Dedo nesmie sám
+         *     postrčiť prácu na zákazníkovom projekte — zostáva nedotknutá.
+         *
+         *     Odmieta neznámy projekt (404), neznáme sloveso a prázdny text (409).
+         */
+        post: operations["propose_project_brief_api_v1_dedo_projects__project_id__proposals_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/dedo/waiting": {
         parameters: {
             query?: never;
@@ -1611,6 +1643,76 @@ export interface paths {
         get: operations["read_project_assignments_api_v1_projects__project_id__assignments_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/dedo-proposal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Dedo Proposal
+         * @description Zadanie od Deda, ktoré čaká na rozhodnutie — alebo ``null``, keď žiadne nie je.
+         *
+         *     Prázdna odpoveď je správna odpoveď, nie chyba: väčšinu času Dedo nič nenavrhuje a stránka projektu
+         *     sa má tváriť presne tak, ako sa tvárila doteraz.
+         */
+        get: operations["get_dedo_proposal_api_v1_projects__project_id__dedo_proposal_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/dedo-proposal/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject Dedo Proposal
+         * @description Manažér zadanie zamietol. Nevzniká z neho nič a Dedovi zmizne z ponuky.
+         */
+        post: operations["reject_dedo_proposal_api_v1_projects__project_id__dedo_proposal_reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/dedo-proposal/send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Dedo Proposal
+         * @description Manažér zadanie schválil — TU vzniká verzia, pod jeho účtom.
+         *
+         *     ``fast_fix`` založí opravnú verziu a spustí ju presne tou cestou, akou ju spúšťa formulár *Rýchla
+         *     oprava*; ``new_version`` založí verziu ako koncept so zadaním v popise a **nespustí nič**.
+         *
+         *     ⚠️ Text sa berie z tela požiadavky, nie z návrhu: Manažér ho mohol upraviť a platí to, čo mal na
+         *     obrazovke. A koná sa nad návrhom, ktorý MENUJE — nie nad „tým, čo je otvorené teraz" (409, keď ho
+         *     Dedo medzitým nahradil).
+         */
+        post: operations["send_dedo_proposal_api_v1_projects__project_id__dedo_proposal_send_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3670,6 +3772,90 @@ export interface components {
         DedoMessageCreate: {
             /** Content */
             content: string;
+        };
+        /**
+         * DedoProjectProposalCreate
+         * @description Zadanie, ktoré Dedo pripravil pre prácu, ktorá sa ešte NEZAČALA (ICCINT-152).
+         *
+         *     Dvojička k :class:`DedoProposalCreate`. Rozdiel je jediný a je to celý dôvod jej existencie: tamtá sa
+         *     pripína na bežiacu stavbu, táto na projekt — lebo keď stavba nebeží, niet sa na čo pripnúť, a práve
+         *     vtedy zadanie treba.
+         */
+        DedoProjectProposalCreate: {
+            /** Content */
+            content: string;
+            /**
+             * Proposed Action
+             * @description fast_fix | new_version
+             */
+            proposed_action: string;
+        };
+        /**
+         * DedoProjectProposalRead
+         * @description Otvorené zadanie tak, ako ho Manažér uvidí na stránke projektu.
+         */
+        DedoProjectProposalRead: {
+            /** Content */
+            content: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Proposed Action */
+            proposed_action: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * DedoProjectProposalRejectRequest
+         * @description Manažér zadanie zamieta — menuje ten, ktorý videl, z rovnakého dôvodu.
+         */
+        DedoProjectProposalRejectRequest: {
+            /**
+             * Proposal Id
+             * Format: uuid
+             */
+            proposal_id: string;
+        };
+        /**
+         * DedoProjectProposalSendRequest
+         * @description Manažér posiela zadanie ďalej — text je TEN, ktorý mal na obrazovke, aj s jeho úpravami.
+         *
+         *     ``proposal_id`` nie je ozdoba: koná sa nad návrhom, ktorý mal pred očami, nie nad „tým, čo je
+         *     otvorené teraz". Inak by Dedov novší návrh podaný medzi zobrazením a kliknutím odišiel namiesto neho.
+         */
+        DedoProjectProposalSendRequest: {
+            /**
+             * Proposal Id
+             * Format: uuid
+             */
+            proposal_id: string;
+            /** Text */
+            text: string;
+        };
+        /**
+         * DedoProjectProposalSendResponse
+         * @description Čo z kliknutia vzniklo. Verzia je jediná odpoveď, ktorá Manažéra zaujíma — vezme ho tam.
+         */
+        DedoProjectProposalSendResponse: {
+            /** Started */
+            started: boolean;
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
         };
         /**
          * DedoProposalCreate
@@ -7696,6 +7882,41 @@ export interface operations {
             };
         };
     };
+    propose_project_brief_api_v1_dedo_projects__project_id__proposals_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DedoProjectProposalCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DedoProjectProposalRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_waiting_builds_api_v1_dedo_waiting_get: {
         parameters: {
             query?: never;
@@ -9001,6 +9222,109 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["_AssignmentRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_dedo_proposal_api_v1_projects__project_id__dedo_proposal_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DedoProjectProposalRead"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_dedo_proposal_api_v1_projects__project_id__dedo_proposal_reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DedoProjectProposalRejectRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_dedo_proposal_api_v1_projects__project_id__dedo_proposal_send_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DedoProjectProposalSendRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DedoProjectProposalSendResponse"];
                 };
             };
             /** @description Validation Error */

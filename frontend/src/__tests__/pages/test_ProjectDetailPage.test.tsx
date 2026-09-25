@@ -28,6 +28,7 @@ const {
   listVersionsMock,
   getVersionMock,
   startFastFixApiMock,
+  getProjectDedoProposalApiMock,
   setSelectedProjectMock,
   setSelectedVersionMock,
   authStateMock,
@@ -42,6 +43,7 @@ const {
   listVersionsMock: vi.fn(),
   getVersionMock: vi.fn(),
   startFastFixApiMock: vi.fn(),
+  getProjectDedoProposalApiMock: vi.fn(),
   setSelectedProjectMock: vi.fn(),
   setSelectedVersionMock: vi.fn(),
   authStateMock: { user: { role: "ri", username: "admin", id: "u-admin" } as { role: string; username: string; id: string } | null },
@@ -65,6 +67,9 @@ vi.mock("@/services/api/projects", () => ({
   // a spadne celé vykreslenie — nie kvôli tomu, čo test meria.
   reassignProjectApi: reassignProjectApiMock,
   projectAssignmentsApi: projectAssignmentsApiMock,
+  // ICCINT-152: stránka sa pýta, či Dedo nepripravil zadanie. Chýbajúca atrapa nie je „o jeden dopyt
+  // menej“ — volanie `undefined` vyhodí chybu SYNCHRÓNNE a zhodí celé načítanie projektu.
+  getProjectDedoProposalApi: getProjectDedoProposalApiMock,
 }));
 vi.mock("@/services/api/users", () => ({ listUsersApi: listUsersApiMock }));
 vi.mock("@/services/api/versions", () => ({ listVersions: listVersionsMock, getVersion: getVersionMock }));
@@ -131,6 +136,8 @@ beforeEach(() => {
   listVersionsMock.mockResolvedValue([baseVersion]);
   getVersionMock.mockResolvedValue(patchVersion);
   startFastFixApiMock.mockResolvedValue({ version_id: "v2", board: { state: null, recent_messages: [] } });
+  // Bežný stav: Dedo nič nenavrhol. Stránka sa má vtedy tváriť presne tak, ako sa tvárila doteraz.
+  getProjectDedoProposalApiMock.mockResolvedValue(null);
   // The ACCOUNT named admin — the ri ROLE no longer confers anything over a project (permissions.ts).
   authStateMock.user = { role: "ri", username: "admin", id: "u-admin" };
 });
@@ -138,6 +145,58 @@ beforeEach(() => {
 async function importPage() {
   return (await import("@/pages/ProjectDetailPage")).default;
 }
+
+describe("ProjectDetailPage — Dedovo zadanie (ICCINT-152)", () => {
+  it("ukáže zadanie, ktoré Dedo pripravil", async () => {
+    getProjectDedoProposalApiMock.mockResolvedValue({
+      id: "n-1",
+      project_id: "p1",
+      content: "Prijmi na spúšťacej adrese aj POST a lístok čítaj z tela.",
+      proposed_action: "fast_fix",
+      status: "proposed",
+      created_at: "2026-09-25T10:00:00Z",
+    });
+    const ProjectDetailPage = await importPage();
+    render(<ProjectDetailPage />);
+
+    expect(await screen.findByText(/Dedo .*pripravil zadanie/i)).toBeInTheDocument();
+    expect(screen.getByLabelText("Zadanie od Deda")).toHaveValue(
+      "Prijmi na spúšťacej adrese aj POST a lístok čítaj z tela.",
+    );
+  });
+
+  it("bez zadania vyzerá stránka presne tak, ako vyzerala doteraz", async () => {
+    const ProjectDetailPage = await importPage();
+    render(<ProjectDetailPage />);
+
+    await screen.findByRole("button", { name: /^rýchla oprava$/i });
+    expect(screen.queryByText(/pripravil zadanie/i)).not.toBeInTheDocument();
+  });
+
+  it("⚠️ projekt sa načíta aj vtedy, keď dopyt na zadanie zlyhá", async () => {
+    // Zadanie je pomoc navyše, nie podmienka toho, aby sa projekt dal otvoriť. Pri prvom zapojení
+    // zhodil tento dopyt celé načítanie — a to synchrónne, takže `.catch` ho nezachytil.
+    getProjectDedoProposalApiMock.mockRejectedValue(new Error("evidencia neodpovedala"));
+    const ProjectDetailPage = await importPage();
+    render(<ProjectDetailPage />);
+
+    expect(await screen.findByRole("button", { name: /^rýchla oprava$/i })).toBeInTheDocument();
+    expect(screen.queryByText(/Nepodarilo sa načítať projekt/i)).not.toBeInTheDocument();
+  });
+
+  it("⚠️ a načíta sa aj vtedy, keď dopyt vyhodí chybu SYNCHRÓNNE", async () => {
+    // Presne ten tvar, ktorý 25.09.2026 zhodil 17 stráží tejto stránky: atrapa dopyt nepoznala,
+    // takže volanie `undefined` vyhodilo chybu ešte pred vznikom sľubu.
+    getProjectDedoProposalApiMock.mockImplementation(() => {
+      throw new TypeError("nie je to funkcia");
+    });
+    const ProjectDetailPage = await importPage();
+    render(<ProjectDetailPage />);
+
+    expect(await screen.findByRole("button", { name: /^rýchla oprava$/i })).toBeInTheDocument();
+    expect(screen.queryByText(/Nepodarilo sa načítať projekt/i)).not.toBeInTheDocument();
+  });
+});
 
 describe("ProjectDetailPage — Fast-Fix Lane (CR-NS-095)", () => {
   it("posts the directive, pins the patch version (project first), and opens the cockpit", async () => {

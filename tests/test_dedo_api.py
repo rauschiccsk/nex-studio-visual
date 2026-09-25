@@ -573,6 +573,19 @@ class TestNothingBeyondTheCharter:
         # action, with that action's guards. That is why it may name ANY build while ``post_build_message``
         # still may not — pinned by ``tests/test_dedo_proposal.py``.
         ("POST", "/builds/{version_id}/proposals", "propose_build_message"),
+        # GRANTED by the Director 25.09.2026 (ICCINT-152). WHERE THE DECISION IS RECORDED: ticket
+        # ICCINT-152 in the ICC register — Dedo wrote the proposed shape into it as a comment on
+        # 25.09.2026 and the Director answered "yes, go ahead and implement it" in the same session.
+        # Read it with `icc_ticket.py citaj 152`; this line is checkable, not a claim.
+        #
+        # WHY IT IS NOT A WIDENING, by the same argument as the proposal above: it delivers NOTHING and
+        # starts NOTHING. The row lands ``status='proposed'`` on the PROJECT and waits. The version is
+        # created only when the Manažér presses the button on the project page — under HIS account,
+        # through the same path as the Rýchla oprava form he fills in himself. What it removes is the
+        # Director acting as a typist, which is the whole ICCINT-24 argument applied one step earlier:
+        # to work that has not started yet, where the old door could not reach at all. Pinned by
+        # ``tests/test_dedo_proposal_before_the_work_starts.py``.
+        ("POST", "/projects/{project_id}/proposals", "propose_project_brief"),
     }
 
     #: MOUNTED BUT NOT YET GRANTED — kept in its own set so the difference is impossible to overlook.
