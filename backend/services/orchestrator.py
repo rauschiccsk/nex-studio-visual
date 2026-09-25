@@ -61,6 +61,7 @@ from backend.services import (
     create_project_postscaffold,
     dedo_escalation,
     dedo_message,
+    deploy_progress,
     failure_framing,
     fast_fix,
     release_note_writer,
@@ -5114,7 +5115,9 @@ def _verify_env_for_target(deploy_host: Optional[str]) -> Optional[dict[str, str
 CLEANUP_TIMEOUT = 300
 
 
-async def _uprac_na_cieli(ok: bool, detail: str, deploy_host: Optional[str]) -> str:
+async def _uprac_na_cieli(
+    ok: bool, detail: str, deploy_host: Optional[str], instance_dir: Optional[Path] = None
+) -> str:
     """Po ÚSPEŠNOM nasadení upratať na cieli, čo po sebe stavba nechala (ICCINT-154).
 
     **Prečo.** Odkedy sa obrazy stavajú na serveri zákazníka, zostáva tam po každej stavbe vyrovnávacia
@@ -5137,6 +5140,8 @@ async def _uprac_na_cieli(ok: bool, detail: str, deploy_host: Optional[str]) -> 
 
     from backend.services import remote_instance
 
+    if instance_dir is not None:
+        deploy_progress.krok(instance_dir, deploy_progress.KROK_UPRATOVANIE)
     env = remote_instance.docker_env(ciel)
     uvolnene: list[str] = []
     for popis, cmd in (
@@ -5190,6 +5195,9 @@ async def _run_uat_deploy(
     compose = _uat_compose_path(
         uat_slug, environment=environment, customer_slug=customer_slug, full_project_slug=full_project_slug
     )
+    # ICCINT-153 — odtiaľto je vidieť, v ktorom kroku nasadenie je. Bez toho človek nerozozná prácu
+    # od zamrznutia a pri dlhej operácii klikne znovu.
+    deploy_progress.krok(compose.parent, deploy_progress.KROK_STAVBA)
     # ICCINT-151 — pri nasadzovaní na CUDZÍ stroj najprv over, že predpis, ktorý kokpit drží, je ten
     # istý ako ten na cieli. Kokpit číta predpis u seba a použije ho tam; keď sa rozišli, nasadenie
     # by cudzí stav prepísalo (24.09.2026: kópia zo 14.07. proti stavu z 23.09., 50 riadkov rozdielu
@@ -5207,6 +5215,7 @@ async def _run_uat_deploy(
         if rozdiel:
             return False, rozdiel
 
+    deploy_progress.krok(compose.parent, deploy_progress.KROK_SPUSTENIE)
     cmd = ["docker", "compose", "-f", str(compose), "up", "-d", "--build", "--force-recreate"]
     # A GENERATED app shows its OWN semantic version (each change = a new version), NOT a build counter (Director
     # 2026-07-11: NEX Studio itself is regularly patched → a counter; the apps we build get their real version).
@@ -5248,6 +5257,7 @@ async def _run_uat_deploy(
     )
     if not mig_ok:
         return False, mig_detail
+    deploy_progress.krok(compose.parent, deploy_progress.KROK_OVERENIE)
     # ``up`` exit 0 only means the containers were created — NOT that the app serves (the nex-asistent
     # false-success bug). Verify the app actually responds before reporting success. UAT keeps the exact
     # 2-arg call (byte-identical — a monkeypatched serve-verify fake gets only project_slug + uat_slug);
@@ -5264,7 +5274,7 @@ async def _run_uat_deploy(
         )
     else:
         ok, detail = await _verify_uat_serves(project_slug, uat_slug)
-    return ok, await _uprac_na_cieli(ok, detail, deploy_host)
+    return ok, await _uprac_na_cieli(ok, detail, deploy_host, compose.parent)
 
 
 async def _run_prod_deploy(

@@ -47,7 +47,7 @@ from backend.schemas.deploy import (
     DeployResult,
 )
 from backend.services import deploy as deploy_service
-from backend.services import instance_adoption, uat_provisioner
+from backend.services import deploy_progress, instance_adoption, uat_provisioner
 from backend.services import uat_launch as uat_launch_service
 
 router = APIRouter(tags=["Deploy"])
@@ -280,6 +280,56 @@ def _adoption_context(
     # Ostrá inštalácia môže bývať na inom stroji; testovacia býva vždy tu.
     deploy_host = (customer.prod_host or None) if environment == "prod" else None
     return instance_dir, render, deploy_host
+
+
+class _DeployProgressResponse(BaseModel):
+    """Čo sa práve deje s inštaláciou (ICCINT-153).
+
+    Director 25.09.2026 pri prevzatí ostrého NEX Inboxu: *„už niekoľko minút vidím tú istú obrazovku
+    bez zmeny, bez informácie, že niečo sa deje… neviem či skutočne niečo sa robí, alebo zamrzol
+    systém."* Obrazovka si odtiaľto prečíta, v ktorom kroku nasadenie je a ako dlho už beží.
+    """
+
+    #: Beží pre túto inštaláciu nasadenie?
+    bezi: bool
+    #: Čo sa práve robí — veta pre človeka, alebo ``None``, keď nič nebeží.
+    krok: Optional[str] = None
+    #: Ako dlho beží CELÉ nasadenie.
+    trva_sekund: int = 0
+    #: Ako dlho beží tento krok. Dlho visiaci krok je iná informácia než dlho bežiace nasadenie.
+    krok_trva_sekund: int = 0
+
+
+@router.get("/customers/{customer_id}/deploy-progress", response_model=_DeployProgressResponse)
+def deploy_progress_read(
+    customer_id: UUID,
+    environment: str = "uat",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> _DeployProgressResponse:
+    """V ktorom kroku je nasadenie tejto inštalácie — pre obrazovku, ktorá čaká (ICCINT-153)."""
+    customer = db.get(Customer, customer_id)
+    if customer is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Zákazník neexistuje.")
+    authz.assert_customer_access(db, current_user, customer_id)
+    project = db.get(Project, customer.project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projekt zákazníka neexistuje.")
+
+    instalacia = uat_provisioner.instance_dir_for(
+        environment=environment,
+        customer_slug=deploy_service._customer_dir_slug(customer),
+        full_project_slug=project.slug,
+    )
+    priebeh = deploy_progress.stav(instalacia)
+    if priebeh is None:
+        return _DeployProgressResponse(bezi=False)
+    return _DeployProgressResponse(
+        bezi=True,
+        krok=priebeh.krok,
+        trva_sekund=priebeh.trva_sekund(),
+        krok_trva_sekund=priebeh.krok_trva_sekund(),
+    )
 
 
 @router.get("/customers/{customer_id}/adoption-preview", response_model=_AdoptionPreviewResponse)

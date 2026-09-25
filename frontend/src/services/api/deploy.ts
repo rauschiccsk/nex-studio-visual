@@ -78,6 +78,24 @@ export interface AdoptionPreview {
   can_adopt: boolean;
 }
 
+/** Kde nasadenie práve je — pre obrazovku, ktorá čaká (ICCINT-153). */
+export interface DeployProgress {
+  /** Beží pre túto inštaláciu nasadenie? */
+  bezi: boolean;
+  /** Čo sa práve robí — veta pre človeka. */
+  krok: string | null;
+  /** Ako dlho beží CELÉ nasadenie. */
+  trva_sekund: number;
+  /** Ako dlho beží tento krok. Dlho visiaci krok je iná informácia než dlho bežiace nasadenie. */
+  krok_trva_sekund: number;
+}
+
+export function getDeployProgress(customerId: string, environment: string): Promise<DeployProgress> {
+  return api.get<DeployProgress>(
+    `/customers/${customerId}/deploy-progress?environment=${encodeURIComponent(environment)}`,
+  );
+}
+
 export function getAdoptionPreview(
   customerId: string,
   environment: string,

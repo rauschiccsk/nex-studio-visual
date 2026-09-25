@@ -567,6 +567,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/customers/{customer_id}/deploy-progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Deploy Progress Read
+         * @description V ktorom kroku je nasadenie tejto inštalácie — pre obrazovku, ktorá čaká (ICCINT-153).
+         */
+        get: operations["deploy_progress_read_api_v1_customers__customer_id__deploy_progress_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/customers/{customer_id}/uat-launch": {
         parameters: {
             query?: never;
@@ -6217,6 +6237,30 @@ export interface components {
             /** To Person */
             to_person: string;
         };
+        /**
+         * _DeployProgressResponse
+         * @description Čo sa práve deje s inštaláciou (ICCINT-153).
+         *
+         *     Director 25.09.2026 pri prevzatí ostrého NEX Inboxu: *„už niekoľko minút vidím tú istú obrazovku
+         *     bez zmeny, bez informácie, že niečo sa deje… neviem či skutočne niečo sa robí, alebo zamrzol
+         *     systém."* Obrazovka si odtiaľto prečíta, v ktorom kroku nasadenie je a ako dlho už beží.
+         */
+        _DeployProgressResponse: {
+            /** Bezi */
+            bezi: boolean;
+            /** Krok */
+            krok?: string | null;
+            /**
+             * Krok Trva Sekund
+             * @default 0
+             */
+            krok_trva_sekund: number;
+            /**
+             * Trva Sekund
+             * @default 0
+             */
+            trva_sekund: number;
+        };
         /** _GitCommitRequest */
         _GitCommitRequest: {
             /** Message */
@@ -7402,6 +7446,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeployEventRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deploy_progress_read_api_v1_customers__customer_id__deploy_progress_get: {
+        parameters: {
+            query?: {
+                environment?: string;
+            };
+            header?: never;
+            path: {
+                customer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["_DeployProgressResponse"];
                 };
             };
             /** @description Validation Error */

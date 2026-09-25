@@ -1624,6 +1624,17 @@ def _leading_comment_block(text: str) -> str:
     return "\n".join(lines)
 
 
+def instance_dir_for(*, environment: str, customer_slug: str, full_project_slug: str) -> Path:
+    """Priečinok inštalácie — JEDNO miesto, kde sa počíta (ICCINT-153).
+
+    Počítali si ho tri miesta zvlášť (náhľad prevzatia, nasadenie, sledovanie priebehu). Keby sa
+    rozišli, jedno by ukazovalo na iný priečinok než druhé — a pri sledovaní priebehu by to znamenalo,
+    že obrazovka čaká na prácu, ktorá beží inde.
+    """
+    koren = PROD_ROOT if environment == "prod" else UAT_ROOT
+    return koren / customer_slug / full_project_slug
+
+
 def is_provisioner_generated(compose_path: Path) -> bool:
     """True when ``compose_path`` carries this module's generated-by header (:data:`GENERATED_BY_MARKER`).
 

@@ -82,8 +82,9 @@ def instance_dir_for(*, environment: str, customer_slug: str, full_project_slug:
     ⚠️ Keby si tieto dve miesta cestu počítali každé po svojom, náhľad by ukazoval jeden priečinok a
     prevzatie by siahlo na druhý. Preto sa berú tie isté korene z toho istého modulu.
     """
-    root = uat_provisioner.PROD_ROOT if environment == "prod" else uat_provisioner.UAT_ROOT
-    return root / customer_slug / full_project_slug
+    return uat_provisioner.instance_dir_for(
+        environment=environment, customer_slug=customer_slug, full_project_slug=full_project_slug
+    )
 
 
 def _fraza(instance_dir: Path) -> str:

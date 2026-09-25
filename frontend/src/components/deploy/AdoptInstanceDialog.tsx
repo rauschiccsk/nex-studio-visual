@@ -24,9 +24,16 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, Loader2 } from "lucide-react";
 
-import { getAdoptionPreview, adoptInstance, type AdoptionPreview } from "@/services/api/deploy";
+import {
+  getAdoptionPreview,
+  adoptInstance,
+  getDeployProgress,
+  type AdoptionPreview,
+  type DeployProgress,
+} from "@/services/api/deploy";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
+import { popisPriebehu } from "@/components/deploy/popisPriebehu";
 
 interface Props {
   customerId: string;
@@ -50,6 +57,25 @@ export default function AdoptInstanceDialog({
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<HumanError | null>(null);
+  // ICCINT-153 — Director 25.09.2026: „už niekoľko minút vidím tú istú obrazovku bez zmeny, bez
+  // informácie, že niečo sa deje… neviem či skutočne niečo sa robí, alebo zamrzol systém."
+  // Prenáša sa zdrojový kód, stavajú sa obrazy, reštartujú kontajnery — a na obrazovke jedno slovo.
+  const [priebeh, setPriebeh] = useState<DeployProgress | null>(null);
+
+  // Kým beží, pýtame sa, v ktorom kroku to je. Nie častejšie než raz za dve sekundy: je to údaj pre
+  // oko, nie meranie — a pýtať sa v slučke by zaťažilo kokpit počas jeho najdrahšej práce.
+  useEffect(() => {
+    if (!busy) return;
+    let zruene = false;
+    const tik = () => {
+      getDeployProgress(customerId, environment)
+        .then((p) => { if (!zruene) setPriebeh(p); })
+        .catch(() => { /* priebeh je doplnková informácia — jeho výpadok nesmie nič zhodiť */ });
+    };
+    tik();
+    const id = window.setInterval(tik, 2000);
+    return () => { zruene = true; window.clearInterval(id); };
+  }, [busy, customerId, environment]);
 
   useEffect(() => {
     let cancelled = false;
@@ -236,7 +262,7 @@ export default function AdoptInstanceDialog({
               }
               className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
-              {busy ? "Preberám…" : `Prevziať a nasadiť ${versionNumber}`}
+              {busy ? popisPriebehu(priebeh) : `Prevziať a nasadiť ${versionNumber}`}
             </button>
           )}
         </div>

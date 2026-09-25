@@ -80,7 +80,7 @@ from backend.schemas.deploy import (
     DEPLOY_CAUSE_STALE_SIGNOFF,
     DEPLOY_CAUSE_VERSION_BUSY,
 )
-from backend.services import uat_provisioner
+from backend.services import deploy_progress, uat_provisioner
 
 # The terminal pipeline stage = "Hotovo" = a version is VERIFIED (design §3.1,
 # CR-V2-014: reaching ``done`` means *verified*, not *deployed*). Only a verified
@@ -997,14 +997,31 @@ async def deploy(
     # Pri testovacej inštalácii je to vždy ``None``: tá beží na stroji kokpitu.
     deploy_host = (customer.prod_host or None) if environment == "prod" else None
 
-    outcome = await runner(
-        project_slug=project.slug,
-        uat_slug=instance_slug,
-        version_number=deployed_version,
-        force_fresh=force_fresh,
-        admin_password=admin_password,
-        deploy_host=deploy_host,
+    # ICCINT-153 — odtiaľto vie obrazovka, že nasadenie BEŽÍ a v ktorom kroku je. Je to JEDNO miesto
+    # so zárukou: vykonávateľov je viac a každý má viac koncov, takže záznam by niekde zostal visieť —
+    # a visiaci záznam navždy tvrdí, že sa pracuje, čím zablokuje ďalšie nasadenie.
+    instalacia = uat_provisioner.instance_dir_for(
+        environment=environment,
+        customer_slug=_customer_dir_slug(customer),
+        full_project_slug=project.slug,
     )
+    if deploy_progress.bezi(instalacia):
+        raise ValueError(
+            "Pre túto inštaláciu už jedno nasadenie beží. Počkaj, kým skončí — druhé spustenie by "
+            "siahalo na tie isté súbory a na tie isté kontajnery."
+        )
+    deploy_progress.zacni(instalacia)
+    try:
+        outcome = await runner(
+            project_slug=project.slug,
+            uat_slug=instance_slug,
+            version_number=deployed_version,
+            force_fresh=force_fresh,
+            admin_password=admin_password,
+            deploy_host=deploy_host,
+        )
+    finally:
+        deploy_progress.skonci(instalacia)
     ok, detail, url = outcome
     # The provisioner's non-fatal notes, if this runner carries any: the default runner returns a
     # :class:`RunnerResult`, an injected/faked runner a plain 3-tuple (→ no warnings). Read via ``getattr``
