@@ -5110,6 +5110,57 @@ def _verify_env_for_target(deploy_host: Optional[str]) -> Optional[dict[str, str
     return _docker_env_for_target(dict(os.environ), deploy_host)
 
 
+#: Ako dlho sa čaká na upratanie po nasadení. Je to údržba, nie brána — keď sa nestihne, nevadí.
+CLEANUP_TIMEOUT = 300
+
+
+async def _uprac_na_cieli(ok: bool, detail: str, deploy_host: Optional[str]) -> str:
+    """Po ÚSPEŠNOM nasadení upratať na cieli, čo po sebe stavba nechala (ICCINT-154).
+
+    **Prečo.** Odkedy sa obrazy stavajú na serveri zákazníka, zostáva tam po každej stavbe vyrovnávacia
+    pamäť. 25.09.2026 zazvonil hlásič MAGERa: na koreňovom disku zostávalo 14 %. Z 81,6 GB použitých
+    držala vyrovnávacia pamäť 12,2 GB — narástla za deň a pol, za dve nasadenia. Ručné upratovanie by
+    znamenalo vrátiť človeka do cesty, ktorú má automatizované nasadzovanie odstrániť.
+
+    ⚠️ **Po NEÚSPEŠNOM nasadení sa neupratuje nič.** Vtedy je cesta späť dôležitejšia než miesto —
+    a práve staršie obrazy sú tou cestou.
+
+    ⚠️ **Pripnuté obrazy zostávajú.** Maže sa vyrovnávacia pamäť a vrstvy, ktoré už nikto nedrží
+    (``image prune`` bez ``-a``). Obraz predchádzajúcej verzie je návrat a ten sa nezahadzuje.
+
+    ⚠️ **Zlyhanie upratovania nezhodí nasadenie.** Je to údržba: appka beží, len disku sa neuľavilo.
+    Povie sa to v hlásení, aby to nezostalo tajomstvom.
+    """
+    ciel = (deploy_host or "").strip()
+    if not ok or not ciel:
+        return detail
+
+    from backend.services import remote_instance
+
+    env = remote_instance.docker_env(ciel)
+    uvolnene: list[str] = []
+    for popis, cmd in (
+        ("vyrovnávacia pamäť stavby", ["docker", "builder", "prune", "-af"]),
+        ("nepoužívané vrstvy obrazov", ["docker", "image", "prune", "-f"]),
+    ):
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=env
+            )
+            vystup, _ = await asyncio.wait_for(proc.communicate(), timeout=CLEANUP_TIMEOUT)
+        except (OSError, asyncio.TimeoutError) as exc:
+            return f"{detail} ⚠️ Upratanie na cieli sa nepodarilo ({popis}: {exc.__class__.__name__})."
+        text = (vystup or b"").decode("utf-8", "replace")
+        koniec = next((r for r in reversed(text.splitlines()) if "reclaimed" in r.lower()), "")
+        if proc.returncode != 0:
+            return f"{detail} ⚠️ Upratanie na cieli sa nepodarilo ({popis})."
+        if koniec:
+            uvolnene.append(f"{popis}: {koniec.split(':', 1)[-1].strip()}")
+    if uvolnene:
+        return f"{detail} Upratané na cieli — {'; '.join(uvolnene)}."
+    return detail
+
+
 async def _run_uat_deploy(
     project_slug: str,
     uat_slug: str,
@@ -5202,7 +5253,7 @@ async def _run_uat_deploy(
     # 2-arg call (byte-identical — a monkeypatched serve-verify fake gets only project_slug + uat_slug);
     # PROD threads the layout kwargs so the FE cross-probe targets the ``<customer>-<app>-<svc>`` name.
     if customer_slug:
-        return await _verify_uat_serves(
+        ok, detail = await _verify_uat_serves(
             project_slug,
             uat_slug,
             environment=environment,
@@ -5211,7 +5262,9 @@ async def _run_uat_deploy(
             full_project_slug=full_project_slug,
             deploy_host=deploy_host,
         )
-    return await _verify_uat_serves(project_slug, uat_slug)
+    else:
+        ok, detail = await _verify_uat_serves(project_slug, uat_slug)
+    return ok, await _uprac_na_cieli(ok, detail, deploy_host)
 
 
 async def _run_prod_deploy(
