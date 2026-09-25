@@ -1422,13 +1422,33 @@ def render_version_bump(
         repo = zdroj_obraz.split(":", 1)[0] if isinstance(zdroj_obraz, str) else f"{project_slug}-{zdroj_meno}"
         stavia.setdefault(repo, zdroj_svc["build"])
 
-    for svc in sluzby.values():
+    # ICCINT-151 — a keď sa meno obrazu nezhoduje, páruje sa podľa ÚLOHY. Meno obrazu si ručne písaná
+    # inštalácia zvolila sama a nemusí sedieť s tým, čo projekt vyrobí: ostrý NEX Manager MÁGERSTAVU
+    # má `nexmanager-backend`, projekt `nex-manager` vyrobí `nex-manager-backend` — rozdiel je jedna
+    # pomlčka a stačil na to, aby kokpit nevedel, kto ten obraz stavia, a nasadenie zastavil.
+    # ⚠️ Cudzí obraz (postgres) sa zo zdrojákov neberie ani takto: rolu `db` má aj zdroj, ale jeho
+    # služba nič nestavia, takže v `stavia_podla_roly` nie je.
+    _zdroj_role = identify_service_roles((source or {}).get("services") or {})
+    _inst_role = identify_service_roles(sluzby)
+    # Rola, ktorej zdrojová služba nič nestavia (napr. `db` s cudzím obrazom), tu skončí s ``None`` —
+    # a `.get()` vráti to isté ako chýbajúci kľúč, takže sa nefiltruje. Mutácia 25.09.2026 ukázala, že
+    # pôvodná podmienka navyše správanie zmeniť nevie; zbytočná podmienka predstiera stráženie.
+    stavia_podla_roly = {
+        rola: ((source or {}).get("services") or {}).get(meno, {}).get("build")
+        for rola, meno in _zdroj_role.items()
+        if meno
+    }
+
+    for meno_sluzby, svc in sluzby.items():
         if not isinstance(svc, dict) or svc.get("build") is not None:
             continue
         obraz = svc.get("image")
         if not isinstance(obraz, str):
             continue
         build = stavia.get(obraz.split(":", 1)[0])
+        if build is None:
+            rola = next((r for r, m in _inst_role.items() if m == meno_sluzby), None)
+            build = stavia_podla_roly.get(rola) if rola else None
         if build is None:
             continue  # cudzí obraz (postgres) sa zo zdrojákov neberie
         if isinstance(build, str):
@@ -2465,13 +2485,20 @@ def provision_uat(
     # postaviť inštaláciu nanovo, takže sa povýšenie verzie nepoužije. Chytila to existujúca stráž
     # ``test_rotate_secrets_forces_fresh``, nie ja.
     #
-    # ⚠️ A rovnako sa nepoužije pri PREVZATÍ (``allow_overwrite``) — ICCINT-151, 24.09.2026. Prevzatie
-    # znamená „táto inštalácia odteraz patrí kokpitu", teda vykresliť ju zo zdrojového projektu; náhľad
-    # predtým potvrdil, že sa pritom nič nestratí. Povýšenie verzie chráni inštaláciu, ktorú kokpit UŽ
-    # spravuje — nie tú, ktorú práve preberá. Zmerané na ostrom MÁGERSTAVE: povýšenie vzalo pripnuté
-    # obrazy `nexmanager-backend:1.0.0` (bez predpisu na stavbu) a prepísalo číslo na `v1.2.2` — taký
-    # obraz nikto nepostaví ani nikde neleží, a stráž ICCINT-137 nasadenie správne zastavila.
-    if is_redeploy and not allow_overwrite and compose_path.is_file() and env_path.is_file():
+    # ⚠️ **PLATÍ AJ PRI PREVZATÍ** — a 24.09.2026 som to mal krátko naopak. Prevzatie vtedy zlyhalo
+    # („obrazy, ktoré sa nemajú odkiaľ vziať") a ja som z toho usúdil, že preberanú inštaláciu treba
+    # vykresliť zo zdrojového projektu. Prešlo to, lebo stavba MÁGERSTAV Managera je projektu podobná.
+    # Zmerané o deň neskôr na NEX Inboxe: tam by to isté prepísalo mená služieb (`postgres`→`db`) aj
+    # meno úložiska (`postgres-data`→`inbox_dev_pg_data`) — appka by naštartovala s PRÁZDNOU databázou
+    # a faktúry zákazníka by zostali vedľa bez odkazu.
+    #
+    # Skutočná príčina toho zlyhania bola inde a je opravená v `render_version_bump`: stavba sa párovala
+    # len podľa mena obrazu a ručne písaná inštalácia si ho zvolila sama (`nexmanager-backend` oproti
+    # `nex-manager-backend`, rozdiel jedna pomlčka). Odteraz sa páruje aj podľa ÚLOHY.
+    #
+    # Preberaná inštalácia teda ide tou istou cestou ako každá iná: mená, siete a úložiská si ponechá,
+    # mení sa VERZIA. To je celý zmysel prevzatia — začať spravovať to, čo tam je.
+    if is_redeploy and compose_path.is_file() and env_path.is_file():
         chyba = services_missing_against_source(uat_dir, source)
         if chyba:
             # Známy dôsledok, povedaný nahlas: inštalácia sa neprestavuje, takže novú službu sama

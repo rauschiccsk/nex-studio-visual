@@ -261,25 +261,40 @@ def test_the_target_machine_is_named_in_the_docker_environment() -> None:
 # ── 5. prevzatie vykresľuje, nepovyšuje ───────────────────────────────────────
 
 
-def test_adoption_renders_from_the_project_instead_of_bumping_the_version(tmp_path, monkeypatch) -> None:
-    """⚠️ Zmerané na ostrom MÁGERSTAVE 24.09.2026. Prevzatie šlo cestou „do existujúcej inštalácie
-    nasadzuj VERZIU, nie stavbu" (ICCINT-133) a vzalo pripnuté obrazy `nexmanager-backend:1.0.0` bez
-    akéhokoľvek predpisu na stavbu — len prepísalo číslo na `v1.2.2`. Taký obraz nikto nepostaví ani
-    nikde neleží a stráž ICCINT-137 nasadenie zastavila.
+def test_adoption_keeps_the_instance_identity_and_still_gets_a_buildable_image(tmp_path, monkeypatch) -> None:
+    """⚠️ OBRÁTENÉ 25.09.2026 — a hovorím to nahlas, lebo je to druhá obrátená stráž za dva dni.
 
-    Zmyslom prevzatia je vziať inštaláciu POD SPRÁVU, teda vykresliť ju zo zdrojového projektu;
-    náhľad predtým potvrdil, že sa nič nestratí. Povýšenie chráni inštaláciu, ktorú kokpit UŽ
-    spravuje — nie tú, ktorú práve preberá.
+    24.09. tu stálo, že prevzatie musí inštaláciu VYKRESLIŤ zo zdrojového projektu. Napísal som to
+    po tom, čo prevzatie MÁGERSTAV Managera zlyhalo na „obrazoch, ktoré sa nemajú odkiaľ vziať".
+    Prešlo to, lebo stavba Managera je projektu podobná.
+
+    O deň neskôr zmerané na NEX Inboxe: to isté by mu prepísalo mená služieb (`postgres`→`db`) aj
+    meno úložiska (`postgres-data`→`inbox_dev_pg_data`). Appka by naštartovala s PRÁZDNOU databázou
+    a faktúry zákazníka by zostali vedľa, nedotknuté, ale bez odkazu.
+
+    Skutočná príčina bola inde: stavba sa párovala len podľa mena obrazu, a ručne písaná inštalácia
+    si ho zvolila sama — `nexmanager-backend` oproti `nex-manager-backend`, rozdiel jedna pomlčka.
+
+    Prevzatie teda ide tou istou cestou ako každé nasadenie: inštalácii ponechá jej vlastné mená a
+    úložiská, a obraz aj tak musí byť z čoho postaviť.
     """
-    pripnute = "name: mager-manager\nservices:\n  backend:\n    image: nexmanager-backend:1.0.0\n"
+    pripnute = (
+        "name: mager-manager\n"
+        "services:\n"
+        "  postgres:\n    image: postgres:16-alpine\n"
+        "  backend:\n    image: nexmanager-backend:1.0.0\n"
+        "volumes:\n  postgres-data: null\n"
+    )
     ciel = _Ciel({"docker-compose.yml": pripnute, ".env": "POSTGRES_PASSWORD=x\n"})
     monkeypatch.setattr(P, "remote_instance", ciel)
 
     _provision(tmp_path, deploy_host="mager", allow_overwrite=True)
 
     zapisany = ciel.zapisane["docker-compose.yml"][0]
-    assert "build:" in zapisany, "prevzatie len povýšilo verziu — obraz by sa nemal odkiaľ vziať"
-    assert "nexmanager-backend:1.0.0" not in zapisany
+    assert "postgres:" in zapisany and "postgres-data" in zapisany, "prevzatie prepísalo mená inštalácie"
+    assert "  db:" not in zapisany, "služba sa premenovala podľa projektu — appka by stratila adresu k dátam"
+    assert "build:" in zapisany, "obraz by sa nemal odkiaľ vziať"
+    assert "nexmanager-backend:1.0.0" not in zapisany, "verzia sa nepovýšila"
 
 
 def test_an_ordinary_redeploy_still_only_changes_the_version(tmp_path, monkeypatch) -> None:
@@ -448,3 +463,70 @@ def test_a_local_instance_is_still_backed_up_locally(tmp_path, monkeypatch) -> N
     assert odlozene == ["docker-compose.yml.pre-nex-studio"]
     assert (miestny / "docker-compose.yml.pre-nex-studio").read_text(encoding="utf-8") == "name: miestna\n"
     assert ciel.zapisane == {}, "miestna záloha sa posielala na cudzí stroj"
+
+
+def test_the_build_recipe_is_matched_by_role_when_the_image_name_differs(tmp_path) -> None:
+    """⚠️ Jadro opravy z 25.09.2026. Ručne písaná inštalácia si meno obrazu zvolila sama a nemusí
+    sedieť s tým, čo projekt vyrobí: ostrý NEX Manager má `nexmanager-backend`, projekt `nex-manager`
+    vyrobí `nex-manager-backend`. Rozdiel je jedna pomlčka — a stačil na to, aby kokpit nevedel, kto
+    ten obraz stavia, a nasadenie zastavil."""
+    import yaml
+
+    _projekt(tmp_path)
+    instalacia = tmp_path / "inst"
+    instalacia.mkdir()
+    (instalacia / "docker-compose.yml").write_text(
+        "name: mager-manager\n"
+        "services:\n"
+        "  postgres:\n    image: postgres:16-alpine\n"
+        "  backend:\n    image: nexmanager-backend:1.0.0\n"
+        "  frontend:\n    image: nexmanager-frontend:1.0.0\n",
+        encoding="utf-8",
+    )
+    source = P.load_source_compose(tmp_path / "projects" / "nex-manager")
+
+    povysene = P.render_version_bump(
+        instalacia,
+        version="v1.2.2",
+        project_slug="nex-manager",
+        source=source,
+        project_path=tmp_path / "projects" / "nex-manager",
+    )
+
+    sluzby = povysene["services"]
+    assert sluzby["backend"].get("build"), "stavba sa nespárovala — meno obrazu nesedí, rola áno"
+    assert sluzby["frontend"].get("build")
+    assert sluzby["postgres"].get("build") is None, "cudzí obraz sa zo zdrojákov brať nesmie"
+
+    povodne = yaml.safe_load((instalacia / "docker-compose.yml").read_text(encoding="utf-8"))
+    assert P.unbuildable_images(povodne, povysene, image_exists=lambda _o: False) == []
+
+
+def test_the_service_and_volume_names_of_the_instance_are_never_rewritten(tmp_path) -> None:
+    """⚠️ Prípad NEX Inboxu. Meno služby je adresa, na ktorú sa appka k databáze pripája; meno
+    úložiska je miesto, kde tie dáta ležia. Prepísať ich znamená naštartovať appku s prázdnou
+    databázou, kým pôvodná leží vedľa bez odkazu."""
+    _projekt(tmp_path)
+    instalacia = tmp_path / "inst"
+    instalacia.mkdir()
+    (instalacia / "docker-compose.yml").write_text(
+        "name: mager-inbox\n"
+        "services:\n"
+        "  postgres:\n    image: postgres:16-alpine\n"
+        "  alembic-init:\n    image: nex-manager-backend:1.0.0\n"
+        "  backend:\n    image: nex-manager-backend:1.0.0\n"
+        "volumes:\n  postgres-data: null\n",
+        encoding="utf-8",
+    )
+    source = P.load_source_compose(tmp_path / "projects" / "nex-manager")
+
+    povysene = P.render_version_bump(
+        instalacia,
+        version="v1.5.6",
+        project_slug="nex-manager",
+        source=source,
+        project_path=tmp_path / "projects" / "nex-manager",
+    )
+
+    assert sorted(povysene["services"]) == ["alembic-init", "backend", "postgres"]
+    assert list(povysene["volumes"]) == ["postgres-data"]
