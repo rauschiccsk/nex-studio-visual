@@ -346,3 +346,105 @@ def test_the_local_working_copy_of_the_settings_comes_from_the_target(tmp_path, 
     miestne_nastavenia = (miestny / ".env").read_text(encoding="utf-8")
     assert "zo-septembra" in miestne_nastavenia, "miestna pracovná kópia zostala pri starých hodnotách"
     assert "z-jula" not in miestne_nastavenia
+
+
+# ── 6. záloha patrí tam, kde býva originál ────────────────────────────────────
+
+
+class _CielSoZapisom(_Ciel):
+    """Cieľ, ktorý si zapísané súbory aj pamätá ako ďalší obsah — aby sa dalo čítať späť."""
+
+    def write_files(self, instance_dir, files, *, deploy_host, timeout=180):
+        chyba = super().write_files(instance_dir, files, deploy_host=deploy_host, timeout=timeout)
+        if chyba is None:
+            for meno, (obsah, _prava) in files.items():
+                self.subory[meno] = obsah
+        return chyba
+
+
+def test_the_hand_written_files_are_set_aside_on_the_target(monkeypatch) -> None:
+    """⚠️ Zmerané na MÁGERSTAVE 24.09.2026: odkladanie prebehlo len na stroji kokpitu, takže na cieli
+    sa živý predpis prepísal BEZ zálohy — a tu sa odložila júlová kópia, ktorá už týždne nebola tým
+    živým. Poistka nesplnila ani jedno."""
+    from backend.services import instance_adoption as ia
+
+    ciel = _CielSoZapisom({"docker-compose.yml": "name: rucne\n", ".env": "TAJNE=1\n"})
+    monkeypatch.setattr(ia, "remote_instance", ciel)
+
+    odlozene = ia._set_aside_on_target(Path("/opt/customers/mager/nex-manager"), "mager")
+
+    assert sorted(odlozene) == [".env.pre-nex-studio", "docker-compose.yml.pre-nex-studio"]
+    assert ciel.zapisane[".env.pre-nex-studio"][0] == "TAJNE=1\n"
+    assert ciel.zapisane[".env.pre-nex-studio"][1] == 0o600, "záloha nastavení musí zostať zavretá"
+    assert ciel.zapisane["docker-compose.yml.pre-nex-studio"][0] == "name: rucne\n"
+
+
+def test_an_existing_backup_on_the_target_is_never_overwritten(monkeypatch) -> None:
+    """Druhé prevzatie by inak uložilo vedľa NAŠU vlastnú kópiu a originál by zmizol (ICCINT-87)."""
+    from backend.services import instance_adoption as ia
+
+    ciel = _CielSoZapisom(
+        {
+            "docker-compose.yml": "name: nase\n",
+            "docker-compose.yml.pre-nex-studio": "name: povodne\n",
+        }
+    )
+    monkeypatch.setattr(ia, "remote_instance", ciel)
+
+    odlozene = ia._set_aside_on_target(Path("/opt/customers/mager/nex-manager"), "mager")
+
+    assert odlozene == []
+    assert ciel.zapisane == {}, "existujúca záloha sa prepísala"
+
+
+def test_an_unreadable_target_stops_the_adoption(monkeypatch) -> None:
+    """⚠️ Ticho preskočená poistka je horšia než žiadna: prevzatie by pokračovalo BEZ zálohy a
+    človek by sa to dozvedel až vtedy, keď by sa chcel vracať."""
+    from backend.services import instance_adoption as ia
+
+    class _Nedostupny:
+        def read_text(self, *_a, **_k):
+            return None, "na cieľový stroj sa nedalo pozrieť: spojenie odmietnuté"
+
+    monkeypatch.setattr(ia, "remote_instance", _Nedostupny())
+
+    with pytest.raises(OSError, match="odkladanie ručných súborov zlyhalo"):
+        ia._set_aside_on_target(Path("/opt/customers/mager/nex-manager"), "mager")
+
+
+def test_the_backup_goes_to_the_machine_the_instance_lives_on(tmp_path, monkeypatch) -> None:
+    """⚠️ Túto stráž si vypýtala mutácia, ktorá prešla nezachytená (25.09.2026): stráže volali
+    vzdialenú vetvu priamo, takže samotné ROZHODNUTIE — kam sa odkladá — nestrážil nikto. A pritom
+    je to celá podstata opravy."""
+    from backend.services import instance_adoption as ia
+
+    ciel = _CielSoZapisom({"docker-compose.yml": "name: rucne\n"})
+    monkeypatch.setattr(ia, "remote_instance", ciel)
+    miestny = tmp_path / "mager" / "nex-manager"
+    miestny.mkdir(parents=True)
+    (miestny / "docker-compose.yml").write_text("name: miestna-kopia\n", encoding="utf-8")
+
+    odlozene = ia.set_aside_hand_authored(miestny, deploy_host="mager")
+
+    assert odlozene == ["docker-compose.yml.pre-nex-studio"]
+    assert ciel.zapisane["docker-compose.yml.pre-nex-studio"][0] == "name: rucne\n", "odložila sa miestna kópia"
+    assert not (miestny / "docker-compose.yml.pre-nex-studio").exists(), (
+        "záloha vznikla tu namiesto na cieli — presne tá chyba z MÁGERSTAVU"
+    )
+
+
+def test_a_local_instance_is_still_backed_up_locally(tmp_path, monkeypatch) -> None:
+    """Opačný smer: bez cieľa sa nesmie nič posielať po sieti — testovacie inštalácie bývajú tu."""
+    from backend.services import instance_adoption as ia
+
+    ciel = _CielSoZapisom()
+    monkeypatch.setattr(ia, "remote_instance", ciel)
+    miestny = tmp_path / "icc" / "nex-demo"
+    miestny.mkdir(parents=True)
+    (miestny / "docker-compose.yml").write_text("name: miestna\n", encoding="utf-8")
+
+    odlozene = ia.set_aside_hand_authored(miestny)
+
+    assert odlozene == ["docker-compose.yml.pre-nex-studio"]
+    assert (miestny / "docker-compose.yml.pre-nex-studio").read_text(encoding="utf-8") == "name: miestna\n"
+    assert ciel.zapisane == {}, "miestna záloha sa posielala na cudzí stroj"

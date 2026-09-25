@@ -77,7 +77,7 @@ async def test_the_adoption_carries_it_too(monkeypatch) -> None:
     """Prevzatie je druhá cesta k tomu istému nasadeniu — a nesmie o cieli vedieť menej."""
     videne = _zachyt(monkeypatch)
     _bez_zapisu(monkeypatch)
-    monkeypatch.setattr(instance_adoption, "set_aside_hand_authored", lambda _d: [])
+    monkeypatch.setattr(instance_adoption, "set_aside_hand_authored", lambda _d, **_k: [])
 
     await instance_adoption.adopting_deploy_runner(
         project_slug="nex-manager",

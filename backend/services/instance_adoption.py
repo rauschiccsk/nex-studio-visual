@@ -36,7 +36,7 @@ from typing import Any, NamedTuple, Optional
 
 import yaml
 
-from backend.services import uat_provisioner
+from backend.services import remote_instance, uat_provisioner
 from backend.services.deploy import RunnerResult, _prod_url, _url_for_instance_slug
 
 #: Prípona, pod ktorou sa ručná práca odkladá. Rovnaká ako pri prevzatí projektu (ICCINT-87), aby sa
@@ -445,7 +445,7 @@ def preview(instance_dir: Path, *, render: RenderRequest, deploy_host: Optional[
     )
 
 
-def set_aside_hand_authored(instance_dir: Path) -> list[str]:
+def set_aside_hand_authored(instance_dir: Path, *, deploy_host: Optional[str] = None) -> list[str]:
     """Odlož ručnú prácu bokom, kým ju prepíšeme (ICCINT-102).
 
     ⚠️ **Kopíruje, nepresúva.** Pôvodný súbor musí na mieste zostať až do chvíle, keď ho provisioner
@@ -455,8 +455,15 @@ def set_aside_hand_authored(instance_dir: Path) -> list[str]:
     ⚠️ **Existujúcu zálohu neprepisuje.** Druhé prevzatie by inak uložilo vedľa NAŠU vlastnú kópiu a
     originál by zmizol — presne tá chyba, ktorú pri chartách zavrel ICCINT-87.
 
+    ⚠️ **Záloha patrí tam, kde býva ORIGINÁL** (ICCINT-151, 25.09.2026). Dovtedy sa odkladalo vždy na
+    stroji kokpitu, aj keď inštalácia bežala inde — pri prevzatí MÁGERSTAVu to zlyhalo dvakrát naraz:
+    na cieli nevznikla žiadna záloha a tu vznikla záloha JÚLOVEJ kópie, teda súboru, ktorý už týždne
+    nebol tým živým. Poistka nesplnila ani jedno: nezachránila originál a uložila nesprávny súbor.
+
     Vracia mená vytvorených záloh (prázdny zoznam = nebolo čo odkladať).
     """
+    if (deploy_host or "").strip():
+        return _set_aside_on_target(instance_dir, deploy_host.strip())
     vytvorene = []
     for meno in HAND_AUTHORED_FILES:
         zdroj = instance_dir / meno
@@ -467,6 +474,34 @@ def set_aside_hand_authored(instance_dir: Path) -> list[str]:
             continue
         shutil.copy2(zdroj, zaloha)
         vytvorene.append(zaloha.name)
+    return vytvorene
+
+
+def _set_aside_on_target(instance_dir: Path, deploy_host: str) -> list[str]:
+    """To isté, ale na stroji, kde inštalácia naozaj beží (ICCINT-151).
+
+    ⚠️ Nečitateľný cieľ zastaví prevzatie. Odkladanie je poistka, ktorá robí krok vratným; keby sa
+    pri nedostupnom cieli len ticho preskočila, prevzatie by pokračovalo BEZ nej — a človek by sa to
+    dozvedel až vtedy, keď by sa chcel vracať.
+    """
+    vytvorene: list[str] = []
+    for meno in HAND_AUTHORED_FILES:
+        obsah, chyba = remote_instance.read_text(instance_dir, meno, deploy_host=deploy_host)
+        if chyba:
+            raise OSError(f"odkladanie ručných súborov zlyhalo: {chyba}")
+        if obsah is None:
+            continue
+        zaloha = meno + SET_ASIDE_SUFFIX
+        existujuca, chyba = remote_instance.read_text(instance_dir, zaloha, deploy_host=deploy_host)
+        if chyba:
+            raise OSError(f"odkladanie ručných súborov zlyhalo: {chyba}")
+        if existujuca is not None:
+            continue
+        prava = 0o600 if meno == ".env" else 0o664
+        chyba = remote_instance.write_files(instance_dir, {zaloha: (obsah, prava)}, deploy_host=deploy_host)
+        if chyba:
+            raise OSError(f"odkladanie ručných súborov zlyhalo: {chyba}")
+        vytvorene.append(zaloha)
     return vytvorene
 
 
@@ -501,7 +536,9 @@ async def adopting_deploy_runner(
     instance_dir = instance_dir_for(
         environment=environment, customer_slug=customer_slug, full_project_slug=project_slug
     )
-    odlozene = await asyncio.to_thread(set_aside_hand_authored, instance_dir)
+    odlozene = await asyncio.to_thread(
+        set_aside_hand_authored, instance_dir, deploy_host=deploy_host if is_prod else None
+    )
 
     def _provision() -> uat_provisioner.ProvisionResult:
         return uat_provisioner.provision_uat(

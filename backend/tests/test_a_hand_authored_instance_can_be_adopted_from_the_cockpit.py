@@ -170,8 +170,23 @@ def test_one_call_adopts_exactly_one_instance() -> None:
     parametre = inspect.signature(instance_adoption.set_aside_hand_authored).parameters
 
     # ``from __future__ import annotations`` robí z anotácií reťazce — porovnáva sa teda meno typu.
-    assert list(parametre) == ["instance_dir"]
+    prvy, *ostatne = parametre
+    assert prvy == "instance_dir"
     assert parametre["instance_dir"].annotation in (Path, "Path")
+
+    # ⚠️ PRESNEJŠIE ZNENIE (25.09.2026). Dovtedy sa žiadalo, aby bol parameter PRÁVE JEDEN — a stráž
+    # správne sčervenala, keď k nej pribudol `deploy_host` (na ktorom stroji inštalácia býva,
+    # ICCINT-151). Ten hromadnosť neprináša. Stráž teda drží to, o čo naozaj ide: žiadny parameter
+    # nesmie byť ZOZNAM. Hromadné prevzatie by potrebovalo `instance_dirs: list[Path]` — a to tu padne.
+    zoznamove = [
+        m
+        for m, par in parametre.items()
+        if any(z in str(par.annotation) for z in ("list", "set", "tuple", "Sequence", "Iterable"))
+    ]
+    assert zoznamove == [], f"prevzatie by sa dalo zavolať hromadne cez: {zoznamove}"
+    assert all(parametre[m].kind is inspect.Parameter.KEYWORD_ONLY for m in ostatne), (
+        "ďalšie údaje sa musia pomenovať — inak sa raz omylom prihodí priečinok navyše poradím"
+    )
 
 
 @pytest.mark.parametrize("meno", ["docker-compose.yml", ".env"])
