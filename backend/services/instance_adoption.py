@@ -253,6 +253,11 @@ class RenderRequest(NamedTuple):
     environment: str
     customer_slug: str
     app: str
+    #: Verzia, ktorú by nasadenie zapísalo. Náhľad ju potrebuje, lebo do stojacej inštalácie sa
+    #: nasadzuje VERZIA — a predpoveď sa musí robiť tým istým kódom ako zápis.
+    version: str = "v0.0.0-dev"
+    #: Nastavenia inštalácie ako text (z cieľa). Rozhodujú o tom, ktoré premenné by sa dopĺňali.
+    env_text: Optional[str] = None
 
 
 def _labely(sluzba: dict[str, Any]) -> set[str]:
@@ -339,15 +344,28 @@ def _vykresli(render: RenderRequest, existing_compose_text: Optional[str]) -> tu
     nevieme ani, čo by sme prepísali.
     """
     try:
-        compose = uat_provisioner.build_compose_for_instance(
-            project_path=render.project_path,
-            slug=render.slug,
-            project=render.project,
-            environment=render.environment,
-            customer_slug=render.customer_slug,
-            app=render.app,
-            existing_compose_text=existing_compose_text,
-        )
+        if existing_compose_text:
+            # ⚠️ Inštalácia, ktorá už stojí, sa NEPREKRESĽUJE — nasadzuje sa do nej verzia (ICCINT-133).
+            # Náhľad preto musí predpovedať to isté, inak hlási stratu služieb a úložísk, ktoré nikam
+            # nezmiznú, a prevzatie sa zamkne samo. Presne to sa 25.09.2026 stalo NEX Inboxu.
+            compose = uat_provisioner.version_bump_from_text(
+                existing_compose_text,
+                version=render.version,
+                project_slug=render.project,
+                source=uat_provisioner.load_source_compose(render.project_path),
+                project_path=render.project_path,
+                env_text=render.env_text,
+            )
+        else:
+            compose = uat_provisioner.build_compose_for_instance(
+                project_path=render.project_path,
+                slug=render.slug,
+                project=render.project,
+                environment=render.environment,
+                customer_slug=render.customer_slug,
+                app=render.app,
+                existing_compose_text=existing_compose_text,
+            )
         return uat_provisioner.render_uat_compose(compose), None
     except Exception as exc:  # noqa: BLE001 — pozri docstring: nevykreslené = neprevzaté
         return None, f"predpis, ktorý by sme zapísali, sa nedá vykresliť ({exc.__class__.__name__}: {exc})"

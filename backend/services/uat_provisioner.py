@@ -1379,7 +1379,41 @@ def render_version_bump(
     ``alembic-init``, zdroj ``db`` a ``migrate``. Vlastné ``build:`` inštalácie sa neprepisuje a
     cudzí obraz (postgres) ho nikdy nedostane — ten sa neberie zo zdrojákov.
     """
-    data = yaml.safe_load((Path(instance_dir) / "docker-compose.yml").read_text(encoding="utf-8")) or {}
+    return version_bump_from_text(
+        (Path(instance_dir) / "docker-compose.yml").read_text(encoding="utf-8"),
+        env_text=_precitaj_ak_je(Path(instance_dir) / ".env"),
+        version=version,
+        project_slug=project_slug,
+        source=source,
+        project_path=project_path,
+    )
+
+
+def _precitaj_ak_je(cesta: Path) -> Optional[str]:
+    """Obsah súboru, alebo ``None``, keď tam nie je."""
+    try:
+        return cesta.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def version_bump_from_text(
+    compose_text: str,
+    *,
+    version: str,
+    project_slug: str = "nex-inbox",
+    source: Optional[dict[str, Any]] = None,
+    project_path: Optional[Path] = None,
+    env_text: Optional[str] = None,
+) -> dict[str, Any]:
+    """To isté z TEXTU predpisu — aby to isté vedel aj NÁHĽAD (ICCINT-151, 25.09.2026).
+
+    ⚠️ Náhľad prevzatia musí predpovedať to, čo sa naozaj zapíše. Keď predpovedal podľa zdrojového
+    projektu, kým zapisovanie povyšovalo verziu, hlásil stratu služieb a úložiska, ktoré by v
+    skutočnosti nikam nezmizli — a NEX Inbox sa preto nedal prevziať, hoci mu nič nehrozilo.
+    Predpovedať a zapisovať musí ten istý kód; inak stráži jedno a robí sa druhé.
+    """
+    data = yaml.safe_load(compose_text) or {}
     novy = copy.deepcopy(data)
     sluzby = novy.get("services") or {}
     for svc in sluzby.values():
@@ -1392,7 +1426,7 @@ def render_version_bump(
     # ICCINT-104 — premennú, ktorú NOVÁ verzia deklaruje a inštalácia ju nemá, doplníme. Existujúcu
     # hodnotu nikdy neprepisujeme: to je presne to, čo v septembri prepísalo ostré nastavenia
     # vývojovými. Pridanie chýbajúceho kľúča a prepísanie existujúceho sú dve rôzne veci.
-    _z_env = set(_parse_env_file(Path(instance_dir) / ".env"))
+    _z_env = set(_parse_env_text(env_text))
     for _inst_meno, _kluce in _chybajuce_env(novy, source, _z_env).items():
         _zdroj_role = identify_service_roles((source or {}).get("services") or {})
         _inst_role = identify_service_roles(sluzby)

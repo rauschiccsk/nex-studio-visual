@@ -274,6 +274,9 @@ def _adoption_context(
         customer_slug=customer_slug,
         app=uat_provisioner.derive_uat_slug(project.slug),
     )
+    # ⚠️ ``version`` zostáva na predvolenej hodnote tam, kde ju obrazovka ešte nemá (náhľad sa pýta
+    # pred výberom verzie). Na odpoveď „čo by sa stratilo" to nemá vplyv: predpoveď sa porovnáva na
+    # STRATY, a číslo verzie ani dopĺňané premenné nič neuberajú. Pri samotnom prevzatí sa doplní.
     # Ostrá inštalácia môže bývať na inom stroji; testovacia býva vždy tu.
     deploy_host = (customer.prod_host or None) if environment == "prod" else None
     return instance_dir, render, deploy_host
@@ -347,7 +350,7 @@ async def adopt_instance(
     nahlad = await run_blocking(
         instance_adoption.preview,
         instance_dir,
-        render=render,
+        render=render._replace(version=payload.version_number),
         deploy_host=deploy_host,
         cap=180,
     )

@@ -169,29 +169,46 @@ def _magerstav_render(tmp_path):
     )
 
 
-def test_a_description_carrying_something_we_cannot_write_is_refused(tmp_path) -> None:
-    """Celá cesta odznova — od predpisu v priečinku po odmietnutie na obrazovke.
+def test_nothing_is_lost_when_the_instance_already_stands(tmp_path) -> None:
+    """⚠️ OBRÁTENÉ 25.09.2026. Dovtedy tu stálo, že služba navyše v inštalácii sa „stratí" — vtedy to
+    bola pravda, lebo prevzatie vykresľovalo inštaláciu zo zdrojového projektu.
 
-    Príkladom je služba, ktorú zdrojový projekt nemá: vykreslenie ju nemá z čoho postaviť, takže by
-    z inštalácie zmizla. Odmietnuť je jediná správna odpoveď — prevzatie, ktoré ohlási úspech a
-    pritom appku oberie o časť, je horšie než odmietnutie.
+    Odvtedy sa do stojacej inštalácie nasadzuje VERZIA, nie stavba (ICCINT-133). Jej služby, siete
+    ani úložiská sa preto nemajú ako stratiť — a náhľad to musí predpovedať tým istým kódom, akým sa
+    zapisuje. Kým predpovedal podľa zdroja, hlásil stratu `postgres`, `alembic-init` a `postgres-data`
+    a NEX Inbox sa nedal prevziať, hoci mu nič nehrozilo.
     """
     s_navyse = MAGERSTAV.replace(
         "networks:\n  manager-net:",
         "  worker:\n    image: fronta:1.0.0\nnetworks:\n  manager-net:",
         1,
     )
-    # ⚠️ Kotva musí byť sieť ZHORA (stĺpec 0). Prvé „networks:" v súbore patrí službe a podľa neho
-    #    by kontrola prešla aj vtedy, keby služba skončila medzi sieťami.
-    assert "  worker:\n" in s_navyse and s_navyse.index("  worker:") < s_navyse.index("\nnetworks:"), (
-        "služba navyše musí skončiť medzi službami, nie medzi sieťami"
-    )
     d = _instalacia(tmp_path, s_navyse)
 
     n = ia.preview(d, render=_magerstav_render(tmp_path))
 
-    assert not n.can_adopt
-    assert any("worker" in s and "zmizla" in s for s in n.blocking), n.blocking
+    assert n.can_adopt, f"prevzatie sa zamklo samo: {n.blocking}"
+
+
+def test_the_preview_predicts_with_the_same_code_that_writes(tmp_path) -> None:
+    """⚠️ Stráž proti návratu. Keby náhľad predpovedal podľa zdrojového projektu a zapisovalo sa
+    povýšenie verzie, hlásil by straty, ktoré nenastanú — a prevzatie by sa zamklo. Opačne by
+    mlčal o stratách, ktoré nastanú. Predpovedať a zapisovať musí ten istý kód."""
+    volane: list[str] = []
+    povodne = uat_provisioner.version_bump_from_text
+
+    def _zaznamenaj(*a, **k):
+        volane.append("povysenie")
+        return povodne(*a, **k)
+
+    d = _instalacia(tmp_path, MAGERSTAV)
+    uat_provisioner.version_bump_from_text = _zaznamenaj
+    try:
+        ia.preview(d, render=_magerstav_render(tmp_path))
+    finally:
+        uat_provisioner.version_bump_from_text = povodne
+
+    assert volane == ["povysenie"], "náhľad predpovedal inou cestou, než akou sa zapisuje"
 
 
 def test_the_real_magerstav_description_is_adoptable_since_its_routing_is_carried(tmp_path) -> None:
@@ -349,3 +366,20 @@ def test_the_description_can_be_read_without_a_disk() -> None:
     assert not uat_provisioner.is_provisioner_generated_text(MAGERSTAV)
     assert not uat_provisioner.is_provisioner_generated_text(None), "prázdny text nie je náš predpis"
     assert uat_provisioner.is_provisioner_generated_text(f"# {uat_provisioner.GENERATED_BY_MARKER}\nname: x\n")
+
+
+def test_a_folder_without_a_description_is_predicted_from_the_project(tmp_path) -> None:
+    """⚠️ Túto stráž si vypýtala mutácia, ktorá prešla nezachytená (25.09.2026).
+
+    Priečinok môže existovať a predpis v ňom ešte nie — napríklad po nedokončenom nasadení. Vtedy
+    niet čo povyšovať a predpoveď musí vyjsť zo zdrojového projektu. Keby sa aj tu povyšovalo,
+    predpoveďou by bol PRÁZDNY predpis a náhľad by o strate mlčal, hoci by sa zapísalo všetko nanovo.
+    """
+    d = tmp_path / "icc" / "nex-demo"
+    d.mkdir(parents=True)
+    (d / ".env").write_text("X=1\n", encoding="utf-8")
+
+    vykreslene, chyba = ia._vykresli(render_request(tmp_path), None)
+
+    assert chyba is None, chyba
+    assert "services:" in vykreslene and "backend:" in vykreslene, "predpoveď je prázdna"
