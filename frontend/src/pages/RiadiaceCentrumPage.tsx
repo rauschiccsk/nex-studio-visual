@@ -40,6 +40,7 @@ import ZopakovatKonzultaciuBar from "@/components/riadiace/ZopakovatKonzultaciuB
 import PokracovatPoOpraveBar from "@/components/riadiace/PokracovatPoOpraveBar";
 import DedoProposalBar from "@/components/riadiace/DedoProposalBar";
 import ReverifyBar from "@/components/riadiace/ReverifyBar";
+import PrenosDoRiadnejVerzieBar from "@/components/riadiace/PrenosDoRiadnejVerzieBar";
 import ReverifyNoFixBar from "@/components/riadiace/ReverifyNoFixBar";
 import ChangeRequestBar from "@/components/riadiace/ChangeRequestBar";
 import PhaseBar from "@/components/riadiace/PhaseBar";
@@ -276,6 +277,8 @@ export default function RiadiaceCentrumPage() {
         />
         <SchvalitBar board={board} versionId={versionId} onBoard={setBoard} />
         <ReverifyBar board={board} versionId={versionId} onBoard={setBoard} />
+        {/* ICCINT-139: rýchla oprava, ktorá tam nepatrí, sa dá preniesť do riadnej verzie. */}
+        <PrenosDoRiadnejVerzieBar board={board} versionId={versionId} onBoard={setBoard} />
         <ReverifyNoFixBar
           board={board}
           versionId={versionId}

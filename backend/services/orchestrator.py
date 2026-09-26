@@ -53,6 +53,7 @@ from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.versions import Version
+from backend.schemas import version as version_schemas
 from backend.schemas.epic import EpicCreate
 from backend.schemas.feat import FeatCreate
 from backend.schemas.task import TaskCreate
@@ -521,6 +522,11 @@ _ACTIONS = frozenset(
         # recorded Verifikácia PASS is stale (:func:`version_verified` == ``sha_drift`` — HEAD moved past the
         # verified commit). Re-enters Verifikácia and re-runs the independent Auditor against HEAD; the fresh
         # verdict re-anchors (PASS bound to the new commit → drift gone) or re-gates (FAIL → targeted fix).
+        # ICCINT-139: „Preniesť do riadnej verzie" — dráha sa dovtedy nastavila raz, pri spustení,
+        # a nikde inde sa nemenila. Agent sa smel spýtať, či práca patrí na rýchlu dráhu, Manažér smel
+        # odpovedať — a odpoveď nemala kam ísť. NEX Inbox 1.5.2 tak niesla migráciu databázy cez ľahkú
+        # kontrolu Audítora napriek tomu, že sa obaja zhodli na opaku.
+        "na_riadnu_verziu",
         "overit_znovu",
         # v4.0.10 (Director 2026-07-20): "Znova overiť bez opravy" — a Verifikácia FAIL whose ROOT CAUSE was
         # fixed OUTSIDE the project (engine / framework / infra) has NO project code to change. The fix-loop
@@ -634,6 +640,11 @@ def determine_available_actions(state: PipelineState) -> set[str]:
     (:func:`dial_stops_at`, applied in the dispatch path), but once it has stopped the Manažér can act."""
     stage, status = state.current_stage, state.status
 
+    # ICCINT-139: prenos na riadnu dráhu sa ponúka LEN na rýchlej oprave a len na ustálenej stavbe.
+    # Uprostred ťahu agenta nie — založiť vedľa druhú verziu z toho istého zadania, kým prvá pracuje,
+    # by znamenalo dve stavby na tej istej práci.
+    prenos = {"na_riadnu_verziu"} if state.flow_type == "fast_fix" and status != "agent_working" else set()
+
     if status == "agent_working":
         # Nothing to ratify while the agent works; only the Programovanie loop has a cooperative pause boundary.
         return {"pause"} if stage == "programovanie" else set()
@@ -642,7 +653,7 @@ def determine_available_actions(state: PipelineState) -> set[str]:
     if status == "paused":
         # A paused Programovanie loop: only the resume verb (CR-V2-009 collapses end_build away — a
         # paused build resumes via ``pokracovat`` or the Manažér steers it with ``uprav``).
-        return {"pokracovat", "uprav"}
+        return {"pokracovat", "uprav"} | prenos
 
     # ICCINT-13: Dedo has fixed the NEX Studio bug this build escalated and released it
     # (:func:`backend.services.dedo_unblock.unblock_framework_issue`). The build is settled and waiting for the
@@ -656,7 +667,7 @@ def determine_available_actions(state: PipelineState) -> set[str]:
     # itself and cannot leave a stale resume button behind a running build. MUST precede the generic
     # settled-state defaults below.
     if status == "awaiting_manazer" and state.resume_after_framework_fix:
-        return {"pokracovat"}
+        return {"pokracovat"} | prenos
 
     # Director observation #6: a ``framework_issue`` block is an escalation to our technical team — the fix
     # needs a change to NEX Studio ITSELF, which the Manažér objectively CANNOT do (no Uprav / answer / decide
@@ -664,19 +675,19 @@ def determine_available_actions(state: PipelineState) -> set[str]:
     # P0): offer the ONE action they DO have — ``nahlasit_znova`` (re-send the report) — so they have agency and
     # a concrete button instead of a locked screen. MUST precede the universal ask+uprav defaults below.
     if status == "blocked" and state.block_reason == "framework_issue":
-        return {"nahlasit_znova"}
+        return {"nahlasit_znova"} | prenos
 
     # CR-V2-041: a multi-decision CONSULTATION blocks with block_reason="decision_needed" — the Manažér
     # resolves it via Decision Cards (``decide``), one decision at a time, NEVER the raw free-text
     # answer/uprav box (a non-expert must not face a blank box). ``ask`` stays so the Manažér can probe a
     # card before deciding; the card owns the action.
     if status == "blocked" and state.block_reason == "decision_needed":
-        return {"decide", "ask"}
+        return {"decide", "ask"} | prenos
 
     # Settled (awaiting_manazer / blocked): ask + uprav are universally valid — ``uprav`` doubles as the
     # error-block "Skús znova" / re-work recovery at any phase, and ``ask`` opens a direct AI-Agent
     # consult. A blocked state is an agent QUESTION → the Manažér can ``answer`` it.
-    actions: set[str] = {"ask", "uprav"}
+    actions: set[str] = {"ask", "uprav"} | prenos
     if status == "blocked":
         # A blocked state (agent_question / agent_error / system_error / parse_exhaustion — framework_issue and
         # decision_needed already returned above) is a QUESTION or an ERROR the Manažér must answer / recover
@@ -12571,6 +12582,92 @@ async def apply_action(
             payload={"phase": state.current_stage},
         )
         _begin_dispatch(db, state)
+        return state
+
+    if action == "na_riadnu_verziu":
+        # ICCINT-139: obaja sa zhodli, že práca na rýchlu dráhu nepatrí — a odpoveď nemala kam ísť.
+        #
+        # AI Agent na začiatku NEX Inbox 1.5.2 napísal, že rozsah presahuje rýchlu opravu (tri body
+        # menia Špecifikáciu, dva žiadajú prestavbu údajov v ostrej prevádzke so 117 faktúrami) a žiadal
+        # o potvrdenie. Manažér potvrdil. Stavba aj tak dobehla ako rýchla oprava, lebo ``flow_type`` sa
+        # nastaví raz pri ``start`` a žiadna akcia ho nemenila. Migrácia databázy tak prešla ĽAHKOU
+        # kontrolou Audítora a jeden zo štyroch bodov svoj účel nesplnil.
+        #
+        # ⚠️ **Dráha sa NEPREPÍNA za behu.** Prepnúť ju uprostred by znamenalo domýšľať, ktoré už
+        # prebehnuté fázy ešte platia. Zakladá sa ČISTÁ riadna verzia z toho istého zadania; stará
+        # stavba sa pozastaví a povie, kam práca pokračuje.
+        if state.flow_type != "fast_fix":
+            raise OrchestratorError("Prenos do riadnej verzie je platný len na rýchlej oprave.")
+        if state.status == "agent_working" or state.dispatch_in_flight:
+            raise OrchestratorError(
+                "Prenos do riadnej verzie nejde uprostred ťahu agenta — počkaj, kým sa stavba ustáli."
+            )
+        if state.status == "done":
+            raise OrchestratorError("Rýchla oprava je hotová — niet čo prenášať.")
+
+        # ⚠️ ŽIADNY lokálny import `version_service` — priradenie k tomu menu kdekoľvek vo funkcii
+        # z neho spraví lokálnu premennú pre CELÚ funkciu a ostatné vetvy padnú na
+        # `UnboundLocalError`. Stalo sa presne to: 63 skúšok naraz. Modulový import stačí.
+        stara = db.get(Version, version_id)
+        if stara is None:
+            raise OrchestratorError("Verziu tejto stavby sa nepodarilo prečítať.")
+
+        # Zadanie sa berie zo štartovacej správy — pri rýchlej oprave JE brífom (``directive``). Keď tam
+        # nie je, skúsi sa Zadanie verzie; prázdny bríf je lepší než vymyslený, tak sa nedopĺňa ničím.
+        brief = ""
+        kickoff = db.execute(
+            select(PipelineMessage)
+            .where(PipelineMessage.version_id == version_id, PipelineMessage.kind == "kickoff")
+            .order_by(PipelineMessage.seq.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        if kickoff is not None:
+            brief = str((kickoff.payload or {}).get("directive") or kickoff.content or "").strip()
+        if not brief:
+            try:
+                brief = version_service.read_zadanie(db, version_id).strip()
+            except Exception:  # noqa: BLE001 — chýbajúce Zadanie nie je dôvod prenos zastaviť
+                brief = ""
+
+        nova = version_service.create(
+            db,
+            stara.project_id,
+            version_schemas.VersionCreate(
+                version_number=version_service.suggest_next_version_number(db, stara.project_id),
+                name="Riadna verzia",
+                description=brief or None,
+            ),
+            # Autora nesie PROJEKT, nie verzia; `version_service.create` ho beztak zatiaľ neukladá.
+            db.get(Project, stara.project_id).created_by,
+        )
+        if brief:
+            version_service.write_zadanie(db, nova.id, brief)
+
+        # Stará stavba sa pozastaví a POVIE, kam práca pokračuje. Bez tejto vety vyzerá o mesiac ako
+        # opustená stavba a nikto nezistí, že má pokračovanie.
+        state.status = "paused"
+        state.next_action = f"Práca pokračuje v riadnej verzii {nova.version_number}."
+        _record_message(
+            db,
+            version_id=version_id,
+            stage=state.current_stage,
+            author="manazer",
+            recipient="ai_agent",
+            kind="notification",
+            content=(
+                f"Táto rýchla oprava sa zastavuje — rozsah práce na ňu nepatrí. Pokračuje sa v riadnej "
+                f"verzii {nova.version_number} s tým istým zadaním, kde prejde plnou kontrolou Audítora."
+            ),
+            payload={
+                "phase": state.current_stage,
+                "prenesene_do": str(nova.id),
+                "prenesene_do_verzie": nova.version_number,
+            },
+        )
+        db.flush()
+        logger.info(
+            "Rýchla oprava %s prenesená do riadnej verzie %s (%s)", stara.version_number, nova.version_number, nova.id
+        )
         return state
 
     if action == "overit_znovu":

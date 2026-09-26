@@ -494,6 +494,12 @@ def test_apply_action_is_sole_mutator_grep_guard():
         # STEP 5 (step5-kontrola-design.md): + "skontrolovat" ("Skontrolovať" — the partner's honest self-check
         # after Programovanie; STAYS at priprava, emits a gate_report, invisible to the release/deploy path).
         # NOT advancing (like zostav_plan) — it never walks the phase automaton.
+        # ICCINT-139: + "na_riadnu_verziu" („Preniesť do riadnej verzie"). Dráha sa dovtedy nastavila raz,
+        # pri ``start``, a NIKDE inde sa nemenila — agent sa smel spýtať, či práca na rýchlu dráhu patrí,
+        # Manažér smel odpovedať, a odpoveď nemala kam ísť. NEX Inbox 1.5.2 tak niesla migráciu databázy
+        # cez ĽAHKÚ kontrolu Audítora napriek tomu, že sa obaja zhodli na opaku. NEPREPÍNA dráhu za behu:
+        # zakladá čistú riadnu verziu z toho istého zadania a starú stavbu pozastaví (prepnutie uprostred
+        # by znamenalo domýšľať, ktoré už prebehnuté fázy platia).
         # STEP 6 (step6-hotovo-design.md): + "hotovo" ("Označiť ako hotové" — the Manažér's TERMINAL sign-off
         # after Kontrola; settles the conversation build to 'done' + records a SHA-anchored manager signature
         # version_verified honours → deployable). NOT advancing (a terminal signature, not a phase-walk).
@@ -508,6 +514,7 @@ def test_apply_action_is_sole_mutator_grep_guard():
             "answer",
             "pause",
             "decide",
+            "na_riadnu_verziu",
             "overit_znovu",
             # v4.0.10: + "overit_bez_opravy" ("Znova overiť bez opravy" — exit a Verifikácia fix-loop when the
             # root cause was fixed OUTSIDE the project; re-run the Verifikácia gate directly, no project fix).

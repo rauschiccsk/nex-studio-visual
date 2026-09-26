@@ -195,6 +195,8 @@ export type PipelineActionName =
   | "overit_bez_opravy" // v4.0.10: "Znova overiť bez opravy" — exit a Verifikácia fix-loop (external/no-project fix) → re-run the Verifikácia gate directly
   | "skontrolovat" // STEP 5 (Kontrola): the partner honestly re-checks its own FINISHED build against the approved Špecifikácia (stays priprava, never a verdict/deploy)
   | "hotovo" // STEP 6 (Hotovo): the Manažér's TERMINAL sign-off — makes the conversation version deployable (SHA-bound signature, stays priprava; never a verdict/deploy)
+  | "na_riadnu_verziu" // ICCINT-139: „Preniesť do riadnej verzie" — rýchla oprava, do ktorej práca nepatrí,
+  //                      sa zastaví a založí sa riadna verzia s tým istým zadaním. Dráha sa NEPREPÍNA za behu.
   | "nahlasit_znova" // framework_issue recovery: re-report the NEX-Studio bug to the technical team — the Manažér's ONE concrete move on a framework_issue block. Hand-written union — no codegen regen for the verb.
   | "zopakovat_konzultaciu"; // ICCINT-25: ask for the Decision Cards again after the turn that was to build them never came back (outage / unparseable answer) — the way back from a fail-open that used to be one-way.
 
