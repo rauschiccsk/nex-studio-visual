@@ -2331,6 +2331,18 @@ def _verifikacia_directive(
         # Fast-fix LIGHT verifikácia (CR-V2-028; design §2.5): a FOCUSED fix-works + no-regression check
         # scoped to the directive — NOT the full adversarial release oracle. Still emits a verdict, still
         # checks §4 hard-security + the smoke result, just lighter (the lane's value is the short path).
+        #
+        # ⚠️ ICCINT-136: ĽAHŠIA kontrola áno — kontrola NASLEPO nie. Táto vetva sa vracala skôr, než sa
+        # prehľad deklarovaného pokrytia vôbec poskladal, takže Auditor na rýchlej dráhe nevidel zoznam
+        # invariantov, ktoré má overiť. Brána pred vydaním ich pritom vyžaduje na OBOCH dráhach rovnako
+        # (``_evaluate_release_coverage`` rýchlej dráhe neodpúšťa nič) — Auditor teda posudzoval pokrytie
+        # niečoho, čo nevidel, a dozvedel sa o tom až z textu chyby. Po ICCINT-135 navyše prehľad nesie
+        # identifikátor, ktorý má agent doslova prepísať, aby sa jeho naviazanie priradilo; bez neho sa
+        # slučka preruší až PO prvom zlyhaní. Prehľad vopred je lacnejší než zlyhanie.
+        #
+        # Mení sa LEN to, že Auditor vie, čo hľadať. Hĺbka zostáva ľahká — to je dôvod, prečo tá dráha
+        # existuje.
+        rychle_pokrytie = _release_coverage_brief(db, version_id)
         return (
             "VERIFIKÁCIA — RÝCHLA OPRAVA (nezávislý Auditor, ĽAHKÁ koncová kontrola; NIE plný release oracle).\n"
             "1. Si NEZÁVISLÝ overovateľ MIMO tímu AI Agenta, READ + RUN-ONLY — smieš ČÍTAŤ a SPUSTIŤ appku, "
@@ -2341,6 +2353,7 @@ def _verifikacia_directive(
             "   b) ŽIADNA REGRESIA — nerozbila oprava nič susedné? Engine spustil release smoke (interné "
             "fixtúry) — výsledok je nižšie; zohľadni ho.\n"
             + smoke_block
+            + rychle_pokrytie
             + "3. §4 HARD-SECURITY (rýchla, ale POVINNÁ kontrola): žiadny credential pridaný do zdrojáku / "
             "commitnutý / v logoch; secrets len v `.env`/runtime; `VITE_*` len public. Únik = FAIL.\n"
             "4. Vráť `kind=verdict`:\n"
