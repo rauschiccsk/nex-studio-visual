@@ -1705,7 +1705,28 @@ async def send_dedo_proposal(
                 ),
                 current_user.id,
             )
+            # ⚠️ Dva kroky, nie jeden. Popis je nadpisová poznámka; ZADANIE je to, čo číta fáza
+            # Príprava (`customer-requirements.md`). 26.09.2026 pri prvom skutočnom použití vyšlo
+            # najavo, že sa zapisoval len popis — verzia vznikla, v kokpite vyzerala správne a agent
+            # by dostal prázdny brief. Presne tá jedna vec, kvôli ktorej ICCINT-152 vznikol.
+            #
+            # `replace_existing` zostáva vypnuté: keď v priečinku verzie už zákaznícka špecifikácia
+            # je, Dedov návrh ju NESMIE prepísať (ICCINT-71 — takto sa raz stratilo 71 riadkov
+            # ručnej práce a agent dostal 51 znakov namiesto 3 380).
+            version_service.write_zadanie(db, version.id, payload.text)
             state = None
+    except version_service.ZadanieWouldBeOverwritten as exc:
+        # ⚠️ ICCINT-71: v priečinku tej verzie UŽ leží zákaznícka špecifikácia. Raz sa takto stratilo
+        # 71 riadkov ručnej práce a agent dostal 51 znakov namiesto 3 380. Dedov návrh nesmie byť tá
+        # istá nehoda druhýkrát — nič sa nezapíše a Manažér sa dozvie, ČO tam je, nie že „to nejde".
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"V priečinku tej verzie už leží zadanie ({exc.rel_path}) a Dedov návrh by ho prepísal. "
+                "Nič som nezapísal. Pozri sa, čo tam je, a rozhodni — verzia sa nezaložila."
+            ),
+        ) from exc
     except ValueError as exc:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

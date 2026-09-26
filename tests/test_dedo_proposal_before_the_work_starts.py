@@ -319,6 +319,68 @@ class TestManazerRozhoduje:
         assert db_session.execute(select(PipelineState)).scalars().all() == [], "koncept spustil stavbu"
         assert no_dispatch == [], "koncept poslal agenta do práce"
 
+    def test_the_brief_lands_where_priprava_reads_it(self, client, db_session, dedo_token, no_dispatch):
+        """⚠️ Nájdené 26.09.2026 pri prvom skutočnom použití: text sa ukladal do POPISU verzie, ale
+        fáza Príprava číta ZADANIE (`customer-requirements.md`). Verzia teda vznikla, v kokpite
+        vyzerala správne — a agent by dostal prázdny brief. Presne tá jedna vec, kvôli ktorej celý
+        tiket vznikol.
+
+        Overuje sa čítaním cez `read_zadanie`, teda tou istou cestou, ktorou to číta Príprava —
+        nie pozeraním na pole, do ktorého som to zapísal."""
+        from backend.services import version as version_service
+
+        user = _make_user(db_session)
+        project = _make_project(db_session, user)
+        db_session.commit()
+        navrh = _navrhni(client, project.id, action="new_version").json()
+
+        r = _posli(client, user, project.id, navrh["id"])
+
+        assert r.status_code == 200, r.text
+        zadanie = version_service.read_zadanie(db_session, uuid.UUID(r.json()["version_id"]))
+        assert _ZADANIE in zadanie, f"Príprava by dostala: {zadanie!r}"
+
+    def test_the_edited_text_is_what_priprava_gets(self, client, db_session, dedo_token, no_dispatch):
+        """⚠️ Manažérova úprava sa nesmie stratiť cestou k agentovi. Pri rýchlej oprave to stráž mala,
+        pri novej verzii nie — a mutácia „zapíš Dedov pôvodný text" cez ňu prešla (26.09.2026)."""
+        from backend.services import version as version_service
+
+        user = _make_user(db_session)
+        project = _make_project(db_session, user)
+        db_session.commit()
+        navrh = _navrhni(client, project.id, action="new_version").json()
+        upravene = _ZADANIE + " A over to aj na tmavom režime."
+
+        r = _posli(client, user, project.id, navrh["id"], text=upravene)
+
+        assert r.status_code == 200, r.text
+        zadanie = version_service.read_zadanie(db_session, uuid.UUID(r.json()["version_id"]))
+        assert zadanie.strip() == upravene.strip(), zadanie
+
+    def test_a_hand_written_specification_is_never_overwritten(self, client, db_session, dedo_token, no_dispatch):
+        """⚠️ ICCINT-71: takto sa raz stratilo 71 riadkov ručne písanej zákazníckej špecifikácie a agent
+        dostal 51 znakov namiesto 3 380. Dedov návrh nesmie byť tá istá nehoda druhýkrát.
+
+        Odmietnutie musí byť ZROZUMITEĽNÉ — nie chyba servera. Manažér má vedieť, že tam niečo je."""
+        from backend.services import claude_agent
+        from backend.services import version as version_service
+
+        user = _make_user(db_session)
+        project = _make_project(db_session, user)
+        db_session.commit()
+        navrh = _navrhni(client, project.id, action="new_version").json()
+        # Ručná práca, ktorá v priečinku budúcej verzie UŽ leží.
+        dalsia = version_service.suggest_next_version_number(db_session, project.id)
+        rucne = claude_agent.PROJECTS_ROOT / project.slug / f"docs/specs/versions/v{dalsia}/customer-requirements.md"
+        rucne.parent.mkdir(parents=True, exist_ok=True)
+        rucne.write_text("Sedemdesiatjeden riadkov ručnej práce.", encoding="utf-8")
+
+        r = _posli(client, user, project.id, navrh["id"])
+
+        assert r.status_code == 409, f"{r.status_code}: {r.text}"
+        assert rucne.read_text(encoding="utf-8") == "Sedemdesiatjeden riadkov ručnej práce."
+        assert "customer-requirements" in r.json()["detail"], r.json()
+
     def test_he_can_decline_it(self, client, db_session, dedo_token, no_dispatch):
         user = _make_user(db_session)
         project = _make_project(db_session, user)
