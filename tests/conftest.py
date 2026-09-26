@@ -26,7 +26,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
-from backend.api.dependencies import get_knowledge_base_writer, get_rag_indexer
+from backend.api.dependencies import get_rag_indexer
 from backend.config.settings import settings
 
 # ``backend.db.base`` imports every ORM model — importing it here populates
@@ -47,8 +47,6 @@ from backend.db.models.tasks import Epic  # noqa: F401
 from backend.db.models.versions import Version  # noqa: F401
 from backend.db.session import _ensure_pg8000_driver, get_db
 from backend.main import app
-from backend.services import template_bootstrap
-from backend.services.knowledge_base_writer import KnowledgeBaseWriter
 from tests._db_guard import assert_test_db_distinct, run_scoped_url
 
 #: Suffix pattern of a run-scoped database (``…_test_gw0`` / ``…_test_p12345``). Used to sweep databases
@@ -64,7 +62,6 @@ def _run_token() -> str:
 
 def _base_test_database_url() -> str:
     """The configured test database URL (shared name, no run suffix), ensuring pg8000 driver."""
-    from backend.config.settings import settings
 
     url = os.environ.get("TEST_DATABASE_URL", settings.test_database_url)
     return _ensure_pg8000_driver(url)
@@ -216,7 +213,6 @@ def test_engine():
     Two concurrent runs in the same checkout therefore cannot drop each other's schema mid-test, which
     is what made this gate report failures that did not exist (audit 2026-08-23, finding 6).
     """
-    from backend.config.settings import settings
 
     url = _get_test_database_url()
 
@@ -254,29 +250,6 @@ def test_engine():
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _isolate_projects_root(tmp_path_factory):
-    """Redirect ``PROJECTS_ROOT`` to a throwaway temp dir for the WHOLE session, so create-project /
-    charter-provisioning / metrics tests NEVER scaffold into the REAL ``/opt/projects`` — the source of the
-    1690 ``p-<hex>`` / ``metrics-phase-<hex>`` junk dirs that polluted the dev workspace (Director 2026-07-10).
-
-    ``PROJECTS_ROOT`` is a hardcoded module global in ``claude_agent`` (no env/settings knob). ``project_memory``
-    copied it at import time, so BOTH bindings are rebound — a leftover copy at ``project_memory.PROJECTS_ROOT``
-    would otherwise still point at the real dir. ``api.routes.projects`` re-imports it INSIDE its functions, so
-    it picks up this rebind at call time. Per-test ``monkeypatch.setattr(<mod>, "PROJECTS_ROOT", ...)`` still
-    overrides for a specific test — this only moves the DEFAULT off the real workspace.
-    """
-    from backend.services import claude_agent, project_memory
-
-    tmp = tmp_path_factory.mktemp("projects_root")
-    orig_ca, orig_pm = claude_agent.PROJECTS_ROOT, project_memory.PROJECTS_ROOT
-    claude_agent.PROJECTS_ROOT = tmp
-    project_memory.PROJECTS_ROOT = tmp
-    yield tmp
-    claude_agent.PROJECTS_ROOT = orig_ca
-    project_memory.PROJECTS_ROOT = orig_pm
-
-
-@pytest.fixture(scope="session", autouse=True)
 def _guard_prod_db_isolation(test_engine):
     """Guarantee no test can EVER write to the cockpit/PROD database (CR-NS-076).
 
@@ -309,7 +282,6 @@ def _guard_prod_db_isolation(test_engine):
        the lifespan migration is redundant here — replace it with a no-op for
        the session. Production startup behaviour is untouched.
     """
-    from backend.config.settings import settings
     from backend.db import session as db_session_module
     from backend.main import _run_alembic_upgrade as _orig_run_alembic_upgrade
 
@@ -408,68 +380,6 @@ def client(db_session):
 # tests/integration/test_knowledge_rag.py) legitimately point settings at their
 # own tmp KB, and a blanket autouse would fight them. Scope stays on the
 # create-touching paths.
-
-
-@pytest.fixture()
-def _isolate_create_project_kb(tmp_path, monkeypatch):
-    """Redirect the Create-Project flow's KB writes to an ISOLATED tmp KB.
-
-    ``POST /api/v1/projects`` has bootstrap side-effects (the ``init.sh``
-    subprocess, the :class:`KnowledgeBaseWriter`) that otherwise land dirs
-    under the SHARED ``/home/icc/knowledge/projects/<slug>/`` — the ghost
-    scaffold dirs cleaned by hand 2026-06-13 + 2026-07-09. Isolation, not
-    clean-up: point the KB root at ``tmp_path`` so nothing touches the real KB
-    even on a mid-test crash, and force ``init.sh`` into ``dry_run`` so its
-    subprocess performs no ``/opt/projects`` or KB filesystem writes regardless
-    of whether ``template_init_script_path`` is configured in this environment.
-
-    Neutralises all three ghost vectors:
-      1. ``settings.knowledge_base_path`` → tmp (``get_knowledge_base_writer``
-         reads it at call time).
-      2. ``get_knowledge_base_writer`` DI on the shared app → a tmp-rooted
-         writer (belt-and-suspenders; modules that mount the router on their
-         OWN app also override this on that app).
-      3. ``invoke_init_script`` → dry-run (the historical ghost vector).
-
-    Doubles as a live regression sentinel: snapshots the real KB ``projects``
-    dir before the test and asserts NO new dir appeared there afterwards (the
-    exact ghost-dir check the fix targets).
-    """
-    # Capture the REAL KB projects dir BEFORE we monkeypatch settings.
-    real_kb_projects = Path(settings.knowledge_base_path) / "projects"
-    before = {p.name for p in real_kb_projects.iterdir()} if real_kb_projects.is_dir() else set()
-
-    kb_root = tmp_path / "knowledge"
-    (kb_root / "projects").mkdir(parents=True)
-
-    # (1) Settings-rooted KB access (``get_knowledge_base_writer`` reads this at
-    #     call time) + (2) belt-and-suspenders DI override of the writer itself.
-    monkeypatch.setattr(settings, "knowledge_base_path", str(kb_root))
-    app.dependency_overrides[get_knowledge_base_writer] = lambda: KnowledgeBaseWriter(kb_root)
-
-    # (3) init.sh — the historical ghost vector. Force dry-run so the subprocess
-    #     never writes to /opt/projects or the KB even if the init script path is
-    #     configured. Patched on the route module because it imports
-    #     ``invoke_init_script`` by value (binding-by-value), so patching the
-    #     source module would not rebind the route's reference.
-    real_invoke = template_bootstrap.invoke_init_script
-
-    def _dry_run_invoke(db, project, **kwargs):
-        kwargs.setdefault("dry_run", True)
-        return real_invoke(db, project, **kwargs)
-
-    monkeypatch.setattr("backend.api.routes.projects.invoke_init_script", _dry_run_invoke)
-
-    yield kb_root
-
-    app.dependency_overrides.pop(get_knowledge_base_writer, None)
-
-    after = {p.name for p in real_kb_projects.iterdir()} if real_kb_projects.is_dir() else set()
-    new_dirs = after - before
-    assert not new_dirs, (
-        f"Create-Project test polluted the real KB {real_kb_projects}: {sorted(new_dirs)} — "
-        "KB isolation broke (docs/specs/kb-ghost-root-cause.md Fix 1 / kb-ghost-followup.md Fix A)."
-    )
 
 
 # ---------------------------------------------------------------------------

@@ -92,6 +92,13 @@ import pytest
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 
+# ⚠️ ICCINT-157: tieto skúšky zakladajú projekt, takže patria pod izoláciu zakladania — tá posiela
+# zápisy do dočasnej Znalostnej bázy a núti `init.sh` do behu nasucho. Dovtedy ju nemali, lebo bývala
+# v `tests/conftest.py` a táto skúšobňa doň nevidí; prechádzali len preto, že priečinok
+# `/opt/projects/nex-horizont` NÁHODOU existoval — bola to prázdna kostra, ktorú Director 26.09.2026
+# nechal zmazať. Odpad bol nosný.
+pytestmark = pytest.mark.usefixtures("_isolate_create_project_kb")
+
 
 @pytest.fixture(autouse=True)
 def _mock_github_validation():
