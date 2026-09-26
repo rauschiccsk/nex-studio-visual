@@ -470,6 +470,31 @@ export default function ProjectDetailPage() {
         onSaved={setProject}
       />
 
+      {/* Zadanie od Deda pre prácu, ktorá sa ešte nezačala (ICCINT-152). Panel sa nevykreslí, keď
+          žiadne nie je — stránka potom vyzerá presne tak, ako vyzerala doteraz.
+
+          ⚠️ Stojí NAD zoznamom verzií, teda nad tlačidlom „Nová verzia" (ICCINT-158). Pôvodne bol poslednou
+          kartou stránky, pod červenou kartou „Zmazať natrvalo": 26.09.2026 sa Director prišiel pozrieť, či
+          zadanie dorazilo, panel minul a začal formulár Nová verzia vypĺňať ručne. Keď Dedo niečo pripraví,
+          má to Manažér vidieť skôr, než siahne po ručnej ceste. */}
+      {project && dedoProposal && (
+        <DedoBriefBar
+          projectId={project.id}
+          proposal={dedoProposal}
+          onProposal={setDedoProposal}
+          onVersion={async (versionId, started) => {
+            // Rýchla oprava BEŽÍ — Manažéra treba vziať k nej, inak by pozeral na stránku projektu
+            // presvedčený, že sa nič nestalo, kým agent už pracuje (tá istá chyba ako ICCINT-62).
+            if (started) {
+              await openVersionCockpit(versionId, { slug: project.slug, name: project.name });
+              return;
+            }
+            // Koncept nikam neberie — len sa objaví v zozname verzií, kde ho Manažér uvidí.
+            listVersions(project.id).then(setVersions).catch(() => undefined);
+          }}
+        />
+      )}
+
       {/* Versions */}
       <div>
         <div className="flex items-center justify-between mb-4">
@@ -769,26 +794,6 @@ export default function ProjectDetailPage() {
 
       {/* Fast-Fix Lane modal (F-009 §4 CR-B): the Director types the fix directive (the whole brief);
           submit auto-creates a PATCH version + starts the short `fast_fix` pipeline, then opens its board. */}
-      {/* Zadanie od Deda pre prácu, ktorá sa ešte nezačala (ICCINT-152). Panel sa nevykreslí, keď
-          žiadne nie je — stránka potom vyzerá presne tak, ako vyzerala doteraz. */}
-      {project && dedoProposal && (
-        <DedoBriefBar
-          projectId={project.id}
-          proposal={dedoProposal}
-          onProposal={setDedoProposal}
-          onVersion={async (versionId, started) => {
-            // Rýchla oprava BEŽÍ — Manažéra treba vziať k nej, inak by pozeral na stránku projektu
-            // presvedčený, že sa nič nestalo, kým agent už pracuje (tá istá chyba ako ICCINT-62).
-            if (started) {
-              await openVersionCockpit(versionId, { slug: project.slug, name: project.name });
-              return;
-            }
-            // Koncept nikam neberie — len sa objaví v zozname verzií, kde ho Manažér uvidí.
-            listVersions(project.id).then(setVersions).catch(() => undefined);
-          }}
-        />
-      )}
-
       {fastFixOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"

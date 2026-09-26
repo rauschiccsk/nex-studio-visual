@@ -34,7 +34,16 @@ export default function VersionDetailPage() {
   // Zadanie editor (Director: the Zadanie belongs on the version's page). For a not-yet-started
   // ("planned") version — incl. the auto-created v0.1.0 — enter the brief here → Uložiť → Spustiť.
   const [zadanie, setZadanie] = useState("");
-  const [zadanieSaved, setZadanieSaved] = useState(false);
+  // Čo je na DISKU — teda to, čo si Príprava prečíta. Nie „stlačil v tomto okne Uložiť".
+  //
+  // ⚠️ Pôvodne tu stálo `zadanieSaved` s počiatočnou hodnotou `false`, a spustenie sa otváralo až po
+  // stlačení Uložiť. Zadanie načítané z disku tak bolo pre stránku neuložené: 26.09.2026 Director prešiel
+  // celú cestu od Deda až sem a tlačidlo „Spustiť tvorbu špecifikácie" ho nepustilo ďalej (ICCINT-152).
+  // Netýkalo sa to len tej cesty — narazil na to každý, kto sa vrátil na verziu s uloženým zadaním.
+  //
+  // Otázka „líši sa obrazovka od disku?" má odpoveď v každom okamihu, aj hneď po načítaní. Otázka „stlačil
+  // už niekto Uložiť?" ju po načítaní nemá — a `false` nie je „nie", je to „neviem".
+  const [zadanieNaDisku, setZadanieNaDisku] = useState("");
   const [savingZadanie, setSavingZadanie] = useState(false);
   const [starting, setStarting] = useState(false);
   const [zadanieError, setZadanieError] = useState<HumanError | null>(null);
@@ -42,6 +51,10 @@ export default function VersionDetailPage() {
   // editor is locked and Uložiť/Spustiť are closed, so an empty editor can never truncate the saved file.
   const [zadanieUnreadable, setZadanieUnreadable] = useState<HumanError | null>(null);
   const [reloadingZadanie, setReloadingZadanie] = useState(false);
+
+  // Líši sa obrazovka od disku? To je celá otázka — pre Uložiť aj pre Spustiť, len z opačnej strany.
+  // Porovnáva sa orezane, lebo orezane sa aj ukladá; inak by pridaná medzera na konci vyzerala ako zmena.
+  const zadanieNeulozene = zadanie.trim() !== zadanieNaDisku.trim();
 
   useActiveContextSync(project, version);
 
@@ -69,6 +82,7 @@ export default function VersionDetailPage() {
         setProject(proj);
         setVersion(ver);
         setZadanie(zad.content);
+        setZadanieNaDisku(zad.content);
         setZadanieUnreadable(zad.error);
       })
       .catch(() => { if (!cancelled) setError("Nepodarilo sa načítať dáta."); })
@@ -82,12 +96,12 @@ export default function VersionDetailPage() {
   const handleSaveZadanie = async () => {
     // Never write over a Zadanie we could not read — the editor is empty because the READ failed, not because
     // the file is. The disabled button is the visible guard; this is the one that cannot be raced.
-    if (!versionId || zadanieUnreadable || !zadanie.trim()) return;
+    if (!versionId || zadanieUnreadable || !zadanieNeulozene) return;
     setSavingZadanie(true);
     setZadanieError(null);
     try {
       await writeZadanie(versionId, zadanie.trim());
-      setZadanieSaved(true);
+      setZadanieNaDisku(zadanie.trim());
     } catch (e: unknown) {
       setZadanieError(humanizeApiError(e, "Uloženie Zadania zlyhalo"));
     } finally {
@@ -103,7 +117,7 @@ export default function VersionDetailPage() {
     try {
       const { content } = await readZadanie(versionId);
       setZadanie(content ?? "");
-      setZadanieSaved(false);
+      setZadanieNaDisku(content ?? "");
       setZadanieUnreadable(null);
     } catch (e: unknown) {
       setZadanieUnreadable(humanizeApiError(e, "Načítanie Zadania zlyhalo"));
@@ -116,8 +130,9 @@ export default function VersionDetailPage() {
   // to watch the interactive spec dialogue. The active context (project+version) is already synced.
   const handleStart = async () => {
     // Same rule as Uložiť: Príprava reads the Zadanie file, so starting while its content is unknown would
-    // launch the whole phase from a brief nobody on this screen has seen.
-    if (!versionId || zadanieUnreadable) return;
+    // launch the whole phase from a brief nobody on this screen has seen. A brief that DIFFERS from the file
+    // is the same mistake with the opposite sign — the phase would run on a text the Manažér no longer sees.
+    if (!versionId || zadanieUnreadable || zadanieNeulozene) return;
     setStarting(true);
     setZadanieError(null);
     try {
@@ -242,7 +257,7 @@ export default function VersionDetailPage() {
                   lang="sk"
                   spellCheck={true}
                   value={zadanie}
-                  onChange={(e) => { setZadanie(e.target.value); setZadanieSaved(false); }}
+                  onChange={(e) => setZadanie(e.target.value)}
                   rows={14}
                   placeholder="Opíš, čo má aplikácia robiť…"
                   className="w-full resize-y rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] transition-colors focus:border-primary-500 focus:outline-none"
@@ -253,21 +268,25 @@ export default function VersionDetailPage() {
                 <button
                   type="button"
                   onClick={handleSaveZadanie}
-                  disabled={savingZadanie || !!zadanieUnreadable || !zadanie.trim()}
+                  disabled={savingZadanie || !!zadanieUnreadable || !zadanieNeulozene}
                   title={zadanieUnreadable ? ZADANIE_UNKNOWN_REASON : undefined}
                   className="rounded-lg border border-[var(--color-border-strong)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50 transition-colors"
                 >
-                  {savingZadanie ? "Ukladám…" : zadanieSaved ? "Zadanie uložené ✓" : "Uložiť Zadanie"}
+                  {savingZadanie
+                    ? "Ukladám…"
+                    : !zadanieNeulozene && zadanie.trim()
+                      ? "Zadanie uložené ✓"
+                      : "Uložiť Zadanie"}
                 </button>
                 <button
                   type="button"
                   onClick={handleStart}
-                  disabled={starting || !!zadanieUnreadable || (!!zadanie.trim() && !zadanieSaved)}
+                  disabled={starting || !!zadanieUnreadable || zadanieNeulozene}
                   title={
                     zadanieUnreadable
                       ? ZADANIE_UNKNOWN_REASON
-                      : !!zadanie.trim() && !zadanieSaved
-                        ? "Najprv ulož Zadanie (alebo ho vymaž a spusti od nuly)"
+                      : zadanieNeulozene
+                        ? "Zadanie na obrazovke sa líši od uloženého. Príprava číta to uložené — najprv ulož zmeny."
                         : undefined
                   }
                   className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500 disabled:opacity-50 transition-colors"

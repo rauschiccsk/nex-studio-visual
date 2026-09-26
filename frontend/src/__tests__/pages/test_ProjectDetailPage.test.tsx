@@ -165,6 +165,30 @@ describe("ProjectDetailPage — Dedovo zadanie (ICCINT-152)", () => {
     );
   });
 
+  it("⚠️ zadanie je NAD zoznamom verzií — skôr než tlačidlo „Nová verzia“ (ICCINT-158)", async () => {
+    // 26.09.2026 sa Director prišiel pozrieť, či zadanie od Deda dorazilo — a namiesto panela otvoril
+    // formulár Nová verzia a začal ho vypĺňať ručne. Panel bol posledná karta stránky, pod červenou kartou
+    // „Zmazať natrvalo"; ručná cesta je pritom hore v hlavičke zoznamu verzií. Zadanie ostalo neodoslané.
+    //
+    // Stráž meria PORADIE, nie prítomnosť. Keby merala len to, že panel na stránke je, prežila by aj návrat
+    // na koniec stránky — teda presne tú chybu, kvôli ktorej vznikla.
+    getProjectDedoProposalApiMock.mockResolvedValue({
+      id: "n-1",
+      project_id: "p1",
+      content: "Povýš zdieľaný kit nex-shared z v0.8.1 na v0.19.0.",
+      proposed_action: "new_version",
+      status: "proposed",
+      created_at: "2026-09-26T08:02:49Z",
+    });
+    const ProjectDetailPage = await importPage();
+    render(<ProjectDetailPage />);
+
+    const panel = await screen.findByText(/Dedo .*pripravil zadanie/i);
+    const novaVerzia = screen.getByRole("button", { name: /^nová verzia$/i });
+
+    expect(panel.compareDocumentPosition(novaVerzia) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("bez zadania vyzerá stránka presne tak, ako vyzerala doteraz", async () => {
     const ProjectDetailPage = await importPage();
     render(<ProjectDetailPage />);

@@ -132,7 +132,11 @@ describe("VersionDetailPage — an unreadable Zadanie is its own state", () => {
       expect(screen.getByPlaceholderText(/Opíš, čo má aplikácia robiť/i)).toHaveValue("Skutočné zadanie na disku."),
     );
     expect(screen.queryByText(/Zadanie sa nepodarilo načítať/)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Uložiť Zadanie/ })).toBeEnabled();
+    // „Odomknuté" sa od ICCINT-152 meria na Spustiť, nie na Uložiť. Uložiť je teraz otvorené vtedy, keď je
+    // ČO uložiť — a čerstvo načítaný text z disku uložený je, takže tam ostáva zašednuté právom. Tvrdenie
+    // tejto stráže sa nemení: po úspešnom načítaní sa dá pokračovať. Mení sa len tlačidlo, ktoré to dokladá.
+    expect(screen.getByRole("button", { name: /Spustiť tvorbu špecifikácie/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Zadanie uložené/ })).toBeInTheDocument();
   });
 
   it("keeps a genuinely empty Zadanie editable and startable (the backend's own '' answer)", async () => {

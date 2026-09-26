@@ -138,7 +138,7 @@ export default function DedoBriefBar({ projectId, proposal, onProposal, onVersio
   }
 
   return (
-    <div className="rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface)] overflow-hidden">
+    <div className="mb-6 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface)] overflow-hidden">
       {/* OD KOHO to je — povedané prvé, lebo text nie je Manažérov a nikdy ho nesmie spustiť v domnení,
           že bol. Jantárová: niečo na zváženie, nie chyba a nie zelená. */}
       <div
