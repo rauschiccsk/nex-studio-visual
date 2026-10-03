@@ -506,6 +506,9 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
   const canFinish = !!board?.available_actions?.includes("hotovo");
   // Honest, derived from the live status: a token-stopped build reads `paused` — the amber note reflects it.
   const isPaused = board?.state?.status === "paused";
+  // ICCINT-163: "Pozastaviť" was pressed, the agent is still finishing its task (the loop stops at its end).
+  // The BE offers nothing meanwhile; the rung says why instead of just disappearing.
+  const pausePending = board?.state?.status === "agent_working" && board?.state?.pause_reason === "manazer";
 
   // One handler for all three trigger buttons — reuses the shared triggering/triggerError state + the EXISTING
   // postPipelineActionApi client, then swaps in the fresh board the action returns (onBoard from usePipelineWs).
@@ -638,6 +641,12 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
             {triggering ? "Pokračujem…" : "Pokračovať v stavbe"}
           </button>
           <ErrorNote error={triggerError} className="mt-1" />
+        </div>
+      ) : pausePending ? (
+        <div className="flex-shrink-0 border-b border-[var(--color-border-default)] px-4 py-3">
+          <p className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-700 dark:text-amber-300">
+            {board?.state?.next_action?.trim() || "Pozastavujem — AI Agent dokončí rozrobenú úlohu a potom zastane."}
+          </p>
         </div>
       ) : canPause ? (
         <div className="flex-shrink-0 border-b border-[var(--color-border-default)] px-4 py-3">

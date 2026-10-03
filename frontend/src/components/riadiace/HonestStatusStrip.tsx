@@ -65,6 +65,11 @@ function statusText(state: PipelineState | null, projectName: string, versionNum
   }
   if (state.status === "awaiting_manazer") return "Čaká na súhlas";
   if (state.status === "paused") return "Pozastavené";
+  // ICCINT-163: pauza je vyžiadaná, ale AI Agent ešte dorába úlohu — slučka zastane až na jej konci. Pruh tu
+  // hlásil „Pozastavené“ a Director podľa toho poslal pokyn, ktorý sa stratil. Kým sa pracuje, povedz to.
+  if (state.status === "agent_working" && state.pause_reason === "manazer") {
+    return "Pozastavujem — AI Agent dokončuje rozrobenú úlohu";
+  }
   // agent_working — name the project, version, and live phase. version_number is stored without a leading
   // "v" (e.g. "1.0.0"), so prefix it here.
   const phase = PHASE_LABELS[state.current_stage as BuildPhase] ?? state.current_stage;

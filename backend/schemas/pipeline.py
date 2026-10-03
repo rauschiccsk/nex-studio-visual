@@ -51,7 +51,8 @@ class PipelineStateRead(BaseModel):
     #: ICCINT-126: prečo je stavba ``paused``. ``fix_ready`` je VÝZVA (oprava podľa pokynu Manažéra je
     #: pripravená a čaká na jedno kliknutie) — kokpit na ňu vykreslí rovnako nápadný pruh ako na
     #: ``decision_needed``. ``token_limit`` je prekážka, ``manazer`` si pozastavenie vyžiadal sám.
-    #: ``None`` vždy, keď ``status != 'paused'`` (a na starých riadkoch).
+    #: ``None`` vždy, keď ``status != 'paused'`` (a na starých riadkoch) — okrem ``agent_working`` +
+    #: ``manazer``: pauza je vyžiadaná a AI Agent ešte dokončuje rozrobenú úlohu (ICCINT-163).
     pause_reason: Optional[str] = None
     #: STEP 5 (step5-kontrola-design.md MAJOR): the build register — ``'conversation'`` for a spine build,
     #: ``None`` for the legacy phase automaton. ADDITIVE (``mode`` already exists on the ``PipelineState``

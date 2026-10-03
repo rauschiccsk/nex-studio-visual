@@ -549,6 +549,29 @@ describe("PlanUlohRail — salvaged regressions: build-progress indicator + Poza
     );
     expect(screen.queryByRole("button", { name: /Pozastaviť/ })).not.toBeInTheDocument();
   });
+
+  // ICCINT-163: between "Pozastaviť" and the loop's next task boundary the agent still works. The rung used to
+  // vanish with nothing in its place (or, before the fix, say "pozastavené") — now it says what is happening.
+  it("says the agent is finishing its task while the pause is pending, and offers no button", async () => {
+    render(
+      <PlanUlohRail
+        versionId="v1"
+        messages={[]}
+        board={mkBoard({
+          available_actions: [],
+          state: mkState({
+            status: "agent_working",
+            pause_reason: "manazer",
+            next_action: "Pozastavujem — AI Agent dokončí rozrobenú úlohu a potom zastane.",
+          }),
+        })}
+        onBoard={() => {}}
+      />,
+    );
+    expect(await screen.findByText(/Pozastavujem — AI Agent dokončí rozrobenú úlohu/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Pozastaviť/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Pokračovať v stavbe/ })).not.toBeInTheDocument();
+  });
 });
 
 // STEP 5 (Kontrola, docs/architecture/step5-kontrola-design.md): once the Programovanie build is FINISHED, the

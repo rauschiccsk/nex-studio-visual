@@ -625,6 +625,19 @@ def _timeout_for(stage: str) -> int:
 VERIF_STALL_BLOCK_REASONS = ("agent_error", "parse_exhaustion", "system_error")
 
 
+#: ICCINT-163: what the board says between "Pozastaviť" and the loop's next task boundary, and after it.
+PAUSE_PENDING_NEXT_ACTION = "Pozastavujem — AI Agent dokončí rozrobenú úlohu a potom zastane."
+PAUSED_BY_MANAZER_NEXT_ACTION = "Pozastavené Manažérom — pokračuj cez 'Pokračovať'."
+
+
+def pause_pending(state: PipelineState) -> bool:
+    """The Manažér asked for a pause the running loop has not landed yet (ICCINT-163).
+
+    The one case where ``pause_reason`` is set while the status is not ``paused``: the request waits for the
+    loop's next task boundary, and the status keeps saying what is true meanwhile — the agent works."""
+    return state.status == "agent_working" and state.pause_reason == "manazer"
+
+
 def determine_available_actions(state: PipelineState) -> set[str]:
     """The Manažér actions valid to OFFER right now, derived from (current_stage, status) — WS-C1
     (CR-NS-030); rebuilt to the 4-phase model in CR-V2-009. The single backend source of truth for
@@ -647,7 +660,8 @@ def determine_available_actions(state: PipelineState) -> set[str]:
 
     if status == "agent_working":
         # Nothing to ratify while the agent works; only the Programovanie loop has a cooperative pause boundary.
-        return {"pause"} if stage == "programovanie" else set()
+        # Once the pause is asked for there is nothing left to press until the loop lands it (ICCINT-163).
+        return {"pause"} if stage == "programovanie" and not pause_pending(state) else set()
     if status == "done":
         return set()
     if status == "paused":
@@ -3541,6 +3555,15 @@ async def relay_manazer_message(db: Session, *, version_id: uuid.UUID, text: str
     if state is None:
         raise OrchestratorError("Pipeline not started for this version")
     text = str(text).strip()
+
+    # ICCINT-163: a message queued now would be drained the moment the loop lands the pause the Manažér just
+    # asked for — and the drain re-arms the dispatch, quietly undoing that pause. From ``paused`` a message is
+    # refused (the paused guard in apply_action); the pending pause is the same intent and gets the same answer.
+    if pause_pending(state):
+        raise OrchestratorError(
+            "Stavba sa pozastavuje — AI Agent dokončuje rozrobenú úlohu. Napíš mu, keď zastane, "
+            "cez „Vrátiť agentovi na doplnenie“ alebo po „Pokračovať“."
+        )
 
     # In-flight → enqueue behind the running turn (the runner drains it next). NEVER dispatch concurrently:
     # the durable ``dispatch_in_flight`` flag is the same guard ``apply_action`` enforces, made explicit here
@@ -11673,6 +11696,13 @@ async def _run_build_round(
             db.refresh(state)
         if state is None or state.status != "agent_working":
             return state  # Manažér intervened (pause / steer) — land cleanly at a task boundary
+        if pause_pending(state):
+            # ICCINT-163: the pause the Manažér pressed during the task just finished lands HERE, and only now
+            # is the build truly paused — the status listener drops the single-flight flag with it.
+            state.status = "paused"
+            state.next_action = PAUSED_BY_MANAZER_NEXT_ACTION
+            db.flush()
+            return state
 
         # Token-stop poistka (spine STEP 1, REDESIGN §9 — "must ACTUALLY pause"): between tasks, honour the
         # GLOBAL ``programovanie_token_stop_millions`` cap. When set (>0) and this version's total spend has
@@ -13117,13 +13147,22 @@ async def apply_action(
         _begin_dispatch(db, state)
         return state
 
-    # action == "pause" (CR-NS-027): a genuine paused status, not just a label. The running Programovanie
-    # loop re-reads state at its next task boundary (db.refresh, READ COMMITTED) and, seeing a status other
-    # than agent_working, settles + stops cleanly — the current task finishes, no mid-task kill. Leaving
-    # agent_working also stops the action route from re-dispatching (the no-op-pause bug that spawned a 2nd
-    # loop). Resume via ``pokracovat``.
-    state.status = "paused"
+    # action == "pause" (CR-NS-027): the running Programovanie loop re-reads state at its next task boundary
+    # (db.refresh, READ COMMITTED) and stops cleanly there — the current task finishes, no mid-task kill.
+    #
+    # ICCINT-163: while that task is still being worked on, the build is NOT paused, and saying so was the
+    # defect. Writing ``paused`` here made the status listener drop ``dispatch_in_flight``, so for the rest of
+    # the task (an hour, on dedo-home 03.10.2026) the cockpit offered "Vrátiť agentovi na doplnenie", accepted
+    # it, recorded the Manažér's text as delivered — and the runner, still busy, skipped the dispatch that
+    # would have carried it. The loop then reached its boundary, saw ``agent_working`` and carried on.
+    # So with a dispatch in flight this records the REQUEST (``pause_reason``) and leaves the status and the
+    # single-flight flag telling the truth; :func:`_run_build_round` writes ``paused`` when it really stops.
+    # With nothing in flight there is no task to finish, and pausing at once is the truthful answer.
     state.pause_reason = "manazer"  # ICCINT-126: toto Manažér vie, sám to stlačil
-    state.next_action = "Pozastavené Manažérom — pokračuj cez 'Pokračovať'."
+    if state.dispatch_in_flight:
+        state.next_action = PAUSE_PENDING_NEXT_ACTION
+    else:
+        state.status = "paused"
+        state.next_action = PAUSED_BY_MANAZER_NEXT_ACTION
     db.flush()
     return state

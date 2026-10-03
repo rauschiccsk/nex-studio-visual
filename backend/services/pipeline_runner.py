@@ -64,6 +64,23 @@ _MAX_RELAY_DRAIN = 20
 # the task completes.
 _ACTIVE_DISPATCH: dict[uuid.UUID, asyncio.Task] = {}
 
+#: ICCINT-163: how long a Manažér action waits for a dispatch that is only finishing up (status already
+#: written; the task still broadcasting, notifying, cleaning up) before it is refused as "agent still works".
+SETTLE_GRACE_SECONDS = 5.0
+
+
+async def idle_within(version_id: uuid.UUID, timeout: float) -> bool:
+    """``True`` when no dispatch for ``version_id`` runs in this process — now, or after waiting ``timeout``.
+
+    The in-memory registry is what :func:`schedule_dispatch` consults before it SKIPS a dispatch, so it is the
+    authority on whether an action's dispatch can start at all. The durable ``dispatch_in_flight`` flag is
+    the restart-proof guard; this one cannot drift from the runner it describes (ICCINT-163)."""
+    active = _ACTIVE_DISPATCH.get(version_id)
+    if active is None or active.done():
+        return True
+    await asyncio.wait({active}, timeout=timeout)
+    return active.done()
+
 
 def schedule_dispatch(version_id: uuid.UUID, directive: str | None = None) -> None:
     """Fire-and-forget the agent run for ``version_id`` as a tracked task.
@@ -321,10 +338,17 @@ def _clear_dispatch_flags(db, version_id: uuid.UUID) -> None:
     this runner-level backstop covers a dispatch that ended WITHOUT a clean ORM status transition (e.g. the
     fast_fix auto-chain exhausting its guard while still ``agent_working``). No-op — and **no commit** — when
     neither is set, so the commit cadence is unchanged for flows that never armed them. Guarded against a
-    missing :class:`PipelineState` row (version deleted mid-flight — Seam #3)."""
+    missing :class:`PipelineState` row (version deleted mid-flight — Seam #3).
+
+    ICCINT-163: a dispatch that ends still ``agent_working`` while the Manažér's pause is pending never reached
+    the boundary that would land it — so it lands here, or the board would say "Pozastavujem…" over a build
+    nothing is running for."""
     state = db.execute(select(PipelineState).where(PipelineState.version_id == version_id)).scalar_one_or_none()
     if state is None or (not state.dispatch_in_flight and not state.dispatch_baseline_sha):
         return
+    if orchestrator.pause_pending(state):
+        state.status = "paused"
+        state.next_action = orchestrator.PAUSED_BY_MANAZER_NEXT_ACTION
     state.dispatch_in_flight = False
     state.dispatch_baseline_sha = None
     db.commit()

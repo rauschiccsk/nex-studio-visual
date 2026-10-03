@@ -203,7 +203,9 @@ class PipelineState(Base, UUIDMixin, TimestampMixin):
     #: prekročila strop spracovania (PREKÁŽKA), alebo ju Manažér sám pozastavil (to VIE). Prvé si
     #: žiada rovnako nápadný pruh ako ``decision_needed``; ostatné nie. Bez tohto stĺpca sa to dá
     #: rozlíšiť len hádaním z textu ``next_action`` — a text sa preformuluje.
-    #: Nullable; NULL vždy, keď ``status != 'paused'`` (rovnaká disciplína ako pri ``block_reason``).
+    #: Nullable; NULL vždy, keď ``status != 'paused'`` (rovnaká disciplína ako pri ``block_reason``) — s jednou
+    #: výnimkou (ICCINT-163): ``agent_working`` + ``'manazer'`` znamená, že Manažér pauzu vyžiadal počas úlohy
+    #: a slučka ju zapíše až na najbližšej hranici úlohy (:func:`orchestrator.pause_pending`).
     pause_reason = Column(String(32), nullable=True)
     #: Per-build Miera autonómie override (v2.0.0, CR-V2-008 / AUTON-6). The TOP layer of the
     #: dial resolution order (per-build → per-project → global): a non-NULL value here overrides

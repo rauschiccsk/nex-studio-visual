@@ -515,7 +515,16 @@ async def _apply_and_publish(
     ``on_applied`` runs INSIDE the same transaction, after the action succeeded and before the commit — so
     a bookkeeping write that belongs to the action (ICCINT-24 marks the proposal handled) lands if and only
     if the action itself did. An ``OrchestratorError`` rolls back both.
+
+    ICCINT-163: an action is refused while the runner still works on this version. ``schedule_dispatch``
+    would skip its dispatch and the Manažér's words with it — after the action had already written them down
+    as delivered. ``pause`` is the one action meant for a running build; it never dispatches.
     """
+    if action != "pause" and not await pipeline_runner.idle_within(version_id, pipeline_runner.SETTLE_GRACE_SECONDS):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="AI Agent ešte pracuje — počkaj, kým dokončí rozrobenú úlohu a zastane. Nič sa neodoslalo.",
+        )
     pre_ids = {
         row for row in db.execute(select(PipelineMessage.id).where(PipelineMessage.version_id == version_id)).scalars()
     }
@@ -547,7 +556,9 @@ async def _apply_and_publish(
     # fresh-phase dispatch (start/approve/verdict) → directive None.
     # (The v1 Gate-E sub-flow selector was removed in CR-V2-017 — the 4-phase model has no Gate E;
     # the Auditor's upfront review after Návrh replaces it.)
-    if state.status == "agent_working":
+    # ICCINT-163: a pause pressed during a task leaves the build ``agent_working`` (the request waits for the
+    # loop's boundary) — the loop is already running, so there is nothing to schedule.
+    if state.status == "agent_working" and action != "pause":
         directive = orchestrator.dispatch_directive(db, version_id, action, payload or {}, state.current_stage)
         pipeline_runner.schedule_dispatch(version_id, directive)
     return state

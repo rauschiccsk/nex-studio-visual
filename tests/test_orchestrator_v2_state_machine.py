@@ -434,7 +434,10 @@ async def test_pause_then_pokracovat_resumes(db_session, fake_claude):
     st.current_actor = "ai_agent"
     db_session.flush()  # agent_working in programovanie
     state = await orchestrator.apply_action(db_session, version_id=version.id, action="pause")
-    assert state.status == "paused"
+    # ICCINT-163: ``start`` armed a dispatch, so the pause is a REQUEST until the loop lands it at its next
+    # task boundary (driven for real in test_pause_lands_at_task_boundary.py) — emulate that landing here.
+    assert state.status == "agent_working" and orchestrator.pause_pending(state)
+    _settle(db_session, version.id, status="paused")
     state = await orchestrator.apply_action(db_session, version_id=version.id, action="pokracovat")
     assert state.status == "agent_working"
     assert state.current_stage == "programovanie"
