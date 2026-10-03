@@ -51,6 +51,13 @@ BRANCH_PROTECTION_TIMEOUT = 30
 # register → refused → deregister → restart loop for nine days. A version that may not update is a failure
 # scheduled for GitHub's next release; bumping the number here would only reschedule it.
 CI_RUNNER_IMAGE = "myoung34/github-runner:2.335.1"
+#: The command the runner container runs — GitHub's own ``run.sh``, not the image's default
+#: ``./bin/Runner.Listener run --startuptype service`` (ICCINT-165). On an update the listener exits and a
+#: detached updater swaps ``bin``; with the default command that exit ends the container, Docker restarts it and
+#: kills the updater halfway (measured 03.10.2026: ``bin`` gone, ``No such file or directory`` on every start —
+#: a new restart loop). ``run.sh`` waits for ``update.finished`` and re-launches the listener in the SAME
+#: container; measured 2.335.1 → 2.337.0 with zero container restarts, still listening after a restart.
+CI_RUNNER_COMMAND = "./run.sh"
 #: Where a container runner keeps its checkout — the SAME path in the container and on the host (ICCINT-66).
 #: Anything the CI mounts out of the repository depends on those two agreeing.
 CI_RUNNER_WORKDIR_ROOT = "/opt/ci-work"
@@ -914,6 +921,7 @@ def _provision_ci_runner(slug: str, repo_url: str | None, *, github_org: str | N
             "-v",
             f"{CI_RUNNER_WORKDIR_ROOT}/{slug}:{CI_RUNNER_WORKDIR_ROOT}/{slug}",
             CI_RUNNER_IMAGE,
+            CI_RUNNER_COMMAND,
         ],
         capture_output=True,
         text=True,

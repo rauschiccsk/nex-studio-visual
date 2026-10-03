@@ -468,6 +468,37 @@ def test_provision_ci_runner_lets_the_runner_update_itself(monkeypatch) -> None:
     assert "DISABLE_AUTO_UPDATE" not in (run_kwargs.get("env") or {}), "zákaz aktualizácie cez prostredie"
 
 
+def test_provision_ci_runner_survives_its_own_update(monkeypatch) -> None:
+    """ICCINT-165: the update must happen INSIDE the running container, not across a restart of it.
+
+    The image's default command is ``./bin/Runner.Listener run --startuptype service``. On an update the
+    listener exits and leaves the swap of ``bin`` to a detached updater — in a container that exit ends the
+    entrypoint, Docker restarts the container and kills the updater halfway. Measured 03.10.2026 on the
+    re-provisioned dedo-home runner: ``bin`` renamed to ``bin.2.335.1``, the new one never linked, and
+    ``./bin/Runner.Listener: No such file or directory`` on every start — a NEW restart loop. ``./run.sh`` is
+    GitHub's own wrapper for exactly this: on exit code 3/4 it waits for ``update.finished`` and re-launches
+    the listener in the same process tree (measured: 2.335.1 → 2.337.0 with 0 container restarts).
+    """
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_x")
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        if len(cmd) > 1 and cmd[1] == "ps":
+            return _FakeCompleted(returncode=0, stdout="")
+        return _FakeCompleted(returncode=0, stdout="cid\n")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    _provision_ci_runner("nex-demo", "https://github.com/rauschiccsk/nex-demo")
+
+    run_cmd = calls[-1]
+    image_at = next(i for i, arg in enumerate(run_cmd) if str(arg).startswith("myoung34/github-runner:"))
+    assert run_cmd[image_at + 1 :] == ["./run.sh"], (
+        f"po obraze musí ísť práve ./run.sh, inak aktualizácia zabije vlastný kontajner: {run_cmd[image_at + 1 :]}"
+    )
+
+
 def test_provision_ci_runner_registers_against_the_configured_organisation(monkeypatch) -> None:
     """The runner must register against the project's REAL owner.
 
