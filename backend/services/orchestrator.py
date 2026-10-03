@@ -11821,6 +11821,9 @@ async def _run_build_round(
         # task anchors to repo HEAD now; a reclaimed (orphaned in_progress) task keeps its PERSISTED baseline_sha
         # so it re-runs against the SAME anchor, never a moved HEAD (never build on an unverified base). ORM
         # assignment keeps the in-memory object in sync so verify_mechanical gets the real baseline, not None.
+        # ICCINT-164: read BEFORE the anchor is written — a baseline already on the row is the durable proof the
+        # agent was on this task before (asked a question mid-task, failed and was sent back, orphaned by a crash).
+        task_was_started = task.baseline_sha is not None
         if task.baseline_sha is None:
             task.baseline_sha = _repo_head(project_root)
         if task.baseline_sha is None:
@@ -11863,7 +11866,20 @@ async def _run_build_round(
         task_done = False
         for attempt in range(1, _SELF_CHECK_RETRIES + 1):
             if attempt == 1 and pending_directive is not None:
-                prompt = pending_directive  # the Manažér's framed return/answer for the resumed task
+                if task_was_started:
+                    prompt = pending_directive  # the Manažér's framed return/answer for the resumed task
+                else:
+                    # ICCINT-164: a FRESH task — the steer is not about it (dedo-home 03.10.2026: "zrýchli
+                    # skúšky" arrived as task 5.1.1's whole prompt, and 5.1.1 was closed as done unseen). The
+                    # steer goes first, the task's own brief after it: this turn's report closes THIS task.
+                    prompt = (
+                        f"{pending_directive}\n\n---\n\n"
+                        "Keď pokyn Manažéra vybavíš, pokračuj touto úlohou plánu — správu na konci ťahu "
+                        "odovzdávaš za ňu:\n\n"
+                        + _directive_for_build_task(
+                            task, cross_cutting, prior_failures, state.flow_type, task_label=_task_full_number(db, task)
+                        )
+                    )
                 pending_directive = None  # consume once — later attempts/tasks use generated briefs
             else:
                 prompt = _directive_for_build_task(

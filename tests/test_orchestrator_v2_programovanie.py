@@ -370,10 +370,13 @@ async def test_fast_fix_auto_continues_to_verifikacia(db_session, monkeypatch):
 
 async def test_directive_seeds_first_attempt(db_session, monkeypatch):
     # An ``uprav`` / ``answer`` re-dispatch threads the Manažér's framed message as the resumed task's brief
-    # (two-way comms — the Coordinator relay is retired).
+    # (two-way comms — the Coordinator relay is retired). ICCINT-164: RESUMED — the task carries the baseline it
+    # started from; a fresh task gets the directive in front of its own brief (test_steer_never_replaces_a_fresh_task).
     version, project = _make_version(db_session, project_dial="po_kazdej_faze")
     _seed_programovanie(db_session, version.id)
-    _seed_tasks(db_session, version, project, ["T1"])
+    _, _, (t1,) = _seed_tasks(db_session, version, project, ["T1"])
+    t1.baseline_sha = "c" * 40
+    db_session.flush()
     _no_baseline_git(monkeypatch)
     calls = _stub_turns(monkeypatch, [_done_block()])
     _stub_mech(monkeypatch, [None])
