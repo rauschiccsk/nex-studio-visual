@@ -295,10 +295,23 @@ def _guard_prod_db_isolation(test_engine):
 
     _main_module._run_alembic_upgrade = lambda: None
 
+    # 4. Neutralise the lifespan's sweep of build-turn docker objects. In production it runs when the
+    #    process owns no turn, so whatever wears ``build_db.OWNER_LABEL`` is garbage. A TEST process owns no
+    #    turn either — but the backend that does is alive on the same host, and its build's database wears
+    #    the same label. Run on ANDROS (and by the self-hosted CI runner, in the ``docker`` group), the real
+    #    sweep removed the database of a running dedo-home turn (03.10.2026, ICCINT-162).
+    _orig_reap_build_orphans = _main_module._reap_build_orphans
+
+    async def _no_reap() -> None:
+        return None
+
+    _main_module._reap_build_orphans = _no_reap
+
     yield
 
     # Restore process-global state exactly as we found it.
     _main_module._run_alembic_upgrade = _orig_run_alembic_upgrade
+    _main_module._reap_build_orphans = _orig_reap_build_orphans
     db_session_module.SessionLocal.configure(bind=original_engine)
     db_session_module.engine = original_engine
 

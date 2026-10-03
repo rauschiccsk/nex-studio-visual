@@ -1,5 +1,5 @@
 /**
- * useSessionKeepAlive — keep an ACTIVELY-working user logged in (sliding session).
+ * useSessionKeepAlive — keep a present user logged in (sliding session).
  *
  * The JWT access token is deliberately short-lived (see
  * ``access_token_expire_minutes``); without renewal an active user is bounced
@@ -7,17 +7,26 @@
  * This hook, mounted once at the app root, silently renews the token BEFORE it
  * expires — but ONLY while the user is actually present.
  *
- * Security posture (the whole point):
- *   - ACTIVE user  → the token is renewed indefinitely → they never see login.
- *   - IDLE / walked-away tab → NO recent activity → we do NOTHING → the token
- *     expires → the existing 401 → ``/login`` flow logs them out. A
- *     backgrounded, untouched tab is NOT kept alive forever.
+ * Who counts as present (ICCINT-162, Director 03.10.2026: „pokiaľ agent aktívne
+ * pracuje, treba predlžovať"):
+ *   - the user TOUCHED the cockpit at any moment since the current token was
+ *     issued — not "in the last 5 minutes". The old test forgot every click made
+ *     before the renewal window opened: on 02.10.2026 it logged the Director out
+ *     ~4 hours after his last click, while the setting promises 8;
+ *   - or nobody touched it, but the server says a build he can see was alive
+ *     since then (an agent working, a new message) — Programovanie runs for days
+ *     and the Manažér mostly watches it.
+ *
+ * Security posture: the session ends only when NOTHING happened for a whole
+ * token lifetime — neither the user nor a build. A forgotten tab on a quiet
+ * cockpit expires → the existing 401 → ``/login`` flow logs it out.
  *
  * Mechanics: every ``KEEPALIVE_CHECK_INTERVAL_MS`` we check the stored token.
  * Once it enters its renewal window (~``KEEPALIVE_RENEW_FRACTION`` of its
- * actual lifetime, derived from the ``iat``/``exp`` claims) AND the user was
- * active within ``KEEPALIVE_ACTIVITY_WINDOW_MS``, we call ``/auth/refresh`` and
- * store the fresh token under the SAME ``TOKEN_STORAGE_KEY``.
+ * actual lifetime, derived from the ``iat``/``exp`` claims) we renew if the user
+ * was present (above) — asking the server at most once per
+ * ``KEEPALIVE_HOLD_CHECK_INTERVAL_MS`` — by calling ``/auth/refresh`` and storing
+ * the fresh token under the SAME ``TOKEN_STORAGE_KEY``.
  *
  * A failed renewal is triaged, because the two failures mean opposite things:
  *   - 401 → the token is dead/superseded. The api-client has already bounced to
@@ -30,13 +39,18 @@
 import { useEffect, useRef } from "react";
 
 import { ApiError, TOKEN_STORAGE_KEY } from "@/services/api";
-import { refreshApi } from "@/services/api/auth";
+import { refreshApi, sessionHoldApi } from "@/services/api/auth";
 import { useAuthStore } from "@/store/authStore";
 
 /** How often we re-evaluate whether the token needs renewing. */
 export const KEEPALIVE_CHECK_INTERVAL_MS = 30_000; // 30s
-/** "Recently active" = the last user input was within this window. */
+/**
+ * "Recently active" for a legacy token WITHOUT an ``iat`` claim, where "since the
+ * token was issued" cannot be known: the last user input was within this window.
+ */
 export const KEEPALIVE_ACTIVITY_WINDOW_MS = 5 * 60_000; // 5 min
+/** How often an untouched tab may ask the server whether a build keeps it alive. */
+export const KEEPALIVE_HOLD_CHECK_INTERVAL_MS = 5 * 60_000; // 5 min
 /** Renew once this fraction of the token's lifetime (exp - iat) has elapsed. */
 export const KEEPALIVE_RENEW_FRACTION = 0.75;
 /**
@@ -120,6 +134,8 @@ export function useSessionKeepAlive(): void {
   // symptom is the user being thrown out with no explanation.
   const retryAtRef = useRef(0);
   const failuresRef = useRef(0);
+  // Earliest next question to the server about a live build (untouched tab only).
+  const holdCheckAtRef = useRef(0);
 
   useEffect(() => {
     const markActive = () => {
@@ -137,21 +153,8 @@ export function useSessionKeepAlive(): void {
     );
     document.addEventListener("visibilitychange", onVisibility);
 
-    const tick = () => {
-      const token = readToken();
-      if (!token) return; // not logged in → nothing to keep alive
-      if (token === deadTokenRef.current) return; // server said no — asking again cannot help
-      if (inFlightRef.current) return; // a renewal is already on its way
-
-      const timing = decodeTokenTiming(token);
-      if (!timing) return;
-
-      const now = Date.now();
-      if (now < renewalDueAt(timing)) return; // too early — plenty of life left
-      if (now < retryAtRef.current) return; // backing off after a transient failure
-      if (now - lastActivityRef.current > KEEPALIVE_ACTIVITY_WINDOW_MS) return; // idle → let it expire
-
-      // Near expiry + recently active → renew SILENTLY.
+    // Near expiry + present → renew SILENTLY.
+    const renew = (token: string) => {
       inFlightRef.current = true;
       refreshApi()
         .then((res) => {
@@ -186,6 +189,45 @@ export function useSessionKeepAlive(): void {
             );
         })
         .finally(() => {
+          inFlightRef.current = false;
+        });
+    };
+
+    const tick = () => {
+      const token = readToken();
+      if (!token) return; // not logged in → nothing to keep alive
+      if (token === deadTokenRef.current) return; // server said no — asking again cannot help
+      if (inFlightRef.current) return; // a renewal is already on its way
+
+      const timing = decodeTokenTiming(token);
+      if (!timing) return;
+
+      const now = Date.now();
+      if (now < renewalDueAt(timing)) return; // too early — plenty of life left
+      if (now < retryAtRef.current) return; // backing off after a transient failure
+
+      const touched =
+        timing.iatMs !== null
+          ? lastActivityRef.current >= timing.iatMs
+          : now - lastActivityRef.current <= KEEPALIVE_ACTIVITY_WINDOW_MS;
+      if (touched) {
+        renew(token);
+        return;
+      }
+
+      // Nobody touched the cockpit since this token was issued. Is a build alive?
+      if (now < holdCheckAtRef.current) return;
+      holdCheckAtRef.current = now + KEEPALIVE_HOLD_CHECK_INTERVAL_MS;
+      const since = new Date(timing.iatMs ?? now).toISOString();
+      inFlightRef.current = true;
+      sessionHoldApi(since)
+        .then((res) => {
+          inFlightRef.current = false;
+          if (res.hold) renew(token);
+        })
+        .catch(() => {
+          // A dead token already bounced to /login (401); anything else is asked again at the next
+          // hold check. Either way nothing to do here — and never a renewal on a guess.
           inFlightRef.current = false;
         });
     };

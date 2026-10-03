@@ -73,6 +73,16 @@ def _run_alembic_upgrade() -> None:
         raise
 
 
+async def _reap_build_orphans() -> None:
+    """Sweep the build-turn docker objects the previous backend process did not live to clean up.
+
+    A module-level hook (like :func:`_run_alembic_upgrade`) so the test session can neutralise it: every
+    ``TestClient(app)`` enters this lifespan, and a test process owns no build turn — for it, everything
+    wearing the label belongs to a LIVE build on the same host (incident 03.10.2026, ICCINT-162).
+    """
+    await build_db_service.reap_orphans()
+
+
 async def _agent_terminal_idle_loop() -> None:
     """Background task: every 5 min, kill agent terminal sessions idle > TTL.
 
@@ -201,7 +211,7 @@ async def lifespan(app: FastAPI):
     # middle of that turn re-creates this container and no ``finally`` ever runs. Both objects carry
     # ``build_db.OWNER_LABEL`` precisely so they can be found; until now nothing looked. Safe HERE and only
     # here: this process owns no turn yet, so everything wearing the label is garbage by definition.
-    await build_db_service.reap_orphans()
+    await _reap_build_orphans()
 
     db = SessionLocal()
     try:

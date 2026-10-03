@@ -12,7 +12,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 
-const { refreshApi, setState, FakeApiError } = vi.hoisted(() => {
+const { refreshApi, sessionHoldApi, setState, FakeApiError } = vi.hoisted(() => {
   class FakeApiError extends Error {
     status: number;
     constructor(status: number) {
@@ -20,10 +20,10 @@ const { refreshApi, setState, FakeApiError } = vi.hoisted(() => {
       this.status = status;
     }
   }
-  return { refreshApi: vi.fn(), setState: vi.fn(), FakeApiError };
+  return { refreshApi: vi.fn(), sessionHoldApi: vi.fn(), setState: vi.fn(), FakeApiError };
 });
 
-vi.mock("@/services/api/auth", () => ({ refreshApi }));
+vi.mock("@/services/api/auth", () => ({ refreshApi, sessionHoldApi }));
 vi.mock("@/store/authStore", () => ({ useAuthStore: { setState } }));
 vi.mock("@/services/api", () => ({
   TOKEN_STORAGE_KEY: "nex_studio_token",
@@ -35,6 +35,8 @@ import {
   KEEPALIVE_CHECK_INTERVAL_MS,
   KEEPALIVE_RENEW_FRACTION,
   KEEPALIVE_RETRY_BASE_MS,
+  KEEPALIVE_ACTIVITY_WINDOW_MS,
+  KEEPALIVE_HOLD_CHECK_INTERVAL_MS,
 } from "@/hooks/useSessionKeepAlive";
 
 const TOKEN_KEY = "nex_studio_token";
@@ -68,6 +70,8 @@ describe("useSessionKeepAlive", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     refreshApi.mockReset();
+    sessionHoldApi.mockReset();
+    sessionHoldApi.mockResolvedValue({ hold: false, reason: "nič" });
     setState.mockReset();
     window.localStorage.clear();
   });
@@ -207,5 +211,98 @@ describe("useSessionKeepAlive", () => {
 
     expect(window.localStorage.getItem(TOKEN_KEY)).toBe("fresh.token.value");
     expect(setState).toHaveBeenCalledWith({ token: "fresh.token.value" });
+  });
+
+  // ── ICCINT-162 — Director, 03.10.2026: „pokiaľ agent aktívne pracuje, treba predlžovať." ──────────
+
+  /** A full 8-hour token issued at ``t0`` — the real shape, so "4 hours ago" means something. */
+  function eightHourToken(t0: number): string {
+    return makeToken(t0, t0 + 8 * 60 * 60_000);
+  }
+  const SIX_HOURS = 6 * 60 * 60_000;
+
+  it("renews when the user touched the cockpit ANY time since the token was issued", async () => {
+    // 02.10.2026: last click at 09:16, token from 05:04, logged out at 13:04 — the activity was
+    // simply too early to count. Activity since the token was issued is presence, full stop.
+    const t0 = Date.now();
+    window.localStorage.setItem(TOKEN_KEY, eightHourToken(t0));
+    refreshApi.mockResolvedValue({ access_token: "renewed.after.early.click" });
+
+    renderHook(() => useSessionKeepAlive());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60 * 60_000); // one hour in …
+    });
+    act(() => {
+      window.dispatchEvent(new Event("pointerdown")); // … a click …
+    });
+    await act(async () => {
+      // … then hours of watching without touching, well past the renewal point (75 % = 6 h).
+      await vi.advanceTimersByTimeAsync(SIX_HOURS - 60 * 60_000 + KEEPALIVE_ACTIVITY_WINDOW_MS + 2 * KEEPALIVE_CHECK_INTERVAL_MS);
+    });
+
+    expect(refreshApi).toHaveBeenCalledTimes(1);
+    expect(window.localStorage.getItem(TOKEN_KEY)).toBe("renewed.after.early.click");
+  });
+
+  it("renews an untouched cockpit while the server says a build is alive", async () => {
+    const t0 = Date.now();
+    window.localStorage.setItem(TOKEN_KEY, eightHourToken(t0));
+    sessionHoldApi.mockResolvedValue({ hold: true, reason: "AI Agent pracuje na dedo-home v0.1.0." });
+    refreshApi.mockResolvedValue({ access_token: "renewed.while.agent.works" });
+
+    renderHook(() => useSessionKeepAlive());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SIX_HOURS + 2 * KEEPALIVE_CHECK_INTERVAL_MS);
+    });
+
+    expect(sessionHoldApi).toHaveBeenCalled();
+    // It asks about the time since THIS token was issued — not "ever".
+    expect(sessionHoldApi.mock.calls[0]![0]).toBe(new Date(Math.floor(t0 / 1000) * 1000).toISOString());
+    expect(refreshApi).toHaveBeenCalledTimes(1);
+    expect(window.localStorage.getItem(TOKEN_KEY)).toBe("renewed.while.agent.works");
+  });
+
+  it("lets an untouched cockpit expire when no build is alive", async () => {
+    // The security half: a forgotten tab on a quiet cockpit still logs out.
+    const t0 = Date.now();
+    const token = eightHourToken(t0);
+    window.localStorage.setItem(TOKEN_KEY, token);
+
+    renderHook(() => useSessionKeepAlive());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SIX_HOURS + 30 * 60_000);
+    });
+
+    expect(sessionHoldApi).toHaveBeenCalled();
+    expect(refreshApi).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem(TOKEN_KEY)).toBe(token);
+  });
+
+  it("asks the server at most once per hold-check interval", async () => {
+    const t0 = Date.now();
+    window.localStorage.setItem(TOKEN_KEY, eightHourToken(t0));
+
+    renderHook(() => useSessionKeepAlive());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SIX_HOURS + 30 * 60_000);
+    });
+
+    // 30 minutes inside the renewal window with a 30 s tick would be 60 questions without the limit.
+    const allowed = Math.ceil((30 * 60_000) / KEEPALIVE_HOLD_CHECK_INTERVAL_MS) + 1;
+    expect(sessionHoldApi.mock.calls.length).toBeGreaterThan(0);
+    expect(sessionHoldApi.mock.calls.length).toBeLessThanOrEqual(allowed);
+  });
+
+  it("does not ask the server before the renewal window", async () => {
+    const t0 = Date.now();
+    window.localStorage.setItem(TOKEN_KEY, eightHourToken(t0));
+
+    renderHook(() => useSessionKeepAlive());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SIX_HOURS - 2 * KEEPALIVE_CHECK_INTERVAL_MS);
+    });
+
+    expect(sessionHoldApi).not.toHaveBeenCalled();
+    expect(refreshApi).not.toHaveBeenCalled();
   });
 });

@@ -47,3 +47,23 @@ backgrounded+idle tab forever.
 ## Out of scope
 - Refresh-token / httpOnly-cookie rotation (a bigger auth redesign) — the sliding-renew of a valid session
   covers the reported problem. Note as a future option, don't build now.
+
+## Rozhodnutie Directora 03.10.2026 — kto je „prítomný" (ICCINT-162)
+
+*„Pokiaľ beží kokpit, systém automaticky predĺži prihlásenie … pokiaľ agent aktívne pracuje, treba
+predlžovať."* Programovanie dedo-home trvá dni a Manažér ho väčšinou len sleduje; za jeden deň ho
+kokpit dvakrát odhlásil, presne 8 h po vydaní tokenu (02.10. 13:04, 03.10. 04:08).
+
+Dve zmeny oproti časti 2 vyššie:
+
+1. **Dotyk sa počíta od vydania terajšieho tokenu**, nie len v posledných 5 minútach. Pôvodné pravidlo
+   zabudlo každý klik spred okna obnovy — 02.10. odhlásilo ~4 h po poslednom kliknutí, hoci nastavenie
+   sľubuje 8 h. Päťminútové okno ostáva len pre starý token bez `iat`.
+2. **Nedotknuté okno sa spýta servera** (`GET /api/v1/auth/session-hold?since=<iat>`, najviac raz za
+   5 min): na stavbe, ktorú človek vidí (pravidlo zoznamu projektov), agent práve pracuje, alebo od
+   `since` pribudla správa v jej priebehu → obnoví sa. Druhá podmienka robí pravidlo súmerné: keď agent
+   zastane a čaká na Manažéra, 8 hodín sa ráta od posledného slova agenta, nie od posledného kliku.
+
+Bezpečnosť: kokpit odhlási, keď sa celú dobu platnosti tokenu **nedeje nič — ani človek, ani stavba**.
+Zabudnuté okno bez živej stavby sa odhlási ako doteraz. Server sám nič nepredlžuje — nový token vydá
+len `/auth/refresh` a len platnému tokenu.

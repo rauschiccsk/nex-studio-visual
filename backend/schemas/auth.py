@@ -72,3 +72,17 @@ class LoginResponse(BaseModel):
         description="Token lifetime in seconds.",
     )
     user: AuthUser = Field(..., description="Authenticated user details.")
+
+
+class SessionHoldRead(BaseModel):
+    """Response from ``GET /auth/session-hold`` — does a build keep this session alive? (ICCINT-162)"""
+
+    hold: bool = Field(
+        ...,
+        description=(
+            "True when, since ``since``, something happened on a build this user can see — an agent is "
+            "working right now, or the build's conversation got a message. The open cockpit then renews "
+            "the session even though nobody touched it."
+        ),
+    )
+    reason: str = Field(..., description="One sentence saying why — the build that holds it, or that none does.")

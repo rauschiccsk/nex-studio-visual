@@ -5,6 +5,7 @@
  *
  *   - ``POST  /auth/login``   → loginApi
  *   - ``POST  /auth/refresh`` → refreshApi
+ *   - ``GET   /auth/session-hold`` → sessionHoldApi
  *   - ``POST  /auth/logout``  → logoutApi
  *   - ``GET   /auth/me``      → getMeApi
  */
@@ -80,6 +81,23 @@ export function loginApi(
  */
 export function refreshApi(): Promise<LoginResponse> {
   return api.post<LoginResponse>("/auth/refresh", undefined);
+}
+
+/** Mirrors ``backend.schemas.auth.SessionHoldRead``. */
+export interface SessionHold {
+  hold: boolean;
+  reason: string;
+}
+
+/**
+ * Did anything happen on a build this user can see since ``since``? (ICCINT-162)
+ *
+ * Mirrors ``GET /auth/session-hold``. The keep-alive asks when the token nears expiry and nobody
+ * touched the cockpit: a working agent or a new message in a visible build means the Manažér is
+ * still following it, so the session is renewed. It renews nothing itself — only ``refreshApi`` does.
+ */
+export function sessionHoldApi(since: string): Promise<SessionHold> {
+  return api.get<SessionHold>("/auth/session-hold", { params: { since } });
 }
 
 /**

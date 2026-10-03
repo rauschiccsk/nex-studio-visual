@@ -217,6 +217,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/session-hold": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Session Hold
+         * @description Did anything happen on a build this user can see since ``since``? (ICCINT-162)
+         *
+         *     The open cockpit asks when its token nears expiry and nobody touched the tab: a working agent or a new
+         *     message in a visible build renews the session; a quiet one lets it expire. It holds nothing by itself —
+         *     only a still-valid token gets here, and only ``/refresh`` issues a new one.
+         */
+        get: operations["session_hold_api_v1_auth_session_hold_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/backlog": {
         parameters: {
             query?: never;
@@ -5619,6 +5643,22 @@ export interface components {
             telegram_chat_id?: string | null;
         };
         /**
+         * SessionHoldRead
+         * @description Response from ``GET /auth/session-hold`` — does a build keep this session alive? (ICCINT-162)
+         */
+        SessionHoldRead: {
+            /**
+             * Hold
+             * @description True when, since ``since``, something happened on a build this user can see — an agent is working right now, or the build's conversation got a message. The open cockpit then renews the session even though nobody touched it.
+             */
+            hold: boolean;
+            /**
+             * Reason
+             * @description One sentence saying why — the build that holds it, or that none does.
+             */
+            reason: string;
+        };
+        /**
          * SystemSettingRead
          * @description Serialised representation of a single system_settings row.
          *
@@ -6872,6 +6912,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+        };
+    };
+    session_hold_api_v1_auth_session_hold_get: {
+        parameters: {
+            query: {
+                /** @description Issue time of the caller's current token (its ``iat``). */
+                since: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionHoldRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

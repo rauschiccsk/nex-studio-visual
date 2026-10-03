@@ -8,16 +8,19 @@ threadpool).  Business logic is delegated to
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from backend.core.security import get_current_user
 from backend.db.models.foundation import User
 from backend.db.session import get_db
-from backend.schemas.auth import AuthUser, LoginRequest, LoginResponse
+from backend.schemas.auth import AuthUser, LoginRequest, LoginResponse, SessionHoldRead
 from backend.schemas.user import SelfProfileUpdate
 from backend.services import auth as auth_service
 from backend.services import notify
+from backend.services import session_hold as session_hold_service
 from backend.services import user as user_service
 
 router = APIRouter(tags=["Auth"])
@@ -97,6 +100,26 @@ def refresh(
         expires_in=expires_in,
         user=AuthUser.model_validate(current_user),
     )
+
+
+@router.get(
+    "/session-hold",
+    response_model=SessionHoldRead,
+    status_code=status.HTTP_200_OK,
+)
+def session_hold(
+    since: datetime = Query(..., description="Issue time of the caller's current token (its ``iat``)."),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> SessionHoldRead:
+    """Did anything happen on a build this user can see since ``since``? (ICCINT-162)
+
+    The open cockpit asks when its token nears expiry and nobody touched the tab: a working agent or a new
+    message in a visible build renews the session; a quiet one lets it expire. It holds nothing by itself —
+    only a still-valid token gets here, and only ``/refresh`` issues a new one.
+    """
+    hold, reason = session_hold_service.session_hold(db, current_user, since)
+    return SessionHoldRead(hold=hold, reason=reason)
 
 
 @router.post(
