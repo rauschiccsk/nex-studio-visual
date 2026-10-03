@@ -437,6 +437,37 @@ def test_provision_ci_runner_runs_container_with_correct_label(monkeypatch) -> N
     assert not any(str(arg).startswith("ACCESS_TOKEN=") for arg in run_cmd)
 
 
+def test_provision_ci_runner_lets_the_runner_update_itself(monkeypatch) -> None:
+    """ICCINT-165: a container runner must keep itself current, exactly like the host systemd runners do.
+
+    The image was pinned to 2.335.1 AND the runner was started with ``DISABLE_AUTO_UPDATE=true`` (the image
+    turns that into ``--disableupdate``). The host runners updated themselves to 2.337.0 and kept working; on
+    24.09.2026 GitHub refused 2.335.1 ("is deprecated and cannot receive messages"), so every container runner
+    registered, was refused, deregistered and was restarted by ``unless-stopped`` — every ~15 s for nine days,
+    ~117 000 restarts, CI for nex-websites and dedo-home dead, cAdvisor up from 1.8 to 9.4 cores. A pinned
+    version that may not update is a failure scheduled for GitHub's next release; the pin is only where the
+    runner STARTS. Whatever the spelling — a value on argv, or a name-only ``-e`` fed from the child env.
+    """
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_x")
+    calls: list[tuple[list[str], dict]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        if len(cmd) > 1 and cmd[1] == "ps":
+            return _FakeCompleted(returncode=0, stdout="")
+        return _FakeCompleted(returncode=0, stdout="cid\n")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    _provision_ci_runner("nex-demo", "https://github.com/rauschiccsk/nex-demo")
+
+    run_cmd, run_kwargs = calls[-1]
+    assert run_cmd[:3] == ["docker", "run", "-d"]
+    disabling = [arg for arg in run_cmd if str(arg).split("=", 1)[0] in ("DISABLE_AUTO_UPDATE", "--disableupdate")]
+    assert disabling == [], f"runner sa nesmie zakladať so zakázanou aktualizáciou: {disabling}"
+    assert "DISABLE_AUTO_UPDATE" not in (run_kwargs.get("env") or {}), "zákaz aktualizácie cez prostredie"
+
+
 def test_provision_ci_runner_registers_against_the_configured_organisation(monkeypatch) -> None:
     """The runner must register against the project's REAL owner.
 

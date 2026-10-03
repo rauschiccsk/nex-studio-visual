@@ -44,7 +44,12 @@ BRANCH_PROTECTION_TIMEOUT = 30
 # Containerized self-hosted CI runner (Director 2026-07-16). The backend runs INSIDE a container and cannot
 # install a HOST systemd runner (no systemctl/sudo/host runner dir) like the 13 legacy ones — so it runs the
 # runner as a Docker container via the mounted docker.sock. See :func:`_provision_ci_runner` for the full why.
-# Image tag pinned to the SAME runner version as the host systemd runners (2.335.1).
+# The tag is only where the runner STARTS: it updates itself from there, exactly like the host systemd runners
+# (ICCINT-165). Until 03.10.2026 this pin came with ``DISABLE_AUTO_UPDATE=true`` and a comment claiming it was
+# "the same version as the host runners" — true only until they updated themselves to 2.337.0. On 24.09.2026
+# GitHub refused 2.335.1 ("is deprecated and cannot receive messages") and every container runner went into a
+# register → refused → deregister → restart loop for nine days. A version that may not update is a failure
+# scheduled for GitHub's next release; bumping the number here would only reschedule it.
 CI_RUNNER_IMAGE = "myoung34/github-runner:2.335.1"
 #: Where a container runner keeps its checkout — the SAME path in the container and on the host (ICCINT-66).
 #: Anything the CI mounts out of the repository depends on those two agreeing.
@@ -889,8 +894,7 @@ def _provision_ci_runner(slug: str, repo_url: str | None, *, github_org: str | N
             f"RUNNER_NAME={label}",
             "-e",
             f"LABELS={label}",
-            "-e",
-            "DISABLE_AUTO_UPDATE=true",
+            # No ``DISABLE_AUTO_UPDATE`` (ICCINT-165): the runner must keep itself current — see CI_RUNNER_IMAGE.
             # ICCINT-66: the work dir must be the SAME PATH inside the runner and on the host.
             #
             # CI runs inside this container but executes docker through the HOST's socket, so a compose bind
