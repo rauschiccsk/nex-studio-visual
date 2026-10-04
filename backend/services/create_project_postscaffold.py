@@ -19,6 +19,9 @@ from pathlib import Path
 
 import yaml
 
+from backend.core.agent_env import agent_env
+from backend.services import build_provenance
+
 logger = logging.getLogger(__name__)
 
 # Container-correct templates dir: parents[2] of this file is the repo root — ``/app`` inside the backend
@@ -562,10 +565,15 @@ def _run_smoke_test(target: Path, slug: str, *, full: bool) -> str | None:
     # The health verdict, carried out of the try/finally below. None = nothing to report.
     unhealthy: str | None = None
 
+    # ICCINT-166: z ktorej zmeny sa obraz stavia — ako pri každej stavbe, ktorú kokpit spúšťa. To isté prostredie
+    # dostane aj ``up`` a ``down``: projekt, ktorý by premennú v compose vyžadoval, by inak ostal bežať.
+    compose_env = agent_env(build_provenance.build_env(compose_file))
+
     # Minimal smoke: docker compose build (always run)
     build_result = subprocess.run(
         ["docker", "compose", "build"],
         cwd=str(target),
+        env=compose_env,
         capture_output=True,
         text=True,
         timeout=SMOKE_FULL_TIMEOUT if full else SMOKE_BUILD_TIMEOUT,
@@ -591,6 +599,7 @@ def _run_smoke_test(target: Path, slug: str, *, full: bool) -> str | None:
         up_result = subprocess.run(
             ["docker", "compose", "up", "-d"],
             cwd=str(target),
+            env=compose_env,
             capture_output=True,
             text=True,
             timeout=120,
@@ -643,6 +652,7 @@ def _run_smoke_test(target: Path, slug: str, *, full: bool) -> str | None:
         subprocess.run(
             ["docker", "compose", "down", "-v"],
             cwd=str(target),
+            env=compose_env,
             capture_output=True,
             timeout=60,
             check=False,

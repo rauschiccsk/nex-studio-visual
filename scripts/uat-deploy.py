@@ -41,7 +41,7 @@ for _p in (str(SCRIPTS_DIR), str(NEX_STUDIO_ROOT)):
 
 import _uat_lib  # noqa: E402
 
-from backend.services import uat_provisioner  # noqa: E402
+from backend.services import build_provenance, uat_provisioner  # noqa: E402
 
 UAT_ROOT = Path("/opt/uat")
 PROJECTS_ROOT = Path("/opt/projects")
@@ -188,7 +188,12 @@ def deploy(
         # Build + start. Export APP_VERSION / VITE_APP_VERSION so source build-args resolve to the
         # real version (the FE host-build + backend image-arg bake the same value).
         app_version = _uat_lib.git_describe(project_path)
-        build_env = {"APP_VERSION": app_version, "VITE_APP_VERSION": app_version}
+        # ICCINT-166: aj zmena, z ktorej sa obraz stavia — z toho istého miesta ako každá stavba v kokpite.
+        build_env = {
+            "APP_VERSION": app_version,
+            "VITE_APP_VERSION": app_version,
+            **build_provenance.build_env(result.compose_path),
+        }
         _uat_lib.docker_compose(["build"], cwd=result.uat_dir, env=build_env)
         _uat_lib.docker_compose(["up", "-d"], cwd=result.uat_dir, env=build_env)
 

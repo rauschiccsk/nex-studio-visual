@@ -31,7 +31,7 @@ import tempfile
 import unicodedata
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from time import perf_counter
@@ -58,6 +58,7 @@ from backend.schemas.epic import EpicCreate
 from backend.schemas.feat import FeatCreate
 from backend.schemas.task import TaskCreate
 from backend.services import (
+    build_provenance,
     ci_status,
     claude_agent,
     create_project_postscaffold,
@@ -5276,7 +5277,12 @@ async def _run_uat_deploy(
     # Agent-controlled input again, less obviously: the compose file being brought up is one the AI Agent
     # wrote, and compose INTERPOLATES this environment into it (``${DEDO_API_TOKEN}`` in a generated
     # service block would hand the secret to the deployed app). Same withholding as every other spawn.
-    env = _docker_env_for_target(agent_env({"APP_VERSION": build_ver, "VITE_APP_VERSION": build_ver}), deploy_host)
+    # ICCINT-166: vedľa verzie aj zmena, z ktorej sa obraz stavia (``APP_COMMIT``) — z kontextov stavby
+    # tohto compose, nie z mena projektu.
+    provenance = await _build_provenance_env(compose)
+    env = _docker_env_for_target(
+        agent_env({"APP_VERSION": build_ver, "VITE_APP_VERSION": build_ver, **provenance}), deploy_host
+    )
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=env
@@ -6117,10 +6123,30 @@ class _SmokeStack:
     roles: dict[str, Optional[str]]
     up_rc: int
     up_detail: str
+    #: ICCINT-166: s čím sa compose TOHTO stacku interpoluje — číslo zmeny stavby a vyrenderovaný súbor premenných
+    #: ako ``COMPOSE_ENV_FILES``. Engine svoje príkazy púšťa s ``--env-file`` v ``base``; projektový skript
+    #: previerky volá ``docker compose`` sám, a bez tohto by interpoloval zo živého ``.env`` projektu — iného
+    #: a často neúplného (dedo-home 04.10.2026: dva riadky, osem povinných premenných chýbalo).
+    interpolation_env: dict[str, str] = field(default_factory=dict)
 
     @property
     def up_ok(self) -> bool:
         return self.up_rc == 0
+
+
+#: Strop na zistenie čísla zmeny (niekoľko volaní gitu, každé so stropom 15 s).
+BUILD_PROVENANCE_CAP = 60
+
+
+async def _build_provenance_env(compose: Path) -> dict[str, str]:
+    """:func:`build_provenance.build_env` mimo hlavnej slučky — pýta sa gitu (ICCINT-74, ICCINT-166).
+
+    Keď nestihne, vráti ``{}``: číslo zmeny sa nevymýšľa a projekt, ktorý ho potrebuje, zlyhá zatvorený sám."""
+    try:
+        return await run_blocking(build_provenance.build_env, compose, cap=BUILD_PROVENANCE_CAP)
+    except BlockingWorkTimedOut:
+        logger.warning("build provenance: zistenie čísla zmeny pre %s nestihlo %ss", compose, BUILD_PROVENANCE_CAP)
+        return {}
 
 
 #: Prefix of a boot-leg failure caused by a container that EXITED NON-ZERO. Parsed back by
@@ -6197,20 +6223,34 @@ async def _boot_smoke_stack(project_slug: str, compose: Path, roles: dict[str, O
     smoke_env_rendered = _render_smoke_env(compose.parent / ".env.example", smoke_env)
     env_file_args = ["--env-file", str(smoke_env)] if smoke_env_rendered else []
     base = ["docker", "compose", "-p", project, *env_file_args, "-f", str(compose), "-f", str(override)]
+    # ICCINT-166: z ktorej zmeny sa obraz stavia — ako pri každej stavbe, ktorú kokpit spúšťa — a ten istý súbor
+    # premenných pre každého, kto stack ovláda (aj projektový skript previerky). Dostane to aj ``down``: projekt,
+    # ktorý by premennú v compose vyžadoval, by sa inak postavil, spustil a už nezastavil.
+    interpolation_env = await _build_provenance_env(compose)
+    if smoke_env_rendered:
+        interpolation_env["COMPOSE_ENV_FILES"] = str(smoke_env)
     stack = _SmokeStack(
-        base=base, compose=compose, override=override, project=project, roles=roles, up_rc=-1, up_detail=""
+        base=base,
+        compose=compose,
+        override=override,
+        project=project,
+        roles=roles,
+        up_rc=-1,
+        up_detail="",
+        interpolation_env=interpolation_env,
     )
+    compose_env = agent_env(interpolation_env)
     try:
         # Isolate — ephemeral override stripping container_name + host ports — then up (build + boot;
         # ``--wait`` blocks until healthchecks pass; Ollama reached via the app's own extra_hosts).
         override.write_text(_acceptance_smoke_override(compose, smoke_env if smoke_env_rendered else None))
         stack.up_rc, stack.up_detail = await _compose_smoke_step(
-            base + ["up", "-d", "--build", "--wait"], ACCEPTANCE_SMOKE_TIMEOUT
+            base + ["up", "-d", "--build", "--wait"], ACCEPTANCE_SMOKE_TIMEOUT, env=compose_env
         )
         yield stack
     finally:
         # Teardown — ALWAYS: tear the isolated stack (+ its volumes) down and drop the temp override.
-        await _compose_smoke_step(base + ["down", "-v"], 120)
+        await _compose_smoke_step(base + ["down", "-v"], 120, env=compose_env)
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
@@ -6416,6 +6456,8 @@ async def _run_release_acceptance(
         # made the smoke's boot-floor probe :80 → connection refused → 0 asserts run (release-acceptance
         # verified NOTHING, nex-shopify 2026-07-20). The template boot-floor also defaults now (belt + braces).
         "SMOKE_BACKEND_PORT": str(_compose_backend_port(stack.compose) or "8000"),
+        # ICCINT-166: skript ovláda stack vlastným ``docker compose`` — nech ho interpoluje tak ako engine.
+        **stack.interpolation_env,
     }
     rc, out = await _run_acceptance_script(script, env)
     if rc != 0:
