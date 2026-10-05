@@ -317,6 +317,8 @@ describe("PoradcaPage", () => {
     );
     renderPage();
     await screen.findByText("Rozoberám kroky agenta stavby — posledných 80 krokov");
-    expect(screen.getByRole("button", { name: "Vymazať rozhovor" })).toBeDisabled();
+    // Kôš zašedne až po zosúladení zoznamu s otvoreným rozhovorom (efekt po vykreslení) — bez čakania
+    // skúška padala v polovici behov (CI 05.10.2026).
+    await waitFor(() => expect(screen.getByRole("button", { name: "Vymazať rozhovor" })).toBeDisabled());
   });
 });
