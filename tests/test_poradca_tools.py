@@ -201,3 +201,54 @@ def test_role_sql_grants_columns_not_tables_and_refuses_foreign_access_extension
         assert re.search(uat_db.SECRET_COLUMN_PATTERN, secret, re.I), secret
     for plain in ("username", "stav", "suma", "created_at"):
         assert not re.search(uat_db.SECRET_COLUMN_PATTERN, plain, re.I), plain
+    # Zašifrované tajomstvo je tiež tajomstvo; tabuľka s prístupmi sa nevydá vôbec.
+    for secret in ("ciphertext", "nonce"):
+        assert re.search(uat_db.SECRET_COLUMN_PATTERN, secret, re.I), secret
+    assert "c.table_name !~*" in sql
+    for table in ("email_credentials", "user_sessions", "launch_token_jti", "api_secrets"):
+        assert re.search(uat_db.SECRET_TABLE_PATTERN, table, re.I), table
+    for table in ("invoices", "users", "suppliers", "system_settings"):
+        assert not re.search(uat_db.SECRET_TABLE_PATTERN, table, re.I), table
+
+
+# ── 05.10.2026, zmerané pred zápisom do živých UAT: správca nie je „postgres" ─────────────────────────
+
+
+async def test_role_setup_connects_as_the_installations_own_superuser(monkeypatch, tmp_path):
+    """V živých UAT sa správca volá podľa nastavenia inštalácie (nexmanager, nexweb, nex_inbox) a rola
+    ``postgres`` tam neexistuje — ``psql`` bez ``-U`` by sa prihlásil ako ``postgres`` a zlyhal. Prihlásenie
+    musí ísť menom z ``POSTGRES_USER`` kontajnera databázy."""
+    calls: list[tuple[str, ...]] = []
+
+    async def fake_docker(*argv, stdin=None, timeout=60):
+        calls.append(argv)
+        if argv[0] == "ps":
+            return 0, "uat-x-db\n"
+        if argv[:3] == ("exec", "uat-x-db", "printenv"):
+            return 0, {"POSTGRES_DB": "nexmanager\n", "POSTGRES_USER": "nexmanager\n"}[argv[3]]
+        return 0, ""
+
+    monkeypatch.setattr(uat_db, "_docker", fake_docker)
+    monkeypatch.setattr(uat_db, "_db_service", lambda inst: "db")
+    ok, _ = await uat_db.ensure_role(tmp_path, "andros")
+    assert ok
+    psql = next(c for c in calls if "psql" in c)
+    assert psql[psql.index("-U") + 1] == "nexmanager"
+
+
+async def test_role_setup_refuses_a_superuser_name_that_is_not_an_identifier(monkeypatch, tmp_path):
+    calls: list[tuple[str, ...]] = []
+
+    async def fake_docker(*argv, stdin=None, timeout=60):
+        calls.append(argv)
+        if argv[0] == "ps":
+            return 0, "uat-x-db\n"
+        if argv[:3] == ("exec", "uat-x-db", "printenv"):
+            return 0, {"POSTGRES_DB": "app\n", "POSTGRES_USER": "x; drop\n"}[argv[3]]
+        return 0, ""
+
+    monkeypatch.setattr(uat_db, "_docker", fake_docker)
+    monkeypatch.setattr(uat_db, "_db_service", lambda inst: "db")
+    ok, msg = await uat_db.ensure_role(tmp_path, "andros")
+    assert not ok and "správcu" in msg
+    assert not any("psql" in c for c in calls)

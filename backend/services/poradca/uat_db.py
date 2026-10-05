@@ -32,8 +32,17 @@ logger = logging.getLogger(__name__)
 
 ROLE = "poradca_ro"
 
-#: Stĺpec s takýmto menom Poradca nedostane. Široko — radšej nevidieť stĺpec navyše než heslo.
-SECRET_COLUMN_PATTERN = r"(pass|pwd|secret|token|hash|salt|key|session|otp|credential|private|cookie|signature)"
+#: Meno roly v PostgreSQL, ktoré smie ísť do ``psql -U`` (z ``POSTGRES_USER`` kontajnera).
+_PG_ROLE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
+
+#: Stĺpec s takýmto menom Poradca nedostane. Široko — radšej nevidieť stĺpec navyše než heslo. ``cipher`` /
+#: ``nonce``: zašifrované tajomstvo (NEX Inbox ``email_credentials.ciphertext``) je tiež materiál k prístupom.
+SECRET_COLUMN_PATTERN = (
+    r"(pass|pwd|secret|token|hash|salt|key|session|otp|credential|private|cookie|signature|cipher|nonce)"
+)
+#: Tabuľku s takýmto menom Poradca nedostane vôbec — ani jej „nevinné" stĺpce (zmerané 05.10.2026 v živom
+#: UAT NEX Inboxu: ``email_credentials`` mala skrytý len ``key``, šifrovaný text bol čitateľný).
+SECRET_TABLE_PATTERN = r"(credential|secret|password|token|session)"
 
 _FORBIDDEN_EXTENSIONS = ("dblink", "postgres_fdw")
 _ALLOWED_START = re.compile(r"^\s*(select|with|explain)\b", re.IGNORECASE)
@@ -190,6 +199,7 @@ BEGIN
            JOIN information_schema.tables t
              ON t.table_schema = c.table_schema AND t.table_name = c.table_name
            WHERE c.table_schema = 'public' AND t.table_type = 'BASE TABLE'
+             AND c.table_name !~* '{SECRET_TABLE_PATTERN}'
              AND c.column_name !~* '{SECRET_COLUMN_PATTERN}' LOOP
     EXECUTE format('GRANT SELECT (%I) ON %I.%I TO {ROLE}', r.column_name, r.table_schema, r.table_name);
   END LOOP;
@@ -215,6 +225,12 @@ async def _ensure_role(installation: UatInstallation) -> tuple[bool, str]:
         container, db_name = await _db_container(installation)
     except ToolError as exc:
         return False, str(exc)
+    # Správca databázy je ten z nastavenia inštalácie (nexmanager, nexweb, …) — rola ``postgres`` v živých
+    # UAT neexistuje (zmerané 05.10.2026 pred prvým zápisom). Miestny socket ho pustí bez hesla.
+    code, superuser = await _docker("exec", container, "printenv", "POSTGRES_USER")
+    superuser = (superuser.strip() if code == 0 else "") or "postgres"
+    if not _PG_ROLE_RE.match(superuser):
+        return False, f"Účet Poradcu v databáze UAT {customer_slug}: meno správcu databázy sa nedá bezpečne použiť."
     code, out = await _docker(
         "exec",
         "-i",
@@ -226,6 +242,8 @@ async def _ensure_role(installation: UatInstallation) -> tuple[bool, str]:
         "-q",
         "-v",
         "ON_ERROR_STOP=1",
+        "-U",
+        superuser,
         "-d",
         db_name,
         stdin=role_setup_sql(db_name).encode("utf-8"),

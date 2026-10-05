@@ -130,6 +130,12 @@ databázu neurčuje AI, ale backend z projektu. Každý výstup prejde filtrom t
   `token`, `secret`, `key`, `session`…) — zoznam sa vygeneruje zo schémy pri každom nasadení. Stĺpce
   s heslami tak nevydá ani `row_to_json`, alias či `substr` — stráži to databáza, nie filter.
   Tvarový filter hodnôt ostáva ako druhá vrstva.
+- **Celé tabuľky s prístupmi** (meno obsahuje `credential`, `secret`, `password`, `token`, `session`)
+  Poradca nedostane vôbec, ani ich „nevinné" stĺpce; zašifrovaný obsah (`cipher`, `nonce`) tiež nie.
+  Zmerané 05.10.2026 v živom UAT NEX Inboxu: `email_credentials` mala skrytý len `key`, šifrovaný text by
+  bol čitateľný — opravené pred prvým použitím.
+- Účet zakladá správca databázy z `POSTGRES_USER` inštalácie (v živých UAT nexmanager, nexweb, nex_inbox —
+  rola `postgres` tam neexistuje; zmerané pred prvým zápisom).
 - Spustenie: `docker exec -u postgres <db> psql -X -At -U poradca_ro -c <dotaz>` ako pole argumentov;
   dotaz s `\` sa odmietne; jediný príkaz overí rozbor. Pri nasadení sa overí, že databáza nemá
   rozšírenia `dblink` ani `postgres_fdw`.
