@@ -6,10 +6,19 @@ from datetime import datetime
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 #: Najdlhšia otázka — dlhší text je skôr vložený log; ten si Poradca prečíta sám nástrojom.
 MAX_QUESTION_CHARS = 20_000
+#: Najdlhší názov rozhovoru — šírka stĺpca ``poradca_conversations.title``.
+TITLE_MAX_CHARS = 200
+
+
+def _refuse_nul(value: str) -> str:
+    """Znak NUL databáza do textu neuloží (pád 500) — odmietne sa vetou, nie chybou servera."""
+    if "\x00" in value:
+        raise ValueError("Text nesmie obsahovať znak NUL.")
+    return value
 
 
 class PoradcaStep(BaseModel):
@@ -75,9 +84,19 @@ class PoradcaConversationCreate(BaseModel):
     question: str = Field(..., min_length=1, max_length=MAX_QUESTION_CHARS)
     version_id: Optional[UUID] = None
 
+    @field_validator("question")
+    @classmethod
+    def _no_nul(cls, value: str) -> str:
+        return _refuse_nul(value)
+
 
 class PoradcaAsk(BaseModel):
     question: str = Field(..., min_length=1, max_length=MAX_QUESTION_CHARS)
+
+    @field_validator("question")
+    @classmethod
+    def _no_nul(cls, value: str) -> str:
+        return _refuse_nul(value)
 
 
 class PoradcaScopeUpdate(BaseModel):
@@ -85,6 +104,22 @@ class PoradcaScopeUpdate(BaseModel):
     vynechanie neznamenalo nechcenú zmenu)."""
 
     version_id: Optional[UUID]
+
+
+class PoradcaRename(BaseModel):
+    """Nový názov rozhovoru — jeden riadok; medzery a zalomenia sa zlejú do jednej medzery."""
+
+    title: str = Field(..., min_length=1, max_length=TITLE_MAX_CHARS)
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def _one_line(cls, value: object) -> object:
+        return " ".join(value.split()) if isinstance(value, str) else value
+
+    @field_validator("title")
+    @classmethod
+    def _no_nul(cls, value: str) -> str:
+        return _refuse_nul(value)
 
 
 class PoradcaVersionInfo(BaseModel):

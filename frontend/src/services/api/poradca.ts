@@ -45,6 +45,16 @@ export function setPoradcaScopeApi(id: string, versionId: string | null): Promis
   return api.patch<PoradcaConversation>(`/poradca/conversations/${id}`, { version_id: versionId });
 }
 
+/** Premenovať rozhovor — poradie v zozname sa nemení. */
+export function renamePoradcaConversationApi(id: string, title: string): Promise<PoradcaConversation> {
+  return api.put<PoradcaConversation>(`/poradca/conversations/${id}/title`, { title });
+}
+
+/** Vymazať rozhovor natrvalo — text je preč, cena ostáva v Nákladoch. Kým Poradca odpovedá, 409. */
+export function deletePoradcaConversationApi(id: string): Promise<void> {
+  return api.delete<void>(`/poradca/conversations/${id}`);
+}
+
 export function stopPoradcaApi(messageId: string): Promise<{ stopping: boolean }> {
   return api.post<{ stopping: boolean }>(`/poradca/messages/${messageId}/stop`);
 }

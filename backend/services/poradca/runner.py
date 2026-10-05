@@ -74,6 +74,14 @@ class PoradcaBusy(Exception):
     """V rozhovore už jedna otázka beží — ďalšia počká, kým dobehne alebo ju človek zastaví."""
 
 
+class ConversationGone(LookupError):
+    """Rozhovor bol medzitým vymazaný — otázka doň už nepatrí."""
+
+
+#: Názov vymazaného rozhovoru. Pôvodný názov je prvá otázka, takže ide preč s textom.
+DELETED_TITLE = "Vymazaný rozhovor"
+
+
 # ── priebeh pre prehliadač ────────────────────────────────────────────────────
 
 
@@ -170,7 +178,9 @@ def ask(
 
     Raises:
         PoradcaBusy: v tomto rozhovore už odpoveď beží.
+        ConversationGone: rozhovor medzitým niekto vymazal.
     """
+    _lock_live(db, conversation.id)
     running = db.execute(
         select(PoradcaMessage.id).where(
             PoradcaMessage.conversation_id == conversation.id, PoradcaMessage.status == RUNNING
@@ -496,3 +506,105 @@ def new_conversation(
     db.add(conversation)
     db.flush()
     return conversation
+
+
+def edit_conversation(db: Session, conversation: PoradcaConversation, **values: Any) -> None:
+    """Zmení názov alebo „o čom sa rozprávame" — rozhovor sa pritom v zozname nepohne.
+
+    Poradie rozhovorov určuje posledná otázka (``updated_at`` nastaví :func:`ask`), nie úprava. Preto
+    ``updated_at`` ostáva výslovne taký, aký bol — inak by ho ``onupdate`` posunul na teraz.
+
+    Raises:
+        ConversationGone: rozhovor medzitým niekto vymazal. Podmienka ``deleted_at IS NULL`` je v samotnom
+            zápise: úprava, ktorá čakala na zámok vymazania, sa po ňom znova vyhodnotí a nič nezapíše —
+            nový názov by inak vrátil text do vymazaného rozhovoru (nález previerky 05.10.2026).
+    """
+    result = db.execute(
+        update(PoradcaConversation)
+        .where(PoradcaConversation.id == conversation.id, PoradcaConversation.deleted_at.is_(None))
+        .values(**values, updated_at=PoradcaConversation.updated_at)
+    )
+    if result.rowcount == 0:
+        db.rollback()
+        raise ConversationGone("Rozhovor bol vymazaný.")
+    db.commit()
+    db.refresh(conversation)
+
+
+async def delete_conversation(db: Session, conversation: PoradcaConversation) -> None:
+    """Vymaže, čo sa v rozhovore povedalo; spotrebu nechá Nákladom.
+
+    Zahodí otázky, odpovede, kroky, chyby, názov aj celý záznam sedenia Claude Code na disku — ten nesie
+    aj to, čo nástroje Poradcovi vrátili. Zo správ ostane len spotreba a čas: Náklady projektu ich sčítajú
+    (``metrics._poradca_rows``) a bez nich by ukázali menej, než sa naozaj minulo. Rozhovor dostane
+    ``deleted_at`` a rozhranie ho odvtedy nevidí.
+
+    Poradie: pod zámkom sa záznam presunie do koša (jeden nedeliteľný krok) a zmení sa databáza; zlyhá
+    databáza → záznam sa vráti. Súbory z koša sa mažú až potom, mimo zámku a mimo slučky udalostí.
+
+    Raises:
+        PoradcaBusy: odpoveď ešte beží — kontajner by písal do záznamu, ktorý mažeme; najprv ju zastaviť.
+        ConversationGone: už je vymazaný.
+        OSError: záznam na disku sa nedal presunúť — databáza aj záznam ostali, ako boli.
+    """
+    trashed = _wipe(db, conversation)
+    hub.publish(conversation.id, {"type": "deleted"})
+    if trashed is not None:
+        await asyncio.to_thread(sandbox.discard, trashed)
+
+
+def _wipe(db: Session, conversation: PoradcaConversation) -> Optional[Path]:
+    _lock_live(db, conversation.id)
+    running = db.execute(
+        select(PoradcaMessage.id).where(
+            PoradcaMessage.conversation_id == conversation.id, PoradcaMessage.status == RUNNING
+        )
+    ).first()
+    if running is not None:
+        db.rollback()
+        raise PoradcaBusy("Kým Poradca odpovedá, rozhovor sa nedá vymazať — najprv odpoveď zastav.")
+    try:
+        trashed = sandbox.move_to_trash(conversation.id)
+    except OSError:
+        db.rollback()
+        raise
+    try:
+        db.execute(
+            update(PoradcaMessage)
+            .where(PoradcaMessage.conversation_id == conversation.id)
+            .values(content="", steps=[], error=None, captured_version_id=None)
+        )
+        db.execute(
+            update(PoradcaConversation)
+            .where(PoradcaConversation.id == conversation.id)
+            .values(
+                title=DELETED_TITLE,
+                deleted_at=datetime.now(timezone.utc),
+                updated_at=PoradcaConversation.updated_at,
+            )
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        if trashed is not None:
+            try:
+                sandbox.restore_from_trash(trashed, conversation.id)
+            except OSError:
+                logger.exception("poradca: transcript of %s stays in %s — restore failed", conversation.id, trashed)
+        raise
+    db.refresh(conversation)
+    return trashed
+
+
+def _lock_live(db: Session, conversation_id: UUID) -> None:
+    """Zamkne riadok rozhovoru do konca transakcie; vymazaný alebo neexistujúci → :class:`ConversationGone`.
+
+    Otázka aj vymazanie idú cez tento zámok, takže sa neprekrížia: otázka do práve vymazaného rozhovoru
+    neprejde a vymazanie nezačne, kým sa otázka ukladá (potom ju už vidí ako bežiacu).
+    """
+    row = db.execute(
+        select(PoradcaConversation.deleted_at).where(PoradcaConversation.id == conversation_id).with_for_update()
+    ).one_or_none()
+    if row is None or row.deleted_at is not None:
+        db.rollback()
+        raise ConversationGone("Rozhovor bol vymazaný.")

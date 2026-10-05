@@ -51,6 +51,9 @@ class PoradcaConversation(Base, UUIDMixin, TimestampMixin):
     #: Názov podľa prvej otázky (skrátený), aby sa rozhovory dali v zozname rozlíšiť.
     title = Column(String(200), nullable=False)
     claude_session_id = Column(UUID(as_uuid=True), nullable=False, unique=True)
+    #: Kedy ho autor (alebo admin) vymazal. Riadok ostáva len kvôli Nákladom: text, kroky aj názov sú preč,
+    #: zo správ ostala spotreba a čas. Pre rozhranie taký rozhovor neexistuje (404).
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (Index("ix_poradca_conversations_project_author", "project_id", "author_id"),)
 

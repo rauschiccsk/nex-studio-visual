@@ -39,6 +39,13 @@ admin — ako všade v kokpite. „Autor rozhovoru" je prihlásený účet.
   logu backendu v UAT", „Pýtam sa databázy UAT", „Rozoberám, čo agent stavby robil za poslednú hodinu".
   Tlačidlo **Zastaviť** otázku preruší.
 - Pod odpoveďou: **ako dlho trvala a koľko stála**.
+- **Premenovať a vymazať** (v4.42.0, Director 05.10.2026: „chýba mi premenovanie rozhovoru a vymazanie
+  rozhovoru"). Pri rozhovore v zozname ceruzka a kôš. Premenovanie priamo v zozname: Enter uloží, Esc zruší,
+  odchod z poľa uloží; názov je jeden riadok do 200 znakov. Poradie v zozname určuje posledná otázka, nie
+  úprava názvu ani voľba „o čom sa rozprávame". Vymazanie sa potvrdí v riadku („Vymazať … natrvalo? Text sa
+  nedá obnoviť; cena ostane v Nákladoch."). Vymažú sa otázky, odpovede, kroky, chyby, názov a celý záznam
+  sedenia Claude Code na disku; ostane len spotreba a čas odpovedí, aby Náklady sedeli. Kým Poradca
+  odpovedá, kôš je zašednutý s dôvodom „najprv odpoveď zastav". Smie autor rozhovoru a účet admin.
 
 ### Čo Poradca vidí („zozadu")
 1. **Kód a dokumenty projektu** a históriu zmien (kto, kedy, čo).
@@ -161,6 +168,23 @@ bežia na výstupe každého nástroja aj na odpovedi. Skúšky len na umelých 
   `user_agent_settings` (dnes `('ai_agent','auditor')`, migrácia 069) aj v `schemas/user_agent_setting.py`;
   nastavenie súbežnosti.
 - API `/api/v1/poradca/…` (rozhovory, otázka, zastavenie, WebSocket priebehu); `authz` ako inde.
+- Migrácia `103` (v4.42.0): `poradca_conversations.deleted_at`. Vymazanie (`DELETE /conversations/{id}`)
+  riadky nezmaže — `metrics._poradca_rows` sčíta spotrebu z `poradca_messages` a tvrdé zmazanie by z Nákladov
+  zobralo minuté peniaze. Text, kroky, chyba a názov sa prepíšu na prázdne (názov „Vymazaný rozhovor").
+  Priečinok `sessions/<id>` sa pod zámkom presunie do `trash/` jedným krokom (`os.rename`, ten istý disk);
+  zlyhá presun → 500 a rozhovor ostane celý; zlyhá zápis do databázy → priečinok sa vráti. Súbory z koša sa
+  mažú až po zápise, mimo zámku; čo nejde (kontajner z minulého behu ešte píše), dozmaže štart backendu
+  (`sandbox.sweep_trash`). Vymazaný rozhovor je pre rozhranie 404 všade (zoznam, detail, otázka,
+  premenovanie, voľba verzie, nová verzia, WebSocket); otvorené karty dostanú udalosť `deleted`. Otázka aj
+  vymazanie zamknú riadok rozhovoru (`SELECT … FOR UPDATE`), takže sa neprekrížia; premenovanie a voľba
+  verzie zapisujú len s podmienkou `deleted_at IS NULL`. Počas bežiacej odpovede je vymazanie 409.
+  Premenovanie `PUT /conversations/{id}/title`; znak NUL v názve či otázke je 422.
+- Kontajner otázky nesie značku `build_db.OWNER_LABEL` — keď prežije reštart backendu, odprace ho pri štarte
+  `reap_orphans` spolu s jeho sieťou (nález previerky v4.42.0; predtým bežal ďalej a písal do záznamu).
+- Vymazaný text ešte ostáva v zálohách databázy kokpitu, kým sa neobmenia (zmerané 05.10.2026:
+  `/opt/infra/platform/scripts/backup-server.sh` robí denný `pg_dump` databázy kokpitu, restic drží 7 denných,
+  4 týždenné a 6 mesačných), a v starých verziách riadkov, kým ich Postgres neupratá. Priečinok
+  `/opt/data/nex-studio-visual/poradca` záloha servera nezahŕňa — záznam na disku po vymazaní nie je nikde.
 - Charta `templates/poradca-charter.md`: len číta a radí; tvrdenie dokladá tým, čo prečítal; odporúča len
   tlačidlá z nástroja `stavba`; zmenu aplikácie smeruje do novej verzie.
 - „Založiť novú verziu" dnes číta požiadavku zo správy stavby (`change_request.py:61-86`) — dostane druhý

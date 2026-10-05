@@ -226,3 +226,43 @@ def test_a_hard_linked_file_with_a_comma_is_refused_too(tmp_path):
 def test_run_argv_itself_refuses_an_unsafe_overlay(project):
     with pytest.raises(sandbox.PoradcaUnavailable):
         _argv(overlays=[".env,source=/etc"])
+
+
+def test_a_container_that_outlives_the_backend_is_swept_at_startup(project):
+    # ``build_db.reap_orphans`` hľadá ``label=<OWNER_LABEL>`` — kontajner Poradcu musí niesť presne ten kľúč.
+    from backend.services import build_db
+
+    argv = _argv()
+    labels = [argv[i + 1] for i, a in enumerate(argv) if a == "--label"]
+    assert [lbl.split("=", 1)[0] for lbl in labels] == [build_db.OWNER_LABEL]
+
+
+def test_trash_moves_the_whole_record_in_one_step_and_can_put_it_back(project):
+    cid = uuid4()
+    assert sandbox.move_to_trash(cid) is None  # rozhovor bez záznamu
+    record = sandbox.session_dir(cid)
+    (record / "sub").mkdir(parents=True)
+    (record / "sub" / "a.jsonl").write_text("x")
+    trashed = sandbox.move_to_trash(cid)
+    assert trashed is not None and not record.exists() and (trashed / "sub" / "a.jsonl").exists()
+    sandbox.restore_from_trash(trashed, cid)
+    assert (record / "sub" / "a.jsonl").read_text() == "x" and not trashed.exists()
+
+
+def test_what_discard_cannot_remove_the_startup_sweep_does(project, monkeypatch):
+    cid = uuid4()
+    sandbox.session_dir(cid).mkdir(parents=True)
+    trashed = sandbox.move_to_trash(cid)
+    # Len vlastná náhrada v ``context()`` — ``monkeypatch.undo()`` by vrátil aj presmerovanie dátového
+    # priečinka z prípravku a ``sweep_trash`` by siahol na kôš živého kokpitu.
+    with monkeypatch.context() as m:
+        m.setattr(sandbox.shutil, "rmtree", lambda *a, **k: None)  # napr. kontajner ešte píše
+        sandbox.discard(trashed)
+    assert trashed.exists()
+    assert sandbox.trash_dir() == trashed.parent  # stále dočasný priečinok, nie živý
+    assert sandbox.sweep_trash() == 1
+    assert not trashed.exists()
+
+
+def test_sweep_without_a_trash_does_nothing(project):
+    assert sandbox.sweep_trash() == 0

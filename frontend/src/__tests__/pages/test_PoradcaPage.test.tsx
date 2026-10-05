@@ -15,6 +15,8 @@ const api = vi.hoisted(() => ({
   getPoradcaConversationApi: vi.fn(),
   askPoradcaApi: vi.fn(),
   setPoradcaScopeApi: vi.fn(),
+  renamePoradcaConversationApi: vi.fn(),
+  deletePoradcaConversationApi: vi.fn(),
   stopPoradcaApi: vi.fn(),
   newVersionFromPoradcaApi: vi.fn(),
   buildPoradcaWsUrl: vi.fn(() => "ws://test/ws"),
@@ -191,5 +193,130 @@ describe("PoradcaPage", () => {
     renderPage("/poradca");
     expect(await screen.findByText("Poradca teraz nevie bežať: chýba obraz")).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/Opýtaj sa Poradcu/)).toBeDisabled();
+  });
+
+  // Premenovanie a vymazanie (Director 05.10.2026: „chýba mi premenovanie rozhovoru a vymazanie rozhovoru").
+
+  it("renames in place: Enter saves one clean line and the list shows it", async () => {
+    api.getPoradcaConversationApi.mockResolvedValue(conversation("v13", []));
+    let finish: (v: unknown) => void = () => {};
+    api.renamePoradcaConversationApi.mockReturnValue(new Promise((r) => (finish = r)));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Premenovať rozhovor" }));
+    const input = screen.getByLabelText("Názov rozhovoru") as HTMLInputElement;
+    expect(input.value).toBe("Prečo agent stojí?");
+    fireEvent.change(input, { target: { value: "  Nový \n  názov " } });
+    fireEvent.submit(input.closest("form") as HTMLFormElement);
+    // Kým sa ukladá, pole zašedne a prehliadač z neho odíde — to je druhá cesta k uloženiu; uloží sa raz.
+    fireEvent.blur(input);
+    finish({ ...conversation("v13", []), title: "Nový názov" });
+    expect(await screen.findByText("Nový názov")).toBeInTheDocument();
+    expect(api.renamePoradcaConversationApi).toHaveBeenCalledTimes(1);
+    expect(api.renamePoradcaConversationApi).toHaveBeenCalledWith("c1", "Nový názov");
+    expect(screen.queryByLabelText("Názov rozhovoru")).not.toBeInTheDocument();
+  });
+
+  it("Esc cancels the rename and nothing is saved", async () => {
+    api.getPoradcaConversationApi.mockResolvedValue(conversation("v13", []));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Premenovať rozhovor" }));
+    const input = screen.getByLabelText("Názov rozhovoru");
+    fireEvent.change(input, { target: { value: "Iný" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByLabelText("Názov rozhovoru")).not.toBeInTheDocument();
+    expect(screen.getByText("Prečo agent stojí?")).toBeInTheDocument();
+    expect(api.renamePoradcaConversationApi).not.toHaveBeenCalled();
+  });
+
+  it("leaving the field saves; a failed save keeps the typed title open and says why", async () => {
+    api.getPoradcaConversationApi.mockResolvedValue(conversation("v13", []));
+    api.renamePoradcaConversationApi.mockRejectedValue(new Error("network"));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Premenovať rozhovor" }));
+    const input = screen.getByLabelText("Názov rozhovoru") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "Rozpísaný názov" } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(api.renamePoradcaConversationApi).toHaveBeenCalledWith("c1", "Rozpísaný názov"));
+    expect(await screen.findByText(/Premenovanie zlyhalo/)).toBeInTheDocument();
+    expect((screen.getByLabelText("Názov rozhovoru") as HTMLInputElement).value).toBe("Rozpísaný názov");
+    // Druhý pokus prejde.
+    api.renamePoradcaConversationApi.mockResolvedValue({ ...conversation("v13", []), title: "Rozpísaný názov" });
+    fireEvent.submit(screen.getByLabelText("Názov rozhovoru").closest("form") as HTMLFormElement);
+    await waitFor(() => expect(screen.queryByLabelText("Názov rozhovoru")).not.toBeInTheDocument());
+    expect(api.renamePoradcaConversationApi).toHaveBeenCalledTimes(2);
+  });
+
+  it("delete asks first, says the text is gone for good and the cost stays, then removes it", async () => {
+    api.getPoradcaConversationApi.mockResolvedValue(conversation("v13", []));
+    api.deletePoradcaConversationApi.mockResolvedValue(undefined);
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Vymazať rozhovor" }));
+    expect(api.deletePoradcaConversationApi).not.toHaveBeenCalled();
+    expect(screen.getByText("Vymazať „Prečo agent stojí?“ natrvalo?")).toBeInTheDocument();
+    expect(screen.getByText("Text sa nedá obnoviť; cena ostane v Nákladoch.")).toBeInTheDocument();
+    api.listPoradcaConversationsApi.mockResolvedValue([]);
+    fireEvent.click(screen.getByRole("button", { name: "Vymazať" }));
+    await waitFor(() => expect(api.deletePoradcaConversationApi).toHaveBeenCalledWith("c1"));
+    // Bol otvorený → stránka sa vráti na nový rozhovor; v zozname už nie je.
+    expect(await screen.findByText(/Opýtaj sa na čokoľvek k projektu/)).toBeInTheDocument();
+    expect(screen.queryByText("Prečo agent stojí?")).not.toBeInTheDocument();
+  });
+
+  it("Ponechať keeps the conversation and calls nothing", async () => {
+    api.getPoradcaConversationApi.mockResolvedValue(conversation("v13", []));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Vymazať rozhovor" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ponechať" }));
+    expect(screen.getByText("Prečo agent stojí?")).toBeInTheDocument();
+    expect(api.deletePoradcaConversationApi).not.toHaveBeenCalled();
+  });
+
+  it("while Poradca answers the bin is greyed out with the way forward", async () => {
+    api.listPoradcaConversationsApi.mockResolvedValue([{ ...conversation("v13", []), running: true }]);
+    renderPage("/poradca");
+    const bin = await screen.findByRole("button", { name: "Vymazať rozhovor" });
+    await waitFor(() => expect(bin).toBeDisabled());
+    expect(bin).toHaveAttribute(
+      "title",
+      "Kým Poradca odpovedá, rozhovor sa nedá vymazať — najprv odpoveď zastav.",
+    );
+    // Premenovať sa dá aj počas odpovede.
+    expect(screen.getByRole("button", { name: "Premenovať rozhovor" })).toBeEnabled();
+  });
+
+  it("an answer that finished while I was elsewhere frees the bin when I open the conversation", async () => {
+    // Zoznam ešte hovorí „beží" (odpoveď dobehla, kým som bol v inom rozhovore); otvorený rozhovor vie lepšie.
+    api.listPoradcaConversationsApi.mockResolvedValue([{ ...conversation("v13", []), running: true }]);
+    api.getPoradcaConversationApi.mockResolvedValue(conversation("v13", [ANSWER_WITH_INSTRUCTION]));
+    renderPage();
+    expect(await screen.findByText("trvalo 1 min 20 s")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Vymazať rozhovor" })).toBeEnabled());
+    expect(screen.queryByTitle("Poradca odpovedá")).not.toBeInTheDocument();
+  });
+
+  it("a later success clears an old failure note", async () => {
+    api.getPoradcaConversationApi.mockResolvedValue(conversation("v13", []));
+    api.deletePoradcaConversationApi.mockRejectedValueOnce(new Error("network"));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Vymazať rozhovor" }));
+    fireEvent.click(screen.getByRole("button", { name: "Vymazať" }));
+    expect(await screen.findByText(/Vymazanie zlyhalo/)).toBeInTheDocument();
+    api.renamePoradcaConversationApi.mockResolvedValue({ ...conversation("v13", []), title: "Nový" });
+    fireEvent.click(screen.getByRole("button", { name: "Premenovať rozhovor" }));
+    const input = screen.getByLabelText("Názov rozhovoru");
+    fireEvent.change(input, { target: { value: "Nový" } });
+    fireEvent.submit(input.closest("form") as HTMLFormElement);
+    await waitFor(() => expect(screen.queryByText(/Vymazanie zlyhalo/)).not.toBeInTheDocument());
+  });
+
+  it("the open conversation's live answer greys the bin too, even before the list catches up", async () => {
+    api.getPoradcaConversationApi.mockResolvedValue(
+      conversation("v13", [
+        { ...ANSWER_WITH_INSTRUCTION, status: "running", content: "", instruction: null, model: null, cost: null },
+      ]),
+    );
+    renderPage();
+    await screen.findByText("Rozoberám kroky agenta stavby — posledných 80 krokov");
+    expect(screen.getByRole("button", { name: "Vymazať rozhovor" })).toBeDisabled();
   });
 });

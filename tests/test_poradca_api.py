@@ -8,6 +8,8 @@ skutočný beh skúša ``test_poradca_runner``.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -17,12 +19,13 @@ from fastapi.testclient import TestClient
 from backend.api.routes import poradca as poradca_routes
 from backend.core.security import get_current_user
 from backend.db.models.foundation import User
-from backend.db.models.poradca import PoradcaMessage
+from backend.db.models.poradca import PoradcaConversation, PoradcaMessage
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.db.session import get_db
 from backend.schemas.poradca import PoradcaStatus
-from backend.services.poradca import runner
+from backend.services import metrics
+from backend.services.poradca import runner, sandbox
 
 
 def _user(db: Any, username: str | None = None) -> User:
@@ -306,3 +309,199 @@ def test_context_lists_versions_with_build_state_and_where_an_instruction_can_go
         _client(db_session, _user(db_session)).get(f"/api/v1/poradca/projects/{project.slug}/context").status_code
         == 403
     )
+
+
+# ── premenovanie a vymazanie (Director 05.10.2026: „chýba mi premenovanie a vymazanie rozhovoru") ──
+
+_LONG_AGO = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+
+def _start(c: TestClient, project: Project, question: str = "Prečo agent stojí?") -> str:
+    r = c.post(f"/api/v1/poradca/projects/{project.slug}/conversations", json={"question": question})
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+def _age(db: Any, cid: str) -> None:
+    """Posledná otázka „dávno" — v jednej transakcii skúšky dá ``now()`` stále ten istý čas, takže bez toho
+    by posun ``updated_at`` úpravou nebolo vidieť."""
+    db.query(PoradcaConversation).filter(PoradcaConversation.id == uuid.UUID(cid)).update({"updated_at": _LONG_AGO})
+    db.commit()
+
+
+def _updated_at(db: Any, cid: str) -> datetime:
+    db.expire_all()
+    return db.get(PoradcaConversation, uuid.UUID(cid)).updated_at
+
+
+def test_rename_changes_the_title_and_the_conversation_keeps_its_place(db_session):
+    owner = _user(db_session)
+    project = _project(db_session, owner)
+    c = _client(db_session, owner)
+    older, newer = _start(c, project, "Prvá"), _start(c, project, "Druhá")
+    _age(db_session, older)
+
+    r = c.put(f"/api/v1/poradca/conversations/{older}/title", json={"title": "  Prečo   padá\n zostavenie  "})
+    assert r.status_code == 200, r.text
+    assert r.json()["title"] == "Prečo padá zostavenie"
+    # Poradie určuje posledná otázka, nie úprava názvu.
+    assert _updated_at(db_session, older) == _LONG_AGO
+    listed = c.get(f"/api/v1/poradca/projects/{project.slug}/conversations").json()
+    assert [x["id"] for x in listed] == [newer, older]
+    assert listed[1]["title"] == "Prečo padá zostavenie"
+
+
+def test_scope_change_does_not_move_the_conversation_either(db_session):
+    owner = _user(db_session)
+    project = _project(db_session, owner)
+    c = _client(db_session, owner)
+    cid = _start(c, project)
+    _age(db_session, cid)
+    assert c.patch(f"/api/v1/poradca/conversations/{cid}", json={"version_id": None}).status_code == 200
+    assert _updated_at(db_session, cid) == _LONG_AGO
+
+
+@pytest.mark.parametrize("title", ["", "   \n  ", "x" * 201])
+def test_empty_or_too_long_title_is_refused(db_session, title):
+    owner = _user(db_session)
+    project = _project(db_session, owner)
+    c = _client(db_session, owner)
+    cid = _start(c, project)
+    assert c.put(f"/api/v1/poradca/conversations/{cid}/title", json={"title": title}).status_code == 422
+
+
+def test_only_the_author_or_admin_renames_or_deletes(db_session):
+    owner = _user(db_session)
+    project = _project(db_session, owner)
+    cid = _start(_client(db_session, owner), project)
+    stranger = _client(db_session, _user(db_session))
+    assert stranger.put(f"/api/v1/poradca/conversations/{cid}/title", json={"title": "cudzí"}).status_code == 404
+    assert stranger.delete(f"/api/v1/poradca/conversations/{cid}").status_code == 404
+    admin = db_session.query(User).filter(User.username == "admin").first() or _user(db_session, "admin")
+    r = _client(db_session, admin).put(f"/api/v1/poradca/conversations/{cid}/title", json={"title": "Admin"})
+    assert r.status_code == 200 and r.json()["title"] == "Admin"
+
+
+def test_delete_wipes_what_was_said_and_its_disk_record_but_keeps_the_cost(db_session, tmp_path, monkeypatch):
+    monkeypatch.setattr(sandbox.settings, "poradca_data_dir", str(tmp_path))
+    owner = _user(db_session)
+    project = _project(db_session, owner)
+    c = _client(db_session, owner)
+    cid = _start(c, project, "Aké heslo má databáza?")
+    kept = _start(c, project, "Iný rozhovor")
+    record = sandbox.session_dir(uuid.UUID(cid))
+    (record / "subagents").mkdir(parents=True)
+    (record / "subagents" / "x.jsonl").write_text('{"tool_result": "obsah súboru"}')
+    answer = (
+        db_session.query(PoradcaMessage)
+        .filter(PoradcaMessage.conversation_id == uuid.UUID(cid), PoradcaMessage.author == "poradca")
+        .one()
+    )
+    answer.steps = [{"tool": "Read", "target": "backend/x.py"}]
+    answer.error = "chyba s textom"
+    db_session.commit()
+    before = metrics.compute_project_metrics(db_session, project)
+
+    assert c.delete(f"/api/v1/poradca/conversations/{cid}").status_code == 204
+
+    # Pre rozhranie rozhovor neexistuje — nikde.
+    assert c.get(f"/api/v1/poradca/conversations/{cid}").status_code == 404
+    assert [x["id"] for x in c.get(f"/api/v1/poradca/projects/{project.slug}/conversations").json()] == [kept]
+    assert c.post(f"/api/v1/poradca/conversations/{cid}/messages", json={"question": "y"}).status_code == 404
+    assert c.put(f"/api/v1/poradca/conversations/{cid}/title", json={"title": "z"}).status_code == 404
+    assert c.patch(f"/api/v1/poradca/conversations/{cid}", json={"version_id": None}).status_code == 404
+    assert c.delete(f"/api/v1/poradca/conversations/{cid}").status_code == 404
+    assert c.post(f"/api/v1/poradca/messages/{answer.id}/new-version").status_code == 404
+    # Text, kroky, chyba, názov aj záznam na disku sú preč (aj z koša)…
+    assert not record.exists()
+    assert not any(sandbox.trash_dir().iterdir())
+    db_session.expire_all()
+    conversation = db_session.get(PoradcaConversation, uuid.UUID(cid))
+    assert conversation.deleted_at is not None and conversation.title == runner.DELETED_TITLE
+    messages = db_session.query(PoradcaMessage).filter(PoradcaMessage.conversation_id == uuid.UUID(cid)).all()
+    assert len(messages) == 2
+    assert all(m.content == "" and m.steps == [] and m.error is None for m in messages)
+    # …cena ostala: Náklady projektu ukazujú to isté ako pred vymazaním.
+    after = metrics.compute_project_metrics(db_session, project)
+    row = lambda result: next(r for r in result.rows if r.kind == "poradca")  # noqa: E731
+    assert (row(after).input_tokens, row(after).output_tokens, row(after).turns) == (
+        row(before).input_tokens,
+        row(before).output_tokens,
+        row(before).turns,
+    )
+    assert row(after).input_tokens == 2000  # obe odpovede atrapy po 1000
+
+
+def test_delete_while_the_answer_runs_is_409_and_changes_nothing(db_session, tmp_path, monkeypatch):
+    monkeypatch.setattr(sandbox.settings, "poradca_data_dir", str(tmp_path))
+    owner = _user(db_session)
+    project = _project(db_session, owner)
+    c = _client(db_session, owner)
+    cid = _start(c, project)
+    record = sandbox.session_dir(uuid.UUID(cid))
+    record.mkdir(parents=True)
+    db_session.add(PoradcaMessage(conversation_id=uuid.UUID(cid), author="poradca", content="", status="running"))
+    db_session.commit()
+
+    r = c.delete(f"/api/v1/poradca/conversations/{cid}")
+    assert r.status_code == 409 and "zastav" in r.json()["detail"]
+    assert record.exists()
+    body = c.get(f"/api/v1/poradca/conversations/{cid}").json()
+    assert body["messages"][0]["content"] == "Prečo agent stojí?"
+
+
+def test_disk_record_that_cannot_be_moved_leaves_the_conversation_whole(db_session, tmp_path, monkeypatch):
+    monkeypatch.setattr(sandbox.settings, "poradca_data_dir", str(tmp_path))
+    owner = _user(db_session)
+    project = _project(db_session, owner)
+    c = _client(db_session, owner)
+    cid = _start(c, project)
+    sandbox.session_dir(uuid.UUID(cid)).mkdir(parents=True)
+
+    def _denied(conversation_id: uuid.UUID) -> Path:
+        raise PermissionError(13, "Permission denied", str(conversation_id))
+
+    monkeypatch.setattr(sandbox, "move_to_trash", _denied)
+    r = c.delete(f"/api/v1/poradca/conversations/{cid}")
+    assert r.status_code == 500 and "ostal celý" in r.json()["detail"]
+    body = c.get(f"/api/v1/poradca/conversations/{cid}").json()
+    assert body["title"] == "Prečo agent stojí?" and body["messages"][1]["content"] == "Odpoveď."
+    assert sandbox.session_dir(uuid.UUID(cid)).is_dir()
+
+
+def test_rename_or_scope_that_loses_the_race_with_a_delete_is_404_and_writes_nothing(db_session, monkeypatch):
+    owner = _user(db_session)
+    project = _project(db_session, owner)
+    c = _client(db_session, owner)
+    cid = _start(c, project)
+
+    def _gone(*a, **k):
+        raise runner.ConversationGone("Rozhovor bol vymazaný.")
+
+    monkeypatch.setattr(runner, "edit_conversation", _gone)
+    assert c.put(f"/api/v1/poradca/conversations/{cid}/title", json={"title": "x"}).status_code == 404
+    assert c.patch(f"/api/v1/poradca/conversations/{cid}", json={"version_id": None}).status_code == 404
+
+
+def test_question_that_loses_the_race_with_a_delete_is_404(db_session, monkeypatch):
+    owner = _user(db_session)
+    project = _project(db_session, owner)
+    c = _client(db_session, owner)
+    cid = _start(c, project)
+
+    def _gone(*a, **k):
+        raise runner.ConversationGone("Rozhovor bol vymazaný.")
+
+    monkeypatch.setattr(runner, "ask", _gone)
+    assert c.post(f"/api/v1/poradca/conversations/{cid}/messages", json={"question": "y"}).status_code == 404
+
+
+def test_nul_in_a_title_or_question_is_a_sentence_not_a_server_error(db_session):
+    owner = _user(db_session)
+    project = _project(db_session, owner)
+    c = _client(db_session, owner)
+    cid = _start(c, project)
+    assert c.put(f"/api/v1/poradca/conversations/{cid}/title", json={"title": "a\x00b"}).status_code == 422
+    assert c.post(f"/api/v1/poradca/conversations/{cid}/messages", json={"question": "a\x00b"}).status_code == 422
+    r = c.post(f"/api/v1/poradca/projects/{project.slug}/conversations", json={"question": "a\x00b"})
+    assert r.status_code == 422

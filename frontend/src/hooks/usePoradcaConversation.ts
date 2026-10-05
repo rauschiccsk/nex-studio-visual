@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useAuthStore } from "@/store/authStore";
 import { buildPoradcaWsUrl, getPoradcaConversationApi } from "@/services/api/poradca";
+import { ApiError } from "@/services/api";
 import { humanizeApiError } from "@/services/apiError";
 import type { PoradcaConversationDetail, PoradcaEvent } from "@/types/poradca";
 
@@ -37,7 +38,10 @@ export function usePoradcaConversation(conversationId: string | null): UsePoradc
         setError(null);
       }
     } catch (e: unknown) {
-      if (current.current === conversationId) setError(humanizeApiError(e, "Rozhovor sa nepodarilo načítať").message);
+      if (current.current !== conversationId) return;
+      // Vymazaný alebo cudzí rozhovor: starý text na obrazovke nenechávame.
+      if (e instanceof ApiError && e.status === 404) setDetail(null);
+      setError(humanizeApiError(e, "Rozhovor sa nepodarilo načítať").message);
     }
   }, [conversationId]);
 
@@ -75,7 +79,8 @@ export function usePoradcaConversation(conversationId: string | null): UsePoradc
                 }
               : d,
           );
-        } else if (evt.type === "finished") {
+        } else if (evt.type === "finished" || evt.type === "deleted") {
+          // Vymazaný (napr. v inej karte): načítanie vráti „Rozhovor sa nenašiel." namiesto starého textu.
           void reload();
         }
       };

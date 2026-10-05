@@ -18,4 +18,5 @@ export type PoradcaNewVersion = S["PoradcaNewVersion"];
 export type PoradcaEvent =
   | { type: "step"; message_id: string; tool: string; target: string }
   | { type: "queued"; message_id: string; limit: number }
-  | { type: "finished"; message_id: string; status: string };
+  | { type: "finished"; message_id: string; status: string }
+  | { type: "deleted" };

@@ -400,7 +400,10 @@ def _poradca_rows(
 
     Nameraná spotreba, ale mimo fáz stavby a bez ľudského ekvivalentu: Poradca nerobí prácu, ktorú by
     inak robil programátor, odpovedá na otázky. Rozsah: ``version_id`` → odpovede na otázky k tej verzii
-    (verzia v čase otázky, nie súčasná voľba rozhovoru); ``None`` → všetky odpovede projektu."""
+    (verzia v čase otázky, nie súčasná voľba rozhovoru); ``None`` → všetky odpovede projektu.
+
+    Vymazané rozhovory sa rátajú ZÁMERNE: vymazanie zahodí text, nie peniaze, ktoré odpovede stáli
+    (``runner.delete_conversation`` spotrebu ponechá práve kvôli tomuto súčtu)."""
     stmt = (
         select(PoradcaMessage)
         .join(PoradcaConversation, PoradcaConversation.id == PoradcaMessage.conversation_id)

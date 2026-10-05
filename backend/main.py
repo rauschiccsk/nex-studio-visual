@@ -45,6 +45,7 @@ from backend.services import kb_index_sync as kb_index_sync_service
 from backend.services import orchestrator as orchestrator_service
 from backend.services.poradca import readiness as poradca_readiness
 from backend.services.poradca import runner as poradca_runner
+from backend.services.poradca import sandbox as poradca_sandbox
 
 # Route application loggers at INFO to stderr so ``docker logs`` surfaces
 # request-level diagnostics (SSE state, Claude subprocess events, spec
@@ -83,6 +84,15 @@ async def _reap_build_orphans() -> None:
     wearing the label belongs to a LIVE build on the same host (incident 03.10.2026, ICCINT-162).
     """
     await build_db_service.reap_orphans()
+
+
+def _sweep_poradca_trash() -> int:
+    """Dozmaže záznamy vymazaných rozhovorov Poradcu, ktoré ostali v koši (ICCINT-167).
+
+    Háčik na úrovni modulu (ako :func:`_reap_build_orphans`), aby ho skúšobňa mohla vypnúť: proces skúšok
+    by inak siahol na kôš živého kokpitu na tom istom stroji.
+    """
+    return poradca_sandbox.sweep_trash()
 
 
 async def _agent_terminal_idle_loop() -> None:
@@ -228,6 +238,11 @@ async def lifespan(app: FastAPI):
         failed_poradca = poradca_runner.fail_orphans(db)
         if failed_poradca:
             logger.info("Poradca: closed %d answer(s) interrupted by the restart", failed_poradca)
+        # …a dozmaže záznamy vymazaných rozhovorov, ktoré sa pri vymazaní nedali zmazať celé (kontajner
+        # z minulého behu do nich ešte písal; ten už odpratal ``_reap_build_orphans`` vyššie).
+        swept_poradca = _sweep_poradca_trash()
+        if swept_poradca:
+            logger.info("Poradca: removed %d transcript(s) of deleted conversations left in the trash", swept_poradca)
     finally:
         db.close()
 

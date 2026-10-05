@@ -5,12 +5,15 @@
 * ``POST  /projects/{slug}/conversations``            → nový rozhovor s prvou otázkou
 * ``GET   /conversations/{id}``                       → rozhovor so správami
 * ``PATCH /conversations/{id}``                       → o čom sa rozprávame (verzia / celý projekt)
+* ``PUT   /conversations/{id}/title``                 → premenovať
+* ``DELETE /conversations/{id}``                      → vymazať (text preč, cena ostáva v Nákladoch)
 * ``POST  /conversations/{id}/messages``              → ďalšia otázka
 * ``POST  /messages/{id}/stop``                        → zastaviť odpoveď
 * ``WS    /conversations/{id}/ws?token``               → živý priebeh (kroky, stav)
 
 Prístup: k projektu jeho vlastník alebo účet admin (ako všade v kokpite); k rozhovoru jeho autor alebo
-admin. Iný človek dostane 404 — o cudzom rozhovore sa nemá dozvedieť ani to, že existuje.
+admin. Iný človek dostane 404 — o cudzom rozhovore sa nemá dozvedieť ani to, že existuje. Vymazaný
+rozhovor je 404 pre každého; jeho riadok ostal len kvôli Nákladom.
 """
 
 from __future__ import annotations
@@ -19,7 +22,7 @@ import asyncio
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, WebSocket, WebSocketDisconnect, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -39,6 +42,7 @@ from backend.schemas.poradca import (
     PoradcaMessageRead,
     PoradcaNewVersion,
     PoradcaProjectContext,
+    PoradcaRename,
     PoradcaScopeUpdate,
     PoradcaStatus,
     PoradcaVersionInfo,
@@ -72,7 +76,11 @@ def _check_version(db: Session, project: Project, version_id: Optional[uuid.UUID
 
 def _conversation_for(db: Session, user: User, conversation_id: uuid.UUID) -> tuple[PoradcaConversation, Project]:
     conversation = db.get(PoradcaConversation, conversation_id)
-    if conversation is None or not (conversation.author_id == user.id or authz.is_admin(user)):
+    if (
+        conversation is None
+        or conversation.deleted_at is not None
+        or not (conversation.author_id == user.id or authz.is_admin(user))
+    ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Rozhovor sa nenašiel.")
     project = authz.assert_project_id_access(db, user, conversation.project_id)
     return conversation, project
@@ -156,6 +164,15 @@ def _ask(db: Session, conversation: PoradcaConversation, question: str, user: Us
         runner.ask(db, conversation, question, user)
     except runner.PoradcaBusy as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except runner.ConversationGone as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Rozhovor sa nenašiel.") from exc
+
+
+def _edit(db: Session, conversation: PoradcaConversation, **values: object) -> None:
+    try:
+        runner.edit_conversation(db, conversation, **values)
+    except runner.ConversationGone as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Rozhovor sa nenašiel.") from exc
 
 
 @router.get("/status", response_model=PoradcaStatus)
@@ -210,7 +227,9 @@ def list_conversations(
 ) -> list[PoradcaConversationRead]:
     """Moje rozhovory k projektu, najnovší prvý. Admin vidí rozhovory všetkých."""
     project = authz.assert_project_slug_access(db, current_user, slug)
-    query = select(PoradcaConversation).where(PoradcaConversation.project_id == project.id)
+    query = select(PoradcaConversation).where(
+        PoradcaConversation.project_id == project.id, PoradcaConversation.deleted_at.is_(None)
+    )
     if not authz.is_admin(current_user):
         query = query.where(PoradcaConversation.author_id == current_user.id)
     rows = db.execute(query.order_by(PoradcaConversation.updated_at.desc())).scalars().all()
@@ -253,9 +272,44 @@ def update_scope(
 ) -> PoradcaConversationRead:
     conversation, project = _conversation_for(db, current_user, conversation_id)
     _check_version(db, project, payload.version_id)
-    conversation.version_id = payload.version_id
-    db.commit()
+    _edit(db, conversation, version_id=payload.version_id)
     return _conversation_read(db, conversation)
+
+
+@router.put("/conversations/{conversation_id}/title", response_model=PoradcaConversationRead)
+def rename_conversation(
+    conversation_id: uuid.UUID,
+    payload: PoradcaRename,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PoradcaConversationRead:
+    """Premenovať rozhovor. Poradie v zozname sa nemení — určuje ho posledná otázka."""
+    conversation, _project = _conversation_for(db, current_user, conversation_id)
+    _edit(db, conversation, title=payload.title)
+    return _conversation_read(db, conversation)
+
+
+@router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
+async def delete_conversation(
+    conversation_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+) -> Response:
+    """Vymazať rozhovor: otázky, odpovede, kroky aj záznam na disku sú preč natrvalo; cena ostáva v Nákladoch.
+
+    Kým Poradca odpovedá, 409 — najprv treba odpoveď zastaviť.
+    """
+    conversation, _project = _conversation_for(db, current_user, conversation_id)
+    try:
+        await runner.delete_conversation(db, conversation)
+    except runner.PoradcaBusy as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except runner.ConversationGone as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Rozhovor sa nenašiel.") from exc
+    except OSError as exc:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Záznam rozhovoru na disku sa nepodarilo vymazať; rozhovor ostal celý. Skús to znova.",
+        ) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/conversations/{conversation_id}/messages", response_model=PoradcaConversationDetail)

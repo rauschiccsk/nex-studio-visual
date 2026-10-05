@@ -1354,7 +1354,13 @@ export interface paths {
         get: operations["get_conversation_api_v1_poradca_conversations__conversation_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Conversation
+         * @description Vymazať rozhovor: otázky, odpovede, kroky aj záznam na disku sú preč natrvalo; cena ostáva v Nákladoch.
+         *
+         *     Kým Poradca odpovedá, 409 — najprv treba odpoveď zastaviť.
+         */
+        delete: operations["delete_conversation_api_v1_poradca_conversations__conversation_id__delete"];
         options?: never;
         head?: never;
         /** Update Scope */
@@ -1372,6 +1378,26 @@ export interface paths {
         put?: never;
         /** Ask */
         post: operations["ask_api_v1_poradca_conversations__conversation_id__messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/poradca/conversations/{conversation_id}/title": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Rename Conversation
+         * @description Premenovať rozhovor. Poradie v zozname sa nemení — určuje ho posledná otázka.
+         */
+        put: operations["rename_conversation_api_v1_poradca_conversations__conversation_id__title_put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5400,6 +5426,14 @@ export interface components {
             versions?: components["schemas"]["PoradcaVersionInfo"][];
         };
         /**
+         * PoradcaRename
+         * @description Nový názov rozhovoru — jeden riadok; medzery a zalomenia sa zlejú do jednej medzery.
+         */
+        PoradcaRename: {
+            /** Title */
+            title: string;
+        };
+        /**
          * PoradcaScopeUpdate
          * @description Zmena „o čom sa rozprávame". ``version_id = None`` = celý projekt (pole je povinné, aby
          *     vynechanie neznamenalo nechcenú zmenu).
@@ -9274,6 +9308,35 @@ export interface operations {
             };
         };
     };
+    delete_conversation_api_v1_poradca_conversations__conversation_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     update_scope_api_v1_poradca_conversations__conversation_id__patch: {
         parameters: {
             query?: never;
@@ -9331,6 +9394,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PoradcaConversationDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_conversation_api_v1_poradca_conversations__conversation_id__title_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PoradcaRename"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoradcaConversationRead"];
                 };
             };
             /** @description Validation Error */

@@ -14,6 +14,7 @@ import { Loader2, MessageSquarePlus, Send } from "lucide-react";
 
 import ErrorNote from "@/components/common/ErrorNote";
 import PoradcaAnswer from "@/components/poradca/PoradcaAnswer";
+import PoradcaConversationItem from "@/components/poradca/PoradcaConversationItem";
 import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { usePoradcaConversation } from "@/hooks/usePoradcaConversation";
 import { useActiveContextStore } from "@/store/activeContextStore";
@@ -21,14 +22,15 @@ import { useAuthStore } from "@/store/authStore";
 import {
   askPoradcaApi,
   createPoradcaConversationApi,
+  deletePoradcaConversationApi,
   getPoradcaContextApi,
   getPoradcaStatusApi,
   listPoradcaConversationsApi,
+  renamePoradcaConversationApi,
   setPoradcaScopeApi,
 } from "@/services/api/poradca";
 import { ApiError } from "@/services/api";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
-import { formatDate } from "@/utils/format";
 import { versionOptionLabel } from "@/lib/poradcaAnswer";
 import type { PoradcaConversation, PoradcaProjectContext, PoradcaStatus } from "@/types/poradca";
 
@@ -83,6 +85,18 @@ export default function PoradcaPage() {
     if (wasRunning.current && !running) void refreshList();
     wasRunning.current = running;
   }, [running, refreshList]);
+
+  // Otvorený rozhovor pozná svoj stav presnejšie než zoznam: odpoveď mohla dobehnúť, kým bol človek
+  // v inom rozhovore (zoznam by ho držal ako bežiaci a kôš zašednutý bez dôvodu), alebo práve začala.
+  // Zoznam je potom jediný zdroj „beží" pre bodku aj kôš.
+  useEffect(() => {
+    if (!detail) return;
+    setConversations((list) =>
+      list.some((c) => c.id === detail.id && c.running !== running)
+        ? list.map((c) => (c.id === detail.id ? { ...c, running } : c))
+        : list,
+    );
+  }, [detail, running]);
 
   // Predvolená verzia nového rozhovoru: z adresy, inak pripnutá verzia, inak celý projekt.
   const defaultScope = useMemo(() => {
@@ -146,6 +160,32 @@ export default function PoradcaPage() {
     }
   }
 
+  async function renameConversation(id: string, title: string): Promise<boolean> {
+    try {
+      const updated = await renamePoradcaConversationApi(id, title);
+      setConversations((list) => list.map((c) => (c.id === id ? updated : c)));
+      setLoadError(null);
+      return true;
+    } catch (e: unknown) {
+      setLoadError(humanizeApiError(e, "Premenovanie zlyhalo"));
+      return false;
+    }
+  }
+
+  async function deleteConversation(id: string): Promise<boolean> {
+    try {
+      await deletePoradcaConversationApi(id);
+      setConversations((list) => list.filter((c) => c.id !== id));
+      setLoadError(null);
+      if (id === conversationId) select(null);
+      void refreshList();
+      return true;
+    } catch (e: unknown) {
+      setLoadError(humanizeApiError(e, "Vymazanie zlyhalo"));
+      return false;
+    }
+  }
+
   const notReady = status && !status.ready ? (status.problems ?? []).join("; ") : null;
 
   return (
@@ -169,28 +209,16 @@ export default function PoradcaPage() {
             </li>
           )}
           {conversations.map((c) => (
-            <li key={c.id}>
-              <button
-                type="button"
-                onClick={() => select(c.id)}
-                className={`w-full rounded-md px-2 py-1.5 text-left ${
-                  c.id === conversationId
-                    ? "bg-[var(--color-accent-primary)]/10"
-                    : "hover:bg-[var(--color-surface-hover)]"
-                }`}
-              >
-                <div className="flex items-center gap-1.5">
-                  {c.running && (
-                    <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--color-accent-primary)]" title="Poradca odpovedá" />
-                  )}
-                  <span className="truncate text-xs text-[var(--color-text-primary)]">{c.title}</span>
-                </div>
-                <div className="truncate text-[10px] text-[var(--color-text-muted)]">
-                  {c.version_number ? `verzia ${c.version_number}` : "celý projekt"} · {formatDate(c.updated_at)}
-                  {me && c.author_id !== me.id ? ` · ${c.author_name}` : ""}
-                </div>
-              </button>
-            </li>
+            <PoradcaConversationItem
+              key={c.id}
+              conversation={c}
+              active={c.id === conversationId}
+              busy={c.running}
+              authorName={me && c.author_id !== me.id ? c.author_name : null}
+              onSelect={() => select(c.id)}
+              onRename={(title) => renameConversation(c.id, title)}
+              onDelete={() => deleteConversation(c.id)}
+            />
           ))}
         </ul>
       </aside>

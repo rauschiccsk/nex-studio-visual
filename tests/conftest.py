@@ -307,11 +307,17 @@ def _guard_prod_db_isolation(test_engine):
 
     _main_module._reap_build_orphans = _no_reap
 
+    # 5. The same for the sweep of Poradca's trash (ICCINT-167): ``poradca_data_dir`` defaults to the LIVE
+    #    cockpit's directory on this host — a test process has no business emptying it.
+    _orig_sweep_poradca_trash = _main_module._sweep_poradca_trash
+    _main_module._sweep_poradca_trash = lambda: 0
+
     yield
 
     # Restore process-global state exactly as we found it.
     _main_module._run_alembic_upgrade = _orig_run_alembic_upgrade
     _main_module._reap_build_orphans = _orig_reap_build_orphans
+    _main_module._sweep_poradca_trash = _orig_sweep_poradca_trash
     db_session_module.SessionLocal.configure(bind=original_engine)
     db_session_module.engine = original_engine
 

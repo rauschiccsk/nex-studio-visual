@@ -15,9 +15,10 @@ import uuid
 from pathlib import Path
 
 import pytest
+from sqlalchemy import event
 
 from backend.db.models.foundation import User
-from backend.db.models.poradca import PoradcaMessage
+from backend.db.models.poradca import PoradcaConversation, PoradcaMessage
 from backend.db.models.projects import Project
 from backend.services import build_db, build_sandbox
 from backend.services.poradca import runner, sandbox, tools
@@ -253,3 +254,95 @@ async def test_every_step_passes_the_secret_filter_before_db_and_websocket(world
     assert FAKE_SECRET not in json.dumps(msg.steps) and "‹skryté›" in msg.steps[0]["target"]
     assert FAKE_SECRET not in json.dumps(queue.get_nowait())
     runner.hub.unsubscribe(world["conversation"].id, queue)
+
+
+async def test_a_question_into_a_deleted_conversation_never_starts(world):
+    # Otázka aj vymazanie idú cez zámok riadku rozhovoru: do vymazaného sa nič neuloží ani nespustí.
+    db = world["db"]
+    await runner.delete_conversation(db, world["conversation"])
+    with pytest.raises(runner.ConversationGone):
+        runner.ask(db, world["conversation"], "Ešte jedna", world["user"])
+    assert db.query(PoradcaMessage).filter(PoradcaMessage.conversation_id == world["conversation"].id).count() == 0
+    assert not any(e.conversation_id == world["conversation"].id for e in runner._running.values())
+
+
+async def test_delete_refuses_while_the_real_run_is_going_then_succeeds(world):
+    db = world["db"]
+    world["mode"]["value"] = "slow"
+    _human, answer = runner.ask(db, world["conversation"], "Pomaly", world["user"])
+    with pytest.raises(runner.PoradcaBusy):
+        await runner.delete_conversation(db, world["conversation"])
+    for _ in range(100):
+        entry = runner._running.get(answer.id)
+        if entry is not None and entry.process is not None and entry.steps:
+            break
+        await asyncio.sleep(0.05)
+    assert await runner.stop(answer.id) is True
+    await _finish(answer.id)
+    db.expire_all()
+    await runner.delete_conversation(db, world["conversation"])
+    assert db.get(PoradcaMessage, answer.id).content == ""
+
+
+def test_rename_after_a_delete_writes_nothing_back(world):
+    # Úprava, ktorá prešla kontrolou prístupu pred vymazaním a zápis robí až po ňom (čakala na zámok).
+    db = world["db"]
+    conversation = world["conversation"]
+    asyncio.run(runner.delete_conversation(db, conversation))
+    with pytest.raises(runner.ConversationGone):
+        runner.edit_conversation(db, conversation, title="Heslo do UAT je …")
+    db.expire_all()
+    assert db.get(PoradcaConversation, conversation.id).title == runner.DELETED_TITLE
+
+
+async def test_ask_and_delete_take_the_row_lock(world):
+    """Zámok riadku je to, čo otázku a vymazanie radí za seba; v jednej relácii skúšky ho nevidno inak než
+    v poslanom príkaze."""
+    db = world["db"]
+    statements: list[str] = []
+
+    def _seen(conn, cursor, statement, *a):
+        statements.append(statement)
+
+    engine = db.get_bind()
+    event.listen(engine, "before_cursor_execute", _seen)
+    try:
+        _human, answer = runner.ask(db, world["conversation"], "Prvá", world["user"])
+        await _finish(answer.id)
+        asked = [st for st in statements if "FOR UPDATE" in st and "poradca_conversations" in st]
+        statements.clear()
+        db.expire_all()
+        await runner.delete_conversation(db, world["conversation"])
+        deleted = [st for st in statements if "FOR UPDATE" in st and "poradca_conversations" in st]
+    finally:
+        event.remove(engine, "before_cursor_execute", _seen)
+    assert asked and deleted
+
+
+async def test_a_failed_database_write_puts_the_transcript_back(world, monkeypatch):
+    db = world["db"]
+    conversation = world["conversation"]
+    record = sandbox.session_dir(conversation.id)
+    record.mkdir(parents=True)
+    (record / "t.jsonl").write_text("{}")
+
+    def _boom():
+        raise RuntimeError("databáza spadla")
+
+    with monkeypatch.context() as m:  # nie ``undo()`` — ten by vrátil aj presmerovanie z prípravku ``world``
+        m.setattr(db, "commit", _boom)
+        with pytest.raises(RuntimeError):
+            await runner.delete_conversation(db, conversation)
+    assert (record / "t.jsonl").read_text() == "{}"
+    assert not sandbox.trash_dir().exists() or not any(sandbox.trash_dir().iterdir())
+    db.expire_all()
+    assert db.get(PoradcaConversation, conversation.id).deleted_at is None
+
+
+async def test_delete_tells_open_tabs(world):
+    queue = runner.hub.subscribe(world["conversation"].id)
+    try:
+        await runner.delete_conversation(world["db"], world["conversation"])
+        assert queue.get_nowait() == {"type": "deleted"}
+    finally:
+        runner.hub.unsubscribe(world["conversation"].id, queue)

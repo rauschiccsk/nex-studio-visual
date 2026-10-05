@@ -28,16 +28,20 @@ Keď sa kontajner nedá spustiť, otázka skončí chybou s dôvodom — **nikdy
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
+import shutil
 import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from backend.config.settings import settings
-from backend.services import build_sandbox, sandbox_paths
+from backend.services import build_db, build_sandbox, sandbox_paths
+
+logger = logging.getLogger(__name__)
 
 _LABEL = "poradca sandbox"
 
@@ -107,6 +111,50 @@ def run_dir(token: str) -> Path:
 
 def empty_file() -> Path:
     return data_dir() / "empty"
+
+
+def trash_dir() -> Path:
+    return data_dir() / "trash"
+
+
+def move_to_trash(conversation_id: UUID) -> Optional[Path]:
+    """Presunie záznam vymazaného rozhovoru do koša JEDNÝM krokom a vráti, kam; ``None``, keď záznam nie je.
+
+    ``os.rename`` v rámci jedného disku (kôš leží vedľa ``sessions/``) je nedeliteľný: záznam je buď celý
+    preč, alebo celý na mieste. Vymazanie ho robí pred zmenou databázy a pri jej zlyhaní ho vráti
+    (:func:`restore_from_trash`); samotné mazanie súborov (:func:`discard`) príde až po nej, mimo zámku.
+    """
+    source = session_dir(conversation_id)
+    if not source.exists():
+        return None
+    trash_dir().mkdir(parents=True, exist_ok=True)
+    target = trash_dir() / f"{conversation_id}-{uuid4().hex}"
+    os.rename(source, target)
+    return target
+
+
+def restore_from_trash(trashed: Path, conversation_id: UUID) -> None:
+    os.rename(trashed, session_dir(conversation_id))
+
+
+def discard(trashed: Path) -> None:
+    """Zmaže záznam z koša. Čo nejde (napr. kontajner, ktorý prežil reštart, doň ešte píše), dozmaže
+    :func:`sweep_trash` pri ďalšom štarte — rozhovor je vymazaný tak či tak."""
+    shutil.rmtree(trashed, ignore_errors=True)
+    if trashed.exists():
+        logger.warning("%s: %s sa nepodarilo celý zmazať — dozmaže ho štart backendu", _LABEL, trashed)
+
+
+def sweep_trash() -> int:
+    """Pri štarte backendu: dozmaže, čo v koši ostalo. Vráti, koľko záznamov zmizlo. Nikdy nevyhodí."""
+    base = trash_dir()
+    if not base.is_dir():
+        return 0
+    removed = 0
+    for child in base.iterdir():
+        shutil.rmtree(child, ignore_errors=True)
+        removed += 0 if child.exists() else 1
+    return removed
 
 
 def container_name(project_slug: str, token: str) -> str:
@@ -296,6 +344,10 @@ def run_argv(
         "--rm",
         "--name",
         container_name(project_slug, token),
+        # Značka stavby: kontajner, ktorý prežije reštart backendu (otázka beží ďalej, nikto ju nečíta, píše
+        # do záznamu rozhovoru), pri štarte odprace ``build_db.reap_orphans`` — rovnako ako jeho sieť.
+        "--label",
+        f"{build_db.OWNER_LABEL}=poradca",
         "--user",
         _USER,
         *(["--network", network] if network else []),
