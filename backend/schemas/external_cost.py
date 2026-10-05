@@ -21,7 +21,12 @@ class ExternalCostCreate(BaseModel):
 
     occurred_on: date = Field(..., description="Deň, kedy práca prebehla (nesmie byť v budúcnosti).")
     description: str = Field(..., min_length=1, max_length=500, description="Čo sa robilo.")
-    model: str = Field(..., min_length=1, max_length=100, description='Úplné id modelu, napr. "claude-opus-5".')
+    model: str = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        description="Model: rodina (opus, sonnet, haiku) alebo úplné meno, ktoré hlási Claude Code; cena podľa rodiny.",
+    )
     input_tokens: int = Field(default=0, ge=0, description="Spotrebované vstupné tokeny.")
     output_tokens: int = Field(default=0, ge=0, description="Spotrebované výstupné tokeny.")
     version_id: Optional[UUID] = Field(

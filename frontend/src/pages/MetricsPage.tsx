@@ -10,11 +10,13 @@ import {
   deleteExternalCost,
   type ExternalCostRead,
 } from "@/services/api/externalCost";
+import { listAgentModelsApi } from "@/services/api/userAgentSettings";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import { PHASE_LABELS, type BuildPhase } from "@/components/cockpit/labels";
 import type { AgentModel } from "@/types/user_agent_setting";
+import { familyLabel, modelDisplayName } from "@/utils/modelLabel";
 import type { CostRow, CostTotals, ManagerOverhead, ProjectCosts } from "@/types/metrics";
 
 type View = "version" | "cumulative";
@@ -23,17 +25,11 @@ type View = "version" | "cumulative";
 const EXTERNAL_ROW_LABEL = "Externé (ručne zadané)";
 const SYSTEM_ROW_LABEL = "Systém (neporovnané)";
 
-// The spec names no source for the model options; the cockpit's own agent models are the only ids that
-// occur in practice. Typed as `AgentModel` (aliased from the GENERATED contract) so a backend model roll
-// breaks the build instead of drifting silently. An entry carrying any other id still round-trips —
-// the select appends the stored value as an extra option (see `modelOptions` below).
-const DEFAULT_MODEL: AgentModel = "claude-opus-5";
-const MODEL_OPTIONS: { id: AgentModel; label: string }[] = [
-  { id: DEFAULT_MODEL, label: "Opus 5" },
-  { id: "claude-opus-4-8", label: "Opus 4.8" },
-  { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
-  { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
-];
+// The model options are the families the cockpit's agents run on (ICCINT-167), read from the backend —
+// the price is per family, so the family is all a hand-entered cost needs and no version is named here.
+// `AgentModel` is aliased from the GENERATED contract. An entry carrying any other id (an older entry with
+// a full id) still round-trips — the select appends the stored value as an extra option (`modelOptions`).
+const DEFAULT_MODEL: AgentModel = "opus";
 
 // ─── formatting (honest: null → dash, never a fabricated number) ─────────────
 
@@ -317,6 +313,7 @@ export default function MetricsPage() {
   const [occurredOn, setOccurredOn] = useState("");
   const [description, setDescription] = useState("");
   const [model, setModel] = useState<string>(DEFAULT_MODEL);
+  const [modelFamilies, setModelFamilies] = useState<{ id: string; label: string }[]>([]);
   const [inputTokens, setInputTokens] = useState("");
   const [outputTokens, setOutputTokens] = useState("");
   const [formVersionId, setFormVersionId] = useState("");
@@ -397,12 +394,28 @@ export default function MetricsPage() {
     return metrics?.by_version.find((v) => v.version_id === versionId)?.version_number ?? "neznáma verzia";
   }
 
-  // A stored id outside MODEL_OPTIONS (a hand-typed / retired model) stays selectable so an edit never
+  useEffect(() => {
+    let cancelled = false;
+    listAgentModelsApi()
+      .then((list) => {
+        if (!cancelled) setModelFamilies(list.map((m) => ({ id: m.id, label: familyLabel(m.id) })));
+      })
+      .catch((err) => {
+        if (!cancelled) setFormError(humanizeApiError(err, "Načítanie modelov zlyhalo"));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // A stored id outside the families (an older entry with a full id) stays selectable so an edit never
   // silently rewrites it.
   const modelOptions = useMemo(() => {
-    const known = MODEL_OPTIONS.map((m) => ({ id: m.id as string, label: m.label }));
-    return model && !known.some((m) => m.id === model) ? [...known, { id: model, label: model }] : known;
-  }, [model]);
+    const known = modelFamilies;
+    return model && !known.some((m) => m.id === model)
+      ? [...known, { id: model, label: modelDisplayName(model) }]
+      : known;
+  }, [model, modelFamilies]);
 
   function resetForm() {
     setEditingId(null);

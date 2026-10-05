@@ -1,6 +1,7 @@
 """REST router for per-user per-role agent model/effort config (CR-NS-040, E3(b/c)).
 
 * ``GET  /``              → the CALLER's config rows (only roles they have set).
+* ``GET  /models``        → the model families on offer + the version that last really ran (ICCINT-167).
 * ``PUT  /{agent_role}``  → upsert the caller's ``model`` + ``effort`` for one pipeline role.
 
 Every call is scoped to ``current_user`` — a user can only read/edit their OWN config (there is no
@@ -18,6 +19,7 @@ from backend.core.security import get_current_user
 from backend.db.models.foundation import User
 from backend.db.session import get_db
 from backend.schemas.user_agent_setting import (
+    AgentModelOption,
     PipelineAgentRole,
     UserAgentSettingRead,
     UserAgentSettingUpsert,
@@ -34,6 +36,18 @@ def list_my_agent_settings(
 ) -> list[UserAgentSettingRead]:
     """Return the authenticated user's per-role model/effort config rows."""
     return service.list_for_user(db, current_user.id)
+
+
+@router.get("/models", response_model=list[AgentModelOption])
+def list_agent_models(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[AgentModelOption]:
+    """The model families a role can run on, strongest first, each with the version that last ran on it.
+
+    No version is written in the cockpit: the family is dispatched and the CLI runs its newest version;
+    the label the screen shows is what the run record says really ran."""
+    return service.model_options(db)
 
 
 @router.put("/{agent_role}", response_model=UserAgentSettingRead)

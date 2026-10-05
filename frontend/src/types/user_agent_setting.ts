@@ -13,6 +13,9 @@ export type PipelineAgentRole = "ai_agent" | "auditor";
 // až po regenerácii (2026-07-27).
 export type AgentModel = NonNullable<components["schemas"]["UserAgentSettingRead"]["model"]>;
 
+// ICCINT-167: a model family on offer + the full id that last REALLY ran on it (from the run record).
+export type AgentModelOption = components["schemas"]["AgentModelOption"];
+
 // The 5 effort levels `claude --effort` accepts (NO ultracode — the CLI ignores it).
 export type AgentEffort = "low" | "medium" | "high" | "xhigh" | "max";
 

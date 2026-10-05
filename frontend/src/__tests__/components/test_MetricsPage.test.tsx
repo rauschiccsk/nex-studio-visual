@@ -9,12 +9,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { CostRow, CostRowKind, CostTotals, ManagerOverhead, ProjectCosts } from "@/types/metrics";
 
-const { mockGetMetrics, mockListExternal } = vi.hoisted(() => ({
+const { mockGetMetrics, mockListExternal, mockListModels } = vi.hoisted(() => ({
   mockGetMetrics: vi.fn(),
   mockListExternal: vi.fn(),
+  mockListModels: vi.fn(),
 }));
 
 vi.mock("@/services/api/metrics", () => ({ getProjectMetricsApi: mockGetMetrics }));
@@ -25,6 +26,8 @@ vi.mock("@/services/api/externalCost", () => ({
   updateExternalCost: vi.fn(),
   deleteExternalCost: vi.fn(),
 }));
+
+vi.mock("@/services/api/userAgentSettings", () => ({ listAgentModelsApi: mockListModels }));
 
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
@@ -213,6 +216,12 @@ describe("MetricsPage — Náklady (CR-V2-063)", () => {
     mockGetMetrics.mockReset();
     mockListExternal.mockReset();
     mockListExternal.mockResolvedValue([]);
+    mockListModels.mockReset();
+    mockListModels.mockResolvedValue([
+      { id: "opus", last_run_model: "claude-opus-5-5", last_run_at: "2026-10-05T10:00:00Z" },
+      { id: "sonnet", last_run_model: null, last_run_at: null },
+      { id: "haiku", last_run_model: null, last_run_at: null },
+    ]);
   });
 
   // ── case 11 ────────────────────────────────────────────────────────────────
@@ -301,5 +310,20 @@ describe("MetricsPage — Náklady (CR-V2-063)", () => {
     expect(labels.slice(0, 5)).toEqual(PHASE_LABELS);
     expect(labels[5]).toMatch(/^Externé \(ručne zadané\)/); // the `ručne` badge shares the cell
     expect(labels[6]).toBe("Systém (neporovnané)");
+  });
+
+  // ── ICCINT-167: the model of a hand-entered cost is a FAMILY from the backend, never a written version ──
+
+  it("offers the model families the backend lists, Opus first, and names no version", async () => {
+    await renderPage(CONFIGURED);
+    fireEvent.click(screen.getByRole("button", { name: /Pridať náklad/ }));
+    const select = (await screen.findByText("Model *")).parentElement!.querySelector("select")!;
+    await vi.waitFor(() => expect(select.options.length).toBe(3));
+    expect(Array.from(select.options).map((o) => [o.value, o.text])).toEqual([
+      ["opus", "Opus"],
+      ["sonnet", "Sonnet"],
+      ["haiku", "Haiku"],
+    ]);
+    expect(select.value).toBe("opus");
   });
 });

@@ -2454,6 +2454,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/user-agent-settings/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Agent Models
+         * @description The model families a role can run on, strongest first, each with the version that last ran on it.
+         *
+         *     No version is written in the cockpit: the family is dispatched and the CLI runs its newest version;
+         *     the label the screen shows is what the run record says really ran.
+         */
+        get: operations["list_agent_models_api_v1_user_agent_settings_models_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/user-agent-settings/{agent_role}": {
         parameters: {
             query?: never;
@@ -2976,6 +2999,24 @@ export interface components {
              * @description The UAT version being accepted.
              */
             version_number: string;
+        };
+        /**
+         * AgentModelOption
+         * @description One family the Nastavenia offers + the version that last REALLY ran on it (ICCINT-167).
+         *
+         *     ``last_run_model`` is the full id the CLI reported (``modelUsage``) on the newest recorded run of the
+         *     family — the honest answer to "what does Opus mean today"; ``None`` until the family has run once.
+         */
+        AgentModelOption: {
+            /**
+             * Id
+             * @enum {string}
+             */
+            id: "opus" | "sonnet" | "haiku";
+            /** Last Run At */
+            last_run_at?: string | null;
+            /** Last Run Model */
+            last_run_model?: string | null;
         };
         /**
          * AgentSession
@@ -4436,7 +4477,7 @@ export interface components {
             input_tokens: number;
             /**
              * Model
-             * @description Úplné id modelu, napr. "claude-opus-5".
+             * @description Model: rodina (opus, sonnet, haiku) alebo úplné meno, ktoré hlási Claude Code; cena podľa rodiny.
              */
             model: string;
             /**
@@ -5948,9 +5989,9 @@ export interface components {
             /** Effort */
             effort?: ("low" | "medium" | "high" | "xhigh" | "max") | null;
             /** Helper Model */
-            helper_model?: ("claude-opus-5" | "claude-opus-4-8" | "claude-sonnet-4-6" | "claude-haiku-4-5-20251001") | null;
+            helper_model?: ("opus" | "sonnet" | "haiku") | null;
             /** Model */
-            model?: ("claude-opus-5" | "claude-opus-4-8" | "claude-sonnet-4-6" | "claude-haiku-4-5-20251001") | null;
+            model?: ("opus" | "sonnet" | "haiku") | null;
         };
         /**
          * UserAgentSettingUpsert
@@ -5960,9 +6001,9 @@ export interface components {
             /** Effort */
             effort?: ("low" | "medium" | "high" | "xhigh" | "max") | null;
             /** Helper Model */
-            helper_model?: ("claude-opus-5" | "claude-opus-4-8" | "claude-sonnet-4-6" | "claude-haiku-4-5-20251001") | null;
+            helper_model?: ("opus" | "sonnet" | "haiku") | null;
             /** Model */
-            model?: ("claude-opus-5" | "claude-opus-4-8" | "claude-sonnet-4-6" | "claude-haiku-4-5-20251001") | null;
+            model?: ("opus" | "sonnet" | "haiku") | null;
         };
         /**
          * UserCreate
@@ -10587,6 +10628,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserAgentSettingRead"][];
+                };
+            };
+        };
+    };
+    list_agent_models_api_v1_user_agent_settings_models_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentModelOption"][];
                 };
             };
         };

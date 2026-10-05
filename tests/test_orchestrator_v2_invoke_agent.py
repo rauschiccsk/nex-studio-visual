@@ -407,9 +407,9 @@ async def test_parse_retry_accumulates_usage_and_attempts(db_session, monkeypatc
 
 
 def test_resolve_overrides_owner_config_applies(db_session):
-    version, _ = _make_version_with_owner_config(db_session, [("ai_agent", "claude-sonnet-4-6", "high")])
+    version, _ = _make_version_with_owner_config(db_session, [("ai_agent", "sonnet", "high")])
     assert orchestrator._resolve_dispatch_overrides(db_session, version.id, "ai_agent") == (
-        "claude-sonnet-4-6",
+        "sonnet",
         "high",
     )
 
@@ -418,16 +418,13 @@ def test_resolve_overrides_auditor_defaults_max(db_session):
     # CR-V2-008 / AUTON-5: the Auditor (independent verifier) effort defaults to max when unset.
     # CR-V2-028: the model defaults to DEFAULT_AGENT_MODEL (Opus) when there is no per-user pick.
     version, _ = _make_version_with_owner_config(db_session, [])
-    assert orchestrator._resolve_dispatch_overrides(db_session, version.id, "auditor") == (
-        orchestrator.DEFAULT_AGENT_MODEL,
-        "max",
-    )
+    assert orchestrator._resolve_dispatch_overrides(db_session, version.id, "auditor") == ("opus", "max")
 
 
 def test_resolve_overrides_auditor_explicit_overrides_default(db_session):
-    version, _ = _make_version_with_owner_config(db_session, [("auditor", "claude-opus-4-8", "low")])
+    version, _ = _make_version_with_owner_config(db_session, [("auditor", "opus", "low")])
     assert orchestrator._resolve_dispatch_overrides(db_session, version.id, "auditor") == (
-        "claude-opus-4-8",
+        "opus",
         "low",
     )
 
@@ -436,29 +433,25 @@ def test_resolve_overrides_no_owner_falls_back(db_session):
     # _make_version leaves owner_id NULL → no per-user config. CR-V2-028: the model still defaults to
     # DEFAULT_AGENT_MODEL for BOTH roles (never the CLI's small default); the Auditor effort stays max,
     # the AI Agent effort stays unset (CLI default).
+    # ICCINT-167: the default is the FAMILY ("opus"), so the CLI runs its newest version — a pinned id
+    # here is what kept every build on Opus 5 after Opus 5.5 shipped.
     version, _ = _make_version(db_session)
-    assert orchestrator._resolve_dispatch_overrides(db_session, version.id, "ai_agent") == (
-        orchestrator.DEFAULT_AGENT_MODEL,
-        None,
-    )
-    assert orchestrator._resolve_dispatch_overrides(db_session, version.id, "auditor") == (
-        orchestrator.DEFAULT_AGENT_MODEL,
-        "max",
-    )
+    assert orchestrator._resolve_dispatch_overrides(db_session, version.id, "ai_agent") == ("opus", None)
+    assert orchestrator._resolve_dispatch_overrides(db_session, version.id, "auditor") == ("opus", "max")
 
 
 async def test_invoke_agent_threads_owner_model_effort(db_session, monkeypatch):
     fake = _fake_claude(monkeypatch)
-    version, _ = _make_version_with_owner_config(db_session, [("ai_agent", "claude-sonnet-4-6", "high")])
+    version, _ = _make_version_with_owner_config(db_session, [("ai_agent", "sonnet", "high")])
     await orchestrator.invoke_agent(db_session, version_id=version.id, role="ai_agent", stage="navrh", prompt="go")
-    assert fake.calls[-1]["model"] == "claude-sonnet-4-6"
+    assert fake.calls[-1]["model"] == "sonnet"
     assert fake.calls[-1]["effort"] == "high"
 
 
 async def test_parse_retry_keeps_model_effort(db_session, monkeypatch):
     """Each parse-retry re-enters invoke_agent → re-resolves + re-applies the owner config (no loss)."""
     fake = _fake_claude(monkeypatch)
-    version, _ = _make_version_with_owner_config(db_session, [("ai_agent", "claude-sonnet-4-6", "high")])
+    version, _ = _make_version_with_owner_config(db_session, [("ai_agent", "sonnet", "high")])
     # Primary (prompt "go") fails to parse; the retry (re-prompt starting "Tvoj…") emits a valid block.
     fake.response = lambda prompt: _navrh_block() if prompt.startswith("Tvoj") else "no status block"
     result = await orchestrator.invoke_agent_with_parse_retry(
@@ -466,7 +459,7 @@ async def test_parse_retry_keeps_model_effort(db_session, monkeypatch):
     )
     assert isinstance(result, PipelineStatusBlock)
     assert len(fake.calls) >= 2  # primary + at least one retry
-    assert all(c["model"] == "claude-sonnet-4-6" and c["effort"] == "high" for c in fake.calls)
+    assert all(c["model"] == "sonnet" and c["effort"] == "high" for c in fake.calls)
 
 
 # ── session TTL driver: every turn bumps last_input_at ─────────────────────────
@@ -702,16 +695,16 @@ async def test_invoke_agent_appends_exact_stage_to_prompt(db_session, monkeypatc
 def test_resolve_helper_model_defaults_to_haiku_when_unset(db_session):
     # No per-owner helper_model → the dispatch default (Haiku): the AI Agent does the hard core itself and
     # delegates only bulk to cheap helpers.
-    version, _ = _make_version_with_owner_config(db_session, [("ai_agent", "claude-opus-4-8", "max")])
-    assert orchestrator._resolve_helper_model(db_session, version.id) == orchestrator.DEFAULT_HELPER_MODEL
+    version, _ = _make_version_with_owner_config(db_session, [("ai_agent", "opus", "max")])
+    assert orchestrator._resolve_helper_model(db_session, version.id) == "haiku"
 
 
 def test_resolve_helper_model_honours_explicit_owner_choice(db_session):
     # The Manažér can raise the AI Agent's helpers to Opus for a high-stakes build ("identically to Dedo").
     version, owner = _make_version_with_owner_config(db_session, [])
-    db_session.add(UserAgentSettings(user_id=owner.id, agent_role="ai_agent", helper_model="claude-opus-4-8"))
+    db_session.add(UserAgentSettings(user_id=owner.id, agent_role="ai_agent", helper_model="opus"))
     db_session.flush()
-    assert orchestrator._resolve_helper_model(db_session, version.id) == "claude-opus-4-8"
+    assert orchestrator._resolve_helper_model(db_session, version.id) == "opus"
 
 
 async def test_invoke_agent_injects_helper_directive_for_ai_agent_only(db_session, monkeypatch):
@@ -719,14 +712,14 @@ async def test_invoke_agent_injects_helper_directive_for_ai_agent_only(db_sessio
     # carrying the resolved model — but the Auditor (which is not the helper-spawner) never gets it.
     fake = _fake_claude(monkeypatch)
     version, owner = _make_version_with_owner_config(db_session, [])
-    db_session.add(UserAgentSettings(user_id=owner.id, agent_role="ai_agent", helper_model="claude-opus-4-8"))
+    db_session.add(UserAgentSettings(user_id=owner.id, agent_role="ai_agent", helper_model="opus"))
     db_session.flush()
 
     await orchestrator.invoke_agent(
         db_session, version_id=version.id, role="ai_agent", stage="programovanie", prompt="go"
     )
     ai_prompt = fake.calls[-1]["prompt"]
-    assert "pomocné agenty" in ai_prompt.lower() and "claude-opus-4-8" in ai_prompt
+    assert "pomocné agenty" in ai_prompt.lower() and "`opus`" in ai_prompt
 
     await orchestrator.invoke_agent(db_session, version_id=version.id, role="auditor", stage="verifikacia", prompt="go")
     assert "pomocné agenty" not in fake.calls[-1]["prompt"].lower()

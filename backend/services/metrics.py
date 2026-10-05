@@ -43,6 +43,7 @@ from backend.schemas.metrics import (
     UsageTotalsRead,
     VersionCostsRead,
 )
+from backend.schemas.user_agent_setting import MODEL_FAMILIES
 from backend.services import system_setting
 from backend.services.pipeline_metrics import (
     UsageTotals,
@@ -60,7 +61,9 @@ logger = logging.getLogger(__name__)
 #: agent-only ``system`` row.
 TERMINAL_PHASE = "done"
 COMPARISON_PHASES: tuple[str, ...] = tuple(s for s in STAGE_VALUES if s != TERMINAL_PHASE)
-_PRICE_FAMILIES: tuple[str, ...] = ("opus", "sonnet", "haiku")
+#: Price families = the model families the cockpit dispatches (ICCINT-167) — one list, not two copies that
+#: can drift apart.
+_PRICE_FAMILIES: tuple[str, ...] = MODEL_FAMILIES
 
 #: Row keys outside the build phases. ``externe`` is hand-entered spend (its wage key is
 #: ``metrics_hourly_wage_externe``); ``system`` is un-phased engine spend and is AGENT-ONLY — it has no
@@ -97,7 +100,8 @@ def _effective_price(db: Session, key: str, env_fallback: float) -> float:
 
 
 def _model_family(model_id: Optional[str]) -> str:
-    """Map a full model id (``claude-opus-4-8`` …) to a price family. The ``"_unknown"`` sentinel (no
+    """Map a model to its price family — a full id the CLI reported (``claude-<family>-<version>``) or a bare
+    family name (a hand-entered external cost, ICCINT-167). The ``"_unknown"`` sentinel (no
     model named in the envelope) maps to ``"_unknown"`` silently; a *named* id that matches no family
     logs a warning so a model roll that changes the family token surfaces, never silently mis-priced."""
     if not model_id or model_id == "_unknown":

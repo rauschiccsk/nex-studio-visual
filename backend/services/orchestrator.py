@@ -155,13 +155,16 @@ CONSULT_READ_ONLY_TOOLS: list[str] = ["Read", "Grep", "Glob"]
 #: (CR-V2-028). Both the AI Agent (the doer) and the Auditor (the verifier) are strong roles that own /
 #: verify the whole build, so the unconfigured default must be the strongest model — NOT the CLI's own
 #: default (which is a small/fast model). A per-user ``user_agent_settings`` row still overrides this.
-DEFAULT_AGENT_MODEL = "claude-opus-5"
+#: The FAMILY, never a version (ICCINT-167): the CLI runs the newest Opus, so a model roll needs no change
+#: here — the pinned Opus 5 id kept every build on Opus 5 after Opus 5.5 shipped.
+DEFAULT_AGENT_MODEL = "opus"
 
 #: Default model the AI Agent spawns its ephemeral HELPERS on (Agent/Task tool) when the owner has set no
 #: explicit ``helper_model`` (CR-V2-038). Haiku by design: the AI Agent does the hard CORE itself on its own
 #: (Opus + max) turn and delegates only parallel/bulk grunt work to helpers — cheap + fast is the right
 #: default there. The Manažér can raise it to Opus per project (Nastavenia) for a high-stakes build.
-DEFAULT_HELPER_MODEL = "claude-haiku-4-5-20251001"
+#: A family name too — it is also the exact value the Agent tool's model parameter takes.
+DEFAULT_HELPER_MODEL = "haiku"
 
 #: DB role value → charter-path slug (underscore → hyphen). Identity for ``auditor``; explicit for the
 #: AI Agent (``ai_agent`` → ``ai-agent``). The ONLY place the two spellings are reconciled.

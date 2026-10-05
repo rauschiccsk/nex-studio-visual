@@ -27,6 +27,7 @@ import {
   updateSystemSettingApi,
 } from "@/services/api/systemSettings";
 import {
+  listAgentModelsApi,
   listUserAgentSettingsApi,
   upsertUserAgentSettingApi,
 } from "@/services/api/userAgentSettings";
@@ -45,6 +46,7 @@ import { TOKEN_PRICE_KEYS } from "@/components/settings/tokenPrices";
 import { useAuthStore } from "@/store/authStore";
 import { ROLE_LABELS } from "@/components/cockpit/labels";
 import { humanizeApiError } from "@/services/apiError";
+import { modelOptionLabel } from "@/utils/modelLabel";
 import type { UserRole, UserRead } from "@/types/user";
 import type { SystemSettingRead } from "@/types/system_setting";
 import type {
@@ -68,12 +70,9 @@ const AGENT_ROLES: { id: PipelineAgentRole; label: string }[] = [
   { id: "auditor", label: ROLE_LABELS.auditor },
 ];
 
-const AGENT_MODELS: { id: AgentModel; label: string }[] = [
-  { id: "claude-opus-5", label: "Opus 5" },
-  { id: "claude-opus-4-8", label: "Opus 4.8" },
-  { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
-  { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
-];
+// Models are NOT listed here (ICCINT-167): the backend offers the families (`opus`, `sonnet`, `haiku`) and
+// the version that last really ran on each — the cockpit never names a version, so a model roll needs no
+// change in the application. See `listAgentModelsApi` / `modelOptionLabel`.
 
 // The 5 levels `claude --effort` accepts (no ultracode — see CR-NS-040 policy).
 const AGENT_EFFORTS: AgentEffort[] = ["low", "medium", "high", "xhigh", "max"];
@@ -286,12 +285,14 @@ function SystemTab({
 }
 
 function AgentsTab({
+  models,
   drafts,
   loadError,
   saveErrors,
   onLoad,
   onSave,
 }: {
+  models: { id: string; label: string }[];
   drafts: Record<string, AgentDraft>;
   loadError: string;
   saveErrors: Record<string, string>;
@@ -305,9 +306,9 @@ function AgentsTab({
     <div>
       <AgentsPanel
         roles={AGENT_ROLES}
-        models={AGENT_MODELS}
+        models={models}
         efforts={AGENT_EFFORTS}
-        helperModels={AGENT_MODELS}
+        helperModels={models}
         helperModelRoleIds={["ai_agent"]}
         drafts={drafts}
         onSave={onSave}
@@ -320,6 +321,10 @@ function AgentsTab({
         <p>
           <strong>„Max"</strong> je najvyššia úroveň uvažovania — niet vyššej. „Ultracode" nie je vyššia
           úroveň; je to len schopnosť spúšťať dynamických pomocníkov — a tú má AI Agent zabudovanú.
+        </p>
+        <p>
+          Model sa volí podľa <strong>rodiny</strong> — kokpit vždy spustí jej najnovšiu verziu, takže nová
+          verzia modelu nepotrebuje zmenu aplikácie. Pri voľbe je vidno, ktorá verzia naposledy naozaj bežala.
         </p>
         <p>
           AI Agent si <strong>dynamických pomocníkov spúšťa sám</strong> pre paralelnú/hromadnú prácu
@@ -468,6 +473,7 @@ export default function SettingsPage() {
 
   // ── Agents (per-user model/effort, CR-NS-040) ──
   const [agentDrafts, setAgentDrafts] = useState<Record<string, AgentDraft>>({});
+  const [agentModels, setAgentModels] = useState<{ id: string; label: string }[]>([]);
   const [agentsLoaded, setAgentsLoaded] = useState(false);
   const [agentsLoadError, setAgentsLoadError] = useState("");
   const [agentSaveErrors, setAgentSaveErrors] = useState<Record<string, string>>(
@@ -476,8 +482,9 @@ export default function SettingsPage() {
 
   const loadAgents = useCallback(() => {
     if (agentsLoaded) return;
-    listUserAgentSettingsApi()
-      .then((rows) => {
+    Promise.all([listUserAgentSettingsApi(), listAgentModelsApi()])
+      .then(([rows, models]) => {
+        setAgentModels(models.map((m) => ({ id: m.id, label: modelOptionLabel(m) })));
         const initial: Record<string, AgentDraft> = {};
         for (const r of AGENT_ROLES) initial[r.id] = { model: "", effort: "", helperModel: "" };
         for (const row of rows) {
@@ -658,6 +665,7 @@ export default function SettingsPage() {
         ),
         agents: (
           <AgentsTab
+            models={agentModels}
             drafts={agentDrafts}
             loadError={agentsLoadError}
             saveErrors={agentSaveErrors}

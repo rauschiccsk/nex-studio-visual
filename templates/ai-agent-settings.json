@@ -1,5 +1,5 @@
 {
-  "model": "claude-opus-4-8",
+  "model": "opus",
   "_comment": "v2.0.0 AI Agent (the doer) settings.json template (CR-V2-007). Pri Create Project sa <PROJECT_ROOT> nahradí konkrétnou cestou, kópia ide do <PROJECT_ROOT>/.claude/agents/ai-agent/settings.json (charter-path slug 'ai-agent'). SYNTAX PRAVIDIEL — overené proti reálnemu CLI, nie odhadnuté: (1) absolútna cesta sa píše DVOJITOU lomkou, 'Edit(//opt/projects/demo/CLAUDE.md)'; jedna lomka sa číta ako relatívna a nesedí na nič — dosadenie <PROJECT_ROOT> tú druhú lomku doplní. (2) 'Write(cesta)' pravidlá sa na súbory NEAPLIKUJÚ vôbec — CLI to samo hlási a odkazuje na 'Edit(cesta)', ktoré pokrýva všetky nástroje meniace súbory; preto sú tu path pravidlá len ako Edit(...). (3) Profil je účinný LEN preto, že dispatch ho posiela cez '--settings' (backend/services/claude_agent.py) — '--setting-sources' pozná iba user/project/local a .claude/agents/<role>/settings.json nie je ani jedno z nich; bez toho prepínača bol celý deny zoznam dekorácia a agent bežal pod 'bypassPermissions' s plne schválenými právami. Deny doručený cez --settings platí aj pri bypassPermissions (overené). FLAG (CR-V2-007): profil je DESIGN-BEARING návrh na revíziu Manažérom — AI Agent je doer, takže invertuje Koordinátorov deny-all-code posture. Finálny profil potvrdzuje Manažér.",
   "permissions": {
     "allow": [

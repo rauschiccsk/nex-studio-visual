@@ -39,8 +39,8 @@ class ExternalCost(Base, UUIDMixin, TimestampMixin):
     )
     occurred_on = Column(Date, nullable=False)
     description = Column(String(500), nullable=False)
-    # Full model id (e.g. "claude-opus-5") — priced through the SAME ``_model_family`` chain as metered
-    # spend, so an entered Opus turn costs exactly what a metered Opus turn costs.
+    # A model family (``opus``…, ICCINT-167) or a full id the CLI reported — priced through the SAME
+    # ``_model_family`` chain as metered spend, so an entered Opus turn costs exactly what a metered one costs.
     model = Column(String(100), nullable=False)
     input_tokens = Column(Integer, nullable=False, default=0)
     output_tokens = Column(Integer, nullable=False, default=0)

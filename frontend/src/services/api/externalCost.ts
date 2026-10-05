@@ -22,7 +22,7 @@ export interface ExternalCostRead {
   version_id: string | null;
   occurred_on: string; // ISO date (YYYY-MM-DD)
   description: string;
-  model: string; // full model id (e.g. "claude-opus-5")
+  model: string; // model family ("opus", ICCINT-167) or an older entry's full id — priced per family
   input_tokens: number;
   output_tokens: number;
   created_by: string | null;

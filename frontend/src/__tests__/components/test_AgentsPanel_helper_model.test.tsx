@@ -16,8 +16,8 @@ const ROLES = [
   { id: "auditor", label: "Auditor" },
 ];
 const MODELS = [
-  { id: "claude-opus-4-8", label: "Opus 4.8" },
-  { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
+  { id: "opus", label: "Opus — vždy najnovší" },
+  { id: "haiku", label: "Haiku — vždy najnovší" },
 ];
 const EFFORTS = ["low", "max"];
 
@@ -59,12 +59,12 @@ describe("AgentsPanel — helper model selector (CR-V2-038)", () => {
     // comboboxes for the single role: [0]=Model, [1]=Úroveň, [2]=Model pomocníkov
     const helperSelect = screen.getAllByRole("combobox")[2];
     if (!helperSelect) throw new Error("helper-model select not rendered");
-    fireEvent.change(helperSelect, { target: { value: "claude-opus-4-8" } });
+    fireEvent.change(helperSelect, { target: { value: "opus" } });
     fireEvent.click(screen.getByText("Uložiť"));
     await waitFor(() =>
       expect(onSave).toHaveBeenCalledWith(
         "ai_agent",
-        expect.objectContaining({ helperModel: "claude-opus-4-8" }),
+        expect.objectContaining({ helperModel: "opus" }),
       ),
     );
   });

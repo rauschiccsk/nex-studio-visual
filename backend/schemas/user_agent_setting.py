@@ -5,7 +5,10 @@ enums HERE (not a DB CHECK) so the CLI's accepted sets can evolve without a migr
 
 * effort = the 5 levels ``claude --effort`` accepts (verified 2026-06-13: low/medium/high/xhigh/max
   — NO ``ultracode``; the CLI silently ignores it and falls back to default effort).
-* model = the 3 dispatchable model IDs.
+* model = the model FAMILY, never a version (ICCINT-167). ``claude --model opus`` runs the newest Opus
+  (measured 2026-10-05 with CLI 2.1.289 — the result is recorded in ``docs/specs/poradca.md`` §4.6) and the
+  CLI updates itself on the host, so a model roll needs no change here. Which version really ran is read
+  from the run record (:func:`backend.services.user_agent_settings.model_options`).
 
 ``protected_namespaces=()`` lets a field be literally named ``model`` (pydantic v2 otherwise warns it
 collides with the reserved ``model_`` namespace).
@@ -13,15 +16,19 @@ collides with the reserved ``model_`` namespace).
 
 from __future__ import annotations
 
-from typing import Literal, Optional
+from datetime import datetime
+from typing import Literal, Optional, get_args
 
 from pydantic import BaseModel, ConfigDict
 
 # The PIPELINE agent role {ai_agent, auditor} (same set as OrchestratorSession; v2.0.0 CR-V2-001), NOT
 # the user's ri/ha/shu access role.
 PipelineAgentRole = Literal["ai_agent", "auditor"]
-# Dispatchable model IDs (claude --model accepts the full name).
-AgentModel = Literal["claude-opus-5", "claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"]
+# The model families ``claude --model`` resolves to their newest version — strongest first (the order
+# the Nastavenia select shows). The Agent tool a helper is spawned with takes exactly these names too.
+AgentModel = Literal["opus", "sonnet", "haiku"]
+#: The same families as a tuple — the single source for the price families (``metrics``) and the options.
+MODEL_FAMILIES: tuple[str, ...] = get_args(AgentModel)
 # The 5 effort levels claude --effort accepts (NO ultracode — see module docstring).
 AgentEffort = Literal["low", "medium", "high", "xhigh", "max"]
 
@@ -47,3 +54,16 @@ class UserAgentSettingUpsert(BaseModel):
     model: Optional[AgentModel] = None
     effort: Optional[AgentEffort] = None
     helper_model: Optional[AgentModel] = None
+
+
+class AgentModelOption(BaseModel):
+    """One family the Nastavenia offers + the version that last REALLY ran on it (ICCINT-167).
+
+    ``last_run_model`` is the full id the CLI reported (``modelUsage``) on the newest recorded run of the
+    family — the honest answer to "what does Opus mean today"; ``None`` until the family has run once."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    id: AgentModel
+    last_run_model: Optional[str] = None
+    last_run_at: Optional[datetime] = None
