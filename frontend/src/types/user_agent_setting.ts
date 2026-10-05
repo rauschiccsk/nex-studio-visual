@@ -5,7 +5,8 @@ import type { components } from "@/services/api/pipeline.generated";
 
 // The PIPELINE agent role (NOT the user's ri/ha/shu access role). v2 (CR-V2-001/007): the 5-role waterfall
 // collapsed to the two v2 agents — the AI Agent (doer) + the independent Auditor. DB values (underscore).
-export type PipelineAgentRole = "ai_agent" | "auditor";
+// ICCINT-167: + Poradca — nie je rola stavby, ale model a úsilie si nastavuje rovnako.
+export type PipelineAgentRole = "ai_agent" | "auditor" | "poradca";
 
 // Aliasované z GENEROVANÉHO kontraktu, nie prepísané ručne: backend deklaruje zoznam ako `Literal`,
 // FastAPI ho vydá ako OpenAPI enum a `npm run codegen` ho donesie sem. Pridanie modelu na backende tak

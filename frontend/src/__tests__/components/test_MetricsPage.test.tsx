@@ -312,6 +312,24 @@ describe("MetricsPage — Náklady (CR-V2-063)", () => {
     expect(labels[6]).toBe("Systém (neporovnané)");
   });
 
+  // ── ICCINT-167: Poradca má vlastný riadok, medzi ručne zadaným a systémom ─────────────────────────────
+
+  it("names the Poradca row and keeps it agent-only", async () => {
+    const withPoradca = project(
+      [
+        ...PHASES.map((p) => row(p, "phase", { agent_cost: 2, human_minutes: 60, human_cost: 12 })),
+        row("poradca", "poradca", { turns: 3, agent_cost: 0.5 }),
+        row("system", "system", { turns: 2, agent_cost: 1 }),
+      ],
+      CONFIGURED.totals,
+    );
+    const table = await renderPage(withPoradca);
+    const labels = costRows(table).map((r) => text(r, 0));
+    expect(labels).toEqual([...PHASE_LABELS, "Poradca", "Systém (neporovnané)"]);
+    const poradca = rowAt(costRows(table), 5);
+    expect(cell(poradca, COL_HUMAN_COST).textContent).toBe("—");
+  });
+
   // ── ICCINT-167: the model of a hand-entered cost is a FAMILY from the backend, never a written version ──
 
   it("offers the model families the backend lists, Opus first, and names no version", async () => {

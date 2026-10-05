@@ -13,7 +13,8 @@ export interface UsageTotals {
 
 // `phase` = a build phase (measured), `external` = the manually entered row, `system` = un-phased
 // engine tokens (agent-only: no human equivalent exists, so its human figures are always null).
-export type CostRowKind = "phase" | "external" | "system";
+// ICCINT-167: + "poradca" — odpovede Poradcu (namerané, bez ľudského porovnania).
+export type CostRowKind = "phase" | "external" | "poradca" | "system";
 
 export interface CostRow {
   key: string; // phase key (COMPARISON_PHASES), or "externe", or "system"

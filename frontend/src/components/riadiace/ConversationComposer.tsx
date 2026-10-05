@@ -13,6 +13,7 @@ import { Loader2, Send } from "lucide-react";
 
 import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { useDraft, draftKey } from "@/hooks/useDraft";
+import { draftCameFromPoradca, forgetPoradcaOrigin } from "@/lib/poradcaHandoff";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 
 const ENGINE_BUSY_HINT = "AI Agent práve pracuje — správa sa pošle, keď dokončí.";
@@ -46,6 +47,8 @@ interface Props {
 export function ConversationComposer({ onRelay, disabled, frameworkBlocked, blockedAbove, atVizual, versionId }: Props) {
   // ICCINT-30: the box the Director lost a message from. Persisted per build, cleared on a real send.
   const { text, setText, clear: clearDraft, restored } = useDraft(draftKey("rozhovor", versionId));
+  // ICCINT-167: pokyn vložený z Poradcu — pole musí povedať, odkiaľ sa text vzal, a že ho treba odoslať.
+  const fromPoradca = restored && draftCameFromPoradca(versionId);
   const [sending, setSending] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
   const [error, setError] = useState<HumanError | null>(null);
@@ -67,6 +70,7 @@ export function ConversationComposer({ onRelay, disabled, frameworkBlocked, bloc
     try {
       const { deferred } = await onRelay(trimmed);
       clearDraft();
+      forgetPoradcaOrigin(versionId);
       // `deferred` ⇒ a turn was in flight; the message is queued and lands at the next boundary.
       setHint(deferred ? ENGINE_BUSY_HINT : null);
     } catch (e: unknown) {
@@ -124,11 +128,16 @@ export function ConversationComposer({ onRelay, disabled, frameworkBlocked, bloc
         </div>
       )}
       <div className="flex items-end gap-2">
-        {restored && (
+        {restored && !fromPoradca && (
           // ICCINT-30: text that appears by itself must be recognisable as HIS earlier draft — not as
           // something someone else wrote into his box while he was away.
           <p className="text-[11px] text-[var(--color-text-muted)]">
             Obnovený rozpísaný text — pokračuj, alebo ho prepíš.
+          </p>
+        )}
+        {fromPoradca && (
+          <p className="text-[11px] font-medium text-[var(--color-accent-primary)]">
+            Pokyn od Poradcu — prečítaj ho, uprav podľa potreby a odošli sám.
           </p>
         )}
         <textarea
@@ -136,7 +145,10 @@ export function ConversationComposer({ onRelay, disabled, frameworkBlocked, bloc
           spellCheck={true}
           ref={growRef}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            forgetPoradcaOrigin(versionId);
+            setText(e.target.value);
+          }}
           onKeyDown={onKeyDown}
           disabled={locked || sending}
           rows={1}

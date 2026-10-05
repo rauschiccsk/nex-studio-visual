@@ -267,3 +267,42 @@ def test_no_request_block_no_version(db_session):
     assert c.post(f"/api/v1/poradca/messages/{running.id}/new-version").status_code == 422
     stranger = _client(db_session, _user(db_session))
     assert stranger.post(f"/api/v1/poradca/messages/{plain.id}/new-version").status_code == 404
+
+
+def test_context_lists_versions_with_build_state_and_where_an_instruction_can_go(db_session):
+    from backend.db.models.pipeline import PipelineState
+
+    owner = _user(db_session)
+    project = _project(db_session, owner)
+    states = {
+        "1.0.0": None,
+        "1.1.0": ("done", "done", None),
+        "1.2.0": ("programovanie", "blocked", "framework_issue"),
+        "1.3.0": ("programovanie", "agent_working", None),
+    }
+    for number, st in states.items():
+        v = Version(project_id=project.id, version_number=number)
+        db_session.add(v)
+        db_session.flush()
+        if st:
+            db_session.add(
+                PipelineState(
+                    version_id=v.id,
+                    flow_type="new_version",
+                    current_stage=st[0],
+                    current_actor="ai_agent",
+                    status=st[1],
+                    block_reason=st[2],
+                )
+            )
+    db_session.flush()
+    body = _client(db_session, owner).get(f"/api/v1/poradca/projects/{project.slug}/context").json()
+    by = {v["version_number"]: v for v in body["versions"]}
+    assert by["1.3.0"]["instruction_open"] is True and by["1.3.0"]["stage"] == "programovanie"
+    assert by["1.0.0"]["instruction_open"] is False and "nezačala" in by["1.0.0"]["instruction_closed_reason"]
+    assert "novej verzie" in by["1.1.0"]["instruction_closed_reason"]
+    assert "opravu kokpitu" in by["1.2.0"]["instruction_closed_reason"]
+    assert (
+        _client(db_session, _user(db_session)).get(f"/api/v1/poradca/projects/{project.slug}/context").status_code
+        == 403
+    )

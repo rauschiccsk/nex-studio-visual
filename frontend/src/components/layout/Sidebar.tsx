@@ -42,6 +42,7 @@ const IconMetrics = () => <NavIcon glyph="📊" />;
 // build surface (replaces the AI Agent terminal + the 4-phase Vývoj board);
 // Špecifikácia = the read-only spec shell.
 const IconRiadiace = () => <NavIcon glyph="🎛️" />;
+const IconPoradca = () => <NavIcon glyph="💬" />;
 const IconSpec = () => <NavIcon glyph="📄" />;
 
 // CR-1 (nex-studio-visual): the Vizuál surface — the live app preview (monitor 2) during the vizual phase.
@@ -242,6 +243,20 @@ export default function Sidebar() {
         }
         badge={hasProject && !pipelineAccessDenied && cockpitAwaiting}
         badgeLabel="čaká na Manažéra"
+      />
+      {/* ICCINT-167: Poradca — rozhovor s agentom, ktorý len číta a radí; beží vedľa stavby. Projektová položka:
+          bez pripnutého projektu alebo bez prístupu zašednutá s dôvodom, rovnako ako Riadiace centrum. */}
+      <NavItem
+        icon={<IconPoradca />}
+        label="Poradca"
+        active={hasProject ? isActive("/poradca") : false}
+        onClick={() => navigate(hasProject ? "/poradca" : projectsFallback)}
+        disabled={!hasProject || pipelineAccessDenied}
+        disabledTitle={
+          pipelineAccessDenied
+            ? "Nemáš prístup k tomuto projektu — Poradcu k nemu môže otvoriť jeho vlastník alebo Manažér. V Projektoch si pripni vlastný projekt."
+            : "Vyber projekt pre prístup k Poradcovi"
+        }
       />
       {/* CR-1 (nex-studio-visual): the Vizuál surface — the live app preview (monitor 2), shown while the AI
           edits the FE during the vizual phase. Project-scoped like the other build items → disabled (not

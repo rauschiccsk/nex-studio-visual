@@ -87,6 +87,26 @@ class PoradcaScopeUpdate(BaseModel):
     version_id: Optional[UUID]
 
 
+class PoradcaVersionInfo(BaseModel):
+    """Verzia projektu pre voľbu „o čom sa rozprávame" — s fázou a stavom stavby."""
+
+    id: UUID
+    version_number: str
+    stage: Optional[str] = None
+    status: Optional[str] = None
+    #: Dá sa teraz pokyn od Poradcu vložiť do poľa Riadiaceho centra tejto verzie?
+    instruction_open: bool = False
+    #: Prečo nie — veta pre tlačidlo zašednuté s dôvodom.
+    instruction_closed_reason: Optional[str] = None
+
+
+class PoradcaProjectContext(BaseModel):
+    project_id: UUID
+    project_slug: str
+    project_name: str
+    versions: list[PoradcaVersionInfo] = Field(default_factory=list)
+
+
 class PoradcaStatus(BaseModel):
     """Či Poradca vie bežať — pre obrazovku (zašednutie s dôvodom) aj ``/health``."""
 

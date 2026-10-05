@@ -1442,6 +1442,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/poradca/projects/{slug}/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Project Context
+         * @description Projekt a jeho verzie s fázou a stavom stavby — pre voľbu „o čom sa rozprávame".
+         */
+        get: operations["project_context_api_v1_poradca_projects__slug__context_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/poradca/projects/{slug}/conversations": {
         parameters: {
             query?: never;
@@ -5430,6 +5450,20 @@ export interface components {
             /** Version Number */
             version_number: string;
         };
+        /** PoradcaProjectContext */
+        PoradcaProjectContext: {
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Project Name */
+            project_name: string;
+            /** Project Slug */
+            project_slug: string;
+            /** Versions */
+            versions?: components["schemas"]["PoradcaVersionInfo"][];
+        };
         /**
          * PoradcaScopeUpdate
          * @description Zmena „o čom sa rozprávame". ``version_id = None`` = celý projekt (pole je povinné, aby
@@ -5465,6 +5499,30 @@ export interface components {
             target: string;
             /** Tool */
             tool: string;
+        };
+        /**
+         * PoradcaVersionInfo
+         * @description Verzia projektu pre voľbu „o čom sa rozprávame" — s fázou a stavom stavby.
+         */
+        PoradcaVersionInfo: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Instruction Closed Reason */
+            instruction_closed_reason?: string | null;
+            /**
+             * Instruction Open
+             * @default false
+             */
+            instruction_open: boolean;
+            /** Stage */
+            stage?: string | null;
+            /** Status */
+            status?: string | null;
+            /** Version Number */
+            version_number: string;
         };
         /**
          * PortBlockSuggestResponse
@@ -9437,6 +9495,37 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    project_context_api_v1_poradca_projects__slug__context_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoradcaProjectContext"];
                 };
             };
             /** @description Validation Error */

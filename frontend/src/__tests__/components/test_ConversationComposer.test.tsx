@@ -63,3 +63,30 @@ describe("ConversationComposer — framework_issue lock (Director obs #6)", () =
     expect(screen.getByPlaceholderText(/požiadavku na zmenu vizuálu/i)).toBeInTheDocument();
   });
 });
+
+// ICCINT-167: pokyn vložený z Poradcu — pole musí povedať, odkiaľ sa text vzal; nesmie sa tváriť ako jeho
+// vlastný starší koncept, a keď ho človek upraví, je jeho.
+describe("ConversationComposer — pokyn od Poradcu (ICCINT-167)", () => {
+  it("labels an inserted instruction as Poradca's and drops the label once he edits it", async () => {
+    const { insertInstructionDraft } = await import("@/lib/poradcaHandoff");
+    const { fireEvent } = await import("@testing-library/react");
+    window.localStorage.clear();
+    insertInstructionDraft("v9", "Oprav test_login.");
+    render(<ConversationComposer onRelay={noopRelay} versionId="v9" />);
+    expect(screen.getByRole("textbox")).toHaveValue("Oprav test_login.");
+    expect(screen.getByText(/Pokyn od Poradcu/)).toBeInTheDocument();
+    expect(screen.queryByText(/Obnovený rozpísaný text/)).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Oprav test_login, prosím." } });
+    expect(screen.queryByText(/Pokyn od Poradcu/)).not.toBeInTheDocument();
+    expect(window.localStorage.getItem("nex.draft.rozhovor.v9.origin")).toBeNull();
+    expect(noopRelay).not.toHaveBeenCalled();
+  });
+
+  it("an ordinary restored draft keeps its own label", () => {
+    window.localStorage.clear();
+    window.localStorage.setItem("nex.draft.rozhovor.v8", "moja veta");
+    render(<ConversationComposer onRelay={noopRelay} versionId="v8" />);
+    expect(screen.getByText(/Obnovený rozpísaný text/)).toBeInTheDocument();
+    expect(screen.queryByText(/Pokyn od Poradcu/)).not.toBeInTheDocument();
+  });
+});

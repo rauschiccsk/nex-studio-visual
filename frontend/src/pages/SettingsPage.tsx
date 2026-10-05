@@ -68,6 +68,8 @@ import type {
 const AGENT_ROLES: { id: PipelineAgentRole; label: string }[] = [
   { id: "ai_agent", label: ROLE_LABELS.ai_agent },
   { id: "auditor", label: ROLE_LABELS.auditor },
+  // ICCINT-167: Poradca — rozhovory k projektu; predvolene Opus, úsilie high.
+  { id: "poradca", label: "Poradca" },
 ];
 
 // Models are NOT listed here (ICCINT-167): the backend offers the families (`opus`, `sonnet`, `haiku`) and
@@ -89,6 +91,13 @@ const AGENT_EFFORTS: AgentEffort[] = ["low", "medium", "high", "xhigh", "max"];
 // setting, add its prefix here too, or it will not exist as far as the
 // Manažér is concerned.
 const SETTINGS_CATEGORIES: SettingsCategory[] = [
+  {
+    id: "poradca",
+    label: "Poradca",
+    description:
+      "Koľko otázok Poradcu smie bežať naraz v celom kokpite — všetky čerpajú z jedného predplatného ako stavby.",
+    prefixes: ["poradca_"],
+  },
   {
     id: "pipeline",
     label: "Priebeh / AI",

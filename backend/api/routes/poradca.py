@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from backend.core import authz
 from backend.core.security import get_current_user, verify_ws_token
 from backend.db.models.foundation import User
+from backend.db.models.pipeline import PipelineState
 from backend.db.models.poradca import AUTHOR_PORADCA, RUNNING, PoradcaConversation, PoradcaMessage
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
@@ -37,8 +38,10 @@ from backend.schemas.poradca import (
     PoradcaConversationRead,
     PoradcaMessageRead,
     PoradcaNewVersion,
+    PoradcaProjectContext,
     PoradcaScopeUpdate,
     PoradcaStatus,
+    PoradcaVersionInfo,
 )
 from backend.services import metrics
 from backend.services.poradca import handoff, readiness, runner
@@ -158,6 +161,47 @@ def _ask(db: Session, conversation: PoradcaConversation, question: str, user: Us
 @router.get("/status", response_model=PoradcaStatus)
 def poradca_status(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)) -> PoradcaStatus:
     return readiness.status(db)
+
+
+def _instruction_target(state: Optional[PipelineState]) -> tuple[bool, Optional[str]]:
+    """Či pole Riadiaceho centra tejto verzie prijme pokyn — tie isté pravidlá, aké platia pre pole samo."""
+    if state is None:
+        return False, "Stavba tejto verzie ešte nezačala — pokyn nemá komu ísť. Začni stavbu v Riadiacom centre."
+    if state.current_stage == "done":
+        return False, "Verzia je hotová — zmena patrí do novej verzie."
+    if state.status == "blocked" and state.block_reason == "framework_issue":
+        return False, "Stavba čaká na opravu kokpitu — pole v Riadiacom centre je zatvorené."
+    return True, None
+
+
+@router.get("/projects/{slug}/context", response_model=PoradcaProjectContext)
+def project_context(
+    slug: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+) -> PoradcaProjectContext:
+    """Projekt a jeho verzie s fázou a stavom stavby — pre voľbu „o čom sa rozprávame"."""
+    project = authz.assert_project_slug_access(db, current_user, slug)
+    rows = db.execute(
+        select(Version, PipelineState)
+        .outerjoin(PipelineState, PipelineState.version_id == Version.id)
+        .where(Version.project_id == project.id)
+        .order_by(Version.created_at.desc())
+    ).all()
+    versions = []
+    for version, state in rows:
+        open_, reason = _instruction_target(state)
+        versions.append(
+            PoradcaVersionInfo(
+                id=version.id,
+                version_number=version.version_number,
+                stage=state.current_stage if state else None,
+                status=state.status if state else None,
+                instruction_open=open_,
+                instruction_closed_reason=reason,
+            )
+        )
+    return PoradcaProjectContext(
+        project_id=project.id, project_slug=project.slug, project_name=project.name, versions=versions
+    )
 
 
 @router.get("/projects/{slug}/conversations", response_model=list[PoradcaConversationRead])
