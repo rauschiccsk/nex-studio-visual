@@ -192,3 +192,37 @@ def test_shim_path_is_where_the_image_has_the_backend():
     # Obraz kopíruje backend do /app/backend (koreňový Dockerfile) — prostredník musí byť tam.
     rel = Path(sandbox.SHIM_PATH).relative_to("/app")
     assert (Path(__file__).resolve().parents[1] / rel).is_file()
+
+
+# ── nález nezávislej previerky 05.10.2026: meno súboru nesmie vpašovať voľby do --mount ─────────────
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        ".env.x,source=etc",
+        '.env.q"uote',
+        ".env.new\nline",
+    ],
+)
+def test_a_secret_file_whose_name_could_inject_mount_options_is_refused(tmp_path, name):
+    proj = tmp_path / "p"
+    proj.mkdir()
+    (proj / name).write_text("x")
+    with pytest.raises(sandbox.PoradcaUnavailable, match="Premenuj"):
+        sandbox.overlay_paths(str(proj))
+
+
+def test_a_hard_linked_file_with_a_comma_is_refused_too(tmp_path):
+    proj = tmp_path / "p"
+    proj.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("x")
+    os.link(outside, proj / "nevinny,source=etc")
+    with pytest.raises(sandbox.PoradcaUnavailable):
+        sandbox.overlay_paths(str(proj))
+
+
+def test_run_argv_itself_refuses_an_unsafe_overlay(project):
+    with pytest.raises(sandbox.PoradcaUnavailable):
+        _argv(overlays=[".env,source=/etc"])

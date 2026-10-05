@@ -20,7 +20,6 @@ from urllib.parse import urlsplit
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.config.settings import settings
 from backend.db.models.customers import Customer
 from backend.db.models.projects import Project
 from backend.services import uat_provisioner
@@ -101,6 +100,10 @@ def _values_from_file(path: Path) -> list[str]:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return []
+    return _values_from_text(text)
+
+
+def _values_from_text(text: str) -> list[str]:
     stripped = text.strip()
     if stripped.startswith(("{", "[")):
         try:
@@ -113,8 +116,9 @@ def _values_from_file(path: Path) -> list[str]:
 def known_secret_values(db: Session, project: Project) -> list[str]:
     """Hodnoty pre presnú zhodu filtra: prostredie kokpitu, nastavenia inštalácií UAT projektu, trezor.
 
-    Trezor prístupov sa prechádza celý — viac skrytého je bezpečnejšie než menej. Súbor, ktorý sa nedá
-    prečítať, sa preskočí (filter tvarov ostáva); nič z toho nesmie zastaviť otázku.
+    Trezor prístupov sa prechádza celý — viac skrytého je bezpečnejšie než menej — a číta sa cez službu
+    trezoru (:mod:`backend.services.credentials`, tie isté stráže cesty ako API), nie priamo zo súborov.
+    Záznam, ktorý sa nedá prečítať, sa preskočí (filter tvarov ostáva); nič z toho nesmie zastaviť otázku.
     """
     values: list[str] = []
     for name in _ENV_SECRETS:
@@ -123,11 +127,13 @@ def known_secret_values(db: Session, project: Project) -> list[str]:
         values.append(_url_password(os.environ.get(name, "")))
     for installation in uat_installations(db, project):
         values += _values_from_file(installation.directory / ".env")
-    store = Path(settings.credentials_storage_path)
-    try:
-        files = [p for p in store.rglob("*") if p.is_file()] if store.is_dir() else []
-    except OSError:
-        files = []
-    for path in files:
-        values += _values_from_file(path)
+    from backend.services import credentials as credentials_service
+
+    for credential in credentials_service.list_credentials(db):
+        try:
+            values += _values_from_text(credentials_service.read_content(db, credential.id).content)
+        except (OSError, ValueError, LookupError):
+            continue
+        except Exception:  # noqa: BLE001 — trezor nesmie zastaviť otázku; filter tvarov ostáva
+            logger.warning("poradca: credential %s could not be read for redaction", credential.id)
     return [v for v in values if v]

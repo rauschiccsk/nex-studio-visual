@@ -183,8 +183,10 @@ def test_other_queries_are_refused_before_the_database(query, word):
 
 
 def test_select_is_wrapped_with_a_row_cap_explain_is_not():
-    assert uat_db._wrapped("SELECT a FROM t;").startswith("SELECT * FROM (\nSELECT a FROM t\n) AS poradca_dotaz LIMIT")
-    assert uat_db._wrapped("EXPLAIN SELECT 1") == "EXPLAIN SELECT 1"
+    assert uat_db._wrapped("SELECT a FROM t;", 201) == "SELECT * FROM (\nSELECT a FROM t\n) AS poradca_dotaz LIMIT 201"
+    assert uat_db._wrapped("SELECT '{limit}'", 5).endswith("LIMIT 5")  # text dotazu sa nikdy neprepisuje
+    assert "'{limit}'" in uat_db._wrapped("SELECT '{limit}'", 5)
+    assert uat_db._wrapped("EXPLAIN SELECT 1", 201) == "EXPLAIN SELECT 1"
 
 
 def test_role_sql_grants_columns_not_tables_and_refuses_foreign_access_extensions():

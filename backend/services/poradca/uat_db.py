@@ -26,6 +26,7 @@ import yaml
 from backend.services import uat_provisioner
 from backend.services.poradca.context import UatInstallation
 from backend.services.poradca.mcp_server import ToolError
+from backend.services.poradca.secrets_filter import SecretFilter
 
 logger = logging.getLogger(__name__)
 
@@ -57,12 +58,12 @@ def query_problem(query: str) -> Optional[str]:
     return None
 
 
-def _wrapped(query: str) -> str:
+def _wrapped(query: str, limit: int) -> str:
     """SELECT/WITH sa obalí stropom riadkov; EXPLAIN sa pustí, ako je."""
     body = _strip_comments(query).strip().rstrip(";").strip()
     if re.match(r"^\s*explain\b", body, re.IGNORECASE):
         return body
-    return f"SELECT * FROM (\n{body}\n) AS poradca_dotaz LIMIT {{limit}}"
+    return f"SELECT * FROM (\n{body}\n) AS poradca_dotaz LIMIT {int(limit)}"
 
 
 async def _docker(*argv: str, stdin: Optional[bytes] = None, timeout: int = 60) -> tuple[int, str]:
@@ -120,7 +121,7 @@ async def _db_container(installation: UatInstallation) -> tuple[str, str]:
 
 async def run_query(installation: UatInstallation, query: str, *, rows: int, timeout_s: int) -> str:
     container, db_name = await _db_container(installation)
-    sql = _wrapped(query).replace("{limit}", str(rows + 1))
+    sql = _wrapped(query, rows + 1)
     code, out = await _docker(
         "exec",
         "-u",
@@ -230,6 +231,8 @@ async def _ensure_role(installation: UatInstallation) -> tuple[bool, str]:
         stdin=role_setup_sql(db_name).encode("utf-8"),
     )
     if code != 0:
-        logger.warning("poradca: role setup failed in %s: %s", installation.directory, out.strip()[:500])
+        logger.warning(
+            "poradca: role setup failed in %s: %s", installation.directory, SecretFilter()(out.strip())[:500]
+        )
         return False, f"Účet Poradcu v databáze UAT {customer_slug} sa nepodarilo pripraviť."
     return True, f"Účet Poradcu v databáze UAT {customer_slug} je pripravený (len čítanie, bez tajných stĺpcov)."

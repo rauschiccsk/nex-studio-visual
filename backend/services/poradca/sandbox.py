@@ -66,8 +66,16 @@ _SECRET_FILE_RE = re.compile(
     r"^(?:\.env(?:\..+)?"
     r"|.+\.(?:pem|key|p12|pfx|jks|keystore|kdbx)"
     r"|id_(?:rsa|dsa|ecdsa|ed25519)(?:[^.]*|.*(?<!\.pub))"
-    r"|\.netrc|\.pgpass|\.git-credentials|credentials\.json)$"
+    r"|\.netrc|\.pgpass|\.git-credentials|credentials\.json)$",
+    # ``.`` aj cez nový riadok: súbor ``.env.<nový riadok>…`` nesmie uniknúť prekrytiu len pre svoje meno.
+    re.S,
 )
+
+#: Znaky, ktoré v zápise ``--mount`` dockera začínajú nové pole alebo záznam (čiarka, úvodzovky) — a riadiace
+#: znaky. Súbor s takým menom by do pripojenia prekrytia vpašoval vlastný ``source=`` a docker by pod
+#: priečinok projektu pripojil ľubovoľnú cestu hostiteľa (nález nezávislej previerky 05.10.2026). Takú cestu
+#: preto Poradca nikdy neskladá — otázka zlyhá s menom súboru.
+_MOUNT_UNSAFE = re.compile(r'[,"\x00-\x1f\x7f]')
 
 #: Najdlhšia cesta unixového socketu, ktorú jadro Linuxu prijme (``sun_path`` má 108 bajtov vrátane nuly).
 MAX_SOCKET_PATH = 107
@@ -148,7 +156,13 @@ def overlay_paths(project_dir: str) -> list[str]:
             if not stat.S_ISREG(st.st_mode):
                 continue
             if _SECRET_FILE_RE.match(name) or st.st_nlink > 1:
-                found.append(os.path.relpath(full, project_dir))
+                rel = os.path.relpath(full, project_dir)
+                if _MOUNT_UNSAFE.search(rel):
+                    raise PoradcaUnavailable(
+                        f"{_LABEL}: súbor s tajomstvom alebo pevným odkazom má v ceste čiarku, úvodzovky či riadiaci "
+                        f"znak ({rel!r}) — také meno sa nedá bezpečne prekryť. Premenuj ho, potom sa Poradca spustí."
+                    )
+                found.append(rel)
                 if len(found) > MAX_OVERLAYS:
                     raise PoradcaUnavailable(
                         f"{_LABEL}: projekt má viac než {MAX_OVERLAYS} súborov na prekrytie (tajomstvá alebo "
@@ -247,6 +261,13 @@ def claude_argv(call: ClaudeCall) -> list[str]:
     return args
 
 
+def _assert_mount_safe(*parts: str) -> None:
+    """Druhá poistka: nič, čo sa skladá do ``--mount``, nesmie niesť znak, ktorý v ňom začína nové pole."""
+    for part in parts:
+        if _MOUNT_UNSAFE.search(part):
+            raise PoradcaUnavailable(f"{_LABEL}: cesta {part!r} sa nedá bezpečne pripojiť (čiarka/úvodzovky)")
+
+
 def run_argv(
     *,
     project_slug: str,
@@ -264,6 +285,10 @@ def run_argv(
     Znalostná báza, trezor prístupov, zdieľaný ``~/.claude``, záznamy agenta stavby.
     """
     container_dir, host_dir = project_dirs(project_slug)
+    _assert_mount_safe(
+        host_dir, container_dir, str(session_dir(conversation_id)), str(run_dir(token)), str(empty_file())
+    )
+    _assert_mount_safe(*overlays)
     container_session_dir = f"{_CLAUDE_DIR}/projects/{build_sandbox.session_dir_name(container_dir)}"
     argv = [
         "docker",

@@ -187,7 +187,15 @@ def test_known_secret_values_come_from_env_uat_and_the_vault(world, tmp_path, mo
     vault.mkdir()
     (vault / "a.env").write_text("API_TOKEN='fake-vault-token-0004'\nHOST=server.example\n")
     (vault / "b.json").write_text('{"smtp": {"password": "fake-vault-json-0005", "user": "jano"}}')
-    monkeypatch.setattr(context.settings, "credentials_storage_path", str(vault))
+    from backend.config.settings import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "credentials_storage_path", str(vault))
+    from backend.db.models.credentials import Credential
+
+    for name in ("a.env", "b.json"):
+        db.add(Credential(title=name, file_path=str(vault / name)))
+    db.add(Credential(title="chýba", file_path=str(vault / "zmazany.env")))  # nečitateľný záznam sa preskočí
+    db.flush()
     values = set(context.known_secret_values(db, project))
     for fake in (
         "fake-env-oauth-0001",

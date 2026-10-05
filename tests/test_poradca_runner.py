@@ -235,3 +235,21 @@ def test_fail_orphans_closes_answers_a_restart_interrupted(world):
     assert runner.fail_orphans(db) >= 1
     db.refresh(msg)
     assert msg.status == "failed" and "reštart" in msg.error
+
+
+async def test_every_step_passes_the_secret_filter_before_db_and_websocket(world):
+    """Nález previerky 05.10.2026: kroky vstavaných nástrojov (Grep vzor, Read cesta) išli do databázy
+    a prehliadača nefiltrované. Teraz filtruje ``_record_step`` pre všetky kroky na jednom mieste."""
+    from backend.services.poradca.secrets_filter import SecretFilter
+
+    db = world["db"]
+    msg = PoradcaMessage(conversation_id=world["conversation"].id, author="poradca", content="", status="running")
+    db.add(msg)
+    db.commit()
+    entry = runner._Running(conversation_id=world["conversation"].id, secret_filter=SecretFilter([FAKE_SECRET]))
+    queue = runner.hub.subscribe(world["conversation"].id)
+    await runner._record_step(entry, msg.id, "Grep", f"„{FAKE_SECRET}“ v celý projekt")
+    db.refresh(msg)
+    assert FAKE_SECRET not in json.dumps(msg.steps) and "‹skryté›" in msg.steps[0]["target"]
+    assert FAKE_SECRET not in json.dumps(queue.get_nowait())
+    runner.hub.unsubscribe(world["conversation"].id, queue)

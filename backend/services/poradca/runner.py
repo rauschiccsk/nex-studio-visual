@@ -147,6 +147,9 @@ class _Running:
     stop_requested: bool = False
     task: Optional[asyncio.Task] = None
     steps: list[dict] = field(default_factory=list)
+    #: Filter tajomstiev tejto otázky — každý krok aj log prejde ním (nález previerky 05.10.2026: kroky
+    #: vstavaných nástrojov a chybový výstup Claude išli predtým nefiltrované).
+    secret_filter: SecretFilter = field(default_factory=SecretFilter)
 
 
 #: Bežiace odpovede podľa id správy — pre zastavenie.
@@ -296,7 +299,7 @@ def _builtin_target(name: str, args: dict, project_dir: str) -> str:
 
 
 async def _record_step(entry: _Running, message_id: UUID, tool: str, target: str) -> None:
-    step = {"tool": tool, "target": target}
+    step = {"tool": tool, "target": entry.secret_filter(target)[:300]}
     entry.steps.append(step)
     hub.publish(entry.conversation_id, {"type": "step", "message_id": str(message_id), **step})
     with SessionLocal() as db:
@@ -319,6 +322,7 @@ async def _run(message_id: UUID, conversation_id: UUID, question: str, user_id: 
             scope = scope_line(db, project, conversation.version_id)
             model, effort = _model_and_effort(db, user_id)
             secret_filter = SecretFilter(known_secret_values(db, project))
+            entry.secret_filter = secret_filter
             asker = " ".join(p for p in (user.first_name, user.last_name) if p) or user.username
             slug, session_id = project.slug, conversation.claude_session_id
             from backend.services.poradca.tools import build_tools
@@ -469,7 +473,11 @@ async def _stream(argv: list[str], entry: _Running, message_id: UUID, project_di
     if result_text is None or is_error or proc.returncode not in (0, None):
         if build_sandbox.looks_unavailable(stderr_text):
             raise sandbox.PoradcaUnavailable(stderr_text[:300])
-        logger.warning("poradca: claude ended without an answer rc=%s stderr=%s", proc.returncode, stderr_text[:500])
+        logger.warning(
+            "poradca: claude ended without an answer rc=%s stderr=%s",
+            proc.returncode,
+            entry.secret_filter(stderr_text)[:500],
+        )
         detail = (result_text or "").strip()[:300] if is_error else ""
         raise _QuestionFailed("Poradca skončil bez odpovede." + (f" ({detail})" if detail else ""))
     return str(result_text).strip(), usage

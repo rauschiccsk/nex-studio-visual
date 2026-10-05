@@ -99,6 +99,12 @@ Každá otázka = dočasný kontajner z obrazu backendu (`docker run --rm`), pod
   nie obsah (B7);
 - **zlyhá nahlas**: keď sa kontajner nedá spustiť, otázka skončí chybou s dôvodom; nikdy neustúpi na beh
   mimo kontajnera.
+- **meno súboru nesmie meniť pripojenie** (nález nezávislej bezpečnostnej previerky 05.10.2026, opravené
+  pred nasadením): súbor na prekrytie, ktorého cesta obsahuje čiarku, úvodzovky či riadiaci znak, by do
+  zápisu `--mount` vpašoval vlastný `source=` a docker by pod projekt pripojil ľubovoľnú cestu hostiteľa.
+  Taký súbor Poradca odmietne s jeho menom (premenovať) — a druhá poistka to isté overí pri skladaní celého
+  `docker run`. Previerka ďalej opravila: kroky vstavaných nástrojov a chybový výstup Claude teraz idú
+  filtrom tajomstiev; trezor prístupov sa číta cez jeho službu, nie priamo zo súborov.
 
 ### 4.2 Nástroje na pohľad „zozadu"
 Všetko „zozadu" podá **backend**. Kontajner má v sebe malého prostredníka (MCP cez stdio), ktorý sa spojí
@@ -133,6 +139,10 @@ databázu neurčuje AI, ale backend z projektu. Každý výstup prejde filtrom t
 - Predpoklad na overenie pri stavbe: prihlásenie na lokálnom sockete v `postgres:16-alpine` bez hesla.
 
 ### 4.4 Ochrana tajomstiev
+„Bez internetu" stojí na nástrojoch, nie na sieti: oplotená sieť (rovnaká ako pri stavbe) nechá von
+spojenie na Claude, ktoré Poradca potrebuje; webové nástroje a príkazy mu odoberá obmedzený režim a žiadny
+nástroj kokpitu nesťahuje nič podľa pokynu agenta. Nový nástroj, ktorý by niečo sťahoval, by to otvoril.
+
 Tri vrstvy: (1) **čo Poradca nedostane vôbec** — obmedzený režim, prekryté súbory, stĺpce bez práva,
 žiadne priame záznamy agenta; (2) **známe hodnoty** v backende — prístupy projektu z trezoru, tajné premenné
 z `.env` UAT, `CLAUDE_CODE_OAUTH_TOKEN`, kľúč Deda, kľúč podpisu prihlásení — nahradené presnou zhodou;
@@ -140,7 +150,7 @@ z `.env` UAT, `CLAUDE_CODE_OAUTH_TOKEN`, kľúč Deda, kľúč podpisu prihláse
 bežia na výstupe každého nástroja aj na odpovedi. Skúšky len na umelých hodnotách.
 
 ### 4.5 Dáta, API, obrazovka
-- Migrácia `101`: `poradca_conversations`, `poradca_messages` (poradie, autor, text, kroky = nástroj + cieľ,
+- Migrácia `102` (`101` je model podľa rodiny, 4.6): `poradca_conversations`, `poradca_messages` (poradie, autor, text, kroky = nástroj + cieľ,
   spotreba a cena, trvanie, stav `running|done|failed|stopped`); rola `poradca` v obmedzení
   `user_agent_settings` (dnes `('ai_agent','auditor')`, migrácia 069) aj v `schemas/user_agent_setting.py`;
   nastavenie súbežnosti.
