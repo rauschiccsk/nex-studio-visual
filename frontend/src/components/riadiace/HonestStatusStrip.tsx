@@ -7,7 +7,7 @@
 // paused / token-stopped run reads "Pozastavené", NOT "working".
 
 import { useEffect, useState } from "react";
-import { Eye, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 import type { PipelineState } from "../../services/api/pipeline";
 import { elapsedSince } from "../../utils/elapsed";
@@ -22,20 +22,10 @@ import {
 } from "../cockpit/labels";
 import type { BuildPhase, StatusTone } from "../cockpit/labels";
 
-// konzultacia-mode.md Part 3: a TERMINAL version (current_stage === 'done' — a finished / released build) is
-// answerable in READ-ONLY advisory mode. The strip shows this so the Manažér knows typing now = advice, not
-// a build. No mode toggle — the version's terminal state IS the mode.
-const CONSULT_INDICATOR = "Konzultácia — poradím, nič nezmením";
-
 
 // Honest status text (salvaged verbatim from the retired AI Agent tab's headerStatus, design §4.4.1):
 // Voľný / Pracuje na <projekt> v<ver> — fáza X / Čaká na súhlas / Pozastavené.
 function statusText(state: PipelineState | null, projectName: string, versionNumber: string): string {
-  // Konzultácia (Part 3): a running consult turn on a terminal version reads "premýšľam…" — NOT the generic
-  // agent_working "fáza done" (the phase is meaningless in read-only advisory mode). Precedes every branch.
-  if (state && state.current_stage === "done" && state.status === "agent_working") {
-    return "Konzultácia — premýšľam…";
-  }
   // Hotovo: ANY signed-off build reads "Hotovo — pripravené na nasadenie" (green via the existing done→green
   // tone). Mode-agnostic — a completed GUIDED (phase-automaton) build must show "Hotovo" too, not fall through
   // to "Voľný" as it did when this was gated on mode==="conversation". MUST precede the bare-"Voľný" branch
@@ -125,8 +115,6 @@ export function HonestStatusStrip({
     const id = setInterval(() => setNow(Date.now()), 15_000);
     return () => clearInterval(id);
   }, [working]);
-  // Konzultácia (Part 3): a terminal version (current_stage === 'done') is in read-only advisory mode.
-  const consultMode = !!state && state.current_stage === "done";
   // Audit Theme 1: surface the engine's ready-made "čo ďalej" guidance (state.next_action) — previously
   // rendered NOWHERE. Shown for the settled awaiting_manazer wait (blocked states carry it in their own bar:
   // BlockRecoveryBar / Decision Cards / the Dedo banner), so it never double-renders.
@@ -156,13 +144,6 @@ export function HonestStatusStrip({
         <div className="flex items-start gap-1.5 border-t border-[var(--color-border-default)] px-4 py-1.5 text-[11px] text-[var(--color-text-muted)]">
           <span className="truncate">{guidance}</span>
           {since && <span className="flex-shrink-0 whitespace-nowrap">· {since}</span>}
-        </div>
-      )}
-
-      {consultMode && (
-        <div className="flex items-center gap-1.5 border-t border-[var(--color-border-default)] px-4 py-1.5 text-[11px] text-[var(--color-text-muted)]">
-          <Eye className="h-3 w-3 flex-shrink-0" />
-          <span className="truncate">{CONSULT_INDICATOR}</span>
         </div>
       )}
 

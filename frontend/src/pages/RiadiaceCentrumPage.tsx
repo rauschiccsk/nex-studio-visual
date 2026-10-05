@@ -42,7 +42,7 @@ import DedoProposalBar from "@/components/riadiace/DedoProposalBar";
 import ReverifyBar from "@/components/riadiace/ReverifyBar";
 import PrenosDoRiadnejVerzieBar from "@/components/riadiace/PrenosDoRiadnejVerzieBar";
 import ReverifyNoFixBar from "@/components/riadiace/ReverifyNoFixBar";
-import ChangeRequestBar from "@/components/riadiace/ChangeRequestBar";
+import OpytajSaPoradcuBar from "@/components/riadiace/OpytajSaPoradcuBar";
 import PhaseBar from "@/components/riadiace/PhaseBar";
 import StavZostavenia from "@/components/riadiace/StavZostavenia";
 import HonestStatusStrip from "@/components/riadiace/HonestStatusStrip";
@@ -230,8 +230,7 @@ export default function RiadiaceCentrumPage() {
           SpecApprovalBar on a settled Príprava (approve_spec, STEP 2); SchvalitBar on a Návrh gate awaiting
           the Manažér (schvalit — advances to Programovanie); DecisionCardsBar on a consultation blocker
           (decide — one Decision Card at a time, CR-V2-041); ReverifyBar on a settled version whose verified
-          green drifted past HEAD (overit_znovu — CR-V2-057); ChangeRequestBar on a read-only consult answer
-          that raised a change_request (konzultacia-mode.md Part 3). */}
+          green drifted past HEAD (overit_znovu — CR-V2-057). */}
       <div className="col-start-1 row-start-3 min-w-0">
         <DecisionCardsBar
           board={board}
@@ -284,19 +283,23 @@ export default function RiadiaceCentrumPage() {
           versionId={versionId}
           onBoard={setBoard}
         />
-        <ChangeRequestBar board={board} versionId={versionId} />
       </div>
 
-      {/* Bottom — the relay send box. */}
+      {/* Bottom — the relay send box; on a FINISHED version „Opýtaj sa Poradcu" instead (ICCINT-167): no agent
+          works on a done version, so a message there would go unanswered (the engine refuses it). */}
       <div className="col-start-1 row-start-4 min-w-0">
-        <ConversationComposer
-          versionId={versionId}
-          onRelay={handleSend}
-          disabled={!versionId}
-          frameworkBlocked={frameworkBlocked}
-          blockedAbove={blockRecoveryActive}
-          atVizual={board?.state?.current_stage === "vizual"}
-        />
+        {board?.state?.current_stage === "done" ? (
+          <OpytajSaPoradcuBar versionId={versionId} />
+        ) : (
+          <ConversationComposer
+            versionId={versionId}
+            onRelay={handleSend}
+            disabled={!versionId}
+            frameworkBlocked={frameworkBlocked}
+            blockedAbove={blockRecoveryActive}
+            atVizual={board?.state?.current_stage === "vizual"}
+          />
+        )}
       </div>
 
       {/* Right rail — the Plán úloh three-layer manager map (STEP 3), spanning the full height. Reads the live

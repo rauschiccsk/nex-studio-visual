@@ -89,17 +89,6 @@ export interface AgentSession {
   status: AgentLiveness;
 }
 
-// konzultacia-mode.md Part 2: a read-only Konzultácia turn raises this marker (in the message payload) when
-// the Manažér's ask needs a NEW version — the FE ChangeRequestBar turns it into "Založiť novú verziu z tejto
-// požiadavky". Mirrors backend pipeline_status.ChangeRequestMarker. `null` on every build turn.
-export interface ChangeRequestMarker {
-  summary: string;
-  title?: string | null;
-  // konzultacia-followup.md Fix 3: stamped by the capture endpoint once this marker minted a version. Present
-  // ⇒ already captured — the ChangeRequestBar hides (a repeat click / revisit can never mint a duplicate).
-  captured_version_id?: string | null;
-}
-
 export interface PipelineMessage {
   id: string;
   version_id: string;
@@ -109,9 +98,8 @@ export interface PipelineMessage {
   kind: PipelineMessageKind;
   content: string;
   status: string;
-  // The JSONB payload; the ONLY typed key is the Part 2 `change_request` marker (the ChangeRequestBar reads
-  // it) — everything else stays an opaque bag. `null` on messages without a payload.
-  payload: (Record<string, unknown> & { change_request?: ChangeRequestMarker | null }) | null;
+  // The JSONB payload — an opaque bag; `null` on messages without a payload.
+  payload: Record<string, unknown> | null;
   created_at: string;
   // Monotonic insertion order (CR-NS-018) — authoritative ordering for both the REST
   // board and incremental WS message_added frames; sort by it, don't trust arrival.
@@ -302,28 +290,6 @@ export function relayPipelineMessageApi(
   text: string,
 ): Promise<PipelineRelayResponse> {
   return api.post<PipelineRelayResponse>(`/pipeline/${versionId}/relay`, { text });
-}
-
-// konzultacia-mode.md Part 2 (-followup Fix 3/4): capture a read-only consult's change request into a NEW
-// draft version. `versionId` is the FINISHED version the consult ran on; `messageId` is the SOURCE consult
-// message carrying the change_request marker (the summary/title live on that marker — the BE reads them, so
-// the capture is idempotent per source message). The backend records a project backlog REQ-N and mints the
-// NEXT version in DRAFT (planned, NO build). Returns `project_slug` + the new version's id/number — navigate
-// using the RETURNED slug (Fix 4), so it is correct even if the pin diverged from the consulted project.
-export interface ChangeRequestCaptureResponse {
-  version_id: string;
-  version_number: string;
-  project_slug: string;
-  backlog_number: number;
-}
-
-export function captureChangeRequestApi(
-  versionId: string,
-  messageId: string,
-): Promise<ChangeRequestCaptureResponse> {
-  return api.post<ChangeRequestCaptureResponse>(`/pipeline/${versionId}/change-request`, {
-    message_id: messageId,
-  });
 }
 
 // ── WebSocket ────────────────────────────────────────────────────────────────

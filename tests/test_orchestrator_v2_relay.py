@@ -348,6 +348,33 @@ class TestRelayQueue:
         with pytest.raises(orchestrator.OrchestratorError):
             await orchestrator.relay_manazer_message(db_session, version_id=version.id, text="hi")
 
+    # ICCINT-167: Konzultácia na hotovej verzii je preč — správa tam nemá komu ísť. Odmietne sa ešte pred
+    # zápisom, s vetou, ktorá ukáže cestu ďalej (Poradca, nová verzia), namiesto správy bez odpovede.
+    @pytest.mark.asyncio
+    async def test_relay_on_a_finished_version_is_refused_and_records_nothing(self, db_session):
+        version, _ = _make_version(db_session)
+        _seed_state(db_session, version.id, stage="done", status="done")
+        before = db_session.query(PipelineMessage).filter(PipelineMessage.version_id == version.id).count()
+        with pytest.raises(orchestrator.OrchestratorError, match="Poradcovi"):
+            await orchestrator.relay_manazer_message(db_session, version_id=version.id, text="Prečo to padá?")
+        after = db_session.query(PipelineMessage).filter(PipelineMessage.version_id == version.id).count()
+        assert after == before
+        state = db_session.query(PipelineState).filter(PipelineState.version_id == version.id).one()
+        assert (state.current_stage, state.status) == ("done", "done")
+
+    @pytest.mark.asyncio
+    async def test_a_message_queued_as_the_build_finished_is_not_dispatched(self, db_session, monkeypatch):
+        version, _ = _make_version(db_session)
+        _seed_state(db_session, version.id, stage="done", status="done")
+        monkeypatch.setattr(orchestrator, "pop_relay_message", lambda vid: "neskoro")
+
+        async def _never(*a, **k):
+            raise AssertionError("na hotovej verzii sa ťah nespúšťa")
+
+        monkeypatch.setattr(orchestrator, "run_dispatch", _never)
+        state = await orchestrator.drain_relay_turn(db_session, version.id)
+        assert (state.current_stage, state.status) == ("done", "done")
+
 
 # ── 5) a relayed message becomes an engine --resume turn, never a PTY write ───────
 

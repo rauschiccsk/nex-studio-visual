@@ -181,8 +181,9 @@ z hostiteľa — nová verzia modelu príde bez zmeny aplikácie.
 ## 5. Čo sa stane s dnešnou Konzultáciou
 Poradca ju **nahradí**: na PROD ju nikto nepoužil, kontajner sa jej podľa kódu nespustí a nesie dve diery
 (celý `~/.claude` na zápis, povolený `WebFetch`). Na hotovej verzii bude v Riadiacom centre namiesto poľa
-na otázku tlačidlo **„Opýtaj sa Poradcu"**. Odstráni sa cesta Konzultácie (~27 súborov + zmienka
-v `templates/ai-agent-charter.md`). **Neruší sa** „kolo konzultácie" s kartami rozhodnutí počas stavby
+na otázku tlačidlo **„Opýtaj sa Poradcu"**. Odstráni sa cesta Konzultácie (backend, obrazovka, skúšky;
+v `templates/ai-agent-charter.md` zmienka o nej nebola — „konzultuj" tam patrí Príprave a kartám
+rozhodnutí). Správu do Riadiaceho centra hotovej verzie backend odmietne vetou, ktorá menuje Poradcu. **Neruší sa** „kolo konzultácie" s kartami rozhodnutí počas stavby
 (`DecisionCardsBar`) — iná vec s podobným menom.
 
 ## 6. Postup a veľkosť

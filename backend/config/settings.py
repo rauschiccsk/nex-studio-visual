@@ -57,28 +57,13 @@ class Settings(BaseSettings):
     claude_config_dir: str = "/root/.claude"
     claude_cli_path: str = "claude"
 
-    # Konzultácia OS-level read-only sidecar (konzultacia-sidecar-sandbox.md). The consult turn runs
-    # inside an ephemeral ``docker run --rm`` sibling of THIS backend image so the project is
-    # KERNEL-enforced ``:ro``. ``consult_sandbox_image`` is that image tag — a dedicated knob
-    # (env ``CONSULT_SANDBOX_IMAGE``) rather than overloading ``app_version`` (a semver, not an image
-    # tag). The on/off kill-switch is the ``CONSULT_SANDBOX`` env (default on), read at turn time in
-    # :func:`backend.services.consult_sandbox.sandbox_enabled`.
-    #
-    # EMPTY on purpose, like ``build_sandbox_image`` below. The literal default this used to carry
-    # (``nex-studio-visual-backend:v3.0.0``) names a tag that does not exist on this host — the oldest
-    # present is v4.0.85 — so every Konzultácia raised ``SidecarUnavailable`` and degraded to the in-process
-    # turn, i.e. the kernel read-only guarantee was in effect on none of them.
-    # :func:`backend.services.consult_sandbox.sidecar_image` now derives the running version's tag instead,
-    # which is the tag the deploy script actually built. ``CONSULT_SANDBOX_IMAGE`` still overrides.
-    consult_sandbox_image: str = ""
-
     # Build sandbox (ICCINT-16 STEP 2) — the image the Príprava/Návrh/Programovanie build turns run inside, a sibling of
     # THIS backend image (it needs the same git/gh/node tooling and the same mounted ``claude`` binary).
     # EMPTY on purpose: :func:`backend.services.build_sandbox.sandbox_image` then derives
     # ``nex-studio-visual-backend:v<app_version>``, i.e. the tag the deploy script actually built for the
-    # running version. A literal default is what broke ``consult_sandbox_image`` — it names a tag that does
-    # not exist on this host, so every Konzultácia silently lost its guarantee. Set BUILD_SANDBOX_IMAGE to
-    # pin something else. The on/off switch is the ``BUILD_SANDBOX`` env (default on), read at turn time.
+    # running version. A literal default broke the former Konzultácia sidecar — it named a tag that did not
+    # exist on this host, so every consult silently lost its guarantee. Set BUILD_SANDBOX_IMAGE to pin
+    # something else. The on/off switch is the ``BUILD_SANDBOX`` env (default on), read at turn time.
     build_sandbox_image: str = ""
 
     # Poradca (ICCINT-167, docs/specs/poradca.md §4.1): priečinok so záznamami rozhovorov, socketmi otázok

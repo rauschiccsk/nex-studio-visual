@@ -1,9 +1,9 @@
 /**
- * HonestStatusStrip — the read-only Konzultácia indicator (konzultacia-mode.md Part 3).
+ * HonestStatusStrip — the honest status of a FINISHED version (verification #6 and drift).
  *
- * A TERMINAL version (current_stage === 'done' — finished / released) is answerable in read-only advisory
- * mode; the strip shows "Konzultácia — poradím, nič nezmením" so the Manažér knows typing now is advice, not
- * a build. A mid-build version shows NO such indicator.
+ * (Until ICCINT-167 this file also pinned the Konzultácia read-only indicator; Konzultácia is gone — a done
+ * version now offers „Opýtaj sa Poradcu" instead, see test_OpytajSaPoradcuBar — and the strip must NOT say
+ * "Konzultácia" any more.)
  */
 
 import { describe, it, expect } from "vitest";
@@ -13,37 +13,18 @@ import "@testing-library/jest-dom/vitest";
 import HonestStatusStrip from "@/components/riadiace/HonestStatusStrip";
 import type { PipelineState } from "@/services/api/pipeline";
 
-function strip(state: Partial<PipelineState> | null) {
-  return (
-    <HonestStatusStrip
-      state={state as PipelineState | null}
-      projectName="Demo"
-      versionNumber="1.0.0"
-      reconnecting={false}
-      error={null}
-    />
-  );
-}
-
-describe("HonestStatusStrip — Konzultácia read-only indicator", () => {
-  it("renders the read-only indicator on a terminal (done) version", () => {
-    render(strip({ current_stage: "done", status: "done", mode: "conversation" }));
-    expect(screen.getByText("Konzultácia — poradím, nič nezmením")).toBeInTheDocument();
-  });
-
-  it("renders the read-only indicator on a released version too (current_stage === 'done')", () => {
-    render(strip({ current_stage: "done", status: "done", mode: null }));
-    expect(screen.getByText("Konzultácia — poradím, nič nezmením")).toBeInTheDocument();
-  });
-
-  it("a running consult turn reads 'premýšľam…' (not the generic 'fáza done')", () => {
-    render(strip({ current_stage: "done", status: "agent_working", mode: "conversation" }));
-    expect(screen.getByText("Konzultácia — premýšľam…")).toBeInTheDocument();
-  });
-
-  it("shows NO consult indicator on a mid-build version", () => {
-    render(strip({ current_stage: "priprava", status: "agent_working", mode: "conversation" }));
-    expect(screen.queryByText("Konzultácia — poradím, nič nezmením")).not.toBeInTheDocument();
+describe("HonestStatusStrip — no Konzultácia on a done version (ICCINT-167)", () => {
+  it("a done version reads Hotovo, never the old consult indicator", () => {
+    render(
+      <HonestStatusStrip
+        state={{ current_stage: "done", status: "done", mode: "conversation" } as PipelineState}
+        projectName="Demo"
+        versionNumber="1.0.0"
+        reconnecting={false}
+        error={null}
+      />,
+    );
+    expect(screen.queryByText(/Konzultácia/)).not.toBeInTheDocument();
   });
 });
 

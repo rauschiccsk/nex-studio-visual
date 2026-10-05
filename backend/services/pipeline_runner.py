@@ -212,14 +212,6 @@ async def run_one_turn(
     """
     if state is None:
         state = db.execute(select(PipelineState).where(PipelineState.version_id == version_id)).scalar_one_or_none()
-    # Konzultácia (konzultacia-mode.md Part 1): a TERMINAL version (``current_stage == 'done'`` — a
-    # hotovo-signed conversation build, a legacy schvalit-done build, or a PROD-released version) answers in
-    # READ-ONLY advisory mode. Routed by the STAGE (mode-agnostic — both a conversation and a legacy done
-    # build reach here), BEFORE the conversation/dispatch split. ``run_consult_turn`` guards
-    # ``agent_working`` (a spurious run on a settled done version is a no-op), so it fires only when a
-    # consult relay/drain armed it; it never advances a phase (returns to terminal rest).
-    if state is not None and state.current_stage == "done":
-        return await orchestrator.run_consult_turn(db, version_id, on_event, on_message=on_message)
     # Spine STEP 1: a ``mode='conversation'`` build runs the non-phase conversation loop
     # (``run_conversation_turn``) instead of the 4-phase automaton (``run_dispatch``) — NULL mode = the phase
     # automaton, UNCHANGED. STEP 4 (step4-programovanie-design.md MD-A): a conversation build that is

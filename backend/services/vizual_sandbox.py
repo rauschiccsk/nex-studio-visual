@@ -10,7 +10,7 @@ Proven mechanism (PoC passed 2026-07-12): ``node:20`` with the project ``fronten
 watcher crosses the bind mount natively (no ``CHOKIDAR_USEPOLLING`` needed). This module wraps that in
 the two disciplines the real thing needs:
 
-  * **Isolation** (mirrors :mod:`backend.services.consult_sandbox`): the slug is validated and the
+  * **Isolation** (the shared :mod:`backend.services.sandbox_paths` posture): the slug is validated and the
     resolved host source is containment-asserted BEFORE it is composed into a ``-v`` bind; the ONLY
     bind mounts are the project ``frontend/`` (rw — HMR must see host edits) + one tiny generated Vite
     override config (ro); the container joins ONLY ``nex-proxy-net``. Deliberately ABSENT (the negative
@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import Optional
 
 #: The ICC-canonical kebab-case project-slug rule, reused verbatim (DRY) — identical to the rule
-#: :mod:`backend.services.consult_sandbox` guards its bind source with. Rejects ``..`` / ``/`` / empty /
+#: :mod:`backend.services.sandbox_paths` guards every bind source with. Rejects ``..`` / ``/`` / empty /
 #: anything non-slug BEFORE it is composed into a ``-v`` bind source.
 from backend.services.project_specs import _SLUG_RE as _PROJECT_SLUG_RE
 
@@ -124,7 +124,7 @@ _DOCKER_CALL_TIMEOUT = 60
 
 
 # ---------------------------------------------------------------------------
-# Slug validation + host-path containment (mirrors consult_sandbox's posture)
+# Slug validation + host-path containment (the sandbox_paths posture)
 # ---------------------------------------------------------------------------
 
 
@@ -134,7 +134,7 @@ def _validate_project_slug(slug: str) -> None:
     ``pathlib`` does NOT normalize ``..``, so an unvalidated slug of ``..`` would compose the bind
     SOURCE ``/opt/projects/..`` → docker would mount ALL of ``/opt`` into the sandbox, defeating the
     isolation guarantee. Reuses the ICC-canonical :data:`_PROJECT_SLUG_RE` (DRY) — identical to
-    :func:`backend.services.consult_sandbox._validate_project_slug`.
+    :func:`backend.services.sandbox_paths.validate_project_slug`.
     """
     if not isinstance(slug, str) or not _PROJECT_SLUG_RE.match(slug):
         raise ValueError(f"vizual sandbox: refusing unsafe project slug {slug!r}")

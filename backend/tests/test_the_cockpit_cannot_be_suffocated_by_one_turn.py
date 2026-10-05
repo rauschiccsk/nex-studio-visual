@@ -37,7 +37,6 @@ SHELLING_MODULES = {
     "build_sandbox",
     "ci_status",
     "claude_agent",
-    "consult_sandbox",
     "create_project_postscaffold",
     "git_state",
     "instance_adoption",

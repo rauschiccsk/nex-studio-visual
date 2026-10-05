@@ -9,8 +9,8 @@ socket is reachable by a determined one no matter what we mount, and pretending 
 The threat model is the MISTAKE of an unsupervised agent — the same class of mistake that, during a manual
 tidy-up of ``/opt``, moved directories without checking what referenced them and took down every backup.
 
-THE GUARANTEE IS THE MOUNT LIST — AND THE MOUNT LIST IS NOT ONLY ABOUT ``/opt``. :mod:`consult_sandbox`
-states the lesson this module inherits: *"a deny-list cannot be completed … only OS isolation is robust."*
+THE GUARANTEE IS THE MOUNT LIST — AND THE MOUNT LIST IS NOT ONLY ABOUT ``/opt``. The former Konzultácia sidecar
+stated the lesson this module inherits: *"a deny-list cannot be completed … only OS isolation is robust."*
 A container that has never been shown ``/opt/customers`` cannot write to ``/opt/customers``. The first
 version of this module stopped there and was WRONG, because a sandbox does not need a path to a victim if it
 can write a file that a LATER, PRIVILEGED turn executes. Two such files were demonstrated by audit:
@@ -301,8 +301,8 @@ _GIT_IDENTITY_ENV: tuple[tuple[str, str], ...] = (
 
 #: Default image repository for the sandbox. It is a sibling of THIS backend image (it needs the same git /
 #: gh / node tooling and the same ``claude`` symlink), tagged with the running ``APP_VERSION``. Deriving the
-#: default from the version rather than pinning a literal is the fix for the failure :mod:`consult_sandbox`
-#: was audited for: its default names a tag that does not exist on this host, so every Konzultácia silently
+#: default from the version rather than pinning a literal is the fix for the failure the former Konzultácia
+#: sidecar was audited for: its default named a tag that did not exist on this host, so every consult silently
 #: lost its guarantee. ``BUILD_SANDBOX_IMAGE`` overrides.
 _DEFAULT_IMAGE_REPO = "nex-studio-visual-backend"
 
@@ -388,8 +388,8 @@ _OFF_VALUES: tuple[str, ...] = ("0", "false", "no", "off")
 class BuildSandboxUnavailable(ClaudeAgentError):
     """The build sandbox could not be launched (no docker CLI, daemon unreachable, image or bind absent).
 
-    THIS IS RAISED, NOT SWALLOWED — the deliberate difference from :class:`consult_sandbox.SidecarUnavailable`.
-    A Konzultácia that loses its sidecar degrades to an in-process turn that is still read-only by tool
+    THIS IS RAISED, NOT SWALLOWED — the deliberate difference from the former Konzultácia sidecar.
+    A Konzultácia that lost its sidecar degraded to an in-process turn that is still read-only by tool
     profile, so the fallback costs defence-in-depth and nothing else. A BUILD turn that loses its sandbox
     degrades to an unrestricted Bash tool inside a container mounting every customer's production tree: the
     fallback IS the exposure this module exists to remove, so taking it automatically would quietly undo the
@@ -929,7 +929,7 @@ def build_run_argv(
 def log_network_residual_once() -> None:
     """Say ONCE per process what the sandbox does NOT isolate. Called from the first sandboxed dispatch.
 
-    Modelled on :data:`consult_sandbox._EGRESS_RESTRICTION_FOLLOWUP`: a guarantee that is not implemented is
+    Modelled on the former Konzultácia sidecar's egress note: a guarantee that is not implemented is
     stated out loud, not left to be discovered by whoever reads the argv closely enough.
     """
     global _network_residual_logged

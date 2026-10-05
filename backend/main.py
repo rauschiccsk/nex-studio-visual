@@ -41,7 +41,6 @@ from backend.db.session import SessionLocal
 from backend.services import agent_terminal as agent_terminal_service
 from backend.services import build_db as build_db_service
 from backend.services import build_sandbox as build_sandbox_service
-from backend.services import consult_sandbox as consult_sandbox_service
 from backend.services import kb_index_sync as kb_index_sync_service
 from backend.services import orchestrator as orchestrator_service
 from backend.services.poradca import readiness as poradca_readiness
@@ -195,19 +194,13 @@ async def lifespan(app: FastAPI):
     * Spawn the periodic idle-cleanup task that kills sessions idle
       beyond :data:`agent_terminal.IDLE_TTL_SECONDS`.
 
-    Consult sidecar readiness (added after the audit): the OS-isolated Konzultácia sandbox is enabled by
-    default and degrades QUIETLY when it cannot launch, so its preconditions are probed once at boot and an
-    enabled-but-unready sandbox is logged at ERROR. Never fatal — a consult must stay usable — but the
-    deployment can no longer run without its promised kernel read-only guarantee and look healthy doing it.
-
-    Build sandbox readiness (ICCINT-16 STEP 2): the Príprava/Návrh/Programovanie build turns run OS-isolated and, unlike
-    the consult sidecar, do NOT fall back to a subprocess when the sandbox cannot start — the fallback is
-    the exposure the sandbox removes. An unmet precondition therefore FAILS those turns, so it is probed at
+    Build sandbox readiness (ICCINT-16 STEP 2): the Príprava/Návrh/Programovanie build turns run OS-isolated and
+    do NOT fall back to a subprocess when the sandbox cannot start — the fallback is the exposure the sandbox
+    removes. An unmet precondition therefore FAILS those turns, so it is probed at
     boot and logged at ERROR: the operator learns the image is missing now, not when the first build stops.
     """
     _run_alembic_upgrade()
 
-    consult_sandbox_service.log_startup_readiness()
     build_sandbox_service.log_startup_readiness()
     _poradca_problems = poradca_readiness.problems()
     if _poradca_problems:

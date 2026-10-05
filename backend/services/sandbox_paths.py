@@ -1,8 +1,8 @@
 """The bind-mount path guards EVERY project sandbox shares — one copy, on purpose.
 
 WHY ONE MODULE AND NOT A COPY PER SANDBOX. Three sandboxes now compose a ``docker run`` bind whose SOURCE
-is derived from a project slug: the read-only Konzultácia sidecar (:mod:`consult_sandbox`), the live Vite
-preview (:mod:`vizual_sandbox`) and the build sandbox (:mod:`build_sandbox`). All three depend on the same
+is derived from a project slug: the read-only Poradca question container (:mod:`poradca.sandbox`), the live
+Vite preview (:mod:`vizual_sandbox`) and the build sandbox (:mod:`build_sandbox`). All three depend on the same
 two invariants, and both are load-bearing rather than cosmetic:
 
   * **the slug is canonical** — ``pathlib`` does NOT normalise ``..``, so an unvalidated slug of ``..``
@@ -44,7 +44,7 @@ def validate_project_slug(project_slug: object, *, sandbox: str) -> None:
     """Reject any non-canonical project slug BEFORE it is composed into a bind source.
 
     ``sandbox`` is the caller's own label, so the raised message reads in that sandbox's register
-    (e.g. ``"consult sidecar: refusing unsafe project slug '..'"``).
+    (e.g. ``"poradca sandbox: refusing unsafe project slug '..'"``).
     """
     if not isinstance(project_slug, str) or not _PROJECT_SLUG_RE.match(project_slug):
         raise SandboxPathError(f"{sandbox}: refusing unsafe project slug {project_slug!r}")

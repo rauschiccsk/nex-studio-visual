@@ -43,7 +43,6 @@ from __future__ import annotations
 
 import ast
 import asyncio
-import inspect
 import json
 import logging
 import os
@@ -61,7 +60,7 @@ def _pin_projects_root(monkeypatch):
     """These tests assert the FIXED ``/opt/projects`` container→host translation, so ``PROJECTS_ROOT`` must
     be the real one here. The suite-wide isolation fixture points it at a temp dir so scaffolding writes
     cannot pollute the real workspace; these tests scaffold nothing (docker is mocked), so pinning the real
-    prefix is both correct and leak-free — the same posture ``test_consult_sandbox`` takes."""
+    prefix is both correct and leak-free."""
     monkeypatch.setattr(claude_agent, "PROJECTS_ROOT", Path("/opt/projects"))
 
 
@@ -818,13 +817,6 @@ async def test_every_other_phase_still_runs_as_a_subprocess(monkeypatch, stage) 
     assert (await _turn_argv(monkeypatch, stage=stage))[0] == "claude"
 
 
-async def test_a_consult_turn_never_takes_the_build_sandbox(monkeypatch) -> None:
-    # A read-only consult has its own sidecar; the build wrapper keys on a build profile
-    # (``allowed_tools is None``) so the two can never collide even if a consult carried a build phase.
-    argv = await _turn_argv(monkeypatch, stage="priprava", allowed_tools=["Read", "Grep", "Glob"])
-    assert argv[0] == "claude"
-
-
 def test_phase_gate_is_the_single_source_of_the_routing() -> None:
     assert build_sandbox.SANDBOXED_PHASES == ("priprava", "navrh", "vizual", "programovanie")
     assert build_sandbox.phase_uses_sandbox("priprava") is True
@@ -929,8 +921,8 @@ async def test_an_empty_value_means_unset_which_means_on(monkeypatch, empty) -> 
 async def test_unreachable_daemon_fails_loudly_and_does_not_fall_back(monkeypatch) -> None:
     """The decision this pins: a build turn that loses its sandbox FAILS.
 
-    Unlike the consult sidecar — whose fallback is still read-only by tool profile and so costs only
-    defence-in-depth — a build turn falling back gets an unrestricted Bash tool inside a container mounting
+    Unlike the former Konzultácia sidecar — whose fallback was still read-only by tool profile and so cost
+    only defence-in-depth — a build turn falling back gets an unrestricted Bash tool inside a container mounting
     every customer's production tree. That fallback IS the exposure the sandbox removes, so taking it
     automatically would undo the change while every surface reported success. It fails instead, and
     ``BUILD_SANDBOX=0`` is the one way back — a switch somebody throws on purpose.
@@ -1034,7 +1026,7 @@ async def test_a_timed_out_sandbox_container_is_reaped_streaming(monkeypatch) ->
 
 
 async def test_an_unexpected_error_mid_stream_still_reaps_the_container(monkeypatch) -> None:
-    """The regression :mod:`consult_sandbox` already had a test for and this module did not carry over.
+    """The regression the former Konzultácia sidecar already had a test for and this module did not carry over.
 
     A stream line above :data:`claude_agent._STREAM_LINE_LIMIT` raises ``ValueError``/``LimitOverrunError``
     — the very case CR-NS-018 raised that limit for — which is neither a Timeout nor a Cancel. Without a
@@ -1079,7 +1071,7 @@ async def test_an_unexpected_error_mid_run_still_reaps_the_container_non_streami
 
 
 async def test_a_timed_out_sandbox_container_is_reaped(monkeypatch) -> None:
-    # The non-streaming branch keeps its own coverage (Gate E / the consult transport use it).
+    # The non-streaming branch keeps its own coverage (Gate E uses it).
     proc = MagicMock()
     proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
     monkeypatch.setattr(claude_agent.asyncio, "create_subprocess_exec", AsyncMock(return_value=proc))
@@ -1478,33 +1470,6 @@ def test_reading_the_knowledge_base_works_BOTH_ways_or_neither(monkeypatch) -> N
     # §3(3) stays refused, and the docstring must say so rather than let it be discovered by a failed write.
     assert "read-only" in doc.lower()
     assert "MEMORY.md" in doc
-
-
-def test_the_two_transports_of_a_consult_turn_cannot_drift_apart(monkeypatch) -> None:
-    """The failure that made this a rule: ``claude_agent._invoke_once`` passed ``settings_path=`` to
-    ``consult_sandbox.run_consult_in_sandbox``, whose signature did not have it. Every live consult raised
-    ``TypeError`` — which ``except SidecarUnavailable`` does not catch, so the turn died AND
-    ``record_degradation`` never ran, leaving ``/health``'s ``degraded_turns`` at 0 for a guarantee that was
-    failing every single time. A signature is checkable; leave it to review and it drifts again."""
-    from backend.services import consult_sandbox
-
-    sidecar = set(inspect.signature(consult_sandbox.run_consult_in_sandbox).parameters)
-    in_process = set(inspect.signature(claude_agent._invoke_once).parameters)
-    # Everything the sidecar transport is handed must be a parameter it declares.
-    handed_over = {
-        "project_slug",
-        "claude_session_id",
-        "prompt",
-        "charter_path",
-        "timeout",
-        "model",
-        "effort",
-        "json_schema",
-        "allowed_tools",
-        "settings_path",
-    }
-    assert handed_over <= sidecar, f"the consult sidecar cannot accept {handed_over - sidecar}"
-    assert handed_over <= in_process
 
 
 def test_the_readiness_line_counts_instead_of_claiming(monkeypatch) -> None:

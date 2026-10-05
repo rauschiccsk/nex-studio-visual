@@ -24,7 +24,6 @@ from uuid import UUID
 from backend.config.settings import settings
 from backend.constants.paths import TERMINAL_LOG_DIR as DURABLE_TERMINAL_LOG_DIR
 from backend.core.agent_env import agent_env
-from backend.core.offload import run_blocking
 
 logger = logging.getLogger(__name__)
 
@@ -66,31 +65,6 @@ _SILENCE_POLL_SECONDS = 5
 #: can be a whole spec file on a single line, so the 64 KB default is far too
 #: small (CR-NS-018). 64 MB is generous and bounded.
 _STREAM_LINE_LIMIT = 64 * 1024 * 1024
-
-#: The known WRITE / EXECUTE / spawn tools a read-only turn must NOT reach (konzultacia-mode.md Part 1).
-#: When ``invoke_claude`` is given an explicit ``allowed_tools`` set, every one of these NOT in that set is
-#: passed to ``--disallowedTools`` — a CLI DENY, which ALWAYS wins over the project ``settings.json`` allow
-#: list (the ai-agent profile allows Edit/Write/Bash). So the hard guarantee is the ABSENCE of any write
-#: tool from the turn (per the Bash-permission lesson), not a "read-only Bash". Sub-agent spawn is denied
-#: under BOTH names: ``Agent`` (Claude Code 2.x) AND ``Task`` (historical/SDK) — the CLI spawns helpers via
-#: ``Task`` (see ``_kill_process_tree``) and the sibling ``pipeline_activity._HELPER_SPAWN_TOOLS`` keys on
-#: both, so a rename can't silently reopen the hole; a helper would run with its OWN write-capable profile
-#: and could mutate the project (konzultacia-followup.md Fix 2a). Also denied: the orchestration / skill /
-#: tool-loading meta-tools ``Workflow`` / ``Skill`` / ``ToolSearch`` — a live read-only smoke showed these
-#: remain in a headless session and could indirectly spawn a write-capable sub-agent or load a mutating
-#: deferred/MCP tool; a read-only consult needs none of them (Read/Grep/Glob suffice to read the project).
-_MUTATING_TOOLS: tuple[str, ...] = (
-    "Bash",
-    "Write",
-    "Edit",
-    "MultiEdit",
-    "NotebookEdit",
-    "Agent",
-    "Task",
-    "Workflow",
-    "Skill",
-    "ToolSearch",
-)
 
 
 class ClaudeAgentError(RuntimeError):
@@ -303,41 +277,33 @@ def build_claude_argv(
     model: Optional[str] = None,
     effort: Optional[str] = None,
     json_schema: Optional[dict] = None,
-    allowed_tools: Optional[list[str]] = None,
     settings_path: Optional[Path] = None,
     permission_mode: Optional[str] = None,
     force_new_session: bool = False,
 ) -> list[str]:
-    """Compose the ``claude -p`` argv shared by the in-process turn AND the OS-isolated consult sidecar.
+    """Compose the ``claude -p`` argv of a build turn — in-process AND inside the build sandbox.
 
-    The SINGLE source of the per-turn ``claude`` flags (konzultacia-sidecar-sandbox.md Part 1): both
-    :func:`_invoke_once` (in-process subprocess) and :func:`consult_sandbox.run_consult_in_sandbox` (the
-    ``docker run --entrypoint claude`` sidecar) call this so the two transports stay byte-identical except
-    for the container wrapper. Returns the full argv beginning with the CLI binary
-    (``settings.claude_cli_path``, default ``"claude"``); the sidecar drops that leading element (the
+    The SINGLE source of the per-turn ``claude`` flags: :func:`_invoke_once` composes it once and the build
+    sandbox (:func:`build_sandbox.build_run_argv`) wraps the same argv in ``docker run``, so the two transports
+    stay byte-identical except for the container wrapper. Returns the full argv beginning with the CLI binary
+    (``settings.claude_cli_path``, default ``"claude"``); the sandbox drops that leading element (the
     entrypoint provides it) and appends the rest after the image.
 
     Flags, in order:
       * ``--output-format`` — ``stream-json`` (+ ``--verbose``) when ``streaming`` else ``json`` (WS-D,
-        CR-NS-036: json carries the usage/cost envelope; the sidecar is always non-streaming → json).
+        CR-NS-036: json carries the usage/cost envelope).
       * ``charter_text`` given (first turn for this session — already read by the caller via
         :func:`_load_charter`, whose descriptive error is preserved) → ``--session-id`` +
         ``--append-system-prompt``; else ``--resume`` the existing session.
       * ``--model`` / ``--effort`` (CR-NS-040) when set; unset → no flag (CLI default).
       * ``--json-schema`` (R3, v0.7.0) when set → grammar-constrain the status block at the source.
-      * ``allowed_tools`` given (konzultacia-mode.md Part 1 + konzultacia-followup.md Fix 2) → the
-        EXCLUSIVE, deny-by-default read-only profile: ``--allowedTools`` auto-approves exactly those,
-        ``--disallowedTools`` hard-denies every :data:`_MUTATING_TOOLS` member NOT in the set (a CLI deny
-        wins over the project ``settings.json`` allow), and ``--permission-mode default`` makes the allow
-        list exclusive (every other/MCP/future tool denied in headless). Unset → no tool flags (build
-        turns, byte-identical).
       * ``--setting-sources user,project`` + ``--strict-mcp-config`` — on EVERY turn, sandboxed or not.
         Both exist to make a file a build turn could CREATE in its own project tree un-loadable by the
         turns that still run as root: see :data:`_SETTING_SOURCES` / :data:`_STRICT_MCP_CONFIG`. Freezing
         the files that EXIST is the sandbox's job (a read-only re-mount); a file that does not exist yet
         can only be neutralised where it would be read.
-      * ``permission_mode`` — an explicit ``--permission-mode``. A read-only consult passes ``default``
-        (the allow-list must be exclusive); a SANDBOXED build turn passes ``bypassPermissions``, which is
+      * ``permission_mode`` — an explicit ``--permission-mode``. A SANDBOXED build turn passes
+        ``bypassPermissions``, which is
         exactly what it used to inherit from the mounted user ``settings.json`` — except that the mounted
         file was writable BY the turn and the flag is not (ICCINT-16). An in-process build turn passes
         nothing, byte-identical to before.
@@ -384,13 +350,7 @@ def build_claude_argv(
         args += ["--json-schema", json.dumps(json_schema)]
     if settings_path is not None:
         args += ["--settings", str(settings_path)]
-    if allowed_tools is not None:
-        args += ["--allowedTools", ",".join(allowed_tools)]
-        deny = [t for t in _MUTATING_TOOLS if t not in allowed_tools]
-        if deny:
-            args += ["--disallowedTools", ",".join(deny)]
-        args += ["--permission-mode", "default"]
-    elif permission_mode:
+    if permission_mode:
         args += ["--permission-mode", permission_mode]
     args.append(prompt)
     return args
@@ -407,9 +367,7 @@ async def invoke_claude(
     model: Optional[str] = None,
     effort: Optional[str] = None,
     json_schema: Optional[dict] = None,
-    allowed_tools: Optional[list[str]] = None,
     settings_path: Optional[Path] = None,
-    sandbox: bool = False,
     stage: Optional[str] = None,
     log_dir: Optional[Path] = None,
     log_label: Optional[str] = None,
@@ -425,19 +383,6 @@ async def invoke_claude(
     grammar-constrains its output to the schema and returns the validated object in the envelope's
     ``structured_output`` field — making a malformed status block impossible at the source. Unset →
     today's behavior (no flag, ``structured_output`` ``None``).
-
-    ``allowed_tools`` (konzultacia-mode.md Part 1): an explicit read-only tool profile. When given, the
-    turn is auto-approved for exactly those tools (``--allowedTools``) AND every mutating/exec/spawn tool
-    NOT in the set is HARD-denied (``--disallowedTools`` — a CLI deny wins over the project settings.json
-    allow list), so a read-only Konzultácia turn provably cannot touch the project. Unset (default) →
-    today's full-auto build profile, byte-identical (no tool flags — the project settings.json governs).
-
-    ``sandbox`` (konzultacia-sidecar-sandbox.md Part 2): when ``True`` AND ``allowed_tools`` is set (a
-    CONSULT turn), the turn runs inside an OS-isolated sidecar container where the project is
-    KERNEL-enforced ``:ro`` and the host is unreachable — not the in-process subprocess. Build turns
-    (``allowed_tools is None``) never take the sidecar path regardless of this flag. If the sidecar is
-    unavailable it degrades to the in-process read-only turn with an honest WARNING (see
-    :func:`_invoke_once`). Default ``False`` → today's in-process behavior, byte-identical.
 
     ``stage`` (ICCINT-16 STEP 2): the pipeline phase this turn belongs to. A BUILD turn in one of
     :data:`build_sandbox.SANDBOXED_PHASES` (``priprava`` / ``navrh`` / ``programovanie``) runs inside an
@@ -472,9 +417,7 @@ async def invoke_claude(
                 model=model,
                 effort=effort,
                 json_schema=json_schema,
-                allowed_tools=allowed_tools,
                 settings_path=settings_path,
-                sandbox=sandbox,
                 stage=stage,
                 log_dir=log_dir,
                 log_label=log_label,
@@ -517,9 +460,7 @@ async def _invoke_once(
     model: Optional[str] = None,
     effort: Optional[str] = None,
     json_schema: Optional[dict] = None,
-    allowed_tools: Optional[list[str]] = None,
     settings_path: Optional[Path] = None,
-    sandbox: bool = False,
     stage: Optional[str] = None,
     log_dir: Optional[Path] = None,
     log_label: Optional[str] = None,
@@ -550,19 +491,10 @@ async def _invoke_once(
             grammar-constrains the agent's output to this JSON Schema and returns the validated
             object in the envelope's ``structured_output`` field; ``None`` → no flag (no structured
             output, fence fallback applies).
-        allowed_tools: optional read-only tool profile (konzultacia-mode.md Part 1). When given,
-            ``--allowedTools`` auto-approves exactly these tools AND ``--disallowedTools`` hard-denies
-            every :data:`_MUTATING_TOOLS` member NOT in the set (a CLI deny wins over settings.json
-            allow), so the turn cannot mutate the project. ``None`` → no tool flags (build profile).
-        sandbox: konzultacia-sidecar-sandbox.md Part 2. When ``True`` and ``allowed_tools`` is set (a
-            CONSULT turn), run inside an OS-isolated sidecar container (project KERNEL-``:ro``, host
-            unreachable) instead of this in-process subprocess; the sidecar produces the same
-            ``--output-format json`` envelope so the return contract is unchanged. Build turns
-            (``allowed_tools is None``) never take the sidecar path. ``None``/``False`` → in-process.
-        stage: ICCINT-16 STEP 2. The pipeline phase this turn belongs to. A BUILD turn
-            (``allowed_tools is None``) whose phase is in :data:`build_sandbox.SANDBOXED_PHASES` has its
-            argv WRAPPED in a ``docker run`` with an ephemeral HOME that mounts only the project (rw, with
-            its executable config re-mounted read-only), that project's own claude transcript, the shared
+        stage: ICCINT-16 STEP 2. The pipeline phase this turn belongs to. A BUILD turn whose phase is in
+            :data:`build_sandbox.SANDBOXED_PHASES` has its argv WRAPPED in a ``docker run`` with an
+            ephemeral HOME that mounts only the project (rw, with its executable config re-mounted
+            read-only), that project's own claude transcript, the shared
             knowledge base (read-only) and the claude binary — the claude flags, streaming, timeout,
             per-turn logging and return contract are untouched, because only the transport and the
             permission-mode FLAG change. ``programovanie`` additionally gets a throwaway PostgreSQL on a
@@ -589,45 +521,6 @@ async def _invoke_once(
 
     project_root = PROJECTS_ROOT / project_slug
 
-    # konzultacia-sidecar-sandbox.md Part 2: a CONSULT turn (read-only tool profile active) requested to run
-    # OS-isolated executes inside an ephemeral sidecar container where the project is KERNEL-enforced ``:ro``
-    # and the host is unreachable — NOT this in-process subprocess. Build turns (``allowed_tools is None``)
-    # never take this path. If the sidecar is UNAVAILABLE (no docker CLI / daemon), degrade to the in-process
-    # read-only turn below (still tool-profile read-only, just not kernel-isolated) and LOG the weaker
-    # guarantee HONESTLY — never a silent downgrade (Part 2).
-    if sandbox and allowed_tools is not None:
-        from backend.services import consult_sandbox  # local import — avoids a claude_agent↔consult_sandbox cycle
-
-        if consult_sandbox.sandbox_enabled():
-            try:
-                return await consult_sandbox.run_consult_in_sandbox(
-                    project_slug=project_slug,
-                    claude_session_id=claude_session_id,
-                    prompt=prompt,
-                    charter_path=charter_path,
-                    timeout=timeout,
-                    model=model,
-                    effort=effort,
-                    json_schema=json_schema,
-                    allowed_tools=allowed_tools,
-                    settings_path=settings_path,
-                )
-            except consult_sandbox.SidecarUnavailable as exc:
-                # LOUD, not a warning buried in a log: a promised kernel boundary that is not in effect gets
-                # counted + published on ``GET /health`` (consult_sandbox.degraded_turns) and logged at ERROR
-                # with the failing precondition. The audited deployment degraded on EVERY consult — the
-                # configured image did not exist — and nothing outside the log file ever said so.
-                # ICCINT-74: aj toto ide do vlákna — ``record_degradation`` sa cez ``preflight()``
-                # pýta dockerovho démona. Sú to sekundy, nie minúty, ale pravidlo neznie „veľké volania
-                # do vlákna“; znie „z async funkcie sa priamo nečaká na proces“. Výnimka pre malé
-                # volanie je presne to miesto, kde raz jedno z nich prestane byť malé.
-                await run_blocking(consult_sandbox.record_degradation, str(exc), cap=15)
-        else:
-            logger.info(
-                "CONSULT_SANDBOX disabled — running the consult turn in-process (tool-profile read-only, "
-                "not kernel-isolated)",
-            )
-
     # ICCINT-16 STEP 2: a BUILD turn in the Príprava/Návrh/Programovanie phases is WRAPPED in a ``docker
     # run`` that mounts only its own project (rw), its own session transcript, the shared knowledge base
     # (read-only) and the claude binary — no docker socket, no /opt/customers, no /opt/uat, no /opt/infra, no
@@ -638,14 +531,13 @@ async def _invoke_once(
     # Programovanie is in the list since STEP 2 because the engine hands it a throwaway PostgreSQL
     # (:mod:`build_db`) instead of the docker socket its charter used to need. Vizuál and Verifikácia stay
     # OUT: they build and run the whole app through ``docker compose``, which is what the socket is for — so
-    # this covers three phases out of five, and no more. ``allowed_tools is None`` keeps a consult turn
-    # (handled above) out.
+    # this covers three phases out of five, and no more.
     #
     # Decided BEFORE the argv is composed, because the isolation changes one claude flag as well as the
     # transport: a sandboxed turn carries ``--permission-mode bypassPermissions`` in its ARGV instead of
     # inheriting it from a user ``settings.json`` it could itself rewrite.
-    use_sandbox = allowed_tools is None and build_sandbox.phase_uses_sandbox(stage) and build_sandbox.sandbox_enabled()
-    if allowed_tools is None and build_sandbox.phase_uses_sandbox(stage) and not use_sandbox:
+    use_sandbox = build_sandbox.phase_uses_sandbox(stage) and build_sandbox.sandbox_enabled()
+    if build_sandbox.phase_uses_sandbox(stage) and not use_sandbox:
         # The kill-switch was thrown deliberately; say so at WARNING every turn, naming what is back in
         # reach. A boundary that is not in effect must never be inferable only from its absence.
         logger.warning(
@@ -668,7 +560,6 @@ async def _invoke_once(
         model=model,
         effort=effort,
         json_schema=json_schema,
-        allowed_tools=allowed_tools,
         settings_path=settings_path,
         permission_mode=build_sandbox.SANDBOX_PERMISSION_MODE if use_sandbox else None,
     )
@@ -853,9 +744,9 @@ async def _run_turn(
         # ANY OTHER unexpected error between launch and the process finishing (an OSError out of
         # ``communicate``, a decode blowing up) must NOT leave the container running: ``--rm`` reaps a CLEAN
         # exit only, and this container holds WRITE access to the project, so a leaked one keeps writing
-        # after the turn is over from the backend's point of view. :mod:`consult_sandbox` already paid for
-        # this lesson (``test_unexpected_error_mid_run_reaps_container``); the copy that did not carry it
-        # over is the copy that would leak. Timeout/Cancelled are handled above and a clean exit never
+        # after the turn is over from the backend's point of view. The removed Konzultácia sidecar had already
+        # paid for this lesson; the copy that did not carry it over is the copy that would leak.
+        # Timeout/Cancelled are handled above and a clean exit never
         # enters here, so there is no double reap.
         if sandbox_container is not None:
             await _kill_process_tree(proc)

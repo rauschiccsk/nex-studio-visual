@@ -14,10 +14,9 @@ These tests assert the BEHAVIOUR of the return leg, not its shape:
    headless CLI faked, and the prompt handed to that CLI must contain Dedo's text. This is the whole point
    of the change: a message the agent never sees is a failed delivery, not a partial one.
 3. **Delivered once, and never by the wrong turn** — the next turn does not repeat it; an Auditor turn does
-   not swallow a message addressed to the AI Agent; the read-only Konzultácia turn does not either (driven
-   through ``run_consult_turn``, so it proves Konzultácia SENDS the flag, not merely that the flag works);
-   and a turn whose ENVELOPE IS LOST — the way a real crash/timeout actually presents, as a ``ParseFailure``
-   from ``invoke_agent``, not as a raised exception — leaves it pending and the next turn carries it.
+   not swallow a message addressed to the AI Agent; and a turn whose ENVELOPE IS LOST — the way a real
+   crash/timeout actually presents, as a ``ParseFailure`` from ``invoke_agent``, not as a raised exception —
+   leaves it pending and the next turn carries it.
 4. **The build resolution Dedo replies through** — ``version_awaiting_dedo`` finds the build blocked on
    ``framework_issue`` and refuses to guess when the answer is ambiguous.
 5. **The trigger** — pinned from both sides: a ``framework_issue`` block neither OFFERS nor EXECUTES any
@@ -276,27 +275,6 @@ class TestDeliveryToTheAgent:
         assert prompts and _DEDO_TEXT not in prompts[0]
         db_session.refresh(msg)
         assert msg.status == "pending"  # still waiting for the AI Agent's next turn
-
-    async def test_the_read_only_consult_turn_does_not_swallow_it(self, db_session, monkeypatch):
-        """Konzultácia advises the Manažér on a finished build with no write tools — it cannot act on a
-        Dedo instruction, so consuming it there would lose it silently.
-
-        Driven through :func:`run_consult_turn` — the real entry point — NOT through the shared chokepoint
-        with the flag handed in by the test. Passing ``deliver_dedo=False`` here ourselves would only prove
-        the parameter works when someone sends it, which is not the property under test: the property is
-        that Konzultácia SENDS it. (Verified by mutation: deleting ``deliver_dedo=False`` from
-        ``run_consult_turn`` must turn this test red.)
-        """
-        version, _ = _make_version(db_session)
-        _seed_state(db_session, version.id, current_stage="done", status="agent_working", next_action="konzultacia")
-        msg = dedo_message.record_dedo_message(db_session, version_id=version.id, content=_DEDO_TEXT)
-        prompts = _fake_cli(monkeypatch, response=_block(kind="consultation", summary="poradil som", stage="done"))
-
-        await orchestrator.run_consult_turn(db_session, version.id)
-
-        assert prompts and _DEDO_TEXT not in prompts[0]
-        db_session.refresh(msg)
-        assert msg.status == "pending"
 
     async def test_several_messages_all_arrive_in_order(self, db_session, monkeypatch):
         version, _ = _make_version(db_session)
