@@ -5331,6 +5331,13 @@ async def _run_uat_deploy(
         )
     else:
         ok, detail = await _verify_uat_serves(project_slug, uat_slug)
+    if ok and environment == "uat" and not deploy_host:
+        # ICCINT-167: účet Poradcu len na čítanie v databáze UAT — po každom nasadení, aby práva sledovali
+        # schému (nový stĺpec s heslom nesmie zostať čitateľný). Nasadenie kvôli nemu nikdy nezlyhá.
+        from backend.services.poradca import uat_db
+
+        role_ok, role_detail = await uat_db.ensure_role(compose.parent, customer_slug or uat_slug)
+        (logger.info if role_ok else logger.warning)("poradca: %s", role_detail)
     return ok, await _uprac_na_cieli(ok, detail, deploy_host, compose.parent)
 
 

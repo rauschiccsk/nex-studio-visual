@@ -96,7 +96,9 @@ class UserAgentSettings(Base, UUIDMixin, TimestampMixin):
         CheckConstraint(
             # v2.0.0 (CR-V2-001): 2 agent roles. A SECOND surviving 5-role CHECK (was migration 061) —
             # moves in lock-step with ck_orchestrator_session_role or 2-role dispatch is DB-rejected.
-            "agent_role IN ('ai_agent', 'auditor')",
+            # ICCINT-167 (migration 102): + ``poradca`` — Poradca's model/effort, set like the build agents'
+            # (it is not a pipeline role and never appears in ``orchestrator_session``).
+            "agent_role IN ('ai_agent', 'auditor', 'poradca')",
             name="ck_user_agent_settings_role",
         ),
     )

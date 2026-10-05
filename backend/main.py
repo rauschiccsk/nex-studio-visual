@@ -24,6 +24,7 @@ from backend.api.routes.health import health_check as _health_check_handler
 from backend.api.routes.knowledge import router as knowledge_router
 from backend.api.routes.metrics import router as metrics_router
 from backend.api.routes.pipeline import router as pipeline_router
+from backend.api.routes.poradca import router as poradca_router
 from backend.api.routes.project_specs import router as project_specs_router
 from backend.api.routes.projects import router as projects_router
 from backend.api.routes.rag import router as rag_router
@@ -43,6 +44,8 @@ from backend.services import build_sandbox as build_sandbox_service
 from backend.services import consult_sandbox as consult_sandbox_service
 from backend.services import kb_index_sync as kb_index_sync_service
 from backend.services import orchestrator as orchestrator_service
+from backend.services.poradca import readiness as poradca_readiness
+from backend.services.poradca import runner as poradca_runner
 
 # Route application loggers at INFO to stderr so ``docker logs`` surfaces
 # request-level diagnostics (SSE state, Claude subprocess events, spec
@@ -206,6 +209,11 @@ async def lifespan(app: FastAPI):
 
     consult_sandbox_service.log_startup_readiness()
     build_sandbox_service.log_startup_readiness()
+    _poradca_problems = poradca_readiness.problems()
+    if _poradca_problems:
+        logger.error("Poradca is NOT ready: %s", "; ".join(_poradca_problems))
+    else:
+        logger.info("Poradca ready")
     # …and sweep what the LAST process did not live to clean up. A Programovanie turn holds a PostgreSQL
     # container and a docker network that its ``finally`` releases — a ``docker compose up -d`` deploy in the
     # middle of that turn re-creates this container and no ``finally`` ever runs. Both objects carry
@@ -222,6 +230,11 @@ async def lifespan(app: FastAPI):
         recovered_builds = orchestrator_service.recover_orphaned_builds_on_startup(db)
         if recovered_builds:
             logger.info("Recovered %d orphaned build pipeline(s) after restart", recovered_builds)
+        # ICCINT-167: odpoveď Poradcu, ktorú prerušil reštart, už nikto nedokončí — uzavrie sa s dôvodom,
+        # aby rozhovor nevisel v „Poradca odpovedá…" navždy.
+        failed_poradca = poradca_runner.fail_orphans(db)
+        if failed_poradca:
+            logger.info("Poradca: closed %d answer(s) interrupted by the restart", failed_poradca)
     finally:
         db.close()
 
@@ -318,6 +331,7 @@ app.include_router(uploads_router, prefix="/api/v1")
 app.include_router(release_notes_router, prefix="/api/v1")
 app.include_router(system_settings_router, prefix="/api/v1/system-settings")
 app.include_router(user_agent_settings_router, prefix="/api/v1/user-agent-settings")
+app.include_router(poradca_router, prefix="/api/v1/poradca")
 app.include_router(agent_terminal_router, prefix="/api/v1/agent-terminal")
 app.include_router(pipeline_router, prefix="/api/v1/pipeline")
 # Dedo's own door (ICCINT-14, charter §4.5) — the NEX Studio technical team's MACHINE identity, mounted

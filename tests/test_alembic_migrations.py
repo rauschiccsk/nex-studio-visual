@@ -71,6 +71,8 @@ def test_expected_domain_tables_present() -> None:
         "pipeline_state",
         "pipeline_message",
         "orchestrator_session",
+        "poradca_conversations",
+        "poradca_messages",
     }
     present = set(Base.metadata.tables.keys())
     missing = expected_tables - present

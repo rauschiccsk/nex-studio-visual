@@ -1370,6 +1370,116 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/poradca/conversations/{conversation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Conversation */
+        get: operations["get_conversation_api_v1_poradca_conversations__conversation_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Scope */
+        patch: operations["update_scope_api_v1_poradca_conversations__conversation_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/poradca/conversations/{conversation_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ask */
+        post: operations["ask_api_v1_poradca_conversations__conversation_id__messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/poradca/messages/{message_id}/new-version": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * New Version From Answer
+         * @description „Založiť novú verziu z tejto požiadavky" — koncept verzie z požiadavky v odpovedi Poradcu.
+         */
+        post: operations["new_version_from_answer_api_v1_poradca_messages__message_id__new_version_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/poradca/messages/{message_id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop Message */
+        post: operations["stop_message_api_v1_poradca_messages__message_id__stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/poradca/projects/{slug}/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Conversations
+         * @description Moje rozhovory k projektu, najnovší prvý. Admin vidí rozhovory všetkých.
+         */
+        get: operations["list_conversations_api_v1_poradca_projects__slug__conversations_get"];
+        put?: never;
+        /** Create Conversation */
+        post: operations["create_conversation_api_v1_poradca_projects__slug__conversations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/poradca/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Poradca Status */
+        get: operations["poradca_status_api_v1_poradca_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/project-specs/content": {
         parameters: {
             query?: never;
@@ -3550,7 +3660,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "phase" | "external" | "system";
+            kind: "phase" | "external" | "poradca" | "system";
             /** Output Tokens */
             output_tokens: number;
             /** Share Pct */
@@ -5163,6 +5273,199 @@ export interface components {
             /** Working Since */
             working_since?: string | null;
         };
+        /** PoradcaAsk */
+        PoradcaAsk: {
+            /** Question */
+            question: string;
+        };
+        /** PoradcaConversationCreate */
+        PoradcaConversationCreate: {
+            /** Question */
+            question: string;
+            /** Version Id */
+            version_id?: string | null;
+        };
+        /** PoradcaConversationDetail */
+        PoradcaConversationDetail: {
+            /**
+             * Author Id
+             * Format: uuid
+             */
+            author_id: string;
+            /** Author Name */
+            author_name: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Messages */
+            messages?: components["schemas"]["PoradcaMessageRead"][];
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /**
+             * Running
+             * @default false
+             */
+            running: boolean;
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version Id */
+            version_id?: string | null;
+            /** Version Number */
+            version_number?: string | null;
+        };
+        /** PoradcaConversationRead */
+        PoradcaConversationRead: {
+            /**
+             * Author Id
+             * Format: uuid
+             */
+            author_id: string;
+            /** Author Name */
+            author_name: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /**
+             * Running
+             * @default false
+             */
+            running: boolean;
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version Id */
+            version_id?: string | null;
+            /** Version Number */
+            version_number?: string | null;
+        };
+        /** PoradcaMessageRead */
+        PoradcaMessageRead: {
+            /**
+             * Author
+             * @enum {string}
+             */
+            author: "human" | "poradca";
+            /** Captured Version Id */
+            captured_version_id?: string | null;
+            /** Content */
+            content: string;
+            /** Cost */
+            cost?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
+            /** Error */
+            error?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Input Tokens */
+            input_tokens?: number | null;
+            /** Instruction */
+            instruction?: string | null;
+            /** Model */
+            model?: string | null;
+            /** New Version Request */
+            new_version_request?: string | null;
+            /** Output Tokens */
+            output_tokens?: number | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "running" | "done" | "failed" | "stopped";
+            /** Steps */
+            steps?: components["schemas"]["PoradcaStep"][];
+        };
+        /** PoradcaNewVersion */
+        PoradcaNewVersion: {
+            /** Created */
+            created: boolean;
+            /** Project Slug */
+            project_slug: string;
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+            /** Version Number */
+            version_number: string;
+        };
+        /**
+         * PoradcaScopeUpdate
+         * @description Zmena „o čom sa rozprávame". ``version_id = None`` = celý projekt (pole je povinné, aby
+         *     vynechanie neznamenalo nechcenú zmenu).
+         */
+        PoradcaScopeUpdate: {
+            /** Version Id */
+            version_id: string | null;
+        };
+        /**
+         * PoradcaStatus
+         * @description Či Poradca vie bežať — pre obrazovku (zašednutie s dôvodom) aj ``/health``.
+         */
+        PoradcaStatus: {
+            /** Max Concurrent */
+            max_concurrent: number;
+            /** Problems */
+            problems?: string[];
+            /** Ready */
+            ready: boolean;
+            /** Running */
+            running: number;
+        };
+        /**
+         * PoradcaStep
+         * @description Čo Poradca urobil — nástroj a cieľ, nikdy obsah.
+         */
+        PoradcaStep: {
+            /**
+             * Target
+             * @default
+             */
+            target: string;
+            /** Tool */
+            tool: string;
+        };
         /**
          * PortBlockSuggestResponse
          * @description Response for block-based port suggestion.
@@ -5985,7 +6288,7 @@ export interface components {
              * Agent Role
              * @enum {string}
              */
-            agent_role: "ai_agent" | "auditor";
+            agent_role: "ai_agent" | "auditor" | "poradca";
             /** Effort */
             effort?: ("low" | "medium" | "high" | "xhigh" | "max") | null;
             /** Helper Model */
@@ -8982,6 +9285,257 @@ export interface operations {
             };
         };
     };
+    get_conversation_api_v1_poradca_conversations__conversation_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoradcaConversationDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_scope_api_v1_poradca_conversations__conversation_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PoradcaScopeUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoradcaConversationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ask_api_v1_poradca_conversations__conversation_id__messages_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PoradcaAsk"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoradcaConversationDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    new_version_from_answer_api_v1_poradca_messages__message_id__new_version_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoradcaNewVersion"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_message_api_v1_poradca_messages__message_id__stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_conversations_api_v1_poradca_projects__slug__conversations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoradcaConversationRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_conversation_api_v1_poradca_projects__slug__conversations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PoradcaConversationCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoradcaConversationDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    poradca_status_api_v1_poradca_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoradcaStatus"];
+                };
+            };
+        };
+    };
     get_project_spec_content_api_v1_project_specs_content_get: {
         parameters: {
             query: {
@@ -10657,7 +11211,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                agent_role: "ai_agent" | "auditor";
+                agent_role: "ai_agent" | "auditor" | "poradca";
             };
             cookie?: never;
         };

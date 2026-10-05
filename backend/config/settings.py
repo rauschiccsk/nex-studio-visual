@@ -81,6 +81,13 @@ class Settings(BaseSettings):
     # pin something else. The on/off switch is the ``BUILD_SANDBOX`` env (default on), read at turn time.
     build_sandbox_image: str = ""
 
+    # Poradca (ICCINT-167, docs/specs/poradca.md §4.1): priečinok so záznamami rozhovorov, socketmi otázok
+    # a prázdnym súborom na prekrytie tajomstiev. Backend ho musí mať pripojený na TEJ ISTEJ ceste ako
+    # hostiteľ — zdroj ``--mount`` kontajnera otázky rozlúšti docker na hostiteľovi.
+    poradca_data_dir: str = "/opt/data/nex-studio-visual/poradca"
+    # Strop jednej otázky Poradcu v sekundách (návrh §3: 15 minút).
+    poradca_question_timeout: int = 900
+
     # Backstop timeout (seconds) for a single headless ``claude -p`` invocation
     # driven by the F-007 orchestrator (CR-NS-018 fix-round). Since agent
     # dispatch is asynchronous, this only guards a *hung* agent, so it is

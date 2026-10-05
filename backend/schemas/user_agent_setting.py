@@ -21,9 +21,10 @@ from typing import Literal, Optional, get_args
 
 from pydantic import BaseModel, ConfigDict
 
-# The PIPELINE agent role {ai_agent, auditor} (same set as OrchestratorSession; v2.0.0 CR-V2-001), NOT
-# the user's ri/ha/shu access role.
-PipelineAgentRole = Literal["ai_agent", "auditor"]
+# The agent whose model/effort a row sets: the two PIPELINE agents {ai_agent, auditor} (same set as
+# OrchestratorSession; v2.0.0 CR-V2-001) + Poradca (ICCINT-167 — not a pipeline role, it runs beside the
+# build). NOT the user's ri/ha/shu access role.
+PipelineAgentRole = Literal["ai_agent", "auditor", "poradca"]
 # The model families ``claude --model`` resolves to their newest version — strongest first (the order
 # the Nastavenia select shows). The Agent tool a helper is spawned with takes exactly these names too.
 AgentModel = Literal["opus", "sonnet", "haiku"]

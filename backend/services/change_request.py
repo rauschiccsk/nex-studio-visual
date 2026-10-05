@@ -109,32 +109,10 @@ def capture(db: Session, *, source_message_id: UUID, user_id: UUID) -> CaptureRe
             )
         # The captured version was deleted → fall through and re-mint (self-healing; a stamp with no version).
 
-    req_title = _clamp(str(marker.get("title")).strip() if marker.get("title") else summary, _REQ_TITLE_MAX)
-
-    # (a) Record the request as a project backlog REQ-N (status='open').
-    backlog_item = backlog_service.create(
-        db,
-        BacklogItemCreate(project_id=consulted.project_id, title=req_title, description=summary),
+    req_title = str(marker.get("title")).strip() if marker.get("title") else summary
+    backlog_item, new_version = mint_from_request(
+        db, project_id=consulted.project_id, summary=summary, title=req_title, user_id=user_id
     )
-
-    # (b) Mint the NEXT version in DRAFT — planned, NO PipelineState, NO build. version_service.create leaves
-    # status at the DB server_default 'planned'; we never call apply_action('start') here (Part 2.3).
-    next_number = version_service.suggest_next_version_number(db, consulted.project_id)
-    new_version = version_service.create(
-        db,
-        consulted.project_id,
-        VersionCreate(
-            version_number=next_number,
-            name=_clamp(req_title, _VERSION_NAME_MAX),
-            description=summary,
-        ),
-        user_id,
-    )
-
-    # (c) Link the REQ to the new version (status='included') so the new version's Špecifikácia starts from it,
-    # and seed its Zadanie (customer-requirements.md) so the Príprava phase reads the request when it begins.
-    backlog_service.assign_to_version(db, backlog_item.id, new_version.id)
-    version_service.write_zadanie(db, new_version.id, summary)
 
     # (d) Stamp the SOURCE marker (Fix 3): a repeat capture short-circuits to the existing version above, and
     # the FE bar hides once the latest message's marker carries a captured_version_id. Reassign the payload to
@@ -157,3 +135,40 @@ def capture(db: Session, *, source_message_id: UUID, user_id: UUID) -> CaptureRe
         backlog_number=backlog_item.number,
         created=True,
     )
+
+
+def mint_from_request(db: Session, *, project_id: UUID, summary: str, title: str, user_id: UUID):
+    """Požiadavka → ``REQ-N`` v zásobníku + ďalšia verzia ako KONCEPT so zadaním z požiadavky.
+
+    Spoločné pre Konzultáciu a Poradcu (ICCINT-167): obe cesty majú založiť verziu rovnako — koncept bez
+    stavby, požiadavka v zásobníku priradená k nej a zadanie verzie z textu požiadavky. Stavbu spustí
+    Manažér sám, keď verziu otvorí. Vráti ``(položka zásobníka, nová verzia)``; ``flush`` len, commit robí volajúci.
+    """
+    req_title = _clamp(title or summary, _REQ_TITLE_MAX)
+
+    # (a) Record the request as a project backlog REQ-N (status='open').
+    backlog_item = backlog_service.create(
+        db,
+        BacklogItemCreate(project_id=project_id, title=req_title, description=summary),
+    )
+
+    # (b) Mint the NEXT version in DRAFT — planned, NO PipelineState, NO build. version_service.create leaves
+    # status at the DB server_default 'planned'; we never call apply_action('start') here (Part 2.3).
+    next_number = version_service.suggest_next_version_number(db, project_id)
+    new_version = version_service.create(
+        db,
+        project_id,
+        VersionCreate(
+            version_number=next_number,
+            name=_clamp(req_title, _VERSION_NAME_MAX),
+            description=summary,
+        ),
+        user_id,
+    )
+
+    # (c) Link the REQ to the new version (status='included') so the new version's Špecifikácia starts from it,
+    # and seed its Zadanie (customer-requirements.md) so the Príprava phase reads the request when it begins.
+    backlog_service.assign_to_version(db, backlog_item.id, new_version.id)
+    version_service.write_zadanie(db, new_version.id, summary)
+    db.flush()
+    return backlog_item, new_version

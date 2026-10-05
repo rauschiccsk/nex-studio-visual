@@ -12,6 +12,7 @@ from backend.db.models.external_cost import ExternalCost
 from backend.db.models.foundation import User, UserAgentSettings, UserSession
 from backend.db.models.orchestrator import OrchestratorSession
 from backend.db.models.pipeline import PipelineMessage, PipelineState
+from backend.db.models.poradca import PoradcaConversation, PoradcaMessage
 from backend.db.models.project_assignments import ProjectAssignment
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic, Feat, Task
@@ -32,6 +33,8 @@ __all__ = [
     "OrchestratorSession",
     "PipelineMessage",
     "PipelineState",
+    "PoradcaConversation",
+    "PoradcaMessage",
     "Project",
     "ProjectAssignment",
     "Epic",

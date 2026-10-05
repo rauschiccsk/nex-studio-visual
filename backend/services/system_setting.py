@@ -57,6 +57,19 @@ class _Default:
 #: ``is_default=True``. Type hints are casted on read by the typed
 #: helpers further down.
 DEFAULT_SETTINGS: dict[str, _Default] = {
+    # ── Poradca (ICCINT-167) ────────────────────────────────────────
+    # Koľko otázok Poradcu smie bežať naraz v celom kokpite. Všetky čerpajú z jedného predplatného
+    # Claude s týždenným limitom — rovnakého ako stavby; ďalšia otázka počká a človek vidí prečo.
+    "poradca_max_concurrent": _Default(
+        value="3",
+        value_type="int",
+        label="Poradca — otázky naraz",
+        unit="otázok",
+        description=(
+            "Koľko otázok Poradcu smie bežať naraz v celom kokpite. Ďalšia počká, kým sa miesto uvoľní. "
+            "Poradca čerpá z toho istého predplatného Claude ako stavby."
+        ),
+    ),
     # ── ICC ─────────────────────────────────────────────────────────
     "github_org": _Default(
         value="rauschiccsk",

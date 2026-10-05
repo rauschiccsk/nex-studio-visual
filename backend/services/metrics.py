@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 from backend.config.settings import settings
 from backend.db.models.external_cost import ExternalCost
 from backend.db.models.pipeline import STAGE_VALUES, PipelineMessage, PipelineState
+from backend.db.models.poradca import AUTHOR_PORADCA, PoradcaConversation, PoradcaMessage
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.schemas.metrics import (
@@ -46,6 +47,7 @@ from backend.schemas.metrics import (
 from backend.schemas.user_agent_setting import MODEL_FAMILIES
 from backend.services import system_setting
 from backend.services.pipeline_metrics import (
+    ModelTokens,
     UsageTotals,
     aggregate_pipeline_usage,
     aggregate_usage_by_phase,
@@ -70,6 +72,8 @@ _PRICE_FAMILIES: tuple[str, ...] = MODEL_FAMILIES
 #: wage key and never carries human figures.
 EXTERNAL_ROW_KEY = "externe"
 SYSTEM_ROW_KEY = "system"
+#: ICCINT-167: spotreba Poradcu — riadok zvlášť od fáz stavby, len strana agenta (ako ``system``).
+PORADCA_ROW_KEY = "poradca"
 
 #: The single human-work coefficient (minutes of human work per 1M tokens) — one key for every phase
 #: AND for the external row (CR-V2-063 collapsed the five per-phase copies that only drifted apart).
@@ -150,6 +154,17 @@ def _agent_cost_split(
     if unpriced:
         return None, None, None, unpriced
     return (value_in + value_out) / 1_000_000.0, value_in / 1_000_000.0, value_out / 1_000_000.0, []
+
+
+def usage_cost(db: Session, model: Optional[str], input_tokens: int, output_tokens: int) -> Optional[float]:
+    """Cena jednej spotreby v EUR tou istou cestou ako stavba (ICCINT-167 — cena odpovede Poradcu).
+
+    ``None``, keď model nemá cenu ani po celom reťazci náhrad — rovnako poctivo ako riadok fázy."""
+    flat_in = _effective_price(db, "api_price_input_per_mtok", settings.api_price_input_per_mtok)
+    flat_out = _effective_price(db, "api_price_output_per_mtok", settings.api_price_output_per_mtok)
+    by_model = {model or "_unknown": ModelTokens(input_tokens=input_tokens, output_tokens=output_tokens)}
+    cost, _in, _out, _unpriced = _agent_cost_split(db, by_model, flat_in, flat_out)
+    return cost
 
 
 # ── human side ────────────────────────────────────────────────────────────────
@@ -374,6 +389,59 @@ def _external_rows(
     ]
 
 
+def _poradca_rows(
+    db: Session,
+    project_id: uuid.UUID,
+    version_id: Optional[uuid.UUID],
+    flat_in: float,
+    flat_out: float,
+) -> list[CostRowRead]:
+    """Riadok ``kind="poradca"`` (0 alebo 1) — odpovede Poradcu k projektu (ICCINT-167).
+
+    Nameraná spotreba, ale mimo fáz stavby a bez ľudského ekvivalentu: Poradca nerobí prácu, ktorú by
+    inak robil programátor, odpovedá na otázky. Rozsah: ``version_id`` → odpovede na otázky k tej verzii
+    (verzia v čase otázky, nie súčasná voľba rozhovoru); ``None`` → všetky odpovede projektu."""
+    stmt = (
+        select(PoradcaMessage)
+        .join(PoradcaConversation, PoradcaConversation.id == PoradcaMessage.conversation_id)
+        .where(
+            PoradcaConversation.project_id == project_id,
+            PoradcaMessage.author == AUTHOR_PORADCA,
+            PoradcaMessage.usage.is_not(None),
+        )
+    )
+    if version_id is not None:
+        stmt = stmt.where(PoradcaMessage.version_id == version_id)
+    answers = db.execute(stmt).scalars().all()
+    t = UsageTotals()
+    for answer in answers:
+        usage = answer.usage or {}
+        t.add(
+            input_tokens=int(usage.get("input_tokens") or 0),
+            output_tokens=int(usage.get("output_tokens") or 0),
+            duration_seconds=float(answer.duration_seconds or 0.0),
+            model=usage.get("model"),
+        )
+    if not _has_activity(t):
+        return []
+    agent_cost, _, _, unpriced = _agent_cost_split(db, t.by_model, flat_in, flat_out)
+    return [
+        CostRowRead(
+            key=PORADCA_ROW_KEY,
+            kind="poradca",
+            turns=t.messages,
+            input_tokens=t.input_tokens,
+            output_tokens=t.output_tokens,
+            share_pct=0.0,
+            agent_cost=agent_cost,
+            unpriced_model_keys=unpriced,
+            human_minutes=None,
+            human_cost=None,
+            active_seconds=t.duration_seconds,
+        )
+    ]
+
+
 def _fill_share_pct(rows: list[CostRowRead]) -> None:
     """Set each row's share of the SCOPE's tokens (in place, once every row of the scope exists).
 
@@ -397,9 +465,11 @@ def _scope_rows(
 ) -> list[CostRowRead]:
     """A scope's rows in PAYLOAD ORDER — the screen renders them as they arrive, so the order is a
     backend contract: phase rows in canonical ``COMPARISON_PHASES`` order, then the ``external`` row,
-    then the ``system`` row last (it foots the table). A row absent from the scope is not emitted."""
+    then the ``poradca`` row (ICCINT-167), then the ``system`` row last (it foots the table). A row absent
+    from the scope is not emitted."""
     rows = _build_phases(db, by_phase, flat_in, flat_out)
     rows += _external_rows(db, project_id, version_id, flat_in, flat_out)
+    rows += _poradca_rows(db, project_id, version_id, flat_in, flat_out)
     rows += _system_rows(db, _overhead_totals(by_phase), flat_in, flat_out)
     _fill_share_pct(rows)
     return rows
@@ -441,7 +511,7 @@ def _cost_totals(rows: list[CostRowRead]) -> CostTotalsRead:
     ``0`` — exactly what a scope whose whole metered spend sits in the agent-only ``system`` row would
     show ("Cena ľudskej práce 0,00 €" under a table of ``—``). No phase tokens → no human figure."""
     phase_rows = [r for r in rows if r.kind == "phase"]
-    measured_rows = [r for r in rows if r.kind in ("phase", "system")]
+    measured_rows = [r for r in rows if r.kind in ("phase", "poradca", "system")]
     external_row = next((r for r in rows if r.kind == "external"), None)
 
     token_measured_rows = [r for r in measured_rows if r.input_tokens or r.output_tokens]

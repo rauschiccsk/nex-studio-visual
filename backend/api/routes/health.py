@@ -9,6 +9,7 @@ from sqlalchemy import text
 from backend.config.settings import settings
 from backend.db.session import engine
 from backend.services import consult_sandbox, notify
+from backend.services.poradca import readiness as poradca_readiness
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,9 @@ def health_check() -> dict:
         # for the audited deployment was every single consult — the configured image did not exist on the
         # host. Publishing readiness here means an unusable sandbox stops looking healthy.
         "consult_sandbox": consult_sandbox.preflight().as_dict(),
+        # ICCINT-167: Poradca nemá cestu mimo kontajnera — nesplnená podmienka má byť vidno tu, nie až pri
+        # prvej otázke.
+        "poradca": {"ready": not (problems := poradca_readiness.problems()), "problems": problems},
         # Empty ``app_public_url`` strips the cockpit deep link out of every Telegram nudge, so an away
         # Manažér gets a ping with no way back in. Report the absence rather than letting it stay invisible.
         "app_public_url_configured": bool(settings.app_public_url.strip()),
