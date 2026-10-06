@@ -14,6 +14,8 @@ for the measurements. The per-run database is created at session start and DROPP
 
 import os
 import re
+import shutil
+import tempfile
 from pathlib import Path
 
 # Set required env vars BEFORE any backend imports trigger Settings() instantiation
@@ -312,12 +314,28 @@ def _guard_prod_db_isolation(test_engine):
     _orig_sweep_poradca_trash = _main_module._sweep_poradca_trash
     _main_module._sweep_poradca_trash = lambda: 0
 
+    # 6. ICCINT-168: Náklady fetch the ECB rate when a price list appears — a test never reaches the
+    #    internet. A test that cares about the rate passes its own ``fetch_rate``.
+    from backend.services import build_sandbox as _build_sandbox
+    from backend.services import model_pricing as _model_pricing
+
+    _orig_ecb_rate = _model_pricing.ecb_rate
+    _model_pricing.ecb_rate = lambda timeout=15.0: None
+
+    # 7. …and every build turn now reads its session transcript under the Claude config dir. On ANDROS that
+    #    is the LIVE agents' directory; a test process reads (and writes) its own, empty one.
+    _orig_claude_home = _build_sandbox._CLAUDE_HOME_DIR
+    _build_sandbox._CLAUDE_HOME_DIR = tempfile.mkdtemp(prefix="test-claude-home-")
+
     yield
 
     # Restore process-global state exactly as we found it.
     _main_module._run_alembic_upgrade = _orig_run_alembic_upgrade
     _main_module._reap_build_orphans = _orig_reap_build_orphans
     _main_module._sweep_poradca_trash = _orig_sweep_poradca_trash
+    _model_pricing.ecb_rate = _orig_ecb_rate
+    shutil.rmtree(_build_sandbox._CLAUDE_HOME_DIR, ignore_errors=True)
+    _build_sandbox._CLAUDE_HOME_DIR = _orig_claude_home
     db_session_module.SessionLocal.configure(bind=original_engine)
     db_session_module.engine = original_engine
 

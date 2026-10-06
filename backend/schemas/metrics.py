@@ -6,8 +6,9 @@ per-phase wages + per-model pricing, PLUS the hand-entered ``external_cost`` ent
 
 HONEST by construction, two rules that govern every field below:
 
-* **A missing input stays ``None``** — every figure that depends on an unconfigured input (price /
-  coefficient / wage) is ``None``, never a fabricated ``0``.
+* **A missing input stays ``None``** — every figure that depends on an unconfigured input (coefficient /
+  wage) is ``None``, never a fabricated ``0``; spend that cannot be priced is NAMED (``unpriced``), never
+  silently dropped or guessed (ICCINT-168).
 * **Measured and entered figures are summed but never merged** — ``kind`` keeps them distinguishable
   per row, and every total carries its ``…_measured`` / ``…_external`` split.
 
@@ -18,6 +19,7 @@ CR-V2-063 together with its three confirmed defects.
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Literal, Optional
 from uuid import UUID
 
@@ -40,6 +42,15 @@ class UsageTotalsRead(BaseModel):
     messages: int
 
 
+class UnpricedRead(BaseModel):
+    """Spend a row could NOT price, and why (ICCINT-168) — the screen names it instead of hiding it."""
+
+    #: Slovak sentence for the Manažér, e.g. "záznam sedenia sa nezachoval".
+    reason: str
+    turns: int
+    tokens: int
+
+
 class CostRowRead(BaseModel):
     """One cost row within a scope. `kind` keeps measured and entered figures distinguishable all
     the way to the screen — a renderer must never present them as the same class of number."""
@@ -50,14 +61,46 @@ class CostRowRead(BaseModel):
     turns: int  # metered messages (UsageTotals.messages) — NOT parse_attempts
     input_tokens: int
     output_tokens: int
+    #: ICCINT-168: prompt-cache reads/writes — priced on the agent side, never converted to human minutes.
+    cache_read_tokens: int
+    cache_write_tokens: int
     #: this row's tokens ÷ the scope's total tokens × 100. Always computable (never None), which is
     #: why it is token share and not cost share — cost is None whenever a model is unpriced.
     share_pct: float
-    agent_cost: Optional[float]
-    unpriced_model_keys: list[str]
+    #: ICCINT-168: whole euros, rounded UP (Director: rather a little more than less) — the part of the row
+    #: that could be priced; ``None`` when nothing in it could. ``unpriced`` names what is missing.
+    agent_cost: Optional[int]
+    unpriced: list[UnpricedRead]
     human_minutes: Optional[float]
-    human_cost: Optional[float]
+    #: whole euros, rounded up, like every euro figure on the screen.
+    human_cost: Optional[int]
     active_seconds: float  # kept: real measured compute time (0.0 for external rows)
+
+
+class PriceListRead(BaseModel):
+    """One model's price list the scope was priced with (ICCINT-168) — read from turns Claude Code paid
+    for, never typed in. Prices are per million tokens."""
+
+    model: str
+    valid_from: datetime
+    input_usd: float
+    output_usd: float
+    cache_read_usd: float
+    cache_write_usd: float
+    #: one web search (Claude Code bills it apart from tokens); ``None`` until the model has made one.
+    web_search_usd: Optional[float]
+    #: dollars per euro as the ECB publishes it; ``None`` until the rate could be fetched.
+    eur_usd: Optional[float]
+    rate_date: Optional[date]
+    rate_source: Optional[str]
+    input_eur: Optional[float]
+    output_eur: Optional[float]
+    cache_read_eur: Optional[float]
+    cache_write_eur: Optional[float]
+    web_search_eur: Optional[float]
+    #: how many Claude-Code-paid turns the list reproduces, and the worst relative miss on any of them.
+    observations: int
+    max_deviation: float
 
 
 class CostTotalsRead(BaseModel):
@@ -77,15 +120,23 @@ class CostTotalsRead(BaseModel):
     output_tokens: int
     output_tokens_measured: int
     output_tokens_external: int
-    agent_cost_measured: Optional[float]
-    agent_cost_external: Optional[float]
-    agent_cost_total: Optional[float]
+    #: ICCINT-168: prompt-cache tokens — measured only (a hand-entered cost carries none).
+    cache_read_tokens: int
+    cache_write_tokens: int
+    #: whole euros, the SUM of the rows' rounded-up figures (so the table adds up). ``None`` only when there
+    #: was spend and none of it could be priced.
+    agent_cost_measured: Optional[int]
+    agent_cost_external: Optional[int]
+    agent_cost_total: Optional[int]
+    #: ``False`` when some spend in the scope could not be priced — the figures above are then the priced
+    #: part only and the screen must say so.
+    agent_cost_complete: bool
     human_minutes_measured: Optional[float]
     human_minutes_external: Optional[float]
     human_minutes_total: Optional[float]
-    human_cost_measured: Optional[float]
-    human_cost_external: Optional[float]
-    human_cost_total: Optional[float]
+    human_cost_measured: Optional[int]
+    human_cost_external: Optional[int]
+    human_cost_total: Optional[int]
 
 
 class ManagerOverheadRead(BaseModel):
@@ -118,6 +169,9 @@ class VersionCostsRead(BaseModel):
     internal_idle_seconds: Optional[float]
     #: real wall-clock span from min/max(message created_at); release_date fallback; None if unknowable.
     total_time_seconds: Optional[float]
+    #: ICCINT-168: the price lists this version's agent cost was computed with (Director: "chcel by som
+    #: vidieť, akými cenami sme to počítali").
+    price_list: list[PriceListRead]
 
 
 class ProjectCostsRead(BaseModel):
@@ -137,5 +191,6 @@ class ProjectCostsRead(BaseModel):
     #: human equivalent by definition (that row is agent-only).
     wages: dict[str, Optional[float]]
     currency: str = "EUR"
-    pricing_configured: bool
     wages_configured: bool
+    #: ICCINT-168: every price list the project's figures use (all versions, Poradca, hand-entered costs).
+    price_list: list[PriceListRead]

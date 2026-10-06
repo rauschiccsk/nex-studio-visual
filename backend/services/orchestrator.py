@@ -336,16 +336,25 @@ class _DispatchMetrics:
     attempts: int = 0
     model: Optional[str] = None
     saw_usage: bool = False
+    #: ICCINT-168: the full per-model spend of every invocation of the turn (cache included, Claude Code's
+    #: price where it reported one) — what Náklady price. Kept as parts, never merged, so a priced part and an
+    #: unpriced one (a cut-off attempt) stay distinguishable.
+    parts: list = field(default_factory=list)
+    #: Which turn this is — a lost-work notification can be re-entered by the same turn (parse-retries) or reached
+    #: by another one (a crash re-dispatch); it keeps each turn's spend under its own key (:func:`_audit_lost_work`).
+    turn_id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
     def record(self, usage: Optional["claude_agent.UsageMetadata"], duration: float) -> None:
         """Fold one invocation's outcome in: always count the attempt + its wall-clock; add tokens
-        only when the envelope actually carried usage."""
+        only when usage was actually captured — for a failed invocation that is what the session transcript
+        shows it spent (ICCINT-168), never a guess."""
         self.attempts += 1
         self.duration_seconds += duration
         if usage is not None:
             self.saw_usage = True
             self.input_tokens += usage.input_tokens
             self.output_tokens += usage.output_tokens
+            self.parts.extend(usage.parts)
             if usage.model:
                 self.model = usage.model
 
@@ -353,7 +362,14 @@ class _DispatchMetrics:
         """The ``payload.usage`` block, or ``None`` when no usage was ever captured (never fabricate)."""
         if not self.saw_usage:
             return None
-        return {"input_tokens": self.input_tokens, "output_tokens": self.output_tokens, "model": self.model}
+        payload: dict[str, Any] = {
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "model": self.model,
+        }
+        if self.parts:
+            payload["parts"] = [p.to_payload() for p in self.parts]
+        return payload
 
     def timing_payload(self) -> dict[str, Any]:
         """The ``payload.timing`` block — duration + how many invocations the turn took (parse-retries)."""
@@ -3805,7 +3821,7 @@ async def invoke_agent(
         # build round settles to awaiting_manazer). Distinguished from a crash via ``envelope_loss_kind`` so
         # the round routes the honest, type-specific message (Fix 3). MUST precede ``except ClaudeAgentError``
         # (ClaudeAgentTimeout is a subclass).
-        turn_metrics.record(None, perf_counter() - _started)
+        turn_metrics.record(exc.usage, perf_counter() - _started)
         lost_work = await _audit_lost_work(
             db,
             version_id=version_id,
@@ -3814,6 +3830,7 @@ async def invoke_agent(
             timeout_seconds=timeout if timeout is not None else _timeout_for(stage),
             on_message=on_message,
             cause_label="Agent vyčerpal časový limit",
+            metrics=turn_metrics,
         )
         return ParseFailure(
             f"claude invocation failed: {exc}",
@@ -3826,7 +3843,7 @@ async def invoke_agent(
     except ClaudeAgentError as exc:
         # A failed invocation still burned wall-clock (and counts as an attempt) — record it so the
         # turn's timing/parse_attempts reflect retries; no usage (no envelope was returned) (WS-D).
-        turn_metrics.record(None, perf_counter() - _started)
+        turn_metrics.record(exc.usage, perf_counter() - _started)
         # R1-c (D1): an envelope-loss (timeout/crash) may have left real commits behind even though the
         # JSON envelope was lost. Audit ``baseline..HEAD`` and record ONE system→director notification so
         # the Director can review & continue — never silently re-do or lose the work. The audit dict rides
@@ -3843,6 +3860,7 @@ async def invoke_agent(
             timeout_seconds=timeout if timeout is not None else _timeout_for(stage),
             on_message=on_message,
             cause_label="Agent stratil spojenie / spadol",
+            metrics=turn_metrics,
         )
         # Return the failure SILENTLY otherwise (CR-NS-022 §2 — no raw system→director dump here). The
         # caller decides if/how it reaches the Director: invoke_agent_with_parse_retry relays the
@@ -4204,7 +4222,7 @@ async def _plan_pass_once(
     except ClaudeAgentTimeout as exc:
         # A genuine TIMEOUT — the turn burned its whole budget. A failed invocation still burned wall-clock
         # (no usage envelope) — count it (WS-D).
-        metrics.record(None, perf_counter() - _started)
+        metrics.record(exc.usage, perf_counter() - _started)
         # R1 envelope-loss parity (CR-1, audit 2026-06-18): a timeout may have left real commits behind even
         # though the JSON envelope was lost — audit baseline..HEAD and ride the audit dict on
         # ParseFailure.lost_work so the round settles to awaiting_manazer ("review & continue"), exactly
@@ -4219,6 +4237,7 @@ async def _plan_pass_once(
             stage=stage,  # CR-V2-011 navrh (folds into Návrh); STEP 3 priprava (conversation) — honest phase
             timeout_seconds=_timeout_for("navrh"),
             on_message=on_message,
+            metrics=metrics,
         )
         return ParseFailure(
             f"{_PLAN_PASS_ENVELOPE_LOSS_PREFIX} {exc}",
@@ -4234,7 +4253,7 @@ async def _plan_pass_once(
         # rather than discard the whole accumulated plan. Same envelope-loss prefix as a timeout (it IS a
         # claude invocation failure → block_reason=agent_error if the retries are exhausted), but no
         # lost_work ⇒ the retry loop picks it up. Logged (the cause was previously swallowed → undiagnosable).
-        metrics.record(None, perf_counter() - _started)
+        metrics.record(exc.usage, perf_counter() - _started)
         logger.warning("task_plan pass crashed (retryable) for version=%s: %s", version_id, exc)
         return ParseFailure(
             f"{_PLAN_PASS_ENVELOPE_LOSS_PREFIX} {exc}",
@@ -4345,6 +4364,7 @@ async def _invoke_plan_pass(
                 timeout_seconds=_timeout_for("navrh"),
                 on_message=on_message,
                 cause_label="Agent opakovane zlyhal",
+                metrics=metrics,
             )
             result = replace(result, lost_work=lost_work)
         # Attach the accumulated turn metrics so the fail-closed relay can carry the lost tokens.
@@ -4792,15 +4812,15 @@ def _rev_list_count(project_root: Path, baseline: Optional[str]) -> int:
     return int(out) if r.returncode == 0 and out.isdigit() else 0
 
 
-def _lost_work_audit_recorded(db: Session, version_id: uuid.UUID, baseline: str) -> bool:
-    """True if a lost-work audit notification for THIS dispatch baseline already exists (R1-c idempotency).
+def _lost_work_audit_message(db: Session, version_id: uuid.UUID, baseline: str) -> Optional[PipelineMessage]:
+    """The lost-work audit notification for THIS dispatch baseline, if one exists (R1-c idempotency).
 
     The timeout catch is re-entered once per parse-retry (the parse-retry machinery is untouched — §5), so
     without this guard a single timed-out dispatch would record N identical notifications. Keyed on the
     frozen ``dispatch_baseline_sha`` → exactly one notification per dispatch (Seam #4)."""
     return (
         db.execute(
-            select(PipelineMessage.id)
+            select(PipelineMessage)
             .where(
                 PipelineMessage.version_id == version_id,
                 PipelineMessage.author == "system",
@@ -4809,9 +4829,41 @@ def _lost_work_audit_recorded(db: Session, version_id: uuid.UUID, baseline: str)
                 PipelineMessage.payload["dispatch_baseline_sha"].astext == baseline,
             )
             .limit(1)
-        ).first()
-        is not None
+        )
+        .scalars()
+        .first()
     )
+
+
+def _lost_work_audit_recorded(db: Session, version_id: uuid.UUID, baseline: str) -> bool:
+    return _lost_work_audit_message(db, version_id, baseline) is not None
+
+
+def _turn_metrics_entry(metrics: _DispatchMetrics) -> dict[str, Any]:
+    return {"usage": metrics.usage_payload(), "timing": metrics.timing_payload()}
+
+
+def _metered_turns_payload(turns: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """``usage``/``timing`` summed over the turns a lost-work notification carries (ICCINT-168), plus the turns
+    themselves under ``metered_turns`` so a re-entry can replace its own entry. Empty when nothing was metered."""
+    if not turns:
+        return {}
+    usages = [t["usage"] for t in turns.values() if t.get("usage")]
+    usage: Optional[dict[str, Any]] = None
+    if usages:
+        usage = {
+            "input_tokens": sum(int(u.get("input_tokens") or 0) for u in usages),
+            "output_tokens": sum(int(u.get("output_tokens") or 0) for u in usages),
+            "model": next((u.get("model") for u in reversed(usages) if u.get("model")), None),
+        }
+        if any(isinstance(u.get("parts"), list) for u in usages):
+            usage["parts"] = [p for u in usages for p in (u.get("parts") or [])]
+    timings = [t.get("timing") or {} for t in turns.values()]
+    timing = {
+        "duration_seconds": round(sum(float(t.get("duration_seconds") or 0.0) for t in timings), 3),
+        "parse_attempts": sum(int(t.get("parse_attempts") or 0) for t in timings),
+    }
+    return {"metered_turns": turns, "usage": usage, "timing": timing}
 
 
 async def _audit_lost_work(
@@ -4823,9 +4875,15 @@ async def _audit_lost_work(
     timeout_seconds: int,
     on_message: Optional[MessageCallback] = None,
     cause_label: str = "Vypršal čas agenta",
+    metrics: Optional[_DispatchMetrics] = None,
 ) -> Optional[dict[str, Any]]:
     """R1-c (D1): on an agent envelope-loss (timeout/crash), audit ``baseline..HEAD`` and surface any
     committed-but-lost work to the Director — *review & continue*, never silently lost, never auto-merged.
+
+    ICCINT-168: the notification is the ONLY message such a turn leaves (every lost-work path settles without
+    another one), so it carries what the turn spent — ``metrics`` — or the spend would vanish from Náklady.
+    Re-entered by the same turn (parse-retries) its entry is replaced; reached by another turn of the same
+    dispatch (a crash re-dispatch) a second entry is added; ``usage``/``timing`` are always their sum.
 
     Reads the dispatch's frozen ``dispatch_baseline_sha``, compares it to the current HEAD, and records ONE
     ``system→director`` ``notification`` carrying ``{dispatch_baseline_sha, post_timeout_head_sha,
@@ -4849,7 +4907,9 @@ async def _audit_lost_work(
         next_action = f"{cause_label} — môžu byť zapísané zmeny ({count} commitov). Over 'git log' a pokračuj."
     else:
         next_action = f"{cause_label} — žiadna zmena nezistená. Pokračuj."
-    if not _lost_work_audit_recorded(db, version_id, baseline):
+    metered = {} if metrics is None else {metrics.turn_id: _turn_metrics_entry(metrics)}
+    existing = _lost_work_audit_message(db, version_id, baseline)
+    if existing is None:
         msg = _record_message(
             db,
             version_id=version_id,
@@ -4865,10 +4925,16 @@ async def _audit_lost_work(
                 "post_timeout_head_sha": head,
                 "timeout_seconds": timeout_seconds,
                 "detected_commit_count": count,
+                **_metered_turns_payload(metered),
             },
         )
         if on_message is not None:
             await on_message(msg)
+    elif metered:
+        payload = dict(existing.payload or {})
+        payload.update(_metered_turns_payload({**(payload.get("metered_turns") or {}), **metered}))
+        existing.payload = payload
+        db.flush()
     return {
         "dispatch_baseline_sha": baseline,
         "post_timeout_head_sha": head,
@@ -9463,7 +9529,7 @@ async def _invoke_fix_critique(
             )
     except (ClaudeAgentError, ClaudeAgentTimeout) as exc:
         # Fail-OPEN: a critic crash/timeout leaves NO fix_critique record → the card demotes accept_fix (§5).
-        metrics.record(None, perf_counter() - _started)
+        metrics.record(exc.usage, perf_counter() - _started)
         logger.warning("fix-critique invoke failed (fail-open → guide) for version=%s: %s", version_id, exc)
         return None
     metrics.record(usage, perf_counter() - _started)

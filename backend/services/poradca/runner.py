@@ -50,8 +50,8 @@ from backend.db.models.poradca import (
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.db.session import SessionLocal
-from backend.services import build_db, build_sandbox, system_setting
-from backend.services.claude_agent import _usage_from
+from backend.services import build_db, build_sandbox, system_setting, usage_ledger
+from backend.services.claude_agent import UsageMetadata, _usage_from
 from backend.services.poradca import sandbox
 from backend.services.poradca.context import known_secret_values
 from backend.services.poradca.mcp_server import McpServer
@@ -322,6 +322,7 @@ async def _run(message_id: UUID, conversation_id: UUID, question: str, user_id: 
     started = time.monotonic()
     status, content, error, usage = FAILED, "", None, None
     acquired = False
+    transcript, before, launched_at = None, None, None
     secret_filter = SecretFilter()
     try:
         with SessionLocal() as db:
@@ -352,6 +353,11 @@ async def _run(message_id: UUID, conversation_id: UUID, question: str, user_id: 
 
         token = build_sandbox.turn_token()
         _sessions, run_path = await asyncio.to_thread(sandbox.prepare, conversation_id, token)
+        # ICCINT-168: čo odpoveď stála, sa číta zo záznamu sedenia — súčet pred odpoveďou a po nej (aj keď ju
+        # niekto zastaví alebo vyprší čas). Výsledok behu nesie súčet za celý rozhovor, nie za odpoveď.
+        transcript = usage_ledger.build_transcript(sandbox.session_dir(conversation_id), session_id)
+        before = await asyncio.to_thread(usage_ledger.last_cost_state, transcript)
+        launched_at = datetime.now(timezone.utc)
         container_dir, host_dir = sandbox.project_dirs(slug)
         overlays = await asyncio.to_thread(sandbox.overlay_paths, host_dir)
 
@@ -408,6 +414,10 @@ async def _run(message_id: UUID, conversation_id: UUID, question: str, user_id: 
             await _slots.release()
         if entry.stop_requested and status != DONE:
             status = STOPPED
+        if transcript is not None and launched_at is not None:
+            parts = await asyncio.to_thread(usage_ledger.settle, transcript, before, launched_at)
+            if parts:
+                usage = _usage_payload(UsageMetadata.from_parts(parts))
         content = secret_filter(content or "")
         error = secret_filter(error) if error else None
         with SessionLocal() as db:
@@ -427,6 +437,27 @@ async def _run(message_id: UUID, conversation_id: UUID, question: str, user_id: 
             db.commit()
         _running.pop(message_id, None)
         hub.publish(conversation_id, {"type": "finished", "message_id": str(message_id), "status": status})
+        if usage and usage.get("parts"):
+            # ICCINT-168: odpoveď mohla byť posledná, ktorá modelu chýbala do cenníka — nech ho má hneď.
+            await asyncio.to_thread(_refresh_prices)
+
+
+def _refresh_prices() -> None:
+    from backend.services import model_pricing
+
+    try:
+        with SessionLocal() as db:
+            model_pricing.refresh(db)
+    except Exception:  # noqa: BLE001 — cenník sa doplní pri ďalšej príležitosti, odpoveď je zapísaná
+        logger.warning("poradca: cenník sa po odpovedi nepodarilo obnoviť", exc_info=True)
+
+
+def _usage_payload(meta: UsageMetadata) -> dict:
+    """Spotreba odpovede v tvare, aký nesie aj ťah stavby — Náklady ju ocenia tou istou cestou."""
+    payload: dict = {"input_tokens": meta.input_tokens, "output_tokens": meta.output_tokens, "model": meta.model}
+    if meta.parts:
+        payload["parts"] = [p.to_payload() for p in meta.parts]
+    return payload
 
 
 class _QuestionFailed(Exception):
@@ -475,7 +506,7 @@ async def _stream(argv: list[str], entry: _Running, message_id: UUID, project_di
             is_error = bool(evt.get("is_error"))
             meta = _usage_from(evt)
             if meta is not None:
-                usage = {"input_tokens": meta.input_tokens, "output_tokens": meta.output_tokens, "model": meta.model}
+                usage = _usage_payload(meta)
     await proc.wait()
     stderr_text = (await stderr_task).decode("utf-8", errors="replace").strip()
     if entry.stop_requested:

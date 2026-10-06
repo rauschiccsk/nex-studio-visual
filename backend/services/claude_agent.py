@@ -17,6 +17,7 @@ import signal
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 from uuid import UUID
@@ -24,6 +25,7 @@ from uuid import UUID
 from backend.config.settings import settings
 from backend.constants.paths import TERMINAL_LOG_DIR as DURABLE_TERMINAL_LOG_DIR
 from backend.core.agent_env import agent_env
+from backend.services import usage_ledger
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +79,9 @@ class ClaudeAgentError(RuntimeError):
 
     #: Class-level default so ``exc.log_path`` is always safe to read (raisers set the instance attr).
     log_path: Optional[str] = None
+    #: ICCINT-168: what the failed invocation spent — read from the session transcript (a timeout or crash is
+    #: paid for too). ``None`` when nothing could be read.
+    usage: Optional["UsageMetadata"] = None
 
 
 class ClaudeAgentTimeout(ClaudeAgentError):
@@ -197,19 +202,58 @@ EventCallback = Callable[[dict], Awaitable[None]]
 
 @dataclass(frozen=True)
 class UsageMetadata:
-    """Token usage for one ``claude -p`` invocation (WS-D, CR-NS-036). Extracted from the json /
-    stream-json result envelope — never fabricated (``None`` when the envelope carries no usage)."""
+    """Token usage for one ``claude -p`` invocation (WS-D, CR-NS-036) — never fabricated (``None`` when
+    nothing carried usage).
+
+    ``parts`` (ICCINT-168) is the full spend per model — cache reads/writes included, and Claude Code's own
+    price when it reported one — read from the session transcript by :mod:`backend.services.usage_ledger`.
+    ``input_tokens``/``output_tokens``/``model`` stay what they always were (uncached input, output, the
+    dominant model): the human-side minutes, the token stop and Nastavenia's "last model" read them."""
 
     input_tokens: int
     output_tokens: int
     model: Optional[str] = None
+    parts: tuple[usage_ledger.UsagePart, ...] = ()
+
+    @classmethod
+    def from_parts(cls, parts: "list[usage_ledger.UsagePart] | tuple[usage_ledger.UsagePart, ...]") -> "UsageMetadata":
+        """The invocation's usage from its per-model parts; the model is the one that wrote the most output
+        (CR-V2-038 — a Haiku helper must not relabel an Opus turn)."""
+        dominant = max(parts, key=lambda p: p.output_tokens).model if parts else None
+        return cls(
+            input_tokens=sum(p.input_tokens for p in parts),
+            output_tokens=sum(p.output_tokens for p in parts),
+            model=dominant,
+            parts=tuple(parts),
+        )
+
+
+def merge_usage(first: Optional[UsageMetadata], second: Optional[UsageMetadata]) -> Optional[UsageMetadata]:
+    """Usage of two invocations that make one (a transient retry after a failed attempt — ICCINT-168: the
+    failed attempt was paid for too)."""
+    if first is None:
+        return second
+    if second is None:
+        return first
+    if first.parts and second.parts:
+        return UsageMetadata.from_parts([*first.parts, *second.parts])
+    return UsageMetadata(
+        input_tokens=first.input_tokens + second.input_tokens,
+        output_tokens=first.output_tokens + second.output_tokens,
+        model=second.model or first.model,
+        parts=first.parts + second.parts,
+    )
 
 
 def _usage_from(envelope: dict) -> Optional[UsageMetadata]:
     """Extract :class:`UsageMetadata` from a claude json / stream-json ``result`` envelope. The
     envelope carries top-level ``usage`` ({input_tokens, output_tokens, …}) + ``modelUsage`` (a map
     keyed by model name) — verified against the live ``--output-format json`` envelope. Returns
-    ``None`` (never zeros/guesses) when there is no ``usage`` block."""
+    ``None`` (never zeros/guesses) when there is no ``usage`` block.
+
+    ICCINT-168: this is the FALLBACK when the session transcript cannot be read. Top-level ``usage`` is this
+    invocation's own (cache included); ``modelUsage`` and ``total_cost_usd`` are SESSION totals on a
+    ``--resume`` and are used only to name the model. The one part therefore carries no price."""
     usage = envelope.get("usage")
     if not isinstance(usage, dict):
         return None
@@ -230,11 +274,15 @@ def _usage_from(envelope: dict) -> Optional[UsageMetadata]:
                 return int(entry.get("outputTokens") or entry.get("output_tokens") or 0)
 
             model = max(model_usage, key=_model_output)
-    return UsageMetadata(
+    model = model if isinstance(model, str) else None
+    part = usage_ledger.UsagePart(
+        model=model,
         input_tokens=int(usage.get("input_tokens") or 0),
         output_tokens=int(usage.get("output_tokens") or 0),
-        model=model if isinstance(model, str) else None,
+        cache_read_tokens=int(usage.get("cache_read_input_tokens") or 0),
+        cache_write_tokens=int(usage.get("cache_creation_input_tokens") or 0),
     )
+    return UsageMetadata(input_tokens=part.input_tokens, output_tokens=part.output_tokens, model=model, parts=(part,))
 
 
 def _structured_from(envelope: dict) -> Optional[dict]:
@@ -405,9 +453,12 @@ async def invoke_claude(
     # ICCINT-110: keď sedenie zmizne, skúsi sa RAZ znova s čerstvým. Nie je to prechodná chyba, takže
     # do backoffu nepatrí — a opakovať to donekonečna netreba, buď sa založí, alebo je zle inde.
     zacni_nacisto = False
+    # ICCINT-168: a failed attempt was paid for too — what it spent rides on its exception and is folded into
+    # the attempt that succeeds (or into the exception that finally escapes).
+    spent: Optional[UsageMetadata] = None
     for attempt in range(attempts):
         try:
-            return await _invoke_once(
+            text, usage, structured = await _invoke_once(
                 project_slug=project_slug,
                 claude_session_id=claude_session_id,
                 prompt=prompt,
@@ -424,6 +475,8 @@ async def invoke_claude(
                 force_new_session=zacni_nacisto,
             )
         except ClaudeAgentError as exc:
+            spent = merge_usage(spent, exc.usage)
+            exc.usage = spent
             if not zacni_nacisto and _SESSION_GONE_RE.search(str(exc)):
                 # ⚠️ NAHLAS. Agent stráca históriu rozhovoru — prompt ťahu je sebestačný, ale nikto sa
                 # nesmie dozvedieť až z výsledku, že pokračoval bez pamäte.
@@ -446,6 +499,7 @@ async def invoke_claude(
                 await asyncio.sleep(delay)
                 continue
             raise
+        return text, merge_usage(spent, usage), structured
     raise AssertionError("unreachable")  # the loop always returns or raises
 
 
@@ -639,6 +693,57 @@ async def _invoke_once(
 
 
 async def _run_turn(
+    args: list[str],
+    *,
+    project_root: Path,
+    project_slug: str,
+    claude_session_id: UUID,
+    charter_path: Optional[Path],
+    prompt: str,
+    timeout: int,
+    on_event: Optional[EventCallback],
+    log_dir: Optional[Path],
+    log_label: Optional[str],
+    sandbox_container: Optional[str],
+) -> tuple[str, Optional["UsageMetadata"], Optional[dict]]:
+    """Run the turn and meter what it spent from the session transcript (ICCINT-168) — on EVERY way out.
+
+    The session total is read before the turn and again after it: a new total means Claude Code closed the
+    turn and the difference is exactly what it charged; no new total means the turn was cut off and its
+    finished messages are counted instead (:mod:`usage_ledger`). A failure carries the spend on
+    ``exc.usage``. When the transcript cannot be read, the result envelope's own usage stays the answer."""
+    from backend.services import build_sandbox  # local import — cycle (see :func:`_invoke_once`)
+
+    transcript = usage_ledger.build_transcript(
+        Path(build_sandbox._host_session_dir(str(project_root))), claude_session_id
+    )
+    before = await asyncio.to_thread(usage_ledger.last_cost_state, transcript)
+    started_at = datetime.now(timezone.utc)
+    try:
+        text, usage, structured = await _launch_turn(
+            args,
+            project_root=project_root,
+            project_slug=project_slug,
+            claude_session_id=claude_session_id,
+            charter_path=charter_path,
+            prompt=prompt,
+            timeout=timeout,
+            on_event=on_event,
+            log_dir=log_dir,
+            log_label=log_label,
+            sandbox_container=sandbox_container,
+        )
+    except ClaudeAgentError as exc:
+        parts = await asyncio.to_thread(usage_ledger.settle, transcript, before, started_at)
+        if parts is not None:
+            # [] = the record was read and the turn spent nothing — a known zero, not "unknown" (ICCINT-168)
+            exc.usage = UsageMetadata.from_parts(parts)
+        raise
+    parts = await asyncio.to_thread(usage_ledger.settle, transcript, before, started_at)
+    return text, (UsageMetadata.from_parts(parts) if parts else usage), structured
+
+
+async def _launch_turn(
     args: list[str],
     *,
     project_root: Path,

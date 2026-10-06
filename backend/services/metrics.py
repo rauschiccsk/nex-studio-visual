@@ -23,15 +23,17 @@ with CR-V2-063: the Manažér needs what it cost, not whether we beat a human.)
 from __future__ import annotations
 
 import logging
+import math
 import uuid
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from backend.config.settings import settings
 from backend.db.models.external_cost import ExternalCost
+from backend.db.models.model_price import ModelPrice
 from backend.db.models.pipeline import STAGE_VALUES, PipelineMessage, PipelineState
 from backend.db.models.poradca import AUTHOR_PORADCA, PoradcaConversation, PoradcaMessage
 from backend.db.models.projects import Project
@@ -40,18 +42,19 @@ from backend.schemas.metrics import (
     CostRowRead,
     CostTotalsRead,
     ManagerOverheadRead,
+    PriceListRead,
     ProjectCostsRead,
+    UnpricedRead,
     UsageTotalsRead,
     VersionCostsRead,
 )
-from backend.schemas.user_agent_setting import MODEL_FAMILIES
-from backend.services import system_setting
+from backend.services import model_pricing, system_setting
 from backend.services.pipeline_metrics import (
-    ModelTokens,
     UsageTotals,
     aggregate_pipeline_usage,
     aggregate_usage_by_phase,
 )
+from backend.services.usage_ledger import UsagePart, parts_from_usage_payload
 
 logger = logging.getLogger(__name__)
 
@@ -63,10 +66,6 @@ logger = logging.getLogger(__name__)
 #: agent-only ``system`` row.
 TERMINAL_PHASE = "done"
 COMPARISON_PHASES: tuple[str, ...] = tuple(s for s in STAGE_VALUES if s != TERMINAL_PHASE)
-#: Price families = the model families the cockpit dispatches (ICCINT-167) — one list, not two copies that
-#: can drift apart.
-_PRICE_FAMILIES: tuple[str, ...] = MODEL_FAMILIES
-
 #: Row keys outside the build phases. ``externe`` is hand-entered spend (its wage key is
 #: ``metrics_hourly_wage_externe``); ``system`` is un-phased engine spend and is AGENT-ONLY — it has no
 #: wage key and never carries human figures.
@@ -98,73 +97,133 @@ def _totals_read(t: UsageTotals) -> UsageTotalsRead:
     )
 
 
-def _effective_price(db: Session, key: str, env_fallback: float) -> float:
-    """system_settings value, else the env value (config.settings) — 0.0 means unset."""
-    return system_setting.get_float(db, key) or env_fallback
+#: Why spend could not be priced — sentences the screen shows next to the figure (ICCINT-168).
+UNRECORDED_REASON = "záznam sedenia sa nezachoval — ťah spred v4.43.0 má len vstup a výstup, bez vyrovnávacej pamäte"
+NO_PRICE_REASON = "cenník modelu {model} sa zatiaľ nedá zistiť — málo ťahov, ktoré zaplatil Claude Code"
+NO_RATE_REASON = "kurz eura sa nepodarilo stiahnuť z ECB"
+NO_MODEL_REASON = "spotreba neuvádza model"
+NO_SEARCH_PRICE_REASON = "vyhľadávanie na webe — cenník modelu {model} jeho cenu zatiaľ nepozná"
+UNKNOWN_SPEND_REASON = (
+    "ťah, ktorého spotreba sa nezaznamenala (zlyhal pred v4.43.0, alebo sa záznam sedenia nedal prečítať)"
+)
 
 
-def _model_family(model_id: Optional[str]) -> str:
-    """Map a model to its price family — a full id the CLI reported (``claude-<family>-<version>``) or a bare
-    family name (a hand-entered external cost, ICCINT-167). The ``"_unknown"`` sentinel (no
-    model named in the envelope) maps to ``"_unknown"`` silently; a *named* id that matches no family
-    logs a warning so a model roll that changes the family token surfaces, never silently mis-priced."""
-    if not model_id or model_id == "_unknown":
-        return "_unknown"
-    mid = model_id.lower()
-    for fam in _PRICE_FAMILIES:
-        if fam in mid:
-            return fam
-    logger.warning("metrics: unrecognized model id %r → _unknown bucket", model_id)
-    return "_unknown"
+@dataclass
+class _Pricing:
+    """The price lists (by model) and the ones a scope actually used — those are what the screen shows."""
+
+    lists: dict[str, list[ModelPrice]]
+    used: dict[uuid.UUID, ModelPrice] = field(default_factory=dict)
+    #: row key → (exact agent euros, exact human euros or None) — before rounding UP, so the project scope can be
+    #: reconciled with its versions (:func:`_reconcile_with_versions`).
+    exact: dict[str, tuple[float, Optional[float]]] = field(default_factory=dict)
+
+    def for_scope(self) -> "_Pricing":
+        return _Pricing(self.lists)
 
 
-def _resolve_price(db: Session, family: str, flat_in: float, flat_out: float) -> tuple[float, float]:
-    """Ordered fallback: per-family key (when both > 0) → flat pair (system_settings → env). The flat
-    pair covers ``_unknown`` + any family left unkeyed."""
-    if family != "_unknown":
-        pin = _effective_price(db, f"api_price_input_per_mtok_{family}", 0.0)
-        pout = _effective_price(db, f"api_price_output_per_mtok_{family}", 0.0)
-        if pin > 0 and pout > 0:
-            return pin, pout
-    return flat_in, flat_out
+@dataclass
+class _Cost:
+    eur: float = 0.0
+    priced: bool = False
+    #: reason → [parts, tokens]
+    unpriced: dict[str, list[int]] = field(default_factory=dict)
+
+    def miss(self, reason: str, count: int, tokens: int) -> None:
+        acc = self.unpriced.setdefault(reason, [0, 0])
+        acc[0] += count
+        acc[1] += tokens
+
+    def whole_euros(self, has_spend: bool) -> Optional[int]:
+        """Rounded UP to whole euros (Director 06.10.2026: rather a little more than less). ``None`` when there
+        was spend and none of it could be priced; a real ``0`` when there was none."""
+        if self.priced:
+            return _ceil_euros(self.eur)
+        return None if has_spend else 0
+
+    def unpriced_read(self) -> list[UnpricedRead]:
+        return [UnpricedRead(reason=r, turns=c, tokens=t) for r, (c, t) in sorted(self.unpriced.items())]
 
 
-def _agent_cost_split(
-    db: Session, by_model: dict, flat_in: float, flat_out: float
-) -> tuple[Optional[float], Optional[float], Optional[float], list[str]]:
-    """``(total_cost, value_in, value_out, unpriced_model_keys)`` for a phase's per-model token split.
-
-    The three costs are ``None`` if ANY token-bearing model resolves to no price after the full
-    fallback chain (a fully-priced set with ``_unknown`` mass costed at the flat pair is LEGITIMATE —
-    the "paid for compute, envelope didn't name the model" case). A model carrying 0 tokens never
-    triggers an unpriced gap (0 tokens cost 0 regardless of price); a phase with no tokens at all costs
-    a real 0 (it did no work), not ``None``."""
-    value_in = 0.0
-    value_out = 0.0
-    unpriced: list[str] = []
-    for model_key, mt in by_model.items():
-        if mt.input_tokens == 0 and mt.output_tokens == 0:
-            continue
-        pin, pout = _resolve_price(db, _model_family(model_key), flat_in, flat_out)
-        if pin <= 0 or pout <= 0:
-            unpriced.append(model_key)
-            continue
-        value_in += mt.input_tokens * pin
-        value_out += mt.output_tokens * pout
-    if unpriced:
-        return None, None, None, unpriced
-    return (value_in + value_out) / 1_000_000.0, value_in / 1_000_000.0, value_out / 1_000_000.0, []
+def _price_part(pricing: _Pricing, cost: _Cost, part: UsagePart, at: Optional[datetime]) -> None:
+    if not part.model:
+        cost.miss(NO_MODEL_REASON, 1, part.tokens)
+        return
+    row = model_pricing.row_for(pricing.lists, part.model, at)
+    if row is None:
+        cost.miss(NO_PRICE_REASON.format(model=part.model), 1, part.tokens)
+        return
+    if not row.eur_usd:
+        cost.miss(NO_RATE_REASON, 1, part.tokens)
+        return
+    cost.eur += model_pricing.part_cost_usd(row, part) / row.eur_usd
+    cost.priced = True
+    pricing.used[row.id] = row
+    searches = model_pricing.search_cost_usd(row, part)
+    if searches is None:
+        cost.miss(NO_SEARCH_PRICE_REASON.format(model=part.model), part.web_search_requests, 0)
+    else:
+        cost.eur += searches / row.eur_usd
 
 
-def usage_cost(db: Session, model: Optional[str], input_tokens: int, output_tokens: int) -> Optional[float]:
-    """Cena jednej spotreby v EUR tou istou cestou ako stavba (ICCINT-167 — cena odpovede Poradcu).
-
-    ``None``, keď model nemá cenu ani po celom reťazci náhrad — rovnako poctivo ako riadok fázy."""
-    flat_in = _effective_price(db, "api_price_input_per_mtok", settings.api_price_input_per_mtok)
-    flat_out = _effective_price(db, "api_price_output_per_mtok", settings.api_price_output_per_mtok)
-    by_model = {model or "_unknown": ModelTokens(input_tokens=input_tokens, output_tokens=output_tokens)}
-    cost, _in, _out, _unpriced = _agent_cost_split(db, by_model, flat_in, flat_out)
+def _price_totals(pricing: _Pricing, t: UsageTotals) -> _Cost:
+    """Tokens × the price list valid when they were spent × that list's rate — one formula for every row."""
+    cost = _Cost()
+    for at, part in t.parts:
+        _price_part(pricing, cost, part, at)
+    if t.unrecorded_turns:
+        cost.miss(UNRECORDED_REASON, t.unrecorded_turns, t.unrecorded_tokens)
+    if t.unknown_turns:
+        cost.miss(UNKNOWN_SPEND_REASON, t.unknown_turns, 0)
     return cost
+
+
+def _has_spend(t: UsageTotals) -> bool:
+    return bool(t.parts or t.unrecorded_turns or t.unknown_turns)
+
+
+def _price_list_read(row: ModelPrice) -> PriceListRead:
+    def eur(usd: float) -> Optional[float]:
+        return round(usd / row.eur_usd, 4) if row.eur_usd else None
+
+    return PriceListRead(
+        model=row.model,
+        valid_from=row.valid_from,
+        input_usd=row.input_usd,
+        output_usd=row.output_usd,
+        cache_read_usd=row.cache_read_usd,
+        cache_write_usd=row.cache_write_usd,
+        web_search_usd=row.web_search_usd,
+        eur_usd=row.eur_usd,
+        rate_date=row.rate_date,
+        rate_source=row.rate_source,
+        input_eur=eur(row.input_usd),
+        output_eur=eur(row.output_usd),
+        cache_read_eur=eur(row.cache_read_usd),
+        cache_write_eur=eur(row.cache_write_usd),
+        web_search_eur=eur(row.web_search_usd) if row.web_search_usd is not None else None,
+        observations=row.observations,
+        max_deviation=row.max_deviation,
+    )
+
+
+def _price_list(pricing: _Pricing) -> list[PriceListRead]:
+    return [_price_list_read(r) for r in sorted(pricing.used.values(), key=lambda r: (r.model, r.valid_from))]
+
+
+def usage_cost(db: Session, usage: object, at: Optional[datetime]) -> Optional[float]:
+    """Cena jednej odpovede Poradcu v eurách — tým istým cenníkom ako Náklady (ICCINT-168), zaokrúhlená hore
+    na celé centy. ``None``, keď sa celá oceniť nedá (stará odpoveď bez záznamu, model bez cenníka, bez kurzu)."""
+    parts = parts_from_usage_payload(usage)
+    if not parts:
+        return None
+    pricing = _Pricing(model_pricing.price_rows(db))
+    cost = _Cost()
+    for part in parts:
+        _price_part(pricing, cost, part, at)
+    if cost.unpriced or not cost.priced:
+        return None
+    return math.ceil(round(cost.eur * 100, 6)) / 100
 
 
 # ── human side ────────────────────────────────────────────────────────────────
@@ -178,10 +237,20 @@ def _human_minutes_for_phase(t: UsageTotals, conv_rate: float) -> Optional[float
     return (t.input_tokens + t.output_tokens) / 1_000_000.0 * conv_rate
 
 
-def _human_cost(human_minutes: Optional[float], wage: float) -> Optional[float]:
+def _human_exact(human_minutes: Optional[float], wage: float) -> Optional[float]:
     if human_minutes is None or wage <= 0:
         return None
     return human_minutes / 60.0 * wage
+
+
+def _human_cost(human_minutes: Optional[float], wage: float) -> Optional[int]:
+    """Whole euros rounded up, like every euro figure on the screen (ICCINT-168)."""
+    exact = _human_exact(human_minutes, wage)
+    return None if exact is None else _ceil_euros(exact)
+
+
+def _ceil_euros(exact: float) -> int:
+    return math.ceil(round(exact, 6))
 
 
 def _coefficient(db: Session) -> float:
@@ -255,30 +324,43 @@ def _has_activity(t: UsageTotals) -> bool:
     """Did this bucket meter ANY activity? Tokens OR wall-clock OR parse-attempts — a failed turn whose
     envelope carried ``timing`` but no ``usage`` is real work (0 tokens + real seconds) and must not be
     dropped, or its time would foot nowhere (metrics-v3-followup.md C1)."""
-    return bool(t.input_tokens or t.output_tokens or t.duration_seconds or t.parse_attempts)
+    return bool(t.input_tokens or t.output_tokens or t.duration_seconds or t.parse_attempts or t.parts)
 
 
-def _phase_row(db: Session, phase: str, t: UsageTotals, flat_in: float, flat_out: float) -> CostRowRead:
-    """One ``kind="phase"`` row. ``share_pct`` is filled in per scope afterwards (see
-    :func:`_fill_share_pct`) — it needs every row of the scope to exist first."""
-    human_minutes = _human_minutes_for_phase(t, _coefficient(db))
-    agent_cost, _, _, unpriced = _agent_cost_split(db, t.by_model, flat_in, flat_out)
+def _measured_row(
+    db: Session,
+    pricing: _Pricing,
+    *,
+    key: str,
+    kind: str,
+    t: UsageTotals,
+    with_human: bool,
+) -> CostRowRead:
+    """One measured row (a phase, Poradca or the un-phased system spend). ``share_pct`` is filled in per scope
+    afterwards (see :func:`_fill_share_pct`) — it needs every row of the scope to exist first. Only a phase row
+    has a human side: Poradca answers questions and the system row is engine overhead."""
+    cost = _price_totals(pricing, t)
+    human_minutes = _human_minutes_for_phase(t, _coefficient(db)) if with_human else None
+    wage = _phase_wage(db, key) if with_human else 0.0
+    pricing.exact[key] = (cost.eur, _human_exact(human_minutes, wage))
     return CostRowRead(
-        key=phase,
-        kind="phase",
+        key=key,
+        kind=kind,
         turns=t.messages,
         input_tokens=t.input_tokens,
         output_tokens=t.output_tokens,
+        cache_read_tokens=t.cache_read_tokens,
+        cache_write_tokens=t.cache_write_tokens,
         share_pct=0.0,
-        agent_cost=agent_cost,
-        unpriced_model_keys=unpriced,
+        agent_cost=cost.whole_euros(_has_spend(t)),
+        unpriced=cost.unpriced_read(),
         human_minutes=human_minutes,
-        human_cost=_human_cost(human_minutes, _phase_wage(db, phase)),
+        human_cost=_human_cost(human_minutes, _phase_wage(db, key)) if with_human else None,
         active_seconds=t.duration_seconds,
     )
 
 
-def _build_phases(db: Session, by_phase: dict[str, UsageTotals], flat_in: float, flat_out: float) -> list[CostRowRead]:
+def _build_phases(db: Session, pricing: _Pricing, by_phase: dict[str, UsageTotals]) -> list[CostRowRead]:
     """The comparison-phase rows for the phases that ACTUALLY did work — emit only a phase with SOME metered
     activity (tokens OR wall-clock OR parse-attempts), in canonical ``COMPARISON_PHASES`` order
     (metrics-v3-three-phases.md Part 2; drop predicate widened in metrics-v3-followup.md C2). A phase with NO
@@ -294,7 +376,7 @@ def _build_phases(db: Session, by_phase: dict[str, UsageTotals], flat_in: float,
         t = by_phase.get(phase)
         if t is None or not _has_activity(t):
             continue
-        rows.append(_phase_row(db, phase, t, flat_in, flat_out))
+        rows.append(_measured_row(db, pricing, key=phase, kind="phase", t=t, with_human=True))
     return rows
 
 
@@ -309,7 +391,7 @@ def _overhead_totals(by_phase: dict[str, UsageTotals]) -> UsageTotals:
     return overhead
 
 
-def _system_rows(db: Session, t: UsageTotals, flat_in: float, flat_out: float) -> list[CostRowRead]:
+def _system_rows(db: Session, pricing: _Pricing, t: UsageTotals) -> list[CostRowRead]:
     """The ``kind="system"`` row (0 or 1) — un-phased engine spend, AGENT-ONLY.
 
     ``human_minutes``/``human_cost`` are ALWAYS ``None`` and there is no ``metrics_hourly_wage_system``
@@ -319,30 +401,14 @@ def _system_rows(db: Session, t: UsageTotals, flat_in: float, flat_out: float) -
     phase rows."""
     if not _has_activity(t):
         return []
-    agent_cost, _, _, unpriced = _agent_cost_split(db, t.by_model, flat_in, flat_out)
-    return [
-        CostRowRead(
-            key=SYSTEM_ROW_KEY,
-            kind="system",
-            turns=t.messages,
-            input_tokens=t.input_tokens,
-            output_tokens=t.output_tokens,
-            share_pct=0.0,
-            agent_cost=agent_cost,
-            unpriced_model_keys=unpriced,
-            human_minutes=None,
-            human_cost=None,
-            active_seconds=t.duration_seconds,
-        )
-    ]
+    return [_measured_row(db, pricing, key=SYSTEM_ROW_KEY, kind="system", t=t, with_human=False)]
 
 
 def _external_rows(
     db: Session,
+    pricing: _Pricing,
     project_id: uuid.UUID,
     version_id: Optional[uuid.UUID],
-    flat_in: float,
-    flat_out: float,
 ) -> list[CostRowRead]:
     """The ``kind="external"`` row (0 or 1) aggregating the scope's hand-entered ``external_cost`` rows.
 
@@ -350,10 +416,10 @@ def _external_rows(
     project's entries, version-bound and version-less alike (a version-less entry belongs to the project
     total and to no version).
 
-    Priced through the SAME ``_agent_cost_split`` chain (the entries' ``model`` field builds the
-    ``by_model`` split) and converted with the SAME coefficient as measured work, with the
-    ``metrics_hourly_wage_externe`` wage. ``active_seconds`` is 0.0 (nothing was metered here) and
-    ``turns`` is the number of entries."""
+    Priced with the SAME price lists as measured work (ICCINT-168): the entry names a model or just a family
+    (``opus``) and carries input/output only — it is priced by that model's newest list. Converted with the
+    SAME coefficient as measured work, with the ``metrics_hourly_wage_externe`` wage. ``active_seconds`` is
+    0.0 (nothing was metered here) and ``turns`` is the number of entries."""
     stmt = select(ExternalCost).where(ExternalCost.project_id == project_id)
     if version_id is not None:
         stmt = stmt.where(ExternalCost.version_id == version_id)
@@ -362,16 +428,17 @@ def _external_rows(
         return []
 
     t = UsageTotals()
+    cost = _Cost()
     for entry in entries:
-        t.add(
-            input_tokens=int(entry.input_tokens or 0),
-            output_tokens=int(entry.output_tokens or 0),
-            duration_seconds=0.0,
-            model=entry.model,
-        )
+        input_tokens, output_tokens = int(entry.input_tokens or 0), int(entry.output_tokens or 0)
+        t.add(input_tokens=input_tokens, output_tokens=output_tokens, duration_seconds=0.0, model=entry.model)
+        row = model_pricing.family_row(pricing.lists, entry.model)
+        model = row.model if row else entry.model
+        part = UsagePart(model=model, input_tokens=input_tokens, output_tokens=output_tokens)
+        _price_part(pricing, cost, part, None)
 
     human_minutes = _human_minutes_for_phase(t, _coefficient(db))
-    agent_cost, _, _, unpriced = _agent_cost_split(db, t.by_model, flat_in, flat_out)
+    pricing.exact[EXTERNAL_ROW_KEY] = (cost.eur, _human_exact(human_minutes, _phase_wage(db, EXTERNAL_ROW_KEY)))
     return [
         CostRowRead(
             key=EXTERNAL_ROW_KEY,
@@ -379,9 +446,11 @@ def _external_rows(
             turns=t.messages,
             input_tokens=t.input_tokens,
             output_tokens=t.output_tokens,
+            cache_read_tokens=0,
+            cache_write_tokens=0,
             share_pct=0.0,
-            agent_cost=agent_cost,
-            unpriced_model_keys=unpriced,
+            agent_cost=cost.whole_euros(bool(t.input_tokens or t.output_tokens)),
+            unpriced=cost.unpriced_read(),
             human_minutes=human_minutes,
             human_cost=_human_cost(human_minutes, _phase_wage(db, EXTERNAL_ROW_KEY)),
             active_seconds=0.0,
@@ -391,10 +460,9 @@ def _external_rows(
 
 def _poradca_rows(
     db: Session,
+    pricing: _Pricing,
     project_id: uuid.UUID,
     version_id: Optional[uuid.UUID],
-    flat_in: float,
-    flat_out: float,
 ) -> list[CostRowRead]:
     """Riadok ``kind="poradca"`` (0 alebo 1) — odpovede Poradcu k projektu (ICCINT-167).
 
@@ -424,25 +492,38 @@ def _poradca_rows(
             output_tokens=int(usage.get("output_tokens") or 0),
             duration_seconds=float(answer.duration_seconds or 0.0),
             model=usage.get("model"),
+            parts=parts_from_usage_payload(usage),
+            at=answer.created_at,
         )
     if not _has_activity(t):
         return []
-    agent_cost, _, _, unpriced = _agent_cost_split(db, t.by_model, flat_in, flat_out)
-    return [
-        CostRowRead(
-            key=PORADCA_ROW_KEY,
-            kind="poradca",
-            turns=t.messages,
-            input_tokens=t.input_tokens,
-            output_tokens=t.output_tokens,
-            share_pct=0.0,
-            agent_cost=agent_cost,
-            unpriced_model_keys=unpriced,
-            human_minutes=None,
-            human_cost=None,
-            active_seconds=t.duration_seconds,
-        )
-    ]
+    return [_measured_row(db, pricing, key=PORADCA_ROW_KEY, kind="poradca", t=t, with_human=False)]
+
+
+def _reconcile_with_versions(
+    rows: list[CostRowRead], pricing: _Pricing, versions: list[tuple[list[CostRowRead], _Pricing]]
+) -> None:
+    """The project scope never shows less than its versions (ICCINT-168 — Director: rather a little more).
+
+    Each version rounds every row UP on its own, so rounding the merged project rows once would come out up to a
+    euro per row and version LOWER than the sum of the versions. A project row is therefore the sum of its versions'
+    rounded figures plus — rounded up — whatever belongs to no version (a Poradca answer about the whole project, a
+    hand-entered cost without a version)."""
+    for row in rows:
+        p_agent, p_human = pricing.exact.get(row.key, (0.0, None))
+        same = [(next((r for r in v_rows if r.key == row.key), None), v_pricing) for v_rows, v_pricing in versions]
+        if row.agent_cost is not None:
+            rounded = sum((vr.agent_cost or 0) for vr, _ in same if vr is not None)
+            exact = sum(vp.exact.get(row.key, (0.0, None))[0] for _, vp in same)
+            row.agent_cost = rounded + _remainder(p_agent - exact)
+        if row.human_cost is not None and p_human is not None:
+            rounded = sum((vr.human_cost or 0) for vr, _ in same if vr is not None)
+            exact = sum((vp.exact.get(row.key, (0.0, None))[1] or 0.0) for _, vp in same)
+            row.human_cost = rounded + _remainder(p_human - exact)
+
+
+def _remainder(exact: float) -> int:
+    return _ceil_euros(exact) if exact > 1e-6 else 0
 
 
 def _fill_share_pct(rows: list[CostRowRead]) -> None:
@@ -460,20 +541,19 @@ def _fill_share_pct(rows: list[CostRowRead]) -> None:
 
 def _scope_rows(
     db: Session,
+    pricing: _Pricing,
     by_phase: dict[str, UsageTotals],
     project_id: uuid.UUID,
     version_id: Optional[uuid.UUID],
-    flat_in: float,
-    flat_out: float,
 ) -> list[CostRowRead]:
     """A scope's rows in PAYLOAD ORDER — the screen renders them as they arrive, so the order is a
     backend contract: phase rows in canonical ``COMPARISON_PHASES`` order, then the ``external`` row,
     then the ``poradca`` row (ICCINT-167), then the ``system`` row last (it foots the table). A row absent
     from the scope is not emitted."""
-    rows = _build_phases(db, by_phase, flat_in, flat_out)
-    rows += _external_rows(db, project_id, version_id, flat_in, flat_out)
-    rows += _poradca_rows(db, project_id, version_id, flat_in, flat_out)
-    rows += _system_rows(db, _overhead_totals(by_phase), flat_in, flat_out)
+    rows = _build_phases(db, pricing, by_phase)
+    rows += _external_rows(db, pricing, project_id, version_id)
+    rows += _poradca_rows(db, pricing, project_id, version_id)
+    rows += _system_rows(db, pricing, _overhead_totals(by_phase))
     _fill_share_pct(rows)
     return rows
 
@@ -495,46 +575,56 @@ def _total_of(measured: Optional[float], external: Optional[float]) -> Optional[
     return measured + external
 
 
+def _agent_sum(rows: list[CostRowRead]) -> Optional[int]:
+    """Σ of the rows' whole-euro agent figures — the table adds up because it sums what it shows. ``None``
+    only when some row had spend and NO row could price anything (ICCINT-168: the unpriced part is named on
+    the rows and by ``agent_cost_complete``, not hidden in a ``None`` that swallows the priced part)."""
+    priced = [r.agent_cost for r in rows if r.agent_cost is not None]
+    if priced:
+        return sum(priced)
+    return None if any(r.agent_cost is None for r in rows) else 0
+
+
 def _cost_totals(rows: list[CostRowRead]) -> CostTotalsRead:
     """Scope totals with the measured/entered split — summed but NEVER merged.
 
-    **None propagation, scoped deliberately.** A ``…_measured`` figure is ``None`` iff some MEASURED row
-    that carries tokens has that figure unconfigured. For the human side that scope is the
-    ``kind="phase"`` rows ONLY (the pre-CR ``_cost_totals`` scope, kept): the agent-only ``system`` row
-    carries ``None`` human figures by definition and must not drag the human totals to ``None``. For the
-    agent side the ``system`` row COUNTS — it is metered spend, so an unpriced system row does make
-    ``agent_cost_measured`` ``None``.
+    **Agent side (ICCINT-168).** Every figure is the sum of the rows' whole-euro figures; spend that could not
+    be priced is named on its row (``unpriced``) and flips ``agent_cost_complete`` to ``False`` — the total is
+    then the priced part and the screen says so.
 
-    A scope with no external entries reports ``0.0`` externals — a REAL zero (nothing was entered), not
-    ``None``. A ``…_total`` is ``None`` when either half is ``None``.
+    **Human side, None propagation scoped deliberately.** A ``…_measured`` figure is ``None`` iff some
+    ``kind="phase"`` row that carries tokens has that figure unconfigured: the agent-only ``system`` and
+    ``poradca`` rows carry ``None`` human figures by definition and must not drag the human totals to ``None``.
+    **Only a token-bearing row can make a figure incomplete** (0 tokens cost 0 whatever the wage), and at
+    least ONE such phase row must EXIST: with none, ``all(...)`` over the empty filtered sequence would be
+    vacuously True and Σ of an all-``None`` list would render a fabricated ``0`` — exactly what a scope whose
+    whole metered spend sits in the agent-only ``system`` row would show ("Cena ľudskej práce 0 €" under a
+    table of ``—``). No phase tokens → no human figure.
 
-    **Only a token-bearing row can make a figure incomplete** (0 tokens cost 0 whatever the price/wage),
-    and on the human side at least ONE such phase row must EXIST: with none, ``all(...)`` over the empty
-    filtered sequence would be vacuously True and Σ of an all-``None`` list would render a fabricated
-    ``0`` — exactly what a scope whose whole metered spend sits in the agent-only ``system`` row would
-    show ("Cena ľudskej práce 0,00 €" under a table of ``—``). No phase tokens → no human figure."""
+    A scope with no external entries reports ``0`` externals — a REAL zero (nothing was entered), not
+    ``None``. A human ``…_total`` is ``None`` when either half is ``None``."""
     phase_rows = [r for r in rows if r.kind == "phase"]
     measured_rows = [r for r in rows if r.kind in ("phase", "poradca", "system")]
     external_row = next((r for r in rows if r.kind == "external"), None)
 
-    token_measured_rows = [r for r in measured_rows if r.input_tokens or r.output_tokens]
     token_phase_rows = [r for r in phase_rows if r.input_tokens or r.output_tokens]
-
-    agent_ok = all(r.agent_cost is not None for r in token_measured_rows)
     human_ok = bool(token_phase_rows) and all(r.human_minutes is not None for r in token_phase_rows)
     human_cost_ok = bool(token_phase_rows) and all(r.human_cost is not None for r in token_phase_rows)
 
-    agent_measured = _sum_or_none([r.agent_cost for r in measured_rows], complete=agent_ok)
+    agent_measured = _agent_sum(measured_rows)
+    agent_external: Optional[int] = _agent_sum([external_row]) if external_row else 0
+    # Straight from the rows, not from the halves: a measured half that priced nothing (``None``) next to a
+    # real-zero external half must stay "unpriced", never add up to a fabricated 0 €.
+    agent_total = _agent_sum(rows)
     human_minutes_measured = _sum_or_none([r.human_minutes for r in phase_rows], complete=human_ok)
     human_cost_measured = _sum_or_none([r.human_cost for r in phase_rows], complete=human_cost_ok)
 
     # No external entry at all → a real 0 on every external figure (nothing was entered). An entry that
-    # exists carries its own figures, ``None`` included (unpriced model / unset wage). The VOLUME figures
-    # split the same way as the money ones — the screen's "z toho namerané / z toho ručne zadané" rows
-    # must be able to cover every column, not just money.
-    agent_external: Optional[float] = external_row.agent_cost if external_row else 0.0
+    # exists carries its own figures, ``None`` included (unset wage). The VOLUME figures split the same way
+    # as the money ones — the screen's "z toho namerané / z toho ručne zadané" rows must be able to cover
+    # every column, not just money.
     human_minutes_external: Optional[float] = external_row.human_minutes if external_row else 0.0
-    human_cost_external: Optional[float] = external_row.human_cost if external_row else 0.0
+    human_cost_external: Optional[int] = external_row.human_cost if external_row else 0
 
     return CostTotalsRead(
         turns=sum(r.turns for r in rows),
@@ -546,9 +636,12 @@ def _cost_totals(rows: list[CostRowRead]) -> CostTotalsRead:
         output_tokens=sum(r.output_tokens for r in rows),
         output_tokens_measured=sum(r.output_tokens for r in measured_rows),
         output_tokens_external=external_row.output_tokens if external_row else 0,
+        cache_read_tokens=sum(r.cache_read_tokens for r in rows),
+        cache_write_tokens=sum(r.cache_write_tokens for r in rows),
         agent_cost_measured=agent_measured,
         agent_cost_external=agent_external,
-        agent_cost_total=_total_of(agent_measured, agent_external),
+        agent_cost_total=agent_total,
+        agent_cost_complete=not any(r.unpriced for r in rows),
         human_minutes_measured=human_minutes_measured,
         human_minutes_external=human_minutes_external,
         human_minutes_total=_total_of(human_minutes_measured, human_minutes_external),
@@ -561,19 +654,10 @@ def _cost_totals(rows: list[CostRowRead]) -> CostTotalsRead:
 # ── config flags / assumptions ────────────────────────────────────────────────
 
 
-def _config_flags(db: Session, flat_in: float, flat_out: float) -> tuple[bool, bool, bool]:
-    """``(pricing, coefficient, wages)`` — the per-dimension config booleans the screen shows in its
-    assumption strip (an unconfigured dimension hides its columns instead of faking them)."""
-    pricing_configured = (flat_in > 0 and flat_out > 0) or any(
-        _effective_price(db, f"api_price_input_per_mtok_{fam}", 0.0) > 0
-        and _effective_price(db, f"api_price_output_per_mtok_{fam}", 0.0) > 0
-        for fam in _PRICE_FAMILIES
-    )
-    coefficient_configured = _coefficient(db) > 0
-    # Every wage-bearing row counts — ``externe`` included: its wage produces a real human-cost figure
-    # on screen, so a scope priced through it alone must never be labelled "Mzdy nenastavené".
-    wages_configured = any(_phase_wage(db, key) > 0 for key in WAGE_ROW_KEYS)
-    return pricing_configured, coefficient_configured, wages_configured
+def _wages_configured(db: Session) -> bool:
+    """Every wage-bearing row counts — ``externe`` included: its wage produces a real human-cost figure on
+    screen, so a scope priced through it alone must never be labelled "Mzdy nenastavené"."""
+    return any(_phase_wage(db, key) > 0 for key in WAGE_ROW_KEYS)
 
 
 def _wages(db: Session) -> dict[str, Optional[float]]:
@@ -590,12 +674,15 @@ def _manager_overhead(interventions: int, wait_seconds: float) -> ManagerOverhea
 
 
 def compute_project_metrics(db: Session, project: Project) -> ProjectCostsRead:
-    """Aggregate the project's cost per phase / version / project — measured + hand-entered, split."""
-    flat_in = _effective_price(db, "api_price_input_per_mtok", settings.api_price_input_per_mtok)
-    flat_out = _effective_price(db, "api_price_output_per_mtok", settings.api_price_output_per_mtok)
+    """Aggregate the project's cost per phase / version / project — measured + hand-entered, split.
+
+    ICCINT-168: the price lists are brought up to date first (a model that has just collected enough
+    Claude-Code-paid turns gets its list and its ECB rate here), then every scope is priced with them."""
+    model_pricing.refresh(db)
+    pricing = _Pricing(model_pricing.price_rows(db))
     # `coefficient_configured` is intentionally NOT shipped: the screen derives the same state from
     # `coefficient_minutes_per_mtok is None`, and two sources for one fact is how they drift apart.
-    pricing_configured, _coefficient_configured, wages_configured = _config_flags(db, flat_in, flat_out)
+    wages_configured = _wages_configured(db)
 
     versions = (
         db.execute(select(Version).where(Version.project_id == project.id).order_by(Version.version_number.asc()))
@@ -608,6 +695,7 @@ def compute_project_metrics(db: Session, project: Project) -> ProjectCostsRead:
     cum_manager_wait = 0.0
     cum_interventions = 0
     by_version: list[VersionCostsRead] = []
+    version_scopes: list[tuple[list[CostRowRead], _Pricing]] = []
 
     for version in versions:
         grand = aggregate_pipeline_usage(db, version.id).version
@@ -615,7 +703,9 @@ def compute_project_metrics(db: Session, project: Project) -> ProjectCostsRead:
         v_wait = _manager_wait_seconds(db, version.id)
         interventions = _manager_interventions(db, version.id)
 
-        rows = _scope_rows(db, by_phase_totals, project.id, version.id, flat_in, flat_out)
+        v_pricing = pricing.for_scope()
+        rows = _scope_rows(db, v_pricing, by_phase_totals, project.id, version.id)
+        version_scopes.append((rows, v_pricing))
         total_time = _total_time_seconds(db, version)
 
         by_version.append(
@@ -630,6 +720,7 @@ def compute_project_metrics(db: Session, project: Project) -> ProjectCostsRead:
                 manager_wait_seconds=v_wait,
                 internal_idle_seconds=_internal_idle_seconds(total_time, grand.duration_seconds, v_wait),
                 total_time_seconds=total_time,
+                price_list=_price_list(v_pricing),
             )
         )
 
@@ -642,7 +733,9 @@ def compute_project_metrics(db: Session, project: Project) -> ProjectCostsRead:
 
     # Project scope: the merged per-phase buckets + ALL the project's external entries (version-less
     # ones included — they belong to the project total and to no version).
-    cum_rows = _scope_rows(db, cumulative_by_phase, project.id, None, flat_in, flat_out)
+    p_pricing = pricing.for_scope()
+    cum_rows = _scope_rows(db, p_pricing, cumulative_by_phase, project.id, None)
+    _reconcile_with_versions(cum_rows, p_pricing, version_scopes)
 
     return ProjectCostsRead(
         project_id=project.id,
@@ -655,6 +748,6 @@ def compute_project_metrics(db: Session, project: Project) -> ProjectCostsRead:
         coefficient_minutes_per_mtok=(_coefficient(db) or None),
         wages=_wages(db),
         currency="EUR",
-        pricing_configured=pricing_configured,
         wages_configured=wages_configured,
+        price_list=_price_list(p_pricing),
     )

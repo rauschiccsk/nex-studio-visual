@@ -29,6 +29,7 @@ from backend.api.routes.metrics import router as metrics_router
 from backend.core.security import get_current_user
 from backend.db.models.external_cost import ExternalCost
 from backend.db.models.foundation import User
+from backend.db.models.model_price import ModelPrice
 from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.system_settings import SystemSetting
@@ -90,11 +91,22 @@ def _make_version(db_session, project, version_number="1.0.0"):
     return v
 
 
-def _msg(db_session, version_id, author, stage, *, in_tok, out_tok, dur, model="m", phase=None):
-    payload: dict[str, Any] = {
-        "usage": {"input_tokens": in_tok, "output_tokens": out_tok, "model": model},
-        "timing": {"duration_seconds": dur, "parse_attempts": 1},
-    }
+def _msg(db_session, version_id, author, stage, *, in_tok, out_tok, dur, model="m", phase=None, recorded=True):
+    """One metered turn. ``recorded`` (ICCINT-168): the turn carries its per-model parts — as every turn does
+    since v4.43.0; ``False`` is a turn from before, input/output only, which cannot be priced."""
+    usage: dict[str, Any] = {"input_tokens": in_tok, "output_tokens": out_tok, "model": model}
+    if recorded:
+        usage["parts"] = [
+            {
+                "model": model,
+                "input_tokens": in_tok,
+                "output_tokens": out_tok,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+                "cost_usd": None,
+            }
+        ]
+    payload: dict[str, Any] = {"usage": usage, "timing": {"duration_seconds": dur, "parse_attempts": 1}}
     if phase is not None:
         payload["phase"] = phase
     m = PipelineMessage(
@@ -137,17 +149,28 @@ def _set(db_session, key, value):
     system_setting.invalidate_cache(key)
 
 
-def _no_env_prices(monkeypatch):
-    """Drop the env-level flat price fallback so a test controls pricing purely through
-    ``system_settings`` (``_effective_price`` reads the row first, the env value second)."""
-    monkeypatch.setattr(metrics_service.settings, "api_price_input_per_mtok", 0.0)
-    monkeypatch.setattr(metrics_service.settings, "api_price_output_per_mtok", 0.0)
-
-
-def _flat_prices(db_session, *, price_in="3.0", price_out="15.0"):
-    """The flat per-Mtok pair — the fallback that prices the ``"m"`` test model (family ``_unknown``)."""
-    _set(db_session, "api_price_input_per_mtok", price_in)
-    _set(db_session, "api_price_output_per_mtok", price_out)
+def _price_list(db_session, *, model="m", input_usd=3000.0, output_usd=15000.0, eur_usd=1.0):
+    """A price list for ``model`` (ICCINT-168 — lists are read from Claude-Code-paid turns, a test plants one).
+    The prices are deliberately huge and the rate 1 : 1 so ordinary token counts give euro figures whose
+    round-UP is visible: (1000×3000 + 500×15000)/1e6 = 10,5 € → 11 €. Checked "until" far ahead, so the
+    refresh at the start of every computation leaves it alone."""
+    row = ModelPrice(
+        model=model,
+        valid_from=datetime(2020, 1, 1, tzinfo=timezone.utc),
+        input_usd=input_usd,
+        output_usd=output_usd,
+        cache_read_usd=input_usd / 10,
+        cache_write_usd=input_usd * 2,
+        eur_usd=eur_usd,
+        rate_date=date(2026, 10, 5) if eur_usd else None,
+        rate_source="test" if eur_usd else None,
+        observations=10,
+        max_deviation=0.0,
+        checked_until=datetime(2099, 1, 1, tzinfo=timezone.utc),
+    )
+    db_session.add(row)
+    db_session.flush()
+    return row
 
 
 def _rows(scope) -> dict[str, Any]:
@@ -172,18 +195,16 @@ def _client(db_session, current):
 
 
 def test_pricing_settings_keys_present(db_session):
-    """The registry AFTER CR-V2-063 Part 1: the flat price pair + the six per-family prices + ONE
-    token→minutes coefficient + SIX wages (5 phases + externe). The five per-phase coefficients and the
-    dead ``developer_hourly_rate`` are gone; the agent-only ``system`` row has no wage key at all."""
-    flat = ("api_price_input_per_mtok", "api_price_output_per_mtok")
+    """The registry AFTER ICCINT-168: NO hand-entered model price at all (the list is read from turns Claude
+    Code paid for — Director: "je zmetkujúce ak niečo tam je uvedené a v skutočnosti sa používa niečo iné"),
+    ONE token→minutes coefficient and SIX wages (5 phases + externe). The agent-only ``system`` row has no
+    wage key at all."""
+    assert not [k for k in system_setting.DEFAULT_SETTINGS if k.startswith("api_price")]
     wages = [f"metrics_hourly_wage_{p}" for p in COMPARISON_PHASES] + [f"metrics_hourly_wage_{EXTERNAL_ROW_KEY}"]
-    families = tuple(
-        f"api_price_{d}_per_mtok_{fam}" for d in ("input", "output") for fam in ("opus", "sonnet", "haiku")
-    )
-    for key in (*flat, COEFFICIENT_KEY, *wages, *families):
+    for key in (COEFFICIENT_KEY, *wages):
         assert key in system_setting.DEFAULT_SETTINGS, key
         assert system_setting.DEFAULT_SETTINGS[key].value_type == "float"
-    for key in (*wages, *families):
+    for key in wages:
         assert system_setting.DEFAULT_SETTINGS[key].value == "0.0", key  # unset by default → null, never faked
     assert len(wages) == 6  # 5 phases + externe — one wage per row that HAS a human side
     # ONE coefficient now, carrying the Manažér-calibrated 600 as its default.
@@ -366,7 +387,6 @@ def test_metrics_manager_overhead_measured_only(db_session):
 
 
 def test_metrics_unconfigured_returns_nulls(db_session, monkeypatch):
-    _no_env_prices(monkeypatch)
     _set(db_session, COEFFICIENT_KEY, "0")  # migration 086 seeds 600 — this scope is deliberately unset
 
     user = _make_user(db_session)
@@ -376,14 +396,18 @@ def test_metrics_unconfigured_returns_nulls(db_session, monkeypatch):
 
     m = metrics_service.compute_project_metrics(db_session, project)
     prog = _rows(m)["programovanie"]
-    assert prog.agent_cost is None  # "m" → _unknown, flat unset → unpriced
+    assert prog.agent_cost is None  # "m" has no price list yet → nothing priced
+    assert [u.reason for u in prog.unpriced] == [metrics_service.NO_PRICE_REASON.format(model="m")]
     assert prog.human_minutes is None
     assert prog.human_cost is None
+    # nothing priced: unpriced, never a fabricated 0 € — even next to the external half's REAL zero
     assert m.totals.agent_cost_measured is None and m.totals.agent_cost_total is None
+    assert m.totals.agent_cost_external == 0
+    assert m.totals.agent_cost_complete is False
     assert m.totals.human_minutes_measured is None and m.totals.human_minutes_total is None
     assert m.totals.human_cost_measured is None and m.totals.human_cost_total is None
     assert m.coefficient_minutes_per_mtok is None
-    assert m.pricing_configured is False
+    assert m.price_list == []  # no list was used — the screen shows none
     # `coefficient_configured` was removed: the screen derives the same fact from the coefficient
     # itself, and one fact with two sources is how they drift apart. Assert the source.
     assert m.coefficient_minutes_per_mtok is None
@@ -394,8 +418,7 @@ def test_metrics_unconfigured_returns_nulls(db_session, monkeypatch):
 
 
 def test_metrics_configured_computes_costs(db_session, monkeypatch):
-    _no_env_prices(monkeypatch)
-    _flat_prices(db_session)
+    _price_list(db_session)
     _set(db_session, COEFFICIENT_KEY, "240")
     _set(db_session, "metrics_hourly_wage_programovanie", "60")
     _set(db_session, "metrics_hourly_wage_navrh", "100")
@@ -409,22 +432,25 @@ def test_metrics_configured_computes_costs(db_session, monkeypatch):
     m = metrics_service.compute_project_metrics(db_session, project)
     rows = _rows(m)
 
-    # programovanie: agent (1000×3 + 500×15)/1e6 = 0.0105; human 1500/1e6×240 = 0.36 min → /60×60 = 0.36
-    assert rows["programovanie"].agent_cost == pytest.approx(0.0105)
+    # Every euro figure is WHOLE euros rounded UP (ICCINT-168 — Director: rather a little more than less).
+    # programovanie: agent (1000×3000 + 500×15000)/1e6 = 10,5 € → 11; human 1500/1e6×240 = 0.36 min → 0,36 € → 1
+    assert rows["programovanie"].agent_cost == 11
     assert rows["programovanie"].human_minutes == pytest.approx(0.36)
-    assert rows["programovanie"].human_cost == pytest.approx(0.36)
-    # navrh: agent (2000×3 + 800×15)/1e6 = 0.018; human 2800/1e6×240 = 0.672 min → /60×100 = 1.12
-    assert rows["navrh"].agent_cost == pytest.approx(0.018)
+    assert rows["programovanie"].human_cost == 1
+    # navrh: agent (2000×3000 + 800×15000)/1e6 = 18 € → 18 (an exact euro is NOT rounded up to 19);
+    # human 2800/1e6×240 = 0.672 min → /60×100 = 1,12 € → 2
+    assert rows["navrh"].agent_cost == 18
     assert rows["navrh"].human_minutes == pytest.approx(0.672)
-    assert rows["navrh"].human_cost == pytest.approx(1.12)
+    assert rows["navrh"].human_cost == 2
 
     t = m.totals
-    assert t.agent_cost_measured == pytest.approx(0.0285)  # 0.0105 + 0.018 (other phases 0 tokens)
-    assert t.agent_cost_external == 0.0  # nothing was entered → a REAL zero, not None
-    assert t.agent_cost_total == pytest.approx(0.0285)
+    assert t.agent_cost_measured == 29  # 11 + 18 — the SUM of what the rows show, so the table adds up
+    assert t.agent_cost_external == 0  # nothing was entered → a REAL zero, not None
+    assert t.agent_cost_total == 29
+    assert t.agent_cost_complete is True
     assert t.human_minutes_measured == pytest.approx(1.032)
-    assert t.human_cost_measured == pytest.approx(1.48)
-    assert t.human_cost_total == pytest.approx(1.48)
+    assert t.human_cost_measured == 3  # 1 + 2, not ⌈1,48⌉ = 2
+    assert t.human_cost_total == 3
 
     # the assumption block the screen must display
     assert m.coefficient_minutes_per_mtok == pytest.approx(240)
@@ -432,18 +458,18 @@ def test_metrics_configured_computes_costs(db_session, monkeypatch):
     assert m.wages["navrh"] == pytest.approx(100)
     assert m.wages["priprava"] is None  # unset → None, never 0
     assert m.currency == "EUR"
-    assert m.pricing_configured is True
+    # the price list the figures were computed with — shown on the screen with its rate
+    assert [(p.model, p.input_usd, p.output_usd, p.eur_usd) for p in m.price_list] == [("m", 3000.0, 15000.0, 1.0)]
+    assert m.by_version[0].price_list == m.price_list
     assert m.coefficient_minutes_per_mtok is not None
     assert m.wages_configured is True
 
 
-def test_metrics_per_model_family_pricing_and_unpriced_row(db_session, monkeypatch):
-    """Per-family price prices a named family; an un-named/unkeyed model with no flat fallback is left
-    unpriced. Also CR-V2-063 test case 5: that row's ``agent_cost`` is ``None``, ``agent_cost_total`` is
-    ``None`` and ``unpriced_model_keys`` names the model (a partial sum would read as a total)."""
-    _no_env_prices(monkeypatch)
-    _set(db_session, "api_price_input_per_mtok_opus", "5.0")
-    _set(db_session, "api_price_output_per_mtok_opus", "25.0")
+def test_metrics_per_model_price_list_and_unpriced_row(db_session, monkeypatch):
+    """Each model is priced by ITS list; a model with no list yet is NAMED as unpriced and the priced part
+    still shows (ICCINT-168: the old rule — a ``None`` total for any gap — hid the whole known spend), with
+    ``agent_cost_complete`` False so the screen says the figure is partial."""
+    _price_list(db_session, model="claude-opus-4-8", input_usd=5000.0, output_usd=25000.0)
 
     user = _make_user(db_session)
     project = _make_project(db_session, user)
@@ -473,11 +499,94 @@ def test_metrics_per_model_family_pricing_and_unpriced_row(db_session, monkeypat
 
     m = metrics_service.compute_project_metrics(db_session, project)
     rows = _rows(m)
-    assert rows["programovanie"].agent_cost == pytest.approx((1000 * 5 + 400 * 25) / 1e6)  # 0.015
-    assert rows["navrh"].agent_cost is None  # _unknown, no flat fallback → unpriced
-    assert rows["navrh"].unpriced_model_keys == ["claude-zeta-9"]
-    assert m.totals.agent_cost_measured is None
-    assert m.totals.agent_cost_total is None
+    assert rows["programovanie"].agent_cost == 15  # (1000×5000 + 400×25000)/1e6 = 15 €
+    assert rows["programovanie"].unpriced == []
+    assert rows["navrh"].agent_cost is None  # no list for claude-zeta-9 → nothing in the row priced
+    assert [(u.reason, u.tokens) for u in rows["navrh"].unpriced] == [
+        (metrics_service.NO_PRICE_REASON.format(model="claude-zeta-9"), 1400)
+    ]
+    assert m.totals.agent_cost_measured == 15  # the priced part …
+    assert m.totals.agent_cost_total == 15
+    assert m.totals.agent_cost_complete is False  # … flagged as partial
+    assert [p.model for p in m.price_list] == ["claude-opus-4-8"]  # only lists actually used
+
+
+def test_turn_recorded_before_v4_43_is_named_unrecorded_not_priced(db_session):
+    """A turn stored before ICCINT-168 carries input/output only — the cache it read was never seen — so it
+    cannot be priced and must not be under-priced from what it does carry. The row says why."""
+    _price_list(db_session)
+    user = _make_user(db_session)
+    project = _make_project(db_session, user)
+    version = _make_version(db_session, project)
+    _msg(db_session, version.id, "ai_agent", "programovanie", in_tok=1000, out_tok=500, dur=10.0, phase="programovanie")
+    _msg(
+        db_session,
+        version.id,
+        "ai_agent",
+        "programovanie",
+        in_tok=2000,
+        out_tok=800,
+        dur=10.0,
+        phase="programovanie",
+        recorded=False,
+    )
+
+    row = _rows(metrics_service.compute_project_metrics(db_session, project))["programovanie"]
+    assert row.agent_cost == 11  # the recorded turn alone (10,5 € → 11)
+    assert [(u.reason, u.turns, u.tokens) for u in row.unpriced] == [(metrics_service.UNRECORDED_REASON, 1, 2800)]
+    assert row.input_tokens == 3000 and row.output_tokens == 1300  # its tokens still count everywhere else
+
+
+def test_cache_tokens_are_priced_and_shown_but_never_human_minutes(db_session):
+    """ICCINT-168: cache reads/writes are on the agent's bill (each at its own price) and on the screen, but
+    a person does not re-read the whole conversation at every step — the human minutes stay input+output."""
+    _price_list(db_session)  # cache read 300 $, cache write 6000 $ per million (from the helper)
+    _set(db_session, COEFFICIENT_KEY, "600")
+    user = _make_user(db_session)
+    project = _make_project(db_session, user)
+    version = _make_version(db_session, project)
+    m = _msg(
+        db_session, version.id, "ai_agent", "programovanie", in_tok=1000, out_tok=500, dur=1.0, phase="programovanie"
+    )
+    part = m.payload["usage"]["parts"][0]
+    m.payload = {
+        **m.payload,
+        "usage": {**m.payload["usage"], "parts": [{**part, "cache_read_tokens": 10_000, "cache_write_tokens": 500}]},
+    }
+    db_session.flush()
+
+    row = _rows(metrics_service.compute_project_metrics(db_session, project))["programovanie"]
+    assert (row.cache_read_tokens, row.cache_write_tokens) == (10_000, 500)
+    # 10,5 € (input+output) + 10 000×300/1e6 = 3 € + 500×6000/1e6 = 3 € → 16,5 € → 17
+    assert row.agent_cost == 17
+    assert row.human_minutes == pytest.approx(0.9)  # 1500/1e6×600 — the cache is not human work
+
+
+def test_price_list_without_rate_is_named_not_converted(db_session):
+    """A list whose ECB rate could not be fetched yet cannot give euros — named, never a guessed rate."""
+    _price_list(db_session, eur_usd=None)
+    user = _make_user(db_session)
+    project = _make_project(db_session, user)
+    version = _make_version(db_session, project)
+    _msg(db_session, version.id, "ai_agent", "programovanie", in_tok=1000, out_tok=500, dur=1.0, phase="programovanie")
+
+    row = _rows(metrics_service.compute_project_metrics(db_session, project))["programovanie"]
+    assert row.agent_cost is None
+    assert [u.reason for u in row.unpriced] == [metrics_service.NO_RATE_REASON]
+
+
+def test_euros_follow_the_lists_rate(db_session):
+    """The list's ECB rate converts: 1 € = 2 $ halves the dollar figure (21 $ → 10,5 € → 11)."""
+    _price_list(db_session, eur_usd=2.0)
+    user = _make_user(db_session)
+    project = _make_project(db_session, user)
+    version = _make_version(db_session, project)
+    _msg(db_session, version.id, "ai_agent", "programovanie", in_tok=2000, out_tok=1000, dur=1.0, phase="programovanie")
+
+    m = metrics_service.compute_project_metrics(db_session, project)
+    assert _rows(m)["programovanie"].agent_cost == 11
+    listed = m.price_list[0]
+    assert (listed.input_eur, listed.output_eur) == (1500.0, 7500.0)  # the list shown in euros at that rate
 
 
 # ── external cost: measured and entered are summed but NEVER merged ───────────
@@ -485,8 +594,7 @@ def test_metrics_per_model_family_pricing_and_unpriced_row(db_session, monkeypat
 
 def _configured_scope(db_session, monkeypatch):
     """Prices + coefficient + the two wages the external cases compare against."""
-    _no_env_prices(monkeypatch)
-    _flat_prices(db_session)
+    _price_list(db_session)
     _set(db_session, COEFFICIENT_KEY, "600")
     _set(db_session, "metrics_hourly_wage_programovanie", "60")
     _set(db_session, f"metrics_hourly_wage_{EXTERNAL_ROW_KEY}", "50")
@@ -509,19 +617,19 @@ def test_external_entry_on_version_counts_in_that_version_and_the_project(db_ses
     assert ext_row.kind == "external"
     assert ext_row.turns == 1  # one entry
     assert ext_row.active_seconds == 0.0  # nothing was metered here
-    assert ext_row.agent_cost == pytest.approx(0.021)  # (2000×3 + 1000×15)/1e6
+    assert ext_row.agent_cost == 21  # (2000×3000 + 1000×15000)/1e6 — priced by the SAME list as measured work
 
     for totals in (v.totals, m.totals):
         # measured stays the metered row alone — the entered figure never merges into it
-        assert totals.agent_cost_measured == pytest.approx(0.0105)
-        assert totals.agent_cost_external == pytest.approx(0.021)
-        assert totals.agent_cost_total == pytest.approx(0.0315)
+        assert totals.agent_cost_measured == 11
+        assert totals.agent_cost_external == 21
+        assert totals.agent_cost_total == 32
         assert totals.human_minutes_measured == pytest.approx(0.9)  # 1500/1e6×600
         assert totals.human_minutes_external == pytest.approx(1.8)  # 3000/1e6×600
         assert totals.human_minutes_total == pytest.approx(2.7)
-        assert totals.human_cost_measured == pytest.approx(0.9)  # 0.9/60×60
-        assert totals.human_cost_external == pytest.approx(1.5)  # 1.8/60×50
-        assert totals.human_cost_total == pytest.approx(2.4)
+        assert totals.human_cost_measured == 1  # 0.9/60×60 = 0,90 € → 1
+        assert totals.human_cost_external == 2  # 1.8/60×50 = 1,50 € → 2
+        assert totals.human_cost_total == 3
 
 
 def test_version_less_external_entry_counts_in_the_project_only(db_session, monkeypatch):
@@ -537,14 +645,14 @@ def test_version_less_external_entry_counts_in_the_project_only(db_session, monk
     v = m.by_version[0]
 
     assert EXTERNAL_ROW_KEY not in _rows(v)  # absent from the version scope entirely
-    assert v.totals.agent_cost_external == 0.0  # a REAL zero — nothing was entered for this version
+    assert v.totals.agent_cost_external == 0  # a REAL zero — nothing was entered for this version
     assert v.totals.human_minutes_external == 0.0
-    assert v.totals.human_cost_external == 0.0
-    assert v.totals.agent_cost_total == pytest.approx(0.0105)
+    assert v.totals.human_cost_external == 0
+    assert v.totals.agent_cost_total == 11
 
     assert EXTERNAL_ROW_KEY in _rows(m)
-    assert m.totals.agent_cost_external == pytest.approx(0.021)
-    assert m.totals.agent_cost_total == pytest.approx(0.0315)
+    assert m.totals.agent_cost_external == 21
+    assert m.totals.agent_cost_total == 32
 
 
 def test_deleting_a_version_keeps_its_external_entries_at_project_level(db_session, monkeypatch):
@@ -569,7 +677,7 @@ def test_deleting_a_version_keeps_its_external_entries_at_project_level(db_sessi
     m = metrics_service.compute_project_metrics(db_session, project)
     assert m.by_version == []  # the version really is gone
     assert EXTERNAL_ROW_KEY in _rows(m)  # …and its spend still counts in the project total
-    assert m.totals.agent_cost_external == pytest.approx(0.021)
+    assert m.totals.agent_cost_external == 21
 
 
 def test_totals_split_turns_and_tokens_measured_vs_entered(db_session, monkeypatch):
@@ -635,9 +743,9 @@ def test_coefficient_unset_nulls_every_human_figure_but_no_cost(db_session, monk
     t = m.totals
     assert t.human_minutes_measured is None and t.human_minutes_external is None and t.human_minutes_total is None
     assert t.human_cost_measured is None and t.human_cost_external is None and t.human_cost_total is None
-    assert t.agent_cost_measured == pytest.approx(0.0105)
-    assert t.agent_cost_external == pytest.approx(0.021)
-    assert t.agent_cost_total == pytest.approx(0.0315)
+    assert t.agent_cost_measured == 11
+    assert t.agent_cost_external == 21
+    assert t.agent_cost_total == 32
     assert m.coefficient_minutes_per_mtok is None
     # `coefficient_configured` was removed: the screen derives the same fact from the coefficient
     # itself, and one fact with two sources is how they drift apart. Assert the source.
@@ -647,8 +755,7 @@ def test_coefficient_unset_nulls_every_human_figure_but_no_cost(db_session, monk
 def test_wage_missing_on_one_phase_nulls_the_human_cost_totals_only(db_session, monkeypatch):
     """Case 4: a wage set for 4 of the 5 phases → the human COST totals are ``None`` (a partial sum would
     read as a total), while the coefficient-only minutes and the whole agent side are unaffected."""
-    _no_env_prices(monkeypatch)
-    _flat_prices(db_session)
+    _price_list(db_session)
     _set(db_session, COEFFICIENT_KEY, "600")
     unpaid_phase = "vizual"
     for phase in COMPARISON_PHASES:
@@ -665,22 +772,21 @@ def test_wage_missing_on_one_phase_nulls_the_human_cost_totals_only(db_session, 
     rows = _rows(m)
     assert rows[unpaid_phase].human_minutes == pytest.approx(0.9)  # minutes need the coefficient only
     assert rows[unpaid_phase].human_cost is None  # …but no wage → no cost
-    assert rows["programovanie"].human_cost == pytest.approx(0.9)
+    assert rows["programovanie"].human_cost == 1  # 0,90 € → 1
 
     t = m.totals
     assert t.human_cost_measured is None
     assert t.human_cost_total is None
     assert t.human_minutes_measured == pytest.approx(4.5)  # 5 × 0.9 — wage-independent
-    assert t.agent_cost_measured == pytest.approx(0.0525)  # 5 × 0.0105 — unaffected
-    assert t.agent_cost_total == pytest.approx(0.0525)
+    assert t.agent_cost_measured == 55  # 5 × 11 — unaffected
+    assert t.agent_cost_total == 55
 
 
 def test_system_row_is_agent_only_and_counts_in_agent_measured(db_session, monkeypatch):
     """Case 9: the ``kind="system"`` row carries NO human figures and has no wage key, yet its
     ``agent_cost`` IS metered spend — it belongs in ``agent_cost_measured`` and must never drag the human
     totals to ``None``."""
-    _no_env_prices(monkeypatch)
-    _flat_prices(db_session)
+    _price_list(db_session)
     _set(db_session, COEFFICIENT_KEY, "600")
     _set(db_session, "metrics_hourly_wage_programovanie", "60")
 
@@ -698,11 +804,11 @@ def test_system_row_is_agent_only_and_counts_in_agent_measured(db_session, monke
     assert sys_row.human_minutes is None
     assert sys_row.human_cost is None
     assert SYSTEM_ROW_KEY not in m.wages  # no metrics_hourly_wage_system key exists or will be added
-    assert sys_row.agent_cost == pytest.approx(0.0021)  # (200×3 + 100×15)/1e6
+    assert sys_row.agent_cost == 3  # (200×3000 + 100×15000)/1e6 = 2,1 € → 3
 
     t = m.totals
-    assert t.agent_cost_measured == pytest.approx(0.0126)  # 0.0105 (phase) + 0.0021 (system)
-    assert t.human_cost_measured == pytest.approx(0.9)  # a NUMBER — the system row did not drag it to None
+    assert t.agent_cost_measured == 14  # 11 (phase) + 3 (system)
+    assert t.human_cost_measured == 1  # a NUMBER — the system row did not drag it to None
     assert t.human_minutes_measured == pytest.approx(0.9)
 
 
@@ -727,17 +833,16 @@ def test_system_row_alone_nulls_the_human_totals_instead_of_fabricating_zero(db_
         assert t.human_minutes_total is None
         assert t.human_cost_total is None
         # the agent side is metered spend and stays a number; nothing was entered → a REAL 0.0 external
-        assert t.agent_cost_measured == pytest.approx(0.0021)  # (200×3 + 100×15)/1e6
-        assert t.agent_cost_external == 0.0
-        assert t.agent_cost_total == pytest.approx(0.0021)
+        assert t.agent_cost_measured == 3  # (200×3000 + 100×15000)/1e6 = 2,1 € → 3
+        assert t.agent_cost_external == 0
+        assert t.agent_cost_total == 3
 
 
 def test_externe_wage_alone_marks_wages_configured(db_session, monkeypatch):
     """``wages_configured`` covers EVERY wage-bearing row, ``externe`` included: its wage puts a real
     human-cost number on screen, so a scope priced through it alone must not be labelled
     "Mzdy nenastavené"."""
-    _no_env_prices(monkeypatch)
-    _flat_prices(db_session)
+    _price_list(db_session)
     _set(db_session, COEFFICIENT_KEY, "600")
     for phase in COMPARISON_PHASES:
         _set(db_session, f"metrics_hourly_wage_{phase}", "0")
@@ -751,7 +856,7 @@ def test_externe_wage_alone_marks_wages_configured(db_session, monkeypatch):
     assert m.wages[EXTERNAL_ROW_KEY] == pytest.approx(50)
     assert all(m.wages[phase] is None for phase in COMPARISON_PHASES)
     assert m.wages_configured is True  # the externe wage alone satisfies the flag
-    assert m.totals.human_cost_external == pytest.approx(1.5)  # 3000/1e6×600 = 1.8 min → /60×50
+    assert m.totals.human_cost_external == 2  # 3000/1e6×600 = 1.8 min → /60×50 = 1,50 € → 2
 
 
 # ── share_pct + row order ────────────────────────────────────────────────────
@@ -1061,3 +1166,93 @@ def test_migration_086_up_down_up_leaves_no_orphan_rows(monkeypatch):
         if engine is not None:
             engine.dispose()
         _drop_database_if_exists(admin_url, mig_db_name)
+
+
+def test_a_turn_that_ran_without_any_recorded_spend_makes_the_total_incomplete(db_session):
+    """Ťah bežal (má trvanie), ale jeho spotreba sa nezaznamenala vôbec (zlyhal pred v4.43.0, alebo sa záznam sedenia
+    nedal prečítať) — jeho cena nie je nula, je neznáma; súčet nesmie vyzerať úplný (nález kontroly ICCINT-168)."""
+    _price_list(db_session)
+    user = _make_user(db_session)
+    project = _make_project(db_session, user)
+    version = _make_version(db_session, project)
+    _msg(db_session, version.id, "ai_agent", "programovanie", in_tok=1000, out_tok=500, dur=10.0, phase="programovanie")
+    failed = _msg(
+        db_session, version.id, "system", "programovanie", in_tok=0, out_tok=0, dur=40.0, phase="programovanie"
+    )
+    failed.payload = {**failed.payload, "usage": None}
+    db_session.flush()
+
+    m = metrics_service.compute_project_metrics(db_session, project)
+    row = _rows(m)["programovanie"]
+    assert row.agent_cost == 11
+    assert [(u.reason, u.turns) for u in row.unpriced] == [(metrics_service.UNKNOWN_SPEND_REASON, 1)]
+    assert m.totals.agent_cost_complete is False
+
+
+def test_the_project_never_shows_less_than_its_versions(db_session):
+    """Každá verzia zaokrúhľuje nahor sama: 10,5 € → 11 v oboch. Projekt preto ukáže 22, nie ⌈21⌉ = 21 —
+    a Poradca o celom projekte (žiadna verzia) pribudne k tomu zvlášť, tiež nahor."""
+    from backend.db.models.poradca import PoradcaConversation, PoradcaMessage
+
+    _price_list(db_session)
+    user = _make_user(db_session)
+    project = _make_project(db_session, user)
+    for number in ("1.0.0", "1.1.0"):
+        version = _make_version(db_session, project, version_number=number)
+        _msg(
+            db_session,
+            version.id,
+            "ai_agent",
+            "programovanie",
+            in_tok=1000,
+            out_tok=500,
+            dur=1.0,
+            phase="programovanie",
+        )
+    conversation = PoradcaConversation(
+        project_id=project.id, author_id=user.id, title="t", claude_session_id=uuid.uuid4()
+    )
+    db_session.add(conversation)
+    db_session.flush()
+    part = {"model": "m", "input_tokens": 100, "output_tokens": 10, "cache_read_tokens": 0, "cache_write_tokens": 0}
+    db_session.add(
+        PoradcaMessage(
+            conversation_id=conversation.id,
+            author="poradca",
+            status="done",
+            usage={"input_tokens": 100, "output_tokens": 10, "model": "m", "parts": [{**part, "cost_usd": None}]},
+        )
+    )
+    db_session.flush()
+
+    m = metrics_service.compute_project_metrics(db_session, project)
+    assert [v.totals.agent_cost_total for v in m.by_version] == [11, 11]
+    assert _rows(m)["programovanie"].agent_cost == 22
+    assert _rows(m)["poradca"].agent_cost == 1  # (100×3000 + 10×15000)/1e6 = 0,45 € → 1, len na úrovni projektu
+    assert m.totals.agent_cost_total == 23
+
+
+def test_web_searches_are_priced_by_the_list_or_named(db_session):
+    """Vyhľadávanie na webe Claude Code účtuje zvlášť od tokenov — cenník ho má ako vlastnú cenu; kým ju nepozná,
+    vyhľadávania sú pomenované a tokeny ostávajú ocenené."""
+    row = _price_list(db_session)
+    user = _make_user(db_session)
+    project = _make_project(db_session, user)
+    version = _make_version(db_session, project)
+    m = _msg(
+        db_session, version.id, "ai_agent", "programovanie", in_tok=1000, out_tok=500, dur=1.0, phase="programovanie"
+    )
+    part = m.payload["usage"]["parts"][0]
+    m.payload = {**m.payload, "usage": {**m.payload["usage"], "parts": [{**part, "web_search_requests": 3}]}}
+    db_session.flush()
+
+    unpriced = _rows(metrics_service.compute_project_metrics(db_session, project))["programovanie"]
+    assert unpriced.agent_cost == 11  # tokeny 10,5 €
+    assert [(u.reason, u.turns) for u in unpriced.unpriced] == [
+        (metrics_service.NO_SEARCH_PRICE_REASON.format(model="m"), 3)
+    ]
+    row.web_search_usd = 0.5
+    db_session.flush()
+    priced = metrics_service.compute_project_metrics(db_session, project)
+    assert _rows(priced)["programovanie"].agent_cost == 12  # 10,5 + 3 × 0,5 = 12 €
+    assert priced.price_list[0].web_search_usd == 0.5

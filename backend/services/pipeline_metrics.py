@@ -24,11 +24,14 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.db.models.pipeline import PipelineMessage
+from backend.services.usage_ledger import UsagePart, parts_from_usage_payload
 
 
 @dataclass
@@ -53,6 +56,20 @@ class UsageTotals:
     messages: int = 0
     parse_attempts: int = 0
     by_model: dict[str, ModelTokens] = field(default_factory=dict)
+    #: ICCINT-168: tokens read from / written to the prompt cache — on the agent's bill, never on the human
+    #: side (re-reading the conversation is not work a person would do).
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    #: Every per-model part with WHEN it was spent — the cost layer prices each by the price list valid then.
+    parts: list[tuple[Optional[datetime], UsagePart]] = field(default_factory=list)
+    #: Turns that spent tokens but carry no parts — recorded before ICCINT-168 (input/output only, cache unseen)
+    #: and not recovered from a session transcript. They cannot be priced, and the screen must say so.
+    unrecorded_turns: int = 0
+    unrecorded_tokens: int = 0
+    #: Turns that ran (they carry timing) but whose spend was never captured at all (``usage`` is ``None``): a
+    #: failed turn from before ICCINT-168, or one whose session transcript could not be read. Their spend is
+    #: unknown — not zero — so a total that leaves them out must not read as complete.
+    unknown_turns: int = 0
 
     def add(
         self,
@@ -63,6 +80,9 @@ class UsageTotals:
         messages: int = 1,
         parse_attempts: int = 0,
         model: str | None = None,
+        parts: Optional[list[UsagePart]] = None,
+        at: Optional[datetime] = None,
+        spend_unknown: bool = False,
     ) -> None:
         self.input_tokens += input_tokens
         self.output_tokens += output_tokens
@@ -73,6 +93,18 @@ class UsageTotals:
         mt = self.by_model.setdefault(key, ModelTokens())
         mt.input_tokens += input_tokens
         mt.output_tokens += output_tokens
+        if spend_unknown:
+            self.unknown_turns += messages
+            return
+        if parts is None:
+            if input_tokens or output_tokens:
+                self.unrecorded_turns += messages
+                self.unrecorded_tokens += input_tokens + output_tokens
+            return
+        for part in parts:
+            self.cache_read_tokens += part.cache_read_tokens
+            self.cache_write_tokens += part.cache_write_tokens
+            self.parts.append((at, part))
 
     def merge(self, other: "UsageTotals") -> None:
         """Fold another :class:`UsageTotals` in (cumulative-across-versions), including ``by_model``."""
@@ -85,6 +117,19 @@ class UsageTotals:
             dst = self.by_model.setdefault(m, ModelTokens())
             dst.input_tokens += mt.input_tokens
             dst.output_tokens += mt.output_tokens
+        self.cache_read_tokens += other.cache_read_tokens
+        self.cache_write_tokens += other.cache_write_tokens
+        self.parts.extend(other.parts)
+        self.unrecorded_turns += other.unrecorded_turns
+        self.unrecorded_tokens += other.unrecorded_tokens
+        self.unknown_turns += other.unknown_turns
+
+
+def _spend_unknown(payload: dict) -> bool:
+    """The turn ran (it has timing) but nothing captured what it spent — ``usage`` is ``None`` (ICCINT-168)."""
+    timing = payload.get("timing") or {}
+    ran = bool(float(timing.get("duration_seconds") or 0.0) or int(timing.get("parse_attempts") or 0))
+    return payload.get("usage") is None and ran
 
 
 @dataclass
@@ -126,6 +171,9 @@ def aggregate_pipeline_usage(db: Session, version_id: uuid.UUID) -> PipelineUsag
             duration_seconds=float(timing.get("duration_seconds") or 0.0),
             parse_attempts=int(timing.get("parse_attempts") or 0),
             model=model if isinstance(model, str) else None,
+            parts=parts_from_usage_payload(usage),
+            at=msg.created_at,
+            spend_unknown=_spend_unknown(payload),
         )
 
     return agg
@@ -167,5 +215,8 @@ def aggregate_usage_by_phase(db: Session, version_id: uuid.UUID) -> dict[str, Us
             duration_seconds=float(timing.get("duration_seconds") or 0.0),
             parse_attempts=int(timing.get("parse_attempts") or 0),
             model=model if isinstance(model, str) else None,
+            parts=parts_from_usage_payload(usage),
+            at=msg.created_at,
+            spend_unknown=_spend_unknown(payload),
         )
     return by_phase

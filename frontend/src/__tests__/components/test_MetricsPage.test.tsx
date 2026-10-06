@@ -10,7 +10,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import type { CostRow, CostRowKind, CostTotals, ManagerOverhead, ProjectCosts } from "@/types/metrics";
+import type { CostRow, CostRowKind, CostTotals, ManagerOverhead, PriceList, ProjectCosts } from "@/types/metrics";
 
 const { mockGetMetrics, mockListExternal, mockListModels } = vi.hoisted(() => ({
   mockGetMetrics: vi.fn(),
@@ -57,8 +57,10 @@ function row(key: string, kind: CostRowKind, over: Partial<CostRow> = {}): CostR
     input_tokens: 100,
     output_tokens: 50,
     share_pct: 15,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
     agent_cost: null,
-    unpriced_model_keys: [],
+    unpriced: [],
     human_minutes: null,
     human_cost: null,
     active_seconds: 600,
@@ -80,14 +82,15 @@ function project(rows: CostRow[], totals: CostTotals, over: Partial<ProjectCosts
         manager_wait_seconds: 120,
         internal_idle_seconds: null,
         total_time_seconds: null,
+        price_list: over.price_list ?? [],
       },
     ],
     manager: MANAGER,
     coefficient_minutes_per_mtok: 600,
     wages: Object.fromEntries([...PHASES, "externe"].map((k) => [k, 12])),
     currency: "EUR",
-    pricing_configured: true,
     wages_configured: true,
+    price_list: [],
     ...over,
   };
 }
@@ -116,9 +119,12 @@ const CONFIGURED = project(
     output_tokens: 350,
     output_tokens_measured: 300,
     output_tokens_external: 50,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
     agent_cost_measured: 11, // 5 phases × 2 + the system row's 1 — metered spend counts here
     agent_cost_external: 4,
     agent_cost_total: 15,
+    agent_cost_complete: true,
     human_minutes_measured: 300,
     human_minutes_external: 30,
     human_minutes_total: 330,
@@ -142,9 +148,12 @@ const UNSET = project(
     output_tokens: 300,
     output_tokens_measured: 300,
     output_tokens_external: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
     agent_cost_measured: null,
     agent_cost_external: 0,
     agent_cost_total: null,
+    agent_cost_complete: false,
     human_minutes_measured: null,
     human_minutes_external: 0,
     human_minutes_total: null,
@@ -155,7 +164,6 @@ const UNSET = project(
   {
     coefficient_minutes_per_mtok: null,
     wages: Object.fromEntries([...PHASES, "externe"].map((k) => [k, null])),
-    pricing_configured: false,
     wages_configured: false,
   },
 );
@@ -236,7 +244,7 @@ describe("MetricsPage — Náklady (CR-V2-063)", () => {
     expect(systemCell.textContent).not.toMatch(/0/);
 
     // …and the dash is specific to the missing figure, not a blanket over the column.
-    expect(text(rowAt(rows, 0), COL_HUMAN_COST)).toBe("12,00");
+    expect(text(rowAt(rows, 0), COL_HUMAN_COST)).toBe("12"); // whole euros (ICCINT-168)
   });
 
   it("renders every human cost as — when the coefficient and wages are unset", async () => {
@@ -255,17 +263,17 @@ describe("MetricsPage — Náklady (CR-V2-063)", () => {
     const external = rowAt(costRows(table), 5);
 
     expect(within(cell(external, 0)).getByText("ručne")).toBeInTheDocument();
-    expect(text(external, COL_AGENT_COST)).toBe("4,00");
+    expect(text(external, COL_AGENT_COST)).toBe("4");
 
     // Summed but never merged: the entered 4 € sits in "z toho ručne zadané" — the measured half
     // (11 €) does not contain it, and only the total (15 €) carries both.
-    expect(text(footRow(table, "z toho namerané"), COL_AGENT_COST)).toBe("11,00");
-    expect(text(footRow(table, "z toho ručne zadané"), COL_AGENT_COST)).toBe("4,00");
-    expect(text(footRow(table, "Spolu"), COL_AGENT_COST)).toBe("15,00");
+    expect(text(footRow(table, "z toho namerané"), COL_AGENT_COST)).toBe("11");
+    expect(text(footRow(table, "z toho ručne zadané"), COL_AGENT_COST)).toBe("4");
+    expect(text(footRow(table, "Spolu"), COL_AGENT_COST)).toBe("15");
 
     // The headline cards carry the same split.
-    expect(screen.getByText("z toho ručne zadané: 4,00 €")).toBeInTheDocument();
-    expect(screen.getByText("z toho ručne zadané: 6,00 €")).toBeInTheDocument();
+    expect(screen.getByText("z toho ručne zadané: 4 €")).toBeInTheDocument();
+    expect(screen.getByText("z toho ručne zadané: 6 €")).toBeInTheDocument();
   });
 
   it("splits ťahy and tokeny in the footer too — a metered turn never merges with an entered record", async () => {
@@ -318,7 +326,7 @@ describe("MetricsPage — Náklady (CR-V2-063)", () => {
     const withPoradca = project(
       [
         ...PHASES.map((p) => row(p, "phase", { agent_cost: 2, human_minutes: 60, human_cost: 12 })),
-        row("poradca", "poradca", { turns: 3, agent_cost: 0.5 }),
+        row("poradca", "poradca", { turns: 3, agent_cost: 1 }),
         row("system", "system", { turns: 2, agent_cost: 1 }),
       ],
       CONFIGURED.totals,
@@ -343,5 +351,71 @@ describe("MetricsPage — Náklady (CR-V2-063)", () => {
       ["haiku", "Haiku"],
     ]);
     expect(select.value).toBe("opus");
+  });
+
+  // ── ICCINT-168: the price list, the cache, and what could not be priced ─────────────────────────────
+
+  const OPUS: PriceList = {
+    model: "claude-opus-5-5",
+    valid_from: "2026-10-01T10:00:00Z",
+    input_usd: 4,
+    output_usd: 20,
+    cache_read_usd: 0.2,
+    cache_write_usd: 8,
+    web_search_usd: 0.01,
+    eur_usd: 1.1204,
+    rate_date: "2026-10-05",
+    rate_source: "Európska centrálna banka — referenčný kurz",
+    input_eur: 3.5702,
+    output_eur: 17.8508,
+    cache_read_eur: 0.1785,
+    cache_write_eur: 7.1403,
+    web_search_eur: 0.0089,
+    observations: 191,
+    max_deviation: 0.0013,
+  };
+
+  it("shows the price list the scope was priced with — dollars, euros and the ECB rate with its date", async () => {
+    const table = await renderPage(project(CONFIGURED.rows, CONFIGURED.totals, { price_list: [OPUS] }));
+    expect(table).toBeTruthy();
+    expect(screen.getAllByText("Cenník, ktorým sme počítali").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/claude-opus-5-5 · overené na 191 ťahoch/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/1 € = 1,1204 \$/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/5\. 10\. 2026 · Európska centrálna banka/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("17,8508 €").length).toBeGreaterThan(0); // výstup v eurách — presne, nezaokrúhlený
+    expect(screen.getAllByText(/vyhľadávanie na webe: 0,01 \$ \/ 0,0089 € za jedno/).length).toBeGreaterThan(0);
+  });
+
+  it("says when the rate is still missing instead of converting with a guess", async () => {
+    await renderPage(project(CONFIGURED.rows, CONFIGURED.totals, { price_list: [{ ...OPUS, eur_usd: null, input_eur: null }] }));
+    expect(screen.getAllByText("kurz sa zatiaľ nepodarilo stiahnuť").length).toBeGreaterThan(0);
+  });
+
+  it("names unpriced spend — fully unpriced shows nevyčíslené, partial keeps the priced figure", async () => {
+    const reason = "záznam sedenia sa nezachoval — ťah spred v4.43.0 má len vstup a výstup";
+    const rows = [
+      row("navrh", "phase", { agent_cost: null, unpriced: [{ reason, turns: 4, tokens: 900 }] }),
+      row("programovanie", "phase", { agent_cost: 5, unpriced: [{ reason, turns: 1, tokens: 100 }] }),
+    ];
+    const table = await renderPage(
+      project(rows, { ...CONFIGURED.totals, agent_cost_total: 5, agent_cost_complete: false }),
+    );
+    const [navrh, prog] = costRows(table);
+    expect(text(navrh!, COL_AGENT_COST)).toBe(`nevyčíslené${reason}`);
+    expect(text(prog!, COL_AGENT_COST)).toBe(`5+ nevyčíslené: ${reason}`);
+    expect(text(footRow(table, "Spolu"), COL_AGENT_COST)).toBe("5+ nevyčíslené (dôvod pri riadku)");
+  });
+
+  it("shows the cache tokens under input/output where there are any", async () => {
+    const rows = [row("programovanie", "phase", { cache_read_tokens: 2270000, cache_write_tokens: 17500 })];
+    const table = await renderPage(project(rows, CONFIGURED.totals));
+    // sk-SK groups thousands with a no-break space
+    expect(text(rowAt(costRows(table), 0), COL_TOKENS)).toMatch(/^100 \/ 50pamäť: čítanie 2\s270\s000 · zápis 17\s500$/);
+  });
+
+  it("states the formula — Anthropic list from Claude Code × ECB rate, rounded up", async () => {
+    await renderPage(CONFIGURED);
+    expect(screen.getByText(/cenník Anthropic \(zistený z ťahov, ktoré zaplatil Claude Code\) × kurz ECB/)).toBeInTheDocument();
+    expect(screen.getByText(/zaokrúhlených hore na celé eurá/)).toBeInTheDocument();
   });
 });

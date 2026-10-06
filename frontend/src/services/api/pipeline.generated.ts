@@ -3629,6 +3629,10 @@ export interface components {
             active_seconds: number;
             /** Agent Cost */
             agent_cost: number | null;
+            /** Cache Read Tokens */
+            cache_read_tokens: number;
+            /** Cache Write Tokens */
+            cache_write_tokens: number;
             /** Human Cost */
             human_cost: number | null;
             /** Human Minutes */
@@ -3648,8 +3652,8 @@ export interface components {
             share_pct: number;
             /** Turns */
             turns: number;
-            /** Unpriced Model Keys */
-            unpriced_model_keys: string[];
+            /** Unpriced */
+            unpriced: components["schemas"]["UnpricedRead"][];
         };
         /**
          * CostTotalsRead
@@ -3661,12 +3665,18 @@ export interface components {
          *     merged turn/token count would be exactly the merge rule 2 above forbids.
          */
         CostTotalsRead: {
+            /** Agent Cost Complete */
+            agent_cost_complete: boolean;
             /** Agent Cost External */
             agent_cost_external: number | null;
             /** Agent Cost Measured */
             agent_cost_measured: number | null;
             /** Agent Cost Total */
             agent_cost_total: number | null;
+            /** Cache Read Tokens */
+            cache_read_tokens: number;
+            /** Cache Write Tokens */
+            cache_write_tokens: number;
             /** Human Cost External */
             human_cost_external: number | null;
             /** Human Cost Measured */
@@ -5608,6 +5618,50 @@ export interface components {
              */
             warnings?: string[];
         };
+        /**
+         * PriceListRead
+         * @description One model's price list the scope was priced with (ICCINT-168) — read from turns Claude Code paid
+         *     for, never typed in. Prices are per million tokens.
+         */
+        PriceListRead: {
+            /** Cache Read Eur */
+            cache_read_eur: number | null;
+            /** Cache Read Usd */
+            cache_read_usd: number;
+            /** Cache Write Eur */
+            cache_write_eur: number | null;
+            /** Cache Write Usd */
+            cache_write_usd: number;
+            /** Eur Usd */
+            eur_usd: number | null;
+            /** Input Eur */
+            input_eur: number | null;
+            /** Input Usd */
+            input_usd: number;
+            /** Max Deviation */
+            max_deviation: number;
+            /** Model */
+            model: string;
+            /** Observations */
+            observations: number;
+            /** Output Eur */
+            output_eur: number | null;
+            /** Output Usd */
+            output_usd: number;
+            /** Rate Date */
+            rate_date: string | null;
+            /** Rate Source */
+            rate_source: string | null;
+            /**
+             * Valid From
+             * Format: date-time
+             */
+            valid_from: string;
+            /** Web Search Eur */
+            web_search_eur: number | null;
+            /** Web Search Usd */
+            web_search_usd: number | null;
+        };
         /** ProjectCostsRead */
         ProjectCostsRead: {
             /** By Version */
@@ -5620,8 +5674,8 @@ export interface components {
              */
             currency: string;
             manager: components["schemas"]["ManagerOverheadRead"];
-            /** Pricing Configured */
-            pricing_configured: boolean;
+            /** Price List */
+            price_list: components["schemas"]["PriceListRead"][];
             /**
              * Project Id
              * Format: uuid
@@ -6280,6 +6334,18 @@ export interface components {
              */
             title?: string | null;
         };
+        /**
+         * UnpricedRead
+         * @description Spend a row could NOT price, and why (ICCINT-168) — the screen names it instead of hiding it.
+         */
+        UnpricedRead: {
+            /** Reason */
+            reason: string;
+            /** Tokens */
+            tokens: number;
+            /** Turns */
+            turns: number;
+        };
         /** UpdateDocumentRequest */
         UpdateDocumentRequest: {
             /** Content */
@@ -6595,6 +6661,8 @@ export interface components {
             manager: components["schemas"]["ManagerOverheadRead"];
             /** Manager Wait Seconds */
             manager_wait_seconds: number;
+            /** Price List */
+            price_list: components["schemas"]["PriceListRead"][];
             /** Rows */
             rows: components["schemas"]["CostRowRead"][];
             /** Status */

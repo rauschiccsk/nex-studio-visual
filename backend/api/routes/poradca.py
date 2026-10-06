@@ -89,11 +89,8 @@ def _conversation_for(db: Session, user: User, conversation_id: uuid.UUID) -> tu
 def _message_read(db: Session, msg: PoradcaMessage) -> PoradcaMessageRead:
     usage = msg.usage or {}
     done_answer = msg.author == AUTHOR_PORADCA and msg.status == "done"
-    cost = None
-    if msg.author == AUTHOR_PORADCA and usage:
-        cost = metrics.usage_cost(
-            db, usage.get("model"), int(usage.get("input_tokens") or 0), int(usage.get("output_tokens") or 0)
-        )
+    # ICCINT-168: tým istým cenníkom ako Náklady (tokeny všetkých druhov × cenník z Claude Code × kurz ECB).
+    cost = metrics.usage_cost(db, usage, msg.created_at) if msg.author == AUTHOR_PORADCA and usage else None
     return PoradcaMessageRead(
         id=msg.id,
         author=msg.author,

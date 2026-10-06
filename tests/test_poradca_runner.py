@@ -28,9 +28,18 @@ FAKE_SECRET = "fake-oauth-token-for-tests-0001"
 
 FAKE_CLAUDE = textwrap.dedent(
     """
-    import json, socket, sys, time
-    sock_path, mode = sys.argv[1], sys.argv[2]
+    import datetime, json, os, socket, sys, time
+    sock_path, mode, transcript = sys.argv[1], sys.argv[2], sys.argv[3]
     def out(o): print(json.dumps(o), flush=True)
+    # Ako Claude Code: dokončená správa ide do záznamu sedenia s konečnou spotrebou, súčet sedenia
+    # (cost-state) až na konci DOKONČENÉHO behu — zastavený beh ho nezapíše.
+    USAGE = {"input_tokens": 120, "output_tokens": 30,
+             "cache_read_input_tokens": 5000, "cache_creation_input_tokens": 200}
+    def note(o):
+        with open(transcript, "a") as t:
+            t.write(json.dumps(o) + "\\n")
+    note({"type": "assistant", "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+          "message": {"id": "msg-%f" % time.time(), "model": "claude-opus-test", "usage": USAGE}})
     s = socket.socket(socket.AF_UNIX); s.connect(sock_path); f = s.makefile("rw")
     f.write(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                         "params": {"name": "stavba", "arguments": {"verzia": "1.0.0"}}}) + "\\n"); f.flush()
@@ -41,6 +50,18 @@ FAKE_CLAUDE = textwrap.dedent(
     if mode == "slow":
         time.sleep(60)
     text = "Agent stojí na teste. " + reply["result"]["content"][0]["text"]
+    total = {"inputTokens": 0, "outputTokens": 0, "cacheReadInputTokens": 0,
+             "cacheCreationInputTokens": 0, "costUSD": 0.0}
+    if os.path.exists(transcript):
+        for line in open(transcript):
+            row = json.loads(line)
+            if row.get("type") == "cost-state":
+                total = row["modelUsage"]["claude-opus-test"]
+    total = {"inputTokens": total["inputTokens"] + 120, "outputTokens": total["outputTokens"] + 30,
+             "cacheReadInputTokens": total["cacheReadInputTokens"] + 5000,
+             "cacheCreationInputTokens": total["cacheCreationInputTokens"] + 200,
+             "costUSD": round(total["costUSD"] + 0.0123, 9)}
+    note({"type": "cost-state", "totalCostUSD": total["costUSD"], "modelUsage": {"claude-opus-test": total}})
     out({"type": "result", "result": text, "is_error": False,
          "usage": {"input_tokens": 120, "output_tokens": 30},
          "modelUsage": {"claude-opus-test": {"inputTokens": 120, "outputTokens": 30}}})
@@ -109,7 +130,9 @@ def world(db_session, tmp_path, monkeypatch):
 
     def _argv(**kw):
         sock = str(sandbox.run_dir(kw["token"]) / sandbox.SOCKET_NAME)
-        return [sys.executable, str(script), sock, mode["value"]]
+        sessions = _mk(sandbox.session_dir(kw["conversation_id"]))
+        transcript = sessions / f"{kw['call'].claude_session_id}.jsonl"
+        return [sys.executable, str(script), sock, mode["value"], str(transcript)]
 
     monkeypatch.setattr(sandbox, "run_argv", _argv)
 
@@ -150,7 +173,23 @@ async def test_question_runs_to_a_filtered_answer_with_steps_and_usage(world):
     assert "Agent stojí na teste" in stored.content
     # Kroky: vstavaný nástroj z priebehu, nástroj Poradcu zo servera (raz, nie dvakrát), bez obsahu.
     assert stored.steps == [{"tool": "stavba", "target": "verzia 1.0.0"}, {"tool": "Read", "target": "app.py"}]
-    assert stored.usage == {"input_tokens": 120, "output_tokens": 30, "model": "claude-opus-test"}
+    # ICCINT-168: spotreba zo záznamu sedenia — rozdiel súčtov, aj s vyrovnávacou pamäťou a cenou Claude Code.
+    assert stored.usage == {
+        "input_tokens": 120,
+        "output_tokens": 30,
+        "model": "claude-opus-test",
+        "parts": [
+            {
+                "model": "claude-opus-test",
+                "input_tokens": 120,
+                "output_tokens": 30,
+                "cache_read_tokens": 5000,
+                "cache_write_tokens": 200,
+                "cost_usd": 0.0123,
+                "web_search_requests": 0,
+            }
+        ],
+    }
     assert stored.duration_seconds is not None and stored.finished_at is not None
     events = []
     while not queue.empty():
@@ -180,8 +219,35 @@ async def test_stop_kills_the_run_and_records_stopped(world):
     assert await runner.stop(answer.id) is True
     await _finish(answer.id)
     db.expire_all()
-    assert db.get(PoradcaMessage, answer.id).status == "stopped"
+    stopped = db.get(PoradcaMessage, answer.id)
+    assert stopped.status == "stopped"
+    # ICCINT-168: zastavená odpoveď nie je zadarmo — jej dokončené správy zo záznamu sedenia, bez ceny Claude Code
+    # (ten ju do súčtu nezapíše); ocení ju cenník.
+    assert stopped.usage["parts"] == [
+        {
+            "model": "claude-opus-test",
+            "input_tokens": 120,
+            "output_tokens": 30,
+            "cache_read_tokens": 5000,
+            "cache_write_tokens": 200,
+            "cost_usd": None,
+            "web_search_requests": 0,
+        }
+    ]
     assert await runner.stop(answer.id) is False
+
+
+async def test_a_second_answer_costs_only_itself_not_the_whole_conversation(world):
+    """ICCINT-168: Claude Code hlási pri pokračovaní sedenia súčet ZA CELÝ ROZHOVOR. Druhá odpoveď nesmie
+    zaplatiť aj prvú — jej spotreba je rozdiel súčtov pred ňou a po nej."""
+    db = world["db"]
+    for question in ("Prvá", "Druhá"):
+        _human, answer = runner.ask(db, world["conversation"], question, world["user"])
+        await _finish(answer.id)
+    db.expire_all()
+    second = db.get(PoradcaMessage, answer.id)
+    assert second.status == "done", second.error
+    assert [(p["output_tokens"], p["cost_usd"]) for p in second.usage["parts"]] == [(30, 0.0123)]
 
 
 async def test_timeout_records_a_sentence_not_a_hang(world, monkeypatch):

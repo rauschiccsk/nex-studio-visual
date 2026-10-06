@@ -17,7 +17,7 @@ import { useActiveContextStore } from "@/store/activeContextStore";
 import { PHASE_LABELS, type BuildPhase } from "@/components/cockpit/labels";
 import type { AgentModel } from "@/types/user_agent_setting";
 import { familyLabel, modelDisplayName } from "@/utils/modelLabel";
-import type { CostRow, CostTotals, ManagerOverhead, ProjectCosts } from "@/types/metrics";
+import type { CostRow, CostTotals, ManagerOverhead, PriceList, ProjectCosts } from "@/types/metrics";
 
 type View = "version" | "cumulative";
 
@@ -51,13 +51,24 @@ function fmtDuration(seconds: number): string {
   return `${s} s`;
 }
 
+/** Whole euros — the backend already rounded every figure UP (ICCINT-168: rather a little more than less). */
 function fmtCost(n: number | null): string {
-  return n === null ? "—" : n.toLocaleString("sk-SK", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return n === null ? "—" : n.toLocaleString("sk-SK", { maximumFractionDigits: 0 });
 }
 
 /** Money WITH the currency sign — for cards / sublines (the table carries the € in its header). */
 function fmtMoney(n: number | null): string {
   return n === null ? "—" : `${fmtCost(n)} €`;
+}
+
+/** An hourly wage as the Manažér set it — a setting is shown exactly, never rounded like a cost. */
+function fmtWage(n: number | null): string {
+  return n === null ? "—" : `${n.toLocaleString("sk-SK", { maximumFractionDigits: 2 })} €`;
+}
+
+/** A price per million tokens (or a rate) — exact, as the price list states it. */
+function fmtPrice(n: number): string {
+  return n.toLocaleString("sk-SK", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
 }
 
 function fmtMinutes(min: number | null): string {
@@ -132,6 +143,19 @@ const TD = "px-2 py-1.5 align-top";
 const TH = "px-2 py-1.5 text-left font-semibold text-[var(--color-text-muted)] whitespace-nowrap";
 const TURNS_HINT = "Počet meraných ťahov (správ) agenta; pri ručne zadaných nákladoch počet záznamov.";
 const SHARE_HINT = "Podiel tokenov tohto riadku na všetkých tokenoch v zobrazenom rozsahu.";
+const CACHE_HINT =
+  "Vyrovnávacia pamäť: agent pri každom kroku znova číta celý doterajší rozhovor. Platí sa (každý druh vlastnou " +
+  "cenou z cenníka), ale do ľudského času sa neráta.";
+
+/** Tokens read from / written to the prompt cache — under the input/output pair, only when there are any. */
+function CacheLine({ read, write }: { read: number; write: number }) {
+  if (read <= 0 && write <= 0) return null;
+  return (
+    <div className="text-[10px] mt-0.5" title={CACHE_HINT}>
+      pamäť: čítanie {fmtInt(read)} · zápis {fmtInt(write)}
+    </div>
+  );
+}
 
 function CostRowView({ r }: { r: CostRow }) {
   const isExternal = r.kind === "external";
@@ -156,13 +180,16 @@ function CostRowView({ r }: { r: CostRow }) {
       <td className={TD}>{fmtInt(r.turns)}</td>
       <td className={`${TD} text-[var(--color-text-muted)]`}>
         {fmtInt(r.input_tokens)} / {fmtInt(r.output_tokens)}
+        <CacheLine read={r.cache_read_tokens} write={r.cache_write_tokens} />
       </td>
       <td className={`${TD} text-[var(--color-text-muted)]`}>{fmtPct(r.share_pct)}</td>
       <td className={`${TD} ${moneyCls(r.agent_cost)}`}>
-        {fmtCost(r.agent_cost)}
-        {r.agent_cost === null && r.unpriced_model_keys.length > 0 && (
+        {r.agent_cost === null && r.unpriced.length > 0 ? "nevyčíslené" : fmtCost(r.agent_cost)}
+        {/* ICCINT-168: what could not be priced is NAMED, never dropped or guessed */}
+        {r.unpriced.length > 0 && (
           <div className="text-[10px] text-[var(--color-status-warning)] mt-0.5">
-            AI cena zatiaľ nie je k dispozícii
+            {r.agent_cost !== null && "+ nevyčíslené: "}
+            {r.unpriced.map((u) => u.reason).join("; ")}
           </div>
         )}
       </td>
@@ -208,9 +235,17 @@ function CostTotalsFoot({ t }: { t: CostTotals }) {
         <td className={TD}>{fmtInt(t.turns)}</td>
         <td className={TD}>
           {fmtInt(t.input_tokens)} / {fmtInt(t.output_tokens)}
+          <CacheLine read={t.cache_read_tokens} write={t.cache_write_tokens} />
         </td>
         <td className={TD}>—</td>
-        <td className={`${TD} ${moneyCls(t.agent_cost_total)}`}>{fmtCost(t.agent_cost_total)}</td>
+        <td className={`${TD} ${moneyCls(t.agent_cost_total)}`}>
+          {t.agent_cost_total === null && !t.agent_cost_complete ? "nevyčíslené" : fmtCost(t.agent_cost_total)}
+          {t.agent_cost_total !== null && !t.agent_cost_complete && (
+            <div className="text-[10px] font-normal text-[var(--color-status-warning)] mt-0.5">
+              + nevyčíslené (dôvod pri riadku)
+            </div>
+          )}
+        </td>
         <td className={TD}>{fmtMinutes(t.human_minutes_total)}</td>
         <td className={`${TD} ${moneyCls(t.human_cost_total)}`}>{fmtCost(t.human_cost_total)}</td>
       </tr>
@@ -283,6 +318,79 @@ function CostTable({
   );
 }
 
+/** The price list a scope was priced with — Director 06.10.2026: "chcel by som vidieť, akými cenami sme to
+ *  počítali". Read from turns Claude Code paid for; the ECB rate was fetched when the list appeared. */
+function PriceListView({ list }: { list: PriceList[] }) {
+  if (list.length === 0) return null;
+  const cell = (usd: number, eur: number | null) => (
+    <>
+      {fmtPrice(usd)} $
+      <div className="text-[10px] text-[var(--color-text-muted)]">{eur === null ? "—" : `${fmtPrice(eur)} €`}</div>
+    </>
+  );
+  return (
+    <div className="mt-2 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] overflow-x-auto">
+      <div className="px-2 pt-2 text-[11px] font-semibold text-[var(--color-text-secondary)]">
+        Cenník, ktorým sme počítali
+      </div>
+      <table className="w-full text-[11px]">
+        <thead>
+          <tr>
+            <th className={TH}>Model</th>
+            <th className={TH}>Vstup</th>
+            <th className={TH}>Výstup</th>
+            <th className={TH} title={CACHE_HINT}>
+              Čítanie z pamäte
+            </th>
+            <th className={TH} title={CACHE_HINT}>
+              Zápis do pamäte
+            </th>
+            <th className={TH}>Kurz</th>
+          </tr>
+        </thead>
+        <tbody>
+          {list.map((p) => (
+            <tr key={`${p.model}:${p.valid_from}`} className="border-t border-[var(--color-border-default)]">
+              <td className={TD}>
+                {modelDisplayName(p.model)}
+                <div className="text-[10px] text-[var(--color-text-muted)]">
+                  {p.model} · overené na {fmtInt(p.observations)} ťahoch
+                </div>
+                {p.web_search_usd !== null && (
+                  <div className="text-[10px] text-[var(--color-text-muted)]">
+                    vyhľadávanie na webe: {fmtPrice(p.web_search_usd)} $
+                    {p.web_search_eur !== null && ` / ${fmtPrice(p.web_search_eur)} €`} za jedno
+                  </div>
+                )}
+              </td>
+              <td className={TD}>{cell(p.input_usd, p.input_eur)}</td>
+              <td className={TD}>{cell(p.output_usd, p.output_eur)}</td>
+              <td className={TD}>{cell(p.cache_read_usd, p.cache_read_eur)}</td>
+              <td className={TD}>{cell(p.cache_write_usd, p.cache_write_eur)}</td>
+              <td className={TD}>
+                {p.eur_usd === null ? (
+                  <span className="text-[var(--color-status-warning)]">kurz sa zatiaľ nepodarilo stiahnuť</span>
+                ) : (
+                  <>
+                    1 € = {fmtPrice(p.eur_usd)} $
+                    <div className="text-[10px] text-[var(--color-text-muted)]">
+                      {p.rate_date ? fmtDate(p.rate_date) : ""} · {p.rate_source}
+                    </div>
+                  </>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="px-2 pb-2 text-[10px] text-[var(--color-text-muted)]">
+        Ceny za milión tokenov. Cenník je zistený z ťahov, ktoré zaplatil Claude Code; kurz sa stiahol, keď cenník
+        vznikol.
+      </div>
+    </div>
+  );
+}
+
 // ─── view-scoped slice (a version OR the cumulative project) ─────────────────
 
 interface Scope {
@@ -292,6 +400,7 @@ interface Scope {
   manager_wait_seconds: number;
   internal_idle_seconds: number | null;
   total_time_seconds: number | null;
+  price_list: PriceList[];
 }
 
 export default function MetricsPage() {
@@ -378,6 +487,7 @@ export default function MetricsPage() {
         manager_wait_seconds: metrics.manager.wait_seconds,
         internal_idle_seconds: null, // wall-clock idle is a per-version figure (not summed cumulatively)
         total_time_seconds: null,
+        price_list: metrics.price_list,
       };
     }
     if (!selectedVersion) return null;
@@ -388,6 +498,7 @@ export default function MetricsPage() {
       manager_wait_seconds: selectedVersion.manager_wait_seconds,
       internal_idle_seconds: selectedVersion.internal_idle_seconds,
       total_time_seconds: selectedVersion.total_time_seconds,
+      price_list: selectedVersion.price_list,
     };
   }, [metrics, view, selectedVersion]);
 
@@ -542,7 +653,8 @@ export default function MetricsPage() {
             mil. tokenov.
           </>
         )}{" "}
-        · Ceny sú v eurách. ·{" "}
+        · Cena AI = tokeny × cenník Anthropic (zistený z ťahov, ktoré zaplatil Claude Code) × kurz ECB, v eurách
+        zaokrúhlených hore na celé eurá. ·{" "}
         <span className="font-semibold text-[var(--color-text-secondary)]">
           Cena AI je hodnota spotrebovaného výpočtu v cenníku, nie minutá hotovosť
         </span>{" "}
@@ -553,7 +665,7 @@ export default function MetricsPage() {
             {wageEntries.map(([k, v], i) => (
               <span key={k}>
                 {i > 0 && " · "}
-                {wageKeyLabel(k)} {fmtMoney(v)}
+                {wageKeyLabel(k)} {fmtWage(v)}
               </span>
             ))}
           </div>
@@ -563,11 +675,9 @@ export default function MetricsPage() {
       {/* Unset-config banner (per dimension) — WHY a column is all dashes; the coefficient case is the
           strip's job above. Deliberately carries no second "Nastavenia" link: one settings entry point
           per screen (the strip's), no duplicated navigation. */}
-      {(!metrics.pricing_configured || !metrics.wages_configured) && (
+      {!metrics.wages_configured && (
         <div className="rounded-lg border border-[var(--color-state-warning-bg)] bg-[var(--color-state-warning-bg)] px-3 py-2 text-xs text-[var(--color-state-warning-fg)] mb-4">
-          {!metrics.pricing_configured && <>Ceny modelov nenastavené. </>}
-          {!metrics.wages_configured && <>Mzdy nenastavené. </>}
-          Chýbajúce stĺpce sa zobrazia až po doplnení v Nastaveniach → Náklady (koeficient, mzdy, ceny).
+          Mzdy nenastavené. Chýbajúce stĺpce sa zobrazia až po doplnení v Nastaveniach → Náklady (koeficient, mzdy).
         </div>
       )}
 
@@ -577,7 +687,10 @@ export default function MetricsPage() {
           <Card
             label="Cena AI"
             value={fmtMoney(scope.totals.agent_cost_total)}
-            hint={`z toho ručne zadané: ${fmtMoney(scope.totals.agent_cost_external)}`}
+            hint={
+              `z toho ručne zadané: ${fmtMoney(scope.totals.agent_cost_external)}` +
+              (scope.totals.agent_cost_complete ? "" : " · časť sa nedá vyčísliť (dôvod pri riadku)")
+            }
             tone={moneyTone(scope.totals.agent_cost_total)}
           />
           <Card
@@ -612,6 +725,7 @@ export default function MetricsPage() {
       {scope && (
         <div className="mb-4">
           <CostTable rows={scope.rows} totals={scope.totals} manager={scope.manager} />
+          <PriceListView list={scope.price_list} />
         </div>
       )}
 
@@ -651,6 +765,7 @@ export default function MetricsPage() {
             <div key={v.version_id}>
               <div className="font-mono text-xs text-[var(--color-text-secondary)] mb-1">{v.version_number}</div>
               <CostTable rows={v.rows} totals={v.totals} />
+              <PriceListView list={v.price_list} />
             </div>
           ))}
         </div>
@@ -670,9 +785,9 @@ export default function MetricsPage() {
         </button>
       </div>
       <p className="text-xs text-[var(--color-text-muted)] mb-3">
-        Práca urobená mimo kokpitu (terminál, vývojár priamo). Oceňuje sa rovnakými cenami modelov a rovnakým
-        koeficientom ako meraná práca, ale vždy zostáva samostatný riadok — ručne zadané čísla sa nikdy nezlúčia s
-        nameranými.
+        Práca urobená mimo kokpitu (terminál, vývojár priamo). Oceňuje sa najnovším cenníkom zvoleného modelu (vstup a
+        výstup) a rovnakým koeficientom ako meraná práca, ale vždy zostáva samostatný riadok — ručne zadané čísla sa
+        nikdy nezlúčia s nameranými.
       </p>
 
       {showForm && (

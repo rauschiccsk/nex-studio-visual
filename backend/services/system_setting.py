@@ -269,32 +269,8 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
             "dočasne vypnutá alebo nebeží v Dockeri, takto nezistí — pre tie si rozsah dopíš sem."
         ),
     ),
-    # ── Metrics / ROI pricing (E5, CR-NS-043) ───────────────────────
-    # Prices are entered in EUR (CR-V2-063): the wages are € / hod and the Náklady screen renders €,
-    # so a $ price would silently mix two currencies in one sum. The stored values are NOT converted —
-    # a silent × rate would be worse than the mismatch; the Manažér re-enters them.
-    "api_price_input_per_mtok": _Default(
-        value="0.0",
-        value_type="float",
-        label="Cena za vstupné tokeny",
-        unit="€ / mil. tokenov",
-        description=(
-            "Cena Claude API za 1 milión vstupných tokenov — pre výpočet nákladov na stránke "
-            "Metriky. 0 = nenastavené → náklad sa nezobrazí. "
-            "Zadaj v eurách — všetky sumy na obrazovke Náklady sú v eurách."
-        ),
-    ),
-    "api_price_output_per_mtok": _Default(
-        value="0.0",
-        value_type="float",
-        label="Cena za výstupné tokeny",
-        unit="€ / mil. tokenov",
-        description=(
-            "Cena Claude API za 1 milión výstupných tokenov — pre výpočet nákladov na stránke "
-            "Metriky. 0 = nenastavené → náklad sa nezobrazí. "
-            "Zadaj v eurách — všetky sumy na obrazovke Náklady sú v eurách."
-        ),
-    ),
+    # ICCINT-168: no hand-entered model prices (``api_price_*``) any more — Náklady price spend with the list
+    # read from turns Claude Code paid for (``services.model_pricing``), with the ECB rate stored beside it.
     # ── Metrics / Náklady — agent-vs-human model (v2 per-phase basis, CR-V2-029; CR-V2-063) ────────
     # The v1 11 per-role keys (metrics_minutes_per_mtok_{coordinator,designer,customer,implementer,
     # auditor} + metrics_hourly_wage_{coordinator,designer,customer,implementer,auditor,director}) and
@@ -369,69 +345,6 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
         label="Hodinová sadzba — Externé náklady",
         unit="€ / hod",
         description="Sadzba pre ručne zadané externé náklady. 0 = nenastavené → nezobrazí sa.",
-    ),
-    # Per-family API price (IN/OUT per 1,000,000 tokens), in EUR like the flat pair above (CR-V2-063).
-    # Falls back to the flat api_price_*_per_mtok pair (which itself falls back to env) for the _unknown
-    # family + any family left at 0.
-    "api_price_input_per_mtok_opus": _Default(
-        value="0.0",
-        value_type="float",
-        label="Cena vstupu — Opus",
-        unit="€ / mil. tokenov",
-        description=(
-            "Cena za 1 milión vstupných tokenov pre modely Opus. Ak je 0, použije sa všeobecná cena vstupu. "
-            "Zadaj v eurách — všetky sumy na obrazovke Náklady sú v eurách."
-        ),
-    ),
-    "api_price_output_per_mtok_opus": _Default(
-        value="0.0",
-        value_type="float",
-        label="Cena výstupu — Opus",
-        unit="€ / mil. tokenov",
-        description=(
-            "Cena za 1 milión výstupných tokenov pre modely Opus. Ak je 0, použije sa všeobecná cena výstupu. "
-            "Zadaj v eurách — všetky sumy na obrazovke Náklady sú v eurách."
-        ),
-    ),
-    "api_price_input_per_mtok_sonnet": _Default(
-        value="0.0",
-        value_type="float",
-        label="Cena vstupu — Sonnet",
-        unit="€ / mil. tokenov",
-        description=(
-            "Cena za 1 milión vstupných tokenov pre modely Sonnet. Ak je 0, použije sa všeobecná cena vstupu. "
-            "Zadaj v eurách — všetky sumy na obrazovke Náklady sú v eurách."
-        ),
-    ),
-    "api_price_output_per_mtok_sonnet": _Default(
-        value="0.0",
-        value_type="float",
-        label="Cena výstupu — Sonnet",
-        unit="€ / mil. tokenov",
-        description=(
-            "Cena za 1 milión výstupných tokenov pre modely Sonnet. Ak je 0, použije sa všeobecná cena výstupu. "
-            "Zadaj v eurách — všetky sumy na obrazovke Náklady sú v eurách."
-        ),
-    ),
-    "api_price_input_per_mtok_haiku": _Default(
-        value="0.0",
-        value_type="float",
-        label="Cena vstupu — Haiku",
-        unit="€ / mil. tokenov",
-        description=(
-            "Cena za 1 milión vstupných tokenov pre modely Haiku. Ak je 0, použije sa všeobecná cena vstupu. "
-            "Zadaj v eurách — všetky sumy na obrazovke Náklady sú v eurách."
-        ),
-    ),
-    "api_price_output_per_mtok_haiku": _Default(
-        value="0.0",
-        value_type="float",
-        label="Cena výstupu — Haiku",
-        unit="€ / mil. tokenov",
-        description=(
-            "Cena za 1 milión výstupných tokenov pre modely Haiku. Ak je 0, použije sa všeobecná cena výstupu. "
-            "Zadaj v eurách — všetky sumy na obrazovke Náklady sú v eurách."
-        ),
     ),
 }
 

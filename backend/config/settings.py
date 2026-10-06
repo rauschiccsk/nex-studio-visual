@@ -80,16 +80,6 @@ class Settings(BaseSettings):
     # this is the default + the env-tunable knob.
     claude_invoke_timeout: int = 900
 
-    # WS-D metrics (CR-NS-036) — stored now for the FUTURE metrics page (Phase 3 / E5); no cost
-    # calc / UI uses them yet. The developer hourly rate baselines an agent run against a human
-    # developer; the per-million-token API prices (IN / OUT separately, the natural Claude billing
-    # unit) turn captured token usage into a money figure. Default 0.0 = "not configured" (never a
-    # fabricated price); set via env (API_PRICE_INPUT_PER_MTOK / ...). These are the FLAT fallback
-    # pair — the per-model-family prices live in system_settings only. (CR-V2-063 retired
-    # `developer_hourly_rate`: the human side is per-phase wages × one token→minutes coefficient.)
-    api_price_input_per_mtok: float = 0.0
-    api_price_output_per_mtok: float = 0.0
-
     # Public base URL of the NEX Studio frontend, used only to build the
     # ``/cockpit`` deep link in presence-aware Telegram notifications
     # (CR-NS-018 Phase 5a). Empty → the notification omits the link.

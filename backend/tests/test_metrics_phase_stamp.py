@@ -25,7 +25,7 @@ from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.services import claude_agent, orchestrator
-from backend.services.metrics import COMPARISON_PHASES, _build_phases
+from backend.services.metrics import COMPARISON_PHASES, _build_phases, _Pricing
 from backend.services.pipeline_metrics import UsageTotals, aggregate_usage_by_phase
 from backend.services.pipeline_status import (
     TASK_PLAN_SKELETON_JSON_SCHEMA,
@@ -36,6 +36,9 @@ from backend.services.pipeline_status import (
 # ---------------------------------------------------------------------------
 # Seeding helpers
 # ---------------------------------------------------------------------------
+
+#: No price list at all — these cases are about WHICH rows exist, not what they cost (ICCINT-168).
+_NO_PRICES = _Pricing({})
 
 
 def _seed_user(db) -> User:
@@ -467,7 +470,7 @@ def test_build_phases_drops_zero_token_phases_keeps_canonical_order(db_session) 
         "programovanie": _ut(2000, 800),
         "verifikacia": _ut(300, 120),
     }
-    rows = _build_phases(db_session, by_phase, 0.0, 0.0)
+    rows = _build_phases(db_session, _NO_PRICES, by_phase)
     assert [r.key for r in rows] == ["navrh", "programovanie", "verifikacia"]
 
 
@@ -479,7 +482,7 @@ def test_build_phases_priprava_zero_row_dropped(db_session) -> None:
         "programovanie": _ut(200, 80),
         "verifikacia": _ut(30, 12),
     }
-    rows = _build_phases(db_session, by_phase, 0.0, 0.0)
+    rows = _build_phases(db_session, _NO_PRICES, by_phase)
     assert [r.key for r in rows] == ["navrh", "programovanie", "verifikacia"]
     assert "priprava" not in [r.key for r in rows]
 
@@ -491,7 +494,7 @@ def test_build_phases_footing_preserved(db_session) -> None:
         "programovanie": _ut(2000, 800),
         "verifikacia": _ut(300, 120),
     }
-    rows = _build_phases(db_session, by_phase, 0.0, 0.0)
+    rows = _build_phases(db_session, _NO_PRICES, by_phase)
     grand = sum(t.input_tokens + t.output_tokens for t in by_phase.values())
     assert sum(r.input_tokens + r.output_tokens for r in rows) == grand
 
@@ -499,12 +502,12 @@ def test_build_phases_footing_preserved(db_session) -> None:
 def test_build_phases_legacy_all_four_when_all_nonzero(db_session) -> None:
     """A legacy project that truly used all four phases still renders all four (regression guard)."""
     by_phase = {p: _ut(10, 5) for p in COMPARISON_PHASES}
-    rows = _build_phases(db_session, by_phase, 0.0, 0.0)
+    rows = _build_phases(db_session, _NO_PRICES, by_phase)
     assert [r.key for r in rows] == list(COMPARISON_PHASES)
 
 
 def test_build_phases_empty_by_phase_yields_no_rows(db_session) -> None:
-    assert _build_phases(db_session, {}, 0.0, 0.0) == []
+    assert _build_phases(db_session, _NO_PRICES, {}) == []
 
 
 # ---------------------------------------------------------------------------
@@ -527,7 +530,7 @@ def test_build_phases_keeps_zero_token_nonzero_duration_phase(db_session) -> Non
         "navrh": _ut_time_only(5.0),  # 0 tokens, real time
         "programovanie": _ut(2000, 800),
     }
-    rows = _build_phases(db_session, by_phase, 0.0, 0.0)
+    rows = _build_phases(db_session, _NO_PRICES, by_phase)
     assert [r.key for r in rows] == ["navrh", "programovanie"]  # navrh NOT dropped
     navrh_row = next(r for r in rows if r.key == "navrh")
     assert navrh_row.active_seconds == 5.0
@@ -538,14 +541,14 @@ def test_build_phases_keeps_zero_token_nonzero_parse_attempts_phase(db_session) 
     t_pa = UsageTotals()
     t_pa.add(input_tokens=0, output_tokens=0, duration_seconds=0.0, parse_attempts=2, model="claude-opus-4-8")
     by_phase = {"verifikacia": t_pa, "programovanie": _ut(100, 40)}
-    rows = _build_phases(db_session, by_phase, 0.0, 0.0)
+    rows = _build_phases(db_session, _NO_PRICES, by_phase)
     assert [r.key for r in rows] == ["programovanie", "verifikacia"]  # canonical order, verifikacia kept
 
 
 def test_build_phases_still_drops_fully_empty_phase(db_session) -> None:
     """C2: a phase with NO metered activity (0 tokens, 0 time, 0 parse attempts) is still DROPPED."""
     by_phase = {"priprava": UsageTotals(), "navrh": _ut(100, 50)}
-    rows = _build_phases(db_session, by_phase, 0.0, 0.0)
+    rows = _build_phases(db_session, _NO_PRICES, by_phase)
     assert [r.key for r in rows] == ["navrh"]
 
 
@@ -555,7 +558,7 @@ def test_build_phases_duration_footing_with_zero_token_phase(db_session) -> None
         "navrh": _ut_time_only(5.0),
         "programovanie": _ut(2000, 800, duration=12.0),
     }
-    rows = _build_phases(db_session, by_phase, 0.0, 0.0)
+    rows = _build_phases(db_session, _NO_PRICES, by_phase)
     grand_tok = sum(t.input_tokens + t.output_tokens for t in by_phase.values())
     grand_dur = sum(t.duration_seconds for t in by_phase.values())
     assert sum(r.input_tokens + r.output_tokens for r in rows) == grand_tok

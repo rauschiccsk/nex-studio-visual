@@ -1,8 +1,9 @@
 // Per-scope COST rows for the Náklady screen (CR-V2-063; replaces the v2 ROI shape, CR-V2-029).
 // Mirrors backend/schemas/metrics.py (ProjectCostsRead) — hand-written on purpose: the page does NOT
-// read the generated contract. Honest by construction: any figure depending on an unset price /
-// coefficient / wage is null and renders "—", never a fabricated 0. Measured and hand-entered figures
-// are summed but never merged — every total carries its `…_external` split.
+// read the generated contract. Honest by construction: any figure depending on an unset coefficient /
+// wage is null and renders "—", never a fabricated 0; spend that cannot be priced is NAMED (`unpriced`)
+// (ICCINT-168). Measured and hand-entered figures are summed but never merged — every total carries its
+// `…_external` split. Every euro figure is WHOLE euros rounded up (Director 06.10.2026).
 
 export interface UsageTotals {
   input_tokens: number;
@@ -16,6 +17,12 @@ export interface UsageTotals {
 // ICCINT-167: + "poradca" — odpovede Poradcu (namerané, bez ľudského porovnania).
 export type CostRowKind = "phase" | "external" | "poradca" | "system";
 
+export interface Unpriced {
+  reason: string; // Slovak sentence, e.g. "záznam sedenia sa nezachoval — …"
+  turns: number;
+  tokens: number;
+}
+
 export interface CostRow {
   key: string; // phase key (COMPARISON_PHASES), or "externe", or "system"
   kind: CostRowKind;
@@ -25,10 +32,14 @@ export interface CostRow {
   // this row's tokens ÷ the scope's total tokens × 100 — always computable (never null), which is why
   // it is a TOKEN share and not a cost share (cost is null whenever a model is unpriced).
   share_pct: number;
-  agent_cost: number | null; // tokens × per-model price; null if any present model is unpriced
-  unpriced_model_keys: string[]; // drives the per-row "AI cena zatiaľ nie je k dispozícii" note
+  // ICCINT-168: prompt-cache reads/writes — on the agent's bill, never in the human minutes.
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  // whole euros rounded up: the part of the row that could be priced; null when nothing in it could
+  agent_cost: number | null;
+  unpriced: Unpriced[]; // what could NOT be priced, and why — the screen names it
   human_minutes: number | null; // always null for kind="system"
-  human_cost: number | null; // always null for kind="system"
+  human_cost: number | null; // whole euros rounded up; always null for kind="system"
   active_seconds: number; // real measured compute time (0 for external rows)
 }
 
@@ -44,9 +55,13 @@ export interface CostTotals {
   output_tokens: number;
   output_tokens_measured: number;
   output_tokens_external: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  // SUM of the rows' whole-euro figures (the table adds up); null only when nothing could be priced
   agent_cost_measured: number | null;
   agent_cost_external: number | null; // a real 0 when nothing was entered — never null for that reason
-  agent_cost_total: number | null; // null when EITHER half is null
+  agent_cost_total: number | null;
+  agent_cost_complete: boolean; // false → some spend is unpriced; the figures are the priced part
   human_minutes_measured: number | null;
   human_minutes_external: number | null;
   human_minutes_total: number | null;
@@ -74,6 +89,29 @@ export interface VersionCosts {
   manager_wait_seconds: number;
   internal_idle_seconds: number | null;
   total_time_seconds: number | null;
+  price_list: PriceList[]; // the price lists this version was priced with (ICCINT-168)
+}
+
+// One model's price list — read from turns Claude Code paid for, never typed in (ICCINT-168).
+// Per million tokens; the euro side uses the ECB rate stored WITH the list (fetched when it appeared).
+export interface PriceList {
+  model: string;
+  valid_from: string;
+  input_usd: number;
+  output_usd: number;
+  cache_read_usd: number;
+  cache_write_usd: number;
+  web_search_usd: number | null; // one web search — Claude Code bills it apart from tokens; null until one ran
+  eur_usd: number | null; // dollars per euro as the ECB publishes it; null until fetched
+  rate_date: string | null;
+  rate_source: string | null;
+  input_eur: number | null;
+  output_eur: number | null;
+  cache_read_eur: number | null;
+  cache_write_eur: number | null;
+  web_search_eur: number | null;
+  observations: number;
+  max_deviation: number;
 }
 
 export interface ProjectCosts {
@@ -89,6 +127,6 @@ export interface ProjectCosts {
   coefficient_minutes_per_mtok: number | null; // the single tokens→minutes setting; null when unset
   wages: Record<string, number | null>; // row key → hourly wage; null when unset ("system" never present)
   currency: string;
-  pricing_configured: boolean;
   wages_configured: boolean;
+  price_list: PriceList[]; // every list the project's figures use
 }

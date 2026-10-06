@@ -38,7 +38,7 @@ describe("formats", () => {
     expect(formatDuration(80)).toBe("1 min 20 s");
     expect(formatDuration(120)).toBe("2 min");
     expect(formatDuration(null)).toBe("");
-    expect(formatCost(null)).toBe("cena nenastavená");
+    expect(formatCost(null)).toBe("cena sa zatiaľ nedá vyčísliť");
     expect(formatCost(0.4)).toMatch(/^0,40\s€$/);
   });
 });

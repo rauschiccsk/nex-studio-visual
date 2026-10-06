@@ -61,8 +61,10 @@ export function formatDuration(seconds: number | null | undefined): string {
   return rest ? `${m} min ${rest} s` : `${m} min`;
 }
 
+/** Cena odpovede tým istým cenníkom ako Náklady (ICCINT-168). Bez nej cenník modelu alebo kurz ešte nie je
+ *  zistený, alebo ide o starú odpoveď bez záznamu sedenia — nikdy nie „nezadaná cena". */
 export function formatCost(eur: number | null | undefined): string {
-  if (eur == null) return "cena nenastavená";
+  if (eur == null) return "cena sa zatiaľ nedá vyčísliť";
   return `${eur.toLocaleString("sk-SK", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
 }
 
