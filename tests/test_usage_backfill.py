@@ -122,7 +122,9 @@ def world(db_session, tmp_path):
     return {"db": db_session, "version": version, "home": home, "user": user, "project": project, "tmp": tmp_path}
 
 
-def _turn(db, version, *, at: datetime, out: int, duration: float = 60.0) -> PipelineMessage:
+def _turn(db, version, *, at: datetime, out: int, duration: float = 15.0) -> PipelineMessage:
+    """Ťah, ako ho kokpit zapísal. ``at`` je čas ZÁPISU = začiatok transakcie, teda PRED behom ťahu (zmerané:
+    ťah zapísaný 13:49:59 s trvaním 73 s, jeho beh skončil 13:51:11)."""
     msg = PipelineMessage(
         version_id=version.id,
         stage="programovanie",
@@ -141,70 +143,62 @@ def _turn(db, version, *, at: datetime, out: int, duration: float = 60.0) -> Pip
     return msg
 
 
+#: Začiatky ťahov troch behov z :func:`_three_runs` (behy začínajú T0, T0+5 min, T0+10 min).
+STARTS = (T0 - timedelta(seconds=1), T0 + timedelta(minutes=4, seconds=59), T0 + timedelta(minutes=9, seconds=59))
+
+
+def _three_turns(db, version, outs=(300, 400, 50)) -> list[PipelineMessage]:
+    return [_turn(db, version, at=at, out=out) for at, out in zip(STARTS, outs)]
+
+
 def test_old_turns_get_their_runs_and_keep_what_they_recorded(world):
-    """Každý beh pripadne prvému ťahu zapísanému po jeho skončení; ťah dostane časti a značku, jeho vstup a výstup
-    (z ktorých sa ráta ľudský čas) ostanú. Ťah, ktorému beh nepatrí, ostane nedoplnený."""
+    """Každý beh patrí ťahu, ktorý začal posledný pred ním; ťah dostane časti a značku, jeho vstup a výstup
+    (z ktorých sa ráta ľudský čas) ostanú. Ťah, ktorému žiadny beh nepatrí, ostane nedoplnený."""
     db, version = world["db"], world["version"]
-    first = _turn(db, version, at=T0 + timedelta(seconds=12), out=300)
-    cut = _turn(db, version, at=T0 + timedelta(minutes=5, seconds=40), out=400)
+    first, cut, _third = _three_turns(db, version)
     nothing = _turn(db, version, at=T0 + timedelta(hours=3), out=999)  # žiadny beh — záznam sa nezachoval
 
     the_plan = usage_backfill.plan(db, claude_home=world["home"], poradca_sessions=world["tmp"] / "none")
-    assert usage_backfill.apply(db, the_plan) == 2
+    assert usage_backfill.apply(db, the_plan) == 3
     db.expire_all()
     assert db.get(PipelineMessage, first.id).payload["usage"]["parts"][0]["cost_usd"] == 0.10
     stored = db.get(PipelineMessage, cut.id).payload["usage"]
     assert stored["parts"][0]["cost_usd"] is None and stored["backfill"] == usage_backfill.BACKFILL_MARK
     assert (stored["input_tokens"], stored["output_tokens"]) == (3, 400)  # nezmenené
     assert "parts" not in db.get(PipelineMessage, nothing.id).payload["usage"]
-    assert the_plan.unmatched_runs[world["project"].slug] == 1  # tretí beh nepatrí žiadnemu doplňovanému ťahu
-    assert any("1.5.0: ťahov 3, doplní sa 2" in line for line in usage_backfill.report(the_plan))
+    assert the_plan.unmatched_runs[world["project"].slug] == 0
+    assert any("1.5.0: ťahov 4, doplní sa 3" in line for line in usage_backfill.report(the_plan))
+
+
+def test_a_run_long_after_the_last_turn_belongs_to_no_turn(world):
+    """Beh, ktorý skončil dávno po trvaní ťahu, čo začal pred ním, mu nepatrí — jeho vlastný ťah sa nezachoval."""
+    db, version = world["db"], world["version"]
+    early = _turn(db, version, at=T0 - timedelta(hours=1), out=300)
+    the_plan = usage_backfill.plan(db, claude_home=world["home"], poradca_sessions=world["tmp"] / "none")
+    assert usage_backfill.apply(db, the_plan) == 0
+    db.expire_all()
+    assert "parts" not in db.get(PipelineMessage, early.id).payload["usage"]
+    assert the_plan.unmatched_runs[world["project"].slug] == 3
 
 
 def test_a_run_that_does_not_cover_the_turn_is_not_forced_onto_it(world):
     """Ťah zapísal 5 000 výstupných tokenov, beh v jeho čase má 300 — to nie je jeho beh (alebo záznam je neúplný):
     radšej „nevyčíslené" než cudzia spotreba."""
     db, version = world["db"], world["version"]
-    turn = _turn(db, version, at=T0 + timedelta(seconds=12), out=5_000)
+    first, *_rest = _three_turns(db, version, outs=(5_000, 400, 50))
     the_plan = usage_backfill.plan(db, claude_home=world["home"], poradca_sessions=world["tmp"] / "none")
-    assert usage_backfill.apply(db, the_plan) == 0
+    assert usage_backfill.apply(db, the_plan) == 2
     db.expire_all()
-    assert "parts" not in db.get(PipelineMessage, turn.id).payload["usage"]
+    assert "parts" not in db.get(PipelineMessage, first.id).payload["usage"]
 
 
 def test_a_turn_already_recorded_with_parts_is_left_alone(world):
     db, version = world["db"], world["version"]
-    msg = _turn(db, version, at=T0 + timedelta(seconds=12), out=300)
+    msg = _turn(db, version, at=STARTS[0], out=300)
     msg.payload = {**msg.payload, "usage": {**msg.payload["usage"], "parts": []}}
     db.flush()
     the_plan = usage_backfill.plan(db, claude_home=world["home"], poradca_sessions=world["tmp"] / "none")
     assert the_plan.turns == []
-
-
-def test_an_old_poradca_answer_is_filled_from_its_conversation_record(world):
-    db = world["db"]
-    conversation = PoradcaConversation(
-        project_id=world["project"].id, author_id=world["user"].id, title="t", claude_session_id=uuid.uuid4()
-    )
-    db.add(conversation)
-    db.flush()
-    answer = PoradcaMessage(
-        conversation_id=conversation.id,
-        author="poradca",
-        status="done",
-        usage={"input_tokens": 3, "output_tokens": 300, "model": OPUS},
-        created_at=T0 - timedelta(seconds=2),
-        finished_at=T0 + timedelta(seconds=11),
-    )
-    db.add(answer)
-    db.flush()
-    sessions = world["tmp"] / "poradca"
-    _three_runs(sessions / str(conversation.id) / f"{conversation.claude_session_id}.jsonl")
-
-    the_plan = usage_backfill.plan(db, claude_home=world["tmp"] / "none", poradca_sessions=sessions)
-    assert usage_backfill.apply(db, the_plan) == 1
-    db.expire_all()
-    assert db.get(PoradcaMessage, answer.id).usage["parts"][0]["cost_usd"] == 0.10
 
 
 def test_a_compaction_summary_does_not_split_a_run(tmp_path):
@@ -229,24 +223,24 @@ def test_a_compaction_summary_does_not_split_a_run(tmp_path):
 
 
 def test_running_the_backfill_twice_counts_nothing_twice(world):
-    """Druhé spustenie: beh, ktorý už patrí doplnenému ťahu, si ten ťah nechá — nepripadne susednému."""
+    """Druhé spustenie: beh, ktorý už patrí doplnenému ťahu, si ten ťah nechá — nepripadne inému nedoplnenému
+    ťahu, ktorý začal skôr a jeho vlastný beh v zázname chýba (presne by mu „sedel")."""
     db, version = world["db"], world["version"]
-    first = _turn(db, version, at=T0 + timedelta(seconds=12), out=300)
-    # ďalší ťah začal tesne po prvom behu a jeho vlastný beh v zázname chýba; beh prvého by mu presne „sedel"
-    neighbour = _turn(db, version, at=T0 + timedelta(seconds=40), out=300, duration=20.0)
+    earlier = _turn(db, version, at=T0 - timedelta(minutes=2), out=300, duration=200.0)
+    first, *_rest = _three_turns(db, version)
     for _ in range(2):
         the_plan = usage_backfill.plan(db, claude_home=world["home"], poradca_sessions=world["tmp"] / "none")
         usage_backfill.apply(db, the_plan)
     db.expire_all()
     assert len(db.get(PipelineMessage, first.id).payload["usage"]["parts"]) == 1
-    assert "parts" not in db.get(PipelineMessage, neighbour.id).payload["usage"]
+    assert "parts" not in db.get(PipelineMessage, earlier.id).payload["usage"]
 
 
 def test_a_failed_turns_runs_are_costed_but_not_turned_into_human_work(world):
     """Ťah, ktorý zlyhal pred v4.43.0, nemá zapísanú spotrebu vôbec — jeho beh je v zázname. Doplní sa do ceny;
     vstup a výstup (z nich sa ráta ľudský čas) ostanú nulové — zlyhaný pokus nie je práca, ktorú by robil človek."""
     db, version = world["db"], world["version"]
-    failed = _turn(db, version, at=T0 + timedelta(minutes=5, seconds=40), out=0)
+    _first, failed, _third = _three_turns(db, version)
     failed.payload = {**failed.payload, "usage": None}
     db.flush()
     the_plan = usage_backfill.plan(db, claude_home=world["home"], poradca_sessions=world["tmp"] / "none")
@@ -257,9 +251,9 @@ def test_a_failed_turns_runs_are_costed_but_not_turned_into_human_work(world):
     assert [p["output_tokens"] for p in usage["parts"]] == [400]
 
 
-def test_a_poradca_run_right_before_the_next_question_stays_with_its_answer(world):
-    """Odpovede jedného rozhovoru sa priraďujú spolu — beh, ktorý skončil tesne pred ďalšou otázkou, patrí
-    predchádzajúcej odpovedi, nie obom."""
+def test_a_short_run_stays_with_its_answer_even_when_the_next_question_follows_at_once(world):
+    """Odpovede jedného rozhovoru sa priraďujú spolu. Krátky beh patrí odpovedi, ktorá začala PRED ním — nie ďalšej
+    otázke, položenej pár sekúnd po jeho štarte."""
     db = world["db"]
     conversation = PoradcaConversation(
         project_id=world["project"].id, author_id=world["user"].id, title="t", claude_session_id=uuid.uuid4()
@@ -281,7 +275,8 @@ def test_a_poradca_run_right_before_the_next_question_stays_with_its_answer(worl
         return answer
 
     first = _answer(T0 - timedelta(seconds=2), T0 + timedelta(seconds=10), 300)
-    second = _answer(T0 + timedelta(seconds=12), T0 + timedelta(minutes=5, seconds=9), 400)  # 2 s po prvom
+    second = _answer(T0 + timedelta(seconds=12), T0 + timedelta(minutes=5, seconds=9), 400)  # 12 s po štarte behu
+    _answer(T0 + timedelta(minutes=9, seconds=58), T0 + timedelta(minutes=10, seconds=5), 50)
     sessions = world["tmp"] / "poradca"
     _three_runs(sessions / str(conversation.id) / f"{conversation.claude_session_id}.jsonl")
     the_plan = usage_backfill.plan(db, claude_home=world["tmp"] / "none", poradca_sessions=sessions)
@@ -289,3 +284,33 @@ def test_a_poradca_run_right_before_the_next_question_stays_with_its_answer(worl
     db.expire_all()
     assert [p["output_tokens"] for p in db.get(PoradcaMessage, first.id).usage["parts"]] == [300]
     assert [p["output_tokens"] for p in db.get(PoradcaMessage, second.id).usage["parts"]] == [400]
+
+
+def test_an_old_poradca_answer_is_filled_from_its_conversation_record(world):
+    """Stará odpoveď Poradcu sa doplní zo záznamu sedenia SVOJHO rozhovoru — aj s cenou, ktorú Claude Code zaplatil."""
+    db = world["db"]
+    conversation = PoradcaConversation(
+        project_id=world["project"].id, author_id=world["user"].id, title="t", claude_session_id=uuid.uuid4()
+    )
+    db.add(conversation)
+    db.flush()
+    answers = []
+    for start, out in zip(STARTS, (300, 400, 50)):
+        answer = PoradcaMessage(
+            conversation_id=conversation.id,
+            author="poradca",
+            status="done",
+            usage={"input_tokens": 3, "output_tokens": out, "model": OPUS},
+            created_at=start,
+            finished_at=start + timedelta(seconds=20),
+        )
+        db.add(answer)
+        answers.append(answer)
+    db.flush()
+    sessions = world["tmp"] / "poradca"
+    _three_runs(sessions / str(conversation.id) / f"{conversation.claude_session_id}.jsonl")
+
+    the_plan = usage_backfill.plan(db, claude_home=world["tmp"] / "none", poradca_sessions=sessions)
+    assert usage_backfill.apply(db, the_plan) == 3
+    db.expire_all()
+    assert db.get(PoradcaMessage, answers[0].id).usage["parts"][0]["cost_usd"] == 0.10

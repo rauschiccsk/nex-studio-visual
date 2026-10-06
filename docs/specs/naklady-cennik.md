@@ -59,6 +59,11 @@ eurá klamali).
   behu zarátala dvakrát — Dedo Home +169-tisíc výstupných tokenov); behy sa priraďujú ku VŠETKÝM ťahom vrátane
   doplnených, takže opakované spustenie nič nezaráta dvakrát; ťah, ktorý zlyhal bez spotreby, dostane spotrebu len
   do ceny (vstup a výstup ostávajú nulové); odpovede Poradcu jedného rozhovoru sa priraďujú spolu.
+- **Čas zápisu ťahu je jeho začiatok** (nanečisto na ostrých dátach 06.10.2026, v4.43.1): databáza dáva správe čas
+  začiatku transakcie (`now()`), otvorenej ešte pred spustením agenta — ťah zapísaný 13:49:59 s trvaním 73 s mal
+  beh do 13:51:11. Prvé pravidlo (beh patrí ťahu zapísanému po ňom) dávalo každému ťahu beh predchádzajúceho;
+  platné pravidlo: beh patrí ťahu, ktorý začal posledný pred ním (15 s tolerancia len keď pred ním žiadny nezačal).
+  Výsledok nanečisto: 598 ťahov doplnených, z toho 583 presne na zapísaný výstup (0,98–1,02); Dedo Home 189 zo 190.
 
 ## Čo sa zámerne nemení
 

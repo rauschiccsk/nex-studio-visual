@@ -9,9 +9,12 @@ zo záznamov sedení"; kde záznam chýba alebo je neúplný, Náklady napíšu 
 ktorý Claude Code uzavrel, končí riadkom ``cost-state``; jeho spotreba je rozdiel súčtov aj s cenou (presne ako
 pri novom ťahu, :mod:`usage_ledger`). Prerušený beh súčet nemá; jeho spotreba sú dokončené správy, aj pomocníkov.
 
-Behy sa priradia k ťahom kokpitu podľa času: ťah sa zapisuje hneď po svojom behu (a pri opakovaní po všetkých
-pokusoch), takže beh patrí prvému ťahu zapísanému po jeho skončení, ak padne do trvania toho ťahu. Ťah sa doplní,
-len keď priradené behy pokryjú jeho zapísaný výstup — inak ostane nevyčíslený (radšej „nevyčíslené" než cudzí ťah).
+Behy sa priradia k ťahom kokpitu podľa času. **Čas zápisu ťahu je jeho ZAČIATOK**, nie koniec: databáza dáva
+správe čas začiatku transakcie (``now()``), a tá sa otvorila ešte pred spustením agenta (zmerané 06.10.2026: ťah
+zapísaný 13:49:59 s trvaním 73 s, jeho beh skončil 13:51:11). Beh preto patrí ťahu, ktorý začal posledný pred ním,
+ak do jeho trvania padne. Na Dedo Home takto sedí 178 zo 190 ťahov presne na zapísaný výstup (0,98–1,02). Ťah sa
+doplní, len keď priradené behy pokryjú jeho zapísaný výstup — inak ostane nevyčíslený (radšej „nevyčíslené" než
+cudzí ťah).
 
 Nič sa nemaže ani neprepisuje: k spotrebe ťahu pribudnú ``parts`` a značka ``backfill``; vstup a výstup, z ktorých
 sa ráta ľudský čas, ostávajú.
@@ -47,9 +50,13 @@ from backend.services.usage_ledger import (
 #: Značka doplnenej spotreby — aby sa dala odlíšiť (a keby treba, odstrániť) bez dotyku zvyšku záznamu.
 BACKFILL_MARK = "transcript-2026-10"
 
-#: Beh môže skončiť toľko pred začiatkom ťahu (meranie ťahu začína až po príprave) a ťah sa zapíše toľko po behu.
-_BEFORE_SLACK = timedelta(seconds=180)
-_AFTER_SLACK = timedelta(seconds=15)
+#: Beh môže začať toľko pred časom zápisu ťahu (keby sa transakcia otvorila až počas behu); 5–30 s dáva na Dedo Home,
+#: NEX Inboxe aj NEX Manageri rovnaké a najlepšie priradenie, 60 s a viac už berie behy susedných ťahov.
+_START_SLACK = timedelta(seconds=15)
+#: Beh musí skončiť najneskôr toľko po trvaní ťahu (príprava pred behom a zápis po ňom sa do trvania nerátajú).
+_END_SLACK = timedelta(seconds=600)
+#: Pomocník patrí prerušenému behu, ak jeho správa vznikla do tejto chvíle po poslednom zápise behu.
+_HELPER_SLACK = timedelta(seconds=15)
 #: Priradené behy musia pokryť zapísaný výstup ťahu aspoň takto (výsledok behu niekedy nerátal pomocníkov,
 #: preto horná hranica nie je 1, ale :data:`_MAX_COVERAGE`).
 _MIN_COVERAGE = 0.98
@@ -182,7 +189,7 @@ def _attach_helpers(transcript: Path, invocations: list[Invocation]) -> None:
                 continue
             key, stamp, model, tokens = row
             for n, run in enumerate(open_runs):
-                if run.start <= stamp <= run.end + _AFTER_SLACK:
+                if run.start <= stamp <= run.end + _HELPER_SLACK:
                     per_run.setdefault(n, {})[key] = (stamp, model, tokens)
                     break
         for n, messages in per_run.items():
@@ -215,8 +222,8 @@ class Turn:
 
     record: object  # PipelineMessage | PoradcaMessage
     label: str  # "projekt verzia" pre výkaz
-    recorded_at: datetime
-    window_start: datetime
+    started_at: datetime  # čas zápisu ťahu = začiatok jeho transakcie, teda pred behom
+    duration: timedelta
     recorded_output: int
     kind: str = LEGACY
     matched: list[Invocation] = field(default_factory=list)
@@ -248,16 +255,17 @@ def _kind(payload_usage: object, timing: object) -> Optional[str]:
 
 
 def _match(turns: list[Turn], invocations: list[Invocation]) -> None:
-    """Každý beh prvému ťahu zapísanému po jeho skončení — ak padne do trvania toho ťahu."""
-    ordered = sorted(turns, key=lambda t: t.recorded_at)
-    for run in sorted(invocations, key=lambda i: i.end):
-        for turn in ordered:
-            if turn.recorded_at + _AFTER_SLACK < run.end:
-                continue
-            if run.end >= turn.window_start:
-                turn.matched.append(run)
-                run.taken = True
-            break
+    """Každý beh ťahu, ktorý začal posledný pred ním — ak beh skončil v trvaní toho ťahu. Ťah, ktorý začal až po
+    štarte behu (v tolerancii), dostane beh len vtedy, keď pred ním nezačal žiadny — inak by krátky beh vzal ďalší
+    ťah, ktorý sa začal tesne po ňom."""
+    ordered = sorted(turns, key=lambda t: t.started_at)
+    for run in invocations:
+        before = [t for t in ordered if t.started_at <= run.start]
+        soon = [t for t in ordered if run.start < t.started_at <= run.start + _START_SLACK]
+        turn = before[-1] if before else (soon[0] if soon else None)
+        if turn is not None and run.end <= turn.started_at + turn.duration + _END_SLACK:
+            turn.matched.append(run)
+            run.taken = True
 
 
 @dataclass
@@ -287,8 +295,8 @@ def plan(db: Session, *, claude_home: Path, poradca_sessions: Path) -> Plan:
         turn = Turn(
             record=msg,
             label=f"{slug} {version_number}",
-            recorded_at=msg.created_at,
-            window_start=msg.created_at - timedelta(seconds=duration) - _BEFORE_SLACK,
+            started_at=msg.created_at,
+            duration=timedelta(seconds=duration),
             recorded_output=int((payload.get("usage") or {}).get("output_tokens") or 0),
             kind=kind,
         )
@@ -316,8 +324,8 @@ def plan(db: Session, *, claude_home: Path, poradca_sessions: Path) -> Plan:
         turn = Turn(
             record=answer,
             label=f"{slug} Poradca",
-            recorded_at=answer.finished_at or answer.updated_at,
-            window_start=answer.created_at - _AFTER_SLACK,
+            started_at=answer.created_at,
+            duration=(answer.finished_at or answer.updated_at) - answer.created_at,
             recorded_output=int((answer.usage or {}).get("output_tokens") or 0),
             kind=kind,
         )
