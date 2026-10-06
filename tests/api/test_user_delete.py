@@ -108,3 +108,99 @@ class TestRiCannotDeleteSelf:
 
         assert resp.status_code == 400
         assert "delete" in resp.json()["detail"].lower()
+
+
+class TestDeleteKeepsWhatTheUserPaidFor:
+    """ICCINT-169: zmazanie používateľa nesmie zobrať jeho rozhovory s Poradcom — s nimi by z Nákladov projektu zmizla
+    cena odpovedí, hoci sa naozaj minula. Kokpit zmazanie odmietne a panel ponúkne deaktiváciu."""
+
+    def _ri(self, client, db_session, name):
+        seed_user(db_session, username=name, password="Nex12345", role="ri")
+        return login_user(client, username=name, password="Nex12345")
+
+    def test_a_user_with_poradca_conversations_is_not_deleted_and_the_cost_stays(self, client, db_session):
+        from backend.db.models.poradca import PoradcaConversation, PoradcaMessage
+        from backend.db.models.projects import Project
+
+        token = self._ri(client, db_session, "ri_del_poradca")
+        owner = seed_user(db_session, username=f"owner_{uuid.uuid4().hex[:6]}", password="Nex12345", role="ri")
+        asker = seed_user(db_session, username=f"asker_{uuid.uuid4().hex[:6]}", password="Nex12345", role="ha")
+        project = Project(
+            name="P",
+            slug=f"p-{uuid.uuid4().hex[:8]}",
+            type="standard",
+            auth_mode="password",
+            description="d",
+            created_by=owner.id,
+        )
+        db_session.add(project)
+        db_session.flush()
+        conversation = PoradcaConversation(
+            project_id=project.id, author_id=asker.id, title="t", claude_session_id=uuid.uuid4()
+        )
+        db_session.add(conversation)
+        db_session.flush()
+        answer = PoradcaMessage(
+            conversation_id=conversation.id,
+            author="poradca",
+            status="done",
+            usage={"input_tokens": 1, "output_tokens": 2, "model": "m"},
+        )
+        db_session.add(answer)
+        db_session.commit()
+
+        resp = client.delete(f"/api/v1/users/{asker.id}", headers={"Authorization": f"Bearer {token}"})
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "používateľ má rozhovory s Poradcom a ich cena je v Nákladoch projektov"
+        db_session.expire_all()
+        assert db_session.get(PoradcaMessage, answer.id) is not None  # odpoveď aj jej cena ostali
+
+    def test_the_database_itself_refuses_to_cascade_the_conversations(self, db_session):
+        """Aj mimo kokpitu (priame zmazanie riadku) databáza rozhovor nezoberie — kľúč je RESTRICT, nie CASCADE."""
+        import pytest
+        from sqlalchemy import text
+        from sqlalchemy.exc import DBAPIError
+
+        from backend.db.models.poradca import PoradcaConversation
+        from backend.db.models.projects import Project
+
+        owner = seed_user(db_session, username=f"o_{uuid.uuid4().hex[:6]}", password="Nex12345", role="ri")
+        asker = seed_user(db_session, username=f"a_{uuid.uuid4().hex[:6]}", password="Nex12345", role="ha")
+        project = Project(
+            name="P",
+            slug=f"p-{uuid.uuid4().hex[:8]}",
+            type="standard",
+            auth_mode="password",
+            description="d",
+            created_by=owner.id,
+        )
+        db_session.add(project)
+        db_session.flush()
+        db_session.add(
+            PoradcaConversation(project_id=project.id, author_id=asker.id, title="t", claude_session_id=uuid.uuid4())
+        )
+        db_session.flush()
+        with pytest.raises(DBAPIError, match="poradca_conversations_author_id_fkey"):
+            with db_session.begin_nested():
+                db_session.execute(text("DELETE FROM users WHERE id = :id"), {"id": asker.id})
+
+    def test_the_refusal_names_projects_in_slovak_too(self, client, db_session):
+        from backend.db.models.projects import Project
+
+        token = self._ri(client, db_session, "ri_del_projects")
+        creator = seed_user(db_session, username=f"c_{uuid.uuid4().hex[:6]}", password="Nex12345", role="ha")
+        db_session.add(
+            Project(
+                name="P",
+                slug=f"p-{uuid.uuid4().hex[:8]}",
+                type="standard",
+                auth_mode="password",
+                description="d",
+                created_by=creator.id,
+            )
+        )
+        db_session.commit()
+        resp = client.delete(f"/api/v1/users/{creator.id}", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "používateľ založil projekty"

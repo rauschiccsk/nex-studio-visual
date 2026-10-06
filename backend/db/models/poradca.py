@@ -46,8 +46,9 @@ class PoradcaConversation(Base, UUIDMixin, TimestampMixin):
 
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     version_id = Column(UUID(as_uuid=True), ForeignKey("versions.id", ondelete="SET NULL"), nullable=True)
-    #: Autor rozhovoru — prihlásený účet. Rozhovor vidí on a účet admin.
-    author_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    #: Autor rozhovoru — prihlásený účet. Rozhovor vidí on a účet admin. RESTRICT (ICCINT-169): zmazanie autora by
+    #: zobralo rozhovory aj cenu odpovedí z Nákladov — autora treba deaktivovať, nie zmazať.
+    author_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     #: Názov podľa prvej otázky (skrátený), aby sa rozhovory dali v zozname rozlíšiť.
     title = Column(String(200), nullable=False)
     claude_session_id = Column(UUID(as_uuid=True), nullable=False, unique=True)

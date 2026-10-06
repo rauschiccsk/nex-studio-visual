@@ -81,7 +81,7 @@ Viac ľudí sa môže pýtať naraz.
 Autor; Director (účet admin) vidí všetky.
 
 ### Náklady a limit
-Cena pri každej odpovedi (od v4.43.0 cenníkom Anthropic z Claude Code a kurzom ECB, aj zastavená odpoveď — `naklady-cennik.md`); v **Nákladoch** riadok **Poradca** zvlášť od fáz stavby. Naraz najviac **3 otázky**
+Autora rozhovoru kokpit nezmaže (od v4.43.2, ICCINT-169) — s rozhovormi by zmizla aj cena odpovedí; ponúkne deaktiváciu. Cena pri každej odpovedi (od v4.43.0 cenníkom Anthropic z Claude Code a kurzom ECB, aj zastavená odpoveď — `naklady-cennik.md`); v **Nákladoch** riadok **Poradca** zvlášť od fáz stavby. Naraz najviac **3 otázky**
 v celom kokpite (nastaviteľné), ďalšia počká s vetou prečo. Strop jednej otázky 15 minút. Model a úsilie
 v **Nastaveniach** ako pri AI Agentovi; predvolený Opus (vždy najnovší, 4.6), úsilie `high`.
 

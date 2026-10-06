@@ -41,6 +41,7 @@ from sqlalchemy.orm import Session
 
 from backend.db.models.bugs import Bug
 from backend.db.models.foundation import User, UserSession
+from backend.db.models.poradca import PoradcaConversation
 from backend.db.models.projects import Project
 from backend.schemas.user import SelfProfileUpdate, UserCreate, UserRole, UserUpdate
 
@@ -273,11 +274,15 @@ def update_own_profile(db: Session, user_id: UUID, data: SelfProfileUpdate) -> U
 
 
 def _has_restrict_dependencies(db: Session, user_id: UUID) -> Optional[str]:
-    """Return a human-readable reason if any RESTRICT FK references the user.
+    """Return a human-readable reason (Slovak — the users panel shows it as "Nedá sa vymazať: <reason>. Skús miesto
+    toho deaktivovať.") if any RESTRICT FK references the user.
 
     Checks every inbound ``ondelete='RESTRICT'`` FK on ``users.id``:
       * ``projects.created_by``
       * ``bugs.created_by``
+      * ``poradca_conversations.author_id`` (ICCINT-169) — a deleted user's conversations used to CASCADE away
+        with their answers, and the answers' cost vanished from the project's Náklady. Deleted conversations
+        count too: their row is kept precisely for that cost.
 
     ``user_sessions.user_id`` uses ``ON DELETE CASCADE`` and therefore
     imposes no constraint.
@@ -285,8 +290,13 @@ def _has_restrict_dependencies(db: Session, user_id: UUID) -> Optional[str]:
     Returns ``None`` when the user is safe to delete.
     """
     checks: list[tuple[type, object, str]] = [
-        (Project, Project.created_by, "projects"),
-        (Bug, Bug.created_by, "bugs"),
+        (Project, Project.created_by, "používateľ založil projekty"),
+        (Bug, Bug.created_by, "používateľ nahlásil chyby"),
+        (
+            PoradcaConversation,
+            PoradcaConversation.author_id,
+            "používateľ má rozhovory s Poradcom a ich cena je v Nákladoch projektov",
+        ),
     ]
     for model, column, table in checks:
         exists = db.execute(select(model.id).where(column == user_id).limit(1)).first()
@@ -312,7 +322,7 @@ def delete(db: Session, user_id: UUID) -> None:
 
     blocking = _has_restrict_dependencies(db, user.id)
     if blocking is not None:
-        raise ValueError(f"Cannot delete User {user.id}: referenced by existing {blocking}")
+        raise ValueError(blocking)
 
     db.delete(user)
     db.flush()

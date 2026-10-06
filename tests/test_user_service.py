@@ -250,7 +250,7 @@ class TestUserService:
         db_session.add(project)
         db_session.flush()
 
-        with pytest.raises(ValueError, match="projects"):
+        with pytest.raises(ValueError, match="založil projekty"):
             service.delete(db_session, owner.id)
 
     def test_delete_blocked_by_bug(self, db_session):
@@ -279,7 +279,7 @@ class TestUserService:
         db_session.add(bug)
         db_session.flush()
 
-        with pytest.raises(ValueError, match="bugs"):
+        with pytest.raises(ValueError, match="nahlásil chyby"):
             service.delete(db_session, reporter.id)
 
     # ------------------------------------------------------------------ list
