@@ -1977,6 +1977,16 @@ def _consultation_directive(
         "  • `options` — 2-3 možnosti, každá `label` + `detail` (krátky dôsledok voľby).\n"
         "  • práve JEDNU možnosť označ `recommended: true` a daj jednoriadkové `rationale` (prečo ju odporúčaš).\n"
         "  • `allow_free_text: true` IBA ak sa bod nedá rozumne rozložiť na možnosti.\n"
+        # DEV-34: the cards used to be written one by one, each plan on its own — two decided cards then
+        # contradicted each other, or a plan stopped half way, and only the next review round noticed.
+        "PRED odoslaním kariet over každú odporúčanú možnosť proti ostatným kartám a proti celému Návrhu "
+        "a Špecifikácii:\n"
+        "  1. má každý nový alebo zmenený stav jasný začiatok AJ koniec (čo ho spustí a čo ho ukončí);\n"
+        "  2. je každý nevratný krok (mazanie, zápis do cudzieho systému, odoslanie) podložený dôkazom, že sa "
+        "týka len toho, čoho sa týkať má;\n"
+        "  3. voľba sa nevylučuje s inou kartou ani so Špecifikáciou.\n"
+        "  Čo tvoj plán pokrýva, napíš do `technical_detail`. Keď voľba na jednej karte mení predpoklady inej, "
+        "zapíš to do `related` pri OBOCH kartách (`key` druhej karty + `why` jednou vetou po ľudsky).\n"
         f"- `consultation.source`: '{source}'.\n"
         "`summary` daj krátke, po ľudsky. Ukonči štruktúrovaným stavovým výstupom."
     )
@@ -3422,6 +3432,16 @@ def _latest_consultation(db: Session, version_id: uuid.UUID) -> Optional[tuple[d
     return (c, seq) if isinstance(c, dict) and c.get("decisions") else None
 
 
+#: DEV-34: the decisions were applied without a look at them together — clashes between two decided cards
+#: surfaced only in the next review round. Checked once, before anything is written.
+CONSULTATION_APPLY_CHECK = (
+    "Pred zápisom prejdi všetky rozhodnutia SPOLU, aj s poznámkami Manažéra: (1) nevylučujú sa navzájom ani "
+    "so Špecifikáciou; (2) každý nový či zmenený stav má začiatok aj koniec; (3) každý nevratný krok je "
+    "podložený dôkazom, že sa týka len toho, čoho má. Medzeru alebo rozpor, ktorý vieš uzavrieť v duchu "
+    "rozhodnutí, uzavri a v gate_report ju vymenuj vetou „Doplnené pri zlaďovaní rozhodnutí: …“. Čo by "
+    "vyžadovalo nové rozhodnutie Manažéra, nerozhoduj sám — vráť `kind=question` s jednou otázkou."
+)
+
 #: DEV-27: what the agent is told when the Manažér asks in the chat while the Decision Cards wait.
 CONSULTATION_QUESTION_DIRECTIVE = (
     "Prebieha konzultácia — Manažér rozhoduje body previerky na kartách a ešte neskončil. Medzitým sa ťa pýta "
@@ -3617,6 +3637,8 @@ def dispatch_directive(
         return (
             "Manažér rozhodol v konzultácii:\n"
             + "\n".join(lines)
+            + "\n"
+            + CONSULTATION_APPLY_CHECK
             + "\nTeraz PREPRACUJ Špecifikáciu/Návrh podľa týchto rozhodnutí a uzavri fázu (gate_report)."
         )
     del db, version_id  # route-call signature parity; the v1 DB-fetch relay paths are retired (CR-V2-009)

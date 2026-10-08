@@ -224,6 +224,15 @@ mid-build otázka) do **jedného modelu** — Manažér sa naučí jednu interak
    agent dostane pokyn odpovedať a dokumenty nemeniť, potom stavba čaká na tých istých kartách s tým istým
    kolom. Pokyn od Poradcu počas konzultácie ide na aktuálnu kartu do poľa „Pokyn pre AI partnera" (DEV-26).
 4. **Single-flight** → len posledný `decide` dispatchuje; medzikliky čisté DB; dispatch_in_flight ako poistka.
+   ⚠️ **Súvislosti medzi kartami (DEV-34, v4.43.10):** na NEX Inbox 1.7.0 (08.10.2026) si dve rozhodnuté karty
+   odporovali (karta 7 × 9, karta 1 × 2) a plány kariet končili v polovici (kedy sa nový výpadok skončí; odtlačok
+   ako dôkaz, že súbor je náš) — karty „dôsledok“ v kolách 3/9, 5/10, 1/3. Agent ich písal po jednej a rozhodnutia
+   zapracoval bez spoločnej kontroly. Odvtedy: pokyn na karty žiada pred odoslaním preveriť každú odporúčanú
+   možnosť proti ostatným kartám, Návrhu a Špecifikácii (začiatok aj koniec stavu, nevratné kroky, rozpory) a
+   súvislosti zapísať do `related` (`key` + `why`, overené enginom — len iná karta tej istej konzultácie); karta
+   ich ukáže („Súvisí s kartou N …“) a vidí ich aj Poradca. Pokyn na zapracovanie (`CONSULTATION_APPLY_CHECK`)
+   žiada prejsť všetky rozhodnutia SPOLU, medzery uzavrieť a vymenovať („Doplnené pri zlaďovaní rozhodnutí“),
+   a čo vyžaduje nové rozhodnutie, vrátiť ako `kind=question`.
 5. **Otvorené nálezy bez čistých možností** → `allow_free_text` + univerzálna „Iná odpoveď" (nikdy slepá ulička).
 6. **Tokeny/latencia** → spúšťa sa len keď problém build aj tak zastaví; kliky 0 tokenov; teplý kontext.
 7. **Migrácia** → CR si nesie vlastnú malú migráciu (dve CHECK hodnoty).

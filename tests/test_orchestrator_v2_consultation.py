@@ -222,3 +222,60 @@ def test_consultation_block_rejects_duplicate_decision_keys():
                 },
             ],
         )
+
+
+# ── DEV-34: the agent checks how its cards hang together, and its plan for completeness ─────────────────────
+#
+# Director 08.10.2026 on NEX Inbox 1.7.0: „Ak Poradca stále musí dať nejaký pokyn pre Agenta, tak s Agentom je
+# nejaký problém.“ Every justified Poradca instruction that day was one of two kinds: two cards contradicting each
+# other once one was decided (card 7 × 9, card 1 × 2), or a card's plan that stopped half way (when a new outage
+# ENDS; a fingerprint taken as proof that a file is ours). The brief asked for neither, and the apply turn wrote
+# all decisions in without looking at them together — the Auditor found the clashes one round later.
+
+
+def test_the_card_brief_asks_the_agent_to_check_its_plan_before_sending_the_cards():
+    brief = orchestrator._consultation_directive(
+        None, None, source="auditor_upfront", findings=["Bod A", "Bod B"], proposed_fix=None
+    )
+    assert "PRED odoslaním kariet over každú odporúčanú možnosť" in brief
+    assert "začiatok AJ koniec" in brief
+    assert "nevratný krok" in brief
+    assert "nevylučuje s inou kartou ani so Špecifikáciou" in brief
+    assert "`related`" in brief
+    assert "`technical_detail`" in brief
+
+
+async def test_the_apply_turn_checks_all_decisions_together_before_writing(db_session):
+    version = _seed_consultation(db_session)
+    for key in ("d1", "d2"):
+        await orchestrator.apply_action(
+            db_session, version_id=version.id, action="decide", payload={"decision_key": key, "option_id": "a"}
+        )
+    directive = orchestrator.dispatch_directive(db_session, version.id, "decide", {}, "navrh")
+    assert directive is not None
+    assert directive.index("Pred zápisom prejdi všetky rozhodnutia SPOLU") < directive.index("PREPRACUJ")
+    assert "Doplnené pri zlaďovaní rozhodnutí:" in directive
+    assert "nerozhoduj sám — vráť `kind=question`" in directive
+
+
+def test_a_card_names_the_cards_its_choice_depends_on():
+    from backend.services.pipeline_status import ConsultationBlock
+
+    decisions = [
+        {**_DECISIONS[0], "related": [{"key": "d2", "why": "Voľba A1 mení, kedy platí otázka 2."}]},
+        _DECISIONS[1],
+    ]
+    block = ConsultationBlock(id="c1", source="auditor_upfront", decisions=decisions)
+    assert block.decisions[0].related[0].key == "d2"
+    assert block.decisions[1].related == []
+
+
+@pytest.mark.parametrize("bad_key", ["d9", "d1"])
+def test_a_related_card_must_be_another_card_of_the_same_consultation(bad_key):
+    from pydantic import ValidationError
+
+    from backend.services.pipeline_status import ConsultationBlock
+
+    decisions = [{**_DECISIONS[0], "related": [{"key": bad_key, "why": "x"}]}, _DECISIONS[1]]
+    with pytest.raises(ValidationError, match="related"):
+        ConsultationBlock(id="c1", source="auditor_upfront", decisions=decisions)

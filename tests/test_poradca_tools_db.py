@@ -234,6 +234,7 @@ _CARDS = {
             "origin_of": "R2",
             "technical_detail": "compute_active_alerts: NIB-071 len pri outage_since; BEHAVIOR §4.3 + skúška.",
             "rationale": "Presne napĺňa R2.",
+            "related": [{"key": "drobnosti", "why": "Oprava textov musí počítať s novým upozornením."}],
             "options": [
                 {
                     "id": "hned",
@@ -361,3 +362,14 @@ def test_the_charter_asks_poradca_to_read_the_cards_again_before_advising():
     """DEV-30: in the morning conversation Poradca advised on card 10 from memory, without calling `stavba`."""
     charter = (Path(__file__).resolve().parents[1] / "templates" / "poradca-charter.md").read_text(encoding="utf-8")
     assert "Pred každou radou ku karte znova zavolaj `stavba`" in charter
+
+
+async def test_stavba_names_the_cards_a_choice_hangs_together_with(world):
+    """DEV-34: the link the agent wrote between two cards — Poradca sees it as the Manažér does."""
+    _consultation_world(world, decided=True)
+    out = await world["tools"].stavba({})
+    card = out[out.index("Karta 2 [NA RADE]") : out.index("Karta 3 [")]
+    assert (
+        "Súvisí s kartou 3 („Čo s drobnými nepresnosťami Návrhu?“): Oprava textov musí počítať s novým upozornením."
+        in card
+    )

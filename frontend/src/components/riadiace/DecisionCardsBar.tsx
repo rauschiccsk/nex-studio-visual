@@ -49,6 +49,8 @@ interface ConsultDecision {
   origin_of?: string;
   /** v4.0.11: the jargon backing `explanation`, shown collapsed behind a "Technický detail" disclosure. */
   technical_detail?: string;
+  /** DEV-34: other cards of this consultation whose premises this card's choice changes — and why. */
+  related?: { key: string; why?: string }[];
   options: ConsultOption[];
   rationale?: string;
   allow_free_text?: boolean;
@@ -70,6 +72,21 @@ function povodVeta(d: ConsultDecision): string | null {
     default:
       return null;
   }
+}
+
+/**
+ * DEV-34: the cards this choice hangs together with, named by number and question — so two decisions that
+ * would contradict each other are seen while deciding, not one review round later. A link to a card that is
+ * not in the consultation is skipped (the engine rejects such cards; old records may still carry one).
+ */
+function suvisiaceVety(decisions: ConsultDecision[], d: ConsultDecision): string[] {
+  return (d.related ?? []).flatMap((rel) => {
+    const i = decisions.findIndex((x) => x.key === rel.key);
+    const other = decisions[i];
+    if (!other || rel.key === d.key) return [];
+    const why = rel.why?.trim();
+    return [`Súvisí s kartou ${i + 1} („${other.question}“)${why ? `: ${why}` : "."}`];
+  });
 }
 
 /**
@@ -287,6 +304,11 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
           {povodVeta(current) && (
             <p className="mt-1 text-[11px] italic text-[var(--color-text-muted)]">{povodVeta(current)}</p>
           )}
+          {suvisiaceVety(consultation.decisions, current).map((veta) => (
+            <p key={veta} className="mt-1 text-[11px] text-[var(--color-text-secondary)]">
+              {veta}
+            </p>
+          ))}
           {current.explanation && (
             <p className="mt-1 whitespace-pre-line text-xs text-[var(--color-text-secondary)]">
               {current.explanation}

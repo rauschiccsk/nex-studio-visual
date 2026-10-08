@@ -149,6 +149,17 @@ def _cards_lines(db: Session, version_id: UUID) -> list[str]:
             out.append(f"  Vysvetlenie: {d['explanation']}")
         if d.get("origin") == "dosledok" and d.get("origin_of"):
             out.append(f"  Vyplýva z rozhodnutia o: {d['origin_of']}")
+        # DEV-34: the cards this choice hangs together with, as the card shows them to the Manažér.
+        index = {x.get("key"): n for n, x in enumerate(decisions)}
+        for rel in d.get("related") or []:
+            other = index.get(rel.get("key"))
+            if other is None or rel.get("key") == d.get("key"):
+                continue
+            why = (rel.get("why") or "").strip()
+            out.append(
+                f"  Súvisí s kartou {other + 1} („{decisions[other].get('question', '')}“)"
+                + (f": {why}" if why else ".")
+            )
         # DEV-30: the plan the agent already wrote — without it Poradca rewrote the plan in every instruction.
         if d.get("technical_detail"):
             out.append(f"  Technický detail: {d['technical_detail']}")

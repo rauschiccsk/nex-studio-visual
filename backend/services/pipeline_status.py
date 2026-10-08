@@ -326,6 +326,13 @@ class ConsultOption(BaseModel):
     recommended: bool = False
 
 
+class ConsultRelation(BaseModel):
+    """DEV-34: another card of the same consultation whose premises this card's choice changes — and why."""
+
+    key: str
+    why: str = ""
+
+
 class ConsultDecision(BaseModel):
     """One decision the Manažér resolves: a plain-language (non-expert) problem + 2-3 options + the
     AI Agent's recommendation. ``key`` is the stable id the Manažér's answer is recorded against (the
@@ -347,6 +354,10 @@ class ConsultDecision(BaseModel):
     #: collapsed behind the card's "Technický detail" disclosure so ``explanation`` stays plain for a
     #: non-expert. Empty ⇒ the card shows no disclosure.
     technical_detail: str = ""
+    #: DEV-34: cards whose premises this card's choice changes. On NEX Inbox 1.7.0 two decided cards contradicted
+    #: each other (card 7 × 9, card 1 × 2) and nobody saw it until the next review round; the agent now names
+    #: such links when it writes the cards, and the card and Poradca show them.
+    related: list[ConsultRelation] = Field(default_factory=list)
 
 
 class ConsultationBlock(BaseModel):
@@ -375,6 +386,15 @@ class ConsultationBlock(BaseModel):
         if len(keys) != len(set(keys)):
             dupes = sorted({k for k in keys if keys.count(k) > 1})
             raise ValueError(f"consultation decision keys must be unique (duplicates: {', '.join(dupes)})")
+        # DEV-34: a link that points nowhere (or at the card itself) would tell the Manažér to look at a card
+        # that is not there — reject it like a duplicate key, so the agent's parse retry writes it again.
+        for d in self.decisions:
+            for rel in d.related:
+                if rel.key == d.key or rel.key not in keys:
+                    raise ValueError(
+                        f"consultation decision {d.key!r}: related key {rel.key!r} must be another decision "
+                        "of the same consultation"
+                    )
         return self
 
 
