@@ -15,9 +15,11 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import func, select
 
 from backend.api.routes import poradca as poradca_routes
 from backend.core.security import get_current_user
+from backend.db.models.backlog import BacklogItem
 from backend.db.models.foundation import User
 from backend.db.models.poradca import PoradcaConversation, PoradcaMessage
 from backend.db.models.projects import Project
@@ -218,7 +220,11 @@ def test_empty_or_huge_question_is_refused(db_session):
     assert c.post(url, json={"question": "x" * 20_001}).status_code == 422
 
 
-# ── „Založiť novú verziu z tejto požiadavky" ────────────────────────────────────
+# ── „Uložiť do Zásobníka" (DEV-29) ───────────────────────────────────────────────
+#
+# Director 08.10.2026: „O verziách rozhodujem ja. Treba, aby zapísal len do zásobníku. To je všetko." The button
+# used to mint a whole new version (the next number, with the request as its brief) — on NEX Inbox 1.7.0 it would
+# have taken 1.8.0, which he had set aside for something else.
 
 
 def _answer(db, conversation_id, content, status="done"):
@@ -228,7 +234,11 @@ def _answer(db, conversation_id, content, status="done"):
     return msg
 
 
-def test_new_version_from_the_request_block_is_a_draft_and_only_once(db_session):
+def _versions(db, project) -> int:
+    return db.execute(select(func.count()).select_from(Version).where(Version.project_id == project.id)).scalar_one()
+
+
+def test_the_request_goes_to_the_backlog_only_never_a_version_and_only_once(db_session):
     owner = _user(db_session)
     project = _project(db_session, owner)
     c = _client(db_session, owner)
@@ -236,40 +246,82 @@ def test_new_version_from_the_request_block_is_a_draft_and_only_once(db_session)
     msg = _answer(
         db_session,
         uuid.UUID(cid),
-        "Odporúčam novú verziu.\n<poziadavka-na-novu-verziu>\nPridať export faktúr do CSV.\n"
-        "</poziadavka-na-novu-verziu>\n<pokyn-pre-agenta>Oprav test_login.</pokyn-pre-agenta>",
+        "Do tejto stavby to nepatrí.\n<poziadavka-do-zasobnika>\nPridať export faktúr do CSV.\n\nKvôli účtovníčke.\n"
+        "</poziadavka-do-zasobnika>\n<pokyn-pre-agenta>Oprav test_login.</pokyn-pre-agenta>",
     )
-    detail = c.get(f"/api/v1/poradca/conversations/{cid}").json()
-    last = detail["messages"][-1]
-    assert last["new_version_request"] == "Pridať export faktúr do CSV."
+    last = c.get(f"/api/v1/poradca/conversations/{cid}").json()["messages"][-1]
+    assert last["backlog_request"] == "Pridať export faktúr do CSV.\n\nKvôli účtovníčke."
     assert last["instruction"] == "Oprav test_login."
+    assert last["captured_backlog_number"] is None
+    versions_before = _versions(db_session, project)
 
-    first = c.post(f"/api/v1/poradca/messages/{msg.id}/new-version")
+    first = c.post(f"/api/v1/poradca/messages/{msg.id}/backlog")
     assert first.status_code == 200, first.text
     body = first.json()
     assert body["created"] is True and body["project_slug"] == project.slug
-    version = db_session.get(Version, uuid.UUID(body["version_id"]))
-    assert version.project_id == project.id and version.status == "planned"
-    again = c.post(f"/api/v1/poradca/messages/{msg.id}/new-version").json()
-    assert again["created"] is False and again["version_id"] == body["version_id"]
+    item = db_session.get(BacklogItem, uuid.UUID(body["backlog_item_id"]))
+    assert item.project_id == project.id and item.number == body["number"]
+    assert item.title == "Pridať export faktúr do CSV."
+    assert item.description == "Pridať export faktúr do CSV.\n\nKvôli účtovníčke."
+    assert item.version_id is None  # assigned to no version — the Director decides that
+    assert _versions(db_session, project) == versions_before  # and no version came of it
+
+    again = c.post(f"/api/v1/poradca/messages/{msg.id}/backlog").json()
+    assert again["created"] is False and again["backlog_item_id"] == body["backlog_item_id"]
+    assert (
+        db_session.execute(
+            select(func.count()).select_from(BacklogItem).where(BacklogItem.project_id == project.id)
+        ).scalar_one()
+        == 1
+    )
+    shown = c.get(f"/api/v1/poradca/conversations/{cid}").json()["messages"][-1]
+    assert shown["captured_backlog_number"] == body["number"]
 
 
-def test_no_request_block_no_version(db_session):
+def test_an_answer_written_before_the_change_is_saved_to_the_backlog_too(db_session):
+    """Answers from before DEV-29 carry the old block — e.g. the request about credit notes on 1.7.0."""
+    owner = _user(db_session)
+    project = _project(db_session, owner)
+    c = _client(db_session, owner)
+    cid = c.post(f"/api/v1/poradca/projects/{project.slug}/conversations", json={"question": "x"}).json()["id"]
+    msg = _answer(
+        db_session,
+        uuid.UUID(cid),
+        "<poziadavka-na-novu-verziu>Riadne spracovanie dobropisov.</poziadavka-na-novu-verziu>",
+    )
+    versions_before = _versions(db_session, project)
+    body = c.post(f"/api/v1/poradca/messages/{msg.id}/backlog").json()
+    assert db_session.get(BacklogItem, uuid.UUID(body["backlog_item_id"])).title == "Riadne spracovanie dobropisov."
+    assert _versions(db_session, project) == versions_before
+
+
+def test_no_request_block_nothing_is_saved(db_session):
     owner = _user(db_session)
     project = _project(db_session, owner)
     c = _client(db_session, owner)
     cid = c.post(f"/api/v1/poradca/projects/{project.slug}/conversations", json={"question": "x"}).json()["id"]
     plain = _answer(db_session, uuid.UUID(cid), "Len vysvetlenie, nič na zmenu.")
-    assert c.post(f"/api/v1/poradca/messages/{plain.id}/new-version").status_code == 422
+    assert c.post(f"/api/v1/poradca/messages/{plain.id}/backlog").status_code == 422
     running = _answer(
         db_session,
         uuid.UUID(cid),
-        "<poziadavka-na-novu-verziu>Ešte nedopísané, ale dlhé dosť.</poziadavka-na-novu-verziu>",
+        "<poziadavka-do-zasobnika>Ešte nedopísané, ale dlhé dosť.</poziadavka-do-zasobnika>",
         status="running",
     )
-    assert c.post(f"/api/v1/poradca/messages/{running.id}/new-version").status_code == 422
+    assert c.post(f"/api/v1/poradca/messages/{running.id}/backlog").status_code == 422
     stranger = _client(db_session, _user(db_session))
-    assert stranger.post(f"/api/v1/poradca/messages/{plain.id}/new-version").status_code == 404
+    assert stranger.post(f"/api/v1/poradca/messages/{plain.id}/backlog").status_code == 404
+
+
+def test_there_is_no_way_left_to_mint_a_version_from_poradca(db_session):
+    owner = _user(db_session)
+    project = _project(db_session, owner)
+    c = _client(db_session, owner)
+    cid = c.post(f"/api/v1/poradca/projects/{project.slug}/conversations", json={"question": "x"}).json()["id"]
+    msg = _answer(
+        db_session, uuid.UUID(cid), "<poziadavka-do-zasobnika>Pridať export do CSV.</poziadavka-do-zasobnika>"
+    )
+    assert c.post(f"/api/v1/poradca/messages/{msg.id}/new-version").status_code in (404, 405)
 
 
 def test_context_lists_versions_with_build_state_and_where_an_instruction_can_go(db_session):
@@ -411,7 +463,7 @@ def test_delete_wipes_what_was_said_and_its_disk_record_but_keeps_the_cost(db_se
     assert c.put(f"/api/v1/poradca/conversations/{cid}/title", json={"title": "z"}).status_code == 404
     assert c.patch(f"/api/v1/poradca/conversations/{cid}", json={"version_id": None}).status_code == 404
     assert c.delete(f"/api/v1/poradca/conversations/{cid}").status_code == 404
-    assert c.post(f"/api/v1/poradca/messages/{answer.id}/new-version").status_code == 404
+    assert c.post(f"/api/v1/poradca/messages/{answer.id}/backlog").status_code == 404
     # Text, kroky, chyba, názov aj záznam na disku sú preč (aj z koša)…
     assert not record.exists()
     assert not any(sandbox.trash_dir().iterdir())
@@ -505,3 +557,14 @@ def test_nul_in_a_title_or_question_is_a_sentence_not_a_server_error(db_session)
     assert c.post(f"/api/v1/poradca/conversations/{cid}/messages", json={"question": "a\x00b"}).status_code == 422
     r = c.post(f"/api/v1/poradca/projects/{project.slug}/conversations", json={"question": "a\x00b"})
     assert r.status_code == 422
+
+
+def test_the_charter_asks_for_the_block_the_cockpit_saves_to_the_backlog():
+    """DEV-29: Poradca writes the block the button reads — and is no longer told a version will come of it."""
+    from backend.services.poradca import handoff
+
+    charter = (Path(__file__).resolve().parents[1] / "templates" / "poradca-charter.md").read_text(encoding="utf-8")
+    assert f"<{handoff.BLOCK_BACKLOG}>" in charter
+    assert handoff.BLOCK_BACKLOG_LEGACY not in charter
+    assert '„Uložiť do Zásobníka"' in charter
+    assert "Založiť novú verziu" not in charter

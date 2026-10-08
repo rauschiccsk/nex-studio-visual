@@ -88,8 +88,10 @@ class PoradcaMessage(Base, UUIDMixin, TimestampMixin):
     #: Verzia, ku ktorej sa otázka vzťahovala v čase, keď padla — rozhovor môže verziu zmeniť, Náklady
     #: verzie však musia sčítať len to, čo sa na ňu naozaj pýtalo. Prázdne = celý projekt.
     version_id = Column(UUID(as_uuid=True), ForeignKey("versions.id", ondelete="SET NULL"), nullable=True)
-    #: Verzia, ktorú človek z požiadavky v tejto odpovedi založil — druhé kliknutie vráti ju, nezaloží novú.
-    captured_version_id = Column(UUID(as_uuid=True), ForeignKey("versions.id", ondelete="SET NULL"), nullable=True)
+    #: DEV-29: the backlog item the Manažér saved from this answer's request — a second click returns it.
+    captured_backlog_item_id = Column(
+        UUID(as_uuid=True), ForeignKey("backlog_items.id", ondelete="SET NULL"), nullable=True
+    )
 
     __table_args__ = (
         CheckConstraint(f"author IN ({_in(MESSAGE_AUTHORS)})", name="ck_poradca_messages_author"),

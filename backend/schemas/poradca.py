@@ -48,15 +48,18 @@ class PoradcaMessageRead(BaseModel):
     finished_at: Optional[datetime] = None
     #: Odpoveď nesie pokyn pre agenta bežiacej stavby (blok ``<pokyn-pre-agenta>``) — text na vloženie.
     instruction: Optional[str] = None
-    #: Odpoveď nesie požiadavku na novú verziu (blok ``<poziadavka-na-novu-verziu>``).
-    new_version_request: Optional[str] = None
-    #: Verzia, ktorá už z požiadavky vznikla.
-    captured_version_id: Optional[UUID] = None
+    #: Odpoveď nesie požiadavku do Zásobníka (blok ``<poziadavka-do-zasobnika>``, staršie odpovede
+    #: ``<poziadavka-na-novu-verziu>``) — DEV-29.
+    backlog_request: Optional[str] = None
+    #: Číslo požiadavky (REQ-N), ktorú človek z tejto odpovede už uložil do Zásobníka.
+    captured_backlog_number: Optional[int] = None
 
 
-class PoradcaNewVersion(BaseModel):
-    version_id: UUID
-    version_number: str
+class PoradcaBacklogSaved(BaseModel):
+    """DEV-29: požiadavka z odpovede Poradcu uložená do Zásobníka (verzia z nej nevzniká)."""
+
+    backlog_item_id: UUID
+    number: int
     project_slug: str
     created: bool
 

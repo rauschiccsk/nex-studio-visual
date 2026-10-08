@@ -2,16 +2,17 @@
 //
 // Tlačidlá sa ukážu len vtedy, keď odpoveď nesie príslušný blok (charta Poradcu, časť 4) — a „Vložiť do
 // Riadiaceho centra" je zašednuté s dôvodom, keď pole stavby pokyn neprijme. Nič sa neodošle samo:
-// pokyn odošle človek v Riadiacom centre, verzia vznikne ako koncept bez spustenej stavby.
+// pokyn odošle človek v Riadiacom centre; požiadavka ide len do Zásobníka — verzia z nej nevzniká, o verziách
+// rozhoduje Director (DEV-29).
 
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronDown, ChevronRight, GitBranchPlus, Loader2, Send, Square } from "lucide-react";
+import { Archive, ChevronDown, ChevronRight, Loader2, Send, Square } from "lucide-react";
 
 import { SpecMarkdown } from "@/components/markdown/SpecMarkdown";
 import ErrorNote from "@/components/common/ErrorNote";
 import { useActiveContextStore } from "@/store/activeContextStore";
-import { newVersionFromPoradcaApi, stopPoradcaApi } from "@/services/api/poradca";
+import { saveRequestToBacklogApi, stopPoradcaApi } from "@/services/api/poradca";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { handOffInstruction } from "@/lib/poradcaHandoff";
 import { answerForDisplay, formatCost, formatDuration, stepLabel } from "@/lib/poradcaAnswer";
@@ -27,6 +28,9 @@ interface Props {
 export default function PoradcaAnswer({ message, scopeVersion }: Props) {
   const navigate = useNavigate();
   const setSelectedVersion = useActiveContextStore((s) => s.setSelectedVersion);
+  const projectSlug = useActiveContextStore((s) => s.selectedProject?.slug ?? null);
+  // DEV-29: the REQ-N the request was saved as — from the answer itself, or from the click just now.
+  const [savedNumber, setSavedNumber] = useState<number | null>(message.captured_backlog_number ?? null);
   const [showSteps, setShowSteps] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<HumanError | null>(null);
@@ -55,17 +59,16 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
     navigate("/riadiace-centrum");
   }
 
-  async function newVersion() {
-    if (inFlight.current) return; // druhé kliknutie pred prekreslením nesmie založiť druhú verziu
+  async function saveToBacklog() {
+    if (inFlight.current) return; // a second click before the re-render must not save it twice
     inFlight.current = true;
     setBusy(true);
     setError(null);
     try {
-      const v = await newVersionFromPoradcaApi(message.id);
-      setSelectedVersion({ versionId: v.version_id, versionNumber: v.version_number });
-      navigate(`/projects/${v.project_slug}/versions/${v.version_id}`);
+      const saved = await saveRequestToBacklogApi(message.id);
+      setSavedNumber(saved.number);
     } catch (e: unknown) {
-      setError(humanizeApiError(e, "Založenie verzie zlyhalo"));
+      setError(humanizeApiError(e, "Uloženie do Zásobníka zlyhalo"));
     } finally {
       inFlight.current = false;
       setBusy(false);
@@ -114,7 +117,7 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
       )}
       {message.status === "stopped" && <p className="text-xs text-[var(--color-text-muted)]">Zastavené.</p>}
 
-      {!running && (message.instruction || message.new_version_request) && (
+      {!running && (message.instruction || message.backlog_request) && (
         <div className="mt-2 flex flex-wrap gap-2">
           {message.instruction && (
             <button
@@ -127,17 +130,31 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
               <Send className="h-3.5 w-3.5" /> Vložiť do Riadiaceho centra
             </button>
           )}
-          {message.new_version_request && (
+          {message.backlog_request && savedNumber == null && (
             <button
               type="button"
-              onClick={() => void newVersion()}
+              onClick={() => void saveToBacklog()}
               disabled={busy}
-              title="Požiadavka pôjde do zásobníka a vznikne koncept verzie — stavbu spustíš sám."
+              title="Požiadavka sa zapíše do Zásobníka projektu. Do ktorej verzie pôjde, rozhodneš sám."
               className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
             >
-              <GitBranchPlus className="h-3.5 w-3.5" />
-              {message.captured_version_id ? "Otvoriť založenú verziu" : "Založiť novú verziu z tejto požiadavky"}
+              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Archive className="h-3.5 w-3.5" />} Uložiť do
+              Zásobníka
             </button>
+          )}
+          {message.backlog_request && savedNumber != null && (
+            <span className="flex items-center gap-2 text-xs text-[var(--color-text-secondary)]">
+              {`Uložené v Zásobníku ako REQ-${savedNumber}.`}
+              {projectSlug && (
+                <button
+                  type="button"
+                  onClick={() => navigate(`/projects/${projectSlug}/backlog`)}
+                  className="rounded-lg border border-[var(--color-border-default)] px-2 py-1 text-xs font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)]"
+                >
+                  Otvoriť Zásobník
+                </button>
+              )}
+            </span>
           )}
         </div>
       )}

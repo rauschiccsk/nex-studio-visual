@@ -5,7 +5,9 @@ import type { PoradcaVersionInfo } from "@/types/poradca";
 /** Bloky z charty Poradcu (časť 4) a nadpis, pod ktorým ich človek uvidí. Kokpit z nich robí tlačidlá. */
 const BLOCKS: { tag: string; heading: string }[] = [
   { tag: "pokyn-pre-agenta", heading: "Pokyn pre agenta stavby" },
-  { tag: "poziadavka-na-novu-verziu", heading: "Požiadavka na novú verziu" },
+  { tag: "poziadavka-do-zasobnika", heading: "Požiadavka do Zásobníka" },
+  // DEV-29: answers from before the change carry the old block — it, too, only ever goes to the Zásobník.
+  { tag: "poziadavka-na-novu-verziu", heading: "Požiadavka do Zásobníka" },
 ];
 
 /**

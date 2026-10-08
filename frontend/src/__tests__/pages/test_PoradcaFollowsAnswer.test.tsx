@@ -27,7 +27,7 @@ const api = vi.hoisted(() => ({
   renamePoradcaConversationApi: vi.fn(),
   deletePoradcaConversationApi: vi.fn(),
   stopPoradcaApi: vi.fn(),
-  newVersionFromPoradcaApi: vi.fn(),
+  saveRequestToBacklogApi: vi.fn(),
   buildPoradcaWsUrl: vi.fn(() => "ws://test/ws"),
 }));
 vi.mock("@/services/api/poradca", () => api);
@@ -69,8 +69,8 @@ function answer(status: "running" | "done", content = "") {
     created_at: "2026-10-08T10:00:01Z",
     finished_at: null,
     instruction: null,
-    new_version_request: null,
-    captured_version_id: null,
+    backlog_request: null,
+    captured_backlog_number: null,
   };
 }
 function conversation(messages: unknown[]) {

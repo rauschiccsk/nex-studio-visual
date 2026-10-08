@@ -603,7 +603,7 @@ def _wipe(db: Session, conversation: PoradcaConversation) -> Optional[Path]:
         db.execute(
             update(PoradcaMessage)
             .where(PoradcaMessage.conversation_id == conversation.id)
-            .values(content="", steps=[], error=None, captured_version_id=None)
+            .values(content="", steps=[], error=None, captured_backlog_item_id=None)
         )
         db.execute(
             update(PoradcaConversation)

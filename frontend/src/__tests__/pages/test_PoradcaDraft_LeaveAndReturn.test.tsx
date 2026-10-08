@@ -25,7 +25,7 @@ const api = vi.hoisted(() => ({
   renamePoradcaConversationApi: vi.fn(),
   deletePoradcaConversationApi: vi.fn(),
   stopPoradcaApi: vi.fn(),
-  newVersionFromPoradcaApi: vi.fn(),
+  saveRequestToBacklogApi: vi.fn(),
   buildPoradcaWsUrl: vi.fn(() => "ws://test/ws"),
 }));
 vi.mock("@/services/api/poradca", () => api);

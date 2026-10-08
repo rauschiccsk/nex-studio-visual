@@ -12,7 +12,7 @@ export type PoradcaConversationDetail = S["PoradcaConversationDetail"];
 export type PoradcaStatus = S["PoradcaStatus"];
 export type PoradcaProjectContext = S["PoradcaProjectContext"];
 export type PoradcaVersionInfo = S["PoradcaVersionInfo"];
-export type PoradcaNewVersion = S["PoradcaNewVersion"];
+export type PoradcaBacklogSaved = S["PoradcaBacklogSaved"];
 
 /** Udalosť živého priebehu — nástroj a cieľ, nikdy obsah. */
 export type PoradcaEvent =

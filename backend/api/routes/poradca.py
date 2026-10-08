@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from backend.core import authz
 from backend.core.security import get_current_user, verify_ws_token
+from backend.db.models.backlog import BacklogItem
 from backend.db.models.foundation import User
 from backend.db.models.pipeline import PipelineState
 from backend.db.models.poradca import AUTHOR_PORADCA, RUNNING, PoradcaConversation, PoradcaMessage
@@ -36,11 +37,11 @@ from backend.db.models.versions import Version
 from backend.db.session import SessionLocal, get_db
 from backend.schemas.poradca import (
     PoradcaAsk,
+    PoradcaBacklogSaved,
     PoradcaConversationCreate,
     PoradcaConversationDetail,
     PoradcaConversationRead,
     PoradcaMessageRead,
-    PoradcaNewVersion,
     PoradcaProjectContext,
     PoradcaRename,
     PoradcaScopeUpdate,
@@ -86,6 +87,13 @@ def _conversation_for(db: Session, user: User, conversation_id: uuid.UUID) -> tu
     return conversation, project
 
 
+def _captured_backlog_number(db: Session, msg: PoradcaMessage) -> Optional[int]:
+    if msg.captured_backlog_item_id is None:
+        return None
+    item = db.get(BacklogItem, msg.captured_backlog_item_id)
+    return item.number if item is not None else None
+
+
 def _message_read(db: Session, msg: PoradcaMessage) -> PoradcaMessageRead:
     usage = msg.usage or {}
     done_answer = msg.author == AUTHOR_PORADCA and msg.status == "done"
@@ -106,8 +114,8 @@ def _message_read(db: Session, msg: PoradcaMessage) -> PoradcaMessageRead:
         created_at=msg.created_at,
         finished_at=msg.finished_at,
         instruction=handoff.extract_block(msg.content, handoff.BLOCK_INSTRUCTION) if done_answer else None,
-        new_version_request=handoff.extract_block(msg.content, handoff.BLOCK_NEW_VERSION) if done_answer else None,
-        captured_version_id=msg.captured_version_id,
+        backlog_request=handoff.backlog_request(msg.content) if done_answer else None,
+        captured_backlog_number=_captured_backlog_number(db, msg),
     )
 
 
@@ -334,23 +342,23 @@ async def stop_message(
     return {"stopping": True}
 
 
-@router.post("/messages/{message_id}/new-version", response_model=PoradcaNewVersion)
-def new_version_from_answer(
+@router.post("/messages/{message_id}/backlog", response_model=PoradcaBacklogSaved)
+def save_request_to_backlog(
     message_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
-) -> PoradcaNewVersion:
-    """„Založiť novú verziu z tejto požiadavky" — koncept verzie z požiadavky v odpovedi Poradcu."""
+) -> PoradcaBacklogSaved:
+    """„Uložiť do Zásobníka" — požiadavka z odpovede Poradcu do Zásobníka projektu; verzia nevzniká (DEV-29)."""
     msg = db.get(PoradcaMessage, message_id)
     if msg is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Správa sa nenašla.")
     _conversation_for(db, current_user, msg.conversation_id)
     try:
-        result = handoff.new_version_from_message(db, msg, user_id=current_user.id)
+        result = handoff.backlog_item_from_message(db, msg)
     except handoff.HandoffRefused as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     db.commit()
-    return PoradcaNewVersion(
-        version_id=result.version_id,
-        version_number=result.version_number,
+    return PoradcaBacklogSaved(
+        backlog_item_id=result.backlog_item_id,
+        number=result.number,
         project_slug=result.project_slug,
         created=result.created,
     )

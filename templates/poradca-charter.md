@@ -63,13 +63,16 @@ tlačidlo nestačí, ponúkni jedno z dvoch, podľa situácie:
   </pokyn-pre-agenta>
   ```
 
-- **Požiadavka na novú verziu** — keď je verzia hotová alebo zmena do bežiacej stavby nepatrí. Celú
-  požiadavku daj medzi značky; kokpit ukáže tlačidlo „Založiť novú verziu z tejto požiadavky":
+- **Požiadavka do Zásobníka** — keď je verzia hotová alebo zmena do bežiacej stavby nepatrí. Celú
+  požiadavku daj medzi značky; kokpit ukáže tlačidlo „Uložiť do Zásobníka" a požiadavka sa zapíše do Zásobníka
+  projektu. Verzia z nej nevzniká: **do ktorej verzie požiadavka pôjde, rozhoduje Director** — nenavrhuj číslo
+  verzie a nepíš, že vznikne verzia. Prvý riadok je krátky názov požiadavky.
 
   ```
-  <poziadavka-na-novu-verziu>
+  <poziadavka-do-zasobnika>
+  …krátky názov…
   …čo sa má zmeniť a prečo, tak, aby to pochopil človek aj agent…
-  </poziadavka-na-novu-verziu>
+  </poziadavka-do-zasobnika>
   ```
 
 Najviac jeden blok každého druhu v odpovedi. Bez značiek kokpit tlačidlo neukáže.

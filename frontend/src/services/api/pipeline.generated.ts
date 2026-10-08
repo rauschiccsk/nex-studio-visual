@@ -1404,7 +1404,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/poradca/messages/{message_id}/new-version": {
+    "/api/v1/poradca/messages/{message_id}/backlog": {
         parameters: {
             query?: never;
             header?: never;
@@ -1414,10 +1414,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * New Version From Answer
-         * @description „Založiť novú verziu z tejto požiadavky" — koncept verzie z požiadavky v odpovedi Poradcu.
+         * Save Request To Backlog
+         * @description „Uložiť do Zásobníka" — požiadavka z odpovede Poradcu do Zásobníka projektu; verzia nevzniká (DEV-29).
          */
-        post: operations["new_version_from_answer_api_v1_poradca_messages__message_id__new_version_post"];
+        post: operations["save_request_to_backlog_api_v1_poradca_messages__message_id__backlog_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5269,6 +5269,23 @@ export interface components {
             /** Question */
             question: string;
         };
+        /**
+         * PoradcaBacklogSaved
+         * @description DEV-29: požiadavka z odpovede Poradcu uložená do Zásobníka (verzia z nej nevzniká).
+         */
+        PoradcaBacklogSaved: {
+            /**
+             * Backlog Item Id
+             * Format: uuid
+             */
+            backlog_item_id: string;
+            /** Created */
+            created: boolean;
+            /** Number */
+            number: number;
+            /** Project Slug */
+            project_slug: string;
+        };
         /** PoradcaConversationCreate */
         PoradcaConversationCreate: {
             /** Question */
@@ -5367,8 +5384,10 @@ export interface components {
              * @enum {string}
              */
             author: "human" | "poradca";
-            /** Captured Version Id */
-            captured_version_id?: string | null;
+            /** Backlog Request */
+            backlog_request?: string | null;
+            /** Captured Backlog Number */
+            captured_backlog_number?: number | null;
             /** Content */
             content: string;
             /** Cost */
@@ -5395,8 +5414,6 @@ export interface components {
             instruction?: string | null;
             /** Model */
             model?: string | null;
-            /** New Version Request */
-            new_version_request?: string | null;
             /** Output Tokens */
             output_tokens?: number | null;
             /**
@@ -5406,20 +5423,6 @@ export interface components {
             status: "running" | "done" | "failed" | "stopped";
             /** Steps */
             steps?: components["schemas"]["PoradcaStep"][];
-        };
-        /** PoradcaNewVersion */
-        PoradcaNewVersion: {
-            /** Created */
-            created: boolean;
-            /** Project Slug */
-            project_slug: string;
-            /**
-             * Version Id
-             * Format: uuid
-             */
-            version_id: string;
-            /** Version Number */
-            version_number: string;
         };
         /** PoradcaProjectContext */
         PoradcaProjectContext: {
@@ -9510,7 +9513,7 @@ export interface operations {
             };
         };
     };
-    new_version_from_answer_api_v1_poradca_messages__message_id__new_version_post: {
+    save_request_to_backlog_api_v1_poradca_messages__message_id__backlog_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -9527,7 +9530,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PoradcaNewVersion"];
+                    "application/json": components["schemas"]["PoradcaBacklogSaved"];
                 };
             };
             /** @description Validation Error */

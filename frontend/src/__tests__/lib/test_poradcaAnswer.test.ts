@@ -12,11 +12,17 @@ describe("answerForDisplay", () => {
     expect(out).not.toContain("<pokyn-pre-agenta>");
   });
 
-  it("does the same for a new-version request and leaves plain text alone", () => {
-    expect(answerForDisplay("<poziadavka-na-novu-verziu>Export CSV.</poziadavka-na-novu-verziu>")).toContain(
-      "**Požiadavka na novú verziu:**",
+  it("does the same for a request to the Zásobník and leaves plain text alone", () => {
+    expect(answerForDisplay("<poziadavka-do-zasobnika>Export CSV.</poziadavka-do-zasobnika>")).toContain(
+      "**Požiadavka do Zásobníka:**",
     );
     expect(answerForDisplay("Len odpoveď.")).toBe("Len odpoveď.");
+  });
+
+  it("DEV-29: an answer from before the change shows its request as one for the Zásobník, never a new version", () => {
+    const out = answerForDisplay("<poziadavka-na-novu-verziu>Dobropisy.</poziadavka-na-novu-verziu>");
+    expect(out).toContain("**Požiadavka do Zásobníka:**");
+    expect(out).not.toContain("novú verziu");
   });
 });
 

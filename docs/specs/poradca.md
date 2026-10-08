@@ -96,7 +96,13 @@ Poradca poradí, **ktorým tlačidlom** to urobiť, a podľa situácie ponúkne:
   človek sám (DEV-22). Keď žiadne pole text neprijme (stavba čaká na opravu kokpitu, hotová verzia), tlačidlo
   je zašednuté s dôvodom; server a obrazovka sa v tom zhodujú
   (`tests/test_poradca_instruction_target_matches_cockpit.py`).
-- **„Založiť novú verziu z tejto požiadavky"** (pri hotovej verzii) — tá istá cesta k novej verzii, ktorú kokpit má.
+- **„Uložiť do Zásobníka"** (keď zmena do bežiacej stavby nepatrí alebo je verzia hotová) — požiadavka sa zapíše
+  do Zásobníka projektu ako REQ-N a nič viac; pod odpoveďou potom stojí „Uložené v Zásobníku ako REQ-N.“
+  s tlačidlom „Otvoriť Zásobník“, druhé kliknutie nezaloží druhú požiadavku. Verzia z nej nevzniká — do ktorej
+  verzie požiadavka pôjde, rozhoduje Director (v4.43.7, DEV-29: „O verziách rozhodujem ja. Treba, aby zapísal len
+  do zásobníku.“). Do v4.43.6 sa tlačidlo volalo „Založiť novú verziu z tejto požiadavky“ a zakladalo aj ďalšiu
+  verziu so zadaním z požiadavky; z odpovedí Poradcu tak nevznikla ani jedna. Blok v odpovedi je
+  `<poziadavka-do-zasobnika>`; staršie odpovede s `<poziadavka-na-novu-verziu>` sa ukladajú rovnako.
 
 ### Počas stavby
 Beží **vedľa** stavby: neprepína jej stav, nečaká na ňu, nezastaví ju. Agent stavby o rozhovore nevie.
@@ -211,9 +217,10 @@ bežia na výstupe každého nástroja aj na odpovedi. Skúšky len na umelých 
   4 týždenné a 6 mesačných), a v starých verziách riadkov, kým ich Postgres neupratá. Priečinok
   `/opt/data/nex-studio-visual/poradca` záloha servera nezahŕňa — záznam na disku po vymazaní nie je nikde.
 - Charta `templates/poradca-charter.md`: len číta a radí; tvrdenie dokladá tým, čo prečítal; odporúča len
-  tlačidlá z nástroja `stavba`; zmenu aplikácie smeruje do novej verzie.
-- „Založiť novú verziu" dnes číta požiadavku zo správy stavby (`change_request.py:61-86`) — dostane druhý
-  zdroj: štruktúrovaný výstup Poradcu.
+  tlačidlá z nástroja `stavba`; zmenu aplikácie smeruje do Zásobníka (od v4.43.7, DEV-29; predtým do novej verzie).
+- „Založiť novú verziu" čítalo požiadavku zo správy stavby (`change_request.py`) — dostalo druhý zdroj:
+  štruktúrovaný výstup Poradcu. Od v4.43.7 (DEV-29) je z toho „Uložiť do Zásobníka" a `change_request.py`
+  je odstránený (nikto iný ho nepoužíval).
 - Frontend: položka ponuky, `/poradca`, priebeh, zastavenie, cena, nastavenie modelu, Náklady, dve tlačidlá
   prepojenia; `npm run codegen`. `/health` ukáže pripravenosť Poradcu namiesto `consult_sandbox`.
 

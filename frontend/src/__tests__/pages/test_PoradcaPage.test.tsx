@@ -18,7 +18,7 @@ const api = vi.hoisted(() => ({
   renamePoradcaConversationApi: vi.fn(),
   deletePoradcaConversationApi: vi.fn(),
   stopPoradcaApi: vi.fn(),
-  newVersionFromPoradcaApi: vi.fn(),
+  saveRequestToBacklogApi: vi.fn(),
   buildPoradcaWsUrl: vi.fn(() => "ws://test/ws"),
 }));
 vi.mock("@/services/api/poradca", () => api);
@@ -94,8 +94,8 @@ const ANSWER_WITH_INSTRUCTION = {
   created_at: "2026-10-05T10:00:01Z",
   finished_at: "2026-10-05T10:01:21Z",
   instruction: "Oprav test_login.",
-  new_version_request: null,
-  captured_version_id: null,
+  backlog_request: null,
+  captured_backlog_number: null,
 };
 
 function renderPage(url = "/poradca?c=c1") {
@@ -105,6 +105,7 @@ function renderPage(url = "/poradca?c=c1") {
         <Route path="/poradca" element={<PoradcaPage />} />
         <Route path="/riadiace-centrum" element={<div>RIADIACE CENTRUM</div>} />
         <Route path="/projects" element={<div>PROJEKTY</div>} />
+        <Route path="/projects/:slug/backlog" element={<div>ZÁSOBNÍK</div>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -323,5 +324,38 @@ describe("PoradcaPage", () => {
     // Kôš zašedne až po zosúladení zoznamu s otvoreným rozhovorom (efekt po vykreslení) — bez čakania
     // skúška padala v polovici behov (CI 05.10.2026).
     await waitFor(() => expect(screen.getByRole("button", { name: "Vymazať rozhovor" })).toBeDisabled());
+  });
+
+  // DEV-29 — Director 08.10.2026: „O verziách rozhodujem ja. Treba, aby zapísal len do zásobníku."
+  describe("a request from Poradca goes to the Zásobník only", () => {
+    const REQUEST_ANSWER = {
+      ...ANSWER_WITH_INSTRUCTION,
+      content: "Do tejto stavby to nepatrí.\n<poziadavka-do-zasobnika>Riadne spracovanie dobropisov.</poziadavka-do-zasobnika>",
+      instruction: null,
+      backlog_request: "Riadne spracovanie dobropisov.",
+    };
+
+    it("„Uložiť do Zásobníka“ saves it, says under which number, and opens no version", async () => {
+      api.getPoradcaConversationApi.mockResolvedValue(conversation("v13", [REQUEST_ANSWER]));
+      api.saveRequestToBacklogApi.mockResolvedValue({ backlog_item_id: "b7", number: 7, project_slug: "demo", created: true });
+      renderPage();
+      fireEvent.click(await screen.findByRole("button", { name: /Uložiť do Zásobníka/ }));
+      await waitFor(() => expect(api.saveRequestToBacklogApi).toHaveBeenCalledWith("m2"));
+      expect(await screen.findByText("Uložené v Zásobníku ako REQ-7.")).toBeInTheDocument();
+      expect(ctx.state.setSelectedVersion).not.toHaveBeenCalled();
+      expect(screen.queryByRole("button", { name: /Uložiť do Zásobníka/ })).not.toBeInTheDocument();
+      expect(screen.queryByText(/novú verziu|založenú verziu/)).not.toBeInTheDocument();
+    });
+
+    it("an answer already saved says so and offers the way to the Zásobník", async () => {
+      api.getPoradcaConversationApi.mockResolvedValue(
+        conversation("v13", [{ ...REQUEST_ANSWER, captured_backlog_number: 7 }]),
+      );
+      renderPage();
+      expect(await screen.findByText("Uložené v Zásobníku ako REQ-7.")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Uložiť do Zásobníka/ })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Otvoriť Zásobník" }));
+      expect(await screen.findByText("ZÁSOBNÍK")).toBeInTheDocument();
+    });
   });
 });

@@ -4,7 +4,7 @@ import api from "../api";
 import type {
   PoradcaConversation,
   PoradcaConversationDetail,
-  PoradcaNewVersion,
+  PoradcaBacklogSaved,
   PoradcaProjectContext,
   PoradcaStatus,
 } from "../../types/poradca";
@@ -59,8 +59,9 @@ export function stopPoradcaApi(messageId: string): Promise<{ stopping: boolean }
   return api.post<{ stopping: boolean }>(`/poradca/messages/${messageId}/stop`);
 }
 
-export function newVersionFromPoradcaApi(messageId: string): Promise<PoradcaNewVersion> {
-  return api.post<PoradcaNewVersion>(`/poradca/messages/${messageId}/new-version`);
+/** DEV-29: the request in Poradca's answer goes to the project's Zásobník — no version comes of it. */
+export function saveRequestToBacklogApi(messageId: string): Promise<PoradcaBacklogSaved> {
+  return api.post<PoradcaBacklogSaved>(`/poradca/messages/${messageId}/backlog`);
 }
 
 export function buildPoradcaWsUrl(conversationId: string, token: string): string {

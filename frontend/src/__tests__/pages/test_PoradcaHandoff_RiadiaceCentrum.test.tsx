@@ -45,7 +45,7 @@ vi.mock("@/services/api/pipeline", () => ({
 }));
 vi.mock("@/services/api/poradca", () => ({
   stopPoradcaApi: vi.fn(),
-  newVersionFromPoradcaApi: vi.fn(),
+  saveRequestToBacklogApi: vi.fn(),
 }));
 // Heavy read-only parts of the page — irrelevant to which box takes the text.
 vi.mock("@/components/riadiace/ConversationThread", () => ({ default: () => <div /> }));
@@ -76,8 +76,8 @@ const MESSAGE = {
   steps: [],
   status: "done",
   instruction: INSTRUCTION,
-  new_version_request: null,
-  captured_version_id: null,
+  backlog_request: null,
+  captured_backlog_number: null,
 };
 const SCOPE = {
   id: VERSION,
