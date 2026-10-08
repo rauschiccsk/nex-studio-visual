@@ -35,6 +35,13 @@ admin — ako všade v kokpite. „Autor rozhovoru" je prihlásený účet.
 - Nad poľom **o čom sa rozprávame**: projekt a verzia (predvolene vybraná verzia) s fázou a stavom;
   dá sa zmeniť, alebo zvoliť „celý projekt".
 - Rozhovor pokračuje, kde som skončil, aj na druhý deň.
+- **Rozpísaná otázka sa nestratí** (v4.43.4, DEV-24, Director 08.10.2026: „ak začnem písať do promptu pre
+  Poradcu a potom prekliknem na Centrum riadenia … keď sa vrátim môj napísaný prompt už tam nie je"). Pole si
+  otázku pamätá pre každý rozhovor zvlášť a pre nový rozhovor projektu, kým ju neodošlem (`useDraft`, ako pole
+  rozhovoru v Riadiacom centre). Návrat na Poradcu — aj cez bočnú ponuku, ktorá otvára holé `/poradca` —
+  otvorí rozhovor, v ktorom som bol (pamätá si ho prehliadač pre každý projekt; zmazaný rozhovor sa neotvorí).
+  Obnovená otázka je označená vetou „Obnovený rozpísaný text — pokračuj, alebo ho prepíš."; zmaže sa až po
+  úspešnom odoslaní.
 - **Kým pracuje, vidím čo robí**, riadok po riadku: „Čítam `backend/services/x.py`", „Pozerám 200 riadkov
   logu backendu v UAT", „Pýtam sa databázy UAT", „Rozoberám, čo agent stavby robil za poslednú hodinu".
   Tlačidlo **Zastaviť** otázku preruší.

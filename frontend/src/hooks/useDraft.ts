@@ -24,6 +24,9 @@ export function draftKey(surface: string, versionId?: string | null): string | n
   return versionId ? `nex.draft.${surface}.${versionId}` : null;
 }
 
+/** How a box says its text is his own earlier draft — one text for every box that restores one. */
+export const RESTORED_DRAFT_LABEL = "Obnovený rozpísaný text — pokračuj, alebo ho prepíš.";
+
 export interface Draft {
   text: string;
   setText: (value: string) => void;

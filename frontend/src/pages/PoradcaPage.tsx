@@ -16,6 +16,7 @@ import ErrorNote from "@/components/common/ErrorNote";
 import PoradcaAnswer from "@/components/poradca/PoradcaAnswer";
 import PoradcaConversationItem from "@/components/poradca/PoradcaConversationItem";
 import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
+import { RESTORED_DRAFT_LABEL, draftKey, useDraft } from "@/hooks/useDraft";
 import { usePoradcaConversation } from "@/hooks/usePoradcaConversation";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import { useAuthStore } from "@/store/authStore";
@@ -36,6 +37,27 @@ import type { PoradcaConversation, PoradcaProjectContext, PoradcaStatus } from "
 
 const WHOLE_PROJECT = "";
 
+// DEV-24: the sidebar opens bare /poradca. Coming back from another screen must land where the Manažér
+// left — the conversation he had open (or the new one he was starting) — not on an empty new conversation.
+const OPEN_PREFIX = "nex.poradca.open.";
+
+function rememberOpen(slug: string, conversationId: string | null): void {
+  try {
+    if (conversationId) window.localStorage.setItem(OPEN_PREFIX + slug, conversationId);
+    else window.localStorage.removeItem(OPEN_PREFIX + slug);
+  } catch {
+    /* storage unavailable — he lands on a new conversation, as before */
+  }
+}
+
+function recallOpen(slug: string): string | null {
+  try {
+    return window.localStorage.getItem(OPEN_PREFIX + slug);
+  } catch {
+    return null;
+  }
+}
+
 export default function PoradcaPage() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -49,6 +71,8 @@ export default function PoradcaPage() {
   const [conversations, setConversations] = useState<PoradcaConversation[]>([]);
   const [status, setStatus] = useState<PoradcaStatus | null>(null);
   const [loadError, setLoadError] = useState<HumanError | null>(null);
+  // The project whose conversation list has arrived — until then a remembered conversation cannot be checked.
+  const [listedSlug, setListedSlug] = useState<string | null>(null);
 
   const conversationId = params.get("c");
   const { detail, error: convError, setDetail, reload } = usePoradcaConversation(conversationId);
@@ -57,6 +81,7 @@ export default function PoradcaPage() {
     if (!slug) return;
     try {
       setConversations(await listPoradcaConversationsApi(slug));
+      setListedSlug(slug);
     } catch (e: unknown) {
       setLoadError(humanizeApiError(e, "Rozhovory sa nepodarilo načítať"));
     }
@@ -97,6 +122,24 @@ export default function PoradcaPage() {
         : list,
     );
   }, [detail, running]);
+
+  useEffect(() => {
+    if (slug && conversationId) rememberOpen(slug, conversationId);
+  }, [slug, conversationId]);
+
+  const asksForNew = params.has("verzia");
+  useEffect(() => {
+    if (!slug || conversationId || asksForNew || listedSlug !== slug) return;
+    const last = recallOpen(slug);
+    if (!last) return;
+    if (conversations.some((c) => c.id === last)) {
+      const next = new URLSearchParams(params);
+      next.set("c", last);
+      setParams(next, { replace: true });
+    } else {
+      rememberOpen(slug, null); // deleted meanwhile — nothing to come back to
+    }
+  }, [slug, conversationId, asksForNew, listedSlug, conversations, params, setParams]);
 
   // Predvolená verzia nového rozhovoru: z adresy, inak pripnutá verzia, inak celý projekt.
   const defaultScope = useMemo(() => {
@@ -143,6 +186,7 @@ export default function PoradcaPage() {
     const next = new URLSearchParams(params);
     if (id) next.set("c", id);
     else next.delete("c");
+    if (slug) rememberOpen(slug, id);
     setParams(next);
   }
 
@@ -274,6 +318,7 @@ export default function PoradcaPage() {
         </div>
 
         <PoradcaComposer
+          draftKey={draftKey(`poradca.${conversationId ?? "new"}`, selectedProject.slug)}
           disabledReason={
             notReady
               ? `Poradca teraz nevie bežať: ${notReady}`
@@ -298,13 +343,16 @@ export default function PoradcaPage() {
 }
 
 function PoradcaComposer({
+  draftKey: key,
   onAsk,
   disabledReason,
 }: {
+  /** Where the half-written question lives — one per conversation, one for the new conversation (DEV-24). */
+  draftKey: string | null;
   onAsk: (question: string) => Promise<void>;
   disabledReason: string | null;
 }) {
-  const [text, setText] = useState("");
+  const { text, setText, clear, restored } = useDraft(key);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<HumanError | null>(null);
   const growRef = useAutoGrowTextarea(text);
@@ -317,7 +365,7 @@ function PoradcaComposer({
     setError(null);
     try {
       await onAsk(question);
-      setText("");
+      clear(); // only once it went out — a failed question stays in the box
     } catch (e: unknown) {
       setError(humanizeApiError(e, "Otázku sa nepodarilo poslať"));
     } finally {
@@ -341,6 +389,7 @@ function PoradcaComposer({
       className="flex-shrink-0 border-t border-[var(--color-border-default)] bg-[var(--color-surface)] p-3"
     >
       {disabledReason && <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">{disabledReason}</p>}
+      {restored && <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">{RESTORED_DRAFT_LABEL}</p>}
       <ErrorNote error={error} />
       <div className="flex items-end gap-2">
         <textarea

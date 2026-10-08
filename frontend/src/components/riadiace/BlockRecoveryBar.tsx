@@ -19,7 +19,7 @@ import { useState } from "react";
 import { CircleAlert, MessageCircle, RotateCw } from "lucide-react";
 
 import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
-import { useDraft, draftKey } from "@/hooks/useDraft";
+import { RESTORED_DRAFT_LABEL, useDraft, draftKey } from "@/hooks/useDraft";
 import { usePoradcaHandoff } from "@/hooks/usePoradcaHandoff";
 import { FROM_PORADCA_LABEL } from "@/lib/poradcaHandoff";
 
@@ -147,7 +147,7 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
           // ICCINT-30: text that appears by itself must be recognisable as HIS earlier draft — not as
           // something someone else wrote into his box while he was away.
           <p className="text-[11px] text-[var(--color-text-muted)]">
-            Obnovený rozpísaný text — pokračuj, alebo ho prepíš.
+            {RESTORED_DRAFT_LABEL}
           </p>
         )}
         {fromPoradca && (

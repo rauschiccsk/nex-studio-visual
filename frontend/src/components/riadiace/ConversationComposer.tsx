@@ -12,7 +12,7 @@ import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Loader2, Send } from "lucide-react";
 
 import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
-import { useDraft, draftKey } from "@/hooks/useDraft";
+import { RESTORED_DRAFT_LABEL, useDraft, draftKey } from "@/hooks/useDraft";
 import { usePoradcaHandoff } from "@/hooks/usePoradcaHandoff";
 import { FROM_PORADCA_LABEL, draftCameFromPoradca, handOffInstruction } from "@/lib/poradcaHandoff";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
@@ -162,7 +162,7 @@ export function ConversationComposer({
           // ICCINT-30: text that appears by itself must be recognisable as HIS earlier draft — not as
           // something someone else wrote into his box while he was away.
           <p className="text-[11px] text-[var(--color-text-muted)]">
-            Obnovený rozpísaný text — pokračuj, alebo ho prepíš.
+            {RESTORED_DRAFT_LABEL}
           </p>
         )}
         {fromPoradca && (
