@@ -13,7 +13,7 @@ import ErrorNote from "@/components/common/ErrorNote";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import { newVersionFromPoradcaApi, stopPoradcaApi } from "@/services/api/poradca";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
-import { insertInstructionDraft } from "@/lib/poradcaHandoff";
+import { handOffInstruction } from "@/lib/poradcaHandoff";
 import { answerForDisplay, formatCost, formatDuration, stepLabel } from "@/lib/poradcaAnswer";
 import { modelDisplayName } from "@/utils/modelLabel";
 import type { PoradcaMessage, PoradcaVersionInfo } from "@/types/poradca";
@@ -46,7 +46,7 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
   function insert() {
     if (!scopeVersion || !message.instruction) return;
     try {
-      insertInstructionDraft(scopeVersion.id, message.instruction);
+      handOffInstruction(scopeVersion.id, message.instruction);
     } catch (e: unknown) {
       setError({ message: e instanceof Error ? e.message : "Vloženie zlyhalo" });
       return;

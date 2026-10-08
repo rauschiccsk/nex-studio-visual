@@ -20,6 +20,8 @@ import { CircleAlert, MessageCircle, RotateCw } from "lucide-react";
 
 import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { useDraft, draftKey } from "@/hooks/useDraft";
+import { usePoradcaHandoff } from "@/hooks/usePoradcaHandoff";
+import { FROM_PORADCA_LABEL } from "@/lib/poradcaHandoff";
 
 import {
   postPipelineActionApi,
@@ -56,6 +58,16 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
   // Called BEFORE the honest-by-construction early return below — a hook after a conditional return
   // is a hook that sometimes does not run, which React forbids.
   const growRef = useAutoGrowTextarea(text);
+  // DEV-22: while this bar takes the Manažér's text (a question / error / check), it also takes an instruction
+  // handed off from Poradca — the conversation box below is collapsed and nobody would see it there.
+  const { fromPoradca, dismiss: dismissPoradca } = usePoradcaHandoff({
+    surface: "odpoved",
+    versionId,
+    live: !!board?.state && blockRecoveryOwnsInput(board.state) && !!versionId,
+    text,
+    setText,
+    restored,
+  });
 
   const state = board?.state ?? null;
   const reason = state?.block_reason ?? null;
@@ -91,6 +103,7 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
       const nextBoard = await postPipelineActionApi(versionId, req);
       onBoard(nextBoard);
       clearDraft();
+      dismissPoradca();
     } catch (err: unknown) {
       setError(humanizeApiError(err, "Akcia zlyhala"));
     } finally {
@@ -130,12 +143,15 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
           <p className="text-xs text-[var(--color-text-muted)]">{guidance}</p>
         )}
 
-        {restored && (
+        {restored && !fromPoradca && (
           // ICCINT-30: text that appears by itself must be recognisable as HIS earlier draft — not as
           // something someone else wrote into his box while he was away.
           <p className="text-[11px] text-[var(--color-text-muted)]">
             Obnovený rozpísaný text — pokračuj, alebo ho prepíš.
           </p>
+        )}
+        {fromPoradca && (
+          <p className="text-[11px] font-medium text-[var(--color-accent-primary)]">{FROM_PORADCA_LABEL}</p>
         )}
         <div className="flex items-center gap-2">
           <textarea
@@ -144,7 +160,10 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
             ref={growRef}
             rows={1}
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              dismissPoradca();
+              setText(e.target.value);
+            }}
             placeholder={
               isQuestion
                 ? "Tvoja odpoveď… (Enter odošle, Shift+Enter nový riadok)"

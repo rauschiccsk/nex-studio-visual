@@ -157,7 +157,10 @@ describe("PoradcaPage", () => {
     await waitFor(() => expect(api.stopPoradcaApi).toHaveBeenCalledWith("m2"));
   });
 
-  it("puts the instruction into the Riadiace centrum draft — never sends it", async () => {
+  // DEV-22: the instruction is handed off as PENDING — which box of Riadiace centrum takes it is decided there
+  // (test_PoradcaHandoff_RiadiaceCentrum walks that path through the real page). Here: handed off, not sent,
+  // and the Manažér's own draft is left alone.
+  it("hands the instruction off to Riadiace centrum — never sends it", async () => {
     window.localStorage.setItem("nex.draft.rozhovor.v13", "moja rozpísaná veta");
     api.getPoradcaConversationApi.mockResolvedValue(conversation("v13", [ANSWER_WITH_INSTRUCTION]));
     renderPage();
@@ -165,8 +168,8 @@ describe("PoradcaPage", () => {
     expect(screen.getByText(/0,42\s€ · Opus 5\.5/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Vložiť do Riadiaceho centra/ }));
     expect(await screen.findByText("RIADIACE CENTRUM")).toBeInTheDocument();
-    expect(window.localStorage.getItem("nex.draft.rozhovor.v13")).toBe("moja rozpísaná veta\n\nOprav test_login.");
-    expect(window.localStorage.getItem("nex.draft.rozhovor.v13.origin")).toBe("poradca");
+    expect(window.localStorage.getItem("nex.poradca.pending.v13")).toBe("Oprav test_login.");
+    expect(window.localStorage.getItem("nex.draft.rozhovor.v13")).toBe("moja rozpísaná veta");
     expect(ctx.state.setSelectedVersion).toHaveBeenCalledWith({ versionId: "v13", versionNumber: "1.3.0" });
   });
 

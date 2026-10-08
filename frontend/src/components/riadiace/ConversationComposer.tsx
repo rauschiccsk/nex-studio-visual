@@ -8,12 +8,13 @@
 // is in flight the relay returns `deferred: true` (the message is enqueued behind the in-flight turn and lands
 // at the next turn boundary) — we surface the design-mandated busy hint.
 
-import { useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Loader2, Send } from "lucide-react";
 
 import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { useDraft, draftKey } from "@/hooks/useDraft";
-import { draftCameFromPoradca, forgetPoradcaOrigin } from "@/lib/poradcaHandoff";
+import { usePoradcaHandoff } from "@/hooks/usePoradcaHandoff";
+import { FROM_PORADCA_LABEL, draftCameFromPoradca, handOffInstruction } from "@/lib/poradcaHandoff";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 
 const ENGINE_BUSY_HINT = "AI Agent práve pracuje — správa sa pošle, keď dokončí.";
@@ -42,13 +43,22 @@ interface Props {
   atVizual?: boolean;
   /** ICCINT-30: scopes the saved draft to THIS build, so two half-written messages never mix. */
   versionId?: string | null;
+  /** DEV-22: the build state is known (the board has loaded). Until then nobody can tell whether this box or
+   *  the recovery bar above takes the Manažér's text, so a pending Poradca instruction must wait. */
+  inputReady?: boolean;
 }
 
-export function ConversationComposer({ onRelay, disabled, frameworkBlocked, blockedAbove, atVizual, versionId }: Props) {
+export function ConversationComposer({
+  onRelay,
+  disabled,
+  frameworkBlocked,
+  blockedAbove,
+  atVizual,
+  versionId,
+  inputReady = true,
+}: Props) {
   // ICCINT-30: the box the Director lost a message from. Persisted per build, cleared on a real send.
   const { text, setText, clear: clearDraft, restored } = useDraft(draftKey("rozhovor", versionId));
-  // ICCINT-167: pokyn vložený z Poradcu — pole musí povedať, odkiaľ sa text vzal, a že ho treba odoslať.
-  const fromPoradca = restored && draftCameFromPoradca(versionId);
   const [sending, setSending] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
   const [error, setError] = useState<HumanError | null>(null);
@@ -60,6 +70,26 @@ export function ConversationComposer({ onRelay, disabled, frameworkBlocked, bloc
   // Category I: a recovery bar above owns the input — COLLAPSE the composer to a pointer (framework_issue keeps
   // its own locked banner below, so it is excluded here).
   const collapsed = !!blockedAbove && !frameworkBlocked;
+  // ICCINT-167 / DEV-22: an instruction from Poradca lands here only while THIS box takes the text.
+  const { fromPoradca, dismiss: dismissPoradca } = usePoradcaHandoff({
+    surface: "rozhovor",
+    versionId,
+    live: inputReady && !collapsed && !locked && !!versionId,
+    text,
+    setText,
+    restored,
+  });
+
+  // DEV-22: Poradca's instruction parked here (handed off while the agent was working, before the build
+  // blocked on a question) must not hide in a collapsed box — hand it on to the bar that took the input.
+  useEffect(() => {
+    if (!inputReady || !collapsed || !versionId || !text.trim()) return;
+    if (!draftCameFromPoradca(versionId, "rozhovor")) return;
+    handOffInstruction(versionId, text);
+    clearDraft();
+    dismissPoradca();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when the box collapses, not on every keystroke
+  }, [inputReady, collapsed, versionId]);
 
   async function submit() {
     const trimmed = text.trim();
@@ -70,7 +100,7 @@ export function ConversationComposer({ onRelay, disabled, frameworkBlocked, bloc
     try {
       const { deferred } = await onRelay(trimmed);
       clearDraft();
-      forgetPoradcaOrigin(versionId);
+      dismissPoradca();
       // `deferred` ⇒ a turn was in flight; the message is queued and lands at the next boundary.
       setHint(deferred ? ENGINE_BUSY_HINT : null);
     } catch (e: unknown) {
@@ -137,7 +167,7 @@ export function ConversationComposer({ onRelay, disabled, frameworkBlocked, bloc
         )}
         {fromPoradca && (
           <p className="text-[11px] font-medium text-[var(--color-accent-primary)]">
-            Pokyn od Poradcu — prečítaj ho, uprav podľa potreby a odošli sám.
+            {FROM_PORADCA_LABEL}
           </p>
         )}
         <textarea
@@ -146,7 +176,7 @@ export function ConversationComposer({ onRelay, disabled, frameworkBlocked, bloc
           ref={growRef}
           value={text}
           onChange={(e) => {
-            forgetPoradcaOrigin(versionId);
+            dismissPoradca();
             setText(e.target.value);
           }}
           onKeyDown={onKeyDown}

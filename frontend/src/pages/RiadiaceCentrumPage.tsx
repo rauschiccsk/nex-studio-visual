@@ -297,6 +297,7 @@ export default function RiadiaceCentrumPage() {
             disabled={!versionId}
             frameworkBlocked={frameworkBlocked}
             blockedAbove={blockRecoveryActive}
+            inputReady={!!board}
             atVizual={board?.state?.current_stage === "vizual"}
           />
         )}

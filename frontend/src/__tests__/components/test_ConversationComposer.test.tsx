@@ -68,10 +68,11 @@ describe("ConversationComposer — framework_issue lock (Director obs #6)", () =
 // vlastný starší koncept, a keď ho človek upraví, je jeho.
 describe("ConversationComposer — pokyn od Poradcu (ICCINT-167)", () => {
   it("labels an inserted instruction as Poradca's and drops the label once he edits it", async () => {
-    const { insertInstructionDraft } = await import("@/lib/poradcaHandoff");
+    // DEV-22: the instruction is handed off as pending; a live conversation box takes it when it mounts.
+    const { handOffInstruction } = await import("@/lib/poradcaHandoff");
     const { fireEvent } = await import("@testing-library/react");
     window.localStorage.clear();
-    insertInstructionDraft("v9", "Oprav test_login.");
+    handOffInstruction("v9", "Oprav test_login.");
     render(<ConversationComposer onRelay={noopRelay} versionId="v9" />);
     expect(screen.getByRole("textbox")).toHaveValue("Oprav test_login.");
     expect(screen.getByText(/Pokyn od Poradcu/)).toBeInTheDocument();

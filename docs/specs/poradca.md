@@ -69,8 +69,12 @@ admin — ako všade v kokpite. „Autor rozhovoru" je prihlásený účet.
 
 ### Keď treba niečo zmeniť
 Poradca poradí, **ktorým tlačidlom** to urobiť, a podľa situácie ponúkne:
-- **„Vložiť do Riadiaceho centra"** (počas stavby) — text pokynu sa vloží do poľa; odošle ho človek sám.
-  Keď je pole zatvorené (napr. stavba čaká na opravu kokpitu), tlačidlo je zašednuté s dôvodom.
+- **„Vložiť do Riadiaceho centra"** (počas stavby) — pokyn sa vloží do poľa, ktoré práve prijíma text: keď
+  agent čaká na odpoveď (otázka, chyba, kontrola), do poľa v lište nad rozhovorom („Tvoja odpoveď…“), inak do
+  poľa rozhovoru. Ktoré pole to je, rozhodne Riadiace centrum až podľa známeho stavu stavby; pokyn, ktorý
+  ostal v zbalenom poli rozhovoru, sa presunie do lišty. Vždy s označením „Pokyn od Poradcu“ a odošle ho
+  človek sám (DEV-22). Keď je pole zatvorené (napr. stavba čaká na opravu kokpitu), tlačidlo je zašednuté
+  s dôvodom.
 - **„Založiť novú verziu z tejto požiadavky"** (pri hotovej verzii) — tá istá cesta k novej verzii, ktorú kokpit má.
 
 ### Počas stavby
