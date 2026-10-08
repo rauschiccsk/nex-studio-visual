@@ -114,6 +114,9 @@ def _int_arg(args: dict, key: str, default: int, maximum: int) -> int:
 def _cards_lines(db: Session, version_id: UUID) -> list[str]:
     """DEV-28: the Decision Cards as the Manažér sees them, so Poradca names an option word for word.
 
+    DEV-30: everything the card shows — the option descriptions, the technical detail and the rationale too.
+    They carry the fix the agent already planned; Poradca adds to it only what is missing.
+
     The cards live in the consultation message beside its text (``payload.consultation``) and the decisions in
     the Manažér's answers (``payload.consultation_decision``); the text alone named none of the options — on
     NEX Inbox 1.7.0 the consultation's 332 characters carried 0 of its 20 option labels, and Poradca could only
@@ -146,10 +149,17 @@ def _cards_lines(db: Session, version_id: UUID) -> list[str]:
             out.append(f"  Vysvetlenie: {d['explanation']}")
         if d.get("origin") == "dosledok" and d.get("origin_of"):
             out.append(f"  Vyplýva z rozhodnutia o: {d['origin_of']}")
+        # DEV-30: the plan the agent already wrote — without it Poradca rewrote the plan in every instruction.
+        if d.get("technical_detail"):
+            out.append(f"  Technický detail: {d['technical_detail']}")
         for option in d.get("options") or []:
             out.append(
-                f"  možnosť „{option.get('label', '')}“" + (" (odporúčané)" if option.get("recommended") else "")
+                f"  možnosť „{option.get('label', '')}“"
+                + (" (odporúčané)" if option.get("recommended") else "")
+                + (f" — {option['detail']}" if option.get("detail") else "")
             )
+        if d.get("rationale"):
+            out.append(f"  Zdôvodnenie odporúčania: {d['rationale']}")
         if d.get("allow_free_text"):
             out.append("  dá sa napísať aj vlastná odpoveď (Iná odpoveď)")
         if answer:

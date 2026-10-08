@@ -232,8 +232,15 @@ _CARDS = {
             "explanation": "Dnes by svietilo ešte 24 hodín.",
             "origin": "dosledok",
             "origin_of": "R2",
+            "technical_detail": "compute_active_alerts: NIB-071 len pri outage_since; BEHAVIOR §4.3 + skúška.",
+            "rationale": "Presne napĺňa R2.",
             "options": [
-                {"id": "hned", "label": "Zhasnúť hneď, keď sa doručovanie obnoví", "recommended": True},
+                {
+                    "id": "hned",
+                    "label": "Zhasnúť hneď, keď sa doručovanie obnoví",
+                    "detail": "Kliknutie otvorí zoznam faktúr čakajúcich na doručenie.",
+                    "recommended": True,
+                },
                 {"id": "24h", "label": "Nechať 24 hodín"},
             ],
         },
@@ -328,3 +335,23 @@ def test_the_charter_points_poradca_at_the_cards_the_tool_returns():
     charter = (Path(__file__).resolve().parents[1] / "templates" / "poradca-charter.md").read_text(encoding="utf-8")
     assert "(nástroj `stavba` vráti „Karty rozhodnutí“)" in charter
     assert "doslova" in charter
+
+
+async def test_stavba_shows_the_agents_own_plan_on_every_card(world):
+    """DEV-30: the card's option descriptions, technical detail and rationale — what the Manažér sees, and the
+    plan the agent already wrote. Without them Poradca rewrote the whole plan in every instruction."""
+    _consultation_world(world, decided=True)
+    out = await world["tools"].stavba({})
+    card = out[out.index("Karta 2 [NA RADE]") : out.index("Karta 3 [")]
+    assert "Technický detail: compute_active_alerts: NIB-071 len pri outage_since; BEHAVIOR §4.3 + skúška." in card
+    assert "Zdôvodnenie odporúčania: Presne napĺňa R2." in card
+    assert (
+        "možnosť „Zhasnúť hneď, keď sa doručovanie obnoví“ (odporúčané) — "
+        "Kliknutie otvorí zoznam faktúr čakajúcich na doručenie." in card
+    )
+
+
+def test_the_charter_asks_for_an_instruction_only_when_the_card_misses_something():
+    charter = (Path(__file__).resolve().parents[1] / "templates" / "poradca-charter.md").read_text(encoding="utf-8")
+    assert "Pokyn pre agenta napíš **len vtedy**" in charter
+    assert "„Pokyn netreba — agent má v karte presný plán.“" in charter

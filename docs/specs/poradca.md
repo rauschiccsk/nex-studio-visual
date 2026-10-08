@@ -68,6 +68,12 @@ admin — ako všade v kokpite. „Autor rozhovoru" je prihlásený účet.
      možnosť a pokyn pre AI partnera. Číta ich tými istými funkciami, z ktorých kokpit karty skladá
      (`_latest_consultation`, `_consultation_answers`). Charta Poradcu mu káže radiť kartu a možnosť doslova
      a pokyn pre agenta písať ku karte, ktorá je na rade (vloží sa do jej poľa „Pokyn pre AI partnera“, DEV-26).
+   - **Pokyn len keď plánu niečo chýba** (v4.43.8, DEV-30, Director 08.10.2026: „treba spraviť aby Poradca dával
+     to upresnenie len vtedy ak je to skutočne potrebné“): nástroj dá z karty aj popis každej možnosti, technický
+     detail a zdôvodnenie — plán, ktorý agent už napísal. Charta: pokyn len keď plánu chýba niečo konkrétne
+     (riziko, existujúca inštalácia, nepokrytý prípad, rozpor so Špecifikáciou) a v ňom len to, čo chýba; inak
+     „Pokyn netreba — agent má v karte presný plán.“ Na 1.7.0 (kolo 2) malo pokyn 10 z 10 odpovedí a z 7
+     odoslaných pokynov dva nepridali nič a ostatné jednu-dve vety k zopakovanému plánu.
 3. **Čo robil agent stavby** — rozobrané na kroky: ktoré súbory čítal, aké príkazy spustil, kde zlyhal.
 4. **Kontajnery a logy** tohto projektu: živý náhľad z Vizuálu, dočasná databáza stavby, inštalácie UAT
    (tie isté, ktoré človek vidí na obrazovke UAT).
