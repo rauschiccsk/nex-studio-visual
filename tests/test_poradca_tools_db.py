@@ -355,3 +355,9 @@ def test_the_charter_asks_for_an_instruction_only_when_the_card_misses_something
     charter = (Path(__file__).resolve().parents[1] / "templates" / "poradca-charter.md").read_text(encoding="utf-8")
     assert "Pokyn pre agenta napíš **len vtedy**" in charter
     assert "„Pokyn netreba — agent má v karte presný plán.“" in charter
+
+
+def test_the_charter_asks_poradca_to_read_the_cards_again_before_advising():
+    """DEV-30: in the morning conversation Poradca advised on card 10 from memory, without calling `stavba`."""
+    charter = (Path(__file__).resolve().parents[1] / "templates" / "poradca-charter.md").read_text(encoding="utf-8")
+    assert "Pred každou radou ku karte znova zavolaj `stavba`" in charter

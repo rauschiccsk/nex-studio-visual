@@ -74,6 +74,12 @@ admin — ako všade v kokpite. „Autor rozhovoru" je prihlásený účet.
      (riziko, existujúca inštalácia, nepokrytý prípad, rozpor so Špecifikáciou) a v ňom len to, čo chýba; inak
      „Pokyn netreba — agent má v karte presný plán.“ Na 1.7.0 (kolo 2) malo pokyn 10 z 10 odpovedí a z 7
      odoslaných pokynov dva nepridali nič a ostatné jednu-dve vety k zopakovanému plánu.
+   - **Zmenená charta sa dostane aj do bežiaceho rozhovoru** (v4.43.9, DEV-30): Claude Code berie chartu
+     (`--append-system-prompt`) len pri prvej otázke a pri `--resume` novú ignoruje (zmerané 08.10.2026). Rozhovor
+     si pamätá odtlačok charty (`poradca_conversations.charter_sha`, migrácia 107); keď sa charta zmení, runner ju
+     pridá na začiatok textu najbližšej otázky — raz — a odtlačok prepíše až po zodpovedanej otázke. Rozhovory
+     spred v4.43.9 ju dostanú pri najbližšej otázke. Charta tiež káže pred každou radou ku karte znova zavolať
+     `stavba` (Poradca radil ku karte 10 z pamäte rozhovoru).
 3. **Čo robil agent stavby** — rozobrané na kroky: ktoré súbory čítal, aké príkazy spustil, kde zlyhal.
 4. **Kontajnery a logy** tohto projektu: živý náhľad z Vizuálu, dočasná databáza stavby, inštalácie UAT
    (tie isté, ktoré človek vidí na obrazovke UAT).

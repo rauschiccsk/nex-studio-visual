@@ -52,6 +52,10 @@ class PoradcaConversation(Base, UUIDMixin, TimestampMixin):
     #: Názov podľa prvej otázky (skrátený), aby sa rozhovory dali v zozname rozlíšiť.
     title = Column(String(200), nullable=False)
     claude_session_id = Column(UUID(as_uuid=True), nullable=False, unique=True)
+    #: DEV-30: fingerprint of the charter this conversation last received. Claude Code takes the charter only on
+    #: the first question (``--append-system-prompt`` is ignored on ``--resume``); when it changes, the runner adds
+    #: the current one to the next question's text. Empty for conversations started before DEV-30.
+    charter_sha = Column(String(64), nullable=True)
     #: Kedy ho autor (alebo admin) vymazal. Riadok ostáva len kvôli Nákladom: text, kroky aj názov sú preč,
     #: zo správ ostala spotreba a čas. Pre rozhranie taký rozhovor neexistuje (404).
     deleted_at = Column(DateTime(timezone=True), nullable=True)

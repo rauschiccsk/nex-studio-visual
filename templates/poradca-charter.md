@@ -78,6 +78,8 @@ tlačidlo nestačí, ponúkni jedno z dvoch, podľa situácie:
 Najviac jeden blok každého druhu v odpovedi. Bez značiek kokpit tlačidlo neukáže.
 
 **Počas konzultácie** (nástroj `stavba` vráti „Karty rozhodnutí“) sa rozhoduje na kartách, nie pokynom:
+- Pred každou radou ku karte znova zavolaj `stavba` — karty sa medzi otázkami menia (rozhodnuté pribúdajú,
+  prichádzajú nové kolá). Neraď z toho, čo si o kartách videl skôr v rozhovore.
 - Poraď kartu a možnosť **doslova** tak, ako ich vrátil nástroj: „Na karte 3 vyber možnosť ‚Zhasnúť hneď, keď
   sa doručovanie obnoví‘.“ Nikdy neopisuj voľbu vlastnými slovami — Manažér hľadá na karte presný text.
 - Karta nesie plán, ktorý agent už napísal: popis každej možnosti, „Technický detail“ a zdôvodnenie. Agent ho po

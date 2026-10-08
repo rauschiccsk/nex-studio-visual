@@ -17,6 +17,7 @@ visieť v ``running``: pri štarte backendu :func:`fail_orphans` uzavrie tie, kt
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -266,6 +267,10 @@ def _charter_text() -> str:
     return _CHARTER.read_text(encoding="utf-8")
 
 
+def _charter_sha(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def _model_and_effort(db: Session, user_id: UUID) -> tuple[str, str]:
     row = db.execute(
         select(UserAgentSettings.model, UserAgentSettings.effort).where(
@@ -289,8 +294,16 @@ def scope_line(db: Session, project: Project, version_id: Optional[UUID]) -> str
     return f"Projekt {project.name} ({project.slug}), verzia {version.version_number}{stage}."
 
 
-def _prompt(scope: str, asker: str, question: str) -> str:
-    return f"[Kontext z kokpitu]\n{scope}\nPýta sa: {asker}.\n\n{question}"
+#: DEV-30: how a changed charter is handed to a conversation that started under an older one.
+_CHARTER_REFRESH = (
+    "[Pravidlá Poradcu sa od začiatku tohto rozhovoru zmenili. Odteraz platia tieto aktuálne pravidlá — "
+    "nahrádzajú tie zo začiatku rozhovoru:]\n{charter}\n[Koniec aktuálnych pravidiel]\n\n"
+)
+
+
+def _prompt(scope: str, asker: str, question: str, charter_refresh: Optional[str] = None) -> str:
+    refresh = _CHARTER_REFRESH.format(charter=charter_refresh) if charter_refresh else ""
+    return f"{refresh}[Kontext z kokpitu]\n{scope}\nPýta sa: {asker}.\n\n{question}"
 
 
 def _builtin_target(name: str, args: dict, project_dir: str) -> str:
@@ -324,6 +337,9 @@ async def _run(message_id: UUID, conversation_id: UUID, question: str, user_id: 
     acquired = False
     transcript, before, launched_at = None, None, None
     secret_filter = SecretFilter()
+    charter = _charter_text()
+    charter_sha = _charter_sha(charter)
+    charter_refresh = False
     try:
         with SessionLocal() as db:
             conversation = db.get(PoradcaConversation, conversation_id)
@@ -336,6 +352,8 @@ async def _run(message_id: UUID, conversation_id: UUID, question: str, user_id: 
             entry.secret_filter = secret_filter
             asker = " ".join(p for p in (user.first_name, user.last_name) if p) or user.username
             slug, session_id = project.slug, conversation.claude_session_id
+            # DEV-30: Claude Code ignores a new charter on --resume — a changed one goes into the question itself.
+            charter_refresh = not first and conversation.charter_sha != charter_sha
             from backend.services.poradca.tools import build_tools
 
             tools = build_tools(project_id=project.id, version_id=conversation.version_id, user_id=user_id)
@@ -375,9 +393,9 @@ async def _run(message_id: UUID, conversation_id: UUID, question: str, user_id: 
                 token=token,
                 network=network,
                 call=sandbox.ClaudeCall(
-                    prompt=_prompt(scope, asker, question),
+                    prompt=_prompt(scope, asker, question, charter if charter_refresh else None),
                     claude_session_id=session_id,
-                    charter_text=_charter_text() if first else None,
+                    charter_text=charter if first else None,
                     model=model,
                     effort=effort,
                 ),
@@ -434,6 +452,13 @@ async def _run(message_id: UUID, conversation_id: UUID, question: str, user_id: 
                     finished_at=datetime.now(timezone.utc),
                 )
             )
+            if status == DONE and (first or charter_refresh):
+                # The conversation now carries this charter — only an answered question proves it arrived.
+                db.execute(
+                    update(PoradcaConversation)
+                    .where(PoradcaConversation.id == conversation_id)
+                    .values(charter_sha=charter_sha)
+                )
             db.commit()
         _running.pop(message_id, None)
         hub.publish(conversation_id, {"type": "finished", "message_id": str(message_id), "status": status})

@@ -412,3 +412,54 @@ async def test_delete_tells_open_tabs(world):
         assert queue.get_nowait() == {"type": "deleted"}
     finally:
         runner.hub.unsubscribe(world["conversation"].id, queue)
+
+
+# ── DEV-30: a conversation started under an older charter gets the current one ────────────────────────────────
+#
+# Claude Code takes the charter (--append-system-prompt) only on a conversation's first question; on --resume it
+# ignores a new one (measured 08.10.2026: a rule appended on resume — "start every answer with GAMA" — was not
+# followed). The Director asked in a conversation from the morning, so the new rule never reached it.
+
+
+def _capture_calls(monkeypatch) -> list:
+    calls: list = []
+    patched = sandbox.run_argv
+
+    def _capture(**kw):
+        calls.append(kw["call"])
+        return patched(**kw)
+
+    monkeypatch.setattr(sandbox, "run_argv", _capture)
+    return calls
+
+
+async def _ask(world, question: str) -> None:
+    _, answer = runner.ask(world["db"], world["conversation"], question, world["user"])
+    await _finish(answer.id)
+    world["db"].expire_all()
+    assert world["db"].get(PoradcaMessage, answer.id).status == "done"
+
+
+async def test_a_changed_charter_reaches_a_running_conversation_once(world, monkeypatch):
+    calls = _capture_calls(monkeypatch)
+    await _ask(world, "Prvá otázka")
+    assert calls[0].charter_text == "charta"  # the first question starts the session with the charter
+    await _ask(world, "Druhá otázka")
+    assert calls[1].charter_text is None and "charta" not in calls[1].prompt  # unchanged → nothing repeated
+
+    monkeypatch.setattr(runner, "_charter_text", lambda: "charta v2 — pokyn len keď niečo chýba")
+    await _ask(world, "Tretia otázka")
+    assert calls[2].charter_text is None  # on --resume an appended charter would be ignored
+    assert "charta v2 — pokyn len keď niečo chýba" in calls[2].prompt
+    assert calls[2].prompt.index("charta v2") < calls[2].prompt.index("Tretia otázka")
+    await _ask(world, "Štvrtá otázka")
+    assert "charta v2" not in calls[3].prompt  # once, not with every question
+
+
+async def test_a_conversation_from_before_the_change_gets_the_charter_at_its_next_question(world, monkeypatch):
+    calls = _capture_calls(monkeypatch)
+    await _ask(world, "Prvá otázka")
+    world["conversation"].charter_sha = None  # as every conversation started before DEV-30
+    world["db"].commit()
+    await _ask(world, "Druhá otázka")
+    assert "charta" in calls[1].prompt
