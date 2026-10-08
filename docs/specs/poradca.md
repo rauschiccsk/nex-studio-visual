@@ -62,6 +62,12 @@ admin — ako všade v kokpite. „Autor rozhovoru" je prihlásený účet.
 1. **Kód a dokumenty projektu** a históriu zmien (kto, kedy, čo).
 2. **Stavbu** — fázu, stav, dôvod zastavenia, rozhovor Manažéra s agentom, plán úloh; a **tlačidlá, ktoré
    Manažér na obrazovke práve vidí** (z tých istých dát, z ktorých kreslí obrazovka).
+   - **Karty rozhodnutí počas konzultácie** (v4.43.6, DEV-28, Director 08.10.2026: „Poradca nevidí do karty …
+     popisuje len všeobecne“): nástroj `stavba` pridá karty tak, ako ich vidí Manažér — kolo, ktorá karta je na
+     rade, pri každej otázka, vysvetlenie a možnosti doslova (s označením odporúčanej), pri rozhodnutých zvolenú
+     možnosť a pokyn pre AI partnera. Číta ich tými istými funkciami, z ktorých kokpit karty skladá
+     (`_latest_consultation`, `_consultation_answers`). Charta Poradcu mu káže radiť kartu a možnosť doslova
+     a pokyn pre agenta písať ku karte, ktorá je na rade (vloží sa do jej poľa „Pokyn pre AI partnera“, DEV-26).
 3. **Čo robil agent stavby** — rozobrané na kroky: ktoré súbory čítal, aké príkazy spustil, kde zlyhal.
 4. **Kontajnery a logy** tohto projektu: živý náhľad z Vizuálu, dočasná databáza stavby, inštalácie UAT
    (tie isté, ktoré človek vidí na obrazovke UAT).

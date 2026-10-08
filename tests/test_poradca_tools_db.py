@@ -208,3 +208,123 @@ def test_known_secret_values_come_from_env_uat_and_the_vault(world, tmp_path, mo
     # Nie-tajné hodnoty sa neskrývajú — inak by odpoveď prestala dávať zmysel.
     for plain in ("demo-aplikacia", "server.example", "jano"):
         assert plain not in values, plain
+
+
+# ── DEV-28: Poradca sees the Decision Cards the Manažér sees ─────────────────────────────────────────────────
+
+_CARDS = {
+    "id": "navrh-2",
+    "source": "auditor_upfront",
+    "round": 2,
+    "round_max": 5,
+    "decisions": [
+        {
+            "key": "velke-faktury",
+            "question": "Čo s veľkou faktúrou, ktorá sa nezmestí do limitu?",
+            "options": [
+                {"id": "kusky", "label": "Posielať po menších potvrdených kúskoch", "recommended": True},
+                {"id": "limit", "label": "Dlhší limit pre veľké súbory"},
+            ],
+        },
+        {
+            "key": "upozornenie-prehlad",
+            "question": "Kedy zhasne upozornenie na Prehľade po výpadku?",
+            "explanation": "Dnes by svietilo ešte 24 hodín.",
+            "origin": "dosledok",
+            "origin_of": "R2",
+            "options": [
+                {"id": "hned", "label": "Zhasnúť hneď, keď sa doručovanie obnoví", "recommended": True},
+                {"id": "24h", "label": "Nechať 24 hodín"},
+            ],
+        },
+        {
+            "key": "drobnosti",
+            "question": "Čo s drobnými nepresnosťami Návrhu?",
+            "options": [{"id": "opravit", "label": "Opraviť všetky naraz", "recommended": True}],
+        },
+    ],
+}
+
+
+def _consultation_world(world, *, decided: bool) -> None:
+    db, version = world["db"], world["version"]
+    db.add(
+        PipelineState(
+            version_id=version.id,
+            flow_type="new_version",
+            current_stage="navrh",
+            current_actor="ai_agent",
+            status="blocked",
+            block_reason="decision_needed",
+            next_action="Manažér: rozhodni 2/3 (konzultácia).",
+        )
+    )
+    db.add(
+        PipelineMessage(
+            version_id=version.id,
+            stage="navrh",
+            author="ai_agent",
+            recipient="manazer",
+            kind="consultation",
+            content="Previerka našla tri body.",
+            payload={"consultation": _CARDS},
+        )
+    )
+    db.flush()
+    if decided:
+        db.add(
+            PipelineMessage(
+                version_id=version.id,
+                stage="navrh",
+                author="manazer",
+                recipient="ai_agent",
+                kind="answer",
+                content="Čo s veľkou faktúrou, ktorá sa nezmestí do limitu? → Posielať po menších potvrdených kúskoch",
+                payload={
+                    "consultation_decision": {
+                        "key": "velke-faktury",
+                        "option_id": "kusky",
+                        "label": "Posielať po menších potvrdených kúskoch",
+                        "note": "Kúsky po 1 MB.",
+                    }
+                },
+            )
+        )
+        db.flush()
+
+
+async def test_stavba_shows_the_cards_word_for_word_and_which_one_is_next(world):
+    _consultation_world(world, decided=True)
+    out = await world["tools"].stavba({})
+    assert "Karty rozhodnutí (konzultácia, kolo 2 z 5) — na rade je karta 2 z 3:" in out
+    # Every option word for word — Poradca names it exactly, the way the card shows it.
+    for decision in _CARDS["decisions"]:
+        assert decision["question"] in out
+        for option in decision["options"]:
+            assert f"„{option['label']}“" in out
+    assert "„Zhasnúť hneď, keď sa doručovanie obnoví“ (odporúčané)" in out
+    assert "Dnes by svietilo ešte 24 hodín." in out
+    lines = out.splitlines()
+    first = next(i for i, line in enumerate(lines) if "Čo s veľkou faktúrou" in line)
+    second = next(i for i, line in enumerate(lines) if "Kedy zhasne upozornenie" in line)
+    assert "rozhodnutá" in lines[first] and "na rade" not in lines[first]
+    assert "Manažér zvolil „Posielať po menších potvrdených kúskoch“" in "\n".join(lines[first:second])
+    assert "Kúsky po 1 MB." in "\n".join(lines[first:second])
+    assert "NA RADE" in lines[second]
+
+
+async def test_stavba_without_a_consultation_shows_no_cards(world):
+    _consultation_world(world, decided=False)
+    db, version = world["db"], world["version"]
+    state = db.query(PipelineState).filter_by(version_id=version.id).one()
+    state.status, state.block_reason = "awaiting_manazer", None
+    db.flush()
+    out = await world["tools"].stavba({})
+    assert "Karty rozhodnutí" not in out
+
+
+def test_the_charter_points_poradca_at_the_cards_the_tool_returns():
+    """The charter tells Poradca what to look for — the heading the tool really writes, word for word."""
+    charter = (Path(__file__).resolve().parents[1] / "templates" / "poradca-charter.md").read_text(encoding="utf-8")
+    assert "(nástroj `stavba` vráti „Karty rozhodnutí“)" in charter
+    assert "doslova" in charter

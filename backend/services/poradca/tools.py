@@ -111,6 +111,57 @@ def _int_arg(args: dict, key: str, default: int, maximum: int) -> int:
     return min(value, maximum)
 
 
+def _cards_lines(db: Session, version_id: UUID) -> list[str]:
+    """DEV-28: the Decision Cards as the Manažér sees them, so Poradca names an option word for word.
+
+    The cards live in the consultation message beside its text (``payload.consultation``) and the decisions in
+    the Manažér's answers (``payload.consultation_decision``); the text alone named none of the options — on
+    NEX Inbox 1.7.0 the consultation's 332 characters carried 0 of its 20 option labels, and Poradca could only
+    describe a choice („zvoľ opravu, pri ktorej …"). Read through the engine's own functions — the same ones
+    the cards are built and decided from — never through a copy of their rules."""
+    from backend.services.orchestrator import _consultation_answers, _latest_consultation
+
+    latest = _latest_consultation(db, version_id)
+    if latest is None:
+        return []
+    consultation, seq = latest
+    answers = _consultation_answers(db, version_id, seq)
+    decisions = consultation.get("decisions") or []
+    current = next((i for i, d in enumerate(decisions) if d.get("key") not in answers), None)
+    rnd, rmax = consultation.get("round"), consultation.get("round_max")
+    head = "Karty rozhodnutí (konzultácia" + (
+        f", kolo {rnd} z {rmax}" if rnd and rmax else f", kolo {rnd}" if rnd else ""
+    )
+    head += (
+        f") — na rade je karta {current + 1} z {len(decisions)}:"
+        if current is not None
+        else ") — všetky sú rozhodnuté:"
+    )
+    out = ["", head]
+    for i, d in enumerate(decisions):
+        answer = answers.get(d.get("key"))
+        mark = "rozhodnutá" if answer else ("NA RADE" if i == current else "čaká")
+        out.append(f"Karta {i + 1} [{mark}]: {d.get('question', '')}")
+        if d.get("explanation"):
+            out.append(f"  Vysvetlenie: {d['explanation']}")
+        if d.get("origin") == "dosledok" and d.get("origin_of"):
+            out.append(f"  Vyplýva z rozhodnutia o: {d['origin_of']}")
+        for option in d.get("options") or []:
+            out.append(
+                f"  možnosť „{option.get('label', '')}“" + (" (odporúčané)" if option.get("recommended") else "")
+            )
+        if d.get("allow_free_text"):
+            out.append("  dá sa napísať aj vlastná odpoveď (Iná odpoveď)")
+        if answer:
+            note = (answer.get("note") or "").strip()
+            if len(note) > _MESSAGE_CHARS:
+                note = note[:_MESSAGE_CHARS] + " …"
+            out.append(
+                f"  Manažér zvolil „{answer.get('label', '')}“" + (f"; pokyn pre AI partnera: {note}" if note else "")
+            )
+    return out
+
+
 class PoradcaTools:
     """Nástroje jednej otázky — viazané na projekt, verziu rozhovoru a človeka, ktorý sa pýta."""
 
@@ -178,6 +229,8 @@ class PoradcaTools:
                 )
             else:
                 lines.append("Manažér teraz v Riadiacom centre nevidí žiadne tlačidlo stavby.")
+            if "decide" in actions:
+                lines.extend(_cards_lines(db, version.id))
             lines.append(f"\nPosledných {len(board.recent_messages or [])} správ rozhovoru stavby (najstaršia prvá):")
             for msg in board.recent_messages or []:
                 text = (msg.content or "").strip()
