@@ -45,6 +45,10 @@ admin — ako všade v kokpite. „Autor rozhovoru" je prihlásený účet.
 - **Kým pracuje, vidím čo robí**, riadok po riadku: „Čítam `backend/services/x.py`", „Pozerám 200 riadkov
   logu backendu v UAT", „Pýtam sa databázy UAT", „Rozoberám, čo agent stavby robil za poslednú hodinu".
   Tlačidlo **Zastaviť** otázku preruší.
+- **Rozhovor ide za textom** (v4.43.5, DEV-25, Director 08.10.2026: „Ak chcem čítať čo píše musím ja skrolovať
+  obrazovku.“): nový riadok priebehu aj hotová odpoveď posunú rozhovor na koniec, otvorený rozhovor začína na
+  konci. Kto si odroloval vyššie a číta staršiu časť, toho nový riadok nevytrhne; keď sa vráti na koniec, ide
+  rozhovor znovu za textom. Vlastná otázka ho na koniec vráti vždy.
 - Pod odpoveďou: **ako dlho trvala a koľko stála**.
 - **Premenovať a vymazať** (v4.42.0, Director 05.10.2026: „chýba mi premenovanie rozhovoru a vymazanie
   rozhovoru"). Pri rozhovore v zozname ceruzka a kôš. Premenovanie priamo v zozname: Enter uloží, Esc zruší,
@@ -77,11 +81,15 @@ admin — ako všade v kokpite. „Autor rozhovoru" je prihlásený účet.
 ### Keď treba niečo zmeniť
 Poradca poradí, **ktorým tlačidlom** to urobiť, a podľa situácie ponúkne:
 - **„Vložiť do Riadiaceho centra"** (počas stavby) — pokyn sa vloží do poľa, ktoré práve prijíma text: keď
-  agent čaká na odpoveď (otázka, chyba, kontrola), do poľa v lište nad rozhovorom („Tvoja odpoveď…“), inak do
-  poľa rozhovoru. Ktoré pole to je, rozhodne Riadiace centrum až podľa známeho stavu stavby; pokyn, ktorý
-  ostal v zbalenom poli rozhovoru, sa presunie do lišty. Vždy s označením „Pokyn od Poradcu“ a odošle ho
-  človek sám (DEV-22). Keď je pole zatvorené (napr. stavba čaká na opravu kokpitu), tlačidlo je zašednuté
-  s dôvodom.
+  agent čaká na odpoveď (otázka, chyba, kontrola), do poľa v lište nad rozhovorom („Tvoja odpoveď…“); počas
+  konzultácie do aktuálnej karty rozhodnutia, do poľa „Pokyn pre AI partnera“ (viacriadkové, DEV-26); inak do
+  poľa rozhovoru. Ktoré pole to je, rozhoduje jediné pravidlo `inputOwner` (úplný zoznam všetkých dôvodov
+  zastavenia v `frontend/src/components/riadiace/blockRecovery.ts`; nový dôvod neprejde kontrolou typov, kým
+  ho niekto nezaradí) a Riadiace centrum ho použije až podľa známeho stavu stavby. Pokyn, ktorý ostal v poli
+  rozhovoru, keď text prevzalo iné pole, sa presunie tam. Vždy s označením „Pokyn od Poradcu“ a odošle ho
+  človek sám (DEV-22). Keď žiadne pole text neprijme (stavba čaká na opravu kokpitu, hotová verzia), tlačidlo
+  je zašednuté s dôvodom; server a obrazovka sa v tom zhodujú
+  (`tests/test_poradca_instruction_target_matches_cockpit.py`).
 - **„Založiť novú verziu z tejto požiadavky"** (pri hotovej verzii) — tá istá cesta k novej verzii, ktorú kokpit má.
 
 ### Počas stavby

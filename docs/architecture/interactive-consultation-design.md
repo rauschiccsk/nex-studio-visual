@@ -217,6 +217,12 @@ mid-build otázka) do **jedného modelu** — Manažér sa naučí jednu interak
    nález; surový verdikt viditeľný; Auditor re-review chytí zatajené (ohraničené stropom).
 2. **Nekonečná slučka** verdikt→konzultácia → re-consult strop, potom voľnotextový stop (dnešné správanie ako podlaha).
 3. **Desync kurzora** → kurzor pripnutý na id pôvodnej konzultácie; „ask" ťah nesmie re-emitnúť konzultáciu.
+   ⚠️ **Do v4.43.4 to neplatilo (DEV-27, nájdené 08.10.2026 na NEX Inbox 1.7.0):** otázka z rozhovoru počas
+   konzultácie išla ako bežné `ask` a vo fáze Návrh každé `ask` spustí celú fázu — agent prepísal Návrh aj
+   Špecifikáciu, nasledovala nová previerka a kolo 2 z 5 po jedinom rozhodnutí z deviatich. Od v4.43.5 je to
+   jeden ťah bokom (`_answer_during_consultation` v `orchestrator.py`, otázka nesie `during_consultation`):
+   agent dostane pokyn odpovedať a dokumenty nemeniť, potom stavba čaká na tých istých kartách s tým istým
+   kolom. Pokyn od Poradcu počas konzultácie ide na aktuálnu kartu do poľa „Pokyn pre AI partnera" (DEV-26).
 4. **Single-flight** → len posledný `decide` dispatchuje; medzikliky čisté DB; dispatch_in_flight ako poistka.
 5. **Otvorené nálezy bez čistých možností** → `allow_free_text` + univerzálna „Iná odpoveď" (nikdy slepá ulička).
 6. **Tokeny/latencia** → spúšťa sa len keď problém build aj tak zastaví; kliky 0 tokenov; teplý kontext.

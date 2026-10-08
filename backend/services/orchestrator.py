@@ -3422,6 +3422,89 @@ def _latest_consultation(db: Session, version_id: uuid.UUID) -> Optional[tuple[d
     return (c, seq) if isinstance(c, dict) and c.get("decisions") else None
 
 
+#: DEV-27: what the agent is told when the Manažér asks in the chat while the Decision Cards wait.
+CONSULTATION_QUESTION_DIRECTIVE = (
+    "Prebieha konzultácia — Manažér rozhoduje body previerky na kartách a ešte neskončil. Medzitým sa ťa pýta "
+    "v rozhovore:\n\n{text}\n\n"
+    "Odpovedz mu na otázku. Špecifikáciu ani Návrh teraz NEMEŇ a nič necommituj — všetky rozhodnutia z kariet "
+    "zapracuješ naraz, keď rozhodne poslednú kartu. Ak je jeho správa rozhodnutím alebo pokynom, povedz mu, "
+    "ktorej karte a ktorej možnosti zodpovedá: vyberie ju na karte a pokyn môže dopísať do poľa "
+    "„Pokyn pre AI partnera“."
+)
+
+
+def consultation_question_pending(db: Session, version_id: uuid.UUID) -> Optional[PipelineMessage]:
+    """DEV-27: the Manažér's chat question asked while Decision Cards wait and not answered yet, else ``None``.
+
+    The question is marked when it is asked (``payload.during_consultation``, see the ``ask`` branch of
+    :func:`apply_action`). It is pending while it is the Manažér's LATEST message and nothing has answered it —
+    so the mark can never route a later dispatch: the next action writes a newer Manažér message, and the
+    answer turn writes the reply."""
+    last = db.execute(
+        select(PipelineMessage)
+        .where(PipelineMessage.version_id == version_id, PipelineMessage.author == "manazer")
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if last is None or last.kind != "question" or not (last.payload or {}).get("during_consultation"):
+        return None
+    replied = db.execute(
+        select(func.count())
+        .select_from(PipelineMessage)
+        .where(PipelineMessage.version_id == version_id, PipelineMessage.seq > last.seq)
+    ).scalar_one()
+    return None if replied else last
+
+
+async def _answer_during_consultation(
+    db: Session,
+    state: PipelineState,
+    question: PipelineMessage,
+    *,
+    on_event: Optional[claude_agent.EventCallback] = None,
+    on_message: Optional[MessageCallback] = None,
+) -> PipelineState:
+    """DEV-27: ONE answer turn for a question asked while the Decision Cards wait, then the SAME cards again.
+
+    Re-running the phase instead (Návrh: rewrite the design, commit it, review it again) answered the question
+    by spending a whole consultation round — 08.10.2026 on NEX Inbox 1.7.0 one chat message turned round 1 of 5
+    into round 2 after a single decision of nine. Whatever the turn returns, the build goes back to the cards
+    it was waiting on; only a NEX Studio bug the agent reports is escalated as everywhere else."""
+    stage = state.current_stage
+    result = await invoke_agent_with_parse_retry(
+        db,
+        version_id=state.version_id,
+        role=state.current_actor,
+        stage=stage,
+        prompt=CONSULTATION_QUESTION_DIRECTIVE.format(text=question.content),
+        on_event=on_event,
+        on_message=on_message,
+    )
+    if isinstance(result, PipelineStatusBlock) and result.kind == "framework_issue":
+        return await _settle_framework_issue(db, state, result, stage=stage, on_message=on_message)
+    if isinstance(result, ParseFailure):
+        msg = _record_message(
+            db,
+            version_id=state.version_id,
+            stage=stage,
+            author="system",
+            recipient="manazer",
+            kind="notification",
+            content=(
+                "Odpoveď AI partnera na tvoju otázku sa nepodarilo prečítať. Karty rozhodnutí čakajú ďalej — "
+                "opýtaj sa znova, alebo rozhodni na karte."
+            ),
+            payload={"phase": stage, "parse_failure_reason": result.reason, "consultation_question": True},
+        )
+        if on_message is not None:
+            await on_message(msg)
+    state.status = "blocked"
+    state.block_reason = "decision_needed"
+    state.next_action = (question.payload or {}).get("resume_next_action") or state.next_action
+    db.flush()
+    return state
+
+
 def consultation_retry_pending(db: Session, version_id: uuid.UUID) -> Optional[tuple[str, list[str]]]:
     """ICCINT-25: ``(source, findings)`` when the Decision Cards are worth asking for AGAIN, else ``None``.
 
@@ -7351,6 +7434,12 @@ async def run_dispatch(
             on_message=on_message,
         )
 
+    # DEV-27: a question asked in the chat while the Decision Cards wait is ONE answer turn, never a re-run of
+    # the phase — taken before the stage rounds for the same reason as ``retry_consultation`` above.
+    if directive is not None:
+        asked = consultation_question_pending(db, version_id)
+        if asked is not None:
+            return await _answer_during_consultation(db, state, asked, on_event=on_event, on_message=on_message)
     # ICCINT-75: Manažér schválil Vizuál a dokončenie toho schválenia patrí sem, na pozadie. Spotrebúva
     # sa a maže PRED akýmkoľvek smerovaním — rovnako ako ``retry_consultation`` vyššie — aby príznak
     # nemohol prežiť do ďalšieho kola a schválenie sa nespracovalo dvakrát.
@@ -12812,6 +12901,10 @@ async def apply_action(
         text = payload.get("text")
         if not text or not str(text).strip():
             raise OrchestratorError("ask requires a non-empty payload.text")
+        question_payload: dict[str, Any] = {"phase": state.current_stage}
+        if state.status == "blocked" and state.block_reason == "decision_needed":
+            # DEV-27: asked while the Decision Cards wait — answered aside, then back to the same cards.
+            question_payload.update(during_consultation=True, resume_next_action=state.next_action)
         _record_message(
             db,
             version_id=version_id,
@@ -12820,7 +12913,7 @@ async def apply_action(
             recipient=state.current_actor,
             kind="question",
             content=str(text),
-            payload={"phase": state.current_stage},
+            payload=question_payload,
         )
         _begin_dispatch(db, state)
         return state

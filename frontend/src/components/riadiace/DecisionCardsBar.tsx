@@ -19,6 +19,11 @@ import { useMemo, useState } from "react";
 import { CircleAlert, Lightbulb } from "lucide-react";
 
 import { postPipelineActionApi, type PipelineBoard, type PipelineMessage } from "@/services/api/pipeline";
+import { inputOwner } from "@/components/riadiace/blockRecovery";
+import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
+import { RESTORED_DRAFT_LABEL, draftKey, useDraft } from "@/hooks/useDraft";
+import { usePoradcaHandoff } from "@/hooks/usePoradcaHandoff";
+import { FROM_PORADCA_LABEL } from "@/lib/poradcaHandoff";
 import { smerDoRiadku, smerKonzultacie } from "@/lib/smerKonzultacie";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
@@ -147,7 +152,28 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
 
   const [picked, setPicked] = useState<string | null>(null);
   const [freeText, setFreeText] = useState("");
-  const [note, setNote] = useState("");
+  // DEV-26: the card's instruction for the AI partner is a writing surface like any other — it takes
+  // Poradca's instruction during a consultation, keeps its lines, and survives a trip to another screen.
+  // One draft per card, so an instruction written for one decision never rides along with the next one.
+  const currentKey = useMemo(() => {
+    const decisions = latest?.consultation.decisions ?? [];
+    return decisions.find((d) => !(d.key in answered))?.key ?? null;
+  }, [latest, answered]);
+  const noteDraft = useDraft(currentKey ? draftKey(`karta.${currentKey}`, versionId) : null);
+  const note = noteDraft.text;
+  const noteRef = useAutoGrowTextarea(note);
+  const { fromPoradca, dismiss: dismissPoradca } = usePoradcaHandoff({
+    surface: "karta",
+    versionId,
+    live:
+      !!versionId &&
+      !!currentKey &&
+      !!board?.available_actions?.includes("decide") &&
+      inputOwner(board?.state) === "karta",
+    text: note,
+    setText: noteDraft.setText,
+    restored: noteDraft.restored,
+  });
   const [showFree, setShowFree] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<HumanError | null>(null);
@@ -182,7 +208,8 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
       onBoard(nextBoard);
       setPicked(null);
       setFreeText("");
-      setNote("");
+      noteDraft.clear();
+      dismissPoradca();
       setShowFree(false);
     } catch (err: unknown) {
       setError(humanizeApiError(err, "Rozhodnutie zlyhalo"));
@@ -343,13 +370,24 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
             />
           )}
 
-          <input
+          {fromPoradca && (
+            <p className="mt-2 text-[11px] font-medium text-[var(--color-accent-primary)]">{FROM_PORADCA_LABEL}</p>
+          )}
+          {noteDraft.restored && !fromPoradca && (
+            <p className="mt-2 text-[11px] text-[var(--color-text-muted)]">{RESTORED_DRAFT_LABEL}</p>
+          )}
+          <textarea
             lang="sk"
             spellCheck={true}
+            ref={noteRef}
             value={note}
-            onChange={(e) => setNote(e.target.value)}
+            onChange={(e) => {
+              noteDraft.setText(e.target.value);
+              if (fromPoradca) dismissPoradca(); // he edited it — the text is his now
+            }}
+            rows={1}
             placeholder="Pokyn pre AI partnera (nepovinné) — napíš, čo má spraviť"
-            className="mt-2 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-xs text-[var(--color-text-primary)] focus:border-primary-500 focus:outline-none"
+            className="mt-2 w-full resize-none rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-xs text-[var(--color-text-primary)] focus:border-primary-500 focus:outline-none"
           />
 
           <div className="mt-3 flex items-center justify-between gap-3">

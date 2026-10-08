@@ -30,6 +30,7 @@ import {
 import { BLOCK_REASON_LABELS } from "@/components/cockpit/labels";
 import {
   blockRecoveryOwnsInput,
+  inputOwner,
   isCheckReason,
   isErrorReason,
   DEFAULT_CHECK_FIX,
@@ -63,7 +64,7 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
   const { fromPoradca, dismiss: dismissPoradca } = usePoradcaHandoff({
     surface: "odpoved",
     versionId,
-    live: !!board?.state && blockRecoveryOwnsInput(board.state) && !!versionId,
+    live: inputOwner(board?.state) === "odpoved" && !!versionId,
     text,
     setText,
     restored,

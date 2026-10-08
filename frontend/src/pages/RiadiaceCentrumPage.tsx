@@ -34,7 +34,7 @@ import SpecApprovalBar from "@/components/riadiace/SpecApprovalBar";
 import SchvalitBar from "@/components/riadiace/SchvalitBar";
 import DecisionCardsBar from "@/components/riadiace/DecisionCardsBar";
 import BlockRecoveryBar from "@/components/riadiace/BlockRecoveryBar";
-import { blockRecoveryOwnsInput } from "@/components/riadiace/blockRecovery";
+import { blockRecoveryOwnsInput, inputOwner } from "@/components/riadiace/blockRecovery";
 import NahlasitZnovaBar from "@/components/riadiace/NahlasitZnovaBar";
 import ZopakovatKonzultaciuBar from "@/components/riadiace/ZopakovatKonzultaciuBar";
 import PokracovatPoOpraveBar from "@/components/riadiace/PokracovatPoOpraveBar";
@@ -298,6 +298,7 @@ export default function RiadiaceCentrumPage() {
             frameworkBlocked={frameworkBlocked}
             blockedAbove={blockRecoveryActive}
             inputReady={!!board}
+            owner={inputOwner(board?.state)}
             atVizual={board?.state?.current_stage === "vizual"}
           />
         )}

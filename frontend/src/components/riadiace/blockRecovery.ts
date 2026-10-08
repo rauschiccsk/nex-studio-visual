@@ -34,18 +34,42 @@ export function isCheckReason(reason: BlockReason | null): boolean {
   return !!reason && CHECK_REASONS.includes(reason);
 }
 
+/** Which box of Riadiace centrum takes the Manažér's text — and with it Poradca's instruction (DEV-22). */
+export type InputOwner = "rozhovor" | "odpoved" | "karta";
+
+/**
+ * DEV-26: every reason a build can block on, with the box that takes the text then; `null` — none does (only
+ * our technical team moves the build on). A Record over the generated `BlockReason`, so a reason the backend
+ * adds fails the type check here until someone decides where its text goes. A default is how it broke: on
+ * 08.10.2026 `decision_needed` fell through to the chat, and Poradca's instruction for a Decision Card was
+ * sent as a chat message instead.
+ */
+export const BLOCKED_INPUT_OWNER: Record<BlockReason, InputOwner | null> = {
+  agent_question: "odpoved",
+  agent_error: "odpoved",
+  system_error: "odpoved",
+  parse_exhaustion: "odpoved",
+  check_failed: "odpoved",
+  decision_needed: "karta",
+  framework_issue: null,
+};
+
+type OwnerState =
+  | { status?: string | null; block_reason?: BlockReason | null; current_stage?: string | null }
+  | null
+  | undefined;
+
+/** The box that takes the text in this state — `null` while the state is unknown or no box takes it. */
+export function inputOwner(state: OwnerState): InputOwner | null {
+  if (!state) return null;
+  if (state.current_stage === "done") return null;
+  if (state.status !== "blocked" || !state.block_reason) return "rozhovor";
+  const owner = BLOCKED_INPUT_OWNER[state.block_reason];
+  // `null` is a decision (no box takes it); only a reason this build of the screen does not know falls back.
+  return owner === undefined ? "rozhovor" : owner;
+}
+
 /** The one gate both readers ask. */
-export function blockRecoveryOwnsInput(
-  state:
-    | { status?: string | null; block_reason?: BlockReason | null }
-    | null
-    | undefined,
-): boolean {
-  const reason = state?.block_reason ?? null;
-  if (state?.status !== "blocked" || !reason) return false;
-  return (
-    reason === "agent_question" ||
-    isErrorReason(reason) ||
-    isCheckReason(reason)
-  );
+export function blockRecoveryOwnsInput(state: OwnerState): boolean {
+  return state?.status === "blocked" && !!state.block_reason && BLOCKED_INPUT_OWNER[state.block_reason] === "odpoved";
 }

@@ -17,6 +17,7 @@ import PoradcaAnswer from "@/components/poradca/PoradcaAnswer";
 import PoradcaConversationItem from "@/components/poradca/PoradcaConversationItem";
 import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { RESTORED_DRAFT_LABEL, draftKey, useDraft } from "@/hooks/useDraft";
+import { useFollowBottom } from "@/hooks/useFollowBottom";
 import { usePoradcaConversation } from "@/hooks/usePoradcaConversation";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import { useAuthStore } from "@/store/authStore";
@@ -105,6 +106,13 @@ export default function PoradcaPage() {
 
   // Keď odpoveď dobehne, zoznam si obnoví „beží" a poradie.
   const running = !!detail?.messages?.some((m) => m.status === "running");
+  // DEV-25: what grows while Poradca writes — a new message, a new step of the last one, its answer (the text
+  // arrives with the status change, not piece by piece).
+  const lastMessage = detail?.messages?.[detail.messages.length - 1];
+  const thread = useFollowBottom<HTMLDivElement>(
+    `${detail?.messages?.length ?? 0}:${lastMessage?.steps?.length ?? 0}:${lastMessage?.status ?? ""}`,
+    conversationId,
+  );
   const wasRunning = useRef(false);
   useEffect(() => {
     if (wasRunning.current && !running) void refreshList();
@@ -288,7 +296,13 @@ export default function PoradcaPage() {
           </select>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3">
+        <div
+          ref={thread.ref}
+          onScroll={thread.onScroll}
+          role="log"
+          aria-label="Rozhovor s Poradcom"
+          className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3"
+        >
           <ErrorNote error={loadError} />
           {convError && <p className="text-xs text-[var(--color-state-error-fg)]">{convError}</p>}
           {!conversationId && (
@@ -327,6 +341,7 @@ export default function PoradcaPage() {
                 : null
           }
           onAsk={async (question) => {
+            thread.follow(); // his own question: show what comes back, wherever he had scrolled to
             if (conversationId) {
               setDetail(await askPoradcaApi(conversationId, question));
             } else {

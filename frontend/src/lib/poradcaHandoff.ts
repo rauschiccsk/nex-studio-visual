@@ -2,8 +2,9 @@
 //
 // The instruction is NEVER sent. It is handed off as PENDING for the version, and the box of Riadiace
 // centrum that currently takes the Manažér's text picks it up: the block-recovery bar while the build waits
-// on an agent question / error / check, the conversation box otherwise. Which box that is decides ONE rule —
-// `blockRecoveryOwnsInput` — and it is applied only once the build state is known.
+// on an agent question / error / check, the current Decision Card during a consultation (DEV-26), the
+// conversation box otherwise. Which box that is decides ONE rule — `inputOwner` — and it is applied only once
+// the build state is known.
 //
 // DEV-22 (08.10.2026): the handoff used to write straight into the conversation box's draft. While the agent
 // waited on a question that box is collapsed to a one-line pointer, so the instruction landed in a box nobody
@@ -12,9 +13,10 @@
 // Text already in the receiving box is never overwritten — the instruction goes under it. The box then says
 // where the text came from: text that appears by itself must not look like the Manažér's own earlier draft.
 
+import type { InputOwner } from "@/components/riadiace/blockRecovery";
 import { draftKey } from "@/hooks/useDraft";
 
-export type HandoffSurface = "rozhovor" | "odpoved";
+export type HandoffSurface = InputOwner;
 
 const PENDING_PREFIX = "nex.poradca.pending.";
 const ORIGIN_SUFFIX = ".origin";

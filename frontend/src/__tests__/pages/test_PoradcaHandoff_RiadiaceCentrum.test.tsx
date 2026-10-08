@@ -55,6 +55,7 @@ vi.mock("@/components/riadiace/HonestStatusStrip", () => ({ default: () => <div 
 vi.mock("@/components/riadiace/PlanUlohRail", () => ({ default: () => <div /> }));
 
 import PoradcaAnswer from "@/components/poradca/PoradcaAnswer";
+import { BLOCKED_INPUT_OWNER, type InputOwner } from "@/components/riadiace/blockRecovery";
 import RiadiaceCentrumPage from "@/pages/RiadiaceCentrumPage";
 
 const VERSION = "v170";
@@ -87,9 +88,9 @@ const SCOPE = {
   instruction_closed_reason: null,
 };
 
-function tree() {
+function tree(start = "/poradca") {
   return (
-    <MemoryRouter initialEntries={["/poradca"]}>
+    <MemoryRouter initialEntries={[start]}>
       <Routes>
         <Route
           path="/poradca"
@@ -99,6 +100,11 @@ function tree() {
       </Routes>
     </MemoryRouter>
   );
+}
+
+function openRiadiaceCentrum() {
+  h.ctx.selectedVersion = { versionId: VERSION, versionNumber: "1.7.0" };
+  return render(tree("/riadiace-centrum"));
 }
 
 function clickInsert() {
@@ -206,3 +212,149 @@ describe("DEV-22 — the Director's own case after the fix is deployed", () => {
     await waitFor(() => expect(window.localStorage.getItem(`nex.draft.odpoved.${VERSION}.origin`)).toBeNull());
   });
 });
+
+// ── DEV-26 / DEV-27 — a consultation: the Decision Card takes the instruction, the chat only asks ─────────────
+
+const NOTE_PLACEHOLDER = /Pokyn pre AI partnera/;
+
+function consultationBoard(): PipelineBoard {
+  return {
+    state: {
+      status: "blocked",
+      block_reason: "decision_needed",
+      current_stage: "navrh",
+      next_action: "Manažér: rozhodni 1/2 (2 rozhodnutia, konzultácia — kolo 2 z 5).",
+    },
+    available_actions: ["decide", "ask"],
+    recent_messages: [
+      {
+        id: "k1",
+        seq: 10,
+        kind: "consultation",
+        author: "ai_agent",
+        recipient: "manazer",
+        content: "Previerka našla dva body.",
+        payload: {
+          consultation: {
+            id: "navrh-2",
+            round: 2,
+            round_max: 5,
+            decisions: [
+              {
+                key: "velke",
+                question: "Čo s veľkou faktúrou?",
+                options: [
+                  { id: "dlhsi", label: "Dlhší limit", recommended: true },
+                  { id: "nechat", label: "Nechať tak" },
+                ],
+              },
+              {
+                key: "sablona",
+                question: "Čo so šablónou?",
+                options: [{ id: "povinny", label: "Povinný priečinok", recommended: true }],
+              },
+            ],
+          },
+        },
+      },
+    ],
+  } as unknown as PipelineBoard;
+}
+
+describe("DEV-26 — during a consultation Poradca's instruction lands on the Decision Card", () => {
+  it("the instruction is in the card's „Pokyn pre AI partnera“, labelled as Poradca's; the chat stays empty", async () => {
+    h.ws.board = consultationBoard();
+    render(tree());
+    clickInsert();
+    const note = await screen.findByPlaceholderText(NOTE_PLACEHOLDER);
+    await waitFor(() => expect(note).toHaveValue(INSTRUCTION));
+    expect(screen.getByText(/Pokyn od Poradcu/)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(CHAT_PLACEHOLDER)).toHaveValue("");
+  });
+
+  it("a multi-line instruction keeps its lines in the card", async () => {
+    h.ws.board = consultationBoard();
+    render(tree());
+    window.localStorage.setItem(`nex.poradca.pending.${VERSION}`, "1. prvý bod\n2. druhý bod");
+    clickInsert();
+    const note = await screen.findByPlaceholderText(NOTE_PLACEHOLDER);
+    await waitFor(() => expect(note).toHaveValue(`1. prvý bod\n2. druhý bod\n\n${INSTRUCTION}`));
+    expect(note.tagName).toBe("TEXTAREA");
+  });
+
+  it("deciding the card sends Poradca's instruction as the card's note — and forgets where it came from", async () => {
+    h.ws.board = consultationBoard();
+    h.postPipelineActionApi.mockResolvedValue(consultationBoard());
+    render(tree());
+    clickInsert();
+    await waitFor(async () => expect(await screen.findByPlaceholderText(NOTE_PLACEHOLDER)).toHaveValue(INSTRUCTION));
+    fireEvent.click(screen.getByRole("button", { name: /Dlhší limit/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Rozhodnúť/ }));
+    await waitFor(() =>
+      expect(h.postPipelineActionApi).toHaveBeenCalledWith(VERSION, {
+        action: "decide",
+        payload: { decision_key: "velke", option_id: "dlhsi", note: INSTRUCTION },
+      }),
+    );
+    await waitFor(() => expect(window.localStorage.getItem(`nex.draft.karta.${VERSION}.origin`)).toBeNull());
+  });
+
+  it("parked in the chat while the agent worked, then the consultation opened: it moves to the card", async () => {
+    h.ws.board = board("agent_working");
+    const { rerender } = render(tree());
+    clickInsert();
+    await waitFor(() => expect(screen.getByPlaceholderText(CHAT_PLACEHOLDER)).toHaveValue(INSTRUCTION));
+    h.ws.board = consultationBoard();
+    rerender(tree());
+    await waitFor(async () => expect(await screen.findByPlaceholderText(NOTE_PLACEHOLDER)).toHaveValue(INSTRUCTION));
+    await waitFor(() => expect(screen.getByPlaceholderText(CHAT_PLACEHOLDER)).toHaveValue(""));
+  });
+});
+
+describe("DEV-27 — during a consultation the chat says it is for questions", () => {
+  it("above the chat: decisions are made on the card, a question here changes no document", async () => {
+    h.ws.board = consultationBoard();
+    openRiadiaceCentrum();
+    expect(await screen.findByText(/Prebieha konzultácia — rozhoduj na karte vyššie/)).toBeInTheDocument();
+  });
+
+  it("outside a consultation the sentence is not there", async () => {
+    h.ws.board = board("agent_working");
+    openRiadiaceCentrum();
+    await screen.findByPlaceholderText(CHAT_PLACEHOLDER);
+    expect(screen.queryByText(/Prebieha konzultácia/)).not.toBeInTheDocument();
+  });
+});
+
+// The guard as a rule, not a list: EVERY reason a build can block on (the Record is exhaustive over the
+// generated BlockReason, so a new reason cannot skip this). DEV-22 tested two states and missed the third.
+const FIELD_OF: Record<InputOwner, RegExp> = {
+  odpoved: /Tvoja odpoveď|Usmernenie k oprave/,
+  karta: NOTE_PLACEHOLDER,
+  rozhovor: CHAT_PLACEHOLDER,
+};
+
+function boxesHolding(text: string): HTMLElement[] {
+  return screen
+    .queryAllByRole("textbox")
+    .filter((el) => (el as HTMLInputElement | HTMLTextAreaElement).value.includes(text));
+}
+
+describe("DEV-26 — every reason a build blocks on: the instruction is in the box that takes the text, or nowhere", () => {
+  it.each(Object.entries(BLOCKED_INPUT_OWNER))("%s → %s", async (reason, owner) => {
+    h.ws.board = reason === "decision_needed" ? consultationBoard() : board("blocked", reason);
+    render(tree());
+    clickInsert();
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Vložiť do Riadiaceho centra/ })).toBeNull());
+    if (owner) {
+      await waitFor(() => expect(screen.getByPlaceholderText(FIELD_OF[owner])).toHaveValue(INSTRUCTION));
+      expect(boxesHolding(INSTRUCTION)).toHaveLength(1);
+    } else {
+      // No box takes text here: the instruction waits, untouched, for the box that will.
+      expect(await screen.findByText("Túto chybu rieši náš technický tím.")).toBeInTheDocument();
+      expect(boxesHolding(INSTRUCTION)).toHaveLength(0);
+      expect(window.localStorage.getItem(`nex.poradca.pending.${VERSION}`)).toBe(INSTRUCTION);
+    }
+  });
+});
+

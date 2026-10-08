@@ -15,6 +15,7 @@ import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { RESTORED_DRAFT_LABEL, useDraft, draftKey } from "@/hooks/useDraft";
 import { usePoradcaHandoff } from "@/hooks/usePoradcaHandoff";
 import { FROM_PORADCA_LABEL, draftCameFromPoradca, handOffInstruction } from "@/lib/poradcaHandoff";
+import type { InputOwner } from "@/components/riadiace/blockRecovery";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 
 const ENGINE_BUSY_HINT = "AI Agent práve pracuje — správa sa pošle, keď dokončí.";
@@ -27,6 +28,10 @@ const FRAMEWORK_ISSUE_BANNER = "Túto chybu rieši náš technický tím.";
 // confusing duplicate input, "2 editory"). Neutral wording: a question is answered, an error is retried, both
 // "v lište vyššie".
 const BLOCKED_ABOVE_HINT = "Pokračuj cez lištu vyššie.";
+// DEV-27: during a consultation the decisions are made on the Decision Card; a message here is a QUESTION
+// about it — the engine answers it aside and the documents stay as they are.
+const CONSULTATION_HINT =
+  "Prebieha konzultácia — rozhoduj na karte vyššie. Tu sa môžeš AI partnera len opýtať; dokumenty sa tým nezmenia.";
 
 interface Props {
   /** Relay the text through the engine; resolves to whether it was ENQUEUED behind an in-flight turn. */
@@ -46,6 +51,9 @@ interface Props {
   /** DEV-22: the build state is known (the board has loaded). Until then nobody can tell whether this box or
    *  the recovery bar above takes the Manažér's text, so a pending Poradca instruction must wait. */
   inputReady?: boolean;
+  /** DEV-26: which box takes the Manažér's text in this state (`inputOwner`). Only when it is this one does a
+   *  Poradca instruction land here; otherwise one parked here moves on to the box that does. */
+  owner?: InputOwner | null;
 }
 
 export function ConversationComposer({
@@ -56,6 +64,7 @@ export function ConversationComposer({
   atVizual,
   versionId,
   inputReady = true,
+  owner = "rozhovor",
 }: Props) {
   // ICCINT-30: the box the Director lost a message from. Persisted per build, cleared on a real send.
   const { text, setText, clear: clearDraft, restored } = useDraft(draftKey("rozhovor", versionId));
@@ -70,26 +79,28 @@ export function ConversationComposer({
   // Category I: a recovery bar above owns the input — COLLAPSE the composer to a pointer (framework_issue keeps
   // its own locked banner below, so it is excluded here).
   const collapsed = !!blockedAbove && !frameworkBlocked;
+  const takesInstruction = owner === "rozhovor";
   // ICCINT-167 / DEV-22: an instruction from Poradca lands here only while THIS box takes the text.
   const { fromPoradca, dismiss: dismissPoradca } = usePoradcaHandoff({
     surface: "rozhovor",
     versionId,
-    live: inputReady && !collapsed && !locked && !!versionId,
+    live: inputReady && takesInstruction && !collapsed && !locked && !!versionId,
     text,
     setText,
     restored,
   });
 
-  // DEV-22: Poradca's instruction parked here (handed off while the agent was working, before the build
-  // blocked on a question) must not hide in a collapsed box — hand it on to the bar that took the input.
+  // DEV-22 / DEV-26: Poradca's instruction parked here (handed off while the agent was working) must not stay
+  // in a box that no longer takes the text — the build blocked on a question, or a consultation opened. Hand it
+  // on to the box that took the input over.
   useEffect(() => {
-    if (!inputReady || !collapsed || !versionId || !text.trim()) return;
+    if (!inputReady || (takesInstruction && !collapsed) || !versionId || !text.trim()) return;
     if (!draftCameFromPoradca(versionId, "rozhovor")) return;
     handOffInstruction(versionId, text);
     clearDraft();
     dismissPoradca();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when the box collapses, not on every keystroke
-  }, [inputReady, collapsed, versionId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when the owner changes, not on every keystroke
+  }, [inputReady, takesInstruction, collapsed, versionId]);
 
   async function submit() {
     const trimmed = text.trim();
@@ -145,6 +156,9 @@ export function ConversationComposer({
         >
           {FRAMEWORK_ISSUE_BANNER}
         </div>
+      )}
+      {owner === "karta" && (
+        <p className="mb-2 text-[11px] font-medium text-[var(--color-text-muted)]">{CONSULTATION_HINT}</p>
       )}
       {(hint || error) && (
         <div
