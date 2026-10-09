@@ -44,6 +44,7 @@ from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from backend.config.settings import settings
 from backend.core.agent_env import agent_env
 from backend.core.offload import BlockingWorkTimedOut, run_blocking
 from backend.db.models.backlog import BacklogItem
@@ -62,6 +63,7 @@ from backend.services import (
     ci_status,
     claude_agent,
     create_project_postscaffold,
+    database_schema,
     dedo_escalation,
     dedo_message,
     deploy_progress,
@@ -539,6 +541,8 @@ _ACTIONS = frozenset(
         "ask",
         "answer",
         "pause",
+        # DEV-7: Ri approves the database change the AI Agent stopped for in Programovanie (``schema_approval``).
+        "schvalit_schemu",
         # CR-V2-041: the Manažér picks an option for ONE consultation decision (Decision Card). Like
         # ``answer`` it threads input + does not advance the phase; the LAST decide re-dispatches the apply.
         "decide",
@@ -618,6 +622,7 @@ _ADVANCING_ACTIONS = frozenset(
     {
         "approve_spec",
         "schvalit",
+        "schvalit_schemu",
         "uprav",
         "verdict",
         "pokracovat",
@@ -733,6 +738,9 @@ def determine_available_actions(state: PipelineState) -> set[str]:
         # past an unresolved error/question is a footgun (e.g. "Schváliť špecifikáciu" appearing right after a
         # parse failure — the audit's Theme 1). Only the settled ``awaiting_manazer`` path offers the advance body.
         actions.add("answer")
+        # DEV-7: a database change the agent stopped for — approved by Ri with one click (the answer box rejects).
+        if state.block_reason == "schema_approval":
+            actions.add("schvalit_schemu")
         # ICCINT-109: keď zlyhal SÁM overovací beh (Audítor nevrátil verdikt — spadol, vypršal čas,
         # nedala sa prečítať odpoveď), ponúkni „Znova overiť bez opravy“.
         #
@@ -1438,6 +1446,13 @@ def _navrh_design_doc_rel(version_number: str) -> str:
     return f"{_version_spec_rel(version_number)}/design.md"
 
 
+#: Relative repo path of the version's WHOLE target database schema (DEV-7) — written by the AI Agent in Návrh
+#: next to the design document, approved by Ri, then published by the cockpit to the Knowledge Base
+#: (:mod:`backend.services.database_schema`). Same name as the Knowledge Base document it becomes.
+def _database_schema_rel(version_number: str) -> str:
+    return f"{_version_spec_rel(version_number)}/{database_schema.SCHEMA_FILENAME}"
+
+
 class IccStandard(NamedTuple):
     """Jeden povinný celoICC štandard — pomenovaný tak, aby sa dal PREČÍTAŤ pred stavbou (ICCINT-125).
 
@@ -1647,7 +1662,33 @@ def _navrh_directive(db: Session, version_id: uuid.UUID) -> str:
         "je hotový).\n"
         "4. Ak je akýkoľvek detail návrhu ešte nejednoznačný, nastav `kind=question`, polož otázku Manažérovi "
         "a ZASTAV — schvaľovací bod po Návrhu tvoje otázky vynesie.\n"
-        "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
+        + _navrh_schema_rule(version_number, _project_slug_for_version(db, version_id))
+        + "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
+    )
+
+
+def _navrh_schema_rule(version_number: str, slug: str) -> str:
+    """DEV-7: the Návrh brief's database item — the whole target schema, in a fixed place, approved with the Návrh."""
+    kb_doc = f"{database_schema.kb_root()}/{database_schema.kb_schema_rel(slug)}"
+    return (
+        f"5. DATABÁZA: ak aplikácia používa databázu, zapíš CELÚ cieľovú schému tejto verzie do "
+        f"`{_database_schema_rel(version_number)}` (tabuľky, stĺpce s typmi, obmedzenia, indexy — celý dokument, "
+        f"NIE len zmenu) a uveď ho v `deliverables[]`. Začni zo schválenej schémy `{kb_doc}`, ak existuje, a "
+        "doplň do nej, čo táto verzia mení. Štruktúru databázy schvaľuje Ri spolu s týmto Návrhom (SCHEMA_GOVERNANCE) "
+        "a schválenú zapíše kokpit do Znalostnej bázy — ty ju tam nezapisuješ. Aplikácia bez databázy tento "
+        "dokument nemá.\n"
+    )
+
+
+def database_schema_missing(version_number: str, slug: str) -> str:
+    """DEV-7: the one follow-up a database app's Návrh gets when it came without its schema document."""
+    return (
+        "Návrh je hotový, ale chýba v ňom dokument štruktúry databázy — táto aplikácia databázu má (schválená "
+        f"schéma `{database_schema.kb_root()}/{database_schema.kb_schema_rel(slug)}` alebo migrácie v kóde). "
+        f"Zapíš CELÚ cieľovú schému tejto verzie do `{_database_schema_rel(version_number)}` (celý dokument, nie "
+        "len zmenu; ak sa databáza v tejto verzii nemení, je to schválená schéma tak, ako je, zladená s "
+        "migráciami v kóde). Nič iné nemeň. Ukonči odpoveď štruktúrovaným stavovým výstupom "
+        "(F-007-orchestration-cockpit.md §5.3)."
     )
 
 
@@ -1941,6 +1982,10 @@ def _auditor_upfront_directive(db: Session, version_id: uuid.UUID, *, narrowed_t
         "2. Hľadaj MEDZERY / nejednoznačnosti / protirečenia v Špecifikácii a Návrhu: chýbajúce detaily, "
         "rozpory medzi zadaním a návrhom, nepokryté hraničné prípady, rizikové predpoklady (bezpečnosť, "
         "peniaze, hlavný kontrakt). Buď adverzariálny — aktívne hľadaj diery, nepotvrdzuj happy-path.\n"
+        f"2a. DATABÁZA: ak aplikácia podľa Špecifikácie či Návrhu používa databázu, musí existovať "
+        f"`{_database_schema_rel(version_number)}` s CELOU schémou a zhodovať sa s dátovým modelom návrhu; ak "
+        "chýba alebo sa s ním rozchádza, je to medzera (FAIL) — štruktúru databázy bude schvaľovať Ri podľa "
+        "tohto dokumentu.\n"
         "2b. Predtým než niečo označíš za MEDZERU, POTVRĎ, že to v AKTUÁLNYCH dokumentoch naozaj chýba alebo "
         "je zle (cituj presné miesto). Požiadavka vyriešená cez KONFIGURÁCIU s bezpečným defaultom "
         "(fail-safe), EXPLICITNE odložená mimo rozsah s odôvodnením, alebo HEDGE „re-overiť pri builde“ — "
@@ -2827,6 +2872,18 @@ def _augment_brief_with_backlog(db: Session, version_id: uuid.UUID, stage: str, 
     return "\n".join(lines) + "\n\n---\n\n" + prompt
 
 
+def _latest_schema_approval(db: Session, version_id: uuid.UUID) -> Optional[str]:
+    """DEV-7: the Manažér's newest „schvaľujem zmenu štruktúry databázy" — framed for the resumed task."""
+    rows = db.execute(
+        select(PipelineMessage)
+        .where(PipelineMessage.version_id == version_id, PipelineMessage.kind == "answer")
+        .order_by(PipelineMessage.seq.desc())
+        .limit(20)
+    ).scalars()
+    latest = next((m for m in rows if (m.payload or {}).get("schema_approved")), None)
+    return f"Manažér odpovedal na tvoju otázku: {latest.content}" if latest is not None else None
+
+
 def directive_for_action(action: str, payload: dict[str, Any], stage: str) -> Optional[str]:
     """Frame the Manažér's interactive message for the re-dispatch prompt, else ``None`` (CR-V2-009).
 
@@ -3374,6 +3431,200 @@ def _persist_priprava_spec(db: Session, state: PipelineState, block: PipelineSta
     return None
 
 
+def _schema_checkout(db: Session, version_id: uuid.UUID) -> Optional[tuple[Project, Version, Path]]:
+    """The project, version and checkout the version's schema document lives in — ``None`` without a checkout."""
+    version = db.get(Version, version_id)
+    project = db.get(Project, version.project_id) if version is not None else None
+    if project is None or not project.source_path:
+        return None
+    return project, version, Path(project.source_path)
+
+
+def _schema_comparison(db: Session, version_id: uuid.UUID) -> Optional[database_schema.SchemaComparison]:
+    """DEV-7: the version's schema document against the approved one in the Knowledge Base."""
+    found = _schema_checkout(db, version_id)
+    if found is None:
+        return None
+    project, version, root = found
+    return database_schema.compare(
+        root, _database_schema_rel(version.version_number), database_schema.kb_root(), project.slug
+    )
+
+
+def database_schema_status(db: Session, version_id: uuid.UUID) -> Optional[dict[str, Any]]:
+    """What the board shows about the version's database schema — ``None`` when the version has no document."""
+    found = _schema_checkout(db, version_id)
+    cmp = _schema_comparison(db, version_id)
+    if found is None or cmp is None or cmp.version_doc is None:
+        return None
+    project, version, _ = found
+    return {
+        **_schema_payload(project, version, cmp),
+        "changes": cmp.changes,
+        "approver_role": database_schema.APPROVER_ROLE,
+    }
+
+
+def _schema_payload(project: Project, version: Version, cmp: database_schema.SchemaComparison) -> dict[str, Any]:
+    return {
+        "path": _database_schema_rel(version.version_number),
+        "kb_path": database_schema.kb_schema_rel(project.slug),
+        "kb_exists": cmp.kb_doc is not None,
+        "added_lines": cmp.added_lines,
+        "removed_lines": cmp.removed_lines,
+    }
+
+
+def _schema_change_sentence(cmp: database_schema.SchemaComparison) -> str:
+    if cmp.kb_doc is None:
+        return "Toto je prvá schéma databázy projektu — v Znalostnej báze ešte nie je."
+    return f"Oproti schválenej schéme v Znalostnej báze pribúda {cmp.added_lines} a ubúda {cmp.removed_lines} riadkov."
+
+
+#: DEV-7: the ceiling for writing an approved schema into the Knowledge Base (a handful of local git commands).
+SCHEMA_PUBLISH_CAP = 120
+
+#: DEV-7: what the Manažér is told when a database change waits for an approval he cannot give.
+SCHEMA_APPROVER_ONLY = (
+    "Štruktúru databázy schvaľuje len Ri (SCHEMA_GOVERNANCE) — tento krok musí schváliť účet s rolou Ri."
+)
+
+
+async def _ensure_navrh_schema_document(
+    db: Session, state: PipelineState, *, on_message: Optional[MessageCallback]
+) -> Optional[str]:
+    """DEV-7: a database app's Návrh carries its whole schema document. Missing → asked ONCE more; still missing →
+    the reason the Návrh cannot close. A project with no database yet (no approved schema, no migrations) is the
+    Auditor's question instead — it reads the design against the document."""
+    found = _schema_checkout(db, state.version_id)
+    if found is None:
+        return None
+    project, version, root = found
+    rel = _database_schema_rel(version.version_number)
+    if (root / rel).is_file() or not database_schema.project_has_database(
+        root, database_schema.kb_root(), project.slug
+    ):
+        return None
+    await invoke_agent_with_parse_retry(
+        db,
+        version_id=state.version_id,
+        role=state.current_actor,
+        stage="navrh",
+        prompt=database_schema_missing(version.version_number, project.slug),
+        recipient="manazer",
+        on_message=on_message,
+    )
+    if (root / rel).is_file():
+        return None
+    return (
+        f"Návrh nemá dokument štruktúry databázy (`{rel}`), hoci aplikácia databázu má — usmerni agenta (Uprav) "
+        "a zopakuj Návrh."
+    )
+
+
+async def _publish_approved_schema(
+    db: Session, state: PipelineState, acting_user: Optional[User]
+) -> Optional[database_schema.PublishResult]:
+    """DEV-7: before a database change counts as approved, Ri approves it and the Knowledge Base holds it.
+
+    Returns ``None`` when the version changes nothing in the database. Raises :class:`OrchestratorError` — and
+    writes nothing — when the approver is not Ri or the Knowledge Base refuses the write."""
+    cmp = _schema_comparison(db, state.version_id)
+    if cmp is None or not cmp.changes:
+        return None
+    if acting_user is None or not database_schema.may_approve(acting_user.role):
+        raise OrchestratorError(SCHEMA_APPROVER_ONLY)
+    project, version, _ = _schema_checkout(db, state.version_id)  # type: ignore[misc]  # cmp implies a checkout
+    publisher = database_schema.KnowledgeBaseSchemaPublisher(database_schema.kb_root())
+    try:
+        # A handful of git commands on the Knowledge Base — off the main loop (ICCINT-74), with a ceiling.
+        result = await run_blocking(
+            publisher.publish,
+            slug=project.slug,
+            project_name=project.name,
+            description=project.description or "",
+            source_path=project.source_path or str(claude_agent.PROJECTS_ROOT / project.slug),
+            content=cmp.version_doc or "",
+            version_number=version.version_number,
+            approved_by=acting_user.username,
+            cap=SCHEMA_PUBLISH_CAP,
+        )
+    except database_schema.SchemaPublishRefused as exc:
+        raise OrchestratorError(f"Štruktúra databázy sa nezapísala do Znalostnej bázy: {exc}") from exc
+    except BlockingWorkTimedOut as exc:
+        raise OrchestratorError(
+            "Zápis štruktúry databázy do Znalostnej bázy neskončil včas — schválenie sa nezapísalo, skús ho znova."
+        ) from exc
+    saved = f", uložené ako {result.commit[:7]}" if result.commit else ""
+    _record_message(
+        db,
+        version_id=state.version_id,
+        stage=state.current_stage,
+        author="system",
+        recipient="manazer",
+        kind="notification",
+        content=(
+            f"Štruktúru databázy schválil {acting_user.username} (Ri) — kokpit ju zapísal do Znalostnej bázy "
+            f"({result.kb_path}{saved})."
+        ),
+        payload={
+            "phase": state.current_stage,
+            "database_schema_published": {"kb_path": result.kb_path, "commit": result.commit, "files": result.changed},
+        },
+    )
+    _schedule_kb_reindex(result.changed)
+    return result
+
+
+def _schedule_kb_reindex(rel_paths: list[str]) -> None:
+    """Re-index the documents just written, in the background; the 15-minute sync loop is the safety net.
+
+    Only for the Knowledge Base the search index mirrors (``settings.knowledge_base_path``): a publish into any
+    other folder — a test's repository — must never put its documents into the live index."""
+    kb = database_schema.kb_root()
+    if not rel_paths or kb.resolve() != Path(settings.knowledge_base_path).resolve():
+        return
+
+    async def _reindex() -> None:
+        try:
+            from backend.rag.indexer import RAGIndexer
+            from backend.services import kb_index_sync
+
+            indexer = RAGIndexer()
+            for rel in rel_paths:
+                await indexer.index_document(str(kb / rel), tenant=kb_index_sync.TENANT, source_file=rel)
+        except Exception:  # noqa: BLE001 — the sync loop re-indexes what this misses
+            logger.exception("DEV-7: re-index of %s failed; the KB sync loop will catch up", rel_paths)
+
+    try:
+        asyncio.get_running_loop().create_task(_reindex())
+    except RuntimeError:  # no running loop (a synchronous caller) — leave it to the sync loop
+        logger.info("DEV-7: no event loop to re-index %s now; the KB sync loop will", rel_paths)
+
+
+def _block_for_schema_approval(db: Session, state: PipelineState, why: str) -> PipelineState:
+    """DEV-7: stop the build for Ri's approval of a database change, saying what changes and who approves it."""
+    cmp = _schema_comparison(db, state.version_id)
+    found = _schema_checkout(db, state.version_id)
+    if cmp is not None and found is not None:
+        project, version, _ = found
+        _record_message(
+            db,
+            version_id=state.version_id,
+            stage=state.current_stage,
+            author="system",
+            recipient="manazer",
+            kind="notification",
+            content=f"{why} {_schema_change_sentence(cmp)}",
+            payload={"phase": state.current_stage, "database_schema": _schema_payload(project, version, cmp)},
+        )
+    state.status = "blocked"
+    state.block_reason = "schema_approval"
+    state.next_action = f"{why} Schváliť ju smie len Ri."
+    db.flush()
+    return state
+
+
 def _persist_navrh_design_doc(db: Session, state: PipelineState, block: PipelineStatusBlock) -> Optional[str]:
     """Persist + verify the Návrh design document at the end of the design-doc turn (CR-V2-011, NAVRH-1).
     Returns a failure reason (→ caller settles ``blocked``, the phase does NOT close) or ``None``.
@@ -3723,6 +3974,9 @@ def dispatch_directive(
     fresh-phase dispatch (``start`` / ``approve_spec`` / ``schvalit`` / ``verdict`` / an ordinary
     pause-``pokracovat``).
     """
+    if action == "schvalit_schemu":
+        # DEV-7: the approval IS the answer to the agent's question — it must reach the resumed task.
+        return _latest_schema_approval(db, version_id)
     if action == "pokracovat":
         # ICCINT-13: a resume after Dedo's framework fix carries a directive (so every phase DISPATCHES it);
         # an ordinary pause-resume returns None and keeps the fresh-phase behaviour it always had.
@@ -8990,6 +9244,15 @@ async def _run_navrh_round(
         db.flush()
         return state
 
+    # 2b. DEV-7: a database app's Návrh carries its whole schema document (asked for once more, then said aloud).
+    schema_err = await _ensure_navrh_schema_document(db, state, on_message=on_message)
+    if schema_err is not None:
+        state.status = "blocked"
+        state.block_reason = "agent_error"
+        state.next_action = schema_err
+        db.flush()
+        return state
+
     # 3. The task plan is NO LONGER generated here (nex-studio-visual, Director 2026-07-13). The Vizuál step
     # keeps refining the app AFTER Návrh, so a plan built now would be stale (it would miss the screens/fields
     # the Manažér adds while walking the live preview). Návrh produces the design DOCUMENT ONLY; the
@@ -9021,11 +9284,37 @@ async def _run_navrh_round(
         return await _settle_for_consultation(
             db, state, source="auditor_upfront", verdict=review_verdict, on_event=on_event, on_message=on_message
         )
-    if _settle_phase_boundary(db, state):
+    # DEV-7: a Návrh that changes the database says so where the Manažér approves it — and never auto-continues,
+    # because only Ri may approve it and approving it is what writes the Knowledge Base.
+    schema = _schema_comparison(db, state.version_id)
+    schema_changes = schema is not None and schema.changes
+    if schema_changes:
+        project, version, _ = _schema_checkout(db, state.version_id)  # type: ignore[misc]
+        note = _record_message(
+            db,
+            version_id=state.version_id,
+            stage="navrh",
+            author="system",
+            recipient="manazer",
+            kind="notification",
+            content=(
+                "Návrh mení štruktúru databázy. "
+                + _schema_change_sentence(schema)  # type: ignore[arg-type]
+                + " Schváliť ju smie len Ri — spolu s Návrhom; kokpit ju potom sám zapíše do Znalostnej bázy."
+            ),
+            payload={"phase": "navrh", "database_schema": _schema_payload(project, version, schema)},  # type: ignore[arg-type]
+        )
+        if on_message is not None:
+            await on_message(note)
+    if not schema_changes and _settle_phase_boundary(db, state):
         return state  # agent_working at the next phase — the auto-chain loop continues
     if state.status != "done":
         state.status = "awaiting_manazer"
-        state.next_action = "Manažér: posúdiť návrhový dokument (Schváliť / Uprav)."
+        state.next_action = (
+            "Manažér: posúdiť návrh — mení aj štruktúru databázy, ktorú schvaľuje len Ri (Schváliť / Uprav)."
+            if schema_changes
+            else "Manažér: posúdiť návrhový dokument (Schváliť / Uprav)."
+        )
         db.flush()
     return state
 
@@ -11224,12 +11513,36 @@ QUALITY_RULES = (
 )
 
 
+def _build_schema_rule(db: Session, version_id: uuid.UUID) -> Optional[str]:
+    """DEV-7: the standing database rule of a Programovanie task — only for an app that has a database."""
+    found = _schema_checkout(db, version_id)
+    if found is None:
+        return None
+    project, version, root = found
+    kb = database_schema.kb_root()
+    if not (
+        database_schema.project_has_database(root, kb, project.slug)
+        or (root / _database_schema_rel(version.version_number)).is_file()
+    ):
+        return None
+    return (
+        "ŠTRUKTÚRA DATABÁZY (SCHEMA_GOVERNANCE): schválená schéma je "
+        f"`{kb}/{database_schema.kb_schema_rel(project.slug)}`. Pred každou migráciou ju porovnaj s tým, čo ideš "
+        "urobiť. Keď potrebuješ niečo, čo v nej nie je (tabuľka, stĺpec, typ, obmedzenie, index), migráciu "
+        f"NEPÍŠ: zapíš celú upravenú schému do `{_database_schema_rel(version.version_number)}`, vráť "
+        "`kind=question` a do poľa `database_schema_change` napíš ľudskou rečou, čo a prečo sa mení — a ZASTAV. "
+        "Schváli ju Ri a kokpit ju zapíše do Znalostnej bázy; potom v úlohe pokračuješ. Keď zmenu neschváli, "
+        "vráť dokument schémy do schválenej podoby a urob úlohu bez nej."
+    )
+
+
 def _directive_for_build_task(
     task: Task,
     cross_cutting_rules: Optional[str],
     prior_failures: list[str],
     flow_type: str = "new_version",
     task_label: Optional[str] = None,
+    schema_rule: Optional[str] = None,
 ) -> str:
     """Per-task brief for the AI Agent's Programovanie SELF-CHECKING loop (CR-V2-012; design §2.1 / §5.1(1)
     "self-check — continuous self-verification while coding, like Dedo").
@@ -11286,6 +11599,8 @@ def _directive_for_build_task(
         "Commitni zmeny a ukonči <<<PIPELINE_STATUS>>> blokom s commits[] + deliverables[] "
         "(F-007-orchestration-cockpit.md §5.3)."
     )
+    if schema_rule:
+        parts.append(schema_rule)
     # ICCINT-114: NEPODMIENENE a v oboch dráhach. Prierezové pravidlá vyššie prichádzajú z Návrhu, ktorý
     # rýchla dráha nemá — bez tohto by na nej nebolo žiadne. A pravidlá, ktoré platia len keď si na ne
     # Manažér spomenie, nie sú pravidlá.
@@ -11944,6 +12259,16 @@ async def _run_build_round(
     # metrics_phase='navrh' keeps the planning effort accounted as design work even though it runs at build time.
     # ONLY the new_version flow: the fast_fix short path skips Návrh entirely and materializes its ONE Task from
     # the directive below (fast_fix.ensure_build_task) — it must never run the heavy EPIC→FEAT→TASK plan passes.
+    # DEV-7: no plan is built on a database schema Ri has not approved — the Vizuál write-back may have changed
+    # the schema document after the Návrh was approved. (Mid-build the agent asks itself, and every finished
+    # task is checked below; this gate is for the start only, so a rejected change can still reach the agent.)
+    if not navrh_plan_materialized(db, version_id):
+        schema = _schema_comparison(db, version_id)
+        if schema is not None and schema.changes:
+            return _block_for_schema_approval(
+                db, state, "Štruktúra databázy sa od schválenia Návrhu zmenila — pred programovaním ju treba schváliť."
+            )
+
     if state.flow_type != "fast_fix" and not navrh_plan_materialized(db, version_id):
         plan_settled = await _generate_incremental_plan(
             db,
@@ -11962,6 +12287,7 @@ async def _run_build_round(
     # Cross-cutting invariants the AI Agent codified once in the Návrh gate_report (re-read each round, threaded
     # into every task brief).
     cross_cutting = _fetch_cross_cutting_rules(db, version_id)
+    schema_rule = _build_schema_rule(db, version_id)  # DEV-7
     # The Manažér's framed return/answer (an ``uprav`` / ``answer`` re-dispatch) seeds attempt 1 of whichever
     # task runs first in THIS dispatch (the resumed task), then is consumed so later turns use generated briefs.
     pending_directive = directive
@@ -12186,13 +12512,23 @@ async def _run_build_round(
                         "Keď pokyn Manažéra vybavíš, pokračuj touto úlohou plánu — správu na konci ťahu "
                         "odovzdávaš za ňu:\n\n"
                         + _directive_for_build_task(
-                            task, cross_cutting, prior_failures, state.flow_type, task_label=_task_full_number(db, task)
+                            task,
+                            cross_cutting,
+                            prior_failures,
+                            state.flow_type,
+                            task_label=_task_full_number(db, task),
+                            schema_rule=schema_rule,
                         )
                     )
                 pending_directive = None  # consume once — later attempts/tasks use generated briefs
             else:
                 prompt = _directive_for_build_task(
-                    task, cross_cutting, prior_failures, state.flow_type, task_label=_task_full_number(db, task)
+                    task,
+                    cross_cutting,
+                    prior_failures,
+                    state.flow_type,
+                    task_label=_task_full_number(db, task),
+                    schema_rule=schema_rule,
                 )
             result = await _dispatch_build_turn(
                 db,
@@ -12267,6 +12603,17 @@ async def _run_build_round(
                 else:
                     prior_failures.append(f"neplatný status blok: {result.reason}")
             elif result.kind in ("question", "blocked"):
+                # DEV-7: a question about a database change the agent already wrote into the version's schema
+                # document is Ri's approval to give — a card, not a free-text answer.
+                if result.database_schema_change:
+                    schema = _schema_comparison(db, version_id)
+                    if schema is not None and schema.changes:
+                        return _block_for_schema_approval(
+                            db,
+                            state,
+                            f"AI Agent (úloha #{task.number}) potrebuje zmeniť štruktúru databázy: "
+                            f"{result.database_schema_change.strip()}",
+                        )
                 # The AI Agent cannot proceed → it asks the Manažér DIRECTLY (no Coordinator relay — design
                 # §2.2). Settle blocked with an agent_question reason so the board offers ``answer``; the
                 # answer threads back into the resumed task on the next dispatch.
@@ -12396,6 +12743,12 @@ async def _run_build_round(
             )
             db.flush()
             return state
+        # DEV-7: a task that changed the database schema without Ri's approval stops the build right after it.
+        schema = _schema_comparison(db, version_id)
+        if schema is not None and schema.changes:
+            return _block_for_schema_approval(
+                db, state, f"Úloha #{_task_full_number(db, task)} zmenila štruktúru databázy bez schválenia."
+            )
         # task done → continue the loop to the next todo task (no Manažér stop between successful tasks)
 
 
@@ -12420,6 +12773,7 @@ async def apply_action(
     version_id: uuid.UUID,
     action: str,
     payload: Optional[dict[str, Any]] = None,
+    acting_user: Optional[User] = None,
 ) -> PipelineState:
     """Apply a Manažér action against the 4-phase build pipeline (v2 design §4.4; CR-V2-009).
 
@@ -12887,6 +13241,10 @@ async def apply_action(
             state.next_action = "Schválenie Vizuálu sa spracúva — skladám dohodnuté do dokumentov."
             db.flush()
             return state
+        # DEV-7: a Návrh that changes the database is approved by Ri, and the approval counts only once the
+        # Knowledge Base holds the schema — a refused write leaves the Návrh unapproved, nothing recorded.
+        if state.current_stage == "navrh":
+            await _publish_approved_schema(db, state, acting_user)
         _record_message(
             db,
             version_id=version_id,
@@ -13206,6 +13564,35 @@ async def apply_action(
             kind="question",
             content=str(text),
             payload=question_payload,
+        )
+        _begin_dispatch(db, state)
+        return state
+
+    if action == "schvalit_schemu":
+        # DEV-7: Ri approves the database change the agent stopped for in Programovanie. The Knowledge Base is
+        # written first; the agent gets the approval as the answer to its question and continues its task.
+        if not (state.status == "blocked" and state.block_reason == "schema_approval"):
+            raise OrchestratorError("Schváliť štruktúru databázy sa dá, len keď na to stavba čaká.")
+        if acting_user is None or not database_schema.may_approve(acting_user.role):
+            raise OrchestratorError(SCHEMA_APPROVER_ONLY)
+        result = await _publish_approved_schema(db, state, acting_user)
+        kb_path = (
+            result.kb_path
+            if result is not None
+            else database_schema.kb_schema_rel(_project_slug_for_version(db, version_id))
+        )
+        _record_message(
+            db,
+            version_id=version_id,
+            stage=state.current_stage,
+            author="manazer",
+            recipient=state.current_actor,
+            kind="answer",
+            content=(
+                f"Schvaľujem zmenu štruktúry databázy — kokpit ju zapísal do Znalostnej bázy ({kb_path}). "
+                "Pokračuj v úlohe; migráciu urob presne podľa schválenej schémy."
+            ),
+            payload={"phase": state.current_stage, "schema_approved": True},
         )
         _begin_dispatch(db, state)
         return state

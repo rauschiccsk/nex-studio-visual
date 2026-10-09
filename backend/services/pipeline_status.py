@@ -537,6 +537,10 @@ class PipelineStatusBlock(BaseModel):
     consultation: Optional[ConsultationBlock] = None
     #: DEV-36: a Vizuál turn (first draft or change) says what the Manažér should check in it. ``None`` elsewhere.
     vizual_checklist: Optional[VizualChecklist] = None
+    #: DEV-7: a Programovanie ``question`` about a database change the agent already wrote into the version's
+    #: schema document — what changes and why, in plain Slovak. The engine stops for Ri's approval instead of a
+    #: free-text answer. ``None`` on every other block.
+    database_schema_change: Optional[str] = Field(default=None, max_length=2000)
 
 
 @dataclass(frozen=True)

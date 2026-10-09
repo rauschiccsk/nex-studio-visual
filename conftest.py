@@ -42,6 +42,21 @@ def _isolate_port_registry(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(port_registry, "PORT_REGISTRY_FILE", absent)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_schema_publishing(tmp_path_factory, monkeypatch):
+    """Keep the suite from ever committing into the LIVE Knowledge Base (DEV-7).
+
+    Approving a database schema commits into the Knowledge Base repository. Every path in the pipeline reaches
+    it through ``database_schema.kb_root()``, so here it points at an empty folder that is no repository: a test
+    that walks into the approval by accident is refused, it never writes. Tests about publishing point it at
+    their own repository explicitly.
+    """
+    from backend.services import database_schema
+
+    empty = tmp_path_factory.mktemp("no-knowledge-base")
+    monkeypatch.setattr(database_schema, "kb_root", lambda: empty)
+
+
 #: Skutočný pracovný priečinok. Počas skúšok doň nesmie ukazovať ŽIADNY modul.
 _SKUTOCNY_PROJECTS_ROOT = Path("/opt/projects")
 

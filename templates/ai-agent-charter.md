@@ -247,6 +247,17 @@ Tri úrovne, každá s vlastnou disciplínou zápisu (`design.md` §5.2; mechani
   `project_memory.reindex_shared_kb_write`, tenant `icc`) — žiadny drift filesystem ↔ vector store
   (CLAUDE.md §13).
 
+- **(4) Štruktúra databázy (DEV-7, `SCHEMA_GOVERNANCE.md`)** — schválená schéma projektu je
+  `/home/icc/knowledge/projects/<slug>/DATABASE_SCHEMAS.md` a je jediný zdroj pravdy o databáze.
+  - **V Návrhu** aplikácie s databázou zapíšeš CELÚ cieľovú schému verzie (nie len zmenu) do
+    `docs/specs/versions/v<verzia>/DATABASE_SCHEMAS.md` — vedľa návrhového dokumentu. Schvaľuje ju **Ri spolu
+    s Návrhom** a kokpit ju po schválení **sám zapíše do KB**. Ty do KB nezapisuješ a Deda o prenos nežiadaš.
+  - **V Programovaní** pred každou migráciou porovnaj, čo ideš urobiť, so schválenou schémou v KB. Keď potrebuješ
+    niečo, čo v nej nie je, **migráciu nepíš**: zapíš celú upravenú schému do toho istého súboru verzie, vráť
+    `kind=question` s poľom `database_schema_change` (ľudskou rečou čo a prečo) a **ZASTAV**. Manažér uvidí kartu,
+    Ri ju schváli a kokpit ju zapíše do KB; potom pokračuješ. Keď ju neschváli, vráť dokument do schválenej
+    podoby a urob úlohu bez zmeny.
+
 > **V Prípravé, Návrhu a Programovaní je zdieľaný KB LEN NA ČÍTANIE.** Tie tri fázy bežia v izolovanom
 > priestore (ICCINT-16): `/home/icc/knowledge` je pripojený read-only, RAG cez `scripts/rag_query.py`
 > funguje. Bod **(3)** — zámerný príspevok do zdieľaného KB + reindex — tam **zlyhá na úrovni jadra**
@@ -299,6 +310,9 @@ CR-V2-006/OQ-10 + CR-1) — deterministický; pri malformed bloku engine nastav�
   odchýlka — presné množiny drží `backend/db/models/pipeline.py` (`STAGE_VALUES`) a
   `backend/services/pipeline_status.py` (`STAGES` / `BLOCK_KINDS`).
   Engine ti pri každom kole pripomenie presnú hodnotu `stage` pre aktuálnu fázu — použi ju doslovne.
+- `database_schema_change` (len pri `kind=question` v Programovaní): čo a prečo sa v štruktúre databázy mení,
+  ľudskou rečou — upravenú schému si už zapísal do dokumentu verzie (§3 bod 4). Engine z otázky spraví kartu
+  na schválenie pre Ri namiesto voľnej odpovede.
 - `kind=consultation` nesie frontu rozhodnutí (`consultation.decisions`, každé **práve jednu**
   odporúčanú možnosť) — nie `question`. `kind=framework_issue` (eskalácia Dedovi, keď oprava vyžaduje
   zmenu samotného NEX Studia) **musí** mať neprázdny `question` so správou pre Deda.

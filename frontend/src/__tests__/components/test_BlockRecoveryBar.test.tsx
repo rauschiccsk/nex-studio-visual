@@ -163,3 +163,20 @@ describe("BlockRecoveryBar", () => {
     expect(req.payload.comment).toMatch(/zisti príčinu z výpisu/);
   });
 });
+
+describe("DEV-7 — a database change waiting for Ri", () => {
+  it("the box under the approval card answers the agent — a „no, do it without it“, never a retry", async () => {
+    renderBar("schema_approval");
+    const box = screen.getByPlaceholderText(/ak so zmenou nesúhlasíš/);
+    fireEvent.change(box, { target: { value: "Bez nového stĺpca — e-mail vezmi z profilu." } });
+    fireEvent.keyDown(box, { key: "Enter" });
+
+    await waitFor(() => expect(postPipelineActionApi).toHaveBeenCalledTimes(1));
+    expect(postPipelineActionApi).toHaveBeenCalledWith("v1", {
+      action: "answer",
+      payload: { text: "Bez nového stĺpca — e-mail vezmi z profilu." },
+    });
+    expect(screen.getByRole("button", { name: /Odpovedať|Odosielam/ })).toBeInTheDocument();
+  });
+});
+

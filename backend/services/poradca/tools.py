@@ -46,6 +46,7 @@ ACTION_LABELS: dict[str, str] = {
     "verdict": "verdikt Audítora (PASS / FAIL)",
     "ask": "otázka pre AI Agenta",
     "answer": "Odpovedať (agent sa pýta)",
+    "schvalit_schemu": "Schváliť štruktúru databázy (len Ri)",
     "pause": "Pozastaviť",
     "decide": "výber na karte rozhodnutia",
     "overit_znovu": "Over znova",

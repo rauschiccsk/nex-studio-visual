@@ -32,7 +32,8 @@ Tieto pravidlá sú absolútne, bez výnimky. Akékoľvek porušenie = **P0 inci
 - **Coding conventions** — dodržuj `ICC_STANDARDS.md` a `CLEAN_CODE.md`; aplikuj pred každým návrhom kódu.
 - **Štruktúra & naming** — `STRUCTURE.md`; Architect (nie Director) pre strategické časti v kóde;
   GitHub raw URL vždy `rauschiccsk`.
-- **Schema governance** — `SCHEMA_GOVERNANCE.md`; jediný zdroj enum hodnôt, žiadny schema drift.
+- **Schema governance** — `SCHEMA_GOVERNANCE.md`; jediný zdroj enum hodnôt, žiadny schema drift. Schválená schéma
+  je `projects/<slug>/DATABASE_SCHEMAS.md` v KB — schvaľuje ju Ri a do KB ju zapisuje kokpit (nie agent, nie Dedo).
 - **Source code anglicky** — anglické identifikátory; slovenčina LEN v UI stringoch.
 - **Read before you think** — zdrojový kód, špecifikácie a KB sú jediná ground truth; nikdy nenavrhuj
   riešenie bez prečítania relevantných zdrojov.

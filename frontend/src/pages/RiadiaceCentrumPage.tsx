@@ -34,6 +34,7 @@ import SpecApprovalBar from "@/components/riadiace/SpecApprovalBar";
 import SchvalitBar from "@/components/riadiace/SchvalitBar";
 import DecisionCardsBar from "@/components/riadiace/DecisionCardsBar";
 import BlockRecoveryBar from "@/components/riadiace/BlockRecoveryBar";
+import SchemaApprovalBar from "@/components/riadiace/SchemaApprovalBar";
 import { blockRecoveryOwnsInput, inputOwner } from "@/components/riadiace/blockRecovery";
 import NahlasitZnovaBar from "@/components/riadiace/NahlasitZnovaBar";
 import ZopakovatKonzultaciuBar from "@/components/riadiace/ZopakovatKonzultaciuBar";
@@ -241,6 +242,12 @@ export default function RiadiaceCentrumPage() {
         {/* ICCINT-25: right under the cards, because it is the same surface failing — when the cards could
             not be built, this is how you ask for them again instead of being left with the raw findings. */}
         <ZopakovatKonzultaciuBar
+          board={board}
+          versionId={versionId}
+          onBoard={setBoard}
+        />
+        {/* DEV-7: a database change waiting for Ri — „Schváliť" here, the answer box right below it. */}
+        <SchemaApprovalBar
           board={board}
           versionId={versionId}
           onBoard={setBoard}

@@ -72,7 +72,10 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
 
   const state = board?.state ?? null;
   const reason = state?.block_reason ?? null;
-  const isQuestion = reason === "agent_question";
+  // DEV-7: a database change waiting for Ri is still the agent's question — „Schváliť" sits on SchemaApprovalBar
+  // above, and this box takes the other answer: do it without the change, or differently.
+  const isSchema = reason === "schema_approval";
+  const isQuestion = reason === "agent_question" || isSchema;
   const isError = isErrorReason(reason);
   const isCheck = isCheckReason(reason);
 
@@ -167,7 +170,9 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
               setText(e.target.value);
             }}
             placeholder={
-              isQuestion
+              isSchema
+                ? "Tvoja odpoveď, ak so zmenou nesúhlasíš — ako to urobiť bez nej… (Enter odošle)"
+                : isQuestion
                 ? "Tvoja odpoveď… (Enter odošle, Shift+Enter nový riadok)"
                 : "Usmernenie k oprave (nepovinné) — Enter odošle, Shift+Enter nový riadok"
             }

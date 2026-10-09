@@ -340,6 +340,7 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         spec_approved=spec_approved,
         vizual_url=vizual_url,
         vizual_checklists=orchestrator.vizual_checklists(db, version_id),
+        database_schema=orchestrator.database_schema_status(db, version_id),
         dedo_proposal=(
             DedoProposalRead(
                 message_id=proposal.id,
@@ -502,6 +503,7 @@ async def _apply_and_publish(
     payload: Optional[dict],
     *,
     on_applied: Optional[Callable[[PipelineState], None]] = None,
+    acting_user: Optional[User] = None,
 ) -> PipelineState:
     """Run one Manažér action and publish its consequences — the ONE path an action takes to the engine.
 
@@ -527,7 +529,9 @@ async def _apply_and_publish(
         row for row in db.execute(select(PipelineMessage.id).where(PipelineMessage.version_id == version_id)).scalars()
     }
     try:
-        state = await orchestrator.apply_action(db, version_id=version_id, action=action, payload=payload)
+        state = await orchestrator.apply_action(
+            db, version_id=version_id, action=action, payload=payload, acting_user=acting_user
+        )
     except OrchestratorError as exc:
         db.rollback()
         raise _map_orch_error(exc) from exc
@@ -571,7 +575,7 @@ async def post_action(
 ) -> PipelineBoardRead:
     """Apply a Director action; broadcast the resulting state + new messages."""
     authz.assert_version_access(db, current_user, version_id)
-    await _apply_and_publish(db, version_id, payload.action, payload.payload)
+    await _apply_and_publish(db, version_id, payload.action, payload.payload, acting_user=current_user)
     return _board(db, version_id)
 
 
@@ -752,7 +756,7 @@ async def send_dedo_proposal(
             sent_message_id=sent.id if sent is not None else None,
         )
 
-    await _apply_and_publish(db, version_id, action, action_payload, on_applied=_mark_sent)
+    await _apply_and_publish(db, version_id, action, action_payload, on_applied=_mark_sent, acting_user=current_user)
     logger.info("Dedo proposal %s sent by %s as %r on version %s", proposal.id, current_user.id, action, version_id)
     return _board(db, version_id)
 

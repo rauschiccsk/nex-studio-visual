@@ -51,6 +51,8 @@ export const BLOCKED_INPUT_OWNER: Record<BlockReason, InputOwner | null> = {
   parse_exhaustion: "odpoved",
   check_failed: "odpoved",
   decision_needed: "karta",
+  // DEV-7: „Schváliť" is a button on SchemaApprovalBar; the answer box below it takes a „no, do it this way".
+  schema_approval: "odpoved",
   framework_issue: null,
 };
 

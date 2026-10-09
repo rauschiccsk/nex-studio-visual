@@ -103,6 +103,8 @@ BLOCK_REASON_VALUES = (
     "parse_exhaustion",
     "framework_issue",
     "check_failed",
+    # DEV-7: the AI Agent needs a database change only Ri may approve — a card with „Schváliť", not a free answer.
+    "schema_approval",
 )
 MESSAGE_KIND_VALUES = (
     "kickoff",

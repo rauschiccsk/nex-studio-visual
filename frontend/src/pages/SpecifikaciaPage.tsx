@@ -22,7 +22,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { FileText, FolderOpen } from "lucide-react";
 
 import { useActiveContextStore } from "@/store/activeContextStore";
@@ -119,6 +119,9 @@ function filterDeliverableDocs(all: ProjectSpecDoc[], slug: string): ProjectSpec
 
 export default function SpecifikaciaPage() {
   const navigate = useNavigate();
+  // DEV-7: `?doc=<path in the project>` opens that document — the approval bars link straight to the schema.
+  const [searchParams] = useSearchParams();
+  const wantedDoc = searchParams.get("doc");
   const selectedProject = useActiveContextStore((s) => s.selectedProject);
   const selectedVersion = useActiveContextStore((s) => s.selectedVersion);
 
@@ -164,7 +167,8 @@ export default function SpecifikaciaPage() {
         setDocs(filtered);
         // Default to the specification (else the first spec doc, else the first deliverable) — unchanged
         // behaviour for spec-only projects.
-        const def = specDocs.find((d) => d.filename === "specification.md") ?? filtered[0];
+        const wanted = wantedDoc ? filtered.find((d) => repoPath(d, slug) === wantedDoc) : undefined;
+        const def = wanted ?? specDocs.find((d) => d.filename === "specification.md") ?? filtered[0];
         setActivePath(def ? repoPath(def, slug) : null);
       })
       .catch((err: unknown) => {
@@ -178,7 +182,7 @@ export default function SpecifikaciaPage() {
     return () => {
       cancelled = true;
     };
-  }, [slug, versionNumber]);
+  }, [slug, versionNumber, wantedDoc]);
 
   // Load the selected document's content (same endpoint as before), whenever the active pick changes.
   useEffect(() => {

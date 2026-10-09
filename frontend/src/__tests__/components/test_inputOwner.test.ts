@@ -20,7 +20,10 @@ const REASONS = Object.keys(BLOCKED_INPUT_OWNER) as BlockReason[];
 
 describe("inputOwner", () => {
   it.each(REASONS)("%s: the recovery bar owns it exactly when it is a question, a failure or a failed check", (reason) => {
-    const owned = reason === "agent_question" || isErrorReason(reason) || isCheckReason(reason);
+    // DEV-7: a database change waiting for Ri is the agent's question too — „Schváliť" is a button above the box,
+    // and the box takes the other answer.
+    const question = reason === "agent_question" || reason === "schema_approval";
+    const owned = question || isErrorReason(reason) || isCheckReason(reason);
     expect(blockRecoveryOwnsInput({ status: "blocked", block_reason: reason })).toBe(owned);
     expect(inputOwner({ status: "blocked", block_reason: reason, current_stage: "navrh" }) === "odpoved").toBe(owned);
   });

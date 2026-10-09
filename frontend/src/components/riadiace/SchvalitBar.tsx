@@ -14,12 +14,14 @@
 
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FileText } from "lucide-react";
+import { Database, FileText } from "lucide-react";
 
 import { postPipelineActionApi, type PipelineBoard, type PipelineActionName } from "@/services/api/pipeline";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
 import { useVizualChecksStore, vizualCheckKey } from "@/store/vizualChecksStore";
+import { useAuthStore } from "@/store/authStore";
+import { schemaChangeSentence, schemaDocLink, SCHEMA_APPROVER_ONLY } from "./databaseSchema";
 
 const NOTHING_CHECKED: string[] = [];
 
@@ -36,6 +38,7 @@ export default function SchvalitBar({ board, versionId, onBoard }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<HumanError | null>(null);
   const checked = useVizualChecksStore((s) => s.checked[versionId] ?? NOTHING_CHECKED);
+  const role = useAuthStore((s) => s.user?.role);
 
   // Honest-by-construction gate: the bar exists ONLY when the backend offers `schvalit` right now.
   if (!board?.available_actions?.includes("schvalit")) return null;
@@ -62,6 +65,9 @@ export default function SchvalitBar({ board, versionId, onBoard }: Props) {
           ? "Schváliť vizuál"
           : "Schváliť plán";
   const approveBusyLabel = stage === "programovanie" ? "Posúvam…" : "Schvaľujem…";
+  // DEV-7: a Návrh that changes the database is approved by Ri alone, and approving it writes the Knowledge Base.
+  const schema = stage === "navrh" && board.database_schema?.changes ? board.database_schema : null;
+  const mayApprove = !schema || (!!role && role === schema.approver_role);
   // DEV-36: how much of what the Vizuál lists to check he has ticked. Only items that still exist count (a
   // stale tick never inflates it), and it never blocks the approval — he decides.
   const checkKeys = isVizual
@@ -109,6 +115,24 @@ export default function SchvalitBar({ board, versionId, onBoard }: Props) {
         </button>
       </div>
 
+      {schema && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--color-border-default)] px-3 py-2 text-xs text-[var(--color-text-secondary)]">
+          <Database className="h-3.5 w-3.5 flex-shrink-0 text-[var(--color-accent-primary)]" aria-hidden="true" />
+          <span className="flex-1">
+            Návrh mení štruktúru databázy. {schemaChangeSentence(schema)} Schválením Návrhu sa schváli aj ona a
+            kokpit ju zapíše do Znalostnej bázy.
+          </span>
+          <button
+            type="button"
+            onClick={() => navigate(schemaDocLink(schema))}
+            className="shrink-0 rounded-lg border border-[var(--color-border-default)] px-3 py-1 font-medium transition-colors hover:bg-[var(--color-surface-hover)]"
+          >
+            Prezrieť štruktúru databázy
+          </button>
+        </div>
+      )}
+      {!mayApprove && <p className="text-xs text-[var(--color-text-muted)]">{SCHEMA_APPROVER_ONLY}</p>}
+
       <div className="flex items-center gap-2">
         {checkKeys.length > 0 && (
           <span className="ml-auto text-xs text-[var(--color-text-secondary)]">
@@ -141,7 +165,7 @@ export default function SchvalitBar({ board, versionId, onBoard }: Props) {
         <button
           type="button"
           onClick={() => submit("schvalit", "Schválenie zlyhalo")}
-          disabled={submitting}
+          disabled={submitting || !mayApprove}
           className={`shrink-0 rounded-lg bg-primary-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50 ${
             isVizual && checkKeys.length === 0 ? "ml-auto" : ""
           }`}

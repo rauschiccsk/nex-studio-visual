@@ -17,8 +17,10 @@ import SpecifikaciaPage from "@/pages/SpecifikaciaPage";
 
 // ── Hoisted mocks ─────────────────────────────────────────────────────────────
 
-const { getProjectSpecContentMock, listProjectSpecsMock, getPipelineBoardApiMock, contextMock } = vi.hoisted(
+const { getProjectSpecContentMock, listProjectSpecsMock, getPipelineBoardApiMock, contextMock, search } = vi.hoisted(
   () => ({
+    // DEV-7: the page reads `?doc=` — the address the approval bars open it with.
+    search: { value: "" },
     getProjectSpecContentMock: vi.fn(),
     listProjectSpecsMock: vi.fn(),
     getPipelineBoardApiMock: vi.fn(),
@@ -42,7 +44,11 @@ const SPEC_DOC = {
 
 vi.mock("react-router-dom", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react-router-dom")>();
-  return { ...actual, useNavigate: () => vi.fn() };
+  return {
+    ...actual,
+    useNavigate: () => vi.fn(),
+    useSearchParams: () => [new URLSearchParams(search.value), vi.fn()],
+  };
 });
 vi.mock("@/store/activeContextStore", () => ({
   useActiveContextStore: (selector: (s: typeof contextMock) => unknown) => selector(contextMock),
@@ -202,5 +208,41 @@ describe("SpecifikaciaPage without a pinned version", () => {
 
     expect(await screen.findByText(/Zatiaľ tu nie sú žiadne dokumenty/)).toBeInTheDocument();
     expect(screen.queryByText(/viazané na verziu/)).not.toBeInTheDocument();
+  });
+});
+
+describe("DEV-7 — the approval bars open the schema document directly", () => {
+  const SCHEMA_DOC = {
+    relative_path: "demo/docs/specs/versions/v2.0.0/DATABASE_SCHEMAS.md",
+    filename: "DATABASE_SCHEMAS.md",
+    category: "docs/specs/versions/v2.0.0",
+    size_bytes: 42,
+    is_directory: false,
+  };
+
+  beforeEach(() => {
+    search.value = "";
+    getProjectSpecContentMock.mockReset().mockResolvedValue({ is_text: true, content: "# Schéma" });
+    listProjectSpecsMock.mockReset().mockResolvedValue({ documents: [SPEC_DOC, SCHEMA_DOC], count: 2 });
+    getPipelineBoardApiMock.mockReset().mockResolvedValue({ spec_approved: true });
+  });
+
+  it("`?doc=` opens that document instead of the specification", async () => {
+    search.value = "doc=docs%2Fspecs%2Fversions%2Fv2.0.0%2FDATABASE_SCHEMAS.md";
+
+    render(<SpecifikaciaPage />);
+
+    await waitFor(() =>
+      expect(getProjectSpecContentMock).toHaveBeenCalledWith("demo", "docs/specs/versions/v2.0.0/DATABASE_SCHEMAS.md"),
+    );
+    expect(getProjectSpecContentMock).not.toHaveBeenCalledWith("demo", "docs/specs/versions/v2.0.0/specification.md");
+  });
+
+  it("without `?doc=` the specification opens, as before", async () => {
+    render(<SpecifikaciaPage />);
+
+    await waitFor(() =>
+      expect(getProjectSpecContentMock).toHaveBeenCalledWith("demo", "docs/specs/versions/v2.0.0/specification.md"),
+    );
   });
 });

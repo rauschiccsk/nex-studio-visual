@@ -38,6 +38,7 @@ SHELLING_MODULES = {
     "ci_status",
     "claude_agent",
     "create_project_postscaffold",
+    "database_schema",
     "git_state",
     "instance_adoption",
     "nexshared",

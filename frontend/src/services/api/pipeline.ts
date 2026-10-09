@@ -139,6 +139,23 @@ export interface VizualChecklist {
   seq?: number;
 }
 
+// DEV-7: the version's database schema against the approved one in the Knowledge Base — what the Manažér
+// approves when the Návrh or a Programovanie stop changes the database. Mirrors backend DatabaseSchemaRead.
+export interface DatabaseSchema {
+  /** The version's schema document, relative to the project (opens on the Špecifikácia page). */
+  path: string;
+  /** Where the cockpit writes it in the Knowledge Base once it is approved. */
+  kb_path: string;
+  /** false — the project's first schema; nothing is in the Knowledge Base yet. */
+  kb_exists: boolean;
+  /** The document differs from the approved one: approving the step approves the database change. */
+  changes: boolean;
+  added_lines: number;
+  removed_lines: number;
+  /** The only role that may approve it (`ri`, icc/SCHEMA_GOVERNANCE.md). */
+  approver_role: string;
+}
+
 export interface PipelineBoard {
   state: PipelineState | null;
   recent_messages: PipelineMessage[];
@@ -179,6 +196,8 @@ export interface PipelineBoard {
   // scrolled out of the tail would silently stop being offered. DedoProposalBar renders IF AND ONLY IF
   // this is set — so an existing proposal is always on screen, and a handled one never comes back.
   dedo_proposal?: DedoProposal | null;
+  // DEV-7: the version's database schema — absent/null when the version has no schema document.
+  database_schema?: DatabaseSchema | null;
 }
 
 // ── action requests ──────────────────────────────────────────────────────────
@@ -199,6 +218,7 @@ export type PipelineActionName =
   | "verdict" // the Auditor's Verifikácia verdict (PASS / FAIL)
   | "ask" // open a direct AI-Agent consult
   | "answer" // answer an agent QUESTION on a blocked state
+  | "schvalit_schemu" // DEV-7: Ri approves the database change the AI Agent stopped for (schema_approval)
   | "pause" // cooperative pause of the Programovanie loop
   | "decide" // CR-V2-041: pick one consultation Decision Card option (decision_needed)
   | "overit_znovu" // CR-V2-057: "Over znova" — re-verify a drifted version (re-run Verifikácia vs current HEAD)

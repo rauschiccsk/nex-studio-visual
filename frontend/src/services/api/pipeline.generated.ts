@@ -3950,6 +3950,28 @@ export interface components {
             subdomain?: string | null;
         };
         /**
+         * DatabaseSchemaRead
+         * @description The version's database schema against the approved one in the Knowledge Base (DEV-7) — what the Manažér
+         *     approves when the Návrh or a Programovanie stop changes the database. ``approver_role`` is the only role that
+         *     may approve it (``icc/SCHEMA_GOVERNANCE.md``); the screen greys the approval out for anyone else.
+         */
+        DatabaseSchemaRead: {
+            /** Added Lines */
+            added_lines: number;
+            /** Approver Role */
+            approver_role: string;
+            /** Changes */
+            changes: boolean;
+            /** Kb Exists */
+            kb_exists: boolean;
+            /** Kb Path */
+            kb_path: string;
+            /** Path */
+            path: string;
+            /** Removed Lines */
+            removed_lines: number;
+        };
+        /**
          * DedoBuildRead
          * @description One build as Dedo needs to see it: which project, where it stands, and why it is stuck.
          *
@@ -5129,6 +5151,7 @@ export interface components {
              */
             build_open_findings: number;
             current_task?: components["schemas"]["BoardTask"] | null;
+            database_schema?: components["schemas"]["DatabaseSchemaRead"] | null;
             dedo_proposal?: components["schemas"]["DedoProposalRead"] | null;
             /** Recent Messages */
             recent_messages?: components["schemas"]["PipelineMessageRead"][];
@@ -5230,7 +5253,7 @@ export interface components {
          */
         PipelineStateRead: {
             /** Block Reason */
-            block_reason?: ("agent_question" | "decision_needed" | "agent_error" | "system_error" | "parse_exhaustion" | "framework_issue" | "check_failed") | null;
+            block_reason?: ("agent_question" | "decision_needed" | "agent_error" | "system_error" | "parse_exhaustion" | "framework_issue" | "check_failed" | "schema_approval") | null;
             /**
              * Created At
              * Format: date-time

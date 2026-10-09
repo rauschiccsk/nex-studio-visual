@@ -173,6 +173,20 @@ class VizualChecklistRead(BaseModel):
     not_verifiable: list[str] = []
 
 
+class DatabaseSchemaRead(BaseModel):
+    """The version's database schema against the approved one in the Knowledge Base (DEV-7) — what the Manažér
+    approves when the Návrh or a Programovanie stop changes the database. ``approver_role`` is the only role that
+    may approve it (``icc/SCHEMA_GOVERNANCE.md``); the screen greys the approval out for anyone else."""
+
+    path: str
+    kb_path: str
+    kb_exists: bool
+    changes: bool
+    added_lines: int
+    removed_lines: int
+    approver_role: str
+
+
 class PipelineBoardRead(BaseModel):
     """Vývoj board snapshot: current 5-phase state + the most recent messages (CR-V2-021).
 
@@ -233,6 +247,8 @@ class PipelineBoardRead(BaseModel):
     #: DEV-36: every list of what to check in the Vizuál, oldest first — read from the database, so the count at
     #: „Schváliť vizuál" covers them all even when the first one fell out of ``recent_messages``.
     vizual_checklists: list[VizualChecklistRead] = []
+    #: DEV-7: the version's database schema — ``None`` when the version has no schema document.
+    database_schema: Optional[DatabaseSchemaRead] = None
     #: ICCINT-24: the open proposal from our technical team, or ``None`` when there is none (the usual
     #: case). Honest-by-construction: the cockpit bar renders IF AND ONLY IF this field is set, so a
     #: proposal can never be silently pending behind a screen that offers nothing — and a handled one

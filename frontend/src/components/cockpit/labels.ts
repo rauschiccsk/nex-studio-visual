@@ -138,6 +138,8 @@ export const BLOCK_REASON_LABELS: Record<BlockReason, string> = {
   // Every other label here names a culprit, which is why this needed its own: on 29.08.2026 the boot re-check
   // borrowed `agent_error` and the screen read "Niečo zlyhalo — Agent zlyhal" over an agent whose fix worked.
   check_failed: "Kontrola neprešla",
+  // DEV-7: the agent needs a database change only Ri may approve — a card, not a free-text question.
+  schema_approval: "Treba schváliť štruktúru databázy",
   // A framework_issue means the bug is in NEX Studio itself (not the project) — our technical team resolves it.
   // Plain Slovak, no internal "Dedo"/"framework" jargon (a non-expert Manažér doesn't know who "Dedo" is). The
   // Manažér's one concrete move is "Nahlásiť znova" (NahlasitZnovaBar); it reads as a system/blocked red state.

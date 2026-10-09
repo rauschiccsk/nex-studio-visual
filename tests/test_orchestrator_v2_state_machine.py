@@ -516,6 +516,9 @@ def test_apply_action_is_sole_mutator_grep_guard():
             "ask",
             "answer",
             "pause",
+            # DEV-7: + "schvalit_schemu" (Ri approves the database change the AI Agent stopped for — the
+            # Knowledge Base is written first, then the build continues). Advancing: the agent resumes.
+            "schvalit_schemu",
             "decide",
             "na_riadnu_verziu",
             "overit_znovu",

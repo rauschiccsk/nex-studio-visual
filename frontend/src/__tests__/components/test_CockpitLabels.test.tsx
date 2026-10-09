@@ -35,8 +35,11 @@ describe("cockpit block_reason phrases", () => {
       // ICCINT-43: + "check_failed" — a check the ENGINE ran came back negative. Its phrase is the only one
       // here that names nobody, which is exactly why it could not keep borrowing "Agent zlyhal".
       "check_failed",
+      // DEV-7: + "schema_approval" — a database change only Ri may approve; a card with „Schváliť", not a question.
+      "schema_approval",
     ];
     for (const r of reasons) expect(BLOCK_REASON_LABELS[r]).toBeTruthy();
+    expect(BLOCK_REASON_LABELS.schema_approval).toBe("Treba schváliť štruktúru databázy");
     expect(BLOCK_REASON_LABELS.agent_question).toBe("Agent sa pýta");
     expect(BLOCK_REASON_LABELS.agent_error).toBe("Agent zlyhal");
     expect(BLOCK_REASON_LABELS.check_failed).toBe("Kontrola neprešla");

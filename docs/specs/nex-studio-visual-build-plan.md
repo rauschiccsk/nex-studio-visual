@@ -44,6 +44,19 @@ to prehliadač) a pri „Schváliť vizuál“ stojí „Skontrolované X z N“
 zoznamy verzie z databázy (`vizual_checklists`), nie z posledných 50 správ; Poradca ich vidí v nástroji `stavba`,
 kým je stavba vo Vizuáli.
 
+**Štruktúra databázy (v4.43.13, DEV-7).** `icc/SCHEMA_GOVERNANCE.md` robí zo schválenej schémy
+`projects/<slug>/DATABASE_SCHEMAS.md` v Znalostnej báze jediný zdroj pravdy a schvaľovanie dáva výlučne Ri. Kokpit
+to nedodržiaval: schéma dedo-home sa 02.10.2026 schválila voľným textom a do Znalostnej bázy ju preniesol Dedo
+ručne; schéma NEX Inboxu v nej ostala na v0.1.0, hoci aplikácia má 25 migrácií. Odteraz: v Návrhu aplikácie
+s databázou agent zapíše CELÚ cieľovú schému verzie do `docs/specs/versions/v<N>/DATABASE_SCHEMAS.md` (chýba →
+jedno dopýtanie, potom Návrh stojí s dôvodom; pri projekte bez databázy to posudzuje Audítor). Návrh, ktorý schému
+mení, sa schvaľuje len rolou Ri a jeho schválenie najprv zapíše Znalostnú bázu (`database_schema.KnowledgeBaseSchemaPublisher`:
+dokument + riadok v tabuľke „Kde sú schémy“ + riadok v `projects/INDEX.md`, commit len týchto súborov cez súkromný
+index, cudzie neuložené zmeny ostanú nedotknuté; odmietnutý zápis nechá Návrh neschválený). V Programovaní agent
+pri potrebe zmeny zapíše upravenú schému a vráti otázku s `database_schema_change` → stavba stojí s
+`block_reason=schema_approval`, Ri schváli akciou `schvalit_schemu` (zápis do Znalostnej bázy, potom pokračuje);
+zmena schémy bez schválenia sa zastaví po úlohe a pri štarte Programovania (zmena pri Vizuáli).
+
 **Vizuál — prvotriedna jednotka:**
 - **Typovaný:** `FE` (frontend appky — má každý projekt) · `WE` (webend — webshop, web pre mobilnú appku…). Systém typov **rozšíriteľný** pre budúce druhy.
 - **1..N na projekt**, rôznych typov. Každý vizuál = vlastný nasaditeľný frontend s vlastným publikom/URL.
