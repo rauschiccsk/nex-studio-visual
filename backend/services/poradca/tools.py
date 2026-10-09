@@ -69,6 +69,16 @@ _KB_DOC_CHARS = 40_000
 _DB_ROWS = 200
 _DB_TIMEOUT_S = 10
 _CMD_TIMEOUT_S = 30
+#: DEV-33: the Zásobník as the screen names it (BacklogPage) — Poradca speaks to the Manažér in his words.
+_BACKLOG_LIMIT = 200
+_BACKLOG_DESCRIPTION_CHARS = 200
+_BACKLOG_STATUS = {
+    "open": "Otvorené",
+    "included": "Vo verzii",
+    "realized": "Realizované vo verzii",
+    "rejected": "Zamietnuté",
+}
+_BACKLOG_PRIORITY = {"low": "nízka", "medium": "stredná", "high": "vysoká", "critical": "kritická"}
 
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 _UAT_DB_ROLE = "poradca_ro"
@@ -197,6 +207,13 @@ def _vizual_checklist_lines(checklists: list) -> list[str]:
     return out
 
 
+def _requirements(n: int) -> str:
+    """„1 požiadavka", „3 požiadavky", „5 požiadaviek" — the Slovak plural the screen would say."""
+    if n == 1:
+        return "1 požiadavka"
+    return f"{n} požiadavky" if 2 <= n <= 4 else f"{n} požiadaviek"
+
+
 class PoradcaTools:
     """Nástroje jednej otázky — viazané na projekt, verziu rozhovoru a človeka, ktorý sa pýta."""
 
@@ -275,6 +292,40 @@ class PoradcaTools:
                     text = text[:_MESSAGE_CHARS] + " …"
                 when = msg.created_at.strftime("%d.%m. %H:%M") if msg.created_at else ""
                 lines.append(f"— [{when}] {msg.author} → {msg.recipient} ({msg.kind}, fáza {msg.stage}):\n{text}")
+            return "\n".join(lines)
+
+    # ── zásobník ───────────────────────────────────────────────────────────────
+
+    async def zasobnik(self, args: dict) -> str:
+        """DEV-33: the project's Zásobník, so Poradca names a requirement that is already there (REQ-N) instead of
+        proposing it again — 08.10.2026 it offered the credit-note requirement a second time, and the click
+        „Uložiť do Zásobníka" would have created a duplicate of REQ-1. Read through the backlog service the
+        Zásobník screen uses, never a copy of its query."""
+        from backend.services import backlog as backlog_service
+
+        with SessionLocal() as db:
+            items = backlog_service.list_backlog(db, project_id=self.project_id, limit=_BACKLOG_LIMIT)
+            if not items:
+                return "Zásobník projektu je prázdny."
+            numbers = {
+                v.id: v.version_number
+                for v in db.execute(select(Version).where(Version.project_id == self.project_id)).scalars()
+            }
+            lines = [f"Zásobník projektu — {_requirements(len(items))} (REQ-číslo, stav, názov, popis):"]
+            for item in items:
+                status = _BACKLOG_STATUS.get(item.status, item.status)
+                if item.status in ("included", "realized") and item.version_id in numbers:
+                    status += f" {numbers[item.version_id]}"
+                line = (
+                    f"REQ-{item.number} [{status}, priorita {_BACKLOG_PRIORITY.get(item.priority, item.priority)}] "
+                    f"{item.title}"
+                )
+                description = " ".join((item.description or "").split())
+                if description:
+                    if len(description) > _BACKLOG_DESCRIPTION_CHARS:
+                        description = description[:_BACKLOG_DESCRIPTION_CHARS].rstrip() + " …"
+                    line += f" — {description}"
+                lines.append(line)
             return "\n".join(lines)
 
     async def plan_uloh(self, args: dict) -> str:
@@ -612,6 +663,15 @@ def build_tools(*, project_id: UUID, version_id: Optional[UUID], user_id: UUID) 
             _schema(verzia),
             t.plan_uloh,
             lambda a: f"verzia {a.get('verzia') or 'rozhovoru'}",
+        ),
+        Tool(
+            "zasobnik",
+            "Zásobník projektu: požiadavky REQ-číslo so stavom (otvorená, vo verzii, realizovaná, zamietnutá), "
+            "prioritou, názvom a začiatkom popisu. Pred návrhom požiadavky do Zásobníka over, či tam podobná "
+            "už nie je.",
+            _schema(),
+            t.zasobnik,
+            lambda a: "projekt",
         ),
         Tool(
             "git_historia",

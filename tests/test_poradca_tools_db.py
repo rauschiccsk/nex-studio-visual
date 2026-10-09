@@ -373,3 +373,76 @@ async def test_stavba_names_the_cards_a_choice_hangs_together_with(world):
         "Súvisí s kartou 3 („Čo s drobnými nepresnosťami Návrhu?“): Oprava textov musí počítať s novým upozornením."
         in card
     )
+
+
+# ── DEV-33: Poradca sees the project's Zásobník before proposing a requirement for it ─────────────────────────
+# 08.10.2026, NEX Inbox 1.7.0: Poradca offered the credit-note requirement for the Zásobník again („ak ju tam
+# ešte nemáš"), although the Director had saved it as REQ-1 — no tool of Poradca read the Zásobník, and the
+# „Uložiť do Zásobníka" click would have created a second, identical requirement.
+
+
+def _backlog(world):
+    from backend.db.models.backlog import BacklogItem
+
+    db, project, version = world["db"], world["project"], world["version"]
+    db.add_all(
+        [
+            BacklogItem(
+                project_id=project.id,
+                number=1,
+                title="Dobropisy do Genesisu",
+                description="Dobropis od dodávateľa sa má doručiť ako záporná faktúra. " + "Podrobnosti. " * 40,
+                status="open",
+                priority="high",
+            ),
+            BacklogItem(
+                project_id=project.id, number=2, title="Tlač zoznamu faktúr", status="included", version_id=version.id
+            ),
+            BacklogItem(project_id=project.id, number=3, title="Export do Excelu", status="rejected"),
+        ]
+    )
+    other = Project(
+        name=f"Iný {uuid.uuid4().hex[:6]}",
+        slug=f"iny-{uuid.uuid4().hex[:6]}",
+        type="standard",
+        auth_mode="password",
+        description="d",
+        created_by=project.created_by,
+    )
+    db.add(other)
+    db.flush()
+    db.add(BacklogItem(project_id=other.id, number=1, title="Cudzia požiadavka", status="open"))
+    db.flush()
+
+
+async def test_zasobnik_lists_the_project_backlog_as_the_screen_names_it(world):
+    _backlog(world)
+
+    out = await world["tools"].zasobnik({})
+
+    lines = out.splitlines()
+    assert lines[0] == "Zásobník projektu — 3 požiadavky (REQ-číslo, stav, názov, popis):"
+    assert lines[1].startswith(
+        "REQ-1 [Otvorené, priorita vysoká] Dobropisy do Genesisu — "
+        "Dobropis od dodávateľa sa má doručiť ako záporná faktúra."
+    )
+    assert lines[1].endswith(" …")
+    assert lines[2] == "REQ-2 [Vo verzii 1.2.0, priorita stredná] Tlač zoznamu faktúr"
+    assert lines[3] == "REQ-3 [Zamietnuté, priorita stredná] Export do Excelu"
+    assert "Cudzia požiadavka" not in out
+
+
+async def test_an_empty_zasobnik_says_so(world):
+    assert await world["tools"].zasobnik({}) == "Zásobník projektu je prázdny."
+
+
+def test_poradca_has_the_zasobnik_tool():
+    names = [t.name for t in tools.build_tools(project_id=uuid.uuid4(), version_id=None, user_id=uuid.uuid4())]
+    assert "zasobnik" in names
+
+
+def test_the_charter_has_poradca_check_the_zasobnik_before_proposing_a_requirement():
+    charter = (Path(__file__).resolve().parents[1] / "templates" / "poradca-charter.md").read_text(encoding="utf-8")
+    assert "| `zasobnik` |" in charter
+    assert "Pred požiadavkou do Zásobníka zavolaj `zasobnik`" in charter
+    assert "menuj ju (REQ-číslo) a novú nenavrhuj" in charter

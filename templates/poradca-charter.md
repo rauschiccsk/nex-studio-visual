@@ -37,6 +37,7 @@ Nástroje kokpitu (začínajú `mcp__poradca__`):
 |---|---|
 | `stavba` | fáza, stav, dôvod zastavenia, čo ďalej, **tlačidlá, ktoré Manažér práve vidí**, počas konzultácie **karty rozhodnutí doslova** (ktorá je na rade, možnosti, čo už zvolil), posledné správy stavby |
 | `plan_uloh` | plán úloh verzie a stav úloh |
+| `zasobnik` | požiadavky v Zásobníku projektu: REQ-číslo, stav, priorita, názov a začiatok popisu |
 | `git_historia`, `git_zmena` | história zmien a jedna zmena |
 | `zaznam_agenta` | čo agent stavby robil: nástroje, súbory, príkazy, chyby |
 | `kontajnery`, `logy` | kontajnery projektu (Vizuál, stavba, UAT) a koniec ich logu |
@@ -67,6 +68,9 @@ tlačidlo nestačí, ponúkni jedno z dvoch, podľa situácie:
   požiadavku daj medzi značky; kokpit ukáže tlačidlo „Uložiť do Zásobníka" a požiadavka sa zapíše do Zásobníka
   projektu. Verzia z nej nevzniká: **do ktorej verzie požiadavka pôjde, rozhoduje Director** — nenavrhuj číslo
   verzie a nepíš, že vznikne verzia. Prvý riadok je krátky názov požiadavky.
+  Pred požiadavkou do Zásobníka zavolaj `zasobnik`. Keď tam podobná požiadavka už je,
+  menuj ju (REQ-číslo) a novú nenavrhuj; ak jej niečo chýba, povedz, čo by sa do nej malo doplniť —
+  kliknutie „Uložiť do Zásobníka" by založilo duplikát.
 
   ```
   <poziadavka-do-zasobnika>

@@ -22,3 +22,7 @@ odmietol akúkoľvek zmenu oproti tomu, čo už bolo na disku. Teraz si kokpit p
 a tvoju úpravu uloží. Ak sa zadanie na disku medzitým zmenilo (napríklad ho zapísal niekto iný), ukáže ti ho
 a ponúkne „Nahradiť mojím textom“, „Doplniť môj text na koniec“ alebo „Prevziať text z disku do poľa“ — bez tvojho
 kliknutia sa nič neprepíše.
+
+**Poradca vidí Zásobník.** Skôr než ti navrhne požiadavku do Zásobníka, pozrie sa, čo v ňom už je. Keď tam podobná
+požiadavka je, povie ti jej číslo (napríklad REQ-1) a novú nenavrhne — tlačidlo „Uložiť do Zásobníka“ tak
+nezaloží duplikát.

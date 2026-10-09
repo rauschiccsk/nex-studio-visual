@@ -83,6 +83,11 @@ admin — ako všade v kokpite. „Autor rozhovoru" je prihlásený účet.
    - **Zoznam, čo vo Vizuáli skontrolovať** (v4.43.12, DEV-36): kým je stavba vo Vizuáli, nástroj `stavba` pridá
      zoznamy tak, ako ich vidí Manažér — obrazovka, čo urobiť, čo má vidieť, priamy odkaz a čo sa vo Vizuáli
      overiť nedá. Keď Manažér požiada Poradcu o kontrolu Vizuálu, prejde tie isté body.
+   - **Zásobník projektu** (v4.43.12, DEV-33): nástroj `zasobnik` vráti požiadavky Zásobníka tak, ako ich ukazuje
+     obrazovka — REQ-číslo, stav (Otvorené / Vo verzii X / Realizované vo verzii X / Zamietnuté), priorita, názov
+     a začiatok popisu; číta ich tou istou službou ako stránka Zásobník. Charta: pred požiadavkou do Zásobníka
+     zavolaj `zasobnik`; keď tam podobná už je, menuj ju (REQ-číslo) a novú nenavrhuj. 08.10.2026 Poradca
+     ponúkol požiadavku o dobropisoch znova, hoci bola uložená ako REQ-1 — kliknutie by založilo duplikát.
 3. **Čo robil agent stavby** — rozobrané na kroky: ktoré súbory čítal, aké príkazy spustil, kde zlyhal.
 4. **Kontajnery a logy** tohto projektu: živý náhľad z Vizuálu, dočasná databáza stavby, inštalácie UAT
    (tie isté, ktoré človek vidí na obrazovke UAT).
