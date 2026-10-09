@@ -1272,6 +1272,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pipeline/{version_id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Private Files
+         * @description What ``private/`` of the project holds — also the files the agent put there itself.
+         */
+        get: operations["list_private_files_api_v1_pipeline__version_id__files_get"];
+        put?: never;
+        /**
+         * Upload Private File
+         * @description Store the attached file in ``private/`` and return the line for the Manažér's message.
+         */
+        post: operations["upload_private_file_api_v1_pipeline__version_id__files_post"];
+        /**
+         * Delete Private File
+         * @description Remove one file from ``private/`` and record who did it.
+         */
+        delete: operations["delete_private_file_api_v1_pipeline__version_id__files_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pipeline/{version_id}/messages": {
         parameters: {
             query?: never;
@@ -3384,6 +3412,14 @@ export interface components {
             number: number;
             /** Title */
             title: string;
+        };
+        /** Body_upload_private_file_api_v1_pipeline__version_id__files_post */
+        Body_upload_private_file_api_v1_pipeline__version_id__files_post: {
+            /**
+             * File
+             * Format: binary
+             */
+            file: string;
         };
         /** Body_upload_screenshot_api_v1_uploads_screenshot_post */
         Body_upload_screenshot_api_v1_uploads_screenshot_post: {
@@ -5712,6 +5748,55 @@ export interface components {
             web_search_eur: number | null;
             /** Web Search Usd */
             web_search_usd: number | null;
+        };
+        /**
+         * PrivateFileRead
+         * @description One file in ``private/``. ``uploaded_by``/``uploaded_at`` come from the build history — empty for a file
+         *     the agent put there itself.
+         */
+        PrivateFileRead: {
+            /**
+             * Modified At
+             * Format: date-time
+             */
+            modified_at: string;
+            /** Path */
+            path: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Size Label */
+            size_label: string;
+            /** Uploaded At */
+            uploaded_at?: string | null;
+            /** Uploaded By */
+            uploaded_by?: string | null;
+        };
+        /**
+         * PrivateFileUploaded
+         * @description The stored file, the line the screen puts into the Manažér's message, and the folder after the upload.
+         */
+        PrivateFileUploaded: {
+            /** Answer Line */
+            answer_line: string;
+            file: components["schemas"]["PrivateFileRead"];
+            /** Files */
+            files: components["schemas"]["PrivateFileRead"][];
+            /** Max Bytes */
+            max_bytes: number;
+            /** Max Label */
+            max_label: string;
+        };
+        /**
+         * PrivateFilesRead
+         * @description What ``private/`` holds now, and the largest file that may be attached.
+         */
+        PrivateFilesRead: {
+            /** Files */
+            files: components["schemas"]["PrivateFileRead"][];
+            /** Max Bytes */
+            max_bytes: number;
+            /** Max Label */
+            max_label: string;
         };
         /** ProjectCostsRead */
         ProjectCostsRead: {
@@ -9354,6 +9439,105 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PipelineBoardRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_private_files_api_v1_pipeline__version_id__files_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrivateFilesRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_private_file_api_v1_pipeline__version_id__files_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_private_file_api_v1_pipeline__version_id__files_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrivateFileUploaded"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_private_file_api_v1_pipeline__version_id__files_delete: {
+        parameters: {
+            query: {
+                path: string;
+            };
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrivateFilesRead"];
                 };
             };
             /** @description Validation Error */

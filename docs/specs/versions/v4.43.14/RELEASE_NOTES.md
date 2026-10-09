@@ -25,3 +25,10 @@ inak než prepínačom zo šablóny, Verifikácia neprejde: kokpit ukáže, na k
 presné súbory, riadky a správny tvar na opravu. Platí to aj vtedy, keď verziu schvaľuješ ručne. Takto sa zachytí
 chyba, pri ktorej by sa aplikácia zostavená s vypnutým náhľadom správala ako náhľad — napríklad by používateľa
 s vypršaným prihlásením neposlala na prihlasovaciu obrazovku.
+
+**AI Agentovi priložíš súbor priamo v kokpite.** Keď agent potrebuje súbor, ktorý máš len ty — vzorový e-mail,
+faktúru, export z iného systému —, klikneš v Riadiacom centre pri odpovedi agentovi alebo v rozhovore na
+„Priložiť súbor“. Súbor sa uloží do projektu, do priečinka `private/`, ktorý git nevidí, takže sa do repozitára
+nikdy nedostane; do tvojej správy sa sám doplní riadok, kde ho agent nájde. Čo v priečinku leží, vidíš
+v Riadiacom centre pod „Súbory pre agenta“ — s veľkosťou a tým, kto súbor nahral — a môžeš to zmazať. Poradca
+vidí len mená týchto súborov, nie ich obsah. Najväčší súbor, ktorý sa dá priložiť, má 25 MB.

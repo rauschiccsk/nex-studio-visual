@@ -38,6 +38,8 @@ import {
 } from "@/components/riadiace/blockRecovery";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
+import AttachFileButton from "@/components/riadiace/AttachFileButton";
+import { withAttachedLine } from "@/components/riadiace/privateFiles";
 
 interface Props {
   board: PipelineBoard | null;
@@ -186,6 +188,15 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
                 e.preventDefault();
                 if (canSubmit) submit();
               }
+            }}
+          />
+          {/* DEV-44: the file the agent asked for — stored in private/, its path lands in this answer. */}
+          <AttachFileButton
+            versionId={versionId}
+            disabled={submitting}
+            onAttached={(line) => {
+              dismissPoradca();
+              setText(withAttachedLine(text, line));
             }}
           />
           <button

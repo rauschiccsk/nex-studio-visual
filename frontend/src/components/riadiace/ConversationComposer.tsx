@@ -16,6 +16,8 @@ import { RESTORED_DRAFT_LABEL, useDraft, draftKey } from "@/hooks/useDraft";
 import { usePoradcaHandoff } from "@/hooks/usePoradcaHandoff";
 import { FROM_PORADCA_LABEL, draftCameFromPoradca, handOffInstruction } from "@/lib/poradcaHandoff";
 import type { InputOwner } from "@/components/riadiace/blockRecovery";
+import AttachFileButton from "@/components/riadiace/AttachFileButton";
+import { withAttachedLine } from "@/components/riadiace/privateFiles";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 
 const ENGINE_BUSY_HINT = "AI Agent práve pracuje — správa sa pošle, keď dokončí.";
@@ -206,6 +208,17 @@ export function ConversationComposer({
           }
           className="min-h-[2.5rem] flex-1 resize-none rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent-primary)] focus:outline-none disabled:opacity-50"
         />
+        {versionId && (
+          // DEV-44: a file for the agent outside a question too — its path lands in this message.
+          <AttachFileButton
+            versionId={versionId}
+            disabled={locked || sending}
+            onAttached={(line) => {
+              dismissPoradca();
+              setText(withAttachedLine(text, line));
+            }}
+          />
+        )}
         <button
           type="submit"
           disabled={locked || sending || !text.trim()}

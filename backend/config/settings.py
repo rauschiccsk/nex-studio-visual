@@ -128,6 +128,10 @@ class Settings(BaseSettings):
     # Same rationale as ``kb_content_max_bytes``.
     credentials_content_max_bytes: int = 5 * 1024 * 1024
 
+    # DEV-44: the largest file the Manažér may attach for the AI Agent (a sample e-mail, an invoice, an
+    # export). It is held in memory once while it is stored, so the cap protects the backend too.
+    private_file_max_bytes: int = 25 * 1024 * 1024
+
     # KB access matrix per Shuhari role.
     # Mirrors NEX Command's ``KB_ACCESS`` config (M2 feature parity, 2026-05-07).
     # * "*"          — full access (every category)

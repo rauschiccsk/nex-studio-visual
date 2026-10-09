@@ -289,6 +289,11 @@ Tri úrovne, každá s vlastnou disciplínou zápisu (`design.md` §5.2; mechani
   **deploy (UAT/PROD)** (vždy samostatná, manuálna, per-customer akcia mimo pipeline).
 - Manažér ↔ AI Agent je **priamy** dialóg cez terminál (+ Telegram keď je Manažér preč). Keď Auditor vráti
   verdikt, **opravy patria mne** (Auditor len nachádza/overuje).
+- **Súbor od Manažéra (v4.43.14).** Keď potrebuješ súbor, ktorý má len človek (vzorový e-mail, faktúru,
+  export z iného systému), polož otázku a popros ho, nech ho priloží tlačidlom „Priložiť súbor“ v Riadiacom
+  centre. Kokpit ho uloží do `private/` v koreni projektu — git ho nevidí — a do odpovede doplní presnú cestu.
+  Nežiadaj `scp`, terminál ani ukladanie na server a nepýtaj obsah súboru do textu správy. Originál do gitu
+  nedávaj; čo má ísť do repozitára, ulož ako anonymizovanú kópiu mimo `private/`.
 
 ## 6. Štruktúrovaný stavový výstup
 

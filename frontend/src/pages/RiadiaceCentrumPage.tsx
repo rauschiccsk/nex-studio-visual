@@ -35,6 +35,7 @@ import SchvalitBar from "@/components/riadiace/SchvalitBar";
 import DecisionCardsBar from "@/components/riadiace/DecisionCardsBar";
 import BlockRecoveryBar from "@/components/riadiace/BlockRecoveryBar";
 import SchemaApprovalBar from "@/components/riadiace/SchemaApprovalBar";
+import PrivateFilesPanel from "@/components/riadiace/PrivateFilesPanel";
 import { blockRecoveryOwnsInput, inputOwner } from "@/components/riadiace/blockRecovery";
 import NahlasitZnovaBar from "@/components/riadiace/NahlasitZnovaBar";
 import ZopakovatKonzultaciuBar from "@/components/riadiace/ZopakovatKonzultaciuBar";
@@ -257,6 +258,8 @@ export default function RiadiaceCentrumPage() {
           versionId={versionId}
           onBoard={setBoard}
         />
+        {/* DEV-44: what lies in private/ for the agent — seen and deletable without a terminal. */}
+        <PrivateFilesPanel board={board} versionId={versionId} />
         <NahlasitZnovaBar
           board={board}
           versionId={versionId}

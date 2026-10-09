@@ -76,6 +76,15 @@ stáť len ako statická poistka `import.meta.env.VITE_PREVIEW && isPreviewEnabl
 ako hodnota odovzdaná ďalej; každé iné použitie zmení PASS na FAIL (`engine_override=preview_switch`) so súborom,
 riadkom a správnym tvarom, ktoré dostane AI Agent na opravu. Platí pre samostatný beh aj pre ručné schválenie.
 
+**Súbory pre agenta (v4.43.14, DEV-44).** Manažér priloží súbor tlačidlom „Priložiť súbor“ v poli odpovede aj
+v rozhovore (`AttachFileButton`); `POST /pipeline/{version_id}/files` ho uloží do `<projekt>/private/`
+(`project_files.save`: očistené meno, strop `private_file_max_bytes`, vlastník projektu) a vráti riadok do
+správy. Pred zápisom `ensure_ignored` doplní `/private/` do `.git/info/exclude` (žiadny sledovaný súbor
+sa nemení) a `git check-ignore` to musí potvrdiť pre presnú cestu, inak sa súbor odmietne. Každé nahratie
+a zmazanie zapíše do histórie stavby záznam s `payload.private_file` (kto, cesta, veľkosť — nikdy obsah);
+z neho zoznam (`GET`, `PrivateFilesPanel`) číta, kto súbor nahral. Poradca má súbory v `private/` prekryté
+prázdnym súborom (vidí mená, nie obsah). Charta AI Agenta aj Poradcu posiela na tlačidlo, nikdy na `scp`.
+
 **Vizuál — prvotriedna jednotka:**
 - **Typovaný:** `FE` (frontend appky — má každý projekt) · `WE` (webend — webshop, web pre mobilnú appku…). Systém typov **rozšíriteľný** pre budúce druhy.
 - **1..N na projekt**, rôznych typov. Každý vizuál = vlastný nasaditeľný frontend s vlastným publikom/URL.

@@ -25,6 +25,7 @@ from backend.api.routes.knowledge import router as knowledge_router
 from backend.api.routes.metrics import router as metrics_router
 from backend.api.routes.pipeline import router as pipeline_router
 from backend.api.routes.poradca import router as poradca_router
+from backend.api.routes.project_files import router as project_files_router
 from backend.api.routes.project_specs import router as project_specs_router
 from backend.api.routes.projects import router as projects_router
 from backend.api.routes.rag import router as rag_router
@@ -342,6 +343,8 @@ app.include_router(user_agent_settings_router, prefix="/api/v1/user-agent-settin
 app.include_router(poradca_router, prefix="/api/v1/poradca")
 app.include_router(agent_terminal_router, prefix="/api/v1/agent-terminal")
 app.include_router(pipeline_router, prefix="/api/v1/pipeline")
+# DEV-44: files the Manažér hands the AI Agent — ``private/`` of the project, under the build they belong to.
+app.include_router(project_files_router, prefix="/api/v1/pipeline")
 # Dedo's own door (ICCINT-14, charter §4.5) — the NEX Studio technical team's MACHINE identity, mounted
 # apart from every user-facing router because that separation IS the permission model: the router carries
 # its own auth dependency (``X-Dedo-Token``, never a user JWT) and exposes exactly five endpoints, so

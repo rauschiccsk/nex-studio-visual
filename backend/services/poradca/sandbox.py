@@ -40,6 +40,7 @@ from uuid import UUID, uuid4
 
 from backend.config.settings import settings
 from backend.services import build_db, build_sandbox, sandbox_paths
+from backend.services.project_files import PRIVATE_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +184,8 @@ def project_dirs(project_slug: str) -> tuple[str, str]:
 def overlay_paths(project_dir: str) -> list[str]:
     """Cesty v projekte (relatívne), ktoré sa prekryjú prázdnym súborom.
 
-    Súbor s menom tajomstva a každý obyčajný súbor s viac než jedným pevným odkazom. Symbolické odkazy sa
+    Súbor s menom tajomstva, každý obyčajný súbor s viac než jedným pevným odkazom a každý súbor v ``private/``
+    (DEV-44 — čo Manažér priložil agentovi). Symbolické odkazy sa
     neprekrývajú: obmedzený režim ich sám rozlúšti a čítanie mimo projektu odmietne (zmerané), kým prekrytie
     odkazu by docker rozlúštil vnútri kontajnera a mohol by ho namieriť mimo projektu. ``.git`` sa
     neprechádza — celý sa prekrýva prázdnym ``tmpfs``.
@@ -203,8 +205,11 @@ def overlay_paths(project_dir: str) -> list[str]:
                 continue
             if not stat.S_ISREG(st.st_mode):
                 continue
-            if _SECRET_FILE_RE.match(name) or st.st_nlink > 1:
-                rel = os.path.relpath(full, project_dir)
+            rel = os.path.relpath(full, project_dir)
+            # DEV-44: what the Manažér attached for the agent (a real e-mail with personal codes) — Poradca
+            # sees the name, never the content, so the codes cannot end up quoted in the conversation.
+            attached = rel.split(os.sep, 1)[0] == PRIVATE_DIR
+            if _SECRET_FILE_RE.match(name) or st.st_nlink > 1 or attached:
                 if _MOUNT_UNSAFE.search(rel):
                     raise PoradcaUnavailable(
                         f"{_LABEL}: súbor s tajomstvom alebo pevným odkazom má v ceste čiarku, úvodzovky či riadiaci "

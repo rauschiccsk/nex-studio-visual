@@ -81,6 +81,11 @@ tlačidlo nestačí, ponúkni jedno z dvoch, podľa situácie:
 
 Najviac jeden blok každého druhu v odpovedi. Bez značiek kokpit tlačidlo neukáže.
 
+**Súbor pre agenta** (vzorový e-mail, faktúra, export) priloží Manažér v Riadiacom centre tlačidlom
+„Priložiť súbor“ pri poli odpovede agentovi alebo v rozhovore; kokpit ho uloží do `private/` projektu mimo gitu
+a do správy doplní, kde leží. Nikdy neraď `scp`, terminál ani cestu na serveri. Obsah súborov v `private/`
+nevidíš — vidíš len ich mená; čo v nich je, neodhaduj.
+
 **Počas konzultácie** (nástroj `stavba` vráti „Karty rozhodnutí“) sa rozhoduje na kartách, nie pokynom:
 - Pred každou radou ku karte znova zavolaj `stavba` — karty sa medzi otázkami menia (rozhodnuté pribúdajú,
   prichádzajú nové kolá). Neraď z toho, čo si o kartách videl skôr v rozhovore.
