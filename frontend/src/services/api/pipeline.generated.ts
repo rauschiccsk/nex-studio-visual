@@ -1663,6 +1663,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/create-presets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Create Presets
+         * @description What the new-project form starts with (DEV-37) — the options the Manažér used to tick every time.
+         */
+        get: operations["get_create_presets_api_v1_projects_create_presets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/ports/check": {
         parameters: {
             query?: never;
@@ -5818,6 +5838,24 @@ export interface components {
             type: "standard" | "web";
         };
         /**
+         * ProjectCreatePresets
+         * @description The new-project form's starting options (DEV-37), and whether branch protection can be offered at all.
+         */
+        ProjectCreatePresets: {
+            /** Branch Protection Available */
+            branch_protection_available: boolean;
+            /** Branch Protection Note */
+            branch_protection_note?: string | null;
+            /** Custom Development Enabled */
+            custom_development_enabled: boolean;
+            /** Enable Branch Protection */
+            enable_branch_protection: boolean;
+            /** Enable Cicd */
+            enable_cicd: boolean;
+            /** Full Smoke */
+            full_smoke: boolean;
+        };
+        /**
          * ProjectRead
          * @description Serialised representation of a project row.
          *
@@ -9955,6 +9993,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_create_presets_api_v1_projects_create_presets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectCreatePresets"];
                 };
             };
         };

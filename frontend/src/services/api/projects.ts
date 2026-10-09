@@ -140,6 +140,22 @@ export function suggestPortBlockApi(): Promise<PortBlockSuggestion> {
   return api.get<PortBlockSuggestion>("/projects/ports/suggest-block");
 }
 
+/** DEV-37: what the new-project form starts with — mirrors backend ProjectCreatePresets. */
+export interface ProjectCreatePresets {
+  enable_cicd: boolean;
+  full_smoke: boolean;
+  enable_branch_protection: boolean;
+  custom_development_enabled: boolean;
+  /** False while GitHub refuses protection on a private repository — the form greys the option out. */
+  branch_protection_available: boolean;
+  branch_protection_note?: string | null;
+}
+
+/** The new-project form's preset options (DEV-37) — the backend is the one place they are decided. */
+export function getProjectCreatePresetsApi(): Promise<ProjectCreatePresets> {
+  return api.get<ProjectCreatePresets>("/projects/create-presets");
+}
+
 /**
  * Jeden riadok histórie presunov projektu (ICCINT-78).
  *

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { createProjectApi, suggestPortBlockApi } from "@/services/api/projects";
+import { createProjectApi, getProjectCreatePresetsApi, suggestPortBlockApi } from "@/services/api/projects";
 import ErrorNote from "@/components/common/ErrorNote";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { getSystemSettingApi } from "@/services/api/systemSettings";
@@ -84,6 +84,18 @@ export default function NewProjectPage() {
   // STEP 6 (R9): "Vývoj na zákazku" — create-only flag, the only switch that later permits deviating from
   // the unified company design. Inert data in STEP 6 (no behaviour binds to it yet). Default unchecked.
   const [customDevelopment, setCustomDevelopment] = useState(false);
+  // DEV-37: the options start preset from the backend (Director 09.10.2026: „Chcem aby pri založení nového
+  // projektu už tie voľby boli prednastavené."). Once he has changed any of them, a late answer changes none.
+  const optionsTouched = useRef(false);
+  const [protectionAvailable, setProtectionAvailable] = useState(true);
+  const [protectionNote, setProtectionNote] = useState<string>("");
+  const [presetsNote, setPresetsNote] = useState<string>("");
+  function touchOption<T>(set: (v: T) => void) {
+    return (v: T) => {
+      optionsTouched.current = true;
+      set(v);
+    };
+  }
 
   // CR-NS-012: notification owner picker. Empty = none (no notifications).
   const [users, setUsers] = useState<UserRead[]>([]);
@@ -121,6 +133,27 @@ export default function NewProjectPage() {
       })
       .catch(() => {
         /* non-admin: no user list — owner stays self (defaulted above) */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getProjectCreatePresetsApi()
+      .then((p) => {
+        if (cancelled) return;
+        setProtectionAvailable(p.branch_protection_available);
+        setProtectionNote(p.branch_protection_note ?? "");
+        if (optionsTouched.current) return;
+        setEnableCicd(p.enable_cicd);
+        setFullSmoke(p.full_smoke);
+        setEnableBranchProtection(p.enable_branch_protection && p.branch_protection_available);
+        setCustomDevelopment(p.custom_development_enabled);
+      })
+      .catch(() => {
+        if (!cancelled) setPresetsNote("Predvolené možnosti sa nepodarilo načítať — zaškrtni, čo chceš, sám.");
       });
     return () => {
       cancelled = true;
@@ -519,7 +552,7 @@ export default function NewProjectPage() {
                 <input
                   type="checkbox"
                   checked={enableCicd}
-                  onChange={(e) => setEnableCicd(e.target.checked)}
+                  onChange={(e) => touchOption(setEnableCicd)(e.target.checked)}
                   className="w-4 h-4 rounded border-[var(--color-border-default)] bg-[var(--color-canvas)] text-primary-500 focus:ring-primary-500"
                 />
                 {/* Said what it DOES. The CI workflow this ships (templates/github-actions-workflow.yml)
@@ -532,20 +565,31 @@ export default function NewProjectPage() {
                 <input
                   type="checkbox"
                   checked={fullSmoke}
-                  onChange={(e) => setFullSmoke(e.target.checked)}
+                  onChange={(e) => touchOption(setFullSmoke)(e.target.checked)}
                   className="w-4 h-4 rounded border-[var(--color-border-default)] bg-[var(--color-canvas)] text-primary-500 focus:ring-primary-500"
                 />
                 <span>Úplná kontrola po zostavení (spustí aplikáciu a overí, že beží — ~5–7 min)</span>
               </label>
-              <label className="flex items-center gap-3 text-sm text-[var(--color-text-primary)] cursor-pointer">
+              <label
+                className={`flex items-center gap-3 text-sm ${
+                  protectionAvailable
+                    ? "text-[var(--color-text-primary)] cursor-pointer"
+                    : "text-[var(--color-text-muted)] cursor-not-allowed"
+                }`}
+              >
                 <input
                   type="checkbox"
                   checked={enableBranchProtection}
-                  onChange={(e) => setEnableBranchProtection(e.target.checked)}
-                  className="w-4 h-4 rounded border-[var(--color-border-default)] bg-[var(--color-canvas)] text-primary-500 focus:ring-primary-500"
+                  onChange={(e) => touchOption(setEnableBranchProtection)(e.target.checked)}
+                  disabled={!protectionAvailable}
+                  className="w-4 h-4 rounded border-[var(--color-border-default)] bg-[var(--color-canvas)] text-primary-500 focus:ring-primary-500 disabled:opacity-50"
                 />
                 <span>Chrániť hlavnú vetvu (zmeny len cez schválenú žiadosť, bez prepisovania histórie)</span>
               </label>
+              {/* DEV-37: greyed out with the reason, not left to fail after the repository exists. */}
+              {!protectionAvailable && protectionNote && (
+                <p className="pl-7 text-xs text-[var(--color-text-muted)]">{protectionNote}</p>
+              )}
               {/* Disabled, with the reason on screen — not hidden, and not left working-looking. The value
                   is stored on the project and read by NOTHING: no screen, no agent brief, no generator
                   consults it, so ticking it permitted exactly nothing while claiming to permit a deviation
@@ -567,6 +611,7 @@ export default function NewProjectPage() {
                   <span className="italic">zatiaľ nezapojené</span>
                 </span>
               </label>
+              {presetsNote && <p className="text-xs text-[var(--color-text-muted)]">{presetsNote}</p>}
             </div>
 
             {/* Error banner */}

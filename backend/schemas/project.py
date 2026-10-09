@@ -132,6 +132,31 @@ class GitHubRepoNotFoundError(BaseModel):
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9-]*[a-z0-9]$")
 
 
+#: DEV-37: what the new-project form starts with. Director 09.10.2026: „Chcem aby pri založení nového projektu
+#: už tie voľby boli prednastavené." — CI and the full check on; branch protection off (GitHub refuses it on a
+#: private repository below GitHub Pro); „Vývoj na zákazku" off. The FORM's starting point, served by
+#: ``GET /projects/create-presets`` — the API defaults below (for a caller that omits a flag) stay opt-in.
+NEW_PROJECT_PRESETS: dict[str, bool] = {
+    "enable_cicd": True,
+    "full_smoke": True,
+    "enable_branch_protection": False,
+    "custom_development_enabled": False,
+}
+
+
+class ProjectCreatePresets(BaseModel):
+    """The new-project form's starting options (DEV-37), and whether branch protection can be offered at all."""
+
+    enable_cicd: bool
+    full_smoke: bool
+    enable_branch_protection: bool
+    custom_development_enabled: bool
+    #: ``False`` while GitHub refuses protection on a private repository (setting
+    #: ``github_private_branch_protection``); the form then greys the option out and shows the note.
+    branch_protection_available: bool
+    branch_protection_note: Optional[str] = None
+
+
 class ProjectCreate(BaseModel):
     """Payload for creating a new project.
 

@@ -53,12 +53,14 @@ from backend.schemas.dedo import (
 from backend.schemas.pagination import PaginatedResponse
 from backend.schemas.pipeline import PipelineStateRead
 from backend.schemas.project import (
+    NEW_PROJECT_PRESETS,
     GitHubRepoNotFoundError,
     PortBlockSuggestResponse,
     PortCheckResponse,
     PortConflictError,
     PortSuggestResponse,
     ProjectCreate,
+    ProjectCreatePresets,
     ProjectRead,
     ProjectStatus,
     ProjectType,
@@ -652,6 +654,30 @@ class _AdoptionPreview(BaseModel):
     notes: list[str] = []
 
 
+#: DEV-37: why „Chrániť hlavnú vetvu" is greyed out — the first sentence also refuses a create that asks for it.
+BRANCH_PROTECTION_REFUSED = "Ochranu hlavnej vetvy GitHub pri súkromnom repozitári na našom pláne nedovolí"
+BRANCH_PROTECTION_NOTE = (
+    f"{BRANCH_PROTECTION_REFUSED} (treba GitHub Pro). Keď sa plán zmení, zapni ju v Nastavenia → GitHub → "
+    "„Ochrana vetvy pri súkromnom repozitári“."
+)
+
+
+def _branch_protection_available(db: Session) -> bool:
+    """Every repository the cockpit creates is private, so protection is possible only when the plan allows it."""
+    return system_setting_service.get_bool(db, "github_private_branch_protection")
+
+
+@router.get("/create-presets", response_model=ProjectCreatePresets)
+def get_create_presets(db: Session = Depends(get_db)) -> ProjectCreatePresets:
+    """What the new-project form starts with (DEV-37) — the options the Manažér used to tick every time."""
+    available = _branch_protection_available(db)
+    return ProjectCreatePresets(
+        **NEW_PROJECT_PRESETS,
+        branch_protection_available=available,
+        branch_protection_note=None if available else BRANCH_PROTECTION_NOTE,
+    )
+
+
 @router.get("/adoptable", response_model=list[_AdoptableCandidate])
 def list_adoptable_projects(
     current_user: User = Depends(require_shu_or_above),
@@ -990,6 +1016,11 @@ def create_project(
     # verbatim; the later stages used to re-derive an owner and fell back to a hardcoded one, so a
     # non-default organisation was honoured at repo creation and nowhere else.
     github_org = resolve_github_org(db)
+
+    # DEV-37: protection GitHub will refuse is refused here, before anything happens — not discovered after the
+    # repository exists, as a warning on a project that was promised a protected branch.
+    if payload.enable_branch_protection and payload.repo_url and not _branch_protection_available(db):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=BRANCH_PROTECTION_NOTE)
 
     # Stage 1 — GitHub repo. Runs before any DB state so a failure is
     # fully reversible (nothing has happened yet on our side).

@@ -81,6 +81,20 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
             "adresa chýba — pri zakladaní priečinka projektu, registrácii CI runnera a ochrane hlavnej vetvy."
         ),
     ),
+    # DEV-37: GitHub refuses branch protection on a private repository below GitHub Pro (measured 09.10.2026 on
+    # nex-inbox, nex-manager, nex-websites: „Upgrade to GitHub Pro or make this repository public …"), and every
+    # repository the cockpit creates is private. Off until the plan allows it; then this one switch makes the
+    # new-project form offer „Chrániť hlavnú vetvu" again — no code change.
+    "github_private_branch_protection": _Default(
+        value="false",
+        value_type="bool",
+        label="Ochrana vetvy pri súkromnom repozitári",
+        unit="",
+        description=(
+            "Zapni, keď GitHub plán dovolí chrániť hlavnú vetvu súkromného repozitára (GitHub Pro alebo vyšší). "
+            "Kým je vypnuté, formulár nového projektu voľbu „Chrániť hlavnú vetvu“ zašedne a povie prečo."
+        ),
+    ),
     # ── Miera autonómie — the autonomy dial (v2.0.0, CR-V2-008 / AUTON-1, AUTON-6) ──
     # GLOBAL default level of the 4-level Miera autonómie dial — how often the AI Agent
     # stops at a schvaľovací bod for the Manažér's approval (design §2.3). The four presets:
