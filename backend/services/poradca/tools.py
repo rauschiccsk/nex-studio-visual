@@ -183,6 +183,20 @@ def _cards_lines(db: Session, version_id: UUID) -> list[str]:
     return out
 
 
+def _vizual_checklist_lines(checklists: list) -> list[str]:
+    """DEV-36: what the Manažér was asked to check in the Vizuál, as his screen shows it — so when he asks
+    Poradca to check the Vizuál too, Poradca walks the same items, links included."""
+    out: list[str] = []
+    for checklist in checklists:
+        label = "prvý návrh" if checklist.round == "first" else "po zmene"
+        out += ["", f"Čo má Manažér vo Vizuáli skontrolovať ({label}):"]
+        for n, item in enumerate(checklist.items, start=1):
+            out.append(f"{n}. {item.screen} — {item.action} → {item.expected}" + (f" ({item.url})" if item.url else ""))
+        if checklist.not_verifiable:
+            out.append("Vo Vizuáli sa overiť nedá: " + "; ".join(checklist.not_verifiable))
+    return out
+
+
 class PoradcaTools:
     """Nástroje jednej otázky — viazané na projekt, verziu rozhovoru a človeka, ktorý sa pýta."""
 
@@ -252,6 +266,8 @@ class PoradcaTools:
                 lines.append("Manažér teraz v Riadiacom centre nevidí žiadne tlačidlo stavby.")
             if "decide" in actions:
                 lines.extend(_cards_lines(db, version.id))
+            if state.current_stage == "vizual":
+                lines.extend(_vizual_checklist_lines(board.vizual_checklists))
             lines.append(f"\nPosledných {len(board.recent_messages or [])} správ rozhovoru stavby (najstaršia prvá):")
             for msg in board.recent_messages or []:
                 text = (msg.content or "").strip()

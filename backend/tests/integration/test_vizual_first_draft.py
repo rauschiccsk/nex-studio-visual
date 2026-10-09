@@ -26,7 +26,11 @@ from backend.db.models.pipeline import PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.services import claude_agent, orchestrator, vizual_sandbox
-from backend.services.pipeline_status import PipelineStatusBlock
+from backend.services.pipeline_status import PipelineStatusBlock, VizualCheckItem, VizualChecklist
+
+#: DEV-36: a complete Vizuál turn carries the list of what to check — without it the round asks once more and
+#: the last prompt the agent sees is that follow-up. These tests are about the drawing turn, so it is complete.
+CHECKLIST = VizualChecklist(items=[VizualCheckItem(screen="Katalóg", path="/", action="Pozri.", expected="Vidno.")])
 
 PREVIEW_URL = "http://sandbox.local:5173"
 
@@ -149,7 +153,11 @@ async def test_first_entry_draws_the_screens_instead_of_asking_for_approval(db_s
         # THE point of the ticket: the Manažér has not yet been promised anything to open.
         seen["url_announced_before_draft"] = _url_announced(db_session, version.id)
         return PipelineStatusBlock(
-            stage="vizual", kind="done", summary="Prvé obrazovky sú postavené.", awaiting="manazer"
+            stage="vizual",
+            kind="done",
+            summary="Prvé obrazovky sú postavené.",
+            awaiting="manazer",
+            vizual_checklist=CHECKLIST,
         )
 
     monkeypatch.setattr(orchestrator, "invoke_agent_with_parse_retry", _fake_agent)
@@ -253,7 +261,9 @@ async def test_a_change_request_still_reaches_the_agent_on_a_first_entry(db_sess
 
     async def _fake_agent(*args, **kwargs):
         seen["prompt"] = kwargs["prompt"]
-        return PipelineStatusBlock(stage="vizual", kind="done", summary="Hotovo.", awaiting="manazer")
+        return PipelineStatusBlock(
+            stage="vizual", kind="done", summary="Hotovo.", awaiting="manazer", vizual_checklist=CHECKLIST
+        )
 
     monkeypatch.setattr(orchestrator, "invoke_agent_with_parse_retry", _fake_agent)
 
@@ -275,7 +285,9 @@ async def test_no_build_is_ever_told_to_approve_an_undrawn_vizual(db_session, tm
 
     async def _fake_agent(*args, **kwargs):
         dispatched["agent_ran"] = True
-        return PipelineStatusBlock(stage="vizual", kind="done", summary="Hotovo.", awaiting="manazer")
+        return PipelineStatusBlock(
+            stage="vizual", kind="done", summary="Hotovo.", awaiting="manazer", vizual_checklist=CHECKLIST
+        )
 
     monkeypatch.setattr(orchestrator, "invoke_agent_with_parse_retry", _fake_agent)
 

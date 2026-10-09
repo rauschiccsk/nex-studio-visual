@@ -415,6 +415,32 @@ class ConsultationBlock(BaseModel):
         return self
 
 
+class VizualCheckItem(BaseModel):
+    """One thing the Manažér should check in the Vizuál, and where (DEV-36)."""
+
+    #: The screen as the Manažér knows it („Prehľad", „Detail faktúry INB-I-000114").
+    screen: str = Field(min_length=1, max_length=1000)
+    #: The screen's address inside the preview (``/invoices/INB-I-000114``); empty when it cannot be opened
+    #: directly. The engine turns it into a link only when it stays inside the preview.
+    path: str = Field(default="", max_length=1000)
+    #: What to do there.
+    action: str = Field(min_length=1, max_length=1000)
+    #: What he should see.
+    expected: str = Field(min_length=1, max_length=1000)
+
+
+class VizualChecklist(BaseModel):
+    """What to check in the Vizuál after a turn — the first draft or a change (DEV-36).
+
+    Director 09.10.2026: „Po vyhotovení vizuálu pred tým linkom na samotný vizual pomohlo by mi krátky popis
+    čo všetko treba prekontrolovať vo vizuáli.\" """
+
+    items: list[VizualCheckItem] = Field(min_length=1)
+    #: What the version changes but screens with sample data cannot show (e-mails, retries, timers) — checked
+    #: only in Programovanie and Verifikácia, so approving the Vizuál does not approve it.
+    not_verifiable: list[str] = Field(default_factory=list)
+
+
 class PipelineStatusBlock(BaseModel):
     """Validated agent status block. ``extra='ignore'`` drops derived fields.
 
@@ -509,6 +535,8 @@ class PipelineStatusBlock(BaseModel):
     #: CR-V2-041: a ``kind=consultation`` turn carries the AI Agent's decision queue here (plain-language
     #: decisions + options + recommendation the Manažér answers one-at-a-time). ``None`` on every other block.
     consultation: Optional[ConsultationBlock] = None
+    #: DEV-36: a Vizuál turn (first draft or change) says what the Manažér should check in it. ``None`` elsewhere.
+    vizual_checklist: Optional[VizualChecklist] = None
 
 
 @dataclass(frozen=True)

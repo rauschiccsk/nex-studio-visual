@@ -120,6 +120,25 @@ export interface DedoProposal {
   created_at: string;
 }
 
+// DEV-36: what to check in the Vizuál after one turn — on the link message (`payload.vizual_checklist`) and,
+// all of them read from the database, on the board (`vizual_checklists`, each with the `seq` of its message).
+export interface VizualCheck {
+  screen: string;
+  action: string;
+  expected: string;
+  /** A direct link to the screen in the preview; null when it cannot be opened directly. */
+  url?: string | null;
+}
+
+export interface VizualChecklist {
+  /** `first` — the first draft; `change` — after a change the Manažér asked for. */
+  round: string;
+  items: VizualCheck[];
+  not_verifiable?: string[];
+  /** On the board: the message that carries the list (the key items are ticked under). */
+  seq?: number;
+}
+
 export interface PipelineBoard {
   state: PipelineState | null;
   recent_messages: PipelineMessage[];
@@ -152,6 +171,9 @@ export interface PipelineBoard {
   // carries one, else null/absent. The Vizuál page embeds this in an iframe so the Manažér can walk the
   // running app while the AI edits it. Absent whenever the version never entered the vizual stage.
   vizual_url?: string | null;
+  // DEV-36: every list of what to check in the Vizuál, oldest first — from the database, not this message tail,
+  // so the count at „Schváliť vizuál" covers them all.
+  vizual_checklists?: VizualChecklist[];
   // ICCINT-24: the OPEN proposal from our technical team, or null/absent when there is none (the usual
   // case). Board-level, not dug out of `recent_messages`: that list is truncated, and a proposal that
   // scrolled out of the tail would silently stop being offered. DedoProposalBar renders IF AND ONLY IF

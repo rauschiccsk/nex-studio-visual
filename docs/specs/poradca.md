@@ -80,6 +80,9 @@ admin — ako všade v kokpite. „Autor rozhovoru" je prihlásený účet.
      pridá na začiatok textu najbližšej otázky — raz — a odtlačok prepíše až po zodpovedanej otázke. Rozhovory
      spred v4.43.9 ju dostanú pri najbližšej otázke. Charta tiež káže pred každou radou ku karte znova zavolať
      `stavba` (Poradca radil ku karte 10 z pamäte rozhovoru).
+   - **Zoznam, čo vo Vizuáli skontrolovať** (v4.43.12, DEV-36): kým je stavba vo Vizuáli, nástroj `stavba` pridá
+     zoznamy tak, ako ich vidí Manažér — obrazovka, čo urobiť, čo má vidieť, priamy odkaz a čo sa vo Vizuáli
+     overiť nedá. Keď Manažér požiada Poradcu o kontrolu Vizuálu, prejde tie isté body.
 3. **Čo robil agent stavby** — rozobrané na kroky: ktoré súbory čítal, aké príkazy spustil, kde zlyhal.
 4. **Kontajnery a logy** tohto projektu: živý náhľad z Vizuálu, dočasná databáza stavby, inštalácie UAT
    (tie isté, ktoré človek vidí na obrazovke UAT).

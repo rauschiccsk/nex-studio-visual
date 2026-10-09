@@ -96,6 +96,13 @@ def _gate_report(stage, **extra):
     return PipelineStatusBlock(stage=stage, kind="gate_report", summary="ok", awaiting="manazer", **extra)
 
 
+#: DEV-36: a complete Vizuál turn carries the list of what to check — without it the round asks once more,
+#: which is a second turn. The tests counting turns speak about a complete answer, so they send one.
+_VIZUAL_DONE = {
+    "vizual_checklist": {"items": [{"screen": "Prehľad", "path": "/", "action": "Pozri.", "expected": "Vidno."}]}
+}
+
+
 def _one_epic_plan():
     return {
         "epics": [
@@ -212,7 +219,7 @@ async def test_vizual_directive_dispatches_ai_and_awaits_manazer(db_session, mon
     version, _ = _make_version(db_session)
     state = _seed_state(db_session, version.id, stage="vizual", actor="ai_agent")
     _patch_spin_up(monkeypatch)
-    calls = _stub_invoke_capture(monkeypatch, lambda s: _gate_report(s))
+    calls = _stub_invoke_capture(monkeypatch, lambda s: _gate_report(s, **_VIZUAL_DONE))
 
     settled = await orchestrator._run_vizual_round(db_session, state, directive="make the total bigger")
 
@@ -251,7 +258,7 @@ async def test_vizual_first_entry_draws_before_handing_over(db_session, monkeypa
     version, _ = _make_version(db_session)
     state = _seed_state(db_session, version.id, stage="vizual", actor="ai_agent")
     _patch_spin_up(monkeypatch)
-    calls = _stub_invoke_capture(monkeypatch, lambda s: _gate_report(s))
+    calls = _stub_invoke_capture(monkeypatch, lambda s: _gate_report(s, **_VIZUAL_DONE))
 
     settled = await orchestrator._run_vizual_round(db_session, state)
 

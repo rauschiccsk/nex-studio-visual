@@ -219,6 +219,7 @@ export default function RiadiaceCentrumPage() {
           verifiedProvenance={board?.verified_provenance}
         />
         <ConversationThread
+          versionId={versionId}
           messages={board?.recent_messages ?? []}
           activity={activity}
           working={!!working}

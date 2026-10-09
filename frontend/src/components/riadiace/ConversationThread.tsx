@@ -17,6 +17,8 @@ import { useEffect, useRef } from "react";
 import { SpecMarkdown } from "../markdown/SpecMarkdown";
 import type { ActivityLine, PipelineMessage, PipelineParticipant } from "../../services/api/pipeline";
 import PipelineActivityFeed from "../cockpit/PipelineActivityFeed";
+import VizualChecklistBlock from "./VizualChecklistBlock";
+import { vizualChecklistOf } from "./vizualChecklist";
 import { ROLE_LABELS } from "../cockpit/labels";
 
 // The Manažér's own messages align right (like an outgoing chat); everyone else aligns left.
@@ -55,9 +57,11 @@ interface Props {
   activity: ActivityLine[];
   /** Whether the agent is actively working (drives the live activity feed below the thread). */
   working: boolean;
+  /** DEV-36: the version whose Vizuál checklists are ticked in this thread (no ticking without it). */
+  versionId?: string;
 }
 
-export function ConversationThread({ messages, activity, working }: Props) {
+export function ConversationThread({ messages, activity, working, versionId }: Props) {
   const endRef = useRef<HTMLDivElement>(null);
 
   // Self-sufficiency kernel: hide internal build-loop chatter the Manažér never needs. The per-attempt
@@ -147,6 +151,14 @@ export function ConversationThread({ messages, activity, working }: Props) {
                 : null;
             const proposalOriginal = (proposalOrigin?.original_content ?? "").trim();
             const proposalEdited = !!proposalOrigin && proposalOriginal !== m.content.trim();
+            // DEV-36: what to check in the Vizuál. The first draft's list stands BEFORE the link it rides with
+            // (the Director asked for it „pred tým linkom"); a change's list follows the sentence announcing it.
+            const checklist = versionId ? vizualChecklistOf(m.payload) : null;
+            const checklistBlock =
+              checklist && versionId ? (
+                <VizualChecklistBlock versionId={versionId} seq={m.seq} checklist={checklist} />
+              ) : null;
+            const checklistFirst = checklist?.round === "first";
             return (
               <li key={m.id} className={`flex ${right ? "justify-end" : "justify-start"}`}>
                 <div className={`max-w-[85%] rounded-lg border px-3 py-2 ${bubbleClass(m.author, isFrameworkIssue)}`}>
@@ -174,10 +186,12 @@ export function ConversationThread({ messages, activity, working }: Props) {
                       )}
                     </div>
                   )}
+                  {checklistFirst && checklistBlock}
                   <SpecMarkdown
                     body={body}
                     className="prose prose-sm dark:prose-invert max-w-none text-sm text-[var(--color-text-primary)]"
                   />
+                  {!checklistFirst && checklistBlock}
                   {question.trim() && (
                     <div className="mt-2 rounded-md border-l-2 border-[var(--color-accent-primary)] bg-[var(--color-accent-primary)]/5 px-3 py-2">
                       <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-accent-primary)]">

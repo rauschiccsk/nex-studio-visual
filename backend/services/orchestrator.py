@@ -92,6 +92,7 @@ from backend.services.pipeline_status import (
     TaskPlanEpic,
     TaskPlanFeat,
     TaskPlanSkeleton,
+    VizualChecklist,
     extract_report_body,
     extract_task_plan_json,
     parse_fix_critique,
@@ -1688,7 +1689,8 @@ def _vizual_directive(
             "3. Zmenu iba ZAPÍŠ do mockupu — NEcommituj (náhľad ju premietne po obnovení). NEROB backend ani "
             "dátové modely — to je Programovanie. Ak je požiadavka naozaj nejednoznačná, `kind=question`, "
             "opýtaj sa PRÁVE JEDNU vec a ZASTAV; inak kolo UZAVRI `kind=done`.\n"
-            "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
+            + _vizual_checklist_rule(first_draft=False, mockup=True)
+            + "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
         )
     # ICCINT-27: the FIRST turn of the stage has no Manažér request to apply — it draws the app's first screens
     # from the approved documents. Everything else in the brief (frontend-only, nex-shared kit, the preview
@@ -1724,7 +1726,34 @@ def _vizual_directive(
         "NEROB backendovú logiku ani dátové modely — to je Programovanie. Ak je požiadavka naozaj "
         "nejednoznačná, nastav `kind=question`, opýtaj sa PRÁVE JEDNU vec a ZASTAV; inak kolo UZAVRI "
         "`kind=done`.\n"
-        "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
+        + _vizual_checklist_rule(first_draft=manager_request is None, mockup=False)
+        + "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
+    )
+
+
+def _vizual_checklist_rule(*, first_draft: bool, mockup: bool) -> str:
+    """The Vizuál brief's request for the list of what the Manažér should check (DEV-36).
+
+    Director 09.10.2026: „Po vyhotovení vizuálu pred tým linkom na samotný vizual pomohlo by mi krátky popis čo
+    všetko treba prekontrolovať vo vizuáli." Asked in EVERY Vizuál turn — after a change he needs to know what to
+    look at again, not only after the first draft."""
+    scope = (
+        "všetko, čo táto verzia na obrazovkách mení"
+        if first_draft
+        else "len to, čoho sa zmena dotkla (čo treba po nej skontrolovať znova)"
+    )
+    path = (
+        "`path` nechaj prázdny (náhľad je jeden súbor mockupu)"
+        if mockup
+        else "`path` (adresa tej obrazovky v náhľade, začína `/`, napr. `/invoices/INB-I-000114` — presne tá, na "
+        "ktorej je vec s tvojimi ukážkovými dátami vidieť; prázdna, keď sa na obrazovku priamo ísť nedá)"
+    )
+    return (
+        "6. KONTROLNÝ ZOZNAM (povinný): do stavového výstupu pridaj pole `vizual_checklist` — čo má Manažér vo "
+        f"Vizuáli skontrolovať, odvodené zo Špecifikácie: {scope}. Pole `items` (aspoň 1, najviac ~10, stručne): "
+        f"`screen` (obrazovka, ako ju volá Manažér), {path}, `action` (čo tam urobiť) a `expected` (čo má "
+        "vidieť). Pole `not_verifiable` (zoznam viet): čo verzia mení, ale na obrazovkách s ukážkovými dátami sa "
+        "to ukázať nedá (napr. e-maily, opakovanie, časovače) — overí sa až pri Programovaní a Verifikácii.\n"
     )
 
 
@@ -11486,6 +11515,65 @@ def latest_vizual_url(db: Session, version_id: uuid.UUID) -> Optional[str]:
     ).scalar_one_or_none()
 
 
+#: DEV-36: what the Vizuál turn is asked for when it came back without the list of what to check.
+VIZUAL_CHECKLIST_MISSING = (
+    "Chýba kontrolný zoznam. Do stavového výstupu doplň pole `vizual_checklist` podľa bodu 6 svojho zadania — "
+    "čo má Manažér vo Vizuáli po tomto kole skontrolovať (`items`: `screen`, `path`, `action`, `expected`; "
+    "`not_verifiable`). Obrazovky už nemeň, pošli len stavový výstup so zoznamom."
+)
+_VIZUAL_CHECKLIST_GONE = (
+    "AI partner nedodal zoznam, čo vo Vizuáli skontrolovať. Prezri si Vizuál podľa jeho hlásenia vyššie."
+)
+
+
+def _vizual_check_url(base_url: str, path: str) -> Optional[str]:
+    """A direct link to one screen of the preview — only for a path that stays inside it (DEV-36).
+
+    The path comes from the agent, so it is trusted for nothing: no other host, no protocol-relative ``//``,
+    no whitespace. A mockup preview is one file served by the cockpit (a relative URL), so it has no screens to
+    link to."""
+    if not base_url.startswith(("https://", "http://")):
+        return None
+    if not path.startswith("/") or path.startswith("//") or "://" in path or any(c.isspace() for c in path):
+        return None
+    return base_url.rstrip("/") + path
+
+
+def _vizual_checklist_payload(checklist: VizualChecklist, base_url: str, round_: str) -> dict[str, Any]:
+    """The list as the Manažér sees it: the engine-made link instead of the agent's raw path (DEV-36)."""
+    return {
+        "round": round_,
+        "items": [
+            {
+                "screen": item.screen,
+                "action": item.action,
+                "expected": item.expected,
+                "url": _vizual_check_url(base_url, item.path),
+            }
+            for item in checklist.items
+        ],
+        "not_verifiable": list(checklist.not_verifiable),
+    }
+
+
+def vizual_checklists(db: Session, version_id: uuid.UUID) -> list[dict[str, Any]]:
+    """Every list of what to check in the Vizuál for the version, oldest first, each with its message ``seq``.
+
+    DEV-36. Read from the database, not from the board's message tail: the count by „Schváliť vizuál" covers
+    every list, and a long Vizuál pushes the first one out of the last 50 messages."""
+    rows = db.execute(
+        select(PipelineMessage.seq, PipelineMessage.payload["vizual_checklist"])
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.stage == "vizual",
+            PipelineMessage.kind == "notification",
+            PipelineMessage.payload["vizual_checklist"].astext.isnot(None),
+        )
+        .order_by(PipelineMessage.seq.asc())
+    ).all()
+    return [{"seq": seq, **checklist} for seq, checklist in rows if isinstance(checklist, dict)]
+
+
 def _vizual_mockup_rel(project_root: Path, version_number: str) -> Optional[str]:
     """Repo-relative path of the version's Vizuál MOCKUP html, or ``None`` (Director 2026-07-17).
 
@@ -11647,9 +11735,18 @@ async def _run_vizual_round(
     # Announce the preview URL ONCE — on the first entry into the stage (no prior vizual_url note on record).
     # The change-request loop re-enters this round every turn (spin_up is idempotent), so re-recording the URL
     # each time would spam the board; guard it on the durable-message probe instead.
-    async def _announce_preview() -> None:
+    async def _announce_preview(checklist: Optional[VizualChecklist] = None, *, expected: bool = False) -> None:
+        # DEV-36: the first draft's list of what to check rides on this message, so it stands right before the
+        # link. ``expected`` — a turn that should have produced one did not: say so here, next to the link.
         if _vizual_url_recorded(db, version_id):
             return
+        content = f"Vizuál je pripravený — otvor si ho: {url}"
+        payload: dict[str, Any] = {"phase": "vizual", "vizual_url": url}
+        if checklist is not None:
+            payload["vizual_checklist"] = _vizual_checklist_payload(checklist, url, "first")
+        elif expected:
+            content += f"\n\n{_VIZUAL_CHECKLIST_GONE}"
+            payload["vizual_checklist_missing"] = True
         ready_msg = _record_message(
             db,
             version_id=version_id,
@@ -11657,8 +11754,8 @@ async def _run_vizual_round(
             author="system",
             recipient="manazer",
             kind="notification",
-            content=f"Vizuál je pripravený — otvor si ho: {url}",
-            payload={"phase": "vizual", "vizual_url": url},
+            content=content,
+            payload=payload,
         )
         if on_message is not None:
             await on_message(ready_msg)
@@ -11740,14 +11837,51 @@ async def _run_vizual_round(
         db.flush()
         return state
 
+    # DEV-36: what the Manažér should check now. Asked for in the brief; a turn without it is asked ONCE more
+    # (the screens are done — only the list is missing), and a second miss is said aloud rather than retried.
+    checklist = result.vizual_checklist
+    if checklist is None:
+        follow_up = await invoke_agent_with_parse_retry(
+            db,
+            version_id=version_id,
+            role=AI_AGENT_ROLE,
+            stage="vizual",
+            prompt=VIZUAL_CHECKLIST_MISSING,
+            recipient="manazer",
+            on_message=on_message,
+        )
+        if isinstance(follow_up, PipelineStatusBlock):
+            checklist = follow_up.vizual_checklist
+
     # The AI applied the change (edited the FE + committed; HMR reflected it) → hand the turn BACK to the
     # Manažér. NEVER advance the stage here — only a ``schvalit`` action moves vizual → programovanie.
     state.status = "awaiting_manazer"
     if first_draft:
         # Only NOW is there something behind the link, so this is where the URL gets announced (ICCINT-27).
-        await _announce_preview()
+        await _announce_preview(checklist, expected=True)
         state.next_action = "Prvý návrh vizuálu je hotový — pozri sa; napíš, čo zmeniť, alebo schváľ."
     else:
+        # A change gets its own list — not a second announcement of the link (that stays once per stage).
+        change_msg = _record_message(
+            db,
+            version_id=version_id,
+            stage="vizual",
+            author="system",
+            recipient="manazer",
+            kind="notification",
+            content=(
+                "Zmena je vo Vizuáli — čo po nej skontrolovať:"
+                if checklist is not None
+                else f"Zmena je vo Vizuáli. {_VIZUAL_CHECKLIST_GONE}"
+            ),
+            payload=(
+                {"phase": "vizual", "vizual_checklist": _vizual_checklist_payload(checklist, url, "change")}
+                if checklist is not None
+                else {"phase": "vizual", "vizual_checklist_missing": True}
+            ),
+        )
+        if on_message is not None:
+            await on_message(change_msg)
         state.next_action = "Zmena je vo vizuáli — pozri sa; napíš ďalšiu úpravu, alebo schváľ."
     db.flush()
     return state

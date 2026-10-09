@@ -31,6 +31,19 @@ NEX Studio Visual (v4) je **samostatný pomenovaný projekt** odštiepený z NEX
 | **3 — Programovanie** | **Nezmenené v jadre**, ale štartuje zo **schválených vizuálov ako záväzného vstupu**: pridáva logiku + wiring **za** presné schválené obrazovky, nemení layout/navigáciu/flow (lock-with-escalation, §3.7). |
 | **4 — Verifikácia · 5 — Nasadenie** | Nezmenené; koncová poistka navyše overí, že appka sedí so schváleným vizuálom. |
 
+**Čo vo Vizuáli skontrolovať (v4.43.12, DEV-36).** Director 09.10.2026: „Po vyhotovení vizuálu pred tým linkom na
+samotný vizual pomohlo by mi krátky popis čo všetko treba prekontrolovať vo vizuáli.“ Každý ťah agenta vo Vizuáli
+(prvý návrh aj každá zmena) vracia v stavovom výstupe `vizual_checklist`: položky `screen`, `path`, `action`,
+`expected`, odvodené zo Špecifikácie (pri prvom návrhu všetko, čo verzia na obrazovkách mení, po zmene len to, čoho
+sa dotkla), a `not_verifiable` — čo verzia mení, ale ukážkové obrazovky to neukážu (e-maily, opakovanie, časovače).
+Ťah bez zoznamu sa raz dopýta; ak zoznam nepríde ani potom, správa to povie pri odkaze. Zoznam prvého návrhu je
+v správe „Vizuál je pripravený — otvor si ho“ pred odkazom, zoznam po zmene v správe „Zmena je vo Vizuáli — čo po
+nej skontrolovať:“ (odkaz na náhľad sa neohlasuje znova). Engine z `path` urobí priamy odkaz na obrazovku v náhľade,
+len keď ostáva v náhľade (začína `/`, žiadny iný server); mockup odkazy nemá. Položky sa dajú odškrtnúť (pamätá si
+to prehliadač) a pri „Schváliť vizuál“ stojí „Skontrolované X z N“ — schválenie neblokuje. Nástenka nesie všetky
+zoznamy verzie z databázy (`vizual_checklists`), nie z posledných 50 správ; Poradca ich vidí v nástroji `stavba`,
+kým je stavba vo Vizuáli.
+
 **Vizuál — prvotriedna jednotka:**
 - **Typovaný:** `FE` (frontend appky — má každý projekt) · `WE` (webend — webshop, web pre mobilnú appku…). Systém typov **rozšíriteľný** pre budúce druhy.
 - **1..N na projekt**, rôznych typov. Každý vizuál = vlastný nasaditeľný frontend s vlastným publikom/URL.

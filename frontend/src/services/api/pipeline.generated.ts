@@ -5128,6 +5128,11 @@ export interface components {
              * @default no_pass
              */
             verified_provenance: string;
+            /**
+             * Vizual Checklists
+             * @default []
+             */
+            vizual_checklists: components["schemas"]["VizualChecklistRead"][];
             /** Vizual Url */
             vizual_url?: string | null;
         };
@@ -6826,6 +6831,39 @@ export interface components {
              * @description Updated semver-style version string.
              */
             version_number?: string | null;
+        };
+        /**
+         * VizualCheckRead
+         * @description One thing to check in the Vizuál, with the engine-made link to its screen (DEV-36); ``url`` is ``None``
+         *     when the screen cannot be opened directly.
+         */
+        VizualCheckRead: {
+            /** Action */
+            action: string;
+            /** Expected */
+            expected: string;
+            /** Screen */
+            screen: string;
+            /** Url */
+            url?: string | null;
+        };
+        /**
+         * VizualChecklistRead
+         * @description What to check in the Vizuál after one turn (DEV-36). ``seq`` is the message that carries it — the key the
+         *     cockpit ticks items under; ``round`` is ``first`` (the first draft) or ``change``.
+         */
+        VizualChecklistRead: {
+            /** Items */
+            items: components["schemas"]["VizualCheckRead"][];
+            /**
+             * Not Verifiable
+             * @default []
+             */
+            not_verifiable: string[];
+            /** Round */
+            round: string;
+            /** Seq */
+            seq: number;
         };
         /**
          * _AdoptRequest

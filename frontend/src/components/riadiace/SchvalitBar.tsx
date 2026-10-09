@@ -19,6 +19,9 @@ import { FileText } from "lucide-react";
 import { postPipelineActionApi, type PipelineBoard, type PipelineActionName } from "@/services/api/pipeline";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
+import { useVizualChecksStore, vizualCheckKey } from "@/store/vizualChecksStore";
+
+const NOTHING_CHECKED: string[] = [];
 
 interface Props {
   board: PipelineBoard | null;
@@ -32,6 +35,7 @@ export default function SchvalitBar({ board, versionId, onBoard }: Props) {
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<HumanError | null>(null);
+  const checked = useVizualChecksStore((s) => s.checked[versionId] ?? NOTHING_CHECKED);
 
   // Honest-by-construction gate: the bar exists ONLY when the backend offers `schvalit` right now.
   if (!board?.available_actions?.includes("schvalit")) return null;
@@ -58,6 +62,12 @@ export default function SchvalitBar({ board, versionId, onBoard }: Props) {
           ? "Schváliť vizuál"
           : "Schváliť plán";
   const approveBusyLabel = stage === "programovanie" ? "Posúvam…" : "Schvaľujem…";
+  // DEV-36: how much of what the Vizuál lists to check he has ticked. Only items that still exist count (a
+  // stale tick never inflates it), and it never blocks the approval — he decides.
+  const checkKeys = isVizual
+    ? (board.vizual_checklists ?? []).flatMap((c) => c.items.map((_, i) => vizualCheckKey(c.seq ?? -1, i)))
+    : [];
+  const checkedCount = checkKeys.filter((k) => checked.includes(k)).length;
   const consequence =
     stage === "verifikacia"
       ? "Potvrdíš overenú verziu (Audítor ju overil); verzia sa označí ako Hotovo a uzavrie."
@@ -100,6 +110,11 @@ export default function SchvalitBar({ board, versionId, onBoard }: Props) {
       </div>
 
       <div className="flex items-center gap-2">
+        {checkKeys.length > 0 && (
+          <span className="ml-auto text-xs text-[var(--color-text-secondary)]">
+            Skontrolované {checkedCount} z {checkKeys.length}
+          </span>
+        )}
         {/* Vizuál: no comment box + no "Upraviť" — the composer below owns change-requests (live HMR). */}
         {!isVizual && (
           <>
@@ -128,7 +143,7 @@ export default function SchvalitBar({ board, versionId, onBoard }: Props) {
           onClick={() => submit("schvalit", "Schválenie zlyhalo")}
           disabled={submitting}
           className={`shrink-0 rounded-lg bg-primary-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50 ${
-            isVizual ? "ml-auto" : ""
+            isVizual && checkKeys.length === 0 ? "ml-auto" : ""
           }`}
         >
           {submitting ? approveBusyLabel : approveLabel}

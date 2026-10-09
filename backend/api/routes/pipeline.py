@@ -339,6 +339,7 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         verified_provenance=verified_provenance,
         spec_approved=spec_approved,
         vizual_url=vizual_url,
+        vizual_checklists=orchestrator.vizual_checklists(db, version_id),
         dedo_proposal=(
             DedoProposalRead(
                 message_id=proposal.id,

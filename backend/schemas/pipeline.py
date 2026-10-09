@@ -153,6 +153,26 @@ class CiStatusRead(BaseModel):
     sha: Optional[str] = None
 
 
+class VizualCheckRead(BaseModel):
+    """One thing to check in the Vizuál, with the engine-made link to its screen (DEV-36); ``url`` is ``None``
+    when the screen cannot be opened directly."""
+
+    screen: str
+    action: str
+    expected: str
+    url: Optional[str] = None
+
+
+class VizualChecklistRead(BaseModel):
+    """What to check in the Vizuál after one turn (DEV-36). ``seq`` is the message that carries it — the key the
+    cockpit ticks items under; ``round`` is ``first`` (the first draft) or ``change``."""
+
+    seq: int
+    round: str
+    items: list[VizualCheckRead]
+    not_verifiable: list[str] = []
+
+
 class PipelineBoardRead(BaseModel):
     """Vývoj board snapshot: current 5-phase state + the most recent messages (CR-V2-021).
 
@@ -210,6 +230,9 @@ class PipelineBoardRead(BaseModel):
     #: iframe so the Manažér can walk the running app while the AI edits it. Additive, no migration; ``None``
     #: whenever the version never entered the ``vizual`` stage (or no URL was recorded yet).
     vizual_url: Optional[str] = None
+    #: DEV-36: every list of what to check in the Vizuál, oldest first — read from the database, so the count at
+    #: „Schváliť vizuál" covers them all even when the first one fell out of ``recent_messages``.
+    vizual_checklists: list[VizualChecklistRead] = []
     #: ICCINT-24: the open proposal from our technical team, or ``None`` when there is none (the usual
     #: case). Honest-by-construction: the cockpit bar renders IF AND ONLY IF this field is set, so a
     #: proposal can never be silently pending behind a screen that offers nothing — and a handled one
