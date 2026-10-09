@@ -293,6 +293,7 @@ export default function CredentialsPage() {
                   <div className="rounded border border-[var(--color-state-error-bg)] bg-[var(--color-state-error-bg)] p-3 text-sm text-[var(--color-state-error-fg)]">{actionError}</div>
                 )}
                 <textarea
+                  data-no-draft="heslá a kľúče sa v prehliadači nikdy neukladajú"
                   lang="sk"
                   spellCheck={false}
                   value={editContent}
@@ -349,6 +350,7 @@ export default function CredentialsPage() {
                 <div>
                   <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">Obsah (Markdown)</label>
                   <textarea
+                    data-no-draft="heslá a kľúče sa v prehliadači nikdy neukladajú"
                     lang="sk"
                     spellCheck={false}
                     value={createContent}

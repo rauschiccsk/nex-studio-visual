@@ -22,6 +22,7 @@ import {
 import { postPipelineActionApi } from "@/services/api/pipeline";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import ZadanieConflictPanel from "@/components/version/ZadanieConflictPanel";
+import { RESTORED_DRAFT_LABEL, draftKey, useDraft } from "@/hooks/useDraft";
 import { appendZadanie, zadanieClashOf } from "@/components/version/zadanieClash";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
@@ -63,6 +64,12 @@ export default function NewVersionPage() {
   const setSelectedVersion = useActiveContextStore((s) => s.setSelectedVersion);
 
   const [project, setProject] = useState<ProjectRead | null>(null);
+  // DEV-32: the Zadanie of a new version survives a trip to another screen — he goes to look at the project's
+  // documents while writing it. One draft per project; a successful save forgets it.
+  const zadanieDraft = useDraft(draftKey("zadanie-novej-verzie", project?.id));
+  useEffect(() => {
+    if (zadanieDraft.text) setZadanie((prev) => prev || zadanieDraft.text);
+  }, [zadanieDraft.text]);
   const [prevVersions, setPrevVersions] = useState<Version[]>([]);
   const [loadError, setLoadError] = useState("");
 
@@ -363,6 +370,7 @@ export default function NewVersionPage() {
       if (content !== zadanie.trim()) setZadanie(content);
       setExistingZadanie(null);
       setSavedVersion(v);
+      zadanieDraft.clear();
     } catch (err: unknown) {
       // ICCINT-71: „zadanie už existuje" NIE je chyba na zahodenie do všeobecnej hlášky. 07.09.2026 tento
       // formulár ticho zapísal jednu vetu cez 71-riadkovú zákaznícku špecifikáciu — Manažér videl prázdne
@@ -562,7 +570,11 @@ export default function NewVersionPage() {
                 Zadanie{" "}
                 <span className="ml-1 text-[var(--color-text-muted)] font-normal text-xs">(nepovinné — brief; voľný text)</span>
               </label>
+              {zadanieDraft.restored && zadanie === zadanieDraft.text && !savedVersion && (
+                <p className="text-[11px] text-[var(--color-text-muted)]">{RESTORED_DRAFT_LABEL}</p>
+              )}
               <textarea
+                data-draft="zadanie-novej-verzie"
                 lang="sk"
                 spellCheck={true}
                 rows={8}
@@ -571,6 +583,7 @@ export default function NewVersionPage() {
                 disabled={!!savedVersion}
                 onChange={(e) => {
                   setZadanie(e.target.value);
+                  zadanieDraft.setText(e.target.value);
                   if (errors.zadanie) setErrors((er) => ({ ...er, zadanie: "" }));
                 }}
                 className={`${inputCls} resize-none leading-relaxed disabled:opacity-60 ${errors.zadanie ? "border-[var(--color-state-error-bg)]" : ""}`}

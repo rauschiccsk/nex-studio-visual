@@ -83,6 +83,7 @@ const version = {
 
 describe("VersionDetailPage — an unreadable Zadanie is its own state", () => {
   beforeEach(() => {
+    window.localStorage.clear(); // DEV-32: the Zadanie keeps a draft — one test must not leave it for the next
     navigateMock.mockReset();
     listProjectsApiMock.mockReset().mockResolvedValue({ items: [project] });
     getVersionMock.mockReset().mockResolvedValue(version);

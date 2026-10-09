@@ -80,6 +80,7 @@ async function editAndSave() {
 }
 
 beforeEach(() => {
+    window.localStorage.clear(); // DEV-32: the Zadanie keeps a draft — one test must not leave it for the next
   listProjectsApiMock.mockReset().mockResolvedValue({ items: [project] });
   getVersionMock.mockReset().mockResolvedValue(version);
   readZadanieMock.mockReset().mockResolvedValue({ content: ON_DISK });
@@ -139,5 +140,33 @@ describe("DEV-40 — editing a saved Zadanie", () => {
     expect(writeZadanieMock).toHaveBeenCalledTimes(1);
     expect(ulozene()).toBeDisabled(); // the editor now holds exactly what is on disk
     expect(screen.queryByRole("button", { name: "Nahradiť mojím textom" })).not.toBeInTheDocument();
+  });
+});
+
+describe("DEV-32 — an unsaved Zadanie survives a trip to another screen", () => {
+  it("leaving and coming back restores his text and says it is his earlier draft; saving forgets it", async () => {
+    const first = render(<VersionDetailPage />);
+    await userEvent.type(await editor(), " A ešte veta.");
+    first.unmount(); // he clicked over to another screen
+
+    render(<VersionDetailPage />);
+    expect(await editor()).toHaveValue(MINE);
+    expect(screen.getByText("Obnovený rozpísaný text — pokračuj, alebo ho prepíš.")).toBeInTheDocument();
+
+    await userEvent.click(ulozit());
+    await waitFor(() => expect(writeZadanieMock).toHaveBeenCalledWith("ver-1", MINE, { basedOn: ON_DISK }));
+    await waitFor(() => expect(window.localStorage.getItem("nex.draft.zadanie-verzie.ver-1")).toBeNull());
+  });
+
+  it("a text typed back to what is on disk is no draft — nothing is kept and nothing is announced", async () => {
+    const first = render(<VersionDetailPage />);
+    await userEvent.type(await editor(), " X{Backspace}{Backspace}"); // edited, then back to the disk text
+    expect(await editor()).toHaveValue(ON_DISK);
+    first.unmount();
+
+    render(<VersionDetailPage />);
+    expect(await editor()).toHaveValue(ON_DISK);
+    expect(screen.queryByText(/Obnovený rozpísaný text/)).not.toBeInTheDocument();
+    expect(window.localStorage.getItem("nex.draft.zadanie-verzie.ver-1")).toBeNull();
   });
 });

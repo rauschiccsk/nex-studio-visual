@@ -136,6 +136,7 @@ const behindNexshared: NexsharedStatus = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.localStorage.clear(); // DEV-32: the Zadanie keeps a draft — one test must not leave it for the next
   listProjectsApiMock.mockResolvedValue({ items: [project], total: 1, skip: 0, limit: 100 });
   listVersionsMock.mockResolvedValue([]);
   getNexsharedStatusApiMock.mockResolvedValue({ ...behindNexshared, behind: 0, up_to_date: true, changelog: [] });
@@ -456,5 +457,27 @@ describe("NewVersionPage — zrážka pri ukladaní ponúkne Nahradiť / Doplni�
     await waitFor(() =>
       expect(writeZadanieMock).toHaveBeenLastCalledWith("v-1", `${NA_DISKU} Doplnené.`, { basedOn: NA_DISKU }),
     );
+  });
+});
+
+describe("NewVersionPage — rozpísané zadanie prežije odchod na inú obrazovku (DEV-32)", () => {
+  it("po návrate je text späť s poznámkou, že je jeho; po uložení sa zabudne", async () => {
+    createVersionMock.mockResolvedValue({ ...version, id: "v-1", description: "Platby cez banku." });
+    writeZadanieMock.mockResolvedValue({ relative_path: "x.md", status: "saved" });
+    const NewVersionPage = (await import("@/pages/NewVersionPage")).default;
+
+    const first = render(<NewVersionPage />);
+    await userEvent.type(await screen.findByPlaceholderText(/Opíš, čo má verzia priniesť/i), "Platby cez banku.");
+    first.unmount();
+
+    render(<NewVersionPage />);
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText(/Opíš, čo má verzia priniesť/i)).toHaveValue("Platby cez banku."),
+    );
+    expect(screen.getByText("Obnovený rozpísaný text — pokračuj, alebo ho prepíš.")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /uložiť zadanie/i }));
+    await waitFor(() => expect(writeZadanieMock).toHaveBeenCalledWith("v-1", "Platby cez banku."));
+    await waitFor(() => expect(window.localStorage.getItem(`nex.draft.zadanie-novej-verzie.${project.id}`)).toBeNull());
   });
 });

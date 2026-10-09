@@ -5,6 +5,7 @@ import { FolderOpen, Loader2, Plus, Trash2, KeyRound, Pencil } from "lucide-reac
 import { listCustomers, createCustomer, updateCustomer, deleteCustomer } from "@/services/api/customers";
 import { ApiError } from "@/services/api";
 import { humanizeApiError } from "@/services/apiError";
+import { draftKey, useDraft } from "@/hooks/useDraft";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import type { CustomerRead } from "@/types/customer";
 
@@ -71,6 +72,12 @@ export default function CustomersPage() {
   // obs #6: when non-null the form is in EDIT mode for this customer (submits via updateCustomer/PATCH
   // instead of createCustomer/POST); null = add mode.
   const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
+  // DEV-32: half-written notes about a customer survive leaving the screen — one draft for a new customer, one per
+  // edited customer; a successful save forgets it. (The integrations field may carry access details — no draft.)
+  const notesDraft = useDraft(draftKey(`zakaznik-poznamky.${editingCustomerId ?? "novy"}`, slug));
+  useEffect(() => {
+    if (showForm && notesDraft.text) setNotes(notesDraft.text);
+  }, [showForm, notesDraft.text]);
 
   const load = useCallback(() => {
     if (!slug) return;
@@ -164,6 +171,7 @@ export default function CustomersPage() {
       } else {
         await createCustomer(slug, payload);
       }
+      notesDraft.clear();
       resetForm();
       setShowForm(false);
       load();
@@ -324,6 +332,7 @@ export default function CustomersPage() {
           <label className="block text-xs">
             <span className="text-[var(--color-text-secondary)]">Integrácie (JSON, voliteľné)</span>
             <textarea
+              data-no-draft="nastavenie integrácií môže niesť prístupové údaje — v prehliadači sa neukladá"
               spellCheck={false}
               value={integrations}
               onChange={(e) => setIntegrations(e.target.value)}
@@ -335,10 +344,15 @@ export default function CustomersPage() {
           <label className="block text-xs">
             <span className="text-[var(--color-text-secondary)]">Poznámka</span>
             <textarea
+              data-draft="zakaznik-poznamky"
               lang="sk"
               spellCheck={false}
               value={notes}
-              onChange={(e) => setNotes(e.target.value)}
+              onChange={(e) => {
+                setNotes(e.target.value);
+                const original = items.find((c) => c.id === editingCustomerId)?.notes ?? "";
+                notesDraft.setText(e.target.value === original ? "" : e.target.value);
+              }}
               rows={2}
               className="mt-1 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-xs text-[var(--color-text-primary)]"
             />

@@ -408,6 +408,7 @@ function PoradcaComposer({
       <ErrorNote error={error} />
       <div className="flex items-end gap-2">
         <textarea
+          data-draft="poradca"
           lang="sk"
           spellCheck={true}
           ref={growRef}

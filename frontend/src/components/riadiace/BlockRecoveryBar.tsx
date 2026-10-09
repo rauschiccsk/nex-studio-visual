@@ -156,6 +156,7 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
         )}
         <div className="flex items-center gap-2">
           <textarea
+            data-draft="odpoved"
             lang="sk"
             spellCheck={true}
             ref={growRef}

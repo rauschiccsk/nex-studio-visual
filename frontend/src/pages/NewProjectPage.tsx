@@ -454,6 +454,7 @@ export default function NewProjectPage() {
             {/* Description */}
             <Field label="Popis">
               <textarea
+                data-no-draft="krátky popis vo formulári nového projektu — formulár sa vypĺňa naraz a jeho ostatné polia sa tiež nepamätajú"
                 lang="sk"
                 spellCheck={true}
                 rows={2}

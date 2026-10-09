@@ -185,6 +185,7 @@ export function ConversationComposer({
           </p>
         )}
         <textarea
+          data-draft="rozhovor"
           lang="sk"
           spellCheck={true}
           ref={growRef}

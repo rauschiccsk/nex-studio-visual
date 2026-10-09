@@ -187,6 +187,7 @@ export default function ProjectSettingsSection({ project, onSaved, canEdit }: Pr
             Popis
           </label>
           <textarea
+            data-no-draft="súčasť formulára nastavení projektu — ukladá sa spolu s ostatnými poliami, ktoré sa nepamätajú"
             lang="sk"
             spellCheck={true}
             id="proj-desc"

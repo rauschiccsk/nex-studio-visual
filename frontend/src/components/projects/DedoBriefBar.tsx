@@ -164,6 +164,7 @@ export default function DedoBriefBar({ projectId, proposal, onProposal, onVersio
         </p>
 
         <textarea
+          data-draft="zadanie-od-deda"
           lang="sk"
           spellCheck={true}
           ref={growRef}

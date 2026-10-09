@@ -196,6 +196,7 @@ export default function VersionSettingsSection({ version, canEdit, onSaved }: Pr
             Popis
           </label>
           <textarea
+            data-no-draft="súčasť formulára nastavení verzie — ukladá sa spolu s ostatnými poliami, ktoré sa nepamätajú"
             id="ver-description"
             lang="sk"
             spellCheck={true}

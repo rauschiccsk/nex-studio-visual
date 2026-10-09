@@ -228,6 +228,7 @@ export default function DedoProposalBar({ board, versionId, onBoard }: Props) {
         </p>
 
         <textarea
+          data-draft="navrh"
           lang="sk"
           spellCheck={true}
           ref={growRef}

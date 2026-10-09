@@ -93,6 +93,7 @@ const ulozit = () => screen.getByRole("button", { name: /Uložiť Zadanie|Zadani
 
 describe("VersionDetailPage — uložené Zadanie nie je neuložené", () => {
   beforeEach(() => {
+    window.localStorage.clear(); // DEV-32: the Zadanie keeps a draft — one test must not leave it for the next
     navigateMock.mockReset();
     listProjectsApiMock.mockReset().mockResolvedValue({ items: [project] });
     getVersionMock.mockReset().mockResolvedValue(version);

@@ -48,6 +48,7 @@ import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { useAuthStore } from "@/store/authStore";
 import { useSessionStore } from "@/store/sessionStore";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
+import { RESTORED_DRAFT_LABEL, draftKey, useDraft } from "@/hooks/useDraft";
 import { CodeBlock } from "@/components/markdown/CodeBlock";
 import { KbTree } from "@/components/KbTree";
 import type { KnowledgeDoc } from "@/types/knowledge";
@@ -125,6 +126,13 @@ export default function KnowledgeBasePage() {
   // Edit state
   const [editContent, setEditContent] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // DEV-32: a half-written document survives leaving the screen — it comes back when he opens the editor again
+  // („Nový" or „Upraviť"). One draft for a new document, one per edited document; a successful save forgets it.
+  const newDraft = useDraft(draftKey("kb-novy-dokument", "znalostna-baza"));
+  const editDraft = useDraft(
+    selectedDoc ? draftKey(`kb-uprava.${selectedDoc.relative_path}`, "znalostna-baza") : null,
+  );
 
   // Create state
   const [newTitle, setNewTitle] = useState("");
@@ -274,6 +282,7 @@ export default function KnowledgeBasePage() {
       setNewCategory("icc");
       setNewFilename("");
       setNewContent("");
+      newDraft.clear();
       await refresh();
     } catch (e) {
       setError(humanizeApiError(e, "Vytvorenie dokumentu zlyhalo"));
@@ -292,6 +301,7 @@ export default function KnowledgeBasePage() {
         tenant: "icc",
       });
       setDocContent(editContent);
+      editDraft.clear();
       setMode("browse");
       await refresh();
     } catch (e) {
@@ -438,7 +448,7 @@ export default function KnowledgeBasePage() {
                   setNewTitle("");
                   setNewCategory("icc");
                   setNewFilename("");
-                  setNewContent("");
+                  setNewContent(newDraft.text);
                   setError(null);
                 }}
                 className="flex items-center gap-1 px-2 py-1.5 bg-[var(--color-accent-primary)] text-white rounded hover:bg-[var(--color-accent-primary-hover)] text-xs font-medium transition-colors"
@@ -611,11 +621,18 @@ export default function KnowledgeBasePage() {
                 <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
                   Obsah (text)
                 </label>
+                {newDraft.restored && newContent === newDraft.text && (
+                  <p className="mb-1 text-[11px] text-[var(--color-text-muted)]">{RESTORED_DRAFT_LABEL}</p>
+                )}
                 <textarea
+                  data-draft="kb-novy-dokument"
                   lang="sk"
                   spellCheck={true}
                   value={newContent}
-                  onChange={(e) => setNewContent(e.target.value)}
+                  onChange={(e) => {
+                    setNewContent(e.target.value);
+                    newDraft.setText(e.target.value);
+                  }}
                   placeholder="# Názov dokumentu&#10;&#10;Text dokumentu..."
                   className="flex-1 min-h-[200px] px-3 py-2 bg-[var(--color-canvas)] border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)] font-mono resize-none focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-focus)]"
                 />
@@ -645,11 +662,18 @@ export default function KnowledgeBasePage() {
                     </h2>
                     <span className="text-xs text-[var(--color-text-muted)]">{selectedDoc.relative_path}</span>
                   </div>
+                  {editDraft.restored && editContent === editDraft.text && (
+                    <p className="mb-1 text-[11px] text-[var(--color-text-muted)]">{RESTORED_DRAFT_LABEL}</p>
+                  )}
                   <textarea
+                    data-draft="kb-uprava"
                     lang="sk"
                     spellCheck={false}
                     value={editContent}
-                    onChange={(e) => setEditContent(e.target.value)}
+                    onChange={(e) => {
+                      setEditContent(e.target.value);
+                      editDraft.setText(e.target.value === docContent ? "" : e.target.value);
+                    }}
                     className="flex-1 px-3 py-2 bg-[var(--color-canvas)] border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)] font-mono resize-none focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-focus)]"
                   />
                   <div className="flex gap-2 mt-3">
@@ -707,7 +731,7 @@ export default function KnowledgeBasePage() {
                         <>
                           <button
                             onClick={() => {
-                              setEditContent(docContent);
+                              setEditContent(editDraft.text || docContent);
                               setMode("edit");
                             }}
                             className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--color-surface-active)] text-[var(--color-text-secondary)] rounded hover:bg-[var(--color-surface-hover)] text-sm transition-colors"

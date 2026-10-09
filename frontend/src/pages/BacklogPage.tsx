@@ -10,6 +10,7 @@ import {
   updateBacklogApi,
   deleteBacklogApi,
 } from "@/services/api/backlog";
+import { draftKey, useDraft } from "@/hooks/useDraft";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
 import type {
@@ -86,6 +87,16 @@ export default function BacklogPage() {
   const [editTitle, setEditTitle] = useState("");
   const [editDesc, setEditDesc] = useState("");
   const [editPriority, setEditPriority] = useState<BacklogPriority>("medium");
+  // DEV-32: a half-written requirement description survives leaving the screen — the new one per project, an
+  // edit per requirement; a successful save forgets it.
+  const newDescDraft = useDraft(draftKey("zasobnik-nova", project?.id));
+  const editDescDraft = useDraft(editingId ? draftKey(`zasobnik-uprava.${editingId}`, project?.id) : null);
+  useEffect(() => {
+    if (newDescDraft.text) setNewDesc((prev) => prev || newDescDraft.text);
+  }, [newDescDraft.text]);
+  useEffect(() => {
+    if (editDescDraft.text) setEditDesc(editDescDraft.text);
+  }, [editDescDraft.text]);
   const [assigningId, setAssigningId] = useState<string | null>(null);
   const [assignVersionId, setAssignVersionId] = useState<string>("");
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -175,6 +186,7 @@ export default function BacklogPage() {
       await reloadBacklog(project.id);
       setNewTitle("");
       setNewDesc("");
+      newDescDraft.clear();
       setNewPriority("medium");
       setShowNew(false);
     } catch {
@@ -202,6 +214,7 @@ export default function BacklogPage() {
         priority: editPriority,
       });
       await reloadBacklog(project.id);
+      editDescDraft.clear();
       setEditingId(null);
     } catch {
       setRowError((p) => ({ ...p, [id]: "Uloženie zlyhalo." }));
@@ -312,10 +325,14 @@ export default function BacklogPage() {
             className="w-full bg-[var(--color-surface)] border border-[var(--color-border-default)] rounded px-3 py-1.5 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-primary-500"
           />
           <textarea
+            data-draft="zasobnik-nova"
             lang="sk"
             spellCheck={true}
             value={newDesc}
-            onChange={(e) => setNewDesc(e.target.value)}
+            onChange={(e) => {
+              setNewDesc(e.target.value);
+              newDescDraft.setText(e.target.value);
+            }}
             placeholder="Popis (voliteľný)"
             rows={2}
             className="w-full bg-[var(--color-surface)] border border-[var(--color-border-default)] rounded px-3 py-1.5 text-xs text-[var(--color-text-primary)] focus:outline-none focus:border-primary-500"
@@ -381,10 +398,15 @@ export default function BacklogPage() {
                       className="w-full bg-[var(--color-surface)] border border-[var(--color-border-default)] rounded px-3 py-1.5 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-primary-500"
                     />
                     <textarea
+                      data-draft="zasobnik-uprava"
                       lang="sk"
                       spellCheck={false}
                       value={editDesc}
-                      onChange={(e) => setEditDesc(e.target.value)}
+                      onChange={(e) => {
+                        setEditDesc(e.target.value);
+                        const original = items.find((i) => i.id === editingId)?.description ?? "";
+                        editDescDraft.setText(e.target.value === original ? "" : e.target.value);
+                      }}
                       rows={2}
                       className="w-full bg-[var(--color-surface)] border border-[var(--color-border-default)] rounded px-3 py-1.5 text-xs text-[var(--color-text-primary)] focus:outline-none focus:border-primary-500"
                     />

@@ -26,3 +26,9 @@ kliknutia sa nič neprepíše.
 **Poradca vidí Zásobník.** Skôr než ti navrhne požiadavku do Zásobníka, pozrie sa, čo v ňom už je. Keď tam podobná
 požiadavka je, povie ti jej číslo (napríklad REQ-1) a novú nenavrhne — tlačidlo „Uložiť do Zásobníka“ tak
 nezaloží duplikát.
+
+**Rozpísaný text sa pri odchode na inú obrazovku nestratí — nikde.** Zadanie na stránke verzie, zadanie novej
+verzie, nový aj upravovaný dokument Znalostnej bázy, popis požiadavky v Zásobníku, poznámky k zákazníkovi, pokyn
+pre rýchlu opravu a vlastná odpoveď na kartu rozhodnutia si pamätajú, čo si napísal; keď sa vrátiš, text je späť
+s poznámkou, že je to tvoj rozpísaný text. Po uložení sa zabudne. Heslá a nastavenie integrácií sa v prehliadači
+zámerne neukladajú. Každé nové pole na písanie musí odteraz o tomto rozhodnúť, inak kontrola kokpitu nepustí zmenu.

@@ -168,7 +168,6 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
   const answered = useMemo(() => (latest ? answeredLabels(messages, latest.seq) : {}), [messages, latest]);
 
   const [picked, setPicked] = useState<string | null>(null);
-  const [freeText, setFreeText] = useState("");
   // DEV-26: the card's instruction for the AI partner is a writing surface like any other — it takes
   // Poradca's instruction during a consultation, keeps its lines, and survives a trip to another screen.
   // One draft per card, so an instruction written for one decision never rides along with the next one.
@@ -177,6 +176,10 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
     return decisions.find((d) => !(d.key in answered))?.key ?? null;
   }, [latest, answered]);
   const noteDraft = useDraft(currentKey ? draftKey(`karta.${currentKey}`, versionId) : null);
+  // DEV-32: his own answer to a card („Iná odpoveď") is a writing surface too — it survives leaving the screen.
+  const freeTextDraft = useDraft(currentKey ? draftKey(`karta-odpoved.${currentKey}`, versionId) : null);
+  const freeText = freeTextDraft.text;
+  const setFreeText = freeTextDraft.setText;
   const note = noteDraft.text;
   const noteRef = useAutoGrowTextarea(note);
   const { fromPoradca, dismiss: dismissPoradca } = usePoradcaHandoff({
@@ -224,7 +227,7 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
       const nextBoard = await postPipelineActionApi(versionId, { action: "decide", payload });
       onBoard(nextBoard);
       setPicked(null);
-      setFreeText("");
+      freeTextDraft.clear();
       noteDraft.clear();
       dismissPoradca();
       setShowFree(false);
@@ -382,6 +385,7 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
           )}
           {showFree && (
             <textarea
+              data-draft="karta-odpoved"
               spellCheck={true}
               lang="sk"
               value={freeText}
@@ -399,6 +403,7 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
             <p className="mt-2 text-[11px] text-[var(--color-text-muted)]">{RESTORED_DRAFT_LABEL}</p>
           )}
           <textarea
+            data-draft="karta"
             lang="sk"
             spellCheck={true}
             ref={noteRef}

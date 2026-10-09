@@ -18,6 +18,7 @@ import { listVersions } from "@/services/api/versions";
 import DedoBriefBar from "@/components/projects/DedoBriefBar";
 import { startFastFixApi } from "@/services/api/pipeline";
 import { useOpenVersionCockpit } from "@/hooks/useOpenVersionCockpit";
+import { draftKey, useDraft } from "@/hooks/useDraft";
 import { useAuthStore } from "@/store/authStore";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
@@ -129,6 +130,9 @@ export default function ProjectDetailPage() {
   const [dedoProposal, setDedoProposal] = useState<DedoProjectProposal | null>(null);
   const [fastFixOpen, setFastFixOpen] = useState(false);
   const [fastFixDirective, setFastFixDirective] = useState("");
+  // DEV-32: a half-written quick-fix instruction survives leaving the screen; it comes back when he opens the
+  // dialog again, and is forgotten once the fix has started.
+  const fastFixDraft = useDraft(draftKey("rychla-oprava", slug));
   const [fastFixSubmitting, setFastFixSubmitting] = useState(false);
   const [fastFixError, setFastFixError] = useState<HumanError | null>(null);
 
@@ -208,6 +212,7 @@ export default function ProjectDetailPage() {
     setFastFixError(null);
     try {
       const res = await startFastFixApi(project.id, directive);
+      fastFixDraft.clear();
       // ICCINT-62: shared with the Dedo proposal bar, the OTHER entry into this same lane — it omitted this
       // step and the build started with the Manažér left on the previous version. One helper, both entries.
       await openVersionCockpit(res.version_id, { slug: project.slug, name: project.name });
@@ -506,7 +511,7 @@ export default function ProjectDetailPage() {
               <button
                 onClick={() => {
                   setFastFixError(null);
-                  setFastFixDirective("");
+                  setFastFixDirective(fastFixDraft.text);
                   setFastFixOpen(true);
                 }}
                 className="flex items-center gap-1.5 border border-[var(--color-accent-primary)]/40 text-[var(--color-accent-primary)] hover:bg-[var(--color-accent-primary)]/10 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
@@ -814,12 +819,16 @@ export default function ProjectDetailPage() {
               Popis opravy
             </label>
             <textarea
+              data-draft="rychla-oprava"
               lang="sk"
               spellCheck={true}
               id="fastfix-directive"
               autoFocus
               value={fastFixDirective}
-              onChange={(e) => setFastFixDirective(e.target.value)}
+              onChange={(e) => {
+                setFastFixDirective(e.target.value);
+                fastFixDraft.setText(e.target.value);
+              }}
               rows={5}
               placeholder="Napríklad: V ľavom menu oprav preklep „Nastvenia“ na „Nastavenia“."
               className="w-full resize-none rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)] focus:border-primary-500 focus:outline-none"

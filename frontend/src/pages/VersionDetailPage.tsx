@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { versionStatusCls, versionStatusLabel } from "@/components/cockpit/labels";
 import { useNavigate, useParams } from "react-router-dom";
 import { listProjectsApi } from "@/services/api/projects";
@@ -6,6 +6,7 @@ import { getVersion, writeZadanie, readZadanie } from "@/services/api/versions";
 import { postPipelineActionApi } from "@/services/api/pipeline";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
+import { RESTORED_DRAFT_LABEL, draftKey, useDraft } from "@/hooks/useDraft";
 import ZadanieConflictPanel from "@/components/version/ZadanieConflictPanel";
 import { appendZadanie, zadanieClashOf, type ZadanieClash } from "@/components/version/zadanieClash";
 import type { ProjectRead } from "@/types";
@@ -59,6 +60,11 @@ export default function VersionDetailPage() {
   // Líši sa obrazovka od disku? To je celá otázka — pre Uložiť aj pre Spustiť, len z opačnej strany.
   // Porovnáva sa orezane, lebo orezane sa aj ukladá; inak by pridaná medzera na konci vyzerala ako zmena.
   const zadanieNeulozene = zadanie.trim() !== zadanieNaDisku.trim();
+  // DEV-32: an unsaved Zadanie survives a trip to another screen — 105 lines of a brief must not vanish because
+  // he went to look something up. The draft holds only what differs from the disk; saving clears it.
+  const zadanieDraft = useDraft(draftKey("zadanie-verzie", versionId));
+  const zadanieDraftRef = useRef(zadanieDraft);
+  zadanieDraftRef.current = zadanieDraft;
 
   useActiveContextSync(project, version);
 
@@ -85,7 +91,8 @@ export default function VersionDetailPage() {
         if (!proj) { setError("Projekt nebol nájdený."); return; }
         setProject(proj);
         setVersion(ver);
-        setZadanie(zad.content);
+        const rozpisane = zadanieDraftRef.current.text;
+        setZadanie(rozpisane && rozpisane.trim() !== zad.content.trim() ? rozpisane : zad.content);
         setZadanieNaDisku(zad.content);
         setZadanieUnreadable(zad.error);
       })
@@ -116,6 +123,7 @@ export default function VersionDetailPage() {
       setZadanie(content);
       setZadanieNaDisku(content);
       setZadanieClash(null);
+      zadanieDraft.clear();
     } catch (e: unknown) {
       const clash = zadanieClashOf(e);
       if (clash) setZadanieClash(clash);
@@ -269,15 +277,24 @@ export default function VersionDetailPage() {
                   </button>
                 </div>
               ) : (
+                <>
+                {zadanieDraft.restored && zadanie === zadanieDraft.text && (
+                  <p className="mb-1 text-[11px] text-[var(--color-text-muted)]">{RESTORED_DRAFT_LABEL}</p>
+                )}
                 <textarea
+                  data-draft="zadanie-verzie"
                   lang="sk"
                   spellCheck={true}
                   value={zadanie}
-                  onChange={(e) => setZadanie(e.target.value)}
+                  onChange={(e) => {
+                    setZadanie(e.target.value);
+                    zadanieDraft.setText(e.target.value.trim() === zadanieNaDisku.trim() ? "" : e.target.value);
+                  }}
                   rows={14}
                   placeholder="Opíš, čo má aplikácia robiť…"
                   className="w-full resize-y rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] transition-colors focus:border-primary-500 focus:outline-none"
                 />
+                </>
               )}
               <ErrorNote error={zadanieError} className="mt-2" />
               {zadanieClash && (
@@ -292,6 +309,7 @@ export default function VersionDetailPage() {
                     setZadanie(zadanieClash.existing);
                     setZadanieNaDisku(zadanieClash.existing);
                     setZadanieClash(null);
+                    zadanieDraft.clear();
                   }}
                 />
               )}
