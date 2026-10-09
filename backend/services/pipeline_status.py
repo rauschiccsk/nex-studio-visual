@@ -199,6 +199,21 @@ class TaskPlanSkeletonEpic(BaseModel):
         return data
 
 
+class ReviewNoteCoverage(BaseModel):
+    """Where the task plan covers one of the Auditor's notes from a PASSED design review (DEV-35).
+
+    A passed review used to keep its notes to itself — the Auditor promised the AI Agent would fix them while
+    programming, and nothing ever handed them over. The skeleton now answers for each note; the engine checks
+    the answer is complete (:func:`backend.services.orchestrator._review_notes_gap`)."""
+
+    #: The note's number as the skeleton prompt listed it (1-based).
+    note: int = Field(ge=1)
+    #: The exact ``title`` of the skeleton feat whose tasks carry the note; empty when the note no longer applies.
+    feat: str = Field(default="", max_length=500)
+    #: One plain sentence for the Manažér: how the plan covers the note, or where the documents already settled it.
+    resolution: str = Field(min_length=1, max_length=1000)
+
+
 class TaskPlanSkeleton(BaseModel):
     """Pass 1: the EPIC + FEAT skeleton (no tasks) + the cross-cutting rules, codified once.
     The per-feat passes fill in each feat's tasks; the orchestrator assembles the full plan."""
@@ -218,6 +233,8 @@ class TaskPlanSkeleton(BaseModel):
     #: CR-V2-052: the safety invariants the app must ENFORCE (≥1 NEGATIVE assertion each — the risky op MUST
     #: be rejected). The oracle FAILs a build that declares a property but ships no negative test for it.
     safety_properties: list[SafetyProperty] = Field(default_factory=list)
+    #: DEV-35: one entry per Auditor note the skeleton prompt listed. Empty when no passed review left notes.
+    review_notes: list[ReviewNoteCoverage] = Field(default_factory=list)
 
 
 class TaskPlanFeatTasks(BaseModel):

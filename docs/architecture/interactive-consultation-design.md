@@ -89,6 +89,15 @@ nález padne v ďalšom verdikte a slučka sa zopakuje (ohraničené `AUDITOR_LO
   ten prepíše `specification.md`/`design.md`, zavrie `kind=gate_report`; `_run_navrh_round` znova spustí
   Auditora. Čistý verdikt → `_settle_phase_boundary` (dial riadi); otvorená diera → znova konzultácia,
   ohraničené re-consult stropom.
+- ⚠️ **Poznámky čistého verdiktu (DEV-35, v4.43.11).** Čistý verdikt smie niesť neblokujúce poznámky a Auditor
+  o nich píše, že ich AI Agent opraví pri programovaní. Do v4.43.10 ich nikto agentovi neodovzdal: diera ide do
+  kariet, čistý verdikt len do správy (NEX Inbox 1.7.0, 09.10.2026 — štyri poznámky, dve o nepravdivých správach
+  pre obsluhu). Odvtedy ich `_unhandled_review_notes` pozbiera zo všetkých čistých previerok (aj zúženej pri
+  schválení Vizuálu; previerka s dierou má hneď za sebou značku `upfront_review_hole` a jej nálezy išli do kariet)
+  a prvý ťah Programovania ich dá do pokynu na kostru plánu úloh. Kostra musí pri každej poznámke povedať, ktorá
+  funkcia ju pokryje (`review_notes`: `note`, `feat`, `resolution`), alebo prečo už neplatí; chýbajúcu, vymyslenú
+  či na neexistujúcu funkciu ukazujúcu odpoveď engine vráti ako neplatnú kostru. Funkcia dostane svoje poznámky aj
+  v pokyne na úlohy a Manažér ich vidí pri zostavenom pláne v Riadiacom centre.
 
 **Cena: presne dva AI-Agent ťahy na konzultáciu** (jeden vyrobí karty, jeden aplikuje) — kliky medzitým 0 tokenov.
 

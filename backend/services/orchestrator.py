@@ -91,6 +91,7 @@ from backend.services.pipeline_status import (
     TaskPlan,
     TaskPlanEpic,
     TaskPlanFeat,
+    TaskPlanSkeleton,
     extract_report_body,
     extract_task_plan_json,
     parse_fix_critique,
@@ -1920,7 +1921,8 @@ def _auditor_upfront_directive(db: Session, version_id: uuid.UUID, *, narrowed_t
         "súbor, nepíš kód ani necommituj. TY NÁJDEŠ — opravuje AI Agent (zachovaná nezávislosť).\n"
         "5. Vráť `kind=verdict`:\n"
         "   - ak je Špecifikácia + Návrh bez blokujúcej medzery → `verdict=true` (PASS); do `findings` daj "
-        "prípadné neblokujúce poznámky (alebo prázdne).\n"
+        "prípadné neblokujúce poznámky (alebo prázdne). Tieto poznámky dostane AI Agent na začiatku "
+        "Programovania a zaradí ich do plánu úloh — každú napíš tak, aby sa podľa nej dalo konať.\n"
         "   - ak nájdeš medzeru (HOLE) → `verdict=false` (FAIL); konkrétne diery vymenuj v `findings` a do "
         "`proposed_fix` napíš ZAMERANÝ rozsah vyjasnenia/úpravy pre Manažéra (NEvykonávaj ho). Medzera sa "
         "eskaluje Manažérovi — build sa zastaví na schvaľovacom bode po Návrhu.\n"
@@ -2638,13 +2640,23 @@ def _task_plan_skeleton_directive(director_note: Optional[str] = None) -> str:
     return base
 
 
-def _task_plan_feat_directive(feat_title: str) -> str:
+def _task_plan_feat_directive(feat_title: str, review_notes: Sequence[tuple[int, str]] = ()) -> str:
     """Passes 2..N prompt (v0.7.3, CR-1; v2 CR-V2-011): the AI Agent emits ONLY one feat's tasks, in a
     ``<<<TASK_PLAN_JSON>>>`` sentinel fence.
 
     Runs on the resumed warm AI-Agent session, so the full design doc + the just-emitted skeleton stay in
     context; the orchestrator grafts the returned tasks onto the matching skeleton feat.
+
+    ``review_notes`` (DEV-35): the Auditor's notes the skeleton assigned to THIS feat, as ``(number, text)`` —
+    repeated here so the feat's tasks are written with the note in front of the agent, not from memory.
     """
+    notes_block = ""
+    if review_notes:
+        notes_block = (
+            "\n\nTáto funkcia v kostre pokrýva poznámky Audítora z previerky Návrhu — jej úlohy ich MUSIA "
+            "zapracovať (chyba v dokumente = úloha typu `docs`, správanie = v `description` úlohy, ktorá tú "
+            "časť programuje):\n" + "\n".join(_numbered_note(n, text) for n, text in review_notes)
+        )
     return (
         f"Pre funkciu „{feat_title}“ z kostry plánu emituj IBA jej úlohy. Objekt má jedno pole `tasks` "
         "(zoznam, ≥1): KAŽDÁ úloha má `title`, `task_type` (jedno z: backend, frontend, migration, test, "
@@ -2653,11 +2665,91 @@ def _task_plan_feat_directive(feat_title: str) -> str:
         "vysvetlenie úlohy BEZ žargónu (čo robí pre Manažéra — nie technický `description`). Granularita "
         "HRUBOZRNNÁ — modul ≈ úloha (F-007 §4); nedeľ koherentný modul. "
         + _TASK_PLAN_ESTIMATE_NOTE
+        + notes_block
         + "\n\n"
         + _TASK_PLAN_FENCE_RULE
         + "\n\n"
         + _FEAT_TASKS_EXAMPLE
     )
+
+
+def _numbered_note(n: int, text: str) -> str:
+    """One Auditor note as a numbered list item; its own further lines stay indented under the number (DEV-35).
+
+    A note can carry its own „- …" lines (NEX Inbox 1.7.0, note 4). At the margin they would end the numbered
+    list in the Manažér's view and leave the plan's answer under nothing."""
+    return f"{n}. " + text.replace("\n", "\n   ")
+
+
+def _unhandled_review_notes(db: Session, version_id: uuid.UUID) -> list[str]:
+    """The Auditor's notes from every PASSED upfront design review of the version, deduplicated, in order (DEV-35).
+
+    A review that found a hole hands its findings to a consultation — the engine marks it with the
+    ``upfront_review_hole`` note it records right after the verdict, so those findings became Decision Cards
+    and are not handed over again. A PASSED review has no such note, and nothing else ever read its findings:
+    NEX Inbox 1.7.0 passed its fifth review with four notes the Auditor said „AI Agent opraví pri
+    programovaní", while the plan passes got ``directive=None``. This collects what nobody handled — the
+    Návrh review AND the narrowed review at Vizuál approval (both carry ``upfront_review``)."""
+    rows = db.execute(
+        select(PipelineMessage.kind, PipelineMessage.payload)
+        .where(
+            PipelineMessage.version_id == version_id,
+            or_(
+                and_(PipelineMessage.kind == "verdict", PipelineMessage.payload["upfront_review"].astext == "true"),
+                and_(
+                    PipelineMessage.kind == "notification",
+                    PipelineMessage.payload["upfront_review_hole"].astext == "true",
+                ),
+            ),
+        )
+        .order_by(PipelineMessage.seq.asc())
+    ).all()
+    notes: list[str] = []
+    for i, (kind, payload) in enumerate(rows):
+        if kind != "verdict":
+            continue
+        went_to_consultation = i + 1 < len(rows) and rows[i + 1][0] == "notification"
+        if went_to_consultation:
+            continue
+        for finding in (payload or {}).get("findings") or []:
+            text = _finding_text(finding).strip()
+            if text and text not in notes:
+                notes.append(text)
+    return notes
+
+
+def _review_notes_directive(version_number: str, notes: Sequence[str]) -> str:
+    """The skeleton pass's framed brief carrying the Auditor's unhandled notes (DEV-35)."""
+    listed = "\n".join(_numbered_note(n, text) for n, text in enumerate(notes, start=1))
+    return (
+        "POZNÁMKY AUDÍTORA Z PREVIERKY NÁVRHU. Previerka Návrhu prešla, ale Audítor k nej zanechal tieto "
+        "poznámky a nikto ich zatiaľ nezapracoval — patria do tohto plánu:\n"
+        f"{listed}\n"
+        f"Každú poznámku najprv over proti AKTUÁLNEJ Špecifikácii (`{_priprava_spec_rel(version_number)}`) a "
+        f"Návrhu (`{_navrh_design_doc_rel(version_number)}`). Platnú poznámku plán MUSÍ pokryť: chybu alebo "
+        "medzeru v dokumente oprav úlohou typu `docs`, správanie zapracuj do úlohy, ktorá danú časť programuje. "
+        "Do kostry pridaj pole `review_notes` — pre KAŽDÚ poznámku aspoň jednu položku: `note` (jej číslo), "
+        "`feat` (presný `title` funkcie z tejto kostry, ktorej úlohy ju pokryjú) a `resolution` (jedna veta pre "
+        "Manažéra bez žargónu: ako ju plán pokryje). Keď poznámku pokrývajú dve funkcie, daj dve položky. Ak "
+        "poznámka už neplatí, lebo ju dokumenty medzičasom vyriešili, nechaj `feat` prázdny a v `resolution` "
+        "napíš, kde je vyriešená. Kostru bez odpovede na každú poznámku engine vráti."
+    )
+
+
+def _review_notes_gap(skeleton: TaskPlanSkeleton, note_count: int) -> Optional[str]:
+    """What the skeleton's ``review_notes`` leaves unanswered, as one sentence for the retry — or ``None`` (DEV-35).
+
+    Checks the answer against the notes the prompt listed and the feats the skeleton itself declares, so an
+    answer can neither skip a note, invent one, nor point at a feat the plan will never build."""
+    feats = {feat.title for epic in skeleton.epics for feat in epic.feats}
+    answered = {entry.note for entry in skeleton.review_notes}
+    gaps = [f"chýba poznámka Audítora č. {n}" for n in range(1, note_count + 1) if n not in answered]
+    for entry in skeleton.review_notes:
+        if entry.note > note_count:
+            gaps.append(f"poznámka Audítora č. {entry.note} neexistuje (poznámok je {note_count})")
+        elif entry.feat and entry.feat not in feats:
+            gaps.append(f"poznámka Audítora č. {entry.note} ukazuje na funkciu „{entry.feat}“, ktorá v kostre nie je")
+    return "; ".join(gaps) or None
 
 
 # (CR-V2-028: the v1 ``_prepend_fast_fix_directive`` helper is RETIRED — there is no separate Coordinator
@@ -4438,7 +4530,8 @@ async def _invoke_plan_pass(
             prompt
             if is_crash
             else (
-                f"Tvoj výstup sa nepodarilo spracovať: {result.reason}. Pošli ho ZNOVA — rovnaký obsah, "
+                f"Tvoj výstup sa nepodarilo spracovať: {result.reason}. Pošli ho ZNOVA — oprav, čo táto chyba "
+                "žiada, inak rovnaký obsah, "
                 "ale VÝHRADNE ako jeden JSON objekt vnútri bloku <<<TASK_PLAN_JSON>>> … "
                 "<<<END_TASK_PLAN_JSON>>>, s presnými názvami polí a bez čohokoľvek navyše."
             )
@@ -8221,8 +8314,14 @@ async def _generate_incremental_plan(
     directive: Optional[str],
     on_message: Optional[MessageCallback],
     metrics_phase: Optional[str] = None,
+    review_notes: Sequence[str] = (),
 ) -> Optional[PipelineState]:
     """Generate the EPIC→FEAT→TASK task plan INCREMENTALLY and materialize it (CR-V2-011; STEP 3 re-home).
+
+    ``review_notes`` (DEV-35): the Auditor's notes nobody handled (:func:`_unhandled_review_notes`). The
+    skeleton pass carries them and must answer for each one (a skeleton that does not is sent back like any
+    invalid skeleton); the feat that covers a note gets it again in its own pass; the plan gate_report shows
+    the Manažér every note and where it went.
 
     The PROVEN incremental machinery, extracted so BOTH registers reuse it byte-for-byte (step3-plan-design.md
     — do NOT parse a whole plan tree off one turn): the Návrh phase (``stage='navrh'`` —
@@ -8258,13 +8357,26 @@ async def _generate_incremental_plan(
     # conversation plan round overrides it to 'navrh' while stage stays 'priprava'; None → phase == stage.
     phase = metrics_phase if metrics_phase is not None else stage
 
+    skeleton_parser: Callable[[dict], Any] = parse_task_plan_skeleton
+    if review_notes:
+        version_number = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
+        notes_brief = _review_notes_directive(version_number, review_notes)
+        directive = f"{notes_brief}\n\n{directive}" if directive else notes_brief
+
+        def skeleton_parser(obj: dict) -> Any:
+            parsed = parse_task_plan_skeleton(obj)
+            if isinstance(parsed, ParseFailure):
+                return parsed
+            gap = _review_notes_gap(parsed, len(review_notes))
+            return ParseFailure(f"kostra plánu neodpovedá na poznámky Audítora — {gap}") if gap else parsed
+
     # Pass 1 — skeleton (EPIC + FEAT, no tasks) + cross_cutting_rules.
     skeleton = await _invoke_plan_pass(
         db,
         state,
         prompt=_task_plan_skeleton_directive(directive),
         json_schema=TASK_PLAN_SKELETON_JSON_SCHEMA,
-        parser=parse_task_plan_skeleton,
+        parser=skeleton_parser,
         label_fn=lambda s: (
             f"Plán — kostra: {len(s.epics)} epík, "
             f"{sum(len(e.feats) for e in s.epics)} funkcií; úlohy sa dopĺňajú per funkcia."
@@ -8311,13 +8423,19 @@ async def _generate_incremental_plan(
         db.flush()
         return state
 
+    # The notes each feat answers for, in note order (DEV-35) — empty when no passed review left any.
+    notes_by_feat: dict[str, list[tuple[int, str]]] = {}
+    for entry in sorted(skeleton.review_notes, key=lambda e: e.note) if review_notes else ():
+        if entry.feat:
+            notes_by_feat.setdefault(entry.feat, []).append((entry.note, review_notes[entry.note - 1]))
+
     # Passes 2..N — per-feat tasks, accumulated in skeleton order.
     feat_tasks: dict[tuple[int, int], list] = {}
     for ei, fi, feat in feat_refs:
         pass_result = await _invoke_plan_pass(
             db,
             state,
-            prompt=_task_plan_feat_directive(feat.title),
+            prompt=_task_plan_feat_directive(feat.title, notes_by_feat.get(feat.title, ())),
             json_schema=TASK_PLAN_FEAT_TASKS_JSON_SCHEMA,
             parser=parse_task_plan_feat_tasks,
             label_fn=lambda r, _t=feat.title: f"Plán — funkcia „{_t}“: {len(r.tasks)} úloh.",
@@ -8403,6 +8521,30 @@ async def _generate_incremental_plan(
         flagship_features=skeleton.flagship_features,
         safety_properties=skeleton.safety_properties,
     )
+    plan_payload: dict[str, Any] = {
+        "plan": full_plan.model_dump(mode="json"),
+        "cross_cutting_rules": skeleton.cross_cutting_rules,
+        # CR-V2-052: the declared release coverage — _declared_release_coverage(db, version_id) reads these
+        # to floor the acceptance (≥1 FEATURE assertion per flagship feature, ≥1 NEGATIVE per safety prop).
+        "flagship_features": skeleton.flagship_features,
+        "safety_properties": [sp.model_dump(mode="json") for sp in skeleton.safety_properties],
+        "phase": phase,
+    }
+    if review_notes:
+        # DEV-35: the Manažér sees each note and where the plan put it — in the thread, under the plan.
+        answers = sorted(skeleton.review_notes, key=lambda e: e.note)
+        plan_payload["review_notes"] = [
+            {"note": e.note, "text": review_notes[e.note - 1], "feat": e.feat, "resolution": e.resolution}
+            for e in answers
+        ]
+        lines = [assembled.summary, "", "**Poznámky Audítora z previerky Návrhu** — plán ich zaradil takto:", ""]
+        for n, text in enumerate(review_notes, start=1):
+            lines.append(_numbered_note(n, text))
+            for e in answers:
+                if e.note == n:
+                    where = f"funkcia „{e.feat}“" if e.feat else "už neplatí"
+                    lines.append(f"   → {where}: {e.resolution}")
+        plan_payload["report"] = "\n".join(lines)
     # Record the AI-Agent gate_report carrying the assembled plan + cross_cutting_rules: the build loop
     # re-reads the rules from THIS message (_fetch_cross_cutting_rules), and it is the audit-trail record of
     # the plan the Manažér reviews. No usage of its own (orchestrator-synthesized — the per-pass notes
@@ -8415,15 +8557,7 @@ async def _generate_incremental_plan(
         recipient="manazer",
         kind="gate_report",
         content=assembled.summary,
-        payload={
-            "plan": full_plan.model_dump(mode="json"),
-            "cross_cutting_rules": skeleton.cross_cutting_rules,
-            # CR-V2-052: the declared release coverage — _declared_release_coverage(db, version_id) reads these
-            # to floor the acceptance (≥1 FEATURE assertion per flagship feature, ≥1 NEGATIVE per safety prop).
-            "flagship_features": skeleton.flagship_features,
-            "safety_properties": [sp.model_dump(mode="json") for sp in skeleton.safety_properties],
-            "phase": phase,
-        },
+        payload=plan_payload,
     )
     if on_message is not None:
         await on_message(plan_msg)
@@ -11685,6 +11819,8 @@ async def _run_build_round(
             directive=None,
             on_message=on_message,
             metrics_phase="navrh",
+            # DEV-35: what the passed design reviews left for „pri programovaní" — handed over here, or never.
+            review_notes=_unhandled_review_notes(db, version_id),
         )
         if plan_settled is not None:
             return plan_settled  # a plan-generation failure already settled (blocked / awaiting_manazer)
