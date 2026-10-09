@@ -86,10 +86,13 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
 - **Vizuál — PREVIEW HARNESS NIKDY NESMIE UKÁZAŤ AUTH-STENU (v4.0.45).** Živý náhľad beží pod `VITE_PREVIEW`
   BEZ backendu (MSW mockne dáta + `GET /session`), aby Manažér videl **obrazovky appky**, nie login. Preto
   globálny handler neúspešnej autentifikácie (`onUnauthorized` v `createApiClient`) **MUSÍ byť v preview
-  no-op** — `if (import.meta.env.VITE_PREVIEW) return;` PRED akýmkoľvek `window.location.assign('/login')`
+  no-op** — `if (isPreviewEnabled()) return;` PRED akýmkoľvek `window.location.assign('/login')`
   (resp. `/unauthorized` pri token-launch). Inak jediná uniknutá požiadavka tvrdo prehodí náhľad na
-  prihlasovaciu stenu. (`<ProtectedRoute>` v preview už renderuje priamo — drž rovnaký princíp aj v api
-  klientovi.) Predbundlovanie MSW rieši sandbox centrálne (`optimizeDeps`), to konfigurovať nemusíš.
+  prihlasovaciu stenu. O náhľade rozhoduje všade len pomocník `frontend/src/preview/isPreview.ts` zo šablóny,
+  nikdy pravdivostne `import.meta.env.VITE_PREVIEW` — aj `VITE_PREVIEW=false` je pravdivé, takže by ostrá
+  aplikácia prestala posielať na prihlásenie (v4.43.14). (`<ProtectedRoute>` v preview už renderuje priamo —
+  drž rovnaký princíp aj v api klientovi.) Predbundlovanie MSW rieši sandbox centrálne (`optimizeDeps`), to
+  konfigurovať nemusíš.
 - **NEX Manager token-launch (`auth_mode=token`) — POVINNÝ BE kontrakt (v4.0.19).** Keď je projekt token-launch
   (vzor NEX Inbox), appka sa NEspúšťa vlastným loginom — NEX Manager ju otvorí presmerovaním na
   **`GET /api/v1/launch?lt=<JWT>`**. MUSÍŠ tento landing endpoint implementovať; **nestačí len validovať Bearer

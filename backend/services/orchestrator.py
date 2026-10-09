@@ -1692,6 +1692,52 @@ def database_schema_missing(version_number: str, slug: str) -> str:
     )
 
 
+#: DEV-2: the live-preview decision helper the project template ships (ICCINT-107) — its presence tells the brief
+#: whether the agent USES the harness or has to CREATE it.
+_PREVIEW_HELPER_REL = "frontend/src/preview/isPreview.ts"
+
+
+def _vizual_preview_rule(project_root: Path) -> str:
+    """DEV-2: item 3 of the Vizuál brief — the preview harness, said as what the project really has.
+
+    The template has shipped the harness since ICCINT-107: ``isPreviewEnabled()`` decides by the LIST of enabling
+    values, and ``main.tsx`` keeps a two-part condition whose first member is a static guard (no variable → a dead
+    branch, so MSW and the fixtures never reach the release build). A brief that only described the old shape left
+    the agent to write its own switch next to the helper, or to "simplify" the guard away. The values come from the
+    sandbox's own list, so what the agent is told is what the sandbox sends."""
+    from backend.services.vizual_sandbox import PREVIEW_ON
+
+    values = ", ".join(f'"{value}"' for value in PREVIEW_ON)
+    common = (
+        "   - do `frontend/src/preview/handlers.ts` (MSW) doplň odpovede: `GET /api/v1/session` (alebo ekvivalent) "
+        "vráti reprezentatívneho používateľa (nech `ProtectedRoute` prejde) a dátové endpointy reprezentatívne "
+        "fixtures;\n"
+        "   - kdekoľvek inde, kde kód potrebuje vedieť, či beží náhľad (`onUnauthorized` v API klientovi, strážca "
+        "prihlásenia), volaj `isPreviewEnabled()` — nikdy pravdivostne `import.meta.env.VITE_PREVIEW` (aj "
+        "`VITE_PREVIEW=false` je pravdivé, takže by ostrá aplikácia prestala posielať na prihlásenie).\n"
+    )
+    if (project_root / _PREVIEW_HELPER_REL).is_file():
+        return (
+            "3. PREVIEW HARNESS (povinné, inak živý náhľad nefunguje): náhľad beží BEZ backendu a aplikácia je "
+            "za prihlásením (`ProtectedRoute`). Projekt ho má zo šablóny hotový — POUŽI ho, vlastný prepínač NEPÍŠ:\n"
+            f"   - `frontend/src/preview/isPreview.ts` (`isPreviewEnabled()`) rozhoduje porovnaním so zoznamom "
+            f"zapínacích hodnôt ({values});\n"
+            "   - `frontend/src/main.tsx` má podmienku `import.meta.env.VITE_PREVIEW && isPreviewEnabled()` — prvý "
+            "člen je statická poistka (bez premennej je vetva mŕtva a MSW ani fixtures sa do ostrého zostavenia "
+            "nedostanú), druhý rozhoduje; ponechaj ju presne tak;\n" + common
+        )
+    return (
+        "3. PREVIEW HARNESS (povinné, inak živý náhľad ukáže len mŕtvu login obrazovku): náhľad beží BEZ backendu a "
+        "aplikácia je za prihlásením (`ProtectedRoute`). Projekt harness zo šablóny NEMÁ — vytvor ho v jej tvare:\n"
+        f"   - `frontend/src/preview/isPreview.ts` s `isPreviewEnabled()`: porovnanie s CELÝM zoznamom zapínacích "
+        f'hodnôt ({values}) — nie s jediným slovom a NIE pravdivostne (`"false"` je v JS pravdivé, takže by '
+        "náhľad zaplo vypnutie); hodnoty neupravuj (žiadny `.toLowerCase()`);\n"
+        "   - v `frontend/src/main.tsx` podmienka `import.meta.env.VITE_PREVIEW && isPreviewEnabled()` — prvý člen je "
+        "statická poistka (bez premennej je vetva mŕtva a MSW sa do ostrého zostavenia nedostane), druhý rozhoduje; "
+        "nezlučuj ich; pod ňou naštartuj MSW (`frontend/src/preview/browser.ts`) pred renderom;\n" + common
+    )
+
+
 def _vizual_directive(
     db: Session, version_id: uuid.UUID, manager_request: Optional[str], mockup_rel: Optional[str] = None
 ) -> str:
@@ -1752,14 +1798,7 @@ def _vizual_directive(
         "2. Obrazovky skladaj zo zdieľaného kitu `nex-shared` (rovnaké komponenty a štýl) — kvôli "
         "konzistentnému vzhľadu naprieč appkami. Staviaš REÁLNE obrazovky, nie kresbu: to, čo Manažér "
         "schváli, sa presne toto aj postaví vo fáze Programovanie.\n"
-        "3. PREVIEW HARNESS (povinné, inak živý náhľad nefunguje): náhľad beží BEZ backendu a appka je za "
-        "prihlásením (`ProtectedRoute`). Nastav MSW mock aktívny LEN pod `import.meta.env.VITE_PREVIEW`, a to "
-        'porovnaním s CELÝM zoznamom zapínacích hodnôt (`"1"`, `"true"`, `"yes"`, `"on"`) — nie s '
-        'jediným slovom a NIE pravdivostne (`"false"` je v JS pravdivé, takže by náhľad zaplo vypnutie). '
-        "Hodnoty nijako neuprav (žiadny `.toLowerCase()`) — inak sa náhľad dostane do ostrého zostavenia. "
-        "`GET /api/v1/session` (alebo ekvivalent) vráti reprezentatívneho používateľa (nech `ProtectedRoute` "
-        "prejde) a dátové endpointy vráť reprezentatívnymi fixtures. Vo `main.tsx` pod `VITE_PREVIEW` naštartuj "
-        "MSW pred renderom. Bez toho ukáže náhľad len mŕtvu login obrazovku.\n"
+        + _vizual_preview_rule(claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id))
         + task_line
         + "5. Výsledok iba ZAPÍŠ do FE zdrojov — NEcommituj (živý náhľad ho cez HMR premietne < 1 s aj bez commitu). "
         "Počas Vizuálu môže byť takýchto drobných úprav veľa; všetky sa spoločne uložia JEDNÝM commitom až keď "

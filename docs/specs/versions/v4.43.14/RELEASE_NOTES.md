@@ -12,3 +12,10 @@ kokpit potom otvoríš z ikony NEX Studio Visual na ploche, vo vlastnom okne bez
 zabezpečenej adrese `https://studio.int.isnex.eu`. Keď okno otvoríš po nasadení novej verzie, načíta si ju samo;
 keď sa kokpit nasadí počas tvojej práce, okno ti novú verziu len ponúkne lištou — rozpísanú prácu nezahodí. Kokpit
 sa z pamäte prehliadača nikdy nepodáva, takže stará verzia sa nemá odkiaľ objaviť.
+
+**Agent vo Vizuáli použije prepínač náhľadu, ktorý projekt dostal zo šablóny.** Nový projekt má zo šablóny hotový
+prepínač živého náhľadu: jedna časť drží ukážkové dáta mimo ostrého zostavenia, druhá rozhoduje, či sa náhľad
+zapne. Pokyn agentovi vo Vizuáli ho teraz menuje — agent ho použije a nepíše si vlastný; projektu, ktorý ho ešte
+nemá, ho vytvorí v rovnakom tvare. Aj inde v aplikácii, napríklad pri presmerovaní na prihlásenie, sa o náhľade
+rozhoduje len cez tento prepínač. Predtým mohla aplikácia zostavená s nastavením „náhľad vypnutý“ omylom prestať
+posielať používateľa s vypršaným prihlásením na prihlasovaciu obrazovku.

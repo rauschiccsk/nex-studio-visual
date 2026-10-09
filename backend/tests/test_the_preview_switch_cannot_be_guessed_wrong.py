@@ -119,19 +119,21 @@ def test_the_template_writes_the_contract_down_where_the_app_reads_it() -> None:
     assert "false" in text, "zmluva pri type nevaruje pred vypnutím slovom „false“ (ICCINT-95)"
 
 
-def test_the_agent_is_told_the_list_not_just_the_flag_name() -> None:
-    """Agent stavia náhľad podľa zadania — ak mu povieme len meno príznaku, tipne si podmienku sám."""
+def test_the_agent_is_told_the_list_not_just_the_flag_name(tmp_path) -> None:
+    """Agent stavia náhľad podľa zadania — ak mu povieme len meno príznaku, tipne si podmienku sám.
+
+    DEV-2 (09.10.2026): hodnoty sa do zadania skladajú z ``PREVIEW_ON`` a zadanie hovorí podľa toho, čo projekt má
+    (pomocník zo šablóny je / nie je), takže stráž sa pýta zadania samotného — oboch podôb — nie textu zdrojáka."""
     from backend.services import orchestrator
 
-    text = pathlib.Path(orchestrator.__file__).read_text(encoding="utf-8")
-    zadanie = [line for line in text.splitlines() if "PREVIEW HARNESS" in line]
-    assert zadanie, "zadanie pre Vizuál už o preview harness nehovorí — stráž oslepla, nájdi novú kotvu"
-
-    # Únikové spätné lomky sa zahodia — či je reťazec v zdroji v úvodzovkách jednoduchých alebo
-    # dvojitých, rozhoduje `ruff format`, a stráž nesmie na jeho rozhodnutí stáť.
-    okno = text[text.index("PREVIEW HARNESS") : text.index("PREVIEW HARNESS") + 2000].replace("\\", "")
-    for value in vizual_sandbox.PREVIEW_ON:
-        assert f'"{value}"' in okno, f"zadanie pre agenta neuvádza zapínaciu hodnotu {value!r}"
+    helper = tmp_path / "s-harnessom" / "frontend" / "src" / "preview" / "isPreview.ts"
+    helper.parent.mkdir(parents=True)
+    helper.write_text("export function isPreviewEnabled() { return false; }\n", encoding="utf-8")
+    for root in (tmp_path / "s-harnessom", tmp_path / "bez-harnessu"):
+        zadanie = orchestrator._vizual_preview_rule(root)
+        assert "PREVIEW HARNESS" in zadanie
+        for value in vizual_sandbox.PREVIEW_ON:
+            assert f'"{value}"' in zadanie, f"zadanie pre agenta ({root.name}) neuvádza zapínaciu hodnotu {value!r}"
 
 
 @pytest.mark.parametrize("slug", ["nex-manager", "nex-productcatalogs", "nex-shopify", "nex-websites"])
