@@ -21,7 +21,8 @@ import {
 } from "@/services/api/versions";
 import { postPipelineActionApi } from "@/services/api/pipeline";
 import { useActiveContextStore } from "@/store/activeContextStore";
-import { ApiError } from "@/services/api";
+import ZadanieConflictPanel from "@/components/version/ZadanieConflictPanel";
+import { appendZadanie, zadanieClashOf } from "@/components/version/zadanieClash";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
 import type { ProjectRead } from "@/types";
@@ -86,7 +87,14 @@ export default function NewVersionPage() {
   // ``origin`` hovorí, odkiaľ o ňom vieme: „clash" = narazili sme naň až pri ukladaní (ICCINT-71),
   // „peek" = videli sme ho ešte pred založením verzie (ICCINT-90). Ten rozdiel Manažér musí vidieť —
   // pri zrážke sa niečo NEuložilo, pri nahliadnutí sa nestalo nič a len sa mu to ukazuje.
-  const [existingZadanie, setExistingZadanie] = useState<{ text: string; origin: "clash" | "peek" } | null>(null);
+  const [existingZadanie, setExistingZadanie] = useState<{
+    text: string;
+    origin: "clash" | "peek";
+    message?: string;
+  } | null>(null);
+  // DEV-40: the disk text he took into the field — his save is then an EDIT of it, which the engine lets through
+  // (``based_on``). Without it any change to a taken-over Zadanie was refused again with the same conflict.
+  const [zadanieZDisku, setZadanieZDisku] = useState<string | null>(null);
   // ICCINT-71 (druhé kolo): verzia vzniká pred zápisom Zadania. Keď zápis odmietneme, verzia už existuje —
   // bez tejto pamäte by druhý pokus padol na „verzia už existuje" a formulár by sa zasekol.
   const [createdVersion, setCreatedVersion] = useState<Version | null>(null);
@@ -308,6 +316,15 @@ export default function NewVersionPage() {
   // Reveals the "Spustiť tvorbu špecifikácie" action; does NOT auto-start the build ("no autopilot").
   async function handleSaveZadanie(e: React.FormEvent) {
     e.preventDefault();
+    await saveVersionAndZadanie(zadanie.trim(), zadanieZDisku !== null ? { basedOn: zadanieZDisku } : undefined);
+  }
+
+  // DEV-40: one path for „Uložiť Zadanie" and for the conflict choices (Nahradiť / Doplniť) — the header edits
+  // (ICCINT-91) and the „version already created" memory (ICCINT-71) apply to all of them alike.
+  async function saveVersionAndZadanie(
+    content: string,
+    writeOpts?: { basedOn?: string; replaceExisting?: boolean },
+  ) {
     if (!project || !validate()) return;
     setFormError(null);
     setSaving(true);
@@ -342,24 +359,19 @@ export default function NewVersionPage() {
       // Persist the brief to the spec tree the Príprava phase reads — ONLY when non-empty. A blank Zadanie
       // writes NO customer-requirements.md (STEP 2): the directive's "read it IF EXISTS" stays a clean
       // present/absent test, never present-but-empty.
-      if (zadanie.trim()) await writeZadanie(v.id, zadanie.trim());
+      if (content) await (writeOpts ? writeZadanie(v.id, content, writeOpts) : writeZadanie(v.id, content));
+      if (content !== zadanie.trim()) setZadanie(content);
+      setExistingZadanie(null);
       setSavedVersion(v);
     } catch (err: unknown) {
       // ICCINT-71: „zadanie už existuje" NIE je chyba na zahodenie do všeobecnej hlášky. 07.09.2026 tento
       // formulár ticho zapísal jednu vetu cez 71-riadkovú zákaznícku špecifikáciu — Manažér videl prázdne
       // pole a nemal ako vedieť. Engine to teraz odmietne (409) a vráti, čo tam je; ukážeme mu to a nechá
       // rozhodnúť sa jeho. Hádať za neho je presne to, čo tú prácu zmazalo.
-      const clash =
-        err instanceof ApiError && err.status === 409
-          ? ((err.data as { detail?: { existing?: string; message?: string } })?.detail)
-          : undefined;
-      if (clash?.existing) {
-        setExistingZadanie({ text: clash.existing, origin: "clash" });
-        setFormError({
-          message:
-            clash.message ??
-            "Pre túto verziu už zadanie existuje. Neprepísal som ho — pozri, čo v ňom je, a rozhodni sa.",
-        });
+      const clash = zadanieClashOf(err);
+      if (clash) {
+        // DEV-40: the conflict panel says it, with the text and the three choices — not a second red line.
+        setExistingZadanie({ text: clash.existing, origin: "clash", message: clash.message });
       } else {
         setFormError(humanizeApiError(err, "Uloženie Zadania zlyhalo"));
       }
@@ -581,15 +593,30 @@ export default function NewVersionPage() {
             {/* ICCINT-71: čo už na disku je — VIDITEĽNE, nie ako veta o tom, že tam čosi je. Manažér
                 stratil 71-riadkovú špecifikáciu preto, že formulár mu ukázal prázdne pole; jediná
                 skutočná náprava je, že to isté pole mu ukáže obsah a nechá ho rozhodnúť sa. */}
-            {existingZadanie && (
+            {/* DEV-40: a clash at saving — the disk text with the three choices, nothing written without a click. */}
+            {existingZadanie?.origin === "clash" && (
+              <ZadanieConflictPanel
+                clash={{
+                  existing: existingZadanie.text,
+                  message: existingZadanie.message ?? "Pre túto verziu už zadanie existuje.",
+                }}
+                busy={saving}
+                onReplace={() => saveVersionAndZadanie(zadanie.trim(), { replaceExisting: true })}
+                onAppend={() =>
+                  saveVersionAndZadanie(appendZadanie(existingZadanie.text, zadanie), { basedOn: existingZadanie.text })
+                }
+                onTakeOver={() => {
+                  setZadanie(existingZadanie.text);
+                  setZadanieZDisku(existingZadanie.text);
+                  setExistingZadanie(null);
+                  setFormError(null);
+                }}
+              />
+            )}
+            {existingZadanie?.origin === "peek" && (
               <div className="rounded-lg border border-[var(--color-border)] p-3 space-y-2">
-                {/* ⚠️ Žiadne vlastné počítanie riadkov. Panel ukazoval 72, hláška nad ním 71 — to isté číslo
-                    z dvoch miest. Počet povie engine v hláške; tu je samotný text. */}
-                <p className="text-sm">
-                  {existingZadanie.origin === "peek"
-                    ? `Pre verziu ${versionNumber.trim()} už na disku pripravené zadanie leží:`
-                    : "Toto zadanie už pre verziu existuje:"}
-                </p>
+                {/* ⚠️ Žiadne vlastné počítanie riadkov — počet povie engine v hláške; tu je samotný text. */}
+                <p className="text-sm">{`Pre verziu ${versionNumber.trim()} už na disku pripravené zadanie leží:`}</p>
                 <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs bg-[var(--color-surface-2)] p-2 rounded">
                   {existingZadanie.text}
                 </pre>
@@ -599,6 +626,7 @@ export default function NewVersionPage() {
                     className="text-sm underline"
                     onClick={() => {
                       setZadanie(existingZadanie.text);
+                      setZadanieZDisku(existingZadanie.text);
                       setExistingZadanie(null);
                       setFormError(null);
                     }}
@@ -606,9 +634,7 @@ export default function NewVersionPage() {
                     Prevziať toto zadanie do poľa
                   </button>
                   <span className="text-xs opacity-70">
-                    {existingZadanie.origin === "peek"
-                      ? "Alebo ho nechaj tak a napíš vlastné — prepísať sa ti ho nepodarí omylom."
-                      : "Potom ho môžeš doplniť a uložiť — nič sa nestratí."}
+                    Alebo ho nechaj tak a napíš vlastné — prepísať sa ti ho nepodarí omylom.
                   </span>
                 </div>
               </div>

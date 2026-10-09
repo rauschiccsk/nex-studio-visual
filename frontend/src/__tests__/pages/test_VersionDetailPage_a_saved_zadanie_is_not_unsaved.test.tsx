@@ -129,7 +129,10 @@ describe("VersionDetailPage — uložené Zadanie nie je neuložené", () => {
 
     await userEvent.click(ulozit());
 
-    await waitFor(() => expect(writeZadanieMock).toHaveBeenCalledWith("ver-1", `${NA_DISKU} A ešte jedna vec.`));
+    // DEV-40: an edit of the loaded text says so — the engine saves it instead of refusing any difference.
+    await waitFor(() =>
+      expect(writeZadanieMock).toHaveBeenCalledWith("ver-1", `${NA_DISKU} A ešte jedna vec.`, { basedOn: NA_DISKU }),
+    );
     await waitFor(() => expect(spustit()).toBeEnabled());
   });
 

@@ -47,11 +47,15 @@ export function createVersion(
 export function writeZadanie(
   versionId: string,
   content: string,
+  opts: { basedOn?: string; replaceExisting?: boolean } = {},
 ): Promise<{ relative_path: string; status: string }> {
-  return api.put<{ relative_path: string; status: string }>(
-    `/versions/${versionId}/zadanie`,
-    { content },
-  );
+  // DEV-40: `basedOn` — the text the editor started from; the engine saves an edit of exactly what is on disk and
+  // refuses (409, with what is there) when the disk changed meanwhile. `replaceExisting` — his explicit decision.
+  return api.put<{ relative_path: string; status: string }>(`/versions/${versionId}/zadanie`, {
+    content,
+    ...(opts.basedOn !== undefined ? { based_on: opts.basedOn } : {}),
+    ...(opts.replaceExisting ? { replace_existing: true } : {}),
+  });
 }
 
 /**

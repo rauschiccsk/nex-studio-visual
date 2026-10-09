@@ -7145,6 +7145,8 @@ export interface components {
          * @description Request body for ``PUT /versions/{version_id}/zadanie``.
          */
         _ZadanieWrite: {
+            /** Based On */
+            based_on?: string | null;
             /** Content */
             content: string;
             /**

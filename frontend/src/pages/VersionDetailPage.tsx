@@ -6,6 +6,8 @@ import { getVersion, writeZadanie, readZadanie } from "@/services/api/versions";
 import { postPipelineActionApi } from "@/services/api/pipeline";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
+import ZadanieConflictPanel from "@/components/version/ZadanieConflictPanel";
+import { appendZadanie, zadanieClashOf, type ZadanieClash } from "@/components/version/zadanieClash";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
 import { useActiveContextSync } from "@/hooks/useActiveContextSync";
@@ -47,6 +49,8 @@ export default function VersionDetailPage() {
   const [savingZadanie, setSavingZadanie] = useState(false);
   const [starting, setStarting] = useState(false);
   const [zadanieError, setZadanieError] = useState<HumanError | null>(null);
+  // DEV-40: the disk holds a different Zadanie than the editor started from — shown with a choice, not an error.
+  const [zadanieClash, setZadanieClash] = useState<ZadanieClash | null>(null);
   // The THIRD Zadanie state: not "empty", not "written" — UNKNOWN, because the read itself failed. Set → the
   // editor is locked and Uložiť/Spustiť are closed, so an empty editor can never truncate the saved file.
   const [zadanieUnreadable, setZadanieUnreadable] = useState<HumanError | null>(null);
@@ -97,17 +101,29 @@ export default function VersionDetailPage() {
     // Never write over a Zadanie we could not read — the editor is empty because the READ failed, not because
     // the file is. The disabled button is the visible guard; this is the one that cannot be raced.
     if (!versionId || zadanieUnreadable || !zadanieNeulozene) return;
+    // DEV-40: say which text the editor started from — an edit of exactly what is on disk is saved; a disk
+    // that changed meanwhile comes back as a conflict with its text. Without it every save after the first
+    // was refused („Conflict") and a saved Zadanie could not be edited at all.
+    await saveZadanie(zadanie.trim(), { basedOn: zadanieNaDisku });
+  };
+
+  async function saveZadanie(content: string, opts: { basedOn?: string; replaceExisting?: boolean }) {
+    if (!versionId) return;
     setSavingZadanie(true);
     setZadanieError(null);
     try {
-      await writeZadanie(versionId, zadanie.trim());
-      setZadanieNaDisku(zadanie.trim());
+      await writeZadanie(versionId, content, opts);
+      setZadanie(content);
+      setZadanieNaDisku(content);
+      setZadanieClash(null);
     } catch (e: unknown) {
-      setZadanieError(humanizeApiError(e, "Uloženie Zadania zlyhalo"));
+      const clash = zadanieClashOf(e);
+      if (clash) setZadanieClash(clash);
+      else setZadanieError(humanizeApiError(e, "Uloženie Zadania zlyhalo"));
     } finally {
       setSavingZadanie(false);
     }
-  };
+  }
 
   // Re-read the Zadanie after a failed load (403 aside, these are usually transient). Only a SUCCESSFUL read
   // clears the locked state — that is the single place the content stops being unknown.
@@ -264,6 +280,21 @@ export default function VersionDetailPage() {
                 />
               )}
               <ErrorNote error={zadanieError} className="mt-2" />
+              {zadanieClash && (
+                <ZadanieConflictPanel
+                  clash={zadanieClash}
+                  busy={savingZadanie}
+                  onReplace={() => saveZadanie(zadanie.trim(), { replaceExisting: true })}
+                  onAppend={() =>
+                    saveZadanie(appendZadanie(zadanieClash.existing, zadanie), { basedOn: zadanieClash.existing })
+                  }
+                  onTakeOver={() => {
+                    setZadanie(zadanieClash.existing);
+                    setZadanieNaDisku(zadanieClash.existing);
+                    setZadanieClash(null);
+                  }}
+                />
+              )}
               <div className="mt-3 flex items-center justify-end gap-2">
                 <button
                   type="button"

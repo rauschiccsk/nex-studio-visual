@@ -389,6 +389,10 @@ class _ZadanieWrite(BaseModel):
     #: effect of saving a form. The cockpit sets this only after showing the Manažér what is there.
     replace_existing: bool = False
 
+    #: DEV-40: the text the editor started from. Equal to what is on disk → an edit, saved; different → 409.
+    #: ``None`` — the editor never saw the disk — keeps the ICCINT-71 refusal of any different text.
+    based_on: Optional[str] = None
+
     content: str
 
 
@@ -422,7 +426,13 @@ def write_zadanie(
     """
     authz.assert_version_access(db, current_user, version_id)
     try:
-        rel = version_service.write_zadanie(db, version_id, payload.content, replace_existing=payload.replace_existing)
+        rel = version_service.write_zadanie(
+            db,
+            version_id,
+            payload.content,
+            replace_existing=payload.replace_existing,
+            based_on=payload.based_on,
+        )
         db.commit()
     except version_service.ZadanieWouldBeOverwritten as clash:
         # ICCINT-71: 409 with the existing text IN the answer, not a description of it. The Manažér saw an

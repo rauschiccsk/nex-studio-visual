@@ -152,6 +152,7 @@ describe("VersionDetailPage — an unreadable Zadanie is its own state", () => {
 
     await userEvent.type(textarea, "Nové zadanie");
     await userEvent.click(screen.getByRole("button", { name: /Uložiť Zadanie/ }));
-    await waitFor(() => expect(writeZadanieMock).toHaveBeenCalledWith("ver-1", "Nové zadanie"));
+    // DEV-40: the save also says which text the editor started from — here the empty disk.
+    await waitFor(() => expect(writeZadanieMock).toHaveBeenCalledWith("ver-1", "Nové zadanie", { basedOn: "" }));
   });
 });

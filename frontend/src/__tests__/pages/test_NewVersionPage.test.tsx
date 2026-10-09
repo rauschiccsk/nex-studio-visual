@@ -279,8 +279,9 @@ describe("NewVersionPage — existujúce zadanie sa neprepíše ticho (ICCINT-71
     await userEvent.click(screen.getByRole("button", { name: /uložiť zadanie/i }));
 
     // Obsah, nie veta o obsahu. Manažér stratil 71 riadkov práve preto, že videl prázdne pole.
+    // DEV-40: pri zrážke ponúka voľby panel konfliktu (Nahradiť / Doplniť / Prevziať text z disku do poľa).
     expect(await screen.findByText(/Sedemdesiat riadkov práce/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /prevziať toto zadanie do poľa/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Prevziať text z disku do poľa" })).toBeInTheDocument();
   });
 
   it("druhý pokus verziu nezakladá znova — inak sa formulár zasekne", async () => {
@@ -298,7 +299,7 @@ describe("NewVersionPage — existujúce zadanie sa neprepíše ticho (ICCINT-71
     await renderPage();
     await userEvent.type(await screen.findByPlaceholderText(/Opíš, čo má verzia priniesť/i), "Jedna veta.");
     await userEvent.click(screen.getByRole("button", { name: /uložiť zadanie/i }));
-    await screen.findByRole("button", { name: /prevziať toto zadanie do poľa/i });
+    await screen.findByRole("button", { name: "Prevziať text z disku do poľa" });
 
     // Verzia vzniká PRED zápisom Zadania. Bez pamäte by druhý pokus padol na „verzia už existuje"
     // a Manažér by sa z formulára nedostal — zmerané na 0.2.0 dňa 07.09.2026.
@@ -357,7 +358,7 @@ describe("NewVersionPage — pripravené zadanie a úpravy hlavičky", () => {
     await userEvent.type(await screen.findByPlaceholderText(/napr. platobný modul/i), "Inštalovateľná appka");
     await userEvent.type(screen.getByPlaceholderText(/Opíš, čo má verzia priniesť/i), "Moje zadanie.");
     await userEvent.click(screen.getByRole("button", { name: /uložiť zadanie/i }));
-    expect(await screen.findByRole("button", { name: /prevziať toto zadanie do poľa/i })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Prevziať text z disku do poľa" })).toBeInTheDocument();
 
     // Director prepíše názov a uloží znova — presne to, čo sa 09.09.2026 ticho stratilo.
     const nazov = screen.getByPlaceholderText(/napr. platobný modul/i);
@@ -384,12 +385,76 @@ describe("NewVersionPage — pripravené zadanie a úpravy hlavičky", () => {
     await renderPage();
     await userEvent.type(await screen.findByPlaceholderText(/Opíš, čo má verzia priniesť/i), "Moje zadanie.");
     await userEvent.click(screen.getByRole("button", { name: /uložiť zadanie/i }));
-    expect(await screen.findByRole("button", { name: /prevziať toto zadanie do poľa/i })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Prevziať text z disku do poľa" })).toBeInTheDocument();
 
     // Druhý pokus bez jediného doteku do hlavičky.
     await userEvent.click(screen.getByRole("button", { name: /uložiť zadanie/i }));
 
     await waitFor(() => expect(writeZadanieMock).toHaveBeenCalledTimes(2));
     expect(updateVersionMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * DEV-40 — a clash at saving offers the same three choices as the version page, and an edit of text taken over
+ * from the disk is saved. 09.10.2026: after „Prevziať toto zadanie do poľa" any edit was refused again — the
+ * engine compared with the disk and the page never said it had started from that very text.
+ */
+describe("NewVersionPage — zrážka pri ukladaní ponúkne Nahradiť / Doplniť / Prevziať (DEV-40)", () => {
+  const NA_DISKU = "# Zadanie na disku\n\nPôvodný text.";
+  const zrazka = () =>
+    new ApiError(409, "conflict", { detail: { message: "Pre túto verziu už zadanie existuje.", existing: NA_DISKU } });
+
+  async function ulozAZrazka() {
+    createVersionMock.mockResolvedValue({ ...version, id: "v-1", description: "Jedna veta." });
+    writeZadanieMock.mockRejectedValueOnce(zrazka()).mockResolvedValue({ relative_path: "x.md", status: "saved" });
+    await renderPage();
+    await userEvent.type(await screen.findByPlaceholderText(/Opíš, čo má verzia priniesť/i), "Jedna veta.");
+    await userEvent.click(screen.getByRole("button", { name: /uložiť zadanie/i }));
+    await screen.findByRole("button", { name: "Nahradiť mojím textom" });
+  }
+
+  it("ukáže text z disku a tri voľby; bez kliknutia nezapíše nič ďalšie", async () => {
+    await ulozAZrazka();
+    expect(screen.getByText(/Pôvodný text\./)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Doplniť môj text na koniec" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Prevziať text z disku do poľa" })).toBeInTheDocument();
+    expect(writeZadanieMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("„Nahradiť“ zapíše jeho text jeho rozhodnutím a zadanie je uložené", async () => {
+    await ulozAZrazka();
+    await userEvent.click(screen.getByRole("button", { name: "Nahradiť mojím textom" }));
+
+    await waitFor(() => expect(writeZadanieMock).toHaveBeenLastCalledWith("v-1", "Jedna veta.", { replaceExisting: true }));
+    expect(await screen.findByText(/Zadanie uložené pre verziu/)).toBeInTheDocument();
+    expect(createVersionMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("„Doplniť“ zapíše jeho text za text z disku, overený proti disku", async () => {
+    await ulozAZrazka();
+    await userEvent.click(screen.getByRole("button", { name: "Doplniť môj text na koniec" }));
+
+    await waitFor(() =>
+      expect(writeZadanieMock).toHaveBeenLastCalledWith("v-1", `${NA_DISKU}\n\nJedna veta.`, { basedOn: NA_DISKU }),
+    );
+    expect(await screen.findByText(/Zadanie uložené pre verziu/)).toBeInTheDocument();
+  });
+
+  it("prevzatý text z disku sa po úprave uloží — ako úprava toho, čo videl", async () => {
+    await ulozAZrazka();
+    await userEvent.click(screen.getByRole("button", { name: "Prevziať text z disku do poľa" }));
+    const pole = screen.getByPlaceholderText(/Opíš, čo má verzia priniesť/i);
+    expect(pole).toHaveValue(NA_DISKU);
+    expect(writeZadanieMock).toHaveBeenCalledTimes(1);
+
+    // The edited text also changes the version's description, so the page updates the version first (ICCINT-91).
+    updateVersionMock.mockImplementation(async (id: string, zmeny: object) => ({ ...version, id, ...zmeny }));
+    await userEvent.type(pole, " Doplnené.");
+    await userEvent.click(screen.getByRole("button", { name: /uložiť zadanie/i }));
+
+    await waitFor(() =>
+      expect(writeZadanieMock).toHaveBeenLastCalledWith("v-1", `${NA_DISKU} Doplnené.`, { basedOn: NA_DISKU }),
+    );
   });
 });

@@ -16,3 +16,9 @@ v Nastavenia → GitHub → „Ochrana vetvy pri súkromnom repozitári“.
 počká, kým sa prihlási na GitHube, a až potom tam pošle predpis kontroly. Doteraz to bolo naopak a prvá kontrola
 čakala niekoľko minút, raz celý deň. Keď sa vykonávač nespustí alebo neprihlási, kokpit to pri založení povie
 a predpis kontroly aj tak pošle.
+
+**Uložené zadanie sa dá upravovať.** Doteraz každé ďalšie uloženie zadania skončilo hláškou „Conflict“ — kokpit
+odmietol akúkoľvek zmenu oproti tomu, čo už bolo na disku. Teraz si kokpit pamätá, z ktorého textu si vychádzal,
+a tvoju úpravu uloží. Ak sa zadanie na disku medzitým zmenilo (napríklad ho zapísal niekto iný), ukáže ti ho
+a ponúkne „Nahradiť mojím textom“, „Doplniť môj text na koniec“ alebo „Prevziať text z disku do poľa“ — bez tvojho
+kliknutia sa nič neprepíše.

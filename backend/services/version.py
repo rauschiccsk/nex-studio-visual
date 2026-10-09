@@ -312,7 +312,9 @@ class ZadanieWouldBeOverwritten(Exception):
         super().__init__(f"Zadanie already exists at {rel_path} ({len(existing.splitlines())} lines)")
 
 
-def write_zadanie(db: Session, version_id: UUID, content: str, *, replace_existing: bool = False) -> str:
+def write_zadanie(
+    db: Session, version_id: UUID, content: str, *, replace_existing: bool = False, based_on: str | None = None
+) -> str:
     """Persist a version's free-text **Zadanie** to ``customer-requirements.md`` (CR-V2-024).
 
     The New-Version flow (design §4.3) lets the Manažér enter the brief as free text and saves it
@@ -336,6 +338,11 @@ def write_zadanie(db: Session, version_id: UUID, content: str, *, replace_existi
     ``replace_existing=True`` — an explicit decision by whoever calls, never a side effect of saving a form.
     :class:`ZadanieWouldBeOverwritten` carries what is there, so the caller can show it instead of guessing.
 
+    ``based_on`` (DEV-40) is the text the editor started from. When the disk still holds exactly that, the write
+    is an edit the Manažér made over what he saw, and it goes through. It is refused when the disk changed
+    meanwhile, or when ``based_on`` is ``None`` — the editor never saw the disk. Before DEV-40 ANY difference was
+    refused, and the cockpit never sent ``replace_existing``: a saved Zadanie could not be edited at all.
+
     Returns the repo-relative path that was written (e.g.
     ``docs/specs/versions/v0.1.0/customer-requirements.md``).
 
@@ -355,8 +362,11 @@ def write_zadanie(db: Session, version_id: UUID, content: str, *, replace_existi
 
     if not replace_existing and abs_path.is_file():
         existing = abs_path.read_text(encoding="utf-8")
+        # DEV-40: an edit of the very text the editor loaded is the Manažér's own decision, not a blind write.
+        # Without this every save after the first was refused — a saved Zadanie could not be edited at all.
+        informed_edit = based_on is not None and based_on.strip() == existing.strip()
         # Identical content is not an overwrite — re-saving the same text must stay a no-op, not an error.
-        if existing.strip() and existing.strip() != content.strip():
+        if existing.strip() and existing.strip() != content.strip() and not informed_edit:
             raise ZadanieWouldBeOverwritten(rel_path, existing)
 
     abs_path.parent.mkdir(parents=True, exist_ok=True)
