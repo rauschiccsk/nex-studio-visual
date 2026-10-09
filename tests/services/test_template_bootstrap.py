@@ -848,3 +848,61 @@ def test_the_template_brings_the_library_the_preview_needs() -> None:
     assert "msw" in pkg.get("devDependencies", {}), "šablóna nemá knižnicu pre predstierané odpovede"
     lock = _skeleton_file("package-lock.json")
     assert '"node_modules/msw"' in lock, "zámok závislostí o tej knižnici nevie — `npm ci` ju nenainštaluje"
+
+
+def test_a_founded_project_has_no_placeholder_brief_and_its_first_brief_saves(db_session, tmp_path, monkeypatch):
+    """DEV-39 — the template must not seed a placeholder Zadanie.
+
+    09.10.2026, Career Asistent (account alex): the template copied a 14-line placeholder into
+    ``docs/specs/versions/v0.1.0/customer-requirements.md`` („TODO: Zoltán doplní …"), and the overwrite guard
+    (ICCINT-71) cannot tell a placeholder from a real brief — the Manažér's first „Uložiť Zadanie" ended in
+    409 Conflict. Director: „Ten zástupný text je úplne zbytočný … aby sme tam nemali." The Zadanie is born
+    from the cockpit, not from the template. The other v0.1.0 seeds stay (they are not the Manažér's input).
+    """
+    from backend.db.models.versions import Version
+    from backend.services import version as version_service
+
+    if not ICC_INIT_SCRIPT.is_file():
+        pytest.skip(f"real init.sh not on this host ({ICC_INIT_SCRIPT}) — cockpit/template drift unchecked here")
+
+    system_setting_service.upsert(db_session, "template_init_script_path", str(ICC_INIT_SCRIPT))
+    db_session.flush()
+    user = User(
+        username=f"boot-brief-{uuid.uuid4().hex[:8]}",
+        email=f"boot-brief-{uuid.uuid4().hex[:8]}@example.com",
+        password_hash="x",
+        role="ri",
+    )
+    db_session.add(user)
+    db_session.flush()
+    slug = f"brief-probe-{uuid.uuid4().hex[:8]}"
+    target = tmp_path / slug
+    project = Project(
+        name="Brief Probe",
+        slug=slug,
+        type="standard",
+        auth_mode="password",
+        description="DEV-39 probe: the first Zadanie of a new project saves",
+        created_by=user.id,
+        source_path=str(target),
+        backend_port=14994,
+    )
+    db_session.add(project)
+    db_session.flush()
+
+    invoke_init_script(db_session, project, dry_run=False)
+
+    v010 = target / "docs" / "specs" / "versions" / "v0.1.0"
+    assert not (v010 / "customer-requirements.md").exists(), "the template seeded a placeholder Zadanie again"
+    assert (v010 / "CHANGES.md").is_file() and (v010 / "RELEASE_NOTES.md").is_file()
+
+    version = Version(project_id=project.id, version_number="0.1.0")
+    db_session.add(version)
+    db_session.flush()
+    monkeypatch.setattr(version_service, "_PROJECTS_ROOT", tmp_path)
+    brief = "# Brief Probe\n\nČo má aplikácia robiť — skutočné zadanie Manažéra.\n"
+
+    rel = version_service.write_zadanie(db_session, version.id, brief)  # no ZadanieWouldBeOverwritten
+
+    assert rel == "docs/specs/versions/v0.1.0/customer-requirements.md"
+    assert (v010 / "customer-requirements.md").read_text(encoding="utf-8") == brief
