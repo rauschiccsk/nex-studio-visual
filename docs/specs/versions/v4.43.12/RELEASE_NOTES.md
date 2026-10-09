@@ -11,3 +11,8 @@ istý zoznam, takže ho môžeš požiadať, aby Vizuál prešiel s tebou.
 kontrola po zostavení sú pri zakladaní projektu zapnuté samy. „Chrániť hlavnú vetvu“ je zašednutá a pod ňou je
 napísané prečo: GitHub ochranu pri súkromnom repozitári na našom pláne nedovolí. Keď sa plán zmení, zapne sa
 v Nastavenia → GitHub → „Ochrana vetvy pri súkromnom repozitári“.
+
+**Prvá kontrola nového projektu sa spustí hneď.** Pri zakladaní projektu kokpit najprv spustí vykonávač kontrol,
+počká, kým sa prihlási na GitHube, a až potom tam pošle predpis kontroly. Doteraz to bolo naopak a prvá kontrola
+čakala niekoľko minút, raz celý deň. Keď sa vykonávač nespustí alebo neprihlási, kokpit to pri založení povie
+a predpis kontroly aj tak pošle.

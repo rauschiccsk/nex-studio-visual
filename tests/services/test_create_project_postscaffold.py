@@ -413,6 +413,8 @@ def test_orchestrator_dispatches_all_three(tmp_path: Path) -> None:
     with (
         patch.object(mod, "CICD_TEMPLATE", template),
         patch.object(mod, "subprocess") as ps,
+        # DEV-38: the runner is now waited for on GitHub before ci.yml goes up — no network in this test.
+        patch.object(mod, "_wait_for_ci_runner", return_value=None),
     ):
         ps.run.return_value = subprocess.CompletedProcess(
             args=["x"],
@@ -451,15 +453,18 @@ def test_post_scaffold_never_raises_on_step_failure(tmp_path: Path, caplog: pyte
         patch.object(mod, "_run_smoke_test"),
         patch.object(mod, "_seed_release_smoke_test"),
         patch.object(mod, "_commit_and_push_scaffold_finalisation"),
+        patch.object(mod, "_provision_ci_runner"),
+        patch.object(mod, "_wait_for_ci_runner", return_value=None),
         patch.object(mod, "_wire_cicd_workflow"),
-        patch.object(mod, "_wire_precommit_hook"),
+        # DEV-38: the runner step reports its own failure (the CI push after it must still happen), so the
+        # generic guard is exercised on a step that still raises straight through — a missing git binary.
         patch.object(
             mod,
-            "_provision_ci_runner",
-            side_effect=FileNotFoundError("[Errno 2] No such file or directory: 'docker'"),
+            "_wire_precommit_hook",
+            side_effect=FileNotFoundError("[Errno 2] No such file or directory: 'git'"),
         ),
     ):
-        # Must NOT raise despite the CI-runner step blowing up.
+        # Must NOT raise despite the pre-commit hook step blowing up.
         mod.run_post_scaffold_steps(
             target=str(tmp_path),
             slug="demo",

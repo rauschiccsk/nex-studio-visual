@@ -79,6 +79,27 @@ def validate_github_repo(repo: str, *, timeout: float = _DEFAULT_GITHUB_API_TIME
     )
 
 
+def runner_status(repo_full: str, label: str, *, timeout: float) -> str | None:
+    """The status GitHub reports for the self-hosted runner ``label`` of ``repo_full`` (DEV-38).
+
+    ``"online"`` / ``"offline"``, or ``None`` when no such runner is registered (yet). Any answer but 200 raises:
+    a status that could not be read is not the same as "offline", and the caller must not wait on a guess."""
+    response = httpx.get(
+        f"{GITHUB_API_BASE}/repos/{repo_full}/actions/runners",
+        headers=_github_headers(),
+        timeout=timeout,
+    )
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"GitHub API returned unexpected status {response.status_code} for the runners of '{repo_full}': "
+            f"{response.text}"
+        )
+    for runner in response.json().get("runners") or []:
+        if runner.get("name") == label:
+            return runner.get("status")
+    return None
+
+
 def _github_headers() -> dict[str, str]:
     """Standard GitHub API headers including the bearer token."""
     return {

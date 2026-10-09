@@ -20,7 +20,7 @@ from pathlib import Path
 import yaml
 
 from backend.core.agent_env import agent_env
-from backend.services import build_provenance
+from backend.services import build_provenance, github_validation
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +65,16 @@ CI_RUNNER_COMMAND = "./run.sh"
 #: Anything the CI mounts out of the repository depends on those two agreeing.
 CI_RUNNER_WORKDIR_ROOT = "/opt/ci-work"
 CI_RUNNER_PROVISION_TIMEOUT = 300  # a cold `docker run` may pull the runner image first
+#: DEV-38: how long founding waits for the new runner to be online on GitHub before pushing ``ci.yml`` (a cold
+#: start pulls the image, then registers — Career Asistent took ~6 s), how often it asks, and the per-ask cap.
+CI_RUNNER_ONLINE_WAIT = 120
+CI_RUNNER_ONLINE_POLL = 3
+CI_RUNNER_STATUS_TIMEOUT = 20
+CI_RUNNER_NEVER_ONLINE = (
+    "Vykonávač kontrol sa do {wait} s neprihlásil na GitHube — prvá kontrola počká, kým sa prihlási."
+)
+CI_RUNNER_CANNOT_ASK = "Nepodarilo sa overiť, či je vykonávač kontrol prihlásený na GitHube — prvá kontrola môže čakať."
+CI_RUNNER_NOT_STARTED = "Vykonávač kontrol sa nepodarilo spustiť — kontroly počkajú, kým ho niekto spustí."
 CI_RUNNER_TEARDOWN_TIMEOUT = 60
 
 
@@ -420,11 +430,12 @@ def run_post_scaffold_steps(
         ]
         if enable_cicd:
             steps += [
+                # The ci.yml runs on ``andros-ubuntu-<slug>`` (self-hosted) — without that runner every job queues
+                # forever (the nex-shopify gap, Director 2026-07-16). DEV-38: the runner FIRST, online on GitHub,
+                # and only then ci.yml — a first run queued before its runner existed waited minutes, or a day.
+                ("spustenie vykonávača kontrol", lambda: _start_ci_runner(slug, repo_url, github_org=github_org)),
                 ("nastavenie automatickej kontroly (CI)", lambda: _wire_cicd_workflow(target_path, slug)),
                 ("nastavenie kontroly pred uložením", lambda: _wire_precommit_hook(target_path)),
-                # The pushed ci.yml runs on ``andros-ubuntu-<slug>`` (self-hosted) — provision that runner
-                # now, else every job queues forever (the nex-shopify gap, Director 2026-07-16).
-                ("spustenie vykonávača kontrol", lambda: _provision_ci_runner(slug, repo_url, github_org=github_org)),
             ]
     else:
         logger.warning("Skipping K-004 smoke test — target %r not a directory", target)
@@ -943,6 +954,53 @@ def _provision_ci_runner(slug: str, repo_url: str | None, *, github_org: str | N
         logger.warning("CI runner provisioning FAILED (slug=%s): %s", slug, run.stderr.strip())
         return
     logger.info("CI runner container provisioned (slug=%s, label=%s)", slug, label)
+
+
+def _start_ci_runner(slug: str, repo_url: str | None, *, github_org: str | None = None) -> str | None:
+    """Start the project's runner and wait until GitHub reports it online — BEFORE ``ci.yml`` is pushed (DEV-38).
+
+    Career Asistent (09.10.2026): ``ci.yml`` went up first, GitHub queued the first run at 10:04:42Z, the runner
+    listened from 10:04:47Z and the job started only at 10:09:26Z; dedo-home's first run never started and was
+    cancelled after exactly 24 h. A run created while its runner is online is handed over at once.
+
+    Never raises: the CI push after this step must happen even without a runner — a project must not be left
+    without CI. What went wrong comes back as the founding warning instead."""
+    try:
+        _provision_ci_runner(slug, repo_url, github_org=github_org)
+    except Exception as exc:  # noqa: BLE001 — the CI push after this step must still happen
+        logger.warning("CI runner could not be started (slug=%s): %s", slug, exc)
+        return CI_RUNNER_NOT_STARTED
+    return _wait_for_ci_runner(slug, repo_url, github_org=github_org)
+
+
+def _wait_for_ci_runner(
+    slug: str,
+    repo_url: str | None,
+    *,
+    github_org: str | None = None,
+    wait: int = CI_RUNNER_ONLINE_WAIT,
+    poll: int = CI_RUNNER_ONLINE_POLL,
+) -> str | None:
+    """Poll GitHub until the runner ``andros-ubuntu-<slug>`` is online — ``None`` when it is, else why not (DEV-38).
+
+    A GitHub that cannot be asked is said at once, not polled until the deadline: retrying a refused token for two
+    minutes would only delay the founding and end in the same sentence."""
+    from backend.services.template_bootstrap import _repo_from_url
+
+    repo_full = _repo_from_url(repo_url, slug, default_owner=github_org)
+    label = f"andros-ubuntu-{slug}"
+    deadline = time.monotonic() + wait
+    while True:
+        try:
+            status = github_validation.runner_status(repo_full, label, timeout=CI_RUNNER_STATUS_TIMEOUT)
+        except Exception as exc:  # noqa: BLE001 — an unreadable status is reported, never waited on
+            logger.warning("CI runner status unreadable (slug=%s): %s", slug, exc)
+            return CI_RUNNER_CANNOT_ASK
+        if status == "online":
+            return None
+        if time.monotonic() >= deadline:
+            return CI_RUNNER_NEVER_ONLINE.format(wait=wait)
+        time.sleep(poll)
 
 
 def deprovision_ci_runner(slug: str) -> None:
