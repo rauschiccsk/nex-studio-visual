@@ -19,3 +19,9 @@ zapne. Pokyn agentovi vo Vizuáli ho teraz menuje — agent ho použije a nepí�
 nemá, ho vytvorí v rovnakom tvare. Aj inde v aplikácii, napríklad pri presmerovaní na prihlásenie, sa o náhľade
 rozhoduje len cez tento prepínač. Predtým mohla aplikácia zostavená s nastavením „náhľad vypnutý“ omylom prestať
 posielať používateľa s vypršaným prihlásením na prihlasovaciu obrazovku.
+
+**Verifikácia skontroluje, ako aplikácia rozhoduje o živom náhľade.** Keď kód aplikácie rozhoduje o náhľade
+inak než prepínačom zo šablóny, Verifikácia neprejde: kokpit ukáže, na koľkých miestach to je, a AI Agent dostane
+presné súbory, riadky a správny tvar na opravu. Platí to aj vtedy, keď verziu schvaľuješ ručne. Takto sa zachytí
+chyba, pri ktorej by sa aplikácia zostavená s vypnutým náhľadom správala ako náhľad — napríklad by používateľa
+s vypršaným prihlásením neposlala na prihlasovaciu obrazovku.

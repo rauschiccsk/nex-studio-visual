@@ -67,6 +67,15 @@ prestaví). Zóna `*.int.isnex.eu` smeruje v Cloudflare bez proxy na ANDROS v Ta
 a server pre to meno odinakiaľ odpovedá 403; čo nesedí, ide Manažérovi ako upozornenie nasadenia. Ostrá inštalácia
 na inom stroji (`deploy_host`) sa riadi smerovaním toho stroja a táto kontrola ju neoveruje.
 
+**Prepínač náhľadu zo šablóny (v4.43.14, DEV-2 a DEV-43).** O živom náhľade rozhoduje v aplikácii len pomocník
+`isPreviewEnabled()` zo šablóny (`frontend/src/preview/isPreview.ts`, porovnanie so zoznamom zapínacích hodnôt).
+Pokyn Vizuálu (`_vizual_preview_rule`) ho menuje podľa toho, či ho projekt má, a charta agenta už nepredpisuje
+pravdivostný test premennej. Pri Verifikácii spoločné vyrovnanie verdiktu (`_settle_verifikacia_verdict`, pred
+kontrolou CI) prečíta zdrojáky frontendu (`preview_switch.find`): surové `import.meta.env.VITE_PREVIEW` smie
+stáť len ako statická poistka `import.meta.env.VITE_PREVIEW && isPreviewEnabled()`, v porovnaní s hodnotou alebo
+ako hodnota odovzdaná ďalej; každé iné použitie zmení PASS na FAIL (`engine_override=preview_switch`) so súborom,
+riadkom a správnym tvarom, ktoré dostane AI Agent na opravu. Platí pre samostatný beh aj pre ručné schválenie.
+
 **Vizuál — prvotriedna jednotka:**
 - **Typovaný:** `FE` (frontend appky — má každý projekt) · `WE` (webend — webshop, web pre mobilnú appku…). Systém typov **rozšíriteľný** pre budúce druhy.
 - **1..N na projekt**, rôznych typov. Každý vizuál = vlastný nasaditeľný frontend s vlastným publikom/URL.

@@ -69,6 +69,7 @@ from backend.services import (
     deploy_progress,
     failure_framing,
     fast_fix,
+    preview_switch,
     release_note_writer,
     uat_provisioner,
 )
@@ -9862,6 +9863,44 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
     )
 
 
+async def _floor_preview_decisions(
+    db: Session, version_id: uuid.UUID, *, on_message: Optional[MessageCallback] = None
+) -> bool:
+    """DEV-43 — floor a Verifikácia PASS when the app decides "is this the preview?" outside the template's switch.
+
+    Returns ``True`` when it floored: a FAIL verdict of its own is recorded (``engine_override="preview_switch"``)
+    with every place as a finding and :func:`preview_switch.fix_instruction` as the proposed fix, so
+    :func:`_latest_verifikacia_fix_scope` hands the AI Agent the places and the right shape. Its own verdict
+    message, not a note: :func:`_verifikacia_passed` reads the latest verdict, so a PASS left standing would sign
+    off however hard the settle blocks the state (the same reason as the CI floor)."""
+    found = preview_switch.find(claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id))
+    if not found:
+        return False
+    floored = _record_message(
+        db,
+        version_id=version_id,
+        stage="verifikacia",
+        author="auditor",
+        recipient="manazer",
+        kind="verdict",
+        content=(
+            "Kód aplikácie rozhoduje o živom náhľade mimo prepínača zo šablóny "
+            f"({preview_switch.places(len(found))}) — aplikácia zostavená s vypnutým náhľadom by sa mohla "
+            "správať ako náhľad. Opraví to AI Agent."
+        ),
+        payload={
+            "phase": "verifikacia",
+            "verdict": "FAIL",
+            "engine_override": "preview_switch",
+            "findings": preview_switch.finding_lines(found),
+            "proposed_fix": preview_switch.fix_instruction(),
+        },
+    )
+    if on_message is not None:
+        await on_message(floored)
+    return True
+
+
 async def _settle_verifikacia_verdict(
     db: Session,
     state: PipelineState,
@@ -9909,8 +9948,13 @@ async def _settle_verifikacia_verdict(
     # ``apply_action`` only — the MANUAL verdict — and the autonomous round, which is how most versions
     # actually pass, walked straight past it: 0.1.6 passed on 07.09.2026 with its verdict carrying no CI
     # evidence at all. One check at the shared settle, so no path can miss it and a fourth caller inherits it.
-    ci_red = False
+    # DEV-43: the app's own code must decide "is this the preview?" only through the template's switch. A static
+    # read of the source — instant, so it goes before the CI wait — and a floored PASS has nothing for CI to confirm.
+    preview_red = False
     if verdict == "PASS" and not runtime_floor_red:
+        preview_red = await _floor_preview_decisions(db, version_id, on_message=on_message)
+    ci_red = False
+    if verdict == "PASS" and not runtime_floor_red and not preview_red:
 
         async def _announce_ci_wait(which: str) -> None:
             # ICCINT-70: the wait can run into minutes. Without this the build looks frozen at the last step
@@ -9971,7 +10015,7 @@ async def _settle_verifikacia_verdict(
                 content=f"Kontroly projektu: {ci_detail}",
                 payload={"phase": "verifikacia", "ci": ci_detail, "ci_red": False},
             )
-    if verdict == "PASS" and not runtime_floor_red and not ci_red:
+    if verdict == "PASS" and not runtime_floor_red and not preview_red and not ci_red:
         state.status = "awaiting_manazer"
         state.next_action = "Verifikácia PASS — schváľ na Hotovo (nasadenie je samostatná akcia per zákazník)."
         db.flush()
