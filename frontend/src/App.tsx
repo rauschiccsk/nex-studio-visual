@@ -7,6 +7,8 @@ import { useEffect } from "react";
 import { useAuthStore } from "./store/authStore";
 import { scopeActiveContextTo } from "./store/activeContextStore";
 import { useSessionKeepAlive } from "./hooks/useSessionKeepAlive";
+import { UpdateBanner } from "./pwa/UpdateBanner";
+import { useVersionWatch } from "./pwa/useVersionWatch";
 
 import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
@@ -45,6 +47,10 @@ function App() {
   // short-lived JWT never bounces them to /login mid-work (idle sessions still
   // expire — see the hook's security posture).
   useSessionKeepAlive();
+
+  // DEV-21: a window installed as an app stays open for days and the cockpit is deployed often — it must notice
+  // a new version itself. The watch and its banner live ABOVE the router so the login screen gets them too.
+  const { updateAvailable, applyUpdate, dismiss } = useVersionWatch();
 
   return (
     <ThemeProvider username={username}>
@@ -108,6 +114,7 @@ function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
+      {updateAvailable && <UpdateBanner onApply={applyUpdate} onDismiss={dismiss} />}
     </ThemeProvider>
   );
 }

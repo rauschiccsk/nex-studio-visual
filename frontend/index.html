@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NEX Studio Visual</title>
+    <!-- DEV-21: installable as an app in its own window (the NEX Manager pattern). theme-color keeps the dark
+         background of the cockpit so the window does not flash white on start. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <meta name="theme-color" content="#0e1116" />
   </head>
   <body>
     <div id="root"></div>

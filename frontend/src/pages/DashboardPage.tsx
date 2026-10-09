@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { listProjectsApi } from "@/services/api/projects";
 import type { ProjectRead } from "@/types";
 import ErrorNote from "@/components/common/ErrorNote";
+import { InstallButton } from "@/pwa/InstallButton";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 
 const SLUG_COLORS = [
@@ -83,6 +84,11 @@ export default function DashboardPage() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
+      {/* DEV-21: the cockpit as an app in its own window — offered on the start page, the NEX Manager pattern. The
+          button hides itself once the cockpit runs installed; its hint says why when the browser cannot install. */}
+      <div className="mb-6 flex justify-end">
+        <InstallButton appName="NEX Studio Visual" />
+      </div>
       {/* My Projects */}
       <div className="mb-8">
         <div className="flex items-center justify-between mb-3">

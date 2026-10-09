@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="NEX Studio Visual">
+  <!-- The app mark: the indigo rounded square with the NSV monogram — the same mark the cockpit wears in its
+       sidebar (nex-shared Brand, initials NSV). The monogram is plain geometry, not text, so it renders the same
+       everywhere; scripts/generate-icons.py draws the PNG sizes from this file. -->
+  <rect width="512" height="512" rx="112" fill="#5b4ce0"/>
+  <g fill="none" stroke="#ffffff" stroke-width="24" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M72 326 L72 186 L162 326 L162 186"/>
+    <path d="M286 186 L218 186 L196 208 L196 236 L218 256 L264 256 L286 276 L286 304 L264 326 L196 326"/>
+    <path d="M320 186 L380 326 L440 186"/>
+  </g>
+</svg>
