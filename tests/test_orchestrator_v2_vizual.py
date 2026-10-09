@@ -133,10 +133,11 @@ def _msgs(db_session, version_id):
 def _patch_spin_up(monkeypatch, calls=None):
     """Monkeypatch ``vizual_sandbox.spin_up`` (the module attribute the round references) — no real docker."""
 
-    def _fake(slug, frontend_path=None):
+    def _fake(slug, frontend_path=None, *, private=False):
         if calls is not None:
             calls["slug"] = slug
-        return f"https://vizual-{slug}.isnex.eu"
+            calls["private"] = private  # DEV-42: the round says which zone the preview belongs to
+        return f"https://vizual-{slug}.{'int.' if private else ''}isnex.eu"
 
     monkeypatch.setattr(vizual_sandbox, "spin_up", _fake)
 

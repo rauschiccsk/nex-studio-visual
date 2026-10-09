@@ -3431,6 +3431,17 @@ def _persist_priprava_spec(db: Session, state: PipelineState, block: PipelineSta
     return None
 
 
+def _project_private_network(db: Session, version_id: uuid.UUID) -> bool:
+    """DEV-42: is the version's project reachable only from the private network (Tailscale)?"""
+    return bool(
+        db.execute(
+            select(Project.private_network)
+            .join(Version, Version.project_id == Project.id)
+            .where(Version.id == version_id)
+        ).scalar_one_or_none()
+    )
+
+
 def _schema_checkout(db: Session, version_id: uuid.UUID) -> Optional[tuple[Project, Version, Path]]:
     """The project, version and checkout the version's schema document lives in — ``None`` without a checkout."""
     version = db.get(Version, version_id)
@@ -12012,7 +12023,13 @@ async def _run_vizual_round(
             # ``npm install`` (strop 600 s) a dva dockerové príkazy (po 60 s). Zavolaná odtiaľto priamo
             # držala celý server 07.09.2026 tak dlho, že Manažér nenačítal v kokpite vôbec nič — bez
             # jedinej chyby v protokole, len s hromadou zaseknutých kontrol zdravia.
-            url = await run_blocking(vizual_sandbox.spin_up, slug, cap=VIZUAL_SPINUP_CAP)
+            url = await run_blocking(
+                vizual_sandbox.spin_up,
+                slug,
+                # DEV-42: a project reachable only from the private network previews in the private zone too.
+                private=_project_private_network(db, version_id),
+                cap=VIZUAL_SPINUP_CAP,
+            )
         except Exception as exc:  # noqa: BLE001 — a sandbox failure must NEVER crash the pipeline; settle honestly.
             # Vypršanie stropu NIE JE to isté ako zlyhanie (ICCINT-74): práca vo vlákne beží ďalej a náhľad
             # sa ešte môže rozbehnúť. Manažérovi sa to preto hovorí inak — inak by sa ponáhľal spúšťať niečo,

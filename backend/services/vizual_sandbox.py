@@ -47,7 +47,7 @@ from typing import Optional
 from backend.services.project_specs import _SLUG_RE as _PROJECT_SLUG_RE
 
 #: Traefik/infra constants — single source of truth in the UAT provisioner (DRY).
-from backend.services.uat_provisioner import PROXY_NETWORK, UAT_DOMAIN_SUFFIX
+from backend.services.uat_provisioner import PROXY_NETWORK, domain_suffix
 
 logger = logging.getLogger(__name__)
 
@@ -167,17 +167,18 @@ def container_name(slug: str) -> str:
     return f"{_CONTAINER_PREFIX}{slug}"
 
 
-def public_host(slug: str) -> str:
-    """The public vhost (``vizual-<slug>.isnex.eu``) Traefik routes to the sandbox."""
-    return f"{_CONTAINER_PREFIX}{slug}.{UAT_DOMAIN_SUFFIX}"
+def public_host(slug: str, *, private: bool = False) -> str:
+    """The vhost Traefik routes to the sandbox — ``vizual-<slug>.isnex.eu``, or ``vizual-<slug>.int.isnex.eu`` for a
+    project reachable only from the private network (DEV-42)."""
+    return f"{_CONTAINER_PREFIX}{slug}.{domain_suffix(private)}"
 
 
-def public_url(slug: str) -> str:
-    """The public URL of the sandbox (``https://vizual-<slug>.isnex.eu``)."""
-    return f"{_PUBLIC_SCHEME}://{public_host(slug)}"
+def public_url(slug: str, *, private: bool = False) -> str:
+    """The URL of the sandbox (``https://vizual-<slug>.isnex.eu`` or its private-zone twin)."""
+    return f"{_PUBLIC_SCHEME}://{public_host(slug, private=private)}"
 
 
-def _traefik_labels(slug: str) -> list[str]:
+def _traefik_labels(slug: str, *, private: bool = False) -> list[str]:
     """The Traefik labels routing ``Host(vizual-<slug>.isnex.eu)`` → the internal Vite port.
 
     Exact pattern of :func:`backend.services.uat_provisioner.frontend_traefik_labels` (cleartext ``web``
@@ -185,7 +186,7 @@ def _traefik_labels(slug: str) -> list[str]:
     forwards the HMR WebSocket upgrade for the matched router by default.
     """
     name = container_name(slug)
-    host = public_host(slug)
+    host = public_host(slug, private=private)
     return [
         "traefik.enable=true",
         f"traefik.docker.network={PROXY_NETWORK}",
@@ -289,7 +290,7 @@ def _write_override_config(frontend_host_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def build_run_argv(*, slug: str, frontend_host_path: Path) -> list[str]:
+def build_run_argv(*, slug: str, frontend_host_path: Path, private: bool = False) -> list[str]:
     """Compose the EXACT ``docker run`` argv for the sandbox (every option is load-bearing).
 
     The ONLY bind mount is the project ``frontend/`` (rw — HMR must see host edits); the override config
@@ -299,7 +300,7 @@ def build_run_argv(*, slug: str, frontend_host_path: Path) -> list[str]:
     store, NO knowledge mount, NO extra network. The sandbox can reach only ``nex-proxy-net``.
     """
     name = container_name(slug)
-    host = public_host(slug)
+    host = public_host(slug, private=private)
     argv: list[str] = [
         "docker",
         "run",
@@ -313,7 +314,7 @@ def build_run_argv(*, slug: str, frontend_host_path: Path) -> list[str]:
         "--network",
         PROXY_NETWORK,
     ]
-    for label in _traefik_labels(slug):
+    for label in _traefik_labels(slug, private=private):
         argv += ["--label", label]
     for scratch in _VITE_SCRATCH_DIRS:
         # Writable RAM scratch shadowing Vite's node_modules cache/temp — keeps the host node_modules
@@ -379,6 +380,25 @@ def _inspect_state(name: str) -> dict[str, bool]:
     return {"exists": True, "running": proc.stdout.strip() == "true"}
 
 
+def _running_public_host(name: str) -> Optional[str]:
+    """The host a running sandbox was started for (its ``VIZUAL_PUBLIC_HOST``), or ``None`` (never raises)."""
+    try:
+        proc = subprocess.run(
+            ["docker", "inspect", "-f", "{{range .Config.Env}}{{println .}}{{end}}", name],
+            capture_output=True,
+            text=True,
+            timeout=_DOCKER_CALL_TIMEOUT,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    for line in proc.stdout.splitlines():
+        if line.startswith("VIZUAL_PUBLIC_HOST="):
+            return line.split("=", 1)[1].strip()
+    return None
+
+
 def _force_remove(name: str) -> None:
     """``docker rm -f <name>`` — idempotent, never raises (a missing container is a no-op success)."""
     try:
@@ -433,14 +453,15 @@ def _ensure_node_modules(frontend_host_path: Path, *, slug: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def spin_up(slug: str, frontend_path: Optional[str] = None) -> str:
+def spin_up(slug: str, frontend_path: Optional[str] = None, *, private: bool = False) -> str:
     """Start (idempotently) an isolated Vite dev-server sandbox for ``slug`` and return its public URL.
 
     Starts container ``vizual-<slug>`` for ``/opt/projects/<slug>/frontend`` (or the explicit
     ``frontend_path``), on ``nex-proxy-net``, with Traefik labels routing
     ``Host(vizual-<slug>.isnex.eu)`` → the internal Vite port. If a container of that name is already
-    RUNNING, returns the URL without recreating; a leftover STOPPED container is removed and recreated.
-    Returns ``https://vizual-<slug>.isnex.eu``.
+    RUNNING under the expected name, returns the URL without recreating; a leftover STOPPED container — or a
+    running one under the other zone's name, after the project's private-network option changed (DEV-42) — is
+    removed and recreated. Returns ``https://vizual-<slug>.isnex.eu`` (``.int.isnex.eu`` when ``private``).
 
     Raises:
         ValueError: unsafe slug / frontend path escaping the projects root.
@@ -451,17 +472,20 @@ def spin_up(slug: str, frontend_path: Optional[str] = None) -> str:
     frontend_host_path = _resolve_frontend_path(slug, frontend_path)
     name = container_name(slug)
 
+    host = public_host(slug, private=private)
     state = _inspect_state(name)
-    if state["running"]:
+    if state["running"] and _running_public_host(name) == host:
         logger.info("vizual sandbox: %s already running — reusing", name)
-        return public_url(slug)
+        return public_url(slug, private=private)
     if state["exists"]:
-        _force_remove(name)  # a stopped/crashed leftover — recreate clean
+        # A stopped/crashed leftover, or one still answering under the other zone's name (DEV-42: a preview of a
+        # private project must not keep its public name) — recreate clean.
+        _force_remove(name)
 
     _ensure_node_modules(frontend_host_path, slug=slug)
     _write_override_config(frontend_host_path)
 
-    argv = build_run_argv(slug=slug, frontend_host_path=frontend_host_path)
+    argv = build_run_argv(slug=slug, frontend_host_path=frontend_host_path, private=private)
     logger.info("vizual sandbox: starting %s for %s", name, frontend_host_path)
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, timeout=_DOCKER_CALL_TIMEOUT)
@@ -475,7 +499,7 @@ def spin_up(slug: str, frontend_path: Optional[str] = None) -> str:
     # (Vite finished booting) is the caller's poll — the cockpit shows a "sandbox is starting" state.
     if not _inspect_state(name)["running"]:
         raise RuntimeError(f"vizual sandbox: container {name} exited immediately after start")
-    return public_url(slug)
+    return public_url(slug, private=private)
 
 
 def teardown(slug: str, frontend_path: Optional[str] = None) -> None:
@@ -493,8 +517,8 @@ def teardown(slug: str, frontend_path: Optional[str] = None) -> None:
         pass
 
 
-def status(slug: str) -> dict:
+def status(slug: str, *, private: bool = False) -> dict:
     """Return ``{"running": bool, "url": str | None}`` for the sandbox of ``slug``."""
     _validate_project_slug(slug)
     running = _inspect_state(container_name(slug))["running"]
-    return {"running": running, "url": public_url(slug) if running else None}
+    return {"running": running, "url": public_url(slug, private=private) if running else None}

@@ -219,6 +219,7 @@ def create(db: Session, data: ProjectCreate) -> Project:
         kb_path=kb_path,
         guardian_enabled=data.guardian_enabled,
         custom_development_enabled=data.custom_development_enabled,
+        private_network=data.private_network,
         created_by=data.created_by,
         owner_id=owner_id,
     )
@@ -232,7 +233,7 @@ def update(db: Session, project_id: UUID, data: ProjectUpdate) -> Project:
 
     Only the fields listed in DESIGN.md §2.2 (``name``, ``description``,
     ``status``, ``backend_port``, ``frontend_port``, ``db_port``,
-    ``repo_url``, ``source_path``, ``kb_path``, ``guardian_enabled``) may
+    ``repo_url``, ``source_path``, ``kb_path``, ``guardian_enabled``, and — DEV-42 — ``private_network``) may
     be changed. ``id``, ``slug``, ``type``, ``auth_mode``, ``created_by``
     and ``created_at`` are immutable; ``updated_at`` is refreshed automatically
     by the ORM ``onupdate=func.now()`` trigger. Fields that are ``None``
@@ -263,6 +264,8 @@ def update(db: Session, project_id: UUID, data: ProjectUpdate) -> Project:
         "source_path",
         "kb_path",
         "guardian_enabled",
+        # DEV-42: „Prístup: len súkromná sieť" — applies from the next deploy.
+        "private_network",
     }
 
     # Uniqueness check only for an actually-changing ``name``.

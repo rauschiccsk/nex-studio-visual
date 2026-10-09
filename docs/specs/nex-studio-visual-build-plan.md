@@ -57,6 +57,16 @@ pri potrebe zmeny zapíše upravenú schému a vráti otázku s `database_schema
 `block_reason=schema_approval`, Ri schváli akciou `schvalit_schemu` (zápis do Znalostnej bázy, potom pokračuje);
 zmena schémy bez schválenia sa zastaví po úlohe a pri štarte Programovania (zmena pri Vizuáli).
 
+**Len súkromná sieť (v4.43.14, DEV-42).** Voľba projektu `private_network` („Prístup len zo súkromnej siete
+(Tailscale)“). Zóna sa rozhoduje na jednom mieste (`uat_provisioner.domain_suffix`): verejná `isnex.eu`, súkromná
+`int.isnex.eu` — tú berú mená inštalácií (`_instance_naming`, UAT aj PROD), odkazy na obrazovke nasadenia
+(`deploy._instance_url`) aj náhľad Vizuálu (`vizual_sandbox.public_host`; bežiaci náhľad pod menom druhej zóny sa
+prestaví). Zóna `*.int.isnex.eu` smeruje v Cloudflare bez proxy na ANDROS v Tailscale (ICCINT-213); nginx
+`int.isnex.eu.conf` pustí len Tailscale a odovzdá smerovaču Traefik. Po nasadení súkromného projektu na ANDROSe
+`private_access.check` overí: v predpise inštalácie nie je verejné meno, meno ukazuje do rozsahov Tailscale
+a server pre to meno odinakiaľ odpovedá 403; čo nesedí, ide Manažérovi ako upozornenie nasadenia. Ostrá inštalácia
+na inom stroji (`deploy_host`) sa riadi smerovaním toho stroja a táto kontrola ju neoveruje.
+
 **Vizuál — prvotriedna jednotka:**
 - **Typovaný:** `FE` (frontend appky — má každý projekt) · `WE` (webend — webshop, web pre mobilnú appku…). Systém typov **rozšíriteľný** pre budúce druhy.
 - **1..N na projekt**, rôznych typov. Každý vizuál = vlastný nasaditeľný frontend s vlastným publikom/URL.

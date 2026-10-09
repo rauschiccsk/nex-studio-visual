@@ -532,6 +532,7 @@ async def adopting_deploy_runner(
     force_fresh: bool,
     admin_password: Optional[str] = None,
     deploy_host: Optional[str] = None,
+    private_network: bool = False,
 ) -> tuple[bool, str, Optional[str]]:
     """Vykonávateľ nasadenia, ktorý smie prepísať ručne písaný priečinok — a najprv ho odloží.
 
@@ -572,6 +573,8 @@ async def adopting_deploy_runner(
             admin_password=admin_password,
             allow_overwrite=True,
             deploy_host=deploy_host if is_prod else None,
+            # DEV-42: prevzatá inštalácia ďalej žije podľa nastavenia projektu, rovnako ako pri bežnom nasadení.
+            private=private_network,
         )
 
     try:
@@ -586,7 +589,7 @@ async def adopting_deploy_runner(
         # ICCINT-151 — pri zlyhaní vráť na cieľ predpis, ktorý tam bol. Prevzatie je tá cesta, kde na
         # tom záleží najviac: prepisuje sa ním ručne písaná inštalácia zákazníka.
         detail = _vrat_predpis_po_zlyhani(ok, detail, result, deploy_host)
-        url = _prod_url(customer_slug, app) if result.fe_service else None
+        url = _prod_url(customer_slug, app, private=private_network) if result.fe_service else None
     else:
         ok, detail = await orchestrator._run_uat_deploy(
             project_slug,
@@ -601,7 +604,7 @@ async def adopting_deploy_runner(
         # v ``deploy._default_deploy_runner``. Prvé znenie tu malo ``result.url`` a padlo to až
         # v ostrej prevádzke, po tom, čo sa priečinok už prevzal: 500 na obrazovke, nič v evidencii,
         # ale na disku hotovo. Preto sa URL berie z toho istého pomocníka ako pri bežnom nasadení.
-        url = _url_for_instance_slug(f"{customer_slug}-{app}") if result.fe_service else None
+        url = _url_for_instance_slug(f"{customer_slug}-{app}", private=private_network) if result.fe_service else None
 
     warnings = list(result.warnings)
     if odlozene:

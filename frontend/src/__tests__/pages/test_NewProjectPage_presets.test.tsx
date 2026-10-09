@@ -39,6 +39,7 @@ function presets(available: boolean) {
     full_smoke: true,
     enable_branch_protection: false,
     custom_development_enabled: false,
+    private_network: false,
     branch_protection_available: available,
     branch_protection_note: available ? null : NOTE,
   };
@@ -128,3 +129,35 @@ describe("DEV-37 — „Možnosti nastavenia“ start preset", () => {
     expect(smoke()).not.toBeChecked();
   });
 });
+
+describe("DEV-42 — „Prístup len zo súkromnej siete“ when founding a project", () => {
+  const privateNet = () => screen.getByRole("checkbox", { name: /Prístup len zo súkromnej siete \(Tailscale\)/ });
+
+  it("is offered switched off, says what it means, and when ticked it is sent with the project", async () => {
+    api.getProjectCreatePresetsApi.mockResolvedValue(presets(false));
+    renderForm();
+    await waitFor(() => expect(ci()).toBeChecked());
+
+    expect(privateNet()).not.toBeChecked();
+    expect(screen.getByText(/dostupnú len zo zariadení v Tailscale — verejnú adresu nedostanú vôbec/)).toBeInTheDocument();
+    fireEvent.click(privateNet());
+    fireEvent.change(screen.getByPlaceholderText("NEX Ledger"), { target: { value: "Career Asistent" } });
+    fireEvent.click(screen.getByRole("button", { name: /Vytvoriť projekt/ }));
+
+    await waitFor(() => expect(api.createProjectApi).toHaveBeenCalledTimes(1));
+    expect(api.createProjectApi.mock.calls[0]![0]).toMatchObject({ private_network: true });
+  });
+
+  it("left alone it is sent off — a project stays public as before", async () => {
+    api.getProjectCreatePresetsApi.mockResolvedValue(presets(false));
+    renderForm();
+    await waitFor(() => expect(ci()).toBeChecked());
+
+    fireEvent.change(screen.getByPlaceholderText("NEX Ledger"), { target: { value: "NEX Career" } });
+    fireEvent.click(screen.getByRole("button", { name: /Vytvoriť projekt/ }));
+
+    await waitFor(() => expect(api.createProjectApi).toHaveBeenCalledTimes(1));
+    expect(api.createProjectApi.mock.calls[0]![0]).toMatchObject({ private_network: false });
+  });
+});
+

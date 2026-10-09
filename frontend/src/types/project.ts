@@ -64,6 +64,8 @@ export interface ProjectCreate {
   /** STEP 6 (R9): "Vývoj na zákazku" — the only switch that later permits deviating from the unified
    *  company design. Set at creation only (like ``type``/``auth_mode``), never in ProjectUpdate. Default false. */
   custom_development_enabled?: boolean;
+  /** DEV-42: installations and the Vizuál preview only in the private network (Tailscale). Default false. */
+  private_network?: boolean;
 }
 
 /**
@@ -84,6 +86,8 @@ export interface ProjectUpdate {
   source_path?: string | null;
   kb_path?: string | null;
   guardian_enabled?: boolean;
+  /** DEV-42: applies from the next deploy. */
+  private_network?: boolean;
 }
 
 /** Serialised representation of a project row. */
@@ -111,6 +115,8 @@ export interface ProjectRead {
   setup_warnings: string[];
   /** STEP 6 (R9): "Vývoj na zákazku" — permits deviating from the unified company design. Fixed at creation. */
   custom_development_enabled: boolean;
+  /** DEV-42: installations and the Vizuál preview named in *.int.isnex.eu — reachable only via Tailscale. */
+  private_network: boolean;
   created_by: string;
   /** Notification owner (CR-NS-012), nullable. */
   owner_id: string | null;

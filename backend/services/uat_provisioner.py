@@ -95,6 +95,15 @@ TEARDOWN_TIMEOUT = 180
 # Phase-1 infra: the external Traefik docker network + the public UAT domain suffix.
 PROXY_NETWORK = "nex-proxy-net"
 UAT_DOMAIN_SUFFIX = "isnex.eu"
+#: DEV-42: the private zone. ``*.int.isnex.eu`` points at ANDROS in Tailscale with no Cloudflare proxy, and nginx
+#: lets only Tailscale in (ICCINT-213) — a project with ``private_network`` gets its names here and none above.
+PRIVATE_DOMAIN_SUFFIX = "int.isnex.eu"
+
+
+def domain_suffix(private: bool) -> str:
+    """The zone an installation's and a Vizuál preview's names live in — the ONE place that decides (DEV-42)."""
+    return PRIVATE_DOMAIN_SUFFIX if private else UAT_DOMAIN_SUFFIX
+
 
 # Traefik router priorities — the BE ``/api`` split wins over the FE catch-all.
 FE_ROUTER_PRIORITY = 10
@@ -1735,14 +1744,15 @@ def assert_writable_instance_dir(instance_dir: Path, *, allow_overwrite: bool = 
 
 
 def _instance_naming(
-    environment: str, uat_slug: str, customer_slug: Optional[str], app: Optional[str]
+    environment: str, uat_slug: str, customer_slug: Optional[str], app: Optional[str], *, private: bool = False
 ) -> tuple[str, str]:
     """The ``(name_base, host)`` for an instance's compose/container/image/router ids + public vhost.
 
     Per-customer (customer_slug + app given): PROD → ``<customer>-<app>``, UAT → ``uat-<customer>-<app>``
     (audit fix 2026-07-11 — the per-customer UAT is per-PROJECT, not the old flat ``uat-<customer>-uat``).
     Project-level UAT (no customer_slug, the uat-deploy.py path) → ``uat-<uat_slug>`` (unchanged). The host is
-    always ``<name_base>.<UAT_DOMAIN_SUFFIX>``, so both route via Traefik on the clean host.
+    always ``<name_base>.<suffix>``, so both route via Traefik on the clean host — the suffix is the private zone
+    for a ``private`` project (DEV-42), else the public one.
     """
     if customer_slug and app:
         base = f"{customer_slug}-{app}"
@@ -1751,7 +1761,7 @@ def _instance_naming(
         raise ValueError("prod instance naming requires customer_slug + app")
     else:
         name_base = f"uat-{uat_slug}"
-    return name_base, f"{name_base}.{UAT_DOMAIN_SUFFIX}"
+    return name_base, f"{name_base}.{domain_suffix(private)}"
 
 
 def frontend_traefik_labels(name_base: str, fe_internal_port: int, host: str) -> list[str]:
@@ -1909,6 +1919,7 @@ def build_uat_compose(
     app: Optional[str] = None,
     version: Optional[str] = None,
     preserved_facts: Optional["InstanceFacts"] = None,
+    private: bool = False,
 ) -> dict[str, Any]:
     """Build the final compose **dict** from the parsed source compose (CR-1), environment-aware.
 
@@ -1926,7 +1937,7 @@ def build_uat_compose(
     fe_name, be_name, db_name_svc = roles["frontend"], roles["backend"], roles["db"]
     src_services: dict[str, Any] = source["services"]
 
-    name_base, host = _instance_naming(environment, slug, customer_slug, app)
+    name_base, host = _instance_naming(environment, slug, customer_slug, app, private=private)
     restart_policy = "unless-stopped" if environment == "prod" else "no"
 
     services: dict[str, Any] = {}
@@ -2217,6 +2228,7 @@ def build_compose_for_instance(
     existing_compose_text: Optional[str] = None,
     preserve_extra_hosts: bool = True,
     loopback_base_port: Optional[int] = None,
+    private: bool = False,
 ) -> dict[str, Any]:
     """Predpis, ktorý by kokpit do tejto inštalácie zapísal — **bez toho, aby čokoľvek zapísal**.
 
@@ -2254,6 +2266,7 @@ def build_compose_for_instance(
         environment=environment,
         customer_slug=customer_slug,
         app=app,
+        private=private,
     )
 
 
@@ -2310,6 +2323,7 @@ def provision_uat(
     admin_password: Optional[str] = None,
     allow_overwrite: bool = False,
     deploy_host: Optional[str] = None,
+    private: bool = False,
 ) -> ProvisionResult:
     """Render an instance's ``{docker-compose.yml,.env}`` + create dirs for ``project_slug``.
 
@@ -2433,6 +2447,7 @@ def provision_uat(
         existing_compose_text=existing_compose_text,
         preserve_extra_hosts=is_redeploy,
         loopback_base_port=loopback_base_port,
+        private=private,
     )
 
     # Paired NEX Manager Deploy — a sibling under the same customer root
@@ -2457,7 +2472,7 @@ def provision_uat(
     if manager_env_path is not None and LAUNCH_KEY_ENV in env_example:
         manager_base_url = read_paired_manager_base_url(manager_env_path)
         if manager_base_url:
-            _nb, app_host = _instance_naming(environment, uat_slug, customer_slug, app)
+            _nb, app_host = _instance_naming(environment, uat_slug, customer_slug, app, private=private)
             manager_api_key, registration_warning = ensure_module_registered(
                 manager_env_path,
                 manager_base_url,
@@ -2615,7 +2630,7 @@ def provision_uat(
         if chyba:
             raise ValueError(chyba)
 
-    _name_base, host = _instance_naming(environment, uat_slug, customer_slug, app)
+    _name_base, host = _instance_naming(environment, uat_slug, customer_slug, app, private=private)
     if roles["frontend"] is None:
         warnings.append(
             f"no frontend service detected in {project_slug}'s compose — Traefik has no default "

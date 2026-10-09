@@ -141,6 +141,8 @@ NEW_PROJECT_PRESETS: dict[str, bool] = {
     "full_smoke": True,
     "enable_branch_protection": False,
     "custom_development_enabled": False,
+    # DEV-42: public as before unless the Manažér asks for the private network.
+    "private_network": False,
 }
 
 
@@ -151,6 +153,7 @@ class ProjectCreatePresets(BaseModel):
     full_smoke: bool
     enable_branch_protection: bool
     custom_development_enabled: bool
+    private_network: bool
     #: ``False`` while GitHub refuses protection on a private repository (setting
     #: ``github_private_branch_protection``); the form then greys the option out and shows the note.
     branch_protection_available: bool
@@ -237,6 +240,13 @@ class ProjectCreate(BaseModel):
         description=(
             "Vývoj na zákazku — the only switch permitting deviation from the unified default design "
             "(firemné zásady §4). Set once at creation (like type / auth_mode). Default False."
+        ),
+    )
+    private_network: bool = Field(
+        default=False,
+        description=(
+            "DEV-42: installations and the Vizuál preview are reachable only from the private network "
+            "(Tailscale) — named in *.int.isnex.eu, with no public name. Default False (public, as before)."
         ),
     )
     created_by: Optional[UUID] = Field(
@@ -348,6 +358,10 @@ class ProjectUpdate(BaseModel):
         default=None,
         description="Updated Guardian-enabled flag.",
     )
+    private_network: Optional[bool] = Field(
+        default=None,
+        description="DEV-42: reachable only from the private network (Tailscale); applies from the next deploy.",
+    )
 
 
 class ProjectRead(BaseModel):
@@ -382,6 +396,7 @@ class ProjectRead(BaseModel):
     kb_path: Optional[str] = None
     guardian_enabled: bool
     custom_development_enabled: bool
+    private_network: bool = False
     created_by: UUID
     owner_id: Optional[UUID] = None
     created_at: datetime

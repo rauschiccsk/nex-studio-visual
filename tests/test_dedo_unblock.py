@@ -132,7 +132,7 @@ def _stub_sandbox(monkeypatch):
     """Keep the Vizuál round's dev-server sandbox out of the test run (no docker, no Vite)."""
     from backend.services import vizual_sandbox
 
-    monkeypatch.setattr(vizual_sandbox, "spin_up", lambda slug: f"http://sandbox.local/{slug}")
+    monkeypatch.setattr(vizual_sandbox, "spin_up", lambda slug, private=False: f"http://sandbox.local/{slug}")
 
 
 def _stub_build_round(db_session, version, project, monkeypatch):

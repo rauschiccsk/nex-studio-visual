@@ -41,6 +41,7 @@ def test_the_form_starts_with_ci_and_the_full_check_on(router_client, db_session
         "full_smoke": True,
         "enable_branch_protection": False,
         "custom_development_enabled": False,
+        "private_network": False,  # DEV-42: public as before unless the Manažér asks
         "branch_protection_available": False,
         "branch_protection_note": (
             f"{REFUSED} (treba GitHub Pro). Keď sa plán zmení, zapni ju v Nastavenia → GitHub → "

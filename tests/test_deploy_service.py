@@ -129,7 +129,15 @@ class _FakeRunner:
         self.calls: list[dict] = []
 
     async def __call__(
-        self, *, project_slug, uat_slug, version_number, force_fresh, admin_password=None, deploy_host=None
+        self,
+        *,
+        project_slug,
+        uat_slug,
+        version_number,
+        force_fresh,
+        admin_password=None,
+        deploy_host=None,
+        private_network=False,
     ):
         self.calls.append(
             {
@@ -140,6 +148,8 @@ class _FakeRunner:
                 # ICCINT-151: na ktorý stroj to ide. Napodobenina, ktorá údaj zahodí, si nevšimne,
                 # keď ho služba prestane posielať — a ostrá prevádzka by ticho zbehla na kokpite.
                 "deploy_host": deploy_host,
+                # DEV-42: whether the project is reachable only from the private network — same reason.
+                "private_network": private_network,
             }
         )
         return self._ok, self._detail, (self._url if self._ok else None)
@@ -155,6 +165,26 @@ async def _deploy(db_session, customer, *, version_number, environment, actor, r
         force_fresh=force_fresh,
         deploy_runner=runner,
     )
+
+
+# ---------------------------------------------------------------------------
+# DEV-42 — the project's „Prístup len zo súkromnej siete" reaches the runner on every deploy
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("private", [True, False])
+async def test_the_deploy_hands_the_projects_private_option_to_the_runner(db_session, private):
+    user = _make_user(db_session)
+    project = _make_project(db_session, user=user)
+    project.private_network = private
+    _make_version(db_session, project, "v0.1.0")
+    customer = _make_customer(db_session, project)
+    runner = _FakeRunner()
+
+    await _deploy(db_session, customer, version_number="v0.1.0", environment="uat", actor=user, runner=runner)
+
+    assert runner.calls[0]["private_network"] is private
 
 
 # ---------------------------------------------------------------------------
@@ -576,7 +606,16 @@ def _fake_default_runner(monkeypatch):
     """Patch the module-level default runner so HTTP deploys never spawn docker."""
     calls: list[dict] = []
 
-    async def _runner(*, project_slug, uat_slug, version_number, force_fresh, admin_password=None, deploy_host=None):
+    async def _runner(
+        *,
+        project_slug,
+        uat_slug,
+        version_number,
+        force_fresh,
+        admin_password=None,
+        deploy_host=None,
+        private_network=False,
+    ):
         calls.append(
             {
                 "project_slug": project_slug,

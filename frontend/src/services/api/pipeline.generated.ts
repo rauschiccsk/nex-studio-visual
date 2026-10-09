@@ -5832,6 +5832,12 @@ export interface components {
              */
             owner_id?: string | null;
             /**
+             * Private Network
+             * @description DEV-42: installations and the Vizuál preview are reachable only from the private network (Tailscale) — named in *.int.isnex.eu, with no public name. Default False (public, as before).
+             * @default false
+             */
+            private_network: boolean;
+            /**
              * Repo Url
              * @description Git repository URL, e.g. 'rauschiccsk/nex-horizont'.
              */
@@ -5877,6 +5883,8 @@ export interface components {
             enable_cicd: boolean;
             /** Full Smoke */
             full_smoke: boolean;
+            /** Private Network */
+            private_network: boolean;
         };
         /**
          * ProjectRead
@@ -5930,6 +5938,11 @@ export interface components {
             name: string;
             /** Owner Id */
             owner_id?: string | null;
+            /**
+             * Private Network
+             * @default false
+             */
+            private_network: boolean;
             /** Repo Url */
             repo_url?: string | null;
             /** Setup Warnings */
@@ -6079,6 +6092,11 @@ export interface components {
              * @description Updated human-readable project name.
              */
             name?: string | null;
+            /**
+             * Private Network
+             * @description DEV-42: reachable only from the private network (Tailscale); applies from the next deploy.
+             */
+            private_network?: boolean | null;
             /**
              * Repo Url
              * @description Updated Git repository URL.

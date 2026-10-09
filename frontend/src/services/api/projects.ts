@@ -146,6 +146,8 @@ export interface ProjectCreatePresets {
   full_smoke: boolean;
   enable_branch_protection: boolean;
   custom_development_enabled: boolean;
+  /** DEV-42: offered switched off — public as before unless the Manažér asks. */
+  private_network: boolean;
   /** False while GitHub refuses protection on a private repository — the form greys the option out. */
   branch_protection_available: boolean;
   branch_protection_note?: string | null;

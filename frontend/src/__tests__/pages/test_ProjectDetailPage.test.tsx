@@ -101,6 +101,7 @@ const project: ProjectRead = {
   guardian_enabled: false,
   setup_warnings: [],
   custom_development_enabled: false,
+  private_network: false,
   created_by: "u1",
   owner_id: null,
   created_at: "2026-06-01T00:00:00Z",

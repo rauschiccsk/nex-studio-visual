@@ -144,7 +144,7 @@ def test_change_request_directive_is_unchanged_by_the_first_draft_branch(db_sess
 async def test_first_entry_draws_the_screens_instead_of_asking_for_approval(db_session, tmp_path, monkeypatch) -> None:
     version, state, _slug = _seed_vizual_state(db_session)
     monkeypatch.setattr(claude_agent, "PROJECTS_ROOT", tmp_path)
-    monkeypatch.setattr(vizual_sandbox, "spin_up", lambda slug: PREVIEW_URL)
+    monkeypatch.setattr(vizual_sandbox, "spin_up", lambda slug, private=False: PREVIEW_URL)
 
     seen: dict[str, object] = {}
 
@@ -180,7 +180,7 @@ async def test_a_failed_first_draft_does_not_promise_a_preview(db_session, tmp_p
     """If the draft could not be produced there is still nothing to open — say nothing about a link."""
     version, state, _slug = _seed_vizual_state(db_session)
     monkeypatch.setattr(claude_agent, "PROJECTS_ROOT", tmp_path)
-    monkeypatch.setattr(vizual_sandbox, "spin_up", lambda slug: PREVIEW_URL)
+    monkeypatch.setattr(vizual_sandbox, "spin_up", lambda slug, private=False: PREVIEW_URL)
 
     async def _fake_agent(*args, **kwargs):
         return PipelineStatusBlock(
@@ -205,7 +205,7 @@ async def test_second_entry_hands_over_the_walk_without_redrawing(db_session, tm
     """Once the agent has drawn something, a fresh entry is the walk+approve settle — unchanged behaviour."""
     version, state, _slug = _seed_vizual_state(db_session)
     monkeypatch.setattr(claude_agent, "PROJECTS_ROOT", tmp_path)
-    monkeypatch.setattr(vizual_sandbox, "spin_up", lambda slug: PREVIEW_URL)
+    monkeypatch.setattr(vizual_sandbox, "spin_up", lambda slug, private=False: PREVIEW_URL)
     orchestrator._record_message(
         db_session,
         version_id=version.id,
@@ -255,7 +255,7 @@ async def test_a_change_request_still_reaches_the_agent_on_a_first_entry(db_sess
     """A Manažér who DID ask for something gets exactly that — the draft branch must not swallow his words."""
     version, state, _slug = _seed_vizual_state(db_session)
     monkeypatch.setattr(claude_agent, "PROJECTS_ROOT", tmp_path)
-    monkeypatch.setattr(vizual_sandbox, "spin_up", lambda slug: PREVIEW_URL)
+    monkeypatch.setattr(vizual_sandbox, "spin_up", lambda slug, private=False: PREVIEW_URL)
 
     seen: dict[str, object] = {}
 
@@ -279,7 +279,7 @@ async def test_no_build_is_ever_told_to_approve_an_undrawn_vizual(db_session, tm
     """The regression in one line: 'look at it and approve' may never be the outcome of drawing nothing."""
     version, state, _slug = _seed_vizual_state(db_session)
     monkeypatch.setattr(claude_agent, "PROJECTS_ROOT", tmp_path)
-    monkeypatch.setattr(vizual_sandbox, "spin_up", lambda slug: PREVIEW_URL)
+    monkeypatch.setattr(vizual_sandbox, "spin_up", lambda slug, private=False: PREVIEW_URL)
 
     dispatched = {"agent_ran": False}
 

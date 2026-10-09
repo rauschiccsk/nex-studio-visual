@@ -80,7 +80,7 @@ from backend.schemas.deploy import (
     DEPLOY_CAUSE_STALE_SIGNOFF,
     DEPLOY_CAUSE_VERSION_BUSY,
 )
-from backend.services import deploy_progress, uat_provisioner
+from backend.services import deploy_progress, private_access, uat_provisioner
 
 # The terminal pipeline stage = "Hotovo" = a version is VERIFIED (design §3.1,
 # CR-V2-014: reaching ``done`` means *verified*, not *deployed*). Only a verified
@@ -707,6 +707,7 @@ async def _default_deploy_runner(
     force_fresh: bool,
     admin_password: Optional[str] = None,
     deploy_host: Optional[str] = None,
+    private_network: bool = False,
 ) -> tuple[bool, str, Optional[str]]:
     """Provision (preserve-by-default) then bring up a customer instance — environment-aware.
 
@@ -754,6 +755,7 @@ async def _default_deploy_runner(
             # ICCINT-151 — predpis a nastavenia sa zapíšu aj na stroj, kde inštalácia beží. Pri
             # testovacej inštalácii nikdy: tá býva vždy tu.
             deploy_host=deploy_host if is_prod else None,
+            private=private_network,
         )
 
     try:
@@ -766,7 +768,7 @@ async def _default_deploy_runner(
             project_slug, customer_slug, app, project_slug, version_number=version_number, deploy_host=deploy_host
         )
         detail = _vrat_predpis_po_zlyhani(ok, detail, result, deploy_host)
-        url = _prod_url(customer_slug, app) if result.fe_service else None
+        url = _prod_url(customer_slug, app, private=private_network) if result.fe_service else None
     else:
         # ⚠️ Testovacia inštalácia beží VŽDY na stroji kokpitu — ``deploy_host`` sa sem zámerne
         # neposiela. Údaj pri zákazníkovi sa volá ``prod_host`` a týka sa ostrej prevádzky; keby ho
@@ -781,11 +783,17 @@ async def _default_deploy_runner(
             full_project_slug=project_slug,
             version_number=version_number,
         )
-        url = _url_for_instance_slug(f"{customer_slug}-{app}") if result.fe_service else None
+        url = _url_for_instance_slug(f"{customer_slug}-{app}", private=private_network) if result.fe_service else None
     # Surface any provision warnings in the recorded (non-secret) detail — AND return them typed, so the
     # deploy screen can show them on a SUCCESSFUL deploy (``detail`` is only rendered on a failure, which is
     # how every provisioning warning has been silently discarded until now).
     warnings = list(result.warnings)
+    # DEV-42: a private project's installation must not be reachable from outside Tailscale — checked on what
+    # was written and on the live server, after every deploy that brought it up here. An installation on
+    # another machine (``deploy_host``) is routed by that machine; this check speaks only for ANDROS.
+    if ok and private_network and not (is_prod and deploy_host):
+        _nb, host = uat_provisioner._instance_naming(environment, uat_slug, customer_slug, app, private=True)
+        warnings.extend(await asyncio.to_thread(private_access.check, result.compose_path, host))
     if warnings:
         detail = f"{detail} | warnings: {'; '.join(warnings)}"
     return RunnerResult(ok, detail, url, warnings)
@@ -1019,6 +1027,7 @@ async def deploy(
             force_fresh=force_fresh,
             admin_password=admin_password,
             deploy_host=deploy_host,
+            private_network=bool(project.private_network),
         )
     finally:
         deploy_progress.skonci(instalacia)
@@ -1103,14 +1112,14 @@ def _instance_slug(customer: Customer, environment: str) -> str:
     return f"{_customer_dir_slug(customer)}-{environment}"
 
 
-def _url_for_instance_slug(instance_slug: str) -> str:
+def _url_for_instance_slug(instance_slug: str, *, private: bool = False) -> str:
     """The public URL for a provisioned instance slug (single source of truth).
 
     ``https://uat-<instance_slug>.<UAT_DOMAIN_SUFFIX>`` — used by BOTH the deploy
     runner (post-provision URL) and the matrix (the UAT tab's link), so they can
     never drift (§3.4/§3.5).
     """
-    return f"https://uat-{instance_slug}.{uat_provisioner.UAT_DOMAIN_SUFFIX}"
+    return f"https://uat-{instance_slug}.{uat_provisioner.domain_suffix(private)}"
 
 
 def _instance_url(customer: Customer, environment: str, project: Project) -> str:
@@ -1120,12 +1129,13 @@ def _instance_url(customer: Customer, environment: str, project: Project) -> str
     non-existent ``uat-<customer>-prod`` host)."""
     base = _customer_dir_slug(customer)
     app = uat_provisioner.derive_uat_slug(project.slug)
+    private = bool(project.private_network)  # DEV-42: the link shows the name the installation really has
     if environment == "prod":
-        return _prod_url(base, app)
-    return _url_for_instance_slug(f"{base}-{app}")
+        return _prod_url(base, app, private=private)
+    return _url_for_instance_slug(f"{base}-{app}", private=private)
 
 
-def _prod_url(customer_slug: str, app: str) -> str:
+def _prod_url(customer_slug: str, app: str, *, private: bool = False) -> str:
     """The public URL for a PROD instance — the clean ``https://<customer>-<app>.isnex.eu`` host (§2).
 
     ``customer_slug`` = ``(subdomain or slug).lower()`` (the base :func:`_instance_slug` uses); ``app``
@@ -1134,7 +1144,7 @@ def _prod_url(customer_slug: str, app: str) -> str:
     ``uat_slug``/``project_slug``) rather than passed as objects — the runner's public interface stays
     ``(project_slug, uat_slug, version_number, force_fresh)`` so an injected/faked runner is untouched.
     """
-    return f"https://{customer_slug}-{app}.{uat_provisioner.UAT_DOMAIN_SUFFIX}"
+    return f"https://{customer_slug}-{app}.{uat_provisioner.domain_suffix(private)}"
 
 
 def _move_release_note_dir(proj_root: Path, old_number: str, target: str) -> None:

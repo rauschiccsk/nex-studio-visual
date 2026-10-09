@@ -32,6 +32,7 @@ const PROJECT = {
   guardian_enabled: false,
   setup_warnings: [],
   custom_development_enabled: false,
+  private_network: false,
   created_by: "u1",
 } as unknown as ProjectRead;
 
@@ -121,3 +122,20 @@ describe("ProjectSettingsSection", () => {
     expect(screen.getByRole("button", { name: /Upraviť/ })).toBeDisabled();
   });
 });
+
+describe("DEV-42 — „Prístup len zo súkromnej siete“ in the project settings", () => {
+  const privateNet = () => screen.getByRole("checkbox", { name: /Prístup len zo súkromnej siete \(Tailscale\)/ });
+
+  it("is read-only until Upraviť, says when it applies, and saves only itself", async () => {
+    renderSection();
+    expect(privateNet()).toBeDisabled();
+    expect(screen.getByText(/Zmena platí od najbližšieho nasadenia\./)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Upraviť/ }));
+    fireEvent.click(privateNet());
+    fireEvent.click(screen.getByRole("button", { name: /Uložiť/ }));
+
+    await waitFor(() => expect(updateProjectApi).toHaveBeenCalledWith("p1", { private_network: true }));
+  });
+});
+

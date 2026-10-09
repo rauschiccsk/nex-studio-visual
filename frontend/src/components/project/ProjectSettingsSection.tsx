@@ -25,6 +25,7 @@ import { useState } from "react";
 import { AlertTriangle, Loader2, Pencil } from "lucide-react";
 
 import { updateProjectApi } from "@/services/api/projects";
+import { PRIVATE_NETWORK_APPLIES, PRIVATE_NETWORK_HINT, PRIVATE_NETWORK_LABEL } from "./privateNetwork";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
 import type { ProjectRead, ProjectUpdate } from "@/types";
@@ -50,6 +51,7 @@ interface FormState {
   frontend_port: string;
   db_port: string;
   guardian_enabled: boolean;
+  private_network: boolean;
 }
 
 function toForm(p: ProjectRead): FormState {
@@ -60,6 +62,7 @@ function toForm(p: ProjectRead): FormState {
     frontend_port: p.frontend_port?.toString() ?? "",
     db_port: p.db_port?.toString() ?? "",
     guardian_enabled: p.guardian_enabled,
+    private_network: p.private_network,
   };
 }
 
@@ -77,6 +80,7 @@ function diff(project: ProjectRead, form: FormState): ProjectUpdate {
   if (port(form.db_port) !== project.db_port) out.db_port = port(form.db_port);
   if (form.guardian_enabled !== project.guardian_enabled)
     out.guardian_enabled = form.guardian_enabled;
+  if (form.private_network !== project.private_network) out.private_network = form.private_network;
   return out;
 }
 
@@ -244,6 +248,24 @@ export default function ProjectSettingsSection({ project, onSaved, canEdit }: Pr
               onChange={(e) => setForm({ ...form, guardian_enabled: e.target.checked })}
             />
             Guardian
+          </label>
+        </div>
+
+        <div className="col-span-2">
+          <label className="flex items-start gap-2 text-sm text-[var(--color-text-secondary)]">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={editing ? form.private_network : project.private_network}
+              disabled={!editing || saving}
+              onChange={(e) => setForm({ ...form, private_network: e.target.checked })}
+            />
+            <span>
+              {PRIVATE_NETWORK_LABEL}
+              <span className="block text-xs text-[var(--color-text-muted)]">
+                {PRIVATE_NETWORK_HINT} {PRIVATE_NETWORK_APPLIES}
+              </span>
+            </span>
           </label>
         </div>
 

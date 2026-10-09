@@ -78,6 +78,10 @@ class Project(Base, UUIDMixin, TimestampMixin):
     # ``type`` / ``auth_mode`` — excluded from ProjectUpdate); an INERT stored datum in STEP 6 (no behaviour
     # binds to it yet — the deviation gate is a future scope). Clones the ``guardian_enabled`` Column shape.
     custom_development_enabled = Column(Boolean, nullable=False, server_default="false")
+    # DEV-42: „Prístup: len súkromná sieť" — the project's installations and Vizuál preview get a name in the
+    # private zone (``*.int.isnex.eu`` → ANDROS in Tailscale) and no public one. Read at every deploy, so a
+    # change applies from the next deploy.
+    private_network = Column(Boolean, nullable=False, server_default="false")
     created_by = Column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="RESTRICT"),

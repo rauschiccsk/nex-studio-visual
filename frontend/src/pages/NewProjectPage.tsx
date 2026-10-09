@@ -10,6 +10,7 @@ import type { ProjectAuthMode, ProjectType } from "@/types";
 import type { UserRead } from "@/types/user";
 import { isAdminAccount } from "@/services/permissions";
 import { personName } from "@/utils/person";
+import { PRIVATE_NETWORK_HINT, PRIVATE_NETWORK_LABEL } from "@/components/project/privateNetwork";
 
 // ─── Slug helper ─────────────────────────────────────────────────────────────
 
@@ -84,6 +85,8 @@ export default function NewProjectPage() {
   // STEP 6 (R9): "Vývoj na zákazku" — create-only flag, the only switch that later permits deviating from
   // the unified company design. Inert data in STEP 6 (no behaviour binds to it yet). Default unchecked.
   const [customDevelopment, setCustomDevelopment] = useState(false);
+  // DEV-42: installations and the Vizuál preview only in the private network (Tailscale).
+  const [privateNetwork, setPrivateNetwork] = useState(false);
   // DEV-37: the options start preset from the backend (Director 09.10.2026: „Chcem aby pri založení nového
   // projektu už tie voľby boli prednastavené."). Once he has changed any of them, a late answer changes none.
   const optionsTouched = useRef(false);
@@ -151,6 +154,7 @@ export default function NewProjectPage() {
         setFullSmoke(p.full_smoke);
         setEnableBranchProtection(p.enable_branch_protection && p.branch_protection_available);
         setCustomDevelopment(p.custom_development_enabled);
+        setPrivateNetwork(p.private_network);
       })
       .catch(() => {
         if (!cancelled) setPresetsNote("Predvolené možnosti sa nepodarilo načítať — zaškrtni, čo chceš, sám.");
@@ -260,6 +264,7 @@ export default function NewProjectPage() {
         enable_branch_protection: enableBranchProtection,
         // STEP 6 (R9): create-only "Vývoj na zákazku" flag.
         custom_development_enabled: customDevelopment,
+        private_network: privateNetwork,
       });
       navigate(`/projects/${project.slug}`, {
         state: {
@@ -610,6 +615,18 @@ export default function NewProjectPage() {
                 <span>
                   Vývoj na zákazku (odchýlka od jednotného firemného dizajnu) —{" "}
                   <span className="italic">zatiaľ nezapojené</span>
+                </span>
+              </label>
+              <label className="flex items-start gap-3 text-sm text-[var(--color-text-primary)] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={privateNetwork}
+                  onChange={(e) => touchOption(setPrivateNetwork)(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded border-[var(--color-border-default)] bg-[var(--color-canvas)] text-primary-500 focus:ring-primary-500"
+                />
+                <span>
+                  {PRIVATE_NETWORK_LABEL}
+                  <span className="block text-xs text-[var(--color-text-muted)]">{PRIVATE_NETWORK_HINT}</span>
                 </span>
               </label>
               {presetsNote && <p className="text-xs text-[var(--color-text-muted)]">{presetsNote}</p>}
