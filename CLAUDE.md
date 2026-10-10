@@ -19,8 +19,9 @@ projektu (`backend/services/create_project_postscaffold.py`). Tento súbor je le
   menuje jednou vetou. Text, ktorý agent dostane pri každej práci (charta, koreňový CLAUDE.md, opisy zručností),
   má strop **37 000 znakov** (Director 09.10.2026, DEV-45) — stráž
   `tests/test_agent_instructions_stay_under_the_ceiling.py`; pri prekročení sa skracuje text, nie strop.
-  Charty aj zručnosti zapisuje do projektu `create_project_postscaffold.py` pri založení a obnovuje ich pri štarte
-  novej verzie; prevzaté projekty sa dnes neobnovujú (DEV-47). Do bežiaceho kokpitu sa zmena dostane nasadením.
+  Charty aj zručnosti zapisuje do projektu `create_project_postscaffold.py` pri založení a obnovuje ich pred každým
+  novým sedením agenta, aj v prevzatých projektoch (`claude_agent._refresh_rules`, DEV-47). Zmena teda platí od
+  najbližšieho nového sedenia po nasadení kokpitu; pokračujúce sedenie si drží chartu, s ktorou začalo.
 - `docs/specs/versions/vX.Y.Z/RELEASE_NOTES.md` — poznámka k vydaniu po slovensky pre toho, kto kokpit používa.
 - `scripts/deploy-prod.sh` — nasadenie na PROD.
 

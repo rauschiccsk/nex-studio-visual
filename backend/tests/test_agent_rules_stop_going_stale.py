@@ -62,18 +62,21 @@ def test_a_missing_project_never_sinks_the_build(tmp_path) -> None:
     assert pps.refresh_v2_agent_charters(tmp_path / "niet-ho", "niet-ho") == 0
 
 
-def test_an_adopted_project_is_skipped_by_the_caller() -> None:
-    """TOTO je tá stráž, na ktorej všetko stojí.
+def test_an_adopted_project_is_refreshed_and_keeps_its_own_rules_aside(tmp_path) -> None:
+    """Prevzatý projekt sa obnovuje tiež — DEV-47 obrátil rozhodnutie z ICCINT-51.
 
-    ``provision_v2_agent_charters`` prepisuje rolové charty BEZ OHĽADU na ``adopted`` — ten príznak
-    v nej riadi len upratovanie adresárov v1. Obnova by teda prevzatému projektu prepísala jeho
-    vlastné pravidlá, a tie sú podľa CLAUDE.md §1 jeho. Stráž musí byť na strane volajúceho.
+    Táto skúška predtým strážila opak: obnova mala prevzatý projekt vynechať, lebo „by mu prepísala jeho
+    vlastné pravidlá“. Zmerané 10.10.2026 to tak nie je: pri prevzatí sa pôvodné súbory odložia ako
+    ``.pre-nex-studio`` a rolové charty sú odvtedy kokpitove — v NEX Inboxe aj NEX Manageri presná kópia
+    šablóny z 02.09.2026. Vynechanie ich len zmrazilo, takže žiadne neskoršie pravidlo sa k agentom prevzatých
+    projektov nedostalo. Director 10.10.2026: „Áno, založ tiket do DEV“ → „Áno, začni DEV-47“.
     """
-    from backend.services import orchestrator
+    root = _project(tmp_path)
+    kept = root / ".claude" / "agents" / "ai-agent" / "CLAUDE.md.pre-nex-studio"
+    kept.write_text("pravidlá projektu spred prevzatia\n", encoding="utf-8")
 
-    src = inspect.getsource(orchestrator.apply_action)
-    assert "refresh_v2_agent_charters" in src, "štart stavby chartu neobnovuje"
-    assert "not _proj.adopted" in src, "obnova sa spúšťa aj na prevzatom projekte"
+    assert pps.refresh_v2_agent_charters(root, "projekt") == 2, "prevzatý projekt ostal so starými pravidlami"
+    assert kept.read_text(encoding="utf-8") == "pravidlá projektu spred prevzatia\n"
 
 
 def test_the_project_remembers_it_was_adopted() -> None:

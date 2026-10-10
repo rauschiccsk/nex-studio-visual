@@ -44,10 +44,10 @@ class Project(Base, UUIDMixin, TimestampMixin):
     db_port = Column(Integer, nullable=True)
     repo_url = Column(String(255), nullable=True)
     source_path = Column(Text, nullable=True)
-    # ICCINT-51: prevzatý projekt (``--adopt``) si podľa CLAUDE.md §1 drží VLASTNÉ pravidlá — do jeho
-    # charty sa nesiaha. Hodnota sa dovtedy počítala pri zakladaní (``adopted=not scaffolded_here``),
-    # použila raz a zabudla, takže engine pri spúšťaní agenta nemal ako tie dva prípady rozlíšiť.
-    # Bez toho sa charta nedá bezpečne obnovovať: obnova by prevzatému projektu prepísala jeho vlastné.
+    # ICCINT-51: projekt prevzatý (``--adopt``), nie založený kokpitom. Do DEV-47 podľa neho engine vynechával
+    # obnovu chárt; odvtedy sa obnovujú aj tu — pri prevzatí sa pôvodné súbory projektu odložili ako
+    # ``.pre-nex-studio`` a charty sú kokpitove (zmerané 10.10.2026: v každom projekte presná kópia šablóny).
+    # Ostáva ako záznam, ako projekt vznikol.
     adopted = Column(Boolean, nullable=False, server_default="false")
     # ICCINT-88: čo sa pri zakladaní zámerne NEurobilo (CI, ochrana vetvy, skúšobné spustenie) alebo
     # sa nepodarilo. Vetu o tom kokpit zostavoval už predtým, ale žila len v odpovedi na založenie —

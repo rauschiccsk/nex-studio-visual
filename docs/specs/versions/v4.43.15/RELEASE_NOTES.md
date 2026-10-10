@@ -14,3 +14,9 @@ Managera. Agent pri práci vidí len ich krátky opis a celý postup si otvorí,
 číta pri každej práci, je preto asi o pätinu kratšia. Kokpit zapisuje zručnosti do projektu spolu s pravidlami
 agenta. Dve zručnosti, ktoré projekty dostávali doteraz, boli uložené v tvare, ktorý agent nevedel načítať —
 nemal ich teda nikdy; odteraz ich má.
+
+**Nové pravidlá sa k agentovi dostanú hneď, aj v prevzatých projektoch.** Kokpit doteraz obnovoval pravidlá
+agenta v projekte len pri štarte novej verzie a v prevzatých projektoch (NEX Inbox, NEX Manager) vôbec — preto
+agenti pracovali s pravidlami z 2. septembra a nič z neskorších vylepšení ich nedosiahlo. Odteraz kokpit
+pravidlá aj zručnosti obnoví tesne pred každým novým sedením agenta, vo všetkých projektoch. Rozhovor, ktorý
+agent práve vedie, sa nemení; nové pravidlá platia od jeho najbližšieho nového sedenia.

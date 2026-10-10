@@ -492,7 +492,7 @@ class TestAdoptingAnExistingProject:
         assert "po-scaffolde" not in volane, "bežiacemu projektu sa prepisovalo CI a spúšťala skúška"
 
     def test_the_project_is_recorded_as_adopted(self, router_client, creator, monkeypatch, tmp_path, db_session):
-        """Bez tohto príznaku by sa charta prevzatého projektu obnovovala zo šablóny (ICCINT-51)."""
+        """Záznam, ako projekt vznikol (ICCINT-51) — prevzatý, nie založený kokpitom."""
         self._spy(monkeypatch, tmp_path)
         existing = tmp_path / "prevzaty2"
         existing.mkdir()

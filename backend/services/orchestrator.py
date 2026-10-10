@@ -62,7 +62,6 @@ from backend.services import (
     build_provenance,
     ci_status,
     claude_agent,
-    create_project_postscaffold,
     database_schema,
     dedo_escalation,
     dedo_message,
@@ -12949,13 +12948,8 @@ async def apply_action(
         # dovtedy volalo jedine pri ručnej úprave epiky, čo priebeh nikdy nerobí, takže rozbehnutá
         # stavba vyzerala rovnako ako nezačatá.
         version_service.auto_activate(db, version_id)
-        # ICCINT-51: obnov agentovi pravidlá zo šablóny, kým sa nezačalo pracovať. Charta sa dovtedy
-        # písala RAZ pri založení projektu a už nikdy — každé zlepšenie pravidiel sa teda mlčky
-        # zastavilo pred existujúcimi stavbami. Prevzatý projekt sa PRESKAKUJE: jeho pravidlá sú jeho
-        # (CLAUDE.md §1) a obnova ich píše bez pýtania — stráž je tu, nie vo volanej funkcii.
-        _proj = db.get(Project, db.get(Version, version_id).project_id)
-        if _proj is not None and not _proj.adopted:
-            create_project_postscaffold.refresh_v2_agent_charters(claude_agent.PROJECTS_ROOT / _proj.slug, _proj.slug)
+        # ICCINT-51 → DEV-47: the agent's rules are no longer refreshed here, once per build, but right before
+        # every new agent session reads its charter (``claude_agent._refresh_rules``) — adopted projects included.
         db.flush()
         _record_message(
             db,

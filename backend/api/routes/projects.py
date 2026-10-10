@@ -1160,9 +1160,8 @@ def create_project(
             provision_v2_agent_charters,
         )
 
-        # ICCINT-51: zapíš to, čo tu vieme, nech to vie aj engine. Prevzatý projekt si drží vlastné
-        # pravidlá (CLAUDE.md §1) a jeho charta sa NESMIE obnovovať zo šablóny; dovtedy sa táto
-        # hodnota vypočítala, použila raz a zabudla, takže pri spúšťaní agenta už nebola k dispozícii.
+        # ICCINT-51: zapíš, ako projekt vznikol. Pôvodné pravidlá prevzatého projektu odloží zakladanie nižšie
+        # (``.pre-nex-studio``); charty kokpitu sa od DEV-47 obnovujú v každom projekte pred novým sedením agenta.
         project.adopted = not scaffolded_here
         db.flush()
         try:

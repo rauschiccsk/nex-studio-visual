@@ -195,6 +195,29 @@ def _load_charter(charter_path: Path) -> str:
     return charter_path.read_text(encoding="utf-8")
 
 
+def _refresh_rules(project_slug: str) -> None:
+    """Bring the project's agent rules (role charters, skills) up to the cockpit's templates — DEV-47.
+
+    Called right before a NEW session reads its charter, because that is the only moment the charter reaches the
+    agent: a resumed session keeps the one it was started with. The refresh used to run only when a build started
+    and skipped adopted projects, so a cockpit release that changed the rules reached a running build only with its
+    next version and NEX Inbox / NEX Manager never (measured 10.10.2026: every project still carried the 02.09.2026
+    charter). Adopted projects are refreshed too: at adoption their own files were set aside as ``.pre-nex-studio``
+    and the cockpit's charters written in their place, so what a refresh rewrites is the cockpit's own copy.
+
+    The refresh writes only what differs and never commits — the project's HEAD does not move, so neither the
+    verified commit nor the Nasadiť button is affected. Best effort: a refresh failure is logged and the turn runs
+    on the rules already in the project, which is exactly the situation before DEV-47."""
+    from backend.services import create_project_postscaffold  # local import — keeps the CLI primitive light
+
+    try:
+        create_project_postscaffold.refresh_v2_agent_charters(PROJECTS_ROOT / project_slug, project_slug)
+    except Exception:  # noqa: BLE001 — a stale rule set must never cost the turn
+        logger.warning(
+            "agent rules refresh failed for slug=%s — the turn runs on the rules it has", project_slug, exc_info=True
+        )
+
+
 #: Per-event callback type for streaming mode. Receives each parsed stream-json
 #: event (a dict); must never raise (the caller guards it anyway).
 EventCallback = Callable[[dict], Awaitable[None]]
@@ -603,7 +626,10 @@ async def _invoke_once(
 
     # First invocation for this claude session loads the charter (a missing one raises a descriptive
     # ClaudeAgentError — the "re-create through NEX Studio v2" hint — not a raw FileNotFoundError); a
-    # subsequent turn passes None and the argv builder emits ``--resume`` instead.
+    # subsequent turn passes None and the argv builder emits ``--resume`` instead. DEV-47: a new session first
+    # brings the project's rules up to the cockpit's templates — it is the only moment they reach the agent.
+    if charter_path is not None:
+        _refresh_rules(project_slug)
     charter_text = _load_charter(charter_path) if charter_path is not None else None
     args = build_claude_argv(
         force_new_session=force_new_session,

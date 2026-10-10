@@ -201,9 +201,10 @@ def refresh_v2_agent_charters(project_root: Path, slug: str) -> int:
     značku dôvery a upratuje adresáre v1. Zastarávajú len rolové charty a zručnosti kokpitu (DEV-46), tak sa
     obnovujú len tie. Vracia počet obnovených rolí; zručnosti len zapíše do logu.
 
-    **Volajúci MUSÍ preskočiť prevzaté projekty.** Stráž nie je tu: ``provision_v2_agent_charters``
-    prepisuje rolové charty bez ohľadu na ``adopted`` (ten príznak riadi len upratovanie v1), takže
-    prevzatému projektu by obnova prepísala jeho vlastné pravidlá — a tie sú podľa CLAUDE.md §1 jeho.
+    Volá sa pred každým novým sedením agenta (``claude_agent._refresh_rules``, DEV-47), aj v prevzatých
+    projektoch: pri prevzatí sa ich pôvodné súbory odložili ako ``.pre-nex-studio`` a rolové charty sú odvtedy
+    kokpitove. Do DEV-47 sa volala len pri štarte stavby a prevzaté projekty vynechávala — zmena pravidiel sa
+    do bežiacej stavby nedostala vôbec a do NEX Inboxu a NEX Managera nikdy.
 
     Best-effort: chýbajúci projekt, chýbajúca šablóna ani zlyhaný zápis nesmú zhodiť stavbu. Agent by
     v najhoršom prípade bežal podľa starších pravidiel, čo je presne dnešný stav — nie zhoršenie.
