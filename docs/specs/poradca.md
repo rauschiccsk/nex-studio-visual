@@ -153,6 +153,12 @@ Každá otázka = dočasný kontajner z obrazu backendu (`docker run --rm`), pod
 - na zápis len priečinok tohto rozhovoru, pripojený presne tam, kam claude ukladá záznam podľa pracovného
   priečinka (`…/projects/-opt-projects-<slug>`), aby `--resume` fungoval; **záznamy agenta stavby sa
   nepripájajú** (B3);
+- **snímky obrazovky, ktoré Manažér priložil k otázkam tohto rozhovoru** (DEV-52), len na čítanie, mimo
+  projektu: `/run/poradca-prilohy`. Obmedzený režim ich smie čítať len vďaka `--add-dir /run/poradca-prilohy`
+  (zmerané 10.10.2026 s CLI 2.1.294: s ním Read obrázok otvorí a model ho opíše, bez neho čítanie odmietne).
+  Na hostiteľovi ležia v dátach Poradcu vedľa záznamu rozhovoru (`<poradca_data_dir>/attachments/<rozhovor>/`),
+  nikdy v projekte; prijímajú sa len PNG, JPEG, WebP a GIF podľa obsahu, so stropmi v nastaveniach backendu;
+  vymazanie rozhovoru ich zmaže spolu so záznamom. Iný rozhovor ani projekt sa k nim nedostane;
 - výstup `stream-json` (ako stavba) → živý priebeh; do databázy a WebSocketu ide **len nástroj a cieľ**,
   nie obsah (B7);
 - **zlyhá nahlas**: keď sa kontajner nedá spustiť, otázka skončí chybou s dôvodom; nikdy neustúpi na beh

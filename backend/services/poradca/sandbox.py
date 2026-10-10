@@ -17,7 +17,10 @@ stavbe, lebo Poradca len číta:
   * **žiadna Znalostná báza** — tú podáva nástroj s právami človeka, ktorý sa pýta; pripojený priečinok
     by ich obišiel;
   * **záznam rozhovoru** v priečinku TOHTO rozhovoru, pripojený tam, kam ho Claude Code ukladá podľa
-    pracovného priečinka — záznamy agenta stavby sa nepripájajú vôbec (nález B3).
+    pracovného priečinka — záznamy agenta stavby sa nepripájajú vôbec (nález B3);
+  * **snímky obrazovky, ktoré Manažér priložil k otázkam TOHTO rozhovoru** (DEV-52) — len na čítanie, mimo
+    projektu, a obmedzenému režimu povolené prepínačom ``--add-dir`` (bez neho Read mimo projektu odmietne;
+    zmerané 10.10.2026 s CLI 2.1.294 oboma smermi). Iný rozhovor ani projekt sa k nim nedostane.
 
 Nástroje „zozadu" podáva backend cez unixový socket platný pre jednu otázku (:mod:`.mcp_server`);
 v kontajneri ich sprostredkuje :mod:`.shim`. Sieť ostáva oplotená ako pri stavbe.
@@ -54,6 +57,8 @@ MCP_SERVER_NAME = "poradca"
 #: Kde kontajner vidí priečinok so socketom tejto otázky.
 CONTAINER_RUN_DIR = "/run/poradca"
 SOCKET_NAME = "mcp.sock"
+#: DEV-52 — kde kontajner vidí priložené snímky svojho rozhovoru (len na čítanie, mimo projektu).
+CONTAINER_ATTACHMENTS_DIR = "/run/poradca-prilohy"
 #: Prostredník stdio ↔ socket, v obraze backendu (iba štandardná knižnica Pythonu).
 SHIM_PATH = "/app/backend/services/poradca/shim.py"
 
@@ -106,6 +111,16 @@ def session_dir(conversation_id: UUID) -> Path:
     return data_dir() / "sessions" / str(conversation_id)
 
 
+def attachments_dir(conversation_id: UUID) -> Path:
+    """DEV-52 — snímky, ktoré Manažér priložil k otázkam rozhovoru. Vedľa záznamu, nie v ňom: záznam má kontajner
+    pripojený na zápis, snímky len na čítanie."""
+    return data_dir() / "attachments" / str(conversation_id)
+
+
+#: Čo vymazanie rozhovoru presúva do koša — záznam sedenia a priložené snímky, každé pod svojím menom.
+_TRASHED = (("session", session_dir), ("attachments", attachments_dir))
+
+
 def run_dir(token: str) -> Path:
     return data_dir() / "run" / token
 
@@ -119,23 +134,37 @@ def trash_dir() -> Path:
 
 
 def move_to_trash(conversation_id: UUID) -> Optional[Path]:
-    """Presunie záznam vymazaného rozhovoru do koša JEDNÝM krokom a vráti, kam; ``None``, keď záznam nie je.
+    """Presunie záznam vymazaného rozhovoru a jeho priložené snímky do koša a vráti, kam; ``None``, keď nie je nič.
 
-    ``os.rename`` v rámci jedného disku (kôš leží vedľa ``sessions/``) je nedeliteľný: záznam je buď celý
-    preč, alebo celý na mieste. Vymazanie ho robí pred zmenou databázy a pri jej zlyhaní ho vráti
+    ``os.rename`` v rámci jedného disku (kôš leží vedľa ``sessions/`` a ``attachments/``) je nedeliteľný: každá
+    časť je buď celá preč, alebo celá na mieste — a keď druhá časť nejde, prvá sa vráti, takže rozhovor nikdy
+    neostane napoly. Vymazanie to robí pred zmenou databázy a pri jej zlyhaní všetko vráti
     (:func:`restore_from_trash`); samotné mazanie súborov (:func:`discard`) príde až po nej, mimo zámku.
     """
-    source = session_dir(conversation_id)
-    if not source.exists():
+    present = [(name, where(conversation_id)) for name, where in _TRASHED if where(conversation_id).exists()]
+    if not present:
         return None
     trash_dir().mkdir(parents=True, exist_ok=True)
     target = trash_dir() / f"{conversation_id}-{uuid4().hex}"
-    os.rename(source, target)
+    target.mkdir()
+    moved: list[tuple[str, Path]] = []
+    try:
+        for name, source in present:
+            os.rename(source, target / name)
+            moved.append((name, source))
+    except OSError:
+        for name, source in reversed(moved):
+            os.rename(target / name, source)
+        target.rmdir()
+        raise
     return target
 
 
 def restore_from_trash(trashed: Path, conversation_id: UUID) -> None:
-    os.rename(trashed, session_dir(conversation_id))
+    for name, where in _TRASHED:
+        if (trashed / name).exists():
+            os.rename(trashed / name, where(conversation_id))
+    trashed.rmdir()
 
 
 def discard(trashed: Path) -> None:
@@ -273,6 +302,8 @@ class ClaudeCall:
     charter_text: Optional[str]
     model: Optional[str]
     effort: Optional[str]
+    #: DEV-52 — rozhovor má priložené snímky: ich priečinok sa pripojí a obmedzený režim ho smie čítať.
+    attachments: bool = False
 
 
 def claude_argv(call: ClaudeCall) -> list[str]:
@@ -299,6 +330,8 @@ def claude_argv(call: ClaudeCall) -> list[str]:
         json.dumps(mcp),
         "--allowedTools",
         f"mcp__{MCP_SERVER_NAME}",
+        # ``--add-dir`` berie viac priečinkov — za ním preto vždy nasleduje ďalší prepínač, nikdy text otázky.
+        *(["--add-dir", CONTAINER_ATTACHMENTS_DIR] if call.attachments else []),
         "--permission-mode",
         "dontAsk",
     ]
@@ -333,7 +366,8 @@ def run_argv(
     """Celý ``docker run`` jednej otázky. Čo tu nie je, Poradca nevidí.
 
     PRÍTOMNÉ: dočasný domov, záznam TOHTO rozhovoru, projekt len na čítanie s prekrytiami, ``.git`` ako
-    prázdny ``tmpfs``, binárka ``claude`` len na čítanie, priečinok socketu tejto otázky len na čítanie.
+    prázdny ``tmpfs``, binárka ``claude`` len na čítanie, priečinok socketu tejto otázky len na čítanie a — keď
+    rozhovor nejaké má — priložené snímky TOHTO rozhovoru len na čítanie (DEV-52).
     NEPRÍTOMNÉ (stráži skúška): ``docker.sock``, ``/opt/customers``, ``/opt/uat``, ``/opt/infra``,
     Znalostná báza, trezor prístupov, zdieľaný ``~/.claude``, záznamy agenta stavby.
     """
@@ -378,6 +412,10 @@ def run_argv(
         argv += ["--mount", f"type=tmpfs,destination={container_dir}/.git,tmpfs-mode=0555"]
     for rel in overlays:
         argv += ["--mount", f"type=bind,source={empty_file()},target={container_dir}/{rel},readonly"]
+    if call.attachments:
+        attached = attachments_dir(conversation_id)
+        _assert_mount_safe(str(attached))
+        argv += ["--mount", f"type=bind,source={attached},target={CONTAINER_ATTACHMENTS_DIR},readonly"]
     argv += [
         "--mount",
         f"type=bind,source={_CLAUDE_BIN_DIR},target={_CLAUDE_BIN_DIR},readonly",

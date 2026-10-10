@@ -73,7 +73,7 @@ def _fake_run(monkeypatch):
     """Otázka sa uloží ako pri skutočnom behu, ale odpoveď hneď skončí — bez kontajnera."""
     calls: list[str] = []
 
-    def _ask(db, conversation, question, user):
+    def _ask(db, conversation, question, user, images=()):
         running = (
             db.query(PoradcaMessage)
             .filter(PoradcaMessage.conversation_id == conversation.id, PoradcaMessage.status == "running")

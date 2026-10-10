@@ -20,6 +20,7 @@ const api = vi.hoisted(() => ({
   stopPoradcaApi: vi.fn(),
   saveRequestToBacklogApi: vi.fn(),
   buildPoradcaWsUrl: vi.fn(() => "ws://test/ws"),
+  getPoradcaAttachmentApi: vi.fn(),
 }));
 vi.mock("@/services/api/poradca", () => api);
 
@@ -189,7 +190,7 @@ describe("PoradcaPage", () => {
     await waitFor(() => expect(select.value).toBe("v13"));
     fireEvent.change(screen.getByPlaceholderText(/Opýtaj sa Poradcu/), { target: { value: "Čo je v UAT?" } });
     fireEvent.click(screen.getByRole("button", { name: /Opýtať sa/ }));
-    await waitFor(() => expect(api.createPoradcaConversationApi).toHaveBeenCalledWith("demo", "Čo je v UAT?", "v13"));
+    await waitFor(() => expect(api.createPoradcaConversationApi).toHaveBeenCalledWith("demo", "Čo je v UAT?", "v13", []));
   });
 
   it("says why it cannot run instead of accepting a question", async () => {
@@ -357,5 +358,129 @@ describe("PoradcaPage", () => {
       fireEvent.click(screen.getByRole("button", { name: "Otvoriť Zásobník" }));
       expect(await screen.findByText("ZÁSOBNÍK")).toBeInTheDocument();
     });
+  });
+});
+
+describe("PoradcaPage — snímka obrazovky v otázke (DEV-52)", () => {
+  const LIMITS = {
+    ready: true,
+    problems: [],
+    running: 0,
+    max_concurrent: 3,
+    attachment_max_bytes: 5 * 1024 * 1024,
+    attachments_max_count: 5,
+    attachments_max_total_bytes: 15 * 1024 * 1024,
+    attachment_types: ["image/gif", "image/jpeg", "image/png", "image/webp"],
+  };
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+  const PNG_BASE64 = btoa(String.fromCharCode(...PNG));
+
+  beforeEach(() => {
+    api.getPoradcaStatusApi.mockResolvedValue(LIMITS);
+    api.getPoradcaConversationApi.mockResolvedValue(conversation("v13", []));
+    URL.createObjectURL = vi.fn(() => "blob:nahled");
+    URL.revokeObjectURL = vi.fn();
+  });
+
+  async function box() {
+    return (await screen.findByPlaceholderText(/Opýtaj sa Poradcu/)) as HTMLTextAreaElement;
+  }
+
+  function paste(target: HTMLElement, files: File[]) {
+    fireEvent.paste(target, { clipboardData: { files, items: [], getData: () => "" } });
+  }
+
+  it("⚠️ snímka vložená zo schránky (Ctrl+V) ide s otázkou k Poradcovi", async () => {
+    api.askPoradcaApi.mockResolvedValue(conversation("v13", []));
+    renderPage();
+    const textarea = await box();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Priložiť snímku obrazovky" })).toBeInTheDocument());
+
+    paste(textarea, [new File([PNG], "image.png", { type: "image/png" })]);
+    const preview = await screen.findByRole("img", { name: /^Snímka 1 .*\.png$/ });
+    expect(preview).toHaveAttribute("src", "blob:nahled");
+
+    fireEvent.change(textarea, { target: { value: "Čo je na snímke?" } });
+    fireEvent.click(screen.getByRole("button", { name: /Opýtať sa/ }));
+
+    await waitFor(() =>
+      expect(api.askPoradcaApi).toHaveBeenCalledWith("c1", "Čo je na snímke?", [
+        { name: preview.getAttribute("alt"), data: PNG_BASE64 },
+      ]),
+    );
+    await waitFor(() => expect(screen.queryByTestId("pending-images")).not.toBeInTheDocument());
+  });
+
+  it("text vložený zo schránky ostane textom", async () => {
+    renderPage();
+    const textarea = await box();
+
+    paste(textarea, []);
+
+    expect(screen.queryByTestId("pending-images")).not.toBeInTheDocument();
+  });
+
+  it("⚠️ iný súbor než obrázok ani priveľký obrázok neprijme a povie prečo", async () => {
+    renderPage();
+    const textarea = await box();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Priložiť snímku obrazovky" })).toBeInTheDocument());
+
+    paste(textarea, [new File(["%PDF"], "faktura.pdf", { type: "image/svg+xml" })]);
+    expect(await screen.findByText("„faktura.pdf“ nie je PNG, JPEG, WebP ani GIF.")).toBeInTheDocument();
+
+    paste(textarea, [new File([new Uint8Array(6 * 1024 * 1024)], "velka.png", { type: "image/png" })]);
+    expect(await screen.findByText("Obrázok má 6 MB — jeden môže mať najviac 5 MB.")).toBeInTheDocument();
+    expect(screen.queryByTestId("pending-images")).not.toBeInTheDocument();
+  });
+
+  it("snímku prijme aj pretiahnutím a cez tlačidlo Priložiť", async () => {
+    renderPage();
+    const textarea = await box();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Priložiť snímku obrazovky" })).toBeInTheDocument());
+
+    fireEvent.drop(textarea.closest("form")!, {
+      dataTransfer: { files: [new File([PNG], "pretiahnuta.png", { type: "image/png" })], items: [] },
+    });
+    fireEvent.change(screen.getByTestId("poradca-image-picker"), {
+      target: { files: [new File([PNG], "vybrana.png", { type: "image/png" })] },
+    });
+
+    expect(await screen.findByRole("img", { name: "pretiahnuta.png" })).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: "vybrana.png" })).toBeInTheDocument();
+  });
+
+  it("priloženú snímku sa dá pred odoslaním odobrať", async () => {
+    renderPage();
+    const textarea = await box();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Priložiť snímku obrazovky" })).toBeInTheDocument());
+    paste(textarea, [new File([PNG], "obrazovka.png", { type: "image/png" })]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Odobrať obrazovka.png" }));
+
+    expect(screen.queryByTestId("pending-images")).not.toBeInTheDocument();
+  });
+
+  it("otázka so snímkou ukáže náhľad a po kliknutí celý obrázok", async () => {
+    api.getPoradcaConversationApi.mockResolvedValue(
+      conversation("v13", [
+        {
+          ...ANSWER_WITH_INSTRUCTION,
+          id: "m1",
+          author: "human",
+          content: "Čo je na snímke?",
+          instruction: null,
+          attachments: [{ id: "a1b2", name: "Snímka 1.png", mime: "image/png", size_bytes: 11 }],
+        },
+      ]),
+    );
+    api.getPoradcaAttachmentApi.mockResolvedValue(new Blob([PNG], { type: "image/png" }));
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("img", { name: "Snímka 1.png" }));
+
+    expect(api.getPoradcaAttachmentApi).toHaveBeenCalledWith("c1", "a1b2");
+    expect(screen.getByRole("dialog", { name: "Snímka 1.png" })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Snímka 1.png" })).not.toBeInTheDocument());
   });
 });

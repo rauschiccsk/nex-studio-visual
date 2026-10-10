@@ -23,6 +23,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -49,7 +50,7 @@ from backend.schemas.poradca import (
     PoradcaVersionInfo,
 )
 from backend.services import metrics
-from backend.services.poradca import handoff, readiness, runner
+from backend.services.poradca import attachments, handoff, readiness, runner
 
 router = APIRouter(tags=["Poradca"])
 
@@ -104,6 +105,7 @@ def _message_read(db: Session, msg: PoradcaMessage) -> PoradcaMessageRead:
         author=msg.author,
         content=msg.content,
         steps=msg.steps or [],
+        attachments=msg.attachments or [],
         status=msg.status,
         model=usage.get("model"),
         input_tokens=usage.get("input_tokens"),
@@ -159,14 +161,28 @@ def _detail(db: Session, conversation: PoradcaConversation) -> PoradcaConversati
     )
 
 
-def _ask(db: Session, conversation: PoradcaConversation, question: str, user: User) -> None:
+def _accept_images(uploads: list) -> list[attachments.Incoming]:
+    """DEV-52 — the pasted screenshots, checked before anything is created: refused → 422 with the sentence why."""
+    try:
+        return attachments.accept((u.name, u.data) for u in uploads)
+    except attachments.AttachmentRefused as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+
+def _ask(
+    db: Session,
+    conversation: PoradcaConversation,
+    question: str,
+    user: User,
+    images: Optional[list[attachments.Incoming]] = None,
+) -> None:
     ready = readiness.status(db)
     if not ready.ready:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, detail="Poradca teraz nevie bežať: " + "; ".join(ready.problems)
         )
     try:
-        runner.ask(db, conversation, question, user)
+        runner.ask(db, conversation, question, user, images or [])
     except runner.PoradcaBusy as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except runner.ConversationGone as exc:
@@ -252,11 +268,12 @@ async def create_conversation(
 ) -> PoradcaConversationDetail:
     project = authz.assert_project_slug_access(db, current_user, slug)
     _check_version(db, project, payload.version_id)
+    images = _accept_images(payload.attachments)
     conversation = runner.new_conversation(
         db, project=project, author=current_user, version_id=payload.version_id, title=_title(payload.question)
     )
     db.commit()
-    _ask(db, conversation, payload.question, current_user)
+    _ask(db, conversation, payload.question, current_user, images)
     return _detail(db, conversation)
 
 
@@ -325,8 +342,30 @@ async def ask(
     current_user: User = Depends(get_current_user),
 ) -> PoradcaConversationDetail:
     conversation, _project = _conversation_for(db, current_user, conversation_id)
-    _ask(db, conversation, payload.question, current_user)
+    _ask(db, conversation, payload.question, current_user, _accept_images(payload.attachments))
     return _detail(db, conversation)
+
+
+@router.get("/conversations/{conversation_id}/attachments/{attachment_id}", response_class=FileResponse)
+def get_attachment(
+    conversation_id: uuid.UUID,
+    attachment_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> FileResponse:
+    """DEV-52 — one screenshot of a question, for whoever may read the conversation (anyone else gets 404).
+
+    Found through the conversation's own messages, never by a path from the request — another conversation's
+    image is not reachable even with its id."""
+    conversation, _project = _conversation_for(db, current_user, conversation_id)
+    for (stored,) in db.execute(
+        select(PoradcaMessage.attachments).where(PoradcaMessage.conversation_id == conversation.id)
+    ).all():
+        meta = next((m for m in stored or [] if m.get("id") == attachment_id), None)
+        path = attachments.path_of(conversation.id, meta) if meta else None
+        if path is not None and path.is_file():
+            return FileResponse(path, media_type=meta["mime"], headers={"Cache-Control": "private, max-age=3600"})
+    raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Obrázok sa nenašiel.")
 
 
 @router.post("/messages/{message_id}/stop", status_code=status.HTTP_202_ACCEPTED)

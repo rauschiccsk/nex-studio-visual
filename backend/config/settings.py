@@ -72,6 +72,12 @@ class Settings(BaseSettings):
     poradca_data_dir: str = "/opt/data/nex-studio-visual/poradca"
     # Strop jednej otázky Poradcu v sekundách (návrh §3: 15 minút).
     poradca_question_timeout: int = 900
+    # DEV-52 — screenshots the Manažér pastes into a question for Poradca: one image, how many in one question, and
+    # all of one question together (they travel base64 in the question, a third larger). The cockpit's nginx
+    # (frontend/nginx.conf, client_max_body_size) must let the largest request through — a test compares them.
+    poradca_attachment_max_bytes: int = 5 * 1024 * 1024
+    poradca_attachments_max_count: int = 5
+    poradca_attachments_max_total_bytes: int = 15 * 1024 * 1024
 
     # Backstop timeout (seconds) for a single headless ``claude -p`` invocation
     # driven by the F-007 orchestrator (CR-NS-018 fix-round). Since agent

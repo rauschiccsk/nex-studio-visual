@@ -28,7 +28,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 from uuid import UUID, uuid4
 
 from sqlalchemy import select, update
@@ -53,7 +53,7 @@ from backend.db.models.versions import Version
 from backend.db.session import SessionLocal
 from backend.services import build_db, build_sandbox, system_setting, usage_ledger
 from backend.services.claude_agent import UsageMetadata, _usage_from
-from backend.services.poradca import sandbox
+from backend.services.poradca import attachments, sandbox
 from backend.services.poradca.context import known_secret_values
 from backend.services.poradca.mcp_server import McpServer
 from backend.services.poradca.secrets_filter import SecretFilter
@@ -173,9 +173,16 @@ def max_concurrent(db: Session) -> int:
 
 
 def ask(
-    db: Session, conversation: PoradcaConversation, question: str, user: User
+    db: Session,
+    conversation: PoradcaConversation,
+    question: str,
+    user: User,
+    images: Sequence[attachments.Incoming] = (),
 ) -> tuple[PoradcaMessage, PoradcaMessage]:
     """Uloží otázku a začne odpoveď na pozadí. Volajúci už overil prístup k rozhovoru.
+
+    DEV-52: ``images`` sú snímky, ktoré Manažér priložil (už prijaté :func:`attachments.accept`). Uložia sa k
+    rozhovoru pred zápisom otázky; keď sa otázka nezapíše, zmažú sa — nikdy neostane snímka bez otázky.
 
     Raises:
         PoradcaBusy: v tomto rozhovore už odpoveď beží.
@@ -192,11 +199,13 @@ def ask(
     first = (
         db.execute(select(PoradcaMessage.id).where(PoradcaMessage.conversation_id == conversation.id)).first() is None
     )
+    stored = attachments.store(conversation.id, list(images))
     human = PoradcaMessage(
         conversation_id=conversation.id,
         version_id=conversation.version_id,
         author=AUTHOR_HUMAN,
         content=question,
+        attachments=stored,
         status=DONE,
     )
     answer = PoradcaMessage(
@@ -208,13 +217,19 @@ def ask(
     )
     db.add_all([human, answer])
     conversation.updated_at = datetime.now(timezone.utc)
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        attachments.discard(conversation.id, stored)
+        raise
     db.refresh(human)
     db.refresh(answer)
     entry = _Running(conversation_id=conversation.id)
     _running[answer.id] = entry
     entry.task = asyncio.get_running_loop().create_task(
-        _run(answer.id, conversation.id, question, user.id, first), name=f"poradca-{answer.id}"
+        _run(answer.id, conversation.id, question + attachments.prompt_note(stored), user.id, first),
+        name=f"poradca-{answer.id}",
     )
     return human, answer
 
@@ -312,7 +327,10 @@ def _builtin_target(name: str, args: dict, project_dir: str) -> str:
         return os.path.relpath(text, project_dir) if text.startswith(project_dir) else text
 
     if name == "Read":
-        return rel(args.get("file_path"))
+        path = str(args.get("file_path") or "")
+        if path.startswith(sandbox.CONTAINER_ATTACHMENTS_DIR + "/"):
+            return "priložená snímka obrazovky"  # DEV-52 — the Manažér's own image, not a file of the project
+        return rel(path)
     if name == "Grep":
         where = rel(args.get("path")) if args.get("path") else "celý projekt"
         return f"„{args.get('pattern', '')}“ v {where}"
@@ -398,6 +416,8 @@ async def _run(message_id: UUID, conversation_id: UUID, question: str, user_id: 
                     charter_text=charter if first else None,
                     model=model,
                     effort=effort,
+                    # DEV-52: images of any question of this conversation stay readable for the follow-ups too.
+                    attachments=await asyncio.to_thread(sandbox.attachments_dir(conversation_id).is_dir),
                 ),
                 overlays=overlays,
             )
@@ -628,7 +648,7 @@ def _wipe(db: Session, conversation: PoradcaConversation) -> Optional[Path]:
         db.execute(
             update(PoradcaMessage)
             .where(PoradcaMessage.conversation_id == conversation.id)
-            .values(content="", steps=[], error=None, captured_backlog_item_id=None)
+            .values(content="", steps=[], attachments=[], error=None, captured_backlog_item_id=None)
         )
         db.execute(
             update(PoradcaConversation)

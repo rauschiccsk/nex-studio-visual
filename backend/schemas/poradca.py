@@ -28,6 +28,23 @@ class PoradcaStep(BaseModel):
     target: str = ""
 
 
+class PoradcaAttachmentUpload(BaseModel):
+    """DEV-52 — snímka obrazovky priložená k otázke: meno súboru a obsah v base64 (tak ako ich berie aj API
+    Claude). Typ sa neberie z mena ani z prehliadača — backend ho rozpozná z obsahu."""
+
+    name: str = Field(default="", max_length=500)
+    data: str = Field(..., min_length=1)
+
+
+class PoradcaAttachmentRead(BaseModel):
+    """Priložená snímka — čo o nej vie obrazovka (obsah sa sťahuje zvlášť, s overením prístupu)."""
+
+    id: str
+    name: str
+    mime: str
+    size_bytes: int
+
+
 class PoradcaMessageRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -35,6 +52,8 @@ class PoradcaMessageRead(BaseModel):
     author: Literal["human", "poradca"]
     content: str
     steps: list[PoradcaStep] = Field(default_factory=list)
+    #: DEV-52 — snímky, ktoré Manažér priložil k otázke.
+    attachments: list[PoradcaAttachmentRead] = Field(default_factory=list)
     status: Literal["running", "done", "failed", "stopped"]
     #: Úplné meno modelu tak, ako ho hlási Claude Code; ``None`` pri otázke a pri nedokončenej odpovedi.
     model: Optional[str] = None
@@ -86,6 +105,8 @@ class PoradcaConversationDetail(PoradcaConversationRead):
 class PoradcaConversationCreate(BaseModel):
     question: str = Field(..., min_length=1, max_length=MAX_QUESTION_CHARS)
     version_id: Optional[UUID] = None
+    #: DEV-52 — snímky obrazovky k prvej otázke (počet a veľkosť stráži ``poradca.attachments.accept``).
+    attachments: list[PoradcaAttachmentUpload] = Field(default_factory=list)
 
     @field_validator("question")
     @classmethod
@@ -95,6 +116,8 @@ class PoradcaConversationCreate(BaseModel):
 
 class PoradcaAsk(BaseModel):
     question: str = Field(..., min_length=1, max_length=MAX_QUESTION_CHARS)
+    #: DEV-52 — snímky obrazovky k otázke (počet a veľkosť stráži ``poradca.attachments.accept``).
+    attachments: list[PoradcaAttachmentUpload] = Field(default_factory=list)
 
     @field_validator("question")
     @classmethod
@@ -152,3 +175,8 @@ class PoradcaStatus(BaseModel):
     problems: list[str] = Field(default_factory=list)
     running: int
     max_concurrent: int
+    #: DEV-52 — stropy priložených snímok, aby obrazovka odmietla priveľký obrázok hneď pri vložení.
+    attachment_max_bytes: int = 0
+    attachments_max_count: int = 0
+    attachments_max_total_bytes: int = 0
+    attachment_types: list[str] = Field(default_factory=list)

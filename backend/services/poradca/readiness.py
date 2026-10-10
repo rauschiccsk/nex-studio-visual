@@ -15,9 +15,10 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from backend.config.settings import settings
 from backend.schemas.poradca import PoradcaStatus
 from backend.services import build_sandbox
-from backend.services.poradca import runner, sandbox
+from backend.services.poradca import attachments, runner, sandbox
 
 _CACHE_SECONDS = 30
 _cache: Optional[tuple[float, list[str]]] = None
@@ -70,4 +71,8 @@ def status(db: Session) -> PoradcaStatus:
         problems=found,
         running=runner._slots.active,
         max_concurrent=runner.max_concurrent(db),
+        attachment_max_bytes=settings.poradca_attachment_max_bytes,
+        attachments_max_count=settings.poradca_attachments_max_count,
+        attachments_max_total_bytes=settings.poradca_attachments_max_total_bytes,
+        attachment_types=sorted(attachments.IMAGE_TYPES),
     )

@@ -10,3 +10,10 @@ rýchlej opravy.
 (účtuje sa), sa teraz volí aj vtedy, keď ju spúšťaš zo zadania od Deda na stránke projektu alebo z Dedovho návrhu
 pri verzii — nielen v dialógu „Rýchla oprava“. Bez tejto voľby sa rýchla oprava nespustí, takže súpis dodaných
 tokenov už nemusí druh práce dopĺňať dodatočne.
+
+**Poradcovi môžeš do otázky vložiť snímku obrazovky.** Stačí ju do poľa otázky vložiť zo schránky (Ctrl+V
+alebo Shift+Insert), pretiahnuť súbor myšou alebo ju vybrať tlačidlom s obrázkom vedľa poľa. Pred odoslaním
+vidíš náhľad a snímku môžeš odobrať; k jednej otázke sa dá priložiť do 5 obrázkov (PNG, JPEG, WebP, GIF, každý
+do 5 MB). Poradca si snímku pri odpovedi naozaj pozrie a v rozhovore ju uvidíš pri otázke — kliknutím celú.
+Snímky ostávajú len pri rozhovore (nikdy v projekte) a vymazaním rozhovoru zmiznú. Zároveň sa opravilo, že
+obrazovka kokpitu odmietala každý súbor väčší než 1 MB — aj súbor priložený agentovi.

@@ -1415,6 +1415,29 @@ export interface paths {
         patch: operations["update_scope_api_v1_poradca_conversations__conversation_id__patch"];
         trace?: never;
     };
+    "/api/v1/poradca/conversations/{conversation_id}/attachments/{attachment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Attachment
+         * @description DEV-52 — one screenshot of a question, for whoever may read the conversation (anyone else gets 404).
+         *
+         *     Found through the conversation's own messages, never by a path from the request — another conversation's
+         *     image is not reachable even with its id.
+         */
+        get: operations["get_attachment_api_v1_poradca_conversations__conversation_id__attachments__attachment_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/poradca/conversations/{conversation_id}/messages": {
         parameters: {
             query?: never;
@@ -5556,8 +5579,38 @@ export interface components {
         };
         /** PoradcaAsk */
         PoradcaAsk: {
+            /** Attachments */
+            attachments?: components["schemas"]["PoradcaAttachmentUpload"][];
             /** Question */
             question: string;
+        };
+        /**
+         * PoradcaAttachmentRead
+         * @description Priložená snímka — čo o nej vie obrazovka (obsah sa sťahuje zvlášť, s overením prístupu).
+         */
+        PoradcaAttachmentRead: {
+            /** Id */
+            id: string;
+            /** Mime */
+            mime: string;
+            /** Name */
+            name: string;
+            /** Size Bytes */
+            size_bytes: number;
+        };
+        /**
+         * PoradcaAttachmentUpload
+         * @description DEV-52 — snímka obrazovky priložená k otázke: meno súboru a obsah v base64 (tak ako ich berie aj API
+         *     Claude). Typ sa neberie z mena ani z prehliadača — backend ho rozpozná z obsahu.
+         */
+        PoradcaAttachmentUpload: {
+            /** Data */
+            data: string;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
         };
         /**
          * PoradcaBacklogSaved
@@ -5578,6 +5631,8 @@ export interface components {
         };
         /** PoradcaConversationCreate */
         PoradcaConversationCreate: {
+            /** Attachments */
+            attachments?: components["schemas"]["PoradcaAttachmentUpload"][];
             /** Question */
             question: string;
             /** Version Id */
@@ -5669,6 +5724,8 @@ export interface components {
         };
         /** PoradcaMessageRead */
         PoradcaMessageRead: {
+            /** Attachments */
+            attachments?: components["schemas"]["PoradcaAttachmentRead"][];
             /**
              * Author
              * @enum {string}
@@ -5750,6 +5807,23 @@ export interface components {
          * @description Či Poradca vie bežať — pre obrazovku (zašednutie s dôvodom) aj ``/health``.
          */
         PoradcaStatus: {
+            /**
+             * Attachment Max Bytes
+             * @default 0
+             */
+            attachment_max_bytes: number;
+            /** Attachment Types */
+            attachment_types?: string[];
+            /**
+             * Attachments Max Count
+             * @default 0
+             */
+            attachments_max_count: number;
+            /**
+             * Attachments Max Total Bytes
+             * @default 0
+             */
+            attachments_max_total_bytes: number;
             /** Max Concurrent */
             max_concurrent: number;
             /** Problems */
@@ -10032,6 +10106,36 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PoradcaConversationRead"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_attachment_api_v1_poradca_conversations__conversation_id__attachments__attachment_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+                attachment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

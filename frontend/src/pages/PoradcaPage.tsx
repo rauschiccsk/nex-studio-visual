@@ -10,11 +10,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Loader2, MessageSquarePlus, Send } from "lucide-react";
+import { ImagePlus, Loader2, MessageSquarePlus, Send, X } from "lucide-react";
 
 import ErrorNote from "@/components/common/ErrorNote";
 import PoradcaAnswer from "@/components/poradca/PoradcaAnswer";
 import PoradcaConversationItem from "@/components/poradca/PoradcaConversationItem";
+import QuestionImages from "@/components/poradca/QuestionImages";
 import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { RESTORED_DRAFT_LABEL, draftKey, useDraft } from "@/hooks/useDraft";
 import { useFollowBottom } from "@/hooks/useFollowBottom";
@@ -34,6 +35,7 @@ import {
 import { ApiError } from "@/services/api";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { versionOptionLabel } from "@/lib/poradcaAnswer";
+import { addImages, imagesIn, toUpload, type ImageLimits, type PendingImage } from "@/lib/poradcaImages";
 import type { PoradcaConversation, PoradcaProjectContext, PoradcaStatus } from "@/types/poradca";
 
 const WHOLE_PROJECT = "";
@@ -324,6 +326,9 @@ export default function PoradcaPage() {
                 className="ml-auto max-w-[80%] whitespace-pre-wrap rounded-lg border border-[var(--color-accent-primary)]/30 bg-[var(--color-accent-primary)]/10 px-3 py-2 text-sm text-[var(--color-text-primary)]"
               >
                 {m.content}
+                {conversationId && (m.attachments ?? []).length > 0 && (
+                  <QuestionImages conversationId={conversationId} attachments={m.attachments ?? []} />
+                )}
               </div>
             ) : (
               <PoradcaAnswer key={m.id} message={m} scopeVersion={scopeVersion} />
@@ -340,12 +345,19 @@ export default function PoradcaPage() {
                 ? "Poradca odpovedá — ďalšiu otázku pošleš, keď dokončí (alebo ho zastav)."
                 : null
           }
-          onAsk={async (question) => {
+          limits={status}
+          onAsk={async (question, images) => {
             thread.follow(); // his own question: show what comes back, wherever he had scrolled to
+            const uploads = await Promise.all(images.map(toUpload));
             if (conversationId) {
-              setDetail(await askPoradcaApi(conversationId, question));
+              setDetail(await askPoradcaApi(conversationId, question, uploads));
             } else {
-              const created = await createPoradcaConversationApi(selectedProject.slug, question, newScope || null);
+              const created = await createPoradcaConversationApi(
+                selectedProject.slug,
+                question,
+                newScope || null,
+                uploads,
+              );
               setDetail(created);
               select(created.id);
             }
@@ -361,17 +373,38 @@ function PoradcaComposer({
   draftKey: key,
   onAsk,
   disabledReason,
+  limits,
 }: {
   /** Where the half-written question lives — one per conversation, one for the new conversation (DEV-24). */
   draftKey: string | null;
-  onAsk: (question: string) => Promise<void>;
+  onAsk: (question: string, images: File[]) => Promise<void>;
   disabledReason: string | null;
+  /** DEV-52 — the backend's limits for pasted screenshots; null until Poradca's status is known. */
+  limits: ImageLimits | null;
 }) {
   const { text, setText, clear, restored } = useDraft(key);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<HumanError | null>(null);
+  const [images, setImages] = useState<PendingImage[]>([]);
+  const [refused, setRefused] = useState<string | null>(null);
+  const picker = useRef<HTMLInputElement>(null);
   const growRef = useAutoGrowTextarea(text);
   const locked = !!disabledReason || sending;
+  const canAttach = !!limits && limits.attachments_max_count > 0;
+
+  function attach(files: File[]) {
+    if (!limits || files.length === 0) return;
+    const { images: next, refused: why } = addImages(images, files, limits);
+    setImages(next);
+    setRefused(why);
+  }
+
+  function detach(key: string) {
+    const gone = images.find((i) => i.key === key);
+    if (gone) URL.revokeObjectURL(gone.url);
+    setImages(images.filter((i) => i.key !== key));
+    setRefused(null);
+  }
 
   async function submit() {
     const question = text.trim();
@@ -379,8 +412,14 @@ function PoradcaComposer({
     setSending(true);
     setError(null);
     try {
-      await onAsk(question);
-      clear(); // only once it went out — a failed question stays in the box
+      await onAsk(
+        question,
+        images.map((i) => i.file),
+      );
+      clear(); // only once it went out — a failed question stays in the box, with its images
+      images.forEach((i) => URL.revokeObjectURL(i.url));
+      setImages([]);
+      setRefused(null);
     } catch (e: unknown) {
       setError(humanizeApiError(e, "Otázku sa nepodarilo poslať"));
     } finally {
@@ -401,12 +440,70 @@ function PoradcaComposer({
         e.preventDefault();
         void submit();
       }}
+      onDragOver={(e) => {
+        if (canAttach && !locked && imagesIn(e.dataTransfer).length) e.preventDefault();
+      }}
+      onDrop={(e) => {
+        const dropped = imagesIn(e.dataTransfer);
+        if (!canAttach || locked || dropped.length === 0) return;
+        e.preventDefault();
+        attach(dropped);
+      }}
       className="flex-shrink-0 border-t border-[var(--color-border-default)] bg-[var(--color-surface)] p-3"
     >
       {disabledReason && <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">{disabledReason}</p>}
       {restored && <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">{RESTORED_DRAFT_LABEL}</p>}
       <ErrorNote error={error} />
+      {refused && (
+        <p role="status" className="mb-2 text-[11px] text-[var(--color-state-warning-fg)]">
+          {refused}
+        </p>
+      )}
+      {images.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-2" data-testid="pending-images">
+          {images.map((i) => (
+            <div key={i.key} className="relative overflow-hidden rounded border border-[var(--color-border-default)]">
+              <img src={i.url} alt={i.file.name} className="h-16 max-w-[8rem] object-cover" />
+              <button
+                type="button"
+                aria-label={`Odobrať ${i.file.name}`}
+                onClick={() => detach(i.key)}
+                disabled={sending}
+                className="absolute right-0.5 top-0.5 rounded-full bg-black/60 p-0.5 text-white hover:bg-black/80"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="flex items-end gap-2">
+        {canAttach && (
+          <>
+            <input
+              ref={picker}
+              type="file"
+              accept={(limits.attachment_types ?? []).join(",")}
+              multiple
+              hidden
+              data-testid="poradca-image-picker"
+              onChange={(e) => {
+                attach(Array.from(e.target.files ?? []));
+                e.target.value = "";
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => picker.current?.click()}
+              disabled={locked}
+              title="Priložiť snímku obrazovky (alebo ju vlož do otázky cez Ctrl+V)"
+              aria-label="Priložiť snímku obrazovky"
+              className="flex h-10 items-center rounded-lg border border-[var(--color-border-default)] px-2.5 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <ImagePlus className="h-4 w-4" />
+            </button>
+          </>
+        )}
         <textarea
           data-draft="poradca"
           lang="sk"
@@ -415,6 +512,13 @@ function PoradcaComposer({
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
+          onPaste={(e) => {
+            // DEV-52: a screenshot from the clipboard (Ctrl+V, Shift+Insert) — text pastes as it always did.
+            const pasted = imagesIn(e.clipboardData);
+            if (!canAttach || pasted.length === 0) return;
+            e.preventDefault();
+            attach(pasted);
+          }}
           disabled={locked}
           rows={1}
           placeholder="Opýtaj sa Poradcu… (Enter odošle, Shift+Enter nový riadok)"

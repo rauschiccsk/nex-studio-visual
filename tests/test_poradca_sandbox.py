@@ -244,7 +244,8 @@ def test_trash_moves_the_whole_record_in_one_step_and_can_put_it_back(project):
     (record / "sub").mkdir(parents=True)
     (record / "sub" / "a.jsonl").write_text("x")
     trashed = sandbox.move_to_trash(cid)
-    assert trashed is not None and not record.exists() and (trashed / "sub" / "a.jsonl").exists()
+    # DEV-52: the trash entry holds the record and the conversation's images, each under its own name.
+    assert trashed is not None and not record.exists() and (trashed / "session" / "sub" / "a.jsonl").exists()
     sandbox.restore_from_trash(trashed, cid)
     assert (record / "sub" / "a.jsonl").read_text() == "x" and not trashed.exists()
 

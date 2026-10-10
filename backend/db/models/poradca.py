@@ -81,6 +81,9 @@ class PoradcaMessage(Base, UUIDMixin, TimestampMixin):
     content = Column(Text, nullable=False, server_default="")
     #: ``[{"tool": "Read", "target": "backend/x.py"}, …]`` — čo Poradca robil, bez obsahu.
     steps = Column(JSONB, nullable=False, server_default="[]")
+    #: DEV-52 — screenshots attached to a question: ``[{"id", "name", "mime", "size_bytes"}, …]``; the files lie in
+    #: Poradca's data next to the conversation's record (``sandbox.attachments_dir``), never in the project.
+    attachments = Column(JSONB, nullable=False, server_default="[]")
     status = Column(String(16), nullable=False, server_default=DONE)
     #: ``{"input_tokens", "output_tokens", "model"}`` — ten istý tvar ako ``payload.usage`` stavby, aby sa
     #: Poradca dal oceniť tou istou cestou ako stavba.

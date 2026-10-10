@@ -92,6 +92,19 @@ export const request = api.request;
  * Download a file the backend serves only to a signed-in user (a CSV statement, DEV-50) and hand it to the browser
  * as a file. A plain link cannot carry the token; the name comes from the server when it sends one.
  */
+/**
+ * A file the backend serves only to a signed-in reader (DEV-52: a screenshot of a Poradca question), as a Blob —
+ * an `<img src>` cannot carry the Authorization header, so the screen fetches it and shows an object URL.
+ */
+export async function fetchBlob(path: string): Promise<Blob> {
+  const token = readToken();
+  const res = await fetch(`${resolveBaseUrl()}/api/v1${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error(`Súbor sa nepodarilo načítať (${res.status}).`);
+  return res.blob();
+}
+
 export async function downloadFile(path: string, fallbackName: string): Promise<void> {
   const token = readToken();
   const res = await fetch(`${resolveBaseUrl()}/api/v1${path}`, {

@@ -1,6 +1,6 @@
 // Poradca (ICCINT-167) — rozhovory s agentom, ktorý len číta a radí. Backend: `backend/api/routes/poradca.py`.
 
-import api from "../api";
+import api, { fetchBlob } from "../api";
 import type {
   PoradcaConversation,
   PoradcaConversationDetail,
@@ -21,14 +21,22 @@ export function listPoradcaConversationsApi(slug: string): Promise<PoradcaConver
   return api.get<PoradcaConversation[]>(`/poradca/projects/${slug}/conversations`);
 }
 
+/** DEV-52 — a screenshot pasted into the question: its name and its content, base64 (as the Claude API takes it). */
+export interface PoradcaImageUpload {
+  name: string;
+  data: string;
+}
+
 export function createPoradcaConversationApi(
   slug: string,
   question: string,
   versionId: string | null,
+  attachments: PoradcaImageUpload[] = [],
 ): Promise<PoradcaConversationDetail> {
   return api.post<PoradcaConversationDetail>(`/poradca/projects/${slug}/conversations`, {
     question,
     version_id: versionId,
+    attachments,
   });
 }
 
@@ -36,8 +44,12 @@ export function getPoradcaConversationApi(id: string): Promise<PoradcaConversati
   return api.get<PoradcaConversationDetail>(`/poradca/conversations/${id}`);
 }
 
-export function askPoradcaApi(id: string, question: string): Promise<PoradcaConversationDetail> {
-  return api.post<PoradcaConversationDetail>(`/poradca/conversations/${id}/messages`, { question });
+export function askPoradcaApi(
+  id: string,
+  question: string,
+  attachments: PoradcaImageUpload[] = [],
+): Promise<PoradcaConversationDetail> {
+  return api.post<PoradcaConversationDetail>(`/poradca/conversations/${id}/messages`, { question, attachments });
 }
 
 /** O čom sa rozprávame — `null` = celý projekt. */
@@ -68,4 +80,9 @@ export function buildPoradcaWsUrl(conversationId: string, token: string): string
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const base = (import.meta.env.VITE_API_BASE_URL as string | undefined) || `${protocol}//${window.location.host}`;
   return `${base.replace(/^http/, "ws")}/api/v1/poradca/conversations/${conversationId}/ws?token=${encodeURIComponent(token)}`;
+}
+
+/** DEV-52 — one screenshot of a question, fetched with the reader's sign-in (the backend checks the conversation). */
+export function getPoradcaAttachmentApi(conversationId: string, attachmentId: string): Promise<Blob> {
+  return fetchBlob(`/poradca/conversations/${conversationId}/attachments/${attachmentId}`);
 }
