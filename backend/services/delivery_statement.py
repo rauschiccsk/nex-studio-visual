@@ -11,6 +11,8 @@ Counting is :mod:`delivered_tokens`; this module adds the decisions around it (D
 * code and tests share one rate, documentation has its own (Nastavenia); without rates a statement can be previewed
   but not issued;
 * each line (code and tests, documentation) carries its own amount, rounded to cents; the total is their sum;
+* a version has one valid statement: issuing again replaces the valid one, only when the Manažér confirms that one
+  (DEV-54) — the old one stays, marked as replaced, so it cannot be invoiced by mistake;
 * next to the figures, what the agent's work cost per 1 000 tokens of each kind (Náklady) — so rates rest on data.
 """
 
@@ -27,7 +29,7 @@ from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.config.settings import settings
@@ -69,6 +71,8 @@ KIND_UNDECIDED = (
     "(účtuje sa) — kokpit to nehádá."
 )
 RATES_MISSING = "V Nastaveniach chýbajú sadzby fakturácie (kód a skúšky, dokumentácia) — súpis sa nedá vydať."
+REPLACE_UNCONFIRMED = "Verzia už má platný súpis z {when} za {amount} € — nový ho nahradí, len keď to potvrdíš."
+VALID_CHANGED = "Platný súpis tejto verzie sa medzitým zmenil — obnov stránku a pozri, ktorý platí."
 
 
 def work_kind(db: Session, version: Version) -> Optional[str]:
@@ -281,15 +285,45 @@ def files_payload(count: delivered_tokens.Count) -> list[dict]:
     ]
 
 
-def issue(db: Session, version: Version, repo: Path, user_id: Optional[uuid.UUID]) -> DeliveryStatement:
-    """Freeze the statement as it is now — rates, rule and tokenizer stay with it (a later change cannot alter it)."""
+def valid_statement(db: Session, version_id: uuid.UUID) -> Optional[DeliveryStatement]:
+    """The version's valid statement — the one not replaced (the database keeps at most one)."""
+    return db.execute(
+        select(DeliveryStatement).where(
+            DeliveryStatement.version_id == version_id, DeliveryStatement.replaced_at.is_(None)
+        )
+    ).scalar_one_or_none()
+
+
+def issue(
+    db: Session,
+    version: Version,
+    repo: Path,
+    user_id: Optional[uuid.UUID],
+    replace: Optional[uuid.UUID] = None,
+) -> DeliveryStatement:
+    """Freeze the statement as it is now — rates, rule and tokenizer stay with it (a later change cannot alter it).
+
+    When the version already has a valid statement, the new one replaces it — only if ``replace`` names exactly that
+    one (DEV-54): what the Manažér confirmed is what gets replaced, never a statement someone issued meanwhile."""
     p = preview(db, version, repo)
     if p.blocked:
         raise CannotIssue(p.blocked)
     if p.cannot_issue:
         raise CannotIssue(" ".join(p.cannot_issue))
     assert p.count is not None and p.work_kind is not None and p.amounts is not None
+    current = valid_statement(db, version.id)
+    if current is None and replace is not None:
+        raise CannotIssue(VALID_CHANGED)
+    if current is not None and current.id != replace:
+        raise CannotIssue(
+            REPLACE_UNCONFIRMED.format(when=_local_time(current.created_at), amount=_number(current.amount_eur))
+        )
+    if current is not None:
+        # Marked first, in the same transaction, at the moment the new one is issued (both read now()).
+        current.replaced_at = func.now()
+        db.flush()
     row = DeliveryStatement(
+        replaces_id=current.id if current is not None else None,
         version_id=version.id,
         base_sha=p.base_sha,
         delivered_sha=p.delivered_sha,
@@ -341,6 +375,8 @@ def csv_text(row: DeliveryStatement, version: Version, project: Project) -> str:
     out = io.StringIO()
     w = csv.writer(out, delimiter=";", lineterminator="\n")
     w.writerow(["Súpis dodaných tokenov"])
+    if row.replaced_at is not None:
+        w.writerow([f"NAHRADENÝ súpisom z {_local_time(row.replaced_at)} — nepoužiť na faktúru"])
     w.writerow(["Projekt", project.name])
     w.writerow(["Verzia", version.version_number])
     w.writerow(["Vydaný", _local_time(row.created_at)])

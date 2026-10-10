@@ -2,7 +2,8 @@
 // cost. What a version delivered (code, tests, documentation — counted with o200k_base), what is left out and why,
 // the work kind (a fix of our own error is never billed), the rates from Nastavenia, the amount of every line (the
 // total is their sum), and what the agent's work cost per 1 000 delivered tokens — so the rates rest on data.
-// „Vydať súpis“ freezes it; an issued one downloads as CSV.
+// „Vydať súpis“ freezes it; an issued one downloads as CSV. A version has one valid statement (DEV-54): issuing
+// again asks first and replaces it — the old one stays in the list, greyed and marked as replaced.
 
 import { useCallback, useEffect, useState } from "react";
 import { Download, FileText, Loader2 } from "lucide-react";
@@ -21,6 +22,7 @@ import { WORK_KIND_OPTIONS, type WorkKind } from "@/lib/workKind";
 const int = new Intl.NumberFormat("sk-SK");
 const eur = (v: string | number | null | undefined) =>
   v == null ? "—" : `${Number(v).toLocaleString("sk-SK", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+const when = (iso: string) => new Date(iso).toLocaleString("sk-SK");
 const rate = (v: string) => `${Number(v).toLocaleString("sk-SK", { maximumFractionDigits: 4 })} € / 1 000 tokenov`;
 
 const KIND_LABELS: Record<string, string> = { kod: "kód", skusky: "skúšky", dokumentacia: "dokumentácia" };
@@ -63,6 +65,19 @@ export default function DeliveryStatementPanel({ versionId }: { versionId: strin
   const excluded = p?.files.filter((f) => !f.kind) ?? [];
   const codeTokens = (p?.code?.tokens ?? 0) + (p?.tests?.tokens ?? 0);
   const kindLabel = (k: WorkKind | null) => WORK_KIND_OPTIONS.find((o) => o.value === k)?.label ?? "neurčený";
+  const valid = view?.issued.find((s) => !s.replaced_at) ?? null;
+
+  function issue() {
+    if (
+      valid &&
+      !window.confirm(
+        `Nahradiť súpis z ${when(valid.created_at)} za ${eur(valid.amount_eur)}? ` +
+          "Ostane v zozname ako nahradený a na faktúru sa už nepoužije.",
+      )
+    )
+      return;
+    act(() => issueDeliveryStatement(versionId, valid?.id), "Súpis sa nepodarilo vydať");
+  }
 
   return (
     <section
@@ -175,10 +190,10 @@ export default function DeliveryStatementPanel({ versionId }: { versionId: strin
             <button
               type="button"
               disabled={busy || p.cannot_issue.length > 0}
-              onClick={() => act(() => issueDeliveryStatement(versionId), "Súpis sa nepodarilo vydať")}
+              onClick={issue}
               className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500 disabled:opacity-50"
             >
-              Vydať súpis
+              {valid ? "Vydať nový súpis" : "Vydať súpis"}
             </button>
             <button
               type="button"
@@ -211,9 +226,22 @@ export default function DeliveryStatementPanel({ versionId }: { versionId: strin
           <h3 className="mb-1 text-xs font-semibold text-[var(--color-text-secondary)]">Vydané súpisy</h3>
           <ul className="space-y-1 text-xs">
             {view.issued.map((s) => (
-              <li key={s.id} className="flex items-center justify-between gap-2" data-testid="issued-statement">
+              <li
+                key={s.id}
+                className={`flex items-center justify-between gap-2 ${
+                  s.replaced_at ? "text-[var(--color-text-muted)]" : "text-[var(--color-text-primary)]"
+                }`}
+                data-testid="issued-statement"
+              >
                 <span>
-                  {new Date(s.created_at).toLocaleString("sk-SK")} · {kindLabel(s.work_kind)} ·{" "}
+                  {s.replaced_at ? (
+                    <span className="mr-1.5">nahradený {when(s.replaced_at)} ·</span>
+                  ) : (
+                    <span className="mr-1.5 rounded bg-emerald-500/15 px-1 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
+                      platný
+                    </span>
+                  )}
+                  {when(s.created_at)} · {kindLabel(s.work_kind)} ·{" "}
                   {int.format(s.tokens_code + s.tokens_tests + s.tokens_docs)} tokenov · {eur(s.amount_eur)}
                 </span>
                 <button

@@ -6,10 +6,12 @@ so the event loop never waits on it.
 
 from __future__ import annotations
 
+from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from backend.core import authz
@@ -24,6 +26,7 @@ from backend.schemas.delivery_statement import (
     DeliveredFileRead,
     DeliveryStatementView,
     IssuedStatementRead,
+    IssueStatementWrite,
     KindTotalRead,
     StatementPreviewRead,
     WorkKindRead,
@@ -72,7 +75,8 @@ def _issued(db: Session, version_id: UUID) -> list[IssuedStatementRead]:
     rows = db.execute(
         select(DeliveryStatement)
         .where(DeliveryStatement.version_id == version_id)
-        .order_by(DeliveryStatement.created_at.desc())
+        # DEV-54: the valid statement (never replaced) first, then the replaced ones, the most recently replaced first.
+        .order_by(DeliveryStatement.replaced_at.desc().nulls_first(), DeliveryStatement.created_at.desc())
     ).scalars()
     return [IssuedStatementRead.model_validate(r) for r in rows]
 
@@ -81,7 +85,7 @@ def _issued(db: Session, version_id: UUID) -> list[IssuedStatementRead]:
 def get_statement(
     version_id: UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ) -> DeliveryStatementView:
-    """The statement as it would be issued now, and the ones already issued (newest first)."""
+    """The statement as it would be issued now, and the ones already issued (the valid one first)."""
     version = authz.assert_version_access(db, current_user, version_id)
     return DeliveryStatementView(
         preview=_preview_read(statements.preview(db, version, _repo(db, version))), issued=_issued(db, version_id)
@@ -94,14 +98,25 @@ def get_statement(
     status_code=status.HTTP_201_CREATED,
 )
 def issue_statement(
-    version_id: UUID, db: Session = Depends(get_db), current_user: User = Depends(require_shu_or_above)
+    version_id: UUID,
+    payload: Optional[IssueStatementWrite] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_shu_or_above),
 ) -> IssuedStatementRead:
-    """Issue it: the counts, the rates and the tokenizer are frozen — a later change cannot alter it (409 + why)."""
+    """Issue it: the counts, the rates and the tokenizer are frozen — a later change cannot alter it (409 + why).
+
+    A version that has a valid statement gets a new one only as its confirmed replacement (``replace`` = its id)."""
     version = authz.assert_version_access(db, current_user, version_id)
     try:
-        row = statements.issue(db, version, _repo(db, version), current_user.id)
+        row = statements.issue(db, version, _repo(db, version), current_user.id, payload.replace if payload else None)
     except statements.CannotIssue as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except DBAPIError as exc:
+        # Two issues at once: the database keeps one valid statement per version and refuses the second.
+        if "ux_delivery_statements_" not in str(exc):
+            raise
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=statements.VALID_CHANGED) from exc
     db.commit()
     db.refresh(row)
     return IssuedStatementRead.model_validate(row)
@@ -131,7 +146,8 @@ def statement_csv(
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Súpis sa nenašiel.")
     version = authz.assert_version_access(db, current_user, row.version_id)
     project = db.get(Project, version.project_id)
-    name = f"supis-{project.slug}-{version.version_number}-{row.created_at:%Y%m%d}.csv"
+    replaced = "-nahradeny" if row.replaced_at is not None else ""
+    name = f"supis-{project.slug}-{version.version_number}-{row.created_at:%Y%m%d}{replaced}.csv"
     return Response(
         content=statements.csv_text(row, version, project).encode("utf-8-sig"),
         media_type="text/csv; charset=utf-8",

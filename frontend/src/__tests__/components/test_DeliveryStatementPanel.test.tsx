@@ -137,16 +137,19 @@ describe("Súpis dodaných tokenov", () => {
       amount_code_eur: "170.52",
       amount_docs_eur: "58.19",
       amount_eur: "228.71",
+      replaces_id: null,
+      replaced_at: null,
     };
     vi.mocked(getDeliveryStatement).mockResolvedValueOnce(view()).mockResolvedValue(view({}, [issued]));
     vi.mocked(issueDeliveryStatement).mockResolvedValue(issued);
     render(<DeliveryStatementPanel versionId="v-160" />);
 
     await userEvent.click(await screen.findByRole("button", { name: "Vydať súpis" }));
-    await waitFor(() => expect(issueDeliveryStatement).toHaveBeenCalledWith("v-160"));
+    await waitFor(() => expect(issueDeliveryStatement).toHaveBeenCalledWith("v-160", undefined));
 
     await userEvent.click(await screen.findByRole("button", { name: /Stiahnuť CSV/ }));
     expect(downloadStatementCsv).toHaveBeenCalledWith("s-1", "supis-1.6.0.csv");
+    expect(screen.getByTestId("issued-statement")).toHaveTextContent("platný");
     expect(screen.getByTestId("issued-statement")).toHaveTextContent("81 424 tokenov · 228,71 €");
   });
 
@@ -158,5 +161,66 @@ describe("Súpis dodaných tokenov", () => {
 
     expect(await screen.findByText(/Verzia ešte nie je hotová/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Vydať súpis" })).not.toBeInTheDocument();
+  });
+
+  describe("jedna verzia — jeden platný súpis (DEV-54)", () => {
+    const valid = {
+      id: "s-2",
+      created_at: "2026-10-10T13:47:36Z",
+      work_kind: "change" as const,
+      base_sha: "a",
+      delivered_sha: "b",
+      delivered_source: "verifikacia",
+      tokenizer: "o200k_base (tiktoken 0.14.0)",
+      tokens_code: 94321,
+      tokens_tests: 79569,
+      tokens_docs: 76087,
+      rate_code: "1.0000",
+      rate_docs: "1.0000",
+      amount_code_eur: "173.89",
+      amount_docs_eur: "76.09",
+      amount_eur: "249.98",
+      replaces_id: "s-1",
+      replaced_at: null,
+    };
+    const replaced = {
+      ...valid,
+      id: "s-1",
+      created_at: "2026-10-10T13:36:08Z",
+      rate_code: "2.0000",
+      amount_code_eur: "347.78",
+      amount_eur: "423.87",
+      replaces_id: null,
+      replaced_at: "2026-10-10T13:47:36Z",
+    };
+
+    it("⚠️ nový súpis sa vydá až po potvrdení, že nahradí ten platný", async () => {
+      vi.mocked(getDeliveryStatement).mockResolvedValue(view({}, [valid, replaced]));
+      vi.mocked(issueDeliveryStatement).mockResolvedValue(valid);
+      const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+      render(<DeliveryStatementPanel versionId="v-170" />);
+
+      const button = await screen.findByRole("button", { name: "Vydať nový súpis" });
+      await userEvent.click(button);
+      expect(confirm).toHaveBeenCalledWith(expect.stringMatching(/^Nahradiť súpis z .* za 249,98 €\?/));
+      expect(issueDeliveryStatement).not.toHaveBeenCalled();
+
+      await userEvent.click(button);
+      await waitFor(() => expect(issueDeliveryStatement).toHaveBeenCalledWith("v-170", "s-2"));
+      confirm.mockRestore();
+    });
+
+    it("platný súpis je označený, nahradený zašednutý s dátumom nahradenia", async () => {
+      vi.mocked(getDeliveryStatement).mockResolvedValue(view({}, [valid, replaced]));
+      render(<DeliveryStatementPanel versionId="v-170" />);
+
+      const items = await screen.findAllByTestId("issued-statement");
+      expect(items).toHaveLength(2);
+      const [first, second] = items as [HTMLElement, HTMLElement];
+      expect(first).toHaveTextContent(/^platný.*249,98 €/);
+      expect(second).toHaveTextContent(/^nahradený .* · .*423,87 €/);
+      expect(second).not.toHaveTextContent("platný");
+      expect(second.className).toContain("color-text-muted");
+    });
   });
 });

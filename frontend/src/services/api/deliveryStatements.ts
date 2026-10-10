@@ -4,7 +4,8 @@
  * Maps to ``backend.api.routes.delivery_statements``:
  *
  *   - ``GET  /versions/{id}/delivery-statement``   → getDeliveryStatement (preview + issued, newest first)
- *   - ``POST /versions/{id}/delivery-statement``   → issueDeliveryStatement (409 + why when it cannot be issued)
+ *   - ``POST /versions/{id}/delivery-statement``   → issueDeliveryStatement (409 + why when it cannot be issued;
+ *                                                     a new one replaces the valid one only when ``replace`` names it)
  *   - ``PUT  /versions/{id}/work-kind``            → setWorkKind
  *   - ``GET  /delivery-statements/{id}/csv``       → downloadStatementCsv
  */
@@ -76,6 +77,9 @@ export interface IssuedStatement {
   amount_code_eur: string | null;
   amount_docs_eur: string | null;
   amount_eur: string;
+  /** DEV-54 — the statement this one replaced, and when this one was replaced in turn (null = the valid one). */
+  replaces_id: string | null;
+  replaced_at: string | null;
 }
 
 export interface DeliveryStatementView {
@@ -87,8 +91,8 @@ export function getDeliveryStatement(versionId: string): Promise<DeliveryStateme
   return api.get<DeliveryStatementView>(`/versions/${versionId}/delivery-statement`);
 }
 
-export function issueDeliveryStatement(versionId: string): Promise<IssuedStatement> {
-  return api.post<IssuedStatement>(`/versions/${versionId}/delivery-statement`, {});
+export function issueDeliveryStatement(versionId: string, replace?: string): Promise<IssuedStatement> {
+  return api.post<IssuedStatement>(`/versions/${versionId}/delivery-statement`, replace ? { replace } : {});
 }
 
 export function setWorkKind(versionId: string, workKind: WorkKind): Promise<{ work_kind: WorkKind | null }> {

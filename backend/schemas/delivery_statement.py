@@ -83,6 +83,9 @@ class IssuedStatementRead(BaseModel):
     amount_code_eur: Optional[Decimal] = None
     amount_docs_eur: Optional[Decimal] = None
     amount_eur: Decimal
+    #: DEV-54 — the statement this one replaced, and when this one was replaced in turn (``None`` = valid).
+    replaces_id: Optional[UUID] = None
+    replaced_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
@@ -90,6 +93,12 @@ class IssuedStatementRead(BaseModel):
 class DeliveryStatementView(BaseModel):
     preview: StatementPreviewRead
     issued: list[IssuedStatementRead]
+
+
+class IssueStatementWrite(BaseModel):
+    """DEV-54 — the valid statement the Manažér confirmed to replace; empty when the version has none yet."""
+
+    replace: Optional[UUID] = None
 
 
 class WorkKindWrite(BaseModel):

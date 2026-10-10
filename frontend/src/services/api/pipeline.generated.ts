@@ -2990,13 +2990,15 @@ export interface paths {
         };
         /**
          * Get Statement
-         * @description The statement as it would be issued now, and the ones already issued (newest first).
+         * @description The statement as it would be issued now, and the ones already issued (the valid one first).
          */
         get: operations["get_statement_api_v1_versions__version_id__delivery_statement_get"];
         put?: never;
         /**
          * Issue Statement
          * @description Issue it: the counts, the rates and the tokenizer are frozen — a later change cannot alter it (409 + why).
+         *
+         *     A version that has a valid statement gets a new one only as its confirmed replacement (``replace`` = its id).
          */
         post: operations["issue_statement_api_v1_versions__version_id__delivery_statement_post"];
         delete?: never;
@@ -5057,6 +5059,14 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * IssueStatementWrite
+         * @description DEV-54 — the valid statement the Manažér confirmed to replace; empty when the version has none yet.
+         */
+        IssueStatementWrite: {
+            /** Replace */
+            replace?: string | null;
+        };
         /** IssuedStatementRead */
         IssuedStatementRead: {
             /** Amount Code Eur */
@@ -5085,6 +5095,10 @@ export interface components {
             rate_code: string;
             /** Rate Docs */
             rate_docs: string;
+            /** Replaced At */
+            replaced_at?: string | null;
+            /** Replaces Id */
+            replaces_id?: string | null;
             /** Tokenizer */
             tokenizer: string;
             /** Tokens Code */
@@ -12506,7 +12520,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["IssueStatementWrite"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             201: {
