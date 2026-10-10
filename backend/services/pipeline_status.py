@@ -310,6 +310,22 @@ CONSULT_ORIGINS = ("objav", "dosledok", "odklad")
 #: preformulovaní alebo preklade zmizne.
 _LEGACY_NON_BLOCKING_MARKER = "neblokujúce"
 
+#: DEV-3 — what every instruction that asks for ``findings`` tells the agent: a finding is DATA. The schema demands
+#: ``blocking`` in new output (:data:`PIPELINE_STATUS_JSON_SCHEMA`) and :func:`_validate_block` refuses a sentence.
+FINDINGS_AS_DATA_RULE = (
+    "Každý nález v `findings` je objekt `{text, blocking}`: `text` = krátka ľudská veta, `blocking: true`, keď "
+    "bráni pokračovať, `blocking: false` pri poznámke, ktorá nebráni. Závažnosť nepíš do vety („(neblokujúce)“) — "
+    "je to údaj."
+)
+
+#: DEV-3 — what every instruction that asks for consultation cards tells the agent about each card's origin.
+ORIGIN_RULE = (
+    "  • `origin` — odkiaľ otázka prišla (povinné): `objav` = bolo to tak odjakživa a teraz sa to našlo "
+    "(nerozbilo sa nič), `dosledok` = vyplýva z už prijatého rozhodnutia — vtedy `origin_of` = `key` toho "
+    "rozhodnutia, `odklad` = vedome odložené a teraz to dozrelo. Manažér z toho vidí, či sa niečo pokazilo, "
+    "alebo či len vidíme viac."
+)
+
 
 class Finding(BaseModel):
     """Jeden nález Audítora — a či BLOKUJE.
@@ -320,8 +336,11 @@ class Finding(BaseModel):
     Audítor pri verdikte); zo strany kokpitu sa to odvodiť nedá.
     """
 
-    text: str
-    blocking: bool = True
+    text: str = Field(description="Krátka ľudská veta — čo sa našlo.")
+    blocking: bool = Field(
+        default=True,
+        description="true = bráni pokračovať; false = poznámka, ktorá nebráni. Údaj, nie slovo vo vete.",
+    )
 
     def __str__(self) -> str:  # výpisy a f-reťazce musia ďalej fungovať
         return self.text
@@ -363,10 +382,16 @@ class ConsultDecision(BaseModel):
     allow_free_text: bool = False
     #: ICCINT-122 — odkiaľ táto otázka prišla (:data:`CONSULT_ORIGINS`). ``None`` len pri starých
     #: záznamoch; nové karty ho musia niesť, inak sa veta na karte nedá napísať.
-    origin: Optional[Literal["objav", "dosledok", "odklad"]] = None
+    origin: Optional[Literal["objav", "dosledok", "odklad"]] = Field(
+        default=None,
+        description=(
+            "Odkiaľ otázka prišla: objav = bolo to tak odjakživa a teraz sa to našlo; dosledok = vyplýva z už "
+            "prijatého rozhodnutia (origin_of = jeho key); odklad = vedome odložené, teraz dozrelo."
+        ),
+    )
     #: Pri ``origin="dosledok"``: kľúč rozhodnutia, ktorého je to dôsledok. Z toho ICCINT-124 počíta,
     #: koľko uzavretých rozhodnutí tá voľba znovu otvára.
-    origin_of: str = ""
+    origin_of: str = Field(default="", description="Pri origin=dosledok: key rozhodnutia, ktorého je to dôsledok.")
     #: v4.0.11: the jargon (paths / codes / repro / line numbers) that backs ``explanation`` — surfaced
     #: collapsed behind the card's "Technický detail" disclosure so ``explanation`` stays plain for a
     #: non-expert. Empty ⇒ the card shows no disclosure.
@@ -610,7 +635,30 @@ def _format_validation_errors(exc: ValidationError) -> str:
 #: enum/cross-field checks below (STAGES / BLOCK_KINDS / question-required / navrh-plan) are NOT
 #: expressible as the model's plain ``str`` fields, so :func:`_validate_block` still enforces them on
 #: BOTH transports — the schema is the first line of defense, not the only one.
-PIPELINE_STATUS_JSON_SCHEMA = PipelineStatusBlock.model_json_schema()
+def _demanded_in_new_output(schema: dict[str, Any]) -> dict[str, Any]:
+    """DEV-3 — the schema a NEW status block is written against demands what the reader may only hope for.
+
+    The models stay lenient (``origin`` may be missing, ``blocking`` defaults) so the hundreds of stored cards and
+    findings from before keep reading. An agent writing now is grammar-constrained by this schema: every card
+    carries its ``origin`` (one of :data:`CONSULT_ORIGINS`, never null) and every finding its ``blocking``. Without
+    it the field stayed empty and the screens built on it looked like they worked (ICCINT-123)."""
+    defs = schema["$defs"]
+    decision = defs["ConsultDecision"]
+    decision["required"] = sorted({*decision.get("required", []), "origin"})
+    origin = decision["properties"]["origin"]
+    decision["properties"]["origin"] = {
+        "enum": list(CONSULT_ORIGINS),
+        "type": "string",
+        "title": origin.get("title", "Origin"),
+        "description": origin.get("description", ""),
+    }
+    finding = defs["Finding"]
+    finding["required"] = sorted({*finding.get("required", []), "blocking"})
+    finding["properties"]["blocking"].pop("default", None)
+    return schema
+
+
+PIPELINE_STATUS_JSON_SCHEMA = _demanded_in_new_output(PipelineStatusBlock.model_json_schema())
 
 
 def _validate_block(data: dict) -> ParseResult:
@@ -625,6 +673,14 @@ def _validate_block(data: dict) -> ParseResult:
         # WS-B3: name the exact field(s) so the parse-retry re-prompt (orchestrator.py, which
         # interpolates this reason) tells the agent what to fix — not a stringified error array.
         return ParseFailure(f"status block schema invalid — {_format_validation_errors(exc)}")
+    # DEV-3: NEW output carries the data the reader only tolerates missing in old records — a finding is an object
+    # with ``blocking`` (never a sentence), a card names its ``origin``. Checked on the raw dict: the model turns a
+    # sentence into a finding, so after it the difference would be gone.
+    for raw in data.get("findings") or []:
+        if not isinstance(raw, dict):
+            return ParseFailure(f"findings: each finding must be an object {{text, blocking}}, not text — {raw!r:.80}")
+        if "blocking" not in raw:
+            return ParseFailure(f"findings: finding {str(raw.get('text', ''))[:60]!r} must say 'blocking' (true/false)")
 
     if block.stage not in STAGES:
         return ParseFailure(f"unknown stage {block.stage!r}")
@@ -663,6 +719,18 @@ def _validate_block(data: dict) -> ParseResult:
                 return ParseFailure(
                     f"consultation decision {d.key!r} must have exactly ONE recommended option (has {n_rec})"
                 )
+            # DEV-3 (ICCINT-122): the card says where its question came from — the screens of DEV-4/DEV-5 read it.
+            if d.origin is None:
+                return ParseFailure(
+                    f"consultation decision {d.key!r} must carry 'origin' (one of {', '.join(CONSULT_ORIGINS)})"
+                )
+            if d.origin == "dosledok" and not d.origin_of.strip():
+                return ParseFailure(
+                    f"consultation decision {d.key!r} has origin 'dosledok' — 'origin_of' must name the key of the "
+                    "decision it follows from"
+                )
+            if d.origin_of.strip() and d.origin_of == d.key:
+                return ParseFailure(f"consultation decision {d.key!r} cannot follow from itself ('origin_of')")
 
     return block
 

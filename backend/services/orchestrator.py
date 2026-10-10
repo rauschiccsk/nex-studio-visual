@@ -82,7 +82,9 @@ from backend.services import version as version_service
 from backend.services.claude_agent import ClaudeAgentError, ClaudeAgentTimeout, invoke_claude
 from backend.services.pipeline_metrics import aggregate_pipeline_usage
 from backend.services.pipeline_status import (
+    FINDINGS_AS_DATA_RULE,
     FIX_CRITIQUE_JSON_SCHEMA,
+    ORIGIN_RULE,
     PIPELINE_STATUS_JSON_SCHEMA,
     TASK_PLAN_FEAT_TASKS_JSON_SCHEMA,
     TASK_PLAN_SKELETON_JSON_SCHEMA,
@@ -1936,8 +1938,8 @@ def _vizual_writeback_directive(db: Session, version_id: uuid.UUID) -> str:
         "• Na obrazovky nesiahaj. Vizuál je schválený; ty upravuješ IBA dokumenty.\n\n"
         f"⚠️ KEĎ NARAZÍŠ NA ROZPOR — Špecifikácia hovorí X a schválená obrazovka robí nie-X — **NEROZHODUJ**. "
         f"Zapíš do `summary` slovo `{_VIZUAL_CONFLICT_MARKER}` a do `findings` každý rozpor ako JEDNU položku "
-        "v tvare:\n"
-        "  `<čoho sa týka> — Špecifikácia: <čo hovorí ona> | Obrazovka: <čo robí ona>`\n"
+        "s `blocking: true` a s `text` v tvare:\n"
+        "  `<čoho sa týka> — Špecifikácia: <čo hovorí ona> | Obrazovka: <čo robí ona>`\n" + FINDINGS_AS_DATA_RULE + "\n"
         "Obe strany doslova, aby sa Manažér vedel rozhodnúť z faktov, nie z nálepky. Rozpor znamená, že sa "
         "v dvoch časoch rozhodlo dvakrát inak — či si Manažér názor zmenil, alebo obrazovkou prekĺzla chyba, "
         "nemáš ako vedieť. Dokumenty vtedy nechaj tak, ako sú.\n\n"
@@ -2050,6 +2052,7 @@ def _auditor_upfront_directive(db: Session, version_id: uuid.UUID, *, narrowed_t
         "   - ak nájdeš medzeru (HOLE) → `verdict=false` (FAIL); konkrétne diery vymenuj v `findings` a do "
         "`proposed_fix` napíš ZAMERANÝ rozsah vyjasnenia/úpravy pre Manažéra (NEvykonávaj ho). Medzera sa "
         "eskaluje Manažérovi — build sa zastaví na schvaľovacom bode po Návrhu.\n"
+        "   - " + FINDINGS_AS_DATA_RULE + "\n"
         "6. MANAŽÉRSKY TEXT vs. TECHNICKÝ DETAIL — POVINNÉ rozdelenie (Manažér/junior je NEŠPECIALISTA): "
         "`summary`/`findings` = 1–2 vety / krátke odrážky po slovensky (čo treba rozhodnúť z pohľadu POUŽÍVATEĽA), "
         "BEZ ciest k súborom, názvov premenných/endpointov, kódov, čísel riadkov, počtov testov a žargónu. VŠETOK "
@@ -2102,7 +2105,8 @@ def _consultation_directive(
         "  • `explanation` — 1 veta prečo to záleží.\n"
         "  • `options` — 2-3 možnosti, každá `label` + `detail` (krátky dôsledok voľby).\n"
         "  • práve JEDNU možnosť označ `recommended: true` a daj jednoriadkové `rationale` (prečo ju odporúčaš).\n"
-        "  • `allow_free_text: true` IBA ak sa bod nedá rozumne rozložiť na možnosti.\n"
+        "  • `allow_free_text: true` IBA ak sa bod nedá rozumne rozložiť na možnosti.\n" + ORIGIN_RULE + "\n"
+        # DEV-3 (ICCINT-122): the card's origin — the Manažér sees whether something broke or we just see more.
         # DEV-34: the cards used to be written one by one, each plan on its own — two decided cards then
         # contradicted each other, or a plan stopped half way, and only the next review round noticed.
         "PRED odoslaním kariet over každú odporúčanú možnosť proti ostatným kartám a proti celému Návrhu "
@@ -2533,6 +2537,7 @@ def _verifikacia_directive(
             "   - inak → `verdict=false` (FAIL); konkrétne zlyhania do `findings`, zameraný rozsah opravy do "
             "`proposed_fix` (NEvykonávaj — opravuje AI Agent, ty re-verifikuješ). FAIL sa vráti do "
             "ohraničenej slučky.\n"
+            "   - " + FINDINGS_AS_DATA_RULE + "\n"
             "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
         )
     # CR-V2-053: the END release verification depth is FIXED — always deep + adversarial, INDEPENDENT of the
@@ -2590,6 +2595,7 @@ def _verifikacia_directive(
         "   - ak nájdeš zlyhanie → `verdict=false` (FAIL); konkrétne zlyhania vymenuj v `findings` a do "
         "`proposed_fix` napíš ZAMERANÝ rozsah opravy pre AI Agenta (NEvykonávaj ho — opravuje AI Agent, ty "
         "re-verifikuješ). FAIL sa vráti AI Agentovi do ohraničenej slučky.\n"
+        "   - " + FINDINGS_AS_DATA_RULE + "\n"
         "7. MANAŽÉRSKY TEXT vs. TECHNICKÝ DETAIL — POVINNÉ rozdelenie (Manažér aj junior je NEŠPECIALISTA):\n"
         "   • `summary` = JEDNA–DVE vety po slovensky: ČO nefunguje z pohľadu POUŽÍVATEĽA + čo treba rozhodnúť. "
         "`findings` = krátke ľudské odrážky v tom istom duchu. V OBOCH: ŽIADNE cesty k súborom, názvy "
@@ -9951,6 +9957,8 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
             ConsultDecision(
                 key="verifikacia_fix_next",
                 question="Verifikácia našla blokujúcu chybu. Ako chceš pokračovať?",
+                # DEV-3: what Verifikácia finds was in the build before it was checked — found, not caused.
+                origin="objav",
                 explanation=explanation,
                 # v4.0.11: the technical scope (paths / codes / repro) behind the card's "Technický detail"
                 # disclosure — keeps ``explanation`` plain while preserving the full detail one click away.
@@ -10139,6 +10147,7 @@ async def _settle_verifikacia_verdict(
                 ConsultDecision(
                     key="verifikacia_fail_next",
                     question="Auditor nevie verziu dostať cez koncovú Verifikáciu. Ako chceš pokračovať?",
+                    origin="objav",  # DEV-3: found by the check, not caused by a decision of the Manažér
                     explanation=scope,
                     options=[
                         ConsultOption(

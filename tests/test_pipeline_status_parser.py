@@ -211,7 +211,7 @@ def test_auditor_fail_verdict_carries_findings_and_fix_scope():
             summary="FAIL — money rounding off by 0.01",
             awaiting="none",
             verdict=False,
-            findings=["DPH rounding accumulates per line, not on the cumulative total"],
+            findings=[{"text": "DPH rounding accumulates per line, not on the cumulative total", "blocking": True}],
             proposed_fix="Round on the cumulative total in services/invoice.py compute_totals().",
         )
     )
@@ -219,7 +219,7 @@ def test_auditor_fail_verdict_carries_findings_and_fix_scope():
     assert res.verdict is False
     # ICCINT-122: nález je odteraz ÚDAJ (text + blocking), nie holá veta.
     assert [f.text for f in res.findings] == ["DPH rounding accumulates per line, not on the cumulative total"]
-    assert res.findings[0].blocking is True, "bez markera v texte je nález blokujúci"
+    assert res.findings[0].blocking is True
     assert res.proposed_fix.startswith("Round on the cumulative total")
 
 
@@ -233,7 +233,10 @@ def test_auditor_upfront_review_findings_after_navrh():
             summary="upfront review — 2 holes",
             awaiting="manazer",
             verdict=False,
-            findings=["password reset flow undefined", "no rate-limit on login"],
+            findings=[
+                {"text": "password reset flow undefined", "blocking": True},
+                {"text": "no rate-limit on login", "blocking": True},
+            ],
             plan={
                 "epics": [
                     {"title": "E1", "feats": [{"title": "F1", "tasks": [{"title": "T1", "task_type": "backend"}]}]}

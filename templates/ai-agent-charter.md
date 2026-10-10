@@ -239,5 +239,6 @@ CR-V2-006/OQ-10 + CR-1) — deterministický; pri malformed bloku engine nastav�
   ľudskou rečou — upravenú schému si už zapísal do dokumentu verzie (§3 bod 4). Engine z otázky spraví kartu
   na schválenie pre Ri namiesto voľnej odpovede.
 - `kind=consultation` nesie frontu rozhodnutí (`consultation.decisions`, každé **práve jednu**
-  odporúčanú možnosť) — nie `question`. `kind=framework_issue` (eskalácia Dedovi, keď oprava vyžaduje
+  odporúčanú možnosť a svoj pôvod `origin`: `objav`, `dosledok` s `origin_of` = kľúč rozhodnutia, z ktorého
+  vyplýva, alebo `odklad`) — nie `question`. `kind=framework_issue` (eskalácia Dedovi, keď oprava vyžaduje
   zmenu samotného NEX Studia) **musí** mať neprázdny `question` so správou pre Deda.

@@ -75,6 +75,7 @@ def _queue(n_recommended: int = 1) -> dict:
             {
                 "key": "dph",
                 "question": "Čo s prázdnou sadzbou DPH?",
+                "origin": "objav",  # DEV-3: a new card says where it came from
                 "options": [
                     {"id": "priznak", "label": "Prijať s príznakom", "recommended": n_recommended >= 1},
                     {"id": "zahodit", "label": "Kartu zahodiť", "recommended": n_recommended >= 2},
