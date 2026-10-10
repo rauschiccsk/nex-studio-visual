@@ -26,7 +26,8 @@ def test_build_channel_file_format() -> None:
         now=now,
     )
     # Filename convention: system-to-dedo-YYYY-MM-DD-HHMM-framework-issue-<slug>.md
-    assert filename == "system-to-dedo-2026-07-07-1405-framework-issue-nex-payables.md"
+    # DEV-59: the channel's HHMM is the Director's clock (14:05 UTC = 16:05 in Bratislava in July)
+    assert filename == "system-to-dedo-2026-07-07-1605-framework-issue-nex-payables.md"
     # YAML frontmatter per .dedo-channel/README.md
     assert body.startswith("---\n")
     assert "from: system\n" in body

@@ -99,8 +99,10 @@ class Settings(BaseSettings):
     # (CR-NS-018 Phase 5a). Empty → the notification omits the link.
     app_public_url: str = ""
 
-    # The time zone of the people who read what the cockpit writes out (DEV-50: the issue time on a delivered-token
-    # statement's CSV is the time they saw on the screen, not UTC).
+    # The time zone of the people who use the cockpit — the Director's clock (DEV-59: „V kokpite má byť také isté
+    # časové pásmo ako tu u mňa“). Every time the backend writes for a person goes through
+    # backend.core.local_time; the database's default zone is set from it (migration 114); the PROD compose gives
+    # the containers the same ``TZ``.
     display_timezone: str = "Europe/Bratislava"
 
     # Filesystem location of the .dedo-channel Dedo↔agent message bus (Director

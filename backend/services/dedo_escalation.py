@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Optional
 
 from backend.config.settings import settings
+from backend.core.local_time import local_time
 from backend.services import notify
 
 logger = logging.getLogger(__name__)
@@ -61,7 +62,7 @@ def build_channel_file(
     ``type: flag``) + the agent's message + the build context.
     """
     slug = _slugify_topic(project_slug)
-    stamp = now.strftime("%Y-%m-%d-%H%M")
+    stamp = local_time(now).strftime("%Y-%m-%d-%H%M")  # DEV-59: the channel's HHMM is the Director's clock
     filename = f"system-to-dedo-{stamp}-framework-issue-{slug}.md"
     body = (
         "---\n"

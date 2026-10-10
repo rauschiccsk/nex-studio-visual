@@ -27,12 +27,11 @@ from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Optional
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from backend.config.settings import settings
+from backend.core.local_time import local_time
 from backend.db.models.delivery_statement import DeliveryStatement
 from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
@@ -363,7 +362,7 @@ def _number(value: Decimal, places: int = 2) -> str:
 
 def _local_time(at: datetime) -> str:
     """The issue time as the Manažér saw it on the screen — local, without microseconds."""
-    return at.astimezone(ZoneInfo(settings.display_timezone)).strftime("%d.%m.%Y %H:%M:%S")
+    return local_time(at).strftime("%d.%m.%Y %H:%M:%S")
 
 
 def csv_text(row: DeliveryStatement, version: Version, project: Project) -> str:

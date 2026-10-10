@@ -15,6 +15,7 @@ import json
 import os
 import re
 from collections import deque
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 from uuid import UUID
@@ -23,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.config.settings import settings
+from backend.core.local_time import local_time
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic, Feat, Task
@@ -106,6 +108,19 @@ async def _run(argv: list[str], *, cwd: Optional[str] = None, timeout: int = _CM
         proc.kill()
         raise ToolError(f"Príkaz nedobehol do {timeout} s.") from exc
     return proc.returncode or 0, out.decode("utf-8", errors="replace")
+
+
+def _history_line(row: str) -> str:
+    """One commit of ``git_historia`` as the Manažér reads it — its time on the local clock (DEV-59)."""
+    parts = row.split("\x1f")
+    if len(parts) != 4:
+        return row
+    sha, iso, author, subject = parts
+    try:
+        when = local_time(datetime.fromisoformat(iso)).strftime("%d.%m.%Y %H:%M")
+    except ValueError:
+        when = iso
+    return f"{sha}  {when}  {author}  {subject}"
 
 
 def _tail(text: str, lines: int) -> str:
@@ -291,7 +306,7 @@ class PoradcaTools:
                 text = (msg.content or "").strip()
                 if len(text) > _MESSAGE_CHARS:
                     text = text[:_MESSAGE_CHARS] + " …"
-                when = msg.created_at.strftime("%d.%m. %H:%M") if msg.created_at else ""
+                when = local_time(msg.created_at).strftime("%d.%m. %H:%M") if msg.created_at else ""
                 lines.append(f"— [{when}] {msg.author} → {msg.recipient} ({msg.kind}, fáza {msg.stage}):\n{text}")
             return "\n".join(lines)
 
@@ -374,15 +389,16 @@ class PoradcaTools:
             "log",
             f"-n{count}",
             "--no-color",
-            "--date=format:%d.%m.%Y %H:%M",
-            "--format=%h  %ad  %an  %s",
+            # DEV-59: git gives the time with its zone (ISO 8601); the cockpit puts it on the local clock itself —
+            # never the zone of whatever process runs git.
+            "--format=%h%x1f%aI%x1f%an%x1f%s",
         ]
         if rel:
             argv += ["--", rel]
         code, out = await _run(argv)
         if code != 0:
             raise ToolError("História zmien sa nedá prečítať.")
-        return out.strip() or "Žiadne zmeny."
+        return "\n".join(_history_line(row) for row in out.strip().splitlines()) or "Žiadne zmeny."
 
     async def git_zmena(self, args: dict) -> str:
         commit = args.get("commit")
