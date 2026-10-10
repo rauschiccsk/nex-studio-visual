@@ -132,6 +132,29 @@ def _spend_unknown(payload: dict) -> bool:
     return payload.get("usage") is None and ran
 
 
+def _fold(totals: UsageTotals, msg: PipelineMessage, payload: dict) -> None:
+    """Add one metered message to ``totals`` — the ONE reading of a turn's ``usage``/``timing`` that every scope
+    (version, phase, plan task) shares, so their figures can never disagree about the same turn."""
+    usage = payload.get("usage") or {}
+    timing = payload.get("timing") or {}
+    model = usage.get("model")
+    totals.add(
+        input_tokens=int(usage.get("input_tokens") or 0),
+        output_tokens=int(usage.get("output_tokens") or 0),
+        duration_seconds=float(timing.get("duration_seconds") or 0.0),
+        parse_attempts=int(timing.get("parse_attempts") or 0),
+        model=model if isinstance(model, str) else None,
+        parts=parts_from_usage_payload(usage),
+        at=msg.created_at,
+        spend_unknown=_spend_unknown(payload),
+    )
+
+
+def _metered(payload: dict) -> bool:
+    """A message that carries what a turn spent (``usage``) or how long it ran (``timing``)."""
+    return "usage" in payload or "timing" in payload
+
+
 @dataclass
 class PipelineUsageAggregate:
     """Version grand-total usage roll-up for one version (WS-D; scope roll-up retired in the metrics
@@ -160,21 +183,9 @@ def aggregate_pipeline_usage(db: Session, version_id: uuid.UUID) -> PipelineUsag
 
     for msg in messages:
         payload = msg.payload or {}
-        if "usage" not in payload and "timing" not in payload:
+        if not _metered(payload):
             continue  # not a metered dispatch (e.g. a plain system notification)
-        usage = payload.get("usage") or {}
-        timing = payload.get("timing") or {}
-        model = usage.get("model")
-        agg.version.add(
-            input_tokens=int(usage.get("input_tokens") or 0),
-            output_tokens=int(usage.get("output_tokens") or 0),
-            duration_seconds=float(timing.get("duration_seconds") or 0.0),
-            parse_attempts=int(timing.get("parse_attempts") or 0),
-            model=model if isinstance(model, str) else None,
-            parts=parts_from_usage_payload(usage),
-            at=msg.created_at,
-            spend_unknown=_spend_unknown(payload),
-        )
+        _fold(agg.version, msg, payload)
 
     return agg
 
@@ -202,21 +213,30 @@ def aggregate_usage_by_phase(db: Session, version_id: uuid.UUID) -> dict[str, Us
     )
     for msg in messages:
         payload = msg.payload or {}
-        if "usage" not in payload and "timing" not in payload:
+        if not _metered(payload):
             continue
-        usage = payload.get("usage") or {}
-        timing = payload.get("timing") or {}
         phase_stamp = payload.get("phase")
         phase = phase_stamp if isinstance(phase_stamp, str) else msg.stage
-        model = usage.get("model")
-        by_phase.setdefault(phase, UsageTotals()).add(
-            input_tokens=int(usage.get("input_tokens") or 0),
-            output_tokens=int(usage.get("output_tokens") or 0),
-            duration_seconds=float(timing.get("duration_seconds") or 0.0),
-            parse_attempts=int(timing.get("parse_attempts") or 0),
-            model=model if isinstance(model, str) else None,
-            parts=parts_from_usage_payload(usage),
-            at=msg.created_at,
-            spend_unknown=_spend_unknown(payload),
-        )
+        _fold(by_phase.setdefault(phase, UsageTotals()), msg, payload)
     return by_phase
+
+
+def aggregate_usage_by_task(db: Session, version_id: uuid.UUID) -> dict[str, UsageTotals]:
+    """DEV-49 — what the agent spent on each task of the plan: the metered messages that carry ``task_id``, keyed
+    by it. A Programovanie turn stamps the task it worked on (its question, its retry, its crash re-dispatch); a
+    turn without one — the plan passes of Návrh, Verifikácia — belongs to its phase in Náklady, not to a task."""
+    by_task: dict[str, UsageTotals] = {}
+    messages = (
+        db.execute(
+            select(PipelineMessage).where(PipelineMessage.version_id == version_id).order_by(PipelineMessage.seq.asc())
+        )
+        .scalars()
+        .all()
+    )
+    for msg in messages:
+        payload = msg.payload or {}
+        task_id = payload.get("task_id")
+        if not _metered(payload) or not isinstance(task_id, str) or not task_id:
+            continue
+        _fold(by_task.setdefault(task_id, UsageTotals()), msg, payload)
+    return by_task

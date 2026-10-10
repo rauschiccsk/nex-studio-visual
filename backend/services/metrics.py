@@ -223,7 +223,59 @@ def usage_cost(db: Session, usage: object, at: Optional[datetime]) -> Optional[f
         _price_part(pricing, cost, part, at)
     if cost.unpriced or not cost.priced:
         return None
-    return math.ceil(round(cost.eur * 100, 6)) / 100
+    return _ceil_cents(cost.eur)
+
+
+def _ceil_cents(eur: float) -> float:
+    """Euros rounded UP to whole cents (rather a little more than less — Director 06.10.2026)."""
+    return math.ceil(round(eur * 100, 6)) / 100
+
+
+# ── DEV-49: what one task, FEAT or EPIC of the plan cost ─────────────────────
+
+
+def plan_pricing(db: Session) -> _Pricing:
+    """The price lists, read once for a whole plan."""
+    return _Pricing(model_pricing.price_rows(db))
+
+
+def merged(parts: list[Optional[UsageTotals]]) -> Optional[UsageTotals]:
+    """A FEAT's (or an EPIC's) totals — its children's, folded; ``None`` when none of them spent anything."""
+    present = [t for t in parts if t is not None]
+    if not present:
+        return None
+    total = UsageTotals()
+    for t in present:
+        total.merge(t)
+    return total
+
+
+def node_spend(pricing: _Pricing, totals: Optional[UsageTotals]) -> Optional[dict]:
+    """What the agent spent on one node of the plan — the line under each EPIC, FEAT and TASK (DEV-49).
+
+    Director 10.10.2026: „Chcel by som niečo podobné pre každý EPIC, FEAT a TASK napríklad takto: ‚Trvalo: 26 s
+    cena: 0,68 € 1200 tokenov'.“ ``seconds`` is the time the agent actually worked (its turns — waiting for the
+    Manažér, the night or a pause is not counted). The price is the Náklady price (same lists, same rate, priced
+    exactly and rounded UP once, here); ``eur_complete`` is False when some of the spend could not be priced, and
+    ``unpriced`` says why — the screen then reads "aspoň", never a partial figure posing as the whole. Tokens are
+    all four kinds the price is made of. ``None`` for a node the agent has not worked on."""
+    if totals is None or not totals.messages:
+        return None
+    cost = _price_totals(pricing, totals)
+    tokens = {
+        "input": totals.input_tokens,
+        "output": totals.output_tokens,
+        "cache_read": totals.cache_read_tokens,
+        "cache_write": totals.cache_write_tokens,
+    }
+    return {
+        "seconds": round(totals.duration_seconds, 1),
+        "turns": totals.messages,
+        "tokens": {**tokens, "total": sum(tokens.values())},
+        "eur": _ceil_cents(cost.eur) if cost.priced else None,
+        "eur_complete": cost.priced and not cost.unpriced,
+        "unpriced": sorted(cost.unpriced),
+    }
 
 
 # ── human side ────────────────────────────────────────────────────────────────

@@ -40,11 +40,13 @@ import { findCurrentTaskPath, type CurrentTaskPath } from "./currentTaskPath";
 import { postPipelineActionApi } from "../../services/api/pipeline";
 import type { CiStatus, PipelineActionName, PipelineBoard, PipelineMessage } from "../../services/api/pipeline";
 import type {
+  NodeSpend,
   TaskPlanResponse,
   TaskPlanEpicNode,
   TaskPlanFeatNode,
   TaskPlanTaskNode,
 } from "../../types/task-plan";
+import { spendDetail, spendLine } from "@/lib/spend";
 import {
   TASK_STATUS_LABELS,
   TASK_TYPE_LABELS,
@@ -235,6 +237,8 @@ function PlanNode(props: {
   onToggleCollapse: () => void;
   isExpanded: boolean;
   onToggleTechnical: () => void;
+  /** DEV-49 — what the agent spent on this node; shown even when the node is collapsed. */
+  spend?: NodeSpend | null;
   className?: string;
   children?: React.ReactNode;
 }) {
@@ -253,6 +257,7 @@ function PlanNode(props: {
     onToggleCollapse,
     isExpanded,
     onToggleTechnical,
+    spend,
     className,
     children,
   } = props;
@@ -297,6 +302,16 @@ function PlanNode(props: {
         </span>
         <StatusDot status={status} />
       </div>
+      {/* DEV-49: what this node cost — stays visible on a collapsed node, its totals are the point of collapsing. */}
+      {spend && (
+        <p
+          className="pl-5 text-[10px] text-[var(--color-text-muted)]"
+          title={spendDetail(spend)}
+          data-testid={`planrail-spend-${nodeId}`}
+        >
+          {spendLine(spend)}
+        </p>
+      )}
       {/* A collapsed node is reduced to its single header line — its own L1/L2 and its whole subtree vanish. */}
       {!isCollapsed && <PlainLine text={plain} />}
       {!isCollapsed && hasTechnical && isExpanded && <TechnicalDetail text={technical ?? ""} />}
@@ -809,6 +824,7 @@ export function PlanUlohRail({ versionId, messages, board, onBoard, ci }: Props)
               onToggleCollapse={() => toggleCollapse(epic.id)}
               isExpanded={expanded.has(epic.id)}
               onToggleTechnical={() => toggleTechnical(epic.id)}
+              spend={epic.spend}
             >
               {epic.feats.map((feat: TaskPlanFeatNode) => (
                 <PlanNode
@@ -826,6 +842,7 @@ export function PlanUlohRail({ versionId, messages, board, onBoard, ci }: Props)
                   onToggleCollapse={() => toggleCollapse(feat.id)}
                   isExpanded={expanded.has(feat.id)}
                   onToggleTechnical={() => toggleTechnical(feat.id)}
+                  spend={feat.spend}
                 >
                   {feat.tasks.map((task: TaskPlanTaskNode) => (
                     // Leaf task — no children (no chevron); keeps only the L2 technical-detail reveal on its title.
@@ -845,6 +862,7 @@ export function PlanUlohRail({ versionId, messages, board, onBoard, ci }: Props)
                       onToggleCollapse={() => {}}
                       isExpanded={expanded.has(task.id)}
                       onToggleTechnical={() => toggleTechnical(task.id)}
+                      spend={task.spend}
                     />
                   ))}
                 </PlanNode>

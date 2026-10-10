@@ -67,6 +67,7 @@ from backend.db.models.foundation import User
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.session import get_db
 from backend.schemas.version import VersionCreate, VersionRead, VersionUpdate
+from backend.services import metrics, pipeline_metrics
 from backend.services import version as version_service
 
 router = APIRouter(tags=["Versions"])
@@ -329,6 +330,13 @@ def get_task_plan(
         else []
     )
 
+    # DEV-49: what the agent spent on each node — the task's own turns, summed up to its FEAT and EPIC.
+    pricing = metrics.plan_pricing(db)
+    by_task = pipeline_metrics.aggregate_usage_by_task(db, version_id)
+    by_feat = {
+        str(f.id): metrics.merged([by_task.get(str(t.id)) for t in tasks_all if t.feat_id == f.id]) for f in feats
+    }
+
     tasks_by_feat: dict[str, list[dict]] = {}
     for t in tasks_all:
         tasks_by_feat.setdefault(str(t.feat_id), []).append(
@@ -343,6 +351,7 @@ def get_task_plan(
                 "description": t.description,
                 # STEP 3 (step3-plan-design.md): the plain-language L2 one-liner for the three-layer rail.
                 "plain_description": t.plain_description,
+                "spend": metrics.node_spend(pricing, by_task.get(str(t.id))),
             }
         )
 
@@ -358,6 +367,7 @@ def get_task_plan(
                 "description": f.description,
                 "plain_description": f.plain_description,
                 "tasks": tasks_by_feat.get(str(f.id), []),
+                "spend": metrics.node_spend(pricing, by_feat.get(str(f.id))),
             }
         )
 
@@ -370,6 +380,9 @@ def get_task_plan(
             # STEP 3: the Epic's ONLY prose (no technical description column) — the L2 one-liner.
             "plain_description": e.plain_description,
             "feats": feats_by_epic.get(str(e.id), []),
+            "spend": metrics.node_spend(
+                pricing, metrics.merged([by_feat.get(str(f.id)) for f in feats if f.epic_id == e.id])
+            ),
         }
         for e in epics
     ]

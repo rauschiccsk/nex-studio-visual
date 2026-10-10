@@ -13,6 +13,20 @@ export type EpicNodeStatus = "planned" | "in_progress" | "done";
 /** Feat / Task lifecycle status (``feats.status`` / ``tasks.status``). */
 export type TaskNodeStatus = "todo" | "in_progress" | "done" | "failed";
 
+/**
+ * DEV-49 — what the agent spent on one node (backend ``metrics.node_spend``): the time it actually worked (its
+ * turns), the Náklady price rounded UP once (``eur_complete`` false = part of the spend could not be priced, the
+ * reasons in ``unpriced``), and every kind of token the price is made of. ``null`` = not worked on yet.
+ */
+export interface NodeSpend {
+  seconds: number;
+  turns: number;
+  tokens: { input: number; output: number; cache_read: number; cache_write: number; total: number };
+  eur: number | null;
+  eur_complete: boolean;
+  unpriced: string[];
+}
+
 export interface TaskPlanTaskNode {
   id: string;
   number: number;
@@ -25,6 +39,8 @@ export interface TaskPlanTaskNode {
   description: string;
   /** Plain-language (L1) one-liner for the Manažér — jargon-free; "" ⇒ FE muted placeholder (STEP 3). */
   plain_description: string;
+  /** DEV-49 — what the agent spent on this task. */
+  spend?: NodeSpend | null;
 }
 
 export interface TaskPlanFeatNode {
@@ -37,6 +53,8 @@ export interface TaskPlanFeatNode {
   /** Plain-language (L1) one-liner for the Manažér (STEP 3). */
   plain_description: string;
   tasks: TaskPlanTaskNode[];
+  /** DEV-49 — the sum of its tasks. */
+  spend?: NodeSpend | null;
 }
 
 export interface TaskPlanEpicNode {
@@ -47,6 +65,8 @@ export interface TaskPlanEpicNode {
   /** Plain-language (L1) one-liner — the Epic's ONLY prose (no technical description column) (STEP 3). */
   plain_description: string;
   feats: TaskPlanFeatNode[];
+  /** DEV-49 — the sum of its FEATs. */
+  spend?: NodeSpend | null;
 }
 
 export interface TaskPlanResponse {
