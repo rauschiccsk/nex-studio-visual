@@ -386,8 +386,8 @@ describe("PoradcaPage — snímka obrazovky v otázke (DEV-52)", () => {
     return (await screen.findByPlaceholderText(/Opýtaj sa Poradcu/)) as HTMLTextAreaElement;
   }
 
-  function paste(target: HTMLElement, files: File[]) {
-    fireEvent.paste(target, { clipboardData: { files, items: [], getData: () => "" } });
+  function paste(target: HTMLElement, files: File[], types: string[] = files.length ? ["Files"] : []) {
+    fireEvent.paste(target, { clipboardData: { files, items: [], types, getData: () => "" } });
   }
 
   it("⚠️ snímka vložená zo schránky (Ctrl+V) ide s otázkou k Poradcovi", async () => {
@@ -411,13 +411,61 @@ describe("PoradcaPage — snímka obrazovky v otázke (DEV-52)", () => {
     await waitFor(() => expect(screen.queryByTestId("pending-images")).not.toBeInTheDocument());
   });
 
-  it("text vložený zo schránky ostane textom", async () => {
+  it("text vložený zo schránky ostane textom a nič sa nehlási", async () => {
     renderPage();
     const textarea = await box();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Priložiť snímku obrazovky" })).toBeInTheDocument());
 
-    paste(textarea, []);
+    paste(textarea, [], ["text/plain"]);
 
     expect(screen.queryByTestId("pending-images")).not.toBeInTheDocument();
+    expect(screen.queryByText(/schránka je prázdna/)).not.toBeInTheDocument();
+  });
+
+  it("⚠️ Ctrl+V so snímkou funguje kdekoľvek na stránke, nielen v poli — a len raz", async () => {
+    renderPage();
+    const textarea = await box();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Priložiť snímku obrazovky" })).toBeInTheDocument());
+
+    paste(document.body, [new File([PNG], "mimo-pola.png", { type: "image/png" })]);
+    paste(textarea, [new File([PNG], "v-poli.png", { type: "image/png" })]);
+
+    expect(await screen.findByRole("img", { name: "mimo-pola.png" })).toBeInTheDocument();
+    expect(screen.getAllByRole("img", { name: "v-poli.png" })).toHaveLength(1);
+  });
+
+  it("⚠️ po odchode zo stránky Poradcu vloženie obrázka inde v kokpite nezachytáva", async () => {
+    const { unmount } = renderPage();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Priložiť snímku obrazovky" })).toBeInTheDocument());
+
+    unmount();
+    const notPrevented = fireEvent.paste(document.body, {
+      clipboardData: { files: [new File([PNG], "inde.png", { type: "image/png" })], items: [], types: ["Files"] },
+    });
+
+    expect(notPrevented).toBe(true);
+  });
+
+  it("⚠️ Ctrl+V s prázdnou schránkou povie prečo, namiesto ticha", async () => {
+    renderPage();
+    const textarea = await box();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Priložiť snímku obrazovky" })).toBeInTheDocument());
+
+    paste(textarea, [], []);
+
+    expect(
+      await screen.findByText(
+        "Ctrl+V nedonieslo obrázok ani text — schránka je prázdna. Snímku urob na počítači, kde beží kokpit (vo " +
+          "vzdialenej ploche priamo v nej, napríklad klávesom PrtScn), alebo ju vyber tlačidlom s obrázkom.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("pole otázky povie, že Ctrl+V vloží snímku", async () => {
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText(/Ctrl\+V vloží snímku obrazovky/)).toBeInTheDocument(),
+    );
   });
 
   it("⚠️ iný súbor než obrázok ani priveľký obrázok neprijme a povie prečo", async () => {

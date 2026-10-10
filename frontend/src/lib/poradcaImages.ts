@@ -18,6 +18,20 @@ export interface PendingImage {
   url: string;
 }
 
+/**
+ * Ctrl+V brought neither an image nor text: the clipboard is empty — typically a screenshot taken on another
+ * computer than the one the cockpit runs on (a remote desktop does not always carry images over). Said, not silent.
+ */
+export const EMPTY_CLIPBOARD =
+  "Ctrl+V nedonieslo obrázok ani text — schránka je prázdna. Snímku urob na počítači, kde beží kokpit (vo " +
+  "vzdialenej ploche priamo v nej, napríklad klávesom PrtScn), alebo ju vyber tlačidlom s obrázkom.";
+
+/** Whether a paste carried text — a text paste is the field's own business, never a reason to say anything. */
+export function carriesText(transfer: DataTransfer | null): boolean {
+  const types = Array.from(transfer?.types ?? []);
+  return types.includes("text/plain") || types.includes("text/html") || types.includes("text/uri-list");
+}
+
 const mb = (bytes: number) => `${Math.round(bytes / (1024 * 1024))} MB`;
 
 /** The image files a paste or a drop carries — text and other files are left alone. */

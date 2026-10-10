@@ -35,7 +35,15 @@ import {
 import { ApiError } from "@/services/api";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { versionOptionLabel } from "@/lib/poradcaAnswer";
-import { addImages, imagesIn, toUpload, type ImageLimits, type PendingImage } from "@/lib/poradcaImages";
+import {
+  EMPTY_CLIPBOARD,
+  addImages,
+  carriesText,
+  imagesIn,
+  toUpload,
+  type ImageLimits,
+  type PendingImage,
+} from "@/lib/poradcaImages";
 import type { PoradcaConversation, PoradcaProjectContext, PoradcaStatus } from "@/types/poradca";
 
 const WHOLE_PROJECT = "";
@@ -399,6 +407,24 @@ function PoradcaComposer({
     setRefused(why);
   }
 
+  // DEV-52: Ctrl+V / Shift+Insert with a screenshot works ANYWHERE on Poradca's page, not only with the cursor in
+  // the field (the Director 10.10.2026: „nechápem kde to mám stlačiť v editore chatu?“). Text still pastes where the
+  // cursor is; a paste that brings nothing at all says why instead of doing nothing.
+  useEffect(() => {
+    if (!canAttach) return;
+    function onPaste(e: ClipboardEvent) {
+      const pasted = imagesIn(e.clipboardData);
+      if (pasted.length > 0) {
+        e.preventDefault();
+        attach(pasted);
+      } else if (!carriesText(e.clipboardData)) {
+        setRefused(EMPTY_CLIPBOARD);
+      }
+    }
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  });
+
   function detach(key: string) {
     const gone = images.find((i) => i.key === key);
     if (gone) URL.revokeObjectURL(gone.url);
@@ -512,16 +538,13 @@ function PoradcaComposer({
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
-          onPaste={(e) => {
-            // DEV-52: a screenshot from the clipboard (Ctrl+V, Shift+Insert) — text pastes as it always did.
-            const pasted = imagesIn(e.clipboardData);
-            if (!canAttach || pasted.length === 0) return;
-            e.preventDefault();
-            attach(pasted);
-          }}
           disabled={locked}
           rows={1}
-          placeholder="Opýtaj sa Poradcu… (Enter odošle, Shift+Enter nový riadok)"
+          placeholder={
+            canAttach
+              ? "Opýtaj sa Poradcu… (Enter odošle, Shift+Enter nový riadok, Ctrl+V vloží snímku obrazovky)"
+              : "Opýtaj sa Poradcu… (Enter odošle, Shift+Enter nový riadok)"
+          }
           className="min-h-[2.5rem] flex-1 resize-none rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent-primary)] focus:outline-none disabled:opacity-50"
         />
         <button
