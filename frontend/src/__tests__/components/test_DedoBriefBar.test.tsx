@@ -106,10 +106,11 @@ describe("Rozhoduje Manažér", () => {
     vi.mocked(sendProjectDedoProposalApi).mockResolvedValue({ version_id: "v-9", started: true });
     const { onVersion } = vykresli(navrh());
 
+    fireEvent.click(screen.getByLabelText(/Oprava chyby v dodanom kóde/)); // DEV-56: the work kind first
     fireEvent.click(screen.getByRole("button", { name: /Spustiť rýchlu opravu/i }));
 
     await waitFor(() =>
-      expect(sendProjectDedoProposalApi).toHaveBeenCalledWith(PROJEKT, "n-1", ZADANIE),
+      expect(sendProjectDedoProposalApi).toHaveBeenCalledWith(PROJEKT, "n-1", ZADANIE, "fix"),
     );
     await waitFor(() => expect(onVersion).toHaveBeenCalledWith("v-9", true));
   });
@@ -120,10 +121,11 @@ describe("Rozhoduje Manažér", () => {
     const upravene = ZADANIE + " Najprv over, či to na UAT naozaj padá.";
 
     fireEvent.change(screen.getByLabelText("Zadanie od Deda"), { target: { value: upravene } });
+    fireEvent.click(screen.getByLabelText(/Oprava chyby v dodanom kóde/)); // DEV-56: the work kind first
     fireEvent.click(screen.getByRole("button", { name: /Spustiť rýchlu opravu/i }));
 
     await waitFor(() =>
-      expect(sendProjectDedoProposalApi).toHaveBeenCalledWith(PROJEKT, "n-1", upravene),
+      expect(sendProjectDedoProposalApi).toHaveBeenCalledWith(PROJEKT, "n-1", upravene, "fix"),
     );
   });
 
@@ -157,10 +159,35 @@ describe("Keď sa zadanie zmenilo pod rukami", () => {
     vi.mocked(getProjectDedoProposalApi).mockResolvedValue(novsie);
     const { onProposal, onVersion } = vykresli(navrh());
 
+    fireEvent.click(screen.getByLabelText(/Oprava chyby v dodanom kóde/)); // DEV-56: the work kind first
     fireEvent.click(screen.getByRole("button", { name: /Spustiť rýchlu opravu/i }));
 
     expect(await screen.findByText(/napísal novší návrh/i)).toBeInTheDocument();
     await waitFor(() => expect(onProposal).toHaveBeenCalledWith(novsie));
     expect(onVersion).not.toHaveBeenCalled();
+  });
+});
+
+describe("Druh práce pri rýchlej oprave (DEV-56)", () => {
+  it("⚠️ rýchlu opravu zo zadania nespustí, kým Manažér neurčí druh práce — a ten pošle", async () => {
+    vi.mocked(sendProjectDedoProposalApi).mockResolvedValue({ version_id: "v-9", started: true });
+    vykresli(navrh());
+    const start = screen.getByRole("button", { name: /Spustiť rýchlu opravu/i });
+
+    expect(start).toBeDisabled();
+    fireEvent.click(start);
+    expect(sendProjectDedoProposalApi).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByLabelText(/Zmena alebo nová práca/));
+    expect(start).toBeEnabled();
+    fireEvent.click(start);
+    await waitFor(() => expect(sendProjectDedoProposalApi).toHaveBeenCalledWith(PROJEKT, "n-1", ZADANIE, "change"));
+  });
+
+  it("nová verzia zo zadania sa na druh práce nepýta", () => {
+    vykresli(navrh({ proposed_action: "new_version" }));
+
+    expect(screen.queryByText("Druh práce")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Založiť novú verziu/i })).toBeEnabled();
   });
 });

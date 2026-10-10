@@ -181,7 +181,7 @@ def _propose(db_session, version_id, *, content: str = _FINDING, action: str = "
     return msg
 
 
-def _send(client, user: User, version_id, proposal, *, text: str = _FINDING):
+def _send(client, user: User, version_id, proposal, *, text: str = _FINDING, work_kind: str | None = "fix"):
     """The Manažér presses send on the proposal he is looking at.
 
     ``message_id`` is not decoration: the endpoint acts on the proposal NAMED here and refuses if that one
@@ -191,7 +191,12 @@ def _send(client, user: User, version_id, proposal, *, text: str = _FINDING):
     return client.post(
         f"/api/v1/pipeline/{version_id}/dedo-proposal/send",
         headers=_bearer(user),
-        json={"message_id": str(proposal.id if hasattr(proposal, "id") else proposal), "text": text},
+        json={
+            "message_id": str(proposal.id if hasattr(proposal, "id") else proposal),
+            "text": text,
+            # DEV-56: a proposal that starts a fast fix carries the Manažér's work kind; other verbs ignore it.
+            "work_kind": work_kind,
+        },
     )
 
 

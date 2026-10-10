@@ -30,7 +30,9 @@ import {
 } from "@/services/api/projects";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
+import WorkKindChoice from "@/components/common/WorkKindChoice";
 import { WARNING_CHROME } from "@/components/common/WarningActionBar";
+import type { WorkKind } from "@/lib/workKind";
 
 // Čo tlačidlo spraví, povedané ako dôsledok — nie ako sloveso enginu. Manažér si akciu nevyberá; zadanie
 // ju nesie a panel mu len povie, čo stlačenie znamená.
@@ -73,6 +75,9 @@ export default function DedoBriefBar({ projectId, proposal, onProposal, onVersio
   // Prečo sa obrazovka zmenila pod rukami. Držané oddelene od `error`: po odmietnutí nasleduje načítanie
   // nového zadania, ktoré `error` vyčistí — a vysvetlenie by zmizlo v tej istej chvíli ako dôvod.
   const [staleNotice, setStaleNotice] = useState<string | null>(null);
+  // DEV-56: a fast fix starts only with the Manažér's work kind, as in the „Rýchla oprava“ dialog — the
+  // delivered-token statement bills by it, and the cockpit never guesses it.
+  const [workKind, setWorkKind] = useState<WorkKind | null>(null);
   // Háčiky musia bežať PRED skorým návratom nižšie — háčik za podmieneným návratom React zakazuje.
   const growRef = useAutoGrowTextarea(text);
 
@@ -80,6 +85,7 @@ export default function DedoBriefBar({ projectId, proposal, onProposal, onVersio
     if (proposalId) {
       draft.clear();
       setError(null);
+      setWorkKind(null);
     }
   }, [proposalId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -90,7 +96,8 @@ export default function DedoBriefBar({ projectId, proposal, onProposal, onVersio
   const decidingAbout = proposal.id;
   const copy = ACTION_COPY[proposal.proposed_action] ?? FALLBACK_COPY;
   const edited = text.trim() !== proposal.content.trim();
-  const canSend = busy === null && text.trim().length > 0;
+  const needsKind = proposal.proposed_action === "fast_fix";
+  const canSend = busy === null && text.trim().length > 0 && (!needsKind || workKind !== null);
 
   async function handleFailure(err: unknown, phrase: string): Promise<void> {
     if (err instanceof ApiError && err.status === 409) {
@@ -112,7 +119,7 @@ export default function DedoBriefBar({ projectId, proposal, onProposal, onVersio
     setStaleNotice(null);
     setBusy("send");
     try {
-      const vysledok = await sendProjectDedoProposalApi(projectId, decidingAbout, text.trim());
+      const vysledok = await sendProjectDedoProposalApi(projectId, decidingAbout, text.trim(), needsKind ? workKind : null);
       onProposal(null);
       await onVersion(vysledok.version_id, vysledok.started);
     } catch (err: unknown) {
@@ -180,6 +187,10 @@ export default function DedoBriefBar({ projectId, proposal, onProposal, onVersio
           <p className="text-xs text-[var(--color-text-muted)]">
             Text si upravil — použije sa tvoje znenie. Pôvodný Dedov text zostáva zapísaný.
           </p>
+        )}
+
+        {needsKind && (
+          <WorkKindChoice name="zadanie-od-deda-druh" value={workKind} onChange={setWorkKind} disabled={busy !== null} />
         )}
 
         <div className="flex items-center justify-end gap-2">

@@ -29,6 +29,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from backend.schemas.delivery_statement import WorkKind
+
 # Mirrors the CHECK constraint
 # ``status IN ('planned', 'active', 'done', 'released')``
 # on the ``versions`` table.
@@ -71,7 +73,7 @@ class VersionCreate(BaseModel):
         default=None,
         description="Planned release date.",
     )
-    work_kind: Optional[Literal["fix", "change"]] = Field(
+    work_kind: Optional[WorkKind] = Field(
         default=None,
         description=(
             "DEV-50: 'fix' — fixes an error in delivered code (never billed); 'change' — new work or a change "

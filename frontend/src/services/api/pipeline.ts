@@ -6,6 +6,7 @@
 import api from "../api";
 import type { components } from "./pipeline.generated";
 import type { PaginatedResponse } from "../../types/common";
+import type { WorkKind } from "@/lib/workKind";
 
 // Debug-attach (CR-V2-015) break-glass targets a v2 orchestrator session — the two agents only. These are
 // CHARTER-PATH SLUGS (hyphen, e.g. `ai-agent`), which the BE bridges to the DB role value (underscore,
@@ -309,8 +310,18 @@ export function postPipelineActionApi(
 // arrives. Without it, a finding Dedo wrote during the 25s reconcile window would be the one executed — the
 // button said "Spýtať sa agenta" and the engine ran "uprav" (audit 2026-08-23). If the named proposal is no
 // longer open the call is refused with 409 and the reason is shown; nothing is ever substituted for it.
-export function sendDedoProposalApi(versionId: string, messageId: string, text: string): Promise<PipelineBoard> {
-  return api.post<PipelineBoard>(`/pipeline/${versionId}/dedo-proposal/send`, { message_id: messageId, text });
+export function sendDedoProposalApi(
+  versionId: string,
+  messageId: string,
+  text: string,
+  workKind: WorkKind | null = null,
+): Promise<PipelineBoard> {
+  // DEV-56: a proposal that starts a fast fix carries the Manažér's work kind (the server refuses it without one).
+  return api.post<PipelineBoard>(`/pipeline/${versionId}/dedo-proposal/send`, {
+    message_id: messageId,
+    text,
+    work_kind: workKind,
+  });
 }
 
 // ICCINT-24: decline the finding. Nothing is sent, no turn runs; the proposal is archived (marked rejected,

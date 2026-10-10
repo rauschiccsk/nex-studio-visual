@@ -542,8 +542,11 @@ def test_a_fast_fix_and_a_new_version_carry_their_kind_from_the_start(client, pr
     assert created.status_code in (200, 201), created.text
     assert db.get(Version, uuid.UUID(created.json()["id"])).work_kind == "change"
 
-    version = fast_fix_service.create_patch_version(db, project_id=proj_id, user_id=owner.id)
-    assert version.work_kind is None, "rýchla oprava bez voľby ostáva neurčená — kokpit nehádá"
+    # DEV-56: a fast fix without the Manažér's choice does not start at all — the cockpit never guesses it.
+    with pytest.raises(ValueError, match="kokpit to nehádá"):
+        fast_fix_service.create_patch_version(db, project_id=proj_id, user_id=owner.id, work_kind=None)
+    version = fast_fix_service.create_patch_version(db, project_id=proj_id, user_id=owner.id, work_kind="fix")
+    assert version.work_kind == "fix"
 
 
 # ── 6. statements issued before the lines were kept ──────────────────────────

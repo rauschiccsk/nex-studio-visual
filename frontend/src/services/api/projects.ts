@@ -1,5 +1,6 @@
 import api from "../api";
 import type { PaginatedResponse, ProjectCreate, ProjectRead, ProjectUpdate } from "../../types";
+import type { WorkKind } from "@/lib/workKind";
 
 export interface ListProjectsParams {
   skip?: number;
@@ -297,10 +298,13 @@ export function sendProjectDedoProposalApi(
   projectId: string,
   proposalId: string,
   text: string,
+  workKind: WorkKind | null = null,
 ): Promise<DedoProjectProposalSent> {
+  // DEV-56: a brief that starts a fast fix carries the Manažér's work kind (the server refuses it without one).
   return api.post<DedoProjectProposalSent>(`/projects/${projectId}/dedo-proposal/send`, {
     proposal_id: proposalId,
     text,
+    work_kind: workKind,
   });
 }
 

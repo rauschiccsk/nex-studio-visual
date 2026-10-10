@@ -96,7 +96,7 @@ def test_latest_semver_version_no_base_raises(db_session):
 
 def test_create_patch_version_bumps_and_creates_planned(db_session):
     project, user = _make_project(db_session, version_numbers=["0.6.0"])
-    version = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=user.id)
+    version = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=user.id, work_kind="fix")
     assert version.version_number == "0.6.1"
     assert version.status == "planned"
     assert version.project_id == project.id
@@ -107,14 +107,14 @@ def test_create_patch_version_bumps_and_creates_planned(db_session):
 
 def test_create_patch_version_anchors_on_semver_max(db_session):
     project, user = _make_project(db_session, version_numbers=["0.9.0", "0.10.0"])
-    version = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=user.id)
+    version = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=user.id, work_kind="fix")
     assert version.version_number == "0.10.1"
 
 
 def test_create_patch_version_no_base_raises(db_session):
     project, user = _make_project(db_session, version_numbers=[])
     with pytest.raises(ValueError):
-        fast_fix.create_patch_version(db_session, project_id=project.id, user_id=user.id)
+        fast_fix.create_patch_version(db_session, project_id=project.id, user_id=user.id, work_kind="fix")
 
 
 # ── ensure_build_task ──────────────────────────────────────────────────────────

@@ -4224,6 +4224,8 @@ export interface components {
             proposal_id: string;
             /** Text */
             text: string;
+            /** Work Kind */
+            work_kind?: ("fix" | "change") | null;
         };
         /**
          * DedoProjectProposalSendResponse
@@ -4331,6 +4333,11 @@ export interface components {
              * @description The text to send — Dedo's proposal as the Manažér edited it.
              */
             text: string;
+            /**
+             * Work Kind
+             * @description DEV-56 — for a proposal that starts a fast fix: a fix of an error in delivered code ('fix') or a change ('change'). Required for that verb (400 without it); other verbs ignore it.
+             */
+            work_kind?: ("fix" | "change") | null;
         };
         /**
          * DedoUnblockRequest

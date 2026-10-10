@@ -109,7 +109,7 @@ describe("DedoProposalBar — a finding from the technical team, one click away"
 
     fireEvent.click(screen.getByRole("button", { name: /Vrátiť agentovi/ }));
 
-    await waitFor(() => expect(sendDedoProposalApi).toHaveBeenCalledWith("v-42", "m-1", FINDING));
+    await waitFor(() => expect(sendDedoProposalApi).toHaveBeenCalledWith("v-42", "m-1", FINDING, null));
     await waitFor(() => expect(onBoard).toHaveBeenCalledWith(NEXT_BOARD));
   });
 
@@ -121,7 +121,7 @@ describe("DedoProposalBar — a finding from the technical team, one click away"
     expect(screen.getByText(/odošle sa tvoje znenie/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Vrátiť agentovi/ }));
-    await waitFor(() => expect(sendDedoProposalApi).toHaveBeenCalledWith("v-1", "m-1", edited));
+    await waitFor(() => expect(sendDedoProposalApi).toHaveBeenCalledWith("v-1", "m-1", edited, null));
   });
 
   it("cannot send an empty box", () => {
@@ -167,7 +167,7 @@ describe("DedoProposalBar — a finding from the technical team, one click away"
 
     fireEvent.click(screen.getByRole("button", { name: /Vrátiť agentovi/ }));
 
-    await waitFor(() => expect(sendDedoProposalApi).toHaveBeenCalledWith("v-1", "m-1", FINDING));
+    await waitFor(() => expect(sendDedoProposalApi).toHaveBeenCalledWith("v-1", "m-1", FINDING, null));
   });
 
   it("when the finding changed under him, it says so and swaps in the current one", async () => {
@@ -234,6 +234,7 @@ describe("ICCINT-62 — a fast fix moves the cockpit onto the build it started",
     } as unknown as PipelineBoard);
 
     render(<DedoProposalBar board={board({ action: "fast_fix" })} versionId="v-old" onBoard={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText(/Oprava chyby v dodanom kóde/)); // DEV-56: the work kind first
     fireEvent.click(screen.getByRole("button", { name: /rýchlu opravu/i }));
 
     await waitFor(() => expect(openVersionCockpit).toHaveBeenCalledWith("v-new"));
@@ -250,5 +251,25 @@ describe("ICCINT-62 — a fast fix moves the cockpit onto the build it started",
 
     await waitFor(() => expect(sendDedoProposalApi).toHaveBeenCalled());
     expect(openVersionCockpit).not.toHaveBeenCalled();
+  });
+});
+
+describe("DedoProposalBar — a fast fix carries the work kind (DEV-56)", () => {
+  it("⚠️ does not start a fast fix until the Manažér decides the work kind, and sends it", async () => {
+    vi.mocked(sendDedoProposalApi).mockResolvedValue(board({ proposal: false }));
+    render(<DedoProposalBar board={board({ action: "fast_fix" })} versionId="v-old" onBoard={vi.fn()} />);
+    const start = screen.getByRole("button", { name: /rýchlu opravu/i });
+
+    expect(start).toBeDisabled();
+    fireEvent.click(screen.getByLabelText(/Zmena alebo nová práca/));
+    fireEvent.click(start);
+
+    await waitFor(() => expect(sendDedoProposalApi).toHaveBeenCalledWith("v-old", "m-1", FINDING, "change"));
+  });
+
+  it("other verbs are not asked for a work kind", () => {
+    render(<DedoProposalBar board={board()} versionId="v-1" onBoard={vi.fn()} />);
+
+    expect(screen.queryByText("Druh práce")).not.toBeInTheDocument();
   });
 });

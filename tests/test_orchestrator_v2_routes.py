@@ -153,7 +153,7 @@ def test_fast_fix_route_creates_patch_version_and_starts(client, db_session):
     project = _make_project_with_semver(db_session, client._ri, "0.3.0")
     r = client.post(
         "/api/v1/pipeline/fast-fix",
-        json={"project_id": str(project.id), "directive": "Oprav preklep v hlavičke faktúry"},
+        json={"project_id": str(project.id), "directive": "Oprav preklep v hlavičke faktúry", "work_kind": "fix"},
     )
     assert r.status_code == 201, r.text
     body = r.json()
@@ -173,7 +173,7 @@ def test_fast_fix_route_creates_patch_version_and_starts(client, db_session):
 def test_fast_fix_route_unknown_project_404(client):
     r = client.post(
         "/api/v1/pipeline/fast-fix",
-        json={"project_id": str(uuid.uuid4()), "directive": "x"},
+        json={"project_id": str(uuid.uuid4()), "directive": "x", "work_kind": "fix"},
     )
     assert r.status_code == 404
 
@@ -183,7 +183,7 @@ def test_fast_fix_route_no_semver_base_400(client, db_session):
     project = _make_project_with_semver(db_session, client._ri, "pilot-x")
     r = client.post(
         "/api/v1/pipeline/fast-fix",
-        json={"project_id": str(project.id), "directive": "x"},
+        json={"project_id": str(project.id), "directive": "x", "work_kind": "fix"},
     )
     assert r.status_code == 400
 

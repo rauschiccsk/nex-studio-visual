@@ -98,7 +98,7 @@ async def test_fast_fix_start_creates_patch_version_at_priprava(db_session) -> N
     project = _seed_project(db_session, creator=creator)
     _seed_base_version(db_session, project, "v0.4.9")
 
-    patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id)
+    patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id, work_kind="fix")
     assert patch.version_number == "v0.4.10"  # semver bump, NOT lexicographic
     assert patch.name == "Rýchla oprava"
 
@@ -135,7 +135,7 @@ async def test_ensure_build_task_reads_v2_kickoff_directive(db_session) -> None:
     creator = _seed_user(db_session)
     project = _seed_project(db_session, creator=creator)
     _seed_base_version(db_session, project, "v1.0.0")
-    patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id)
+    patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id, work_kind="fix")
     await orchestrator.apply_action(
         db_session,
         version_id=patch.id,
@@ -176,7 +176,7 @@ async def test_ensure_build_task_multiline_directive_titles_from_first_line(db_s
     creator = _seed_user(db_session)
     project = _seed_project(db_session, creator=creator)
     _seed_base_version(db_session, project, "v1.0.0")
-    patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id)
+    patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id, work_kind="fix")
     directive = (
         "  Fix the IBAN validator off-by-one  \nIt drops the last check digit on 24-char IBANs.\nAdd a regression test."
     )
@@ -245,7 +245,7 @@ async def test_run_dispatch_fast_fix_priprava_auto_advances_without_spec(db_sess
     creator = _seed_user(db_session)
     project = _seed_project(db_session, creator=creator)
     _seed_base_version(db_session, project, "v1.0.0")
-    patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id)
+    patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id, work_kind="fix")
     state = await orchestrator.apply_action(
         db_session,
         version_id=patch.id,
@@ -321,7 +321,7 @@ async def test_fast_fix_priprava_brief_carries_the_manager_directive(db_session)
     creator = _seed_user(db_session)
     project = _seed_project(db_session, creator=creator)
     _seed_base_version(db_session, project, "v1.0.0")
-    patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id)
+    patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id, work_kind="fix")
     directive = "Appka sa nedá otvoriť z NEX Managera — spúšťací token sa neoveruje lokálne."
     await orchestrator.apply_action(
         db_session,
@@ -383,7 +383,7 @@ async def test_build_round_materializes_fast_fix_task_and_runs_it(db_session, mo
     creator = _seed_user(db_session)
     project = _seed_project(db_session, creator=creator)
     _seed_base_version(db_session, project, "v1.0.0")
-    patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id)
+    patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id, work_kind="fix")
     state = await orchestrator.apply_action(
         db_session,
         version_id=patch.id,
@@ -703,7 +703,7 @@ def test_the_fast_fix_priprava_brief_asks_for_the_declaration(db_session) -> Non
     creator = _seed_user(db_session)
     project = _seed_project(db_session, creator=creator)
     _seed_base_version(db_session, project, "v1.0.0")
-    patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id)
+    patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id, work_kind="fix")
     _record_kickoff(db_session, patch.id, "Oprav vstup z Managera")
 
     brief = orchestrator._priprava_directive(db_session, patch.id, flow_type="fast_fix")
@@ -731,7 +731,7 @@ def test_the_task_plan_carries_the_managers_own_words(db_session) -> None:
     creator = _seed_user(db_session)
     project = _seed_project(db_session, creator=creator)
     _seed_base_version(db_session, project, "v1.0.0")
-    patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id)
+    patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id, work_kind="fix")
     directive = "Vstup tokenom cez NEX Manager zlyhá — appka posiela inú hlavičku, než Manager čaká."
     _record_kickoff(db_session, patch.id, directive)
 

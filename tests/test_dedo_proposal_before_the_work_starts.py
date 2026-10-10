@@ -108,11 +108,12 @@ def _navrhni(client, project_id, *, content: str = _ZADANIE, action: str = "fast
     )
 
 
-def _posli(client, user, project_id, proposal_id, *, text: str = _ZADANIE):
+def _posli(client, user, project_id, proposal_id, *, text: str = _ZADANIE, work_kind: str | None = "fix"):
+    # DEV-56: a brief that starts a fast fix carries the Manažér's work kind; a new version ignores it.
     return client.post(
         f"/api/v1/projects/{project_id}/dedo-proposal/send",
         headers=_bearer(user),
-        json={"proposal_id": str(proposal_id), "text": text},
+        json={"proposal_id": str(proposal_id), "text": text, "work_kind": work_kind},
     )
 
 

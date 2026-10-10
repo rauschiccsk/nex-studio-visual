@@ -46,6 +46,8 @@ import {
 import { ApiError } from "@/services/api";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
+import WorkKindChoice from "@/components/common/WorkKindChoice";
+import type { WorkKind } from "@/lib/workKind";
 // The amber chrome only — NOT WarningActionBar itself: that shape is title + one sentence + ONE button, and
 // this bar is an editable box with two (send / decline). Sharing the tokens is DRY; sharing a shape that
 // does not fit would be abstraction for its own sake (the note that component carries about itself).
@@ -116,6 +118,9 @@ export default function DedoProposalBar({ board, versionId, onBoard }: Props) {
   // tick as the explanation for why the screen just changed. This one survives the swap and is cleared
   // when he acts again.
   const [staleNotice, setStaleNotice] = useState<string | null>(null);
+  // DEV-56: a proposal that starts a fast fix goes only with the Manažér's work kind, as in the „Rýchla oprava“
+  // dialog — the delivered-token statement bills by it, and the cockpit never guesses it.
+  const [workKind, setWorkKind] = useState<WorkKind | null>(null);
   // Hooks run BEFORE the honest-by-construction early return below — a hook after a conditional return is
   // a hook that sometimes does not run, which React forbids.
   const growRef = useAutoGrowTextarea(text);
@@ -127,6 +132,7 @@ export default function DedoProposalBar({ board, versionId, onBoard }: Props) {
     if (proposalId) {
       draft.clear();
       setError(null);
+      setWorkKind(null);
     }
   }, [proposalId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -137,7 +143,8 @@ export default function DedoProposalBar({ board, versionId, onBoard }: Props) {
   const decidingAbout = proposal.message_id;
   const copy = ACTION_COPY[proposal.proposed_action] ?? FALLBACK_COPY;
   const edited = text.trim() !== proposal.content.trim();
-  const canSend = busy === null && text.trim().length > 0;
+  const needsKind = proposal.proposed_action === "fast_fix";
+  const canSend = busy === null && text.trim().length > 0 && (!needsKind || workKind !== null);
 
   // A 409 means exactly one thing here: the finding on this screen is not the one on the desk any more —
   // it was already sent, already declined, or Dedo replaced it while the Manažér was reading. The server
@@ -169,7 +176,7 @@ export default function DedoProposalBar({ board, versionId, onBoard }: Props) {
     setStaleNotice(null);
     setBusy("send");
     try {
-      const next = await sendDedoProposalApi(versionId, decidingAbout, text.trim());
+      const next = await sendDedoProposalApi(versionId, decidingAbout, text.trim(), needsKind ? workKind : null);
       onBoard(next);
       // ICCINT-62: `fast_fix` is the one verb that STARTS A NEW VERSION rather than continuing this one, so
       // the response describes a different build. Without this the bar vanished and the Manažér kept staring
@@ -246,6 +253,10 @@ export default function DedoProposalBar({ board, versionId, onBoard }: Props) {
           <p className="text-xs text-[var(--color-text-muted)]">
             Text si upravil — odošle sa tvoje znenie. Pôvodný Dedov text zostáva zapísaný v protokole.
           </p>
+        )}
+
+        {needsKind && (
+          <WorkKindChoice name="navrh-od-deda-druh" value={workKind} onChange={setWorkKind} disabled={busy !== null} />
         )}
 
         <div className="flex items-center justify-end gap-2">

@@ -386,8 +386,9 @@ async def start_fast_fix(
         select(func.count()).select_from(Version).where(Version.project_id == payload.project_id)
     ).scalar_one()
     try:
-        version = fast_fix_service.create_patch_version(db, project_id=payload.project_id, user_id=current_user.id)
-        version.work_kind = payload.work_kind  # DEV-50 — decided when the fast fix is started
+        version = fast_fix_service.create_patch_version(
+            db, project_id=payload.project_id, user_id=current_user.id, work_kind=payload.work_kind
+        )
         state = await orchestrator.apply_action(
             db,
             version_id=version.id,
@@ -662,7 +663,9 @@ async def send_dedo_proposal(
         project_id = db.execute(select(Version.project_id).where(Version.id == version_id)).scalar_one()
         authz.assert_project_id_access(db, current_user, project_id)
         try:
-            new_version = fast_fix_service.create_patch_version(db, project_id=project_id, user_id=current_user.id)
+            new_version = fast_fix_service.create_patch_version(
+                db, project_id=project_id, user_id=current_user.id, work_kind=body.work_kind
+            )
             new_state = await orchestrator.apply_action(
                 db,
                 version_id=new_version.id,

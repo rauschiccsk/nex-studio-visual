@@ -16,6 +16,7 @@ from backend.db.models.pipeline import (
     STAGE_VALUES,
     STATUS_VALUES,
 )
+from backend.schemas.delivery_statement import WorkKind
 
 # Literal aliases sourced from the DB CHECK value tuples (v0.7.0 R2, D2) — the response-schema enums
 # and the DB constraints share ONE source so they cannot drift. FastAPI introspects each ``Literal``
@@ -278,6 +279,13 @@ class DedoProposalSendRequest(BaseModel):
 
     message_id: UUID = Field(..., description="The proposal the Manažér was shown (PipelineBoardRead.dedo_proposal).")
     text: str = Field(..., min_length=1, description="The text to send — Dedo's proposal as the Manažér edited it.")
+    work_kind: Optional[WorkKind] = Field(
+        default=None,
+        description=(
+            "DEV-56 — for a proposal that starts a fast fix: a fix of an error in delivered code ('fix') or a change "
+            "('change'). Required for that verb (400 without it); other verbs ignore it."
+        ),
+    )
 
 
 class DedoProposalRejectRequest(BaseModel):
@@ -332,8 +340,8 @@ class FastFixStartRequest(BaseModel):
     project_id: UUID
     directive: str = Field(..., min_length=1, description="The Director's fast-fix directive (the task brief).")
     #: DEV-50: a fix of an error in delivered code (``fix`` — never billed) or a change (``change`` — billed).
-    #: ``None`` leaves it undecided: the delivered-token statement then asks before it can be issued.
-    work_kind: Optional[Literal["fix", "change"]] = None
+    #: Required (DEV-56): without it the fast fix does not start — 400 with the sentence why, never a guess.
+    work_kind: Optional[WorkKind] = None
 
 
 class FastFixStartResponse(BaseModel):

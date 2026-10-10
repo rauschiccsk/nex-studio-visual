@@ -1717,7 +1717,9 @@ async def send_dedo_proposal(
     verb = proposal.proposed_action
     try:
         if verb == "fast_fix":
-            version = fast_fix_service.create_patch_version(db, project_id=project_id, user_id=current_user.id)
+            version = fast_fix_service.create_patch_version(
+                db, project_id=project_id, user_id=current_user.id, work_kind=payload.work_kind
+            )
             state = await orchestrator.apply_action(
                 db,
                 version_id=version.id,

@@ -25,7 +25,7 @@ Design notes:
 from __future__ import annotations
 
 import re
-from typing import Optional
+from typing import Optional, get_args
 from uuid import UUID
 
 from sqlalchemy import select
@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session
 from backend.db.models.pipeline import PipelineMessage
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.versions import Version
+from backend.schemas.delivery_statement import WorkKind
 from backend.schemas.epic import EpicCreate
 from backend.schemas.feat import FeatCreate
 from backend.schemas.task import TaskCreate
@@ -97,21 +98,36 @@ def latest_semver_version(db: Session, project_id: UUID) -> Version:
     return best
 
 
-def create_patch_version(db: Session, *, project_id: UUID, user_id: UUID) -> Version:
+#: DEV-56 — what a fast fix must be told before it starts (the delivered-token statement bills by it).
+WORK_KIND_REQUIRED = (
+    "Pri rýchlej oprave urči, či opraví chybu v dodanom kóde (neúčtuje sa), alebo urobí zmenu (účtuje sa) — "
+    "kokpit to nehádá."
+)
+WORK_KINDS = get_args(WorkKind)
+
+
+def create_patch_version(db: Session, *, project_id: UUID, user_id: UUID, work_kind: Optional[str]) -> Version:
     """Create the next PATCH version for a Fast-Fix (``vX.Y.Z+1`` from the project's semver max).
 
     The version is created with the default ``planned`` status and a ``name`` marking it as a
     fast-fix patch; the caller then starts a ``fast_fix`` pipeline on it.
 
+    ``work_kind`` is required (DEV-56): a fix of an error in delivered code (``fix`` — never billed) or a change
+    (``change`` — billed). Every way a fast fix starts — the „Rýchla oprava“ dialog, Dedo's brief on the project,
+    Dedo's proposal on a version — passes the Manažér's choice through HERE, so none can start one undecided.
+
     Raises:
-        ValueError: If the project has no semver base version, or the bumped version already exists.
+        ValueError: If the work kind is not decided, the project has no semver base version, or the bumped
+            version already exists.
     """
+    if work_kind not in WORK_KINDS:
+        raise ValueError(WORK_KIND_REQUIRED)
     base = latest_semver_version(db, project_id)
     next_number = bump_patch(base.version_number)
     return version_service.create(
         db,
         project_id,
-        VersionCreate(version_number=next_number, name="Rýchla oprava"),
+        VersionCreate(version_number=next_number, name="Rýchla oprava", work_kind=work_kind),
         user_id,
     )
 

@@ -17,6 +17,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from backend.schemas.delivery_statement import WorkKind
+
 
 class DedoBuildRead(BaseModel):
     """One build as Dedo needs to see it: which project, where it stands, and why it is stuck.
@@ -107,6 +109,9 @@ class DedoProjectProposalSendRequest(BaseModel):
 
     proposal_id: UUID
     text: str = Field(min_length=1)
+    #: DEV-56 — pri zadaní rýchlej opravy: oprava chyby v dodanom kóde (``fix``) alebo zmena (``change``).
+    #: Pre rýchlu opravu povinné (bez neho 400 s vetou prečo); pri novej verzii sa nečíta.
+    work_kind: Optional[WorkKind] = None
 
 
 class DedoProjectProposalRejectRequest(BaseModel):
