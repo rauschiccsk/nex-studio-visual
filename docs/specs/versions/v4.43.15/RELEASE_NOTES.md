@@ -20,3 +20,5 @@ agenta v projekte len pri štarte novej verzie a v prevzatých projektoch (NEX I
 agenti pracovali s pravidlami z 2. septembra a nič z neskorších vylepšení ich nedosiahlo. Odteraz kokpit
 pravidlá aj zručnosti obnoví tesne pred každým novým sedením agenta, vo všetkých projektoch. Rozhovor, ktorý
 agent práve vedie, sa nemení; nové pravidlá platia od jeho najbližšieho nového sedenia.
+Platí to aj vtedy, keď sa sedenie agenta stratí a kokpit mu založí náhradné — doteraz náhradné sedenie
+bežalo úplne bez pravidiel agenta.

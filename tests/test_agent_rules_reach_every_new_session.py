@@ -8,19 +8,24 @@ none of the rules released on 09.10.2026.
 
 Director 10.10.2026: „Áno, založ tiket do DEV“ → „Áno, začni DEV-47“.
 
+DEV-48: when Claude Code has lost a session, the cockpit starts a replacement under the same id (ICCINT-110). That
+replacement is a new session too, but the resumed turn that started it carried no charter, so the agent ran the
+rest of its session without any rules. Director 10.10.2026: „Áno, založ tiket do DEV“ → „Áno, začni DEV-48“.
+
 These tests drive the real :func:`claude_agent._invoke_once` up to the CLI: only the process that would run
 ``claude`` is replaced, so what is asserted is the argv the agent would get.
 """
 
 from __future__ import annotations
 
+import ast
 import subprocess
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
 
-from backend.services import claude_agent
+from backend.services import claude_agent, orchestrator
 from backend.services import create_project_postscaffold as cps
 
 SLUG = "projekt"
@@ -68,11 +73,13 @@ def _charter_given(argv: list[str]) -> str | None:
 
 
 async def _turn(root: Path, *, new_session: bool, role: str = "ai-agent") -> None:
+    """A turn the way the orchestrator sends it: always with its role's charter, ``resume`` on a later turn."""
     await claude_agent._invoke_once(
         project_slug=SLUG,
         claude_session_id=uuid4(),
         prompt="pokračuj",
-        charter_path=(root / ".claude" / "agents" / role / "CLAUDE.md") if new_session else None,
+        charter_path=root / ".claude" / "agents" / role / "CLAUDE.md",
+        resume=not new_session,
     )
 
 
@@ -109,6 +116,40 @@ async def test_a_resumed_session_is_left_alone(project, turns):
     assert charter == "stará charta ai-agent", "pokračujúce sedenie prepisovalo pravidlá, ktoré už nečíta"
 
 
+async def test_a_replacement_for_a_lost_session_gets_the_current_rules(project, monkeypatch):
+    root = project(adopted=False)
+    seen: list[list[str]] = []
+
+    async def _session_lost_once(args, **_kwargs):
+        seen.append(args)
+        if len(seen) == 1:
+            raise claude_agent.ClaudeAgentError("No conversation found with session ID: 7d1e…")
+        return "hotovo", None, None
+
+    monkeypatch.setattr(claude_agent, "_run_turn", _session_lost_once)
+    await claude_agent.invoke_claude(
+        project_slug=SLUG,
+        claude_session_id=uuid4(),
+        prompt="pokračuj",
+        charter_path=root / ".claude" / "agents" / "ai-agent" / "CLAUDE.md",
+        resume=True,
+    )
+
+    resumed, replacement = seen
+    assert "--resume" in resumed and _charter_given(resumed) is None
+    assert "--session-id" in replacement and "--resume" not in replacement
+    assert _charter_given(replacement) == _current_charter("ai-agent"), "náhradné sedenie beží bez pravidiel"
+
+
+async def test_a_turn_without_a_known_charter_still_resumes(turns, tmp_path, monkeypatch):
+    monkeypatch.setattr(claude_agent, "PROJECTS_ROOT", tmp_path)
+    (tmp_path / SLUG).mkdir()
+
+    await claude_agent._invoke_once(project_slug=SLUG, claude_session_id=uuid4(), prompt="x", charter_path=None)
+
+    assert "--resume" in turns[-1] and _charter_given(turns[-1]) is None
+
+
 async def test_a_failed_refresh_does_not_cost_the_turn(project, turns, monkeypatch):
     root = project(adopted=False)
 
@@ -135,3 +176,24 @@ async def test_a_refresh_never_moves_the_project_head(project, turns):
     assert subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout == head
     changed = subprocess.run([*git, "status", "--porcelain"], capture_output=True, text=True, check=True).stdout
     assert ".claude/agents/ai-agent/CLAUDE.md" in changed, "obnova sa neudiala — skúška by nič nedokazovala"
+
+
+def test_every_orchestrator_turn_names_its_charter_and_says_whether_it_resumes():
+    """DEV-48, as a rule rather than a list: every ``invoke_claude`` call in the orchestrator names the charter of
+    its role, and one in a function that resumes sessions (``_resolve_orch_session``) says whether it does — a call
+    without them is exactly the turn whose lost session would be replaced without any rules."""
+    tree = ast.parse(Path(orchestrator.__file__).read_text(encoding="utf-8"))
+    calls = []
+    for function in ast.walk(tree):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        names = [n.func.id for n in ast.walk(function) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)]
+        resumes = "_resolve_orch_session" in names
+        for node in ast.walk(function):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "invoke_claude":
+                given = {kw.arg for kw in node.keywords}
+                calls.append((node.lineno, "charter_path" in given and (not resumes or "resume" in given)))
+
+    assert calls, "v orchestrátore sa nenašlo ani jedno spustenie agenta — stráž by nič nestrážila"
+    offenders = sorted({line for line, ok in calls if not ok})
+    assert offenders == [], f"spustenie agenta bez charty roly alebo bez resume= v orchestrator.py, riadky {offenders}"

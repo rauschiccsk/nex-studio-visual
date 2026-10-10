@@ -135,6 +135,7 @@ class FakeClaude:
         claude_session_id,
         prompt,
         charter_path=None,
+        resume=False,
         settings_path=None,
         timeout=180,
         on_event=None,
@@ -153,6 +154,8 @@ class FakeClaude:
         self.calls.append(
             {
                 "prompt": prompt,
+                "charter_path": charter_path,
+                "resume": resume,
                 "model": model,
                 "effort": effort,
                 "json_schema": json_schema,
@@ -239,6 +242,25 @@ async def test_invoke_agent_records_message(db_session, monkeypatch):
     assert msgs[0].kind == "gate_report"
     assert msgs[0].recipient == "manazer"
     assert msgs[0].payload["commits"] == ["abc123"]
+
+
+async def test_every_turn_names_its_roles_charter_and_only_the_first_starts_the_session(db_session, monkeypatch):
+    # DEV-48: a resumed turn used to name no charter at all, so when Claude Code had lost the session the
+    # replacement it started (ICCINT-110) ran without the agent's rules. Every turn now names the charter of its
+    # role; ``resume`` says whether the session already exists.
+    fake = _fake_claude(monkeypatch)
+    version, _ = _make_version(db_session)
+    fake.response = _navrh_block()
+    for _ in range(2):
+        await orchestrator.invoke_agent(
+            db_session, version_id=version.id, role=orchestrator.AI_AGENT_ROLE, stage="navrh", prompt="go"
+        )
+
+    first, second = fake.calls
+    slug = orchestrator._project_slug_for_version(db_session, version.id)
+    charter = orchestrator.claude_agent.PROJECTS_ROOT / slug / ".claude" / "agents" / "ai-agent" / "CLAUDE.md"
+    assert (first["charter_path"], second["charter_path"]) == (charter, charter)
+    assert (first["resume"], second["resume"]) == (False, True)
 
 
 @pytest.mark.parametrize("stage", ["priprava", "navrh", "programovanie", "verifikacia"])

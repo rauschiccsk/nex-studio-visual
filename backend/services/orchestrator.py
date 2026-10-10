@@ -222,6 +222,15 @@ def _agent_settings_path(slug: str, role: str) -> Optional[Path]:
     return path
 
 
+def _agent_charter_path(slug: str, role: str) -> Path:
+    """The ``Pravidlá agenta`` charter of ``role`` in project ``slug`` — the one place its path is spelled (DEV-48).
+
+    Passed on EVERY turn, the resumed ones included: a resumed turn does not send it, but when Claude Code has lost
+    the session the replacement it starts (ICCINT-110) needs it as much as a first turn does. CR-V2-007: the DB role
+    value (underscore) maps to the charter-path slug (hyphen) via the single bridge."""
+    return claude_agent.PROJECTS_ROOT / slug / ".claude" / "agents" / _charter_slug_for_role(role) / "CLAUDE.md"
+
+
 def db_role_for_charter_slug(slug: str) -> str:
     """Map a charter-path slug (hyphen) to its DB role value (underscore) — inverse of
     :func:`_charter_slug_for_role`. ``ai-agent`` → ``ai_agent``; ``auditor`` → ``auditor``. Used at the
@@ -4277,14 +4286,7 @@ async def invoke_agent(
     # in the parse-retry wrapper) so EVERY dispatch — including each parse-retry, which re-enters
     # invoke_agent — applies the owner's config; unset → no flags (today's behavior).
     model_override, effort_override = _resolve_dispatch_overrides(db, version_id, role)
-    charter_path: Optional[Path] = None
-    if is_first:
-        # CR-V2-007: DB role value (underscore) → charter-path slug (hyphen) via the single bridge, so
-        # the on-disk ``Pravidlá agenta`` path (``.claude/agents/ai-agent/CLAUDE.md``) never diverges
-        # from the DB ``ai_agent``.
-        charter_path = (
-            claude_agent.PROJECTS_ROOT / slug / ".claude" / "agents" / _charter_slug_for_role(role) / "CLAUDE.md"
-        )
+    charter_path = _agent_charter_path(slug, role)
 
     tagged_on_event: Optional[claude_agent.EventCallback] = None
     if on_event is not None:
@@ -4326,6 +4328,7 @@ async def invoke_agent(
                     claude_session_id=session_id,
                     prompt=prompt,
                     charter_path=charter_path,
+                    resume=not is_first,
                     settings_path=_agent_settings_path(slug, role),
                     timeout=timeout if timeout is not None else _timeout_for(stage),
                     on_event=tagged_on_event,
@@ -4701,16 +4704,8 @@ async def _plan_pass_once(
         .values(last_input_at=datetime.now(timezone.utc))
     )
     model_override, effort_override = _resolve_dispatch_overrides(db, version_id, AI_AGENT_ROLE)
-    charter_path: Optional[Path] = None
-    if is_first:  # task_plan normally runs after the design phase (session exists → resume); defensive.
-        charter_path = (
-            claude_agent.PROJECTS_ROOT
-            / slug
-            / ".claude"
-            / "agents"
-            / _charter_slug_for_role(AI_AGENT_ROLE)
-            / "CLAUDE.md"
-        )
+    # task_plan normally runs after the design phase (session exists → resume); a first call is defensive.
+    charter_path = _agent_charter_path(slug, AI_AGENT_ROLE)
 
     tagged_on_event: Optional[claude_agent.EventCallback] = None
     if on_event is not None:
@@ -4732,6 +4727,7 @@ async def _plan_pass_once(
                     claude_session_id=session_id,
                     prompt=prompt,
                     charter_path=charter_path,
+                    resume=not is_first,
                     settings_path=_agent_settings_path(slug, AI_AGENT_ROLE),
                     timeout=_timeout_for("navrh"),
                     on_event=tagged_on_event,
@@ -10155,9 +10151,7 @@ async def _invoke_fix_critique(
     # ephemeral — never persisted as an OrchestratorSession (never resumed), so no warm-session bookkeeping.
     session_id = uuid.uuid4()
     model_override, effort_override = _resolve_dispatch_overrides(db, version_id, AUDITOR_ROLE)
-    charter_path: Optional[Path] = (
-        claude_agent.PROJECTS_ROOT / slug / ".claude" / "agents" / _charter_slug_for_role(AUDITOR_ROLE) / "CLAUDE.md"
-    )
+    charter_path = _agent_charter_path(slug, AUDITOR_ROLE)
     prompt = _fix_critique_directive(db, version_id, verdict_msg=verdict_msg)
     _started = perf_counter()
     try:

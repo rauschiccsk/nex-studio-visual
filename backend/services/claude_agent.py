@@ -433,6 +433,7 @@ async def invoke_claude(
     claude_session_id: UUID,
     prompt: str,
     charter_path: Optional[Path] = None,
+    resume: bool = False,
     timeout: int = CLAUDE_INVOKE_TIMEOUT,
     on_event: Optional[EventCallback] = None,
     model: Optional[str] = None,
@@ -486,6 +487,7 @@ async def invoke_claude(
                 claude_session_id=claude_session_id,
                 prompt=prompt,
                 charter_path=charter_path,
+                resume=resume,
                 timeout=timeout,
                 on_event=on_event,
                 model=model,
@@ -532,6 +534,7 @@ async def _invoke_once(
     claude_session_id: UUID,
     prompt: str,
     charter_path: Optional[Path] = None,
+    resume: bool = False,
     timeout: int = CLAUDE_INVOKE_TIMEOUT,
     on_event: Optional[EventCallback] = None,
     model: Optional[str] = None,
@@ -550,10 +553,14 @@ async def _invoke_once(
             project-level settings (CLAUDE.md, .claude/settings).
         claude_session_id: claude CLI session UUID (disk-persisted by claude).
         prompt: user message to send.
-        charter_path: only on the **first** call for this session —
-            ``--session-id <uuid>`` + ``--append-system-prompt <charter>``
-            create the session and load the agent's charter. For subsequent
-            calls pass ``None`` and we ``--resume <uuid>``.
+        charter_path: the charter of the role this session belongs to. A session that STARTS here —
+            the first call (``resume=False``) or the replacement for a session Claude Code no longer has
+            (``force_new_session``, ICCINT-110) — is created with ``--session-id <uuid>`` +
+            ``--append-system-prompt <charter>``; a resumed one (``resume=True``) gets ``--resume <uuid>``
+            and keeps the charter it started with. ``None`` = no charter known: the call resumes.
+        resume: DEV-48 — the call continues an existing session. The charter is still passed, so that a
+            replacement session started for a lost one gets its rules too; until DEV-48 a resumed call
+            carried no charter and the replacement ran the rest of its session without any.
         timeout: per-invocation subprocess timeout (seconds).
         on_event: opt-in streaming (CR-NS-018). When given, run with
             ``--output-format stream-json --verbose`` and ``await on_event(evt)``
@@ -624,13 +631,15 @@ async def _invoke_once(
             project_slug,
         )
 
-    # First invocation for this claude session loads the charter (a missing one raises a descriptive
-    # ClaudeAgentError — the "re-create through NEX Studio v2" hint — not a raw FileNotFoundError); a
-    # subsequent turn passes None and the argv builder emits ``--resume`` instead. DEV-47: a new session first
-    # brings the project's rules up to the cockpit's templates — it is the only moment they reach the agent.
-    if charter_path is not None:
+    # A session that starts here loads the charter (a missing one raises a descriptive ClaudeAgentError — the
+    # "re-create through NEX Studio v2" hint — not a raw FileNotFoundError): the first call and, DEV-48, the
+    # replacement for a lost session. A resumed turn sends none and the argv builder emits ``--resume``.
+    # DEV-47: a starting session first brings the project's rules up to the cockpit's templates — it is the only
+    # moment they reach the agent.
+    starts_session = charter_path is not None and (not resume or force_new_session)
+    if starts_session:
         _refresh_rules(project_slug)
-    charter_text = _load_charter(charter_path) if charter_path is not None else None
+    charter_text = _load_charter(charter_path) if starts_session else None
     args = build_claude_argv(
         force_new_session=force_new_session,
         streaming=on_event is not None,
@@ -696,7 +705,7 @@ async def _invoke_once(
             project_root=project_root,
             project_slug=project_slug,
             claude_session_id=claude_session_id,
-            charter_path=charter_path,
+            charter_path=charter_path if starts_session else None,
             prompt=prompt,
             timeout=timeout,
             on_event=on_event,
