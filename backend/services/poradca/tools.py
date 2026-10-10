@@ -460,8 +460,12 @@ class PoradcaTools:
         with SessionLocal() as db:
             project_dir = self._project_dir(db)
         snap = await ci_status.snapshot(Path(project_dir))
-        lines = [f"Zostavenie (CI) pre commit {snap.sha or '?'}: {snap.state} — {snap.detail}"]
-        if snap.state != "red" or not snap.sha:
+        # DEV-53: the answer's field is ``stav`` — reading ``state`` raised on every call, so Poradca could not say
+        # anything about a build (tests/test_poradca_reads_the_ci_state.py guards every field the tool reads).
+        lines = [f"Zostavenie (CI) pre commit {snap.sha or '?'}: {snap.stav} — {snap.detail}"]
+        if snap.url:
+            lines.append(f"Beh na GitHube: {snap.url}")
+        if snap.stav != "red" or not snap.sha:
             return "\n".join(lines)
         code, remote = await _run(["git", "-C", project_dir, "config", "--get", "remote.origin.url"])
         repo = ci_status._repo_z_remote(remote) if code == 0 else None
