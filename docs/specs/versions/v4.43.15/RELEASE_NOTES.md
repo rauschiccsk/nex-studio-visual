@@ -22,3 +22,9 @@ pravidlá aj zručnosti obnoví tesne pred každým novým sedením agenta, vo v
 agent práve vedie, sa nemení; nové pravidlá platia od jeho najbližšieho nového sedenia.
 Platí to aj vtedy, keď sa sedenie agenta stratí a kokpit mu založí náhradné — doteraz náhradné sedenie
 bežalo úplne bez pravidiel agenta.
+
+**Verzia s červenými kontrolami sa už nedá nasadiť.** Pri dokončení verzie kokpit označí kód značkou verzie a tá
+na GitHube spustí ďalšie kontroly projektu. Kokpit doteraz vyhlásil „CI zelené“ skôr, než sa tieto kontroly
+vôbec rozbehli, a keď neskôr zlyhali, ponúkal verziu ďalej ako „pripravenú na nasadenie“. Odteraz na ne počká,
+a keď kontroly na kóde, ktorý by sa nasadil, zlyhajú alebo ešte bežia, obrazovka nasadenia povie, ktorá kontrola
+to je, dá odkaz na ňu a „Nasadiť“ ostane zavreté. Riadiace centrum v takom prípade nepíše „pripravené na nasadenie“.

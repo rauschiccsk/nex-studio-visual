@@ -15,7 +15,7 @@
 // is true solely for the `drift` cause — its handler rejects every other shape). Where there is no action
 // this user can take, no button is drawn: a button that 400s or 403s would just move the dead end one click.
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { CircleAlert, FolderOpen, Loader2, RotateCw } from "lucide-react";
 
@@ -69,7 +69,7 @@ export default function DeployBlockNotice({ block, projectSlug, onReverifyStarte
   // The copy is per CAUSE, because the remedies genuinely differ — one sentence for all of them would send
   // the manager to the wrong place. No jargon: never "commit", "HEAD", "SHA", "drift", "overená verzia".
   let title: string;
-  let body: string;
+  let body: ReactNode;
   let action: { label: string; icon: "reverify" | "open"; run: () => void } | null = null;
 
   switch (block.cause) {
@@ -121,6 +121,34 @@ export default function DeployBlockNotice({ block, projectSlug, onReverifyStarte
       action = openVersion;
       break;
 
+    case "ci_red":
+      // DEV-51 (NEX Inbox 1.7.0, 10.10.2026): the release gate the version tag started failed AFTER the
+      // Verifikácia gate had said "CI zelené". The version is finished; the code that would ship is not proven.
+      title = "Nasadenie je zastavené — kontroly projektu zlyhali";
+      body = (
+        <>
+          {`Verzia ${version} je hotová, ale kontroly projektu na kóde, ktorý by sa nasadil, zlyhali` +
+            (block.ci_detail ? `: ${block.ci_detail}. ` : ". ") +
+            "K zákazníkovi ju nepustíme, kým chyba nie je opravená a kontroly neprejdú — oprav ju rýchlou " +
+            "opravou alebo novou verziou. "}
+          <CiRunLink url={block.ci_url} />
+        </>
+      );
+      action = openVersion;
+      break;
+
+    case "ci_running":
+      title = "Kontroly projektu ešte bežia";
+      body = (
+        <>
+          {`Verzia ${version} je hotová, ale kontroly projektu na kóde, ktorý by sa nasadil, ešte bežia` +
+            (block.ci_detail ? ` (${block.ci_detail}). ` : ". ") +
+            "Nasadenie sa odomkne, keď dobehnú a prejdú — táto stránka sa obnovuje sama. "}
+          <CiRunLink url={block.ci_url} />
+        </>
+      );
+      break;
+
     case "none_finished":
       title = "Zatiaľ nie je čo nasadiť";
       body =
@@ -135,7 +163,7 @@ export default function DeployBlockNotice({ block, projectSlug, onReverifyStarte
       return null;
   }
 
-  const running = block.cause === "reverify_running";
+  const running = block.cause === "reverify_running" || block.cause === "ci_running";
   const isReverify = action?.icon === "reverify";
 
   return (
@@ -160,5 +188,15 @@ export default function DeployBlockNotice({ block, projectSlug, onReverifyStarte
     >
       {body}
     </WarningActionBar>
+  );
+}
+
+/** The failed (or still running) check on GitHub — one click instead of a search (DEV-51). */
+function CiRunLink({ url }: { url?: string | null }) {
+  if (!url) return null;
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className="underline">
+      Pozrieť beh na GitHube
+    </a>
   );
 }

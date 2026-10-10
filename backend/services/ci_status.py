@@ -25,11 +25,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import re
 import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
+
+import yaml
+
+logger = logging.getLogger(__name__)
 
 #: Závery, ktoré znamenajú, že beh o kóde povedal „v poriadku".
 CI_CONCLUSIONS_OK = frozenset({"success", "skipped", "neutral"})
@@ -59,6 +65,11 @@ def pomenuj_beh(row: dict) -> str:
     cislo = row.get("databaseId")
     postup = str(row.get("workflowName") or "").strip()
     return f"postup {postup}, beh {cislo}" if postup else f"beh {cislo}"
+
+
+def bezi(rows: list[dict]) -> list[dict]:
+    """Behy, ktoré ešte nedobehli — o kóde zatiaľ nehovoria nič."""
+    return [r for r in rows if r.get("status") != "completed"]
 
 
 def prvy_zlyhany(rows: list[dict]) -> Optional[dict]:
@@ -115,8 +126,110 @@ def prikaz_na_behy(repo: str, sha: str) -> list[str]:
         "--limit",
         str(CI_RUNS_PER_COMMIT_LIMIT),
         "--json",
-        "status,conclusion,databaseId,workflowName",
+        # DEV-51: ``headBranch`` + ``event`` say WHICH push started a run (a branch, or a version tag), so the gate
+        # can tell the run its own tag push caused from older runs of the same commit; ``url`` lets the screen
+        # send the Manažér straight to a failed run.
+        "status,conclusion,databaseId,workflowName,headBranch,event,url",
     ]
+
+
+# ── DEV-51: the runs a version tag push starts ───────────────────────────────
+
+
+def _vzor_na_regex(vzor: str) -> re.Pattern[str]:
+    """A GitHub Actions ref filter pattern as a regex: ``**`` any characters, ``*`` any but ``/``, ``?``/``+``
+    the preceding character's quantifiers, ``[...]`` a character class — everything else literal."""
+    out, i = [], 0
+    while i < len(vzor):
+        if vzor.startswith("**", i):
+            out.append(".*")
+            i += 2
+            continue
+        ch = vzor[i]
+        if ch == "*":
+            out.append("[^/]*")
+        elif ch in "?+":
+            out.append(ch)
+        elif ch == "[":
+            end = vzor.find("]", i)
+            if end == -1:
+                out.append(re.escape(ch))
+            else:
+                out.append(vzor[i : end + 1])
+                i = end
+        else:
+            out.append(re.escape(ch))
+        i += 1
+    return re.compile("".join(out) + r"\Z")
+
+
+def _zodpoveda_filtru(ref: str, vzory: Any) -> bool:
+    """Whether ``ref`` passes a GitHub ``tags``/``branches`` filter list — later patterns win, ``!`` negates."""
+    if isinstance(vzory, str):
+        vzory = [vzory]
+    vysledok = False
+    for vzor in vzory or []:
+        vzor = str(vzor)
+        neguj = vzor.startswith("!")
+        if _vzor_na_regex(vzor[1:] if neguj else vzor).match(ref):
+            vysledok = not neguj
+    return vysledok
+
+
+def _push_spusti_znacku(push: Any, tag: str) -> bool:
+    """Whether a workflow's ``on.push`` block starts a run when ``tag`` is pushed (GitHub's own rules)."""
+    if push is None:
+        return True  # ``push:`` with no filters — every branch and every tag
+    if not isinstance(push, dict):
+        return False
+    if "tags" in push:
+        return _zodpoveda_filtru(tag, push["tags"])
+    if "tags-ignore" in push:
+        return not _zodpoveda_filtru(tag, push["tags-ignore"])
+    # Only branch filters → the workflow does not run for tags. Neither (only ``paths``) → it runs for both;
+    # path filters are not evaluated for tag pushes.
+    return "branches" not in push and "branches-ignore" not in push
+
+
+def postupy_spustene_znackou(project_root: Path, tag: str) -> list[str]:
+    """Names of the project's workflows that a push of ``tag`` starts — what the gate must wait for (DEV-51).
+
+    10.10.2026, NEX Inbox 1.7.0: the cockpit pushed the version tag ``v1.7.0`` and asked GitHub about the commit
+    two seconds later. Two green runs from an hour before were already there, so the gate declared "CI zelené";
+    the run the tag started (``Release smoke gate`` on ``push: tags: ['v*']``) registered two seconds after
+    the question and failed. The name is what ``gh run list`` reports as ``workflowName``: the workflow's
+    ``name``, or its file path when it has none. A file that cannot be read is skipped and logged — the gate
+    then cannot wait for it, which is the old behaviour, not a new hole."""
+    adresar = project_root / ".github" / "workflows"
+    if not adresar.is_dir():
+        return []
+    mena = []
+    for subor in sorted([*adresar.glob("*.yml"), *adresar.glob("*.yaml")]):
+        try:
+            data = yaml.safe_load(subor.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError) as exc:
+            logger.warning("workflow %s sa nedá prečítať — brána naň nepočká: %s", subor, exc)
+            continue
+        if not isinstance(data, dict):
+            continue
+        on = data.get("on", data.get(True))  # YAML 1.1 reads a bare ``on:`` key as True
+        if isinstance(on, str):
+            spusti = on == "push"
+        elif isinstance(on, list):
+            spusti = "push" in on
+        elif isinstance(on, dict):
+            spusti = "push" in on and _push_spusti_znacku(on["push"], tag)
+        else:
+            spusti = False
+        if spusti:
+            mena.append(str(data.get("name") or f".github/workflows/{subor.name}"))
+    return mena
+
+
+def chybajuce_behy_znacky(rows: list[dict], tag: str, postupy: list[str]) -> list[str]:
+    """Which of ``postupy`` has no run yet for the push of ``tag`` (``headBranch`` is the tag for a tag push)."""
+    mame = {str(r.get("workflowName") or "") for r in rows if r.get("headBranch") == tag}
+    return [p for p in postupy if p not in mame]
 
 
 @dataclass(frozen=True)
@@ -129,6 +242,10 @@ class StavZostavenia:
     sha: Optional[str] = None
     #: Kedy sme sa pýtali. Odpoveď je stará najviac :data:`PAMAT_SEKUND`.
     zistene_o: float = 0.0
+    #: DEV-51: niektorý beh ešte nedobehol — nasadenie počká, kým dobehne.
+    bezi: bool = False
+    #: DEV-51: odkaz na zlyhaný (alebo ešte bežiaci) beh — nech Manažér nehľadá, ktorý to bol.
+    url: Optional[str] = None
 
 
 _pamat: dict[str, tuple[float, StavZostavenia]] = {}
@@ -168,37 +285,49 @@ def _repo_z_remote(url: str) -> Optional[str]:
     return None
 
 
-async def snapshot(project_root: Path) -> StavZostavenia:
-    """Okamžitý obraz stavu zostavenia pre obrazovku. **Nikdy nečaká a nikdy nepadá.**
-
-    Keď sa nedá zistiť čokoľvek z reťaze (HEAD, vzdialený repozitár, odpoveď GitHubu), vráti
-    ``unknown`` s vetou, ktorá hovorí PREČO. ⚠️ Nevedomosť sa nesmie tváriť ako dobrá správa.
-    """
-    kluc = str(project_root)
-    teraz = time.time()
-    zapamatane = _pamat.get(kluc)
-    if zapamatane is not None and teraz - zapamatane[0] < PAMAT_SEKUND:
-        return zapamatane[1]
-
-    def _uloz(v: StavZostavenia) -> StavZostavenia:
-        _pamat[kluc] = (teraz, v)
-        return v
-
-    rc, head = await asyncio.to_thread(_bez_cakania, ["git", "-C", str(project_root), "rev-parse", "HEAD"])
-    sha = head.strip() if rc == 0 else ""
+async def _zisti(project_root: Path, sha: Optional[str], teraz: float) -> StavZostavenia:
+    """Stav CI pre ``sha`` (``None`` = HEAD projektu) — bez pamäte, bez čakania, nikdy nepadá."""
     if not sha:
-        return _uloz(StavZostavenia("unknown", "HEAD projektu sa nepodarilo zistiť", None, teraz))
+        rc, head = await asyncio.to_thread(_bez_cakania, ["git", "-C", str(project_root), "rev-parse", "HEAD"])
+        sha = head.strip() if rc == 0 else ""
+    if not sha:
+        return StavZostavenia("unknown", "HEAD projektu sa nepodarilo zistiť", None, teraz)
 
     rc, remote = await asyncio.to_thread(
         _bez_cakania, ["git", "-C", str(project_root), "config", "--get", "remote.origin.url"]
     )
     repo = _repo_z_remote(remote) if rc == 0 else None
     if not repo:
-        return _uloz(StavZostavenia("unknown", "projekt nemá čitateľný vzdialený repozitár", sha, teraz))
+        return StavZostavenia("unknown", "projekt nemá čitateľný vzdialený repozitár", sha, teraz)
 
     rows, chyba = await _behy_z_githubu(project_root, repo, sha)
     if chyba:
-        return _uloz(StavZostavenia("unknown", chyba, sha, teraz))
+        return StavZostavenia("unknown", chyba, sha, teraz)
+    rows = rows or []
 
-    stav, detail = verdikt(rows or [])
-    return _uloz(StavZostavenia(stav, detail, sha, teraz))
+    stav, detail = verdikt(rows)
+    zlyhal = prvy_zlyhany(rows)
+    beziace = bezi(rows)
+    odkaz = (zlyhal or (beziace[0] if beziace else None) or {}).get("url")
+    return StavZostavenia(stav, detail, sha, teraz, bezi=stav != "red" and bool(beziace), url=odkaz)
+
+
+async def stav_commitu(project_root: Path, sha: Optional[str] = None, *, cerstvy: bool = False) -> StavZostavenia:
+    """Čo hovorí CI o commite ``sha`` (``None`` = HEAD) — pre obrazovku aj pre nasadenie (DEV-51).
+
+    Odpoveď si pamätá :data:`PAMAT_SEKUND`; ``cerstvy=True`` sa spýta GitHubu vždy — tak sa pýta samotné
+    nasadenie, kde rozhoduje, nie len ukazuje. **Nikdy nečaká a nikdy nepadá:** keď sa nedá zistiť čokoľvek
+    z reťaze, vráti ``unknown`` s vetou, ktorá hovorí PREČO. ⚠️ Nevedomosť sa nesmie tváriť ako dobrá správa."""
+    kluc = f"{project_root}@{sha or 'HEAD'}"
+    teraz = time.time()
+    zapamatane = _pamat.get(kluc)
+    if not cerstvy and zapamatane is not None and teraz - zapamatane[0] < PAMAT_SEKUND:
+        return zapamatane[1]
+    v = await _zisti(project_root, sha, teraz)
+    _pamat[kluc] = (teraz, v)
+    return v
+
+
+async def snapshot(project_root: Path) -> StavZostavenia:
+    """Okamžitý obraz stavu zostavenia HEAD projektu pre obrazovku. **Nikdy nečaká a nikdy nepadá.**"""
+    return await stav_commitu(project_root)

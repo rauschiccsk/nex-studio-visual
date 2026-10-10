@@ -47,6 +47,7 @@ import ReverifyNoFixBar from "@/components/riadiace/ReverifyNoFixBar";
 import OpytajSaPoradcuBar from "@/components/riadiace/OpytajSaPoradcuBar";
 import PhaseBar from "@/components/riadiace/PhaseBar";
 import StavZostavenia from "@/components/riadiace/StavZostavenia";
+import { useStavZostavenia } from "@/components/riadiace/useStavZostavenia";
 import HonestStatusStrip from "@/components/riadiace/HonestStatusStrip";
 import PlanUlohRail from "@/components/riadiace/PlanUlohRail";
 
@@ -68,6 +69,8 @@ export default function RiadiaceCentrumPage() {
     versionGone,
     setBoard,
   } = usePipelineWs(versionId);
+  // DEV-51: the build's CI, read ONCE — the phase-bar line, the status strip and the rail all show the same answer.
+  const ci = useStavZostavenia(versionId);
 
   async function handleSend(text: string): Promise<{ deferred: boolean }> {
     if (!versionId) throw new Error("Najprv vyber verziu (pin v Projektoch).");
@@ -207,7 +210,7 @@ export default function RiadiaceCentrumPage() {
         <PhaseBar board={board ?? null} />
         {/* ICCINT-129: stav posledného zostavenia patrí VEDĽA fáz, jednou vetou. Kto vidí červenú
             pri druhom commite, nedostane sa do stavu, že prerába hotovú verziu. */}
-        <StavZostavenia versionId={versionId ?? null} />
+        <StavZostavenia stav={ci} />
       </div>
 
       {/* Centre — the SPINE: honest status pinned above the live conversation thread (the overflow region). */}
@@ -219,6 +222,7 @@ export default function RiadiaceCentrumPage() {
           reconnecting={reconnecting}
           error={error}
           verifiedProvenance={board?.verified_provenance}
+          ci={ci}
         />
         <ConversationThread
           versionId={versionId}
@@ -323,6 +327,7 @@ export default function RiadiaceCentrumPage() {
           messages={board?.recent_messages ?? []}
           board={board}
           onBoard={setBoard}
+          ci={ci}
         />
       </div>
     </div>

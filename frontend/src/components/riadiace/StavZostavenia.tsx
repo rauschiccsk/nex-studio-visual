@@ -13,12 +13,7 @@
 // (beh 34869175048)" o behu úplne iného postupu, takže jediné slovo, na ktoré sa Manažér spoliehal,
 // bolo to nesprávne.
 
-import { useEffect, useState } from "react";
-
-import { getCiStatusApi, type CiStatus } from "@/services/api/pipeline";
-
-/** Ako často sa pýtať. Odpoveď si server pamätá minútu, takže častejšie by nemalo čo priniesť. */
-const OBNOVA_MS = 60_000;
+import type { CiStatus } from "@/services/api/pipeline";
 
 interface Podoba {
   znak: string;
@@ -48,40 +43,11 @@ const PODOBA: Record<string, Podoba> = {
 };
 
 interface Props {
-  versionId: string | null;
+  /** Stav z `useStavZostavenia` — načítaný raz na stránke. */
+  stav: CiStatus | null;
 }
 
-export default function StavZostavenia({ versionId }: Props) {
-  const [stav, setStav] = useState<CiStatus | null>(null);
-
-  useEffect(() => {
-    if (!versionId) {
-      setStav(null);
-      return;
-    }
-    let zrusene = false;
-    // Zlyhanie tohto dopytu nesmie nič zhodiť ani nič tvrdiť: keď sa nedozvieme, nezobrazíme nič.
-    // Riadok, ktorý po výpadku siete ukáže starú zelenú, je horší než riadok, ktorý nie je.
-    // ⚠️ `Promise.resolve().then(...)` a nie holé volanie: keby `getCiStatusApi` chýbalo (napríklad
-    // v atrape modulu), volanie vyhodí chybu SYNCHRÓNNE — a tá by neskončila v `.catch`, ale zhodila
-    // by celú obrazovku. Presne to sa 25.09.2026 stalo stránke projektu pri inom novom dopyte.
-    const natiahni = () =>
-      Promise.resolve()
-        .then(() => getCiStatusApi(versionId))
-        .then((v) => {
-          if (!zrusene) setStav(v);
-        })
-        .catch(() => {
-          if (!zrusene) setStav(null);
-        });
-    natiahni();
-    const timer = setInterval(natiahni, OBNOVA_MS);
-    return () => {
-      zrusene = true;
-      clearInterval(timer);
-    };
-  }, [versionId]);
-
+export default function StavZostavenia({ stav }: Props) {
   if (!stav) return null;
 
   const podoba = PODOBA[stav.stav] ?? NEVIEME;
@@ -98,6 +64,17 @@ export default function StavZostavenia({ versionId }: Props) {
       <span className="min-w-0 truncate text-[var(--color-text-muted)]" title={stav.detail}>
         {stav.detail}
       </span>
+      {/* DEV-51: ktorý beh to bol, jedným klikom — Manažér nemá hľadať po GitHube. */}
+      {stav.url && (stav.stav === "red" || stav.bezi) && (
+        <a
+          href={stav.url}
+          target="_blank"
+          rel="noreferrer"
+          className="flex-shrink-0 text-[var(--color-text-secondary)] underline hover:text-[var(--color-text-primary)]"
+        >
+          Pozrieť beh
+        </a>
+      )}
     </div>
   );
 }

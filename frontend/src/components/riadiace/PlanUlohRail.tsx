@@ -38,7 +38,7 @@ import { ChevronDown, ChevronRight, Loader2, Rocket } from "lucide-react";
 import { getTaskPlan } from "../../services/api/versions";
 import { findCurrentTaskPath, type CurrentTaskPath } from "./currentTaskPath";
 import { postPipelineActionApi } from "../../services/api/pipeline";
-import type { PipelineActionName, PipelineBoard, PipelineMessage } from "../../services/api/pipeline";
+import type { CiStatus, PipelineActionName, PipelineBoard, PipelineMessage } from "../../services/api/pipeline";
 import type {
   TaskPlanResponse,
   TaskPlanEpicNode,
@@ -50,6 +50,7 @@ import {
   TASK_TYPE_LABELS,
   TASK_STATUS_TONE,
   TONE_DOT,
+  ciDeployBlock,
   verificationDrifted,
   verificationUnconfirmed,
 } from "../cockpit/labels";
@@ -65,6 +66,8 @@ interface Props {
   board: PipelineBoard | null;
   /** Replace the live board with the fresh one the action returns (setBoard from usePipelineWs). */
   onBoard: (board: PipelineBoard) => void;
+  /** DEV-51: the build's CI — a finished version with red (or running) checks is not ready to deploy. */
+  ci?: CiStatus | null;
 }
 
 // Level colour-coding (design §4.5, salvaged): EPIC = purple, FEAT = yellow, TASK = blue, on the node TITLE
@@ -302,7 +305,7 @@ function PlanNode(props: {
   );
 }
 
-export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
+export function PlanUlohRail({ versionId, messages, board, onBoard, ci }: Props) {
   const navigate = useNavigate();
   const [plan, setPlan] = useState<TaskPlanResponse | null>(null);
   const [error, setError] = useState<HumanError | null>(null);
@@ -711,6 +714,16 @@ export function PlanUlohRail({ versionId, messages, board, onBoard }: Props) {
             <p className="mb-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-700 dark:text-amber-300">
               Kód sa po označení za hotové zmenil — verziu treba znova overiť. Tlačidlo „Over znova" nájdeš
               nižšie na tejto obrazovke.
+            </p>
+          ) : ciDeployBlock(ci) === "red" ? (
+            // DEV-51: the deploy screen refuses this version — the card must not promise otherwise.
+            <p className="mb-2 rounded border border-red-500/40 bg-red-500/10 px-2 py-1 text-xs text-red-700 dark:text-red-300">
+              Kontroly projektu na kóde, ktorý by sa nasadil, zlyhali — nasadenie je zastavené. Na obrazovke
+              nasadenia uvidíš, ktorá kontrola to bola a čo s tým.
+            </p>
+          ) : ciDeployBlock(ci) === "running" ? (
+            <p className="mb-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-700 dark:text-amber-300">
+              Kontroly projektu ešte bežia — nasadenie sa odomkne, keď dobehnú a prejdú.
             </p>
           ) : (
             <p className="mb-2 text-xs text-[var(--color-text-muted)]">

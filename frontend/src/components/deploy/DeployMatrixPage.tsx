@@ -143,8 +143,10 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
     load();
   }, [load]);
 
-  // Self-refresh while a re-verification is in flight, so "Nasadiť" re-opens on its own when it goes green.
-  const reverifyRunning = matrix?.deployability?.cause === "reverify_running";
+  // Self-refresh while a re-verification is in flight, so "Nasadiť" re-opens on its own when it goes green —
+  // and, DEV-51, while the project's checks on the code to deploy are still running.
+  const reverifyRunning =
+    matrix?.deployability?.cause === "reverify_running" || matrix?.deployability?.cause === "ci_running";
   useEffect(() => {
     if (!reverifyRunning) return;
     const timer = window.setInterval(() => load(true), REVERIFY_POLL_INTERVAL_MS);

@@ -392,6 +392,10 @@ export interface CiStatus {
   /** Veta pre človeka — pri červenej menuje POSTUP aj číslo behu, nie len číslo. */
   detail: string;
   sha: string | null;
+  /** DEV-51: niektorý beh ešte nedobehol — verzia sa nasadí, až keď dobehne. */
+  bezi?: boolean;
+  /** DEV-51: odkaz na zlyhaný (alebo ešte bežiaci) beh na GitHube. */
+  url?: string | null;
 }
 
 export function getCiStatusApi(versionId: string): Promise<CiStatus> {

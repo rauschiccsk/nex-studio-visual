@@ -151,6 +151,10 @@ class CiStatusRead(BaseModel):
     detail: str
     #: Commit, o ktorom to platí.
     sha: Optional[str] = None
+    #: DEV-51: niektorý beh ešte nedobehol — verzia sa nasadí, až keď dobehne.
+    bezi: bool = False
+    #: DEV-51: odkaz na zlyhaný (alebo ešte bežiaci) beh na GitHube.
+    url: Optional[str] = None
 
 
 class VizualCheckRead(BaseModel):

@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
+import anyio
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -46,8 +47,8 @@ from backend.schemas.deploy import (
     DeployRequest,
     DeployResult,
 )
+from backend.services import ci_status, claude_agent, deploy_progress, instance_adoption, uat_provisioner
 from backend.services import deploy as deploy_service
-from backend.services import deploy_progress, instance_adoption, uat_provisioner
 from backend.services import uat_launch as uat_launch_service
 
 router = APIRouter(tags=["Deploy"])
@@ -58,7 +59,7 @@ def _map_value_error(exc: ValueError) -> HTTPException:
     lowered = message.lower()
     if "not found" in lowered:
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message)
-    if "blocked" in lowered or "cannot accept" in lowered or "already" in lowered:
+    if "blocked" in lowered or "zastaven" in lowered or "cannot accept" in lowered or "already" in lowered:
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message)
     return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=message)
 
@@ -92,7 +93,10 @@ def get_deploy_matrix(
     project = _resolve_project(db, slug)
     # v4.0.54: the user is passed through so the matrix can answer whether THIS user may re-verify a drifted
     # version (the pipeline action is ri-or-owner while this read is wider — the frontend cannot derive it).
-    return DeployMatrix.model_validate(deploy_service.build_matrix(db, project, _current_user))
+    # DEV-51: the checks (CI) on the code that would be deployed — asked of GitHub here, in the event loop the
+    # sync route hands back to, so the matrix itself stays a database read.
+    ci = anyio.from_thread.run(ci_status.stav_commitu, claude_agent.PROJECTS_ROOT / project.slug)
+    return DeployMatrix.model_validate(deploy_service.build_matrix(db, project, _current_user, ci=ci))
 
 
 class _UatLaunchRequest(BaseModel):

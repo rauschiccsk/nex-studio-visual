@@ -189,6 +189,11 @@ DEPLOY_CAUSE_AWAITING_SIGNOFF = "awaiting_signoff"
 DEPLOY_CAUSE_STALE_SIGNOFF = "stale_signoff"
 #: No version of this project was ever finished — nothing to deploy, and nothing to re-verify.
 DEPLOY_CAUSE_NONE_FINISHED = "none_finished"
+#: DEV-51: the version is finished, but the project's checks (CI) on the code that would be deployed FAILED —
+#: including a run that started after the Verifikácia gate (the version tag's own release gate).
+DEPLOY_CAUSE_CI_RED = "ci_red"
+#: DEV-51: the version is finished, but a check (CI) on the code that would be deployed is still running.
+DEPLOY_CAUSE_CI_RUNNING = "ci_running"
 
 #: The closed cause vocabulary. Declared as a ``Literal`` (like ``Environment`` / ``EventType`` above) so
 #: FastAPI emits an OpenAPI enum and ``npm run codegen`` carries it to the frontend as a union — the cause
@@ -201,6 +206,8 @@ DeployCause = Literal[
     "awaiting_signoff",
     "stale_signoff",
     "none_finished",
+    "ci_red",
+    "ci_running",
 ]
 
 
@@ -222,7 +229,8 @@ class DeployBlock(BaseModel):
             "now) | 'version_busy' (drifted, but mid-work or stuck — re-verify would be rejected) | "
             "'awaiting_signoff' (the check passed; it only needs the manager's Hotovo approval) | "
             "'stale_signoff' (later work outranked the sign-off — must be re-checked on the version) | "
-            "'none_finished' (no version was ever finished)."
+            "'none_finished' (no version was ever finished) | 'ci_red' (the project's checks on the code that "
+            "would be deployed failed) | 'ci_running' (those checks are still running)."
         ),
     )
     version_number: Optional[str] = Field(
@@ -240,6 +248,14 @@ class DeployBlock(BaseModel):
             "matrix is readable more widely than the pipeline action is writable, and only the 'drift' cause "
             "has a handler that accepts the action."
         ),
+    )
+    ci_detail: Optional[str] = Field(
+        default=None,
+        description="For 'ci_red' / 'ci_running': which check, which run, what it said (the human sentence).",
+    )
+    ci_url: Optional[str] = Field(
+        default=None,
+        description="For 'ci_red' / 'ci_running': the link to that run on GitHub.",
     )
 
 

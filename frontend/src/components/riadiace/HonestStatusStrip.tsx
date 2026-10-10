@@ -9,10 +9,11 @@
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 
-import type { PipelineState } from "../../services/api/pipeline";
+import type { CiStatus, PipelineState } from "../../services/api/pipeline";
 import { elapsedSince } from "../../utils/elapsed";
 import {
   BLOCK_REASON_LABELS,
+  ciDeployBlock,
   PHASE_LABELS,
   PIPELINE_STATUS_TONE,
   TONE_BANNER,
@@ -82,6 +83,9 @@ interface Props {
   /** Live verification provenance from the board (audit honest #6). When a `done` version's provenance is
    *  unconfirmable (unbound / repo_unreadable / hotovo_unbound) the "Hotovo" badge reads AMBER, not green. */
   verifiedProvenance?: string | null;
+  /** DEV-51: the build's CI — a `done` version with red (or still running) checks is not "pripravené na
+   *  nasadenie", and the deploy screen refuses it; the strip must not say otherwise. */
+  ci?: CiStatus | null;
 }
 
 export function HonestStatusStrip({
@@ -91,6 +95,7 @@ export function HonestStatusStrip({
   reconnecting,
   error,
   verifiedProvenance,
+  ci,
 }: Props) {
   // Honest #6: a settled `done` version whose verification could NOT be confirmed must read amber, never a
   // green "overená/Hotovo". Override the derived text + tone for exactly that case.
@@ -99,12 +104,19 @@ export function HonestStatusStrip({
   // merely fail to confirm the check, we KNOW it no longer describes the current code, so a green "pripravené
   // na nasadenie" is an outright false statement (and the deploy screen refuses that version anyway).
   const drifted = state?.status === "done" && verificationDrifted(verifiedProvenance);
+  // DEV-51: NEX Inbox 1.7.0, 10.10.2026 — "Zostavenie zlyhalo" above, "Hotovo — pripravené na nasadenie" here.
+  const ciBlock = state?.status === "done" ? ciDeployBlock(ci) : null;
   const text = drifted
     ? "Hotovo — kód sa odvtedy zmenil, treba znova overiť"
-    : unconfirmed
-      ? "Hotovo — overenie sa nedá potvrdiť"
-      : statusText(state, projectName, versionNumber);
-  const tone: StatusTone = unconfirmed || drifted ? "amber" : statusTone(state);
+    : ciBlock === "red"
+      ? "Hotovo — kontroly projektu zlyhali, nasadenie je zastavené"
+      : ciBlock === "running"
+        ? "Hotovo — kontroly projektu ešte bežia, nasadenie počká"
+        : unconfirmed
+          ? "Hotovo — overenie sa nedá potvrdiť"
+          : statusText(state, projectName, versionNumber);
+  const tone: StatusTone =
+    ciBlock === "red" && !drifted ? "red" : unconfirmed || drifted || ciBlock ? "amber" : statusTone(state);
   const working = state?.status === "agent_working";
   // Hodiny, ktoré tikajú len počas práce. Bez nich by „pracuje sa 2 min“ zamrzlo na dvoch minútach a
   // Manažér by z toho čítal opak toho, čo to má povedať.

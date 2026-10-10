@@ -3668,12 +3668,19 @@ export interface components {
          *     sa riadi brána. Dva kusy kódu, ktoré si samostatne vykladajú „čo je červená", sa raz rozídu.
          */
         CiStatusRead: {
+            /**
+             * Bezi
+             * @default false
+             */
+            bezi: boolean;
             /** Detail */
             detail: string;
             /** Sha */
             sha?: string | null;
             /** Stav */
             stav: string;
+            /** Url */
+            url?: string | null;
         };
         /**
          * CostRowRead
@@ -4270,11 +4277,21 @@ export interface components {
             can_reverify: boolean;
             /**
              * Cause
-             * @description 'ok' (a version is deployable) | 'drift' (code moved past the checked commit — re-verifiable in place, the only cause with a button) | 'reverify_running' (that re-verification is running now) | 'version_busy' (drifted, but mid-work or stuck — re-verify would be rejected) | 'awaiting_signoff' (the check passed; it only needs the manager's Hotovo approval) | 'stale_signoff' (later work outranked the sign-off — must be re-checked on the version) | 'none_finished' (no version was ever finished).
+             * @description 'ok' (a version is deployable) | 'drift' (code moved past the checked commit — re-verifiable in place, the only cause with a button) | 'reverify_running' (that re-verification is running now) | 'version_busy' (drifted, but mid-work or stuck — re-verify would be rejected) | 'awaiting_signoff' (the check passed; it only needs the manager's Hotovo approval) | 'stale_signoff' (later work outranked the sign-off — must be re-checked on the version) | 'none_finished' (no version was ever finished) | 'ci_red' (the project's checks on the code that would be deployed failed) | 'ci_running' (those checks are still running).
              * @default ok
              * @enum {string}
              */
-            cause: "ok" | "drift" | "reverify_running" | "version_busy" | "awaiting_signoff" | "stale_signoff" | "none_finished";
+            cause: "ok" | "drift" | "reverify_running" | "version_busy" | "awaiting_signoff" | "stale_signoff" | "none_finished" | "ci_red" | "ci_running";
+            /**
+             * Ci Detail
+             * @description For 'ci_red' / 'ci_running': which check, which run, what it said (the human sentence).
+             */
+            ci_detail?: string | null;
+            /**
+             * Ci Url
+             * @description For 'ci_red' / 'ci_running': the link to that run on GitHub.
+             */
+            ci_url?: string | null;
             /**
              * Version Id
              * @description The implicated version's id — what the re-verify action is posted against.

@@ -95,6 +95,9 @@ export interface DeployMatrixRow {
  * `stale_signoff`    — later work outranked the sign-off; "Over znova" is NOT offered for this shape
  *                      anywhere (its handler rejects it) — route the manager to Riadiace centrum instead.
  * `none_finished`    — no version of this project was ever finished.
+ * `ci_red`           — DEV-51: the version is finished, but the project's checks (CI) on the code that would be
+ *                      deployed failed — also a run that started after the Verifikácia gate (the version tag's).
+ * `ci_running`       — DEV-51: those checks are still running; the deploy unlocks when they pass.
  */
 /**
  * Aliased from the GENERATED contract, never restated by hand: the backend declares the vocabulary as a
@@ -116,6 +119,10 @@ export interface DeployBlock {
    * the action — never re-derive this in the frontend.
    */
   can_reverify: boolean;
+  /** For `ci_red` / `ci_running`: which check, which run, what it said (DEV-51). */
+  ci_detail?: string | null;
+  /** For `ci_red` / `ci_running`: the link to that run on GitHub (DEV-51). */
+  ci_url?: string | null;
 }
 
 /** The full version × customer matrix payload for a project's UAT/PROD tabs. */

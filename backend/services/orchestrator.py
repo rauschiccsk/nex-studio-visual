@@ -6208,6 +6208,28 @@ CI_CONCLUSIONS_OK = ci_status.CI_CONCLUSIONS_OK
 CI_CONCLUSIONS_RED = frozenset({"failure", "timed_out", "startup_failure", "action_required"})
 
 
+def _release_tag_at_head(project_root: Path, version_number: str) -> Optional[str]:
+    """The version tag (``v{version_number}``, as :func:`_git_tag_version` names it) when it points at HEAD.
+
+    The gate waits for the runs a tag push starts only when the tag the PASS made is really on this commit
+    (DEV-51). ``None`` when there is no such tag, it names another commit, or git cannot answer."""
+    import subprocess
+
+    tag = f"v{version_number}"
+    head = _repo_head(project_root)
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(project_root), "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}^{{commit}}"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return tag if head and r.returncode == 0 and r.stdout.strip() == head else None
+
+
 def _project_has_ci(project_root: Path) -> bool:
     """Whether this project has any workflow at all. Without one there is nothing to wait FOR, and waiting
     two minutes on every verdict of a CI-less project would be pure delay."""
@@ -6251,7 +6273,10 @@ def _finding_as_data(f: Any) -> dict[str, Any]:
 
 
 async def _ci_status_for_head(
-    project_root: Path, *, on_wait: Optional[Callable[[str], Awaitable[None]]] = None
+    project_root: Path,
+    *,
+    on_wait: Optional[Callable[[str], Awaitable[None]]] = None,
+    release_tag: Optional[str] = None,
 ) -> tuple[str, str]:
     """CI verdict for the commit the Auditor is about to bless — ``("green"|"red"|"unknown", detail)``.
 
@@ -6263,6 +6288,12 @@ async def _ci_status_for_head(
     ``unknown`` NEVER blocks. A run that has not registered yet, a CI still in flight, an unreachable GitHub —
     none of those are evidence that the code is broken, and a gate that stops on ignorance is a gate people
     learn to route around. Only a COMPLETED, non-successful run is a red.
+
+    DEV-51: ``release_tag`` is the version tag the engine has just pushed to this commit. A tag push starts its
+    own runs (a release gate on ``push: tags``), and the commit usually has older runs already — so "a run
+    exists" stopped meaning "the run I caused exists". NEX Inbox 1.7.0, 10.10.2026: tag pushed 09:47:11, gate
+    read two green runs from an hour before at 09:47:13 and said "CI zelené"; the tag's run registered at
+    09:47:15 and failed. With a tag, the first wait lasts until every workflow the tag starts has its run.
     """
     head = _repo_head(project_root)
     if not head:
@@ -6302,6 +6333,7 @@ async def _ci_status_for_head(
     # Bounded by a COUNT of tries, not by summing the interval: with a zero interval (as tests set it, to
     # measure the logic rather than the clock) an interval-summing loop never reaches its own ceiling — it
     # spins for ever. Mine did, on the first run.
+    tag_workflows = ci_status.postupy_spustene_znackou(project_root, release_tag) if release_tag else []
     tries_left = max(1, CI_RUN_APPEAR_TIMEOUT // max(CI_RUN_APPEAR_INTERVAL, 1))
     rows: list[dict] = []
     while True:
@@ -6310,7 +6342,8 @@ async def _ci_status_for_head(
             return "unknown", failure
         rows = looked or []
         tries_left -= 1
-        if rows or tries_left <= 0:
+        missing = ci_status.chybajuce_behy_znacky(rows, release_tag, tag_workflows) if release_tag else []
+        if (rows and not missing) or tries_left <= 0:
             break
         await asyncio.sleep(CI_RUN_APPEAR_INTERVAL)
     if not rows:
@@ -6344,6 +6377,14 @@ async def _ci_status_for_head(
     # obrazovka. Brána k nemu pridáva len to, čo je JEJ: že už čakala, a ako dlho.
     stav, detail = ci_status.verdikt(rows)
     pending = [r for r in rows if r.get("status") != "completed"]
+    missing = ci_status.chybajuce_behy_znacky(rows, release_tag, tag_workflows) if release_tag else []
+    if stav != "red" and missing:
+        # DEV-51: the run the tag starts never showed up — say so; the older green runs are not its answer.
+        return (
+            "unknown",
+            f"beh postupu {', '.join(missing)} pre značku {release_tag} sa neobjavil ani po "
+            f"{CI_RUN_APPEAR_TIMEOUT} s — verzia prešla bez jeho výsledku",
+        )
     if stav == "unknown" and pending:
         return (
             "unknown",
@@ -9967,9 +10008,12 @@ async def _settle_verifikacia_verdict(
             if on_message is not None:
                 await on_message(waiting)
 
+        _ci_root = claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id)
         ci_state, ci_detail = await _ci_status_for_head(
-            claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id),
+            _ci_root,
             on_wait=_announce_ci_wait,
+            # DEV-51: the PASS just pushed the version tag to this commit — wait for the runs the tag starts.
+            release_tag=_release_tag_at_head(_ci_root, db.get(Version, version_id).version_number),
         )
         ci_red = ci_state == "red"
         if ci_red:

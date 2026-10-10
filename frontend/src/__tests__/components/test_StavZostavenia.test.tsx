@@ -19,6 +19,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 import StavZostavenia from "@/components/riadiace/StavZostavenia";
+import { useStavZostavenia } from "@/components/riadiace/useStavZostavenia";
 import { getCiStatusApi } from "@/services/api/pipeline";
 
 vi.mock("@/services/api/pipeline", () => ({ getCiStatusApi: vi.fn() }));
@@ -26,6 +27,11 @@ vi.mock("@/services/api/pipeline", () => ({ getCiStatusApi: vi.fn() }));
 beforeEach(() => {
   vi.clearAllMocks();
 });
+
+/** The page reads the build's CI once (DEV-51) and hands it down; this is that page in miniature. */
+function Riadok({ versionId }: { versionId: string | null }) {
+  return <StavZostavenia stav={useStavZostavenia(versionId)} />;
+}
 
 describe("Stav zostavenia vedľa fáz", () => {
   it("⚠️ červené zostavenie pomenuje aj postup, nielen číslo behu", async () => {
@@ -35,7 +41,7 @@ describe("Stav zostavenia vedľa fáz", () => {
       sha: "5fb85a6",
     });
 
-    render(<StavZostavenia versionId="v-1" />);
+    render(<Riadok versionId="v-1" />);
 
     expect(await screen.findByText(/Zostavenie zlyhalo/i)).toBeInTheDocument();
     expect(screen.getByText(/postup CI, beh 34869173177/)).toBeInTheDocument();
@@ -44,7 +50,7 @@ describe("Stav zostavenia vedľa fáz", () => {
   it("zelené zostavenie povie, že prešlo", async () => {
     vi.mocked(getCiStatusApi).mockResolvedValue({ stav: "green", detail: "CI zelené (postup CI, beh 5)", sha: "abc" });
 
-    render(<StavZostavenia versionId="v-1" />);
+    render(<Riadok versionId="v-1" />);
 
     expect(await screen.findByText(/Zostavenie prešlo/i)).toBeInTheDocument();
   });
@@ -56,7 +62,7 @@ describe("Stav zostavenia vedľa fáz", () => {
       sha: "abc",
     });
 
-    render(<StavZostavenia versionId="v-1" />);
+    render(<Riadok versionId="v-1" />);
 
     expect(await screen.findByText(/zatiaľ nevieme/i)).toBeInTheDocument();
     expect(screen.queryByText(/Zostavenie prešlo/i)).not.toBeInTheDocument();
@@ -65,7 +71,7 @@ describe("Stav zostavenia vedľa fáz", () => {
   it("⚠️ keď sa stav nedá zistiť, nezobrazí sa NIČ — nie stará hodnota", async () => {
     vi.mocked(getCiStatusApi).mockRejectedValue(new Error("sieť"));
 
-    const { container } = render(<StavZostavenia versionId="v-1" />);
+    const { container } = render(<Riadok versionId="v-1" />);
 
     await waitFor(() => expect(getCiStatusApi).toHaveBeenCalled());
     expect(container.querySelector('[data-testid="stav-zostavenia"]')).toBeNull();
@@ -79,14 +85,44 @@ describe("Stav zostavenia vedľa fáz", () => {
       throw new TypeError("nie je to funkcia");
     });
 
-    const { container } = render(<StavZostavenia versionId="v-1" />);
+    const { container } = render(<Riadok versionId="v-1" />);
 
     expect(container.querySelector('[data-testid="stav-zostavenia"]')).toBeNull();
   });
 
   it("bez vybranej verzie sa GitHubu nepýta vôbec", () => {
-    render(<StavZostavenia versionId={null} />);
+    render(<Riadok versionId={null} />);
 
     expect(getCiStatusApi).not.toHaveBeenCalled();
+  });
+});
+
+describe("DEV-51 — zlyhaný beh jedným klikom", () => {
+  it("pri červenom zostavení ponúkne odkaz na ten beh", async () => {
+    vi.mocked(getCiStatusApi).mockResolvedValue({
+      stav: "red",
+      detail: "CI zlyhalo (postup Release smoke gate, beh 38042619283, failure)",
+      sha: "48de080",
+      url: "https://github.com/rauschiccsk/nex-inbox/actions/runs/38042619283",
+    });
+
+    render(<Riadok versionId="v-1" />);
+
+    const odkaz = await screen.findByRole("link", { name: /Pozrieť beh/i });
+    expect(odkaz).toHaveAttribute("href", "https://github.com/rauschiccsk/nex-inbox/actions/runs/38042619283");
+  });
+
+  it("pri zelenom zostavení odkaz nepridáva", async () => {
+    vi.mocked(getCiStatusApi).mockResolvedValue({
+      stav: "green",
+      detail: "CI zelené (postup CI, beh 5)",
+      sha: "abc",
+      url: "https://github.com/x/y/actions/runs/5",
+    });
+
+    render(<Riadok versionId="v-1" />);
+
+    expect(await screen.findByText(/Zostavenie prešlo/i)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Pozrieť beh/i })).not.toBeInTheDocument();
   });
 });

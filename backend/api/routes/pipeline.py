@@ -435,7 +435,7 @@ async def get_ci_status(
     authz.assert_version_access(db, current_user, version_id)
     koren = claude_agent.PROJECTS_ROOT / orchestrator._project_slug_for_version(db, version_id)
     v = await ci_status.snapshot(koren)
-    return CiStatusRead(stav=v.stav, detail=v.detail, sha=v.sha)
+    return CiStatusRead(stav=v.stav, detail=v.detail, sha=v.sha, bezi=v.bezi, url=v.url)
 
 
 @router.get("/{version_id}", response_model=PipelineBoardRead)

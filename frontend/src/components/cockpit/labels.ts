@@ -284,6 +284,21 @@ export const VERIFICATION_DRIFTED_PROVENANCES = [
   "hotovo_drift",
 ] as const;
 
+/**
+ * DEV-51 — how the project's checks (CI) on the code that would be deployed stand against a deploy. The backend
+ * decides (`deploy.ci_deploy_cause` closes Nasadiť and refuses the deploy itself); this mirrors that rule only
+ * so Riadiace centrum never says "pripravené na nasadenie" next to a failed build. Red blocks; a run still
+ * going blocks until it finishes; not knowing does not — and says so in its own line (StavZostavenia).
+ */
+export type CiDeployBlock = "red" | "running" | null;
+
+export function ciDeployBlock(ci: { stav: string; bezi?: boolean } | null | undefined): CiDeployBlock {
+  if (!ci) return null;
+  if (ci.stav === "red") return "red";
+  if (ci.bezi) return "running";
+  return null;
+}
+
 export function verificationDrifted(
   provenance: string | null | undefined,
 ): boolean {

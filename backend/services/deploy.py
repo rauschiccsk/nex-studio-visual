@@ -73,6 +73,8 @@ from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.schemas.deploy import (
     DEPLOY_CAUSE_AWAITING_SIGNOFF,
+    DEPLOY_CAUSE_CI_RED,
+    DEPLOY_CAUSE_CI_RUNNING,
     DEPLOY_CAUSE_DRIFT,
     DEPLOY_CAUSE_NONE_FINISHED,
     DEPLOY_CAUSE_OK,
@@ -80,7 +82,7 @@ from backend.schemas.deploy import (
     DEPLOY_CAUSE_STALE_SIGNOFF,
     DEPLOY_CAUSE_VERSION_BUSY,
 )
-from backend.services import deploy_progress, private_access, uat_provisioner
+from backend.services import ci_status, deploy_progress, private_access, uat_provisioner
 
 # The terminal pipeline stage = "Hotovo" = a version is VERIFIED (design §3.1,
 # CR-V2-014: reaching ``done`` means *verified*, not *deployed*). Only a verified
@@ -357,6 +359,52 @@ def list_verified_versions(db: Session, project_id: UUID) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# DEV-51 — the project's checks (CI) on the code that would be deployed
+# ---------------------------------------------------------------------------
+
+
+def ci_deploy_cause(ci: Optional[ci_status.StavZostavenia]) -> Optional[str]:
+    """Whether the CI state of the code that would be deployed closes Nasadiť — the ONE rule for the matrix and
+    for the deploy action itself (DEV-51). ``None`` = CI does not block.
+
+    A deploy builds the project's CURRENT code (HEAD), so that is the commit whose CI counts. Red blocks; a run
+    still going blocks until it finishes; ``unknown`` (unreachable GitHub, a project without checks) does not —
+    the same stance as the Verifikácia gate, where a check that cannot be read is no evidence of broken code.
+
+    10.10.2026, NEX Inbox 1.7.0: the release gate the version tag started failed ten minutes after the
+    Verifikácia gate had said "CI zelené"; the screen showed "Zostavenie zlyhalo" next to "Hotovo — pripravené na
+    nasadenie", and nothing between the two stopped a deploy."""
+    if ci is None:
+        return None
+    if ci.stav == "red":
+        return DEPLOY_CAUSE_CI_RED
+    if ci.bezi:
+        return DEPLOY_CAUSE_CI_RUNNING
+    return None
+
+
+def _ci_block(
+    db: Session, project: Project, verified_versions: list[str], ci: Optional[ci_status.StavZostavenia]
+) -> Optional[dict]:
+    """The deploy block for a CI that closes Nasadiť — naming the version the manager would deploy — or ``None``."""
+    cause = ci_deploy_cause(ci) if verified_versions else None
+    if cause is None or ci is None:
+        return None
+    version_number = verified_versions[0]
+    version_id = db.execute(
+        select(Version.id).where(Version.project_id == project.id, Version.version_number == version_number)
+    ).scalar_one_or_none()
+    return {
+        "cause": cause,
+        "version_number": version_number,
+        "version_id": version_id,
+        "can_reverify": False,
+        "ci_detail": ci.detail,
+        "ci_url": ci.url,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Why Nasadiť is closed (v4.0.54) — the cause the deploy screen renders
 # ---------------------------------------------------------------------------
 
@@ -583,7 +631,13 @@ def accepted_versions(db: Session, customer_id: UUID) -> list[str]:
     return result
 
 
-def build_matrix(db: Session, project: Project, user: Optional[object] = None) -> dict:
+def build_matrix(
+    db: Session,
+    project: Project,
+    user: Optional[object] = None,
+    *,
+    ci: Optional[ci_status.StavZostavenia] = None,
+) -> dict:
     """Assemble the version × customer matrix for a project's UAT/PROD tabs (§3.3).
 
     One read returns everything both tabs render:
@@ -642,13 +696,16 @@ def build_matrix(db: Session, project: Project, user: Optional[object] = None) -
         )
 
     verified = list_verified_versions(db, project.id)
+    # DEV-51: a finished version is still not deployable while the checks on the code that would be deployed are
+    # red or running. ``ci`` is read by the caller (it asks GitHub); ``None`` = not known, never a block.
+    ci_block = _ci_block(db, project, verified, ci)
     # One predicate, read three times below — see the note on the flags.
     _may_operate = user is not None and authz.is_owner_or_admin(user, authz.project_owner_id(project))
 
     return {
         "project_slug": project.slug,
         "auth_mode": project.auth_mode,
-        "verified_versions": verified,
+        "verified_versions": [] if ci_block else verified,
         # All three collapse to ONE rule under the ownership model: the owner may do everything on his own
         # project — deploy UAT, deploy PROD, record an acceptance — and so may ``admin``. Nobody else can
         # see the project at all, so there is no third case left to express.
@@ -662,7 +719,7 @@ def build_matrix(db: Session, project: Project, user: Optional[object] = None) -
         "can_deploy": _may_operate,
         # v4.0.54: WHY the Nasadiť button is closed, so the screen never greys out in silence. Computed from
         # the SAME verified list (no second recompute) — see :func:`deployability`.
-        "deployability": deployability(db, project, verified_versions=verified, user=user),
+        "deployability": ci_block or deployability(db, project, verified_versions=verified, user=user),
         "rows": rows,
     }
 
@@ -921,6 +978,29 @@ async def deploy(
             "re-run Verifikácia on the current HEAD before deploying."
         )
 
+    # DEV-51: the same rule as the matrix, asked fresh — the action decides, the screen only shows. A deploy
+    # builds the current code, so its CI is the CI that counts.
+    from backend.services import claude_agent
+    from backend.services.orchestrator import _project_has_ci
+
+    _root = claude_agent.PROJECTS_ROOT / project.slug
+    ci = await ci_status.stav_commitu(_root, cerstvy=True)
+    if ci_deploy_cause(ci) == DEPLOY_CAUSE_CI_RED:
+        raise ValueError(
+            f"Nasadenie zastavené: kontroly projektu na kóde, ktorý by sa nasadil, zlyhali — {ci.detail}. "
+            "Verzia sa k zákazníkovi nedostane, kým chyba nie je opravená a kontroly neprejdú."
+        )
+    if ci_deploy_cause(ci) == DEPLOY_CAUSE_CI_RUNNING:
+        raise ValueError(
+            f"Nasadenie zastavené: kontroly projektu na kóde, ktorý by sa nasadil, ešte bežia — {ci.detail}. "
+            "Nasadiť sa dá, keď dobehnú."
+        )
+    ci_warning = (
+        f"Stav kontrol projektu (CI) sa pred nasadením nepodarilo potvrdiť: {ci.detail}."
+        if ci.stav == "unknown" and _project_has_ci(_root)
+        else None
+    )
+
     # PROD gate (§3.5) — never bypassed.
     if environment == "prod" and not is_accepted(db, customer_id, version_number):
         raise ValueError(
@@ -1036,6 +1116,8 @@ async def deploy(
     # :class:`RunnerResult`, an injected/faked runner a plain 3-tuple (→ no warnings). Read via ``getattr``
     # so the seam stays the 3-tuple every existing fake already returns.
     warnings: list[str] = list(getattr(outcome, "warnings", None) or [])
+    if ci_warning:
+        warnings.append(ci_warning)
 
     # v4.0.58 — prove the UAT instance is actually OPENABLE, i.e. that a launch ticket can be minted for it.
     # Runs only where the cockpit's "Spustiť" applies (UAT + token), and only on an otherwise-successful
