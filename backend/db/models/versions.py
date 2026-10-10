@@ -40,6 +40,10 @@ class Version(Base, UUIDMixin, TimestampMixin):
     # contract. Programovanie preserves it (wire data, don't redesign) and the Auditor
     # verifies the delivered FE still matches it. NULL until Vizuál is approved.
     vizual_approved_sha = Column(String(40), nullable=True)
+    # DEV-50: ``fix`` — a fix of an error in code we delivered (it does not do what the approved specification
+    # says), never billed; ``change`` — new work or a change, billed. NULL = not decided: a new version counts as
+    # ``change``, a fast fix must be decided by the Manažér before its delivered-token statement is issued.
+    work_kind = Column(String(10), nullable=True)
 
     __table_args__ = (
         UniqueConstraint(
@@ -51,6 +55,7 @@ class Version(Base, UUIDMixin, TimestampMixin):
             "status IN ('planned', 'active', 'done', 'released')",
             name="ck_versions_status",
         ),
+        CheckConstraint("work_kind IS NULL OR work_kind IN ('fix', 'change')", name="ck_versions_work_kind"),
     )
 
     # Relationship to the owning Project. The inverse side ``Project.versions``

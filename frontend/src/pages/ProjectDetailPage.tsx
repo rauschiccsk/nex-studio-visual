@@ -22,6 +22,8 @@ import { draftKey, useDraft } from "@/hooks/useDraft";
 import { useAuthStore } from "@/store/authStore";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
+import WorkKindChoice from "@/components/common/WorkKindChoice";
+import type { WorkKind } from "@/lib/workKind";
 import ProjectSettingsSection from "@/components/project/ProjectSettingsSection";
 import type { ProjectRead, UserRead } from "@/types";
 import type { Version } from "@/types/version";
@@ -135,6 +137,8 @@ export default function ProjectDetailPage() {
   const fastFixDraft = useDraft(draftKey("rychla-oprava", slug));
   const [fastFixSubmitting, setFastFixSubmitting] = useState(false);
   const [fastFixError, setFastFixError] = useState<HumanError | null>(null);
+  // DEV-50: a fast fix says up front whether it fixes our own error (never billed) or changes what was agreed.
+  const [fastFixKind, setFastFixKind] = useState<WorkKind | null>(null);
 
   // Guarded project deletion (CR-V2-027): admin-only (role `ri`) + only before any PROD deploy. The
   // backend enforces both; the UI mirrors them (disabled-over-hidden) and adds a type-DELETE confirm.
@@ -207,11 +211,11 @@ export default function ProjectDetailPage() {
 
   const submitFastFix = async () => {
     const directive = fastFixDirective.trim();
-    if (!project || !directive || fastFixSubmitting) return;
+    if (!project || !directive || !fastFixKind || fastFixSubmitting) return;
     setFastFixSubmitting(true);
     setFastFixError(null);
     try {
-      const res = await startFastFixApi(project.id, directive);
+      const res = await startFastFixApi(project.id, directive, fastFixKind);
       fastFixDraft.clear();
       // ICCINT-62: shared with the Dedo proposal bar, the OTHER entry into this same lane — it omitted this
       // step and the build started with the Manažér left on the previous version. One helper, both entries.
@@ -512,6 +516,7 @@ export default function ProjectDetailPage() {
                 onClick={() => {
                   setFastFixError(null);
                   setFastFixDirective(fastFixDraft.text);
+                  setFastFixKind(null);
                   setFastFixOpen(true);
                 }}
                 className="flex items-center gap-1.5 border border-[var(--color-accent-primary)]/40 text-[var(--color-accent-primary)] hover:bg-[var(--color-accent-primary)]/10 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
@@ -833,6 +838,9 @@ export default function ProjectDetailPage() {
               placeholder="Napríklad: V ľavom menu oprav preklep „Nastvenia“ na „Nastavenia“."
               className="w-full resize-none rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)] focus:border-primary-500 focus:outline-none"
             />
+            <div className="mt-3">
+              <WorkKindChoice name="fastfix-kind" value={fastFixKind} onChange={setFastFixKind} disabled={fastFixSubmitting} />
+            </div>
             <ErrorNote
               error={fastFixError}
               className="mt-2 rounded-lg bg-[var(--color-state-error-bg)] border border-[var(--color-state-error-bg)] px-3 py-2"
@@ -847,7 +855,8 @@ export default function ProjectDetailPage() {
               </button>
               <button
                 onClick={submitFastFix}
-                disabled={!fastFixDirective.trim() || fastFixSubmitting}
+                disabled={!fastFixDirective.trim() || !fastFixKind || fastFixSubmitting}
+                title={fastFixKind ? undefined : "Najprv zvoľ druh práce — oprava chyby, alebo zmena"}
                 className="flex items-center gap-1.5 bg-primary-600 hover:bg-primary-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
               >
                 {fastFixSubmitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}

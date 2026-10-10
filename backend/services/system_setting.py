@@ -360,6 +360,28 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
         unit="€ / hod",
         description="Sadzba pre ručne zadané externé náklady. 0 = nenastavené → nezobrazí sa.",
     ),
+    # DEV-50 — invoicing development by delivered tokens (Director 10.10.2026): code and tests share one rate,
+    # documentation has its own, lower one. 0 = not set → a statement is shown but cannot be issued.
+    "billing_rate_code": _Default(
+        value="0.0",
+        value_type="float",
+        label="Sadzba fakturácie — kód a skúšky",
+        unit="€ / 1 000 tokenov",
+        description=(
+            "Koľko účtujeme zákazníkovi za 1 000 tokenov dodaného kódu a skúšok (súpis dodaných tokenov). "
+            "0 = nenastavené → súpis sa dá pozrieť, ale nie vydať."
+        ),
+    ),
+    "billing_rate_docs": _Default(
+        value="0.0",
+        value_type="float",
+        label="Sadzba fakturácie — dokumentácia",
+        unit="€ / 1 000 tokenov",
+        description=(
+            "Koľko účtujeme zákazníkovi za 1 000 tokenov dodanej dokumentácie (špecifikácia, návrh, plán úloh, "
+            "poznámky k vydaniu). 0 = nenastavené → súpis sa dá pozrieť, ale nie vydať."
+        ),
+    ),
 }
 
 

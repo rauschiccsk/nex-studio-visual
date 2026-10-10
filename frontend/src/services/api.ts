@@ -88,6 +88,26 @@ export const api = createApiClient({
 /** Low-level request primitive (exported for advanced/streaming cases). */
 export const request = api.request;
 
+/**
+ * Download a file the backend serves only to a signed-in user (a CSV statement, DEV-50) and hand it to the browser
+ * as a file. A plain link cannot carry the token; the name comes from the server when it sends one.
+ */
+export async function downloadFile(path: string, fallbackName: string): Promise<void> {
+  const token = readToken();
+  const res = await fetch(`${resolveBaseUrl()}/api/v1${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error(`Súbor sa nepodarilo stiahnuť (${res.status}).`);
+  const disposition = res.headers.get("content-disposition") ?? "";
+  const name = /filename="([^"]+)"/.exec(disposition)?.[1] ?? fallbackName;
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // ---------------------------------------------------------------------------
 // Convenience auth helpers — thin wrappers over the verb helpers
 // ---------------------------------------------------------------------------

@@ -26,6 +26,8 @@ import { RESTORED_DRAFT_LABEL, draftKey, useDraft } from "@/hooks/useDraft";
 import { appendZadanie, zadanieClashOf } from "@/components/version/zadanieClash";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
+import WorkKindChoice from "@/components/common/WorkKindChoice";
+import type { WorkKind } from "@/lib/workKind";
 import type { ProjectRead } from "@/types";
 import type { Version, VersionUpdate } from "@/types/version";
 
@@ -77,6 +79,8 @@ export default function NewVersionPage() {
   const [versionManual, setVersionManual] = useState(false);
   const [name, setName] = useState("");
   const [targetDate, setTargetDate] = useState("");
+  // DEV-50: a new version is new work unless the Manažér says it fixes an error in code we delivered.
+  const [workKind, setWorkKind] = useState<WorkKind>("change");
   // The Zadanie — the free-text brief, the MAIN input (design §4.3). Persisted on save to
   // docs/specs/versions/v<N>/customer-requirements.md; the Príprava phase reads it.
   const [zadanie, setZadanie] = useState("");
@@ -360,6 +364,7 @@ export default function NewVersionPage() {
           // The version's free-text intent mirrors the Zadanie so the version list shows a summary.
           description: zadanie.trim() || undefined,
           target_date: targetDate || undefined,
+          work_kind: workKind,
         });
       }
       setCreatedVersion(v);
@@ -562,6 +567,9 @@ export default function NewVersionPage() {
                 className={`${inputCls} disabled:opacity-60`}
               />
             </div>
+
+            {/* DEV-50 — whether the delivered-token statement bills this version. */}
+            <WorkKindChoice name="version-kind" value={workKind} onChange={setWorkKind} disabled={!!savedVersion} />
 
             {/* Zadanie — the free-text brief, the MAIN input (design §4.3). Saved to
                 docs/specs/versions/v<N>/customer-requirements.md; the Príprava phase reads it. */}

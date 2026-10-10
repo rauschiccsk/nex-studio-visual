@@ -7,6 +7,7 @@ from backend.db.models.bugs import Bug
 from backend.db.models.credentials import Credential
 from backend.db.models.customers import Customer
 from backend.db.models.dedo_proposal import DedoProjectProposal
+from backend.db.models.delivery_statement import DeliveryStatement
 from backend.db.models.deploy import DeployEvent
 from backend.db.models.external_cost import ExternalCost
 from backend.db.models.foundation import User, UserAgentSettings, UserSession
@@ -30,6 +31,7 @@ __all__ = [
     "Customer",
     "DeployEvent",
     "DedoProjectProposal",
+    "DeliveryStatement",
     "ExternalCost",
     "ModelPrice",
     "OrchestratorSession",

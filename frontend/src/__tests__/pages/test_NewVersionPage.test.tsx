@@ -482,3 +482,31 @@ describe("NewVersionPage — rozpísané zadanie prežije odchod na inú obrazov
     await waitFor(() => expect(window.localStorage.getItem(`nex.draft.zadanie-novej-verzie.${project.id}`)).toBeNull());
   });
 });
+
+describe("NewVersionPage — druh práce (DEV-50)", () => {
+  it("nová verzia je predvolene zmena alebo nová práca a tak sa aj založí", async () => {
+    createVersionMock.mockResolvedValue({ ...version, id: "v-1", description: "Jedna veta." });
+    writeZadanieMock.mockResolvedValue({ relative_path: "x", status: "saved" });
+
+    await renderPage();
+    expect(await screen.findByRole("radio", { name: /zmena alebo nová práca/i })).toBeChecked();
+    await userEvent.type(screen.getByPlaceholderText(/Opíš, čo má verzia priniesť/i), "Jedna veta.");
+    await userEvent.click(screen.getByRole("button", { name: /uložiť zadanie/i }));
+
+    await waitFor(() => expect(createVersionMock).toHaveBeenCalled());
+    expect(createVersionMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ work_kind: "change" }));
+  });
+
+  it("verzia, ktorá opravuje chybu v dodanom kóde, sa tak aj založí — neúčtuje sa", async () => {
+    createVersionMock.mockResolvedValue({ ...version, id: "v-1", description: "Jedna veta." });
+    writeZadanieMock.mockResolvedValue({ relative_path: "x", status: "saved" });
+
+    await renderPage();
+    await userEvent.click(await screen.findByRole("radio", { name: /oprava chyby v dodanom kóde/i }));
+    await userEvent.type(screen.getByPlaceholderText(/Opíš, čo má verzia priniesť/i), "Jedna veta.");
+    await userEvent.click(screen.getByRole("button", { name: /uložiť zadanie/i }));
+
+    await waitFor(() => expect(createVersionMock).toHaveBeenCalled());
+    expect(createVersionMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ work_kind: "fix" }));
+  });
+});

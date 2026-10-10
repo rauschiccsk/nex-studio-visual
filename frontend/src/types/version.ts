@@ -44,6 +44,8 @@ export interface VersionCreate {
   name?: string;
   description?: string;
   target_date?: string;
+  /** DEV-50 — a fix of our own error (never billed) or a change (billed). */
+  work_kind?: "fix" | "change";
 }
 
 /** Partial update for an existing version (``PATCH /versions/{id}``). */

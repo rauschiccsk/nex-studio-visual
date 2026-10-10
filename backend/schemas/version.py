@@ -71,6 +71,13 @@ class VersionCreate(BaseModel):
         default=None,
         description="Planned release date.",
     )
+    work_kind: Optional[Literal["fix", "change"]] = Field(
+        default=None,
+        description=(
+            "DEV-50: 'fix' — fixes an error in delivered code (never billed); 'change' — new work or a change "
+            "(billed). None: a new version counts as 'change'."
+        ),
+    )
 
 
 class VersionUpdate(BaseModel):

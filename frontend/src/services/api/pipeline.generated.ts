@@ -813,6 +813,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/delivery-statements/{statement_id}/csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Statement Csv
+         * @description The issued statement as CSV — the basis for the invoice.
+         */
+        get: operations["statement_csv_api_v1_delivery_statements__statement_id__csv_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/epics": {
         parameters: {
             query?: never;
@@ -2961,6 +2981,30 @@ export interface paths {
         patch: operations["update_version_api_v1_versions__version_id__patch"];
         trace?: never;
     };
+    "/api/v1/versions/{version_id}/delivery-statement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Statement
+         * @description The statement as it would be issued now, and the ones already issued (newest first).
+         */
+        get: operations["get_statement_api_v1_versions__version_id__delivery_statement_get"];
+        put?: never;
+        /**
+         * Issue Statement
+         * @description Issue it: the counts, the rates and the tokenizer are frozen — a later change cannot alter it (409 + why).
+         */
+        post: operations["issue_statement_api_v1_versions__version_id__delivery_statement_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/versions/{version_id}/nastavenia": {
         parameters: {
             query?: never;
@@ -3092,6 +3136,26 @@ export interface paths {
          */
         get: operations["get_task_plan_api_v1_versions__version_id__task_plan_get"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/versions/{version_id}/work-kind": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Work Kind
+         * @description Decide whether the version fixed an error in delivered code (never billed) or was a change (billed).
+         */
+        put: operations["set_work_kind_api_v1_versions__version_id__work_kind_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -3634,6 +3698,25 @@ export interface components {
              * @description Updated bug title.
              */
             title?: string | null;
+        };
+        /**
+         * CalibrationRead
+         * @description What the agent's work on the version cost (Náklady), per kind and per 1 000 delivered tokens.
+         */
+        CalibrationRead: {
+            /**
+             * Complete
+             * @default true
+             */
+            complete: boolean;
+            /** Eur Code */
+            eur_code?: number | null;
+            /** Eur Docs */
+            eur_docs?: number | null;
+            /** Per 1K Code */
+            per_1k_code?: number | null;
+            /** Per 1K Docs */
+            per_1k_docs?: number | null;
         };
         /**
          * ChangePasswordRequest
@@ -4258,6 +4341,25 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /** DeliveredFileRead */
+        DeliveredFileRead: {
+            /** Excluded */
+            excluded?: string | null;
+            /** Kind */
+            kind?: string | null;
+            /** Lines */
+            lines: number;
+            /** Path */
+            path: string;
+            /** Tokens */
+            tokens: number;
+        };
+        /** DeliveryStatementView */
+        DeliveryStatementView: {
+            /** Issued */
+            issued: components["schemas"]["IssuedStatementRead"][];
+            preview: components["schemas"]["StatementPreviewRead"];
+        };
         /**
          * DeployBlock
          * @description WHY the Nasadiť button is closed — the cause the UAT/PROD screen renders (v4.0.54).
@@ -4774,6 +4876,8 @@ export interface components {
              * Format: uuid
              */
             project_id: string;
+            /** Work Kind */
+            work_kind?: ("fix" | "change") | null;
         };
         /**
          * FastFixStartResponse
@@ -4953,6 +5057,44 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** IssuedStatementRead */
+        IssuedStatementRead: {
+            /** Amount Eur */
+            amount_eur: string;
+            /** Base Sha */
+            base_sha: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Delivered Sha */
+            delivered_sha: string;
+            /** Delivered Source */
+            delivered_source: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Rate Code */
+            rate_code: string;
+            /** Rate Docs */
+            rate_docs: string;
+            /** Tokenizer */
+            tokenizer: string;
+            /** Tokens Code */
+            tokens_code: number;
+            /** Tokens Docs */
+            tokens_docs: number;
+            /** Tokens Tests */
+            tokens_tests: number;
+            /**
+             * Work Kind
+             * @enum {string}
+             */
+            work_kind: "fix" | "change";
+        };
         /**
          * KbIndexStatusRead
          * @description Sedí RAG index so Znalostnou bázou?
@@ -5002,6 +5144,13 @@ export interface components {
              * @description V indexe sú, ale staršie než ich podoba na disku.
              */
             stale: number;
+        };
+        /** KindTotalRead */
+        KindTotalRead: {
+            /** Lines */
+            lines: number;
+            /** Tokens */
+            tokens: number;
         };
         /**
          * LoginRequest
@@ -6272,6 +6421,43 @@ export interface components {
              */
             reason: string;
         };
+        /** StatementPreviewRead */
+        StatementPreviewRead: {
+            /** Amount Eur */
+            amount_eur?: string | null;
+            /** Base Sha */
+            base_sha?: string | null;
+            /** Blocked */
+            blocked?: string | null;
+            calibration?: components["schemas"]["CalibrationRead"] | null;
+            /**
+             * Cannot Issue
+             * @default []
+             */
+            cannot_issue: string[];
+            code?: components["schemas"]["KindTotalRead"] | null;
+            /** Delivered Sha */
+            delivered_sha?: string | null;
+            /** Delivered Source */
+            delivered_source?: string | null;
+            docs?: components["schemas"]["KindTotalRead"] | null;
+            /**
+             * Files
+             * @default []
+             */
+            files: components["schemas"]["DeliveredFileRead"][];
+            /** Rate Code */
+            rate_code: string;
+            /** Rate Docs */
+            rate_docs: string;
+            tests?: components["schemas"]["KindTotalRead"] | null;
+            /** Tokenizer */
+            tokenizer: string;
+            /** Version Number */
+            version_number: string;
+            /** Work Kind */
+            work_kind?: ("fix" | "change") | null;
+        };
         /**
          * SystemSettingRead
          * @description Serialised representation of a single system_settings row.
@@ -6902,6 +7088,11 @@ export interface components {
              * @description Semver-style version string, e.g. '1.0.0' or '1.1.0'.
              */
             version_number: string;
+            /**
+             * Work Kind
+             * @description DEV-50: 'fix' — fixes an error in delivered code (never billed); 'change' — new work or a change (billed). None: a new version counts as 'change'.
+             */
+            work_kind?: ("fix" | "change") | null;
         };
         /**
          * VersionRead
@@ -7045,6 +7236,19 @@ export interface components {
             round: string;
             /** Seq */
             seq: number;
+        };
+        /** WorkKindRead */
+        WorkKindRead: {
+            /** Work Kind */
+            work_kind?: ("fix" | "change") | null;
+        };
+        /** WorkKindWrite */
+        WorkKindWrite: {
+            /**
+             * Work Kind
+             * @enum {string}
+             */
+            work_kind: "fix" | "change";
         };
         /**
          * _AdoptRequest
@@ -8713,6 +8917,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DedoBuildRead"][];
+                };
+            };
+        };
+    };
+    statement_csv_api_v1_delivery_statements__statement_id__csv_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                statement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -12221,6 +12456,68 @@ export interface operations {
             };
         };
     };
+    get_statement_api_v1_versions__version_id__delivery_statement_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryStatementView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    issue_statement_api_v1_versions__version_id__delivery_statement_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssuedStatementRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     version_settings_api_v1_versions__version_id__nastavenia_get: {
         parameters: {
             query?: never;
@@ -12367,6 +12664,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["_TaskPlanResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_work_kind_api_v1_versions__version_id__work_kind_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkKindWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkKindRead"];
                 };
             };
             /** @description Validation Error */

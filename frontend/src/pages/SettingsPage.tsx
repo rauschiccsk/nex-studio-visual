@@ -141,6 +141,15 @@ const SETTINGS_CATEGORIES: SettingsCategory[] = [
       "0 = nenastavené → údaj sa nezobrazí namiesto vymysleného čísla.",
     prefixes: ["metrics_"],
   },
+  {
+    id: "billing",
+    label: "Fakturácia vývoja",
+    description:
+      "Sadzby, za ktoré účtujeme zákazníkovi dodaný vývoj podľa súpisu dodaných tokenov (Náklady → verzia): " +
+      "kód a skúšky jednou sadzbou, dokumentácia vlastnou. Oprava chyby v dodanom kóde sa neúčtuje. " +
+      "0 = nenastavené → súpis sa dá pozrieť, ale nie vydať.",
+    prefixes: ["billing_"],
+  },
 ];
 
 // Role options drive BOTH the Users filter and the create/edit form. Order

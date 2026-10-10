@@ -387,6 +387,7 @@ async def start_fast_fix(
     ).scalar_one()
     try:
         version = fast_fix_service.create_patch_version(db, project_id=payload.project_id, user_id=current_user.id)
+        version.work_kind = payload.work_kind  # DEV-50 — decided when the fast fix is started
         state = await orchestrator.apply_action(
             db,
             version_id=version.id,

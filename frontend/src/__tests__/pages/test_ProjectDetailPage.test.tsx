@@ -233,10 +233,13 @@ describe("ProjectDetailPage — Fast-Fix Lane (CR-NS-095)", () => {
     await userEvent.click(entry);
 
     await userEvent.type(screen.getByLabelText(/popis opravy/i), "Oprav preklep v sidebare.");
+    // DEV-50: the fast fix says whether it fixes our own error (never billed) — required before it can start.
+    expect(screen.getByRole("button", { name: /spustiť rýchlu opravu/i })).toBeDisabled();
+    await userEvent.click(screen.getByRole("radio", { name: /oprava chyby v dodanom kóde/i }));
     await userEvent.click(screen.getByRole("button", { name: /spustiť rýchlu opravu/i }));
 
     await waitFor(() =>
-      expect(startFastFixApiMock).toHaveBeenCalledWith("p1", "Oprav preklep v sidebare."),
+      expect(startFastFixApiMock).toHaveBeenCalledWith("p1", "Oprav preklep v sidebare.", "fix"),
     );
     // CR-V2-019 (OQ-7): the build board route is /vyvoj (renamed from /cockpit).
     await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/vyvoj"));
@@ -270,6 +273,7 @@ describe("ProjectDetailPage — Fast-Fix Lane (CR-NS-095)", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: /^rýchla oprava$/i }));
     await userEvent.type(screen.getByLabelText(/popis opravy/i), "x");
+    await userEvent.click(screen.getByRole("radio", { name: /zmena alebo nová práca/i }));
     await userEvent.click(screen.getByRole("button", { name: /spustiť rýchlu opravu/i }));
 
     expect(await screen.findByText(/no semver version to patch/i)).toBeInTheDocument();

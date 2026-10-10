@@ -1,0 +1,42 @@
+"""An issued delivered-token statement of a version — the basis of an invoice for development (DEV-50).
+
+Written once, when the Manažér issues it, and never rewritten: the rates, the counting rule and the tokenizer it was
+issued with stay with it, so a later change cannot alter an invoice already sent. A new issue is a new row.
+"""
+
+from sqlalchemy import CheckConstraint, Column, ForeignKey, Integer, Numeric, String
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+
+from backend.db.models.base import Base, TimestampMixin, UUIDMixin
+
+
+class DeliveryStatement(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "delivery_statements"
+
+    version_id = Column(UUID(as_uuid=True), ForeignKey("versions.id", ondelete="CASCADE"), nullable=False, index=True)
+    #: The delivered state of the previous version (or of the project after founding) and of this one.
+    base_sha = Column(String(40), nullable=False)
+    delivered_sha = Column(String(40), nullable=False)
+    #: Where the delivered state came from — the sign-off, the Verifikácia PASS, or the version tag.
+    delivered_source = Column(String(40), nullable=False)
+    tokenizer = Column(String(100), nullable=False)
+    #: ``fix`` (an error in delivered code — 0 €) or ``change`` (billed).
+    work_kind = Column(String(10), nullable=False)
+    tokens_code = Column(Integer, nullable=False)
+    tokens_tests = Column(Integer, nullable=False)
+    tokens_docs = Column(Integer, nullable=False)
+    #: € per 1 000 tokens at issue — code and tests share one rate, documentation has its own.
+    rate_code = Column(Numeric(12, 4), nullable=False)
+    rate_docs = Column(Numeric(12, 4), nullable=False)
+    amount_eur = Column(Numeric(12, 2), nullable=False)
+    #: Every file of the delivery: path, kind or the reason it was left out, lines, tokens.
+    files = Column(JSONB, nullable=False)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("work_kind IN ('fix', 'change')", name="ck_delivery_statements_work_kind"),
+        CheckConstraint(
+            "tokens_code >= 0 AND tokens_tests >= 0 AND tokens_docs >= 0 AND amount_eur >= 0",
+            name="ck_delivery_statements_nonneg",
+        ),
+    )

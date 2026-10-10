@@ -268,10 +268,16 @@ export function getPipelineBoardApi(versionId: string, limit = 50): Promise<Pipe
 // Fast-Fix Lane entry (F-009 §3, CR-NS-095): one prompt → the backend auto-creates the next PATCH
 // version (vX.Y.Z+1) and starts a `fast_fix` pipeline carrying the Director directive. Returns the new
 // version_id (navigate the cockpit to it) + the initial board.
-export function startFastFixApi(projectId: string, directive: string): Promise<FastFixStartResponse> {
+export function startFastFixApi(
+  projectId: string,
+  directive: string,
+  /** DEV-50 — decided when the fast fix starts; omitted (a Dedo proposal) leaves it for the statement to ask. */
+  workKind?: "fix" | "change",
+): Promise<FastFixStartResponse> {
   return api.post<FastFixStartResponse>("/pipeline/fast-fix", {
     project_id: projectId,
     directive,
+    ...(workKind ? { work_kind: workKind } : {}),
   });
 }
 

@@ -18,6 +18,7 @@ import { PHASE_LABELS, type BuildPhase } from "@/components/cockpit/labels";
 import type { AgentModel } from "@/types/user_agent_setting";
 import { familyLabel, modelDisplayName } from "@/utils/modelLabel";
 import type { CostRow, CostTotals, ManagerOverhead, PriceList, ProjectCosts } from "@/types/metrics";
+import DeliveryStatementPanel from "@/components/naklady/DeliveryStatementPanel";
 
 type View = "version" | "cumulative";
 
@@ -752,6 +753,9 @@ export default function MetricsPage() {
           />
         </div>
       )}
+
+      {/* DEV-50: what the selected version delivered, counted as tokens — the basis of invoicing development. */}
+      {view === "version" && selectedVersionId && <DeliveryStatementPanel versionId={selectedVersionId} />}
 
       {/* Per-version breakdown — the same table shape, one per version */}
       <h2 className="text-sm font-semibold text-[var(--color-text-secondary)] mb-2">Podľa verzie</h2>

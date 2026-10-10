@@ -269,6 +269,7 @@ def create(
         name=data.name,
         description=data.description,
         target_date=data.target_date,
+        work_kind=data.work_kind,
     )
     db.add(version)
     db.flush()

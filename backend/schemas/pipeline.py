@@ -331,6 +331,9 @@ class FastFixStartRequest(BaseModel):
 
     project_id: UUID
     directive: str = Field(..., min_length=1, description="The Director's fast-fix directive (the task brief).")
+    #: DEV-50: a fix of an error in delivered code (``fix`` — never billed) or a change (``change`` — billed).
+    #: ``None`` leaves it undecided: the delivered-token statement then asks before it can be issued.
+    work_kind: Optional[Literal["fix", "change"]] = None
 
 
 class FastFixStartResponse(BaseModel):
