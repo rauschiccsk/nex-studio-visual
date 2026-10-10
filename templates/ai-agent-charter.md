@@ -47,26 +47,10 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   preview MSW/fixtures reálnymi API volaniami), NEMENÍŠ layout, panely, počet stĺpcov, paletu ani komponenty.
   Nezávislý Auditor vo Verifikácii porovná dodaný FE oproti schválenému Vizuálu (`git diff`); prerobená
   schválená obrazovka = **FAIL**. Čo Manažér schválil, to sa dodá.
-- **Oprava Verifikácie — ZREPRODUKUJ ZLYHANIE, NIE LEN „testy sú zelené" (v4.0.47, upravené ICCINT-16).**
-  Keď opravuješ zlyhanie zo skúšky po spustení (Verifikácia FAIL), konkrétny dôvod máš v zadaní („Konkrétny
-  dôvod zlyhania (zo skúšky po spustení, overené enginom): …"). **Opravné kolo beží v izolovanom
-  Programovaní a Docker v ňom NEMÁŠ** — appku v kontajneri nespustíš. Platí toto, a je to hranica, nie výhovorka:
-  - **Vyčerpaj, čo sa v izolácii overiť DÁ, a rob to naozaj.** Spusti **celú** testovú sadu backendu proti
-    `DATABASE_URL` cez `.venv` (postup nižšie), nie len tie testy, ktorých sa oprava dotkla; k tomu
-    `type-check` + `lint` frontendu a `ruff` backendu. Ak sa dá zlyhanie zachytiť testom, **napíš ten test**
-    — najlepší dôkaz opravy je test, ktorý by pred ňou sčervenel.
-  - **Vedz, čo takto overiť NEVIEŠ, a povedz to.** Rozdiel hosť ↔ kontajner (čo sa zabalí do image,
-    rozloženie súborov, cesty, `release_smoke_test.sh`, schéma v prázdnej smoke DB) je presne to, čo zelené
-    testy v izolácii nezachytia — napr. `/api/v1/release-notes` môže lokálne vracať správne dáta a v image
-    prázdno alebo verziu v zlom formáte (parser vytiahne z nadpisu `## v0.1.0 — Initial prototype` celý text
-    namiesto `v0.1.0`). Preto pri takom dôvode zlyhania **čítaj, čo sa do image kopíruje** (`Dockerfile`,
-    `.dockerignore`, `docker-compose.yml`, `release_smoke_test.sh`) a oprav príčinu tam; do `summary` napíš,
-    že overenie v bežiacom kontajneri urobí až skúška po spustení.
-  - **Overenie v bežiacom kontajneri robí Verifikácia** — má Docker a spúšťa presne tú kontrolu, ktorá
-    padla. Nehlás „overené v kontajneri", keď si to spraviť nemohol; **nepravdivé DONE je horšie než
-    priznaná hranica** a druhé kolo Verifikácie ti povie pravdu tak či tak.
-  - **Nikdy neopakuj tú istú opravu naslepo.** Ak ti Verifikácia vráti to isté zlyhanie druhýkrát, tvoja
-    hypotéza o príčine bola zlá — zmeň hypotézu (čítaj build/deploy súbory appky), nie formuláciu.
+- **Oprava Verifikácie — zreprodukuj zlyhanie, nie len „testy sú zelené“ (v4.0.47, ICCINT-16).** Opravné kolo
+  beží v izolovanom Programovaní bez Dockera; postup je v zručnosti `verification-fix` — použi ju pri každom
+  opravnom kole. Nehlás „overené v kontajneri“, keď si to spraviť nemohol, a tú istú opravu nikdy neopakuj
+  naslepo — keď sa zlyhanie vráti, zmeň hypotézu.
 - **Vizuál — PREVIEW HARNESS NIKDY NESMIE UKÁZAŤ AUTH-STENU (v4.0.45).** Živý náhľad beží pod `VITE_PREVIEW`
   BEZ backendu (MSW mockne dáta + `GET /session`), aby Manažér videl **obrazovky appky**, nie login. Preto
   globálny handler neúspešnej autentifikácie (`onUnauthorized` v `createApiClient`) **MUSÍ byť v preview
@@ -77,24 +61,10 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   aplikácia prestala posielať na prihlásenie (v4.43.14). (`<ProtectedRoute>` v preview už renderuje priamo —
   drž rovnaký princíp aj v api klientovi.) Predbundlovanie MSW rieši sandbox centrálne (`optimizeDeps`), to
   konfigurovať nemusíš.
-- **NEX Manager token-launch (`auth_mode=token`) — POVINNÝ BE kontrakt (v4.0.19).** Keď je projekt token-launch
-  (vzor NEX Inbox), appka sa NEspúšťa vlastným loginom — NEX Manager ju otvorí presmerovaním na
-  **`GET /api/v1/launch?lt=<JWT>`**. MUSÍŠ tento landing endpoint implementovať; **nestačí len validovať Bearer
-  token na `/auth/me`** (presne to nex-shopify spravil a launch z Managera vrátil `404 {"detail":"Not Found"}`).
-  Endpoint: (1) **overí launch-token `lt`** — HS256, podpísaný zdieľaným NEX Manager launch-kľúčom (z configu):
-  `iss=nex-manager`, `aud=<vlastný module slug>`, `purpose=module-launch`, `sub=<username>`, neexpirovaný
-  (TTL 30 s), one-shot (`jti`); (2) **založí session** používateľa (identita z `sub`; modul NEMÁ vlastnú
-  user-tabuľku ani heslo — identitu rieši z Managera) a vystaví **`GET /session`** (aktuálna identita); (3)
-  **presmeruje do SPA** (root), nech používateľ dopadne prihlásený. Pri neplatnom/expirovanom `lt` čistý **401**,
-  NIKDY holý 404. Autoritatívny kontrakt: `docs/architecture/icc-deploy-nex-manager.md` §4.4 + NEX Manager
-  `routers/launch.py` / `core/security.create_launch_token`. (`auth_mode=password` appky používajú `POST /auth/login`
-  + `/auth/me` — nie toto.)
-  - **Presné názvy env premenných launch-kontraktu (v4.0.53) — MUSÍŠ ich takto deklarovať**, inak UAT „Spustiť"
-    zlyhá (provisioner vpisuje kľúč zo spárovaného NEX Managera práve pod týmito názvami): launch-kľúč čítaj
-    v configu z **`MANAGER_LAUNCH_SIGNING_KEY`** (nie vlastný názov ako `NEX_MANAGER_LAUNCH_KEY`); `aud` over
-    proti **`MANAGER_MODULE_SLUG`** (default = vlastný slug); a v `docker-compose.yml` deklaruj všetky tri —
-    `MANAGER_LAUNCH_SIGNING_KEY`, `MANAGER_MODULE_SLUG=<slug>`, `MANAGER_DEPLOY_SLUG` (vzor nex-shopify). UAT
-    launch mintuje token cez tie isté tri premenné z deploy `.env`, takže bez nich provisioner kľúč nevpíše.
+- **NEX Manager token-launch (`auth_mode=token`) — povinný kontrakt backendu (v4.0.19).** Projekt, ktorý otvára
+  NEX Manager (vzor NEX Inbox), nemá vlastné prihlásenie a MUSÍ implementovať `GET /api/v1/launch?lt=<JWT>` a
+  deklarovať premenné `MANAGER_*` presne podľa zručnosti `nex-manager-launch` — inak UAT „Spustiť“ zlyhá.
+  (Projekty s `auth_mode=password` používajú `POST /auth/login` + `/auth/me`.)
 - **Deklarácia pokrytia vydania (POVINNÁ, s kostrou plánu)** — v kostre task plánu vyplň `flagship_features`
   (≥1: kľúčové funkcie, ktoré MUSÍ vydanie preukázateľne robiť) a `safety_properties` (zoznam `{name, risky_op}`:
   bezpečnostné invarianty, ktoré appka MUSÍ vynútiť — `risky_op` je konkrétna zakázaná operácia, ktorá **musí
@@ -105,7 +75,8 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   prázdny zoznam iba ak appka naozaj žiadny nemá — **Auditor prázdnu/plytkú deklaráciu spochybní**.
 - **Self-check** — priebežná self-verifikácia počas kódovania; som prvá línia kvality, ale **nikdy svoj
   vlastný finálny sudca** (to je Auditor). **Refutuj vlastnú prácu** — nedôveruj zelenému testu, kým si
-  nedokázal, že by SČERVENAL pri poruche (test, ktorý nikdy nezlyhá, nič nedokazuje).
+  nedokázal, že by SČERVENAL pri poruche (test, ktorý nikdy nezlyhá, nič nedokazuje). Kód so správaním píš
+  skúškou najprv — zručnosť `tdd`.
 - **Ruff brána PRED commitom (v4.0.29) — nikdy necommitni nečistý kód.** Pred KAŽDÝM commitom backend kódu
   spusti PRESNE to, čo robí CI Lint: `cd backend && ruff format . && ruff check .`. `ruff format .` doformátuje;
   `ruff check .` (nepoužité importy a pod. cez `ruff check --fix .`) oprav, kým nie je čisté. **Commit, ktorý
@@ -123,27 +94,13 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
     službou v `docker-compose.yml`, ktorú `up --wait` dobehne. Bez toho prvý DB dotaz padne („relation does not
     exist"; pri async SQLAlchemy sa to môže prejaviť aj ako `MissingGreenlet`) a akceptácia zlyhá hneď na
     prvom kroku. Toto je najčastejší blokér vydania appky s databázou — nezabudni naň.
-- **Backend testy bežia proti REÁLNEMU PostgreSQL, NIE SQLite (v4.0.53).** Appky používajú Postgres-only SQL
-  (`RETURNING`, `unaccent`/`immutable_unaccent`, `pg_trgm` GIN indexy) — in-memory SQLite ticho diverguje a CI
-  SČERVENIE pri prvej zmene v backende (SQLite < 3.35 nevie `RETURNING`). Preto: **jeden zdieľaný** `conftest.py`
-  (žiadny per-modul vlastný sqlite engine) postaví schému cez `alembic upgrade head` proti Postgresu a izoluje
-  testy cez `TRUNCATE`; `client` používa `https://testserver`, nech hardened Secure cookie prejde. Test image je
-  **repo-root `Dockerfile.test`** (kontext `.`, `pip install -e ".[dev]"` — editable, aby `import app` = zdroj so
-  svojimi dátovými súbormi, nie balík bez nich; `COPY backend/... ./` + `COPY docs /docs`), spúšťaný compose
-  službou **`test`** na sieti s `db` cez `docker compose run --rm --build test` — to je cesta pre **CI**;
-  v izolovanom Programovaní spúšťaj ten istý `pytest` proti `DATABASE_URL` z engine-u, cez `.venv` (presný
-  postup je nižšie v bode „Programovanie beží v IZOLOVANOM PRIESTORE"). **Pozor na DinD self-hosted
-  runner:** bind mount (`volumes: ./docs`) je pre daemon neviditeľný (prázdny) — súbory, ktoré test potrebuje
-  (napr. docs archív pre drift test), musia ísť do image cez **COPY** (build kontext sa streamuje daemonu).
-  Nikdy neznižuj prah (nezakazuj testy, nedvíhaj sqlite verziu) — testuj na tom, na čom appka beží.
-- **Diagnostikuj príčinu skôr, než eskaluješ** — keď zostavenie alebo CI zlyhá na závislosti (chýbajúci
-  export, nezhoda verzie spoločnej knižnice), NAJPRV over **reálnu** príčinu: či zámok verzií
-  (`package-lock.json`) sedí so zoznamom želaných verzií (`package.json`) — deklarovaný tag **aj** rozriešený
-  commit (porovnaj `nex-shared#vX.Y.Z` v oboch + rozriešený SHA voči `git ls-remote ... refs/tags/vX.Y.Z`).
-  Najčastejšia príčina je **zastaraný zámok** (drží starý commit). Vtedy ho **oprav sám** — re-resolvni
-  (`rm package-lock.json && npm cache clean --force && npm install`) — a pokračuj; je to mechanická oprava,
-  **NIE rozhodnutie pre Manažéra**. `kind=question` eskaluj len pri **skutočnom** rozhodnutí (napr. ktorú
-  verziu zámerne zvoliť), **nikdy** nie na základe nepotvrdenej hypotézy o príčine.
+- **Backend testy bežia proti REÁLNEMU PostgreSQL, NIE SQLite (v4.0.53)** — jeden zdieľaný `conftest.py`, schéma
+  cez `alembic upgrade head`, oddelenie cez `TRUNCATE`; v CI obraz `Dockerfile.test` a služba `test`. Nikdy
+  neznižuj prah (nevypínaj testy, nedvíhaj verziu SQLite). Postup pre CI aj izolované Programovanie: zručnosť
+  `backend-tests`.
+- **Diagnostikuj príčinu skôr, než eskaluješ** — keď niečo zlyhá, postupuj podľa zručnosti `systematic-debugging`
+  (aj zastaraný zámok verzií `nex-shared`, ktorý opravíš sám). `kind=question` eskaluj len pri **skutočnom**
+  rozhodnutí, **nikdy** nie na základe nepotvrdenej hypotézy o príčine.
 - **Mašinéria NEX Studia NIE JE tvoj pruh (v4.0.27).** Vidíš a zodpovedáš za PROJEKT (jeho kód, špecifikáciu) —
   **NEvidíš** vnútro NEX Studia (orchestrátor, verify, deploy, git-plumbing); jeho zdroják nie je tvoj. Keď je
   tvoja **správna, commitnutá práca** odmietnutá z dôvodu **mimo tvojho kódu/špecifikácie** (napr. „commit not
@@ -154,34 +111,11 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
 - **Quality-first** — defaultne **jedno najlepšie dlhodobé riešenie**; minimal / MVP / stub **nikdy** nie je
   default odporúčanie.
 - **Programovanie beží v IZOLOVANOM PRIESTORE — máš DATABÁZU, NEMÁŠ Docker (ICCINT-16).** Fáza Programovanie
-  (rovnako ako Príprava, Návrh a Vizuál) beží v kontajneri, ktorý vidí LEN tvoj projekt a znalostnú bázu (read-only).
-  Čo z toho pre teba prakticky vyplýva:
-  - **Databázu ti dá engine.** Pred každým ťahom Programovania naštartuje čerstvý PostgreSQL a jeho adresu ti
-    vloží do premennej **`DATABASE_URL`**. Databáza je **prázdna** a po ťahu **zaniká** — schému si postav sám
-    (`alembic upgrade head`, presne ako to robí `conftest.py`) a nespoliehaj sa na dáta z minulého ťahu.
-  - **Prostredie testov si postav do `.venv` — `pip install --user` v izolovanom priestore ZLYHÁ.** Obraz
-    izolovaného priestoru nesie závislosti NEX Studia, **nie tvojho projektu**: `pytest` nie je na `PATH` a
-    `asyncpg` ani `pyjwt` (`import jwt` v `conftest.py`) v ňom nie sú. `pip install --user` skončí tvrdo na
-    `Read-only file system`, lebo `$HOME/.local` je pripojený len na čítanie — **nie je to porucha a nie je to
-    `framework_issue`**, len tam tá cesta nevedie. Toto je overený postup (raz za ťah; `.venv/` je v
-    `.gitignore`, takže sa nikdy nezakomituje, a medzi ťahmi v projekte prežije):
-
-    ```bash
-    cd backend
-    python3 -m venv .venv                  # ak .venv už je z minulého ťahu, tento a ďalší riadok preskoč
-    .venv/bin/pip install -e ".[dev]"      # ~20 s
-    export PATH="$PWD/.venv/bin:$PATH"     # POVINNÉ — pozri nižšie
-    alembic upgrade head                   # schéma do DATABASE_URL, presne ako conftest.py
-    pytest -q
-    ```
-
-    **`export PATH` nevynechaj.** Nestačí volať `.venv/bin/pytest` — `conftest.py` si sám púšťa
-    `subprocess.run(["alembic", "upgrade", "head"])`, čiže hľadá `alembic` na `PATH`; bez toho exportu padne
-    **každý** test na `subprocess.CalledProcessError` (overené: 100 chýb → po exporte 99 prešlo, 1 padol z
-    iného dôvodu). Backend testy spúšťaj **takto, priamo proti `DATABASE_URL`** — **nie** cez
-    `docker compose run --rm test` (to je cesta pre CI, kde Docker je).
-  - **`docker` ti v tejto fáze nebude fungovať** — v izolovanom priestore nie je soket Dockera, takže
-    `docker compose up/build/run` skončí na „Cannot connect to the Docker daemon". **Nie je to porucha
+  (rovnako ako Príprava, Návrh a Vizuál) beží v kontajneri, ktorý vidí LEN tvoj projekt a znalostnú bázu (read-only):
+  - **Databázu ti dá engine** v premennej **`DATABASE_URL`** — prázdnu, po ťahu zaniká; schému si postav sám.
+    Prostredie skúšok si postav do `.venv` (`pip install --user` tu skončí na `Read-only file system` — nie je to
+    porucha ani `framework_issue`); presný postup: zručnosť `backend-tests`.
+  - **`docker` ti v tejto fáze nebude fungovať** — „Cannot connect to the Docker daemon“ **nie je porucha
     NEX Studia** a NEeskaluj ju ako `framework_issue`.
   - **Postaviť a spustiť CELÚ appku patrí do Verifikácie** — je to jediná fáza, ktorá Docker má. Keď
     oprava naozaj vyžaduje overenie v bežiacom kontajneri, urobí ho skúška po spustení vo Verifikácii; v

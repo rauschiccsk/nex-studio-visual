@@ -120,6 +120,73 @@ _CHARTER_SEP = "\n\n---\n\n"
 #: ONLY ``.claude/agents/{ai-agent,auditor}/CLAUDE.md``) — removed so a v2 project is clean v2 shape.
 _V1_AGENT_DIRS = ("designer", "implementer", "customer")
 
+#: DEV-46: the skills the cockpit ships to every build agent — ``templates/skills/<name>/SKILL.md``, written into the
+#: project as ``.claude/skills/<name>/SKILL.md`` next to the charters and refreshed with them. A directory with
+#: ``SKILL.md`` is the only shape Claude Code loads: the two skills the project template used to copy as loose
+#: ``.claude/skills/<name>.md`` files were never seen by any agent (measured 09.10.2026 on 2.1.294 with the
+#: cockpit's own ``--setting-sources user,project``). At start an agent reads only each skill's ``description``;
+#: the body is loaded when it uses the skill — so a procedure needed only sometimes costs the charter one sentence.
+SKILLS_TEMPLATE_DIR = NEX_STUDIO_TEMPLATES / "skills"
+SKILL_FILE = "SKILL.md"
+#: Written into every skill the cockpit puts into a project, right after its front matter. It tells a human not to
+#: edit the copy, and it is how a refresh knows which skills are the cockpit's: a retired one carrying it is
+#: removed, a skill without it is left alone — it is not ours to delete.
+COCKPIT_SKILL_MARKER = (
+    "<!-- NEX Studio: túto zručnosť zapisuje a obnovuje kokpit zo šablóny; v projekte ju neupravuj. -->"
+)
+#: What the old project template (Knowledge Base ``templates/claude-project/init.sh``) copied as loose files. Claude
+#: Code never loaded them; the same skills now come from ``templates/skills/``, so the loose copies are removed.
+_LOOSE_TEMPLATE_SKILLS = ("tdd.md", "systematic-debugging.md")
+_FRONT_MATTER_END = "\n---\n"
+
+
+def cockpit_skills() -> dict[str, str]:
+    """Every skill the cockpit ships, name → the ``SKILL.md`` text a project gets (marker included)."""
+    if not SKILLS_TEMPLATE_DIR.is_dir():
+        return {}
+    skills = {}
+    for skill_dir in sorted(SKILLS_TEMPLATE_DIR.iterdir()):
+        template = skill_dir / SKILL_FILE
+        if template.is_file():
+            front, end, body = template.read_text(encoding="utf-8").partition(_FRONT_MATTER_END)
+            skills[skill_dir.name] = f"{front}{end}\n{COCKPIT_SKILL_MARKER}\n{body}"
+    return skills
+
+
+def _sync_skills(claude_dir: Path) -> int:
+    """Make the project's cockpit skills equal to the templates. Returns how many files were written or removed.
+
+    Writes only what differs (so an unchanged project keeps its modification times), removes a retired cockpit
+    skill (one carrying :data:`COCKPIT_SKILL_MARKER` whose template is gone) and the old template's loose files.
+    A skill the cockpit did not write stays. Raises :class:`OSError`; the callers decide whether that is fatal."""
+    skills_dir = claude_dir / "skills"
+    wanted = cockpit_skills()
+    changed = 0
+    for name, text in wanted.items():
+        target = skills_dir / name / SKILL_FILE
+        if target.is_file() and target.read_text(encoding="utf-8") == text:
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+        changed += 1
+    if not skills_dir.is_dir():
+        return changed
+    for entry in sorted(skills_dir.iterdir()):
+        skill = entry / SKILL_FILE
+        if (
+            entry.is_dir()
+            and entry.name not in wanted
+            and skill.is_file()
+            and COCKPIT_SKILL_MARKER in skill.read_text(encoding="utf-8")
+        ):
+            shutil.rmtree(entry)
+            changed += 1
+    for loose in _LOOSE_TEMPLATE_SKILLS:
+        if (skills_dir / loose).is_file():
+            (skills_dir / loose).unlink()
+            changed += 1
+    return changed
+
 
 def refresh_v2_agent_charters(project_root: Path, slug: str) -> int:
     """Prepíš rolové charty zo šablóny NEX Studia. Vracia počet obnovených rolí (ICCINT-51).
@@ -131,7 +198,8 @@ def refresh_v2_agent_charters(project_root: Path, slug: str) -> int:
     nedostalo ani do jedného.
 
     ÚZKY zásah, zámerne. Nevolá sa celé zakladanie — to prepisuje aj koreňové ``CLAUDE.md``, nastavenia,
-    značku dôvery a upratuje adresáre v1. Zastarávajú len rolové charty, tak sa obnovujú len tie.
+    značku dôvery a upratuje adresáre v1. Zastarávajú len rolové charty a zručnosti kokpitu (DEV-46), tak sa
+    obnovujú len tie. Vracia počet obnovených rolí; zručnosti len zapíše do logu.
 
     **Volajúci MUSÍ preskočiť prevzaté projekty.** Stráž nie je tu: ``provision_v2_agent_charters``
     prepisuje rolové charty bez ohľadu na ``adopted`` (ten príznak riadi len upratovanie v1), takže
@@ -163,8 +231,14 @@ def refresh_v2_agent_charters(project_root: Path, slug: str) -> int:
             refreshed += 1
         except OSError as exc:
             logger.warning("charter refresh failed for slug=%s role=%s: %s", slug, role_slug, exc)
-    if refreshed:
-        logger.info("charter refresh: slug=%s roles=%d obnovené zo šablóny", slug, refreshed)
+    # DEV-46: the skills travel with the charters — the same template owner, the same moment, the same leniency.
+    try:
+        skills_changed = _sync_skills(claude_dir)
+    except OSError as exc:
+        skills_changed = 0
+        logger.warning("skill refresh failed for slug=%s: %s", slug, exc)
+    if refreshed or skills_changed:
+        logger.info("charter refresh: slug=%s roles=%d skills=%d obnovené zo šablóny", slug, refreshed, skills_changed)
     return refreshed
 
 
@@ -246,6 +320,11 @@ def provision_v2_agent_charters(project_root: Path, slug: str, project_name: str
             raise ProvisioningError(
                 f"v2 charter provisioning failed (slug={slug}): writing {role_slug} charter: {exc}"
             ) from exc
+    # DEV-46: the charters name the skills, so a project gets both or neither.
+    try:
+        _sync_skills(claude_dir)
+    except OSError as exc:
+        raise ProvisioningError(f"v2 charter provisioning failed (slug={slug}): writing skills: {exc}") from exc
 
     universal_tpl = NEX_STUDIO_TEMPLATES / _UNIVERSAL_CLAUDE_MD
     if not universal_tpl.is_file():

@@ -14,10 +14,13 @@ projektu (`backend/services/create_project_postscaffold.py`). Tento súbor je le
 - `migrations/versions/NNN_*.py` — Alembic; backend ich pri štarte spúšťa sám.
 - `frontend/` — React + Vite; typy API `src/services/api/pipeline.generated.ts` sa generujú.
 - `templates/` — charty agentov stavieb (`agent-shared-base.md` + `ai-agent-charter.md` / `auditor-charter.md`),
-  `project-claude-md.md` (koreňový CLAUDE.md projektu), `poradca-charter.md`. Text, ktorý agent dostane pri
-  každej práci, má strop **37 000 znakov** (Director 09.10.2026, DEV-45) — stráž
+  `project-claude-md.md` (koreňový CLAUDE.md projektu), `poradca-charter.md` a zručnosti agentov stavieb
+  `skills/<meno>/SKILL.md` (DEV-46) — postup, ktorý agent potrebuje len niekedy, patrí do zručnosti a charta ho
+  menuje jednou vetou. Text, ktorý agent dostane pri každej práci (charta, koreňový CLAUDE.md, opisy zručností),
+  má strop **37 000 znakov** (Director 09.10.2026, DEV-45) — stráž
   `tests/test_agent_instructions_stay_under_the_ceiling.py`; pri prekročení sa skracuje text, nie strop.
-  Zmena charty platí od nového sedenia agenta a do bežiaceho kokpitu sa dostane nasadením.
+  Charty aj zručnosti zapisuje do projektu `create_project_postscaffold.py` pri založení a obnovuje ich pri štarte
+  novej verzie; prevzaté projekty sa dnes neobnovujú (DEV-47). Do bežiaceho kokpitu sa zmena dostane nasadením.
 - `docs/specs/versions/vX.Y.Z/RELEASE_NOTES.md` — poznámka k vydaniu po slovensky pre toho, kto kokpit používa.
 - `scripts/deploy-prod.sh` — nasadenie na PROD.
 

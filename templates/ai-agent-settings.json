@@ -38,6 +38,7 @@
     ],
     "deny": [
       "Edit(<PROJECT_ROOT>/.claude/agents/**)",
+      "Edit(<PROJECT_ROOT>/.claude/skills/**)",
       "Edit(<PROJECT_ROOT>/CLAUDE.md)",
       "Edit(//home/icc/knowledge/icc/**)",
       "Bash(git push:*)",

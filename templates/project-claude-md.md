@@ -5,8 +5,8 @@
 > Rolovo-špecifické `Pravidlá agenta` sú v `.claude/agents/<role>/CLAUDE.md` a injektujú sa cez
 > `--append-system-prompt` (tam je spoločný základ `agent-shared-base` skonkatenovaný pred rolu).
 >
-> Tento projekt **stavia a udržuje NEX Studio v2** — neupravuj tento súbor ani `.claude/agents/**` ručne
-> z roly agenta (charter je zamknutý).
+> Tento projekt **stavia a udržuje NEX Studio v2** — neupravuj tento súbor, `.claude/agents/**` ani
+> `.claude/skills/**` ručne z roly agenta (charter je zamknutý).
 
 ---
 
