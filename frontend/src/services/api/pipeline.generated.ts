@@ -4397,6 +4397,21 @@ export interface components {
              */
             ci_url?: string | null;
             /**
+             * Dedo Brief
+             * @description For 'ci_red' (DEV-57): the action of Dedo's brief waiting on the project ('fast_fix' | 'new_version'), None when none waits. The screen leads to it before offering to start a fast fix by hand.
+             */
+            dedo_brief?: string | null;
+            /**
+             * Next Version Id
+             * @description For 'ci_red' (DEV-57): the fix already begun — the newest version started after the blocked one and not finished (a fast fix or a new version). The screen leads there instead of offering a new fix.
+             */
+            next_version_id?: string | null;
+            /**
+             * Next Version Number
+             * @description For 'ci_red': that version's number.
+             */
+            next_version_number?: string | null;
+            /**
              * Version Id
              * @description The implicated version's id — what the re-verify action is posted against.
              */

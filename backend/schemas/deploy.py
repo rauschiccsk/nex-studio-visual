@@ -257,6 +257,21 @@ class DeployBlock(BaseModel):
         default=None,
         description="For 'ci_red' / 'ci_running': the link to that run on GitHub.",
     )
+    next_version_id: Optional[UUID] = Field(
+        default=None,
+        description=(
+            "For 'ci_red' (DEV-57): the fix already begun — the newest version started after the blocked one and "
+            "not finished (a fast fix or a new version). The screen leads there instead of offering a new fix."
+        ),
+    )
+    next_version_number: Optional[str] = Field(default=None, description="For 'ci_red': that version's number.")
+    dedo_brief: Optional[str] = Field(
+        default=None,
+        description=(
+            "For 'ci_red' (DEV-57): the action of Dedo's brief waiting on the project ('fast_fix' | 'new_version'), "
+            "None when none waits. The screen leads to it before offering to start a fast fix by hand."
+        ),
+    )
 
 
 class DeployMatrix(BaseModel):

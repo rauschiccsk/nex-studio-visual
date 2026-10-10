@@ -61,7 +61,7 @@ from pathlib import Path
 from typing import Awaitable, Callable, Optional
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from backend.core import authz
@@ -82,7 +82,7 @@ from backend.schemas.deploy import (
     DEPLOY_CAUSE_STALE_SIGNOFF,
     DEPLOY_CAUSE_VERSION_BUSY,
 )
-from backend.services import ci_status, deploy_progress, private_access, uat_provisioner
+from backend.services import ci_status, dedo_project_proposal, deploy_progress, private_access, uat_provisioner
 
 # The terminal pipeline stage = "Hotovo" = a version is VERIFIED (design §3.1,
 # CR-V2-014: reaching ``done`` means *verified*, not *deployed*). Only a verified
@@ -394,13 +394,43 @@ def _ci_block(
     version_id = db.execute(
         select(Version.id).where(Version.project_id == project.id, Version.version_number == version_number)
     ).scalar_one_or_none()
-    return {
+    block = {
         "cause": cause,
         "version_number": version_number,
         "version_id": version_id,
         "can_reverify": False,
         "ci_detail": ci.detail,
         "ci_url": ci.url,
+    }
+    if cause == DEPLOY_CAUSE_CI_RED and version_id is not None:
+        block.update(_where_the_fix_is(db, project, version_id))
+    return block
+
+
+def _where_the_fix_is(db: Session, project: Project, version_id: UUID) -> dict:
+    """DEV-57 — where the manager continues when the checks failed: the fix already begun (the newest version of
+    the project started after the blocked one and not finished — a fast fix or a new version), else Dedo's brief
+    waiting on the project. Neither → the screen offers to start a fast fix.
+
+    10.10.2026, NEX Inbox 1.7.0: the notice said „oprav ju rýchlou opravou“ but offered only „Otvoriť verziu“ —
+    the finished version, not the fix; the Director had to ask how to go on (a brief for the fix was waiting)."""
+    blocked_at = select(Version.created_at).where(Version.id == version_id).scalar_subquery()
+    newer = db.execute(
+        select(Version.id, Version.version_number)
+        .outerjoin(PipelineState, PipelineState.version_id == Version.id)
+        .where(
+            Version.project_id == project.id,
+            Version.created_at > blocked_at,
+            or_(PipelineState.current_stage.is_(None), PipelineState.current_stage != VERIFIED_STAGE),
+        )
+        .order_by(Version.created_at.desc())
+        .limit(1)
+    ).first()
+    brief = dedo_project_proposal.open_for_project(db, project.id)
+    return {
+        "next_version_id": newer.id if newer else None,
+        "next_version_number": newer.version_number if newer else None,
+        "dedo_brief": brief.proposed_action if brief is not None else None,
     }
 
 

@@ -124,7 +124,7 @@ describe("pravý panel pri hotovej verzii", () => {
   });
 });
 
-function block(cause: DeployBlock["cause"], ci: CiStatus): DeployBlock {
+function block(cause: DeployBlock["cause"], ci: CiStatus, fix: Partial<DeployBlock> = {}): DeployBlock {
   return {
     cause,
     version_number: "1.7.0",
@@ -132,6 +132,7 @@ function block(cause: DeployBlock["cause"], ci: CiStatus): DeployBlock {
     can_reverify: false,
     ci_detail: ci.detail,
     ci_url: ci.url,
+    ...fix,
   };
 }
 
@@ -145,8 +146,39 @@ describe("obrazovka nasadenia povie, prečo je „Nasadiť“ zavreté", () => {
     expect(screen.getByText(/postup Release smoke gate, beh 38042619283/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Pozrieť beh na GitHube/ })).toHaveAttribute("href", RUN);
 
-    fireEvent.click(screen.getByRole("button", { name: /Otvoriť verziu/ }));
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/projects/nex-inbox/versions/ver-17"));
+    // DEV-57: the way on is the fix, not the finished version — with nothing begun, start a fast fix.
+    expect(screen.queryByRole("button", { name: /Otvoriť verziu/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Spustiť rýchlu opravu" }));
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/projects/nex-inbox?rychla-oprava=1"));
+  });
+
+  it("⚠️ zlyhané kontroly a oprava už beží: vedie k nej, druhú neponúkne (DEV-57)", async () => {
+    render(
+      <DeployBlockNotice
+        block={block("ci_red", RED, { next_version_id: "ver-171", next_version_number: "1.7.1", dedo_brief: "fast_fix" })}
+        projectSlug="nex-inbox"
+        onReverifyStarted={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/Oprava je už rozpracovaná vo verzii 1\.7\.1/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Spustiť rýchlu opravu" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Otvoriť verziu 1.7.1" }));
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/projects/nex-inbox/versions/ver-171"));
+  });
+
+  it("⚠️ zlyhané kontroly a čaká Dedovo zadanie: vedie k nemu (DEV-57)", async () => {
+    render(
+      <DeployBlockNotice
+        block={block("ci_red", RED, { dedo_brief: "fast_fix" })}
+        projectSlug="nex-inbox"
+        onReverifyStarted={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/Dedo \(náš technický tím\) pripravil zadanie opravy/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Otvoriť zadanie od Deda" }));
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/projects/nex-inbox#zadanie-od-deda"));
   });
 
   it("bežiace kontroly: počká sa, nič netreba stláčať", () => {

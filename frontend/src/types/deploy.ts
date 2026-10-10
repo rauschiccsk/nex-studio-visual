@@ -123,6 +123,14 @@ export interface DeployBlock {
   ci_detail?: string | null;
   /** For `ci_red` / `ci_running`: the link to that run on GitHub (DEV-51). */
   ci_url?: string | null;
+  /**
+   * For `ci_red` (DEV-57): the fix already begun — the newest version started after the blocked one and not
+   * finished. The notice leads there instead of offering a second fix.
+   */
+  next_version_id?: string | null;
+  next_version_number?: string | null;
+  /** For `ci_red` (DEV-57): the action of Dedo's brief waiting on the project; null when none waits. */
+  dedo_brief?: string | null;
 }
 
 /** The full version × customer matrix payload for a project's UAT/PROD tabs. */

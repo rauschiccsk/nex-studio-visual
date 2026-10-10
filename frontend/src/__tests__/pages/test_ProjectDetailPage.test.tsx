@@ -32,6 +32,7 @@ const {
   setSelectedProjectMock,
   setSelectedVersionMock,
   authStateMock,
+  locationMock,
 } = vi.hoisted(() => ({
   navigateMock: vi.fn(),
   listProjectsApiMock: vi.fn(),
@@ -47,6 +48,8 @@ const {
   setSelectedProjectMock: vi.fn(),
   setSelectedVersionMock: vi.fn(),
   authStateMock: { user: { role: "ri", username: "admin", id: "u-admin" } as { role: string; username: string; id: string } | null },
+  // DEV-57: where the manager arrived from — a link may carry `?rychla-oprava=1` or `#zadanie-od-deda`.
+  locationMock: { search: "", hash: "" },
 }));
 
 vi.mock("react-router-dom", async (importOriginal) => {
@@ -55,7 +58,13 @@ vi.mock("react-router-dom", async (importOriginal) => {
     ...actual,
     useNavigate: () => navigateMock,
     useParams: () => ({ slug: "demo" }),
-    useLocation: () => ({ pathname: "/projects/demo", search: "", hash: "", key: "t", state: null }),
+    useLocation: () => ({
+      pathname: "/projects/demo",
+      search: locationMock.search,
+      hash: locationMock.hash,
+      key: "t",
+      state: null,
+    }),
   };
 });
 
@@ -141,6 +150,8 @@ beforeEach(() => {
   getProjectDedoProposalApiMock.mockResolvedValue(null);
   // The ACCOUNT named admin — the ri ROLE no longer confers anything over a project (permissions.ts).
   authStateMock.user = { role: "ri", username: "admin", id: "u-admin" };
+  locationMock.search = "";
+  locationMock.hash = "";
 });
 
 async function importPage() {
@@ -499,5 +510,60 @@ describe("ProjectDetailPage — záznam o nedokončenom zakladaní", () => {
     await screen.findByText(project.name);
 
     expect(screen.queryByText(/Čo sa pri zakladaní nedokončilo/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("ProjectDetailPage — príchod zo zastaveného nasadenia (DEV-57)", () => {
+  it("⚠️ odkaz „Spustiť rýchlu opravu“ otvorí dialóg Rýchla oprava a parameter zahodí", async () => {
+    locationMock.search = "?rychla-oprava=1";
+    const ProjectDetailPage = await importPage();
+    render(<ProjectDetailPage />);
+
+    expect(await screen.findByRole("dialog", { name: "Rýchla oprava" })).toBeInTheDocument();
+    expect(navigateMock).toHaveBeenCalledWith({ pathname: "/projects/demo", hash: "" }, { replace: true });
+  });
+
+  it("bez odkazu sa dialóg sám neotvorí", async () => {
+    const ProjectDetailPage = await importPage();
+    render(<ProjectDetailPage />);
+
+    expect(await screen.findByRole("button", { name: /Rýchla oprava/ })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Rýchla oprava" })).not.toBeInTheDocument();
+  });
+
+  it("⚠️ projekt bez verzie nemá čo opraviť — dialóg sa neotvorí ani z odkazu", async () => {
+    locationMock.search = "?rychla-oprava=1";
+    listVersionsMock.mockResolvedValue([]);
+    const ProjectDetailPage = await importPage();
+    render(<ProjectDetailPage />);
+
+    expect(await screen.findByRole("button", { name: /Nová verzia/ })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Rýchla oprava" })).not.toBeInTheDocument();
+  });
+
+  it("⚠️ odkaz na Dedovo zadanie k nemu stránku posunie", async () => {
+    locationMock.hash = "#zadanie-od-deda";
+    getProjectDedoProposalApiMock.mockResolvedValue({
+      id: "n-1",
+      project_id: "p1",
+      content: "Fix the unstable gate check.",
+      proposed_action: "fast_fix",
+      status: "proposed",
+      created_at: "2026-10-10T15:12:02Z",
+    });
+    const scrolled = vi.fn();
+    const original = Element.prototype.scrollIntoView; // jsdom has none — restored so no other test sees ours
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled(this.id);
+    } as Element["scrollIntoView"];
+    try {
+      const ProjectDetailPage = await importPage();
+      render(<ProjectDetailPage />);
+
+      expect(await screen.findByLabelText("Zadanie od Deda")).toBeInTheDocument();
+      await waitFor(() => expect(scrolled).toHaveBeenCalledWith("zadanie-od-deda"));
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
   });
 });

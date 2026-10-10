@@ -17,12 +17,13 @@
 
 import { useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { CircleAlert, FolderOpen, Loader2, RotateCw } from "lucide-react";
+import { CircleAlert, FolderOpen, Loader2, RotateCw, Zap } from "lucide-react";
 
 import WarningActionBar from "@/components/common/WarningActionBar";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { postPipelineActionApi } from "@/services/api/pipeline";
 import type { DeployBlock } from "@/types/deploy";
+import { DEDO_BRIEF_ANCHOR, FAST_FIX_PARAM } from "@/lib/projectLinks";
 import { fmtVer } from "./version";
 
 export interface DeployBlockNoticeProps {
@@ -70,7 +71,7 @@ export default function DeployBlockNotice({ block, projectSlug, onReverifyStarte
   // the manager to the wrong place. No jargon: never "commit", "HEAD", "SHA", "drift", "overená verzia".
   let title: string;
   let body: ReactNode;
-  let action: { label: string; icon: "reverify" | "open"; run: () => void } | null = null;
+  let action: { label: string; icon: "reverify" | "open" | "fix"; run: () => void } | null = null;
 
   switch (block.cause) {
     case "drift":
@@ -124,17 +125,51 @@ export default function DeployBlockNotice({ block, projectSlug, onReverifyStarte
     case "ci_red":
       // DEV-51 (NEX Inbox 1.7.0, 10.10.2026): the release gate the version tag started failed AFTER the
       // Verifikácia gate had said "CI zelené". The version is finished; the code that would ship is not proven.
+      // DEV-57 (10.10.2026): the button leads to the FIX — the one already begun, else Dedo's brief waiting on the
+      // project, else starting a fast fix. „Otvoriť verziu“ led back to the finished version, and the Director had
+      // to ask how to go on while a brief for the fix was waiting.
       title = "Nasadenie je zastavené — kontroly projektu zlyhali";
-      body = (
-        <>
-          {`Verzia ${version} je hotová, ale kontroly projektu na kóde, ktorý by sa nasadil, zlyhali` +
-            (block.ci_detail ? `: ${block.ci_detail}. ` : ". ") +
+      {
+        const failed =
+          `Verzia ${version} je hotová, ale kontroly projektu na kóde, ktorý by sa nasadil, zlyhali` +
+          (block.ci_detail ? `: ${block.ci_detail}. ` : ". ");
+        let remedy: string;
+        if (block.next_version_id) {
+          const next = fmtVer(block.next_version_number);
+          remedy =
+            `Oprava je už rozpracovaná vo verzii ${next} — keď ju dokončíš a kontroly na nej prejdú, nasadíš ` +
+            "ju namiesto tejto. ";
+          action = {
+            label: `Otvoriť verziu ${next}`,
+            icon: "open",
+            run: () => navigate(`/projects/${projectSlug}/versions/${block.next_version_id}`),
+          };
+        } else if (block.dedo_brief) {
+          remedy =
+            "K zákazníkovi ju nepustíme, kým chyba nie je opravená a kontroly neprejdú. Dedo (náš technický " +
+            "tím) pripravil zadanie opravy — pozri ho a spusti. ";
+          action = {
+            label: "Otvoriť zadanie od Deda",
+            icon: "open",
+            run: () => navigate(`/projects/${projectSlug}#${DEDO_BRIEF_ANCHOR}`),
+          };
+        } else {
+          remedy =
             "K zákazníkovi ju nepustíme, kým chyba nie je opravená a kontroly neprejdú — oprav ju rýchlou " +
-            "opravou alebo novou verziou. "}
-          <CiRunLink url={block.ci_url} />
-        </>
-      );
-      action = openVersion;
+            "opravou alebo novou verziou. ";
+          action = {
+            label: "Spustiť rýchlu opravu",
+            icon: "fix",
+            run: () => navigate(`/projects/${projectSlug}?${FAST_FIX_PARAM}=1`),
+          };
+        }
+        body = (
+          <>
+            {failed + remedy}
+            <CiRunLink url={block.ci_url} />
+          </>
+        );
+      }
       break;
 
     case "ci_running":
@@ -177,7 +212,7 @@ export default function DeployBlockNotice({ block, projectSlug, onReverifyStarte
         action
           ? {
               label: action.label,
-              icon: isReverify ? RotateCw : FolderOpen,
+              icon: isReverify ? RotateCw : action.icon === "fix" ? Zap : FolderOpen,
               spinning: isReverify && submitting,
               disabled: submitting,
               onClick: action.run,

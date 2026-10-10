@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { versionStatusCls, versionStatusLabel } from "@/components/cockpit/labels";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { AlertTriangle, Loader2, Trash2, Zap } from "lucide-react";
@@ -15,6 +15,7 @@ import {
 } from "@/services/api/projects";
 import { listUsersApi } from "@/services/api/users";
 import { listVersions } from "@/services/api/versions";
+import { DEDO_BRIEF_ANCHOR, FAST_FIX_PARAM } from "@/lib/projectLinks";
 import DedoBriefBar from "@/components/projects/DedoBriefBar";
 import { startFastFixApi } from "@/services/api/pipeline";
 import { useOpenVersionCockpit } from "@/hooks/useOpenVersionCockpit";
@@ -273,6 +274,29 @@ export default function ProjectDetailPage() {
     return () => { cancelled = true; };
   }, [slug]);
 
+  const openFastFix = useCallback(() => {
+    setFastFixError(null);
+    setFastFixDirective(fastFixDraft.text);
+    setFastFixKind(null);
+    setFastFixOpen(true);
+  }, [fastFixDraft.text]);
+
+  // DEV-57: a screen that sends the manager here to start a fast fix (the deploy stopped by failed checks) lands
+  // on the open dialog — once the versions are loaded (a fast fix patches the newest one), and only once: the
+  // parameter is dropped, so going back or reloading does not open it again.
+  const wantsFastFix = new URLSearchParams(location.search).has(FAST_FIX_PARAM);
+  useEffect(() => {
+    if (!wantsFastFix || loading || versions.length === 0) return;
+    openFastFix();
+    navigate({ pathname: location.pathname, hash: location.hash }, { replace: true });
+  }, [wantsFastFix, loading, versions.length, openFastFix, navigate, location.pathname, location.hash]);
+
+  // DEV-57: sent here to Dedo's brief — it is above the versions, below the project's settings, often off-screen.
+  useEffect(() => {
+    if (loading || !dedoProposal || location.hash !== `#${DEDO_BRIEF_ANCHOR}`) return;
+    document.getElementById(DEDO_BRIEF_ANCHOR)?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+  }, [loading, dedoProposal, location.hash]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20 text-[var(--color-text-muted)] text-sm gap-2">
@@ -487,21 +511,23 @@ export default function ProjectDetailPage() {
           zadanie dorazilo, panel minul a začal formulár Nová verzia vypĺňať ručne. Keď Dedo niečo pripraví,
           má to Manažér vidieť skôr, než siahne po ručnej ceste. */}
       {project && dedoProposal && (
-        <DedoBriefBar
-          projectId={project.id}
-          proposal={dedoProposal}
-          onProposal={setDedoProposal}
-          onVersion={async (versionId, started) => {
-            // Rýchla oprava BEŽÍ — Manažéra treba vziať k nej, inak by pozeral na stránku projektu
-            // presvedčený, že sa nič nestalo, kým agent už pracuje (tá istá chyba ako ICCINT-62).
-            if (started) {
-              await openVersionCockpit(versionId, { slug: project.slug, name: project.name });
-              return;
-            }
-            // Koncept nikam neberie — len sa objaví v zozname verzií, kde ho Manažér uvidí.
-            listVersions(project.id).then(setVersions).catch(() => undefined);
-          }}
-        />
+        <div id={DEDO_BRIEF_ANCHOR}>
+          <DedoBriefBar
+            projectId={project.id}
+            proposal={dedoProposal}
+            onProposal={setDedoProposal}
+            onVersion={async (versionId, started) => {
+              // Rýchla oprava BEŽÍ — Manažéra treba vziať k nej, inak by pozeral na stránku projektu
+              // presvedčený, že sa nič nestalo, kým agent už pracuje (tá istá chyba ako ICCINT-62).
+              if (started) {
+                await openVersionCockpit(versionId, { slug: project.slug, name: project.name });
+                return;
+              }
+              // Koncept nikam neberie — len sa objaví v zozname verzií, kde ho Manažér uvidí.
+              listVersions(project.id).then(setVersions).catch(() => undefined);
+            }}
+          />
+        </div>
       )}
 
       {/* Versions */}
@@ -513,12 +539,7 @@ export default function ProjectDetailPage() {
                 there is a base version to patch (vX.Y.Z+1). */}
             {versions.length > 0 && (
               <button
-                onClick={() => {
-                  setFastFixError(null);
-                  setFastFixDirective(fastFixDraft.text);
-                  setFastFixKind(null);
-                  setFastFixOpen(true);
-                }}
+                onClick={openFastFix}
                 className="flex items-center gap-1.5 border border-[var(--color-accent-primary)]/40 text-[var(--color-accent-primary)] hover:bg-[var(--color-accent-primary)]/10 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
               >
                 <Zap className="w-3.5 h-3.5" />
