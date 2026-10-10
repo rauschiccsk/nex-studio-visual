@@ -172,8 +172,16 @@ class TestStaraStavbaToPovie:
 
         await orchestrator.apply_action(db_session, version_id=version.id, action="na_riadnu_verziu")
 
+        # Ordered by ``seq``: without ORDER BY PostgreSQL promises no order, and "the last one" was whichever came
+        # out last — red on CI 10.10.2026 (run 38049369624) while green locally.
         spravy = (
-            db_session.execute(select(PipelineMessage).where(PipelineMessage.version_id == version.id)).scalars().all()
+            db_session.execute(
+                select(PipelineMessage)
+                .where(PipelineMessage.version_id == version.id)
+                .order_by(PipelineMessage.seq.asc())
+            )
+            .scalars()
+            .all()
         )
         posledna = spravy[-1]
         assert "1.6.0" in posledna.content, posledna.content
