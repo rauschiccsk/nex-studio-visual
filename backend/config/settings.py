@@ -72,6 +72,14 @@ class Settings(BaseSettings):
     poradca_data_dir: str = "/opt/data/nex-studio-visual/poradca"
     # Strop jednej otázky Poradcu v sekundách (návrh §3: 15 minút).
     poradca_question_timeout: int = 900
+    # DEV-58 — the project's release check (release_smoke_test.sh) in Verifikácia: its temporary files go into a
+    # folder the Docker daemon sees at the SAME path (a script mounts them into containers) — mounted into the
+    # cockpit's backend in the PROD compose like ``poradca_data_dir``. And a disk guard: the check is stopped when
+    # it has taken more than the budget since it began, or when the server has less than the floor left
+    # (04.10.2026 a project's tests filled ANDROS's root disk).
+    release_smoke_tmp_root: str = "/opt/data/nex-studio-visual/smoke"
+    release_smoke_disk_budget_bytes: int = 30 * 1024**3
+    release_smoke_min_free_bytes: int = 20 * 1024**3
     # DEV-52 — screenshots the Manažér pastes into a question for Poradca: one image, how many in one question, and
     # all of one question together (they travel base64 in the question, a third larger). The cockpit's nginx
     # (frontend/nginx.conf, client_max_body_size) must let the largest request through — a test compares them.

@@ -57,6 +57,17 @@ def _isolate_schema_publishing(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(database_schema, "kb_root", lambda: empty)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_smoke_scratch(tmp_path_factory, monkeypatch):
+    """Keep the suite off the LIVE scratch folder of project checks (DEV-58).
+
+    Every run of a project's release check makes and removes a folder under ``release_smoke_tmp_root`` and the
+    backend's start sweeps it; here it is an empty folder of this run. Tests about a missing root point it
+    elsewhere explicitly.
+    """
+    monkeypatch.setattr(settings, "release_smoke_tmp_root", str(tmp_path_factory.mktemp("smoke-scratch")))
+
+
 #: Skutočný pracovný priečinok. Počas skúšok doň nesmie ukazovať ŽIADNY modul.
 _SKUTOCNY_PROJECTS_ROOT = Path("/opt/projects")
 

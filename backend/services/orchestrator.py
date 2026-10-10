@@ -26,6 +26,7 @@ import logging
 import os
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
 import unicodedata
@@ -70,6 +71,7 @@ from backend.services import (
     fast_fix,
     preview_switch,
     release_note_writer,
+    smoke_scratch,
     uat_provisioner,
 )
 from backend.services import epic as epic_service
@@ -6406,6 +6408,10 @@ ACCEPTANCE_SMOKE_TIMEOUT = 900  # matches UAT_DEPLOY_TIMEOUT — covers ``up --b
 # gate-g-hardening GAP 1 (A1): bounds the host-run ``release_smoke_test.sh`` against the already-booted
 # isolated stack — a SEPARATE budget from the build/boot above (the script's own assertions, no rebuild).
 RELEASE_ACCEPTANCE_TIMEOUT = 900
+#: DEV-58 — the scratch folder and the disk guard's look at the disk are quick file operations; a cap so a hung
+#: disk cannot hold the turn, and how long a stopped check gets to end before it is killed.
+SMOKE_SCRATCH_CAP = 60
+SMOKE_STOP_GRACE = 10
 # Readiness gate (v0.7.5 CR-1 robustness, Director Obs-2): ``up --wait`` only guarantees the container is
 # RUNNING — a backend WITHOUT a healthcheck may still be booting/migrating. Poll ``/health`` up to this
 # budget BEFORE the suite so the first acceptance request never races the boot into a false FAIL.
@@ -7004,23 +7010,81 @@ async def _run_acceptance_script(script: Path, env: dict[str, str]) -> tuple[int
     the smoke-stack addressing env, bounded by :data:`RELEASE_ACCEPTANCE_TIMEOUT`; never raises. Mirrors
     :func:`_compose_smoke_step`: a spawn failure → ``(127, reason)``, a timeout → ``(124, reason)``
     (sentinel non-zero codes the caller treats as a FAIL). The script reaches the app via ``docker compose
-    exec`` (host ports are stripped), so the compose project/files are passed through ``env``."""
+    exec`` (host ports are stripped), so the compose project/files are passed through ``env``.
+
+    DEV-58 (:mod:`smoke_scratch`): it runs in the project's root, with its own ``TMPDIR`` in a folder the Docker
+    daemon sees at the same path (none → ``(126, reason)``, it never runs blind), and under a disk guard — past
+    the budget or below the floor the whole process group is stopped → ``(125, output + the reason)``."""
     # NOT ``{**os.environ, **env}``: ``release_smoke_test.sh`` lives in the built project's work tree, which
     # the AI Agent WRITES — running it hands the agent a shell with this process's environment. Dedo's
     # machine token (ICCINT-14) is withheld from it, same as from the agent itself.
     full_env = agent_env(env)
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "bash", str(script), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=full_env
-        )
-    except OSError as exc:
-        return 127, f"spawn failed: {exc}"
+        scratch = await run_blocking(smoke_scratch.new_scratch, cap=SMOKE_SCRATCH_CAP)
+    except (smoke_scratch.ScratchUnavailable, BlockingWorkTimedOut) as exc:
+        return 126, str(exc)
+    full_env["TMPDIR"] = str(scratch)
     try:
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=RELEASE_ACCEPTANCE_TIMEOUT)
-    except asyncio.TimeoutError:
-        proc.kill()
-        return 124, f"timeout ({RELEASE_ACCEPTANCE_TIMEOUT}s)"
-    return proc.returncode, (stdout or b"").decode("utf-8", "replace")
+        guard = smoke_scratch.DiskGuard.start(scratch)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "bash",
+                str(script),
+                cwd=str(script.parent),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                env=full_env,
+                # Its own process group: stopping the check stops what it started too (a foreground
+                # ``docker run`` passes the signal on to its container).
+                start_new_session=True,
+            )
+        except OSError as exc:
+            return 127, f"spawn failed: {exc}"
+        return await _await_guarded(proc, guard)
+    finally:
+        await run_blocking(smoke_scratch.discard, scratch, cap=SMOKE_SCRATCH_CAP)
+
+
+async def _stop_process_group(proc: asyncio.subprocess.Process) -> None:
+    """SIGTERM to the script's whole group, then SIGKILL to whatever is left after a grace period."""
+    for sig, grace in ((signal.SIGTERM, SMOKE_STOP_GRACE), (signal.SIGKILL, None)):
+        try:
+            os.killpg(proc.pid, sig)
+        except ProcessLookupError:
+            return
+        if grace is None:
+            return
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=grace)
+            return
+        except asyncio.TimeoutError:
+            continue
+
+
+async def _await_guarded(proc: asyncio.subprocess.Process, guard: "smoke_scratch.DiskGuard") -> tuple[int, str]:
+    """Wait for the script under :data:`RELEASE_ACCEPTANCE_TIMEOUT`, asking the disk guard every few seconds."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + RELEASE_ACCEPTANCE_TIMEOUT
+    output = asyncio.ensure_future(proc.communicate())
+    while True:
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            await _stop_process_group(proc)
+            output.cancel()
+            return 124, f"timeout ({RELEASE_ACCEPTANCE_TIMEOUT}s)"
+        done, _ = await asyncio.wait({output}, timeout=min(smoke_scratch.DISK_GUARD_INTERVAL, remaining))
+        if output in done:
+            stdout, _ = output.result()
+            return proc.returncode, (stdout or b"").decode("utf-8", "replace")
+        reason = await run_blocking(guard.exceeded, cap=SMOKE_SCRATCH_CAP)
+        if reason is not None:
+            logger.warning("release acceptance stopped by the disk guard: %s", reason)
+            await _stop_process_group(proc)
+            try:
+                stdout, _ = await asyncio.wait_for(output, timeout=SMOKE_STOP_GRACE)
+            except asyncio.TimeoutError:
+                stdout = b""
+            return 125, (stdout or b"").decode("utf-8", "replace") + "\n" + reason
 
 
 async def _run_release_acceptance(

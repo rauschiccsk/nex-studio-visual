@@ -45,6 +45,7 @@ from backend.services import build_db as build_db_service
 from backend.services import build_sandbox as build_sandbox_service
 from backend.services import kb_index_sync as kb_index_sync_service
 from backend.services import orchestrator as orchestrator_service
+from backend.services import smoke_scratch
 from backend.services.poradca import readiness as poradca_readiness
 from backend.services.poradca import runner as poradca_runner
 from backend.services.poradca import sandbox as poradca_sandbox
@@ -95,6 +96,12 @@ def _sweep_poradca_trash() -> int:
     by inak siahol na kôš živého kokpitu na tom istom stroji.
     """
     return poradca_sandbox.sweep_trash()
+
+
+def _sweep_smoke_scratch() -> int:
+    """DEV-58 — removes the scratch folders of project checks a restart interrupted (a check runs in this process,
+    so at start none is in flight). A hook like :func:`_sweep_poradca_trash`."""
+    return smoke_scratch.sweep()
 
 
 async def _agent_terminal_idle_loop() -> None:
@@ -245,6 +252,9 @@ async def lifespan(app: FastAPI):
         swept_poradca = _sweep_poradca_trash()
         if swept_poradca:
             logger.info("Poradca: removed %d transcript(s) of deleted conversations left in the trash", swept_poradca)
+        swept_smoke = _sweep_smoke_scratch()
+        if swept_smoke:
+            logger.info("Release check: removed %d scratch folder(s) left by interrupted runs", swept_smoke)
     finally:
         db.close()
 
