@@ -125,6 +125,33 @@ def test_no_schema_drift_vs_models(test_engine) -> None:
     assert not meaningful, f"Schema drift detected between models and DB: {meaningful}"
 
 
+def test_every_named_check_constraint_is_the_same_in_the_models_and_the_migrated_database(test_engine) -> None:
+    """Autogenerate does not compare CHECK constraints, so a model and its migration could disagree unseen — the
+    tests run on the migrated schema and would never notice a rule the model claims but the database lacks, or the
+    other way round (DEV-50: the line amounts of a statement must add up to its total)."""
+    from sqlalchemy import CheckConstraint, inspect
+
+    insp = inspect(test_engine)
+    tables = set(insp.get_table_names())
+    in_models = {
+        (t.name, c.name)
+        for t in Base.metadata.sorted_tables
+        for c in t.constraints
+        if isinstance(c, CheckConstraint) and c.name and t.name in tables
+    }
+    in_database = {
+        (t.name, c["name"])
+        for t in Base.metadata.sorted_tables
+        if t.name in tables
+        for c in insp.get_check_constraints(t.name)
+    }
+    assert ("delivery_statements", "ck_delivery_statements_lines_add_up") in in_database, "stráž nevidí ani známu"
+    assert in_models == in_database, {
+        "len v modeli": sorted(in_models - in_database),
+        "len v databáze": sorted(in_database - in_models),
+    }
+
+
 @pytest.fixture(scope="module")
 def _raw_engine():
     """A module-scoped engine for reading the Alembic version table directly."""

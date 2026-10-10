@@ -28,6 +28,10 @@ class DeliveryStatement(Base, UUIDMixin, TimestampMixin):
     #: € per 1 000 tokens at issue — code and tests share one rate, documentation has its own.
     rate_code = Column(Numeric(12, 4), nullable=False)
     rate_docs = Column(Numeric(12, 4), nullable=False)
+    #: € per line, each rounded to cents; ``amount_eur`` is their sum. NULL only on a statement issued before the
+    #: lines were kept whose lines would not add up to its total (migration 111) — its total stays as issued.
+    amount_code_eur = Column(Numeric(12, 2), nullable=True)
+    amount_docs_eur = Column(Numeric(12, 2), nullable=True)
     amount_eur = Column(Numeric(12, 2), nullable=False)
     #: Every file of the delivery: path, kind or the reason it was left out, lines, tokens.
     files = Column(JSONB, nullable=False)
@@ -38,5 +42,10 @@ class DeliveryStatement(Base, UUIDMixin, TimestampMixin):
         CheckConstraint(
             "tokens_code >= 0 AND tokens_tests >= 0 AND tokens_docs >= 0 AND amount_eur >= 0",
             name="ck_delivery_statements_nonneg",
+        ),
+        CheckConstraint(
+            "(amount_code_eur IS NULL AND amount_docs_eur IS NULL) OR "
+            "(amount_code_eur >= 0 AND amount_docs_eur >= 0 AND amount_code_eur + amount_docs_eur = amount_eur)",
+            name="ck_delivery_statements_lines_add_up",
         ),
     )

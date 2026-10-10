@@ -85,6 +85,10 @@ class Settings(BaseSettings):
     # (CR-NS-018 Phase 5a). Empty → the notification omits the link.
     app_public_url: str = ""
 
+    # The time zone of the people who read what the cockpit writes out (DEV-50: the issue time on a delivered-token
+    # statement's CSV is the time they saw on the screen, not UTC).
+    display_timezone: str = "Europe/Bratislava"
+
     # Filesystem location of the .dedo-channel Dedo↔agent message bus (Director
     # observation #6). The agent → Dedo ``framework_issue`` escalation writes an
     # audit-trail file into ``<dir>/inbox/``. Env-configurable (DEDO_CHANNEL_DIR)

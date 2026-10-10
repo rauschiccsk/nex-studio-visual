@@ -33,6 +33,7 @@ function view(over: Partial<DeliveryStatementView["preview"]> = {}, issued: Deli
       base_sha: "4f71c9cfeb59aaaa",
       delivered_sha: "ec28fb9ab8d3bbbb",
       delivered_source: "verifikacia",
+      delivered_source_label: "stav, na ktorom prešla Verifikácia",
       tokenizer: "o200k_base (tiktoken 0.14.0)",
       code: { tokens: 23717, lines: 1828 },
       tests: { tokens: 18912, lines: 1410 },
@@ -49,6 +50,8 @@ function view(over: Partial<DeliveryStatementView["preview"]> = {}, issued: Deli
       ],
       rate_code: "4.0000",
       rate_docs: "1.5000",
+      amount_code_eur: "170.52",
+      amount_docs_eur: "58.19",
       amount_eur: "228.71",
       cannot_issue: [],
       calibration: { eur_code: 125.62, eur_docs: 63.78, per_1k_code: 2.95, per_1k_docs: 1.64, complete: true },
@@ -69,6 +72,9 @@ describe("Súpis dodaných tokenov", () => {
     render(<DeliveryStatementPanel versionId="v-160" />);
 
     expect(await screen.findByTestId("statement-amount")).toHaveTextContent("Suma: 228,71 €");
+    expect(screen.getByTestId("statement-amount-code")).toHaveTextContent("170,52 €");
+    expect(screen.getByTestId("statement-amount-docs")).toHaveTextContent("58,19 €");
+    expect(screen.getByText(/stav, na ktorom prešla Verifikácia/)).toBeInTheDocument();
     expect(screen.getByText(/kód 23\s717, skúšky 18\s912/)).toBeInTheDocument();
     expect(screen.getByText("38 795")).toBeInTheDocument();
     expect(screen.getByText(/meria o200k_base \(tiktoken 0\.14\.0\)/)).toBeInTheDocument();
@@ -87,13 +93,20 @@ describe("Súpis dodaných tokenov", () => {
 
   it("⚠️ rýchlu opravu bez určeného druhu vydať nedá a ponúkne ho určiť", async () => {
     vi.mocked(getDeliveryStatement).mockResolvedValue(
-      view({ work_kind: null, amount_eur: null, cannot_issue: ["Pri rýchlej oprave treba určiť … kokpit to nehádá."] }),
+      view({
+        work_kind: null,
+        amount_code_eur: null,
+        amount_docs_eur: null,
+        amount_eur: null,
+        cannot_issue: ["Pri rýchlej oprave treba určiť … kokpit to nehádá."],
+      }),
     );
     vi.mocked(setWorkKind).mockResolvedValue({ work_kind: "fix" });
     render(<DeliveryStatementPanel versionId="v-151" />);
 
     expect(await screen.findByText(/kokpit to nehádá/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Vydať súpis" })).toBeDisabled();
+    expect(screen.getByTestId("statement-amount-code")).toHaveTextContent("—");
 
     await userEvent.click(screen.getByRole("button", { name: "Oprava chyby v dodanom kóde" }));
     await waitFor(() => expect(setWorkKind).toHaveBeenCalledWith("v-151", "fix"));
@@ -101,7 +114,7 @@ describe("Súpis dodaných tokenov", () => {
   });
 
   it("oprava chyby v dodanom kóde má sumu 0 € a povie prečo", async () => {
-    vi.mocked(getDeliveryStatement).mockResolvedValue(view({ work_kind: "fix", amount_eur: "0.00" }));
+    vi.mocked(getDeliveryStatement).mockResolvedValue(view({ work_kind: "fix", amount_code_eur: "0.00", amount_docs_eur: "0.00", amount_eur: "0.00" }));
     render(<DeliveryStatementPanel versionId="v-151" />);
 
     expect(await screen.findByTestId("statement-amount")).toHaveTextContent("0,00 €oprava chyby v dodanom kóde — neúčtuje sa");
@@ -121,6 +134,8 @@ describe("Súpis dodaných tokenov", () => {
       tokens_docs: 38795,
       rate_code: "4.0000",
       rate_docs: "1.5000",
+      amount_code_eur: "170.52",
+      amount_docs_eur: "58.19",
       amount_eur: "228.71",
     };
     vi.mocked(getDeliveryStatement).mockResolvedValueOnce(view()).mockResolvedValue(view({}, [issued]));

@@ -5059,6 +5059,10 @@ export interface components {
         };
         /** IssuedStatementRead */
         IssuedStatementRead: {
+            /** Amount Code Eur */
+            amount_code_eur?: string | null;
+            /** Amount Docs Eur */
+            amount_docs_eur?: string | null;
             /** Amount Eur */
             amount_eur: string;
             /** Base Sha */
@@ -6423,6 +6427,10 @@ export interface components {
         };
         /** StatementPreviewRead */
         StatementPreviewRead: {
+            /** Amount Code Eur */
+            amount_code_eur?: string | null;
+            /** Amount Docs Eur */
+            amount_docs_eur?: string | null;
             /** Amount Eur */
             amount_eur?: string | null;
             /** Base Sha */
@@ -6440,6 +6448,8 @@ export interface components {
             delivered_sha?: string | null;
             /** Delivered Source */
             delivered_source?: string | null;
+            /** Delivered Source Label */
+            delivered_source_label?: string | null;
             docs?: components["schemas"]["KindTotalRead"] | null;
             /**
              * Files

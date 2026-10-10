@@ -10,6 +10,7 @@ Counting is :mod:`delivered_tokens`; this module adds the decisions around it (D
   the cockpit does not guess it; a new version is new work;
 * code and tests share one rate, documentation has its own (Nastavenia); without rates a statement can be previewed
   but not issued;
+* each line (code and tests, documentation) carries its own amount, rounded to cents; the total is their sum;
 * next to the figures, what the agent's work cost per 1 000 tokens of each kind (Náklady) — so rates rest on data.
 """
 
@@ -20,13 +21,16 @@ import io
 import subprocess
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.config.settings import settings
 from backend.db.models.delivery_statement import DeliveryStatement
 from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
@@ -40,6 +44,12 @@ WORK_KINDS = (WORK_FIX, WORK_CHANGE)
 SOURCE_SIGNOFF = "hotovo"
 SOURCE_VERIFIED = "verifikacia"
 SOURCE_TAG = "znacka"
+#: Where the delivered state came from, as the statement says it — on the screen and in the CSV.
+SOURCE_LABELS = {
+    SOURCE_SIGNOFF: "schválenie verzie",
+    SOURCE_VERIFIED: "stav, na ktorom prešla Verifikácia",
+    SOURCE_TAG: "značka verzie v gite",
+}
 
 #: Which phases make which kind (for the calibration): documentation is written in Príprava and Návrh, code and
 #: tests in Vizuál, Programovanie and the Verifikácia fix rounds.
@@ -145,12 +155,34 @@ def _rates(db: Session) -> tuple[Decimal, Decimal]:
     )
 
 
-def amount(kind: str, tokens_code: int, tokens_tests: int, tokens_docs: int, rate_code: Decimal, rate_docs: Decimal):
-    """€ for the delivery — 0 for a fix of our own error; otherwise tokens / 1 000 × rate, rounded to cents."""
+CENT = Decimal("0.01")
+
+
+@dataclass(frozen=True)
+class Amounts:
+    """€ for the delivery, per line — code and tests, documentation — and in total.
+
+    Each line is rounded to cents and the total is their sum, so an invoice built from the lines never differs from
+    the statement by a cent (Director 10.10.2026: „Ešte by som chcel doplniť pre každý riadok na konci sumu“)."""
+
+    code: Decimal
+    docs: Decimal
+
+    @property
+    def total(self) -> Decimal:
+        return self.code + self.docs
+
+
+def amounts(
+    kind: str, tokens_code: int, tokens_tests: int, tokens_docs: int, rate_code: Decimal, rate_docs: Decimal
+) -> Amounts:
+    """0 for a fix of our own error; otherwise each line's tokens / 1 000 × its rate, rounded to cents."""
     if kind == WORK_FIX:
-        return Decimal("0.00")
-    total = Decimal(tokens_code + tokens_tests) / 1000 * rate_code + Decimal(tokens_docs) / 1000 * rate_docs
-    return total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        return Amounts(code=Decimal("0.00"), docs=Decimal("0.00"))
+    return Amounts(
+        code=(Decimal(tokens_code + tokens_tests) / 1000 * rate_code).quantize(CENT, rounding=ROUND_HALF_UP),
+        docs=(Decimal(tokens_docs) / 1000 * rate_docs).quantize(CENT, rounding=ROUND_HALF_UP),
+    )
 
 
 @dataclass
@@ -197,7 +229,7 @@ class Preview:
     count: Optional[delivered_tokens.Count] = None
     rate_code: Decimal = Decimal("0")
     rate_docs: Decimal = Decimal("0")
-    amount_eur: Optional[Decimal] = None
+    amounts: Optional[Amounts] = None
     cannot_issue: list[str] = field(default_factory=list)
     calibration: Optional[Calibration] = None
 
@@ -227,7 +259,7 @@ def preview(db: Session, version: Version, repo: Path) -> Preview:
     if out.rate_code <= 0 or out.rate_docs <= 0:
         out.cannot_issue.append(RATES_MISSING)
     if out.work_kind is not None:
-        out.amount_eur = amount(
+        out.amounts = amounts(
             out.work_kind,
             out.count.tokens(delivered_tokens.KIND_CODE),
             out.count.tokens(delivered_tokens.KIND_TESTS),
@@ -256,7 +288,7 @@ def issue(db: Session, version: Version, repo: Path, user_id: Optional[uuid.UUID
         raise CannotIssue(p.blocked)
     if p.cannot_issue:
         raise CannotIssue(" ".join(p.cannot_issue))
-    assert p.count is not None and p.work_kind is not None and p.amount_eur is not None
+    assert p.count is not None and p.work_kind is not None and p.amounts is not None
     row = DeliveryStatement(
         version_id=version.id,
         base_sha=p.base_sha,
@@ -269,7 +301,9 @@ def issue(db: Session, version: Version, repo: Path, user_id: Optional[uuid.UUID
         tokens_docs=p.count.tokens(delivered_tokens.KIND_DOCS),
         rate_code=p.rate_code,
         rate_docs=p.rate_docs,
-        amount_eur=p.amount_eur,
+        amount_code_eur=p.amounts.code,
+        amount_docs_eur=p.amounts.docs,
+        amount_eur=p.amounts.total,
         files=files_payload(p.count),
         created_by=user_id,
     )
@@ -286,24 +320,71 @@ KIND_LABELS = {
 WORK_LABELS = {WORK_FIX: "oprava chyby v dodanom kóde (neúčtuje sa)", WORK_CHANGE: "zmena alebo nová práca"}
 
 
+def _number(value: Decimal, places: int = 2) -> str:
+    """A decimal as a Slovak spreadsheet reads it — a comma, never a point (``423,87``); a rate keeps the places it
+    has beyond two (``0,0125``)."""
+    shown = max(places, -value.normalize().as_tuple().exponent)
+    return f"{value:.{shown}f}".replace(".", ",")
+
+
+def _local_time(at: datetime) -> str:
+    """The issue time as the Manažér saw it on the screen — local, without microseconds."""
+    return at.astimezone(ZoneInfo(settings.display_timezone)).strftime("%d.%m.%Y %H:%M:%S")
+
+
 def csv_text(row: DeliveryStatement, version: Version, project: Project) -> str:
-    """The issued statement as CSV (semicolons, as a Slovak spreadsheet expects) — the basis for the invoice."""
+    """The issued statement as CSV for a Slovak spreadsheet (semicolons, decimal commas) — the basis for the invoice:
+    who and what, then the lines as on the screen (lines, tokens, rate, amount — the total is their sum), then every
+    file and why some do not count."""
+    lines = {kind: sum(f["lines"] for f in row.files if f["kind"] == kind) for kind in delivered_tokens.KINDS}
+    code_lines = lines[delivered_tokens.KIND_CODE] + lines[delivered_tokens.KIND_TESTS]
     out = io.StringIO()
     w = csv.writer(out, delimiter=";", lineterminator="\n")
     w.writerow(["Súpis dodaných tokenov"])
     w.writerow(["Projekt", project.name])
     w.writerow(["Verzia", version.version_number])
-    w.writerow(["Vydaný", row.created_at.isoformat() if row.created_at else ""])
+    w.writerow(["Vydaný", _local_time(row.created_at)])
     w.writerow(["Druh práce", WORK_LABELS.get(row.work_kind, row.work_kind)])
     w.writerow(["Od stavu kódu", row.base_sha])
-    w.writerow(["Po stav kódu", f"{row.delivered_sha} ({row.delivered_source})"])
+    source = SOURCE_LABELS.get(row.delivered_source, row.delivered_source)
+    w.writerow(["Po stav kódu", f"{row.delivered_sha} ({source})"])
     w.writerow(["Tokenizér", row.tokenizer])
-    w.writerow(["Kód (tokenov)", row.tokens_code])
-    w.writerow(["Skúšky (tokenov)", row.tokens_tests])
-    w.writerow(["Dokumentácia (tokenov)", row.tokens_docs])
-    w.writerow(["Sadzba kód a skúšky (€ / 1 000 tokenov)", row.rate_code])
-    w.writerow(["Sadzba dokumentácia (€ / 1 000 tokenov)", row.rate_docs])
-    w.writerow(["Suma (€)", row.amount_eur])
+    w.writerow([])
+    w.writerow(["Druh", "Riadkov", "Tokenov", "Sadzba (€ / 1 000 tokenov)", "Suma (€)"])
+
+    def line_amount(value: Optional[Decimal]) -> str:
+        # A statement issued before the lines were kept, whose lines would not add up to its total, has none.
+        return _number(value) if value is not None else ""
+
+    w.writerow(
+        [
+            "Kód a skúšky",
+            code_lines,
+            row.tokens_code + row.tokens_tests,
+            _number(row.rate_code),
+            line_amount(row.amount_code_eur),
+        ]
+    )
+    w.writerow(["z toho kód", lines[delivered_tokens.KIND_CODE], row.tokens_code, "", ""])
+    w.writerow(["z toho skúšky", lines[delivered_tokens.KIND_TESTS], row.tokens_tests, "", ""])
+    w.writerow(
+        [
+            "Dokumentácia",
+            lines[delivered_tokens.KIND_DOCS],
+            row.tokens_docs,
+            _number(row.rate_docs),
+            line_amount(row.amount_docs_eur),
+        ]
+    )
+    w.writerow(
+        [
+            "Spolu",
+            code_lines + lines[delivered_tokens.KIND_DOCS],
+            row.tokens_code + row.tokens_tests + row.tokens_docs,
+            "",
+            _number(row.amount_eur),
+        ]
+    )
     w.writerow([])
     w.writerow(["Súbor", "Druh", "Riadkov", "Tokenov", "Neráta sa — prečo"])
     for f in row.files:

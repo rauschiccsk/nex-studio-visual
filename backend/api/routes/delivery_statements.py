@@ -52,6 +52,7 @@ def _preview_read(p: statements.Preview) -> StatementPreviewRead:
         base_sha=p.base_sha,
         delivered_sha=p.delivered_sha,
         delivered_source=p.delivered_source,
+        delivered_source_label=statements.SOURCE_LABELS.get(p.delivered_source or ""),
         tokenizer=p.tokenizer,
         code=total(delivered_tokens.KIND_CODE),
         tests=total(delivered_tokens.KIND_TESTS),
@@ -59,7 +60,9 @@ def _preview_read(p: statements.Preview) -> StatementPreviewRead:
         files=[DeliveredFileRead(**f) for f in statements.files_payload(p.count)] if p.count else [],
         rate_code=p.rate_code,
         rate_docs=p.rate_docs,
-        amount_eur=p.amount_eur,
+        amount_code_eur=p.amounts.code if p.amounts else None,
+        amount_docs_eur=p.amounts.docs if p.amounts else None,
+        amount_eur=p.amounts.total if p.amounts else None,
         cannot_issue=p.cannot_issue,
         calibration=CalibrationRead(**c.__dict__) if c else None,
     )

@@ -1,7 +1,8 @@
 // DeliveryStatementPanel — the delivered-token statement of a version (DEV-50), in Náklady next to what the work
 // cost. What a version delivered (code, tests, documentation — counted with o200k_base), what is left out and why,
-// the work kind (a fix of our own error is never billed), the rates from Nastavenia, and what the agent's work cost
-// per 1 000 delivered tokens — so the rates rest on data. „Vydať súpis“ freezes it; an issued one downloads as CSV.
+// the work kind (a fix of our own error is never billed), the rates from Nastavenia, the amount of every line (the
+// total is their sum), and what the agent's work cost per 1 000 delivered tokens — so the rates rest on data.
+// „Vydať súpis“ freezes it; an issued one downloads as CSV.
 
 import { useCallback, useEffect, useState } from "react";
 import { Download, FileText, Loader2 } from "lucide-react";
@@ -22,11 +23,6 @@ const eur = (v: string | number | null | undefined) =>
   v == null ? "—" : `${Number(v).toLocaleString("sk-SK", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
 const rate = (v: string) => `${Number(v).toLocaleString("sk-SK", { maximumFractionDigits: 4 })} € / 1 000 tokenov`;
 
-const SOURCE_LABELS: Record<string, string> = {
-  hotovo: "schválenie verzie",
-  verifikacia: "stav, na ktorom prešla Verifikácia",
-  znacka: "značka verzie v gite",
-};
 const KIND_LABELS: Record<string, string> = { kod: "kód", skusky: "skúšky", dokumentacia: "dokumentácia" };
 
 export default function DeliveryStatementPanel({ versionId }: { versionId: string }) {
@@ -90,7 +86,7 @@ export default function DeliveryStatementPanel({ versionId }: { versionId: strin
           <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">
             Od stavu kódu <span className="font-mono">{p.base_sha?.slice(0, 7)}</span> po{" "}
             <span className="font-mono">{p.delivered_sha?.slice(0, 7)}</span> (
-            {SOURCE_LABELS[p.delivered_source ?? ""] ?? p.delivered_source}) · meria {p.tokenizer}
+            {p.delivered_source_label ?? p.delivered_source}) · meria {p.tokenizer}
           </p>
 
           <div className="mb-3 text-xs">
@@ -118,6 +114,7 @@ export default function DeliveryStatementPanel({ versionId }: { versionId: strin
                 <th className="py-1 text-right font-normal">Riadkov</th>
                 <th className="py-1 text-right font-normal">Tokenov</th>
                 <th className="py-1 text-right font-normal">Sadzba</th>
+                <th className="py-1 text-right font-normal">Suma</th>
               </tr>
             </thead>
             <tbody className="text-[var(--color-text-primary)]">
@@ -131,12 +128,18 @@ export default function DeliveryStatementPanel({ versionId }: { versionId: strin
                 <td className="py-1 text-right">{int.format((p.code?.lines ?? 0) + (p.tests?.lines ?? 0))}</td>
                 <td className="py-1 text-right">{int.format(codeTokens)}</td>
                 <td className="py-1 text-right">{rate(p.rate_code)}</td>
+                <td className="py-1 text-right" data-testid="statement-amount-code">
+                  {eur(p.amount_code_eur)}
+                </td>
               </tr>
               <tr>
                 <td className="py-1">Dokumentácia</td>
                 <td className="py-1 text-right">{int.format(p.docs?.lines ?? 0)}</td>
                 <td className="py-1 text-right">{int.format(p.docs?.tokens ?? 0)}</td>
                 <td className="py-1 text-right">{rate(p.rate_docs)}</td>
+                <td className="py-1 text-right" data-testid="statement-amount-docs">
+                  {eur(p.amount_docs_eur)}
+                </td>
               </tr>
             </tbody>
           </table>

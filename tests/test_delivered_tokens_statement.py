@@ -274,7 +274,7 @@ def test_a_fast_fix_nobody_classified_cannot_be_issued(project):
 
     p = st.preview(db, v011, root)
 
-    assert p.work_kind is None and p.amount_eur is None
+    assert p.work_kind is None and p.amounts is None
     assert p.cannot_issue == [st.KIND_UNDECIDED]
     with pytest.raises(st.CannotIssue, match="kokpit to nehádá"):
         st.issue(db, v011, root, owner.id)
@@ -288,7 +288,12 @@ def test_a_fix_of_our_own_error_is_issued_at_zero(project):
 
     row = st.issue(db, v011, root, owner.id)
 
-    assert (row.work_kind, row.amount_eur) == ("fix", Decimal("0.00"))
+    assert (row.work_kind, row.amount_code_eur, row.amount_docs_eur, row.amount_eur) == (
+        "fix",
+        Decimal("0.00"),
+        Decimal("0.00"),
+        Decimal("0.00"),
+    )
     assert row.tokens_code > 0, "aj oprava zadarmo ukáže, čo sa dodalo"
 
 
@@ -297,18 +302,20 @@ def test_a_change_is_billed_by_tokens_and_the_issued_statement_keeps_its_rates(p
     _rates(db, owner, 4.0, 1.5)
 
     row = st.issue(db, v010, root, owner.id)
-    expected = (Decimal(row.tokens_code + row.tokens_tests) / 1000 * Decimal("4.0")) + (
-        Decimal(row.tokens_docs) / 1000 * Decimal("1.5")
-    )
+    code = (Decimal(row.tokens_code + row.tokens_tests) / 1000 * Decimal("4.0")).quantize(Decimal("0.01"))
+    docs = (Decimal(row.tokens_docs) / 1000 * Decimal("1.5")).quantize(Decimal("0.01"))
     assert row.work_kind == "change", "nová verzia je nová práca"
-    assert row.amount_eur == expected.quantize(Decimal("0.01"))
+    assert (row.amount_code_eur, row.amount_docs_eur, row.amount_eur) == (code, docs, code + docs)
     assert (row.rate_code, row.rate_docs) == (Decimal("4.0"), Decimal("1.5"))
 
     _rates(db, owner, 10.0, 5.0)
     db.refresh(row)
-    assert (row.rate_code, row.amount_eur) == (Decimal("4.0"), expected.quantize(Decimal("0.01"))), (
-        "neskoršia zmena sadzby prepočítala už vydaný súpis"
-    )
+    assert (row.rate_code, row.amount_code_eur, row.amount_docs_eur, row.amount_eur) == (
+        Decimal("4.0"),
+        code,
+        docs,
+        code + docs,
+    ), "neskoršia zmena sadzby prepočítala už vydaný súpis"
     assert st.preview(db, v010, root).rate_code == Decimal("10.0")
 
 
@@ -367,7 +374,120 @@ def test_the_csv_lists_every_file_and_why_some_do_not_count(project):
     assert "backend/app/invoices.py;kód;" in text
     assert f"docs/specs/versions/v0.1.0/customer-requirements.md;;1;0;{dt.EXCLUDED_ZADANIE}" in text
     assert "Tokenizér;o200k_base (tiktoken 0.14.0)" in text
-    assert f"Suma (€);{row.amount_eur}" in text
+
+
+def _issued(db, version, **values):
+    """A statement as issued — the numbers of the first one the Director issued (NEX Inbox 1.7.0, 10.10.2026)."""
+    row = st.DeliveryStatement(
+        version_id=version.id,
+        base_sha="ec28fb9ab8d31cc836cb09ce7a03f08d81cee4af",
+        delivered_sha="48de08076e594d4b224281b1befd0a5ba0fa9ca3",
+        delivered_source=st.SOURCE_VERIFIED,
+        tokenizer="o200k_base (tiktoken 0.14.0)",
+        work_kind="change",
+        tokens_code=94321,
+        tokens_tests=79569,
+        tokens_docs=76087,
+        rate_code=Decimal("2.0000"),
+        rate_docs=Decimal("1.0000"),
+        amount_code_eur=Decimal("347.78"),
+        amount_docs_eur=Decimal("76.09"),
+        amount_eur=Decimal("423.87"),
+        files=[
+            {"path": "backend/app/inbox.py", "kind": "kod", "excluded": None, "lines": 9000, "tokens": 94321},
+            {"path": "backend/tests/test_inbox.py", "kind": "skusky", "excluded": None, "lines": 6106, "tokens": 79569},
+            {"path": "docs/specification.md", "kind": "dokumentacia", "excluded": None, "lines": 2737, "tokens": 76087},
+            {"path": "package-lock.json", "kind": None, "excluded": dt.EXCLUDED_LOCKFILE, "lines": 0, "tokens": 0},
+        ],
+        created_at=datetime(2026, 10, 10, 13, 36, 8, 268343, tzinfo=timezone.utc),
+    )
+    for key, value in values.items():
+        setattr(row, key, value)
+    db.add(row)
+    db.flush()
+    return row
+
+
+def test_the_csv_reads_in_a_slovak_spreadsheet_line_by_line_as_on_the_screen(project):
+    """Director 10.10.2026: „Áno, doplň sumu ku každému riadku a oprav CSV“ — decimal commas (a point makes a Slovak
+    spreadsheet read 423.87 as text or a date), the delivered state and the issue time in words, an amount on every
+    line and the total as their sum."""
+    db, _root, _owner, v010, _v011, _, _ = project
+    row = _issued(db, v010)
+
+    lines = st.csv_text(row, v010, db.get(Project, v010.project_id)).splitlines()
+
+    assert lines[:8] == [
+        "Súpis dodaných tokenov",
+        "Projekt;Faktúry",
+        "Verzia;0.1.0",
+        "Vydaný;10.10.2026 15:36:08",
+        "Druh práce;zmena alebo nová práca",
+        "Od stavu kódu;ec28fb9ab8d31cc836cb09ce7a03f08d81cee4af",
+        "Po stav kódu;48de08076e594d4b224281b1befd0a5ba0fa9ca3 (stav, na ktorom prešla Verifikácia)",
+        "Tokenizér;o200k_base (tiktoken 0.14.0)",
+    ]
+    assert lines[9:15] == [
+        "Druh;Riadkov;Tokenov;Sadzba (€ / 1 000 tokenov);Suma (€)",
+        "Kód a skúšky;15106;173890;2,00;347,78",
+        "z toho kód;9000;94321;;",
+        "z toho skúšky;6106;79569;;",
+        "Dokumentácia;2737;76087;1,00;76,09",
+        "Spolu;17843;249977;;423,87",
+    ]
+    assert lines[16] == "Súbor;Druh;Riadkov;Tokenov;Neráta sa — prečo"
+    assert f"package-lock.json;;0;0;{dt.EXCLUDED_LOCKFILE}" in lines
+
+
+def test_a_rate_keeps_its_places_beyond_two_and_an_unsplit_statement_still_shows_its_total(project):
+    db, _root, _owner, v010, _v011, _, _ = project
+    row = _issued(
+        db,
+        v010,
+        rate_docs=Decimal("0.0125"),
+        amount_code_eur=None,
+        amount_docs_eur=None,
+        amount_eur=Decimal("348.73"),
+    )
+
+    lines = st.csv_text(row, v010, db.get(Project, v010.project_id)).splitlines()
+
+    assert lines[10:15] == [
+        "Kód a skúšky;15106;173890;2,00;",
+        "z toho kód;9000;94321;;",
+        "z toho skúšky;6106;79569;;",
+        "Dokumentácia;2737;76087;0,0125;",
+        "Spolu;17843;249977;;348,73",
+    ]
+
+
+# ── 5. every line carries its amount; the total is their sum ──────────────────
+
+
+def test_each_line_is_rounded_to_cents_and_the_total_is_their_sum():
+    director = st.amounts("change", 94321, 79569, 76087, Decimal("2"), Decimal("1"))
+    assert (director.code, director.docs, director.total) == (
+        Decimal("347.78"),
+        Decimal("76.09"),
+        Decimal("423.87"),
+    ), "prvý vydaný súpis (NEX Inbox 1.7.0)"
+
+    # Half a cent on each line: rounding the total alone would bill 0,01 € while the lines show 0,01 € + 0,01 €.
+    halves = st.amounts("change", 5, 0, 5, Decimal("1"), Decimal("1"))
+    assert (halves.code, halves.docs, halves.total) == (Decimal("0.01"), Decimal("0.01"), Decimal("0.02"))
+
+    fix = st.amounts("fix", 94321, 79569, 76087, Decimal("2"), Decimal("1"))
+    assert (fix.code, fix.docs, fix.total) == (Decimal("0.00"), Decimal("0.00"), Decimal("0.00"))
+
+
+def test_a_statement_whose_lines_do_not_add_up_is_refused_by_the_database(project):
+    # pg8000 reports a violated check as ProgrammingError, psycopg as IntegrityError — both are DBAPIError.
+    from sqlalchemy.exc import DBAPIError
+
+    db, _root, _owner, v010, _v011, _, _ = project
+    with pytest.raises(DBAPIError, match="ck_delivery_statements_lines_add_up"):
+        with db.begin_nested():
+            _issued(db, v010, amount_docs_eur=Decimal("76.08"))
 
 
 # ── 4. the HTTP surface ───────────────────────────────────────────────────────
@@ -385,9 +505,14 @@ def _as(db, user):
 
 
 def test_the_screen_gets_the_preview_issues_downloads_and_decides_the_kind(client, project):
-    db, _root, owner, _v010, v011, _, _ = project
+    db, _root, owner, v010, v011, _, _ = project
     _rates(db, owner, 4.0, 1.5)
     _as(db, owner)
+
+    change = client.get(f"/api/v1/versions/{v010.id}/delivery-statement").json()["preview"]
+    assert change["delivered_source_label"] == "stav, na ktorom prešla Verifikácia"
+    assert Decimal(change["amount_code_eur"]) > 0 and Decimal(change["amount_docs_eur"]) > 0
+    assert Decimal(change["amount_code_eur"]) + Decimal(change["amount_docs_eur"]) == Decimal(change["amount_eur"])
 
     view = client.get(f"/api/v1/versions/{v011.id}/delivery-statement").json()
     assert view["preview"]["work_kind"] is None and view["issued"] == []
@@ -397,6 +522,7 @@ def test_the_screen_gets_the_preview_issues_downloads_and_decides_the_kind(clien
     issued = client.post(f"/api/v1/versions/{v011.id}/delivery-statement")
     assert issued.status_code == 201, issued.text
     assert issued.json()["amount_eur"] in ("0.00", "0.0", 0, "0")
+    assert (issued.json()["amount_code_eur"], issued.json()["amount_docs_eur"]) == ("0.00", "0.00")
 
     csv = client.get(f"/api/v1/delivery-statements/{issued.json()['id']}/csv")
     assert csv.status_code == 200 and "attachment" in csv.headers["content-disposition"]
@@ -418,3 +544,101 @@ def test_a_fast_fix_and_a_new_version_carry_their_kind_from_the_start(client, pr
 
     version = fast_fix_service.create_patch_version(db, project_id=proj_id, user_id=owner.id)
     assert version.work_kind is None, "rýchla oprava bez voľby ostáva neurčená — kokpit nehádá"
+
+
+# ── 6. statements issued before the lines were kept ──────────────────────────
+
+
+def test_an_issued_statement_gets_its_lines_only_where_they_add_up_to_its_total(monkeypatch):
+    """Migration 111 fills the line amounts of statements issued before it from their own frozen tokens and rates —
+    and never touches a total: a statement whose lines would not add up to it keeps its total alone."""
+    from alembic import command
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import Session
+
+    from tests.test_migration_versions import (
+        _alembic_config,
+        _create_clean_database,
+        _drop_database_if_exists,
+        _get_test_database_url,
+    )
+
+    base_url = _get_test_database_url()
+    parts = base_url.rsplit("/", 1)
+    admin_url = parts[0] + "/postgres"
+    db_name = parts[1].split("?")[0] + "_mig111"
+    db_url = parts[0] + "/" + db_name
+    _create_clean_database(admin_url, db_name)
+    engine = create_engine(db_url)
+    try:
+        config = _alembic_config(db_url, monkeypatch)
+        command.upgrade(config, "110")
+        with Session(engine) as db:
+            owner = User(username="u111", email="u111@t.sk", password_hash="x", role="ri")
+            db.add(owner)
+            db.flush()
+            proj = Project(
+                name="P", slug="p111", type="standard", auth_mode="password", description="", created_by=owner.id
+            )
+            db.add(proj)
+            db.flush()
+            version = Version(project_id=proj.id, version_number="1.7.0", name="1.7.0", status="active")
+            db.add(version)
+            db.commit()
+            version_id = version.id
+        issued = {
+            # the Director's NEX Inbox 1.7.0 — lines 347,78 + 76,09 = 423,87
+            "director": ("change", 94321, 79569, 76087, "2", "1", "423.87"),
+            # half a cent on each line, total rounded alone: lines 0,01 + 0,01 ≠ 0,01
+            "halves": ("change", 5, 0, 5, "1", "1", "0.01"),
+            "fix": ("fix", 94321, 79569, 76087, "2", "1", "0.00"),
+        }
+        with engine.begin() as conn:
+            for sha, (kind, code, tests_, docs, rate_code, rate_docs, total) in issued.items():
+                conn.execute(
+                    text(
+                        "INSERT INTO delivery_statements (id, version_id, base_sha, delivered_sha, delivered_source, "
+                        "tokenizer, work_kind, tokens_code, tokens_tests, tokens_docs, rate_code, rate_docs, "
+                        "amount_eur, files) VALUES (gen_random_uuid(), :v, 'a', :sha, 'verifikacia', 'o200k_base', "
+                        ":kind, :code, :tests, :docs, :rc, :rd, :total, '[]'::jsonb)"
+                    ),
+                    {
+                        "v": version_id,
+                        "sha": sha,
+                        "kind": kind,
+                        "code": code,
+                        "tests": tests_,
+                        "docs": docs,
+                        "rc": Decimal(rate_code),
+                        "rd": Decimal(rate_docs),
+                        "total": Decimal(total),
+                    },
+                )
+
+        command.upgrade(config, "111")
+
+        with engine.connect() as conn:
+            rows = {
+                r.delivered_sha: (r.amount_code_eur, r.amount_docs_eur, r.amount_eur)
+                for r in conn.execute(
+                    text("SELECT delivered_sha, amount_code_eur, amount_docs_eur, amount_eur FROM delivery_statements")
+                )
+            }
+        assert rows == {
+            "director": (Decimal("347.78"), Decimal("76.09"), Decimal("423.87")),
+            "halves": (None, None, Decimal("0.01")),
+            "fix": (Decimal("0.00"), Decimal("0.00"), Decimal("0.00")),
+        }
+
+        command.downgrade(config, "110")
+        with engine.connect() as conn:
+            columns = {
+                r[0]
+                for r in conn.execute(
+                    text("SELECT column_name FROM information_schema.columns WHERE table_name = 'delivery_statements'")
+                )
+            }
+        assert {"amount_code_eur", "amount_docs_eur"} & columns == set()
+    finally:
+        engine.dispose()
+        _drop_database_if_exists(admin_url, db_name)

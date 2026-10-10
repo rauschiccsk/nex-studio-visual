@@ -42,6 +42,8 @@ export interface StatementPreview {
   base_sha: string | null;
   delivered_sha: string | null;
   delivered_source: string | null;
+  /** The same in words („stav, na ktorom prešla Verifikácia“) — one wording for the screen and the CSV. */
+  delivered_source_label: string | null;
   tokenizer: string;
   code: KindTotal | null;
   tests: KindTotal | null;
@@ -49,6 +51,9 @@ export interface StatementPreview {
   files: DeliveredFile[];
   rate_code: string;
   rate_docs: string;
+  /** € per line, each rounded to cents; ``amount_eur`` is their sum. Null while the work kind is undecided. */
+  amount_code_eur: string | null;
+  amount_docs_eur: string | null;
   amount_eur: string | null;
   cannot_issue: string[];
   calibration: StatementCalibration | null;
@@ -67,6 +72,9 @@ export interface IssuedStatement {
   tokens_docs: number;
   rate_code: string;
   rate_docs: string;
+  /** Frozen with the statement; null only on one issued before the lines were kept that would not add up. */
+  amount_code_eur: string | null;
+  amount_docs_eur: string | null;
   amount_eur: string;
 }
 
