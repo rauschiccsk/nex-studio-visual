@@ -10,10 +10,12 @@ guarded by ``tests/test_poradca_sandbox.py``.)
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
-from backend.services import claude_agent
+from backend.config.settings import settings
+from backend.services import claude_agent, host_docker_guard
 
 
 def _ok_proc() -> MagicMock:
@@ -72,11 +74,25 @@ async def test_build_turn_passes_the_role_permission_profile(monkeypatch, tmp_pa
     argv = list(mock_exec.call_args.args)
 
     assert "--settings" in argv
-    assert _value_after(argv, "--settings") == str(profile)
+    # DEV-70: an in-process turn sees this server's Docker — the profile it gets is the project's PLUS the cockpit's
+    # Docker denies, written outside the project.
+    passed = Path(_value_after(argv, "--settings"))
+    assert passed.parent == Path(settings.agent_profile_dir)
+    deny = json.loads(passed.read_text(encoding="utf-8"))["permissions"]["deny"]
+    assert deny == ["Bash(git push:*)", *host_docker_guard.HOST_DOCKER_DENY]
 
 
-async def test_no_profile_means_no_flag(monkeypatch) -> None:
-    """A project founded before CR-V2-018 has no profile on disk — pass no flag rather than a dead path
-    (``--settings <missing>`` fails the whole turn). The caller logs the unconstrained dispatch."""
+async def test_no_profile_still_carries_the_docker_denies(monkeypatch) -> None:
+    """A project founded before CR-V2-018 has no profile on disk. Never a dead path (``--settings <missing>`` fails
+    the whole turn) — but since DEV-70 an in-process turn is not left unconstrained either: the cockpit writes a
+    profile with just its Docker denies and passes that."""
     argv = await _argv_for(monkeypatch)
-    assert "--settings" not in argv
+    passed = json.loads(Path(_value_after(argv, "--settings")).read_text(encoding="utf-8"))
+    assert passed == {"permissions": {"deny": list(host_docker_guard.HOST_DOCKER_DENY)}}
+
+
+def test_a_sandboxed_turn_keeps_the_projects_own_profile(tmp_path) -> None:
+    """The sandbox mounts the project's profile at its own path and has no Docker to protect (DEV-70)."""
+    profile = tmp_path / "settings.json"
+    assert claude_agent.turn_settings_path(profile, "p", sandboxed=True) == profile
+    assert claude_agent.turn_settings_path(None, "p", sandboxed=True) is None

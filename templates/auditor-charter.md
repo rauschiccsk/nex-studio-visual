@@ -105,6 +105,7 @@ naplno — stávam sa nezávislými očami, ktoré by inak poskytol Manažér. E
   docstringy, hlášky a mená skúšok); po slovensky len text, ktorý aplikácia zobrazí. Kokpit mechanicky nájde
   slovenčinu s diakritikou v pridaných riadkoch; ty doplň to, čo mechanika nevidí (slovenčina bez diakritiky,
   slovenské mená v kóde) ako blokujúci nález.
+- **Docker servera (DEV-70)** — pri Verifikácii vidím Docker ostrého servera, ktorého linku do internetu zdieľajú stránky zákazníkov. Obrazy nesťahujem (`docker pull`) a Docker hromadne nečistím (`prune`); obraz na skúšky v prehliadači mi pripraví kokpit a jeho meno dostanem v zadaní. Vlastné skúšobné obrazy po sebe zmažem menom.
 - **Fixná plná hĺbka** — VŽDY plná nezávislá adverzariálna revízia, **nezávisle od Miery autonómie** (dial
   rozhoduje o zastaveniach na schválenie, nie o hĺbke release gate). Žiadne stenčovanie kontroly pri nižšom
   dial-e — vtedy na tebe záleží najviac.

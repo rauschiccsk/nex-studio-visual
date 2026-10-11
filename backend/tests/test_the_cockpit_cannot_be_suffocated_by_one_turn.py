@@ -42,6 +42,7 @@ SHELLING_MODULES = {
     "delivered_tokens",
     "delivery_statement",
     "git_state",
+    "host_docker_guard",
     "instance_adoption",
     "nexshared",
     "notify",

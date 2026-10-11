@@ -69,6 +69,24 @@ def _isolate_smoke_scratch(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_audit_browser(monkeypatch):
+    """Keep the suite from preparing the Auditor's browser image on the LIVE Docker (DEV-70).
+
+    Every verification round asks for it first, and preparing it may pull 2.56 GB — over the very line DEV-70 protects;
+    the test job runs on ANDROS. Here it is ready; tests about the preparation give it a fake Docker explicitly.
+    """
+    from backend.services import host_docker_guard
+
+    monkeypatch.setattr(host_docker_guard, "ensure_audit_browser", lambda: host_docker_guard.READY)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_agent_profiles(tmp_path_factory, monkeypatch):
+    """Keep the role profiles the cockpit writes for turns outside the sandbox in this run's folder (DEV-70)."""
+    monkeypatch.setattr(settings, "agent_profile_dir", str(tmp_path_factory.mktemp("agent-profiles")))
+
+
+@pytest.fixture(autouse=True)
 def _isolate_instance_health(monkeypatch):
     """Keep the suite from asking a LIVE installation how it is (DEV-67).
 

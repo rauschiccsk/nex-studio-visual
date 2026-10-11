@@ -25,7 +25,7 @@ from uuid import UUID
 from backend.config.settings import settings
 from backend.constants.paths import TERMINAL_LOG_DIR as DURABLE_TERMINAL_LOG_DIR
 from backend.core.agent_env import agent_env
-from backend.services import usage_ledger
+from backend.services import host_docker_guard, usage_ledger
 
 logger = logging.getLogger(__name__)
 
@@ -345,6 +345,18 @@ _SETTING_SOURCES = "user,project"
 _STRICT_MCP_CONFIG = "--strict-mcp-config"
 
 
+def turn_settings_path(settings_path: Optional[Path], project_slug: str, *, sandboxed: bool) -> Optional[Path]:
+    """The role profile a turn is started with (DEV-70).
+
+    A turn outside the sandbox sees this server's Docker, so it gets the cockpit's own profile — the project's deny
+    rules plus what it may not do to the server (:data:`host_docker_guard.HOST_DOCKER_DENY`), written outside the
+    project — even when the project has no profile of its own. A sandboxed turn keeps the project's profile: the
+    sandbox mounts that very path and has no Docker to protect."""
+    if sandboxed:
+        return settings_path
+    return host_docker_guard.turn_profile(settings_path, project_slug)
+
+
 def build_claude_argv(
     *,
     streaming: bool,
@@ -646,6 +658,7 @@ async def _invoke_once(
     if starts_session:
         _refresh_rules(project_slug)
     charter_text = _load_charter(charter_path) if starts_session else None
+    settings_path = turn_settings_path(settings_path, project_slug, sandboxed=use_sandbox)
     args = build_claude_argv(
         force_new_session=force_new_session,
         streaming=on_event is not None,

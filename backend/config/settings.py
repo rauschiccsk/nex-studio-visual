@@ -80,6 +80,16 @@ class Settings(BaseSettings):
     release_smoke_tmp_root: str = "/opt/data/nex-studio-visual/smoke"
     release_smoke_disk_budget_bytes: int = 30 * 1024**3
     release_smoke_min_free_bytes: int = 20 * 1024**3
+    # DEV-70 — what a verification turn needs from this server's Docker is prepared by the cockpit, not fetched by the
+    # agent: the Auditor's browser image stays on the server under the cockpit's own tag (removing the public name
+    # then only untags it), and a turn that sees the host Docker may not pull or prune. 11.10.2026 the Auditor pulled
+    # and removed this 2.56 GB image five times; each pull filled ANDROS's internet line for about twenty minutes.
+    audit_browser_image: str = "mcr.microsoft.com/playwright:v1.50.1-noble"
+    audit_browser_pin: str = "nex-studio-visual/audit-browser:v1.50.1-noble"
+    audit_browser_pull_timeout: int = 3600
+    # The role profiles the cockpit writes for turns outside the sandbox — inside the backend container, never in a
+    # project the turn could edit.
+    agent_profile_dir: str = "/tmp/nex-agent-profiles"
     # DEV-52 — screenshots the Manažér pastes into a question for Poradca: one image, how many in one question, and
     # all of one question together (they travel base64 in the question, a third larger). The cockpit's nginx
     # (frontend/nginx.conf, client_max_body_size) must let the largest request through — a test compares them.

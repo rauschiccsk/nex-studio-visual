@@ -70,6 +70,7 @@ from backend.services import (
     deploy_progress,
     failure_framing,
     fast_fix,
+    host_docker_guard,
     preview_switch,
     public_route,
     release_note_writer,
@@ -2461,8 +2462,46 @@ _FAKE_BOUNDARY_ANTIPATTERNS = (
 )
 
 
+#: DEV-70: how long the cockpit waits for the browser image to be ready — one pull of 2.56 GB over a slow line at most.
+AUDIT_BROWSER_CAP = settings.audit_browser_pull_timeout + 120
+
+
+async def _prepare_audit_browser() -> str:
+    """:func:`host_docker_guard.ensure_audit_browser` off the main loop; a timeout reads as ``unavailable``."""
+    try:
+        state = await run_blocking(host_docker_guard.ensure_audit_browser, cap=AUDIT_BROWSER_CAP)
+    except BlockingWorkTimedOut:
+        state = host_docker_guard.UNAVAILABLE
+    logger.info("audit browser %s: %s", settings.audit_browser_image, state)
+    return state
+
+
+def _audit_docker_rule(browser: str) -> str:
+    """The Auditor's brief on this server's Docker (DEV-70) — which browser image is ready, and what it may not do."""
+    if browser == host_docker_guard.UNAVAILABLE:
+        image = (
+            "Obraz na skúšky v prehliadači teraz na serveri NIE JE pripravený — skúšky v prehliadači vynechaj a "
+            "povedz to v nálezoch ako neoverené (nie ako chybu appky).\n"
+        )
+    else:
+        image = (
+            f"Na skúšky v prehliadači použi obraz `{settings.audit_browser_image}` — na serveri UŽ JE, kokpit ho "
+            "pripravil.\n"
+        )
+    return (
+        "DOCKER SERVERA (DEV-70): " + image + "Obrazy NESŤAHUJ (`docker pull`) a Docker hromadne NEČISTI "
+        "(`prune`) — linku servera zdieľajú stránky zákazníkov a stiahnutie veľkého obrazu ich spomalí. Vlastné "
+        "skúšobné obrazy po sebe zmaž menom (`docker rmi <meno>`).\n"
+    )
+
+
 def _verifikacia_directive(
-    db: Session, version_id: uuid.UUID, *, smoke_block: str = "", flow_type: str = "new_version"
+    db: Session,
+    version_id: uuid.UUID,
+    *,
+    smoke_block: str = "",
+    flow_type: str = "new_version",
+    browser: str = host_docker_guard.READY,
 ) -> str:
     """The Auditor's END verification brief (Verifikácia phase; CR-V2-014; VERIF-1..VERIF-3, AUD-1(b),
     AUD-2, AUD-3, AUD-6) — the v2 form of v1 ``gate_g``.
@@ -2530,7 +2569,8 @@ def _verifikacia_directive(
             "VERIFIKÁCIA — RÝCHLA OPRAVA (nezávislý Auditor, ĽAHKÁ koncová kontrola; NIE plný release oracle).\n"
             "1. Si NEZÁVISLÝ overovateľ MIMO tímu AI Agenta, READ + RUN-ONLY — smieš ČÍTAŤ a SPUSTIŤ appku, "
             "NIKDY neupravuj/necommituj. TY NÁJDEŠ — opravuje AI Agent.\n"
-            "2. ZAMERAJ sa na DVE veci (oprava je malá a jednoznačná, nerob plný adverzariálny audit):\n"
+            + _audit_docker_rule(browser)
+            + "2. ZAMERAJ sa na DVE veci (oprava je malá a jednoznačná, nerob plný adverzariálny audit):\n"
             "   a) OPRAVA FUNGUJE — robí appka to, čo smernica (pokyn Manažéra) žiadala? Over to oproti "
             "bežiacej appke / artefaktom, nie oproti slovu AI Agenta.\n"
             "   b) ŽIADNA REGRESIA — nerozbila oprava nič susedné? Engine spustil release smoke (interné "
@@ -2572,7 +2612,8 @@ def _verifikacia_directive(
         "1. Si NEZÁVISLÝ overovateľ MIMO tímu AI Agenta — over z VONKU (žiadny agent sa nevie auditovať sám). "
         "SI READ + RUN-ONLY: smieš ČÍTAŤ a SPUSTIŤ appku na overenie, ale NIKDY neupravuj súbor, nepíš kód "
         "ani necommituj. TY NÁJDEŠ — opravuje AI Agent (zachovaná nezávislosť).\n"
-        "2. RELEASE-ACCEPTANCE (behaviorálny pilier): over, že appka robí to, čo brief sľúbil. Engine už "
+        + _audit_docker_rule(browser)
+        + "2. RELEASE-ACCEPTANCE (behaviorálny pilier): over, že appka robí to, čo brief sľúbil. Engine už "
         "spustil appku proti INTERNÝM FIXTÚRAM (nie zákazníckej inštancii — deploy je mimo pipeline; "
         "„Hotovo“ = overené, nie nasadené) — výsledok je nižšie. Zohľadni ho v synthéze.\n"
         + smoke_block
@@ -10933,6 +10974,10 @@ async def _run_verifikacia_round(
             db, state, verdict="FAIL", runtime_floor_red=True, on_message=on_message
         )
 
+    # DEV-70: the browser image the Auditor checks with is the cockpit's to prepare — before the turn, off the main
+    # loop (Docker waits), and a failure never stops the release check.
+    browser = await _prepare_audit_browser()
+
     # 2. The Auditor's verdict turn (independent, READ + RUN-ONLY). Recorded author=auditor / recipient=manazer
     # / stage=verifikacia / kind=verdict by invoke_agent — all valid v2 tokens. Effort scales with the dial.
     review = await invoke_agent_with_parse_retry(
@@ -10940,7 +10985,9 @@ async def _run_verifikacia_round(
         version_id=version_id,
         role=AUDITOR_ROLE,
         stage="verifikacia",
-        prompt=_verifikacia_directive(db, version_id, smoke_block=smoke_block, flow_type=state.flow_type),
+        prompt=_verifikacia_directive(
+            db, version_id, smoke_block=smoke_block, flow_type=state.flow_type, browser=browser
+        ),
         on_event=on_event,
         recipient="manazer",
         on_message=on_message,
