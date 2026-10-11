@@ -133,6 +133,27 @@ class DecisionCardContextRead(BaseModel):
     reopens_closed: int = 0
 
 
+class RoundGainRead(BaseModel):
+    """DEV-5: what the latest Auditor round of the phase found — told to the Manažér as what it GAINED."""
+
+    findings: int
+    blocking: int
+    #: How many would have passed every automatic test and shown only at the customer; ``None`` when the round's
+    #: findings do not say (records from before DEV-5, the cockpit's own engine findings).
+    escaped: Optional[int] = None
+
+
+class ConsultationDirectionRead(BaseModel):
+    """DEV-5 (ICCINT-124): direction, not state — from the version's whole record
+    (:func:`orchestrator.consultation_direction`)."""
+
+    closed: int
+    open: int
+    #: Blocking findings per Auditor round of the open consultation's phase, in order — raw numbers, no verdict.
+    blocking_by_round: list[int] = []
+    last_round: Optional[RoundGainRead] = None
+
+
 class BoardTask(BaseModel):
     """The Programovanie task currently in focus, for the who's-up status (WS-C2, CR-NS-035; v2 §4.4.2)."""
 
@@ -274,6 +295,8 @@ class PipelineBoardRead(BaseModel):
     #: DEV-4: per open decision card (by its ``key``) — the decision it follows from and how many closed decisions a
     #: different choice reopens, from the whole record. Empty when no decision is offered.
     decision_context: dict[str, DecisionCardContextRead] = {}
+    #: DEV-5: the direction line over the cards and the latest round's gain — ``None`` when no decision is offered.
+    consultation_direction: Optional[ConsultationDirectionRead] = None
 
 
 class DedoProposalSendRequest(BaseModel):

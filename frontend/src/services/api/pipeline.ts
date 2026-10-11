@@ -170,6 +170,23 @@ export interface DecisionCardContext {
   reopens_closed: number;
 }
 
+/** DEV-5: what the latest Auditor round of the phase found — told as what it GAINED. */
+export interface RoundGain {
+  findings: number;
+  blocking: number;
+  /** How many would have passed every automatic test and shown only at the customer; null when the round does not say. */
+  escaped: number | null;
+}
+
+/** DEV-5 (ICCINT-124): direction, not state — the backend reads it from the version's whole record. */
+export interface ConsultationDirection {
+  closed: number;
+  open: number;
+  /** Blocking findings per Auditor round of the open consultation's phase, in order — raw numbers, no verdict. */
+  blocking_by_round: number[];
+  last_round: RoundGain | null;
+}
+
 export interface PipelineBoard {
   state: PipelineState | null;
   recent_messages: PipelineMessage[];
@@ -213,6 +230,9 @@ export interface PipelineBoard {
   // DEV-4: per open decision card (by its key) — the decision it follows from and how many closed decisions a
   // different choice reopens, from the whole record. Absent/empty → the card says nothing it cannot back.
   decision_context?: Record<string, DecisionCardContext>;
+  // DEV-5: the direction line over the cards and what the latest round gained — from the whole record, not this
+  // message tail. Absent/null → no line.
+  consultation_direction?: ConsultationDirection | null;
   // DEV-7: the version's database schema — absent/null when the version has no schema document.
   database_schema?: DatabaseSchema | null;
 }

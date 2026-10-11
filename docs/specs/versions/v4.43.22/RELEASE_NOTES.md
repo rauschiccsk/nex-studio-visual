@@ -19,3 +19,10 @@ dôsledkom tvojho skoršieho rozhodnutia, karta napíše napríklad „Vyplýva 
 znovu otvára N uzavretých rozhodnutí“ počíta len rozhodnutia, ktoré už naozaj máš zodpovedané, v ktoromkoľvek kole —
 doteraz započítal aj nezodpovedané karty toho istého kola. Kokpit to číta z celého záznamu verzie, takže platí aj
 pre rozhodnutia spred mnohých kôl. Je to len údaj: poradie možností ani značku „Odporúčané“ nemení.
+
+**Nad rozhodovacími kartami je vidieť, kam stavba ide a čo posledné kolo previerky získalo.** Riadok „Uzavretých 12 ·
+otvorené 4 · blokujúcich 5 → 1 → 0 → 1 → 0“ počíta z celého záznamu verzie (doteraz len z posledných správ, takže dlhej
+stavbe vypadli prvé kolá) a len z kôl fázy, v ktorej karty sú — prvé kolo Verifikácie po čistom Návrhu už nevyzerá
+ako návrat chýb. Pod ním veta o tom, čo kolo zachytilo, napríklad „Posledné kolo previerky zachytilo 3 nálezy (z toho
+2 blokujúce); jeden z nich by prešiel všetkými skúškami a prejavil sa až u zákazníka.“ Audítor pri každom náleze
+po novom povie, či by ho zachytili automatické skúšky. Zlé správy riadok nezakrýva: rad 0 → 2 → 5 sa vypíše tak, ako je.

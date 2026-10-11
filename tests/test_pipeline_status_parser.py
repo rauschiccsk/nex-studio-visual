@@ -211,7 +211,13 @@ def test_auditor_fail_verdict_carries_findings_and_fix_scope():
             summary="FAIL — money rounding off by 0.01",
             awaiting="none",
             verdict=False,
-            findings=[{"text": "DPH rounding accumulates per line, not on the cumulative total", "blocking": True}],
+            findings=[
+                {
+                    "text": "DPH rounding accumulates per line, not on the cumulative total",
+                    "blocking": True,
+                    "escapes_tests": True,
+                }
+            ],
             proposed_fix="Round on the cumulative total in services/invoice.py compute_totals().",
         )
     )
@@ -234,8 +240,8 @@ def test_auditor_upfront_review_findings_after_navrh():
             awaiting="manazer",
             verdict=False,
             findings=[
-                {"text": "password reset flow undefined", "blocking": True},
-                {"text": "no rate-limit on login", "blocking": True},
+                {"text": "password reset flow undefined", "blocking": True, "escapes_tests": False},
+                {"text": "no rate-limit on login", "blocking": True, "escapes_tests": True},
             ],
             plan={
                 "epics": [

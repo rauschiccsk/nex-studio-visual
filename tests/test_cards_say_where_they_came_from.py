@@ -108,7 +108,9 @@ def test_a_finding_written_as_a_sentence_is_sent_back():
     result = _validate_block(_verdict("Chýba strážca disku (neblokujúce)"))
 
     assert isinstance(result, ParseFailure)
-    assert result.reason.startswith("findings: each finding must be an object {text, blocking}, not text")
+    assert result.reason.startswith(
+        "findings: each finding must be an object {text, blocking, escapes_tests}, not text"
+    )
 
 
 def test_a_finding_that_does_not_say_whether_it_blocks_is_sent_back():
@@ -121,7 +123,8 @@ def test_a_finding_that_does_not_say_whether_it_blocks_is_sent_back():
 def test_findings_as_data_are_accepted_and_counted():
     block = _validate_block(
         _verdict(
-            {"text": "Peniaze sa zaokrúhľujú po riadkoch", "blocking": True}, {"text": "Preklep", "blocking": False}
+            {"text": "Peniaze sa zaokrúhľujú po riadkoch", "blocking": True, "escapes_tests": True},
+            {"text": "Preklep", "blocking": False, "escapes_tests": False},
         )
     )
 
@@ -207,7 +210,7 @@ def test_the_charters_say_it_too():
     agent = (REPO / "templates" / "ai-agent-charter.md").read_text(encoding="utf-8")
     auditor = (REPO / "templates" / "auditor-charter.md").read_text(encoding="utf-8")
     assert "svoj pôvod `origin`" in agent and "`origin_of`" in agent
-    assert "Každý nález je objekt `{text, blocking}`" in auditor
+    assert "Každý nález je objekt `{text, blocking, escapes_tests}`" in auditor
 
 
 def test_the_rules_name_every_origin():

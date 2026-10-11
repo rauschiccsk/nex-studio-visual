@@ -3791,6 +3791,23 @@ export interface components {
             url?: string | null;
         };
         /**
+         * ConsultationDirectionRead
+         * @description DEV-5 (ICCINT-124): direction, not state — from the version's whole record
+         *     (:func:`orchestrator.consultation_direction`).
+         */
+        ConsultationDirectionRead: {
+            /**
+             * Blocking By Round
+             * @default []
+             */
+            blocking_by_round: number[];
+            /** Closed */
+            closed: number;
+            last_round?: components["schemas"]["RoundGainRead"] | null;
+            /** Open */
+            open: number;
+        };
+        /**
          * CostRowRead
          * @description One cost row within a scope. `kind` keeps measured and entered figures distinguishable all
          *     the way to the screen — a renderer must never present them as the same class of number.
@@ -5431,6 +5448,7 @@ export interface components {
              * @default 0
              */
             build_open_findings: number;
+            consultation_direction?: components["schemas"]["ConsultationDirectionRead"] | null;
             current_task?: components["schemas"]["BoardTask"] | null;
             database_schema?: components["schemas"]["DatabaseSchemaRead"] | null;
             /**
@@ -6522,6 +6540,18 @@ export interface components {
             released_at?: string | null;
             /** Version */
             version: string;
+        };
+        /**
+         * RoundGainRead
+         * @description DEV-5: what the latest Auditor round of the phase found — told to the Manažér as what it GAINED.
+         */
+        RoundGainRead: {
+            /** Blocking */
+            blocking: number;
+            /** Escaped */
+            escaped?: number | null;
+            /** Findings */
+            findings: number;
         };
         /**
          * SelfProfileUpdate

@@ -313,9 +313,10 @@ _LEGACY_NON_BLOCKING_MARKER = "neblokujúce"
 #: DEV-3 — what every instruction that asks for ``findings`` tells the agent: a finding is DATA. The schema demands
 #: ``blocking`` in new output (:data:`PIPELINE_STATUS_JSON_SCHEMA`) and :func:`_validate_block` refuses a sentence.
 FINDINGS_AS_DATA_RULE = (
-    "Každý nález v `findings` je objekt `{text, blocking}`: `text` = krátka ľudská veta, `blocking: true`, keď "
-    "bráni pokračovať, `blocking: false` pri poznámke, ktorá nebráni. Závažnosť nepíš do vety („(neblokujúce)“) — "
-    "je to údaj."
+    "Každý nález v `findings` je objekt `{text, blocking, escapes_tests}`: `text` = krátka ľudská veta, "
+    "`blocking: true`, keď bráni pokračovať, `blocking: false` pri poznámke, ktorá nebráni; `escapes_tests: true`, "
+    "keď by nález nezachytila žiadna automatická skúška projektu (ani tá, ktorú táto verzia pridáva) a prejavil by "
+    "sa až pri používaní u zákazníka, inak `false`. Závažnosť nepíš do vety („(neblokujúce)“) — je to údaj."
 )
 
 #: DEV-3 — what every instruction that asks for consultation cards tells the agent about each card's origin.
@@ -340,6 +341,16 @@ class Finding(BaseModel):
     blocking: bool = Field(
         default=True,
         description="true = bráni pokračovať; false = poznámka, ktorá nebráni. Údaj, nie slovo vo vete.",
+    )
+    #: DEV-5 — what the round GAINED: a finding no automatic test would have caught is one that would have reached
+    #: the customer. ``None`` only in records from before (and in the cockpit's own engine findings, written as
+    #: sentences); new output must say it (:func:`_demanded_in_new_output`).
+    escapes_tests: Optional[bool] = Field(
+        default=None,
+        description=(
+            "true = žiadna automatická skúška projektu (ani tá, ktorú táto verzia pridáva) by nález nezachytila — "
+            "prejavil by sa až pri používaní u zákazníka; false = skúšky by ho zachytili."
+        ),
     )
 
     def __str__(self) -> str:  # výpisy a f-reťazce musia ďalej fungovať
@@ -653,8 +664,14 @@ def _demanded_in_new_output(schema: dict[str, Any]) -> dict[str, Any]:
         "description": origin.get("description", ""),
     }
     finding = defs["Finding"]
-    finding["required"] = sorted({*finding.get("required", []), "blocking"})
+    finding["required"] = sorted({*finding.get("required", []), "blocking", "escapes_tests"})
     finding["properties"]["blocking"].pop("default", None)
+    escapes = finding["properties"]["escapes_tests"]
+    finding["properties"]["escapes_tests"] = {
+        "type": "boolean",
+        "title": escapes.get("title", "Escapes Tests"),
+        "description": escapes.get("description", ""),
+    }
     return schema
 
 
@@ -678,9 +695,16 @@ def _validate_block(data: dict) -> ParseResult:
     # sentence into a finding, so after it the difference would be gone.
     for raw in data.get("findings") or []:
         if not isinstance(raw, dict):
-            return ParseFailure(f"findings: each finding must be an object {{text, blocking}}, not text — {raw!r:.80}")
+            return ParseFailure(
+                f"findings: each finding must be an object {{text, blocking, escapes_tests}}, not text — {raw!r:.80}"
+            )
         if "blocking" not in raw:
             return ParseFailure(f"findings: finding {str(raw.get('text', ''))[:60]!r} must say 'blocking' (true/false)")
+        # DEV-5: whether the automatic tests would have caught it — the round's gain is told from this.
+        if not isinstance(raw.get("escapes_tests"), bool):
+            return ParseFailure(
+                f"findings: finding {str(raw.get('text', ''))[:60]!r} must say 'escapes_tests' (true/false)"
+            )
 
     if block.stage not in STAGES:
         return ParseFailure(f"unknown stage {block.stage!r}")

@@ -209,20 +209,52 @@ describe("Rozhodovacia karta — cena voľby (ICCINT-123)", () => {
 describe("Nad kartami je vidieť SMER (ICCINT-124)", () => {
   beforeEach(() => vi.mocked(postPipelineActionApi).mockReset());
 
-  it("⚠️ ukáže, koľko sa uzavrelo a ako klesali blokujúce", () => {
+  it("⚠️ ukáže, koľko sa uzavrelo a ako klesali blokujúce — z údaja backendu, nie z chvosta správ (DEV-5)", () => {
+    const b = {
+      ...boardWith({}),
+      consultation_direction: {
+        closed: 12,
+        open: 1,
+        blocking_by_round: [5, 1, 0, 1, 0],
+        last_round: { findings: 1, blocking: 0, escaped: 0 },
+      },
+    } as PipelineBoard;
+    render(<DecisionCardsBar board={b} versionId="v1" onBoard={vi.fn()} />);
+    expect(screen.getByText("Uzavretých 12 · otvorené 1 · blokujúcich 5 → 1 → 0 → 1 → 0")).toBeInTheDocument();
+    expect(screen.getByText("Posledné kolo previerky zachytilo 1 nález.")).toBeInTheDocument();
+  });
+
+  it("povie, čo kolo získalo — aj vec, ktorá by prešla všetkými skúškami (DEV-5)", () => {
+    const b = {
+      ...boardWith({}),
+      consultation_direction: {
+        closed: 0,
+        open: 1,
+        blocking_by_round: [1],
+        last_round: { findings: 1, blocking: 1, escaped: 1 },
+      },
+    } as PipelineBoard;
+    render(<DecisionCardsBar board={b} versionId="v1" onBoard={vi.fn()} />);
+    expect(
+      screen.getByText(
+        "Posledné kolo previerky zachytilo 1 nález (z toho 1 blokujúci); jeden z nich by prešiel všetkými skúškami a prejavil sa až u zákazníka.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("verdikty v chvoste správ riadok nekreslia — počíta backend z celého záznamu (DEV-5)", () => {
     const b = boardWith({});
     (b as unknown as { recent_messages: unknown[] }).recent_messages.push(
-      { id: "v1", seq: 1, kind: "verdict", payload: { findings: [{ text: "a", blocking: true }, { text: "b", blocking: true }] } },
+      { id: "v1", seq: 1, kind: "verdict", payload: { findings: [{ text: "a", blocking: true }] } },
       { id: "a1", seq: 2, kind: "answer", payload: { consultation_decision: { key: "x" } } },
-      { id: "v2", seq: 3, kind: "verdict", payload: { findings: [{ text: "c", blocking: false }] } },
     );
     render(<DecisionCardsBar board={b} versionId="v1" onBoard={vi.fn()} />);
-    expect(screen.getByText(/Uzavretých 1/)).toBeInTheDocument();
-    expect(screen.getByText(/blokujúcich 2 → 0/)).toBeInTheDocument();
+    expect(screen.queryByText(/Uzavretých/)).not.toBeInTheDocument();
   });
 
   it("keď ešte niet čo ukázať, riadok tam nie je", () => {
     render(<DecisionCardsBar board={boardWith({})} versionId="v1" onBoard={vi.fn()} />);
     expect(screen.queryByText(/Uzavretých/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Posledné kolo/)).not.toBeInTheDocument();
   });
 });

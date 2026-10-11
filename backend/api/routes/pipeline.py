@@ -353,6 +353,10 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         ),
         # DEV-4: the cards read where each question came from in the WHOLE record — only while a decision is offered.
         decision_context=(orchestrator.decision_card_context(db, version_id) if "decide" in available_actions else {}),
+        # DEV-5: direction over the cards and what the latest round gained — from the whole record, same condition.
+        consultation_direction=(
+            orchestrator.consultation_direction(db, version_id) if "decide" in available_actions else None
+        ),
     )
 
 

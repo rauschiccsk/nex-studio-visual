@@ -29,7 +29,7 @@ import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { RESTORED_DRAFT_LABEL, draftKey, useDraft } from "@/hooks/useDraft";
 import { usePoradcaHandoff } from "@/hooks/usePoradcaHandoff";
 import { FROM_PORADCA_LABEL } from "@/lib/poradcaHandoff";
-import { smerDoRiadku, smerKonzultacie } from "@/lib/smerKonzultacie";
+import { smerDoRiadku, ziskKola } from "@/lib/smerKonzultacie";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
 
@@ -225,10 +225,10 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
   const total = consultation.decisions.length;
   const idx = consultation.decisions.findIndex((d) => !(d.key in answered));
   // ICCINT-124 — smer sa počíta zo záznamu, nie z počítadla: uzavreté rozhodnutia a to, ako v
-  // jednotlivých kolách klesali (alebo stúpali) blokujúce nálezy.
-  const smerRiadok = smerDoRiadku(
-    smerKonzultacie(board?.recent_messages ?? [], consultation.decisions.length - Object.keys(answered).length),
-  );
+  // jednotlivých kolách klesali (alebo stúpali) blokujúce nálezy. DEV-5: z celého záznamu verzie (backend),
+  // nie z chvosta posledných správ, a k tomu veta o tom, čo posledné kolo získalo.
+  const smerRiadok = smerDoRiadku(board.consultation_direction);
+  const ziskRiadok = ziskKola(board.consultation_direction?.last_round);
   const current = idx >= 0 ? consultation.decisions[idx] : null;
   if (!current) return null; // all decided → the apply is dispatching; the card disappears
   // DEV-4: where this card's question came from and what a different choice reopens — read from the whole record.
@@ -282,6 +282,9 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
             {smerRiadok}
           </div>
         )}
+        {/* DEV-5: čo kolo ZÍSKALO, nie čo pribudlo — nález, ktorý by prešiel všetkými skúškami, by sa inak
+            prejavil až u zákazníka. */}
+        {ziskRiadok && <p className="px-4 pb-1 text-[11px] text-[var(--color-text-secondary)]">{ziskRiadok}</p>}
 
         {typeof consultation.round === "number" && typeof consultation.round_max === "number" && (
           <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">

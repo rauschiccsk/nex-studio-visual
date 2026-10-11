@@ -4089,6 +4089,85 @@ def decision_card_context(db: Session, version_id: uuid.UUID) -> dict[str, dict[
     return context
 
 
+def _finding_blocks(f: Any) -> bool:
+    """Does a stored finding block? Data since ICCINT-122; a sentence from before says it only by its marker."""
+    if isinstance(f, dict):
+        return f.get("blocking") is not False
+    return "neblokujúce" not in str(f).casefold()
+
+
+def _finding_escapes_tests(f: Any) -> Optional[bool]:
+    """Would no automatic test have caught it (DEV-5)? ``None`` when the finding does not say — a sentence from
+    before, or one of the cockpit's own engine findings."""
+    value = f.get("escapes_tests") if isinstance(f, dict) else None
+    return value if isinstance(value, bool) else None
+
+
+def consultation_direction(db: Session, version_id: uuid.UUID) -> Optional[dict[str, Any]]:
+    """DEV-5 (ICCINT-124): the line over the cards — DIRECTION, not state — and what the latest review round GAINED,
+    read from the version's WHOLE record (the board's tail of recent messages loses the early rounds of a long build).
+
+    * ``closed`` — decisions the Manažér has answered in this build.
+    * ``open`` — cards of the open consultation still without an answer.
+    * ``blocking_by_round`` — how many findings BLOCKED in each Auditor round of the open consultation's PHASE, in
+      record order. Raw numbers, never a verdict: 0 → 2 → 5 must read as what it is — bad news is not covered up.
+      Another phase's rounds are not mixed in: the first Verifikácia round after a clean Návrh starts a new phase,
+      it is not a relapse.
+    * ``last_round`` — the latest of those rounds: ``findings``, ``blocking`` and ``escaped`` — how many would have
+      passed every automatic test and shown only at the customer (``None`` when none of its findings says).
+
+    ``None`` when no consultation is on record."""
+    rows = db.execute(
+        select(PipelineMessage.stage, PipelineMessage.kind, PipelineMessage.payload)
+        .where(
+            PipelineMessage.version_id == version_id,
+            or_(_carries_decision_queue(), PipelineMessage.kind.in_(("answer", "verdict"))),
+        )
+        .order_by(PipelineMessage.seq.asc())
+    ).all()
+    closed = 0
+    phase: Optional[str] = None
+    open_keys: list[str] = []
+    answered_since: set[str] = set()
+    rounds: list[tuple[str, list[Any]]] = []
+    for stage, kind, payload in rows:
+        if not isinstance(payload, dict):
+            continue
+        cd = payload.get("consultation_decision")
+        if kind == "answer" and isinstance(cd, dict) and cd.get("key"):
+            closed += 1
+            answered_since.add(str(cd["key"]))
+            continue
+        findings = payload.get("findings")
+        if kind == "verdict" and isinstance(findings, list):
+            rounds.append((stage, findings))
+            continue
+        consultation = payload.get("consultation")
+        decisions = consultation.get("decisions") if isinstance(consultation, dict) else None
+        if isinstance(decisions, list) and decisions:
+            phase = stage
+            open_keys = [str(d["key"]) for d in decisions if isinstance(d, dict) and d.get("key")]
+            answered_since = set()
+    if phase is None:
+        return None
+    in_phase = [findings for stage, findings in rounds if stage == phase]
+    last_round: Optional[dict[str, Any]] = None
+    if in_phase:
+        last = in_phase[-1]
+        says = [_finding_escapes_tests(f) for f in last]
+        last_round = {
+            "findings": len(last),
+            "blocking": sum(1 for f in last if _finding_blocks(f)),
+            "escaped": sum(1 for s in says if s) if any(s is not None for s in says) else None,
+        }
+    return {
+        "closed": closed,
+        "open": sum(1 for key in open_keys if key not in answered_since),
+        "blocking_by_round": [sum(1 for f in findings if _finding_blocks(f)) for findings in in_phase],
+        "last_round": last_round,
+    }
+
+
 def dispatch_directive(
     db: Session, version_id: uuid.UUID, action: str, payload: dict[str, Any], stage: str
 ) -> Optional[str]:

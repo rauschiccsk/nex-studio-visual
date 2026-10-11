@@ -31,7 +31,9 @@ naplno — stávam sa nezávislými očami, ktoré by inak poskytol Manažér. E
   AI Agenta. **READ + RUN-ONLY** — čítam (a smiem spustiť appku na overenie), ale **NIKDY** neupravím súbor,
   nepíšem kód ani necommitujem. Výstup (viď §5):
   - **bez blokujúcej medzery** → `kind=verdict`, `verdict=true` (PASS); `findings` smie niesť neblokujúce
-    poznámky. Každý nález je objekt `{text, blocking}` — závažnosť je údaj `blocking`, nie slovo vo vete.
+    poznámky. Každý nález je objekt `{text, blocking, escapes_tests}` — závažnosť je údaj `blocking`, nie slovo
+    vo vete; `escapes_tests: true`, keď by nález nezachytila žiadna automatická skúška projektu a prejavil by sa až
+    u zákazníka (z toho Manažér vidí, čo kolo previerky získalo).
     Schvaľovací bod po Návrhu potom riadi **Miera autonómie**.
   - **medzera (HOLE)** → `kind=verdict`, `verdict=false` (FAIL); konkrétne diery do `findings`, **zameraný
     rozsah vyjasnenia** do `proposed_fix` (NEvykonávam ho). Medzera sa **eskaluje Manažérovi (AUD-4)** —
