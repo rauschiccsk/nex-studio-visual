@@ -55,7 +55,7 @@ _SECRET_SUBSTRINGS = ("FAKEsecret", "REFRESHfakeSECRET", "SKKEYfake", _FAKE_TOKE
 
 
 def test_redact_secrets_scrubs_every_token_shape():
-    out = claude_agent._redact_secrets(_STDERR_WITH_SECRETS)
+    out = claude_agent.redact_secrets(_STDERR_WITH_SECRETS)
     for secret in _SECRET_SUBSTRINGS:
         assert secret not in out, f"{secret!r} leaked through redaction"
     assert "[REDACTED]" in out
@@ -65,9 +65,9 @@ def test_redact_secrets_scrubs_every_token_shape():
 
 def test_redact_secrets_is_idempotent_and_noop_on_clean_text():
     clean = "just a normal traceback\nline two\n"
-    assert claude_agent._redact_secrets(clean) == clean
-    once = claude_agent._redact_secrets(_STDERR_WITH_SECRETS)
-    assert claude_agent._redact_secrets(once) == once
+    assert claude_agent.redact_secrets(clean) == clean
+    once = claude_agent.redact_secrets(_STDERR_WITH_SECRETS)
+    assert claude_agent.redact_secrets(once) == once
 
 
 # ── Fix 1: per-turn log written on completion / crash / timeout (real _invoke_once) ──

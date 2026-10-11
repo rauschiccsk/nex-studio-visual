@@ -107,7 +107,7 @@ async def test_the_reported_detail_is_the_measured_one_end_to_end(monkeypatch) -
             )
         return 0, ""
 
-    async def _probe(stack):
+    async def _probe(stack, states=None):
         return True, "backend responded 200 /health"  # the old English detail
 
     monkeypatch.setattr(orchestrator, "_compose_smoke_step", _step)

@@ -87,7 +87,7 @@ async def test_a_one_shot_container_that_finished_is_not_a_failed_boot(monkeypat
     _compose_double(monkeypatch, HEALTHY_WITH_A_FINISHED_MIGRATE)
     probed: list[bool] = []
 
-    async def _probe(stack):
+    async def _probe(stack, states=None):
         probed.append(True)
         return True, "backend responded 200 /health"
 
@@ -106,7 +106,7 @@ async def test_a_one_shot_container_that_finished_is_not_a_failed_boot(monkeypat
 async def test_a_container_that_exited_nonzero_is_named_with_its_log(monkeypatch) -> None:
     _compose_double(monkeypatch, A_FAILED_TEST_CONTAINER, logs="\n--- test ---\n17 errors during collection")
 
-    async def _never(stack):
+    async def _never(stack, states=None):
         raise AssertionError("the app probe ran even though a container had already failed")
 
     monkeypatch.setattr(orchestrator, "_run_app_starts_smoke", _never)
@@ -137,7 +137,7 @@ async def test_a_clean_up_still_goes_straight_to_the_app_probe(monkeypatch) -> N
     """The control: nothing about the ordinary passing path changed."""
     _compose_double(monkeypatch, HEALTHY_WITH_A_FINISHED_MIGRATE)
 
-    async def _probe(stack):
+    async def _probe(stack, states=None):
         return False, "backend not responding on any path"
 
     monkeypatch.setattr(orchestrator, "_run_app_starts_smoke", _probe)

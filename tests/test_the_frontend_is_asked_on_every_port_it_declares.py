@@ -55,8 +55,8 @@ class _Containers:
         raise urllib.error.URLError(ConnectionRefusedError(111, "Connection refused"))
 
     async def __call__(self, cmd, timeout, env=None):  # noqa: ARG002 — _compose_smoke_step's signature
-        if "python" not in cmd:
-            return 0, "ok"
+        if "python" not in cmd:  # the container logs a failed probe brings along (DEV-61) — empty here
+            return 0, ""
         source = cmd[cmd.index("-c") + 1]
         out, code = io.StringIO(), 0
         with mock.patch.object(urllib.request, "urlopen", self._urlopen), contextlib.redirect_stdout(out):

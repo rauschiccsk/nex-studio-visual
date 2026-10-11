@@ -6785,6 +6785,19 @@ _SMOKE_CONTAINER_FAILED = "kontajner zlyhal: "
 #: last frames (where the cause is), short enough that the Manažér's screen stays readable.
 _SMOKE_LOG_TAIL = 2500
 
+#: The Auditor-channel ``proposed_fix`` of a Verifikácia start failure — what the one click "Nechaj to opraviť"
+#: hands the AI Agent next to the measured reason and the container logs. It asks for nothing the fix turn
+#: cannot do (DEV-61): Programovanie runs in the build sandbox without a Docker socket
+#: (:data:`build_sandbox.SANDBOXED_PHASES`), and the brief that told it to ``docker compose up`` and reproduce
+#: the failure led nowhere — 11.10.2026 the Director had to write Career Asistent's fix by hand. The start is
+#: measured again by the cockpit itself after the fix (:func:`_settle_fix_boot_recheck`, or Verifikácia).
+BOOT_FAIL_FIX_BRIEF = (
+    "Aplikácia sa v skúške kokpitu nespustila alebo neodpovedala. Príčinu hľadaj v konkrétnom dôvode zlyhania "
+    "a v zázname kontajnerov pri ňom a v tom, čo spustenie určuje (docker-compose.yml, Dockerfile, nastavenie "
+    "servera, vstupné skripty kontajnerov); oprav ju. Aplikáciu spúšťať nemusíš — spustenie po oprave overí "
+    "kokpit sám tou istou skúškou."
+)
+
 
 async def _smoke_failure_logs(base: list[str]) -> str:
     """The logs of the containers that EXITED NON-ZERO, appended to a boot failure (ICCINT-37).
@@ -6819,13 +6832,27 @@ async def _smoke_failure_logs(base: list[str]) -> str:
                 name = r.get("Service") or r.get("Name")
                 if name:
                     failed.append(str(name))
-    if not failed:
-        return ""
+    return await _smoke_service_logs(base, failed)
+
+
+async def _smoke_service_logs(
+    base: list[str], services: Sequence[str], states: Optional[dict[str, tuple[str, int]]] = None
+) -> str:
+    """The tail of each named service's own log, secrets masked, appended to a boot failure (ICCINT-37, DEV-61).
+
+    Asked for the containers that exited non-zero AND for the one that is running but did not answer the probe:
+    11.10.2026 Career Asistent's frontend ran and refused the connection, and the fix brief carried only
+    "Connection refused" — the nginx line saying it served plain HTTP on port 80 sat in a log nobody was handed.
+    ``states`` (``service -> (state, exit code)``) puts the container's state next to its name when known. The log
+    goes to the Manažér's screen and the AI Agent's brief, so it is masked like a turn log
+    (:func:`claude_agent.redact_secrets`) before it is cut. Best-effort: a log that cannot be read is skipped."""
     chunks: list[str] = []
-    for service in failed[:3]:  # three is already more than anyone reads; the first is nearly always the cause
+    for service in list(services)[:3]:  # three is already more than anyone reads; the first is nearly always the cause
         rc, log = await _compose_smoke_step(base + ["logs", "--no-color", "--tail", "200", service], 30)
         if rc == 0 and log.strip():
-            chunks.append(f"\n\n--- {service} ---\n{log.strip()[-_SMOKE_LOG_TAIL:]}")
+            state = (states or {}).get(service, ("", 0))[0]
+            name = f"{service} (state: {state})" if state else service
+            chunks.append(f"\n\n--- {name} ---\n{claude_agent.redact_secrets(log.strip())[-_SMOKE_LOG_TAIL:]}")
     return "".join(chunks)
 
 
@@ -6882,7 +6909,9 @@ async def _boot_smoke_stack(project_slug: str, compose: Path, roles: dict[str, O
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
-async def _run_app_starts_smoke(stack: _SmokeStack) -> tuple[bool, str]:
+async def _run_app_starts_smoke(
+    stack: _SmokeStack, states: Optional[dict[str, tuple[str, int]]] = None
+) -> tuple[bool, str]:
     """Boot leg (v0.7.5 CR-1, narrowed v0.7.9): against the already-UP isolated stack, verify the deployed
     app actually BOOTS and RESPONDS to HTTP (the v0.7.7 path-agnostic readiness poll) — the deterministic
     runtime floor behind full-flow ``gate_g`` (unfakeable, no test env needed).
@@ -6890,9 +6919,10 @@ async def _run_app_starts_smoke(stack: _SmokeStack) -> tuple[bool, str]:
     It does NOT run the acceptance suite IN the prod image (v0.7.9: ``python:3.12-slim`` carries no pytest);
     behavioural depth is the host-run ``release_smoke_test.sh`` (:func:`_run_release_acceptance`), a sibling
     leg of the SAME up/down cycle. Returns ``(ok, detail)`` and never raises: backend-not-responding /
-    frontend-not-serving → ``(False, reason)``. The compose-structure pre-checks (no compose / a backend web
-    app with no frontend) and the ``up`` itself are the driver's job (:func:`_run_release_smoke`); this leg
-    only probes the running stack."""
+    frontend-not-serving → ``(False, reason)``, the reason followed by the log of the service that did not
+    answer (DEV-61; ``states`` from :func:`_smoke_container_states` names its state). The compose-structure
+    pre-checks (no compose / a backend web app with no frontend) and the ``up`` itself are the driver's job
+    (:func:`_run_release_smoke`); this leg only probes the running stack."""
     base, compose, roles = stack.base, stack.compose, stack.roles
     # Backend ready (the boot check) — ``up --wait`` returns once the container RUNS; a backend without a
     # healthcheck may still be booting/migrating. Poll /health until the server RESPONDS (status <500;
@@ -6901,7 +6931,8 @@ async def _run_app_starts_smoke(stack: _SmokeStack) -> tuple[bool, str]:
     if port is not None:
         ready, last = await _await_acceptance_app_ready(base, port)
         if not ready:
-            return False, f"app did not boot / not responding within {ACCEPTANCE_SMOKE_READY_TIMEOUT}s: {last}"
+            why = await _smoke_service_logs(base, ["backend"], states)
+            return False, f"app did not boot / not responding within {ACCEPTANCE_SMOKE_READY_TIMEOUT}s: {last}{why}"
     # Frontend reachable — the frontend nginx has no Python, so probe it FROM the backend over the isolated
     # project network by service name (no host ports; the override stripped them). A 404 at ``/`` still
     # means "serving" (<500). This catches a frontend that built but never serves.
@@ -6911,7 +6942,8 @@ async def _run_app_starts_smoke(stack: _SmokeStack) -> tuple[bool, str]:
         fe_ports = _frontend_ports(services.get(fe_role) or {})
         fe_ready, fe_last = await _await_http_ready(base, roles["backend"], fe_ports, host=fe_role, path="/")
         if not fe_ready:
-            return False, (f"frontend '{fe_role}' not serving within {ACCEPTANCE_SMOKE_READY_TIMEOUT}s: {fe_last}")
+            why = await _smoke_service_logs(base, [fe_role], states)
+            return False, f"frontend '{fe_role}' not serving within {ACCEPTANCE_SMOKE_READY_TIMEOUT}s: {fe_last}{why}"
     return True, _APP_RESPONDS
 
 
@@ -7526,7 +7558,7 @@ async def _boot_leg(stack: _SmokeStack) -> tuple[bool, str]:
     if not stack.up_ok and not states:
         # Could not look at all — keep the compose output rather than invent a verdict.
         return False, f"up exit {stack.up_rc}: {stack.up_detail.strip()[-400:]}"
-    ok, detail = await _run_app_starts_smoke(stack)
+    ok, detail = await _run_app_starts_smoke(stack, states)
     # ICCINT-44: on the way through, say what was MEASURED — the constant below told the Manažér the same
     # sentence every round and hid that the test container was still running.
     return (True, _boot_pass_detail(stack, states)) if ok else (ok, detail)
@@ -10531,10 +10563,7 @@ async def _run_verifikacia_round(
             payload={
                 "verdict": "FAIL",
                 "findings": [smoke_fail_content],
-                "proposed_fix": (
-                    "Spusti appku tak ako engine (`docker compose up`), zreprodukuj zlyhanú skúšku po spustení "
-                    "a oprav jej príčinu, potom over znova."
-                ),
+                "proposed_fix": BOOT_FAIL_FIX_BRIEF,
                 "phase": "verifikacia",
                 "engine_override": "boot_fail",
                 "technical_detail": smoke_detail,

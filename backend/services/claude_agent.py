@@ -119,18 +119,24 @@ _LOG_EVENT_TAIL = 50
 #: ``api_key=`` / ``access_token=`` k=v pairs, and any bare ``sk-…`` secret (Anthropic OAuth ``sk-ant-oat…``
 #: / API ``sk-ant-api…`` keys). Ordered so the header rule runs first, then the standalone-token rules mop
 #: up anything it left (defense in depth — a leaked token must not survive under ANY of these shapes).
+#: The k=v rule also takes a name that only ENDS in the word (``DB_PASSWORD=``, ``SETTINGS_ENCRYPTION_KEY=``) and a
+#: quoted JSON key (``"password": "…"``) — the shapes a container log prints its environment in (DEV-61: the
+#: release check hands container logs to the Manažér and the AI Agent; ``DB_PASSWORD=…`` passed through untouched).
 _REDACTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"(?im)^(.*\bauthorization)\b\s*[:=].*$"), r"\1: [REDACTED]"),
     (re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._\-]+"), "Bearer [REDACTED]"),
     (
-        re.compile(r"(?i)\b(access[_-]?token|refresh[_-]?token|api[_-]?key|token|secret|password)\s*[:=]\s*\S+"),
-        r"\1=[REDACTED]",
+        re.compile(
+            r"(?i)\b([\w-]*?(?:access[_-]?token|refresh[_-]?token|api[_-]?key|token|secret|password|passwd|key))"
+            r"([\"']?)\s*[:=]\s*\S+"
+        ),
+        r"\1\2=[REDACTED]",
     ),
     (re.compile(r"\bsk-[A-Za-z0-9._\-]{6,}"), "[REDACTED]"),
 )
 
 
-def _redact_secrets(text: str) -> str:
+def redact_secrets(text: str) -> str:
     """Scrub credential / OAuth-token patterns from ``text`` (Fix 1, §4). Idempotent; never raises."""
     if not text:
         return text
@@ -170,7 +176,7 @@ def _write_turn_log(
             sections.append("--- last stream events ---\n" + events_tail[-_LOG_TAIL_BYTES:])
         if stdout_tail:
             sections.append("--- stdout (tail) ---\n" + stdout_tail[-_LOG_TAIL_BYTES:])
-        body = _redact_secrets("\n\n".join(sections))
+        body = redact_secrets("\n\n".join(sections))
         path.write_text(body + "\n", encoding="utf-8")
         return str(path)
     except OSError as exc:  # never let a diagnostic write break a run (Fix 1)
