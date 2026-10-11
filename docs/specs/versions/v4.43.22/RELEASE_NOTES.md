@@ -12,3 +12,10 @@ už nedostane pokyn spustiť ju cez Docker a chybu zopakovať — pri programova
 do slepej uličky. Dostane konkrétny dôvod zlyhania a záznam z kontajnera, ktorý neodpovedal, aj keď beží (doteraz
 prišiel záznam len z kontajnera, ktorý spadol), a spustenie po oprave overí kokpit sám. Heslá a kľúče sú v zázname
 zakryté — aj tvary ako `DB_PASSWORD=…`, ktoré kokpit doteraz prepúšťal.
+
+**Rozhodovacia karta menuje rozhodnutie, z ktorého otázka vyplýva — otázkou a tvojou voľbou.** Pri otázke, ktorá je
+dôsledkom tvojho skoršieho rozhodnutia, karta napíše napríklad „Vyplýva z tvojho rozhodnutia „Aký rozsah kontrol?“
+(tvoja voľba: Široký).“ — doteraz tam stál vnútorný kľúč rozhodnutia, ktorý nič nepovie. Riadok „Zmena tejto voľby
+znovu otvára N uzavretých rozhodnutí“ počíta len rozhodnutia, ktoré už naozaj máš zodpovedané, v ktoromkoľvek kole —
+doteraz započítal aj nezodpovedané karty toho istého kola. Kokpit to číta z celého záznamu verzie, takže platí aj
+pre rozhodnutia spred mnohých kôl. Je to len údaj: poradie možností ani značku „Odporúčané“ nemení.

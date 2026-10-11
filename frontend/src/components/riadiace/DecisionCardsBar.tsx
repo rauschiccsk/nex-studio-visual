@@ -18,7 +18,12 @@
 import { useMemo, useState } from "react";
 import { CircleAlert, Lightbulb } from "lucide-react";
 
-import { postPipelineActionApi, type PipelineBoard, type PipelineMessage } from "@/services/api/pipeline";
+import {
+  postPipelineActionApi,
+  type DecisionCardContext,
+  type PipelineBoard,
+  type PipelineMessage,
+} from "@/services/api/pipeline";
 import { inputOwner } from "@/components/riadiace/blockRecovery";
 import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { RESTORED_DRAFT_LABEL, draftKey, useDraft } from "@/hooks/useDraft";
@@ -58,15 +63,20 @@ interface ConsultDecision {
 /**
  * Veta o pôvode rozhodnutia (ICCINT-123). `null` pre staré karty bez toho údaja — vymyslená veta by
  * bola horšia než žiadna, lebo by tvrdila niečo o pôvode, ktorý nepoznáme.
+ *
+ * DEV-4: pri dôsledku menuje rozhodnutie jeho OTÁZKOU a voľbou Manažéra (`context` z backendu, ktorý číta celý
+ * záznam) — `origin_of` je od DEV-3 kľúč rozhodnutia a kľúč Manažérovi nič nepovie, preto sa nikdy nevypisuje.
  */
-function povodVeta(d: ConsultDecision): string | null {
+function povodVeta(d: ConsultDecision, context: DecisionCardContext | undefined): string | null {
   switch (d.origin) {
     case "objav":
       return "Nález, ktorý tu bol vždy — nevznikol z tvojho rozhodnutia.";
-    case "dosledok":
-      return d.origin_of
-        ? `Vyplýva z tvojho rozhodnutia o: ${d.origin_of}.`
-        : "Vyplýva z niektorého tvojho skoršieho rozhodnutia.";
+    case "dosledok": {
+      const question = context?.origin_of_question;
+      if (!question) return "Vyplýva z niektorého tvojho skoršieho rozhodnutia.";
+      const choice = context?.origin_of_choice;
+      return `Vyplýva z tvojho rozhodnutia „${question}“${choice ? ` (tvoja voľba: ${choice})` : ""}.`;
+    }
     case "odklad":
       return "Toto sme vedome odložili — teraz je na rade.";
     default:
@@ -92,8 +102,9 @@ function suvisiaceVety(decisions: ConsultDecision[], d: ConsultDecision): string
 /**
  * Koľko UŽ UZAVRETÝCH rozhodnutí by sa zmenou tohto rozhodnutia znovu otvorilo (ICCINT-123).
  *
- * Počíta sa z `origin="dosledok"` + `origin_of`: každé neskoršie rozhodnutie, ktoré z tohto vyplýva,
- * by sa muselo rozhodnúť nanovo. Manažér to má vedieť PRI voľbe, nie až po nej.
+ * Počíta backend z celého záznamu (DEV-4): rozhodnutia s `origin="dosledok"` a `origin_of` = kľúč tohto, ktoré
+ * už majú zapísanú odpoveď — v ktoromkoľvek kole. Nezodpovedané karty toho istého kola uzavreté nie sú a nepočítajú
+ * sa. Manažér to má vedieť PRI voľbe, nie až po nej.
  *
  * ⚠️⚠️ AKO ÚDAJ, NIKDY AKO ODPORÚČANIE. Toto je najdôležitejšia veta celého tiketu. Pri NEX Inbox
  * v1.5.0 boli DVE miesta, kde bola drahšia cesta správna — zmena skladania textu namiesto obchádzky
@@ -101,8 +112,15 @@ function suvisiaceVety(decisions: ConsultDecision[], d: ConsultDecision): string
  * vyrobí polovičné opravy, teda presne to, čo tá verzia opravovala. Číslo sa preto len ZOBRAZUJE:
  * nemení poradie možností ani značku „odporúčané“.
  */
-function znovuOtvara(decisions: ConsultDecision[], key: string): number {
-  return decisions.filter((d) => d.origin === "dosledok" && d.origin_of === key).length;
+function znovuOtvara(context: DecisionCardContext | undefined): number {
+  return context?.reopens_closed ?? 0;
+}
+
+/** Slovak plural after a number: 1 uzavreté rozhodnutie, 2–4 uzavreté rozhodnutia, 5+ uzavretých rozhodnutí. */
+function uzavreteRozhodnutia(n: number): string {
+  if (n === 1) return "uzavreté rozhodnutie";
+  if (n >= 2 && n <= 4) return "uzavreté rozhodnutia";
+  return "uzavretých rozhodnutí";
 }
 
 interface Consultation {
@@ -213,6 +231,10 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
   );
   const current = idx >= 0 ? consultation.decisions[idx] : null;
   if (!current) return null; // all decided → the apply is dispatching; the card disappears
+  // DEV-4: where this card's question came from and what a different choice reopens — read from the whole record.
+  const context = board.decision_context?.[current.key];
+  const origin = povodVeta(current, context);
+  const reopens = znovuOtvara(context);
 
   const canSubmit = !submitting && (showFree ? freeText.trim().length > 0 : picked != null);
 
@@ -304,9 +326,7 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
           {/* ICCINT-123: jedna veta o pôvode. Nemení to POČET otázok — mení to, čo si o tom počte
               Manažér myslí. Pri NEX Inbox v1.5.0 vyzeralo štvrté kolo najhoršie a bol to čistý objav:
               nevyvolalo ho žiadne jeho rozhodnutie, a z karty to nijako nevyplývalo. */}
-          {povodVeta(current) && (
-            <p className="mt-1 text-[11px] italic text-[var(--color-text-muted)]">{povodVeta(current)}</p>
-          )}
+          {origin && <p className="mt-1 text-[11px] italic text-[var(--color-text-muted)]">{origin}</p>}
           {suvisiaceVety(consultation.decisions, current).map((veta) => (
             <p key={veta} className="mt-1 text-[11px] text-[var(--color-text-secondary)]">
               {veta}
@@ -358,11 +378,9 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
 
           {/* ICCINT-123: cena voľby PRI voľbe, nie po nej. Údaj, nie odporúčanie — poradím ani
               značkou „odporúčané“ nehýbe. */}
-          {znovuOtvara(consultation.decisions, current.key) > 0 && (
+          {reopens > 0 && (
             <p className="mt-2 text-[11px] text-[var(--color-text-muted)]">
-              {`Zmena tejto voľby znovu otvára ${znovuOtvara(consultation.decisions, current.key)} ${
-                znovuOtvara(consultation.decisions, current.key) === 1 ? "uzavreté rozhodnutie" : "uzavreté rozhodnutia"
-              }.`}
+              {`Zmena tejto voľby znovu otvára ${reopens} ${uzavreteRozhodnutia(reopens)}.`}
             </p>
           )}
 

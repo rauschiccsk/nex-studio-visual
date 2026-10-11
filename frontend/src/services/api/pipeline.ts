@@ -157,6 +157,19 @@ export interface DatabaseSchema {
   approver_role: string;
 }
 
+/**
+ * DEV-4: what one open decision card says about where its question came from and what a choice reopens — the
+ * backend reads it from the version's WHOLE record (the source decision is often older than `recent_messages`).
+ */
+export interface DecisionCardContext {
+  /** The question of the decision a `dosledok` card follows from; null when that one is not on record. */
+  origin_of_question: string | null;
+  /** What the Manažér chose there. */
+  origin_of_choice: string | null;
+  /** How many closed (answered) decisions follow from this card's decision — a figure, never a recommendation. */
+  reopens_closed: number;
+}
+
 export interface PipelineBoard {
   state: PipelineState | null;
   recent_messages: PipelineMessage[];
@@ -197,6 +210,9 @@ export interface PipelineBoard {
   // scrolled out of the tail would silently stop being offered. DedoProposalBar renders IF AND ONLY IF
   // this is set — so an existing proposal is always on screen, and a handled one never comes back.
   dedo_proposal?: DedoProposal | null;
+  // DEV-4: per open decision card (by its key) — the decision it follows from and how many closed decisions a
+  // different choice reopens, from the whole record. Absent/empty → the card says nothing it cannot back.
+  decision_context?: Record<string, DecisionCardContext>;
   // DEV-7: the version's database schema — absent/null when the version has no schema document.
   database_schema?: DatabaseSchema | null;
 }

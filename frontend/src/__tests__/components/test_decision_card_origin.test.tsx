@@ -22,10 +22,11 @@ import { postPipelineActionApi, type PipelineBoard } from "@/services/api/pipeli
 
 vi.mock("@/services/api/pipeline", () => ({ postPipelineActionApi: vi.fn() }));
 
-function boardWith(decision: Record<string, unknown>): PipelineBoard {
+function boardWith(decision: Record<string, unknown>, context?: Record<string, unknown>): PipelineBoard {
   return {
     state: { current_stage: "navrh", status: "blocked", block_reason: "decision_needed" },
     available_actions: ["decide"],
+    decision_context: context ? { k1: context } : {},
     recent_messages: [
       {
         id: "m1",
@@ -64,15 +65,29 @@ describe("Rozhodovacia karta — odkiaľ otázka prišla (ICCINT-123)", () => {
     expect(screen.getByText(/nevznikol z tvojho rozhodnutia/i)).toBeInTheDocument();
   });
 
-  it("pri dôsledku menuje, z čoho vyplýva", () => {
+  it("pri dôsledku menuje rozhodnutie jeho otázkou a voľbou — nie kľúčom (DEV-4)", () => {
     render(
       <DecisionCardsBar
-        board={boardWith({ origin: "dosledok", origin_of: "rozsah kontrol" })}
+        board={boardWith(
+          { origin: "dosledok", origin_of: "scope_key" },
+          { origin_of_question: "Aký rozsah kontrol?", origin_of_choice: "Široký", reopens_closed: 0 },
+        )}
         versionId="v1"
         onBoard={vi.fn()}
       />,
     );
-    expect(screen.getByText(/rozsah kontrol/)).toBeInTheDocument();
+    expect(
+      screen.getByText("Vyplýva z tvojho rozhodnutia „Aký rozsah kontrol?“ (tvoja voľba: Široký)."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/scope_key/)).not.toBeInTheDocument();
+  });
+
+  it("pri dôsledku, ktorého zdroj kokpit nenašiel, nevypíše kľúč ani si nič nevymyslí (DEV-4)", () => {
+    render(
+      <DecisionCardsBar board={boardWith({ origin: "dosledok", origin_of: "scope_key" })} versionId="v1" onBoard={vi.fn()} />,
+    );
+    expect(screen.getByText("Vyplýva z niektorého tvojho skoršieho rozhodnutia.")).toBeInTheDocument();
+    expect(screen.queryByText(/scope_key/)).not.toBeInTheDocument();
   });
 
   it("pri odklade povie, že to bol plán", () => {
@@ -92,7 +107,10 @@ describe("Rozhodovacia karta — odkiaľ otázka prišla (ICCINT-123)", () => {
     // polovičné opravy — presne to, čo v1.5.0 opravovala.
     render(
       <DecisionCardsBar
-        board={boardWith({ origin: "dosledok", origin_of: "rozsah kontrol" })}
+        board={boardWith(
+          { origin: "dosledok", origin_of: "scope_key" },
+          { origin_of_question: "Aký rozsah kontrol?", origin_of_choice: "Široký", reopens_closed: 3 },
+        )}
         versionId="v1"
         onBoard={vi.fn()}
       />,
@@ -105,10 +123,14 @@ describe("Rozhodovacia karta — odkiaľ otázka prišla (ICCINT-123)", () => {
 
 // ── Druhá polovica: cena voľby PRI voľbe, nie po nej ─────────────────────────
 
-function boardWithTwoDecisions(): PipelineBoard {
+function boardWithTwoDecisions(reopensClosed?: number): PipelineBoard {
   return {
     state: { current_stage: "navrh", status: "blocked", block_reason: "decision_needed" },
     available_actions: ["decide"],
+    decision_context:
+      reopensClosed === undefined
+        ? {}
+        : { rozsah: { origin_of_question: null, origin_of_choice: null, reopens_closed: reopensClosed } },
     recent_messages: [
       {
         id: "m1",
@@ -151,14 +173,29 @@ describe("Rozhodovacia karta — cena voľby (ICCINT-123)", () => {
   beforeEach(() => vi.mocked(postPipelineActionApi).mockReset());
 
   it("keď voľba znovu otvára už uzavreté rozhodnutie, povie to PRI nej", () => {
-    render(<DecisionCardsBar board={boardWithTwoDecisions()} versionId="v1" onBoard={vi.fn()} />);
-    expect(screen.getByText(/znovu otvára 1 .*rozhodnutie/i)).toBeInTheDocument();
+    render(<DecisionCardsBar board={boardWithTwoDecisions(1)} versionId="v1" onBoard={vi.fn()} />);
+    expect(screen.getByText("Zmena tejto voľby znovu otvára 1 uzavreté rozhodnutie.")).toBeInTheDocument();
+  });
+
+  it("nezodpovedaný dôsledok v tom istom kole nie je uzavretý — karta ho za uzavretý nevydáva (DEV-4)", () => {
+    // „nasledok“ vyplýva z „rozsah“, ale odpoveď ešte nemá; backend ho preto nepočíta (reopens_closed 0).
+    render(<DecisionCardsBar board={boardWithTwoDecisions(0)} versionId="v1" onBoard={vi.fn()} />);
+    expect(screen.queryByText(/znovu otvára/i)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [2, "Zmena tejto voľby znovu otvára 2 uzavreté rozhodnutia."],
+    [5, "Zmena tejto voľby znovu otvára 5 uzavretých rozhodnutí."],
+  ])("počet %i povie po slovensky správne (DEV-4)", (n, veta) => {
+    render(<DecisionCardsBar board={boardWithTwoDecisions(n)} versionId="v1" onBoard={vi.fn()} />);
+    expect(screen.getByText(veta)).toBeInTheDocument();
   });
 
   it("⚠️⚠️ počet NEHÝBE poradím ani značkou „odporúčané“", () => {
     // Keby sa z tohto údaja stal tlak na lacnejšiu voľbu, vyrobí polovičné opravy. Pri NEX Inbox
     // v1.5.0 boli DVE miesta, kde bola drahšia cesta správna.
-    render(<DecisionCardsBar board={boardWithTwoDecisions()} versionId="v1" onBoard={vi.fn()} />);
+    render(<DecisionCardsBar board={boardWithTwoDecisions(3)} versionId="v1" onBoard={vi.fn()} />);
+    expect(screen.getByText(/znovu otvára 3/)).toBeInTheDocument(); // the figure is on screen…
     const tlacidla = screen.getAllByRole("button").filter((b) => /Široký|Úzky/.test(b.textContent || ""));
     const prve = tlacidla[0];
     expect(prve).toBeDefined();

@@ -4123,6 +4123,22 @@ export interface components {
             removed_lines: number;
         };
         /**
+         * DecisionCardContextRead
+         * @description DEV-4: what one open decision card says about where its question came from and what a choice reopens —
+         *     computed from the version's whole record (:func:`orchestrator.decision_card_context`), not the message tail.
+         */
+        DecisionCardContextRead: {
+            /** Origin Of Choice */
+            origin_of_choice?: string | null;
+            /** Origin Of Question */
+            origin_of_question?: string | null;
+            /**
+             * Reopens Closed
+             * @default 0
+             */
+            reopens_closed: number;
+        };
+        /**
          * DedoBuildRead
          * @description One build as Dedo needs to see it: which project, where it stands, and why it is stuck.
          *
@@ -5417,6 +5433,13 @@ export interface components {
             build_open_findings: number;
             current_task?: components["schemas"]["BoardTask"] | null;
             database_schema?: components["schemas"]["DatabaseSchemaRead"] | null;
+            /**
+             * Decision Context
+             * @default {}
+             */
+            decision_context: {
+                [key: string]: components["schemas"]["DecisionCardContextRead"];
+            };
             dedo_proposal?: components["schemas"]["DedoProposalRead"] | null;
             /** Recent Messages */
             recent_messages?: components["schemas"]["PipelineMessageRead"][];

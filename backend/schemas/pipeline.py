@@ -121,6 +121,18 @@ class DedoProposalRead(BaseModel):
     created_at: datetime
 
 
+class DecisionCardContextRead(BaseModel):
+    """DEV-4: what one open decision card says about where its question came from and what a choice reopens —
+    computed from the version's whole record (:func:`orchestrator.decision_card_context`), not the message tail."""
+
+    #: The question of the decision this ``dosledok`` card follows from; ``None`` when that one is not on record.
+    origin_of_question: Optional[str] = None
+    #: What the Manažér chose in that decision.
+    origin_of_choice: Optional[str] = None
+    #: How many closed (answered) decisions follow from this card's decision — a figure, never a recommendation.
+    reopens_closed: int = 0
+
+
 class BoardTask(BaseModel):
     """The Programovanie task currently in focus, for the who's-up status (WS-C2, CR-NS-035; v2 §4.4.2)."""
 
@@ -259,6 +271,9 @@ class PipelineBoardRead(BaseModel):
     #: proposal can never be silently pending behind a screen that offers nothing — and a handled one
     #: (sent or rejected) is never offered twice, because resolving it archives the row.
     dedo_proposal: Optional[DedoProposalRead] = None
+    #: DEV-4: per open decision card (by its ``key``) — the decision it follows from and how many closed decisions a
+    #: different choice reopens, from the whole record. Empty when no decision is offered.
+    decision_context: dict[str, DecisionCardContextRead] = {}
 
 
 class DedoProposalSendRequest(BaseModel):

@@ -351,6 +351,8 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
             if proposal is not None
             else None
         ),
+        # DEV-4: the cards read where each question came from in the WHOLE record — only while a decision is offered.
+        decision_context=(orchestrator.decision_card_context(db, version_id) if "decide" in available_actions else {}),
     )
 
 

@@ -4029,6 +4029,66 @@ def _consultation_answers(db: Session, version_id: uuid.UUID, after_seq: int) ->
     return out
 
 
+def decision_card_context(db: Session, version_id: uuid.UUID) -> dict[str, dict[str, Any]]:
+    """DEV-4: for each card of the OPEN consultation — what its origin sentence and its price line need, read from
+    the version's WHOLE record (not the board's tail of recent messages, which a busy build scrolls past).
+
+    * ``origin_of_question`` / ``origin_of_choice`` — the question of the decision a ``dosledok`` card follows from
+      (its ``origin_of`` is that decision's KEY since DEV-3) and what the Manažér chose there; ``None`` when that
+      decision is not on record. The card names the decision, never the key.
+    * ``reopens_closed`` — how many CLOSED decisions (answered, in any round) follow from this card's decision
+      (``origin="dosledok"``, ``origin_of`` = its key): what a different choice here would reopen. A consequence not
+      yet answered is not closed and is not counted. A figure shown to the Manažér, never a recommendation — it
+      moves neither the order of the options nor the "odporúčané" mark (the ticket's most important sentence).
+
+    Each decision counts once, in its latest asking: a key asked again in a later round is the same decision.
+    ``{}`` when no consultation is on record."""
+    rows = db.execute(
+        select(PipelineMessage.seq, PipelineMessage.kind, PipelineMessage.payload)
+        .where(
+            PipelineMessage.version_id == version_id,
+            or_(_carries_decision_queue(), PipelineMessage.kind == "answer"),
+        )
+        .order_by(PipelineMessage.seq.asc())
+    ).all()
+    asked: dict[str, dict[str, Any]] = {}  # key → the decision as last asked
+    chosen: dict[str, str] = {}  # key → the label answered to its last asking
+    open_keys: list[str] = []
+    for _seq, kind, payload in rows:
+        if not isinstance(payload, dict):
+            continue
+        cd = payload.get("consultation_decision")
+        if kind == "answer" and isinstance(cd, dict) and cd.get("key"):
+            chosen[str(cd["key"])] = str(cd.get("label") or cd.get("free_text") or "")
+            continue
+        consultation = payload.get("consultation")
+        decisions = consultation.get("decisions") if isinstance(consultation, dict) else None
+        if not isinstance(decisions, list) or not decisions:
+            continue
+        open_keys = []
+        for d in decisions:
+            if isinstance(d, dict) and d.get("key"):
+                key = str(d["key"])
+                asked[key] = d
+                chosen.pop(key, None)  # asked again → open again until this asking is answered
+                open_keys.append(key)
+
+    def _follows_from(d: dict[str, Any]) -> str:
+        return str(d.get("origin_of") or "").strip() if d.get("origin") == "dosledok" else ""
+
+    context: dict[str, dict[str, Any]] = {}
+    for key in open_keys:
+        source = _follows_from(asked[key])
+        context[key] = {
+            "origin_of_question": str(asked[source].get("question") or "") or None if source in asked else None,
+            "origin_of_choice": chosen.get(source) or None,
+            "reopens_closed": sum(
+                1 for other, d in asked.items() if other != key and other in chosen and _follows_from(d) == key
+            ),
+        }
+    return context
+
+
 def dispatch_directive(
     db: Session, version_id: uuid.UUID, action: str, payload: dict[str, Any], stage: str
 ) -> Optional[str]:
